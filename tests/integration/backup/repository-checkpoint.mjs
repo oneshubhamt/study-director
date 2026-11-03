@@ -686,7 +686,7 @@ watched='presentation-cancel';assert.equal(await runtime.providers.backup('prese
 // Production Drive transport + production provider/classifier/retention +
 // owned scheduler. Only HTTP, storage and the clock are simulated.
 const assembledDriveCases=[],assembledDriveWallMs=[];
-for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease']){
+for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease','abandoned-publication','live-publication','legacy-publication']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const scenarioStarted=performance.now(),maintenance=new Map(),progress=[],id='drive-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
  // Four slow deletions may require four protected passes plus a final inventory.
@@ -708,8 +708,18 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   const coldId=id+'-cold';runtime.providers.register(freeze({...h.provider,id:coldId,label:'Drive Cold Background QA'}));
   runtime.providers.configureRepositoryMaintenance(freeze({read:async providerId=>maintenance.get(providerId)||null,mark:async(providerId,value)=>{if(providerId===coldId&&value.reason==='bounded-continuation')progress.push(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length);maintenance.set(providerId,freeze({...maintenance.get(providerId),...value}));return true;},clear:async providerId=>{maintenance.delete(providerId);return true;}}));
   maintenance.set(coldId,freeze({repositoryScope:scope,requestedAt:new Date().toISOString(),nextEligibleAt:new Date(clock.now()+1000).toISOString(),reason:'repository-state'}));
+  // Another device's upload marker: abandoned (renews, but unrenewed for 16
+  // minutes), live (renews, just made) or from an older build (no renewal,
+  // an hour old). Only the abandoned one may stop holding cleanup back early.
+  let foreignMarker=null;
+  if(scenario.endsWith('-publication')){
+   const made=await h.provider.repository.beginPublication();foreignMarker=[...h.state.files.values()].find(file=>file.appProperties.studyDirectorRepositoryId===made.id);
+   foreignMarker.appProperties.sdPublicationDevice='inst_qa_phone_mve00000_bbbbbbbb';
+   if(scenario==='legacy-publication'){delete foreignMarker.appProperties.sdPublicationRenews;delete foreignMarker.appProperties.sdPublicationStartedAt;}
+   foreignMarker.createdTime=new Date(clock.now()-(scenario==='abandoned-publication'?16*60000:scenario==='legacy-publication'?60*60000:0)).toISOString();
+  }
   if(scenario.endsWith('unavailable'))h.state.failMediaKinds=new Set([scenario.startsWith('checkpoint')?'checkpoint':'commit']);
-  else if(!scenario.includes('deletion')&&scenario!=='lost-protection'){h.state.pageSize=1;h.state.pageDelayMs=10000;}
+  else if(!scenario.includes('deletion')&&scenario!=='lost-protection'&&!foreignMarker){h.state.pageSize=1;h.state.pageDelayMs=10000;}
   await runtime.providers.history(coldId,{interactive:false});
   if(scenario.includes('deletion')){const delayMs=Number(scenario.split('-').at(-1))||6000;h.state.requestDelayMs=({url,method})=>(method==='GET'||scenario.includes('-all-'))&&url.searchParams.get('alt')!=='media'&&!String(url.searchParams.get('q')||'').includes("mimeType='application/vnd.google-apps.folder'")?delayMs:0;}
   let inventoryObserved=false,protectionLost=false,historyChanged=false;
@@ -737,6 +747,22 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'history that changes between planning and the destructive lease must invalidate the plan before any deletion');
    assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0,'an invalidated destructive unit must release its maintenance lease before retrying');
    h.state.requestDelayMs=null;await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
+  }else if(scenario==='live-publication'||scenario==='legacy-publication'){
+   await settle(()=>maintenance.get(coldId)?.reason==='publication-contention'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
+   assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,`a live upload holds cleanup back (${scenario})`);
+   assert.ok(h.state.files.has(foreignMarker.id),`cleanup leaves a live upload's marker in place (${scenario})`);
+   const retryAt=Date.parse(maintenance.get(coldId).nextEligibleAt),expected=Date.parse(foreignMarker.createdTime)+(scenario==='live-publication'?15*60000:24*3600000);
+   assert.ok(retryAt>=expected&&retryAt<=expected+5000,`cleanup retries when the marker could lapse, not sooner (${scenario}: ${new Date(retryAt).toISOString()})`);
+   // This device's own upload ending must not pull cleanup forward while
+   // another device's upload is still live (it used to retry every upload).
+   if(scenario==='live-publication'){
+    snapshotRevision='drive-live-publication-2';sourceRevision='2026-10-03T11:40:00.000Z';notes={Subject:freeze({version:2,key:'Subject',text:'own upload during a live one',updatedAt:sourceRevision})};
+    await runtime.providers.backupRepositoryProvider(coldId).catch(()=>null);await settle(()=>!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
+    assert.equal(Date.parse(maintenance.get(coldId)?.nextEligibleAt),retryAt,'cleanup keeps its retry time while another device\'s upload is live');
+   }
+   // The live marker is never renewed, so by then it was abandoned; the older build's upload finishes meanwhile.
+   if(scenario==='legacy-publication')h.state.files.delete(foreignMarker.id);
+   await clock.advance(Math.max(0,retryAt-clock.now()-100));
   }else if(scenario==='lost-protection'){
    await settle(()=>protectionLost&&maintenance.get(coldId)?.reason==='error'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'lost protection invalidates inventory before any data deletion');assert.ok(runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').scheduled);
@@ -746,12 +772,52 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   if(scenario.startsWith('slow-deletion')){assert.ok(progress.length<=4,'at most four unfinished passes for four eligible objects');progress.forEach((removed,index)=>assert.ok(removed>(index?progress[index-1]:0),'each short pass must retire new data, not merely retry its safety preparation'));}
   assert.deepEqual([...h.state.files.values()].filter(file=>['checkpoint','commit'].includes(kind(file))).map(file=>file.id).sort(),originalPairs);
   assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0);
+  if(foreignMarker)assert.equal([...h.state.files.values()].filter(file=>kind(file)==='publication').length,0,`an abandoned upload marker is removed and cleanup completes (${scenario})`);
   const retained=JSON.parse(await committed.find(file=>kind(file)==='checkpoint').content.text()),physicalObjects=new Set([...h.state.files.values()].filter(file=>kind(file)==='object').map(file=>file.appProperties.studyDirectorRepositoryId));
   assert.deepEqual([...physicalObjects].sort(),retained.objects.map(entry=>entry.objectId).sort(),'verified completion retains exactly the referenced objects');
-  if(!scenario.endsWith('unavailable')&&!scenario.includes('deletion')&&scenario!=='lost-protection')assert.ok(h.state.objectPageStarts>=5,'real paginated discovery exceeds the former total deadline');
+  if(!scenario.endsWith('unavailable')&&!scenario.includes('deletion')&&scenario!=='lost-protection'&&!foreignMarker)assert.ok(h.state.objectPageStarts>=5,'real paginated discovery exceeds the former total deadline');
   assembledDriveCases.push(scenario);assembledDriveWallMs.push({scenario,wallMs:Math.round(performance.now()-scenarioStarted)});
  }finally{runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
+// A long upload renews its Drive marker while it runs, so no cleanup takes it
+// for abandoned. An upload whose marker cleanup removed (its page was frozen
+// too long) must stop before its commit, so no version is committed on
+// objects that cleanup may already have removed.
+const heartbeatCases=[];
+for(const scenario of ['renews-while-uploading','stops-when-marker-removed']){
+ const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
+ const id='drive-heartbeat-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Heartbeat QA'}))});
+ const kind=file=>file.appProperties.studyDirectorRepositoryKind,markers=()=>[...h.state.files.values()].filter(file=>kind(file)==='publication'),commits=()=>[...h.state.files.values()].filter(file=>kind(file)==='commit').map(file=>file.appProperties.studyDirectorRepositoryId).sort();
+ try{
+  await h.provider.prepare();await h.provider.authorize();snapshotRevision=id+'-1';sourceRevision='2026-10-03T11:00:00.000Z';
+  await runtime.providers.backupRepositoryProvider(id);const committedBefore=commits();
+  snapshotRevision=id+'-2';sourceRevision='2026-10-03T11:30:00.000Z';notes={Subject:freeze({version:2,key:'Subject',text:'heartbeat '+scenario,updatedAt:sourceRevision})};
+  // Every file upload and every listing takes 40 seconds (within Drive's
+  // request timeout), so the upload runs for minutes; marker requests are
+  // not delayed.
+  const marker=query=>/publication|maintenance|google-apps\.folder/u.test(query);
+  h.state.requestDelayMs=({url,method})=>url.pathname.startsWith('/upload/')||method==='GET'&&url.pathname==='/drive/v3/files'&&!marker(String(url.searchParams.get('q')||''))?40000:0;
+  let outcome=null;const seen=new Set(),startedAt=clock.now();runtime.providers.backupRepositoryProvider(id).then(value=>{outcome={value};},error=>{outcome={error};});
+  let removed=false;
+  for(let elapsed=0;!outcome&&elapsed<60*60000;elapsed+=1000){
+   await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));await realWorkSettled();await clock.drainMicrotasks(220);
+   for(const file of markers())seen.add(file.appProperties.studyDirectorRepositoryId);
+   if(scenario==='stops-when-marker-removed'&&!removed&&seen.size&&elapsed>=60000){removed=true;for(const file of markers())h.state.files.delete(file.id);}
+   if(!outcome)await clock.advance(1000);
+  }
+  assert.ok(outcome,`the upload settles (${scenario})`);h.state.requestDelayMs=null;
+  if(scenario==='renews-while-uploading'){
+   assert.ok(!outcome.error,String(outcome.error?.stack||''));assert.ok(outcome.value?.checkpointId,'a long upload completes');
+   assert.ok(seen.size>=3,`a long upload renews its marker every two minutes (${seen.size} markers seen over ${(clock.now()-startedAt)/1000} s;)`);
+   assert.ok(commits().includes(outcome.value.checkpointId),'its version is committed');
+  }else{
+   assert.ok(outcome.error,'an upload whose marker was removed fails');assert.deepEqual(commits(),committedBefore,'it commits nothing');
+  }
+  assert.equal(markers().length,0,`no upload marker is left behind (${scenario})`);
+  heartbeatCases.push(scenario);
+ }finally{await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
+}
+assert.deepEqual(heartbeatCases,['renews-while-uploading','stops-when-marker-removed']);
 // The actual adapter's uncertainty count must reach the actual integrity owner
 // and host state projector, even when some usable history remains.
 const incompleteInventoryCases=[],hostSource=fs.readFileSync('source/app.html','utf8');

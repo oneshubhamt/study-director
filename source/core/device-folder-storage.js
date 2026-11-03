@@ -30,7 +30,7 @@ registry.define('device-folder-storage',1,()=>{
     functions(input.environment,['canMutate','clearTimeout','now','setTimeout','yieldTask'],'Device Folder storage environment');
     exactObject(input.identities,['checkpoints','commits','legacyRoot','objects','prefix','root'],'Device Folder storage identities');
     if(typeof input.owner!=='function')throw new TypeError('Device Folder storage owner port is invalid.');
-    exactObject(input.limits,['maintenanceAssertionMarginMs','maintenanceMaxAgeMs','publicationAssertionMarginMs','publicationMaxAgeMs','responseTimeoutMs'],'Device Folder storage limits');
+    exactObject(input.limits,['maintenanceAssertionMarginMs','maintenanceMaxAgeMs','publicationAssertionMarginMs','publicationMaxAgeMs','publicationRenewMs','publicationStaleMs','responseTimeoutMs'],'Device Folder storage limits');
     if(typeof input.folder!=='function'||typeof input.checksum!=='function'||typeof input.inspectManifest!=='function')throw new TypeError('Device Folder storage ports are invalid.');
     const environment=input.environment,identities=input.identities,limits=input.limits;
     const summaryCache=new Map(),digestCache=new Map();
@@ -204,18 +204,25 @@ registry.define('device-folder-storage',1,()=>{
       try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);return true;}catch(error){if(error&&error.name==='NotFoundError')return false;throw error;}
     }
     // Locks are marker files; their age comes from the file's modified time.
+    // An upload lock says it renews: its upload rewrites it while it runs, so
+    // one left unrewritten too long was abandoned (see publicationStaleMs).
+    const lockBody=(kind,id)=>{const spec=LOCKS[kind];return new Blob([JSON.stringify({format:spec.format,version:1,id,startedAt:iso(nowMs()),...(kind==='publication'?{renews:true}:{})})],{type:'application/json'});};
+    async function lockRenews(kind,file){
+      if(kind!=='publication')return false;
+      try{const parsed=JSON.parse(await bounded(file.text(),'Device Folder lock contents'));return parsed&&parsed.renews===true;}catch{return false;}
+    }
     async function beginLock(kind){
       const spec=LOCKS[kind],id=spec.prefix+globalThis.crypto.randomUUID().replace(/-/gu,''),name=id+spec.suffix,{objects}=await directories();
-      await writeFile(objects,name,new Blob([JSON.stringify({format:spec.format,version:1,id,startedAt:iso(nowMs())})],{type:'application/json'}));
+      await writeFile(objects,name,lockBody(kind,id));
       const written=await fileOrNull(objects,name);if(!written)throw new Error('The Device Folder lock could not be written.');
-      return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs()),sameDevice:true});
+      return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs()),sameDevice:true,renews:kind==='publication'});
     }
     async function listLocks(kind){
       const spec=LOCKS[kind],{objects}=await directories(),items=[];let ignored=0;
       for(const [name,handle] of await entries(objects,'Device Folder lock folder',null)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true}));}catch{ignored+=1;}
+        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true,renews:await lockRenews(kind,file)}));}catch{ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }
@@ -223,15 +230,16 @@ registry.define('device-folder-storage',1,()=>{
       const spec=LOCKS[kind],id=String(lease&&lease.id||''),name=String(lease&&lease.name||'');
       if(!spec.pattern.test(name)||name!==id+spec.suffix)throw new Error('Device Folder lock is invalid.');
       const {objects}=await directories(),file=await fileOrNull(objects,name);if(!file)throw new Error('Device Folder lock disappeared. Retry the backup.');
-      const age=nowMs()-Number(file.lastModified||0),window=kind==='publication'?limits.publicationMaxAgeMs-limits.publicationAssertionMarginMs:limits.maintenanceMaxAgeMs-limits.maintenanceAssertionMarginMs;
-      if(!Number.isFinite(age)||age<0||age>=window)throw new Error('Device Folder lock is too old to continue safely. Retry the backup.');
       let parsed=null;try{parsed=JSON.parse(await file.text());}catch{}
       if(!parsed||parsed.format!==spec.format||Number(parsed.version)!==1||parsed.id!==id)throw new Error('Device Folder lock could not be verified. Retry the backup.');
+      // A renewing upload lock must be renewed well before cleanup could take it for abandoned.
+      const age=nowMs()-Number(file.lastModified||0),window=kind==='publication'?(parsed.renews===true?limits.publicationStaleMs-limits.publicationRenewMs:limits.publicationMaxAgeMs-limits.publicationAssertionMarginMs):limits.maintenanceMaxAgeMs-limits.maintenanceAssertionMarginMs;
+      if(!Number.isFinite(age)||age<0||age>=window)throw new Error('Device Folder lock is too old to continue safely. Retry the backup.');
       return true;
     }
     async function renewLock(kind,lease){
-      await assertLock(kind,lease);const spec=LOCKS[kind],{objects}=await directories();
-      await writeFile(objects,lease.name,new Blob([JSON.stringify({format:spec.format,version:1,id:lease.id,startedAt:iso(nowMs())})],{type:'application/json'}));
+      await assertLock(kind,lease);const {objects}=await directories();
+      await writeFile(objects,lease.name,lockBody(kind,lease.id));
       // The renewed lease carries the new start, so the next renewal waits a full interval.
       const written=await fileOrNull(objects,lease.name);if(!written)throw new Error('Device Folder lock disappeared. Retry the backup.');
       return freeze({...lease,createdAt:iso(written.lastModified||nowMs())});
@@ -250,7 +258,7 @@ registry.define('device-folder-storage',1,()=>{
         delete:async item=>{await guard();return remove(item);},
         upload:async file=>{await guard();return upload(file);},
         scope,historyReadConcurrency:8,
-        beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:lease=>assertLock('publication',lease),endPublication:lease=>endLock('publication',lease),
+        beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:lease=>assertLock('publication',lease),renewPublication:lease=>renewLock('publication',lease),endPublication:lease=>endLock('publication',lease),
         beginMaintenance:()=>beginLock('maintenance'),listMaintenances:()=>listLocks('maintenance'),assertMaintenance:lease=>assertLock('maintenance',lease),renewMaintenance:lease=>renewLock('maintenance',lease),endMaintenance:lease=>endLock('maintenance',lease)
       });
     }
@@ -362,7 +370,7 @@ registry.define('device-folder-storage',1,()=>{
     return freeze({
       layout:freeze({inspect,create,claim,move,removeLegacy,legacyPresent}),
       list,upload,download,delete:remove,scope,beginOperation,historyReadConcurrency:8,
-      beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:lease=>assertLock('publication',lease),endPublication:lease=>endLock('publication',lease),
+      beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:lease=>assertLock('publication',lease),renewPublication:lease=>renewLock('publication',lease),endPublication:lease=>endLock('publication',lease),
       beginMaintenance:()=>beginLock('maintenance'),listMaintenances:()=>listLocks('maintenance'),assertMaintenance:lease=>assertLock('maintenance',lease),renewMaintenance:lease=>renewLock('maintenance',lease),endMaintenance:lease=>endLock('maintenance',lease)
     });
   }

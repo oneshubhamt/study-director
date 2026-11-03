@@ -37,7 +37,7 @@
   const REPOSITORY_KINDS=Object.freeze(new Set(['object','checkpoint','commit','session-claim']));
   const PUBLICATION_KIND='publication',MAINTENANCE_KIND='maintenance';
   const MAINTENANCE_VERSION='2';
-  let PUBLICATION_MAX_AGE_MS=0,PUBLICATION_ASSERTION_MARGIN_MS=0,MAINTENANCE_MAX_AGE_MS=0,MAINTENANCE_ASSERTION_MARGIN_MS=0;
+  let PUBLICATION_MAX_AGE_MS=0,PUBLICATION_ASSERTION_MARGIN_MS=0,PUBLICATION_RENEW_MS=0,PUBLICATION_STALE_MS=0,MAINTENANCE_MAX_AGE_MS=0,MAINTENANCE_ASSERTION_MARGIN_MS=0;
   let LEGACY_MAINTENANCE_MAX_AGE_MS=0,LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS=0;
   const REQUIRED_CAPABILITIES=Object.freeze({pluginApi:1,backupController:1,backupProviders:1});
   const DEFAULT_MAX_BACKUP_BYTES=20*1024*1024;
@@ -45,6 +45,11 @@
   const MULTIPART_UPLOAD_MAX_BYTES=5*1024*1024;
   // The device an upload marker comes from, so a device never waits its turn
   // for a marker an earlier page of its own left behind.
+  // A marker carrying PUBLICATION_RENEWS_MARKER is replaced by a fresh one
+  // while its upload runs; see renewRepositoryPublication.
+  // A replacement keeps the first marker's start, so taking turns at Drive
+  // still goes by when each upload began.
+  const PUBLICATION_RENEWS_MARKER='sdPublicationRenews',PUBLICATION_STARTED_MARKER='sdPublicationStartedAt';
   const PUBLICATION_DEVICE_MARKER='sdPublicationDevice',MAINTENANCE_DEVICE_MARKER='sdMaintenanceDevice',DEVICE_PATTERN=/^inst_[a-z0-9_]{1,80}$/u;
   const HISTORY_FINGERPRINT_MARKER='sdHistoryFingerprint';
   const HISTORY_COUNTS_MARKER='sdHistoryCounts';
@@ -640,7 +645,7 @@
   function publicationDescriptor(file,parent){
     if(!validPublicationMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director publication metadata.'));
     const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),device=thisDevice();
-    return Object.freeze({kind:PUBLICATION_KIND,id,sameDevice:!!device&&file.appProperties[PUBLICATION_DEVICE_MARKER]===device,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
+    return Object.freeze({kind:PUBLICATION_KIND,id,sameDevice:!!device&&file.appProperties[PUBLICATION_DEVICE_MARKER]===device,renews:file.appProperties[PUBLICATION_RENEWS_MARKER]==='1',startedAt:Number.isFinite(Date.parse(String(file.appProperties[PUBLICATION_STARTED_MARKER]||'')))?new Date(Date.parse(file.appProperties[PUBLICATION_STARTED_MARKER])).toISOString():createdAt,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
   }
   function trustedCoordinationRemoteId(ref,parent,kind,idValid){
     const id=String(ref&&ref.id||''),remoteId=String(ref&&ref.remoteId||''),scope=String(ref&&ref.verificationScope||'');
@@ -684,11 +689,11 @@
     if(payload&&payload.nextPageToken||files.length>1)throw noRetry(new Error('Duplicate Study Director backup publication markers were found. Maintenance stopped safely.'));
     return files[0]||null;
   }
-  async function beginRepositoryPublication(baseContext=EMPTY_DRIVE_OPERATION){
-    const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id='pub_'+Platform.crypto.randomUUID().replace(/-/gu,''),now=new Date().toISOString();
+  async function beginRepositoryPublication(baseContext=EMPTY_DRIVE_OPERATION,startedAt=''){
+    const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id='pub_'+Platform.crypto.randomUUID().replace(/-/gu,''),now=new Date().toISOString(),started=Number.isFinite(Date.parse(String(startedAt||'')))?new Date(Date.parse(startedAt)).toISOString():now;
     const metadata={name:publicationFilename(id),parents:[parent],mimeType:'application/octet-stream',appProperties:{
       [REPOSITORY_MARKER.key]:REPOSITORY_MARKER.value,[REPOSITORY_VERSION_MARKER]:REPOSITORY_VERSION,[REPOSITORY_KIND_MARKER]:PUBLICATION_KIND,[REPOSITORY_ID_MARKER]:id,
-      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now,
+      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now,[PUBLICATION_RENEWS_MARKER]:'1',[PUBLICATION_STARTED_MARKER]:started,
       ...(thisDevice()?{[PUBLICATION_DEVICE_MARKER]:thisDevice()}:{})
     }};
     let response=null,file=null;
@@ -723,6 +728,26 @@
     else if(ref&&ref.remoteId){const candidate=await getFileMetadata(ref.remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;});if(candidate&&validPublicationMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryPublication(parent,id,context);if(!metadata)return false;
     return await deleteCoordinationMarker(metadata,{parent,id,findMarker:findRepositoryPublication,context,label:'Could not clear a completed Study Director backup publication marker.'});
+  }
+
+  // Drive markers never change, so renewal replaces the marker: a fresh one
+  // first, then the old one goes. The old one must still be here and must not
+  // be close to looking abandoned; otherwise cleanup may already have taken it
+  // for abandoned, and the upload has to stop before it commits.
+  async function renewRepositoryPublication(ref,baseContext=EMPTY_DRIVE_OPERATION){
+    const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');
+    if(!publicationIdValid(id))throw noRetry(new Error('A Study Director publication marker has an invalid identity.'));
+    const next=await beginRepositoryPublication(context,ref&&ref.startedAt);
+    try{
+      const remoteId=trustedCoordinationRemoteId(ref,parent,PUBLICATION_KIND,publicationIdValid);
+      const previous=remoteId?await getFileMetadata(remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;}):await findRepositoryPublication(parent,id,context);
+      const created=previous&&validPublicationMetadata(previous,parent)&&previous.appProperties[REPOSITORY_ID_MARKER]===id?Date.parse(String(previous.createdTime||'')):NaN;
+      if(!Number.isFinite(created))throw noRetry(new Error('The Google Drive backup publication marker disappeared before commit. Retry the backup.'));
+      if(Date.now()-created>=PUBLICATION_STALE_MS-PUBLICATION_RENEW_MS)throw noRetry(new Error('The Google Drive backup publication marker went too long without renewal. Retry the backup.'));
+      await endRepositoryPublication(ref,context);return next;
+    }catch(error){
+      await endRepositoryPublication(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
+    }
   }
 
   function maintenanceIdValid(id){return /^mnt_[a-f0-9]{32}$/u.test(String(id||''));}
@@ -988,6 +1013,7 @@
       beginPublication:()=>beginRepositoryPublication(base),
       listPublications:()=>listRepositoryPublications(base),
       assertPublication:ref=>assertRepositoryPublication(ref,base),
+      renewPublication:ref=>renewRepositoryPublication(ref,base),
       // Marker retirement is cleanup, not operation work. Like maintenance
       // release, it must survive the operation signal being aborted by an
       // expected foreground preemption.
@@ -1149,10 +1175,10 @@
     if(!supportsCapabilities(api,REQUIRED_CAPABILITIES)||!api.backup||!api.backup.providers||typeof api.backup.providers.register!=='function')return false;
     const policy=api.backup.repositoryPolicy;
     if(!policy||typeof policy!=='object')return false;
-    const publicationMaxAgeMs=Number(policy.publicationMaxAgeMs),publicationAssertionMarginMs=Number(policy.publicationAssertionMarginMs),maintenanceMaxAgeMs=Number(policy.maintenanceMaxAgeMs),maintenanceAssertionMarginMs=Number(policy.maintenanceAssertionMarginMs);
+    const publicationMaxAgeMs=Number(policy.publicationMaxAgeMs),publicationAssertionMarginMs=Number(policy.publicationAssertionMarginMs),publicationRenewMs=Number(policy.publicationRenewMs),publicationStaleMs=Number(policy.publicationStaleMs),maintenanceMaxAgeMs=Number(policy.maintenanceMaxAgeMs),maintenanceAssertionMarginMs=Number(policy.maintenanceAssertionMarginMs);
     const metadataTimeoutMs=Number(policy.driveMetadataTimeoutMs),driveMaintenanceMaxAgeMs=Number(policy.driveMaintenanceMaxAgeMs),driveMaintenanceAssertionMarginMs=Number(policy.driveMaintenanceAssertionMarginMs);
-    if(![publicationMaxAgeMs,publicationAssertionMarginMs,maintenanceMaxAgeMs,maintenanceAssertionMarginMs,metadataTimeoutMs,driveMaintenanceMaxAgeMs,driveMaintenanceAssertionMarginMs].every(value=>Number.isFinite(value)&&value>0)||publicationAssertionMarginMs>=publicationMaxAgeMs||maintenanceAssertionMarginMs>=maintenanceMaxAgeMs||driveMaintenanceAssertionMarginMs>=driveMaintenanceMaxAgeMs)return false;
-    PUBLICATION_MAX_AGE_MS=publicationMaxAgeMs;PUBLICATION_ASSERTION_MARGIN_MS=publicationAssertionMarginMs;LEGACY_MAINTENANCE_MAX_AGE_MS=maintenanceMaxAgeMs;LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS=maintenanceAssertionMarginMs;API_TIMEOUT_MS=metadataTimeoutMs;MAINTENANCE_MAX_AGE_MS=driveMaintenanceMaxAgeMs;MAINTENANCE_ASSERTION_MARGIN_MS=driveMaintenanceAssertionMarginMs;
+    if(![publicationMaxAgeMs,publicationAssertionMarginMs,publicationRenewMs,publicationStaleMs,maintenanceMaxAgeMs,maintenanceAssertionMarginMs,metadataTimeoutMs,driveMaintenanceMaxAgeMs,driveMaintenanceAssertionMarginMs].every(value=>Number.isFinite(value)&&value>0)||publicationAssertionMarginMs>=publicationMaxAgeMs||2*publicationRenewMs>=publicationStaleMs||publicationStaleMs>=publicationMaxAgeMs||maintenanceAssertionMarginMs>=maintenanceMaxAgeMs||driveMaintenanceAssertionMarginMs>=driveMaintenanceMaxAgeMs)return false;
+    PUBLICATION_MAX_AGE_MS=publicationMaxAgeMs;PUBLICATION_ASSERTION_MARGIN_MS=publicationAssertionMarginMs;PUBLICATION_RENEW_MS=publicationRenewMs;PUBLICATION_STALE_MS=publicationStaleMs;LEGACY_MAINTENANCE_MAX_AGE_MS=maintenanceMaxAgeMs;LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS=maintenanceAssertionMarginMs;API_TIMEOUT_MS=metadataTimeoutMs;MAINTENANCE_MAX_AGE_MS=driveMaintenanceMaxAgeMs;MAINTENANCE_ASSERTION_MARGIN_MS=driveMaintenanceAssertionMarginMs;
     const publishedLimit=Number(api.backup.limits&&api.backup.limits.maxFileBytes);
     if(Number.isFinite(publishedLimit)&&publishedLimit>0)maxBackupBytes=publishedLimit;
     releaseFile=api.backup.releaseFile||releaseFile;
@@ -1177,7 +1203,7 @@
       subscribeConnection,
       disconnect,
       release,
-      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:beginRepositoryPublication,listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
+      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:()=>beginRepositoryPublication(),listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,renewPublication:renewRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }
 

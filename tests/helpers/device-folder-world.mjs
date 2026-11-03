@@ -30,7 +30,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   // backup folders already here?" (null cancels, '' starts a new one).
   const worldNumber=++worlds;
   let owner=freeze({profile,scope:'',device,name}),repositoryChoice=rows=>rows[0].name;const repositoryChoices=[];
-  const clock=createFakeClock(start),notices=[],published=[],verified=new Map(),settingsStore=new Map(),rendered=[],captures=[];
+  const clock=createFakeClock(start),clockNow=()=>clock.now(),notices=[],published=[],verified=new Map(),settingsStore=new Map(),rendered=[],captures=[];
   let current=new clock.Date(clock.now()-MINUTE).toISOString(),localEmpty=false,canMutate=true,pickerResult=null,pickerCalls=0,sequence=0,durablePending=null,registeredProvider=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,File,Promise,Map,Set,WeakMap,TextEncoder,Uint8Array,JSON,Math,Number,String,Array,console,crypto:webcrypto,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,DOMException};
   context.globalThis=context;vm.createContext(context);
@@ -91,7 +91,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const storageFor=(folderPort,repositoryPort=()=>IDENTITIES.root)=>registry.require('device-folder-storage',1).createStorage(freeze({
     folder:folderPort,identities:freeze({...IDENTITIES,root:repositoryPort}),checksum:(blob)=>sha256(blob),inspectManifest,owner:()=>owner,
     environment:freeze({canMutate:()=>canMutate,now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,yieldTask:async()=>{}}),
-    limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
+    limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,publicationRenewMs:policy.protocol.publicationRenewMs,publicationStaleMs:policy.protocol.publicationStaleMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }));
   const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'].map(name=>[name,name])));
   const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBase:identity,reconciliationBaseNote:identity,reconciliationBaseDays:identity})})).deviceFolder;
@@ -108,7 +108,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   }));
   // A browser directory handle with readwrite permission state.
   function directory({permission='granted',grant='granted'}={}){
-    const faults={corruptReadOf:new Set()},handle=createMemoryDirectory({now:()=>clock.now(),faults});
+    const faults={corruptReadOf:new Set()},handle=createMemoryDirectory({now:clockNow,faults});
     Object.assign(handle,{faults,permission,requests:0,queryPermission:async()=>handle.permission,requestPermission:async()=>{handle.requests+=1;handle.permission=grant;return grant;}});
     return handle;
   }
@@ -144,7 +144,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     setOwner:value=>{owner=freeze({...owner,...value});},chooseRepositoryWith:fn=>{repositoryChoice=fn;},
     // The file name the next backup's object will have.
     nextObjectName:async()=>'obj_'+(await sha256(new Blob([current]))).slice(0,32)+'.sdobject',
-    choose:value=>{pickerResult=value;},
+    choose:value=>{pickerResult=value;value?.useClock?.(clockNow);},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
     setLocalEmpty:value=>{localEmpty=value;},setCanMutate:value=>{canMutate=value;},
     store:(handle,baseline='')=>settingsStore.set('deviceFolder',{format:'study-director.device-folder-settings',version:4,directoryHandle:handle,baseline}),
