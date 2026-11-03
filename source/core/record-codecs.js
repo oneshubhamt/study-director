@@ -686,7 +686,15 @@ function materializeDailyRecordSummary(summary){
     const clean=normalizeCurrentActiveSession(session);
     return clean&&sameDataValue(session,clean)?clean:null;
   }
-  return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession});
+  // Study content is distinct from ownership/control metadata. Revisions and
+  // timestamps establish persistence/order; runningOn/status establish control.
+  // Neither may make two otherwise identical study sessions conflict.
+  function contentValue(session){
+    const clean=sanitizeCurrentActiveSession(session);if(!clean)return null;
+    const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,...snapshot}=clean.snapshot;
+    return Object.freeze({date:clean.date,scheduleText:clean.scheduleText,snapshot:Object.freeze(snapshot)});
+  }
+  return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession,contentValue});
   }
   // Portable user data is an explicit allowlist, independent of sync destinations.
   function createPersonalDataCodec(limits){
