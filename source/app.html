@@ -4012,6 +4012,7 @@ function applyRows(rows,options={}){
   TimerState.loadSchedule(buildTasks(rows),{
     studyDate:isValidIsoDate(options.studyDate)?options.studyDate:todayISO()
   });
+  TimerState.scheduleAnchorMin=rows.length&&isValidHHMM(rows[0].start)?clockMinuteToStudyMinute(t2m(rows[0].start)):0;
   invalidateScheduleDerived({identity:true,render:true});
   resetScheduleLayers();setCurrentTask(0);resetCountdownRuntime();setTimerMode(TIMER_MODES.READY,'schedule-apply');clearProgressRuntime();latestCarryForward='';
   const restoredLiveDraft=options.progressMigration?false:(options.sessionSnapshot?applySessionSnapshot(options.sessionSnapshot):restoreLiveDraftIfAny());
@@ -4048,7 +4049,6 @@ function applyRows(rows,options={}){
       renderDirty:!!ScheduleDerivedState.renderDirty
     });
   }
-  function setAnchor(value){TimerState.scheduleAnchorMin=Number(value)||0;return TimerState.scheduleAnchorMin;}
   function timeline(){return Object.freeze({rows:buildLiveTimeline(),realtime:getRealTimeState()});}
   function row(index){
     const i=Number(index);
@@ -4098,7 +4098,7 @@ function applyRows(rows,options={}){
     throw new TypeError('Unknown Plan render state.');
   }
   return Object.freeze({
-    read,setAnchor,timeline,row,act,hasLiveState,
+    read,timeline,row,act,hasLiveState,
     captureMigration:snapshotScheduleProgressForMigration,
     breakState,apply,reconcile,renameAreas,
     flush:flushLiveDraft,
