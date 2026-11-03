@@ -5326,16 +5326,24 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
   const step=text=>{try{onStep?.(text);}catch{}};
   if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
   if(!BackupProviderRuntime.connected('google-drive'))throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
-  const previous=ActiveSessionCodec.sanitizeCurrent(session),planned=previous?ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()}):null;
-  if(!previous||!planned)throw new Error('the transferred session state is invalid');
-  let next=planned;
-  let ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
+  const requested=ActiveSessionCodec.sanitizeCurrent(session);
+  if(!requested)throw new Error('the transferred session state is invalid');
+  let previous=null,planned=null,next=null,ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
   try{
     const draftFlushed=await Promise.resolve(PlanDraftEditor.flush());
     if(draftFlushed===false)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
-    const observedContentFingerprint=await activeSessionContentFingerprint(previous);
     step('Pausing this device’s sync…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
+    // The ownership claim is based on the canonical session after background
+    // reconciliation has actually stopped. Never claim/save the stale copy
+    // that happened to be rendered before this boundary.
+    const loaded=await AppData.activeSession.load();
+    previous=loaded&&loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
+    if(!previous||!CanonicalModule.same(previous,requested))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed while Continue Here was starting. Sync the latest session, then try again.');
+    planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
+    if(!planned)throw new Error('the transferred session state is invalid');
+    next=planned;
+    const observedContentFingerprint=await activeSessionContentFingerprint(previous);
     setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
     const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,revision:planned.revision});
     if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
@@ -5353,7 +5361,7 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     notifyBackupChange({urgent:true,reason:'session-continue'});
     return Object.freeze({previous,session:saved.value||next,claim:ownershipClaim});
   }catch(error){
-    if(localSaved){
+    if(localSaved&&previous&&next){
       try{
         const current=(await AppData.activeSession.load())?.value||null;
         if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous,{strictDurability:true});if(!restored?.ok)throw restored?.error||new Error('session rollback failed');rolledBack=true;}
