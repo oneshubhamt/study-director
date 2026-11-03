@@ -4542,12 +4542,46 @@ function isSuspendedActiveSession(session){
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
 }
-function isRecoverablePreviousActiveSession(session){
-  if(!session||typeof session!=='object'||sessionRunsElsewhere(session)||session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
-  if(session.status&&session.status!=='active')return false;
+function isPreviousActiveSessionRecord(session){
+  if(!session||typeof session!=='object'||session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
+  if(session.status&&!['active','suspended'].includes(session.status))return false;
   if(!isValidIsoDate(session.date)||session.date>=todayISO())return false;
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
+}
+function isRecoverablePreviousActiveSession(session){
+  return isPreviousActiveSessionRecord(session)&&!sessionRunsElsewhere(session)&&session.status!=='suspended';
+}
+async function savedDayCoversActiveSession(session){
+  if(!isPreviousActiveSessionRecord(session))return false;
+  const snapshot=activeSessionSnapshot(session),contentRevision=Number(snapshot&&snapshot.contentRevision);
+  if(!Number.isSafeInteger(contentRevision)||contentRevision<0)return false;
+  let record=null;
+  try{record=await AppData.dailyRecords.get(session.date);}
+  catch(error){AppDiagnostics.capture('session.previous-day-saved-check',error,'warn');return false;}
+  const sourceRevision=Number(record&&record.sourceRevision);
+  return !!record&&record.recordKind==='study'&&record.date===session.date&&Number.isSafeInteger(sourceRevision)&&sourceRevision>=contentRevision;
+}
+async function retireCoveredPreviousActiveSession(session){
+  if(!await savedDayCoversActiveSession(session))return false;
+  const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
+  if(!current||!CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session)))return false;
+  const cleared=await AppData.activeSession.clear();
+  handleActiveSessionRepositoryResult(cleared,'clear');
+  if(!cleared.ok){
+    const reason=cleared.error?(cleared.error.message||String(cleared.error)):'active session clear failed';
+    sessionSafetyMessage=`${prettyDate(session.date)} is already saved in Library, but its redundant recovery copy could not be cleared: ${reason}`;
+    refreshStorageFallbackWarning();
+    setPlanStatus(sessionSafetyMessage,false);
+    return true;
+  }
+  if(saveReminderDate===session.date)saveReminderDate='';
+  if(sessionSafetyMessage.includes('unsaved')||sessionSafetyMessage.includes('Review reminder'))sessionSafetyMessage='';
+  setSessionPanelMode('none');
+  refreshStorageFallbackWarning();
+  setPlanStatus(`✓ ${prettyDate(session.date)} is already saved in Library.`);
+  notifyBackupChange({urgent:true,reason:'saved-session-retired'});
+  return true;
 }
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
@@ -4606,6 +4640,10 @@ async function attemptAutoRestoreActiveSession(){
     if(TASKS.length||PlanScheduleGateway.hasLiveState())return false;
     const session=await loadActiveSessionForRestore();
     if(TASKS.length||PlanScheduleGateway.hasLiveState())return false;
+    // A previous-day recovery row is not evidence of an unsaved day by
+    // itself. If the canonical Saved Day covers its latest content revision,
+    // retire the redundant recovery copy before considering ownership/UI.
+    if(isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session))return false;
     if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
     if(isRecoverablePreviousActiveSession(session))return handlePreviousActiveSession(session);
     if(isSuspendedActiveSession(session)){setSessionPanelMode('suspended',session);return false;}
