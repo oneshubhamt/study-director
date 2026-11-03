@@ -643,12 +643,15 @@ let syncWorld=null;
   b.activeSession=session('2026-08-31','B-SESSION',{runningOn:b.installationId});b.schedule=b.activeSession.scheduleText;
   assert.equal((await B.sync()).cancelled,false,'sync is never blocked by a running session');
   assert.equal(b.activeSession.snapshot.label,'B-SESSION','the session running here stays as it is');assert.equal(b.notes.Shared.text,'edited on A again','everything else merges as usual');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='session'&&review.kept?.snapshot?.label==='A-SESSION').length,1,'the remote earlier-day session is preserved once on B');
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.reviews.open().filter(review=>review.subject==='session'&&review.kept?.snapshot?.label==='A-SESSION').length,1,'repeated sync never generates the same session review twice');
   // Another device's own session never silently replaces one left unsaved
   // here: this one stays and the other is kept for review.
   await B.upload();
   assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.activeSession.snapshot.label,'A-SESSION','an unsaved earlier session is not replaced by a new one from another device');
-  assert.equal(a.reviews.open().find(review=>review.subject==='session').kept.snapshot.label,'B-SESSION','the other session is kept for review');
+  assert.equal(a.reviews.open().filter(review=>review.subject==='session'&&review.kept?.snapshot?.label==='B-SESSION').length,1,'the independent later-day session is preserved exactly once for review');
 }
 
 // Restoring an older version reaches every device: the restoring device makes
@@ -817,6 +820,30 @@ let syncWorld=null;
   assert.equal(a.activeSession,null,'A retires the obsolete Active Session after B ends it');
   assert.equal(a.records.get(day).reflection,'saved after BF1 handoff');
   assert.equal(keptSessions(a).length,0,'a legitimate handoff and save leave no Active Session kept version');
+}
+
+// BF-1: a Drive claim that exists but cannot be verified is not an absent
+// claim. Sync must stop without applying the still-old shared checkpoint;
+// repairing the remote claim then permits the original owner to yield.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note,claims}=syncWorld,day='2026-08-31';
+  const a={installationId:'inst_bf1_uncertain_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('claim'),activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const b={installationId:'inst_bf1_uncertain_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const A=device(a,{claims:true}),B=device(b,{claims:true});
+  a.activeSession=revisionedSession(day,'OWNER-A',{runningOn:a.installationId,revision:20,contentRevision:5});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const source=await B.handoffSource(),fingerprint=await sessionContentFingerprint(source.session);
+  const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:fingerprint,expectedCheckpointId:source.checkpointId,revision:21});
+  assert.equal(claimed.status,'completed');
+  const [id,file]=[...claims.entries()].at(-1);
+  claims.set(id,freeze({...file,blob:new Blob(['invalid protected claim'])}));
+  await assert.rejects(A.sync(),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN','unverifiable ownership must fail closed rather than fall back to stale checkpoint ancestry');
+  assert.equal(a.activeSession.runningOn,a.installationId,'claim read failure must not replace local Active Session');
+  assert.equal(a.running,true,'failure to verify the remote ownership did not authorize a local state transition');
+  claims.set(id,file);
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.running,false,'a verified remote owner stops the old runtime before changing the stored session');
 }
 
 // Continue Here reads Drive's newest session even when this device's local copy
