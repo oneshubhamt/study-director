@@ -10,7 +10,7 @@ function productionFunction(name){
 }
 const saveWarning=source.match(/^const SESSION_CLAIM_SAVE_WARNING=.*;$/mu)?.[0];
 assert.ok(saveWarning,'Production session-claim warning must exist.');
-const runtime=[saveWarning,productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){'),productionFunction('function snapshotWhileSessionClaimFrozen(){')].join('\n');
+const runtime=[saveWarning,productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation=\'active-session transition\'){'),productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){'),productionFunction('function snapshotWhileSessionClaimFrozen(){')].join('\n');
 
 const owned={epoch:2,applies:true,state:'owned',ownedHere:false};
 const session={runningOn:'inst_local',revision:4};
@@ -27,7 +27,7 @@ function harness(){
     TASKS:[{}],sessionPanelMode:'active',
     BackupProviderRuntime:{connected:()=>true,readSessionClaim:async()=>claim,scheduleSharedSync:(id,reason)=>{calls.syncs.push(reason);return true;}},
     AppData:{activeSession:{load:async()=>{const next=loads.length?loads.shift():loaded(sessionValue);return typeof next==='function'?await next():await next;}}},
-    ActiveSessionCodec:{sanitizeCurrent:value=>value},
+    ActiveSessionCodec:{sanitizeCurrent:value=>value},CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
     InstallationIdentity:{getId:()=> 'inst_local'},
     DecisionClock:{nowMs:()=>now},lastTimerSnapshotMs:0,
     restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,
@@ -105,6 +105,7 @@ for(const [name,result] of [
 for(const bad of [
   {ok:false,value:null,error:new Error('read failed')},
   {ok:true,value:{...session,revision:3},storage:{idb:true}},
+  {ok:true,value:{...session,revision:5,unexpectedProgress:9},storage:{idb:true}},
   {ok:true,value:{...session,revision:5},storage:{idb:false}},
   ()=>Promise.reject(new Error('readback rejected'))
 ]){
