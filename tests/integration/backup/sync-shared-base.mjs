@@ -50,6 +50,7 @@ const dailyRecordCodec=freeze({
 });
 const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item,version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,runningOn:item.runningOn||'inst_device_local'}):null;
 const activeSessionCodec=freeze({sanitizeCurrent:sanitizeActiveSession,contentValue:item=>{const clean=sanitizeActiveSession(item);if(!clean)return null;const snapshot=clean.snapshot&&typeof clean.snapshot==='object'?clean.snapshot:{},{contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_updatedAt,...contentSnapshot}=snapshot;return freeze({date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot:freeze(contentSnapshot)});}});
+const sessionContentFingerprint=async item=>processing.run('checksum',{value:CanonicalModule.signature(activeSessionCodec.contentValue(item)),algorithm:'sha256'});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'}):null});
 const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.canonicalizeHistoricalDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)});
@@ -550,6 +551,7 @@ let syncWorld=null;
       combine:(id,checkpointId)=>providers.bringInRepositoryProvider(id,{checkpointId}),
       reviewKept:(options={})=>harness.runtime.controller.reviewKeptVersions(options),
       noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options}),
+      handoffSource:()=>providers.readSessionHandoffSource('drive'),
       claim:request=>providers.claimSessionOwnership('drive',request)
     });
   };
@@ -774,43 +776,53 @@ let syncWorld=null;
   const keptProgress=a.reviews.open().find(review=>review.subject==='session');assert.equal(keptProgress.kept.snapshot.label,'A-PROGRESS','its own progress is kept for review');assert.equal(keptProgress.kept.status,'suspended');
 }
 
-// BF-1: a legitimate A → B handoff changes ownership metadata, not study
-// content. Control-plane revisions on both sides must not manufacture an
-// Active Session kept version. When B then saves the exact session content,
-// the Saved Day's sourceRevision is an explicit acknowledgement that lets A
-// retire its redundant session copy without another "unsaved" review.
+// BF-1: Continue Here is fenced by the exact verified Drive session content.
+// The read is side-effect free: B may have a stale local copy, but it claims
+// the newest shared session without reconciling unrelated domains. Pure
+// ownership changes create no review. When B saves/ends the session, A
+// converges to the Saved Day and no Active Session without an unsaved warning
+// or kept version.
 {
-  syncWorld.drive.clear();
+  syncWorld.drive.clear();syncWorld.claims.clear();
   const {device,note}=syncWorld,day='2026-08-31';
   const a={installationId:'inst_bf1_session_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1'),activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
   const b={installationId:'inst_bf1_session_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
-  const A=device(a),B=device(b),keptSessions=state=>state.reviews.open().filter(review=>review.subject==='session');
+  const A=device(a,{claims:true}),B=device(b,{claims:true}),keptSessions=state=>state.reviews.open().filter(review=>review.subject==='session');
   a.activeSession=revisionedSession(day,'BF1-SHARED',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
   await A.upload();assert.equal((await B.sync()).cancelled,false);
-  // The old owner may persist a newer control revision while observing the
-  // takeover; the actual session evidence is still byte-for-byte the same.
-  a.activeSession=freeze({...a.activeSession,revision:12,updatedAt:'2026-08-31T09:02:00.000Z'});
-  b.activeSession=freeze({...b.activeSession,runningOn:b.installationId,status:'active',revision:11,suspendedAt:null,updatedAt:'2026-08-31T09:01:00.000Z'});b.schedule=b.activeSession.scheduleText;b.running=true;
+  const source=await B.handoffSource();
+  assert.equal(source.status,'completed');assert.equal(source.session.runningOn,a.installationId);assert.equal(source.session.snapshot.label,'BF1-SHARED');
+  const bBefore=structuredClone(b.activeSession),observedContentFingerprint=await sessionContentFingerprint(source.session);
+  assert.deepEqual(b.activeSession,bBefore,'reading the handoff source must not reconcile or mutate B');
+  const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint,expectedCheckpointId:source.checkpointId,revision:11});
+  assert.equal(claimed.status,'completed');
+  b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',revision:11,suspendedAt:null,updatedAt:'2026-08-31T09:01:00.000Z'});b.schedule=b.activeSession.scheduleText;b.running=true;
+
+  // Before B publishes its first owned checkpoint, Drive still names A. The
+  // claim stops A but that stale checkpoint must not create a review or revert
+  // ownership.
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.running,false,'the old owner stops from the handoff claim');
+  assert.equal(keptSessions(a).length,0,'a stale pre-claim checkpoint does not manufacture a session review');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession.runningOn,b.installationId,'A follows B once B publishes the owned session');
+  assert.equal(keptSessions(a).length,0,'ownership-only movement remains review-free');
+
+  // B saves and ends the exact session. The released ownership epoch plus the
+  // no-session checkpoint is the causal end transition; sourceRevision is data
+  // provenance, not cross-device ancestry proof.
+  b.records.set(day,revisionedRecord(day,'saved after BF1 handoff',7,'2026-08-31T09:05:00.000Z'));b.activeSession=null;b.schedule='';b.running=false;
   await B.upload();
-  assert.equal((await A.sync()).cancelled,false,'ownership-only handoff must reconcile without stopping sync');
-  assert.equal(a.activeSession.runningOn,b.installationId,'A follows B as the legitimate new owner');
-  assert.equal(keptSessions(a).length,0,'ownership/status/revision metadata alone must not create an Active Session review');
-  // Saving acknowledges contentRevision 7. Change only A's local control
-  // revision again to prove the acknowledgement, rather than ancestry
-  // fingerprint equality, settles the stale recovery copy.
-  a.activeSession=freeze({...a.activeSession,revision:13,updatedAt:'2026-08-31T09:04:00.000Z'});
-  b.activeSession=null;b.schedule='';b.running=false;b.records.set(day,revisionedRecord(day,'saved after BF1 handoff',7,'2026-08-31T09:05:00.000Z'));
-  await B.upload();
-  assert.equal((await A.sync()).cancelled,false,'a covered saved handoff session must settle without a decision');
-  assert.equal(a.activeSession,null,'A retires the session once B Saved Day covers its content revision');
-  assert.equal(a.records.get(day).sourceRevision,7);
-  assert.equal(keptSessions(a).length,0,'a Saved Day that covers the session must not leave an Active Session kept version');
+  assert.equal((await A.sync()).cancelled,false,'the old owner must converge to the Saved Day without a decision');
+  assert.equal(a.activeSession,null,'A retires the obsolete Active Session after B ends it');
+  assert.equal(a.records.get(day).reflection,'saved after BF1 handoff');
+  assert.equal(keptSessions(a).length,0,'a legitimate handoff and save leave no Active Session kept version');
 }
 
-// Continue here pressed before this device took in the other's newest
-// upload. That upload, saved before the takeover, still names the other
-// device; Drive's claim names this one, so the sync keeps the session here.
-// A later takeover (a newer claim) still stops it.
+// Continue Here reads Drive's newest session even when this device's local copy
+// is stale. Work made by the current owner after the claim stays current; work
+// the old owner records after the observed handoff boundary is kept exactly
+// once for review rather than stealing ownership back.
 {
   syncWorld.drive.clear();syncWorld.claims.clear();
   const {device,note}=syncWorld,day='2026-08-31';
@@ -818,30 +830,35 @@ let syncWorld=null;
   const b={installationId:'inst_claim_sync_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
   const A=device(a,{claims:true}),B=device(b,{claims:true}),running=(state,label,revision)=>{state.activeSession=session(day,label,{runningOn:state.installationId,status:'active',revision});state.schedule=state.activeSession.scheduleText;state.running=true;};
   const keptSessions=state=>state.reviews.open().filter(review=>review.subject==='session');
-  running(a,'A-1',10);await A.upload();
-  assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-1');
-  // A records more and uploads; B has not taken it in when it continues here.
+  running(a,'A-1',10);await A.upload();assert.equal((await B.sync()).cancelled,false);
   running(a,'A-2',11);await A.upload();
-  const claimed=await B.claim({date:day,observedOwner:a.installationId,observedRevision:10,revision:12});
-  assert.equal(claimed.status,'completed','B claims the session from its view of A-1');
-  running(b,'B-CONTINUED',12);
-  // A cannot upload past B's claim.
-  running(a,'A-3',13);await assert.rejects(A.upload(),error=>error?.code==='REPOSITORY_SESSION_OWNERSHIP_AHEAD','the device taken over cannot upload over the claim');
-  assert.equal((await B.sync()).cancelled,false,'B takes in A’s upload');
-  assert.equal(b.running,true,'the session keeps running on B');assert.equal(b.activeSession.runningOn,b.installationId);assert.equal(b.activeSession.snapshot.label,'B-CONTINUED','an upload saved before B took over does not take the session back');
-  assert.equal(keptSessions(b).length,0,'nothing is kept for review on B');
-  assert.equal(b.notes.Shared.text,'first','everything else merges as usual');
-  await B.upload();
-  assert.equal((await A.sync()).cancelled,false);
-  assert.equal(a.running,false,'A stops its timer');assert.equal(a.activeSession.runningOn,b.installationId,'A shows the session running on B');
-  assert.ok(keptSessions(a).some(review=>review.kept.snapshot.label==='A-3'),'A keeps what it recorded since for review');
-  // A takes it back with a newer claim: B, with progress of its own, stops.
-  const back=await A.claim({date:day,observedOwner:b.installationId,observedRevision:12,revision:14});
-  assert.equal(back.status,'completed');running(a,'A-BACK',14);await A.upload();
-  running(b,'B-PROGRESS',15);
+  const source=await B.handoffSource();
+  assert.equal(source.session.snapshot.label,'A-2','Continue Here reads the newest verified Drive session');
+  assert.equal(b.activeSession.snapshot.label,'A-1','the handoff read itself does not mutate B');
+  const claim=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,revision:12});
+  assert.equal(claim.status,'completed');
+  b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',revision:12,suspendedAt:null,updatedAt:new Date().toISOString()});b.schedule=b.activeSession.scheduleText;b.running=true;
+  // Both devices may now make progress. A cannot publish through the ownership
+  // fence; B can continue locally without first importing unrelated data.
+  running(a,'A-3',13);await assert.rejects(A.upload(),error=>error?.code==='REPOSITORY_SESSION_OWNERSHIP_AHEAD','the old owner cannot publish past B’s claim');
+  running(b,'B-CONTINUED',13);
+  assert.equal((await B.sync()).cancelled,false,'B may reconcile the pre-claim Drive head without losing ownership');
+  assert.equal(b.running,true);assert.equal(b.activeSession.runningOn,b.installationId);assert.equal(b.activeSession.snapshot.label,'B-CONTINUED');
+  assert.equal(keptSessions(b).length,0,'the current owner does not review the stale pre-claim copy');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.running,false);assert.equal(a.activeSession.runningOn,b.installationId);assert.equal(a.activeSession.snapshot.label,'B-CONTINUED');
+  assert.equal(keptSessions(a).filter(review=>review.kept?.snapshot?.label==='A-3').length,1,'late old-owner progress is kept exactly once');
+
+  // A takes ownership back from the newest B state, then both sides diverge;
+  // B's late progress is likewise kept once.
+  const backSource=await A.handoffSource();
+  const back=await A.claim({date:day,observedOwner:backSource.session.runningOn,observedRevision:backSource.session.revision,observedContentFingerprint:await sessionContentFingerprint(backSource.session),expectedCheckpointId:backSource.checkpointId,revision:14});
+  assert.equal(back.status,'completed');
+  a.activeSession=freeze({...backSource.session,runningOn:a.installationId,status:'active',revision:14,suspendedAt:null,updatedAt:new Date().toISOString()});a.schedule=a.activeSession.scheduleText;a.running=true;
+  running(a,'A-BACK',15);await A.upload();running(b,'B-PROGRESS',16);
   assert.equal((await B.sync()).cancelled,false);
-  assert.equal(b.running,false,'a takeover with a newer claim still stops B');assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-BACK');
-  assert.ok(keptSessions(b).some(review=>review.kept.snapshot.label==='B-PROGRESS'),'B keeps its progress for review');
+  assert.equal(b.running,false);assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-BACK');
+  assert.equal(keptSessions(b).filter(review=>review.kept?.snapshot?.label==='B-PROGRESS').length,1,'late B progress is kept exactly once after A takes ownership back');
 }
 
 // Taken over and already saved as that day's Saved Day on the other device
