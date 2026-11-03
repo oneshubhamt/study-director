@@ -1066,8 +1066,12 @@ registry.define('backup-provider',1,input=>{
   // back marked unreadable: sync waits on it and never uploads over it, since
   // a device that can read it would take an upload without its changes as
   // newer than them.
-  async function sharedAhead(inventory,selected=null){
+  function sharedRepositoryHead(inventory){
     let head=null;for(const pair of inventory&&inventory.pairs||[])if(pair.item.history?.retention?.role!=='before-restore')head=pair;
+    return head;
+  }
+  async function sharedAhead(inventory,selected=null){
+    const head=sharedRepositoryHead(inventory);
     if(!head)return null;const base=await RepositoryCheckpointPipeline.sharedBase();
     if(head.item.id===String(base&&base.checkpointId||''))return null;
     const unreadable=head.item.unreadable===true||!!(selected&&unreadableByProvider.get(selected.id)?.has(head.item.id));
@@ -1772,13 +1776,20 @@ registry.define('backup-provider',1,input=>{
     if(busy)return freeze({status:'busy',reason:'busy'});
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return freeze({status:'unavailable',reason:'not-connected'});
     if(!repositorySessionClaimCapable(selected))return freeze({status:'unavailable',reason:'unavailable'});
-    const date=String(request&&request.date||''),observedOwner=String(request&&request.observedOwner||''),observedRevision=Number(request&&request.observedRevision),observedContentFingerprint=String(request&&request.observedContentFingerprint||''),revision=Number(request&&request.revision),owner=String(sessionOwnershipHooks&&sessionOwnershipHooks.installationId()||'');
-    if(!sessionOwnershipHooks||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(observedOwner)||!SESSION_OWNER_PATTERN.test(owner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!SESSION_CLAIM_TOKEN_PATTERN.test(observedContentFingerprint)||!Number.isSafeInteger(revision)||revision<=observedRevision)throw new TypeError('Active-session takeover request is invalid.');
+    const date=String(request&&request.date||''),observedOwner=String(request&&request.observedOwner||''),observedRevision=Number(request&&request.observedRevision),observedContentFingerprint=String(request&&request.observedContentFingerprint||''),expectedCheckpointId=String(request&&request.expectedCheckpointId||''),revision=Number(request&&request.revision),owner=String(sessionOwnershipHooks&&sessionOwnershipHooks.installationId()||'');
+    if(!sessionOwnershipHooks||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(observedOwner)||!SESSION_OWNER_PATTERN.test(owner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!SESSION_CLAIM_TOKEN_PATTERN.test(observedContentFingerprint)||!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId)||!Number.isSafeInteger(revision)||revision<=observedRevision)throw new TypeError('Active-session takeover request is invalid.');
     const foreground=beginForeground(selected,request&&request.signal||null);if(!foreground)return freeze({status:'busy',reason:'busy'});
     setBusy(true);let publicationLease=null;
     try{
       await foreground.settled;const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});await synchronizeRepositoryScope(scoped);
       publicationLease=await beginRepositoryPublication(scoped);await assertSharedPublicationTurn(scoped,publicationLease);
+      // The lease excludes another publisher. Re-list the compact checkpoint
+      // identities now: the claim is valid only if Drive is still exactly the
+      // verified head whose session content this device just reconciled.
+      const inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
+      if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive changed or could not be read completely while Continue Here was confirming ownership.');
+      const head=sharedRepositoryHead(inventory);
+      if(!head||head.item.id!==expectedCheckpointId)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Google Drive received a newer Study Director version before this takeover could be confirmed. Sync it, then continue here again.');
       const [current,sessionToken,ownerToken,observedOwnerToken]=await Promise.all([readRepositorySessionClaim(scoped,{signal:foreground.signal}),sessionClaimToken('session',date,{signal:foreground.signal}),sessionClaimToken('owner',owner,{signal:foreground.signal}),sessionClaimToken('owner',observedOwner,{signal:foreground.signal})]);
       if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='owned'&&current.claim.ownerToken===ownerToken&&current.claim.observedOwnerToken===observedOwnerToken&&current.claim.observedRevision===observedRevision&&current.claim.observedContentFingerprint===observedContentFingerprint&&current.claim.revision>=revision)return freeze({status:'completed',claim:current.claim,reused:true});
       if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='released'&&current.claim.revision>=observedRevision)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','The shared Active Session has already ended. Sync before starting it again.');
@@ -1865,10 +1876,10 @@ registry.define('backup-provider',1,input=>{
       await enterForeground(selected,foreground,traceId,{prepare:true});
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
       if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable'});}
-      const sessionClaim=await sessionClaimedHere(selected,{signal:foreground.signal});
+      const sessionClaim=await sessionClaimedHere(selected,{signal:foreground.signal}),checkpointId=String(candidate.preview?.checkpoint?.checkpointId||'');
       const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true,sessionClaim});
-      if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt});}
-      OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt});
+      if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt,checkpointId});}
+      OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt,checkpointId});
     }catch(error){
       if(String(error&&error.code||'')==='STUDY_DIRECTOR_IMPORT_CANCELLED'){finishForegroundView(selected,{message:'Sync cancelled safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'cancelled'},traceId);return freeze({cancelled:true,reason:'cancelled'});}
       finishForegroundView(selected,{message:`Sync failed: ${userProviderMessage(error,'The newest shared version could not be verified safely.')}`,ok:false});OperationDiagnostics.fail(error,{},traceId);throw error;
