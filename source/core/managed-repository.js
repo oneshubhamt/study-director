@@ -981,19 +981,32 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
 // with the fingerprint of its stored record, so versions can be told apart
 // without reading them. Versions from before note ids name notes by title,
 // so they hold no earlier version of a note.
-function repositoryNoteObject(manifest,noteId){
-  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||releasedRepositoryManifest(manifest.version))return null;
+function repositoryStructuredMemberObject(manifest,kind,key){
+  const wantedKind=String(kind||''),wantedKey=String(key||'');if(!wantedKind||!wantedKey)return null;
   for(const entry of manifest.objects||[]){
-    if(entry.kind===noteKind&&entry.key===id)return freeze({entry,fingerprint:entry.fingerprint});
-    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members,manifest.version).find(item=>item.kind===noteKind&&item.key===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
+    if(entry.kind===wantedKind&&entry.key===wantedKey)return freeze({entry,fingerprint:entry.fingerprint});
+    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members,manifest.version).find(item=>item.kind===wantedKind&&item.key===wantedKey);if(member)return freeze({entry,fingerprint:member.fingerprint});}
   }
   return null;
+}
+function repositoryNoteObject(manifest,noteId){
+  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||releasedRepositoryManifest(manifest.version))return null;
+  return repositoryStructuredMemberObject(manifest,noteKind,id);
 }
 // Reads one note's stored record from a version, and nothing else.
 async function readRepositoryNote(manifest,readObject,noteId,options={}){
   const found=repositoryNoteObject(manifest,noteId);if(!found)return null;
   const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
   const row=rows.find(item=>item.kind===repositoryNoteKind(manifest.version)&&item.key===String(noteId));
+  return row?row.payload:null;
+}
+// Reads only the verified Active Session logical object. It may share a
+// structured pack with other small records, but no unrelated repository object
+// or attachment is opened.
+async function readRepositoryActiveSession(manifest,readObject,options={}){
+  const found=repositoryStructuredMemberObject(manifest,'activeSession','active');if(!found)return null;
+  const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
+  const row=rows.find(item=>item.kind==='activeSession'&&item.key==='active');
   return row?row.payload:null;
 }
 async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false}={}){
@@ -1189,7 +1202,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
 
     return freeze({
       format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,
-      noteObject:repositoryNoteObject,readNote:readRepositoryNote,
+      noteObject:repositoryNoteObject,readNote:readRepositoryNote,readSession:readRepositoryActiveSession,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase
     });
