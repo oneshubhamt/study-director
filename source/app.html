@@ -5576,7 +5576,10 @@ async function yieldSessionToOtherDevice(options={}){
   await SessionLifecycle.run('session-yield',{scheduleIdentity:true,date:todayISO(),autoDate:true},async()=>{
     PracticePacer.pauseForSessionEnd({persist:false});
     const now=new Date().toISOString(),session=activeSessionPayload(null,{status:'suspended',suspendedAt:now});
-    if(session){const saved=await AppData.activeSession.save(session);if(!saved.ok)throw saved.error||new Error('active session save failed');}
+    if(session){
+      const saved=await AppData.activeSession.save(session,{strictDurability:true});
+      await requireCanonicalSessionWrite(saved,session,'yielding the Active Session during reconciliation');
+    }
     resetRuntimeSessionState({lifecycleManaged:true,source:'session-yield',date:todayISO()});
     setSessionPanelMode('suspended',session);
     refreshPlanAfterSessionReset();
