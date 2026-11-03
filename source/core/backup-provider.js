@@ -1194,17 +1194,16 @@ registry.define('backup-provider',1,input=>{
     let applies=false;if(local?.value)applies=await sessionClaimToken('session',local.value.date,{signal})===claim.sessionToken;else if(local?.today)applies=await sessionClaimToken('session',local.today,{signal})===claim.sessionToken;
     return freeze({epoch:claim.epoch,state:claim.state,revision:claim.revision,observedRevision:claim.observedRevision,observedContentFingerprint:claim.observedContentFingerprint,claimedAt:claim.claimedAt,ownedHere:!!ownerToken&&ownerToken===claim.ownerToken,applies});
   }
-  // Drive's newest claim names this device for today's session. It remains
-  // authoritative across the owner's final local transition to "no Active
-  // Session": otherwise an older checkpoint could resurrect the pre-handoff
-  // session before this device publishes the Saved Day / ended state.
+  // Project the newest applicable claim for either side of the handoff.
+  // Both devices need the same causal boundary: the new owner uses it to keep
+  // control while Drive still has a pre-claim checkpoint; the old owner uses
+  // it to stop running without mistaking that stale checkpoint for a revert.
   // Unknown counts as no; ordinary reconciliation then remains conservative.
-  async function sessionClaimedHere(selected,{signal=null}={}){
+  async function sessionClaimForSync(selected,{signal=null}={}){
     if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return null;
     try{
-      const me=String(sessionOwnershipHooks.installationId()||'');if(!me)return null;
       const claim=await projectSessionClaim(await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal}),{signal});
-      return claim&&claim.state==='owned'&&claim.ownedHere&&claim.applies?claim:null;
+      return claim&&claim.applies?claim:null;
     }catch(error){if(!signal?.aborted)AppDiagnostics.capture('backup-provider.sync-session-claim',error,'warn');return null;}
   }
   async function assertSharedSessionOwnership(selected,{signal=null}={}){
@@ -1915,7 +1914,7 @@ registry.define('backup-provider',1,input=>{
       }
       const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId,mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
       if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable',checkpointId});}
-      const sessionClaim=await sessionClaimedHere(selected,{signal:foreground.signal}),verifiedCheckpointId=String(candidate.preview?.checkpoint?.checkpointId||checkpointId);
+      const sessionClaim=await sessionClaimForSync(selected,{signal:foreground.signal}),verifiedCheckpointId=String(candidate.preview?.checkpoint?.checkpointId||checkpointId);
       const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true,sessionClaim});
       if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt,checkpointId:verifiedCheckpointId});}
       OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt,checkpointId:verifiedCheckpointId});
