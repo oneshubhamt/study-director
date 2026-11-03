@@ -5479,8 +5479,9 @@ async function continueSessionOnExecute(source){
 // Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
-async function yieldSessionToOtherDevice(){
+async function yieldSessionToOtherDevice(options={}){
   if(!TASKS.length)return false;
+  const deferReview=options&&options.deferReview===true;
   await SessionLifecycle.run('session-yield',{scheduleIdentity:true,date:todayISO(),autoDate:true},async()=>{
     PracticePacer.pauseForSessionEnd({persist:false});
     const now=new Date().toISOString(),session=activeSessionPayload(null,{status:'suspended',suspendedAt:now});
@@ -5493,7 +5494,8 @@ async function yieldSessionToOtherDevice(){
     return true;
   });
   sessionYieldedAt=Date.now();
-  Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.',
+  if(deferReview)Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. Any late progress on this device will be compared when the new owner’s session arrives.'});
+  else Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.',
     action:{label:'Review',opens:true,run:()=>void KeptVersions.review()}});
   return true;
 }
@@ -10032,7 +10034,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     hasTasks:()=>TASKS.length>0,
     toActiveSession:activeSessionPayload,
     withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),
-    yieldSession:()=>yieldSessionToOtherDevice()
+    yieldSession:options=>yieldSessionToOtherDevice(options)
   }),
   domain:Object.freeze({
     clampText,filenameSafeStudentName,
