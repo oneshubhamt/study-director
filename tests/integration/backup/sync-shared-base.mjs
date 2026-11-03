@@ -7,6 +7,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
+import {checkCases} from '../../helpers/generated-cases.mjs';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
@@ -833,4 +834,78 @@ let syncWorld=null;
   assert.equal((await A.sync()).cancelled,false);assert.equal(a.activeSession.snapshot.label,'A-UNSEEN','a session the other side never had is not ended by it');assert.equal(a.running,true);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','a takeover is not undone by an upload saved before it','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
+// The merge rules (docs/areas/backup-and-sync.md#merge-rules) over generated
+// cases. From a shared start, each device keeps, edits (one of the first two
+// paragraphs, so both sides often pick the same one) or
+// deletes each note, keeps or edits each Saved Day, and may add a note of its
+// own. A uploads, B syncs, B uploads, A syncs. Whatever the mix, nothing is
+// lost, both devices end alike, and a repeated sync changes nothing.
+let mergeRuleCases=0;
+{
+  const {device}=syncWorld,T0=Date.parse('2026-09-01T08:00:00.000Z'),iso=ms=>new Date(ms).toISOString();
+  const noteRow=(key,text,ms)=>freeze({version:2,key,text,updatedAt:iso(ms)}),baseText=key=>[0,1,2].map(paragraph=>`${key} paragraph ${paragraph}`).join('\n\n');
+  const snapshot=state=>freeze({notes:Object.fromEntries(Object.entries(state.notes).map(([key,value])=>[key,value.text]).sort(([x],[y])=>x.localeCompare(y))),days:Object.fromEntries([...state.records].map(([date,value])=>[date,value.reflection]).sort(([x],[y])=>x.localeCompare(y))),reviews:state.reviews.open().map(review=>review.id).sort()});
+  mergeRuleCases=await checkCases('sync merge rules',{seed:20261102,count:30},async({int,weighted,chance},index)=>{
+    syncWorld.drive.clear();
+    const keys=Array.from({length:int(2,3)},(_,n)=>`Note${n}`),dates=['2026-08-01','2026-08-02'].slice(0,int(1,2));
+    const a={installationId:`inst_rule_a_${index}`,records:new Map(dates.map(date=>[date,record(date,`${date} as shared`,iso(T0))])),deletions:[],noteDeletions:[],notes:Object.fromEntries(keys.map(key=>[key,noteRow(key,baseText(key),T0)])),activeSession:null,schedule:'',personal:personal('Rule User'),journal:null};
+    const b={installationId:`inst_rule_b_${index}`,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Rule User'),journal:null};
+    const A=device(a),B=device(b);
+    await A.upload();assert.equal((await B.sync()).cancelled,false);assert.deepEqual(snapshot(b).notes,snapshot(a).notes,'both start from the same notes');
+    // Every change gets its own time, so "the newer" is always defined.
+    const used=new Set(),at=()=>{let ms;do ms=T0+int(1,7200)*1000;while(used.has(ms));used.add(ms);return ms;};
+    const change=(state,side)=>{
+      const notes={},days={};
+      for(const key of keys){
+        const kind=weighted({keep:3,edit:4,delete:2});notes[key]={kind};
+        if(kind==='edit'){const paragraph=int(0,1),parts=baseText(key).split('\n\n');parts[paragraph]=`${key} paragraph ${paragraph} by ${side} ${int(1,999999)}`;const ms=at(),text=parts.join('\n\n');state.notes={...state.notes,[key]:noteRow(key,text,ms)};Object.assign(notes[key],{paragraph,line:parts[paragraph],text,ms});}
+        if(kind==='delete'){const ms=at(),{[key]:gone,...rest}=state.notes;state.notes={...rest,[`~deleted ${key}`]:noteRow(`~deleted ${key}`,gone.text,ms)};state.noteDeletions=[...state.noteDeletions,{key,deletedAt:iso(ms)}];}
+      }
+      for(const date of dates){days[date]={kind:'keep'};if(chance(0.5)){const ms=at(),reflection=`${date} by ${side}`;state.records.set(date,record(date,reflection,iso(ms)));days[date]={kind:'edit',reflection,ms};}}
+      const added=chance(0.4)?`Added on ${side}`:null;if(added)state.notes={...state.notes,[added]:noteRow(added,`written on ${side}`,at())};
+      return {notes,days,added};
+    };
+    const byA=change(a,'A'),byB=change(b,'B');
+    await A.upload();assert.equal((await B.sync()).cancelled,false,'a sync never stops to ask');
+    const open=b.reviews.open(),kept=(subject,ref)=>open.filter(review=>review.subject===subject&&review.ref===ref);let expectedReviews=0;
+    for(const key of keys){
+      const theirs=byA.notes[key],mine=byB.notes[key],live=b.notes[key]?.text,held=kept('note',key),label=`note ${key} (A ${theirs.kind}, B ${mine.kind})`;
+      if(theirs.kind==='keep'&&mine.kind==='keep'){assert.equal(live,baseText(key),label);assert.equal(held.length,0,label);}
+      else if(theirs.kind==='keep'||mine.kind==='keep'){
+        const changed=theirs.kind==='keep'?mine:theirs;
+        assert.equal(live,changed.kind==='edit'?changed.text:undefined,`${label}: a change made on one side only is taken`);assert.equal(held.length,0,`${label}: without a review`);
+      }else if(theirs.kind==='delete'&&mine.kind==='delete'){assert.equal(live,undefined,label);assert.equal(held.length,0,label);}
+      else if(theirs.kind==='delete'||mine.kind==='delete'){
+        assert.equal(live,(theirs.kind==='edit'?theirs:mine).text,`${label}: an edited note is never deleted by a sync`);
+        assert.deepEqual(held.map(review=>review.kept),[null],`${label}: its review offers the deletion`);expectedReviews+=1;
+      }else if(theirs.paragraph!==mine.paragraph){
+        assert.equal(held.length,0,`${label}: edits to different paragraphs need no review`);
+        for(const line of [theirs.line,mine.line])assert.ok(String(live).split('\n\n').includes(line),`${label}: both edits are in the joined text`);
+      }else{
+        const [newer,older]=theirs.ms>mine.ms?[theirs,mine]:[mine,theirs];
+        assert.equal(live,newer.text,`${label}: the newer edit shows`);
+        assert.equal(held.length,1,`${label}: the other is kept for review`);assert.equal(held[0].kept.text,older.text,label);assert.equal(held[0].base?.text,baseText(key),`${label}: with what both last shared`);expectedReviews+=1;
+      }
+    }
+    for(const date of dates){
+      const theirs=byA.days[date],mine=byB.days[date],live=b.records.get(date)?.reflection,held=kept('savedDay',date),label=`Saved Day ${date} (A ${theirs.kind}, B ${mine.kind})`;
+      if(theirs.kind==='keep'&&mine.kind==='keep'){assert.equal(live,`${date} as shared`,label);assert.equal(held.length,0,label);}
+      else if(theirs.kind==='keep'||mine.kind==='keep'){assert.equal(live,(theirs.kind==='keep'?mine:theirs).reflection,`${label}: a change made on one side only is taken`);assert.equal(held.length,0,label);}
+      else{
+        const [newer,older]=theirs.ms>mine.ms?[theirs,mine]:[mine,theirs];
+        assert.equal(live,newer.reflection,`${label}: the newer shows`);assert.deepEqual(held.map(review=>review.kept?.reflection),[older.reflection],`${label}: the other is kept for review`);expectedReviews+=1;
+      }
+    }
+    for(const added of [byA.added,byB.added].filter(Boolean))assert.equal(b.notes[added]?.text,`written on ${added.slice(-1)}`,`a note added on one side arrives: ${added}`);
+    assert.equal(open.length,expectedReviews,'nothing else is kept for review');
+    // Every deleted note's text is still in Recently deleted on the device that deleted it.
+    for(const [state,changes] of [[a,byA],[b,byB]])for(const key of keys)if(changes.notes[key].kind==='delete')assert.ok(state.notes[`~deleted ${key}`],`a deleted note stays in Recently deleted: ${key}`);
+    const settled=snapshot(b);
+    await B.upload();assert.equal((await A.sync()).cancelled,false);
+    assert.deepEqual(snapshot(a),settled,'both devices end with the same notes, Saved Days and kept versions');
+    assert.equal((await A.sync()).cancelled,false);assert.deepEqual(snapshot(a),settled,'a repeated sync changes nothing');
+    assert.equal((await B.sync()).cancelled,false);assert.deepEqual(snapshot(b),settled,'nor does a sync of what this device uploaded');
+  });
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',mergeRuleCases,preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','a takeover is not undone by an upload saved before it','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

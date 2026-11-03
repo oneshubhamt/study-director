@@ -128,4 +128,12 @@ checkCard('Retrying',{phase:'signed-in',drive:linked({waiting:true,nextEligibleA
 checkCard('Stopped after retries',{phase:'signed-in',drive:linked({retryBackoffCapped:true,waiting:true},{failed:true})},{tone:'error',title:'Sync stopped',steps:'done,failed,pending',action:'retry'});
 checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({connected:false})},{tone:'attention',steps:'done,waiting,pending',action:'sign-in'});
 
+// While Drive syncs, a restore or combine dialog says the result reaches the other devices; otherwise it says nothing.
+{
+  let synced=true;const withReach=registry.require('backup-presentation',1).createPresentation(Object.freeze({notifications,synced:()=>synced}));
+  assert.equal(withReach.reach(),'Google Drive is connected, so your other devices get the result at their next sync.');
+  synced=false;assert.equal(withReach.reach(),'','no reach line without Drive sync');
+  assert.equal(presentation.reach(),'','no reach line when the host gives no sync state');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:21,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:21}));

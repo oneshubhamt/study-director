@@ -13,6 +13,7 @@ const CHECKPOINT=value=>'cp_'+value.repeat(32);
 const events=[],statuses=[],diagnostics=[];
 let storedPending=null,storageReadError=null,providerBringInResult=freeze({ok:true}),chooseMode='replace',restoredCheckpoint='',restoredConfirmed=false,suspended=0,cancelImportCalls=0,deviceCancelCalls=0,providerCancelCalls=0,lastProviderCancelId='';
 let deletionResults=[];
+let attachmentsBusy=false,notesFailure=null,backgroundSettled=null;
 let providerRestoreImpl=async()=>freeze({ok:true});
 let driveConnected=false,noteVersionsImpl=async()=>freeze({available:true,entries:freeze([])}),lastProviderBringIn=null;
 let deviceRestoreFailure=null;const removedVersions=[];
@@ -41,8 +42,8 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
   }}),
   lifecycle:freeze({
     activeSessionIssue:()=>'',activeSessionLoad:async()=>freeze({ok:true,value:session.tasks?freeze({revision:session.revision}):null,error:null,storage:freeze({idb:true})}),activeSessionSettled:async()=>{events.push('active-settled');return true;},
-    attachmentBusy:()=>false,canonicalPlanDraft:async()=>plan.stored,deletionRecoveryFlush:async()=>{events.push('deletion-flush');const value=deletionResults.length?deletionResults.shift():true;if(value instanceof Error)throw value;return value;},
-    flushNotes:async()=>{events.push('notes-flush');return true;},flushPlanDraft:async()=>{events.push('plan-flush');return true;},hasTasks:()=>session.tasks,noteFailure:()=>null,
+    attachmentBusy:()=>attachmentsBusy,canonicalPlanDraft:async()=>plan.stored,deletionRecoveryFlush:async()=>{events.push('deletion-flush');const value=deletionResults.length?deletionResults.shift():true;if(value instanceof Error)throw value;return value;},
+    flushNotes:async()=>{events.push('notes-flush');return true;},flushPlanDraft:async()=>{events.push('plan-flush');return true;},hasTasks:()=>session.tasks,noteFailure:()=>notesFailure,
     planDraft:()=>plan.cached,planInputValue:()=>plan.input,quiesce:async operation=>{events.push('quiesce-enter');try{return await operation();}finally{events.push('quiesce-exit');}},
     // Mirrors PlanData: the write is skipped when the page believes storage already holds it.
     savePlanDraft:async(options={})=>{plan.saves.push(options.force===true);if(options.force===true||plan.persisted!==plan.input){if(plan.writable)plan.stored=plan.input;plan.persisted=plan.input;}plan.cached=plan.input;return true;},settleAttachmentWriters:async()=>{events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>{session.writes+=1;session.revision+=1;session.source=new Date(Date.parse('2026-09-20T12:00:00.000Z')+session.revision*1000).toISOString();return freeze({ok:true,value:freeze({revision:session.revision}),storage:freeze({idb:true})});}
@@ -67,7 +68,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
       if(id==='device-folder'){restoredCheckpoint=options.checkpointId;restoredConfirmed=options.confirmed===true;events.push(`restore:${restoredCheckpoint}`);return freeze({ok:true});}
       return providerRestoreImpl(id,options);
     },
-    suspendBackground:()=>{suspended+=1;events.push('suspend');let released=false;return freeze({settled:Promise.resolve(),release:()=>{if(released)return false;released=true;suspended-=1;events.push('resume');return true;}});}
+    suspendBackground:()=>{suspended+=1;events.push('suspend');let released=false;return freeze({settled:backgroundSettled||Promise.resolve(),release:()=>{if(released)return false;released=true;suspended-=1;events.push('resume');return true;}});}
   }),
   session:freeze({hasBlocking:()=>sessionBlocking}),
   sourceRevision:()=>session.source,
@@ -85,12 +86,43 @@ await assert.rejects(()=>providerHooks.pending.mark('google-drive'),/temporary a
 assert.equal(storedPending,preservedPending,'failed strict pending-marker mutation must not overwrite or remove unread durable state');
 storageReadError=null;assert.equal(await providerHooks.pending.read('google-drive'),null,'a successfully read marker without this provider is confirmed absence');storedPending=null;diagnostics.length=0;
 
-const recovery=await host.managedRecovery(freeze({kind:'restore-version',label:'Device Folder',createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:'2026-09-20T12:00:00.000Z'}),apply:async()=>{events.push('apply');return freeze({ok:true});},publishPresent:async()=>freeze({status:'completed',checkpointId:CHECKPOINT('e')})}));
+const recoverySpec=freeze({kind:'restore-version',label:'Device Folder',createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:'2026-09-20T12:00:00.000Z'}),apply:async()=>{events.push('apply');return freeze({ok:true});},publishPresent:async()=>freeze({status:'completed',checkpointId:CHECKPOINT('e')})});
+const beforeRecovery=events.length;
+const recovery=await host.managedRecovery(recoverySpec);
 assert.equal(recovery.managedRecovery.present.status,'completed');assert.equal(suspended,0);
+// Before anything is replaced, every pending write is saved: attachments,
+// the Plan draft, notes, deletions and the active session, and automatic
+// backups are paused for the whole operation.
+{
+  const steps=events.slice(beforeRecovery),applied=steps.indexOf('apply');
+  assert.ok(steps.indexOf('suspend')>=0&&steps.indexOf('suspend')<applied,'automatic backups pause before the restore');
+  for(const step of ['attachments-settle','plan-flush','plan-settle','notes-flush','deletion-flush','active-settled'])assert.ok(steps.indexOf(step)>=0&&steps.indexOf(step)<applied,`${step} happens before the restore applies`);
+  assert.ok(steps.lastIndexOf('resume')>applied,'automatic backups resume after it');
+}
+// Background work already running when a restore starts finishes first:
+// nothing is saved or replaced until it has.
+{
+  let finish;backgroundSettled=new Promise(resolve=>{finish=resolve;});
+  const start=events.length,running=host.managedRecovery(recoverySpec);
+  for(let turn=0;turn<20;turn++)await Promise.resolve();
+  assert.deepEqual(events.slice(start).filter(event=>['plan-flush','notes-flush','apply'].includes(event)),[],'nothing happens while background work is still running');
+  finish();backgroundSettled=null;await running;
+  assert.ok(events.slice(start).includes('apply'),'the restore goes ahead once it has finished');assert.equal(suspended,0);
+}
+// Nothing is replaced while an attachment is still being written or notes
+// are not safely stored.
+for(const [label,arrange] of [['an attachment is still saving',()=>{attachmentsBusy=true;}],['notes are not safely stored',()=>{notesFailure=freeze({failed:true,message:'Notes are not safely stored yet.'});}]]){
+  arrange();const start=events.length;
+  await assert.rejects(()=>host.managedRecovery(recoverySpec),/attachment is still being prepared|Notes are not safely stored/,label);
+  assert.equal(events.slice(start).includes('apply'),false,`${label}: the restore does not apply`);assert.equal(suspended,0,`${label}: automatic backups resume`);
+  attachmentsBusy=false;notesFailure=null;
+}
 
 await host.history.open();await new Promise(resolve=>setImmediate(resolve));
 assert.equal(deviceHistoryReads,1);assert.equal(providerHistoryReads,0,'Version History reads only the locations that are connected');
 assert.equal(nodes.get('managed-version-history-title').textContent,'Version History');
+assert.equal(nodes.get('managed-version-history-copy').textContent,'Every version your backups keep, newest first. Choose one to restore.');
+{const actions=nodes.get('managed-version-history-list').children[0].children[1].children[1];assert.equal(actions.children[0].textContent,'Restore…','each version offers Restore…');assert.equal(actions.children[0].dataset.action,'recover-managed-version');}
 const deviceButton={dataset:{versionHistorySource:'device-folder',versionHistoryCheckpoint:CHECKPOINT('a')}};
 const presentation=[];host.history.subscribePresentation(value=>presentation.push(value));
 assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),true);
@@ -196,6 +228,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),false,'the whole-library button does nothing in note mode');
   assert.equal(nodes.get('managed-version-history-kicker').textContent,'Earlier versions');assert.equal(nodes.get('managed-version-history-title').textContent,'GS2 > Ethics');
+  assert.equal(nodes.get('managed-version-history-copy').textContent,'Choose an earlier version of this note. You review the differences before anything changes.');
   const choicesBefore=chooseCount();deviceCombineResult=freeze({ok:false,reason:'note-unchanged'});
   assert.equal(await host.history.recover({target:{closest:()=>noteButton}}),false);
   assert.equal(lastDeviceCombine.note,ethicsId,'the comparison names the note by id');assert.equal(lastDeviceCombine.confirmed,false);assert.match(host.history.status().status.message,/same text as this note/u);assert.equal(nodes.get('managed-version-history').open,true);
@@ -282,7 +315,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(nodes.get('managed-version-history-status').textContent,'3 versions. 1 can’t be read by this app.');
   assert.equal(cards[0].children[0].children[1].textContent,'Can’t be read by this app');assert.match(cards[0].children[1].children[0].children[0].textContent,/newer Study Director, or the file is damaged/u);
   const [restore,remove]=cards[0].children[1].children[1].children;assert.equal(cards[0].children[1].children[1].children.length,2);
-  assert.ok(cards[0].classList.contains('unreadable')&&cards[0].attributes['aria-disabled']==='true','it shows muted');assert.equal(restore.disabled,true,'Restore is there but disabled');
+  assert.ok(cards[0].classList.contains('unreadable')&&cards[0].attributes['aria-disabled']==='true','it shows muted');assert.equal(restore.disabled,true,'Restore is there but disabled');assert.equal(restore.textContent,'Restore…');
   assert.equal(remove.dataset.action,'remove-managed-version');assert.ok(remove.classList.contains('danger')&&!remove.disabled,'Remove is red and enabled');
   assert.match(cards[3].children[0].children[1].textContent,/^Locked: enter the backup password/u);
   // Restore: the Device Folder's read fails before anything changed, so Drive's copy is read.
@@ -316,6 +349,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.deepEqual(driveSkip&&{checkpointIds:[...driveSkip.checkpointIds],contents:[...driveSkip.contents]},{checkpointIds:covered.checkpointIds.slice(),contents:covered.contents.slice()},'Drive skips the versions the Device Folder already read');
   const cards=nodes.get('managed-version-history-list').children,buttons=cards.map(card=>card.children[0].children[2]),labels=cards.map(card=>card.children[0].children[0].textContent);
   assert.deepEqual(buttons.map(button=>button.dataset.versionHistoryCheckpoint),[CHECKPOINT('f'),CHECKPOINT('g'),CHECKPOINT('e')],'one entry per distinct text, newest first, without the current text');
+  assert.deepEqual(buttons.map(button=>button.textContent),['Review','Review','Review'],'a note version offers Review: the differences come before any change');
   assert.equal(labels[0].includes(','),false,'a date with one version shows the day only');assert.ok(labels[1].includes(',')&&labels[2].includes(','),'two versions on one date show their times');
   assert.equal(nodes.get('managed-version-history-title').textContent,'Ethics');
   providerBringInResult=freeze({ok:true});

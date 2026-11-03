@@ -867,7 +867,7 @@ html[data-presentation="aurora"] .sb-stats{
   }
   html[data-presentation="aurora"] .nav-item.on{border-bottom-color:var(--sd-glass-edge)!important}
   html[data-presentation="aurora"] .nav-icon{display:grid!important;width:22px;height:22px;border-radius:8px;font-size:var(--sd-type-role-copy-size)}
-  html[data-presentation="aurora"] .main{margin-left:0!important;padding-right:0;padding-bottom:0}
+  html[data-presentation="aurora"] .main{margin-left:0!important;padding-top:var(--sd-safe-top);padding-right:0;padding-bottom:0}
   html[data-presentation="aurora"] .pane,
   html[data-presentation="aurora"] #pane-plan{padding-top:max(18px,var(--sd-density-pane-padding-top));padding-bottom:var(--sd-glass-mobile-content-clearance)}
   html[data-presentation="aurora"] .display-tools,

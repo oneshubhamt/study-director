@@ -3,7 +3,11 @@
 // listing and removal. Each file's lastModified comes from the given clock.
 // `faults` lets a test corrupt the next read-back of a named file or remove a
 // folder from under its handle.
-export function createMemoryDirectory({now=()=>Date.now(),faults={corruptReadOf:new Set()}}={}){
+export function createMemoryDirectory({now:initialNow=()=>Date.now(),faults={corruptReadOf:new Set()}}={}){
+  // Pages on one device share its clock, but each simulated page keeps its
+  // own and an idle one lags. A folder that several pages use stamps files
+  // with the latest of their clocks, as the device's one clock would.
+  const clocks=[initialNow],now=()=>Math.max(...clocks.map(clock=>Number(clock())));
   function notFound(name){return Object.assign(new Error(`${name} was not found.`),{name:'NotFoundError'});}
   function directory(name){
     const entries=new Map();let removed=false;
@@ -40,5 +44,7 @@ export function createMemoryDirectory({now=()=>Date.now(),faults={corruptReadOf:
       touch(at){modified=at;}
     };
   }
-  return directory('root');
+  const root=directory('root');
+  root.useClock=clock=>{if(!clocks.includes(clock))clocks.push(clock);};
+  return root;
 }

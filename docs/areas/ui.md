@@ -34,3 +34,7 @@ The Library shows one of three sections, chosen by a switch at the top: **Notes*
 - New screens follow the typography roles (capitals and tracking come from `--sd-type-transform-*`, never a hard-coded `uppercase`).
 - Pop-ups, panels and dialogs are checked at laptop and phone widths with screenshots before a UI change is finished.
 - Browser tests wait for motion to settle (`settleMotion` in the browser harness) before measuring or clicking.
+
+## Safe areas
+
+The page uses `viewport-fit=cover`, so on iPhone, iPad and notched Macs it reaches under the status bar and camera cut-out. Everything that touches an edge adds the matching `--sd-safe-*` inset (`env(safe-area-inset-*)`). A top navigation bar (narrow Director layout) carries the top inset itself. Where nothing sits at the top (the floating bottom bar of Glass and Aurora, and every layout wider than 900 px), the main area starts below it, so page titles, tabs and notices never sit under the status strip.

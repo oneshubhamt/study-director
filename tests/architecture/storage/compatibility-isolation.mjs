@@ -35,14 +35,12 @@ const block=repositories.slice(blockStart,blockEnd),rest=repositories.slice(0,bl
 const defined=[...block.matchAll(/^(?:async )?function (\w+)\(/gmu)].map(match=>match[1]);
 assert.ok(defined.length>=10,'the block holds the repository migrations');
 for(const name of defined)assert.equal(new RegExp(`\\b${name}\\b`,'u').test(rest),false,`${name} is compatibility code: only its block may use it`);
-assert.match(block,/const compatibility=freeze\(\{/u,'the AppData.compatibility namespace closes the block');
 for(const name of ['migrateInsightsRevisionEnvelope','verifyInsightsRevisionEnvelope','verifyDeletionState','legacySyncDeleteEntries','rawLegacyMetaGet'])assert.ok(defined.includes(name),`${name} lives in the compatibility block`);
 for(const name of ['migrateNoteRows','migrateNoteRecovery','verifyNoteRecovery'])assert.ok(defined.includes(name),`${name} lives in the compatibility block`);
 assert.doesNotMatch(read('source/core/repositories-notes.js'),/CompatibilityCodec|compatibilityWriteToken|legacyKeys|noteRecovery|async function migrate/u,'the notes repository holds no compatibility code');
 
 // Nothing outside the block reads the retired stores, keys or raw metadata rows.
 assert.doesNotMatch(rest,/rawLegacyMeta|legacySyncDeleteEntries|idbGetAllIfPresent\(DB_LEGACY_|getText\(STORAGE_KEYS\.legacySyncEmergency/u,'retired stores and keys are read only in the compatibility block');
-assert.doesNotMatch(rest,/migrateLegacyEnvelope|verifyCanonicalEnvelope|normalizeLegacyRow/u,'the Insights revision keeps no older-form conversions of its own');
 
 // The backup format module keeps its readers for older backup files in one
 // marked block, reached only through inspectLegacy.

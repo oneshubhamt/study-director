@@ -404,6 +404,14 @@ const providerRestore=await runtime.providers.restoreRepositoryProviderVersion('
 const providerCheckpoints=[...remoteFiles.values()].filter(file=>file.kind==='checkpoint');assert.equal(providerCheckpoints.length,2,'Managed provider Version Restore must retain the selected history and append one protected Before restore checkpoint, without publishing a redundant identical current checkpoint.');assert.ok(providerCheckpoints.some(file=>file.id===checkpointId),'The selected historical checkpoint must remain available after restore.');const historicalAfter=remoteFiles.get(remoteKey('checkpoint',checkpointId)).blob;assert.deepEqual(new Uint8Array(await historicalAfter.arrayBuffer()),originalHistoricalManifestBytes,'Historical managed checkpoint bytes must never be rewritten by Version Restore.');const providerManifests=[];for(const file of providerCheckpoints)providerManifests.push(await runtime.repository.inspectManifest(file.blob,{interactive:false}));const protectedProvider=providerManifests.find(item=>item.retention?.role==='before-restore');assert.ok(protectedProvider,'Managed provider restore must publish a protected Before restore checkpoint before local replacement.');assert.ok(Date.parse(protectedProvider.retention.protectedUntil)>Date.parse(protectedProvider.exportedAt));assert.equal(providerManifests.filter(item=>item.retention?.role!=='before-restore'&&item.checkpoint.checkpointId!==checkpointId).length,0,'Exact same-provider restore must not append a duplicate normal checkpoint after local replacement.');assert.deepEqual(managedProviderRecoveryEvents,['mutation-enter','suspend:restore-version','quiesce-enter','settle:restore-version','quiesce-exit','quiesce-enter','settle:restore-version','rebuild:restore-version','quiesce-exit','mutation-exit','resume:provider-qa'],'Provider recovery must keep long external safety I/O outside the two short quiescence windows while preserving one shared mutation transaction.');
 records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:'orphan-marker local-only',savedAt:'2026-09-21T04:00:00.000Z',updatedAt:'2026-09-21T04:00:00.000Z'}));orphanRestoreMaintenance=true;const orphanMarkerRestore=await runtime.providers.restoreRepositoryProviderVersion('repository-version-qa',{checkpointId});assert.equal(orphanMarkerRestore.mode,'restore-version','Version Restore must recover in the same attempt when a maintenance lease has been abandoned');assert.equal(orphanRestoreReaps,1,'Version Restore must reap the expired maintenance lease instead of timing out repeatedly');assert.equal(orphanRestoreMaintenance,false);assert.deepEqual(records.map(row=>row.date),['2026-09-18']);
 
+// A restore that names no version stops before it reads or writes anything.
+{
+  const recordsBefore=JSON.stringify(records),remoteBefore=[...remoteFiles.keys()].sort().join('|');let outcome='';
+  try{outcome=JSON.stringify(await runtime.providers.restoreRepositoryProviderVersion('repository-version-qa',{}));}catch(error){outcome=String(error&&error.message||error);}
+  assert.match(outcome,/Choose a version to restore\. Nothing was changed\./u);
+  assert.equal(JSON.stringify(records),recordsBefore,'local data is unchanged');assert.equal([...remoteFiles.keys()].sort().join('|'),remoteBefore,'no safety version is written');
+}
+
 // Restoring one note from a Drive version downloads only the objects that
 // hold the note, never the version's attachments or other data, and keeps
 // today's session through the recovery.
@@ -455,7 +463,7 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
     folder:()=>folder,identities:freeze({root:'Study Director - QA - Test Device',legacyRoot:'Study-Director-Automatic-Backup-Repository',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'}),owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),
     checksum:async blob=>codec.checksumBlob(blob),inspectManifest:(file,options)=>runtime.repository.inspectManifest(file,options),
     environment:freeze({canMutate:()=>true,now:()=>Date.now(),setTimeout,clearTimeout,yieldTask:async()=>{}}),
-    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
+    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
   }));
   assert.equal(runtime.providers.register(freeze({id:'device-folder-engine',label:'Device Folder',connected:()=>true,repository:deviceStorage})),true);
   notes={Ethics:normalizeArea({key:'Ethics',text:'folder version',updatedAt:'2026-09-21T01:00:00.000Z'},'Ethics')};
@@ -468,6 +476,27 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   notes={...notes,Ethics:normalizeArea({key:'Ethics',text:'changed after the folder backup',updatedAt:'2099-01-04T00:00:00.000Z'},'Ethics')};noteChoice=conflict=>conflict.incomingValue;
   const noteRestore=await runtime.providers.bringInRepositoryProvider('device-folder-engine',{checkpointId:published.checkpointId,note:'Ethics'});noteChoice=null;
   assert.equal(noteRestore.cancelled,false);assert.equal(notes.Ethics.text,'folder version');
+  // After a restore, every location owes a backup of the result. The restored location and each other location that backs up on its own are
+  // recorded as owing one and scheduled; until every such record is written, the restore reads as pending, never completed.
+  {
+    const owed=new Map(),failing=new Set();
+    runtime.providers.configurePendingBackupRetry(freeze({read:async id=>owed.get(id)||null,mark:async id=>{if(failing.has(id))return false;owed.set(id,freeze({providerId:id}));return true;},clear:async id=>{owed.delete(id);return true;}}));
+    // The Device Folder last backed up before the newest change, so it still owes one after the restore.
+    runtime.providers.configureAutomaticBackup(freeze({covered:id=>id==='device-folder-engine'?'2026-01-01T00:00:00.000Z':'',current:()=>'2099-01-05T00:00:00.000Z'}));
+    assert.equal(runtime.providers.register(freeze({id:'peer-qa',label:'Peer QA',connected:()=>false,automaticConfigured:()=>true,repository:providerTransport})),true);
+    try{
+      const restored=await runtime.providers.restoreRepositoryProviderVersion('device-folder-engine',{checkpointId:published.checkpointId,confirmed:true});
+      assert.equal(restored.convergence.status,'completed');
+      assert.deepEqual([restored.convergence.source.status,restored.convergence.source.retryQueued,restored.convergence.source.scheduled],['pending',true,true],'the restored location owes a backup of the result and has one scheduled');
+      assert.deepEqual(restored.convergence.others.map(row=>[row.id,row.status,row.queued,row.scheduled]),[['peer-qa','pending',true,true]],'the other location is recorded and scheduled too');
+      assert.deepEqual([...owed.keys()].sort(),['device-folder-engine','peer-qa'],'both obligations are written down');
+      failing.add('peer-qa');owed.clear();
+      const unrecorded=await runtime.providers.restoreRepositoryProviderVersion('device-folder-engine',{checkpointId:published.checkpointId,confirmed:true});
+      assert.equal(unrecorded.convergence.status,'pending','a peer whose obligation could not be written keeps the restore pending');
+      assert.match(unrecorded.convergence.reason,/Peer QA automatic backup retry could not be recorded/u);
+      assert.deepEqual(unrecorded.convergence.others.map(row=>[row.status,row.queued]),[['failed',false]]);
+    }finally{runtime.providers.configurePendingBackupRetry(null);runtime.providers.configureAutomaticBackup(null);}
+  }
   ({records,notes,deletions,currentPersonal}=saved);assets.clear();for(const [id,blob] of saved.assets)assets.set(id,blob);
 }
 

@@ -101,4 +101,10 @@ for(const unavailable of ['google-drive','device-folder']){
   assert.equal(restarted.clock.pending(),0,'a fully converged runtime leaves no retry timers');
   cases.push('crash/restart settles outstanding '+unavailable+' without replaying its peer');
 }
+// Forgetting a location drops the backup it still owed: nothing is uploaded later, and no retry stays scheduled.
+{
+ const t=fixture();t.register();t.configure();assert.ok(t.stats().durable,'a backup is owed');
+ assert.equal(await t.runtime.forget('google-drive'),true);assert.equal(t.stats().durable,null,'the owed backup is dropped');
+ await tick(t,3600000);assert.equal(t.stats().writes,0,'nothing is uploaded after Forget');assert.equal(t.clock.pending(),0);cases.push('forget retires the owed backup');
+}
 console.log(JSON.stringify({status:'PASS',suite:'pending-provider-recovery',productionRuntime:true,cases},null,2));

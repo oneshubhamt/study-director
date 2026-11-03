@@ -261,6 +261,35 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
 }
 
 {
+  // An upload renews its marker while it runs: Drive markers never change, so
+  // renewal puts a fresh marker in place and removes the old one. Cleanup
+  // treats a renewing marker left unrenewed as abandoned, so renewal must
+  // fail once the old marker is gone or too close to looking abandoned.
+  let device='inst_qa_laptop_mve00000_aaaaaaaa';const {state,provider}=createHarness({device:()=>device});await provider.prepare();await provider.authorize();
+  const markers=()=>[...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='publication'),markerFile=id=>markers().find(file=>file.appProperties.studyDirectorRepositoryId===id);
+  const first=await provider.repository.beginPublication();
+  assert.equal(first.renews,true,'a new upload marker says it renews');assert.ok(Number.isFinite(Date.parse(first.startedAt)),'a new upload marker records when its upload began');
+  assert.equal((await provider.repository.listPublications()).items.find(row=>row.id===first.id).renews,true,'cleanup sees that the marker renews');
+  const second=await provider.repository.renewPublication(first);
+  assert.notEqual(second.id,first.id,'renewal puts a fresh marker in place');assert.equal(second.renews,true);assert.equal(second.sameDevice,true,'the fresh marker still names this device');
+  assert.equal(second.startedAt,first.startedAt,'the fresh marker keeps the upload\'s start, so taking turns goes by when uploads began');
+  assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[second.id],'the old marker goes once the fresh one is in place');
+  const operation=provider.repository.beginOperation(),third=await operation.renewPublication(second);assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[third.id],'an operation view renews the same way');
+  // Cleanup removed it as abandoned: the upload must stop, and leave nothing behind.
+  state.files.delete(markerFile(third.id).id);
+  await assert.rejects(()=>provider.repository.renewPublication(third),/disappeared before commit/u,'renewal fails once cleanup has removed the marker');
+  assert.equal(markers().length,0,'a failed renewal removes the fresh marker it made');
+  // Unrenewed too long: cleanup may be about to take it for abandoned.
+  const late=await provider.repository.beginPublication();markerFile(late.id).createdTime=new Date(Date.now()-14*60*1000).toISOString();
+  await assert.rejects(()=>provider.repository.renewPublication(late),/too long without renewal/u,'renewal refuses a marker close to looking abandoned');
+  assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[late.id],'a refused renewal leaves only the old marker, for cleanup to judge');
+  // A marker from an older build does not renew; cleanup gives it the full day.
+  const legacy=markerFile(late.id);delete legacy.appProperties.sdPublicationRenews;delete legacy.appProperties.sdPublicationStartedAt;
+  const listed=(await provider.repository.listPublications()).items.find(row=>row.id===late.id);
+  assert.equal(listed.renews,false,'an older build\'s marker does not renew');assert.equal(listed.startedAt,listed.createdAt,'an older build\'s marker began when it was made');
+}
+
+{
   const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
   const operation=provider.repository.beginOperation();state.networkFailCoordinationPostOnce=true;const marker=await operation.beginMaintenance();assert.match(marker.id,/^mnt_[a-f0-9]{32}$/u);assert.equal(marker.kind,'maintenance');assert.equal([...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,1,'ambiguous maintenance creation must recover the exact pre-generated marker instead of creating a duplicate');
   let active=await operation.listMaintenances();assert.equal(active.items.length,1,'a live Drive maintenance marker must be visible to publication coordination');assert.equal(active.ignored,0);

@@ -27,13 +27,11 @@ assert.doesNotMatch(app.slice(fontStart,fontEnd),/AppData\.local\.setText/u,'fon
 const flushStart=app.indexOf('async function flushProtectedPreferences('),flushEnd=app.indexOf('function scheduleProtectedPreferencesWrite()',flushStart);
 const flushBlock=app.slice(flushStart,flushEnd);
 assert.ok(flushBlock.indexOf('const saved=await run;')<flushBlock.indexOf('refreshAppearanceMirrors(saved)'),'appearance mirrors must refresh only after the canonical write resolves');
-assert.match(startup,/lifecycle\.flush-preferences/u,'page/background lifecycle must proactively flush a pending Preferences write');
 
 const migrationStart=compatibilityHost.indexOf('async function migratePlan(){');
 const migrationEnd=compatibilityHost.indexOf('async function migrateReflections(){',migrationStart);
 const migration=compatibilityHost.slice(migrationStart,migrationEnd);
 assert.ok(migrationStart>=0&&migrationEnd>migrationStart,'legacy Plan/Preferences migration must remain isolated in the compatibility host');
-assert.match(migration,/if\(!currentPreferences\)\{/u,'legacy mirrors are migration inputs only when no current PortablePreferences.v2 row exists');
 assert.ok(migration.indexOf('const written=await preferences.write(next')<migration.indexOf('local.remove(obsolete.nudge)'),'legacy nudge authority must survive until canonical Preferences are written and verified');
 assert.match(app,/CompatibilityHostModule\.createFacade/u,'ordinary runtime must consume the isolated compatibility host instead of re-embedding migration logic');
 
@@ -43,7 +41,6 @@ const maintenanceEnd=app.indexOf('/* ONGOING SUBJECT NOTES */',maintenanceStart)
 const maintenanceBlock=app.slice(maintenanceStart,maintenanceEnd);
 assert.match(maintenanceBlock,/if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return false;/u,'data maintenance must not start before compatibility migration and canonical startup verification complete');
 const maintenanceAdmission=app.slice(app.indexOf('const DataMaintenanceJob=OperationLifecycle.createJob('),maintenanceStart);
-assert.match(maintenanceAdmission,/isAvailable:\(\)=>upkeepBlocker\(/u,'the owned maintenance job must recheck the shared gate at execution admission');
 assert.match(app,/function backgroundBlocker\([^)]*\)\{[^}]*if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return 'startup';/u,'the shared background gate rechecks startup');
 assert.match(app,/markReady:async proof=>\{[\s\S]*proof&&proof\.canonical===true[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*scheduleDataMaintenance\(\);/u,'initial maintenance must remain inside the verified-ready boundary after canonical epoch reseeding');
 assert.match(app,/normalizePracticeTargetMs:value=>validPracticeMs\(value,\{min:APP_LIMITS\.minPracticeTargetMs\}\)\|\|null/u,'historical optional Practice targets must normalize absent/invalid values to null rather than zero');

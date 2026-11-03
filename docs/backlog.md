@@ -2,6 +2,34 @@
 
 Open work, decisions still to make, and what has not been checked yet. Nothing here is started without the owner's go-ahead. When an item is done, remove it and record any lasting decision in its area's doc.
 
+## Bugs reported by the owner (2026-11-03)
+
+**Bugs come first** (owner, 2026-11-03). Fix every bug in this section before any new feature, performance work or other improvement in this file. The test programme below is the one exception: it finishes first. Each fix comes with a test that would have caught it. None of these has been investigated yet.
+
+1. **Plan opens in editing mode after Continue here.** Taking over an active session from another device with Continue here leaves the Plan board in editing mode. The handed-over plan should simply be applied, with no edit in progress.
+2. **Repeated "earlier day not saved" notices after a handoff.** A session started on device A is continued and saved on device B. Afterwards, notices keep saying the earlier day was not saved on both devices, especially on A, which did not save it. But that day was saved, by B. Find why A (and B) still think the day is unsaved, and stop the repeated notices.
+3. **Major: items to review appear everywhere, with nothing saying what they are.** On the phone, the laptop and the iPad, sync keeps leaving items to review, two at a time this time. Opening one offers only "Keep current" or "Use kept version"; nothing says what was kept, from which device, or what differs, so there is no way to choose sensibly.
+    - Screenshot (owner, 2026-11-03), the "Kept versions" dialog: one item, **Personal and display settings**, "Changed on both devices; the other version was kept for review", with **Keep current settings** (selected, no description) or **Use kept settings** ("The kept name, theme, text size and other preferences"), then Later / Apply choices. It does not say which settings differ, what each side holds, which device or when; settings sync seems to flag a clash even for small or identical-looking changes. Settle whether settings need a review at all (for example newest wins per setting), and if one remains, show the actual differences.
+   - Diagnostics from the iPad (release SDVB75F18, 2026-11-03) show `keptVersions=2`, and the catch-up there reported `activeSessionConflicts=1`, so at least one item is an Active Session the two devices disagreed on. Diagnostics give only the count, not what each item is.
+   - To settle: why sync keeps producing these (for example, whether a handed-over session should ever count as a conflict); whether each one is needed; what the review must show (what it is, which device, when, what differs); and a diagnostics line per item (kind, origin and reason, never the content).
+4. **Major: first sync on the iPad stuck on "Bringing in what's on Google Drive".** The first sign-in on the new version showed the sync notice stuck at that second stage for a long time, with the ring by the profile spinning and never settling. Closing or backgrounding the app and opening it again let the sync finish, and the data then arrived as expected. The first experience was not deterministic.
+   - The diagnostics were taken after the restart, so they don't show the stuck run: trace history starts at that launch. Make sure a stuck stage leaves evidence, for example a trace that survives a reload, or a stage that has run too long being recorded.
+   - What the later run shows: the first upload attempt waited 5.2 s, then reset the repository generation and found this device behind. The catch-up then took 4.8 s. Drive cleanup listed 112 versions and 241 objects in 29.6 s, then waited more than 3 hours because another device's publication was in progress. Drive verification gave way twice to other work and checked nothing. "Verified external copies" read as unavailable, and "google-drive formats" read as unknown with 0 versions.
+   - To find: what the first sync waits on, why it doesn't time out or recover by itself, and why a restart unblocks it.
+5. **The Plan draft is emptied when a session continues on another device.** When a session is continued elsewhere, the draft plan on this device's Plan board is cleared. The owner thinks this is not wanted. Decide whether the draft should stay, together with item 1 (the plan opens in editing mode after Continue here).
+6. **The sync progress bar stays still on iPad Safari.** In the "Syncing with Google Drive" notice at sign-in, the three steps, the spinner and the progress bar all showed, but the bar stayed at a short fixed segment and never moved while "Bring in what's on Google Drive" was stuck. Find whether it stopped because no progress arrived (item 4) or because Safari doesn't animate it, and make the bar show real progress or visibly indicate work in progress. Investigate together with item 4.
+7. **Fixed on this branch: the top of the screen sat under the status bar and camera cut-out on iPhone and iPad.** In the floating-bar layout (Glass and Aurora at phone and iPad-portrait widths) and in every wide layout (iPad landscape, a notched Mac in full screen), the main area now starts below the top safe area, so the Library tabs, page titles and notices no longer sit under Safari's blurred status strip; the side insets apply in landscape. Checked by measurement with a simulated 24 px inset in Chromium (it has no notch); confirm on the iPad and iPhone. Content scrolled up still passes under the status strip, as in any iOS app.
+8. **Fixed on this branch: stale wording in Library → Data → Verification.** The rows no longer mention the retired reflection drafts.
+9. **"Recheck Google Drive" seems to do nothing, and "Recheck Device Folder" is unclear.** In Library → Data → Verification, pressing Recheck Google Drive shows no visible result; on the iPad the line read "Google Drive: Paused for foreground work". In the same session's diagnostics, each Drive verification gave way to other work and checked 0 versions. On the laptop it is unclear what Recheck Device Folder does. Each button should start a check that finishes or says why it can't (and when it will try again), then show its result, and the row should say plainly what is checked.
+    - Second laptop snapshot (SDVB75F18, 2026-11-03 11:13 UTC), taken after pressing both buttons. Both rows then read "Recheck requested" (Device Folder) and "Paused for foreground work" (Google Drive). Last full scan stayed at the morning's time for both.
+      - **Google Drive.** One check started at 11:11:25 and finished all 38 of 38 in 52 s with no damage, yet the row's "Last full scan" and `completedAt` did not change. The checks started just before and just after it each gave way within about 6–7 s (`yielded`, `reason=preempted`) having checked 0. The state then read `recheck-pending`, so the result the owner saw was the yield, not the finished check.
+      - **Device Folder.** The check gave way after 0.7 s with 4 of 20 checked (`reason=unclassified`) and was rescheduled.
+      - To find: why a finished check is not recorded as the latest result, what keeps preempting checks during a study session, and why the yield reason is unclassified.
+10. **Fixed on this branch: Google Drive versions were not being pruned.** One abandoned upload marker (an upload cut off by a closed or frozen page) held all Drive cleanup back for 24 hours, while a study session added a version every 2 minutes. Upload markers now renew, and cleanup removes one left unrenewed for 15 minutes ([backup-and-sync.md](areas/backup-and-sync.md)). To confirm on the devices once every device runs the new build: the Drive version count falls back to the retention limit. Still open: whether a session needs a full new version every 2 minutes.
+11. **The storage figure may be wrong.** Library → Data → Local storage shows "Browser storage estimate: 21.9 MB of 10 GB" on the laptop. On mobile it showed about 4 GB, which the owner says is impossible, and 21.9 MB also looks unlikely to them.
+    - The figure is `navigator.storage.estimate().usage` (`inspectStorageCapability` in `source/app.html`, about line 3411; also used in `source/core/backup.js` and `source/core/attachment-ingest.js`). It is the browser's estimate for the whole site, not a count of study data. It includes the offline copy of the app (Cache Storage), IndexedDB, OPFS backup scratch files and attachments. Browsers round and pad it: Chrome pads cached cross-origin responses, and Safari on iOS is known to be coarse.
+    - To find: on each device (which phone and browser showed 4 GB?), measure what the app itself stores, by store (IndexedDB records, attachments, OPFS scratch, app caches), and compare with the estimate. A real 4 GB would mean leftover files (for example backup scratch or attachment copies that are never freed); a false one means the label must say what it is. Show the app's own measured size, and the browser estimate only as a labelled extra if it is useful.
+
 ## Owner's observations (noted 2026-10-25)
 
 Status checked against the code and git history and confirmed by the owner on 2026-11-02.
@@ -21,22 +49,20 @@ Status checked against the code and git history and confirmed by the owner on 20
 
 ## Test suite programme (approved by the owner on 2026-11-02)
 
-The suite is slow, pins source text and misses the study features. Eight pull requests, in this order; remove each line when its pull request merges.
+The full plan, its rules and live status are in [test-programme.md](test-programme.md). Steps 1–3 are done; step 4 (backup and storage) is in progress and, with everything after it, paused by the owner until about 2026-11-10. Work so far is on `main` (PR #13 merged early, 2026-11-03); the rest continues on a new branch. The programme finishes before the bugs above.
 
-1. **Speed.** No idle timers or busy polling in tests; a parallel runner that reports every failure; one coverage pass; Promotion runs the fast suite once and Repository checks run all of it.
-2. **Governance.** Keep one-route, manifest and hermetic checks; drop the word-similarity duplicate detector, the history-word bans and `feature-contracts.mjs`. The code-snippet anchors in `coverage-risk.mjs` go in 4–6, once mutants replace them.
-3. **Data-safety rules.** Seeded generated-input tests for sync merge, backup retention and the timer.
-4–6. **Behaviour over source text, and consolidation,** area by area (backup and storage; app, interface and PWA; editor and browser): about 1,300 source-text checks down to about 200; about 95 fast files and 31 browser tests; migration-only tests in `tests/migration/`; names by subject.
-7. **Study features.** Insights numbers (hand-worked cases and generated-input rules), the plan-to-review browser journey, note links, and a median-of-three Insights speed gate.
-8. **Rules and docs.** When to add a test, in `tests/README.md` and `AGENTS.md`.
+## Owner's requests (noted 2026-11-03)
 
-Cautions that hold throughout:
+**Notes: images.** Enlarge an image, pan and zoom it, and focus on it (a full-view mode).
 
-- A source-text check is deleted only after a behaviour test is shown to fail when the code it pinned is broken (mutation harness on a temporary copy, never the working tree); the most important become permanent mutants.
-- Merged files keep every scenario and assertion; merged browser tests pass 3 runs on their own; `alone` rules stay.
-- Coverage of safety modules never drops; the 8 existing mutants stay killed.
-- A new test that disagrees with the app is reported to the owner, not resolved by changing either side.
-- Tests and tooling only; no release bump unless a confirmed app bug is fixed with the owner's agreement.
+**Notes: interface review and redesign.** Tags, links and other note features may be buried: someone could use the app and never find them, or never get their full use. Review how each is discovered and used, and whether the rest of the app makes the most of them. Then propose a redesign. Not started; after the test programme.
+
+**Backup and sync review.** Questions to settle first, as a report, before any building. In this order:
+
+1. **Is the repository design right, from first principles?** The point of the repository is that unchanged large files are never uploaded or downloaded again, which makes transfers faster and safer. Does it upload and download only what changed, and does each upload and restore land whole or not at all? Is it well optimised overall? The owner thinks the repository principle is good; propose a better one only if there is one.
+2. **Handoff or live sync?** Today one device runs the session and "Continue here" hands it over. It sends few requests but feels slow and heavy: Continue here takes a while, and a pause may reach the other device only at the next check, about every 2 minutes. The alternative is live sync, the way a messaging app works: the same session runs on several devices, and a note edit, a timer pause or an added block reaches the other devices on its own. Compare the two.
+3. **Constraints any answer must meet.** Local-first: nothing in the app waits for the internet or Drive. Drive sign-in lasts about 1 hour and there is no server. Full end-to-end encryption, at rest and in transit, comes later and must fit.
+4. **Then speed.** Drive backups take over 20 s and Device Folder backups 2–3 s. Make Drive faster first (backup, then restore), then make handoff feel seamless and quick, then make the Device Folder (about 2 s) faster still. Rows 4 and 8 above and the Drive items under "Noted for later" belong to this work.
 
 ## Decided, not yet scheduled
 

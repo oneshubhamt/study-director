@@ -52,5 +52,5 @@ Stop and ask before you:
 
 - Clean, lean and reliable: simple things done very well, no unnecessary features or over-engineering.
 - The owner's data is never put at risk.
-- The app defines correct behaviour; tests follow it, never the reverse.
+- Fix the app, not just the tests. When work finds a bug, dead code or a clear improvement in the app, fix the app code in the same change, with a test that would have caught it, and say so in the summary. Never weaken a test to make it pass. Ask first only when the right behaviour is unclear or the change is large.
 - Short, plain replies, with tables where they help.

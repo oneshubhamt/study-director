@@ -9180,7 +9180,7 @@ function integrityStatusText(target,{shallow=false}={}){
   const progress=value.partial?` · ${Math.floor(value.partial.stored.offset/1048576)} of ${Math.ceil(value.partial.storedBytes/1048576)} MB downloaded${value.partial.phase==='plain'?'; verifying decrypted content':''}`:value.progress?` · ${value.progress.cursor} of ${value.progress.total} records`:'';
   const history=completed?` · Last full ${shallow?'presence and size check':'scan'}: ${new Date(completed).toLocaleString()}`:'';
   const quarantine=value.quarantinedObjectIds?.length?` · ${value.quarantinedObjectIds.length} quarantined object(s)`:'';
-  return state+progress+history+quarantine+(shallow?' · File contents are not checked.':' · Active sessions and historical reflection drafts are excluded.');
+  return state+progress+history+quarantine+(shallow?' · File contents are not checked.':' · Active sessions are excluded.');
 }
 function renderIntegrityStatuses(){
   for(const [id,label,location] of [['attachment-verification-status','Attachment presence and size',''],['device-verification-status','Device Folder','device-folder'],['drive-verification-status','Google Drive','google-drive']]){
@@ -10282,7 +10282,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
-    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
+    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }))
 }));
 if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){

@@ -15,7 +15,7 @@ const storage=registry.require('device-folder-storage',1).createStorage(freeze({
   checksum:async blob=>sha256(blob),
   inspectManifest:async file=>{const value=JSON.parse(await file.text());if(value.locked)throw Object.assign(new Error('locked'),{code:'BACKUP_LOCKED'});return manifestFor(value.id);},
   environment:freeze({canMutate:()=>canMutate,now:()=>now,setTimeout,clearTimeout,yieldTask:async()=>{}}),
-  limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
+  limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
 }));
 folder=createMemoryDirectory({now:()=>now,faults});
 const id=n=>'cp_'+String(n).padStart(32,'0'),objectId=n=>'obj_'+String(n).padStart(32,'0');
@@ -108,7 +108,7 @@ assert.equal(await storage.scope(),listed[0].verificationScope);
   const timers=[];const stalledStorage=registry.require('device-folder-storage',1).createStorage(freeze({
     folder:()=>stallWrites(stalled),identities,owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),checksum:async blob=>sha256(blob),inspectManifest:async()=>manifestFor(id(9)),
     environment:freeze({canMutate:()=>true,now:()=>now,setTimeout:(callback,ms)=>{timers.push(callback);return timers.length;},clearTimeout:()=>{},yieldTask:async()=>{}}),
-    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
+    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
   }));
   const blob=new Blob(['never lands']),pending=stalledStorage.upload(freeze({kind:'object',id:objectId(9),name:'',blob,size:blob.size,digest:await sha256(blob)}));
   for(let i=0;i<20&&!timers.length;i++)await new Promise(resolve=>setImmediate(resolve));
@@ -135,6 +135,18 @@ await assert.rejects(()=>storage.download({kind:'commit',id:id(1)}),error=>error
 const publication=await storage.beginPublication();
 assert.match(publication.name,/^pub_[a-f0-9]{32}\.sdpublication$/u);assert.equal((await storage.listPublications()).items.length,1);
 assert.equal(await storage.assertPublication(publication),true);
+// An upload lock renews: its upload rewrites it while it runs. Unrenewed
+// close to the abandoned limit, it can no longer be renewed or relied on.
+assert.equal(publication.renews,true,'a new upload lock says it renews');assert.equal((await storage.listPublications()).items[0].renews,true,'cleanup sees that the lock renews');
+now+=10*60000;const renewedPublication=await storage.renewPublication(publication);
+assert.equal(renewedPublication.id,publication.id);assert.equal(renewedPublication.renews,true,'renewal keeps the promise to renew');assert.equal(Date.parse(renewedPublication.createdAt),now,'renewal restarts the lock\'s age');
+assert.equal((await storage.listPublications()).items[0].renews,true,'a renewed lock still says it renews');
+now+=13*60000;await assert.rejects(()=>storage.assertPublication(renewedPublication),/too old/u,'a renewing lock unrenewed this long may already look abandoned');
+await assert.rejects(()=>storage.renewPublication(renewedPublication),/too old/u,'nor can it be renewed');
+// A lock from an older build does not renew and keeps the full day.
+const objectsFolder=await root.getDirectoryHandle('objects'),legacyHandle=await objectsFolder.getFileHandle(publication.name),legacyWriter=await legacyHandle.createWritable();await legacyWriter.write(JSON.stringify({format:'study-director.repository-publication',version:1,id:publication.id,startedAt:new Date(now).toISOString()}));await legacyWriter.close();
+assert.equal((await storage.listPublications()).items[0].renews,false,'an older build\'s lock does not renew');
+now+=60*60000;assert.equal(await storage.assertPublication(publication),true,'an older build\'s lock keeps the full day');
 now+=24*3600000;await assert.rejects(()=>storage.assertPublication(publication),/too old/u);
 assert.equal(await storage.endPublication(publication),true);assert.equal((await storage.listPublications()).items.length,0);
 const maintenance=await storage.beginMaintenance();now+=40000;

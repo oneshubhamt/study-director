@@ -316,4 +316,18 @@ for(const failureAt of [1,2,4]){
   pending[1]();await tick();assert.equal(destroyed.length,2,'late sibling is released once');
 }
 
+// The read-only side names where its text came from, and says "Backup copy" when the caller gives no name.
+{
+  const harness=createController();
+  const unnamed=freeze({...conflict('Unnamed','L-U','B-U'),incomingLabel:''});
+  const promise=harness.controller.resolve({conflicts:[conflict('Named','L-N','B-N'),unnamed],incomingAssets:[]});
+  await tick();await tick();
+  const dialog=harness.document.body.children[0];
+  assert.ok(byText(dialog,'Drive checkpoint · read-only reference'),'the read-only side names its source');
+  byText(dialog,'Apply resolved note').dispatch('click');await tick();await tick();
+  assert.ok(byText(dialog,'Backup copy · read-only reference'),'an unnamed source reads "Backup copy"');
+  byText(dialog,'Apply resolved note').dispatch('click');
+  await promise;
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'reconciliation-ui-runtime',checks:70,coverage:['editable resolved editor','read-only imported editor','Smart merge fallback','safe three-way silent resolution','unsafe three-way proposal','manual custom editing','Diary manual-only reconciliation','Keep local reset','Use the backup’s','Apply navigation','transient ranges','checkpoint-backed read-only AssetStore','cancel cleanup','late-mount cancellation','zero persistence port']},null,2));
