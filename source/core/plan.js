@@ -15,7 +15,7 @@ registry.define('plan',1,()=>{
     parser:freeze(['isCanonicalScheduleText','parseScheduleDraftText','scheduleTextFromRows']),
     clock:freeze(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso']),
     view:freeze(['document','on','textEl','updateRealTimeAwareness','window']),
-    scheduleGateway:freeze(['act','apply','breakState','captureMigration','clearSafety','flush','hasLiveState','markRender','read','reconcile','renameAreas','row','setAnchor','timeline']),
+    scheduleGateway:freeze(['act','apply','breakState','captureMigration','clearSafety','flush','hasLiveState','markRender','read','reconcile','renameAreas','row','timeline']),
     ownership:freeze(['canMutate','requirePrimary']),
     interactions:freeze(['confirm','input']),
     notifications:freeze(['begin','feedback']),
@@ -356,7 +356,6 @@ function createPlanDraftProjection(result=null){
 }
 function setParsedScheduleDraft(rows){
   lastParsed=Array.isArray(rows)?rows.map(row=>({...row})):[];
-  scheduleGateway.setAnchor(lastParsed.length?clockMinuteToStudyMinute(t2m(lastParsed[0].start)):0);
 }
 function keepAppliedScheduleOnReapply(parsed,rawOriginal,options={}){
   setParsedScheduleDraft(parsed);
@@ -696,7 +695,6 @@ const PlanDraftEditor=(()=>{
       if(!duration)break;
       m+=duration;
     }
-    if(idx===0)scheduleGateway.setAnchor(clockMinuteToStudyMinute(t2m(lastParsed[0].start)));
   }
   function rowClass(t){return 'si draft'+scheduleKindClass(t);}
   function refreshRowVisual(idx){
@@ -829,7 +827,6 @@ const PlanDraftEditor=(()=>{
   function recalcTimes(){
     let m=lastParsed.length&&isValidHHMM(lastParsed[0].start)?clockMinuteToStudyMinute(t2m(lastParsed[0].start)):scheduleGateway.read().anchor;
     lastParsed.forEach(row=>{row.start=studyMinuteToHHMM(m);const duration=positiveMinutes(row.dur);if(duration)m+=duration;});
-    if(lastParsed.length)scheduleGateway.setAnchor(clockMinuteToStudyMinute(t2m(lastParsed[0].start)));
   }
   function commitRows(message,ok=true){
     syncTextFromRows();
@@ -855,7 +852,6 @@ const PlanDraftEditor=(()=>{
     const insertAt=lastParsed.length?Math.max(0,Math.min(safeIdx+1,lastParsed.length)):0;
     const row=defaultRowAfter(base);
     lastParsed.splice(insertAt,0,row);
-    if(insertAt===0)scheduleGateway.setAnchor(clockMinuteToStudyMinute(t2m(row.start)));
     commitRows('Blank row added. Complete Task, Minutes, Kind and Area before applying.','warn');
     return true;
   }
