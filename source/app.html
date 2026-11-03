@@ -4156,7 +4156,10 @@ async function savedRecordExistsForDate(date){
   if(savedRecordDates.has(date))return true;
   if(savedRecordCheckPromises.has(date))return savedRecordCheckPromises.get(date);
   const check=AppData.dailyRecords.get(date)
-    .then(rec=>{const savedStudy=!!rec&&rec.recordKind==='study';if(savedStudy)markDayContentSaved(date,rec.sourceRevision);return savedStudy&&!daySaveDirty(date);})
+    // A Saved Day proves persistence exists, not that its sourceRevision belongs
+    // to this Active Session lineage. savedRevision is acknowledged only by the
+    // session's own save path and travels with that session across devices.
+    .then(rec=>{const savedStudy=!!rec&&rec.recordKind==='study',covered=savedStudy&&!daySaveDirty(date);if(covered)savedRecordDates.add(date);return covered;})
     .catch(()=>false)
     .finally(()=>savedRecordCheckPromises.delete(date));
   savedRecordCheckPromises.set(date,check);
