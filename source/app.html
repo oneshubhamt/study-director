@@ -3567,7 +3567,7 @@ function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,li
       ta.value=pendingDraft;
       // Rehydrate the draft projection without entering draft mode; the Plan
       // board continues to show the applied session until the person edits it.
-      PlanDraftEditor.preview({silent:true});
+      PlanDraftEditor.preview({silent:true,enterDraft:false});
     }
     return restored;
   };
@@ -5336,18 +5336,20 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     if(draftFlushed===false)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
     step('Pausing this device’s sync…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
-    // First reconcile the verified current Drive head while background work is
-    // held. The subsequent claim rechecks this checkpoint under the provider's
-    // publication lease, so the observed content and ownership transfer have
-    // one linearizable boundary.
+    // Read only the newest verified Drive Active Session. Continue Here must
+    // not reconcile independent domains such as the Plan draft merely to
+    // establish session ownership.
     step('Checking the latest Google Drive session…');
-    const caughtUp=await BackupProviderRuntime.syncRepositoryProvider('google-drive');
-    if(!caughtUp||caughtUp.cancelled)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE',caughtUp?.reason==='busy'?'Google Drive is busy. Try Continue Here again.':'The latest Google Drive session could not be reconciled before ownership transfer.');
-    const expectedCheckpointId=String(caughtUp.checkpointId||'');
+    const source=await BackupProviderRuntime.readSessionHandoffSource('google-drive');
+    if(source?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
+    if(source?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
+    if(!source||source.status!=='completed')throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','The latest Google Drive session could not be verified before ownership transfer.');
+    const expectedCheckpointId=String(source.checkpointId||'');
     if(!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive did not provide a verified current checkpoint for the handoff.');
-    const loaded=await AppData.activeSession.load();
-    previous=loaded&&loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
-    if(!previous||previous.date!==requested.date||previous.runningOn!==requested.runningOn)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership or ended while Continue Here was starting.');
+    previous=source.session?ActiveSessionCodec.sanitizeCurrent(source.session):null;
+    if(!previous||previous.date!==requested.date)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s shared session ended or changed while Continue Here was starting.');
+    if(previous.runningOn!==requested.runningOn)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership while Continue Here was starting.');
+    if(Number(previous.revision)<Number(requested.revision))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
     planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
     if(!planned)throw new Error('the transferred session state is invalid');
     next=planned;
@@ -9774,11 +9776,11 @@ async function restoreSessionStateThroughLifecycle(importedSession){
       if(!saved.ok)throw saved.error||new Error('Rollback active-session save failed.');
       if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-        PlanDraftEditor.preview({silent:true});setSessionPanelMode('suspended',session);
+        PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('suspended',session);
         if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',tier:'news',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
       }else if(sessionRunsElsewhere(session)){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-        PlanDraftEditor.preview({silent:true});setSessionPanelMode('elsewhere',session);
+        PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('elsewhere',session);
       }else{
         const restored=applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
         if(restored===false)throw new Error('Rollback active-session runtime could not be applied.');
@@ -9789,7 +9791,7 @@ async function restoreSessionStateThroughLifecycle(importedSession){
     const cleared=await AppData.activeSession.clear();
     if(!cleared.ok)throw cleared.error||new Error('Rollback active-session clear failed.');
     resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-    PlanDraftEditor.preview({silent:true});setSessionPanelMode('none');
+    PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('none');
     return cleared;
   });
 }
