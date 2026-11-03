@@ -100,6 +100,11 @@ try{
   // Continue Here, once the phone has finished taking in the plan (buttons
   // are locked while a sync applies changes).
   await waitFor(async()=>!markers()&&!await waiting(b)&&await b.evaluate(`(()=>{const button=[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden);return !!button&&!button.disabled;})()`)&&!(await sync(b)).catchingUp,{label:'the phone settles',timeout:90000});
+  // BF-1: keep a separate local Plan draft while the applied session belongs
+  // to the PC. Continue Here must apply the session without consuming,
+  // replacing or opening this draft.
+  const preservedDraft=await b.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),text=${sched('BF1 Draft')};d.goTab('plan');await wait(80);const input=document.getElementById('plan-input');input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));await wait(450);d.PlanDraftEditor.deactivate();d.goTab('execute');await wait(80);return text;})()`);
+  assert.equal(await b.evaluate(`__PWA6.PlanDraftEditor.active()`),false,'the preserved draft starts outside edit mode');
   await holdBackground(b,'__qaOwnershipHold');
   // The PC records more and uploads it before the phone takes it in. That
   // upload, saved before the phone takes over, still names the PC; it must
@@ -130,6 +135,11 @@ try{
   assert.equal(uploadsBy('B'),returnUploads,'Continue Here does not wait for the full session checkpoint');
   assert.equal(moved.header,'LIVE SESSION','the header follows the session back to this device');
   assert.match(moved.now,/PC Block/u,'with the plan applied on the PC');
+  const draftAfterHandoff=await b.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));d.goTab('plan');await wait(100);const board=document.getElementById('plan-board');return {text:document.getElementById('plan-input').value,editing:d.PlanDraftEditor.active(),mode:board.dataset.mode,board:document.getElementById('sched-list').innerText};})()`);
+  assert.equal(draftAfterHandoff.text,preservedDraft,'Continue Here preserves the independent local Plan draft');
+  assert.equal(draftAfterHandoff.editing,false,'Continue Here does not enter Plan editing mode');
+  assert.equal(draftAfterHandoff.mode,'live','the Plan board stays in applied/live mode after handoff');
+  assert.match(draftAfterHandoff.board,/PC Block/u,'the live board shows the handed-over applied plan, not the preserved draft');
 
   // Hold A's ordinary sync so its stale local owner remains testable. Even an
   // artificially huge local revision must not beat B's newer ownership epoch.
@@ -152,8 +162,9 @@ try{
   // Ending the owner session publishes the no-session checkpoint first, then a
   // higher-epoch released claim. A stale frozen device must not interpret that
   // release as permission to resume its old timer.
-  const ended=await b.evaluate(`(async()=>{const d=__PWA6;d.TimerEngine.stopExecution();const cleared=await d.AppData.activeSession.clear();if(cleared?.ok===false)throw cleared.error||new Error('session clear failed');return d.BackupProviderRuntime.backupRepositoryProvider('google-drive',{interactive:false});})()`);
-  assert.ok(ended?.checkpointId,'the owner publishes the ended-session checkpoint');
+  const ended=await b.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));d.TimerEngine.stopExecution();d.goTab('review');await wait(150);d.ReviewView.refresh({force:true});if(!await d.saveDayRecord())throw new Error('Save Today failed');const record=await d.AppData.dailyRecords.get(d.todayISO()),session=(await d.AppData.activeSession.load()).value,sourceRevision=Number(record?.sourceRevision),contentRevision=Number(session?.snapshot?.contentRevision);if(!Number.isSafeInteger(sourceRevision)||!Number.isSafeInteger(contentRevision)||sourceRevision<contentRevision)throw new Error('Saved Day does not cover the active session revision');const cleared=await d.AppData.activeSession.clear();if(cleared?.ok===false)throw cleared.error||new Error('session clear failed');const publication=await d.BackupProviderRuntime.backupRepositoryProvider('google-drive',{interactive:false});return {checkpointId:publication?.checkpointId||'',sourceRevision,contentRevision};})()`);
+  assert.ok(ended?.checkpointId,'the owner saves the day and publishes the ended-session checkpoint');
+  assert.ok(ended.sourceRevision>=ended.contentRevision,'the Saved Day explicitly covers the session content revision');
   await waitFor(async()=>{const claim=await latestClaim();return claim?.state==='released';},{label:'released session ownership',timeout:10000});
   await a.evaluate(`__PWA6.checkSessionOwnershipClaim()`);
   assert.equal(await a.evaluate(`__PWA6.TimerEngine.status().loopActive`),false,'a released claim never restarts the stale frozen runtime clock');
@@ -162,6 +173,6 @@ try{
   a.evaluate(`__PWA6.BackupProviderRuntime.scheduleSharedSync('google-drive','qa-release')`);
   for(const page of [a,b])assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[]);
   assert.deepEqual(faults,[]);
-  console.log(JSON.stringify({status:'PASS',checks:{asksBeforeTakeover:true,lightweightOwnershipBeforeTimer:true,planTakeoverUsesSameFence:true,staleOwnerFence:true,releasedClaimDoesNotResume:true,uploadsAtOnce:true,phoneShowsNewPlan:true,continueHere:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{asksBeforeTakeover:true,lightweightOwnershipBeforeTimer:true,planTakeoverUsesSameFence:true,staleOwnerFence:true,releasedClaimDoesNotResume:true,uploadsAtOnce:true,phoneShowsNewPlan:true,continueHere:true,draftSurvivesHandoff:true,handoffLeavesPlanLive:true,savedDayCoversEndedSession:true}}));
 }catch(error){console.error(ledger.slice(-30).join('\n'));throw error;}
 finally{for(const release of [...openUploadGates])release();drive.state.uploadPutGate=null;await first.close();await second.close();await server.close();}
