@@ -396,7 +396,7 @@ for(const [index,phase] of crashPhases.entries()){
   currentNotes=freeze({Corrupted:normalizeNote({key:'Corrupted',text:'interrupted '+phase},'Corrupted')});
   restoreJournal={
     state:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),phase},
-    payload:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
+    payload:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),blob:created.blob,filename:created.filename}
   };
   const result=await runtime.controller.recoverInterruptedRestore();
   assert.equal(result.recovered,true,phase+' must be recovered');
@@ -412,7 +412,7 @@ assert.equal(backupPresentation.read('file','startup-recovery').lifecycle,'succe
 importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'half-rolled-back',savedAt:'2026-08-04T20:00:00.000Z'}));
 restoreJournal={
   state:{id:'restore_crash_retry_12345678',phase:'startup-rolling-back'},
-  payload:{id:'restore_crash_retry_12345678',blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
+  payload:{id:'restore_crash_retry_12345678',blob:created.blob,filename:created.filename}
 };
 failStartupRollbackOnce=true;
 await assert.rejects(()=>runtime.controller.recoverInterruptedRestore(),/injected startup rollback interruption/u);
