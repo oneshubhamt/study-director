@@ -1319,13 +1319,6 @@ async function releaseVerifiedPortableSnapshot(snapshot){
   const state=snapshot&&verifiedPortableSnapshots.get(snapshot);if(!state||state.released)return false;state.released=true;verifiedPortableSnapshots.delete(snapshot);if(state.release)await state.release();return true;
 }
 function candidateSnapshotState(stored){return stored&&stored.snapshot?verifiedPortableSnapshotState(stored.snapshot):null;}
-function candidateActiveSession(candidate){
-  const stored=candidate&&typeof candidate==='object'?inspectedBackups.get(candidate):null,snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
-  if(!parsed)throw new Error('Backup candidate is not a current verified Study Director inspection.');
-  const session=parsed.importedActiveSession?ActiveSessionCodec.sanitizeCurrent(parsed.importedActiveSession):null;
-  if(parsed.importedActiveSession&&!session)throw new Error('Verified backup contains an invalid Active Session.');
-  return session?freeze(session):null;
-}
 function createBackupCandidate(snapshot,{file=null,metadata=freeze({}),signal=null}={}){
   const state=verifiedPortableSnapshotState(snapshot),candidate=freeze({
     kind:'study-director.backup-candidate',
@@ -2191,7 +2184,7 @@ const repository=freeze({
   projectHistory:ManagedRepository.projectHistory,
   noteObject:ManagedRepository.noteObject,
   readNote:ManagedRepository.readNote,
-  sessionState:candidate=>candidateActiveSession(candidate),
+  readSession:ManagedRepository.readSession,
   markCompleted:controller.markCompleted,
   // What this device last shared through Drive, and recording a version
   // placed there as shared.
