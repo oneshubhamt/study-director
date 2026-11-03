@@ -4,16 +4,18 @@ The owner approved this programme on 2026-11-02. It makes the suite faster, test
 
 ## Status (2026-11-03)
 
-Work stays on `refactor/background-coordination`. Steps 1–2 reached `main` through PR #12. Steps 3 onward are in PR #13, which the owner merges once, after step 8.
+Steps 1–3 and part of step 4 reached `main` through PRs #12 and #13. The owner merged #13 on 2026-11-03, before step 8, so the bug fixes below could ship. The rest of the programme continues on a new branch from `main`.
 
-**Paused.** The owner paused step 4 and everything after it on 2026-11-03. Resume only when the owner says so. After the programme, the bugs at the top of [backlog.md](backlog.md) come before any feature or performance work.
+**Paused until about 2026-11-10.** The owner paused the programme on 2026-11-03. Start where step 4 stopped ([Step 4 remaining](#step-4-remaining)); the first item is 4a, mutant-proving the post-restore backup test in `tests/integration/backup/repository-restore.mjs` and deleting the source checks it replaces. The bugs at the top of [backlog.md](backlog.md) come before any feature or performance work once the programme ends.
+
+**Done meanwhile, outside the programme** (bugs from the owner, on the same branch): Drive cleanup no longer blocked by abandoned upload markers (bug 10, with tests in `repository-checkpoint`, `drive-security` and `device-folder-storage`); the safe area at the top on iPhone and iPad (bug 7); stale Verification wording (bug 8). The Device Folder test helper now stamps a shared folder with the latest clock of the pages using it.
 
 | Step | Contents | Status |
 |---|---|---|
 | 1 | A: speed | Done (`main`) |
 | 2 | E1: trim the tests about tests | Done (`main`) |
-| 3 | D2–D4: sync merge, retention, timer rules | Done (PR #13) |
-| 4 | B and C for backup and storage | In progress, paused (see [Step 4 remaining](#step-4-remaining)) |
+| 3 | D2–D4: sync merge, retention, timer rules | Done (`main`, PR #13) |
+| 4 | B and C for backup and storage | In progress, paused until about 2026-11-10 (see [Step 4 remaining](#step-4-remaining)) |
 | 5 | B and C for app, interface and PWA | Not started |
 | 6 | B and C for the editor and browser tests, plus C3 | Not started |
 | 7 | D1, D5, D6 (D7 already done) | Not started |

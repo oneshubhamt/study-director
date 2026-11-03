@@ -3296,3 +3296,12 @@ html,body,.app{max-width:100%;overflow-x:hidden}
   #library-data .backup-storage-state>.backup-status-meta:empty{display:none}
   #library-data .backup-storage-action{order:9;justify-self:stretch;margin-top:6px}
 }
+/* Safe areas on wide layouts. iPad in landscape, a wide iPhone in landscape
+   and a notched Mac in full screen put the status bar, camera or notch over
+   the page edges; narrower layouts handle this above (max-width:900px). */
+@media (min-width:901px){
+  .sidebar{padding-top:var(--sd-safe-top);padding-left:var(--sd-safe-left)}
+  .main{padding-top:var(--sd-safe-top)}
+  .pane{padding-right:max(var(--sd-density-pane-padding-right),var(--sd-safe-right));padding-bottom:calc(var(--sd-density-pane-padding-bottom) + var(--sd-safe-bottom))}
+  #pane-plan{padding-right:max(var(--sd-density-plan-padding-right),var(--sd-safe-right));padding-bottom:calc(var(--sd-density-plan-padding-bottom) + var(--sd-safe-bottom))}
+}
