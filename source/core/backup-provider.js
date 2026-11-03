@@ -1204,7 +1204,12 @@ registry.define('backup-provider',1,input=>{
     try{
       const claim=await projectSessionClaim(await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal}),{signal});
       return claim&&claim.applies?claim:null;
-    }catch(error){if(!signal?.aborted)AppDiagnostics.capture('backup-provider.sync-session-claim',error,'warn');return null;}
+    }catch(error){
+      if(!signal?.aborted)AppDiagnostics.capture('backup-provider.sync-session-claim',error,'warn');
+      // Unreadable is not absent. An older checkpoint cannot be reconciled
+      // against an unverified ownership fence without risking owner rollback.
+      throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active Session ownership could not be verified. Sync stopped safely; retry when Google Drive can be read.');
+    }
   }
   async function assertSharedSessionOwnership(selected,{signal=null}={}){
     if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return freeze({current:null,releaseAfterCommit:false});

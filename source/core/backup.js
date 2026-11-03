@@ -822,7 +822,7 @@ function syncSavedDayReviews(plan,settled){
   }
   return freeze(reviews);
 }
-const sessionDecision=(state,value=null)=>freeze({state:String(state||''),value:value||null});
+const sessionDecision=(state,value=null,kept=null)=>freeze({state:String(state||''),value:value||null,kept:kept||null});
 // Active Session reconciliation has two independent dimensions:
 //   content ancestry -> semantic fingerprints
 //   execution ownership -> Drive's monotonic ownership claim
@@ -832,7 +832,7 @@ const sessionDecision=(state,value=null)=>freeze({state:String(state||''),value:
 // ownership back, while true two-sided divergence remains reviewable.
 async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim=null}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
-  if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return sessionDecision('same');
+  const canonicallyEqual=!local&&!incoming||!!local&&!!incoming&&Canonical.same(local,incoming);
   const me=installationId(),shared=String(base&&base.sessionFingerprint||''),[mine,theirs,contentMine,contentTheirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming),sessionContentFingerprint(local),sessionContentFingerprint(incoming)]);
   const sameContent=!!contentMine&&contentMine===contentTheirs,claimApplies=!!(sessionClaim&&sessionClaim.applies),claimedHere=!!(claimApplies&&sessionClaim.state==='owned'&&sessionClaim.ownedHere),claimedAway=!!(claimApplies&&sessionClaim.state==='owned'&&!sessionClaim.ownedHere),releasedAway=!!(claimApplies&&sessionClaim.state==='released'&&!sessionClaim.ownedHere);
   const observed=claimApplies?String(sessionClaim.observedContentFingerprint||''):'',hasObserved=/^[a-f0-9]{64}$/u.test(observed);
@@ -879,12 +879,17 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
     return sessionDecision('claimed-conflict');
   }
 
+  // Even an identical checkpoint may predate a newer verified ownership claim.
+  if(canonicallyEqual)return sessionDecision('same');
   const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
   // Ownership transfer is meaningful only within the same study session/day.
   // A different-date Active Session is independent unsaved work, never a
   // takeover merely because another installation owns it.
   const differentSession=!!local&&!!incoming&&local.date!==incoming.date;
-  if(differentSession)return sessionDecision('conflict');
+  // Independent study days are not competing versions of one running session.
+  // Keep this device's session authoritative during sync; retain the remote
+  // session for review instead of allowing timestamps to displace it.
+  if(differentSession)return sync?sessionDecision('local',null,incoming):sessionDecision('conflict');
   const takenOver=hold&&!!local&&!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me;
   // A verified Saved Day on the other side is an explicit end-of-session
   // transition. It must outrank the ordinary "keep the currently running
@@ -1623,14 +1628,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // Versions a sync keeps for review (5.2). One that cannot be kept leaves
   // the difference for the person, so nothing is overwritten unkept.
   const keptReviews=[],keep=build=>{try{keptReviews.push(...[].concat(build()));return true;}catch(error){AppDiagnostics.capture('backup.sync-keep-review',error,'warn');return false;}};
-  const keepSession=value=>{const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);return !!kept&&keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));};
+  let priorSessionReviews=null;
+  const keepSession=async value=>{
+    const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);if(!kept)return false;
+    // The same unresolved divergence must not create a new review at every sync.
+    if(priorSessionReviews===null)priorSessionReviews=await AppData.pendingReviews.list();
+    if([...priorSessionReviews,...keptReviews].some(review=>review.subject==='session'&&!review.resolvedAt&&Canonical.same(review.kept,kept)))return true;
+    return keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));
+  };
+  if(sync&&settlement.kept&&!(await keepSession(settlement.kept)))return needsDecision();
   if(session==='yield-hold'){
     await yieldSession({deferReview:true});
     session='hold';derivedSession=null;
   }
   if(session==='yield'){
     await yieldSession();
-    if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!keepSession(mine))return needsDecision();}
+    if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!(await keepSession(mine)))return needsDecision();}
     else{settlement=await sessionSettlement(base,parsed);session=settlement.state;derivedSession=settlement.value;}
   }
   // A current-owner claim with exact handoff ancestry is authoritative for
@@ -1638,14 +1651,14 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // boundary, keep the old owner's copy for review while the current owner
   // remains canonical.
   if(sync&&session==='claimed-conflict'){
-    const theirs=parsed.importedActiveSession||null;if(theirs&&!keepSession(theirs))return needsDecision();session='local';
+    const theirs=parsed.importedActiveSession||null;if(theirs&&!(await keepSession(theirs)))return needsDecision();session='local';
   }
   // Other true content conflicts retain the existing sync policy: one
   // version is shown and the other is kept, so nothing is silently lost.
   if(sync&&(session==='conflict'||session===''||session==='ended')){
     const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=value=>Date.parse(String(value&&value.updatedAt||''))||Number(value&&value.revision)||0;
     const incomingShows=session==='ended'||!mine||!!theirs&&time(theirs)>time(mine),hidden=incomingShows?mine:theirs;session=incomingShows?'incoming':'local';
-    if(hidden&&!keepSession(hidden))return needsDecision();
+    if(hidden&&!(await keepSession(hidden)))return needsDecision();
   }
   const holdSession=['hold','local','graft'].includes(session),clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;
