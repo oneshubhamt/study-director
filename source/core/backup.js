@@ -822,7 +822,10 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   const sameContent=!!contentMine&&contentMine===contentTheirs,claimedHere=!!(sessionClaim&&sessionClaim.state==='owned'&&sessionClaim.ownedHere&&sessionClaim.applies);
 
   if(claimedHere){
-    if(!local)return sessionDecision('incoming');
+    // The claim survives the owner's final local transition to no Active
+    // Session until that ended state is published. Never resurrect the older
+    // pre-claim session merely because Drive has not received the ending yet.
+    if(!local)return sessionDecision('local');
     // Drive's head can predate the claim. Absence there cannot end a session
     // that this device has just legitimately claimed.
     if(!incoming)return sessionDecision('hold');
