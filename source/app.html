@@ -5355,8 +5355,26 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     if(Number(previous.revision)<Number(requested.revision))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
     const [requestedContentFingerprint,observedContentFingerprint]=await Promise.all([activeSessionContentFingerprint(requested),activeSessionContentFingerprint(previous)]);
     if(requestedContentFingerprint!==observedContentFingerprint){
-      BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
-      throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content. This device is syncing it first; retry Continue Here after sync.');
+      // The prior claim is the causal boundary. If this waiting device still
+      // holds exactly the semantic content the current owner observed when it
+      // took over, Drive's newer session is a proven one-sided continuation:
+      // advance only Active Session, then transfer ownership. A genuine
+      // divergence—or content with attachment dependencies—uses normal sync.
+      const priorClaim=await BackupProviderRuntime.readSessionClaim('google-drive');
+      const causalContinuation=!!(
+        priorClaim&&priorClaim.state==='owned'&&priorClaim.applies&&!priorClaim.ownedHere&&
+        priorClaim.observedContentFingerprint===requestedContentFingerprint&&
+        Number(priorClaim.revision)<=Number(previous.revision)
+      );
+      const referencedAssets=BackupCodec.assetIds(previous);
+      if(!causalContinuation||referencedAssets.length){
+        BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
+        throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
+      }
+      const advanced=await AppData.activeSession.save(previous,{strictDurability:true});
+      if(!handleActiveSessionRepositoryResult(advanced,'save'))throw advanced?.error||new Error('the newer shared session could not be saved on this device');
+      const advancedRead=(await AppData.activeSession.load())?.value||null;
+      if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(advancedRead),previous))throw new Error('the newer shared session could not be read back exactly before ownership transfer');
     }
     planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
     if(!planned)throw new Error('the transferred session state is invalid');
