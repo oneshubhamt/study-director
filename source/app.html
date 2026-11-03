@@ -2918,9 +2918,7 @@ async function verifyFrozenSessionClaim(){
   try{
     if(!frozen?.snapshot)throw new Error('The frozen Active Session snapshot is unavailable.');
     const saved=await writeActiveSessionNow(snapshotWhileSessionClaimFrozen(),{emergency:true,strictDurability:true});
-    if(!saved?.ok||saved.storage?.idb!==true||!saved.value)throw saved?.error||new Error('The Active Session was not committed to canonical browser storage.');
-    const loaded=await AppData.activeSession.load(0,{strict:true});
-    if(!loaded?.ok||loaded.error||loaded.storage?.idb!==true||!loaded.value||Number(loaded.value.revision)!==Number(saved.value.revision))throw new Error('The transferred Active Session did not pass the strict local read-back.');
+    await requireCanonicalSessionWrite(saved,saved?.value,'yielding a transferred session');
     if(sessionClaimFreeze!==frozen)return false;
     sessionClaimFreeze=Object.freeze({...frozen,localVerified:true});
     if(sessionSafetyMessage===SESSION_CLAIM_SAVE_WARNING)clearSessionSafetyMessage(SESSION_CLAIM_SAVE_WARNING);
@@ -4308,6 +4306,21 @@ function handleActiveSessionRepositoryResult(result,action='save'){
   }
   return false;
 }
+// One canonical durability barrier for an ownership transfer in either direction,
+// session suspension and restore. Local rescue alone does not establish control.
+async function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){
+  const intended=ActiveSessionCodec.sanitizeCurrent(expected);
+  if(!intended||!saved?.ok||saved.storage?.idb!==true||saved.error||
+      !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(saved.value),intended)){
+    throw saved?.error||new Error('Canonical IndexedDB commit is required before '+operation+'.');
+  }
+  const checked=await AppData.activeSession.load(0,{strict:true});
+  if(!checked?.ok||checked.error||checked.storage?.idb!==true||
+      !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(checked.value),intended)){
+    throw checked?.error||new Error('Canonical Active Session read-back differs after '+operation+'.');
+  }
+  return saved;
+}
 function writeActiveSessionNow(snapshot,options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return Promise.resolve(null);
   if(!appCanMutate())return Promise.resolve(null);
@@ -5293,7 +5306,7 @@ async function suspendTodaySession(){
         session.suspendedAt=new Date().toISOString();
         session.updatedAt=session.suspendedAt;
         const saved=await AppData.activeSession.save(session,{strictDurability:true});
-        if(!saved.ok)throw saved.error||new Error('active session save failed');
+        await requireCanonicalSessionWrite(saved,session,'suspending the Active Session');
       }
       resetRuntimeSessionState({lifecycleManaged:true,source:'session-suspend',date:todayISO()});
       setSessionPanelMode('suspended');
@@ -5335,8 +5348,14 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
   if(!requested)throw new Error('the transferred session state is invalid');
   let previous=null,planned=null,next=null,ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
   try{
+    // flush() starts a pending debounce write; settled() also waits for an
+    // already-running write whose timer callback has finished.
+    const expectedDraft=String(document.getElementById('plan-input')?.value||'');
     const draftFlushed=await Promise.resolve(PlanDraftEditor.flush());
     if(draftFlushed===false)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
+    await PlanData.settled();
+    const canonicalDraft=(await AppData.planData.read()).draft;
+    if(canonicalDraft!==expectedDraft)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The independent Plan draft changed or did not reach canonical storage before Continue Here.');
     step('Pausing this device’s sync…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
     // Read only the newest verified Drive Active Session. Continue Here must
@@ -5372,9 +5391,8 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
         throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
       }
       const advanced=await AppData.activeSession.save(previous,{strictDurability:true});
-      if(!handleActiveSessionRepositoryResult(advanced,'save'))throw advanced?.error||new Error('the newer shared session could not be saved on this device');
-      const advancedRead=(await AppData.activeSession.load())?.value||null;
-      if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(advancedRead),previous))throw new Error('the newer shared session could not be read back exactly before ownership transfer');
+      await requireCanonicalSessionWrite(advanced,previous,'advancing the handoff source');
+      handleActiveSessionRepositoryResult(advanced,'save');
     }
     planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
     if(!planned)throw new Error('the transferred session state is invalid');
@@ -5388,10 +5406,9 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
     if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
     const saved=await AppData.activeSession.save(next,{strictDurability:true});
-    if(!handleActiveSessionRepositoryResult(saved,'save'))throw saved.error||new Error('the session could not be saved on this device');
-    localSaved=true;
-    const current=(await AppData.activeSession.load())?.value||null;
-    if(!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next))throw new Error('the session changed locally before its ownership transfer could finish');
+    localSaved=saved?.storage?.idb===true;
+    await requireCanonicalSessionWrite(saved,next,'claiming Active Session ownership');
+    handleActiveSessionRepositoryResult(saved,'save');
     backgroundHold.release();backgroundHold=null;
     notifyBackupChange({urgent:true,reason:'session-continue'});
     return Object.freeze({previous,session:saved.value||next,claim:ownershipClaim});
@@ -5399,7 +5416,7 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     if(localSaved&&previous&&next){
       try{
         const current=(await AppData.activeSession.load())?.value||null;
-        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous,{strictDurability:true});if(!restored?.ok)throw restored?.error||new Error('session rollback failed');rolledBack=true;}
+        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous,{strictDurability:true});await requireCanonicalSessionWrite(restored,previous,'compensating a failed handoff');rolledBack=true;}
       }catch(rollbackError){AppDiagnostics.capture('session.takeover-local-rollback',rollbackError,'warn');}
     }
     if(ownershipClaim&&(!localSaved||rolledBack)){
@@ -8540,8 +8557,9 @@ const PlanData=(()=>{
     await enqueue(async()=>{await AppData.planData.replace(clean.plans);state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;});await applyPreferences(clean.preferences);
     const input=document.getElementById('plan-input'),draftText=String(clean.plans.draft??getActiveDefaults().scheduleText);if(input)input.value=draftText;
     const restored=parseScheduleDraftText(draftText),matchesApplied=!!TASKS.length&&restored.ok&&scheduleFingerprintForRows(restored.parsed)===scheduleFingerprint();
-    if(matchesApplied)PlanDraftEditor.deactivate();
-    PlanDraftEditor.preview({silent:true,enterDraft:!matchesApplied});PlanRuntime.savedPlans.render();
+    // Importing portable Personal Data must never put an already-applied
+    // Active Session into Plan edit mode. The draft remains available on edit.
+    PlanDraftEditor.preview({silent:true,enterDraft:!TASKS.length});PlanRuntime.savedPlans.render();
   }
   async function verify(value){
     await settled();const actual={version:2,plans:await AppData.planData.read(),preferences:await preferences()};
@@ -9807,7 +9825,7 @@ async function restoreSessionStateThroughLifecycle(importedSession){
   },async()=>{
     if(session){
       const saved=await AppData.activeSession.save(session,{strictDurability:true});
-      if(!saved.ok)throw saved.error||new Error('Rollback active-session save failed.');
+      await requireCanonicalSessionWrite(saved,session,'restoring an Active Session');
       if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('suspended',session);
