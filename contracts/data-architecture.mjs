@@ -36,6 +36,7 @@ function containerSurface(role,owner,protection,lifecycle,schema,contains){retur
 // these through the build rather than minting persistence keys ad hoc.
 export const LOCAL_STORAGE_KEYS=freeze({
   recovery:'studyDirector.activeRecovery.v1',
+  sessionHandoffSafety:'studyDirector.sessionHandoffSafety.v1',
   appOwner:'studyDirector.appOwner.v1',
   mutationLock:'studyDirector.mutationLock.v1',
   storageHealth:'studyDirector.storageHealth.v2',
@@ -203,6 +204,7 @@ export const DATA_ARCHITECTURE=freeze({
   }),
   localStorage:freeze({
     recovery:surface('recovery','repositories','protect','until canonical session settles','',{protects:'indexedDb.activeSessions',created:'when live session state needs crash recovery',cleared:'after canonical session persistence/finalization settles',supersededBy:'newer canonical ActiveSession or canonical deletion'}),
+    sessionHandoffSafety:surface('recovery','host','protect-identifiers','until Drive ownership and canonical Active Session are verified or the claim is compensated','SessionHandoffSafety.v1',{protects:'ambiguous Active Session ownership after interrupted Continue Here',created:'before publishing ownership claim',cleared:'after strict local verification plus verified Drive ownership, or verified compensation'}),
     appOwner:surface('coordination','ownership','operational','lease lifetime'),
     mutationLock:surface('coordination','host','operational','lease lifetime'),
     storageHealth:surface('operational','host','operational','bounded operational diagnostics; no user-content details'),

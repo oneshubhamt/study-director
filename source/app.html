@@ -3577,6 +3577,9 @@ async function hydratePrimaryStateFromStorage(options={}){
   const notesReloaded=await AppData.notes.reloadFresh();
   if(!notesReloaded)throw new Error('The latest notes could not be reloaded before ownership transfer.');
   const session=await loadActiveSessionForRestore();
+  if(pendingSessionHandoffSafety()&&!await resolveSessionHandoffSafety(session)){
+    setSessionPanelMode('suspended',session);setPlanStatus(HANDOFF_UNCERTAIN_MESSAGE,false);return false;
+  }
   if(sessionRunsElsewhere(session)&&!TASKS.length){setSessionPanelMode('elsewhere',session);return false;}
   if(isRestorableActiveSession(session)){
     const snapshot=activeSessionSnapshot(session);
@@ -4664,6 +4667,10 @@ async function attemptAutoRestoreActiveSession(){
     if(TASKS.length||PlanScheduleGateway.hasLiveState())return false;
     const session=await loadActiveSessionForRestore();
     if(TASKS.length||PlanScheduleGateway.hasLiveState())return false;
+    if(pendingSessionHandoffSafety()&&!await resolveSessionHandoffSafety(session)){
+      setSessionPanelMode('suspended',session);
+      setPlanStatus(HANDOFF_UNCERTAIN_MESSAGE,false);return false;
+    }
     // A previous-day recovery row is not evidence of an unsaved day by
     // itself. If the canonical Saved Day covers its latest content revision,
     // retire the redundant recovery copy before considering ownership/UI.
@@ -5274,7 +5281,9 @@ function resetRuntimeSessionState(options={}){
   PracticePacer.reset();
 }
 function refreshPlanAfterSessionReset(emptyMessage='',emptyTitle=''){
-  PlanDraftEditor.preview({silent:true});
+  // A suspended/elsewhere Active Session is not a request to edit the
+  // independent Plan draft, even when its live task list is empty.
+  PlanDraftEditor.preview({silent:true,enterDraft:!['suspended','elsewhere'].includes(sessionPanelMode)});
   renderSched();
   updateBadges();
   updateHeaderInfo();
@@ -5339,6 +5348,47 @@ async function confirmSessionTakeover(session,{replace=false}={}){
   });
 }
 const sessionHandoffError=(code,message)=>Object.assign(new Error(message),{code});
+// A profile-scoped, content-free safety latch is written BEFORE publishing a
+// remote claim. It survives reload if Drive accepts a claim but the response,
+// local write or final verification fails. It never serves as session data.
+const HANDOFF_SAFETY_FORMAT='study-director.session-handoff-safety.v1';
+const HANDOFF_UNCERTAIN_MESSAGE='Continue Here did not finish verifying ownership. Keep this device’s session stopped. Connect Google Drive and use Verify ownership / Continue Here to recover.';
+function pendingSessionHandoffSafety(){
+  const marker=AppData.local.getJson(STORAGE_KEYS.sessionHandoffSafety,null);
+  return marker&&typeof marker==='object'?marker:null;
+}
+function armSessionHandoffSafety(session,checkpointId){
+  const marker=Object.freeze({format:HANDOFF_SAFETY_FORMAT,version:1,date:session.date,checkpointId,installedOn:InstallationIdentity.getId(),createdAt:new Date().toISOString()});
+  if(!AppData.local.setJson(STORAGE_KEYS.sessionHandoffSafety,marker)||
+      !CanonicalModule.same(AppData.local.getJson(STORAGE_KEYS.sessionHandoffSafety,null),marker)){
+    throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN','Local handoff safety state could not be saved. No ownership claim was attempted.');
+  }
+  return marker;
+}
+function clearSessionHandoffSafety(){
+  if(!AppData.local.remove(STORAGE_KEYS.sessionHandoffSafety))throw new Error('The pending handoff safety latch could not be cleared from browser storage.');
+}
+async function resolveSessionHandoffSafety(session){
+  const marker=pendingSessionHandoffSafety();
+  if(!marker)return true;
+  if(marker.format!==HANDOFF_SAFETY_FORMAT||marker.version!==1||marker.installedOn!==InstallationIdentity.getId()||marker.date!==session?.date||
+      !/^cp_[a-f0-9]{32}$/u.test(String(marker.checkpointId||'')))return false;
+  if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
+  const claim=await BackupProviderRuntime.readSessionClaim('google-drive');
+  const local=await AppData.activeSession.load(0,{strict:true});
+  if(!local?.ok||local.error||local.storage?.idb!==true||!CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(local.value),ActiveSessionCodec.sanitizeCurrent(session)))return false;
+  if(claim?.applies&&claim.state==='owned'&&claim.ownedHere&&session.runningOn===InstallationIdentity.getId()&&Number(session.revision)>=Number(claim.revision)){
+    clearSessionHandoffSafety();
+    return true;
+  }
+  // A verified previous-owner claim, a released claim or verified absence
+  // permits this device to remain a non-owner. It does not start its timer.
+  if(session.runningOn!==InstallationIdentity.getId()&&(!claim||claim.applies!==true||claim.state!=='owned'||!claim.ownedHere)){
+    clearSessionHandoffSafety();
+    return true;
+  }
+  return false;
+}
 // onStep(text): each step, for Continue Here's progress line.
 async function transferSessionOwnershipHere(session,{onStep=null}={}){
   const step=text=>{try{onStep?.(text);}catch{}};
@@ -5346,7 +5396,7 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
   if(!BackupProviderRuntime.connected('google-drive'))throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
   const requested=ActiveSessionCodec.sanitizeCurrent(session);
   if(!requested)throw new Error('the transferred session state is invalid');
-  let previous=null,planned=null,next=null,ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
+  let previous=null,planned=null,next=null,ownershipClaim=null,backgroundHold=null,claimAttempted=false,localVerified=false;
   try{
     // flush() starts a pending debounce write; settled() also waits for an
     // already-running write whose timer callback has finished.
@@ -5397,7 +5447,10 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
     if(!planned)throw new Error('the transferred session state is invalid');
     next=planned;
+    // Persist the recovery latch before any remote claim can become visible.
+    armSessionHandoffSafety(previous,expectedCheckpointId);
     setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
+    claimAttempted=true;
     const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,expectedCheckpointId,revision:planned.revision});
     if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
     if(claimed?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
@@ -5406,27 +5459,44 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
     if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
     const saved=await AppData.activeSession.save(next,{strictDurability:true});
-    localSaved=saved?.storage?.idb===true;
     await requireCanonicalSessionWrite(saved,next,'claiming Active Session ownership');
+    localVerified=true;
     handleActiveSessionRepositoryResult(saved,'save');
+    clearSessionHandoffSafety();
     backgroundHold.release();backgroundHold=null;
     notifyBackupChange({urgent:true,reason:'session-continue'});
     return Object.freeze({previous,session:saved.value||next,claim:ownershipClaim});
   }catch(error){
-    if(localSaved&&previous&&next){
+    // Reversal is safe only if the strict canonical record is still exactly
+    // the attempted state, or is already the observed previous state. An
+    // unrelated concurrent write is never overwritten during compensation.
+    let compensated=false;
+    if(ownershipClaim&&!localVerified&&previous&&next){
       try{
-        const current=(await AppData.activeSession.load())?.value||null;
-        if(CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(current),next)){const restored=await AppData.activeSession.save(previous,{strictDurability:true});await requireCanonicalSessionWrite(restored,previous,'compensating a failed handoff');rolledBack=true;}
-      }catch(rollbackError){AppDiagnostics.capture('session.takeover-local-rollback',rollbackError,'warn');}
+        const loaded=await AppData.activeSession.load(0,{strict:true});
+        const current=loaded?.ok&&loaded.storage?.idb===true?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
+        let localReverted=!!current&&CanonicalModule.same(current,previous);
+        if(!localReverted&&current&&CanonicalModule.same(current,next)){
+          const restored=await AppData.activeSession.save(previous,{strictDurability:true});
+          await requireCanonicalSessionWrite(restored,previous,'compensating a failed ownership transfer');
+          localReverted=true;
+        }
+        if(localReverted)compensated=await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
+      }catch(rollbackError){AppDiagnostics.capture('session.takeover-compensation',rollbackError,'warn');}
     }
-    if(ownershipClaim&&(!localSaved||rolledBack)){
-      const released=await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
-      if(!released){
-        try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
-        throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN','Google Drive confirmed the ownership transfer, but this device could not finish the local session save or verify the ownership rollback. Do not start the timer here; reload and retry Continue Here.');
-      }
-    }else if(ownershipClaim)notifyBackupChange({urgent:true,reason:'session-continue'});
+    if(compensated){
+      try{clearSessionHandoffSafety();}catch(clearError){AppDiagnostics.capture('session.takeover-safety-clear',clearError,'warn');}
+    }else if(!claimAttempted){
+      // An error before the ownership request cannot have published a claim.
+      try{if(pendingSessionHandoffSafety())clearSessionHandoffSafety();}catch(clearError){AppDiagnostics.capture('session.takeover-safety-clear',clearError,'warn');}
+    }
     try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
+    if(claimAttempted&&!compensated){
+      // The remote claim is durable recovery evidence. Do not overwrite an
+      // unexpected canonical record or pretend that the previous owner won.
+      throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN',
+        'Google Drive may have accepted ownership, but the canonical session or compensation was not verified. '+HANDOFF_UNCERTAIN_MESSAGE);
+    }
     throw error;
   }finally{backgroundHold?.release();}
 }
@@ -5443,7 +5513,7 @@ function sessionHandoffProblem(error){
   if(code==='SESSION_CONTINUE_BUSY')return 'Google Drive is busy with another backup or restore. Try again in a moment.';
   if(code==='SESSION_CONTINUE_NOT_CONNECTED')return 'Google Drive isn’t connected. Sign in from your profile, then try again.';
   if(code==='SESSION_CONTINUE_SYNC_REQUIRED')return 'Today’s shared session advanced. This device is syncing it first; retry Continue Here after sync.';
-  if(code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN')return 'Google Drive confirmed the transfer, but the local save or rollback could not be verified. Do not start the timer here; reload and retry Continue Here.';
+  if(code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN')return HANDOFF_UNCERTAIN_MESSAGE;
   if(code==='REPOSITORY_SESSION_CLAIM_STALE')return 'Today’s session changed on another device. Wait for this device to catch up, then try again.';
   if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
   return String(error&&error.message||error||'Something went wrong.');
@@ -5457,6 +5527,10 @@ async function continueSessionHere(){
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
+    if(pendingSessionHandoffSafety()&&!sessionFromElsewhere(session)){
+      if(!await resolveSessionHandoffSafety(session))throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN',HANDOFF_UNCERTAIN_MESSAGE);
+      return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
+    }
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
@@ -5520,6 +5594,10 @@ async function restoreSuspendedTodaySession(){
   if(!appCanMutate())return false;
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
+    if(pendingSessionHandoffSafety()){
+      if(!await resolveSessionHandoffSafety(session)){setPlanStatus(HANDOFF_UNCERTAIN_MESSAGE,false);return false;}
+      if(session?.status==='active')return attemptAutoRestoreActiveSession();
+    }
     if(!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
     if(sessionFromElsewhere(session))return continueSessionHere();
     const snapshot=activeSessionSnapshot(session);
@@ -8556,10 +8634,11 @@ const PlanData=(()=>{
     const clean=PersonalDataCodec.normalize(value);await settled().catch(()=>{});
     await enqueue(async()=>{await AppData.planData.replace(clean.plans);state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;});await applyPreferences(clean.preferences);
     const input=document.getElementById('plan-input'),draftText=String(clean.plans.draft??getActiveDefaults().scheduleText);if(input)input.value=draftText;
-    const restored=parseScheduleDraftText(draftText),matchesApplied=!!TASKS.length&&restored.ok&&scheduleFingerprintForRows(restored.parsed)===scheduleFingerprint();
-    // Importing portable Personal Data must never put an already-applied
-    // Active Session into Plan edit mode. The draft remains available on edit.
-    PlanDraftEditor.preview({silent:true,enterDraft:!TASKS.length});PlanRuntime.savedPlans.render();
+    // A portable draft can differ from the applied schedule, or be imported
+    // while a suspended/elsewhere session has no runtime tasks. Neither event
+    // is an instruction to enter Plan editing.
+    const sessionRecord=(await AppData.activeSession.load(0,{strict:true})).value;
+    PlanDraftEditor.preview({silent:true,enterDraft:!TASKS.length&&!sessionRecord});PlanRuntime.savedPlans.render();
   }
   async function verify(value){
     await settled();const actual={version:2,plans:await AppData.planData.read(),preferences:await preferences()};
@@ -8915,8 +8994,8 @@ function updateSessionControls(){
     panel.classList.toggle('suspended',suspended||elsewhere);
     const title=document.getElementById('session-panel-title');
     const note=document.getElementById('session-panel-note');
-    if(title)title.textContent=elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
-    if(note)note.textContent=elsewhere
+    if(title)title.textContent=pendingSessionHandoffSafety()?'Session Ownership Needs Verification':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
+    if(note)note.textContent=pendingSessionHandoffSafety()?HANDOFF_UNCERTAIN_MESSAGE:elsewhere
       ? `Today’s session is running ${sessionDevice(sessionPanelSession)} (last update ${sessionUpdateTime(sessionPanelSession)}). Everything else works here as usual. Continue Here moves the session to this device.`
       : handedOff
       ? `Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`
@@ -8933,14 +9012,14 @@ function updateSessionControls(){
   if(planControls){
     planControls.hidden=!visible;
     const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
-    if(state&&state.textContent!==label)state.textContent=label;
+    if(state&&state.textContent!==(pendingSessionHandoffSafety()?'Ownership needs verification':label))state.textContent=pendingSessionHandoffSafety()?'Ownership needs verification':label;
   }
   // The same controls in Execute's status card, its session panel and Plan's
   // strip: the next step first, then Suspend, Finish and Reset. A session
   // running elsewhere offers only Continue Here.
   [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
     const action=btn.dataset.action;
-    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=continuing||!suspended&&!elsewhere;const label=continuing?'Continuing…':elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
+    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=continuing||!suspended&&!elsewhere;const label=continuing?'Continuing…':pendingSessionHandoffSafety()&&!sessionFromElsewhere(sessionPanelSession)?'Verify ownership':elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
     else if(action==='suspend-session'){btn.hidden=suspended||elsewhere;btn.disabled=!active;}
     else if(action==='finish-session'){btn.hidden=elsewhere||suspended;btn.disabled=!active||finished;}
     else if(action==='reset-session'){btn.hidden=elsewhere;btn.disabled=!visible||elsewhere;}
