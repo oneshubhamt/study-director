@@ -6,7 +6,7 @@ Today's study session (the Active Session) and its timer: what is stored, which 
 
 The Active Session is portable across devices and backups. It carries the current session/schedule/review state required to resume work, and the installation running it (`runningOn`, ActiveSession v10; an older session belongs to the installation that converts it). A restored running or paused timer is rehydrated into the timer runtime only on the installation it names, and the Execute controls are then derived from that restored runtime. Any other installation shows the session as running on another device and runs it only after Continue Here (below).
 
-If a restored Plan working draft is semantically identical to the applied Active Session schedule, Plan remains in the applied/live state. A genuinely different restored working draft remains an editing draft.
+The Plan working draft and the applied Active Session schedule are separate state. Restoring or continuing a session applies the session's canonical schedule directly; it never writes that schedule through Plan-draft persistence and never enters Plan editing. Any local Plan draft remains exactly as authored. After a handoff the board stays in the applied/live state until the person explicitly chooses to edit, at which point the preserved draft is available.
 
 ## Across devices
 
@@ -20,6 +20,10 @@ Decisions (owner, 2026-10-18):
 How Continue Here shows its steps and errors: [status-indicator.md](status-indicator.md#continue-here).
 
 **How sync treats it.** The session names the device running it (`runningOn`, the installation id), and only that device runs its timer. Another device keeps a copy it never runs and shows "Running on another device"; notes, Saved Days and everything else work there as usual, and that copy follows the running device at every sync. Otherwise an incoming session is taken only when this device's session is the shared one and the incoming one follows it (same day, same or later revision), or this device has none, or the incoming side saved this device's day and cleared its session. While a session runs here, an incoming change to it waits ("hold") and everything else merges, during a sync and during a review alike. While Drive's newest ownership claim names this device and the session runs here, an incoming version naming another device was saved before this device took over, so it holds too rather than taking the session back (the sync reads the claim only while a session runs here).
+
+Ownership metadata and study content are deliberately different reconciliation domains. Changes only to `runningOn`, session status/revision or persistence timestamps describe a handoff and do not create a kept Active Session version. Timer/progress, Review, Practice Pacer and other session evidence remain content: if both devices genuinely changed that evidence, the divergent copy is still kept for review rather than discarded.
+
+A Saved Day is the durable acknowledgement of the session content it contains. Its `sourceRevision` is the session `contentRevision` captured by Save Today. When a Saved Day for the same date has `sourceRevision >= ActiveSession.snapshot.contentRevision`, that Active Session recovery copy is already covered and may be retired quietly on sync or the next launch. If the session has a later content revision, it remains recoverable/reviewable as unsaved work.
 
 ## Moving a session
 
