@@ -75,7 +75,8 @@ const dailyRecordCodec=freeze({
   sanitizeCurrentNote:normalizeNote,
   isSupportedSavedDate:isDate
 });
-const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
+const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item}):null;
+const activeSessionCodec=freeze({sanitizeCurrent:sanitizeActiveSession,contentValue:item=>{const clean=sanitizeActiveSession(item);if(!clean)return null;const snapshot=clean.snapshot&&typeof clean.snapshot==='object'?clean.snapshot:{},{contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_updatedAt,...contentSnapshot}=snapshot;return freeze({date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot:freeze(contentSnapshot)});}});
 const compatibilityCodec=freeze({
   format:'study-director.compatibility-codecs',contractVersion:1,
   dailyRecord:item=>item&&isDate(item.date)?freeze({...item,date:item.date,version:15}):null,
