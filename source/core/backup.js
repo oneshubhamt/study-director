@@ -743,6 +743,21 @@ function nextMergedSessionRevision(...values){
   if(current>=Number.MAX_SAFE_INTEGER)throw new Error('Active Session revision space is exhausted.');
   return current+1;
 }
+function sessionFullyAcknowledged(session){
+  const clean=ActiveSessionCodec.sanitizeCurrent(session),snapshot=clean&&clean.snapshot;
+  const contentRevision=Number(snapshot&&snapshot.contentRevision),savedRevision=Number(snapshot&&snapshot.savedRevision);
+  return !!clean&&Number.isSafeInteger(contentRevision)&&contentRevision>=0&&Number.isSafeInteger(savedRevision)&&savedRevision>=contentRevision;
+}
+// When semantic content is identical, a verified save acknowledgement is safe
+// to carry across control metadata/counter differences. This is not revision
+// arithmetic across branches: it means only "this exact semantic content has
+// already been materialized as a Saved Day".
+function mergeSessionAcknowledgement(control,peer){
+  const winner=ActiveSessionCodec.sanitizeCurrent(control),other=ActiveSessionCodec.sanitizeCurrent(peer);
+  if(!winner||!other||!sameSessionContent(winner,other)||sessionFullyAcknowledged(winner)||!sessionFullyAcknowledged(other))return winner;
+  const now=new Date().toISOString(),snapshot=freeze({...winner.snapshot,savedRevision:winner.snapshot.contentRevision,updatedAt:now});
+  return ActiveSessionCodec.sanitizeCurrent({...winner,revision:nextMergedSessionRevision(winner.revision,other.revision),snapshot,updatedAt:now});
+}
 // Incoming content can advance after a device has claimed ownership. Preserve
 // the current owner's control state while adopting that later pre-claim work,
 // and start a fresh local content revision so no foreign save acknowledgement
@@ -829,7 +844,10 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
     // Drive's head can predate the claim. Absence there cannot end a session
     // that this device has just legitimately claimed.
     if(!incoming)return sessionDecision('hold');
-    if(sameContent)return sessionDecision('local');
+    if(sameContent){
+      const merged=mergeSessionAcknowledgement(local,incoming);
+      return merged&&!Canonical.same(merged,local)?sessionDecision('graft',merged):sessionDecision('local');
+    }
     const observed=String(sessionClaim.observedContentFingerprint||'');
     // Older claims lack the exact causal fingerprint. They remain safe by
     // refusing to infer ancestry rather than guessing from scalar revisions.
@@ -850,13 +868,20 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   // survives forever and keeps generating earlier-day warnings.
   if(ended)return sessionDecision(mine===shared?'incoming':'ended');
   if(takenOver){
-    if(sameContent||mine===shared)return sessionDecision('incoming');
+    if(sameContent){
+      const merged=mergeSessionAcknowledgement(incoming,local);
+      return merged&&!Canonical.same(merged,incoming)?sessionDecision('graft',merged):sessionDecision('incoming');
+    }
+    if(mine===shared)return sessionDecision('incoming');
     return sessionDecision('yield');
   }
   if(hold&&!takenOver)return sessionDecision('hold');
   if(!local)return sessionDecision('incoming');
   if(!incoming)return sessionDecision('local');
-  if(sameContent)return sessionDecision(sessionControlFollows(local,incoming)?'incoming':'local');
+  if(sameContent){
+    const incomingWins=sessionControlFollows(local,incoming),winner=incomingWins?incoming:local,other=incomingWins?local:incoming,merged=mergeSessionAcknowledgement(winner,other);
+    return merged&&!Canonical.same(merged,winner)?sessionDecision('graft',merged):sessionDecision(incomingWins?'incoming':'local');
+  }
   if(!shared)return sessionDecision('');
   if(mine===shared)return sessionDecision('incoming');
   if(theirs===shared)return sessionDecision('local');
