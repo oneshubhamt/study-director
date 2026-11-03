@@ -1719,7 +1719,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   try{
     rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
     OperationDiagnostics.mark('restore-journal-prepare-start');
-    await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:'',savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
+    await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
     let assetResult=freeze({written:0,published:0,reused:0,deleted:0,changed:false,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
     if(portableAssets&&Number(parsed.formatVersion)>=10){
@@ -2009,7 +2009,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
     try{
       rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
       OperationDiagnostics.mark('restore-journal-prepare-start');
-      await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:'',savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
+      await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
       journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
       const target=replacementSnapshot(parsed,rollbackJournal,plan,notes,keepExtras),targetDeletionState=replacementDeletions(parsed,rollbackDeletionState,target,removed);
       OperationDiagnostics.mark('canonical-replacement-start');
