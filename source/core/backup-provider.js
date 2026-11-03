@@ -1194,15 +1194,15 @@ registry.define('backup-provider',1,input=>{
     let applies=false;if(local?.value)applies=await sessionClaimToken('session',local.value.date,{signal})===claim.sessionToken;else if(local?.today)applies=await sessionClaimToken('session',local.today,{signal})===claim.sessionToken;
     return freeze({epoch:claim.epoch,state:claim.state,revision:claim.revision,observedRevision:claim.observedRevision,observedContentFingerprint:claim.observedContentFingerprint,claimedAt:claim.claimedAt,ownedHere:!!ownerToken&&ownerToken===claim.ownerToken,applies});
   }
-  // Drive's newest claim names this device for the session running here. A
-  // sync then keeps that session even when the version it brings in, saved
-  // before this device took over, still names the other device. Unknown
-  // counts as no: the sync then settles the session as before.
+  // Drive's newest claim names this device for today's session. It remains
+  // authoritative across the owner's final local transition to "no Active
+  // Session": otherwise an older checkpoint could resurrect the pre-handoff
+  // session before this device publishes the Saved Day / ended state.
+  // Unknown counts as no; ordinary reconciliation then remains conservative.
   async function sessionClaimedHere(selected,{signal=null}={}){
     if(!sessionOwnershipHooks||!repositorySessionClaimCapable(selected))return null;
     try{
-      const local=await localSessionOwnership(),me=String(sessionOwnershipHooks.installationId()||'');
-      if(!local?.value||!me||local.value.runningOn!==me)return null;
+      const me=String(sessionOwnershipHooks.installationId()||'');if(!me)return null;
       const claim=await projectSessionClaim(await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal}),{signal});
       return claim&&claim.state==='owned'&&claim.ownedHere&&claim.applies?claim:null;
     }catch(error){if(!signal?.aborted)AppDiagnostics.capture('backup-provider.sync-session-claim',error,'warn');return null;}
