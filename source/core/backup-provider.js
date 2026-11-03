@@ -1874,12 +1874,19 @@ registry.define('backup-provider',1,input=>{
     beginForegroundView(selected,'sync',`Syncing with ${selected.label}…`,options.presentation);setBusy(true);
     try{
       await enterForeground(selected,foreground,traceId,{prepare:true});
-      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId:String(options&&options.checkpointId||''),mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
-      if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable'});}
-      const sessionClaim=await sessionClaimedHere(selected,{signal:foreground.signal}),checkpointId=String(candidate.preview?.checkpoint?.checkpointId||'');
+      let checkpointId=String(options&&options.checkpointId||'');
+      if(!checkpointId){
+        const inventory=await repositoryProviderInventory(repositoryOperationSelected(selected,{signal:foreground.signal}),{signal:foreground.signal});
+        if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The current shared repository head could not be determined safely.');
+        checkpointId=String(sharedRepositoryHead(inventory)?.item?.id||'');
+        if(!checkpointId){finishForegroundView(selected,{message:'Nothing has been saved to this shared location yet.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'no-source'},traceId);return freeze({cancelled:true,reason:'no-source',checkpointId:''});}
+      }
+      const candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId,mode:'bring-in',quiet:true,sync:true,password:options&&options.password===true,onProgress:typeof options?.onProgress==='function'?options.onProgress:null});
+      if(!candidate){finishForegroundView(selected,{message:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'unavailable'},traceId);return freeze({cancelled:true,reason:'unavailable',checkpointId});}
+      const sessionClaim=await sessionClaimedHere(selected,{signal:foreground.signal}),verifiedCheckpointId=String(candidate.preview?.checkpoint?.checkpointId||checkpointId);
       const exportedAt=String(candidate.preview?.exportedAt||''),result=await RepositoryCheckpointPipeline.bringIn(candidate,{sync:true,sessionClaim});
-      if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt,checkpointId});}
-      OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt,checkpointId});
+      if(result&&result.cancelled){finishForegroundView(selected,{message:result.reason==='needs-decision'?`${selected.label} has changes that need your review.`:'Sync stopped safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:String(result.reason||'cancelled')},traceId);return freeze({...result,cancelled:true,exportedAt,checkpointId:verifiedCheckpointId});}
+      OperationDiagnostics.finish({cancelled:false},traceId);return freeze({...result,exportedAt,checkpointId:verifiedCheckpointId});
     }catch(error){
       if(String(error&&error.code||'')==='STUDY_DIRECTOR_IMPORT_CANCELLED'){finishForegroundView(selected,{message:'Sync cancelled safely.',ok:true,lifecycle:'cancelled'});OperationDiagnostics.finish({cancelled:true,reason:'cancelled'},traceId);return freeze({cancelled:true,reason:'cancelled'});}
       finishForegroundView(selected,{message:`Sync failed: ${userProviderMessage(error,'The newest shared version could not be verified safely.')}`,ok:false});OperationDiagnostics.fail(error,{},traceId);throw error;
