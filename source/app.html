@@ -4265,6 +4265,13 @@ function snapshotWhileSessionClaimFrozen(){
   return Object.freeze({...recent,timerRuntime:frozen.snapshot.timerRuntime,practice:frozen.snapshot.practice});
 }
 function nextSessionRevision(seed=0){return AppData.activeSession.nextRevision(seed);}
+async function activeSessionContentFingerprint(session){
+  const content=ActiveSessionCodec.contentValue(session);
+  if(!content)throw new Error('Active Session content is invalid.');
+  const fingerprint=String(await Exports.run('checksum',{value:CanonicalModule.signature(content),algorithm:'sha256'}));
+  if(!/^[a-f0-9]{64}$/u.test(fingerprint))throw new Error('Active Session content fingerprint could not be derived safely.');
+  return fingerprint;
+}
 function activeSessionPayload(snapshot=null,options={}){
   if(!TASKS.length)return null;
   const scheduleText=clampText(PlanRuntime.appliedScheduleText(),APP_LIMITS.maxScheduleChars);
@@ -4553,8 +4560,8 @@ function isRecoverablePreviousActiveSession(session){
 }
 async function savedDayCoversActiveSession(session){
   if(!isPreviousActiveSessionRecord(session))return false;
-  const snapshot=activeSessionSnapshot(session),contentRevision=Number(snapshot&&snapshot.contentRevision);
-  if(!Number.isSafeInteger(contentRevision)||contentRevision<0)return false;
+  const snapshot=activeSessionSnapshot(session),contentRevision=Number(snapshot&&snapshot.contentRevision),savedRevision=Number(snapshot&&snapshot.savedRevision);
+  if(!Number.isSafeInteger(contentRevision)||contentRevision<0||!Number.isSafeInteger(savedRevision)||savedRevision<contentRevision)return false;
   let record=null;
   try{record=await AppData.dailyRecords.get(session.date);}
   catch(error){AppDiagnostics.capture('session.previous-day-saved-check',error,'warn');return false;}
@@ -5324,10 +5331,13 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
   let next=planned;
   let ownershipClaim=null,backgroundHold=null,localSaved=false,rolledBack=false;
   try{
+    const draftFlushed=await Promise.resolve(PlanDraftEditor.flush());
+    if(draftFlushed===false)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
+    const observedContentFingerprint=await activeSessionContentFingerprint(previous);
     step('Pausing this device’s sync…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
     setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
-    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,revision:planned.revision});
+    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,revision:planned.revision});
     if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
     if(claimed?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
     if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
@@ -9725,7 +9735,7 @@ async function restoreNotesSnapshotThroughLifecycle(snapshotNotes){
     date:getReviewDate(),
   },()=>AppData.notes.replace(snapshotNotes));
 }
-async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=''){
+async function restoreSessionStateThroughLifecycle(importedSession){
   const session=importedSession?ActiveSessionCodec.sanitizeCurrent(importedSession):null;
   const date=session&&isValidIsoDate(session.date)?session.date:todayISO();
   const snapshot=session?activeSessionSnapshot(session):null;
@@ -9739,13 +9749,11 @@ async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=
       if(!saved.ok)throw saved.error||new Error('Rollback active-session save failed.');
       if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-        const input=document.getElementById('plan-input');if(input)input.value=session.scheduleText;
-        void PlanData.writeDraft(session.scheduleText);
-        PlanDraftEditor.preview({silent:true,enterDraft:true});setSessionPanelMode('suspended',session);
+        PlanDraftEditor.preview({silent:true});setSessionPanelMode('suspended',session);
         if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',tier:'news',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
       }else if(sessionRunsElsewhere(session)){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-        setSessionPanelMode('elsewhere',session);
+        PlanDraftEditor.preview({silent:true});setSessionPanelMode('elsewhere',session);
       }else{
         const restored=applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
         if(restored===false)throw new Error('Rollback active-session runtime could not be applied.');
@@ -9756,10 +9764,7 @@ async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=
     const cleared=await AppData.activeSession.clear();
     if(!cleared.ok)throw cleared.error||new Error('Rollback active-session clear failed.');
     resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-    const bounded=clampText(scheduleText,APP_LIMITS.maxScheduleChars),input=document.getElementById('plan-input');
-    if(input)input.value=bounded;
-    void PlanData.writeDraft(bounded);
-    PlanDraftEditor.preview({silent:true,enterDraft:true});setSessionPanelMode('none');
+    PlanDraftEditor.preview({silent:true});setSessionPanelMode('none');
     return cleared;
   });
 }
