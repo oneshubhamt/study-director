@@ -1557,7 +1557,8 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // takes the other's.
   // A review during a study session leaves the session as it is too.
   const review=!quiet&&!note&&options?.review===true,base=note?null:await lastSharedBase(stored);
-  let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,claimedHere:sync&&options?.sessionClaimedHere===true});
+  let settlement=note||missingOnly?sessionDecision('same'):await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,sessionClaim:sync?options?.sessionClaim||null:null});
+  let session=settlement.state,derivedSession=settlement.value;
   // Another device took the session over: stop it here, keeping what this
   // device recorded, and let the person choose between the two (a sync shows
   // the other device's, which runs there, and keeps this one's for review).
@@ -1568,18 +1569,23 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   if(session==='yield'){
     await yieldSession(parsed.importedActiveSession);
     if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!keepSession(mine))return needsDecision();}
-    else session=await sessionSettlement(base,parsed);
+    else{settlement=await sessionSettlement(base,parsed);session=settlement.state;derivedSession=settlement.value;}
   }
-  // Both sides changed the session since they last shared it (or never
-  // shared one): a sync shows the newer and keeps the other for review; one
-  // the other side ended shows ended. A side without a session has nothing
-  // to keep.
+  // A current-owner claim with exact handoff ancestry is authoritative for
+  // control, never for content. If both devices changed content after that
+  // boundary, keep the old owner's copy for review while the current owner
+  // remains canonical.
+  if(sync&&session==='claimed-conflict'){
+    const theirs=parsed.importedActiveSession||null;if(theirs&&!keepSession(theirs))return needsDecision();session='local';
+  }
+  // Other true content conflicts retain the existing sync policy: one
+  // version is shown and the other is kept, so nothing is silently lost.
   if(sync&&(session==='conflict'||session===''||session==='ended')){
-    const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=value=>Number(value&&value.revision)||Date.parse(String(value&&value.updatedAt||''))||0;
+    const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=value=>Date.parse(String(value&&value.updatedAt||''))||Number(value&&value.revision)||0;
     const incomingShows=session==='ended'||!mine||!!theirs&&time(theirs)>time(mine),hidden=incomingShows?mine:theirs;session=incomingShows?'incoming':'local';
     if(hidden&&!keepSession(hidden))return needsDecision();
   }
-  const holdSession=session==='hold'||session==='local',clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
+  const holdSession=['hold','local','graft'].includes(session),clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;
   if((quiet||note)&&!impact.reconciliationCapable)return needsDecision();
   // A one-note restore stops here when the backup has no copy of the note or
@@ -1668,7 +1674,12 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const incomingReviews=note?freeze([]):freeze([...(parsed.pendingReviews||[]),...keptReviews]);
   const reviewSet=incomingReviews.length?PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews):freeze([]);
   if(reviewSet.filter(item=>!item.resolvedAt).length>APP_LIMITS.maxPendingReviews){if(quiet)return needsDecision();throw new Error(`More than ${APP_LIMITS.maxPendingReviews} versions would wait for review. Review some under Library → Data first.`);}
-  const resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap,settledDays)),resolvedAssetReferences=await resolvedAssetReferenceIds(resolvedPlan,signal,reviewSet);
+  let resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap,settledDays));
+  if(session==='graft'&&derivedSession){
+    const active=resolvedPlan.activeSession;
+    resolvedPlan=freeze({...resolvedPlan,activeSession:freeze({...active,candidateId:null,value:derivedSession,changed:true,hadLocal:true,local:true})});
+  }
+  const resolvedAssetReferences=await resolvedAssetReferenceIds(resolvedPlan,signal,reviewSet);
   let attachmentPlan=note?await noteAttachmentPlan(resolvedAssetReferences):await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze({}),signal,resolvedAssetReferences);
   // A sync follows the deletion records: an attachment deleted on either side
   // and used by nothing is deleted.
