@@ -37,6 +37,13 @@ Cautions that hold throughout:
 - Improve the app, not only the tests (owner, 2026-11-03). A bug, dead code or a clear refinement found along the way is fixed in the app code in the same step, with a test that would have caught it, and named in the step's summary. Ask the owner first only when the right behaviour is unclear or the change is large.
 - The branch raises `release` once, the first time it changes the shipped app.
 
+## Bugs reported by the owner (2026-11-03)
+
+Not yet investigated. Each fix comes with a test that would have caught it.
+
+1. **Plan opens in editing mode after Continue here.** Taking over an active session from another device with Continue here leaves the Plan board in editing mode. The handed-over plan should simply be applied, with no edit in progress.
+2. **Repeated "earlier day not saved" notices after a handoff.** A session started on device A is continued and saved on device B. Afterwards, notices keep saying the earlier day was not saved on both devices, especially on A, which did not save it. But that day was saved, by B. Find why A (and B) still think the day is unsaved, and stop the repeated notices.
+
 ## Owner's requests (noted 2026-11-03)
 
 **Notes: images.** Enlarge an image, pan and zoom it, and focus on it (a full-view mode).
