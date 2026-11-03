@@ -1646,6 +1646,13 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!(await keepSession(mine)))return needsDecision();}
     else{settlement=await sessionSettlement(base,parsed);session=settlement.state;derivedSession=settlement.value;}
   }
+  // Incoming ownership or a verified end must stop this device's execution
+  // before the incoming/empty canonical state is applied. A same-content
+  // takeover may otherwise change stored ownership but leave the old clock
+  // running until the separate claim watcher fires.
+  if(sync&&hasActiveSession()&&(session==='ended'||session==='incoming'&&(!parsed.importedActiveSession||parsed.importedActiveSession.runningOn!==installationId()))){
+    await yieldSession({deferReview:true});
+  }
   // A current-owner claim with exact handoff ancestry is authoritative for
   // control, never for content. If both devices changed content after that
   // boundary, keep the old owner's copy for review while the current owner
