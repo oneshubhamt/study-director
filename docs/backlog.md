@@ -2,6 +2,21 @@
 
 Open work, decisions still to make, and what has not been checked yet. Nothing here is started without the owner's go-ahead. When an item is done, remove it and record any lasting decision in its area's doc.
 
+## Bugs reported by the owner (2026-11-03)
+
+**Bugs come first** (owner, 2026-11-03). Fix every bug in this section before any new feature, performance work or other improvement in this file. The test programme below is the one exception: it finishes first. Each fix comes with a test that would have caught it. None of these has been investigated yet.
+
+1. **Plan opens in editing mode after Continue here.** Taking over an active session from another device with Continue here leaves the Plan board in editing mode. The handed-over plan should simply be applied, with no edit in progress.
+2. **Repeated "earlier day not saved" notices after a handoff.** A session started on device A is continued and saved on device B. Afterwards, notices keep saying the earlier day was not saved on both devices, especially on A, which did not save it. But that day was saved, by B. Find why A (and B) still think the day is unsaved, and stop the repeated notices.
+3. **Major: items to review appear everywhere, with nothing saying what they are.** On the phone, the laptop and the iPad, sync keeps leaving items to review, two at a time this time. Opening one offers only "Keep current" or "Use kept version"; nothing says what was kept, from which device, or what differs, so there is no way to choose sensibly.
+   - Diagnostics from the iPad (release SDVB75F18, 2026-11-03) show `keptVersions=2`, and the catch-up there reported `activeSessionConflicts=1`, so at least one item is an Active Session the two devices disagreed on. Diagnostics give only the count, not what each item is.
+   - To settle: why sync keeps producing these (for example, whether a handed-over session should ever count as a conflict); whether each one is needed; what the review must show (what it is, which device, when, what differs); and a diagnostics line per item (kind, origin and reason, never the content).
+4. **Major: first sync on the iPad stuck on "Bringing in what's on Google Drive".** The first sign-in on the new version showed the sync notice stuck at that second stage for a long time, with the ring by the profile spinning and never settling. Closing or backgrounding the app and opening it again let the sync finish, and the data then arrived as expected. The first experience was not deterministic.
+   - The diagnostics were taken after the restart, so they don't show the stuck run: trace history starts at that launch. Make sure a stuck stage leaves evidence, for example a trace that survives a reload, or a stage that has run too long being recorded.
+   - What the later run shows: the first upload attempt waited 5.2 s, then reset the repository generation and found this device behind. The catch-up then took 4.8 s. Drive cleanup listed 112 versions and 241 objects in 29.6 s, then waited more than 3 hours because another device's publication was in progress. Drive verification gave way twice to other work and checked nothing. "Verified external copies" read as unavailable, and "google-drive formats" read as unknown with 0 versions.
+   - To find: what the first sync waits on, why it doesn't time out or recover by itself, and why a restart unblocks it.
+5. **The Plan draft is emptied when a session continues on another device.** When a session is continued elsewhere, the draft plan on this device's Plan board is cleared. The owner thinks this is not wanted. Decide whether the draft should stay, together with item 1 (the plan opens in editing mode after Continue here).
+
 ## Owner's observations (noted 2026-10-25)
 
 Status checked against the code and git history and confirmed by the owner on 2026-11-02.
@@ -36,21 +51,6 @@ Cautions that hold throughout:
 - Coverage of safety modules never drops; every mutant in `tests/helpers/mutation.mjs` stays killed.
 - Improve the app, not only the tests (owner, 2026-11-03). A bug, dead code or a clear refinement found along the way is fixed in the app code in the same step, with a test that would have caught it, and named in the step's summary. Ask the owner first only when the right behaviour is unclear or the change is large.
 - The branch raises `release` once, the first time it changes the shipped app.
-
-## Bugs reported by the owner (2026-11-03)
-
-Not yet investigated. Each fix comes with a test that would have caught it.
-
-1. **Plan opens in editing mode after Continue here.** Taking over an active session from another device with Continue here leaves the Plan board in editing mode. The handed-over plan should simply be applied, with no edit in progress.
-2. **Repeated "earlier day not saved" notices after a handoff.** A session started on device A is continued and saved on device B. Afterwards, notices keep saying the earlier day was not saved on both devices, especially on A, which did not save it. But that day was saved, by B. Find why A (and B) still think the day is unsaved, and stop the repeated notices.
-3. **Major: items to review appear everywhere, with nothing saying what they are.** On the phone, the laptop and the iPad, sync keeps leaving items to review, two at a time this time. Opening one offers only "Keep current" or "Use kept version"; nothing says what was kept, from which device, or what differs, so there is no way to choose sensibly.
-   - Diagnostics from the iPad (release SDVB75F18, 2026-11-03) show `keptVersions=2`, and the catch-up there reported `activeSessionConflicts=1`, so at least one item is an Active Session the two devices disagreed on. Diagnostics give only the count, not what each item is.
-   - To settle: why sync keeps producing these (for example, whether a handed-over session should ever count as a conflict); whether each one is needed; what the review must show (what it is, which device, when, what differs); and a diagnostics line per item (kind, origin and reason, never the content).
-4. **Major: first sync on the iPad stuck on "Bringing in what's on Google Drive".** The first sign-in on the new version showed the sync notice stuck at that second stage for a long time, with the ring by the profile spinning and never settling. Closing or backgrounding the app and opening it again let the sync finish, and the data then arrived as expected. The first experience was not deterministic.
-   - The diagnostics were taken after the restart, so they don't show the stuck run: trace history starts at that launch. Make sure a stuck stage leaves evidence, for example a trace that survives a reload, or a stage that has run too long being recorded.
-   - What the later run shows: the first upload attempt waited 5.2 s, then reset the repository generation and found this device behind. The catch-up then took 4.8 s. Drive cleanup listed 112 versions and 241 objects in 29.6 s, then waited more than 3 hours because another device's publication was in progress. Drive verification gave way twice to other work and checked nothing. "Verified external copies" read as unavailable, and "google-drive formats" read as unknown with 0 versions.
-   - To find: what the first sync waits on, why it doesn't time out or recover by itself, and why a restart unblocks it.
-5. **The Plan draft is emptied when a session continues on another device.** When a session is continued elsewhere, the draft plan on this device's Plan board is cleared. The owner thinks this is not wanted. Decide whether the draft should stay, together with item 1 (the plan opens in editing mode after Continue here).
 
 ## Owner's requests (noted 2026-11-03)
 
