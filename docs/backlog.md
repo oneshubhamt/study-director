@@ -40,21 +40,7 @@ Status checked against the code and git history and confirmed by the owner on 20
 
 ## Test suite programme (approved by the owner on 2026-11-02)
 
-The suite is slow, pins source text and misses the study features. Eight steps, in this order. The work stays on `refactor/background-coordination` and the owner merges it once, after step 8 (decided 2026-11-03); remove each line when its step is done.
-
-Steps 1–3 (speed, governance, data-safety rules) are done.
-
-4–6. **Behaviour over source text, and consolidation,** area by area (backup and storage; app, interface and PWA; editor and browser): about 1,300 source-text checks down to about 200; about 95 fast files and 31 browser tests; migration-only tests in `tests/migration/`; names by subject. The code-snippet anchors in `coverage-risk.mjs` go once mutants replace them.
-7. **Study features.** Insights numbers (hand-worked cases and generated-input rules), the plan-to-review browser journey, note links, and a median-of-three Insights speed gate.
-8. **Rules and docs.** When to add a test, in `tests/README.md` and `AGENTS.md`.
-
-Cautions that hold throughout:
-
-- A source-text check is deleted only after a behaviour test is shown to fail when the code it pinned is broken (mutation harness on a temporary copy, never the working tree); the most important become permanent mutants.
-- Merged files keep every scenario and assertion; merged browser tests pass 3 runs on their own; `alone` rules stay.
-- Coverage of safety modules never drops; every mutant in `tests/helpers/mutation.mjs` stays killed.
-- Improve the app, not only the tests (owner, 2026-11-03). A bug, dead code or a clear refinement found along the way is fixed in the app code in the same step, with a test that would have caught it, and named in the step's summary. Ask the owner first only when the right behaviour is unclear or the change is large.
-- The branch raises `release` once, the first time it changes the shipped app.
+The full plan, its rules and live status are in [test-programme.md](test-programme.md). Steps 1–3 are done; step 4 (backup and storage) is in progress and, with everything after it, paused by the owner on 2026-11-03. The owner merges PR #13 once, after step 8. The programme finishes before the bugs above.
 
 ## Owner's requests (noted 2026-11-03)
 

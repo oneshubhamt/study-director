@@ -7,6 +7,7 @@ Start here. Read the page for the area you are changing; the code is the final a
 | [architecture.md](architecture.md) | What the app is, how it is composed, where code lives, and the core safety rules |
 | [workflow.md](workflow.md) | How to work, choosing tests, commands, build, release, CI and real-device acceptance |
 | [backlog.md](backlog.md) | Open work, decisions to make, and what has not been checked yet |
+| [test-programme.md](test-programme.md) | The test suite programme: full plan, rules and status (deleted when it ends) |
 | [history.md](history.md) | A short record of past work and dropped ideas |
 
 **Areas**
