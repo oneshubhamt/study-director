@@ -3549,23 +3549,24 @@ function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,li
   const ta=document.getElementById('plan-input');
   if(!session||!snapshot||!ta)return false;
   const transitionSource=source||'stored-session-apply';
-  const preserveDraft=true;
-  const pendingDraft=preserveDraft?String(ta.value||''):'';
-  const restorePendingDraft=preserveDraft&&PlanData.readDraft()!==null&&pendingDraft!==String(session.scheduleText||'');
+  // The Plan draft is independent authoring state. Applying a canonical
+  // Active Session must neither persist its schedule as that draft nor open
+  // the draft editor. Keep the exact local text in place while the live
+  // schedule is restored from the explicit session schedule.
+  const pendingDraft=String(ta.value||'');
   const applySnapshot=()=>{
     resetRuntimeSessionState({lifecycleManaged:true,source:transitionSource,date:session.date});
-    ta.value=String(session.scheduleText||'');
-    if(appCanMutate())void PlanData.writeDraft(ta.value);
     const dd=document.getElementById('day-date');
     if(dd){dd.value=session.date;dd.dataset.autoDate=session.date===todayISO()?'1':'0';}
     const restored=applySchedule({
       source:transitionSource,skipNotify:true,studyDate:session.date,reviewOnly,forceReload:true,
-      sessionSnapshot:snapshot,lifecycleManaged:true
+      sessionSnapshot:snapshot,lifecycleManaged:true,scheduleText:String(session.scheduleText||''),persistDraft:false
     });
-    if(restored!==false&&restorePendingDraft){
+    if(restored!==false){
       ta.value=pendingDraft;
-      if(appCanMutate())void PlanData.writeDraft(pendingDraft);
-      PlanDraftEditor.preview({silent:true,enterDraft:true});
+      // Rehydrate the draft projection without entering draft mode; the Plan
+      // board continues to show the applied session until the person edits it.
+      PlanDraftEditor.preview({silent:true});
     }
     return restored;
   };
