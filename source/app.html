@@ -5336,18 +5336,24 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     if(draftFlushed===false)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
     step('Pausing this device’s sync…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
-    // The ownership claim is based on the canonical session after background
-    // reconciliation has actually stopped. Never claim/save the stale copy
-    // that happened to be rendered before this boundary.
+    // First reconcile the verified current Drive head while background work is
+    // held. The subsequent claim rechecks this checkpoint under the provider's
+    // publication lease, so the observed content and ownership transfer have
+    // one linearizable boundary.
+    step('Checking the latest Google Drive session…');
+    const caughtUp=await BackupProviderRuntime.syncRepositoryProvider('google-drive');
+    if(!caughtUp||caughtUp.cancelled)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE',caughtUp?.reason==='busy'?'Google Drive is busy. Try Continue Here again.':'The latest Google Drive session could not be reconciled before ownership transfer.');
+    const expectedCheckpointId=String(caughtUp.checkpointId||'');
+    if(!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive did not provide a verified current checkpoint for the handoff.');
     const loaded=await AppData.activeSession.load();
     previous=loaded&&loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
-    if(!previous||!CanonicalModule.same(previous,requested))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed while Continue Here was starting. Sync the latest session, then try again.');
+    if(!previous||previous.date!==requested.date||previous.runningOn!==requested.runningOn)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership or ended while Continue Here was starting.');
     planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
     if(!planned)throw new Error('the transferred session state is invalid');
     next=planned;
     const observedContentFingerprint=await activeSessionContentFingerprint(previous);
     setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
-    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,revision:planned.revision});
+    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,expectedCheckpointId,revision:planned.revision});
     if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
     if(claimed?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
     if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
