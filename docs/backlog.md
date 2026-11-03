@@ -39,6 +39,9 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
       - The re-request after each publication release (`backup-provider.js`, about line 872) and `maintenanceDefersAcrossObservation` in `source/core/repository-background.js`.
       - Whether session-watch should create a full new version every 2 minutes, and whether those count toward retention.
     - Fix so that maintenance cannot be starved by repeated publications or a stale lease, and a deferral says why and when it will retry. Add a test that would have caught it, for example publications every 2 minutes for a day leaving no more than the retention limit.
+11. **The storage figure may be wrong.** Library → Data → Local storage shows "Browser storage estimate: 21.9 MB of 10 GB" on the laptop. On mobile it showed about 4 GB, which the owner says is impossible, and 21.9 MB also looks unlikely to them.
+    - The figure is `navigator.storage.estimate().usage` (`inspectStorageCapability` in `source/app.html`, about line 3411; also used in `source/core/backup.js` and `source/core/attachment-ingest.js`). It is the browser's estimate for the whole site, not a count of study data. It includes the offline copy of the app (Cache Storage), IndexedDB, OPFS backup scratch files and attachments. Browsers round and pad it: Chrome pads cached cross-origin responses, and Safari on iOS is known to be coarse.
+    - To find: on each device (which phone and browser showed 4 GB?), measure what the app itself stores, by store (IndexedDB records, attachments, OPFS scratch, app caches), and compare with the estimate. A real 4 GB would mean leftover files (for example backup scratch or attachment copies that are never freed); a false one means the label must say what it is. Show the app's own measured size, and the browser estimate only as a labelled extra if it is useful.
 
 ## Owner's observations (noted 2026-10-25)
 
