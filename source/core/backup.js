@@ -729,6 +729,33 @@ async function valueFingerprint(value){
 }
 function dayFingerprint(record){return valueFingerprint(record?sanitizeCurrentDailyRecord(record)||record:null);}
 function sessionFingerprint(session){return valueFingerprint(session?ActiveSessionCodec.sanitizeCurrent(session)||session:null);}
+// Ownership and persistence metadata are control-plane state, not study
+// content. A Continue Here that changes only these fields must not manufacture
+// an Active Session conflict. Timer/progress/review/practice content remains in
+// the semantic value, so genuine divergence is still reviewable.
+function sessionContentValue(session){
+  const clean=session&&(ActiveSessionCodec.sanitizeCurrent(session)||session);
+  if(!clean||!clean.snapshot||typeof clean.snapshot!=='object')return null;
+  const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,...snapshot}=clean.snapshot;
+  return {date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot};
+}
+function sameSessionContent(a,b){
+  const left=sessionContentValue(a),right=sessionContentValue(b);
+  return !!left&&!!right&&Canonical.same(left,right);
+}
+// A Saved Day explicitly acknowledges the session content revision it
+// materialized. This is stronger than inferring "ended" merely because a
+// Saved-Day fingerprint changed since the shared base.
+function savedDayCoversSession(record,session){
+  const day=record&&(sanitizeCurrentDailyRecord(record)||record),active=session&&(ActiveSessionCodec.sanitizeCurrent(session)||session);
+  if(!day||day.recordKind!=='study'||!active||String(day.date||'')!==String(active.date||''))return false;
+  const sourceRevision=Number(day.sourceRevision),contentRevision=Number(active.snapshot&&active.snapshot.contentRevision);
+  return Number.isSafeInteger(sourceRevision)&&sourceRevision>=0&&Number.isSafeInteger(contentRevision)&&contentRevision>=0&&sourceRevision>=contentRevision;
+}
+function parsedSavedDayCoversSession(parsed,session){
+  const record=(Array.isArray(parsed&&parsed.records)?parsed.records:[]).find(item=>item&&item.date===session?.date);
+  return !!record&&savedDayCoversSession(record,session);
+}
 // {month: {date: fingerprint}} for these Saved Days.
 async function dayFingerprintMonths(records){
   const months=Object.create(null);
@@ -787,9 +814,18 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,claimedHere=
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
   if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return 'same';
   const me=installationId(),shared=String(base&&base.sessionFingerprint||'');
+  const covered=(hold||sync)&&!!local&&!incoming&&parsedSavedDayCoversSession(parsed,local);
+  // The Saved Day contains this session revision or later. There is no
+  // unsaved local session content to preserve as a kept version.
+  if(covered)return 'incoming';
   const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
   const takenOver=hold&&(!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me&&!claimedHere||ended);
-  if(hold&&!takenOver)return 'hold';if(!base)return takenOver?'yield':'';
+  if(hold&&!takenOver)return 'hold';
+  // A pure ownership/status/revision transition is a handoff, not a content
+  // conflict. If either side changed actual session evidence, the ordinary
+  // ancestry path below remains conservative and may keep it for review.
+  if(takenOver&&local&&incoming&&sameSessionContent(local,incoming))return 'incoming';
+  if(!base)return takenOver?'yield':'';
   const [mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
   if(takenOver)return mine===shared?'incoming':theirs===shared?'local':'yield';
   if(ended)return mine===shared?'incoming':'ended';
