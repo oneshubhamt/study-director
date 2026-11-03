@@ -916,6 +916,53 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   if(theirs===shared)return sessionDecision('local');
   return sessionDecision('conflict');
 }
+// Complete Active Session reconciliation before touching another data domain.
+// Causal ancestry, execution quiescence and retained divergence form one result.
+async function resolveSessionForReconciliation(base,parsed,{sync=false,review=false,sessionClaim=null,keep}={}){
+  let decision=await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,sessionClaim});
+  let state=decision.state,value=decision.value,priorReviews=null;
+  const decisionReviews=[];
+  const keepSession=async candidate=>{
+    const kept=candidate&&ActiveSessionCodec.sanitizeCurrent(candidate);if(!kept)return false;
+    if(priorReviews===null)priorReviews=await AppData.pendingReviews.list();
+    if([...priorReviews,...decisionReviews].some(item=>item.subject==='session'&&!item.resolvedAt&&Canonical.same(item.kept,kept)))return true;
+    const item=PendingReviewCodec.create({subject:'session',ref:'session',kept});
+    if(!keep(()=>item))return false;
+    decisionReviews.push(item);return true;
+  };
+  if(sync&&decision.kept&&!(await keepSession(decision.kept)))return freeze({needsDecision:true});
+  if(state==='yield-hold'){
+    await yieldSession({deferReview:true});state='hold';value=null;
+  }else if(state==='yield'){
+    await yieldSession();
+    if(sync){
+      const mine=(await readCanonicalActiveSession()).value;
+      state='incoming';
+      if(mine&&!(await keepSession(mine)))return freeze({needsDecision:true});
+    }else{
+      decision=await sessionSettlement(base,parsed);state=decision.state;value=decision.value;
+    }
+  }
+  // Ownership transfer or a remote end cannot leave a former owner's timer
+  // running after its local canonical session was replaced.
+  if(sync&&hasActiveSession()&&(state==='ended'||state==='incoming'&&(!parsed.importedActiveSession||parsed.importedActiveSession.runningOn!==installationId()))){
+    await yieldSession({deferReview:true});
+  }
+  if(sync&&state==='claimed-conflict'){
+    const other=parsed.importedActiveSession||null;
+    if(other&&!(await keepSession(other)))return freeze({needsDecision:true});
+    state='local';
+  }
+  if(sync&&(state==='conflict'||state===''||state==='ended')){
+    const mine=(await readCanonicalActiveSession()).value,theirs=parsed.importedActiveSession||null;
+    const time=item=>Date.parse(String(item&&item.updatedAt||''))||Number(item&&item.revision)||0;
+    const incomingShows=state==='ended'||!mine||!!theirs&&time(theirs)>time(mine);
+    const hidden=incomingShows?mine:theirs;
+    state=incomingShows?'incoming':'local';
+    if(hidden&&!(await keepSession(hidden)))return freeze({needsDecision:true});
+  }
+  return freeze({needsDecision:false,state,value});
+}
 // The other side saved this day since both last shared it. This establishes
 // that the session ended there; whether this device has unsaved session
 // content is decided independently by the semantic session ancestry above.
@@ -1615,58 +1662,14 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   await flushRestorePreflightState(signal);
   OperationDiagnostics.mark('restore-preflight-complete');
   const unchanged=reason=>Object.freeze({cancelled:true,reason,mode:'reconcile',added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0}),needsDecision=()=>unchanged('needs-decision');
-  // What both sides last shared, and the session: while one runs here a
-  // sync keeps it as it is; otherwise the side that did not change it since
-  // takes the other's.
-  // A review during a study session leaves the session as it is too.
+  // Active Session: one decision owns causal selection, stopping execution
+  // and retaining a divergent copy. All other domains reconcile afterwards.
   const review=!quiet&&!note&&options?.review===true,base=note?null:await lastSharedBase(stored);
-  let settlement=note||missingOnly?sessionDecision('same'):await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,sessionClaim:sync?options?.sessionClaim||null:null});
-  let session=settlement.state,derivedSession=settlement.value;
-  // Another device took the session over: stop it here, keeping what this
-  // device recorded, and let the person choose between the two (a sync shows
-  // the other device's, which runs there, and keeps this one's for review).
-  // Versions a sync keeps for review (5.2). One that cannot be kept leaves
-  // the difference for the person, so nothing is overwritten unkept.
   const keptReviews=[],keep=build=>{try{keptReviews.push(...[].concat(build()));return true;}catch(error){AppDiagnostics.capture('backup.sync-keep-review',error,'warn');return false;}};
-  let priorSessionReviews=null;
-  const keepSession=async value=>{
-    const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);if(!kept)return false;
-    // The same unresolved divergence must not create a new review at every sync.
-    if(priorSessionReviews===null)priorSessionReviews=await AppData.pendingReviews.list();
-    if([...priorSessionReviews,...keptReviews].some(review=>review.subject==='session'&&!review.resolvedAt&&Canonical.same(review.kept,kept)))return true;
-    return keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));
-  };
-  if(sync&&settlement.kept&&!(await keepSession(settlement.kept)))return needsDecision();
-  if(session==='yield-hold'){
-    await yieldSession({deferReview:true});
-    session='hold';derivedSession=null;
-  }
-  if(session==='yield'){
-    await yieldSession();
-    if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!(await keepSession(mine)))return needsDecision();}
-    else{settlement=await sessionSettlement(base,parsed);session=settlement.state;derivedSession=settlement.value;}
-  }
-  // Incoming ownership or a verified end must stop this device's execution
-  // before the incoming/empty canonical state is applied. A same-content
-  // takeover may otherwise change stored ownership but leave the old clock
-  // running until the separate claim watcher fires.
-  if(sync&&hasActiveSession()&&(session==='ended'||session==='incoming'&&(!parsed.importedActiveSession||parsed.importedActiveSession.runningOn!==installationId()))){
-    await yieldSession({deferReview:true});
-  }
-  // A current-owner claim with exact handoff ancestry is authoritative for
-  // control, never for content. If both devices changed content after that
-  // boundary, keep the old owner's copy for review while the current owner
-  // remains canonical.
-  if(sync&&session==='claimed-conflict'){
-    const theirs=parsed.importedActiveSession||null;if(theirs&&!(await keepSession(theirs)))return needsDecision();session='local';
-  }
-  // Other true content conflicts retain the existing sync policy: one
-  // version is shown and the other is kept, so nothing is silently lost.
-  if(sync&&(session==='conflict'||session===''||session==='ended')){
-    const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=value=>Date.parse(String(value&&value.updatedAt||''))||Number(value&&value.revision)||0;
-    const incomingShows=session==='ended'||!mine||!!theirs&&time(theirs)>time(mine),hidden=incomingShows?mine:theirs;session=incomingShows?'incoming':'local';
-    if(hidden&&!(await keepSession(hidden)))return needsDecision();
-  }
+  const decision=note||missingOnly?sessionDecision('same'):
+    await resolveSessionForReconciliation(base,parsed,{sync,review,sessionClaim:sync?options?.sessionClaim||null:null,keep});
+  if(decision.needsDecision)return needsDecision();
+  const session=decision.state,derivedSession=decision.value;
   const holdSession=['hold','local','graft'].includes(session),clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;
   if((quiet||note)&&!impact.reconciliationCapable)return needsDecision();
