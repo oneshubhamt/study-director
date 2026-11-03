@@ -121,6 +121,8 @@ for(const [label,arrange] of [['an attachment is still saving',()=>{attachmentsB
 await host.history.open();await new Promise(resolve=>setImmediate(resolve));
 assert.equal(deviceHistoryReads,1);assert.equal(providerHistoryReads,0,'Version History reads only the locations that are connected');
 assert.equal(nodes.get('managed-version-history-title').textContent,'Version History');
+assert.equal(nodes.get('managed-version-history-copy').textContent,'Every version your backups keep, newest first. Choose one to restore.');
+{const actions=nodes.get('managed-version-history-list').children[0].children[1].children[1];assert.equal(actions.children[0].textContent,'Restore…','each version offers Restore…');assert.equal(actions.children[0].dataset.action,'recover-managed-version');}
 const deviceButton={dataset:{versionHistorySource:'device-folder',versionHistoryCheckpoint:CHECKPOINT('a')}};
 const presentation=[];host.history.subscribePresentation(value=>presentation.push(value));
 assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),true);
@@ -226,6 +228,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(await host.history.recover({target:{closest:()=>deviceButton}}),false,'the whole-library button does nothing in note mode');
   assert.equal(nodes.get('managed-version-history-kicker').textContent,'Earlier versions');assert.equal(nodes.get('managed-version-history-title').textContent,'GS2 > Ethics');
+  assert.equal(nodes.get('managed-version-history-copy').textContent,'Choose an earlier version of this note. You review the differences before anything changes.');
   const choicesBefore=chooseCount();deviceCombineResult=freeze({ok:false,reason:'note-unchanged'});
   assert.equal(await host.history.recover({target:{closest:()=>noteButton}}),false);
   assert.equal(lastDeviceCombine.note,ethicsId,'the comparison names the note by id');assert.equal(lastDeviceCombine.confirmed,false);assert.match(host.history.status().status.message,/same text as this note/u);assert.equal(nodes.get('managed-version-history').open,true);
@@ -312,7 +315,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.equal(nodes.get('managed-version-history-status').textContent,'3 versions. 1 can’t be read by this app.');
   assert.equal(cards[0].children[0].children[1].textContent,'Can’t be read by this app');assert.match(cards[0].children[1].children[0].children[0].textContent,/newer Study Director, or the file is damaged/u);
   const [restore,remove]=cards[0].children[1].children[1].children;assert.equal(cards[0].children[1].children[1].children.length,2);
-  assert.ok(cards[0].classList.contains('unreadable')&&cards[0].attributes['aria-disabled']==='true','it shows muted');assert.equal(restore.disabled,true,'Restore is there but disabled');
+  assert.ok(cards[0].classList.contains('unreadable')&&cards[0].attributes['aria-disabled']==='true','it shows muted');assert.equal(restore.disabled,true,'Restore is there but disabled');assert.equal(restore.textContent,'Restore…');
   assert.equal(remove.dataset.action,'remove-managed-version');assert.ok(remove.classList.contains('danger')&&!remove.disabled,'Remove is red and enabled');
   assert.match(cards[3].children[0].children[1].textContent,/^Locked: enter the backup password/u);
   // Restore: the Device Folder's read fails before anything changed, so Drive's copy is read.
@@ -346,6 +349,7 @@ for(const gate of [0,1])for(const failure of [false,undefined,new Error('Tempora
   assert.deepEqual(driveSkip&&{checkpointIds:[...driveSkip.checkpointIds],contents:[...driveSkip.contents]},{checkpointIds:covered.checkpointIds.slice(),contents:covered.contents.slice()},'Drive skips the versions the Device Folder already read');
   const cards=nodes.get('managed-version-history-list').children,buttons=cards.map(card=>card.children[0].children[2]),labels=cards.map(card=>card.children[0].children[0].textContent);
   assert.deepEqual(buttons.map(button=>button.dataset.versionHistoryCheckpoint),[CHECKPOINT('f'),CHECKPOINT('g'),CHECKPOINT('e')],'one entry per distinct text, newest first, without the current text');
+  assert.deepEqual(buttons.map(button=>button.textContent),['Review','Review','Review'],'a note version offers Review: the differences come before any change');
   assert.equal(labels[0].includes(','),false,'a date with one version shows the day only');assert.ok(labels[1].includes(',')&&labels[2].includes(','),'two versions on one date show their times');
   assert.equal(nodes.get('managed-version-history-title').textContent,'Ethics');
   providerBringInResult=freeze({ok:true});

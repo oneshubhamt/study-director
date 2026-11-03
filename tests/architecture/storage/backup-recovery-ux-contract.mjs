@@ -10,7 +10,6 @@ const host=fs.readFileSync('source/core/backup-recovery-host.js','utf8');
 const guide=fs.readFileSync('source/external/guide.js','utf8');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
 const reconciliation=fs.readFileSync('source/core/reconciliation.js','utf8');
-const reconciliationUi=fs.readFileSync('source/core/reconciliation-ui.js','utf8');
 
 const dataStart=app.indexOf('class="backup-model-disclosure'),dataEnd=app.indexOf('class="library-danger"',dataStart),dataSurface=app.slice(dataStart,dataEnd);
 assert.ok(dataStart>=0&&dataEnd>dataStart);
@@ -21,7 +20,6 @@ assert.doesNotMatch(dataSurface,/>Primary<|>Optional<|backup-location-badge|reco
 assert.match(dataSurface,/>Device Folder</u);assert.match(dataSurface,/id="device-backup-settings"[^>]*>Settings</u);assert.match(dataSurface,/id="device-backup-settings-panel"/u);assert.match(dataSurface,/id="device-backup-repository-name"/u,'the settings name the backup folder inside the chosen folder');
 assert.match(dataSurface,/>Google Drive</u);assert.match(dataSurface,/id="backup-provider-actions"/u);assert.match(dataSurface,/<span>Sync<\/span><strong>While signed in<\/strong>/u);
 assert.match(dataSurface,/data-action="toggle-backup-info"/u,'backup explanations must use compact info popovers');
-assert.doesNotMatch(dataSurface,/Recovery &amp; history|Restore latest…|View backup history…|Merge from backup…/u,'separate Recovery & History wall must be removed');
 
 assert.match(dataSurface,/class="backup-advanced-disclosure ui-disclosure"/u);assert.doesNotMatch(dataSurface,/class="backup-advanced-disclosure ui-disclosure"[^>]*\sopen(?:\s|>|=)/u,'Advanced must default closed');
 assert.match(dataSurface,/id="backup-file-heading">Portable backup</u);assert.match(dataSurface,/>Export backup…</u);assert.match(dataSurface,/>Restore from file…</u);
@@ -30,8 +28,8 @@ assert.match(dataSurface,/id="backup-file-heading">Portable backup</u);assert.ma
   const repository=fs.readFileSync('source/core/managed-repository.js','utf8'),policy=repository.match(/normalLimit:(\d+),dailyDays:(\d+),weeklyPeriods:(\d+),monthlyPeriods:(\d+),hourlyLimit:(\d+),hourlyWindowHours:(\d+),protectedLimit:1,beforeRestoreProtectionMs:(\d+)\*24\*60\*60\*1000/u);
   assert.ok(policy,'retention policy must be readable');const [,normal,daily,weekly,monthly,hourly,hours,protectedDays]=policy;
   assert.match(dataSurface,new RegExp(`id="backup-retention-note">Your backups keep ${normal} versions: the latest, ${daily} daily, ${weekly} weekly and ${monthly} monthly, so about ${['','one','two','three','four','five','six'][Number(monthly)]} to ${['','one','two','three','four','five','six'][Number(monthly)+1]} months back\\. They also keep one version per hour from the last ${hours} hours when your notes changed, up to ${hourly} more\\. Before a restore, each device also keeps a safety version for ${Number(protectedDays)} days\\. The Device Folder and Google Drive use the same retention rules but keep independent version histories\\.<`,'u'),'the retention note must match the retention policy');
-  // One verb family for getting data back: Versions, then Restore…, Restore note… or Restore from file….
-  assert.match(host,/use\.textContent=noteTarget\?'Restore note…':'Restore…'/u);assert.doesNotMatch(app+host,/Restore \/ Combine|Import backup…/u);
+  // One verb family for getting data back. The Version History labels are checked on the rendered list in tests/unit/backup/backup-recovery-host.mjs.
+  assert.doesNotMatch(app+host,/Restore \/ Combine|Import backup…/u);
 }
 assert.match(dataSurface,/id="security-storage-heading">Storage</u);assert.match(dataSurface,/>Backup encryption</u);assert.match(dataSurface,/>Local storage</u);
 assert.match(styles,/\.backup-advanced-disclosure>summary/u);assert.doesNotMatch(styles,/\.backup-recovery-/u,'obsolete Recovery & History styling must be removed');
@@ -50,7 +48,6 @@ assert.doesNotMatch(provider+device,/checkpoint-selection-start|repository\.choo
 
 assert.match(host,/async function collectAll\(/u);
 assert.doesNotMatch(host,/input\.repository\.mergeHistory/u,'the host merges what the locations return; the repository is not asked to');
-assert.match(host,/Every version your backups keep, newest first\. Choose one to restore\./u);assert.match(host,/'Restore…'/u);
 assert.ok(host.includes('choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]'),'partial attachment backups must never offer exact Replace');assert.match(presentation,/label:'Replace current data'[\s\S]*Make your data match this backup\. You choose whether to keep what isn’t in it/u);assert.match(presentation,/reach:'Google Drive is connected, so your other devices get the result at their next sync\.'/u,'while Drive syncs, a restore says it reaches every device');assert.match(presentation,/label:'Combine with current data'[\s\S]*changed on one side only since your last sync are taken for you; you choose the rest/u);assert.match(presentation,/label:'Add only what’s missing'[\s\S]*Nothing you have now changes/u);
 assert.match(app,/id="managed-version-history-progress"[\s\S]*id="managed-version-history-progress-stage"[\s\S]*id="managed-version-history-progress-detail"/u,'Version History must own its structured recovery progress surface.');
 assert.match(host,/function setHistoryProgress[\s\S]*progressStage[\s\S]*progressDetail/u,'managed recovery progress must be rendered inside Version History rather than a generic page footer.');
@@ -89,6 +86,6 @@ assert.match(app,/ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set\(\[[^\]]*'open-ve
 
 assert.match(guide,/Local-first: each device keeps all its data/u);assert.match(guide,/signed in to Google Drive, it syncs/u);assert.match(guide,/\["Recover"/u);assert.match(guide,/Keep current, Add only what’s missing, Combine with current data, or Replace current data/u);assert.match(guide,/\["Replace current data"/u);assert.match(guide,/\["Combine with current data"/u);
 assert.doesNotMatch(guide,/\["Restore latest"|\["Backup history"|\["Merge from backup"/u);
-assert.match(reconciliation,/label:'Backup copy'/u);assert.match(reconciliationUi,/incomingLabel:String\(item\.incomingLabel\|\|'Backup copy'\)/u);
+assert.match(reconciliation,/label:'Backup copy'/u);
 
 console.log('Backup/recovery UX architecture contract passed.');

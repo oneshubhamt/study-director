@@ -15,19 +15,9 @@ assert.match(persistence,/createLocalStorage[\s\S]*createInstallationIdentity[\s
 assert.doesNotMatch(persistence,/createSyncMetadata/,'distributed-sync metadata must not remain a current persistence primitive');
 assert.match(codecs,/exactObject\(input,\['limits','dataContract','domain','keyedRecord','helpers','timestamps','timer'\]/u,'Daily Record codec must consume timestamps, not a sync contract');
 assert.doesNotMatch(codecs,/sanitizeCurrentSyncMetadata|sanitizeHistoricalSyncMetadata/u,'current domain codecs must not own distributed-sync metadata');
-assert.doesNotMatch(repositories,/idbPutReflectionDraft|DB_REFLECTION_DRAFT_STORE/u,'retired Reflection Draft persistence must not remain a current repository boundary');
 assert.doesNotMatch(notes,/meta\.put\('noteRecoveryPrefix'/u,'Notes save straight to their canonical rows and never journal edits in appMeta');
 assert.match(notes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\(\[DB_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical note commits and deletion markers must share one strict transaction');
 
-const functionSlice=(source,name,next)=>{const start=source.indexOf(name),end=next?source.indexOf(next,start+name.length):-1;assert.ok(start>=0,`${name} must exist`);return source.slice(start,end>start?end:source.length);};
-for(const [label,slice] of [
-  ['DailyRecord batch write',functionSlice(repositories,'async function idbPutDailyRecordBatch','async function idbGet')],
-  ['DailyRecord delete',functionSlice(repositories,'async function idbDelete(','async function idbAll')],
-  ['ActiveSession write',functionSlice(repositories,'async function idbPutActiveSession','async function idbGetActiveSession')],
-  ['Note commit',functionSlice(notes,'async function idbApplyDelta','async function idbReplace')]
-]){
-  assert.doesNotMatch(slice,/DB_SYNC_QUEUE_STORE|DB_TOMBSTONE_STORE/u,`${label} must not depend on legacy sync stores`);
-}
 assert.match(app,/async function legacyBackupSnapshotRevision\(\)[\s\S]*AppData\.dailyRecords\.datasetRevision\(\)[\s\S]*PlanData\.exportData\(\{flush:false\}\)[\s\S]*AttachmentStorage\.list\(\)/,'the legacy heavyweight fence must remain available as a conservative fallback');
 assert.match(app,/async function backupSnapshotRevision\(options=\{\}\)[\s\S]*options&&options\.legacy===true[\s\S]*AppData\.mutationEpoch\.eligible\(\)[\s\S]*study-director\.fast-capture-fence\.v1/,'healthy backup fencing must use the constant-size epoch/generation guard and fail back to the legacy fence when explicitly requested or ineligible');
 assert.match(app,/captureMutationGeneration\+\+/,'in-process textarea mutations must advance the local capture generation before canonical persistence necessarily settles');

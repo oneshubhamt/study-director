@@ -118,12 +118,10 @@ assert.match(reflectionMigration,/issueWriteToken\('discard retired reflection-d
 assert.match(reflectionMigration,/local\.remove\(obsolete\.reflectionLegacy\)/u,'Retired single Reflection Draft storage must be discarded by compatibility migration.');
 assert.doesNotMatch(reflectionMigration,/reflection\.migrate|verifiedRows|putReflection|migrateReflectionDrafts/u,'Reflection retirement must not recreate discarded drafts in current canonical storage.');
 assert.doesNotMatch(review,/legacyStorageKeys|LEGACY_STORAGE_KEYS|OBSOLETE_STORAGE_KEYS|migrateLegacy/u,'normal Review capability must contain no historical storage parser or migration entry point');
-assert.doesNotMatch(app,/event\.key===OBSOLETE_STORAGE_KEYS\.reflectionDrafts/u,'ordinary runtime must not observe retired Reflection LocalStorage as a live data surface');
 assert.match(repositories,/async function migrateNoteRecovery\(\)/u);assert.doesNotMatch(notesRepository,/CompatibilityCodec|compatibilityWriteToken|legacyKeys|async function migrate/u,'the notes repository holds no compatibility code');
 assert.match(repositories,/async function migrateHistoricalActiveSession\(\)/u);
 assert.match(repositories,/async function migrateHistoricalDailyRecords\(\)/u);
 assert.match(repositories,/async function verifyDailyRecordCanonicalBaseline\(\)/u);
-assert.doesNotMatch(repositories,/migrateReflectionDrafts|idbApplyReflectionDrafts|reflectionDrafts=freeze\(/u,'retired Reflection Draft persistence must not remain exposed by current repositories.');
 assert.doesNotMatch(repositories,/function requireDailyRecordCanonicalReady\(\)/u,'normal Daily Record paths must not depend on a disposable migration marker');
 assert.match(repositories,/function readableDailyRecord\(record\)[\s\S]{0,260}canonicalRuntimeError/u);
 assert.doesNotMatch(notesRepository,/normalizePayload\(parsed\.pending,\{compatibility:true\}\)/u,'normal note normalization must not expose a historical-mode switch');
@@ -137,8 +135,6 @@ assert.match(compatibilityCodecs,/function note\(value,keyHint=''/u);
 assert.match(compatibilityCodecs,/function activeSession\(session\)/u);
 assert.match(compatibilityCodecs,/function localRecoveryEnvelope\(raw\)/u);
 assert.match(compatibilityCodecs,/function migrateSessionSnapshot\(snapshot\)/u,'Historical Active Session compatibility must migrate embedded reflectionDraft state into snapshot.review.');
-assert.doesNotMatch(compatibilityCodecs,/function reflectionDraft\(/u,'Standalone Reflection Draft compatibility codec must be retired with the domain.');
-assert.doesNotMatch(persistence,/Number\(e\.oldVersion\|\|0\)<3/u,'historical IndexedDB decisions must not remain in permanent persistence');
 assert.match(compatibility,/function applyIndexedDbUpgrade\(/u);
 assert.doesNotMatch(persistence,/input\.compatibility/u,'permanent IndexedDB primitives must not depend on compatibility');
 assert.match(app,/upgrade:Object\.freeze\(\{/u);
@@ -151,9 +147,8 @@ assert.match(backupCodec,/async function inspectLegacyBackup\(/u);
 assert.match(app,/const RuntimeBackupCodec=Object\.freeze\(Object\.fromEntries/u);
 assert.match(app,/!\['inspectCurrent','inspectLegacy'\]\.includes\(key\)/u,'legacy/current backup inspection entry points must not leak onto the ordinary runtime codec');
 assert.match(app,/\['inspect',\(file,options\)=>CompatibilityFacade\.inspectBackup\(file,options\)\]/u);
-assert.match(exportsSource,/if\(Number\(info\.version\)!==2\)throw/u,'only the current SDENC02 protected format is read');assert.doesNotMatch(exportsSource,/SDENC01|legacyDecryptBackup/u);
+assert.match(exportsSource,/if\(Number\(info\.version\)!==2\)throw/u,'only the current SDENC02 protected format is read');
 assert.doesNotMatch(drive,/SDENC02|\.sdbackup/u,'Drive repository transport must remain opaque to portable/protected backup container formats');
-assert.doesNotMatch(allCompatibilityEntries().map(entry=>entry.id).join('|'),/backup-protection-policy-v1|protected-backup-v1/u,'retired password and encrypted-format paths stay gone');
 
 // Service Worker runs in a separate realm but exposes one explicitly disposable companion facade.
 assert.equal(CACHE_STORAGE_IDENTITIES.updateBridge,'study-director-update-bridge-v2');

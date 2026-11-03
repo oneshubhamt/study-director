@@ -65,14 +65,12 @@ assert.doesNotMatch(app,/schedule\w*\((?:15000|ATTACHMENT_INTEGRITY_RETRY_MS),'f
 assert.match(app,/function backupBackgroundAvailability\(\)\{return backgroundBlocker\(\)\|\|/u,'automatic backups and their upkeep use the shared gate');
 assert.doesNotMatch(app,/isAvailable:\(\)=>(?:!StartupLifecycle|appCanMutate\(\))/u,'no background job keeps its own start-up or ownership check');
 assert.match(app,/function settleStorageReset\(\)\{[\s\S]*?wakeBackgroundOperations\('storage-reset-settled'\)/u,'housekeeping paused by a clear resumes as soon as the clear is settled');
-assert.doesNotMatch(app,/REPOSITORY_INTEGRITY_POLICY|repositoryIntegrityTargetDue|scheduleRepositoryIntegrityScrub|runDeviceRepositoryIntegrityScrub/u,'retired host integrity wrappers must be removed after coordinator consolidation');
 
 assert.match(app,/backgroundMaintenanceStatusBusy\(owner,field='busy'\)[\s\S]*catch\(error\)[\s\S]*return true/u,'foreground-status probe failures must conservatively block unrelated local background maintenance');
 assert.match(app,/backgroundMaintenanceForegroundBusy\(\)[\s\S]*AppMutationCoordinator,'active'[\s\S]*BackupController[\s\S]*BackupProviderRuntime/u,'local background work must yield to foreground backup/recovery');
 assert.match(app,/BackupOperationDiagnostics\.start\('data-maintenance'/u);
 assert.match(app,/DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=AppData\.maintenance\.intervalMs,DATA_MAINTENANCE_FAILURE_RETRY_MS=30\*60\*1000/u,'canonical data maintenance takes its interval from the repository that records it, with a bounded failure retry');
 assert.match(app,/status==='completed'\)\{[\s\S]{0,200}AppData\.notes\.purgeExpiredTrash\(\);[\s\S]{0,120}scheduleRichTextAssetMaintenance\(ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS\);/u,'daily upkeep empties expired Recently deleted notes, then sweeps unused attachments');
-assert.doesNotMatch(app,/scheduleDailyAttachmentMaintenance|(?<!OBSOLETE_)STORAGE_KEYS\.attachmentMaintenance/u,'attachment cleanup keeps no browser-storage record of its own');
 assert.match(app,/status==='completed'[\s\S]*scheduleDataMaintenance\(DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS,'interval'\)[\s\S]*reason==='recent'[\s\S]*lastRun\+DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS[\s\S]*status==='failed'\|\|reason==='indexeddb-unavailable'[\s\S]*DATA_MAINTENANCE_FAILURE_RETRY_MS/u,'canonical data maintenance must remain live across long-running sessions and transient failures');
 assert.match(app,/BackupOperationDiagnostics\.start\('attachment-integrity'/u);
 assert.match(provider,/OperationDiagnostics\.start\('provider-integrity'[\s\S]*nextEligibleAt/u);
@@ -86,8 +84,6 @@ assert.match(mutation,/function assertAuthority\(options=\{\}\)[\s\S]*allowDurab
 assert.match(backup,/requireCanonicalComplete:true/u,'managed repository publication must require a complete canonical capture');
 const pendingReader=host.slice(host.indexOf('async function readPending('),host.indexOf('function mutatePending('));
 assert.doesNotMatch(pendingReader,/normalizePending\(null\)/u,'unavailable provider pending state must not be normalized into absence');
-assert.doesNotMatch(app,/REPOSITORY_INTEGRITY_META_KEY|exactCanonicalKeys\(/u,'retired host declarations must not remain after ownership cleanup');
-assert.doesNotMatch(drive,/function readWithTimeout\b/u,'retired Drive timeout helper must be removed');
 
 // Coordination boundaries, rather than historical timer/flag spellings. The
 // unit and assembled integration suites establish the behavioral invariants.

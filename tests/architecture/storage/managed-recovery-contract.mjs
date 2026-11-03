@@ -47,7 +47,6 @@ const convergenceScheduler=provider.slice(provider.indexOf('function providerCon
 assert.match(convergenceScheduler,/background\.registerJob\('convergence'[\s\S]*background\.beginBackground\('convergence',\{budgetMs:0[\s\S]*retryPendingProviderBackup\(selected,\{signal:scope\.signal\}\)/u,'transfer admission and cancellation are shared; housekeeping deadlines cannot destroy upload progress');
 assert.match(convergenceScheduler,/status:'idle',reason:'none'/u,'confirmed absence alone retires pending work');
 assert.match(convergenceScheduler,/status:'deferred',reason:'busy'[\s\S]*status:'deferred',reason:'background-busy'/u,'temporary contention retains explicit pending outcomes');
-const pendingRead=provider.slice(provider.indexOf('async function pendingRetryState('),provider.indexOf('function resetConvergenceRetry('));
 assert.doesNotMatch(provider,/async function historyRepositoryProvider[\s\S]{0,1200}retryPendingProviderBackup\(selected\)/u,'opening Version History must remain metadata-only and must not unexpectedly publish pending user data');
 assert.match(app,/storage:Object\.freeze\(\{[\s\S]*BackupAppMeta\.read\('managedProviderBackupPending'\)[\s\S]*BackupAppMeta\.write\('managedProviderBackupPending'[\s\S]*strict:true/u,'app composition must bind the extracted retry ledger to typed strict appMeta storage');
 assert.match(repositories,/async function rebaseBackupPreparationState\(\)[\s\S]*unit='\*'[\s\S]*view\.put\('canonicalMutationEpoch'[\s\S]*view\.put\('backupPreparationUnitPrefix'/u,'authoritative recovery rebase must publish a fresh canonical mutation epoch and wildcard preparation stamp atomically');
@@ -59,7 +58,6 @@ assert.match(provider,/background\.createIntegrityScheduler\(freeze\(\{[\s\S]*bu
 assert.match(provider,/async function saveRepositoryProvider[\s\S]*if\(preemptBackground\)await preemptProviderBackground\(selected\)/u,'foreground Drive publication must pre-empt background repository work before taking the provider path.');
 assert.match(provider,/async function loadRepositoryProvider[\s\S]*await preemptProviderBackground\(selected\)/u,'foreground Drive recovery must pre-empt background repository work before reading versions.');
 assert.match(provider,/background\.createIntegrityScheduler\(freeze\(\{[\s\S]*budgetMs:background\.integrity\.workBudgetMs,budgetCode:'REPOSITORY_INTEGRITY_BUDGET'/u,'integrity recurrence for every location uses the per-target shared scheduler with a cooperative allowance at saved checkpoints in addition to object and byte limits.');
-assert.doesNotMatch(backup,/fresh current backup|fresh current managed checkpoint|new Device Folder backup|retry shortly/iu,'restore/import copy must not describe retired synchronous post-recovery publication behavior.');
 
 
 assert.doesNotMatch(repository,/reconciliationAncestorIds\.length>REPOSITORY_RETENTION_POLICY\.normalLimit|out\.length<REPOSITORY_RETENTION_POLICY\.normalLimit/u,'Note three-way ancestry must not be truncated by the managed-retention slot count');

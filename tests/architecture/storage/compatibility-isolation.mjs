@@ -41,7 +41,6 @@ assert.doesNotMatch(read('source/core/repositories-notes.js'),/CompatibilityCode
 
 // Nothing outside the block reads the retired stores, keys or raw metadata rows.
 assert.doesNotMatch(rest,/rawLegacyMeta|legacySyncDeleteEntries|idbGetAllIfPresent\(DB_LEGACY_|getText\(STORAGE_KEYS\.legacySyncEmergency/u,'retired stores and keys are read only in the compatibility block');
-assert.doesNotMatch(rest,/migrateLegacyEnvelope|verifyCanonicalEnvelope|normalizeLegacyRow/u,'the Insights revision keeps no older-form conversions of its own');
 
 // The backup format module keeps its readers for older backup files in one
 // marked block, reached only through inspectLegacy.

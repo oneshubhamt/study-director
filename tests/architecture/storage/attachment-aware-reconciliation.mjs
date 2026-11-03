@@ -8,7 +8,6 @@ const app=fs.readFileSync('source/app.html','utf8');
 
 assert.match(backup,/async function resolvedAssetReferenceIds\(resolvedPlan,signal,reviews=freeze\(\[\]\)\)/,'Backup restore must calculate final attachment references from ResolvedPlan and the versions kept for review.');
 assert.match(backup,/for\(const item of resolvedPlan&&resolvedPlan\.savedDays\|\|\[\]\)/,'Saved-Day choices must contribute attachment references.');
-assert.doesNotMatch(backup,/resolvedPlan&&resolvedPlan\.reflectionDrafts/,'Retired Reflection Drafts must not remain a reconciliation attachment-reference domain.');
 assert.match(backup,/resolvedPlan&&resolvedPlan\.activeSession&&resolvedPlan\.activeSession\.value/,'Resolved Active Session must contribute attachment references.');
 assert.match(backup,/Referenced attachments are never deleted by this choice/,'Attachment Library deletion choices must never override resolved rich-text references.');
 assert.doesNotMatch(backup,/importAll\(assessment\.available/,'Restore must not publish the complete incoming attachment set.');

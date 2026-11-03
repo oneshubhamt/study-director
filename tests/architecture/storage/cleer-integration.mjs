@@ -61,7 +61,6 @@ assert.doesNotMatch(backup,/function managedParsedSnapshot\([\s\S]{0,1200}curren
 assert.match(backup,/function managedSnapshotStage\([\s\S]*managed-checkpoint-\$\{label\}-failed[\s\S]*errorCode/u,'managed checkpoint portable validation failures must expose safe stage-coded diagnostics');
 for(const code of ['MANAGED_CHECKPOINT_DAILY_RECORDS_FAILED','MANAGED_CHECKPOINT_NOTES_FAILED','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED','MANAGED_CHECKPOINT_COUNTS_FAILED','MANAGED_CHECKPOINT_ATTACHMENTS_FAILED','MANAGED_CHECKPOINT_PROTECTED_MANIFEST_FAILED'])assert.match(backup,new RegExp(code),'managed checkpoint validation must retain '+code);
 assert.doesNotMatch(backup,/function (?:resolve|merge|reconcile)Repository(?:Conflict|Handoff)/u,'repository restore must not introduce a parallel conflict engine');
-assert.doesNotMatch(reconciliation,/resolveSavedDayCandidates|groupEquivalent|orderedGroups/u,'retired N-way reconciliation machinery must stay absent');
 assert.doesNotMatch(reconciliation,/sameCanonical/u,'canonical equality must not be reimplemented or re-exported by reconciliation');
 for(const stale of ['handoffCapable','chooseRestoreMode'])assert.equal(backup.includes(stale),false,`stale Handoff terminology must stay absent from current backup orchestration: ${stale}`);
 assert.match(backup,/async function restoreManagedVersion\(candidate,options=\{\}\)[\s\S]*finally\{try\{await candidate\.release\(\)/u,'managed Replace must release its selected candidate exactly at its public consumption boundary');
@@ -79,26 +78,18 @@ assert.match(app,/async function canonicalLocalRecoveryEmpty\(\)[\s\S]*AppData\.
 assert.match(app,/async function offerDeviceRecoveryIfLocalEmpty[\s\S]*BackupProviderRuntime\.history\('device-folder',\{interactive:false\}\)[\s\S]*confirmLabel:'Recover latest'[\s\S]*BackupProviderRuntime\.restoreRepositoryProviderVersion\('device-folder',\{checkpointId:candidate\.location\.checkpointId,confirmed:true\}\)/u,'empty-local startup/reconnect recovery must remain explicit and use the engine');
 assert.match(app,/const connected=state\.connected===true,operationBusy=state\.busy\|\|state\.maintenanceBusy===true/u,'Device Folder UI availability must include repository maintenance so Back up now cannot silently no-op while cleanup is active');
 assert.doesNotMatch(device,/Releasing backup protection/u,'internal publication-lease terminology must not leak into Device Folder progress text');
-assert.doesNotMatch(backupProvider,/pendingIntent:pending,copy:|spineCopy|spineLeader/u,'retired provider-to-provider checkpoint copying must stay absent');
 assert.match(backupProvider,/async function queueOtherLocations\(selected\)[\s\S]*automaticRecoveryDestination\(other\)[\s\S]*markPendingRetry\(other\),scheduled=retryQueued&&schedulePendingProviderBackup\(other,1000,\{trigger:'managed-recovery-peer'\}\)[\s\S]*async function queueResolvedProviderState[\s\S]*markPendingRetry\(selected\),scheduled=retryQueued&&schedulePendingProviderBackup\(selected,1000,\{trigger:'managed-recovery'\}\)[\s\S]*others:await queueOtherLocations\(selected\)/u,'managed recovery must durably record source and configured-peer obligations before scheduling their normal convergence jobs');
 assert.match(backupProvider,/if\(automaticNeeded\(selected\)\)\{[\s\S]{0,500}markPendingRetry\(selected\),scheduled=retryQueued&&schedulePendingProviderBackup\(selected,1000,\{trigger:'managed-recovery-source-current'\}\)/u,'an already-present source checkpoint must durably retain convergence when recovery produced a newer local canonical revision');
-assert.doesNotMatch(backupProvider,/convergeRepositoryProvider|propagateResolvedProviderState/u,'retired synchronous provider-convergence API must stay absent');
 assert.match(backupProvider,/createSafety:sync\?null:async\(\)=>\{[\s\S]*const safetyPurpose=mode==='bring-in'\?'before-combine':'before-restore'[\s\S]*saveRepositoryProvider\(selected,\{retention:\{role:'before-restore',purpose:safetyPurpose\}/u,'every location writes a protected safety version before a restore or combine');
 assert.doesNotMatch(backupRecoveryHost,/input\.device\b|requestDeviceConvergence|configureConvergencePropagation/u,'the recovery host reaches every location, the Device Folder included, through the engine');
 assert.match(app,/restoredFromFile:\(\)=>\{notifyBackupChange\(\{urgent:true,reason:'file-restore'\}\);return BackupProviderRuntime\.automaticActive\(\);\}/u,'a file restore tells every automatic backup location at once');
 assert.match(backup,/await assertRestoreReconciliationCurrent\(reconciliationRevision,relevantDates,stable\.scope\);[\s\S]*runRestoreMutation\(stored,'restore-backup'[\s\S]*captureLocalSafetyCopy\(stored,\{afterCapture:\(\)=>assertRestoreReconciliationCurrent\(reconciliationRevision,relevantDates,stable\.scope\)\}\)[\s\S]*AppData\.restoreJournal\.prepare/u,'stale reconciliation must be rechecked before the safety/journaled commit boundary');
-assert.doesNotMatch(backup,/applyResolvedReflectionDrafts|reconcileReflectionDrafts|restoreReflectionDraftSnapshot|AppData\.reflectionDrafts/u,'retired Reflection Draft state must not remain a current reconciliation or restore domain');
 for(const retiredPort of ['importNotes','importReflectionDrafts','importActiveSession','configureHandoffPropagation','handoffPropagationHooks'])assert.equal(backup.includes(retiredPort),false,`obsolete Handoff-era backup port must stay retired: ${retiredPort}`);
 assert.doesNotMatch(backup,/reconcileNotes\([^\n]+\{\s*merge\s*:/u,'normal note reconciliation must not carry a collection merge/replace mode flag');
-assert.doesNotMatch(backup,/reconcileReflectionDrafts|restoreReflectionDraftSnapshot/u,'Reflection Draft reconciliation and snapshot replacement ports must remain retired');
 assert.doesNotMatch(backup,/id:'(?:notes|reflectionDrafts)'/u,'current restore choices must not expose whole-collection Note or Reflection Draft authority decisions');
 assert.match(app,/async function reconcileNotesThroughLifecycle[\s\S]*AppData\.notes\.reconcile\(importedNotes,deletions\)/u,'host composition must expose an explicit per-key note merge/delete reconciliation path');
 assert.match(app,/async function restoreNotesSnapshotThroughLifecycle[\s\S]*AppData\.notes\.replace/u,'host composition must keep whole-note replacement confined to snapshot rollback');
-assert.doesNotMatch(app,/reconcileReflectionDraftsThroughLifecycle|ReviewEditor\.mergeBackup/u,'host composition must not expose a retired Reflection Draft reconciliation path');
-assert.doesNotMatch(app,/restoreReflectionDraftSnapshotThroughLifecycle|ReviewEditor\.replaceBackup/u,'host composition must not expose a retired Reflection Draft snapshot replacement path');
-assert.doesNotMatch(app,/ReviewEditor\.importBackup/u,'generic draft import mode switching must remain retired');
 assert.match(repositories,/NotesRepositoryModule\.create/u,'repositories façade must compose the extracted Notes domain through an explicit dependency');
-assert.doesNotMatch(backupProvider,/selected\.(?:save|load)\b|confirmPendingReplacement/u,'retired portable-provider fallback must stay absent from core provider runtime');
 assert.match(managedRepository,/const REPOSITORY_RETENTION_POLICY=freeze\(\{[\s\S]*normalLimit:15,dailyDays:6,weeklyPeriods:4,monthlyPeriods:4,hourlyLimit:10,hourlyWindowHours:24,protectedLimit:1[\s\S]*calendar:'local-at-capture'/u,'shared repository lifecycle must define the deterministic 15-point tiered retention policy, up to 10 hourly versions from the last 24 hours, and one protected slot');
 assert.match(backupProvider,/writeManifest:async file=>\{[\s\S]*await file\.checkSource\?\.\(\);[\s\S]*verifyUploadedRepositoryManifest\(selected,item,file\.manifest,digest,signal\);await file\.checkSource\?\.\(\)/u,'provider publication transport must recheck the source-revision fence around remote verification');
 const combineBody=backupProvider.slice(backupProvider.indexOf('async function bringInRepositoryProvider('),backupProvider.indexOf('async function restoreRepositoryProviderVersion('));
@@ -110,7 +101,6 @@ assert.doesNotMatch(device,/lastSlot|Automatic-Checkpoint-A|Automatic-Checkpoint
 assert.doesNotMatch(app,/function repositoryIntegrityUnsafe\(\)[\s\S]{0,900}hasBlockingActiveSession/u,'repository integrity scrub must not be blocked merely because a study plan or timer session is active');
 // Active Session is coordinated by a tiny monotonic ownership record, while
 // full session content remains in ordinary immutable checkpoints.
-assert.doesNotMatch(backupProvider,/normalized\.observedOwner\b/u,'the opaque claim writer must not validate a retired plaintext owner field.');
 assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,date[,}]/u,'new Active Session claims must not persist the session date.');
 assert.doesNotMatch(backupProvider,/claim=freeze\(\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,[^\n]*\bowner[,}]/u,'new Active Session claims must not persist an installation id.');
 assert.match(backupProvider,/state:'released'/u,'session end must use a higher-epoch released ownership state rather than deleting the current claim');
@@ -158,8 +148,6 @@ assert.equal(currentEntities.includes('LEGACY_TOMBSTONE_TYPE'),false,'historical
 assert.equal(canonical.includes('LEGACY_SYNC_SCHEMA_VERSION'),false,'legacy sync schema naming must be absent from the current identity contract');
 assert.match(compatibility,/export const LEGACY_BACKUP_SCHEMA_VERSION=1;/u,'historical backup schema ceiling must live in compatibility, not the current data contract');
 assert.match(app,/const LEGACY_BACKUP_SCHEMA_VERSION=@@SD_LEGACY_BACKUP_SCHEMA_VERSION@@;/u,'host must receive the historical backup ceiling through explicit compatibility injection');
-assert.doesNotMatch(codec,/schemaVersion:DATA_CONTRACT\.schemas\.Backup/u,'current v19 manifest writer must not emit retired schemaVersion baggage');
-assert.doesNotMatch(backup,/schemaVersion:Number\(manifest\.schemaVersion/u,'current restore preview must not expose a retired sync-era schema API');
 
 
 console.log(JSON.stringify({

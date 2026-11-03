@@ -21,7 +21,7 @@ Status checked against the code and git history and confirmed by the owner on 20
 
 ## Test suite programme (approved by the owner on 2026-11-02)
 
-The suite is slow, pins source text and misses the study features. Eight pull requests, in this order; remove each line when its pull request merges.
+The suite is slow, pins source text and misses the study features. Eight steps, in this order. The work stays on `refactor/background-coordination` and the owner merges it once, after step 8 (decided 2026-11-03); remove each line when its step is done.
 
 Steps 1–3 (speed, governance, data-safety rules) are done.
 
@@ -36,6 +36,17 @@ Cautions that hold throughout:
 - Coverage of safety modules never drops; every mutant in `tests/helpers/mutation.mjs` stays killed.
 - A new test that disagrees with the app is reported to the owner, not resolved by changing either side.
 - Tests and tooling only; no release bump unless a confirmed app bug is fixed with the owner's agreement.
+
+## Owner's requests (noted 2026-11-03)
+
+**Notes: images.** Enlarge an image, pan and zoom it, and focus on it (a full-view mode).
+
+**Backup and sync review.** Questions to settle first, as a report, before any building. In this order:
+
+1. **Is the repository design right, from first principles?** The point of the repository is that unchanged large files are never uploaded or downloaded again, which makes transfers faster and safer. Does it upload and download only what changed, and does each upload and restore land whole or not at all? Is it well optimised overall? The owner thinks the repository principle is good; propose a better one only if there is one.
+2. **Handoff or live sync?** Today one device runs the session and "Continue here" hands it over. It sends few requests but feels slow and heavy: Continue here takes a while, and a pause may reach the other device only at the next check, about every 2 minutes. The alternative is live sync, the way a messaging app works: the same session runs on several devices, and a note edit, a timer pause or an added block reaches the other devices on its own. Compare the two.
+3. **Constraints any answer must meet.** Local-first: nothing in the app waits for the internet or Drive. Drive sign-in lasts about 1 hour and there is no server. Full end-to-end encryption, at rest and in transit, comes later and must fit.
+4. **Then speed.** Drive backups take over 20 s and Device Folder backups 2–3 s. Make Drive faster first (backup, then restore), then make handoff feel seamless and quick, then make the Device Folder (about 2 s) faster still. Rows 4 and 8 above and the Drive items under "Noted for later" belong to this work.
 
 ## Decided, not yet scheduled
 
@@ -52,6 +63,7 @@ Cautions that hold throughout:
 - **Duplicate local checkpoint captures**: an optimisation to make only if measurement shows it matters.
 - **Large orchestration modules** (`backup-provider.js`, `backup.js`, `app.html`): no splitting by size alone; consolidate only proven duplication.
 - **`backup-encryption` browser test** fails only under concurrent load and runs alone until its cause is found ([tests/README.md](../tests/README.md#browser-test-reliability)).
+- **Unreachable label in Version History.** `backup-recovery-host.js` gives the whole-library list a `'Restore note…'` label in note mode, but note mode draws its own list, whose buttons say "Review". The branch never runs. Found in step 4 of the test programme; the app is unchanged.
 - **Unregistered sessionStorage key** `study-director.backup-operation-diagnostics.v1` is not listed in `contracts/data-architecture.mjs` with the other browser-storage keys.
 
 ## Not yet checked
