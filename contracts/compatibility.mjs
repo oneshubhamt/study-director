@@ -192,11 +192,11 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['contracts/data-architecture.mjs','source/core/compatibility-host.js','source/core/host-metadata.js','source/app.html'])
     },
     {
-      id:'restore-journal-payload-v1-v4',owner:'compatibility/host',kind:'live-migration',
-      source:'appMeta restoreJournalPayload versions 1 to 4 left by a restore interrupted under an older build',
-      target:'restoreJournalPayload version 5 with explicit deletion lists (noteDeletions, formerly areaNoteDeletions), then resolved by restore crash recovery',
-      proof:'the converted payload is read back and verified before crash recovery runs; the ordinary journal reader accepts only version 5 and unknown shapes fail closed',
-      retirement:'after every supported installed build writes version-5 restore journals and the canonical baseline is verified',
+      id:'restore-journal-payload-v1-v5',owner:'compatibility/host',kind:'live-migration',
+      source:'appMeta restoreJournalPayload versions 1 to 5 left by a restore interrupted under an older build',
+      target:'restoreJournalPayload version 6 with explicit deletion lists and no obsolete Plan-draft scheduleText field, then resolved by restore crash recovery',
+      proof:'the converted payload is read back and verified before crash recovery runs; the ordinary journal reader accepts only version 6 and unknown shapes fail closed',
+      retirement:'after every supported installed build writes version-6 restore journals and the canonical baseline is verified',
       sourceFiles:freeze(['source/core/compatibility-host.js'])
     },
     {
