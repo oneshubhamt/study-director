@@ -3549,6 +3549,7 @@ function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,li
   const ta=document.getElementById('plan-input');
   if(!session||!snapshot||!ta)return false;
   const transitionSource=source||'stored-session-apply';
+  const lifecycleContext={scheduleIdentity:true,date:session.date,autoDate:session.date===todayISO(),snapshotReview:snapshot.review};
   // The Plan draft is independent authoring state. Applying a canonical
   // Active Session must neither persist its schedule as that draft nor open
   // the draft editor. Keep the exact local text in place while the live
@@ -3571,9 +3572,7 @@ function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,li
     return restored;
   };
   if(lifecycleManaged)return applySnapshot();
-  return SessionLifecycle.runSync(transitionSource,{
-    scheduleIdentity:true,date:session.date,autoDate:session.date===todayISO(),snapshotReview:snapshot.review
-  },applySnapshot);
+  return SessionLifecycle.runSync(transitionSource,lifecycleContext,applySnapshot);
 }
 async function hydratePrimaryStateFromStorage(options={}){
   const sameTabReload=!!options.sameTabReload||performance.getEntriesByType('navigation')[0]?.type==='reload'||performance.navigation?.type===1;
