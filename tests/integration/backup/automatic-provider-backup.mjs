@@ -25,7 +25,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
   const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>current,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durable,write:async value=>{durable=value;},remove:async()=>{durable=null;}})}));
   const unexpected=()=>{throw new Error('Unexpected executor in the automatic backup test');};
-  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
+  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,readSession:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
     publish:async(_history,options,executor)=>{
       const expectedInteractive=manual===true&&publishedAt.length===0;
       assert.equal(options.interactive,expectedInteractive,expectedInteractive?'the first publication in the manual-turn case must use the foreground interactive path':'automatic convergence publications never prompt');
