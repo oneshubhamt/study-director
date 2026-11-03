@@ -19,7 +19,7 @@ registry.define('backup-provider',1,input=>{
     environment:freeze(['clearTimeout','setTimeout']),
     diagnostics:freeze(['capture','fail','finish','mark','start'])
   });
-  const REPOSITORY_FIELDS=freeze(['createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','sessionState','markCompleted','sharedBase','establishBase']);
+  const REPOSITORY_FIELDS=freeze(['createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','readSession','markCompleted','sharedBase','establishBase']);
   function createRuntime(input){
     exactObject(input,['background','ports','repository'],'Backup provider input');
     const Background=exactObject(input.background,['contractVersion','createCoordinator','format','maintenance','maintenanceActionable'],'Backup provider repository-background dependency');
@@ -1782,30 +1782,28 @@ registry.define('backup-provider',1,input=>{
     if(!selected||!selected.shared||!selected.repository||!providerConnected(selected))return freeze({status:'unavailable',reason:'not-connected'});
     const traceId=OperationDiagnostics.start('provider-session-source',selected.label,{provider:selected.id}),foreground=beginForeground(selected,options&&options.signal||null);
     if(!foreground){OperationDiagnostics.finish({status:'skipped',reason:'busy'},traceId);return freeze({status:'busy',reason:'busy'});}
-    const operation=BackupController.beginImport(),cancelImport=()=>operation.cancel?.('Session handoff source read was cancelled.');
-    if(foreground.signal.aborted)cancelImport();else foreground.signal.addEventListener('abort',cancelImport,{once:true});
-    let candidate=null;setBusy(true);
+    setBusy(true);
     try{
       await enterForeground(selected,foreground,traceId,{prepare:true});
-      const scoped=repositoryOperationSelected(selected,{signal:foreground.signal}),inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
+      const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});
+      await synchronizeRepositoryScope(scoped);
+      const inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
       if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The current shared repository head could not be determined safely.');
       const head=sharedRepositoryHead(inventory),checkpointId=String(head&&head.item&&head.item.id||'');
       if(!checkpointId){OperationDiagnostics.finish({status:'empty'},traceId);return freeze({status:'empty',reason:'no-source',checkpointId:'',session:null});}
-      candidate=await loadRepositoryProviderCandidate(selected.id,operation,{checkpointId,mode:'bring-in',quiet:true,sync:false});
-      if(!candidate)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The current shared session could not be verified.');
-      const verifiedCheckpointId=String(candidate.preview?.checkpoint?.checkpointId||checkpointId);
-      if(verifiedCheckpointId!==checkpointId)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The verified handoff checkpoint identity changed unexpectedly.');
-      const session=RepositoryCheckpointPipeline.sessionState(candidate);
-      OperationDiagnostics.finish({status:'completed',checkpointId:verifiedCheckpointId,activeSession:!!session},traceId);
-      return freeze({status:'completed',reason:'',checkpointId:verifiedCheckpointId,session});
-    }catch(error){
-      OperationDiagnostics.fail(error,{},traceId);throw error;
-    }finally{
-      if(candidate)try{await candidate.release();}catch(error){AppDiagnostics.capture('backup-provider.session-source-release',error,'warn');}
-      foreground.signal.removeEventListener('abort',cancelImport);BackupController.finishImport(operation);await release(selected,'session-source');setBusy(false);foreground.release();
-    }
+      const row=await verifyRepositoryInventoryPair(scoped,head,{interactive:false,signal:foreground.signal,fresh:true});
+      const listedObjects=await repositoryObjectInventory(scoped,{signal:foreground.signal}),objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest);
+      const readObject=entry=>{
+        const item=objectInventory.byId.get(String(entry&&entry.objectId||''));
+        if(!item)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The verified Active Session object is unavailable.');
+        return scoped.repository.download(item,freeze({signal:foreground.signal}));
+      };
+      const session=await RepositoryCheckpointPipeline.readSession(row.manifest,readObject,{interactive:false,signal:foreground.signal});
+      OperationDiagnostics.finish({status:'completed',checkpointId,activeSession:!!session},traceId);
+      return freeze({status:'completed',reason:'',checkpointId,session:session||null});
+    }catch(error){OperationDiagnostics.fail(error,{},traceId);throw error;}
+    finally{await release(selected,'session-source');setBusy(false);foreground.release();}
   }
-
   async function claimSessionOwnership(id='google-drive',request={}){
     if(busy)return freeze({status:'busy',reason:'busy'});
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return freeze({status:'unavailable',reason:'not-connected'});
