@@ -70,6 +70,11 @@ const startup=(draft=STARTER_SCHEDULE)=>freeze({version:2,plans:freeze({draft,sa
 const personal=(name='Checkpoint User')=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:name,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})});
 const record=(date,reflection,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:16,recordKind:'study',date,reflection,studyQuality:4,savedAt:updatedAt,updatedAt});
 const session=(date,label,{runningOn='inst_device_local',status='suspended',revision=2}={})=>freeze({id:'current',type:'activeSession',version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,revision,date,status,runningOn,scheduleText:`08:00 | 60 | ${label} | work | Ethics | block | 1`,snapshot:freeze({label}),suspendedAt:'2026-08-20T13:00:00.000Z',updatedAt:'2026-08-20T13:00:00.000Z'});
+const revisionedSession=(date,label,{runningOn='inst_device_local',status='active',revision=2,contentRevision=1,savedRevision=0,updatedAt='2026-08-20T13:00:00.000Z'}={})=>{
+  const base=session(date,label,{runningOn,status,revision});
+  return freeze({...base,snapshot:freeze({...base.snapshot,contentRevision,savedRevision:Math.min(contentRevision,savedRevision),updatedAt}),updatedAt});
+};
+const revisionedRecord=(date,reflection,sourceRevision,updatedAt='2026-08-20T18:00:00.000Z')=>freeze({...record(date,reflection,updatedAt),sourceRevision});
 const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:1,date,reflection:text,studyQuality:3,revision,sessionRevision:0,updatedAt});
 
 async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,pendingReviews=[],personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
@@ -762,6 +767,39 @@ let syncWorld=null;
   assert.equal(yielded.cancelled,false,'a takeover never stops the sync');
   assert.equal(a.running,false,'the device that was taken over stops its timer');assert.equal(a.activeSession.snapshot.label,'B-TOOK-BACK','it shows the session running on the other device');
   const keptProgress=a.reviews.open().find(review=>review.subject==='session');assert.equal(keptProgress.kept.snapshot.label,'A-PROGRESS','its own progress is kept for review');assert.equal(keptProgress.kept.status,'suspended');
+}
+
+// BF-1: a legitimate A → B handoff changes ownership metadata, not study
+// content. Control-plane revisions on both sides must not manufacture an
+// Active Session kept version. When B then saves the exact session content,
+// the Saved Day's sourceRevision is an explicit acknowledgement that lets A
+// retire its redundant session copy without another "unsaved" review.
+{
+  syncWorld.drive.clear();
+  const {device,note}=syncWorld,day='2026-08-31';
+  const a={installationId:'inst_bf1_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1'),activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const b={installationId:'inst_bf1_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const A=device(a),B=device(b),keptSessions=state=>state.reviews.open().filter(review=>review.subject==='session');
+  a.activeSession=revisionedSession(day,'BF1-SHARED',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  // The old owner may persist a newer control revision while observing the
+  // takeover; the actual session evidence is still byte-for-byte the same.
+  a.activeSession=freeze({...a.activeSession,revision:12,updatedAt:'2026-08-31T09:02:00.000Z'});
+  b.activeSession=freeze({...b.activeSession,runningOn:b.installationId,status:'active',revision:11,suspendedAt:null,updatedAt:'2026-08-31T09:01:00.000Z'});b.schedule=b.activeSession.scheduleText;b.running=true;
+  await B.upload();
+  assert.equal((await A.sync()).cancelled,false,'ownership-only handoff must reconcile without stopping sync');
+  assert.equal(a.activeSession.runningOn,b.installationId,'A follows B as the legitimate new owner');
+  assert.equal(keptSessions(a).length,0,'ownership/status/revision metadata alone must not create an Active Session review');
+  // Saving acknowledges contentRevision 7. Change only A's local control
+  // revision again to prove the acknowledgement, rather than ancestry
+  // fingerprint equality, settles the stale recovery copy.
+  a.activeSession=freeze({...a.activeSession,revision:13,updatedAt:'2026-08-31T09:04:00.000Z'});
+  b.activeSession=null;b.schedule='';b.running=false;b.records.set(day,revisionedRecord(day,'saved after BF1 handoff',7,'2026-08-31T09:05:00.000Z'));
+  await B.upload();
+  assert.equal((await A.sync()).cancelled,false,'a covered saved handoff session must settle without a decision');
+  assert.equal(a.activeSession,null,'A retires the session once B Saved Day covers its content revision');
+  assert.equal(a.records.get(day).sourceRevision,7);
+  assert.equal(keptSessions(a).length,0,'a Saved Day that covers the session must not leave an Active Session kept version');
 }
 
 // Continue here pressed before this device took in the other's newest
