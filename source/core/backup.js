@@ -443,15 +443,16 @@ async function applyResolvedNotes(resolvedPlan){
 }
 async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
   const resolved=resolvedPlan&&resolvedPlan.activeSession;
-  // The other side ended the session this device had not changed since.
-  if(clear&&resolved&&resolved.value){requireBackupMutationControl('reconciling the active session');const scheduleText=scheduleRead();await restoreSessionState(null,scheduleText);return {message:' and active session',changed:true,expected:null,scheduleText};}
+  // Active Session reconciliation owns only session/runtime state. The Plan
+  // working draft is portable Personal Data and is never transported through
+  // this path.
+  if(clear&&resolved&&resolved.value){requireBackupMutationControl('reconciling the active session');await restoreSessionState(null);return {message:' and active session',changed:true,expected:null};}
   if(!resolved||!resolved.changed||!resolved.value)return {message:'',changed:false,expected:null};
   requireBackupMutationControl('reconciling the active session');
   const expected=ActiveSessionCodec.sanitizeCurrent(resolved.value);
   if(!expected)throw new Error('Resolved Active Session is invalid.');
-  const scheduleText=expected.scheduleText||scheduleRead();
-  await restoreSessionState(expected,scheduleText);
-  return {message:' and active session',changed:true,expected,scheduleText};
+  await restoreSessionState(expected);
+  return {message:' and active session',changed:true,expected};
 }
 function staleReconciliationError(){
   const error=new Error('Local Study Director data changed while differences were being reviewed. The comparison must be rebuilt from the latest saved state.');
@@ -1297,7 +1298,7 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
     if(Array.isArray(expected.noteDeletions)){const stored=await AppData.deletionRecovery.notes();if(!Canonical.same(stored,expected.noteDeletions))throw new Error('Post-restore verification failed for note deletion history.');}
     if(Array.isArray(expected.attachmentDeletions)){const stored=await AppData.deletionRecovery.attachments();if(!Canonical.same(stored,expected.attachmentDeletions))throw new Error('Post-restore verification failed for Attachment deletion history.');}
   });
-  if(Object.prototype.hasOwnProperty.call(expected,'activeSession'))await verifyRestoreDomain('active-session',async()=>{await AppData.activeSession.settled();const loaded=await readCanonicalActiveSession(),stored=loaded&&loaded.value||null;if(!Canonical.same(ActiveSessionCodec.sanitizeCurrent(stored),expected.activeSession))throw new Error('Post-restore verification failed for the active session.');await verifyActiveSessionRuntime(expected.activeSession,expected.scheduleText||'');});
+  if(Object.prototype.hasOwnProperty.call(expected,'activeSession'))await verifyRestoreDomain('active-session',async()=>{await AppData.activeSession.settled();const loaded=await readCanonicalActiveSession(),stored=loaded&&loaded.value||null;if(!Canonical.same(ActiveSessionCodec.sanitizeCurrent(stored),expected.activeSession))throw new Error('Post-restore verification failed for the active session.');await verifyActiveSessionRuntime(expected.activeSession);});
   return true;
 }
 function sealVerifiedPortableSnapshot(parsed,{provenance=freeze({kind:'portable-file'}),release=null}={}){
@@ -1779,7 +1780,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       ...(Array.isArray(assetResult.expectedDeletions)?{attachmentDeletions:assetResult.expectedDeletions}:{}),
       ...(reviewResult.expectedItems?.length?{pendingReviewItems:reviewResult.expectedItems}:{})
     };
-    if(sessionResult.changed){expectedCommit.activeSession=sessionResult.expected;expectedCommit.scheduleText=sessionResult.scheduleText||'';}
+    if(sessionResult.changed)expectedCommit.activeSession=sessionResult.expected;
     await runRestoreMutationStage('verification',async()=>{
       await AppData.restoreJournal.mark(restoreId,'verifying');
       await verifyRestoreCommit(expectedCommit,signal);
