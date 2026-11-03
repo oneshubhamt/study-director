@@ -729,10 +729,11 @@ async function valueFingerprint(value){
   return [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 function dayFingerprint(record){return valueFingerprint(record?sanitizeCurrentDailyRecord(record)||record:null);}
-// Reconciliation ancestry tracks study content only. Ownership/status/revision
-// are control-plane state, resolved by the ownership claim and never by this
-// content fingerprint.
-function sessionFingerprint(session){return valueFingerprint(ActiveSessionCodec.contentValue(session));}
+// The persisted reconciliation baseline retains the exact canonical Active
+// Session fingerprint. Changing that meaning in place would corrupt ancestry.
+// Handoff causality has its own semantic-content fingerprint below.
+function sessionFingerprint(session){return valueFingerprint(session?ActiveSessionCodec.sanitizeCurrent(session)||session:null);}
+function sessionContentFingerprint(session){return valueFingerprint(ActiveSessionCodec.contentValue(session));}
 function sameSessionContent(a,b){
   const left=ActiveSessionCodec.contentValue(a),right=ActiveSessionCodec.contentValue(b);
   return !!left&&!!right&&Canonical.same(left,right);
@@ -817,8 +818,8 @@ const sessionDecision=(state,value=null)=>freeze({state:String(state||''),value:
 async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim=null}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
   if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return sessionDecision('same');
-  const me=installationId(),shared=String(base&&base.sessionFingerprint||''),[mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
-  const sameContent=!!mine&&mine===theirs,claimedHere=!!(sessionClaim&&sessionClaim.state==='owned'&&sessionClaim.ownedHere&&sessionClaim.applies);
+  const me=installationId(),shared=String(base&&base.sessionFingerprint||''),[mine,theirs,contentMine,contentTheirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming),sessionContentFingerprint(local),sessionContentFingerprint(incoming)]);
+  const sameContent=!!contentMine&&contentMine===contentTheirs,claimedHere=!!(sessionClaim&&sessionClaim.state==='owned'&&sessionClaim.ownedHere&&sessionClaim.applies);
 
   if(claimedHere){
     if(!local)return sessionDecision('incoming');
@@ -830,11 +831,11 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
     // Older claims lack the exact causal fingerprint. They remain safe by
     // refusing to infer ancestry rather than guessing from scalar revisions.
     if(!/^[a-f0-9]{64}$/u.test(observed))return sessionDecision('claimed-conflict');
-    if(mine===observed&&theirs!==observed){
+    if(contentMine===observed&&contentTheirs!==observed){
       const rebased=rebaseSessionContentToOwner(local,incoming);
       return rebased?sessionDecision('graft',rebased):sessionDecision('claimed-conflict');
     }
-    if(mine!==observed&&theirs===observed)return sessionDecision('local');
+    if(contentMine!==observed&&contentTheirs===observed)return sessionDecision('local');
     return sessionDecision('claimed-conflict');
   }
 
@@ -1314,6 +1315,13 @@ async function releaseVerifiedPortableSnapshot(snapshot){
   const state=snapshot&&verifiedPortableSnapshots.get(snapshot);if(!state||state.released)return false;state.released=true;verifiedPortableSnapshots.delete(snapshot);if(state.release)await state.release();return true;
 }
 function candidateSnapshotState(stored){return stored&&stored.snapshot?verifiedPortableSnapshotState(stored.snapshot):null;}
+function candidateActiveSession(candidate){
+  const stored=candidate&&typeof candidate==='object'?inspectedBackups.get(candidate):null,snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
+  if(!parsed)throw new Error('Backup candidate is not a current verified Study Director inspection.');
+  const session=parsed.importedActiveSession?ActiveSessionCodec.sanitizeCurrent(parsed.importedActiveSession):null;
+  if(parsed.importedActiveSession&&!session)throw new Error('Verified backup contains an invalid Active Session.');
+  return session?freeze(session):null;
+}
 function createBackupCandidate(snapshot,{file=null,metadata=freeze({}),signal=null}={}){
   const state=verifiedPortableSnapshotState(snapshot),candidate=freeze({
     kind:'study-director.backup-candidate',
@@ -2179,6 +2187,7 @@ const repository=freeze({
   projectHistory:ManagedRepository.projectHistory,
   noteObject:ManagedRepository.noteObject,
   readNote:ManagedRepository.readNote,
+  sessionState:candidate=>candidateActiveSession(candidate),
   markCompleted:controller.markCompleted,
   // What this device last shared through Drive, and recording a version
   // placed there as shared.
