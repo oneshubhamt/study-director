@@ -880,7 +880,12 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   }
 
   const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
-  const takenOver=hold&&!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me;
+  // Ownership transfer is meaningful only within the same study session/day.
+  // A different-date Active Session is independent unsaved work, never a
+  // takeover merely because another installation owns it.
+  const differentSession=!!local&&!!incoming&&local.date!==incoming.date;
+  if(hold&&differentSession)return sessionDecision('conflict');
+  const takenOver=hold&&!!local&&!!incoming&&incoming.date===local.date&&incoming.status!=='suspended'&&incoming.runningOn!==me;
   // A verified Saved Day on the other side is an explicit end-of-session
   // transition. It must outrank the ordinary "keep the currently running
   // local session during sync" hold rule, otherwise the stale recovery row
