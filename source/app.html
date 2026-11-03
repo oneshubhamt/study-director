@@ -9923,7 +9923,6 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
       if(journal?.payload.backupFile)try{await BackupFiles.release(journal.payload.backupFile.name);}
       catch(error){AppDiagnostics.capture('backup.restore-journal-file-release',error,'warn');}
     },
-    scheduleRead:()=>PlanData.readDraft()??'',
     personalSettle:async options=>{
       const backupCapture=options&&options.backupCapture===true;
       if(appCanMutate()&&await PlanDraftEditor.flush({backupCapture})===false)throw new Error('The current Plan draft could not be safely settled before backup.');
