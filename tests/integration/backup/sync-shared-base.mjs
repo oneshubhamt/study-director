@@ -777,8 +777,8 @@ let syncWorld=null;
 {
   syncWorld.drive.clear();
   const {device,note}=syncWorld,day='2026-08-31';
-  const a={installationId:'inst_bf1_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1'),activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
-  const b={installationId:'inst_bf1_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const a={installationId:'inst_bf1_session_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1'),activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const b={installationId:'inst_bf1_session_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
   const A=device(a),B=device(b),keptSessions=state=>state.reviews.open().filter(review=>review.subject==='session');
   a.activeSession=revisionedSession(day,'BF1-SHARED',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
   await A.upload();assert.equal((await B.sync()).cancelled,false);
