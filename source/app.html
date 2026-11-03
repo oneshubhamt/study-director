@@ -8634,11 +8634,12 @@ const PlanData=(()=>{
     const clean=PersonalDataCodec.normalize(value);await settled().catch(()=>{});
     await enqueue(async()=>{await AppData.planData.replace(clean.plans);state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;});await applyPreferences(clean.preferences);
     const input=document.getElementById('plan-input'),draftText=String(clean.plans.draft??getActiveDefaults().scheduleText);if(input)input.value=draftText;
-    // A portable draft can differ from the applied schedule, or be imported
-    // while a suspended/elsewhere session has no runtime tasks. Neither event
-    // is an instruction to enter Plan editing.
+    // Preserve an already-applied schedule and any suspended/elsewhere session
+    // independently of what Personal Data imports into the working draft.
+    const restored=parseScheduleDraftText(draftText),matchesApplied=!!TASKS.length&&restored.ok&&scheduleFingerprintForRows(restored.parsed)===scheduleFingerprint();
     const sessionRecord=(await AppData.activeSession.load(0,{strict:true})).value;
-    PlanDraftEditor.preview({silent:true,enterDraft:!TASKS.length&&!sessionRecord});PlanRuntime.savedPlans.render();
+    if(matchesApplied||sessionRecord)PlanDraftEditor.deactivate();
+    PlanDraftEditor.preview({silent:true,enterDraft:!matchesApplied&&!sessionRecord});PlanRuntime.savedPlans.render();
   }
   async function verify(value){
     await settled();const actual={version:2,plans:await AppData.planData.read(),preferences:await preferences()};
