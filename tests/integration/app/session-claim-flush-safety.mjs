@@ -314,4 +314,51 @@ function acquiringHarness(fault=''){
   assert.equal(state.current.runningOn,'inst_handoff_old');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:22,productionFunctions:true}));
+// A normal cross-device sync must not stop/reset a local session if the
+// suspended evidence reached only the browser recovery envelope, not IndexedDB.
+{
+  const src=[
+    productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
+    productionFunction('async function yieldSessionToOtherDevice(options={}){')
+  ].join('\n');
+  const oldSession={date:'2026-10-27',runningOn:'inst_local',revision:4,status:'suspended',snapshot:{review:'before yield'}};
+  for(const valid of [false,true]){
+    let resets=0,stops=0,panelChanges=0,notices=0;
+    const app={
+      Object,Date,Promise,
+      TASKS:[{}],TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
+      PracticePacer:{pauseForSessionEnd:()=>{stops++;}},
+      activeSessionPayload:()=>oldSession,
+      AppData:{activeSession:{
+        save:async()=>valid?{ok:true,value:oldSession,storage:{idb:true}}:
+          {ok:true,value:oldSession,storage:{idb:false,local:true},error:new Error('IndexedDB unavailable')},
+        load:async()=>({ok:true,value:oldSession,storage:{idb:true}})
+      }},
+      ActiveSessionCodec:{sanitizeCurrent:value=>value},
+      CanonicalModule:{same:(left,right)=>JSON.stringify(left)===JSON.stringify(right)},
+      resetRuntimeSessionState:()=>{resets++;},
+      setSessionPanelMode:()=>{panelChanges++;},
+      refreshPlanAfterSessionReset:()=>{},
+      setTimerMode:()=>{},
+      updateExecutePanels:()=>{},
+      Interactions:{notify:()=>{notices++;}},
+      sessionYieldedAt:0
+    };
+    const context=vm.createContext(app);
+    vm.runInContext(src+'\nglobalThis.yieldSession=yieldSessionToOtherDevice;',context);
+    if(!valid){
+      await assert.rejects(context.yieldSession(),/IndexedDB unavailable/u,'rescue-only session is not a safe cross-device yield');
+      assert.equal(resets,0,'failed canonical save cannot discard the local live state');
+      assert.equal(panelChanges,0,'failed canonical save does not announce a suspended session');
+      assert.equal(notices,0);
+    }else{
+      assert.equal(await context.yieldSession({deferReview:true}),true);
+      assert.equal(resets,1);
+      assert.equal(panelChanges,1);
+      assert.equal(notices,1);
+    }
+    assert.equal(stops,1,'the Practice Pacer is quiesced before the ownership transition');
+  }
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:24,productionFunctions:true}));
