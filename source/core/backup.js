@@ -841,12 +841,16 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
 
   const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
   const takenOver=hold&&!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me;
+  // A verified Saved Day on the other side is an explicit end-of-session
+  // transition. It must outrank the ordinary "keep the currently running
+  // local session during sync" hold rule, otherwise the stale recovery row
+  // survives forever and keeps generating earlier-day warnings.
+  if(ended)return sessionDecision(mine===shared?'incoming':'ended');
   if(takenOver){
     if(sameContent||mine===shared)return sessionDecision('incoming');
     return sessionDecision('yield');
   }
   if(hold&&!takenOver)return sessionDecision('hold');
-  if(ended)return sessionDecision(mine===shared?'incoming':'ended');
   if(!local)return sessionDecision('incoming');
   if(!incoming)return sessionDecision('local');
   if(sameContent)return sessionDecision(sessionControlFollows(local,incoming)?'incoming':'local');
