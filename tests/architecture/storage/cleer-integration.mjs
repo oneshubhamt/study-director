@@ -45,7 +45,7 @@ for(const retiredStartup of ['syncQueue','syncEmergency','tombstone','pendingSyn
 }
 
 assert.doesNotMatch(app,/inspectManifest:\(\.\.\.args\)=>RepositoryCheckpointPipeline\.inspectManifest/u,'app.html must not recreate mechanical repository pass-through wrappers');
-const expectedRepositoryPort=['activeProtected','bringIn','classifyState','cleanup','createPublication','establishBase','inspect','inspectCommit','inspectManifest','markCompleted','noteObject','projectHistory','publish','publishInline','readNote','restoreVersion','retention','scrub','selectRetention','sharedBase','validatePolicy','verifyCheckpoint','verifyObject'].sort();
+const expectedRepositoryPort=['activeProtected','bringIn','classifyState','cleanup','createPublication','establishBase','inspect','inspectCommit','inspectManifest','markCompleted','noteObject','projectHistory','publish','publishInline','readNote','readSession','restoreVersion','retention','scrub','selectRetention','sharedBase','validatePolicy','verifyCheckpoint','verifyObject'].sort();
 const repositoryCapabilityBody=backup.match(/const repository=freeze\(\{([\s\S]*?)\n\}\);\nreturn freeze\(\{controller,repository\}\);/u)?.[1]||'';
 const repositoryCapabilityKeys=[...repositoryCapabilityBody.matchAll(/^\s{2}([A-Za-z_$][\w$]*):/gmu)].map(match=>match[1]).sort();
 const providerRepositoryKeys=[...(backupProvider.match(/const REPOSITORY_FIELDS=freeze\(\[([^\]]+)\]\)/u)?.[1]||'').matchAll(/['"]([^'"]+)['"]/gu)].map(match=>match[1]).sort();
