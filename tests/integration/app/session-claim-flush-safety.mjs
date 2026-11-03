@@ -205,4 +205,113 @@ for(const bad of [
   assert.deepEqual(t.calls.syncs,['session-claim']);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:18,productionFunctions:true}));
+// Independently exercise the acquiring device's production Continue Here
+// function. A success requires both a Drive claim and an exact canonical
+// IndexedDB receipt; a partial claim is never silently treated as success.
+const handoffConstants=[
+  source.match(/^const sessionHandoffError=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_SAFETY_FORMAT=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_UNCERTAIN_MESSAGE=.*;$/mu)?.[0]
+];
+assert.ok(handoffConstants.every(Boolean));
+const acquireRuntime=[
+  ...handoffConstants,
+  productionFunction('function pendingSessionHandoffSafety(){'),
+  productionFunction('function armSessionHandoffSafety(session,checkpointId){'),
+  productionFunction('function clearSessionHandoffSafety(){'),
+  productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
+  productionFunction('async function transferSessionOwnershipHere(session,')
+].join('\n');
+function acquiringHarness(fault=''){
+  const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
+  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0;
+  const storage=new Map();
+  const app={
+    document:{getElementById:id=>id==='plan-input'?{value:'SEPARATE-PLAN-DRAFT'}:null},
+    navigator:{onLine:true},Date,Promise,Object,JSON,
+    appCanMutate:()=>true,
+    PlanDraftEditor:{flush:async()=>true},
+    PlanData:{settled:async()=>{if(fault==='draft-fail')throw new Error('draft write failed');}},
+    AppData:{
+      local:{
+        setJson:(key,value)=>(storage.set(key,structuredClone(value)),true),
+        getJson:(key,fallback)=>storage.has(key)?storage.get(key):fallback,
+        remove:key=>(storage.delete(key),true)
+      },
+      planData:{read:async()=>({draft:'SEPARATE-PLAN-DRAFT'})},
+      activeSession:{
+        save:async value=>{
+          if(fault==='local-only'&&value.runningOn==='inst_handoff_new')
+            return {ok:true,value,error:new Error('IndexedDB failed'),storage:{idb:false,local:true}};
+          current=structuredClone(value);return {ok:true,value:current,storage:{idb:true,local:false}};
+        },
+        load:async()=>{
+          const content=fault==='different-read'&&current.runningOn==='inst_handoff_new'?
+            {...current,snapshot:{...current.snapshot,label:'unexpected concurrent progress'}}:current;
+          return {ok:true,value:content,storage:{idb:true,local:false}};
+        }
+      }
+    },
+    STORAGE_KEYS:{sessionHandoffSafety:'test-session-handoff'},
+    InstallationIdentity:{getId:()=> 'inst_handoff_new'},
+    ActiveSessionCodec:{sanitizeCurrent:value=>value||null},
+    CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
+    activeSessionContentFingerprint:async()=> 'f'.repeat(64),
+    BackupCodec:{assetIds:()=>[]},
+    nextSessionRevision:value=>Number(value)+1,
+    setPlanStatus:()=>{},handleActiveSessionRepositoryResult:()=>true,
+    AppDiagnostics:{capture:()=>{}},
+    notifyBackupChange:()=>{notify++;},
+    BackupProviderRuntime:{
+      connected:()=>true,
+      suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
+      readSessionHandoffSource:async()=>({status:'completed',checkpointId:'cp_'+'a'.repeat(32),session:previous}),
+      claimSessionOwnership:async()=>{claims++;return {status:'completed',claim:{revision:11}};},
+      releaseSessionClaim:async()=>{compensations++;return true;},
+      wakeBackground:()=>true,scheduleSharedSync:()=>true
+    }
+  };
+  const context=vm.createContext(app);
+  vm.runInContext(acquireRuntime+'\nglobalThis.takeOver=transferSessionOwnershipHere;',context,{filename:'production-handoff-acquisition.js'});
+  return {previous,transfer:()=>context.takeOver(previous),state:()=>({current,claims,compensations,backgroundReleases,notify,marker:storage.get('test-session-handoff')||null})};
+}
+{
+  const t=acquiringHarness();
+  const result=await t.transfer(),state=t.state();
+  assert.equal(result.session.runningOn,'inst_handoff_new');
+  assert.equal(state.current.runningOn,'inst_handoff_new');
+  assert.equal(state.claims,1);
+  assert.equal(state.compensations,0);
+  assert.equal(state.marker,null,'successful handoff clears its crash-recovery latch');
+  assert.equal(state.notify,1,'only verified ownership is published as a local change');
+  assert.equal(state.backgroundReleases,1);
+}
+{
+  const t=acquiringHarness('local-only');
+  await assert.rejects(t.transfer(),/IndexedDB failed/u,'localStorage rescue is not an ownership commit');
+  const state=t.state();
+  assert.equal(state.claims,1);
+  assert.equal(state.compensations,1,'failed local commit compensates the remote claim');
+  assert.equal(state.current.runningOn,'inst_handoff_old');
+  assert.equal(state.marker,null,'verified compensation retires the safety latch');
+  assert.equal(state.notify,0);
+}
+{
+  const t=acquiringHarness('different-read');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN','unexpected same-revision content is not a verified handoff');
+  const state=t.state();
+  assert.equal(state.claims,1);
+  assert.equal(state.compensations,0,'divergent canonical progress is not overwritten by an unsafe rollback');
+  assert.ok(state.marker,'uncertain ownership is durably latched for recovery after reload');
+  assert.equal(state.notify,0);
+}
+{
+  const t=acquiringHarness('draft-fail');
+  await assert.rejects(t.transfer(),/draft write failed/u);
+  const state=t.state();
+  assert.equal(state.claims,0,'no remote claim is attempted before the Plan-draft write settles');
+  assert.equal(state.marker,null);
+  assert.equal(state.current.runningOn,'inst_handoff_old');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:22,productionFunctions:true}));
