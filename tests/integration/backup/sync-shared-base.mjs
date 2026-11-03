@@ -167,7 +167,11 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     events:freeze({libraryChanged:fn,backupCompleted:fn,
       reconcileNotes:async(payload,deletions=[])=>{state.notes=normalizeNotes({...state.notes,...payload});const deletedKeys=new Set((deletions||[]).map(item=>String(item.key)));for(const key of deletedKeys)delete state.notes[key];state.noteDeletions=state.noteDeletions.filter(item=>!Object.hasOwn(state.notes,item.key)&&!Object.values(payload||{}).some(note=>note&&note.key===item.key));for(const item of deletions||[]){state.noteDeletions=state.noteDeletions.filter(existing=>existing.key!==item.key);state.noteDeletions.push({...item});}for(const note of Object.values(payload||{}))state.noteDeletions=state.noteDeletions.filter(item=>item.key!==note.key);events.push('notes');return state.notes;},
       restoreNotesSnapshot:async payload=>{state.notes=normalizeNotes(payload);events.push('notes-rollback');return state.notes;},
-      restoreSessionState:async(value,scheduleText)=>(state.activeSession=value,state.schedule=String(scheduleText||''),events.push('session'),true),
+      // This fixture's state.schedule is the applied runtime schedule, not
+      // the independent Plan working draft. Production restore derives it from
+      // the canonical Active Session; the backup layer no longer transports a
+      // second session→draft schedule argument.
+      restoreSessionState:async value=>(state.activeSession=value,state.schedule=String(value&&value.scheduleText||''),events.push('session'),true),
       verifyActiveSessionRuntime:async expected=>(assert.deepEqual(state.activeSession,expected),true),
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
