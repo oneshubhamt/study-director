@@ -326,7 +326,7 @@ function acquiringHarness(fault=''){
     let resets=0,stops=0,panelChanges=0,notices=0;
     const app={
       Object,Date,Promise,
-      TASKS:[{}],TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
+      TASKS:[{}],todayISO:()=> '2026-10-27',TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
       PracticePacer:{pauseForSessionEnd:()=>{stops++;}},
       activeSessionPayload:()=>oldSession,
       AppData:{activeSession:{
