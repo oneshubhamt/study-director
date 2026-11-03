@@ -5420,7 +5420,16 @@ async function continueSessionHere(){
   }catch(error){
     const problem=sessionHandoffProblem(error);
     setPlanStatus('Could not continue today’s session here: '+problem,false);
-    if(previous)setSessionPanelMode(sessionRunsElsewhere(previous)?'elsewhere':'suspended',previous);
+    // Catch-up may legitimately have advanced or ended the session before a
+    // later claim fence rejected the takeover. Re-project from canonical
+    // storage; never redraw the stale object captured before Continue Here.
+    try{
+      const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value||null;
+      if(!current)setSessionPanelMode('none');
+      else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
+      else if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
+      else setSessionPanelMode('active',current);
+    }catch(renderError){AppDiagnostics.capture('session.continue-failure-refresh',renderError,'warn');}
     setSessionHandoff('','Couldn’t continue here. '+problem);
     Interactions.notify({source:'session',kind:'error',key:'session-continue',title:'Couldn’t continue here',message:problem});
     return false;
