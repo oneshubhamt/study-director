@@ -728,33 +728,41 @@ async function valueFingerprint(value){
   return [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 function dayFingerprint(record){return valueFingerprint(record?sanitizeCurrentDailyRecord(record)||record:null);}
-function sessionFingerprint(session){return valueFingerprint(session?ActiveSessionCodec.sanitizeCurrent(session)||session:null);}
-// Ownership and persistence metadata are control-plane state, not study
-// content. A Continue Here that changes only these fields must not manufacture
-// an Active Session conflict. Timer/progress/review/practice content remains in
-// the semantic value, so genuine divergence is still reviewable.
-function sessionContentValue(session){
-  const clean=session&&(ActiveSessionCodec.sanitizeCurrent(session)||session);
-  if(!clean||!clean.snapshot||typeof clean.snapshot!=='object')return null;
-  const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,...snapshot}=clean.snapshot;
-  return {date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot};
-}
+// Reconciliation ancestry tracks study content only. Ownership/status/revision
+// are control-plane state, resolved by the ownership claim and never by this
+// content fingerprint.
+function sessionFingerprint(session){return valueFingerprint(ActiveSessionCodec.contentValue(session));}
 function sameSessionContent(a,b){
-  const left=sessionContentValue(a),right=sessionContentValue(b);
+  const left=ActiveSessionCodec.contentValue(a),right=ActiveSessionCodec.contentValue(b);
   return !!left&&!!right&&Canonical.same(left,right);
 }
-// A Saved Day explicitly acknowledges the session content revision it
-// materialized. This is stronger than inferring "ended" merely because a
-// Saved-Day fingerprint changed since the shared base.
-function savedDayCoversSession(record,session){
-  const day=record&&(sanitizeCurrentDailyRecord(record)||record),active=session&&(ActiveSessionCodec.sanitizeCurrent(session)||session);
-  if(!day||day.recordKind!=='study'||!active||String(day.date||'')!==String(active.date||''))return false;
-  const sourceRevision=Number(day.sourceRevision),contentRevision=Number(active.snapshot&&active.snapshot.contentRevision);
-  return Number.isSafeInteger(sourceRevision)&&sourceRevision>=0&&Number.isSafeInteger(contentRevision)&&contentRevision>=0&&sourceRevision>=contentRevision;
+function nextMergedSessionRevision(...values){
+  const current=Math.max(0,...values.map(value=>Math.max(0,Math.round(Number(value)||0))));
+  if(current>=Number.MAX_SAFE_INTEGER)throw new Error('Active Session revision space is exhausted.');
+  return current+1;
 }
-function parsedSavedDayCoversSession(parsed,session){
-  const record=(Array.isArray(parsed&&parsed.records)?parsed.records:[]).find(item=>item&&item.date===session?.date);
-  return !!record&&savedDayCoversSession(record,session);
+// Incoming content can advance after a device has claimed ownership. Preserve
+// the current owner's control state while adopting that later pre-claim work,
+// and start a fresh local content revision so no foreign save acknowledgement
+// is mistaken for this derived state.
+function rebaseSessionContentToOwner(local,incoming){
+  const mine=ActiveSessionCodec.sanitizeCurrent(local),theirs=ActiveSessionCodec.sanitizeCurrent(incoming);
+  if(!mine||!theirs||mine.date!==theirs.date)return null;
+  const now=new Date().toISOString(),snapshot=freeze({
+    ...theirs.snapshot,
+    contentRevision:nextMergedSessionRevision(mine.snapshot.contentRevision,theirs.snapshot.contentRevision),
+    savedRevision:0,
+    updatedAt:now
+  });
+  return ActiveSessionCodec.sanitizeCurrent({
+    ...theirs,
+    revision:nextMergedSessionRevision(mine.revision,theirs.revision),
+    status:mine.status,
+    runningOn:mine.runningOn,
+    snapshot,
+    suspendedAt:mine.status==='suspended'?mine.suspendedAt:null,
+    updatedAt:now
+  });
 }
 // {month: {date: fingerprint}} for these Saved Days.
 async function dayFingerprintMonths(records){
@@ -797,55 +805,67 @@ function syncSavedDayReviews(plan,settled){
   }
   return freeze(reviews);
 }
-// The Active Session: 'same', 'incoming' or 'local' when one side has not
-// changed it since the shared base, 'conflict' when both have, '' without a
-// shared base, and, while it runs here during a sync or a review, 'hold' (this
-// device's stays and the other side's waits) or 'yield' when another device
-// took it over after this one changed it (this device stops and the person
-// reviews both). A copy of another device's session that this device has not
-// changed always follows the other side. In a sync, a session the other side
-// ended (it has none and saved the session's day since both last shared one)
-// counts as taken over too, or as 'ended' when it does not run here: the
-// other side's ending shows and this device's progress is kept for review.
-// claimedHere: Drive's newest ownership claim names this device, so a
-// version naming another device was saved before this device took over and
-// does not take the session back.
-async function sessionSettlement(base,parsed,{hold=false,sync=false,claimedHere=false}={}){
+const sessionDecision=(state,value=null)=>freeze({state:String(state||''),value:value||null});
+// Active Session reconciliation has two independent dimensions:
+//   content ancestry -> semantic fingerprints
+//   execution ownership -> Drive's monotonic ownership claim
+// A claim made by this device is also a causal boundary: its
+// observedContentFingerprint is exactly what this device saw when it took over.
+// Later content from the old owner can therefore be incorporated without giving
+// ownership back, while true two-sided divergence remains reviewable.
+async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim=null}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
-  if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return 'same';
-  const me=installationId(),shared=String(base&&base.sessionFingerprint||'');
-  const covered=(hold||sync)&&!!local&&!incoming&&parsedSavedDayCoversSession(parsed,local);
-  // The Saved Day contains this session revision or later. There is no
-  // unsaved local session content to preserve as a kept version.
-  if(covered)return 'incoming';
+  if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return sessionDecision('same');
+  const me=installationId(),shared=String(base&&base.sessionFingerprint||''),[mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
+  const sameContent=!!mine&&mine===theirs,claimedHere=!!(sessionClaim&&sessionClaim.state==='owned'&&sessionClaim.ownedHere&&sessionClaim.applies);
+
+  if(claimedHere){
+    if(!local)return sessionDecision('incoming');
+    // Drive's head can predate the claim. Absence there cannot end a session
+    // that this device has just legitimately claimed.
+    if(!incoming)return sessionDecision('hold');
+    if(sameContent)return sessionDecision('local');
+    const observed=String(sessionClaim.observedContentFingerprint||'');
+    // Older claims lack the exact causal fingerprint. They remain safe by
+    // refusing to infer ancestry rather than guessing from scalar revisions.
+    if(!/^[a-f0-9]{64}$/u.test(observed))return sessionDecision('claimed-conflict');
+    if(mine===observed&&theirs!==observed){
+      const rebased=rebaseSessionContentToOwner(local,incoming);
+      return rebased?sessionDecision('graft',rebased):sessionDecision('claimed-conflict');
+    }
+    if(mine!==observed&&theirs===observed)return sessionDecision('local');
+    return sessionDecision('claimed-conflict');
+  }
+
   const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
-  const takenOver=hold&&(!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me&&!claimedHere||ended);
-  if(hold&&!takenOver)return 'hold';
-  // A pure ownership/status/revision transition is a handoff, not a content
-  // conflict. If either side changed actual session evidence, the ordinary
-  // ancestry path below remains conservative and may keep it for review.
-  if(takenOver&&local&&incoming&&sameSessionContent(local,incoming))return 'incoming';
-  if(!base)return takenOver?'yield':'';
-  const [mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
-  if(takenOver)return mine===shared?'incoming':theirs===shared?'local':'yield';
-  if(ended)return mine===shared?'incoming':'ended';
-  return mine===shared?(local&&local.runningOn!==me||sessionFollows(local,incoming,parsed)?'incoming':'conflict'):theirs===shared?'local':'conflict';
+  const takenOver=hold&&!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me;
+  if(takenOver){
+    if(sameContent||mine===shared)return sessionDecision('incoming');
+    return sessionDecision('yield');
+  }
+  if(hold&&!takenOver)return sessionDecision('hold');
+  if(ended)return sessionDecision(mine===shared?'incoming':'ended');
+  if(!local)return sessionDecision('incoming');
+  if(!incoming)return sessionDecision('local');
+  if(sameContent)return sessionDecision(sessionControlFollows(local,incoming)?'incoming':'local');
+  if(!shared)return sessionDecision('');
+  if(mine===shared)return sessionDecision('incoming');
+  if(theirs===shared)return sessionDecision('local');
+  return sessionDecision('conflict');
 }
-// The other side saved this day since both last shared it. When the shared
-// state cannot be read, it did not (the session then stays, as before).
+// The other side saved this day since both last shared it. This establishes
+// that the session ended there; whether this device has unsaved session
+// content is decided independently by the semantic session ancestry above.
 async function daySavedSinceBase(parsed,date){
   const record=(Array.isArray(parsed&&parsed.records)?parsed.records:[]).find(item=>item&&item.date===date);if(!record)return false;
   let shared;try{shared=await AppData.reconciliationBase.readDays([date]);}catch(error){AppDiagnostics.capture('backup.session-ended-base',error,'warn');return false;}
   return await dayFingerprint(record)!==String(shared&&shared[date]||'');
 }
-// The other side's session replaces this device's without asking only when
-// it carries this one on (the same day, not behind it), or ends one that was
-// saved as that day's Saved Day there. Another device's own session, such as
-// a new day started while this one was left unsaved, is the person's choice.
-function sessionFollows(local,incoming,parsed){
-  if(!local)return true;
-  if(!incoming)return (Array.isArray(parsed&&parsed.records)?parsed.records:[]).some(record=>record&&record.date===local.date);
-  return incoming.date===local.date&&Number(incoming.revision)>=Number(local.revision);
+function sessionControlFollows(local,incoming){
+  if(!local)return true;if(!incoming||incoming.date!==local.date)return false;
+  const left=Number(local.revision)||0,right=Number(incoming.revision)||0;
+  if(right!==left)return right>left;
+  return Date.parse(String(incoming.updatedAt||''))>Date.parse(String(local.updatedAt||''));
 }
 function nextNoteRevision(...values){return new Date(Math.max(Date.now(),...values.map(value=>(Date.parse(String(value&&value.updatedAt||''))||0)+1))).toISOString();}
 // Combine settles a note difference without asking only when nothing on this
