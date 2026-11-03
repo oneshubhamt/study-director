@@ -834,7 +834,27 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
   if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return sessionDecision('same');
   const me=installationId(),shared=String(base&&base.sessionFingerprint||''),[mine,theirs,contentMine,contentTheirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming),sessionContentFingerprint(local),sessionContentFingerprint(incoming)]);
-  const sameContent=!!contentMine&&contentMine===contentTheirs,claimedHere=!!(sessionClaim&&sessionClaim.state==='owned'&&sessionClaim.ownedHere&&sessionClaim.applies);
+  const sameContent=!!contentMine&&contentMine===contentTheirs,claimApplies=!!(sessionClaim&&sessionClaim.applies),claimedHere=!!(claimApplies&&sessionClaim.state==='owned'&&sessionClaim.ownedHere),claimedAway=!!(claimApplies&&sessionClaim.state==='owned'&&!sessionClaim.ownedHere),releasedAway=!!(claimApplies&&sessionClaim.state==='released'&&!sessionClaim.ownedHere);
+  const observed=claimApplies?String(sessionClaim.observedContentFingerprint||''):'',hasObserved=/^[a-f0-9]{64}$/u.test(observed);
+
+  // This device is the old owner. The claim is the authoritative handoff
+  // boundary even before the new owner has published its first checkpoint.
+  // A checkpoint that still names this installation is therefore stale
+  // control state: stop here, but hold the local recovery row until the new
+  // owner's canonical session (or ended state) arrives.
+  if(claimedAway&&hasObserved){
+    if(incoming&&String(incoming.runningOn||'')===me)return sessionDecision(local?'yield-hold':'local');
+    if(!local)return sessionDecision('incoming');
+    return sessionDecision(contentMine===observed?'incoming':'yield');
+  }
+  // A released claim is written only after the claimant published its ended
+  // state. If that newest checkpoint has no Active Session, the old owner can
+  // clear unchanged content immediately or preserve genuine late work once
+  // for review before clearing it.
+  if(releasedAway&&hasObserved&&!incoming){
+    if(!local)return sessionDecision('local');
+    return sessionDecision(contentMine===observed?'incoming':'yield');
+  }
 
   if(claimedHere){
     // The claim survives the owner's final local transition to no Active
@@ -848,10 +868,9 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
       const merged=mergeSessionAcknowledgement(local,incoming);
       return merged&&!Canonical.same(merged,local)?sessionDecision('graft',merged):sessionDecision('local');
     }
-    const observed=String(sessionClaim.observedContentFingerprint||'');
     // Older claims lack the exact causal fingerprint. They remain safe by
     // refusing to infer ancestry rather than guessing from scalar revisions.
-    if(!/^[a-f0-9]{64}$/u.test(observed))return sessionDecision('claimed-conflict');
+    if(!hasObserved)return sessionDecision('claimed-conflict');
     if(contentMine===observed&&contentTheirs!==observed){
       const rebased=rebaseSessionContentToOwner(local,incoming);
       return rebased?sessionDecision('graft',rebased):sessionDecision('claimed-conflict');
@@ -1600,8 +1619,12 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // the difference for the person, so nothing is overwritten unkept.
   const keptReviews=[],keep=build=>{try{keptReviews.push(...[].concat(build()));return true;}catch(error){AppDiagnostics.capture('backup.sync-keep-review',error,'warn');return false;}};
   const keepSession=value=>{const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);return !!kept&&keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));};
+  if(session==='yield-hold'){
+    await yieldSession({deferReview:true});
+    session='hold';derivedSession=null;
+  }
   if(session==='yield'){
-    await yieldSession(parsed.importedActiveSession);
+    await yieldSession();
     if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!keepSession(mine))return needsDecision();}
     else{settlement=await sessionSettlement(base,parsed);session=settlement.state;derivedSession=settlement.value;}
   }
