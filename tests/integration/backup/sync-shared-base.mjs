@@ -145,17 +145,17 @@ function createState({withActive=false}={}){
 function baseStore(state){
   const base=()=>state.reconciliationBase;
   return {
-    reconciliationBaseRead:async()=>base()?freeze({format:'study-director.reconciliation-base',version:3,checkpointId:base().checkpointId,establishedAt:base().establishedAt||new Date().toISOString(),noteCount:Number(base().noteCount??Object.keys(base().notes||{}).length),noteKeyFingerprint:String(base().noteKeyFingerprint||'0'.repeat(64)),personalFingerprint:String(base().personalFingerprint||''),sessionFingerprint:String(base().sessionFingerprint||'')}):null,
+    reconciliationBaseRead:async()=>base()?freeze({format:'study-director.reconciliation-base',version:3,checkpointId:base().checkpointId,establishedAt:base().establishedAt||new Date().toISOString(),noteCount:Number(base().noteCount??Object.keys(base().notes||{}).length),noteKeyFingerprint:String(base().noteKeyFingerprint||'0'.repeat(64)),personalFingerprint:String(base().personalFingerprint||''),sessionFingerprint:String(base().sessionFingerprint||''),personalFields:base().personalFields||null}):null,
     reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(base()?.notes||{},key)).map(key=>[key,freeze({label:String(base().notes[key]?.label??''),text:String(base().notes[key]?.text??'')})]))),
     reconciliationBaseReadDays:async dates=>freeze(Object.fromEntries((dates||[]).filter(date=>Object.prototype.hasOwnProperty.call(base()?.days||{},date)).map(date=>[date,base().days[date]]))),
     reconciliationBaseWrite:async(checkpointId,spec)=>{
-      assert.equal(spec?.format,'study-director.reconciliation-base-update');assert.equal(spec.version,2);
+      assert.equal(spec?.format,'study-director.reconciliation-base-update');assert.equal(spec.version,3);
       const current=base();if(!spec.full&&current?.checkpointId!==spec.baseCheckpointId)return false;
       const notes=Object.assign(Object.create(null),spec.full?{}:current?.notes||{}),days=Object.assign(Object.create(null),spec.full?{}:current?.days||{});
       for(const key of spec.deletes||[])delete notes[key];for(const [key,value] of Object.entries(spec.updates||{}))notes[key]=freeze({label:String(value.label),text:String(value.text)});
       for(const [month,value] of Object.entries(spec.days||{})){for(const date of Object.keys(days))if(date.startsWith(month+'-'))delete days[date];Object.assign(days,value||{});}
       const keys=spec.full?[...spec.noteKeys].sort():null,kept=(value,old)=>value===null?String(old||''):String(value);
-      state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount:keys?keys.length:Number(spec.noteCount),noteKeyFingerprint:keys?await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'}):String(spec.noteKeyFingerprint),personalFingerprint:kept(spec.personalFingerprint,current?.personalFingerprint),sessionFingerprint:kept(spec.sessionFingerprint,current?.sessionFingerprint),notes:freeze(notes),days:freeze(days)});
+      state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount:keys?keys.length:Number(spec.noteCount),noteKeyFingerprint:keys?await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'}):String(spec.noteKeyFingerprint),personalFingerprint:kept(spec.personalFingerprint,current?.personalFingerprint),personalFields:spec.personalFingerprint===null?current?.personalFields||null:spec.personalFields,sessionFingerprint:kept(spec.sessionFingerprint,current?.sessionFingerprint),notes:freeze(notes),days:freeze(days)});
       return true;
     }
   };

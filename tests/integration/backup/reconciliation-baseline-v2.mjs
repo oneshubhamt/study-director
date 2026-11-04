@@ -23,16 +23,16 @@ const cp=n=>'cp_'+String(n).padStart(32,'0');
 const identity=async keys=>({noteCount:keys.length,noteKeyFingerprint:await codec.keyFingerprint(keys)});
 // The first base is a full write; older bases are dropped by the compatibility
 // host (tests/integration/storage/compatibility-host.mjs).
-const seed=freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:2,noteKeyFingerprint:'',personalFingerprint:'',sessionFingerprint:'',noteKeys:freeze([E,P]),updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v1'}),[P]:freeze({label:'Polity',text:'polity v1'})}),deletes:freeze([]),days:freeze({})});
+const seed=freeze({format:'study-director.reconciliation-base-update',version:3,full:true,baseCheckpointId:'',noteCount:2,noteKeyFingerprint:'',personalFingerprint:'',personalFields:null,sessionFingerprint:'',noteKeys:freeze([E,P]),updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v1'}),[P]:freeze({label:'Polity',text:'polity v1'})}),deletes:freeze([]),days:freeze({})});
 assert.equal(await store.write(cp(1),seed),true);
 const first=await store.readHeader();
-assert.equal(first.version,3);assert.equal(first.checkpointId,cp(1));assert.equal(first.noteCount,2);assert.match(first.noteKeyFingerprint,/^[a-f0-9]{64}$/u);
+assert.equal(first.version,4);assert.equal(first.personalFields,null,'no per-field ancestry is invented when a verified checkpoint contains no Personal Data');assert.equal(first.checkpointId,cp(1));assert.equal(first.noteCount,2);assert.match(first.noteKeyFingerprint,/^[a-f0-9]{64}$/u);
 assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.text,'ethics v1');assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.label,'Ethics','the base keeps each note’s title too');
 assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+P).value.text,'polity v1');
 
 const polityEnvelopeBefore=structuredClone(sharedStores.meta.get('reconciliationBaseNote:'+P)),ethicsEnvelopeBefore=structuredClone(sharedStores.meta.get('reconciliationBaseNote:'+E));
 await new Promise(resolve=>setTimeout(resolve,2));
-const editIdentity=await identity([E,P]),edit=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:cp(1),...editIdentity,personalFingerprint:null,sessionFingerprint:null,noteKeys:null,updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v2'})}),deletes:freeze([]),days:freeze({})});
+const editIdentity=await identity([E,P]),edit=freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:cp(1),...editIdentity,personalFingerprint:null,personalFields:null,sessionFingerprint:null,noteKeys:null,updates:freeze({[E]:freeze({label:'Ethics',text:'ethics v2'})}),deletes:freeze([]),days:freeze({})});
 assert.equal(await store.write(cp(2),edit),true);
 assert.equal((await store.readHeader()).checkpointId,cp(2));
 assert.equal(sharedStores.meta.get('reconciliationBaseNote:'+E).value.text,'ethics v2');
@@ -41,48 +41,60 @@ assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:'+P),polityEnvelo
 
 const ethicsEnvelopeAfterEdit=structuredClone(sharedStores.meta.get('reconciliationBaseNote:'+E));
 await new Promise(resolve=>setTimeout(resolve,2));
-const noopIdentity=await identity([E,P]),noop=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:cp(2),...noopIdentity,personalFingerprint:null,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({})});
+const noopIdentity=await identity([E,P]),noop=freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:cp(2),...noopIdentity,personalFingerprint:null,personalFields:null,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({})});
 assert.equal(await store.write(cp(3),noop),true);assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:'+E),ethicsEnvelopeAfterEdit,'unchanged checkpoint must advance only the tiny header');assert.deepEqual(sharedStores.meta.get('reconciliationBaseNote:'+P),polityEnvelopeBefore);
 
-const removeIdentity=await identity([E]),remove=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:cp(3),...removeIdentity,personalFingerprint:null,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([P]),days:freeze({})});
+const removeIdentity=await identity([E]),remove=freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:cp(3),...removeIdentity,personalFingerprint:null,personalFields:null,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([P]),days:freeze({})});
 assert.equal(await store.write(cp(4),remove),true);assert.equal(sharedStores.meta.has('reconciliationBaseNote:'+P),false,'deleted note must remove only its reconciliation row');assert.equal((await store.readHeader()).noteCount,1);
 
-const headerBeforeStale=await store.readHeader(),staleIdentity=await identity([E]),stale=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:cp(2),...staleIdentity,personalFingerprint:null,sessionFingerprint:null,noteKeys:null,updates:freeze({[E]:freeze({label:'Ethics',text:'must not commit'})}),deletes:freeze([]),days:freeze({})});
+const headerBeforeStale=await store.readHeader(),staleIdentity=await identity([E]),stale=freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:cp(2),...staleIdentity,personalFingerprint:null,personalFields:null,sessionFingerprint:null,noteKeys:null,updates:freeze({[E]:freeze({label:'Ethics',text:'must not commit'})}),deletes:freeze([]),days:freeze({})});
 assert.equal(await store.write(cp(5),stale),false,'a stale checkpoint baseline must not overwrite newer reconciliation ancestry');assert.equal((await store.readHeader()).checkpointId,headerBeforeStale.checkpointId);assert.equal((await store.readNotes([E]))[E].text,'ethics v2');
 
 const scansBefore=harness.idbReads.metaGetAll,selected=await store.readNotes([E,M]);
 assert.deepEqual(Object.fromEntries(Object.entries(selected)),{[E]:{label:'Ethics',text:'ethics v2'}});assert.equal(harness.idbReads.metaGetAll,scansBefore,'lazy reconciliation reads must use keyed rows, not a full appMeta scan');
 
-const full=freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:1,noteKeyFingerprint:'',personalFingerprint:'',sessionFingerprint:'',noteKeys:freeze([S]),updates:freeze({[S]:freeze({label:'Essay',text:'essay baseline'})}),deletes:freeze([]),days:freeze({})});
+const full=freeze({format:'study-director.reconciliation-base-update',version:3,full:true,baseCheckpointId:'',noteCount:1,noteKeyFingerprint:'',personalFingerprint:'',personalFields:null,sessionFingerprint:'',noteKeys:freeze([S]),updates:freeze({[S]:freeze({label:'Essay',text:'essay baseline'})}),deletes:freeze([]),days:freeze({})});
 assert.equal(await store.write(cp(6),full),true);assert.deepEqual(Object.fromEntries(Object.entries(await store.readNotes([S,E]))),{[S]:{label:'Essay',text:'essay baseline'}},'rare exact/full baseline replacement must remove obsolete per-note rows atomically');
+
+// A bounded field-hash map is locally stored with the same verified base.
+const hash='a'.repeat(64),fields=freeze({format:'study-director.reconciliation-personal-fields',version:1,
+  preferences:freeze(Object.fromEntries(['studentName','theme','presentation','quote','practiceCueMode','fontScale','practiceTargetMs','soundMode'].map(key=>[key,hash]))),
+  nudge:freeze(Object.fromEntries(['present','enabled','sound','nudgeAfter','breakMinutes'].map(key=>[key,hash]))),
+  draft:hash,defaultId:hash,savedPlanOrder:hash,savedPlans:freeze({}),order:freeze([])
+});
+assert.equal(codec.normalizePersonalFields(fields)?.version,1);
+assert.equal(codec.normalizePersonalFields({...fields,order:['plan-unknown']}),null,'unmatched saved-plan ids cannot prove ancestry');
+const legacy=freeze({format:'study-director.reconciliation-base',version:3,checkpointId:cp(6),establishedAt:new Date().toISOString(),noteCount:1,
+  noteKeyFingerprint:await codec.keyFingerprint([S]),personalFingerprint:'a'.repeat(64),sessionFingerprint:''});
+assert.equal(codec.normalizeHeader(legacy)?.personalFields,null,'an existing v3 baseline is read but has unknown field ancestry');
 
 // Plans and settings are one fingerprint: an update that did not read them keeps the base's.
 const sIdentity=await identity([S]),personalA='a'.repeat(64),personalB='b'.repeat(64);
-assert.equal(await store.write(cp(7),freeze({...full,personalFingerprint:personalA})),true);assert.equal((await store.readHeader()).personalFingerprint,personalA);
-assert.equal(await store.write(cp(8),freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:cp(7),...sIdentity,personalFingerprint:null,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({})})),true);
-assert.equal((await store.readHeader()).personalFingerprint,personalA,'an update that did not read plans and settings keeps their fingerprint');
-assert.equal(await store.write(cp(9),freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:cp(8),...sIdentity,personalFingerprint:personalB,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({})})),true);
-assert.equal((await store.readHeader()).personalFingerprint,personalB);
+assert.equal(await store.write(cp(7),freeze({...full,personalFingerprint:personalA,personalFields:fields})),true);assert.equal((await store.readHeader()).personalFingerprint,personalA);
+assert.equal(await store.write(cp(8),freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:cp(7),...sIdentity,personalFingerprint:null,personalFields:null,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({})})),true);
+assert.equal((await store.readHeader()).personalFingerprint,personalA,'an update that did not read plans and settings keeps their fingerprint');assert.deepEqual((await store.readHeader()).personalFields,fields,'the exact field hashes survive an unrelated Note-only checkpoint');
+assert.equal(await store.write(cp(9),freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:cp(8),...sIdentity,personalFingerprint:personalB,personalFields:fields,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({})})),true);
+assert.equal((await store.readHeader()).personalFingerprint,personalB);assert.deepEqual((await store.readHeader()).personalFields,fields);
 assert.equal(await store.write(cp(10),freeze({...full,personalFingerprint:null})),false,'a full base always states its plans-and-settings fingerprint');
 
 // Saved Days: one fingerprint per day, kept as one row per month.
 const h=c=>c.repeat(64),sessionA=h('c'),sessionB=h('d');
-assert.equal(await store.write(cp(10),freeze({...full,personalFingerprint:'',sessionFingerprint:null})),false,'a full base always states its session fingerprint');
-assert.equal(await store.write(cp(11),freeze({...full,personalFingerprint:'',sessionFingerprint:sessionA,days:freeze({'2026-09':freeze({'2026-09-30':h('1')}),'2026-10':freeze({'2026-10-01':h('2'),'2026-10-02':h('3')})})})),true);
+assert.equal(await store.write(cp(10),freeze({...full,personalFingerprint:'',personalFields:null,sessionFingerprint:null})),false,'a full base always states its session fingerprint');
+assert.equal(await store.write(cp(11),freeze({...full,personalFingerprint:'',personalFields:null,sessionFingerprint:sessionA,days:freeze({'2026-09':freeze({'2026-09-30':h('1')}),'2026-10':freeze({'2026-10-01':h('2'),'2026-10-02':h('3')})})})),true);
 assert.deepEqual({...await store.readDays(['2026-09-30','2026-10-01','2026-10-02','2026-10-03'])},{'2026-09-30':h('1'),'2026-10-01':h('2'),'2026-10-02':h('3')},'a day missing from the base reads as absent');
 assert.equal((await store.readHeader()).sessionFingerprint,sessionA);
 const septemberBefore=structuredClone(sharedStores.meta.get('reconciliationBaseDays:2026-09'));
 await new Promise(resolve=>setTimeout(resolve,2));
-assert.equal(await store.write(cp(12),freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:cp(11),...sIdentity,personalFingerprint:null,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({'2026-10':freeze({'2026-10-01':h('4')})})})),true);
+assert.equal(await store.write(cp(12),freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:cp(11),...sIdentity,personalFingerprint:null,personalFields:null,sessionFingerprint:null,noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({'2026-10':freeze({'2026-10-01':h('4')})})})),true);
 assert.deepEqual({...await store.readDays(['2026-10-01','2026-10-02'])},{'2026-10-01':h('4')},'an update replaces the whole month it names');
 assert.deepEqual(sharedStores.meta.get('reconciliationBaseDays:2026-09'),septemberBefore,'a month the update does not name is not rewritten');
 assert.equal((await store.readHeader()).sessionFingerprint,sessionA,'an update that did not read the session keeps its fingerprint');
-assert.equal(await store.write(cp(13),freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:cp(12),...sIdentity,personalFingerprint:null,sessionFingerprint:'',noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({'2026-09':null})})),true);
+assert.equal(await store.write(cp(13),freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:cp(12),...sIdentity,personalFingerprint:null,personalFields:null,sessionFingerprint:'',noteKeys:null,updates:freeze({}),deletes:freeze([]),days:freeze({'2026-09':null})})),true);
 assert.equal(sharedStores.meta.has('reconciliationBaseDays:2026-09'),false,'a month with no Saved Days left is removed');assert.equal((await store.readHeader()).sessionFingerprint,'','no session is a fingerprint too');
-assert.equal(await store.write(cp(14),freeze({...full,personalFingerprint:'',sessionFingerprint:sessionB,days:freeze({'2026-11':freeze({'2026-11-01':h('5')})})})),true);
+assert.equal(await store.write(cp(14),freeze({...full,personalFingerprint:'',personalFields:null,sessionFingerprint:sessionB,days:freeze({'2026-11':freeze({'2026-11-01':h('5')})})})),true);
 assert.equal(sharedStores.meta.has('reconciliationBaseDays:2026-10'),false,'a full base removes months it does not hold');assert.deepEqual({...await store.readDays(['2026-11-01'])},{'2026-11-01':h('5')});
-assert.equal(await store.write(cp(15),freeze({...full,personalFingerprint:'',sessionFingerprint:'',days:freeze({'2026-11':freeze({'2026-12-01':h('6')})})})),false,'a day filed under another month is refused');
-assert.equal(await store.write(cp(15),freeze({...full,version:1,personalFingerprint:'',sessionFingerprint:''})),false,'only the current update format is written');
+assert.equal(await store.write(cp(15),freeze({...full,personalFingerprint:'',personalFields:null,sessionFingerprint:'',days:freeze({'2026-11':freeze({'2026-12-01':h('6')})})})),false,'a day filed under another month is refused');
+assert.equal(await store.write(cp(15),freeze({...full,version:1,personalFingerprint:'',personalFields:null,sessionFingerprint:''})),false,'only the current update format is written');
 assert.equal(codec.normalizeHeader({...await store.readHeader(),version:2}),null,'an older base header is not read');
 
 console.log(JSON.stringify({status:'PASS',suite:'reconciliation-baseline-v2',unchangedCheckpoint:'header-only',editedNote:'one-row',deletedNote:'one-row-delete',lazyReads:'keyed-only',staleBase:'fail-closed',days:'month-rows',session:'fingerprint'},null,2));
