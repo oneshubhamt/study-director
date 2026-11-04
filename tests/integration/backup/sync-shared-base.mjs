@@ -860,7 +860,7 @@ for(const variant of ['unchanged','late','last-tick']){
   assert.equal(source.status,'completed');assert.equal(source.session.runningOn,a.installationId);assert.equal(source.session.snapshot.label,'BF1-SHARED');
   const bBefore=structuredClone(b.activeSession),observedContentFingerprint=await sessionContentFingerprint(source.session);
   assert.deepEqual(b.activeSession,bBefore,'reading the handoff source must not reconcile or mutate B');
-  const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint,expectedCheckpointId:source.checkpointId,revision:11});
+  const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint,expectedCheckpointId:source.checkpointId,handoffToken:'11111111-1111-4111-8111-111111111111',revision:11});
   assert.equal(claimed.status,'completed');
   b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',revision:11,suspendedAt:null,updatedAt:'2026-08-31T09:01:00.000Z'});b.schedule=b.activeSession.scheduleText;b.running=true;
 
@@ -897,7 +897,7 @@ for(const variant of ['unchanged','late','last-tick']){
   a.activeSession=revisionedSession(day,'OWNER-A',{runningOn:a.installationId,revision:20,contentRevision:5});a.schedule=a.activeSession.scheduleText;a.running=true;
   await A.upload();assert.equal((await B.sync()).cancelled,false);
   const source=await B.handoffSource(),fingerprint=await sessionContentFingerprint(source.session);
-  const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:fingerprint,expectedCheckpointId:source.checkpointId,revision:21});
+  const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:fingerprint,expectedCheckpointId:source.checkpointId,handoffToken:'22222222-2222-4222-8222-222222222222',revision:21});
   assert.equal(claimed.status,'completed');
   const [id,file]=[...claims.entries()].at(-1);
   claims.set(id,freeze({...file,blob:new Blob(['invalid protected claim'])}));
@@ -925,7 +925,7 @@ for(const variant of ['unchanged','late','last-tick']){
   const source=await B.handoffSource();
   assert.equal(source.session.snapshot.label,'A-2','Continue Here reads the newest verified Drive session');
   assert.equal(b.activeSession.snapshot.label,'A-1','the handoff read itself does not mutate B');
-  const claim=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,revision:12});
+  const claim=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,handoffToken:'33333333-3333-4333-8333-333333333333',revision:12});
   assert.equal(claim.status,'completed');
   b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',revision:12,suspendedAt:null,updatedAt:new Date().toISOString()});b.schedule=b.activeSession.scheduleText;b.running=true;
   // Both devices may now make progress. A cannot publish through the ownership
@@ -942,7 +942,7 @@ for(const variant of ['unchanged','late','last-tick']){
   // A takes ownership back from the newest B state, then both sides diverge;
   // B's late progress is likewise kept once.
   const backSource=await A.handoffSource();
-  const back=await A.claim({date:day,observedOwner:backSource.session.runningOn,observedRevision:backSource.session.revision,observedContentFingerprint:await sessionContentFingerprint(backSource.session),expectedCheckpointId:backSource.checkpointId,revision:14});
+  const back=await A.claim({date:day,observedOwner:backSource.session.runningOn,observedRevision:backSource.session.revision,observedContentFingerprint:await sessionContentFingerprint(backSource.session),expectedCheckpointId:backSource.checkpointId,handoffToken:'44444444-4444-4444-8444-444444444444',revision:14});
   assert.equal(back.status,'completed');
   a.activeSession=freeze({...backSource.session,runningOn:a.installationId,status:'active',revision:14,suspendedAt:null,updatedAt:new Date().toISOString()});a.schedule=a.activeSession.scheduleText;a.running=true;
   running(a,'A-BACK',15);await A.upload();running(b,'B-PROGRESS',16);

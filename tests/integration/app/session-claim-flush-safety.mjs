@@ -211,43 +211,50 @@ for(const bad of [
 const handoffConstants=[
   source.match(/^const sessionHandoffError=.*;$/mu)?.[0],
   source.match(/^const HANDOFF_SAFETY_FORMAT=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_LEGACY_SAFETY_FORMAT=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_ATTEMPT_PATTERN=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_FINGERPRINT_PATTERN=.*;$/mu)?.[0],
   source.match(/^const HANDOFF_UNCERTAIN_MESSAGE=.*;$/mu)?.[0]
 ];
 assert.ok(handoffConstants.every(Boolean));
 const acquireRuntime=[
   ...handoffConstants,
   productionFunction('function pendingSessionHandoffSafety(){'),
-  productionFunction('function armSessionHandoffSafety(session,checkpointId){'),
+  productionFunction('function armSessionHandoffSafety(session,checkpointId,'),
+  productionFunction('function validSessionHandoffSafety(marker,session){'),
+  productionFunction('function handoffClaimMatches(marker,claim){'),
+  productionFunction('async function resolveSessionHandoffSafety(session){'),
   productionFunction('function clearSessionHandoffSafety(){'),
   productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
   productionFunction('async function transferSessionOwnershipHere(session,')
 ].join('\n');
 function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
-  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0;
+  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),id=0;
   const storage=new Map();
   const app={
-    document:{getElementById:id=>id==='plan-input'?{value:fault==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
+    document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
     navigator:{onLine:true},Date,Promise,Object,JSON,
+    crypto:{randomUUID:()=>('00000000-0000-4000-8000-'+String(++id).padStart(12,'0'))},
     appCanMutate:()=>true,
     getActiveDefaults:()=>({scheduleText:'FALLBACK DEFAULT'}),
     PlanDraftEditor:{flush:async()=>true},
-    PlanData:{settled:async()=>{if(fault==='draft-fail')throw new Error('draft write failed');},readDraft:()=>draft},
+    PlanData:{settled:async()=>{if(faultMode==='draft-fail')throw new Error('draft write failed');},readDraft:()=>draft},
     AppData:{
       local:{
         setJson:(key,value)=>(storage.set(key,structuredClone(value)),true),
         getJson:(key,fallback)=>storage.has(key)?storage.get(key):fallback,
-        remove:key=>(storage.delete(key),true)
+        remove:key=>faultMode==='clear-fail'?false:(storage.delete(key),true)
       },
-      planData:{read:async()=>({draft:fault==='draft-mismatch'?'OTHER DRAFT':draft})},
+      planData:{read:async()=>({draft:faultMode==='draft-mismatch'?'OTHER DRAFT':draft})},
       activeSession:{
         save:async value=>{
-          if(fault==='local-only'&&value.runningOn==='inst_handoff_new')
+          if(['local-only','claim-crash'].includes(faultMode)&&value.runningOn==='inst_handoff_new')
             return {ok:true,value,error:new Error('IndexedDB failed'),storage:{idb:false,local:true}};
           current=structuredClone(value);return {ok:true,value:current,storage:{idb:true,local:false}};
         },
         load:async()=>{
-          const content=fault==='different-read'&&current.runningOn==='inst_handoff_new'?
+          const content=faultMode==='different-read'&&current.runningOn==='inst_handoff_new'?
             {...current,snapshot:{...current.snapshot,label:'unexpected concurrent progress'}}:current;
           return {ok:true,value:content,storage:{idb:true,local:false}};
         }
@@ -265,16 +272,41 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     notifyBackupChange:()=>{notify++;},
     BackupProviderRuntime:{
       connected:()=>true,
+      readSessionClaim:async()=>remoteClaim,
+      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:'e'.repeat(64),session:previous}),
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
-      readSessionHandoffSource:async()=>({status:'completed',checkpointId:'cp_'+'a'.repeat(32),session:previous}),
-      claimSessionOwnership:async()=>{claims++;return {status:'completed',claim:{revision:11}};},
-      releaseSessionClaim:async()=>{compensations++;return true;},
+      claimSessionOwnership:async(_provider,request)=>{
+        claims++;
+        if(faultMode==='claim-throws-before-remote')throw new Error('claim did not reach Drive');
+        remoteClaim={epoch:1,state:'owned',applies:true,ownedHere:true,ownerToken:'d'.repeat(64),
+          observedOwnerToken:'e'.repeat(64),observedRevision:request.observedRevision,
+          observedContentFingerprint:request.observedContentFingerprint,handoffToken:request.handoffToken,
+          revision:request.revision};
+        if(faultMode==='claim-throws-after-remote')throw new Error('claim accepted but response lost');
+        return {status:'completed',claim:remoteClaim};
+      },
+      releaseSessionClaim:async()=>{
+        compensations++;
+        if(faultMode==='claim-crash')return false;
+        remoteClaim={...remoteClaim,epoch:remoteClaim.epoch+1,ownedHere:false,ownerToken:'e'.repeat(64),
+          observedOwnerToken:'d'.repeat(64),observedRevision:remoteClaim.revision,
+          revision:previous.revision,observedContentFingerprint:''};
+        return true;
+      },
       wakeBackground:()=>true,scheduleSharedSync:()=>true
     }
   };
-  const context=vm.createContext(app);
-  vm.runInContext(acquireRuntime+'\nglobalThis.takeOver=transferSessionOwnershipHere;',context,{filename:'production-handoff-acquisition.js'});
-  return {previous,transfer:()=>context.takeOver(previous),state:()=>({current,claims,compensations,backgroundReleases,notify,marker:storage.get('test-session-handoff')||null})};
+  let context;
+  const boot=()=>{
+    context=vm.createContext({...app});
+    vm.runInContext(acquireRuntime+'\nglobalThis.takeOver=transferSessionOwnershipHere;globalThis.recover=resolveSessionHandoffSafety;',context,{filename:'production-handoff-acquisition.js'});
+  };
+  boot();
+  return {previous,transfer:()=>context.takeOver(previous),reload:boot,recover:()=>context.recover(structuredClone(current)),
+    setFault:value=>{faultMode=value;},setHead:value=>{head=value;},
+    setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
+    setOffline:value=>{app.navigator.onLine=!value;},
+    state:()=>({current,claim:remoteClaim,claims,compensations,backgroundReleases,notify,marker:storage.get('test-session-handoff')||null})};
 }
 {
   const t=acquiringHarness();
@@ -328,6 +360,59 @@ for(const fault of ['display-mismatch','draft-mismatch']){
   assert.equal(state.claims,0,'no remote claim is attempted before the Plan-draft write settles');
   assert.equal(state.marker,null);
   assert.equal(state.current.runningOn,'inst_handoff_old');
+}
+
+
+// BF-1R3: the exact interrupted claim can be adopted after a fresh VM boot,
+// without republishing it or silently recovering unrelated data.
+for(const fault of ['claim-crash','claim-throws-after-remote']){
+  const t=acquiringHarness(fault);
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.ok(t.state().marker,'the preclaim marker survives a failed/unknown acquisition');
+  assert.equal(t.state().claim?.handoffToken,t.state().marker.handoffToken,'remote and local evidence name the same attempt');
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'an identical remote claim is adoptable after reload');
+  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+  assert.equal(t.state().marker,null);
+  assert.equal(t.state().claims,1,'recovery must not publish a second claim');
+  assert.equal(await t.recover(),true,'recovery is idempotent');
+}
+// Strict local commit succeeded, but the marker could not be cleared;
+// subsequent verification must not rewrite the already-committed session.
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true);
+  assert.equal(t.state().marker,null);
+  assert.equal(t.state().claims,1);
+}
+// No claim accepted: verify the unchanged remote source, retire the latch,
+// but never start the timer or claim automatically.
+{
+  const t=acquiringHarness('claim-throws-before-remote');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true);
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.equal(t.state().claims,1);
+}
+// A changed verified checkpoint, mismatching claim token, a divergent local
+// snapshot or offline Drive must keep recovery blocked with the marker intact.
+for(const mode of ['changed-head','different-claim','divergent-local','offline']){
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  if(mode==='changed-head')t.setHead('cp_'+'b'.repeat(32));
+  if(mode==='different-claim')t.setClaim({...t.state().claim,handoffToken:'ffffffff-ffff-4fff-8fff-ffffffffffff'});
+  if(mode==='divergent-local')t.setCurrent({...t.state().current,snapshot:{label:'unpublished new work'}});
+  if(mode==='offline')t.setOffline(true);
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),false,mode+' must remain blocked');
+  assert.ok(t.state().marker,mode+' retains durable recovery evidence');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old',mode+' cannot steal ownership');
+  assert.equal(t.state().claims,1,mode+' cannot publish a second claim');
 }
 
 // A normal cross-device sync must not stop/reset a local session if the
