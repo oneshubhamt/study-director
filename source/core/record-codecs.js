@@ -345,6 +345,67 @@ function sanitizeCurrentDailyRecord(record){
   const clean={version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind,date,savedAt,updatedAt,sourceRevision,quote,reflection,studyQuality,realTimeSnapshot,schedule,results,practiceRuns,carryForwardDraft};
   return sameDataValue(record,clean)?clean:null;
 }
+// BF-1R1: the common Saved Day / Active Session evidence comparison.
+// Exact mode permits retirement only on the acknowledged local lineage.
+// Coverage mode tests whether the Day retains the older shared evidence;
+// another device's sourceRevision is not an ancestry identifier.
+function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
+  const snapshot=session?.snapshot;
+  if(record?.recordKind!=='study'||!snapshot||record.date!==session.date||
+      !Array.isArray(record.schedule)||!Array.isArray(record.practiceRuns)||!record.results)return false;
+  if(!allowAdvances&&record.sourceRevision!==snapshot.contentRevision)return false;
+  const parsed=ScheduleModel.parseText(String(session.scheduleText||''));
+  if(!parsed.ok)return false;
+  const rows=record.schedule.map(row=>({
+    start:row.start,dur:row.duration,name:row.name,kind:row.kind,
+    area:row.area,measure:row.measure,target:row.target
+  }));
+  if(ScheduleModel.fingerprint(parsed.parsed)!==ScheduleModel.fingerprint(rows))return false;
+  const review=snapshot.review||{};
+  if((!allowAdvances||String(review.reflection||''))&&
+      String(record.reflection||'')!==String(review.reflection||''))return false;
+  if((!allowAdvances||review.studyQuality!=null)&&
+      (record.studyQuality??null)!==(review.studyQuality??null))return false;
+  if((!allowAdvances||String(snapshot.latestCarryForward||''))&&
+      String(record.carryForwardDraft||'')!==String(snapshot.latestCarryForward||''))return false;
+  const runs=Array.isArray(snapshot.practice?.runs)?snapshot.practice.runs:[];
+  if(runs.some(run=>!record.practiceRuns.some(saved=>sameDataValue(run,saved))))return false;
+  const observed=(value,prior)=>{
+    if(prior===undefined)return true;
+    if(value===undefined||!Number.isFinite(Number(value))||!Number.isFinite(Number(prior)))return false;
+    return allowAdvances?Number(value)>=Number(prior):Number(value)===Number(prior);
+  };
+  for(const [id,state] of Object.entries(snapshot.taskState||{})){
+    const result=record.results[id]||null;
+    if(!result){if(Object.keys(state||{}).length)return false;continue;}
+    if(!observed(result.completion,state.completion))return false;
+    if(state.completionSource&&result.completionSource!==state.completionSource)return false;
+    if(state.resolvedState==='done'&&result.doneFlag!==true||
+        state.resolvedState==='skipped'&&result.skipped!==true)return false;
+    if(!observed(result.done,state.progress?.done)||
+        !observed(result.actualSeconds,state.actual?.seconds))return false;
+    if(state.progress?.total!==undefined&&
+        Number(result.total)!==Number(state.progress.total))return false;
+    const clock=state.actual?.clock||{},actual=state.actual?.record||{};
+    const start=clock.startedAt||actual.firstStartedAt,end=clock.endedAt||actual.lastEndedAt;
+    if(start&&result.actualStart!==start||end&&result.actualEnd!==end)return false;
+    if(clock.startedAtLocalMinute!==undefined&&
+        Number(result.actualStartLocalMinute)!==Number(clock.startedAtLocalMinute))return false;
+    if(clock.startedAtUtcOffsetMinutes!==undefined&&
+        Number(result.actualStartUtcOffsetMinutes)!==Number(clock.startedAtUtcOffsetMinutes))return false;
+    if(clock.startedAtTimeZone&&result.actualStartTimeZone!==clock.startedAtTimeZone)return false;
+    const count=Number(actual.sessionCount)||actual.sessions?.length||0;
+    if(count&&!observed(result.sessionCount,count))return false;
+    const pauses=actual.pauseEvents||[];
+    if(pauses.length&&(!Array.isArray(result.pauseEvents)||
+        !sameDataValue(pauses,allowAdvances?result.pauseEvents.slice(0,pauses.length):result.pauseEvents)))return false;
+  }
+  for(const [id,adjustment] of Object.entries(snapshot.scheduleAdjustments||{})){
+    if(!record.results[id]||
+        record.results[id].adjustedStart!==TimeModel.studyMinuteToHHMM(adjustment.startMin))return false;
+  }
+  return true;
+}
 function createDiaryRecord(date,reflection,options={}){
   if(!isSupportedSavedDate(date))return null;
   const text=clampEditorContent(reflection,APP_LIMITS.maxReflectionChars);if(!String(text||'').trim()||!editorContentWithinLimits(text))return null;
@@ -483,7 +544,7 @@ function materializeDailyRecordSummary(summary){
       contractVersion:1,
       buildDailyRecordSummary,compactPauseEvents,compactRealTimeSnapshot,
       sanitizeTimerRuntimePayload,compactAdjustedSchedule,normalizeDailyResultEntry,
-      dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,createDiaryRecord,
+      dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,savedDayCoversSessionEvidence,createDiaryRecord,
       sanitizeCurrentNote,sanitizeNoteFields,noteKeys,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
     });
   }

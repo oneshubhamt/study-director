@@ -17,7 +17,7 @@ registry.define('backup',1,input=>{
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion','backupVersion','limits','starterSchedule']),
     persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseReadDays','reconciliationBaseWrite','pendingReviewsList','pendingReviewsReadItems','pendingReviewsMerge','pendingReviewsReplace','pendingReviewsResolve']),
-    codecs:freeze(['activeSession','backup','pendingReview']),
+    codecs:freeze(['activeSession','backup','dailyRecord','pendingReview']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve','merge']),
     exports:freeze(['backgroundAvailable','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
@@ -61,7 +61,7 @@ registry.define('backup',1,input=>{
     // or no limit at all, so a missing one stops start-up.
     const missingLimits=REQUIRED_LIMITS.filter(key=>!(Number(ports.configuration.limits[key])>0));
     if(missingLimits.length)throw new TypeError(`Backup configuration is missing limits: ${missingLimits.join(', ')}.`);
-    if(!Object.isFrozen(ports.codecs.backup)||!Object.isFrozen(ports.codecs.activeSession)||!Object.isFrozen(ports.codecs.pendingReview)){
+    if(!Object.isFrozen(ports.codecs.backup)||!Object.isFrozen(ports.codecs.activeSession)||!Object.isFrozen(ports.codecs.dailyRecord)||typeof ports.codecs.dailyRecord.savedDayCoversSessionEvidence!=='function'||!Object.isFrozen(ports.codecs.pendingReview)){
       throw new TypeError('Backup codecs must be frozen.');
     }
     if(!Object.isFrozen(ports.view.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
@@ -77,7 +77,7 @@ registry.define('backup',1,input=>{
       notesNormalizePayload,notesAlignByTitle,notesTrashKey,notesFailure,restoreJournalPrepare,restoreJournalRead,
       restoreJournalMark,restoreJournalClear,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryNotes,deletionRecoveryReplaceNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseReadDays,reconciliationBaseWrite,pendingReviewsList,pendingReviewsReadItems,pendingReviewsMerge,pendingReviewsReplace,pendingReviewsResolve
     }=ports.persistence;
-    const {activeSession:ActiveSessionCodec,backup:BackupCodec,pendingReview:PendingReviewCodec}=ports.codecs;
+    const {activeSession:ActiveSessionCodec,backup:BackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}=ports.codecs;
     const Reconciliation=ports.reconciliation;
     const NoteReconciliation=ports.noteReconciliation;
     const Exports=ports.exports;
@@ -841,6 +841,8 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   const me=installationId(),shared=String(base&&base.sessionFingerprint||''),[mine,theirs,contentMine,contentTheirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming),sessionContentFingerprint(local),sessionContentFingerprint(incoming)]);
   const sameContent=!!contentMine&&contentMine===contentTheirs,claimApplies=!!(sessionClaim&&sessionClaim.applies),claimedHere=!!(claimApplies&&sessionClaim.state==='owned'&&sessionClaim.ownedHere),claimedAway=!!(claimApplies&&sessionClaim.state==='owned'&&!sessionClaim.ownedHere),releasedAway=!!(claimApplies&&sessionClaim.state==='released'&&!sessionClaim.ownedHere);
   const observed=claimApplies?String(sessionClaim.observedContentFingerprint||''):'',hasObserved=/^[a-f0-9]{64}$/u.test(observed);
+  const savedLocalDay=local&&(parsed?.records||[]).find(record=>record?.recordKind==='study'&&record.date===local.date)||null;
+  const savedCoversLocal=!!savedLocalDay&&DailyRecordCodec.savedDayCoversSessionEvidence(savedLocalDay,local,{allowAdvances:true});
 
   // This device is the old owner. The claim is the authoritative handoff
   // boundary even before the new owner has published its first checkpoint.
@@ -850,6 +852,7 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   if(claimedAway&&hasObserved){
     if(incoming&&String(incoming.runningOn||'')===me)return sessionDecision(local?'yield-hold':'local');
     if(!local)return sessionDecision('incoming');
+    if((incoming&&incoming.date>local.date||!incoming&&savedLocalDay)&&!savedCoversLocal)return sessionDecision('yield');
     return sessionDecision(contentMine===observed?'incoming':'yield');
   }
   // A released claim is written only after the claimant published its ended
@@ -858,7 +861,7 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   // for review before clearing it.
   if(releasedAway&&hasObserved&&!incoming){
     if(!local)return sessionDecision('local');
-    return sessionDecision(contentMine===observed?'incoming':'yield');
+    return sessionDecision(contentMine===observed&&savedCoversLocal?'incoming':'yield');
   }
 
   if(claimedHere){
@@ -890,15 +893,13 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   // for this device's older session. Decide that day-boundary transition
   // BEFORE treating two Active Sessions as independent unsaved work.
   const newerRemoteDay=sync&&!!local&&!!incoming&&incoming.date>local.date;
-  const savedOldDay=newerRemoteDay&&Array.isArray(parsed?.records)&&parsed.records.some(record=>record?.recordKind==='study'&&record.date===local.date);
-  if(savedOldDay){
-    // Exact shared-session ancestry proves the local side did not add work
-    // after its last common checkpoint. Without that proof, preserve its
-    // full session for review before adopting the later study day.
-    return sessionDecision(shared&&mine===shared?'incoming':'ended');
+  if(newerRemoteDay&&savedLocalDay){
+    // A common session ancestor and a Saved Day that actually covers its
+    // study evidence are both necessary to retire it without a review.
+    return sessionDecision(shared&&mine===shared&&savedCoversLocal?'incoming':'ended');
   }
   const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
-  if(ended)return sessionDecision(mine===shared?'incoming':'ended');
+  if(ended)return sessionDecision(mine===shared&&savedCoversLocal?'incoming':'ended');
   // Two genuinely unsaved days are independent; never choose their owner
   // by timestamp. No Saved Day above has justified ending the older one.
   const differentSession=!!local&&!!incoming&&local.date!==incoming.date;
