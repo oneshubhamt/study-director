@@ -292,7 +292,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     ActiveSessionCodec:{sanitizeCurrent:value=>value||null},
     CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
     activeSessionContentFingerprint:async session=>session?.snapshot?.label==='original'?'f'.repeat(64):'0'.repeat(64),
-    BackupCodec:{assetIds:()=>[]},
+    BackupCodec:{assetIds:session=>session?.snapshot?.label==='remote with missing attachment'?['img-unavailable']:[]},
     nextSessionRevision:value=>Number(value)+1,
     setPlanStatus:()=>{},handleActiveSessionRepositoryResult:()=>true,
     AppDiagnostics:{capture:()=>{}},
@@ -503,11 +503,34 @@ function supersedeHandoff(t){
   const t=acquiringHarness('clear-fail');
   await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
   supersedeHandoff(t);t.setFault('');
-  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:12,snapshot:{label:'other study'}});
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:12,snapshot:{label:'remote with missing attachment'}});
   t.reload();
-  assert.equal(await t.recover(),false,'unrelated new study evidence cannot be overwritten');
+  assert.equal(await t.recover(),false,'a new attachment must be fetched through ordinary reconciliation before adopting remote content');
   assert.ok(t.state().marker);
   assert.equal(t.state().current.runningOn,'inst_handoff_new');
+}
+
+// A proved successor can contain later study work, not just ownership
+// metadata: the old device has contributed nothing since the causal boundary.
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:12,snapshot:{label:'new remote progress'}});
+  t.reload();
+  assert.equal(await t.recover(),true,'later successor work follows the verified causal handoff');
+  assert.equal(t.state().current.snapshot.label,'new remote progress');
+  assert.equal(t.state().current.runningOn,'inst_handoff_next');
+  assert.equal(t.state().conditionalWrites,1);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:11,snapshot:{label:'unproved remote changes'}});
+  t.reload();
+  assert.equal(await t.recover(),false,'a source older than the successor claim cannot justify new study content');
+  assert.ok(t.state().marker);
 }
 
 // A failed strict write during recovery does not consume the attempt.
