@@ -1219,6 +1219,15 @@ function selectedKeptPersonal(current,review,picked){
     if(Object.hasOwn(kept.preferences,key))preferences[key]=kept.preferences[key];
     else delete preferences[key]; // optional soundMode
   }
+  if(current.preferences.nudge!==null&&kept.preferences.nudge!==null){
+    const nudge={...current.preferences.nudge};
+    for(const key of new Set([...Object.keys(current.preferences.nudge),...Object.keys(kept.preferences.nudge)])){
+      if(!has('nudge:'+key))continue;
+      if(Object.hasOwn(kept.preferences.nudge,key))nudge[key]=kept.preferences.nudge[key];
+      else delete nudge[key];
+    }
+    preferences.nudge=nudge;
+  }
   if(has('draft'))plans.draft=kept.plans.draft;
   const localPlans=new Map(current.plans.savedPlans.map(plan=>[plan.id,plan])),
     remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan])),chosen=new Map(localPlans);
@@ -1270,13 +1279,26 @@ async function reviewKeptVersions({ref=''}={}){
       // The canonical PendingReview keeps the whole opposite Personal Data
       // version. Render only truly differing paths, not a misleading whole
       // Plans/Preferences toggle.
+      const bothNudge=personal.preferences.nudge!==null&&kept.preferences.nudge!==null;
       for(const key of new Set([...Object.keys(personal.preferences),...Object.keys(kept.preferences)])){
+        if(key==='nudge'&&bothNudge)continue;
         const here=personal.preferences[key],other=kept.preferences[key];
         if(Canonical.same(here,other))continue;
         const label=PERSONAL_REVIEW_LABELS[key]||key;
         choice(review,'preference:'+key,`Setting · ${label}`,'Different values were kept. Neither checkpoint-wide timestamp establishes which is newer.',{
           label:'Keep this device',description:keptValueDescription(here)
         },{label:'Use kept value',description:keptValueDescription(other)});
+      }
+      if(bothNudge){
+        const labels={enabled:'Enabled',sound:'Sound',nudgeAfter:'Interval (minutes)',breakMinutes:'Break (minutes)'};
+        for(const key of new Set([...Object.keys(personal.preferences.nudge),...Object.keys(kept.preferences.nudge)])){
+          const here=personal.preferences.nudge[key],other=kept.preferences.nudge[key];
+          if(Canonical.same(here,other))continue;
+          choice(review,'nudge:'+key,`Reminder · ${labels[key]||key}`,
+            'Only this reminder field differs; choosing it leaves the other reminder settings unchanged.',{
+              label:'Keep this device',description:keptValueDescription(here)
+            },{label:'Use kept value',description:keptValueDescription(other)});
+        }
       }
       if(!Canonical.same(personal.plans.draft,kept.plans.draft))
         choice(review,'draft','Plan · Working draft','The working draft is independent of the applied Active Session.',{
