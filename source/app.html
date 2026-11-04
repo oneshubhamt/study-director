@@ -5003,7 +5003,7 @@ function writeHostAppMetaValue(key,value,options={}){return HostAppMeta.write(ex
 async function readReconciliationBase(){return ReconciliationBaselineStore.readHeader();}
 async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
 async function readReconciliationBaseDays(dates){return ReconciliationBaselineStore.readDays(dates);}
-async function readReconciliationBaseSemanticDays(dates){return ReconciliationBaselineStore.readSemanticDays(dates);}
+async function readReconciliationBaseDayAncestry(dates,checkpointId){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
 async function writeReconciliationBase(checkpointId,spec){return ReconciliationBaselineStore.write(checkpointId,spec);}
 const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
 // The one record of past backups (version 3). Each entry is a copy: when it was
@@ -10309,7 +10309,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     reconciliationBaseRead:()=>readReconciliationBase(),
     reconciliationBaseReadNotes:keys=>readReconciliationBaseNotes(keys),
     reconciliationBaseReadDays:dates=>readReconciliationBaseDays(dates),
-    reconciliationBaseReadSemanticDays:dates=>readReconciliationBaseSemanticDays(dates),
+    reconciliationBaseReadDayAncestry:(dates,checkpointId)=>readReconciliationBaseDayAncestry(dates,checkpointId),
     reconciliationBaseWrite:(checkpointId,spec)=>writeReconciliationBase(checkpointId,spec),
     pendingReviewsList:()=>AppData.pendingReviews.list(),
     pendingReviewsReadItems:ids=>AppData.pendingReviews.readItems(ids),
