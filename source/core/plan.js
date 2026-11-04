@@ -326,8 +326,13 @@ function createPlanDraftProjection(result=null){
   const hasApplied=TASKS.length>0,editMode=PlanDraftEditor.active(),hasRows=draft.ok?draft.parsed.length>0:lastParsed.length>0;
   const status=draft.ok?'valid':draft.kind==='empty'||draft.kind==='no-tasks'?'empty':isIncompleteDraftResult(draft,hasRows)?'incomplete':'invalid';
   const changed=draft.ok&&draft.parsed.length>0&&(!hasApplied||scheduleFingerprintForRows(draft.parsed)!==scheduleGateway.read().fingerprint);
+  // The board describes what it actually draws. An independently authored
+  // (even invalid) working draft must not relabel an applied live schedule.
+  const draftSurfaceOpen=editMode||!hasApplied;
   let boardMode='empty',boardLabel='EMPTY',boardCaption='Paste or load a schedule to build the board.';
-  if(status==='invalid'){
+  if(!draftSurfaceOpen){
+    boardMode='live';boardLabel='LIVE';boardCaption='Applied plan. Timing and completion update here.';
+  }else if(status==='invalid'){
     boardMode='invalid';boardLabel='DRAFT INVALID';boardCaption='Fix the schedule text before Apply.';
   }else if(status==='incomplete'){
     boardMode='invalid';boardLabel='INCOMPLETE ROW';boardCaption='Complete Task, Minutes, Kind and Area before applying.';
@@ -337,10 +342,8 @@ function createPlanDraftProjection(result=null){
     boardMode='draft';boardLabel='EDITING PLAN';boardCaption='Review or edit today’s blocks, then apply the plan.';
   }else if(changed){
     boardMode='draft';boardLabel='DRAFT READY';boardCaption='Review or edit today’s blocks, then apply the plan.';
-  }else if(hasApplied){
-    boardMode='live';boardLabel='LIVE';boardCaption='Applied plan. Timing and completion update here.';
   }
-  const canMutate=ownership.canMutate(),draftSurfaceOpen=editMode||!hasApplied;
+  const canMutate=ownership.canMutate();
   const controls=freeze({
     showEdit:hasApplied&&!editMode,editEnabled:canMutate,
     showDone:hasRows&&draftSurfaceOpen,doneEnabled:canMutate&&status==='valid',
@@ -361,7 +364,6 @@ function keepAppliedScheduleOnReapply(parsed,rawOriginal,options={}){
   setParsedScheduleDraft(parsed);
   PlanDraftEditor.deactivate();
   lastAppliedScheduleText=String(rawOriginal||scheduleTextFromRows(lastParsed)||'');
-  PlanDraftEditor.save();
   setPlanComposerOpen(false);
   scheduleGateway.reconcile(options.source||'schedule-reapply');
   renderSched();
@@ -528,18 +530,40 @@ function completeScheduleApply(preparation,parsed,rawOriginal,opts,draft){
 }
 function applySchedule(options={}){
   const opts=options&&typeof options==='object'?options:{};
-  // Active-session restore applies an already-canonical schedule without
-  // borrowing the person's independent Plan draft as a transport buffer.
+  // A canonical Active Session is already durable: restore it synchronously
+  // without writing or replacing the independent working Plan draft.
   const explicitSchedule=typeof opts.scheduleText==='string'?opts.scheduleText:null;
-  const rawOriginal=explicitSchedule===null?String(document.getElementById('plan-input')?.value||''):explicitSchedule;
+  const rawOriginal=explicitSchedule===null?getPlanDraftText():explicitSchedule;
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
     ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
-  if(opts.persistDraft!==false)PlanDraftEditor.save();
-  if(projection.status!=='valid'){renderInvalidScheduleApply(projection);return false;}
-  const draft=projection.draft,parsed=draft.parsed;
-  const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
-  if(preparation&&typeof preparation.then==='function')return preparation.then(result=>completeScheduleApply(result,parsed,rawOriginal,opts,draft));
-  return completeScheduleApply(preparation,parsed,rawOriginal,opts,draft);
+  const currentDraft=()=>explicitSchedule!==null||getPlanDraftText()===rawOriginal;
+  const finish=(preparation,draft,parsed)=>{
+    if(!currentDraft()){
+      setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
+      return false;
+    }
+    return completeScheduleApply(preparation,parsed,rawOriginal,opts,draft);
+  };
+  const apply=()=>{
+    if(projection.status!=='valid'){renderInvalidScheduleApply(projection);return false;}
+    if(!currentDraft()){
+      setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
+      return false;
+    }
+    const draft=projection.draft,parsed=draft.parsed;
+    const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
+    return preparation&&typeof preparation.then==='function'
+      ?preparation.then(result=>finish(result,draft,parsed))
+      :finish(preparation,draft,parsed);
+  };
+  if(opts.persistDraft===false)return apply();
+  // A user-authored Plan may apply only after its exact working text was
+  // committed. Preserve invalid text in storage too, even when Apply rejects
+  // its syntax. Never silently continue after a failed asynchronous save.
+  return Promise.resolve(PlanDraftEditor.save()).then(saved=>{
+    if(saved!==true||!ownership.canMutate())return false;
+    return apply();
+  });
 }
 
 const PlanDraftEditor=(()=>{
@@ -553,7 +577,12 @@ const PlanDraftEditor=(()=>{
   let draftSaveWarningActive=false;
 
   function active(){return draftMode;}
-  function deactivate(){draftMode=false;clearDragState();return false;}
+  function deactivate(){
+    draftMode=false;
+    clearTimer('preview');pendingPreviewProjection=null;
+    clearDragState();
+    return false;
+  }
   function boundDraftInput(){
     const input=document.getElementById('plan-input');
     if(!input)return null;
@@ -604,18 +633,24 @@ const PlanDraftEditor=(()=>{
     draftMode=true;
     renderSched();
   }
-  function confirm(){
+  async function confirm(){
     if(!lastParsed.length)return false;
     const input=document.getElementById('plan-input');
     if(input)input.value=draftTextFromRows(lastParsed);
-    const projection=createPlanDraftProjection();
+    const draftText=getPlanDraftText(),projection=createPlanDraftProjection();
     if(projection.status!=='valid'){
       updatePlanBoardState(projection);
       setPlanStatus(projection.firstActionableError||'Complete every required field before applying.',false);
       return false;
     }
-    save();
-    return applySchedule({skipNotify:true,source:'plan-board-edit',projection});
+    if(!await save())return false;
+    if(!draftMode||!ownership.canMutate()||getPlanDraftText()!==draftText){
+      setPlanStatus('The working draft changed while saving. Review it and press Done again.',false);
+      return false;
+    }
+    // Exactly one draft commit; the ensuing schedule application consumes
+    // that saved version without launching a second asynchronous write.
+    return applySchedule({skipNotify:true,source:'plan-board-edit',projection,persistDraft:false});
   }
   function cancel(){
     // Cancel means do not apply this draft to the live session. Autosaved
@@ -636,7 +671,7 @@ const PlanDraftEditor=(()=>{
     if(projection.status!=='valid'){
       lastParsed=[];
       renderSched(projection);
-      setPlanStatus(projection.firstActionableError||'Fix the schedule before applying.',false);
+      if(!opts.silent)setPlanStatus(projection.firstActionableError||'Fix the schedule before applying.',false);
       return false;
     }
     setParsedScheduleDraft(projection.draft.parsed);
