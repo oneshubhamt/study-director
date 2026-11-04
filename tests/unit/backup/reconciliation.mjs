@@ -122,6 +122,17 @@ const compareSavedDay=(left,right)=>reconciliation.createPlan({
 const sameStudy=compareSavedDay(savedStudyLocal,savedStudyOther);
 assert.equal(sameStudy.conflict,false,'Source revision and save timestamps alone cannot generate a Saved Day conflict.');
 assert.equal(sameStudy.identical,true);
+const metadataPlan=reconciliation.createPlan({
+  local:{id:'here',savedDays:[savedStudyLocal]},incoming:{id:'shared-head',savedDays:[savedStudyOther]}
+});
+const metadataResolution=reconciliation.resolvePlan(metadataPlan,{});
+assert.equal(metadataResolution.savedDays[0].changed,true,
+  'A metadata-only match must still refresh the local canonical record to match the verified shared head.');
+assert.deepEqual(metadataResolution.savedDays[0].record,savedStudyOther,
+  'Shared-base full-record ancestry must match the canonical bytes actually installed.');
+assert.equal(reconciliation.resolvePlan(reconciliation.createPlan({
+  local:{id:'here',savedDays:[savedStudyOther]},incoming:{id:'head',savedDays:[savedStudyOther]}
+}),{}).savedDays[0].changed,false,'An already converged Saved Day must not be rewritten again.');
 assert.equal(compareSavedDay(savedStudyLocal,freeze({...savedStudyOther,reflection:'Changed reflection'})).conflict,true,
   'A genuine reflection change remains reviewable.');
 assert.equal(compareSavedDay(savedStudyLocal,freeze({...savedStudyOther,results:freeze({t1:freeze({completion:80,actualSeconds:3600})})})).conflict,true,
