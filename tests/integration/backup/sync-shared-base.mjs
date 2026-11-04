@@ -870,6 +870,19 @@ let syncWorld=null;
   assert.equal(b.personal.preferences.nudge.nudgeAfter,50);
   assert.equal(b.personal.preferences.nudge.breakMinutes,10);
   assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0,'independent nudge leaves do not cause a false conflict');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,nudge:freeze({...a.personal.preferences.nudge,nudgeAfter:55})})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,nudge:freeze({...b.personal.preferences.nudge,nudgeAfter:60,breakMinutes:12})})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.nudge.nudgeAfter,60,'a true same-leaf reminder conflict keeps the local value');
+  assert.equal(b.personal.preferences.nudge.breakMinutes,12,'a separate local reminder edit survives');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1,'the one same-leaf reminder conflict remains reviewable');
+  b.keptSelections={'nudge:nudgeAfter':'use'};
+  assert.equal((await B.reviewKept()).reviewed,1,'the review permits selecting exactly the other reminder interval');
+  b.keptSelections=null;
+  assert.equal(b.personal.preferences.nudge.nudgeAfter,55);
+  assert.equal(b.personal.preferences.nudge.breakMinutes,12,'accepting the remote interval cannot replace the unrelated break length');
+  assert.deepEqual(b.reviews.open(),[]);
 }
 
 // Restoring an older version reaches every device: the restoring device makes
