@@ -934,7 +934,12 @@ async function savedDaySettlement(plan,base){
   const shared=await AppData.reconciliationBase.readDayAncestry(items.map(item=>item.date),base.checkpointId);
   for(const item of items){
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);if(!local||!incoming)continue;
-    const ancestor=shared[item.date],semanticBase=ancestor?.semantic,hasSemantic=typeof semanticBase==='string'&&/^[a-f0-9]{64}$/u.test(semanticBase),
+    const ancestor=shared[item.date];
+    // An absent date in the common base does not prove that an explicit
+    // deletion was unchanged: creation and deletion on different devices
+    // are both post-base decisions and must remain reviewable.
+    if(!ancestor)continue;
+    const semanticBase=ancestor.semantic,hasSemantic=typeof semanticBase==='string'&&/^[a-f0-9]{64}$/u.test(semanticBase),
       baseValue=hasSemantic?semanticBase:String(ancestor?.full||''),
       fingerprint=candidate=>candidate.kind!=='record'?'':hasSemantic?dayContentFingerprint(candidate.record):dayFingerprint(candidate.record),
       [mine,theirs]=await Promise.all([fingerprint(local),fingerprint(incoming)]);
