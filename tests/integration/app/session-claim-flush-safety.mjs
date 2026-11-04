@@ -464,8 +464,10 @@ function supersedeHandoff(t){
   const t=acquiringHarness('claim-crash');
   await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
   supersedeHandoff(t);t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,'new remote owner releases an unadopted attempt');
-  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.equal(await t.recover(),true,'new remote owner safely replaces an unadopted attempt');
+  assert.equal(t.state().current.runningOn,'inst_handoff_next',
+    'canonical control state follows the verified successor, not a stale previous owner');
+  assert.equal(t.state().conditionalWrites,1,'unadopted predecessor is conditionally updated');
   assert.equal(t.state().marker,null);
   assert.equal(t.state().claims,1);
 }
