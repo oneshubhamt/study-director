@@ -1360,7 +1360,7 @@ for(const variant of ['remote-edit','remote-delete','local-edit','both-edit']){
   else assert.equal(a.records.get(date)?.reflection,variant==='local-edit'?'A added content':'B added content','one-sided meaningful study change wins');
   assert.equal(kept.length,variant==='both-edit'?1:0,'only two different substantive edits create a kept version');
   assert.equal((await A.sync()).cancelled,false);
-  assert.equal(a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date).length,variant==='both-edit'?1:0,'repeated sync remains idempotent');
+  assert.equal(a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date).length,variant==='both-edit'?1:0,`repeated sync remains idempotent: ${variant}; local=${a.records.get(date)?.reflection||'absent'}; deleted=${a.deletions.map(x=>x.date)}; reviews=${a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date).map(x=>x.kept?.reflection||'deletion')}`);
 }
 // Session content ancestry must not hand the running clock to a device merely
 // because metadata differs. It allows the verified owner's actual progress
