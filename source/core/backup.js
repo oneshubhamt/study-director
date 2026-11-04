@@ -1097,6 +1097,48 @@ function deduplicateOpenReviews(reviews){
 // both are confirmed, and nothing that changed meanwhile is overwritten. Each
 // choice is then an edit like any other, so it syncs, and the review ends on
 // every device. A session kept for review waits while a session runs here.
+// A whole Personal Data review is portable, but its decision is not a
+// whole-object winner. Every explicitly selected field is applied to the
+// current canonical object; unrelated changes remain untouched.
+const PERSONAL_REVIEW_LABELS=freeze({
+  studentName:'Student name',theme:'Theme',presentation:'Appearance',quote:'Quote',
+  practiceCueMode:'Practice pacing cues',fontScale:'Text size',
+  practiceTargetMs:'Practice target',nudge:'Reminders',soundMode:'Sound mode'
+});
+function keptValueDescription(value){
+  if(value===undefined)return 'Not present';
+  if(value===null)return 'Not set';
+  return typeof value==='object'?JSON.stringify(value):String(value);
+}
+function keptPlanDescription(plan){
+  if(!plan)return 'Not saved';
+  const preview=String(plan.scheduleText||'');
+  return `${plan.label} · ${preview.length>180?preview.slice(0,180)+'…':preview||'Empty schedule'}`;
+}
+function selectedKeptPersonal(current,review,picked){
+  const kept=review.kept,has=part=>picked[`kept__${review.id}__${part}`]==='use',
+    preferences={...current.preferences},plans={...current.plans};
+  for(const key of new Set([...Object.keys(current.preferences),...Object.keys(kept.preferences)])){
+    if(!has('preference:'+key))continue;
+    if(Object.hasOwn(kept.preferences,key))preferences[key]=kept.preferences[key];
+    else delete preferences[key]; // optional soundMode
+  }
+  if(has('draft'))plans.draft=kept.plans.draft;
+  const localPlans=new Map(current.plans.savedPlans.map(plan=>[plan.id,plan])),
+    remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan])),chosen=new Map(localPlans);
+  for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
+    if(!has('savedPlan:'+id))continue;
+    if(remotePlans.has(id))chosen.set(id,remotePlans.get(id));
+    else chosen.delete(id);
+  }
+  const localOrder=current.plans.savedPlans.map(plan=>plan.id),remoteOrder=kept.plans.savedPlans.map(plan=>plan.id),
+    preferred=has('savedPlanOrder')?remoteOrder:localOrder;
+  plans.savedPlans=[...new Set([...preferred,...localOrder,...remoteOrder])].filter(id=>chosen.has(id)).map(id=>chosen.get(id));
+  plans.defaultId=has('defaultPlan')?kept.plans.defaultId:current.plans.defaultId;
+  const normalized=BackupCodec.normalizePersonalData({version:2,plans,preferences});
+  if(!normalized)throw new Error('The selected Personal Data is invalid. A default saved plan must also be kept if you select it as the default.');
+  return normalized;
+}
 async function reviewKeptVersions({ref=''}={}){
   requireBackupMutationControl('reviewing kept versions');
   // One review per note or day at a time, the oldest first: a second kept
@@ -1127,8 +1169,38 @@ async function reviewKeptVersions({ref=''}={}){
       if(record||kept)choice(review,'',`Saved Day · ${review.ref}`,'Changed on both devices. The newer one shows; the other was kept for review.',{label:record?'Keep the current one':'Keep it deleted',description:day(record,'here')},{label:kept?'Use the kept version':'Delete it',description:day(kept,'kept')});
     }else if(review.subject==='personal'){
       if(!personal){steps.push({id:'',review,part:'',wait:true});continue;}
-      if(!Canonical.same(personal.plans,kept.plans))choice(review,'plans','Plan draft and saved plans','Changed on both devices; the other version was kept for review.',{label:'Keep current plans',description:''},{label:'Use kept plans',description:`The kept draft and saved plans (${kept.plans.savedPlans.length} saved plans).`});
-      if(!Canonical.same(personal.preferences,kept.preferences))choice(review,'settings','Personal and display settings','Changed on both devices; the other version was kept for review.',{label:'Keep current settings',description:''},{label:'Use kept settings',description:'The kept name, theme, text size and other preferences.'});
+      // The canonical PendingReview keeps the whole opposite Personal Data
+      // version. Render only truly differing paths, not a misleading whole
+      // Plans/Preferences toggle.
+      for(const key of new Set([...Object.keys(personal.preferences),...Object.keys(kept.preferences)])){
+        const here=personal.preferences[key],other=kept.preferences[key];
+        if(Canonical.same(here,other))continue;
+        const label=PERSONAL_REVIEW_LABELS[key]||key;
+        choice(review,'preference:'+key,`Setting · ${label}`,'Different values were kept. Neither checkpoint-wide timestamp establishes which is newer.',{
+          label:'Keep this device',description:keptValueDescription(here)
+        },{label:'Use kept value',description:keptValueDescription(other)});
+      }
+      if(!Canonical.same(personal.plans.draft,kept.plans.draft))
+        choice(review,'draft','Plan · Working draft','The working draft is independent of the applied Active Session.',{
+          label:'Keep this draft',description:keptValueDescription(personal.plans.draft)
+        },{label:'Use kept draft',description:keptValueDescription(kept.plans.draft)});
+      const localPlans=new Map(personal.plans.savedPlans.map(plan=>[plan.id,plan])),
+        remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan]));
+      for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
+        const here=localPlans.get(id)||null,other=remotePlans.get(id)||null;
+        if(Canonical.same(here,other))continue;
+        choice(review,'savedPlan:'+id,`Saved plan · ${here?.label||other?.label||id}`,'This saved-plan identity differs; selecting a version does not replace other saved plans.',{
+          label:here?'Keep this plan':'Keep absent',description:keptPlanDescription(here)
+        },{label:other?'Use kept plan':'Remove this plan',description:keptPlanDescription(other)});
+      }
+      if(!Canonical.same(personal.plans.savedPlans.map(plan=>plan.id),kept.plans.savedPlans.map(plan=>plan.id)))
+        choice(review,'savedPlanOrder','Saved plan · Order','Choose the order for retained plans; plans present on only one side still have their own choices.',{
+          label:'Keep this order',description:personal.plans.savedPlans.map(plan=>plan.label).join(', ')||'No saved plans'
+        },{label:'Use kept order',description:kept.plans.savedPlans.map(plan=>plan.label).join(', ')||'No saved plans'});
+      if(personal.plans.defaultId!==kept.plans.defaultId)
+        choice(review,'defaultPlan','Saved plan · Default','The selected default must exist among the plans you choose to retain.',{
+          label:'Keep this default',description:localPlans.get(personal.plans.defaultId)?.label||'No default'
+        },{label:'Use kept default',description:remotePlans.get(kept.plans.defaultId)?.label||'No default'});
     }else if(review.subject==='session'){
       choice(review,'','Active / suspended session',`Both devices changed today’s session; the other was kept for review (${when(review)}).`,{label:session?'Keep the current session':'Keep no session',description:''},{label:'Use the kept session',description:'It is set aside here, ready to continue.'});
     }
@@ -1148,7 +1220,11 @@ async function reviewKeptVersions({ref=''}={}){
     if(personal&&!Canonical.same(await personalExport({flush:false}),personal))changed.add('personal');
     if(of('session').length&&(hasActiveSession()||!Canonical.same((await readCanonicalActiveSession()).value||null,session)))changed.add('session');
     const done=reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&!changed.has(review.ref)),doneIds=new Set(done.map(review=>review.id)),chosen=(review,part)=>steps.some(step=>step.review===review&&step.part===part&&use(step));
-    const noteItems=[],dayItems=[],now=new Date().toISOString();let plans=false,settings=false,keptSession=null;
+    // Validate cross-field saved-plan/default consistency before applying
+    // Notes or Saved Days. Invalid combinations cannot partially apply.
+    const personalSelection=done.some(review=>review.subject==='personal')?
+      selectedKeptPersonal(personal,done.find(review=>review.subject==='personal'),picked):null;
+    const noteItems=[],dayItems=[],now=new Date().toISOString();let keptSession=null;
     for(const review of done){
       if(review.subject==='note'){
         const note=notes.get(review.ref);if(!note)continue;
@@ -1156,12 +1232,16 @@ async function reviewKeptVersions({ref=''}={}){
         const label=chosen(review,'label')?review.kept.label:note.label,text=resolvedTexts&&resolvedTexts.notes[review.ref]?String(resolvedTexts.notes[review.ref].text):note.text;
         if(label!==note.label||text!==note.text)noteItems.push(freeze({key:review.ref,changed:true,state:'record',value:freeze({...note,label,text,updatedAt:nextNoteRevision(note)})}));
       }else if(review.subject==='savedDay'&&chosen(review,''))dayItems.push(freeze(review.kept?{date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}:{date:review.ref,changed:true,state:'deleted',deletedAt:now}));
-      else if(review.subject==='personal'){plans=plans||chosen(review,'plans')&&review.kept.plans;settings=settings||chosen(review,'settings')&&review.kept.preferences;}
       else if(review.subject==='session'&&chosen(review,''))keptSession=review.kept;
     }
     if(noteItems.length)await applyResolvedNotes(freeze({notes:freeze(noteItems)}));
     if(dayItems.length)await applyResolvedSavedDays(freeze({savedDays:freeze(dayItems),sourcePlan:freeze({savedDays:freeze([])})}),null,()=>{});
-    if(plans||settings)await personalImport({version:2,plans:plans||personal.plans,preferences:settings||personal.preferences});
+    if(personalSelection&&!Canonical.same(personalSelection,personal)){
+      await personalImport(personalSelection);
+      const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));
+      if(!committed||!Canonical.same(committed,personalSelection))
+        throw new Error('The selected Personal Data did not reach canonical storage. The review remains open.');
+    }
     if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
     if(doneIds.size)await AppData.pendingReviews.resolve([...doneIds]);
     try{libraryChanged();}catch(error){AppDiagnostics.capture('backup.kept-review-render',error,'warn');}
