@@ -1086,7 +1086,9 @@ const PERSONAL_REVIEW_LABELS=freeze({
 function keptValueDescription(value){
   if(value===undefined)return 'Not present';
   if(value===null)return 'Not set';
-  return typeof value==='object'?JSON.stringify(value):String(value);
+  const description=typeof value==='object'?JSON.stringify(value):String(value);
+  // A working draft may be 100 KiB. Show a bounded preview in the choices.
+  return description.length>240?description.slice(0,240)+`… (${description.length} characters; complete version retained)`:description;
 }
 function keptPlanDescription(plan){
   if(!plan)return 'Not saved';
@@ -1139,12 +1141,12 @@ async function reviewKeptVersions({ref=''}={}){
       if(!note)choice(review,'','Note · deleted here',`Another device changed this note after it was deleted here (kept ${when(review)}). Restore it from Recently deleted to compare.`,{label:'Keep for later',description:'The kept version waits.'},{label:'Discard the kept version',description:'Nothing changes here.'},true);
       else if(!kept)choice(review,'',`Note · ${note.label}`,'Deleted on another device while it was edited here. It stays until you choose.',{label:'Keep the note',description:'It stays as it is.'},{label:'Delete it',description:'It moves to Recently deleted.'});
       else{
-        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Renamed on both devices; “${kept.label}” was kept for review (${when(review)}).`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
+        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`The two titles differ; “${kept.label}” was kept for review (${when(review)}).`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
         if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:`Kept ${when(review)}`,ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
       }
     }else if(review.subject==='savedDay'){
       const record=days.get(review.ref)||null;
-      if(record||kept)choice(review,'',`Saved Day · ${review.ref}`,'Changed on both devices. The newer one shows; the other was kept for review.',{label:record?'Keep the current one':'Keep it deleted',description:day(record,'here')},{label:kept?'Use the kept version':'Delete it',description:day(kept,'kept')});
+      if(record||kept)choice(review,'',`Saved Day · ${review.ref}`,'The two Saved-Day versions differ. One was kept for your choice; content ancestry may be unavailable.',{label:record?'Keep the current one':'Keep it deleted',description:day(record,'here')},{label:kept?'Use the kept version':'Delete it',description:day(kept,'kept')});
     }else if(review.subject==='personal'){
       if(!personal){steps.push({id:'',review,part:'',wait:true});continue;}
       // The canonical PendingReview keeps the whole opposite Personal Data
@@ -1180,11 +1182,11 @@ async function reviewKeptVersions({ref=''}={}){
           label:'Keep this default',description:localPlans.get(personal.plans.defaultId)?.label||'No default'
         },{label:'Use kept default',description:remotePlans.get(kept.plans.defaultId)?.label||'No default'});
     }else if(review.subject==='session'){
-      choice(review,'','Active / suspended session',`Both devices changed today’s session; the other was kept for review (${when(review)}).`,{label:session?'Keep the current session':'Keep no session',description:''},{label:'Use the kept session',description:'It is set aside here, ready to continue.'});
+      choice(review,'','Active / suspended session',`Two session versions differ; one was kept for review (${when(review)}).`,{label:session?'Keep the current session':'Keep no session',description:''},{label:'Use the kept session',description:'It is set aside here, ready to continue.'});
     }
   }
   let picked=freeze({}),resolvedTexts=null;
-  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync kept these versions where both devices changed the same thing. The current one stays selected; choose where the kept one should replace it.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
+  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync retained differences it could not safely settle. This device stays selected; choose exactly which kept values to apply.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   if(texts.length){resolvedTexts=await NoteReconciliation.resolve(freeze({conflicts:freeze(texts),incomingAssets:freeze([]),purpose:'kept'}));if(!resolvedTexts)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   const use=step=>picked[step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
   return runExclusive('review-kept-versions',()=>withPersistenceSuppressed(async()=>{

@@ -885,10 +885,11 @@ function materializeDailyRecordSummary(summary){
         const held=byId.get(review.id);
         if(!held||review.resolvedAt&&(!held.resolvedAt||review.resolvedAt>held.resolvedAt))byId.set(review.id,review);
       }
-      const open=[...byId.values()].filter(review=>!review.resolvedAt).sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)),kept=[];
+      const open=[...byId.values()].filter(review=>!review.resolvedAt).sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)),bySubject=new Map();
       for(const review of open){
-        if(kept.some(previous=>sameOpen(previous,review)))byId.set(review.id,resolved(review));
-        else kept.push(review);
+        const key=review.subject+':'+review.ref,peers=bySubject.get(key)||[];
+        if(peers.some(previous=>sameOpen(previous,review)))byId.set(review.id,resolved(review));
+        else{peers.push(review);bySubject.set(key,peers);}
       }
       const all=[...byId.values()],remaining=all.filter(review=>!review.resolvedAt),
         done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));
