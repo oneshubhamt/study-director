@@ -31,6 +31,7 @@ registry.define('review',1,()=>{
       'resolveTaskCompletion','storeResolvedCompletion','syncProgressInputsToState','updateTimerFocusMetrics'
     ]),
     session:freeze([
+      'acknowledgeSavedStudyDay','clearCanonicalSessionAfterSavedDay',
       'cancelPendingLiveDraftSave','clearSaveReminder','flushLiveDraft','getLifecycleRevision','getOwnershipRevision','getReviewDate',
       'handleActiveSessionRepositoryResult','lifecycleCanWrite',
       'markDayContentChanged','markDayContentSaved','resetRuntimeSessionState','runLifecycle','runLifecycleSync','saveLiveDraft',
@@ -103,6 +104,7 @@ registry.define('review',1,()=>{
       resolveTaskCompletion,storeResolvedCompletion,syncProgressInputsToState,updateTimerFocusMetrics
     }=ports.evidence;
     const {
+      acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
       cancelPendingLiveDraftSave,clearSaveReminder,flushLiveDraft,getLifecycleRevision,getOwnershipRevision,getReviewDate,
       handleActiveSessionRepositoryResult,lifecycleCanWrite,
       markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,runLifecycle,runLifecycleSync,saveLiveDraft,
@@ -450,7 +452,11 @@ async function commitDailyRecord(evidence=SessionEvidenceGateway.snapshot({inclu
   }
   const rec=materializeDailyRecordView(doc);
   if(!rec)throw new Error('Could not materialize the '+label);
-  await AppData.dailyRecords.save(doc);
+  const receipt=await AppData.dailyRecords.save(doc);
+  if(receipt?.storage!=='indexeddb'){
+    throw new Error('The Study Day reached only emergency recovery storage, not canonical IndexedDB. The recovery copy remains available; retry when storage recovers.');
+  }
+  await AppData.dailyRecords.verifyCanonical(doc);
   return freeze({doc,rec});
 }
 async function saveReflectionOnlyRecord(){
@@ -497,13 +503,12 @@ async function saveDayRecord(){
     const metrics=ReviewView.refresh({includeRecords:true,force:true});
     const {doc,rec}=await commitDailyRecord(metrics.evidence,'canonical daily record');committed=rec;
     markStorageHealthTimestamp('lastStudyDataSaveAt');
-    clearSaveReminder(rec.date,doc.sourceRevision);
-    await writeLiveDraftNow({markChanged:false});
+    if(!closesPriorDay)await acknowledgeSavedStudyDay(rec.date,doc.sourceRevision);
     await refreshLibraryAfterSave(rec.date);
     ReviewView.sync();
     if(closesPriorDay){
-      const cleared=await AppData.activeSession.clear();
-      if(!cleared.ok)throw cleared.error||new Error('active session clear failed');
+      await clearCanonicalSessionAfterSavedDay();
+      clearSaveReminder(rec.date,doc.sourceRevision);
       Runtime.setSafetyMessage(`Recovered ${prettyDate(rec.date)} was saved to Library. Apply the current study-day schedule when ready.`);
       resetRuntimeSessionState({source:'recovered-day-close',date:todayISO()});
       clearReviewForNewDay();
@@ -544,6 +549,7 @@ async function handleStudyDayRollover(){
   cancelPendingLiveDraftSave();
   rolloverSaveInProgress=true;
   const endedDate=SessionState.studyDate;
+  let savedDay=null;
   try{
     if(hasSaveableStudyDay()){
       if(isLiveTrackableTimer())recordCurrentActiveToTask(Runtime.currentIndex(),'partial');
@@ -553,19 +559,15 @@ async function handleStudyDayRollover(){
       saveReviewState({markChanged:false,strict:true});
       await flushLiveDraft();
       const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
-        markStorageHealthTimestamp('lastStudyDataSaveAt');
-      markDayContentSaved(rec.date,doc.sourceRevision);
-      notifyUser('Study day auto-saved',`${prettyDate(endedDate)} was saved to Library. Apply today’s schedule when ready.`,`sdm-rollover-${endedDate}`);
-      Runtime.setSafetyMessage(`New study day: ${prettyDate(endedDate)} was auto-saved to Library. Apply today’s schedule when ready.`);
+      savedDay={date:rec.date,revision:doc.sourceRevision};
+      markStorageHealthTimestamp('lastStudyDataSaveAt');
     }else{
       Runtime.setSafetyMessage('New study day: no schedule was loaded, so no Study Day record was created. Apply today’s schedule when ready.');
     }
     await runLifecycle('study-day-rollover',{
       scheduleIdentity:true,date:todayISO(),autoDate:true,review:true
     },async()=>{
-      const cleared=await AppData.activeSession.clear();
-      handleActiveSessionRepositoryResult(cleared,'clear');
-      if(!cleared.ok)throw cleared.error||new Error('active session clear failed');
+      await clearCanonicalSessionAfterSavedDay();
       resetRuntimeSessionState({lifecycleManaged:true,source:'study-day-rollover',date:todayISO()});
       clearReviewForNewDay({lifecycleManaged:true});
       setSessionPanelMode('none');
@@ -574,10 +576,17 @@ async function handleStudyDayRollover(){
       refreshStorageFallbackWarning();
       return true;
     });
+    if(savedDay){
+      markDayContentSaved(savedDay.date,savedDay.revision);
+      notifyUser('Study day auto-saved',`${prettyDate(endedDate)} was saved to Library. Apply today’s schedule when ready.`,`sdm-rollover-${endedDate}`);
+      Runtime.setSafetyMessage(`New study day: ${prettyDate(endedDate)} was auto-saved to Library. Apply today’s schedule when ready.`);
+    }
     return true;
   }catch(e){
     AppDiagnostics.capture('session.rollover-save',e,'error');
-    Runtime.setSafetyMessage(`New study day safety check could not auto-save ${prettyDate(endedDate)}: ${(e&&e.message)||e}. Open Review and save manually before starting a new day.`);
+    Runtime.setSafetyMessage(savedDay
+      ? `Saved ${prettyDate(endedDate)} to Library, but its old session could not be finalized: ${(e&&e.message)||e}. Keep the recovery data and retry after storage recovers.`
+      : `New study day safety check could not auto-save ${prettyDate(endedDate)}: ${(e&&e.message)||e}. Open Review and save manually before starting a new day.`);
     refreshStorageFallbackWarning();
     return false;
   }finally{
