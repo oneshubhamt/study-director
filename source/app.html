@@ -5334,9 +5334,8 @@ function resetRuntimeSessionState(options={}){
   PracticePacer.reset();
 }
 function refreshPlanAfterSessionReset(emptyMessage='',emptyTitle=''){
-  // A suspended/elsewhere Active Session is not a request to edit the
-  // independent Plan draft, even when its live task list is empty.
-  PlanDraftEditor.preview({silent:true,enterDraft:!['suspended','elsewhere'].includes(sessionPanelMode)});
+  // A session reset, suspension or remote handoff is not an edit action.
+  PlanDraftEditor.preview({silent:true,enterDraft:false});
   renderSched();
   updateBadges();
   updateHeaderInfo();
@@ -5453,12 +5452,15 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
   try{
     // flush() starts a pending debounce write; settled() also waits for an
     // already-running write whose timer callback has finished.
-    const expectedDraft=String(document.getElementById('plan-input')?.value||'');
+    const displayedDraft=String(document.getElementById('plan-input')?.value||'');
     const draftFlushed=await Promise.resolve(PlanDraftEditor.flush());
     if(draftFlushed===false)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
     await PlanData.settled();
-    const canonicalDraft=(await AppData.planData.read()).draft;
-    if(canonicalDraft!==expectedDraft)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The independent Plan draft changed or did not reach canonical storage before Continue Here.');
+    const savedDraft=PlanData.readDraft(),canonicalDraft=(await AppData.planData.read()).draft;
+    // A displayed default is not a saved Plan draft. Null is a valid
+    // canonical value until the person deliberately edits or loads a draft.
+    const expectedDisplay=savedDraft===null?getActiveDefaults().scheduleText:savedDraft;
+    if(canonicalDraft!==savedDraft||displayedDraft!==expectedDisplay)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The independent Plan draft changed or did not reach canonical storage before Continue Here.');
     step('Pausing this device’s sync…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
     // Read only the newest verified Drive Active Session. Continue Here must
@@ -8687,15 +8689,15 @@ const PlanData=(()=>{
     applyPortablePreferencesToRuntime(portable);
   }
   async function importData(value){
-    const clean=PersonalDataCodec.normalize(value);await settled().catch(()=>{});
+    const clean=PersonalDataCodec.normalize(value);
+    // A failed pending local edit is not permission to overwrite its draft
+    // during an otherwise successful import or background sync.
+    await settled();
     await enqueue(async()=>{await AppData.planData.replace(clean.plans);state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;});await applyPreferences(clean.preferences);
     const input=document.getElementById('plan-input'),draftText=String(clean.plans.draft??getActiveDefaults().scheduleText);if(input)input.value=draftText;
-    // Preserve an already-applied schedule and any suspended/elsewhere session
-    // independently of what Personal Data imports into the working draft.
-    const restored=parseScheduleDraftText(draftText),matchesApplied=!!TASKS.length&&restored.ok&&scheduleFingerprintForRows(restored.parsed)===scheduleFingerprint();
-    const sessionRecord=(await AppData.activeSession.load(0,{strict:true})).value;
-    if(matchesApplied||sessionRecord)PlanDraftEditor.deactivate();
-    PlanDraftEditor.preview({silent:true,enterDraft:!matchesApplied&&!sessionRecord});PlanRuntime.savedPlans.render();
+    // Personal Data import may replace a working draft, but cannot apply it
+    // to today's session or initiate editing without the person's action.
+    PlanDraftEditor.preview({silent:true,enterDraft:false});PlanRuntime.savedPlans.render();
   }
   async function verify(value){
     await settled();const actual={version:2,plans:await AppData.planData.read(),preferences:await preferences()};

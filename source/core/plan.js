@@ -598,27 +598,9 @@ const PlanDraftEditor=(()=>{
     return true;
   }
   function flush(options={}){return draftSaveTimer?save(options):true;}
-  function cloneAppliedRow(t){
-    return makeScheduleRow({
-      start:t&&t.start||'00:00',
-      dur:positiveMinutes(t&&t.dur)||1,
-      name:t&&t.name||'Task',
-      kind:t&&t.kind||'work',
-      area:taskAreaValue(t),
-      measure:taskMeasureValue(t,''),
-      target:taskTargetValue(t)
-    });
-  }
-  function syncFromApplied(){
-    if(!TASKS.length)return false;
-    setParsedScheduleDraft(TASKS.map(cloneAppliedRow));
-    const input=document.getElementById('plan-input');
-    if(input)input.value=lastAppliedScheduleText||scheduleTextFromRows(lastParsed);
-    save();
-    return true;
-  }
   function enter(){
-    if(!lastParsed.length&&TASKS.length)syncFromApplied();
+    // Edit is a user action; the independent draft is never replaced with
+    // the applied session merely to open its editor.
     draftMode=true;
     renderSched();
   }
@@ -636,11 +618,12 @@ const PlanDraftEditor=(()=>{
     return applySchedule({skipNotify:true,source:'plan-board-edit',projection});
   }
   function cancel(){
-    if(TASKS.length)syncFromApplied();
+    // Cancel means do not apply this draft to the live session. Autosaved
+    // working text remains available for later editing.
     deactivate();
     setPlanComposerOpen(false);
     renderSched();
-    setPlanStatus('Edit cancelled. Live plan kept.','cancelled');
+    setPlanStatus('Edit closed. Live plan kept; working draft preserved.','cancelled');
   }
   function preview(options={}){
     const opts=options&&typeof options==='object'?options:{};
@@ -648,7 +631,6 @@ const PlanDraftEditor=(()=>{
     const supplied=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'?opts.projection:null;
     if(opts.enterDraft===true)draftMode=true;
     else if(opts.enterDraft===false){draftMode=false;clearDragState();}
-    else if(!TASKS.length)draftMode=true;
     const projection=supplied||createPlanDraftProjection();
     pendingPreviewProjection=null;
     if(projection.status!=='valid'){

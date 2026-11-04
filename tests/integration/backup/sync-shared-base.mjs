@@ -637,7 +637,7 @@ let syncWorld=null;
   // A side holding nothing the other lacks takes the other's, and nothing is
   // kept, whichever is newer (Entry 023): a device's start-up state never
   // hides the plans and settings in use elsewhere.
-  a.personal=freeze({...personal('Name on A, planned'),plans:freeze({draft:'07:00 | 60 | A plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});await A.upload();b.personal=startup();
+  a.personal=freeze({...personal('Name on A, planned'),plans:freeze({draft:'07:00 | 60 | A plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});await A.upload();b.personal=startup(null);
   assert.equal((await B.sync()).cancelled,false);
   assert.deepEqual(b.personal,a.personal,'the start-up side takes the plans and settings in use');
   assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'nothing is kept from the start-up side');
@@ -647,6 +647,25 @@ let syncWorld=null;
   assert.deepEqual(b.personal,mine,'this device keeps its own when the other side holds nothing more');
   assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'nothing is kept from the other side either');
   await B.upload();assert.equal((await A.sync()).cancelled,false);
+  // BF-1R2: independent authored drafts cannot be overwritten because
+  // a whole-checkpoint sourceRevision is newer. The remote draft is kept.
+  const remoteDraft='06:00 | 60 | Remote independent draft | work | Polity | pages | 10';
+  const localDraft='09:00 | 45 | Local independent draft | work | History | pages | 8';
+  a.personal=freeze({...a.personal,plans:freeze({...a.personal.plans,draft:remoteDraft})});await A.upload();
+  b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,draft:localDraft})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.plans.draft,localDraft,'sync never replaces an independently authored local draft by a global timestamp');
+  const keptDraft=b.reviews.open().find(review=>review.subject==='personal'&&review.kept?.plans?.draft===remoteDraft);
+  assert.ok(keptDraft,'the remote draft stays available for an explicit kept-version decision');
+  b.keptChoice='use';await B.reviewKept();b.keptChoice='';
+  assert.equal(b.personal.plans.draft,remoteDraft,'choosing the kept version deliberately imports its draft');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  // With verified common ancestry and only one side changed, the new draft
+  // still synchronizes automatically; safety must not disable normal sync.
+  const oneSidedDraft='07:00 | 75 | One-sided draft update | work | Geography | pages | 12';
+  a.personal=freeze({...a.personal,plans:freeze({...a.personal.plans,draft:oneSidedDraft})});await A.upload();
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.plans.draft,oneSidedDraft,'a proven one-sided draft update synchronizes normally');
   // A session running here keeps its own state; everything else merges.
   a.activeSession=session('2026-08-30','A-SESSION',{runningOn:a.installationId});a.schedule=a.activeSession.scheduleText;a.running=false;a.notes=note('edited on A again');await A.upload();
   b.activeSession=session('2026-08-31','B-SESSION',{runningOn:b.installationId});b.schedule=b.activeSession.scheduleText;

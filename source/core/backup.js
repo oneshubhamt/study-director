@@ -719,7 +719,9 @@ async function personalSettled(base,local,incoming){
 function personalAddsNothing(side,other){
   let a,b;try{a=BackupCodec.normalizePersonalData(side);b=BackupCodec.normalizePersonalData(other);}catch{return false;}if(!a||!b)return false;
   if(Object.entries(a.preferences).some(([key,value])=>value!==null&&!Canonical.same(value,b.preferences[key])))return false;
-  const draft=String(a.plans.draft||'').trim();if(draft&&draft!==String(STARTER_SCHEDULE).trim()&&a.plans.draft!==b.plans.draft)return false;
+  // A canonical non-null draft is authored data, even if it happens to
+  // equal the starter template. Only null proves the default is unsaved.
+  if(a.plans.draft!==null&&a.plans.draft!==b.plans.draft)return false;
   if(a.plans.defaultId!==null&&a.plans.defaultId!==b.plans.defaultId)return false;
   const plans=new Map(b.plans.savedPlans.map(plan=>[plan.id,plan]));
   return a.plans.savedPlans.every(plan=>plans.has(plan.id)&&Canonical.same(plan,plans.get(plan.id)));
@@ -1720,8 +1722,17 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
       else if(personalAddsNothing(theirs,localPersonal))personal='keep';
       else{
-        const incomingTime=Date.parse(String(parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.sourceRevision||''))||0,localTime=Date.parse(String(await ports.persistence.sourceRevision()||''))||0;
-        personal=incomingTime>localTime?'replace':'keep';
+        // A checkpoint's global timestamp is not proof that its working
+        // draft supersedes independently authored text on this device.
+        // Without a verified one-sided ancestor, preserve the local draft
+        // and offer the remote Personal Data for deliberate review. BF-2
+        // will reconcile separate settings without whole-object winners.
+        const localDraft=localPersonal?.plans?.draft??null,remoteDraft=theirs.plans?.draft??null;
+        if(localDraft!==null&&localDraft!==remoteDraft)personal='keep';
+        else{
+          const incomingTime=Date.parse(String(parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.sourceRevision||''))||0,localTime=Date.parse(String(await ports.persistence.sourceRevision()||''))||0;
+          personal=incomingTime>localTime?'replace':'keep';
+        }
         if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(personal==='replace'?localPersonal:theirs)})))return needsDecision();
       }
     }

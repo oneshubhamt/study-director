@@ -1,4 +1,4 @@
-const release='SDVB75F20';
+const release='SDVB75F23';
 const sourceDateEpoch='2026-10-27T00:00:00.000Z';
 const buildDate=sourceDateEpoch.slice(0,10).replaceAll('-','');
 const buildId=`${release.toLowerCase()}-${buildDate}-r1`;
