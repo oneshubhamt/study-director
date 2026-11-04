@@ -67,7 +67,7 @@ registry.define('reconciliation-baseline',1,()=>{
       return freeze({format:'study-director.reconciliation-base',version,
         checkpointId:String(value.checkpointId),establishedAt:new Date(String(value.establishedAt)).toISOString(),
         noteCount,noteKeyFingerprint:String(value.noteKeyFingerprint),personalFingerprint:String(value.personalFingerprint),
-        sessionFingerprint:String(value.sessionFingerprint),sessionContentFingerprint,personalFields:fields});
+        sessionFingerprint:String(value.sessionFingerprint),...(semantic?{sessionContentFingerprint}:{}),personalFields:fields});
     }
         function normalizeNote(value,context={}){
       if(!value||!exactKeys(value,['format','version','key','label','text'])||value.format!=='study-director.reconciliation-base-note'||Number(value.version)!==1)return null;
