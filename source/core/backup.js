@@ -852,7 +852,7 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   if(claimedAway&&hasObserved){
     if(incoming&&String(incoming.runningOn||'')===me)return sessionDecision(local?'yield-hold':'local');
     if(!local)return sessionDecision('incoming');
-    if((incoming&&incoming.date>local.date||!incoming&&savedLocalDay)&&!savedCoversLocal)return sessionDecision('yield');
+    if((!incoming||incoming.date>local.date)&&!savedCoversLocal)return sessionDecision('yield');
     return sessionDecision(contentMine===observed?'incoming':'yield');
   }
   // A released claim is written only after the claimant published its ended
