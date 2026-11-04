@@ -4613,17 +4613,57 @@ function isPreviousActiveSessionRecord(session){
 function isRecoverablePreviousActiveSession(session){
   return isPreviousActiveSessionRecord(session)&&!sessionRunsElsewhere(session)&&session.status!=='suspended';
 }
+// Verify the actual canonical Saved Day, not just a date match or two
+// unrelated devices' numeric revision counters. The session must first carry
+// its own durable save acknowledgement; its study evidence must still be
+// represented by the Day presently in Library.
+function savedDayRepresentsSessionEvidence(record,session,snapshot){
+  if(!record||record.recordKind!=='study'||record.date!==session.date||
+      record.sourceRevision!==snapshot.contentRevision)return false;
+  const parsed=parseScheduleDraftText(session.scheduleText);
+  if(!parsed.ok||!Array.isArray(record.schedule)||!Array.isArray(record.practiceRuns))return false;
+  const savedRows=record.schedule.map(row=>({
+    start:row.start,dur:row.duration,name:row.name,kind:row.kind,
+    area:row.area,measure:row.measure,target:row.target
+  }));
+  if(scheduleFingerprintForRows(parsed.parsed)!==scheduleFingerprintForRows(savedRows))return false;
+  if(String(record.reflection||'')!==String(snapshot.review?.reflection||'')||
+      (record.studyQuality??null)!==(snapshot.review?.studyQuality??null)||
+      String(record.carryForwardDraft||'')!==String(snapshot.latestCarryForward||''))return false;
+  const runs=Array.isArray(snapshot.practice?.runs)?snapshot.practice.runs:[];
+  if(runs.length&&!CanonicalModule.same(runs,record.practiceRuns))return false;
+  for(const [id,state] of Object.entries(snapshot.taskState||{})){
+    const progress=record.results?.[id]||null;
+    if(!progress){
+      if(Object.keys(state||{}).length)return false;
+      continue;
+    }
+    if(state.completion!==undefined&&Number(progress.completion)!==Number(state.completion))return false;
+    if(state.completionSource&&progress.completionSource!==state.completionSource)return false;
+    if(state.resolvedState==='done'&&progress.doneFlag!==true||
+        state.resolvedState==='skipped'&&progress.skipped!==true)return false;
+    if(state.progress?.done!==undefined&&Number(progress.done)!==Number(state.progress.done)||
+        state.progress?.total!==undefined&&Number(progress.total)!==Number(state.progress.total)||
+        state.actual?.seconds!==undefined&&Number(progress.actualSeconds)!==Number(state.actual.seconds))return false;
+    const pauses=state.actual?.record?.pauseEvents;
+    if(pauses?.length&&!CanonicalModule.same(pauses,progress.pauseEvents||[]))return false;
+  }
+  return true;
+}
 async function savedDayCoversActiveSession(session){
   if(!isPreviousActiveSessionRecord(session))return false;
-  const snapshot=activeSessionSnapshot(session),contentRevision=Number(snapshot&&snapshot.contentRevision),savedRevision=Number(snapshot&&snapshot.savedRevision);
-  // savedRevision belongs to this exact session lineage: unlike another
-  // device's sourceRevision counter, it cannot coincidentally "cover" a
-  // divergent branch. A current Saved Day must still exist for the date.
-  if(!Number.isSafeInteger(contentRevision)||contentRevision<0||!Number.isSafeInteger(savedRevision)||savedRevision<contentRevision)return false;
-  let record=null;
-  try{record=await AppData.dailyRecords.get(session.date);}
-  catch(error){AppDiagnostics.capture('session.previous-day-saved-check',error,'warn');return false;}
-  return !!record&&record.recordKind==='study'&&record.date===session.date;
+  const snapshot=activeSessionSnapshot(session),contentRevision=Number(snapshot?.contentRevision),savedRevision=Number(snapshot?.savedRevision);
+  if(!Number.isSafeInteger(contentRevision)||contentRevision<0||
+      !Number.isSafeInteger(savedRevision)||savedRevision<contentRevision)return false;
+  try{
+    const rows=await AppData.dailyRecords.documents([session.date],{requireCanonical:true}),record=rows.find(item=>item.date===session.date);
+    if(!savedDayRepresentsSessionEvidence(record,session,snapshot))return false;
+    await AppData.dailyRecords.verifyCanonical(record);
+    return true;
+  }catch(error){
+    AppDiagnostics.capture('session.previous-day-saved-check',error,'warn');
+    return false;
+  }
 }
 async function retireCoveredPreviousActiveSession(session){
   if(!await savedDayCoversActiveSession(session))return false;
