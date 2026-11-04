@@ -877,6 +877,38 @@ let syncWorld=null;
   assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1);
 }
 
+// Manual Kept Versions must flush pending edits before showing a Personal
+// Data comparison and must reject a choice made stale by a new modal-time edit.
+{
+  const local=freeze({...personal('Manual reviewer'),plans:freeze({draft:'Original local',savedPlans:freeze([]),defaultId:null})});
+  const remote=freeze({...personal('Manual reviewer'),plans:freeze({draft:'Remote option',savedPlans:freeze([]),defaultId:null})});
+  const state={installationId:'inst_c2_manual_review',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote})]);
+  state.pendingPlanDraft='Local unsaved in editor';
+  const h=createHarness(state);state.keptChoice='use';
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(state.personal.plans.draft,'Remote option','the selected kept draft replaces only a flushed, visible local draft');
+  assert.equal(h.events.filter(x=>x==='personal-settle').length,2,'the editor settles before and after modal choices');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const local=freeze({...personal('Manual editor'),plans:freeze({draft:'Original local',savedPlans:freeze([]),defaultId:null})});
+  const remote=freeze({...personal('Manual editor'),plans:freeze({draft:'Remote option',savedPlans:freeze([]),defaultId:null})});
+  const state={installationId:'inst_c2_edit_during_modal',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote})]);
+  state.draftEditedDuringReview='New edit while choices are open';
+  const h=createHarness(state);state.keptChoice='use';
+  const result=await h.runtime.controller.reviewKeptVersions();
+  assert.equal(result.reviewed,0,'a newly edited Plan draft makes the modal comparison stale');
+  assert.equal(state.personal.plans.draft,'New edit while choices are open','intervening local work is retained');
+  assert.equal(state.reviews.open().length,1,'stale review remains available after a fresh comparison');
+  state.failPersonalSettle=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE personal preflight failure/u);
+  assert.equal(state.reviews.open().length,1,'a failed local Plan write cannot consume the kept version');
+}
+
 // BF-2: a legacy v3 shared base has no field ancestry. Independent
 // changes must remain reviewable, never guessed from timestamps.
 {
