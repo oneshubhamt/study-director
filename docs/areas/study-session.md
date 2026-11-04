@@ -123,3 +123,11 @@ A second, production-source audit found that the initial BF-1 changes did not ye
 The Saved Day's `sourceRevision` and Active Session's `contentRevision` are device-local bookkeeping, not a cross-device equality test. A canonical Saved Day covers a session only when its applied schedule, Review content, practice runs, task outcomes, adjustments and recorded progress retain the session's evidence. A later Day may include demonstrable additional progress; missing, reduced or contradictory evidence still blocks retirement. Before suppressing a reminder or retiring a previous-day session, the app also requires that session's own durably committed `savedRevision >= contentRevision` acknowledgement.
 
 Save reminders now read and verify the canonical record at their discrete trigger events instead of caching a positive date across save/replacement/import/deletion. No persisted format or historical reconciliation fingerprint was changed. Browser/device acceptance remains outstanding.
+
+## BF-C2 — Handoff compensation and superseded claims (2026-11-04)
+
+Compensation after a failed Continue Here now restores the prior Active Session only through the repository's existing strict `expectedCanonical` IndexedDB compare-and-write. A canonical edit between read and write aborts; the claim is not released, the safety latch remains, and unshared progress is preserved.
+
+For an interrupted v2 handoff, a different newer Drive owner can supersede the attempt only when the newest verified checkpoint names that owner and both sides retain the exact semantic study evidence recorded in the handoff marker. An already-adopted local owner is conditionally replaced with that verified remote session; a device that never adopted simply retires its latch without starting a local timer. The remote claim is rechecked before and after any conditional write. An interrupted latch cleanup can be retried idempotently. If study content, claimed owner, canonical local state or remote verification does not agree, recovery remains fenced and waits for normal reconciliation. No new persisted marker, key or schema was introduced.
+
+Browser handoff and actual desktop/iPad/iPhone acceptance are still required.
