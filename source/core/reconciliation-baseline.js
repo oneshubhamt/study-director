@@ -142,7 +142,7 @@ registry.define('reconciliation-baseline',1,()=>{
         semanticDays=semantic?codec.normalizeDayUpdates(spec.semanticDays,{full}):null;
       if(!updates||!deletes||!days||semantic&&!semanticDays||(!full&&!/^cp_[a-f0-9]{32}$/u.test(baseCheckpointId)))return false;
       if(semantic&&(!sameDayKeys(days,semanticDays)||Object.entries(days).some(([month,values])=>
-        values===null?semanticDays[month]!==null:!sameDayKeys(values,semanticDays[month]))))return false;
+        values===null?semanticDays[month]!==null:semanticDays[month]===null||!sameDayKeys(values,semanticDays[month]))))return false;
             let noteKeys=null,noteCount=Number(spec.noteCount),fingerprint=String(spec.noteKeyFingerprint||'');
       if(full){
         noteKeys=codec.normalizeKeys(spec.noteKeys);if(!noteKeys)return false;noteCount=noteKeys.length;fingerprint=await codec.keyFingerprint(noteKeys);
