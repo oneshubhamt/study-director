@@ -5529,13 +5529,16 @@ async function verifySessionHandoffSafety(session){
     const latest=await BackupProviderRuntime.readSessionClaim('google-drive');
     if(!latest?.applies||latest.epoch!==claim.epoch||latest.state!=='owned'||
         latest.ownerToken!==claim.ownerToken||latest.ownedHere)return false;
-    if(local.runningOn===me&&local.revision===marker.proposedRevision){
+    const unadopted=local.runningOn!==me&&local.revision===marker.observedRevision,
+      adopted=local.runningOn===me&&local.revision===marker.proposedRevision,
+      alreadyRepaired=CanonicalModule.same(local,remote);
+    if(!unadopted&&!adopted&&!alreadyRepaired)return false;
+    if(!alreadyRepaired){
       if(!appCanMutate())return false;
       const restored=await AppData.activeSession.save(remote,{strictDurability:true,expectedCanonical:local});
       await requireCanonicalSessionWrite(restored,remote,'recovering a superseded ownership claim');
       handleActiveSessionRepositoryResult(restored,'save');
-    }else if(local.runningOn===me||
-        local.revision!==marker.observedRevision&&!CanonicalModule.same(local,remote))return false;
+    }
     // An interrupted prior repair can already equal this verified head:
     // reread and retire its latch instead of repeating the same write.
     // Even after a successful conditional commit, a newer remote claim
