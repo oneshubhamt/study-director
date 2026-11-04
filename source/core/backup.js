@@ -969,6 +969,12 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   const observed=claimApplies?String(sessionClaim.observedContentFingerprint||''):'',hasObserved=/^[a-f0-9]{64}$/u.test(observed);
   const savedLocalDay=local&&(parsed?.records||[]).find(record=>record?.recordKind==='study'&&record.date===local.date)||null;
   const savedCoversLocal=!!savedLocalDay&&DailyRecordCodec.savedDayCoversSessionEvidence(savedLocalDay,local,{allowAdvances:true});
+  // The legacy shared hash proves exact canonical identity, not semantic
+  // ancestry. A separately acknowledged, canonically covered Saved Day can
+  // also prove that retiring this local study evidence loses no work.
+  // A raw cross-device revision or an unacknowledged coverage match cannot.
+  const unchangedFromShared=!!shared&&mine===shared;
+  const durablyCoveredLocal=!!local&&savedCoversLocal&&sessionFullyAcknowledged(local);
 
   // This device is the old owner. The claim is the authoritative handoff
   // boundary even before the new owner has published its first checkpoint.
@@ -1022,10 +1028,13 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   if(newerRemoteDay&&savedLocalDay){
     // A common session ancestor and a Saved Day that actually covers its
     // study evidence are both necessary to retire it without a review.
-    return sessionDecision(shared&&mine===shared&&savedCoversLocal?'incoming':'ended');
+    return sessionDecision(savedCoversLocal&&(unchangedFromShared||durablyCoveredLocal)?'incoming':'ended');
   }
-  const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
-  if(ended)return sessionDecision(mine===shared&&savedCoversLocal?'incoming':'ended');
+  // The verified successor checkpoint ending its previously shared session
+  // is the transition proof. A Saved Day's full-record hash changing since
+  // base is NOT proof of new study: only its metadata may have changed.
+  const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&!!savedLocalDay;
+  if(ended)return sessionDecision(savedCoversLocal&&(unchangedFromShared||durablyCoveredLocal)?'incoming':'ended');
   // Two genuinely unsaved days are independent; never choose their owner
   // by timestamp. No Saved Day above has justified ending the older one.
   const differentSession=!!local&&!!incoming&&local.date!==incoming.date;
@@ -1036,7 +1045,7 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
       const merged=mergeSessionAcknowledgement(incoming,local);
       return merged&&!Canonical.same(merged,incoming)?sessionDecision('graft',merged):sessionDecision('incoming');
     }
-    if(mine===shared)return sessionDecision('incoming');
+    if(unchangedFromShared||durablyCoveredLocal)return sessionDecision('incoming');
     return sessionDecision('yield');
   }
   if(hold&&!takenOver)return sessionDecision('hold');
@@ -1103,14 +1112,6 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     if(hidden&&!(await keepSession(hidden)))return freeze({needsDecision:true});
   }
   return freeze({needsDecision:false,state,value});
-}
-// The other side saved this day since both last shared it. This establishes
-// that the session ended there; whether this device has unsaved session
-// content is decided independently by the semantic session ancestry above.
-async function daySavedSinceBase(parsed,date){
-  const record=(Array.isArray(parsed&&parsed.records)?parsed.records:[]).find(item=>item&&item.date===date);if(!record)return false;
-  let shared;try{shared=await AppData.reconciliationBase.readDays([date]);}catch(error){AppDiagnostics.capture('backup.session-ended-base',error,'warn');return false;}
-  return await dayFingerprint(record)!==String(shared&&shared[date]||'');
 }
 function sessionControlFollows(local,incoming){
   if(!local)return true;if(!incoming||incoming.date!==local.date)return false;
