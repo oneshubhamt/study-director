@@ -1383,12 +1383,15 @@ async function reviewKeptVersions({ref=''}={}){
         if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
         await AppData.pendingReviews.resolve([review.id]);
         const [receipt]=await AppData.pendingReviews.readItems([review.id]);
-        if(!receipt?.resolvedAt)throw new Error('The kept-version acknowledgement could not be verified. This version remains available to review.');
+        if(!receipt?.resolvedAt)throw new Error('The kept-version acknowledgement could not be verified. Reopen Kept Versions after storage recovers to check this decision.');
         confirmed++;
       }
     }catch(error){
       OperationDiagnostics.mark('kept-review-incomplete',{completed:confirmed,total:done.length,reason:'error'});
-      if(confirmed)throw new Error(`${confirmed} of ${done.length} kept versions confirmed. Earlier choices remain applied; other versions remain available. Retry after correcting the storage problem.`,{cause:error});
+      // Earlier choices may already be durable. Refresh instead of leaving
+      // Library showing stale review counts after an interrupted batch.
+      try{libraryChanged();}catch(refreshError){AppDiagnostics.capture('backup.kept-review-render',refreshError,'warn');}
+      if(confirmed)throw new Error(`${confirmed} of ${done.length} kept versions confirmed. Earlier choices remain applied. Reopen Kept Versions after storage recovers to check remaining decisions.`,{cause:error});
       throw error;
     }
     try{libraryChanged();}catch(error){AppDiagnostics.capture('backup.kept-review-render',error,'warn');}
