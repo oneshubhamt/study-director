@@ -80,6 +80,33 @@ const revisionedSession=(date,label,{runningOn='inst_device_local',status='activ
 const revisionedRecord=(date,reflection,sourceRevision,updatedAt='2026-08-20T18:00:00.000Z')=>freeze({...record(date,reflection,updatedAt),sourceRevision});
 const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:1,date,reflection:text,studyQuality:3,revision,sessionRevision:0,updatedAt});
 
+// The canonical Pending Review codec owns the semantic identity across
+// every import, not only automatic sync. Distinct kept content remains
+// distinct, and resolved reviews never suppress a future independent one.
+{
+  const kept=personal('Codec baseline'),other=personal('Codec divergent');
+  const a=pendingReviewCodec.create({subject:'personal',ref:'personal',kept}),
+    duplicate=pendingReviewCodec.create({subject:'personal',ref:'personal',kept}),
+    distinct=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:other});
+  const merged=pendingReviewCodec.merge([[duplicate,a,distinct]],limits.maxPendingReviews);
+  assert.equal(merged.filter(item=>!item.resolvedAt).length,2,'identical open reviews coalesce without losing a genuinely different conflict');
+  const retained=merged.find(item=>!item.resolvedAt&&item.kept.preferences.studentName==='Codec baseline');
+  assert.ok(retained);
+  assert.ok(merged.some(item=>item.id!==retained.id&&item.resolvedAt),'the redundant identity is resolved for future devices');
+  const finished=pendingReviewCodec.resolved(retained),reimported=pendingReviewCodec.merge([[...merged,finished],[a,duplicate]],limits.maxPendingReviews);
+  assert.equal(reimported.filter(item=>!item.resolvedAt&&item.subject==='personal').length,1,'resolved aliases never re-open a completed conflict');
+  const recurrence=pendingReviewCodec.create({subject:'personal',ref:'personal',kept}),
+    reopened=pendingReviewCodec.merge([[...reimported,recurrence]],limits.maxPendingReviews);
+  assert.equal(reopened.filter(item=>!item.resolvedAt&&item.subject==='personal').length,2,'a fresh occurrence is not suppressed by a content-free resolved tombstone');
+  const firstSession=pendingReviewCodec.create({subject:'session',ref:'session',kept:revisionedSession('2026-08-29','same',{revision:7})}),
+    secondSession=pendingReviewCodec.create({subject:'session',ref:'session',kept:revisionedSession('2026-08-29','same',{revision:9,updatedAt:'2026-08-29T10:00:00.000Z'})});
+  const sessionMerged=pendingReviewCodec.merge([[firstSession,secondSession]],limits.maxPendingReviews);
+  assert.equal(sessionMerged.filter(item=>!item.resolvedAt).length,1,'session review dedup uses semantic study content, not ownership/control revisions');
+  const firstDay=pendingReviewCodec.create({subject:'savedDay',ref:'2026-08-28',kept:record('2026-08-28','same')}),
+    differentDay=pendingReviewCodec.create({subject:'savedDay',ref:'2026-08-28',kept:record('2026-08-28','changed')});
+  assert.equal(pendingReviewCodec.merge([[firstDay,differentDay]],limits.maxPendingReviews).filter(item=>!item.resolvedAt).length,2,'different Saved-Day content is never collapsed');
+}
+
 async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,pendingReviews=[],personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
   const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});
   const plan=freeze({studentName:'Checkpoint User',installationId,exportedAt,sourceRevision:exportedAt,recordDates:freeze(records.map(item=>item.date).sort()),savedDayDeletions:freeze(deletions),noteItems:freeze(Object.values(notes)),noteDeletions:freeze(noteDeletions),counts});
