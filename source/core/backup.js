@@ -1115,8 +1115,10 @@ function selectedKeptPersonal(current,review,picked){
     preferred=has('savedPlanOrder')?remoteOrder:localOrder;
   plans.savedPlans=[...new Set([...preferred,...localOrder,...remoteOrder])].filter(id=>chosen.has(id)).map(id=>chosen.get(id));
   plans.defaultId=has('defaultPlan')?kept.plans.defaultId:current.plans.defaultId;
-  const normalized=BackupCodec.normalizePersonalData({version:2,plans,preferences});
-  if(!normalized)throw new Error('The selected Personal Data is invalid. A default saved plan must also be kept if you select it as the default.');
+  let normalized=null;
+  try{normalized=BackupCodec.normalizePersonalData({version:2,plans,preferences});}
+  catch(error){throw new Error('The selected Personal Data is invalid. If you choose a default saved plan, also keep that plan.',{cause:error});}
+  if(!normalized)throw new Error('The selected Personal Data is invalid. If you choose a default saved plan, also keep that plan.');
   return normalized;
 }
 async function reviewKeptVersions({ref=''}={}){
