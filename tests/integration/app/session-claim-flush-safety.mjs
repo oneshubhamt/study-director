@@ -607,9 +607,8 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
   const prepare=(failure='')=>{
     let recorded=null,acknowledged=0,clears=0;
     const sessionState={savedRevision:0,contentRevision:7,studyDate:date};
-    const memory=new Set(['2026-08-27']);
     const context=vm.createContext({
-      TASKS:[{}],TimerState:sessionState,savedRecordDates:memory,
+      TASKS:[{}],TimerState:sessionState,
       getReviewDate:()=>date,
       cleanDayRevision:value=>Math.max(0,Math.floor(Number(value)||0)),
       writeLiveDraftNow:async options=>{
@@ -633,7 +632,7 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
       Object
     });
     vm.runInContext(src+'\nglobalThis.ack=acknowledgeSavedStudyDay;globalThis.clearDay=clearCanonicalSessionAfterSavedDay;',context);
-    return {ack:()=>context.ack(date,7),clear:()=>context.clearDay(),state:()=>({saved:sessionState.savedRevision,acknowledged,clears,memory})};
+    return {ack:()=>context.ack(date,7),clear:()=>context.clearDay(),state:()=>({saved:sessionState.savedRevision,acknowledged,clears})};
   };
   const good=prepare();assert.equal(await good.ack(),true);
   assert.equal(good.state().saved,7);assert.equal(good.state().acknowledged,1);
@@ -642,13 +641,43 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
     await assert.rejects(trial.ack(),/IndexedDB unavailable|acknowledgement was not saved|read-back differs/u,fault);
     assert.equal(trial.state().saved,0,fault+' must not mark session revision saved');
     assert.equal(trial.state().acknowledged,0);
-    assert.equal(trial.state().memory.size,0,'invalidated saved-date cache cannot suppress a later reminder');
   }
   const localOnlyClear=prepare('clear-local-only');
   await assert.rejects(localOnlyClear.clear(),/IndexedDB unavailable/u);
   assert.equal(localOnlyClear.state().clears,1);
   const mismatchedClear=prepare('clear-shadow');
   await assert.rejects(mismatchedClear.clear(),/remained after its canonical deletion/u);
+}
+{
+  // A successful reminder check must never survive a later canonical Day
+  // replacement as an in-memory positive cache.
+  const fn=productionFunction('async function savedRecordExistsForDate(date){');
+  const date='2026-08-27',session={date,snapshot:{savedRevision:7,contentRevision:7}};
+  let day={date,reflection:'Saved'},reads=0,coverageChecks=0;
+  const context=vm.createContext({
+    daySaveDirty:()=>false,cleanDayRevision:x=>Number(x),
+    AppData:{
+      activeSession:{load:async()=>({ok:true,value:session,storage:{idb:true}})},
+      dailyRecords:{documents:async()=>{reads++;return day?[day]:[];},
+        verifyCanonical:async record=>{assert.equal(record,day);return true;}}
+    },
+    DailyRecordCodec:{savedDayCoversSessionEvidence:(value,sessionValue,options)=>{
+      coverageChecks++;assert.equal(sessionValue,session);
+      assert.equal(options.allowAdvances,true,'A later Day may cover the session without the same source revision');
+      return value?.reflection==='Saved';
+    }},
+    AppDiagnostics:{capture:()=>false}
+  });
+  vm.runInContext(fn+'\nglobalThis.checkSavedDay=savedRecordExistsForDate;',context);
+  assert.equal(await context.checkSavedDay(date),true);
+  day={date,reflection:'Other content'};
+  assert.equal(await context.checkSavedDay(date),false,
+    'A replaced Saved Day with different evidence must not be hidden by an earlier positive read.');
+  day=null;
+  assert.equal(await context.checkSavedDay(date),false,
+    'Deleting a previously verified Saved Day must be observed by the next reminder check.');
+  assert.equal(reads,3,'Each discrete reminder check must reread canonical storage.');
+  assert.equal(coverageChecks,3);
 }
 {
   // A successful repository write receipt is not sufficient if the strict
