@@ -861,9 +861,23 @@ function materializeDailyRecordSummary(summary){
       const clean=normalize(review);if(!clean)throw new TypeError('The review to resolve is invalid.');
       return clean.resolvedAt?clean:normalize({...clean,kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
     }
+    // Equivalent open conflicts belong to one review, even if two devices
+    // independently minted different ids for that same kept value and base.
+    // Resolved reviews deliberately lack the kept content, so they cannot
+    // suppress a separate future conflict that happens to look similar.
+    function sameOpen(a,b){
+      if(!a||!b||a.resolvedAt||b.resolvedAt||a.subject!==b.subject||a.ref!==b.ref||
+          !sameDataValue(a.base,b.base))return false;
+      if(a.subject==='session'&&a.kept&&b.kept){
+        const left=ActiveSessionCodec.contentValue(a.kept),right=ActiveSessionCodec.contentValue(b.kept);
+        return !!left&&!!right&&sameDataValue(left,right);
+      }
+      return sameDataValue(a.kept,b.kept);
+    }
     // Reviews merge by id: a resolved one wins, so a review resolved on any
-    // device ends everywhere. Only the newest resolved ones are kept, as many
-    // as may wait at once.
+    // device ends everywhere. Equivalent open duplicates retain the oldest
+    // id and publish resolved tombstones for the others. This lets a
+    // subsequent resolution converge even when old devices saw both ids.
     function merge(lists,limit){
       const byId=new Map();
       for(const list of lists)for(const raw of list||[]){
@@ -871,8 +885,14 @@ function materializeDailyRecordSummary(summary){
         const held=byId.get(review.id);
         if(!held||review.resolvedAt&&(!held.resolvedAt||review.resolvedAt>held.resolvedAt))byId.set(review.id,review);
       }
-      const all=[...byId.values()],open=all.filter(review=>!review.resolvedAt),done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));
-      return [...open,...done].sort((a,b)=>a.id.localeCompare(b.id));
+      const open=[...byId.values()].filter(review=>!review.resolvedAt).sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)),kept=[];
+      for(const review of open){
+        if(kept.some(previous=>sameOpen(previous,review)))byId.set(review.id,resolved(review));
+        else kept.push(review);
+      }
+      const all=[...byId.values()],remaining=all.filter(review=>!review.resolvedAt),
+        done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));
+      return [...remaining,...done].sort((a,b)=>a.id.localeCompare(b.id));
     }
     // The rich texts a stored review holds, which may use attachments.
     function richTexts(review){
@@ -880,7 +900,7 @@ function materializeDailyRecordSummary(summary){
       const values=review.subject==='note'?[kept.text,review.base&&review.base.text]:review.subject==='savedDay'?[kept.reflection]:review.subject==='session'?[kept.snapshot&&kept.snapshot.review&&kept.snapshot.review.reflection]:[];
       return values.filter(value=>typeof value==='string'&&value);
     }
-    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,normalize,create,resolved,merge,richTexts});
+    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,normalize,create,resolved,merge,sameOpen,richTexts});
   }
 
   return freeze({
