@@ -16,7 +16,7 @@ registry.define('backup',1,input=>{
   const Canonical=input.canonical,ManagedRepositoryModule=input.managedRepository,BackupProviderModule=input.backupProvider,RepositoryBackgroundModule=input.repositoryBackground,BackupCaptureModule=input.backupCapture;
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion','backupVersion','limits','starterSchedule']),
-    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseReadDays','reconciliationBaseWrite','pendingReviewsList','pendingReviewsReadItems','pendingReviewsMerge','pendingReviewsReplace','pendingReviewsResolve']),
+    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseReadDays','reconciliationBaseReadSemanticDays','reconciliationBaseWrite','pendingReviewsList','pendingReviewsReadItems','pendingReviewsMerge','pendingReviewsReplace','pendingReviewsResolve']),
     codecs:freeze(['activeSession','backup','dailyRecord','pendingReview']),
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
     noteReconciliation:freeze(['resolve','merge']),
@@ -75,7 +75,7 @@ registry.define('backup',1,input=>{
       activeSessionLoad,activeSessionSave,activeSessionClear,activeSessionSettled,dailyRecordBackupDates,dailyRecordBackupMonth,dailyRecordDocuments,
       dailyRecordImportBatches,dailyRecordRemove,dailyRecordTimestamp,notesExportPayload,notesReadFreshPayload,notesReadFreshItems,notesFlush,
       notesNormalizePayload,notesAlignByTitle,notesTrashKey,notesFailure,restoreJournalPrepare,restoreJournalRead,
-      restoreJournalMark,restoreJournalClear,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryNotes,deletionRecoveryReplaceNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseReadDays,reconciliationBaseWrite,pendingReviewsList,pendingReviewsReadItems,pendingReviewsMerge,pendingReviewsReplace,pendingReviewsResolve
+      restoreJournalMark,restoreJournalClear,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryNotes,deletionRecoveryReplaceNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseReadDays,reconciliationBaseReadSemanticDays,reconciliationBaseWrite,pendingReviewsList,pendingReviewsReadItems,pendingReviewsMerge,pendingReviewsReplace,pendingReviewsResolve
     }=ports.persistence;
     const {activeSession:ActiveSessionCodec,backup:BackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}=ports.codecs;
     const Reconciliation=ports.reconciliation;
@@ -97,7 +97,7 @@ registry.define('backup',1,input=>{
       notes:freeze({exportPayload:notesExportPayload,readFreshPayload:notesReadFreshPayload,readFreshItems:notesReadFreshItems,flush:notesFlush,normalizePayload:notesNormalizePayload,alignByTitle:notesAlignByTitle,failure:notesFailure}),
       restoreJournal:freeze({prepare:restoreJournalPrepare,read:restoreJournalRead,mark:restoreJournalMark,clear:restoreJournalClear}),
       pendingReviews:freeze({list:pendingReviewsList,readItems:pendingReviewsReadItems,merge:pendingReviewsMerge,replace:pendingReviewsReplace,resolve:pendingReviewsResolve}),
-      provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,notes:deletionRecoveryNotes,replaceNotes:deletionRecoveryReplaceNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,readDays:reconciliationBaseReadDays,write:reconciliationBaseWrite})
+      provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,notes:deletionRecoveryNotes,replaceNotes:deletionRecoveryReplaceNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,readDays:reconciliationBaseReadDays,readSemanticDays:reconciliationBaseReadSemanticDays,write:reconciliationBaseWrite})
     });
     const AssetData=portableAssets?freeze({
       get:ports.assets.get,put:ports.assets.put,keys:ports.assets.keys,list:ports.assets.list,importAll:ports.assets.importAll,restoreAll:ports.assets.restoreAll,removeMany:ports.assets.removeMany,removeMetadata:ports.assets.removeMetadata,scheduleMaintenance:ports.assets.scheduleMaintenance
@@ -248,7 +248,7 @@ const ManagedRepository=ManagedRepositoryModule.createEngine(freeze({
   codec:BackupCodec,
   ports:freeze({
     configuration:freeze({backupVersion,limits:APP_LIMITS,logicalCaptureFormat:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,logicalCaptureVersion:LOGICAL_CHECKPOINT_CAPTURE_VERSION}),
-    persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:value=>personalFingerprint(value),personalFields:value=>personalFields(value),dayFingerprints:records=>dayFingerprintMonths(records),sessionFingerprint:value=>sessionFingerprint(value)}),
+    persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:value=>personalFingerprint(value),personalFields:value=>personalFields(value),dayFingerprints:records=>dayFingerprintMonths(records),semanticDayFingerprints:records=>dayFingerprintMonths(records,{semantic:true}),sessionFingerprint:value=>sessionFingerprint(value),sessionContentFingerprint:value=>sessionContentFingerprint(value)}),
     assets:freeze({get:assetId=>AssetData.get(assetId),verifyAliases:(catalogue,assetIds)=>verifyAnomalousPhysicalAssetAliases(catalogue,assetIds)}),
     files:freeze({protect:Exports.protect,unprotect:Exports.unprotect,run:Exports.run,scope:Exports.scope}),
     checkpoint:freeze({
@@ -860,6 +860,7 @@ async function valueFingerprint(value){
   return [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 function dayFingerprint(record){return valueFingerprint(record?sanitizeCurrentDailyRecord(record)||record:null);}
+ function dayContentFingerprint(record){return valueFingerprint(Reconciliation.savedDayContentValue(record?sanitizeCurrentDailyRecord(record)||record:null));}
 // The persisted reconciliation baseline retains the exact canonical Active
 // Session fingerprint. Changing that meaning in place would corrupt ancestry.
 // Handoff causality has its own semantic-content fingerprint below.
@@ -913,9 +914,9 @@ function rebaseSessionContentToOwner(local,incoming){
   });
 }
 // {month: {date: fingerprint}} for these Saved Days.
-async function dayFingerprintMonths(records){
+async function dayFingerprintMonths(records,{semantic=false}={}){
   const months=Object.create(null);
-  for(const record of records||[]){const date=String(record&&record.date||'');if(!/^\d{4}-\d{2}-\d{2}$/u.test(date))continue;const month=date.slice(0,7);(months[month]||(months[month]=Object.create(null)))[date]=await dayFingerprint(record);}
+  for(const record of records||[]){const date=String(record&&record.date||'');if(!/^\d{4}-\d{2}-\d{2}$/u.test(date))continue;const month=date.slice(0,7);(months[month]||(months[month]=Object.create(null)))[date]=await (semantic?dayContentFingerprint(record):dayFingerprint(record));}
   for(const month of Object.keys(months))months[month]=freeze(months[month]);
   return freeze(months);
 }
@@ -924,16 +925,19 @@ async function sharedBaseUpdate(parsed){
   const notes=AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.notes||{}),noteKeys=Object.keys(notes).sort(),updates=Object.create(null);
   for(const key of noteKeys)updates[key]=freeze({label:String(notes[key].label||''),text:String(notes[key].text||'')});
   const records=normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
-  return freeze({format:'study-director.reconciliation-base-update',version:3,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await personalFingerprint(parsed&&parsed.importedPersonalData),personalFields:await personalFields(parsed&&parsed.importedPersonalData),sessionFingerprint:await sessionFingerprint(parsed&&parsed.importedActiveSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await dayFingerprintMonths(records)});
+  return freeze({format:'study-director.reconciliation-base-update',version:4,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await personalFingerprint(parsed&&parsed.importedPersonalData),personalFields:await personalFields(parsed&&parsed.importedPersonalData),sessionFingerprint:await sessionFingerprint(parsed&&parsed.importedActiveSession||null),sessionContentFingerprint:await sessionContentFingerprint(parsed&&parsed.importedActiveSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await dayFingerprintMonths(records),semanticDays:await dayFingerprintMonths(records,{semantic:true})});
 }
 // Saved Days that differ and that one side has not changed since the shared
 // base: that side takes the other's (a record or a deletion).
 async function savedDaySettlement(plan,base){
   const settled=new Map(),items=base?plan.savedDays.filter(item=>item.conflict):[];if(!items.length)return settled;
-  const shared=await AppData.reconciliationBase.readDays(items.map(item=>item.date)).catch(()=>freeze({}));
+  const dates=items.map(item=>item.date),[shared,semanticShared]=await Promise.all([AppData.reconciliationBase.readDays(dates).catch(()=>freeze({})),AppData.reconciliationBase.readSemanticDays(dates).catch(()=>freeze({}))]);
   for(const item of items){
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);if(!local||!incoming)continue;
-    const baseValue=String(shared[item.date]||''),[mine,theirs]=await Promise.all([local,incoming].map(candidate=>candidate.kind==='record'?dayFingerprint(candidate.record):'' ));
+    const semanticBase=semanticShared[item.date],hasSemantic=typeof semanticBase==='string'&&/^[a-f0-9]{64}$/u.test(semanticBase),
+      baseValue=hasSemantic?semanticBase:String(shared[item.date]||''),
+      fingerprint=candidate=>candidate.kind!=='record'?'':hasSemantic?dayContentFingerprint(candidate.record):dayFingerprint(candidate.record),
+      [mine,theirs]=await Promise.all([fingerprint(local),fingerprint(incoming)]);
     if(mine===baseValue)settled.set(item.date,incoming.id);else if(theirs===baseValue)settled.set(item.date,local.id);
   }
   return settled;
@@ -964,7 +968,7 @@ const sessionDecision=(state,value=null,kept=null)=>freeze({state:String(state||
 async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim=null}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
   const canonicallyEqual=!local&&!incoming||!!local&&!!incoming&&Canonical.same(local,incoming);
-  const me=installationId(),shared=String(base&&base.sessionFingerprint||''),[mine,theirs,contentMine,contentTheirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming),sessionContentFingerprint(local),sessionContentFingerprint(incoming)]);
+  const me=installationId(),shared=String(base&&base.sessionFingerprint||''),contentShared=base?.sessionContentFingerprint,[mine,theirs,contentMine,contentTheirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming),sessionContentFingerprint(local),sessionContentFingerprint(incoming)]);
   const sameContent=!!contentMine&&contentMine===contentTheirs,claimApplies=!!(sessionClaim&&sessionClaim.applies),claimedHere=!!(claimApplies&&sessionClaim.state==='owned'&&sessionClaim.ownedHere),claimedAway=!!(claimApplies&&sessionClaim.state==='owned'&&!sessionClaim.ownedHere),releasedAway=!!(claimApplies&&sessionClaim.state==='released'&&!sessionClaim.ownedHere);
   const observed=claimApplies?String(sessionClaim.observedContentFingerprint||''):'',hasObserved=/^[a-f0-9]{64}$/u.test(observed);
   const savedLocalDay=local&&(parsed?.records||[]).find(record=>record?.recordKind==='study'&&record.date===local.date)||null;
@@ -973,7 +977,8 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   // ancestry. A separately acknowledged, canonically covered Saved Day can
   // also prove that retiring this local study evidence loses no work.
   // A raw cross-device revision or an unacknowledged coverage match cannot.
-  const unchangedFromShared=!!shared&&mine===shared;
+  const hasSemanticAncestor=typeof contentShared==='string',unchangedFromShared=!!shared&&
+    (hasSemanticAncestor?!!contentShared&&contentMine===contentShared:mine===shared);
   const durablyCoveredLocal=!!local&&savedCoversLocal&&sessionFullyAcknowledged(local);
 
   // This device is the old owner. The claim is the authoritative handoff
@@ -1056,8 +1061,8 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
     return merged&&!Canonical.same(merged,winner)?sessionDecision('graft',merged):sessionDecision(incomingWins?'incoming':'local');
   }
   if(!shared)return sessionDecision('');
-  if(mine===shared)return sessionDecision('incoming');
-  if(theirs===shared)return sessionDecision('local');
+  if((hasSemanticAncestor?contentMine===contentShared:mine===shared))return sessionDecision('incoming');
+  if((hasSemanticAncestor?contentTheirs===contentShared:theirs===shared))return sessionDecision('local');
   return sessionDecision('conflict');
 }
 // Complete Active Session reconciliation before touching another data domain.
