@@ -955,7 +955,13 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
   // Ownership transfer or a remote end cannot leave a former owner's timer
   // running after its local canonical session was replaced.
   if(sync&&hasActiveSession()&&(state==='ended'||state==='incoming'&&(!parsed.importedActiveSession||parsed.importedActiveSession.runningOn!==installationId()))){
+    const before=(await readCanonicalActiveSession()).value;
     await yieldSession({deferReview:true});
+    const frozen=(await readCanonicalActiveSession()).value;
+    // Yield may capture previously unpersisted focus/timer progress. The
+    // earlier settlement decision cannot silently discard that new evidence.
+    if(frozen&&!Canonical.same(ActiveSessionCodec.contentValue(before),ActiveSessionCodec.contentValue(frozen))&&
+        !(await keepSession(frozen)))return freeze({needsDecision:true});
   }
   if(sync&&state==='claimed-conflict'){
     const other=parsed.importedActiveSession||null;
