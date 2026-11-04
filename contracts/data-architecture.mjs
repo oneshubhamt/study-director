@@ -279,7 +279,7 @@ export const DATA_ARCHITECTURE=freeze({
       repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v7',{rebuildFrom:'external backup repository manifests and objects'}),
       managedProviderBackupPending:surface('operational','backup','operational','until the affected managed provider successfully publishes a later current backup or is explicitly disconnected','ManagedProviderBackupPending.v1'),
       repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v4'),
-      reconciliationBase:surface('reconciliation-base','host','protect','advance atomically when a version this device shares through Drive is placed there or caught up to','ReconciliationBase.v3')
+      reconciliationBase:surface('reconciliation-base','host','protect','advance atomically when a version this device shares through Drive is placed there or caught up to','ReconciliationBase.v4')
     }),
     prefixes:freeze({
       backupPreparationUnitPrefix:surface('derived-performance','repositories','operational','disposable; rebuild from canonical data after loss, uncertainty or representation change','BackupPreparationUnit.v1',{rebuildFrom:'portable canonical IndexedDB state'}),

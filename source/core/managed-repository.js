@@ -9,7 +9,7 @@ registry.define('managed-repository',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     configuration:freeze(['backupVersion','limits','logicalCaptureFormat','logicalCaptureVersion']),
-    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','dayFingerprints','sessionFingerprint']),
+    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','personalFields','dayFingerprints','sessionFingerprint']),
     assets:freeze(['get','verifyAliases']),
     files:freeze(['protect','unprotect','run','scope']),
     checkpoint:freeze(['capture','beginPreparation','readPreparationUnits','finalizePreparation','establishPreparationBaseline','assertCurrent','inspectVerifiedCapture','verifyVerifiedCapture','currentImportSignal']),
@@ -28,7 +28,7 @@ registry.define('managed-repository',1,()=>{
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
     const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
-    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,dayFingerprints:ports.persistence.dayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint})});
+    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,personalFields:ports.persistence.personalFields,dayFingerprints:ports.persistence.dayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint})});
     const AssetData=freeze({get:ports.assets.get,verifyAliases:ports.assets.verifyAliases});
     const Exports=ports.files;
     const captureLogicalCheckpoint=ports.checkpoint.capture,beginPreparationCapture=ports.checkpoint.beginPreparation,readPreparationUnits=ports.checkpoint.readPreparationUnits,finalizePreparationCapture=ports.checkpoint.finalizePreparation,establishPreparationBaseline=ports.checkpoint.establishPreparationBaseline,assertLogicalCheckpointCurrent=ports.checkpoint.assertCurrent,inspectVerifiedCapture=ports.checkpoint.inspectVerifiedCapture,verifyVerifiedCapture=ports.checkpoint.verifyVerifiedCapture,currentImportSignal=ports.checkpoint.currentImportSignal;
@@ -662,7 +662,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,pendingReviewIds:inventory.pendingReviewIds,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
       const updates=Object.create(null),deletes=[];for(const [key,state] of readNoteStates){if(state===null)deletes.push(key);else updates[key]=state;}
       candidateIndex=await repositoryPreparationIndexCandidate(preparation.epochToken,preparation.stamps,candidateEntries);if(!candidateIndex)throw new Error('Incremental repository preparation index could not be rebuilt.');
-      if(plan.baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:await daysUpdate(false)});
+      if(plan.baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),personalFields:readPersonal===undefined?null:await AppData.reconciliationBase.personalFields(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:await daysUpdate(false)});
     }else{
       capture=await captureLogicalCheckpoint(exportedAt,preparation?{includeAssetBlobs:false,assumeFlushed:true,requireCanonicalComplete:true}:{includeAssetBlobs:false,requireCanonicalComplete:true});
       for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));
@@ -672,7 +672,7 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       for(const review of capture.pendingReviewItems||[])await materializeStructured(PENDING_REVIEW_KIND,review.id,review);
       assetItems=[...(capture.assetItems||[])];
       const updates=Object.create(null),noteKeys=[];for(const note of capture.noteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
-      noteKeys.sort();if(baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await daysUpdate(true)});
+      noteKeys.sort();if(baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:3,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),personalFields:await AppData.reconciliationBase.personalFields(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await daysUpdate(true)});
     }
     const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,note:3,[PENDING_REVIEW_KIND]:4});
     for(const entry of [...candidateEntries.values()].filter(entry=>entry.present&&!repositoryPackableEntry(entry)).sort((a,b)=>(structuredRank[a.kind]??9)-(structuredRank[b.kind]??9)||String(a.key).localeCompare(String(b.key)))){

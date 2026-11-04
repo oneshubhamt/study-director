@@ -248,7 +248,7 @@ const ManagedRepository=ManagedRepositoryModule.createEngine(freeze({
   codec:BackupCodec,
   ports:freeze({
     configuration:freeze({backupVersion,limits:APP_LIMITS,logicalCaptureFormat:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,logicalCaptureVersion:LOGICAL_CHECKPOINT_CAPTURE_VERSION}),
-    persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:value=>personalFingerprint(value),dayFingerprints:records=>dayFingerprintMonths(records),sessionFingerprint:value=>sessionFingerprint(value)}),
+    persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:value=>personalFingerprint(value),personalFields:value=>personalFields(value),dayFingerprints:records=>dayFingerprintMonths(records),sessionFingerprint:value=>sessionFingerprint(value)}),
     assets:freeze({get:assetId=>AssetData.get(assetId),verifyAliases:(catalogue,assetIds)=>verifyAnomalousPhysicalAssetAliases(catalogue,assetIds)}),
     files:freeze({protect:Exports.protect,unprotect:Exports.unprotect,run:Exports.run,scope:Exports.scope}),
     checkpoint:freeze({
@@ -704,6 +704,36 @@ async function noteReconciliationAncestor(base,keys=[]){
   const notes=keys.length?await AppData.reconciliationBase.readNotes(keys).catch(()=>freeze({})):freeze({});
   return freeze({checkpointId:String(base.checkpointId),notes});
 }
+// Exact per-field causal evidence for one verified Portable Personal Data
+// snapshot. Absence, null, and an authored value have distinct hashes.
+const PERSONAL_PREFERENCE_KEYS=freeze(['studentName','theme','presentation','quote','practiceCueMode','fontScale','practiceTargetMs','soundMode']);
+const PERSONAL_NUDGE_KEYS=freeze(['present','enabled','sound','nudgeAfter','breakMinutes']);
+async function personalFieldFingerprint(present,value=null){
+  return valueFingerprint({present:present===true,value:present===true?value:null});
+}
+async function personalFields(value){
+  if(!value)return null;
+  const clean=BackupCodec.normalizePersonalData(value);if(!clean)throw new Error('Verified Personal Data is unavailable for field ancestry.');
+  const preferences=Object.create(null),nudge=Object.create(null),savedPlans=Object.create(null),
+    own=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key),nudged=clean.preferences.nudge!==null,
+    order=clean.plans.savedPlans.map(plan=>plan.id);
+  await Promise.all([
+    ...PERSONAL_PREFERENCE_KEYS.map(async key=>{preferences[key]=await personalFieldFingerprint(own(clean.preferences,key),clean.preferences[key]);}),
+    ...PERSONAL_NUDGE_KEYS.map(async key=>{
+      nudge[key]=key==='present'?await personalFieldFingerprint(true,nudged):
+        await personalFieldFingerprint(nudged&&own(clean.preferences.nudge,key),nudged?clean.preferences.nudge[key]:null);
+    }),
+    ...clean.plans.savedPlans.map(async plan=>{savedPlans[plan.id]=await personalFieldFingerprint(true,plan);})
+  ]);
+  const [draft,defaultId,savedPlanOrder]=await Promise.all([
+    personalFieldFingerprint(true,clean.plans.draft),
+    personalFieldFingerprint(true,clean.plans.defaultId),
+    personalFieldFingerprint(true,order)
+  ]);
+  return freeze({format:'study-director.reconciliation-personal-fields',version:1,
+    preferences:freeze(preferences),nudge:freeze(nudge),draft,defaultId,savedPlanOrder,
+    savedPlans:freeze(savedPlans),order:freeze(order)});
+}
 // Plans and settings are compared as one unit by fingerprint.
 async function personalFingerprint(value){return value?String(await Exports.run('checksum',{value:Canonical.signature(value),algorithm:'sha256'})):'';}
 // 'replace' or 'keep' when only one side changed plans and settings since the
@@ -800,7 +830,7 @@ async function sharedBaseUpdate(parsed){
   const notes=AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.notes||{}),noteKeys=Object.keys(notes).sort(),updates=Object.create(null);
   for(const key of noteKeys)updates[key]=freeze({label:String(notes[key].label||''),text:String(notes[key].text||'')});
   const records=normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
-  return freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await personalFingerprint(parsed&&parsed.importedPersonalData),sessionFingerprint:await sessionFingerprint(parsed&&parsed.importedActiveSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await dayFingerprintMonths(records)});
+  return freeze({format:'study-director.reconciliation-base-update',version:3,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await personalFingerprint(parsed&&parsed.importedPersonalData),personalFields:await personalFields(parsed&&parsed.importedPersonalData),sessionFingerprint:await sessionFingerprint(parsed&&parsed.importedActiveSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await dayFingerprintMonths(records)});
 }
 // Saved Days that differ and that one side has not changed since the shared
 // base: that side takes the other's (a record or a deletion).
