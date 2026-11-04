@@ -346,6 +346,26 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   assert.equal(state.notify,1,'only verified ownership is published as a local change');
   assert.equal(state.backgroundReleases,1);
 }
+// A local write can succeed before its read-back fails. Compensation must
+// conditionally compare inside IndexedDB, not trust an earlier standalone read.
+{
+  const t=acquiringHarness('compensation-readback');
+  await assert.rejects(t.transfer(),/readback failed before compensation/u);
+  assert.equal(t.state().conditionalWrites,1,'compensation must use canonical compare-and-write');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.equal(t.state().compensations,1);
+  assert.equal(t.state().marker,null);
+}
+{
+  const t=acquiringHarness('compensation-race');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  assert.equal(t.state().conditionalWrites,1);
+  assert.equal(t.state().current.snapshot.label,'new unshared local work',
+    'a competing write between read and compensation cannot be overwritten');
+  assert.equal(t.state().compensations,0);
+  assert.ok(t.state().marker);
+}
+
 // BF-1R2: a fresh installation displays its default without persisting
 // an independent Plan draft. Ownership transfer must accept canonical null.
 {
