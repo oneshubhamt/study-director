@@ -804,6 +804,74 @@ let syncWorld=null;
   assert.deepEqual(a.reviews.open(),[]);
 }
 
+// BF-2: a legacy v3 shared base has no field ancestry. Independent
+// changes must remain reviewable, never guessed from timestamps.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('Legacy ancestry');
+  const a={installationId:'inst_bf2_legacy_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const b={installationId:'inst_bf2_legacy_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  b.reconciliationBase=freeze({...b.reconciliationBase,version:3,personalFields:null});
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,quote:'Unshared locally'})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.theme,null,'v3 ancestry cannot falsely authorize a per-field automatic merge');
+  assert.equal(b.personal.preferences.quote,'Unshared locally');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1);
+}
+// Independently added saved-plan identities must merge, while competing
+// edits to one identity stay reviewable and preserve every unrelated plan.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('Saved-plan union'),
+    plan=(id,label)=>freeze({id,label,scheduleText:'08:00 | 60 | '+label+' | work | Ethics | pages | 8',
+      createdAt:'2026-08-31T10:00:00.000Z',updatedAt:'2026-08-31T10:00:00.000Z'});
+  const pA=plan('plan-bf2-independent-a','A plan'),pB=plan('plan-bf2-independent-b','B plan');
+  const a={installationId:'inst_bf2_plans_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const b={installationId:'inst_bf2_plans_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,plans:freeze({...a.personal.plans,savedPlans:freeze([pA])})});await A.upload();
+  b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,savedPlans:freeze([pB])})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual(new Set(b.personal.plans.savedPlans.map(x=>x.id)),new Set([pA.id,pB.id]),'distinct saved-plan additions merge without loss');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.personal.plans.savedPlans.length,2);
+  const change=(current,label)=>freeze({...current,label,scheduleText:'08:00 | 60 | '+label+' | work | Ethics | pages | 8',updatedAt:'2026-09-01T10:00:00.000Z'});
+  a.personal=freeze({...a.personal,plans:freeze({...a.personal.plans,
+    savedPlans:freeze(a.personal.plans.savedPlans.map(x=>x.id===pA.id?change(x,'A-side edit'):x))})});await A.upload();
+  b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,
+    savedPlans:freeze(b.personal.plans.savedPlans.map(x=>x.id===pA.id?change(x,'B-side edit'):x))})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.plans.savedPlans.find(x=>x.id===pA.id).label,'B-side edit');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1,'same-plan divergent edits remain reviewable');
+  b.keptSelections={['savedPlan:'+pA.id]:'use'};
+  assert.equal((await B.reviewKept()).reviewed,1);
+  b.keptSelections=null;
+  assert.equal(b.personal.plans.savedPlans.find(x=>x.id===pA.id).label,'A-side edit');
+  assert.equal(b.personal.plans.savedPlans.find(x=>x.id===pB.id).label,'B plan','another saved plan is untouched by the chosen version');
+}
+// Nested reminder values are independently reconciled, not treated as one
+// indivisible Personal Data field.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,original=personal('Nudge leaves'),
+    baseline=freeze({...original,preferences:freeze({...original.preferences,nudge:freeze({enabled:true,nudgeAfter:40,breakMinutes:6,sound:true})})});
+  const a={installationId:'inst_bf2_nudge_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:baseline,journal:null};
+  const b={installationId:'inst_bf2_nudge_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:baseline,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,nudge:freeze({...a.personal.preferences.nudge,nudgeAfter:50})})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,nudge:freeze({...b.personal.preferences.nudge,breakMinutes:10})})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.nudge.nudgeAfter,50);
+  assert.equal(b.personal.preferences.nudge.breakMinutes,10);
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0,'independent nudge leaves do not cause a false conflict');
+}
+
 // Restoring an older version reaches every device: the restoring device makes
 // it Drive's newest at its next upload, the other device takes it in at its
 // next sync, and versions kept for review on either device stay.
