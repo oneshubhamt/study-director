@@ -222,23 +222,24 @@ const acquireRuntime=[
   productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
   productionFunction('async function transferSessionOwnershipHere(session,')
 ].join('\n');
-function acquiringHarness(fault=''){
+function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
   let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0;
   const storage=new Map();
   const app={
-    document:{getElementById:id=>id==='plan-input'?{value:'SEPARATE-PLAN-DRAFT'}:null},
+    document:{getElementById:id=>id==='plan-input'?{value:fault==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
     navigator:{onLine:true},Date,Promise,Object,JSON,
     appCanMutate:()=>true,
+    getActiveDefaults:()=>({scheduleText:'FALLBACK DEFAULT'}),
     PlanDraftEditor:{flush:async()=>true},
-    PlanData:{settled:async()=>{if(fault==='draft-fail')throw new Error('draft write failed');}},
+    PlanData:{settled:async()=>{if(fault==='draft-fail')throw new Error('draft write failed');},readDraft:()=>draft},
     AppData:{
       local:{
         setJson:(key,value)=>(storage.set(key,structuredClone(value)),true),
         getJson:(key,fallback)=>storage.has(key)?storage.get(key):fallback,
         remove:key=>(storage.delete(key),true)
       },
-      planData:{read:async()=>({draft:'SEPARATE-PLAN-DRAFT'})},
+      planData:{read:async()=>({draft:fault==='draft-mismatch'?'OTHER DRAFT':draft})},
       activeSession:{
         save:async value=>{
           if(fault==='local-only'&&value.runningOn==='inst_handoff_new')
@@ -285,6 +286,21 @@ function acquiringHarness(fault=''){
   assert.equal(state.marker,null,'successful handoff clears its crash-recovery latch');
   assert.equal(state.notify,1,'only verified ownership is published as a local change');
   assert.equal(state.backgroundReleases,1);
+}
+// BF-1R2: a fresh installation displays its default without persisting
+// an independent Plan draft. Ownership transfer must accept canonical null.
+{
+  const t=acquiringHarness('',null);
+  const result=await t.transfer();
+  assert.equal(result.session.runningOn,'inst_handoff_new','Continue Here works with no saved Plan draft');
+  assert.equal(t.state().claims,1,'the default display is not silently written to draft storage');
+}
+// A changed visible draft or inconsistent canonical read-back stops before
+// any remote claim, rather than risking a silent draft overwrite.
+for(const fault of ['display-mismatch','draft-mismatch']){
+  const t=acquiringHarness(fault,null);
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_DRAFT_UNSAVED',fault+' must block an unsafe draft handoff');
+  assert.equal(t.state().claims,0,'no remote ownership claim precedes draft verification');
 }
 {
   const t=acquiringHarness('local-only');
