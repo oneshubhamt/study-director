@@ -66,7 +66,8 @@ assert.equal(codec.normalizePersonalFields(fields)?.version,1);
 assert.equal(codec.normalizePersonalFields({...fields,order:['plan-unknown']}),null,'unmatched saved-plan ids cannot prove ancestry');
 const legacy=freeze({format:'study-director.reconciliation-base',version:3,checkpointId:cp(6),establishedAt:new Date().toISOString(),noteCount:1,
   noteKeyFingerprint:await codec.keyFingerprint([S]),personalFingerprint:'a'.repeat(64),sessionFingerprint:''});
-assert.equal(codec.normalizeHeader(legacy)?.personalFields,null,'an existing v3 baseline is read but has unknown field ancestry');
+assert.equal(codec.normalizeHeader(legacy)?.personalFields,undefined,'an existing v3 baseline remains exactly canonical without invented field ancestry');
+assert.deepEqual(codec.normalizeHeader(legacy),legacy,'legacy v3 header remains byte-for-byte canonical under host metadata validation');
 
 // Plans and settings are one fingerprint: an update that did not read them keeps the base's.
 const sIdentity=await identity([S]),personalA='a'.repeat(64),personalB='b'.repeat(64);
@@ -101,6 +102,7 @@ assert.equal(codec.normalizeHeader({...await store.readHeader(),version:2}),null
 // ancestry is installed only after a verified baseline write.
 assert.equal((await store.readHeader()).sessionContentFingerprint,undefined,'legacy headers have no semantic ancestor field and retain their exact format');
 assert.deepEqual({...await store.readDayAncestry(['2026-11-01'],cp(14))},{'2026-11-01':{full:h('5'),semantic:null}},'legacy month rows retain the full hash but explicitly lack a semantic ancestor');
+assert.deepEqual(codec.normalizeDays({format:'study-director.reconciliation-base-days',version:1,month:'2026-11',days:{'2026-11-01':h('5')}},{suffix:'2026-11'}),{format:'study-director.reconciliation-base-days',version:1,month:'2026-11',days:{'2026-11-01':h('5')}},'legacy month rows remain canonical for host metadata validation');
 const v5Days=freeze({'2026-11':freeze({'2026-11-01':h('5'),'2026-11-02':h('6')}),'2026-12':freeze({'2026-12-01':h('7')})});
 const v5SemanticDays=freeze({'2026-11':freeze({'2026-11-01':h('8'),'2026-11-02':h('9')}),'2026-12':freeze({'2026-12-01':h('a')})});
 const v5=freeze({...full,version:4,sessionFingerprint:sessionB,sessionContentFingerprint:h('e'),days:v5Days,semanticDays:v5SemanticDays});
