@@ -25,10 +25,45 @@ registry.define('reconciliation-baseline',1,()=>{
     // A fingerprint is '' when the base had nothing (or did not know).
     function fingerprint(raw){return typeof raw==='string'&&(raw===''||HEX.test(raw));}
     function noteState(raw){if(!exactKeys(raw,['label','text']))return null;const label=labelValue(raw.label),text=textValue(raw.text);return label===null||text===null?null:freeze({label,text});}
+    const PREFERENCE_KEYS=freeze(['studentName','theme','presentation','quote','practiceCueMode','fontScale','practiceTargetMs','soundMode']);
+    const NUDGE_KEYS=freeze(['present','enabled','sound','nudgeAfter','breakMinutes']);
+    const PLAN_ID=/^plan-[a-z0-9-]{8,64}$/u;
+    // Only opaque hashes and stable plan ids are stored in the local header.
+    // A null map explicitly means no per-field ancestry is provable.
+    function normalizePersonalFields(raw){
+      if(raw===null)return null;
+      if(!exactKeys(raw,['format','version','preferences','nudge','draft','defaultId','savedPlanOrder','savedPlans','order'])||
+        raw.format!=='study-director.reconciliation-personal-fields'||raw.version!==1||
+        !exactKeys(raw.preferences,PREFERENCE_KEYS)||!exactKeys(raw.nudge,NUDGE_KEYS)||
+        ![raw.draft,raw.defaultId,raw.savedPlanOrder,...Object.values(raw.preferences),...Object.values(raw.nudge)].every(value=>typeof value==='string'&&HEX.test(value)))return null;
+      const plans=raw.savedPlans,order=raw.order;
+      if(!plans||typeof plans!=='object'||Array.isArray(plans)||!Array.isArray(order)||order.length>100||
+        Object.keys(plans).length!==order.length)return null;
+      const ids=new Set();
+      for(const id of order)if(typeof id!=='string'||!PLAN_ID.test(id)||ids.has(id)||!HEX.test(String(plans[id]||''))){return null;}else ids.add(id);
+      for(const id of Object.keys(plans))if(!ids.has(id))return null;
+      return freeze({format:'study-director.reconciliation-personal-fields',version:1,
+        preferences:freeze(Object.fromEntries(PREFERENCE_KEYS.map(key=>[key,raw.preferences[key]]))),
+        nudge:freeze(Object.fromEntries(NUDGE_KEYS.map(key=>[key,raw.nudge[key]]))),
+        draft:raw.draft,defaultId:raw.defaultId,savedPlanOrder:raw.savedPlanOrder,
+        savedPlans:freeze(Object.fromEntries(Object.entries(plans).sort(([a],[b])=>a.localeCompare(b)))),order:freeze([...order])});
+    }
     function normalizeHeader(value){
-      if(!value||!exactKeys(value,['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint','sessionFingerprint'])||value.format!=='study-director.reconciliation-base'||Number(value.version)!==3||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!Number.isFinite(Date.parse(String(value.establishedAt||''))))return null;
-      const noteCount=Number(value.noteCount);if(!Number.isInteger(noteCount)||noteCount<0||noteCount>Number(limits.maxNotes||1000)||!HEX.test(String(value.noteKeyFingerprint||''))||!fingerprint(value.personalFingerprint)||!fingerprint(value.sessionFingerprint))return null;
-      return freeze({format:'study-director.reconciliation-base',version:3,checkpointId:String(value.checkpointId),establishedAt:new Date(String(value.establishedAt)).toISOString(),noteCount,noteKeyFingerprint:String(value.noteKeyFingerprint),personalFingerprint:String(value.personalFingerprint),sessionFingerprint:String(value.sessionFingerprint)});
+      const legacy=value?.version===3,keys=legacy?
+        ['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint','sessionFingerprint']:
+        ['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint','sessionFingerprint','personalFields'];
+      if(!value||!exactKeys(value,keys)||value.format!=='study-director.reconciliation-base'||
+        (!legacy&&value.version!==4)||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||
+        !Number.isFinite(Date.parse(String(value.establishedAt||''))))return null;
+      const noteCount=Number(value.noteCount);
+      if(!Number.isInteger(noteCount)||noteCount<0||noteCount>Number(limits.maxNotes||1000)||
+        !HEX.test(String(value.noteKeyFingerprint||''))||!fingerprint(value.personalFingerprint)||!fingerprint(value.sessionFingerprint))return null;
+      const fields=legacy?null:normalizePersonalFields(value.personalFields);
+      if(!legacy&&value.personalFields!==null&&!fields||fields&&!value.personalFingerprint)return null;
+      return freeze({format:'study-director.reconciliation-base',version:legacy?3:4,
+        checkpointId:String(value.checkpointId),establishedAt:new Date(String(value.establishedAt)).toISOString(),
+        noteCount,noteKeyFingerprint:String(value.noteKeyFingerprint),personalFingerprint:String(value.personalFingerprint),
+        sessionFingerprint:String(value.sessionFingerprint),personalFields:fields});
     }
     function normalizeNote(value,context={}){
       if(!value||!exactKeys(value,['format','version','key','label','text'])||value.format!=='study-director.reconciliation-base-note'||Number(value.version)!==1)return null;
@@ -62,7 +97,7 @@ registry.define('reconciliation-baseline',1,()=>{
       if(!globalThis.crypto?.subtle?.digest)throw new Error('SHA-256 is unavailable for reconciliation baseline metadata.');
       return hex(await globalThis.crypto.subtle.digest('SHA-256',encoder.encode(JSON.stringify(normalized))));
     }
-    return freeze({format:'study-director.reconciliation-baseline-codec',contractVersion:1,normalizeHeader,normalizeNote,normalizeDays,normalizeDayUpdates,normalizeKeys,normalizeUpdates,keyFingerprint});
+    return freeze({format:'study-director.reconciliation-baseline-codec',contractVersion:1,normalizeHeader,normalizePersonalFields,normalizeNote,normalizeDays,normalizeDayUpdates,normalizeKeys,normalizeUpdates,keyFingerprint});
   }
   function createStore(input){
     exactObject(input,['codec','families','meta'],'Reconciliation baseline store input');
@@ -83,9 +118,9 @@ registry.define('reconciliation-baseline',1,()=>{
       for(const row of await Promise.all(months.map(async month=>codec.normalizeDays(await meta.read(families.days,month).catch(()=>null),{suffix:month}))))if(row)for(const [date,value] of Object.entries(row.days))if(wanted.has(date))out[date]=value;
       return freeze(out);
     }
-    const SPEC_KEYS=['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','sessionFingerprint','noteKeys','updates','deletes','days'];
+    const SPEC_KEYS=['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','personalFields','sessionFingerprint','noteKeys','updates','deletes','days'];
     async function write(checkpointId,spec){
-      const id=String(checkpointId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spec||!exactKeys(spec,SPEC_KEYS)||spec.format!=='study-director.reconciliation-base-update'||Number(spec.version)!==2)return false;
+      const id=String(checkpointId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spec||!exactKeys(spec,SPEC_KEYS)||spec.format!=='study-director.reconciliation-base-update'||spec.version!==3)return false;
       const full=spec.full===true,updates=codec.normalizeUpdates(spec.updates),deletes=codec.normalizeKeys(spec.deletes||[]),days=codec.normalizeDayUpdates(spec.days,{full}),baseCheckpointId=String(spec.baseCheckpointId||'');if(!updates||!deletes||!days||(!full&&!/^cp_[a-f0-9]{32}$/u.test(baseCheckpointId)))return false;
       let noteKeys=null,noteCount=Number(spec.noteCount),fingerprint=String(spec.noteKeyFingerprint||'');
       if(full){
@@ -95,10 +130,20 @@ registry.define('reconciliation-baseline',1,()=>{
         if(spec.noteKeys!==null||!Number.isInteger(noteCount)||noteCount<0||!/^[a-f0-9]{64}$/u.test(fingerprint))return false;
         const deleteSet=new Set(deletes);for(const key of Object.keys(updates))if(deleteSet.has(key))return false;
       }
-      // An update that did not read plans and settings, or the session, keeps the base's fingerprint (null).
-      const establishedAt=new Date().toISOString(),personal=spec.personalFingerprint,session=spec.sessionFingerprint,kept=(value,current)=>value===null?String(current||''):value;
-      const headerFor=current=>codec.normalizeHeader({format:'study-director.reconciliation-base',version:3,checkpointId:id,establishedAt,noteCount,noteKeyFingerprint:fingerprint,personalFingerprint:kept(personal,current&&current.personalFingerprint),sessionFingerprint:kept(session,current&&current.sessionFingerprint)});
-      if(full&&(personal===null||session===null)||!headerFor(null))return false;
+      // A checkpoint update that did not read Personal Data carries both
+      // its whole-object hash AND its per-field hashes forward unchanged.
+      // If Personal Data was read but field hashes were unavailable, clear
+      // the field ancestor rather than associating stale hashes with new data.
+      const establishedAt=new Date().toISOString(),personal=spec.personalFingerprint,
+        fields=spec.personalFields===null?null:codec.normalizePersonalFields(spec.personalFields),session=spec.sessionFingerprint,
+        kept=(value,current)=>value===null?String(current||''):value;
+      if(spec.personalFields!==null&&!fields||personal===null&&spec.personalFields!==null||
+        personal!==null&&personal!==''&&fields===null||full&&(personal===null||session===null))return false;
+      const headerFor=current=>codec.normalizeHeader({format:'study-director.reconciliation-base',version:4,checkpointId:id,establishedAt,noteCount,
+        noteKeyFingerprint:fingerprint,personalFingerprint:kept(personal,current&&current.personalFingerprint),
+        personalFields:personal===null?current?.personalFields||null:fields,
+        sessionFingerprint:kept(session,current&&current.sessionFingerprint)});
+      if(!headerFor(null))return false;
       return meta.transaction('readwrite',(view,tx,finish)=>{
         const currentHandle=view.get(families.header),noteHandle=full?view.getAll(families.notes):null,dayHandle=full?view.getAll(families.days):null,handles=[currentHandle,noteHandle,dayHandle].filter(Boolean);let ready=0;
         const fail=error=>{try{tx.abort();}catch{}finish(false,error);};
