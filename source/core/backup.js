@@ -743,6 +743,74 @@ async function personalSettled(base,local,incoming){
   const [mine,theirs]=await Promise.all([personalFingerprint(local),personalFingerprint(incoming)]);
   return mine===theirs?null:mine===shared?'replace':theirs===shared?'keep':null;
 }
+// A three-way decision is possible only when the last verified shared
+// checkpoint retained the exact per-field hashes. An absent plan is hashed
+// as absence; a null, a missing optional field and an authored value differ.
+async function reconcilePersonalFields(base,local,incoming){
+  const ancestry=base?.personalFields;
+  if(!ancestry||ancestry.version!==1||!local||!incoming)return null;
+  const mine=BackupCodec.normalizePersonalData(local),theirs=BackupCodec.normalizePersonalData(incoming);
+  if(!mine||!theirs)return null;
+  let conflicts=0;
+  const choose=async(leftPresent,leftValue,rightPresent,rightValue,ancestor)=>{
+    const [leftHash,rightHash]=await Promise.all([
+      personalFieldFingerprint(leftPresent,leftValue),personalFieldFingerprint(rightPresent,rightValue)
+    ]);
+    if(leftHash===rightHash||rightHash===ancestor)return freeze({present:leftPresent,value:leftValue});
+    if(leftHash===ancestor)return freeze({present:rightPresent,value:rightValue});
+    conflicts++;return freeze({present:leftPresent,value:leftValue});
+  };
+  const prefs={...mine.preferences},own=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key);
+  for(const key of PERSONAL_PREFERENCE_KEYS){
+    const chosen=await choose(own(mine.preferences,key),mine.preferences[key],own(theirs.preferences,key),theirs.preferences[key],ancestry.preferences[key]);
+    if(chosen.present)prefs[key]=chosen.value;else delete prefs[key];
+  }
+  const localNudge=mine.preferences.nudge,remoteNudge=theirs.preferences.nudge;
+  const present=(await choose(true,localNudge!==null,true,remoteNudge!==null,ancestry.nudge.present)).value;
+  if(!present)prefs.nudge=null;
+  else{
+    const nudge={};
+    for(const key of PERSONAL_NUDGE_KEYS.slice(1)){
+      const l=localNudge!==null&&own(localNudge,key),i=remoteNudge!==null&&own(remoteNudge,key);
+      const chosen=await choose(l,l?localNudge[key]:null,i,i?remoteNudge[key]:null,ancestry.nudge[key]);
+      if(chosen.present)nudge[key]=chosen.value;
+    }
+    prefs.nudge=nudge;
+  }
+  const draft=(await choose(true,mine.plans.draft,true,theirs.plans.draft,ancestry.draft)).value,
+    defaultId=(await choose(true,mine.plans.defaultId,true,theirs.plans.defaultId,ancestry.defaultId)).value,
+    localPlans=new Map(mine.plans.savedPlans.map(plan=>[plan.id,plan])),
+    remotePlans=new Map(theirs.plans.savedPlans.map(plan=>[plan.id,plan])),plans=new Map(),
+    allIds=new Set([...ancestry.order,...localPlans.keys(),...remotePlans.keys()]);
+  const absent=await personalFieldFingerprint(false);
+  for(const id of allIds){
+    const hasLocal=localPlans.has(id),hasRemote=remotePlans.has(id),
+      chosen=await choose(hasLocal,localPlans.get(id),hasRemote,remotePlans.get(id),ancestry.savedPlans[id]||absent);
+    if(chosen.present)plans.set(id,chosen.value);
+  }
+  // Additions to the saved-plan list need not be mistaken for an ordering
+  // conflict. Compare relative order only for unchanged baseline identities
+  // still present on both sides, then append independent additions.
+  const shared=new Set(ancestry.order.filter(id=>localPlans.has(id)&&remotePlans.has(id))),
+    baselineOrder=ancestry.order.filter(id=>shared.has(id)),
+    localOrder=mine.plans.savedPlans.map(plan=>plan.id),
+    remoteOrder=theirs.plans.savedPlans.map(plan=>plan.id),
+    localRelative=localOrder.filter(id=>shared.has(id)),
+    remoteRelative=remoteOrder.filter(id=>shared.has(id)),
+    localReordered=!Canonical.same(localRelative,baselineOrder),
+    remoteReordered=!Canonical.same(remoteRelative,baselineOrder);
+  if(localReordered&&remoteReordered&&!Canonical.same(localRelative,remoteRelative))conflicts++;
+  const preferred=!localReordered&&remoteReordered?remoteOrder:localOrder,
+    order=[...new Set([...preferred,...remoteOrder,...localOrder,...ancestry.order])].filter(id=>plans.has(id)),
+    result={version:2,preferences:prefs,plans:{draft,defaultId,savedPlans:order.map(id=>plans.get(id))}};
+  // A changed setting may be individually safe while its combined Plan
+  // default or reminder settings are invalid. Leave both sides reviewable.
+  if(plans.size>100)return freeze({value:mine,conflict:true,valid:false});
+  let canonical=null;
+  try{canonical=BackupCodec.normalizePersonalData(result);}catch{}
+  if(!canonical)return freeze({value:mine,conflict:true,valid:false});
+  return freeze({value:canonical,conflict:conflicts>0,valid:true});
+}
 // True when one side's plans and settings hold nothing the other's lack:
 // each setting unset or equal, the draft empty, the starter plan or equal,
 // every saved plan present and identical, and the default plan unset or equal.
@@ -1823,7 +1891,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const differingNotes=note?[]:impact.reconciliationPlan.notes.filter(item=>item.conflict&&notesTrashKey(item.key)).map(item=>item.key);
   const noteState=noteReconciliationState(impact.reconciliationPlan,differingNotes.length?await noteReconciliationAncestor(base,differingNotes):null);
   const settledDays=note?null:await savedDaySettlement(impact.reconciliationPlan,base);
-  const localPersonal=await personalExport({flush:false});let personal=missingOnly?null:await personalSettled(base,localPersonal,parsed.importedPersonalData);
+  const localPersonal=await personalExport({flush:false});let personal=missingOnly?null:await personalSettled(base,localPersonal,parsed.importedPersonalData),autoPersonal=null;
   // A sync settles every remaining difference itself: the newer version
   // shows and the other is kept for review.
   if(sync){
@@ -1833,13 +1901,16 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       // A side holding nothing the other lacks (a new device's start-up
       // state, say) takes the other's, and nothing is kept. Otherwise the
       // newer shows and the other is kept for review.
-      if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
+      const fieldResult=await reconcilePersonalFields(base,localPersonal,theirs);
+      if(fieldResult){
+        personal='keep';
+        autoPersonal=fieldResult.value;
+        if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+      }else if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
       else if(personalAddsNothing(theirs,localPersonal))personal='keep';
       else{
-        // A checkpoint-wide timestamp cannot establish ancestry for one
-        // particular setting, saved plan or independent working draft. If
-        // both sides have meaningful state and neither is proven unchanged
-        // from the shared base, preserve local values and review the remote.
+        // Without a matching field ancestor, preserve the local version and
+        // make individual differences available for a deliberate choice.
         personal='keep';
         if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
       }
@@ -1991,10 +2062,15 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(result.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
       await AppData.restoreJournal.mark(restoreId,'active-session-committed');return result;
     });
-    const localPersonal=rollbackJournal.importedPersonalData,personalChanged=!!parsed.importedPersonalData&&(decisions.plans==='replace'||decisions.personalSettings==='replace');
+    const localPersonal=rollbackJournal.importedPersonalData,
+      selectedPersonal=autoPersonal|| (parsed.importedPersonalData?
+        BackupCodec.normalizePersonalData(localPersonal?{version:2,
+          plans:decisions.plans==='replace'?parsed.importedPersonalData.plans:localPersonal.plans,
+          preferences:decisions.personalSettings==='replace'?parsed.importedPersonalData.preferences:localPersonal.preferences}:parsed.importedPersonalData):null),
+      personalChanged=!!selectedPersonal&&!Canonical.same(localPersonal,selectedPersonal);
     let committedPersonal=null;
     if(personalChanged){
-      const intendedPersonal=BackupCodec.normalizePersonalData(localPersonal?{version:2,plans:decisions.plans==='replace'?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions.personalSettings==='replace'?parsed.importedPersonalData.preferences:localPersonal.preferences}:parsed.importedPersonalData);
+      const intendedPersonal=selectedPersonal;
       if(!intendedPersonal)throw new Error('Resolved Personal Data is outside the current canonical schema.');
       committedPersonal=await runRestoreMutationStage('personal-data',async()=>{await AppData.restoreJournal.mark(restoreId,'applying-personal-data');await personalImport(intendedPersonal);const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));if(!committed||!Canonical.same(committed,intendedPersonal))throw new Error('Personal-data reconciliation commit did not match the resolved state.');return freeze(committed);});
     }
