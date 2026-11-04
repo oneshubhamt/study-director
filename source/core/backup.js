@@ -1302,25 +1302,34 @@ async function reviewKeptVersions({ref=''}={}){
   // sees it. Never compare or replace that draft from an unflushed snapshot.
   if(of('personal').length)await personalSettle();
   const noteIds=[...new Set(of('note').map(review=>review.ref))],noteRows=noteIds.length?await AppData.notes.readFreshItems(noteIds):[],notes=new Map(noteIds.map((id,index)=>[id,noteRows[index]||null]));
-  const days=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref)):[]).map(record=>[record.date,record]));
+  const days=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref),{requireCanonical:true}):[]).map(record=>[record.date,record]));
   const personal=of('personal').length?await personalExport({flush:false}):null,session=of('session').length?(await readCanonicalActiveSession()).value||null:null;
   // Each choice: 'keep' leaves this device's as it is (wait: the review stays
   // open), 'use' takes the kept version.
   const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
-  const when=review=>savedDayDecisionTimestamp(review.keptAt),day=(record,origin)=>record?savedDayChoiceDescription({kind:'record',record,local:origin==='here',sources:[{label:'Kept version',local:origin==='here'}]}):origin==='here'?'Not on this device.':'Deleted on the other device.';
+  const when=review=>savedDayDecisionTimestamp(review.keptAt);
   for(const review of reviews){
     const kept=review.kept;
     if(review.subject==='note'){
       const note=notes.get(review.ref);
-      if(!note)choice(review,'','Note · deleted here',`Another device changed this note after it was deleted here (kept ${when(review)}). Restore it from Recently deleted to compare.`,{label:'Keep for later',description:'The kept version waits.'},{label:'Discard the kept version',description:'Nothing changes here.'},true);
-      else if(!kept)choice(review,'',`Note · ${note.label}`,'Deleted on another device while it was edited here. It stays until you choose.',{label:'Keep the note',description:'It stays as it is.'},{label:'Delete it',description:'It moves to Recently deleted.'});
+      if(!note)choice(review,'','Note · absent here',`The kept alternative refers to a note absent here. ${keptReviewProvenance(review)} Restore it from Recently deleted if you need its contents.`,{label:'Keep for later',description:'The alternative stays available.'},{label:'Discard kept version',description:'No note is changed here.'},true);
+      else if(!kept)choice(review,'',`Note · ${note.label}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
       else{
-        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`The two titles differ; “${kept.label}” was kept for review (${when(review)}).`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
+        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Titles differ. ${keptReviewProvenance(review)}`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
         if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:`Kept ${when(review)}`,ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
       }
     }else if(review.subject==='savedDay'){
       const record=days.get(review.ref)||null;
-      if(record||kept)choice(review,'',`Saved Day · ${review.ref}`,'The two Saved-Day versions differ. One was kept for your choice; content ancestry may be unavailable.',{label:record?'Keep the current one':'Keep it deleted',description:day(record,'here')},{label:kept?'Use the kept version':'Delete it',description:day(kept,'kept')});
+      if(record||kept){
+        const differences=keptReviewChanges(savedDayReviewContent(record),savedDayReviewContent(kept),[
+          ['recordKind','record type'],['schedule','planned blocks'],['results','task results'],
+          ['practiceRuns','practice runs'],['realTimeSnapshot','time evidence'],
+          ['reflection','reflection'],['studyQuality','quality'],['quote','quote'],['carryForwardDraft','carry-forward']
+        ]);
+        choice(review,'',`Saved Day · ${review.ref}`,`${differences} ${keptReviewProvenance(review)}`,{
+          label:record?'Keep current Saved Day':'Keep absent',description:savedDayReviewSummary(record)
+        },{label:kept?'Use kept Saved Day':'Use kept deletion',description:savedDayReviewSummary(kept)});
+      }
     }else if(review.subject==='personal'){
       if(!personal){steps.push({id:'',review,part:'',wait:true});continue;}
       // The canonical PendingReview keeps the whole opposite Personal Data
@@ -1369,7 +1378,20 @@ async function reviewKeptVersions({ref=''}={}){
           label:'Keep this default',description:localPlans.get(personal.plans.defaultId)?.label||'No default'
         },{label:'Use kept default',description:remotePlans.get(kept.plans.defaultId)?.label||'No default'});
     }else if(review.subject==='session'){
-      choice(review,'','Active / suspended session',`Two session versions differ; one was kept for review (${when(review)}).`,{label:session?'Keep the current session':'Keep no session',description:''},{label:'Use the kept session',description:'It is set aside here, ready to continue.'});
+      const here=session||null,there=kept||null;
+      const differences=keptReviewChanges(here,there,[
+        ['date','study date'],['scheduleText','schedule'],['status','session status'],
+        ['runningOn','recorded owner'],['snapshot','study progress and Review']
+      ]);
+      const evidence=here&&there?keptReviewChanges(here.snapshot,there.snapshot,[
+        ['taskState','task outcomes'],['timerRuntime','timer state'],
+        ['practice','practice attempts'],['review','reflection/quality'],
+        ['scheduleAdjustments','schedule adjustments'],['latestCarryForward','carry-forward'],
+        ['currentTaskId','current block']
+      ]):'';
+      choice(review,'','Active / suspended session',`${differences} ${evidence} ${keptReviewProvenance(review)} Choosing the kept session suspends it here; it does not transfer a live timer.`,{
+        label:session?'Keep current session':'Keep no session',description:sessionReviewSummary(here)
+      },{label:'Use kept session (suspended)',description:sessionReviewSummary(there)});
     }
   }
   let picked=freeze({}),resolvedTexts=null;
