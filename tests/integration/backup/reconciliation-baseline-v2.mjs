@@ -100,7 +100,7 @@ assert.equal(codec.normalizeHeader({...await store.readHeader(),version:2}),null
 // BF-C4.1: existing full-record hashes stay readable while new semantic
 // ancestry is installed only after a verified baseline write.
 assert.equal((await store.readHeader()).sessionContentFingerprint,null,'legacy headers have unknown semantic ancestry');
-assert.deepEqual({...await store.readSemanticDays(['2026-11-01'])},{},'legacy month hashes cannot be reinterpreted as study evidence');
+assert.deepEqual({...await store.readDayAncestry(['2026-11-01'],cp(14))},{'2026-11-01':{full:h('5'),semantic:null}},'legacy month rows retain the full hash but explicitly lack a semantic ancestor');
 const v5Days=freeze({'2026-11':freeze({'2026-11-01':h('5'),'2026-11-02':h('6')}),'2026-12':freeze({'2026-12-01':h('7')})});
 const v5SemanticDays=freeze({'2026-11':freeze({'2026-11-01':h('8'),'2026-11-02':h('9')}),'2026-12':freeze({'2026-12-01':h('a')})});
 const v5=freeze({...full,version:4,sessionFingerprint:sessionB,sessionContentFingerprint:h('e'),days:v5Days,semanticDays:v5SemanticDays});
@@ -109,7 +109,7 @@ assert.equal((await store.readHeader()).version,5);
 assert.equal((await store.readHeader()).sessionFingerprint,sessionB,'old full-session hash is unchanged');
 assert.equal((await store.readHeader()).sessionContentFingerprint,h('e'),'the separate session content ancestor is recorded');
 assert.deepEqual({...await store.readDays(['2026-11-01','2026-11-02','2026-12-01'])},{'2026-11-01':h('5'),'2026-11-02':h('6'),'2026-12-01':h('7')},'full Day hashes retain their exact old meaning');
-assert.deepEqual({...await store.readSemanticDays(['2026-11-01','2026-11-02','2026-12-01'])},{'2026-11-01':h('8'),'2026-11-02':h('9'),'2026-12-01':h('a')},'the new semantic Day hashes are distinct');
+assert.deepEqual(Object.fromEntries(Object.entries(await store.readDayAncestry(['2026-11-01','2026-11-02','2026-12-01'],cp(15))).map(([date,row])=>[date,row.semantic])),{'2026-11-01':h('8'),'2026-11-02':h('9'),'2026-12-01':h('a')},'the new semantic Day hashes are paired with full hashes in one verified read');
 assert.equal(sharedStores.meta.get('reconciliationBaseDays:2026-11').value.version,2,'new semantics live alongside original days in a versioned month row');
 const novemberUnchanged=structuredClone(sharedStores.meta.get('reconciliationBaseDays:2026-11'));
 const noteOnly=freeze({...v5,full:false,baseCheckpointId:cp(15),noteCount:1,noteKeyFingerprint:(await store.readHeader()).noteKeyFingerprint,
@@ -119,12 +119,13 @@ assert.equal((await store.readHeader()).sessionContentFingerprint,h('e'));
 assert.deepEqual(sharedStores.meta.get('reconciliationBaseDays:2026-11'),novemberUnchanged,'an unchanged month is not rewritten');
 const updatedMonth=freeze({...noteOnly,baseCheckpointId:cp(16),days:freeze({'2026-12':freeze({'2026-12-01':h('b')})}),semanticDays:freeze({'2026-12':freeze({'2026-12-01':h('c')})})});
 assert.equal(await store.write(cp(17),updatedMonth),true);
-assert.deepEqual({...await store.readSemanticDays(['2026-11-01','2026-12-01'])},{'2026-11-01':h('8'),'2026-12-01':h('c')},'only the changed month gets fresh semantic ancestry');
+assert.deepEqual(Object.fromEntries(Object.entries(await store.readDayAncestry(['2026-11-01','2026-12-01'],cp(17))).map(([date,row])=>[date,row.semantic])),{'2026-11-01':h('8'),'2026-12-01':h('c')},'only the changed month gets fresh semantic ancestry');
 assert.deepEqual(sharedStores.meta.get('reconciliationBaseDays:2026-11'),novemberUnchanged);
 const beforeBad=await store.readHeader();
 assert.equal(await store.write(cp(18),freeze({...updatedMonth,baseCheckpointId:cp(17),semanticDays:freeze({'2026-12':freeze({'2026-12-02':h('c')})})})),false,'misaligned semantic/full Day dates cannot be accepted');
 assert.equal(await store.write(cp(18),freeze({...updatedMonth,baseCheckpointId:cp(17),sessionFingerprint:h('d'),sessionContentFingerprint:''})),false,'present session cannot have absent semantic content');
 assert.equal(await store.write(cp(18),freeze({...noteOnly,baseCheckpointId:cp(15)})),false,'stale base id cannot overwrite semantic ancestry');
 assert.deepEqual(await store.readHeader(),beforeBad,'invalid or stale writes preserve the last verified semantic baseline');
+await assert.rejects(store.readDayAncestry(['2026-11-01'],cp(16)),/ancestor changed/,'reads with an obsolete checkpoint id cannot reuse newer semantic ancestry');
 assert.equal(codec.normalizeHeader({...await store.readHeader(),sessionContentFingerprint:'bad'}),null,'corrupt semantic hashes fail validation');
 console.log(JSON.stringify({status:'PASS',suite:'reconciliation-baseline-v2',unchangedCheckpoint:'header-only',editedNote:'one-row',deletedNote:'one-row-delete',lazyReads:'keyed-only',staleBase:'fail-closed',days:'month-rows',session:'fingerprint'},null,2));
