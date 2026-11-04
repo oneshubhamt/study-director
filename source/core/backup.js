@@ -1407,11 +1407,12 @@ async function reviewKeptVersions({ref=''}={}){
     // those reviews wait for the next look.
     const still=new Set((await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt).map(review=>review.id)),fresh=noteIds.length?await AppData.notes.readFreshItems(noteIds):[];
     const changed=new Set(noteIds.filter((id,index)=>!Canonical.same(fresh[index]||null,notes.get(id))));
-    const freshDays=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref)):[]).map(record=>[record.date,record]));
+    const freshDays=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref),{requireCanonical:true}):[]).map(record=>[record.date,record]));
     for(const review of of('savedDay'))if(!Canonical.same(freshDays.get(review.ref)||null,days.get(review.ref)||null))changed.add(review.ref);
     if(personal&&!Canonical.same(await personalExport({flush:false}),personal))changed.add('personal');
     if(of('session').length&&(hasActiveSession()||!Canonical.same((await readCanonicalActiveSession()).value||null,session)))changed.add('session');
-    const done=reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&!changed.has(review.ref)),doneIds=new Set(done.map(review=>review.id)),chosen=(review,part)=>steps.some(step=>step.review===review&&step.part===part&&use(step));
+    const done=reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&!changed.has(review.ref)),
+      chosen=(review,part)=>steps.some(step=>step.review===review&&step.part===part&&use(step));
     // Validate cross-field saved-plan/default consistency before applying
     // Notes or Saved Days. Invalid combinations cannot partially apply.
     const personalSelection=done.some(review=>review.subject==='personal')?
@@ -1420,6 +1421,8 @@ async function reviewKeptVersions({ref=''}={}){
     // spanning unrelated domains. Prevalidate all choices; confirm the
     // canonical write and its replicated tombstone before the next decision.
     const now=new Date().toISOString(),intents=[];
+    const deletedDays=new Set(done.some(review=>review.subject==='savedDay'&&!review.kept&&chosen(review,''))?
+      (await AppData.deletionRecovery.savedDays()).map(item=>item.date):[]);
     for(const review of done){
       const noteItems=[],dayItems=[];let keptSession=null;
       if(review.subject==='note'){
@@ -1434,11 +1437,20 @@ async function reviewKeptVersions({ref=''}={}){
               noteItems.push(freeze({key:review.ref,changed:true,state:'record',value:freeze({...note,label,text,updatedAt:nextNoteRevision(note)})}));
           }
         }
-      }else if(review.subject==='savedDay'&&chosen(review,''))
-        dayItems.push(freeze(review.kept?
-          {date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}:
-          {date:review.ref,changed:true,state:'deleted',deletedAt:now}));
-      else if(review.subject==='session'&&chosen(review,''))keptSession=review.kept;
+      }else if(review.subject==='savedDay'&&chosen(review,'')){
+        if(review.kept){
+          // The selected content may already have been committed before an
+          // interrupted pending-review acknowledgement. Never rewrite its
+          // timestamp merely to retry the same explicit choice.
+          if(!Canonical.same(savedDayReviewContent(days.get(review.ref)),savedDayReviewContent(review.kept)))
+            dayItems.push(freeze({date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}));
+        }else if(days.has(review.ref)||!deletedDays.has(review.ref)){
+          // Absence alone is not a replicated deletion. Retry only if its
+          // canonical tombstone is also absent; the original operation may
+          // have written that tombstone before its review receipt failed.
+          dayItems.push(freeze({date:review.ref,changed:true,state:'deleted',deletedAt:now}));
+        }
+      }else if(review.subject==='session'&&chosen(review,'')&&!keptSessionAlreadyApplied(session,review.kept))keptSession=review.kept;
       intents.push(freeze({review,noteItems:freeze(noteItems),dayItems:freeze(dayItems),keptSession}));
     }
     let confirmed=0;
