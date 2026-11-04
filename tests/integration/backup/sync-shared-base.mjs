@@ -1318,6 +1318,23 @@ for(const variant of ['unchanged','late','last-tick']){
   assert.equal(oldCopies().length,lateWork||finalTick?1:0,'replay of an already settled day cannot enqueue a second review');
 }
 
+// A shared baseline that contained NO record does not justify treating an
+// explicit post-base deletion as unchanged against a separately created Day.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const date='2026-09-11',a={installationId:'inst_sem_absent_a',records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('absent'),activeSession:null,schedule:'',personal:personal('Absent QA'),journal:null},
+    b={installationId:'inst_sem_absent_b',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('Absent QA'),journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.records.set(date,record(date,'newly created on A','2026-09-11T10:00:00.000Z'));
+  b.deletions=[{date,deletedAt:'2026-09-11T18:00:00.000Z'}];
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  const pending=a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date);
+  assert.equal(pending.length,1,'independent creation versus explicit deletion stays reviewable without a shared record');
+  assert.equal(pending[0].kept?.reflection,'newly created on A','the newer deletion must not erase the only surviving study evidence');
+}
 // BF-C4.1: a real shared semantic ancestor prevents false reviews when
 // local changes only touch save metadata and the other device changes study.
 for(const variant of ['remote-edit','remote-delete','local-edit','both-edit']){
