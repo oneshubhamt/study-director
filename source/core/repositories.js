@@ -443,6 +443,23 @@ const planData=freeze({
     const token=issueWriteToken('restore Plan documents');if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
     return Meta.transaction('readwrite',(meta,tx,finish)=>{assertWriteToken(token,'restore Plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();meta.put('planDraft',value.draft,{updatedAt});meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true);};},{strict:true,abortMessage:'Plan document restore aborted'});
   },
+  // Save the three existing portable Personal Data records in one strict
+  // transaction. Neither a failed import nor a kept review can split them.
+  replacePortable:value=>{
+    const token=issueWriteToken('restore portable Plans and Preferences');
+    const clean=PersonalDataCodec.normalize(value),now=new Date().toISOString(),
+      portable=PersonalDataCodec.portablePreferences({...clean.preferences,version:2,updatedAt:now});
+    if(new TextEncoder().encode(JSON.stringify(clean.plans)).length>1024*1024)
+      throw new RangeError('Plan data exceeds its storage allowance.');
+    return Meta.transaction('readwrite',(meta,tx,finish)=>{
+      assertWriteToken(token,'restore portable Plans and Preferences');
+      stageCanonicalMutationEpoch(tx,['personalData']);
+      meta.put('planDraft',clean.plans.draft,{updatedAt:now});
+      meta.put('planLibrary',{savedPlans:clean.plans.savedPlans,defaultId:clean.plans.defaultId},{updatedAt:now});
+      meta.put('personalPreferences',portable,{updatedAt:now});
+      tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,freeze(portable));};
+    },{strict:true,abortMessage:'Portable Plans and Preferences restore aborted'});
+  },
   read:async()=>{const [draft,library]=await Promise.all([Meta.read('planDraft'),Meta.read('planLibrary')]);return {draft:draft??null,savedPlans:library?.savedPlans||[],defaultId:library?.defaultId||null};},
   writeDraft:(value,options={})=>{if(value!==null&&(typeof value!=='string'||value.length>APP_LIMITS.maxScheduleChars))throw new RangeError('Plan draft exceeds its text limit.');return writePlanMeta('planDraft',value,options);},
   writeLibrary:(value,options={})=>writePlanMeta('planLibrary',value,{...options,strictDurability:true})

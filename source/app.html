@@ -8796,22 +8796,21 @@ const PlanData=(()=>{
     if(flush&&appCanMutate()){if(await PlanDraftEditor.flush({backupCapture})===false)throw new Error('Save the current Plan draft before exporting.');await settled({backupCapture});}
     return PersonalDataCodec.normalize({version:2,plans:await AppData.planData.read(),preferences:await preferences()});
   }
-  async function applyPreferences(raw){
-    const clean=PersonalDataCodec.preferences(raw);
-    const portable=await AppData.personalPreferences.write({...clean,version:2,updatedAt:new Date().toISOString()});
-    acceptProtectedPreferences(portable);
-    refreshAppearanceMirrors(portable);
-    applyPortablePreferencesToRuntime(portable);
-  }
   async function importData(value){
     const clean=PersonalDataCodec.normalize(value);
-    // A failed pending local edit is not permission to overwrite its draft
-    // during an otherwise successful import or background sync.
+    // A failed local edit cannot be overwritten by an import. The canonical
+    // Plans and Preferences commit together before the runtime adopts them.
     await settled();
-    await enqueue(async()=>{await AppData.planData.replace(clean.plans);state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;});await applyPreferences(clean.preferences);
+    await enqueue(async()=>{
+      const portable=await AppData.planData.replacePortable(clean);
+      state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;
+      acceptProtectedPreferences(portable);
+      refreshAppearanceMirrors(portable);
+      applyPortablePreferencesToRuntime(portable);
+      return true;
+    });
     const input=document.getElementById('plan-input'),draftText=String(clean.plans.draft??getActiveDefaults().scheduleText);if(input)input.value=draftText;
-    // Personal Data import may replace a working draft, but cannot apply it
-    // to today's session or initiate editing without the person's action.
+    // An imported draft never applies a session or enters edit mode.
     PlanDraftEditor.preview({silent:true,enterDraft:false});PlanRuntime.savedPlans.render();
   }
   async function verify(value){

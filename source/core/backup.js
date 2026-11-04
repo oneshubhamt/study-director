@@ -1326,7 +1326,7 @@ async function reviewKeptVersions({ref=''}={}){
     }
   }
   let picked=freeze({}),resolvedTexts=null;
-  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync retained differences it could not safely settle. This device stays selected; choose exactly which kept values to apply.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
+  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync retained differences it could not safely settle. Choose exactly which values to apply. Each kept version is saved and confirmed separately; if a later choice fails, earlier confirmed choices remain and the rest can be retried.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   if(texts.length){resolvedTexts=await NoteReconciliation.resolve(freeze({conflicts:freeze(texts),incomingAssets:freeze([]),purpose:'kept'}));if(!resolvedTexts)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   const use=step=>picked[step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
   return runExclusive('review-kept-versions',()=>withPersistenceSuppressed(async()=>{
@@ -1344,28 +1344,55 @@ async function reviewKeptVersions({ref=''}={}){
     // Notes or Saved Days. Invalid combinations cannot partially apply.
     const personalSelection=done.some(review=>review.subject==='personal')?
       selectedKeptPersonal(personal,done.find(review=>review.subject==='personal'),picked):null;
-    const noteItems=[],dayItems=[],now=new Date().toISOString();let keptSession=null;
+    // A kept version is an independent decision, NOT an implicit transaction
+    // spanning unrelated domains. Prevalidate all choices; confirm the
+    // canonical write and its replicated tombstone before the next decision.
+    const now=new Date().toISOString(),intents=[];
     for(const review of done){
+      const noteItems=[],dayItems=[];let keptSession=null;
       if(review.subject==='note'){
-        const note=notes.get(review.ref);if(!note)continue;
-        if(!review.kept){if(chosen(review,''))noteItems.push(freeze({key:review.ref,changed:true,state:'deleted',deletedAt:now}));continue;}
-        const label=chosen(review,'label')?review.kept.label:note.label,text=resolvedTexts&&resolvedTexts.notes[review.ref]?String(resolvedTexts.notes[review.ref].text):note.text;
-        if(label!==note.label||text!==note.text)noteItems.push(freeze({key:review.ref,changed:true,state:'record',value:freeze({...note,label,text,updatedAt:nextNoteRevision(note)})}));
-      }else if(review.subject==='savedDay'&&chosen(review,''))dayItems.push(freeze(review.kept?{date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}:{date:review.ref,changed:true,state:'deleted',deletedAt:now}));
+        const note=notes.get(review.ref);
+        if(note){
+          if(!review.kept){
+            if(chosen(review,''))noteItems.push(freeze({key:review.ref,changed:true,state:'deleted',deletedAt:now}));
+          }else{
+            const label=chosen(review,'label')?review.kept.label:note.label,
+              text=resolvedTexts&&resolvedTexts.notes[review.ref]?String(resolvedTexts.notes[review.ref].text):note.text;
+            if(label!==note.label||text!==note.text)
+              noteItems.push(freeze({key:review.ref,changed:true,state:'record',value:freeze({...note,label,text,updatedAt:nextNoteRevision(note)})}));
+          }
+        }
+      }else if(review.subject==='savedDay'&&chosen(review,''))
+        dayItems.push(freeze(review.kept?
+          {date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}:
+          {date:review.ref,changed:true,state:'deleted',deletedAt:now}));
       else if(review.subject==='session'&&chosen(review,''))keptSession=review.kept;
+      intents.push(freeze({review,noteItems:freeze(noteItems),dayItems:freeze(dayItems),keptSession}));
     }
-    if(noteItems.length)await applyResolvedNotes(freeze({notes:freeze(noteItems)}));
-    if(dayItems.length)await applyResolvedSavedDays(freeze({savedDays:freeze(dayItems),sourcePlan:freeze({savedDays:freeze([])})}),null,()=>{});
-    if(personalSelection&&!Canonical.same(personalSelection,personal)){
-      await personalImport(personalSelection);
-      const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));
-      if(!committed||!Canonical.same(committed,personalSelection))
-        throw new Error('The selected Personal Data did not reach canonical storage. The review remains open.');
+    let confirmed=0;
+    try{
+      for(const {review,noteItems,dayItems,keptSession} of intents){
+        if(noteItems.length)await applyResolvedNotes(freeze({notes:noteItems}));
+        if(dayItems.length)await applyResolvedSavedDays(freeze({savedDays:dayItems,sourcePlan:freeze({savedDays:freeze([])})}),null,()=>{});
+        if(review.subject==='personal'&&personalSelection&&!Canonical.same(personalSelection,personal)){
+          await personalImport(personalSelection);
+          const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));
+          if(!committed||!Canonical.same(committed,personalSelection))
+            throw new Error('The selected Personal Data did not reach canonical storage. The review remains open.');
+        }
+        if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
+        await AppData.pendingReviews.resolve([review.id]);
+        const [receipt]=await AppData.pendingReviews.readItems([review.id]);
+        if(!receipt?.resolvedAt)throw new Error('The kept-version acknowledgement could not be verified. This version remains available to review.');
+        confirmed++;
+      }
+    }catch(error){
+      OperationDiagnostics.mark('kept-review-incomplete',{confirmed,requested:done.length,reason:'commit-or-receipt-failed'});
+      if(confirmed)throw new Error(`${confirmed} of ${done.length} kept versions confirmed. Earlier choices remain applied; other versions remain available. Retry after correcting the storage problem.`,{cause:error});
+      throw error;
     }
-    if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
-    if(doneIds.size)await AppData.pendingReviews.resolve([...doneIds]);
     try{libraryChanged();}catch(error){AppDiagnostics.capture('backup.kept-review-render',error,'warn');}
-    return freeze({reviewed:doneIds.size,left:waiting.length-doneIds.size,changed:reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&changed.has(review.ref)).length});
+    return freeze({reviewed:confirmed,left:waiting.length-confirmed,changed:reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&changed.has(review.ref)).length});
   }));
 }
 function noteTitleGroup(titles){

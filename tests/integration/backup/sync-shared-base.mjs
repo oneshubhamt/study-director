@@ -804,6 +804,33 @@ let syncWorld=null;
   assert.deepEqual(a.reviews.open(),[]);
 }
 
+// BF-2 closure: a later-domain failure cannot hide earlier commits or
+// retire a review whose canonical Personal Data write did not succeed.
+{
+  const date='2026-08-01',local=personal('Local reviewer'),kept=personal('Kept reviewer');
+  const state={installationId:'inst_bf2_bulk_review',records:new Map([[date,record(date,'Local day')]]),
+    deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  const savedDay=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:record(date,'Kept day'),
+    keptAt:'2026-08-20T10:00:00.000Z'});
+  const personalReview=pendingReviewCodec.create({subject:'personal',ref:'personal',kept,
+    keptAt:'2026-08-20T11:00:00.000Z'});
+  await state.reviews.ports.pendingReviewsMerge([savedDay,personalReview]);
+  const h=createHarness(state);state.keptChoice='use';state.failPersonalImport=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/1 of 2 kept versions confirmed/u,
+    'a later failed domain reports independently committed choices');
+  assert.equal(state.records.get(date)?.reflection,'Kept day');
+  const [receipt]=await state.reviews.ports.pendingReviewsReadItems([savedDay.id]);
+  assert.ok(receipt?.resolvedAt,'the completed day has a replicated acknowledgement');
+  assert.deepEqual(state.reviews.open().map(review=>review.id),[personalReview.id],
+    'the failed Personal Data version is the only outstanding review');
+  assert.equal(state.personal.preferences.studentName,'Local reviewer');
+  state.failPersonalImport=false;
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(state.personal.preferences.studentName,'Kept reviewer');
+  assert.deepEqual(state.reviews.open(),[],'retry neither replays nor loses an earlier choice');
+}
+
 // BF-2: a legacy v3 shared base has no field ancestry. Independent
 // changes must remain reviewable, never guessed from timestamps.
 {
