@@ -1320,7 +1320,10 @@ async function reviewKeptVersions({ref=''}={}){
       }
     }else if(review.subject==='savedDay'){
       const record=days.get(review.ref)||null;
-      if(record||kept){
+      {
+        // Even if a previous attempt already deleted the local record, ask
+        // for an explicit decision while its review receipt remains open.
+        // A null kept copy is a deletion alternative, not an origin claim.
         const differences=keptReviewChanges(savedDayReviewContent(record),savedDayReviewContent(kept),[
           ['recordKind','record type'],['schedule','planned blocks'],['results','task results'],
           ['practiceRuns','practice runs'],['realTimeSnapshot','time evidence'],
