@@ -97,7 +97,7 @@ assert.equal(reconciliation.resolvePlan(noteDeletionPlan,{notes:{Live:incomingNo
 
 assert.throws(()=>reconciliation.createPlan({sources:[{id:'a'},{id:'b'}]}),/requires exactly local and incoming/u,'The production reconciliation API must reject the retired N-way shape.');
 assert.throws(()=>reconciliation.createPlan({local:{id:'local'},incoming:{id:'incoming'},third:{id:'third'}}),/requires exactly local and incoming/u,'The pairwise reconciliation API must reject unexpected top-level participants or metadata.');
-assert.deepEqual(Object.keys(reconciliation).sort(),['contractVersion','createPlan','format','resolvePlan','summarizePlan'],'Dead reconciliation APIs must not remain public.');
+assert.deepEqual(Object.keys(reconciliation).sort(),['contractVersion','createPlan','format','resolvePlan','savedDayContentValue','summarizePlan'],'Dead reconciliation APIs must not remain public.');
 
 // Machine identities must not collide across punctuation, Unicode or truncated labels.
 const collisionKeys=['a b','a_b','हिन्दी','中文','x'.repeat(130)+'a','x'.repeat(130)+'b'];
