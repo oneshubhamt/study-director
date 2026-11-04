@@ -739,7 +739,8 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
     ['exact',saved,snapshot,true],
     ['different reflection',{...saved,reflection:'Different'},snapshot,false],
     ['different focus',{...saved,results:{'ethics-1':{...saved.results['ethics-1'],actualSeconds:200}}},snapshot,false],
-    ['different saved-day revision',{...saved,sourceRevision:8},snapshot,false],
+    ['different saved-day revision',{...saved,sourceRevision:8},snapshot,true],
+    ['later preserved progress',{...saved,sourceRevision:99,results:{'ethics-1':{...saved.results['ethics-1'],completion:75,done:2,actualSeconds:500}}},snapshot,true],
     ['different applied schedule',{...saved,schedule:[{...row,name:'Other Work'}]},snapshot,false],
     ['different practice evidence',saved,{...snapshot,practice:{runs:[{id:'unrecorded'}]}},false],
     ['unacknowledged session',saved,{...snapshot,savedRevision:6},false],
@@ -775,11 +776,10 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
     ['no session','missing',true,false],
     ['strict Saved Day read fails','failed-day-read',true,false]
   ]){
-    const cache=new Set(),pending=new Map(),session={date,snapshot:{contentRevision:7,savedRevision:mode==='unsaved'?6:7}};
+    const session={date,snapshot:{contentRevision:7,savedRevision:mode==='unsaved'?6:7}};
     let dayReads=0;
     const context=vm.createContext({
       daySaveDirty:()=>false,
-      savedRecordDates:cache,savedRecordCheckPromises:pending,
       cleanDayRevision:v=>Number(v)||0,
       AppData:{
         activeSession:{load:async()=>({ok:true,value:mode==='missing'?null:session,storage:{idb:mode!=='rescue'}})},
@@ -788,15 +788,15 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
           verifyCanonical:async()=>true
         }
       },
-      DailyRecordCodec:{savedDayCoversSessionEvidence:()=>covered},
+      DailyRecordCodec:{savedDayCoversSessionEvidence:(day,value,options)=>{assert.equal(options.allowAdvances,true);return covered;}},
       AppDiagnostics:{capture:()=>{}},
       Object
     });
     vm.runInContext(src+'\nglobalThis.hasSaved=savedRecordExistsForDate;',context);
     assert.equal(await context.hasSaved(date),expected,label);
-    assert.equal(cache.has(date),expected,label+' memoization');
     assert.equal(await context.hasSaved(date),expected,label+' replay');
-    assert.equal(dayReads,expected?1:mode==='failed-day-read'?2:mode==='committed'?2:0,label+' canonical query gate');
+    assert.equal(dayReads,['missing','unsaved','rescue'].includes(mode)?0:2,
+      label+' must recheck canonical storage on every eligible reminder');
   }
 }
 
