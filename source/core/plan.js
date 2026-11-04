@@ -560,7 +560,7 @@ function applySchedule(options={}){
   // A user-authored Plan may apply only after its exact working text was
   // committed. Preserve invalid text in storage too, even when Apply rejects
   // its syntax. Never silently continue after a failed asynchronous save.
-  return Promise.resolve(PlanDraftEditor.save()).then(saved=>{
+  return Promise.resolve(PlanDraftEditor.save({strictDurability:true})).then(saved=>{
     if(saved!==true||!ownership.canMutate())return false;
     return apply();
   });
@@ -643,7 +643,7 @@ const PlanDraftEditor=(()=>{
       setPlanStatus(projection.firstActionableError||'Complete every required field before applying.',false);
       return false;
     }
-    if(!await save())return false;
+    if(!await save({strictDurability:true}))return false;
     if(!draftMode||!ownership.canMutate()||getPlanDraftText()!==draftText){
       setPlanStatus('The working draft changed while saving. Review it and press Done again.',false);
       return false;

@@ -173,5 +173,18 @@ const preferences=await h.app.personalPreferences.read();
 for(const [key,value] of Object.entries(after.preferences))
   assert.deepEqual(preferences[key],value,`portable setting ${key} publishes with Plans`);
 assert.ok(h.stores.meta.has('canonicalMutationEpoch'),'the combined commit carries canonical mutation provenance');
+
+// Explicit user Apply/Done must use the same strict IDB durability boundary,
+// while a failed write must leave the previous canonical draft intact.
+const strictBeforeDraft=h.idbDurability.strict;
+controls.failNextMetaWrite=true;
+await assert.rejects(h.app.planData.writeDraft('unsafely rejected',{strictDurability:true}),
+  /injected appMeta write failure/u,'explicit Plan save rejects a failed strict write');
+assert.equal((await h.app.planData.read()).draft,after.plans.draft,
+  'a failed strict Plan write does not replace the canonical draft');
+await h.app.planData.writeDraft('strict Plan saved',{strictDurability:true});
+assert.equal(h.idbDurability.strict,strictBeforeDraft+2,
+  'failed and completed explicit Plan writes each use the existing strict transaction path');
+assert.equal((await h.app.planData.read()).draft,'strict Plan saved');
 console.log(JSON.stringify({status:'PASS',suite:'portable-personal-atomicity',strictCommits:2,rolledBackOnFailure:true,planAndPreferencesTogether:true}));
 }

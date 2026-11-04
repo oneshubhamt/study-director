@@ -48,7 +48,7 @@ const scheduleTextFromRows=rows=>'ROW:'+JSON.stringify(rows);
 const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
-let blockedWrite=null,canonicalDraft=null;
+let blockedWrite=null,canonicalDraft=null;const saveOptions=[];
 const feedback=[];
 const viewFunctions={
   on:()=>{},textEl:(tag,cls,value)=>{const node=new Node(tag);node.className=cls;node.textContent=value;return node;},
@@ -93,8 +93,8 @@ const ports=Object.freeze({
     readDraft:()=>canonicalDraft,
     readLibrary:()=>({savedPlans:[],defaultId:null}),
     writeLibrary:async()=>true,
-    writeDraft:async value=>{
-      draftWrites++;
+    writeDraft:async(value,options={})=>{
+      draftWrites++;saveOptions.push({...options});
       if(blockedWrite)await blockedWrite;
       if(writeFailure)return false;
       canonicalDraft=value;return true;
@@ -155,6 +155,7 @@ writeFailure=true;
 const beforeApply=applyCount,beforeFailWrites=draftWrites;
 assert.equal(await plan.apply(),false);
 assert.equal(draftWrites,beforeFailWrites+1);
+assert.equal(saveOptions.at(-1).strictDurability,true,'Apply requests a strict IndexedDB draft write');
 assert.equal(applyCount,beforeApply);
 assert.equal(tasks[0].name,'Live applied');
 assert.ok(feedback.some(item=>String(item.message||'').includes('Draft not saved')));
@@ -180,6 +181,7 @@ assert.equal(state().label,'EDITING DRAFT');
 const beforeDoneWrites=draftWrites,beforeDoneApply=applyCount;
 assert.equal(await plan.draft.confirm(),true);
 assert.equal(draftWrites,beforeDoneWrites+1);
+assert.equal(saveOptions.at(-1).strictDurability,true,'Done requests one strict draft write');
 assert.equal(applyCount,beforeDoneApply+1);
 assert.equal(state().label,'LIVE');
 

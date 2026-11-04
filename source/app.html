@@ -8803,8 +8803,8 @@ const PlanData=(()=>{
       if(libraryBytes+new TextEncoder().encode(JSON.stringify(value)).length+9>PersonalDataCodec.maxBytes)throw new RangeError('Plans and draft exceed the 1 MiB allowance.');
       // The cache only proves what this page wrote; a forced write (or a browser
       // data clear, which resets the cache) must reach storage again.
-      if(persistedDraft===value&&options.force!==true){failure=null;return true;}
-      await AppData.planData.writeDraft(value,{ownershipToken:token,allowHydrating:!!options.allowHydrating,backupCapture:options.backupCapture===true});persistedDraft=value;failure=null;return true;
+      if(persistedDraft===value&&options.force!==true&&options.strictDurability!==true){failure=null;return true;}
+      await AppData.planData.writeDraft(value,{ownershipToken:token,allowHydrating:!!options.allowHydrating,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true});persistedDraft=value;failure=null;return true;
     },options);
   }
   // Browser data was cleared while this page stayed open. Write back the draft
