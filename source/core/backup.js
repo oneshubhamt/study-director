@@ -881,21 +881,24 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
 
   // Even an identical checkpoint may predate a newer verified ownership claim.
   if(canonicallyEqual)return sessionDecision('same');
+  // A newer study day on Drive may already include the canonical Saved Day
+  // for this device's older session. Decide that day-boundary transition
+  // BEFORE treating two Active Sessions as independent unsaved work.
+  const newerRemoteDay=sync&&!!local&&!!incoming&&incoming.date>local.date;
+  const savedOldDay=newerRemoteDay&&Array.isArray(parsed?.records)&&parsed.records.some(record=>record?.recordKind==='study'&&record.date===local.date);
+  if(savedOldDay){
+    // Exact shared-session ancestry proves the local side did not add work
+    // after its last common checkpoint. Without that proof, preserve its
+    // full session for review before adopting the later study day.
+    return sessionDecision(shared&&mine===shared?'incoming':'ended');
+  }
   const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
-  // Ownership transfer is meaningful only within the same study session/day.
-  // A different-date Active Session is independent unsaved work, never a
-  // takeover merely because another installation owns it.
+  if(ended)return sessionDecision(mine===shared?'incoming':'ended');
+  // Two genuinely unsaved days are independent; never choose their owner
+  // by timestamp. No Saved Day above has justified ending the older one.
   const differentSession=!!local&&!!incoming&&local.date!==incoming.date;
-  // Independent study days are not competing versions of one running session.
-  // Keep this device's session authoritative during sync; retain the remote
-  // session for review instead of allowing timestamps to displace it.
   if(differentSession)return sync?sessionDecision('local',null,incoming):sessionDecision('conflict');
   const takenOver=hold&&!!local&&!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me;
-  // A verified Saved Day on the other side is an explicit end-of-session
-  // transition. It must outrank the ordinary "keep the currently running
-  // local session during sync" hold rule, otherwise the stale recovery row
-  // survives forever and keeps generating earlier-day warnings.
-  if(ended)return sessionDecision(mine===shared?'incoming':'ended');
   if(takenOver){
     if(sameContent){
       const merged=mergeSessionAcknowledgement(incoming,local);
