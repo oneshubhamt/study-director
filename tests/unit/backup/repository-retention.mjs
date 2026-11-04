@@ -13,7 +13,7 @@ const repository=registry.require('managed-repository',1).createEngine(freeze({
   codec:freeze({countShape:value=>value,utf8Bytes:value=>new TextEncoder().encode(String(value)),compressionSupported:()=>false,assetIds:()=>[]}),
   ports:freeze({
     configuration:freeze({backupVersion:1,limits:freeze({}),logicalCaptureFormat:'qa.capture',logicalCaptureVersion:1}),
-    persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused,personalFingerprint:unused,personalFields:unused,dayFingerprints:unused,sessionFingerprint:unused}),assets:freeze({get:unused,verifyAliases:unused}),
+    persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused,personalFingerprint:unused,personalFields:unused,dayFingerprints:unused,semanticDayFingerprints:unused,sessionFingerprint:unused,sessionContentFingerprint:unused}),assets:freeze({get:unused,verifyAliases:unused}),
     files:freeze({protect:unused,unprotect:unused,run:unused,scope:unused}),
     checkpoint:freeze({capture:unused,beginPreparation:unused,readPreparationUnits:unused,finalizePreparation:unused,establishPreparationBaseline:unused,assertCurrent:unused,inspectVerifiedCapture:unused,verifyVerifiedCapture:unused,currentImportSignal:unused}),
     domain:freeze({clampText:value=>String(value)}),environment:freeze({throwIfAborted:signal=>{if(signal?.aborted)throw signal.reason;},yieldTask:async()=>{}}),diagnostics:freeze({capture:()=>{}})
