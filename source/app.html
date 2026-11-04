@@ -5003,6 +5003,7 @@ function writeHostAppMetaValue(key,value,options={}){return HostAppMeta.write(ex
 async function readReconciliationBase(){return ReconciliationBaselineStore.readHeader();}
 async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
 async function readReconciliationBaseDays(dates){return ReconciliationBaselineStore.readDays(dates);}
+async function readReconciliationBaseSemanticDays(dates){return ReconciliationBaselineStore.readSemanticDays(dates);}
 async function writeReconciliationBase(checkpointId,spec){return ReconciliationBaselineStore.write(checkpointId,spec);}
 const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
 // The one record of past backups (version 3). Each entry is a copy: when it was
@@ -10308,6 +10309,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     reconciliationBaseRead:()=>readReconciliationBase(),
     reconciliationBaseReadNotes:keys=>readReconciliationBaseNotes(keys),
     reconciliationBaseReadDays:dates=>readReconciliationBaseDays(dates),
+    reconciliationBaseReadSemanticDays:dates=>readReconciliationBaseSemanticDays(dates),
     reconciliationBaseWrite:(checkpointId,spec)=>writeReconciliationBase(checkpointId,spec),
     pendingReviewsList:()=>AppData.pendingReviews.list(),
     pendingReviewsReadItems:ids=>AppData.pendingReviews.readItems(ids),
@@ -10327,7 +10329,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     scheduleMaintenance:delay=>scheduleRichTextAssetMaintenance(delay)
   }),
   codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}),
-  reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),
+  reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),
   noteReconciliation:Object.freeze({resolve:options=>withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve(options)),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
   exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,followProtection:BackupProtection.follow,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
   session:Object.freeze({
