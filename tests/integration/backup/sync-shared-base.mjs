@@ -779,6 +779,40 @@ let syncWorld=null;
   const keptProgress=a.reviews.open().find(review=>review.subject==='session');assert.equal(keptProgress.kept.snapshot.label,'A-PROGRESS','its own progress is kept for review');assert.equal(keptProgress.kept.status,'suspended');
 }
 
+// BF-1R1: first catch-up after B saves the old day AND starts a newer day.
+// An unchanged A is already covered by the shared ancestor; A's genuinely
+// later work must survive as a single unresolved version, not an obsolete
+// Active Session that keeps triggering previous-day warnings.
+for(const lateWork of [false,true]){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,day='2026-08-27',later='2026-08-28';
+  const suffix=lateWork?'late':'unchanged';
+  const a={installationId:'inst_bf1r1_old_'+suffix,records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1r1'),activeSession:null,schedule:'',personal:personal('BF1R1 User'),journal:null};
+  const b={installationId:'inst_bf1r1_new_'+suffix,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1R1 User'),journal:null};
+  const A=device(a),B=device(b);
+  a.activeSession=session(day,'SHARED-OLD-DAY',{runningOn:a.installationId,revision:10});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  b.records.set(day,record(day,'saved on B before the new day','2026-08-28T02:00:00.000Z'));
+  b.activeSession=session(later,'B-NEXT-DAY',{runningOn:b.installationId,revision:13});
+  b.schedule=b.activeSession.scheduleText;b.running=true;
+  await B.upload();
+  if(lateWork){
+    a.activeSession=session(day,'A-UNSYNCED-LATE-WORK',{runningOn:a.installationId,revision:14});
+    a.schedule=a.activeSession.scheduleText;
+  }
+  assert.equal((await A.sync()).cancelled,false,'a newer-day checkpoint and old Saved Day must converge together');
+  assert.equal(a.activeSession.date,later,'the obsolete previous-day Active Session cannot suppress the new day');
+  assert.equal(a.activeSession.snapshot.label,'B-NEXT-DAY');
+  assert.equal(a.running,false,'the old device must stop executing the prior day');
+  assert.equal(a.records.get(day)?.reflection,'saved on B before the new day');
+  const oldCopies=()=>a.reviews.open().filter(review=>review.subject==='session'&&review.kept?.date===day);
+  assert.equal(oldCopies().length,lateWork?1:0,'only genuinely divergent old work is retained');
+  if(lateWork)assert.equal(oldCopies()[0].kept.snapshot.label,'A-UNSYNCED-LATE-WORK');
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(oldCopies().length,lateWork?1:0,'replay of an already settled day cannot enqueue a second review');
+}
+
 // BF-1: Continue Here is fenced by the exact verified Drive session content.
 // The read is side-effect free: B may have a stale local copy, but it claims
 // the newest shared session without reconciling unrelated domains. Pure
