@@ -4184,6 +4184,33 @@ function clearSaveReminder(date=getReviewDate(),revision=TimerState.contentRevis
   if(sessionSafetyMessage.includes('Review reminder'))sessionSafetyMessage='';
   refreshStorageFallbackWarning();
 }
+async function acknowledgeSavedStudyDay(date,revision){
+  // Do not acknowledge newer study content than the Saved Day actually
+  // captured. Keep the same lineage's savedRevision in its canonical session.
+  const covered=cleanDayRevision(revision),previous=TimerState.savedRevision;
+  if(!TASKS.length||getReviewDate()!==date||TimerState.studyDate!==date||
+      !Number.isSafeInteger(Number(revision))||Number(revision)<0||
+      covered>cleanDayRevision(TimerState.contentRevision)||covered<cleanDayRevision(previous)){
+    throw new Error('The Saved Day and Active Session revision no longer identify the same study evidence.');
+  }
+  TimerState.savedRevision=covered;
+  try{
+    const saved=await writeLiveDraftNow({markChanged:false,strictDurability:true});
+    if(!saved?.value||saved.value.date!==date||
+        cleanDayRevision(saved.value.snapshot?.savedRevision)<covered){
+      throw saved?.error||new Error('The Saved Day acknowledgement was not saved in the Active Session.');
+    }
+    await requireCanonicalSessionWrite(saved,saved.value,'acknowledging the Saved Day');
+    clearSaveReminder(date,covered);
+    return true;
+  }catch(error){
+    // A rejected acknowledgement must not teach later ordinary timer saves
+    // to claim that content was saved. Keep the actual Saved Day in Library.
+    TimerState.savedRevision=previous;
+    savedRecordDates.delete(date);
+    throw error;
+  }
+}
 async function maybePromptBackupNudge(force=false){
   if(!appCanMutate())return;
   const now=Date.now();
@@ -4311,6 +4338,15 @@ function handleActiveSessionRepositoryResult(result,action='save'){
 }
 // One canonical durability barrier for an ownership transfer in either direction,
 // session suspension and restore. Local rescue alone does not establish control.
+async function clearCanonicalSessionAfterSavedDay(){
+  const cleared=await AppData.activeSession.clear();
+  if(!cleared?.ok||cleared.error||cleared.storage?.idb!==true)
+    throw cleared?.error||new Error('The saved study session was not deleted from canonical IndexedDB.');
+  const loaded=await AppData.activeSession.load(0,{strict:true});
+  if(!loaded?.ok||loaded.error||loaded.value)
+    throw loaded?.error||new Error('The saved study session remained after its canonical deletion.');
+  return cleared;
+}
 async function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){
   const intended=ActiveSessionCodec.sanitizeCurrent(expected);
   if(!intended||!saved?.ok||saved.storage?.idb!==true||saved.error||
@@ -9071,6 +9107,7 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
       resolveTaskCompletion,storeResolvedCompletion,syncProgressInputsToState,updateTimerFocusMetrics
     }),
     session:Object.freeze({
+      acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
       cancelPendingLiveDraftSave,clearSaveReminder,flushLiveDraft,
       getLifecycleRevision:()=>SessionLifecycle.revision,getOwnershipRevision:()=>AppOwnership.revision,getReviewDate,
       handleActiveSessionRepositoryResult,
