@@ -1901,18 +1901,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       // A side holding nothing the other lacks (a new device's start-up
       // state, say) takes the other's, and nothing is kept. Otherwise the
       // newer shows and the other is kept for review.
-      const fieldResult=await reconcilePersonalFields(base,localPersonal,theirs);
-      if(fieldResult){
-        personal='keep';
-        autoPersonal=fieldResult.value;
-        if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
-      }else if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
+      // A genuinely fresh/empty side still takes the meaningful version.
+      // This existing rule precedes per-field reconciliation.
+      if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
       else if(personalAddsNothing(theirs,localPersonal))personal='keep';
       else{
+        const fieldResult=await reconcilePersonalFields(base,localPersonal,theirs);
+        if(fieldResult){
+          personal='keep';
+          autoPersonal=fieldResult.value;
+          if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+        }else{
         // Without a matching field ancestor, preserve the local version and
         // make individual differences available for a deliberate choice.
         personal='keep';
         if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+        }
       }
     }
   }

@@ -642,7 +642,12 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
   try{
     if(plan){
       const readUnits=new Set(plan.structuredChanged);
-      if(plan.baseUpdate)for(const unit of plan.index.sinceBase)if(repositoryPreparationDescriptor(unit))readUnits.add(unit);
+      if(plan.baseUpdate){
+        for(const unit of plan.index.sinceBase)if(repositoryPreparationDescriptor(unit))readUnits.add(unit);
+        // An unchanged Personal Data record in a legacy/unknown baseline is
+        // reread from the fenced source once, not falsely inferred.
+        if(!reconciliationBase?.personalFields)readUnits.add('personalData');
+      }
       for(const entry of candidateEntries.values()){
         if(!entry.present||repositoryPackableEntry(entry))continue;
         const old=reuseIndex.structured.get(repositoryUnitKey(entry.kind,entry.key)+'\u0000'+entry.fingerprint);
