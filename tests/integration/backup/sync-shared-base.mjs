@@ -169,7 +169,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     exports:freeze({...processing,followProtection:async value=>{(state.followed??=[]).push({...value});return false;},backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,dailyRecord:dailyRecordCodec,pendingReview:pendingReviewCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
-    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended'});state.running=false;return true;}}),
+    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended',...(state.yieldAddsProgress?{snapshot:freeze({...state.activeSession.snapshot,label:'A-FINAL-TICK'})}:{})});state.running=false;return true;}}),
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
@@ -792,15 +792,16 @@ let syncWorld=null;
 // An unchanged A is already covered by the shared ancestor; A's genuinely
 // later work must survive as a single unresolved version, not an obsolete
 // Active Session that keeps triggering previous-day warnings.
-for(const lateWork of [false,true]){
+for(const variant of ['unchanged','late','last-tick']){
+  const lateWork=variant==='late',finalTick=variant==='last-tick';
   syncWorld.drive.clear();syncWorld.claims.clear();
   const {device,note}=syncWorld,day='2026-08-27',later='2026-08-28';
-  const suffix=lateWork?'late':'unchanged';
+  const suffix=variant;
   const a={installationId:'inst_bf1r1_old_'+suffix,records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1r1'),activeSession:null,schedule:'',personal:personal('BF1R1 User'),journal:null};
   const b={installationId:'inst_bf1r1_new_'+suffix,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1R1 User'),journal:null};
   const A=device(a),B=device(b);
   a.activeSession=session(day,'SHARED-OLD-DAY',{runningOn:a.installationId,revision:10});
-  a.schedule=a.activeSession.scheduleText;a.running=true;
+  a.schedule=a.activeSession.scheduleText;a.running=true;a.yieldAddsProgress=finalTick;
   await A.upload();assert.equal((await B.sync()).cancelled,false);
   b.records.set(day,record(day,'saved on B before the new day','2026-08-28T02:00:00.000Z'));
   b.activeSession=session(later,'B-NEXT-DAY',{runningOn:b.installationId,revision:13});
@@ -816,10 +817,10 @@ for(const lateWork of [false,true]){
   assert.equal(a.running,false,'the old device must stop executing the prior day');
   assert.equal(a.records.get(day)?.reflection,'saved on B before the new day');
   const oldCopies=()=>a.reviews.open().filter(review=>review.subject==='session'&&review.kept?.date===day);
-  assert.equal(oldCopies().length,lateWork?1:0,'only genuinely divergent old work is retained');
-  if(lateWork)assert.equal(oldCopies()[0].kept.snapshot.label,'A-UNSYNCED-LATE-WORK');
+  assert.equal(oldCopies().length,lateWork||finalTick?1:0,'only genuinely unsaved old work is retained');
+  if(lateWork||finalTick)assert.equal(oldCopies()[0].kept.snapshot.label,lateWork?'A-UNSYNCED-LATE-WORK':'A-FINAL-TICK');
   assert.equal((await A.sync()).cancelled,false);
-  assert.equal(oldCopies().length,lateWork?1:0,'replay of an already settled day cannot enqueue a second review');
+  assert.equal(oldCopies().length,lateWork||finalTick?1:0,'replay of an already settled day cannot enqueue a second review');
 }
 
 // BF-1: Continue Here is fenced by the exact verified Drive session content.
