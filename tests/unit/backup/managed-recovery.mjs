@@ -55,10 +55,19 @@ function harness(options={}){
 
 // A safety version that is not verified, or names no real checkpoint or
 // source revision, stops the recovery before local data changes.
-for(const safety of [{verified:false},{checkpointId:'cp_short'},{sourceRevision:'not a time'}]){
+for(const safety of [{verified:false},{checkpointId:'cp_short'},{sourceRevision:'not a time'},{verified:false,skipped:'unknown'}]){
   const h=harness({safety});
   await assert.rejects(()=>h.coordinator.execute(h.spec),/could not verify the Before restore safety version in Device Folder/,JSON.stringify(safety));
   assert.equal(h.events.includes('apply'),false,`an unverified safety version (${JSON.stringify(safety)}) never lets the restore apply`);
+  assert.deepEqual(h.state(),{suspended:0,activeLock:false});
+}
+
+// A device with no study data skips the safety version (nothing to protect);
+// only that exact reason lets the restore go on without one.
+{
+  const h=harness({safety:{verified:false,skipped:'local-empty'}});
+  await h.coordinator.execute(h.spec);
+  assert.equal(h.events.includes('apply'),true,'an empty device brings data in without a safety version');
   assert.deepEqual(h.state(),{suspended:0,activeLock:false});
 }
 

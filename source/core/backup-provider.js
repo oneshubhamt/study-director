@@ -637,19 +637,20 @@ registry.define('backup-provider',1,input=>{
     const lease=await selected.repository.beginPublication();rememberOwnPublication(lease);
     return lease;
   }
-  // An upload keeps a renewing marker fresh while it runs, and renews it once
-  // more just before its commit. A failed renewal is kept and stops the
-  // upload at that last check, so it never commits on a marker that cleanup
-  // may have removed as abandoned.
+  // An upload keeps a renewing marker fresh while it runs. Before its commit
+  // it renews once more only when the last renewal is a full interval old (a
+  // short upload's marker is seconds old), then checks the marker is still
+  // there. A failed renewal is kept and stops the upload at that check, so it
+  // never commits on a marker that cleanup may have removed as abandoned.
   function publicationHeartbeat(selected,lease){
     const renewing=!!(lease&&lease.renews===true&&typeof selected.repository.renewPublication==='function');
-    let current=lease,failure=null,timer=null,stopped=false,chain=Promise.resolve();
-    const renew=()=>{chain=chain.then(async()=>{if(failure)throw failure;const next=await selected.repository.renewPublication(current);rememberOwnPublication(next);current=next;}).catch(error=>{failure=failure||error;throw failure;});return chain;};
+    let current=lease,failure=null,timer=null,stopped=false,chain=Promise.resolve(),renewedAt=Date.now();
+    const renew=()=>{chain=chain.then(async()=>{if(failure)throw failure;const next=await selected.repository.renewPublication(current);rememberOwnPublication(next);current=next;renewedAt=Date.now();}).catch(error=>{failure=failure||error;throw failure;});return chain;};
     const schedule=()=>{if(!renewing||stopped||failure)return;timer=setTimeout(()=>{timer=null;if(stopped)return;renew().then(schedule,error=>AppDiagnostics.capture('backup-provider.repository-publication-renew',error,'warn'));},PUBLICATION_RENEW_MS);};
     schedule();
     return freeze({
       current:()=>current,
-      beforeCommit:async()=>{if(renewing)await renew();return assertRepositoryPublication(selected,current);},
+      beforeCommit:async()=>{if(renewing){await chain;if(Date.now()-renewedAt>=PUBLICATION_RENEW_MS)await renew();}return assertRepositoryPublication(selected,current);},
       stop:async()=>{stopped=true;if(timer!==null){clearTimeout(timer);timer=null;}await chain.catch(()=>{});return current;}
     });
   }
@@ -1496,6 +1497,9 @@ registry.define('backup-provider',1,input=>{
     const managedRecovery=transaction=>managedRecoveryHooks.run(freeze({
       kind:sync?'sync':mode,label:selected.label,keepsActiveSession:!!note||missingOnly||sync||review,apply:async()=>{applying=true;progress('apply',sync?`Taking in changes from ${selected.label}…`:mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
       createSafety:sync?null:async()=>{
+        // A device with no study data has nothing to protect, so it uploads
+        // no safety version; the local rollback journal still guards the apply.
+        if(automaticHooks?.ready&&await automaticHooks.ready()===false)return freeze({verified:false,skipped:'local-empty'});
         applying=true;OperationDiagnostics.mark('external-safety-publication-start',{provider:selected.id});
         progress('safety',`Creating safety version in ${selected.label}…`);
         const safetyPurpose=mode==='bring-in'?'before-combine':'before-restore';
