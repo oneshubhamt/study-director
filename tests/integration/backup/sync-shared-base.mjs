@@ -709,9 +709,8 @@ let syncWorld=null;
   assert.equal(a.reviews.open().filter(review=>review.subject==='session'&&review.kept?.snapshot?.label==='B-SESSION').length,1,'the independent later-day session is preserved exactly once for review');
 }
 
-// BF-2: With only a whole-Personal-Data fingerprint, no checkpoint-wide
-// timestamp can prove which individual setting changed last. Review permits
-// taking just the verified differing preference and preserves local edits.
+// BF-2: Verified per-field ancestors merge independent setting changes
+// without a whole-Personal-Data timestamp winner or an unnecessary review.
 {
   syncWorld.drive.clear();syncWorld.claims.clear();
   const {device,note}=syncWorld,shared=personal('BF2 Shared');
@@ -721,42 +720,37 @@ let syncWorld=null;
   await A.upload();assert.equal((await B.sync()).cancelled,false);
   a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
   b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,quote:'Keep working locally'})});
-  const before=b.personal;
   assert.equal((await B.sync()).cancelled,false);
-  assert.deepEqual(b.personal,before,'unproven independent setting edits never select a whole-object timestamp winner');
-  const open=b.reviews.open().filter(review=>review.subject==='personal');
-  assert.equal(open.length,1,'the remote changed settings remain available for review');
-  assert.equal(open[0].kept.preferences.theme,'dark');
-  b.keptSelections={'preference:theme':'use'};
-  const choices=await B.reviewKept();
-  b.keptSelections=null;
-  assert.equal(choices.reviewed,1);
-  assert.equal(b.personal.preferences.theme,'dark','selecting one remote setting changes only that field');
-  assert.equal(b.personal.preferences.quote,'Keep working locally','independent local setting remains');
-  assert.deepEqual(b.reviews.open(),[],'successful verification resolves the original review');
+  assert.equal(b.personal.preferences.theme,'dark','a remotely edited independent setting merges automatically');
+  assert.equal(b.personal.preferences.quote,'Keep working locally','the local independently changed setting survives');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0,'disjoint proven changes create no Personal Data review');
   await B.upload();assert.equal((await A.sync()).cancelled,false);
-  assert.equal(a.personal.preferences.quote,'Keep working locally','field-level user choice converges to the other device');
+  assert.equal(a.personal.preferences.quote,'Keep working locally','the automatic merge converges on the other device');
   assert.equal(a.personal.preferences.theme,'dark');
   assert.deepEqual(a.reviews.open(),[]);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:null})});
+  await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,soundMode:'minimal'})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.theme,null,'a proven explicit preference removal is not mistaken for fresh-device startup');
+  assert.equal(b.personal.preferences.soundMode,'minimal','an unrelated optional setting addition survives');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
 
-  // The saved-plan list and draft are independent choices, even though they
-  // are still encoded together in one canonical Personal Data review.
+  // A saved-plan addition and default selection are automatic when only A
+  // made them; a competing edit to the same working draft is reviewable.
   const plan=freeze({id:'plan-bf2-saved-0001',label:'Alternate',scheduleText:'09:00 | 60 | Revision | work | Ethics | pages | 12',createdAt:'2026-08-31T10:00:00.000Z',updatedAt:'2026-08-31T10:00:00.000Z'});
   a.personal=freeze({...a.personal,plans:freeze({draft:'06:00 | 45 | Draft A | work | Polity | pages | 8',savedPlans:freeze([plan]),defaultId:plan.id})});
   await A.upload();
   b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,draft:'07:00 | 30 | Draft B | work | History | pages | 6'})});
   assert.equal((await B.sync()).cancelled,false);
   const planReview=b.reviews.open().find(review=>review.subject==='personal');
-  assert.ok(planReview,'saved-plan and working-draft divergence is reviewable');
-  b.keptSelections={defaultPlan:'use'};
-  await assert.rejects(B.reviewKept(),/selected Personal Data is invalid/u);
-  assert.equal(b.personal.plans.defaultId,null,'a default without its saved-plan record is rejected before any change');
-  assert.ok(b.reviews.open().some(review=>review.id===planReview.id),'invalid selection leaves review open');
-  b.keptSelections={['savedPlan:'+plan.id]:'use'};
-  await B.reviewKept();b.keptSelections=null;
-  assert.equal(b.personal.plans.draft,'07:00 | 30 | Draft B | work | History | pages | 6','accepting a saved plan does not overwrite the independent working draft');
-  assert.equal(b.personal.plans.savedPlans[0].id,plan.id,'the selected saved plan is added');
-  assert.equal(b.personal.plans.defaultId,null,'the default is not changed without selecting it');
+  assert.ok(planReview,'only the competing working-draft edits require review');
+  assert.equal(b.personal.plans.draft,'07:00 | 30 | Draft B | work | History | pages | 6','a conflicting draft stays local');
+  assert.equal(b.personal.plans.savedPlans[0].id,plan.id,'the independent saved-plan addition merges automatically');
+  assert.equal(b.personal.plans.defaultId,plan.id,'its one-sided default selection merges with the saved-plan entry');
+  assert.equal((await B.reviewKept()).reviewed,1,'the draft conflict is resolved explicitly');
+  assert.equal(b.personal.plans.draft,'07:00 | 30 | Draft B | work | History | pages | 6');
   assert.deepEqual(b.reviews.open(),[]);
 
   // A remote review id referring to the same open semantic conflict must be
