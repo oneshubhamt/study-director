@@ -175,7 +175,7 @@ registry.define('reconciliation-baseline',1,()=>{
       if(spec.personalFields!==null&&!fields||personal===null&&spec.personalFields!==null||
         personal!==null&&personal!==''&&fields===null||full&&(personal===null||session===null)||
         semantic&&(session===null&&semanticSession!==null||session!==null&&
-          (!fingerprint(semanticSession)||Boolean(session)!==Boolean(semanticSession))||full&&semanticSession===null))return false;
+          (typeof semanticSession!=='string'||semanticSession!==''&&!/^[a-f0-9]{64}$/u.test(semanticSession)||Boolean(session)!==Boolean(semanticSession))||full&&semanticSession===null))return false;
       const headerFor=current=>codec.normalizeHeader({format:'study-director.reconciliation-base',version:semantic?5:4,checkpointId:id,establishedAt,noteCount,
         noteKeyFingerprint:fingerprint,personalFingerprint:kept(personal,current&&current.personalFingerprint),
         personalFields:personal===null?current?.personalFields||null:fields,
