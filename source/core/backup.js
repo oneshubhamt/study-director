@@ -865,7 +865,7 @@ function dayFingerprint(record){return valueFingerprint(record?sanitizeCurrentDa
 // Session fingerprint. Changing that meaning in place would corrupt ancestry.
 // Handoff causality has its own semantic-content fingerprint below.
 function sessionFingerprint(session){return valueFingerprint(session?ActiveSessionCodec.sanitizeCurrent(session)||session:null);}
-function sessionContentFingerprint(session){return valueFingerprint(ActiveSessionCodec.contentValue(session));}
+function sessionContentFingerprint(session){return valueFingerprint(session?ActiveSessionCodec.contentValue(session):null);}
 function sameSessionContent(a,b){
   const left=ActiveSessionCodec.contentValue(a),right=ActiveSessionCodec.contentValue(b);
   return !!left&&!!right&&Canonical.same(left,right);
