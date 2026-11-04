@@ -4645,8 +4645,21 @@ function savedDayRepresentsSessionEvidence(record,session,snapshot){
     if(state.progress?.done!==undefined&&Number(progress.done)!==Number(state.progress.done)||
         state.progress?.total!==undefined&&Number(progress.total)!==Number(state.progress.total)||
         state.actual?.seconds!==undefined&&Number(progress.actualSeconds)!==Number(state.actual.seconds))return false;
-    const pauses=state.actual?.record?.pauseEvents;
+    const clock=state.actual?.clock||{},actual=state.actual?.record||{};
+    const start=clock.startedAt||actual.firstStartedAt,end=clock.endedAt||actual.lastEndedAt;
+    if(start&&progress.actualStart!==start||end&&progress.actualEnd!==end)return false;
+    if(clock.startedAtLocalMinute!==undefined&&
+        Number(progress.actualStartLocalMinute)!==Number(clock.startedAtLocalMinute))return false;
+    if(clock.startedAtUtcOffsetMinutes!==undefined&&
+        Number(progress.actualStartUtcOffsetMinutes)!==Number(clock.startedAtUtcOffsetMinutes))return false;
+    if(clock.startedAtTimeZone&&progress.actualStartTimeZone!==clock.startedAtTimeZone)return false;
+    if(actual.sessions?.length&&Number(progress.sessionCount)<actual.sessions.length)return false;
+    const pauses=actual.pauseEvents;
     if(pauses?.length&&!CanonicalModule.same(pauses,progress.pauseEvents||[]))return false;
+  }
+  for(const [id,adjustment] of Object.entries(snapshot.scheduleAdjustments||{})){
+    const expected=studyMinuteToHHMM(adjustment.startMin);
+    if(!record.results?.[id]||record.results[id].adjustedStart!==expected)return false;
   }
   return true;
 }
