@@ -102,7 +102,7 @@ assert.equal(codec.normalizeHeader({...await store.readHeader(),version:2}),null
 // ancestry is installed only after a verified baseline write.
 assert.equal((await store.readHeader()).sessionContentFingerprint,undefined,'legacy headers have no semantic ancestor field and retain their exact format');
 assert.deepEqual({...await store.readDayAncestry(['2026-11-01'],cp(14))},{'2026-11-01':{full:h('5'),semantic:null}},'legacy month rows retain the full hash but explicitly lack a semantic ancestor');
-assert.deepEqual(codec.normalizeDays({format:'study-director.reconciliation-base-days',version:1,month:'2026-11',days:{'2026-11-01':h('5')}},{suffix:'2026-11'}),{format:'study-director.reconciliation-base-days',version:1,month:'2026-11',days:{'2026-11-01':h('5')}},'legacy month rows remain canonical for host metadata validation');
+assert.equal(JSON.stringify(codec.normalizeDays({format:'study-director.reconciliation-base-days',version:1,month:'2026-11',days:{'2026-11-01':h('5')}},{suffix:'2026-11'})),JSON.stringify({format:'study-director.reconciliation-base-days',version:1,month:'2026-11',days:{'2026-11-01':h('5')}}),'legacy month rows retain the exact canonical data shape under host validation');
 const v5Days=freeze({'2026-11':freeze({'2026-11-01':h('5'),'2026-11-02':h('6')}),'2026-12':freeze({'2026-12-01':h('7')})});
 const v5SemanticDays=freeze({'2026-11':freeze({'2026-11-01':h('8'),'2026-11-02':h('9')}),'2026-12':freeze({'2026-12-01':h('a')})});
 const v5=freeze({...full,version:4,sessionFingerprint:sessionB,sessionContentFingerprint:h('e'),days:v5Days,semanticDays:v5SemanticDays});
