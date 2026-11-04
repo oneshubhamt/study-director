@@ -1323,10 +1323,10 @@ for(const variant of ['unchanged','late','last-tick']){
 for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']){
   syncWorld.drive.clear();syncWorld.claims.clear();
   const day='2026-09-05',later='2026-09-06',a={
-    installationId:'inst_bfc4_a_'+variant,records:new Map(),deletions:[],noteDeletions:[],
+    installationId:'inst_bfc4_a_'+variant.replaceAll('-','_'),records:new Map(),deletions:[],noteDeletions:[],
     notes:syncWorld.note('bfc4'),activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null
   },b={
-    installationId:'inst_bfc4_b_'+variant,records:new Map(),deletions:[],noteDeletions:[],
+    installationId:'inst_bfc4_b_'+variant.replaceAll('-','_'),records:new Map(),deletions:[],noteDeletions:[],
     notes:{},activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null
   };
   const A=syncWorld.device(a),B=syncWorld.device(b);
