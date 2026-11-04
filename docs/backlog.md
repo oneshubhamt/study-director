@@ -70,6 +70,20 @@ The full plan, its rules and live status are in [test-programme.md](test-program
 3. **Constraints any answer must meet.** Local-first: nothing in the app waits for the internet or Drive. Drive sign-in lasts about 1 hour and there is no server. Full end-to-end encryption, at rest and in transit, comes later and must fit.
 4. **Then speed.** Drive backups take over 20 s and Device Folder backups 2–3 s. Make Drive faster first (backup, then restore), then make handoff feel seamless and quick, then make the Device Folder (about 2 s) faster still. Rows 4 and 8 above and the Drive items under "Noted for later" belong to this work.
 
+### First look at items 1 and 4 (2026-11-04, from the phone's diagnostics)
+
+- **Upload markers after bug 10.** A running upload refreshes its marker every 2 minutes, alongside the upload; a marker unrefreshed for 15 minutes is dead (closed or frozen page) and cleanup removes it. A long upload (a large attachment, 20 minutes or more) stays live because it keeps refreshing. One frozen over 15 minutes stops before its commit; next time it reuses the pieces already on Drive (unused pieces are kept 48 hours). Since PR #15 a short upload pays nothing extra: the renewal before the commit runs only when one is due, and the marker check was always there.
+- **Why Drive is slow.** Request count, not data size. Each Drive request takes 1–4 s on the phone and an upload makes about 6 in a row, so a 10 KB upload takes 15–20 s. Handoff waits on the same steps.
+- **What the design already gets right.** Data is split into pieces named by their fingerprint, like a torrent's. Only changed pieces move, every piece is checked on arrival, uploads resume by reusing pieces already there, big files go in resumable chunks, 8 pieces move at once, and a version exists only once complete. Safe, and it never loses data.
+- **Where it is heavier than it needs to be.** All devices write into one shared history, so they need turns: upload markers, refusals when Drive moved on, the heartbeat, and cleanup that must step around live uploads. Most of the complexity and many of the round trips come from that. The whole library is also small (the phone's version was 8 pieces, about 12 KB), so round trips, not bytes, are the cost.
+- **Options, cheapest first:**
+  1. Fewer requests on today's design: make one file both the version and its commit, bundle a version's small pieces into one file (like git's pack files), ask Drive only for what changed since the last look (its changes list), and run independent steps together.
+  2. One stream per device: each device writes only its own files, and the others read and merge them. No device ever waits for another, so markers, turns and most of the cleanup coordination go away; an upload becomes one or two requests.
+  3. Merge by design (CRDTs, as in Automerge, Yjs or Loro): devices exchange small change records that are guaranteed to merge the same way everywhere, notes merged character by character. Fewer "kept for review" items (bug 3), and live sync (item 2) becomes possible. The largest change: the editor's text and the stored formats would move to it.
+  4. Not worth it here: content-defined chunking (attachments rarely change in place) and devices talking straight to each other (needs a server to introduce them, against the no-server rule).
+- **Suggested path:** measure, do option 1, then decide between 2 and 3 with the owner.
+
+
 ## Decided, not yet scheduled
 
 - **Better Smart merge** (`mergeThreeWay`). The owner will come back to it; until then, do not audit it or suggest changes.
