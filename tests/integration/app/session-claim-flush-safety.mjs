@@ -30,7 +30,7 @@ function harness(){
     ActiveSessionCodec:{sanitizeCurrent:value=>value},CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
     InstallationIdentity:{getId:()=> 'inst_local'},
     DecisionClock:{nowMs:()=>now},lastTimerSnapshotMs:0,
-    restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,
+    restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,pendingSessionHandoffSafety:()=>false,
     showLiveDraftSaveWarning:reason=>calls.warnings.push({key:'capture',message:reason}),
     TimerEngine:{stopExecution:()=>{calls.stops++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return resumeWorks;}},
     markDayContentChanged:()=>{calls.changed++;},
@@ -268,7 +268,12 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
       },
       planData:{read:async()=>({draft:faultMode==='draft-mismatch'?'OTHER DRAFT':draft})},
       activeSession:{
-        save:async value=>{
+        save:async(value,options={})=>{
+          if(faultMode==='concurrent-local'&&options.expectedCanonical){
+            current={...current,snapshot:{label:'new unshared local work'}};
+          }
+          if(options.expectedCanonical&&JSON.stringify(current)!==JSON.stringify(options.expectedCanonical))
+            return {ok:false,value,error:new Error('Active Session changed before ownership recovery.'),storage:{idb:false,local:false}};
           if(['local-only','claim-crash'].includes(faultMode)&&value.runningOn==='inst_handoff_new')
             return {ok:true,value,error:new Error('IndexedDB failed'),storage:{idb:false,local:true}};
           current=structuredClone(value);return {ok:true,value:current,storage:{idb:true,local:false}};
@@ -436,6 +441,19 @@ for(const fault of ['claim-crash','claim-throws-after-remote']){
   assert.equal(t.state().claims,1);
 }
 
+// A second writer advancing the local session DURING Drive verification
+// cannot be overwritten by the recovered owner. The exact IDB precondition
+// fails without producing an emergency copy of the recovered session.
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setFault('concurrent-local');t.reload();
+  await assert.rejects(t.recover(),/Active Session changed before ownership recovery/u);
+  assert.equal(t.state().current.snapshot.label,'new unshared local work');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.ok(t.state().marker,'a local write conflict retains the safety marker');
+  assert.equal(t.state().claims,1,'recovery must never republish a claim');
+}
 // Strict local commit succeeded, but the marker could not be cleared;
 // subsequent verification must not rewrite the already-committed session.
 {

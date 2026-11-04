@@ -5507,7 +5507,7 @@ async function verifySessionHandoffSafety(session){
       if(!handoffClaimMatches(marker,latest)||latest.epoch!==claim.epoch)return false;
       const adopted=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:me,revision:marker.proposedRevision,updatedAt:new Date().toISOString()});
       if(!adopted)return false;
-      const saved=await AppData.activeSession.save(adopted,{strictDurability:true});
+      const saved=await AppData.activeSession.save(adopted,{strictDurability:true,expectedCanonical:local});
       await requireCanonicalSessionWrite(saved,adopted,'recovering an interrupted ownership claim');
       handleActiveSessionRepositoryResult(saved,'save');
       const verified=await BackupProviderRuntime.readSessionClaim('google-drive');
