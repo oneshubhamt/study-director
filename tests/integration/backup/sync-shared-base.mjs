@@ -673,13 +673,14 @@ let syncWorld=null;
   const keptPersonal=b.reviews.open().find(review=>review.subject==='personal');assert.equal(keptPersonal.kept.preferences.studentName,'Name on A');
   b.keptChoice='use';await B.reviewKept();b.keptChoice='';assert.equal(b.personal.preferences.studentName,'Name on A','the review lets the person pick the kept settings');assert.deepEqual(b.reviews.open(),[]);
   await B.upload();assert.equal((await A.sync()).cancelled,false);
-  // A side holding nothing the other lacks takes the other's, and nothing is
-  // kept, whichever is newer (Entry 023): a device's start-up state never
-  // hides the plans and settings in use elsewhere.
-  a.personal=freeze({...personal('Name on A, planned'),plans:freeze({draft:'07:00 | 60 | A plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});await A.upload();b.personal=startup(null);
+  // After a verified shared base exists, clearing the name is authored
+  // deletion, not a brand-new device. The separately added remote draft
+  // still merges automatically under per-field ancestry.
+  a.personal=freeze({...personal('Name on A'),plans:freeze({draft:'07:00 | 60 | A plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});await A.upload();b.personal=startup(null);
   assert.equal((await B.sync()).cancelled,false);
-  assert.deepEqual(b.personal,a.personal,'the start-up side takes the plans and settings in use');
-  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'nothing is kept from the start-up side');
+  assert.equal(b.personal.preferences.studentName,null,'a cleared name survives a known shared-base edit');
+  assert.equal(b.personal.plans.draft,a.personal.plans.draft,'the independent remote draft merges');
+  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'disjoint proven edits require no review');
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   a.personal=startup(null);await A.upload();b.personal=freeze({...personal('Name on B, planned'),plans:freeze({draft:'08:00 | 30 | B plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});const mine=b.personal;
   assert.equal((await B.sync()).cancelled,false);
