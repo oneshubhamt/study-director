@@ -5455,7 +5455,7 @@ function clearSessionHandoffSafety(){
 async function resolveSessionHandoffSafety(session){
   const marker=pendingSessionHandoffSafety();
   if(!marker)return true;
-  if(!validSessionHandoffSafety(marker,session)||!appCanMutate()||
+  if(!validSessionHandoffSafety(marker,session)||
       !BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
   const [claim,loaded]=await Promise.all([
     BackupProviderRuntime.readSessionClaim('google-drive'),
@@ -5483,6 +5483,7 @@ async function resolveSessionHandoffSafety(session){
       clearSessionHandoffSafety();return true;
     }
     if(local.runningOn!==me&&local.revision===marker.observedRevision){
+      if(!appCanMutate())return false; // the HYDRATING tab cannot commit; Verify works once PRIMARY
       const source=await BackupProviderRuntime.readSessionHandoffSource('google-drive');
       const previous=source?.status==='completed'?ActiveSessionCodec.sanitizeCurrent(source.session):null;
       if(source?.checkpointId!==marker.checkpointId||source?.observedOwnerToken!==marker.observedOwnerToken||
@@ -5502,7 +5503,7 @@ async function resolveSessionHandoffSafety(session){
       const verified=await BackupProviderRuntime.readSessionClaim('google-drive');
       if(!handoffClaimMatches(marker,verified)||verified.epoch!==claim.epoch)return false;
       clearSessionHandoffSafety();
-      notifyBackupChange({urgent:true,reason:'session-handoff-recovered'});
+      notifyBackupChange({urgent:true,reason:'session-continue'});
       return true;
     }
     return false;
