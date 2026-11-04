@@ -141,7 +141,7 @@ registry.define('compatibility-host',1,()=>{
     function staleReconciliationRows(rows){
       const keyOf=row=>String(row&&row.key||''),noteRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseNotePrefix),dayRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseDayPrefix);
       const base=rows.filter(row=>keyOf(row)===appMeta.reconciliationBase||keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row)||dayRow(row));
-      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&![3,4].includes(Number(row.value?.version))||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
+      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&![3,4,5].includes(Number(row.value?.version))||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
     }
     async function migrateReconciliationBase(requireOwnership){
       let removed=0;
