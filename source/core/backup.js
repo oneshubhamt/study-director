@@ -708,6 +708,9 @@ async function noteReconciliationAncestor(base,keys=[]){
 // snapshot. Absence, null, and an authored value have distinct hashes.
 const PERSONAL_PREFERENCE_KEYS=freeze(['studentName','theme','presentation','quote','practiceCueMode','fontScale','practiceTargetMs','soundMode']);
 const PERSONAL_NUDGE_KEYS=freeze(['present','enabled','sound','nudgeAfter','breakMinutes']);
+function semanticSavedPlan(plan){
+  return plan?{id:plan.id,label:plan.label,scheduleText:plan.scheduleText}:null;
+}
 async function personalFieldFingerprint(present,value=null){
   return valueFingerprint({present:present===true,value:present===true?value:null});
 }
@@ -723,7 +726,7 @@ async function personalFields(value){
       nudge[key]=key==='present'?await personalFieldFingerprint(true,nudged):
         await personalFieldFingerprint(nudged&&own(clean.preferences.nudge,key),nudged?clean.preferences.nudge[key]:null);
     }),
-    ...clean.plans.savedPlans.map(async plan=>{savedPlans[plan.id]=await personalFieldFingerprint(true,plan);})
+    ...clean.plans.savedPlans.map(async plan=>{savedPlans[plan.id]=await personalFieldFingerprint(true,semanticSavedPlan(plan));})
   ]);
   const [draft,defaultId,savedPlanOrder]=await Promise.all([
     personalFieldFingerprint(true,clean.plans.draft),
@@ -785,8 +788,13 @@ async function reconcilePersonalFields(base,local,incoming){
   const absent=await personalFieldFingerprint(false);
   for(const id of allIds){
     const hasLocal=localPlans.has(id),hasRemote=remotePlans.has(id),
-      chosen=await choose(hasLocal,localPlans.get(id),hasRemote,remotePlans.get(id),ancestry.savedPlans[id]||absent);
-    if(chosen.present)plans.set(id,chosen.value);
+      original=await choose(hasLocal,semanticSavedPlan(localPlans.get(id)),hasRemote,semanticSavedPlan(remotePlans.get(id)),ancestry.savedPlans[id]||absent);
+    if(original.present){
+      const record=original.value&&original.value.id===id?
+        (hasLocal&&Canonical.same(semanticSavedPlan(localPlans.get(id)),original.value)?localPlans.get(id):remotePlans.get(id)):null;
+      if(!record){conflicts++;if(hasLocal)plans.set(id,localPlans.get(id));}
+      else plans.set(id,record);
+    }
   }
   // Additions to the saved-plan list need not be mistaken for an ordering
   // conflict. Compare relative order only for unchanged baseline identities
@@ -814,6 +822,11 @@ async function reconcilePersonalFields(base,local,incoming){
 // True when one side's plans and settings hold nothing the other's lack:
 // each setting unset or equal, the draft empty, the starter plan or equal,
 // every saved plan present and identical, and the default plan unset or equal.
+function personalIsBlank(value){
+  let clean=null;try{clean=BackupCodec.normalizePersonalData(value);}catch{return false;}
+  return !!clean&&clean.plans.draft===null&&clean.plans.defaultId===null&&!clean.plans.savedPlans.length&&
+    Object.values(clean.preferences).every(setting=>setting===null||setting===undefined);
+}
 function personalAddsNothing(side,other){
   let a,b;try{a=BackupCodec.normalizePersonalData(side);b=BackupCodec.normalizePersonalData(other);}catch{return false;}if(!a||!b)return false;
   if(Object.entries(a.preferences).some(([key,value])=>value!==null&&!Canonical.same(value,b.preferences[key])))return false;
@@ -1901,21 +1914,23 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       // A side holding nothing the other lacks (a new device's start-up
       // state, say) takes the other's, and nothing is kept. Otherwise the
       // newer shows and the other is kept for review.
-      // A genuinely fresh/empty side still takes the meaningful version.
-      // This existing rule precedes per-field reconciliation.
-      if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
-      else if(personalAddsNothing(theirs,localPersonal))personal='keep';
+      // A truly blank fresh device retains the established first-sync rule.
+      // But a known ancestor can prove an *intentional deletion* of one
+      // setting; mere absence of that value must not masquerade as startup.
+      if(!localPersonal||personalIsBlank(localPersonal))personal='replace';
+      else if(personalIsBlank(theirs))personal='keep';
       else{
         const fieldResult=await reconcilePersonalFields(base,localPersonal,theirs);
         if(fieldResult){
           personal='keep';
           autoPersonal=fieldResult.value;
           if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
-        }else{
-        // Without a matching field ancestor, preserve the local version and
-        // make individual differences available for a deliberate choice.
-        personal='keep';
-        if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+        }else if(personalAddsNothing(localPersonal,theirs))personal='replace';
+        else if(personalAddsNothing(theirs,localPersonal))personal='keep';
+        else{
+          // Missing ancestry is unknown, not evidence of a newer value.
+          personal='keep';
+          if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
         }
       }
     }
