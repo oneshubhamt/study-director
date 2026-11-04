@@ -1340,7 +1340,7 @@ for(const variant of ['remote-edit','remote-delete','local-edit','both-edit']){
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   const kept=a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date);
   if(variant==='remote-delete')assert.equal(a.records.has(date),false,'remote deletion wins against local metadata-only refresh');
-  else assert.equal(a.records.get(date)?.reflection,variant==='local-edit'||variant==='both-edit'?'A added content':'B added content','one-sided meaningful study change wins');
+  else assert.equal(a.records.get(date)?.reflection,variant==='local-edit'?'A added content':'B added content','one-sided meaningful study change wins');
   assert.equal(kept.length,variant==='both-edit'?1:0,'only two different substantive edits create a kept version');
   assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date).length,variant==='both-edit'?1:0,'repeated sync remains idempotent');
