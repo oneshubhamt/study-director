@@ -784,7 +784,7 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
 // too long) must stop before its commit, so no version is committed on
 // objects that cleanup may already have removed.
 const heartbeatCases=[];
-for(const scenario of ['renews-while-uploading','stops-when-marker-removed']){
+for(const scenario of ['renews-while-uploading','stops-when-marker-removed','short-upload-no-renewal']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const id='drive-heartbeat-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Heartbeat QA'}))});
  const kind=file=>file.appProperties.studyDirectorRepositoryKind,markers=()=>[...h.state.files.values()].filter(file=>kind(file)==='publication'),commits=()=>[...h.state.files.values()].filter(file=>kind(file)==='commit').map(file=>file.appProperties.studyDirectorRepositoryId).sort();
@@ -796,7 +796,8 @@ for(const scenario of ['renews-while-uploading','stops-when-marker-removed']){
   // request timeout), so the upload runs for minutes; marker requests are
   // not delayed.
   const marker=query=>/publication|maintenance|google-apps\.folder/u.test(query);
-  h.state.requestDelayMs=({url,method})=>url.pathname.startsWith('/upload/')||method==='GET'&&url.pathname==='/drive/v3/files'&&!marker(String(url.searchParams.get('q')||''))?40000:0;
+  const created=new Set(),put=h.state.files.set.bind(h.state.files);h.state.files.set=(key,file)=>{if(kind(file)==='publication')created.add(file.appProperties.studyDirectorRepositoryId);return put(key,file);};
+  if(scenario!=='short-upload-no-renewal')h.state.requestDelayMs=({url,method})=>url.pathname.startsWith('/upload/')||method==='GET'&&url.pathname==='/drive/v3/files'&&!marker(String(url.searchParams.get('q')||''))?40000:0;
   let outcome=null;const seen=new Set(),startedAt=clock.now();runtime.providers.backupRepositoryProvider(id).then(value=>{outcome={value};},error=>{outcome={error};});
   let removed=false;
   for(let elapsed=0;!outcome&&elapsed<60*60000;elapsed+=1000){
@@ -810,6 +811,9 @@ for(const scenario of ['renews-while-uploading','stops-when-marker-removed']){
    assert.ok(!outcome.error,String(outcome.error?.stack||''));assert.ok(outcome.value?.checkpointId,'a long upload completes');
    assert.ok(seen.size>=3,`a long upload renews its marker every two minutes (${seen.size} markers seen over ${(clock.now()-startedAt)/1000} s;)`);
    assert.ok(commits().includes(outcome.value.checkpointId),'its version is committed');
+  }else if(scenario==='short-upload-no-renewal'){
+   assert.ok(!outcome.error,String(outcome.error?.stack||''));assert.ok(commits().includes(outcome.value?.checkpointId),'a short upload commits');
+   assert.equal(created.size,1,'a short upload makes one marker: its commit does not wait on a renewal');
   }else{
    assert.ok(outcome.error,'an upload whose marker was removed fails');assert.deepEqual(commits(),committedBefore,'it commits nothing');
   }
@@ -817,7 +821,7 @@ for(const scenario of ['renews-while-uploading','stops-when-marker-removed']){
   heartbeatCases.push(scenario);
  }finally{await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
-assert.deepEqual(heartbeatCases,['renews-while-uploading','stops-when-marker-removed']);
+assert.deepEqual(heartbeatCases,['renews-while-uploading','stops-when-marker-removed','short-upload-no-renewal']);
 // The actual adapter's uncertainty count must reach the actual integrity owner
 // and host state projector, even when some usable history remains.
 const incompleteInventoryCases=[],hostSource=fs.readFileSync('source/app.html','utf8');

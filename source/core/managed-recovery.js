@@ -46,7 +46,7 @@ registry.define('managed-recovery',1,()=>{
           input.diagnostics.mark('recovery-preflight-quiesce-complete',{kind:spec.kind});
           let safety=null;
           if(spec.createSafety){input.diagnostics.mark('external-safety-start',{kind:spec.kind,source:spec.label});assertAuthority();safety=await spec.createSafety();assertAuthority();input.diagnostics.mark('external-safety-complete',{kind:spec.kind,source:spec.label});}
-          if(spec.createSafety&&!verifiedSafety(safety))throw new Error(`Study Director could not verify the Before restore safety version in ${spec.label}. Recovery was stopped before changing local data.`);
+          if(spec.createSafety&&safety?.skipped!=='local-empty'&&!verifiedSafety(safety))throw new Error(`Study Director could not verify the Before restore safety version in ${spec.label}. Recovery was stopped before changing local data.`);
           let result;
           input.diagnostics.mark('recovery-commit-quiesce-enter',{kind:spec.kind});
           await input.lifecycle.quiesce(async()=>{
