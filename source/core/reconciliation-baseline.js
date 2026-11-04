@@ -125,12 +125,11 @@ registry.define('reconciliation-baseline',1,()=>{
     }
     // Full-record hashes keep their original meaning, including in v2 rows.
     // For legacy v1 rows, semantic ancestry is explicitly unknown.
-    async function readDayHashes(dates,semantic=false){
+    async function readDays(dates){
       const wanted=new Set((Array.isArray(dates)?dates:[]).map(String).filter(date=>/^\d{4}-\d{2}-\d{2}$/u.test(date))),months=[...new Set([...wanted].map(date=>date.slice(0,7)))],out=Object.create(null);
-      for(const row of await Promise.all(months.map(async month=>codec.normalizeDays(await meta.read(families.days,month).catch(()=>null),{suffix:month}))))if(row)for(const [date,value] of Object.entries(semantic?row.semanticDays||{}:row.days))if(wanted.has(date))out[date]=value;
+      for(const row of await Promise.all(months.map(async month=>codec.normalizeDays(await meta.read(families.days,month).catch(()=>null),{suffix:month}))))if(row)for(const [date,value] of Object.entries(row.days))if(wanted.has(date))out[date]=value;
       return freeze(out);
     }
-    const readDays=dates=>readDayHashes(dates);
     // Ancestry is only safe when all month rows belong to the exact shared
     // checkpoint being reconciled. Distinguish unreadable rows from absence.
     async function readDayAncestry(dates,expectedCheckpointId){
