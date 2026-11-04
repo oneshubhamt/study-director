@@ -137,6 +137,7 @@ const beforeSilent=feedback.length;
 assert.equal(plan.draft.preview({silent:true,enterDraft:false}),false);
 assert.equal(state().label,'LIVE');
 assert.equal(state().mode,'live');
+assert.equal(ids['plan-edit-btn'].textContent,'Edit Draft','invalid independent text still opens a draft, not the applied Plan');
 assert.equal(feedback.length,beforeSilent,'a silent restoration projection cannot announce an unrelated draft error');
 
 // Explicit editing shows draft validity, and Cancel preserves draft text
@@ -168,6 +169,7 @@ assert.equal(await plan.apply(),true);
 assert.equal(draftWrites,beforeSuccessWrites+1);
 assert.equal(applyCount,beforeApply+1);
 assert.equal(state().label,'LIVE');
+assert.equal(ids['plan-edit-btn'].textContent,'Edit Plan','a draft identical to the applied Plan uses the correct label');
 liveActivity=true;
 ids['plan-input'].value='Draft different';
 const beforeReapplyWrites=draftWrites;

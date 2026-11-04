@@ -325,7 +325,9 @@ function createPlanDraftProjection(result=null){
   const draft=immutableDraftResult(result||parseScheduleDraftText(getPlanDraftText()));
   const hasApplied=TASKS.length>0,editMode=PlanDraftEditor.active(),hasRows=draft.ok?draft.parsed.length>0:lastParsed.length>0;
   const status=draft.ok?'valid':draft.kind==='empty'||draft.kind==='no-tasks'?'empty':isIncompleteDraftResult(draft,hasRows)?'incomplete':'invalid';
-  const changed=draft.ok&&draft.parsed.length>0&&(!hasApplied||scheduleFingerprintForRows(draft.parsed)!==scheduleGateway.read().fingerprint);
+  const draftMatchesApplied=hasApplied&&draft.ok&&draft.parsed.length>0&&
+    scheduleFingerprintForRows(draft.parsed)===scheduleGateway.read().fingerprint;
+  const changed=draft.ok&&draft.parsed.length>0&&!draftMatchesApplied;
   // The board describes what it actually draws. An independently authored
   // (even invalid) working draft must not relabel an applied live schedule.
   const draftSurfaceOpen=editMode||!hasApplied;
@@ -348,7 +350,7 @@ function createPlanDraftProjection(result=null){
     showEdit:hasApplied&&!editMode,editEnabled:canMutate,
     showDone:hasRows&&draftSurfaceOpen,doneEnabled:canMutate&&status==='valid',
     showCancel:hasApplied&&editMode,cancelEnabled:canMutate,
-    applyEnabled:canMutate&&status==='valid',editLabel:changed?'Edit Draft':'Edit Plan',doneLabel:hasApplied?'Done':'Apply Draft'
+    applyEnabled:canMutate&&status==='valid',editLabel:draftMatchesApplied?'Edit Plan':'Edit Draft',doneLabel:hasApplied?'Done':'Apply Draft'
   });
   return freeze({
     format:'study-director.plan-draft-projection',contractVersion:1,status,changed,editMode,
