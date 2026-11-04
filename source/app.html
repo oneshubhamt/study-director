@@ -5002,7 +5002,6 @@ async function readHostAppMetaValue(key){return HostAppMeta.read(exactAppMetaFam
 function writeHostAppMetaValue(key,value,options={}){return HostAppMeta.write(exactAppMetaFamily(HostAppMeta,key,'host app metadata'),value,options);}
 async function readReconciliationBase(){return ReconciliationBaselineStore.readHeader();}
 async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
-async function readReconciliationBaseDays(dates){return ReconciliationBaselineStore.readDays(dates);}
 async function readReconciliationBaseDayAncestry(dates,checkpointId){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
 async function writeReconciliationBase(checkpointId,spec){return ReconciliationBaselineStore.write(checkpointId,spec);}
 const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
@@ -10308,7 +10307,6 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     deletionRecoveryClearAttachment:assetId=>AppData.deletionRecovery.clearAttachment(assetId),
     reconciliationBaseRead:()=>readReconciliationBase(),
     reconciliationBaseReadNotes:keys=>readReconciliationBaseNotes(keys),
-    reconciliationBaseReadDays:dates=>readReconciliationBaseDays(dates),
     reconciliationBaseReadDayAncestry:(dates,checkpointId)=>readReconciliationBaseDayAncestry(dates,checkpointId),
     reconciliationBaseWrite:(checkpointId,spec)=>writeReconciliationBase(checkpointId,spec),
     pendingReviewsList:()=>AppData.pendingReviews.list(),
