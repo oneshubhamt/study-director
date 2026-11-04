@@ -1023,6 +1023,15 @@ async function migrateFallbackDailyRecords(records,{strict=false}={}){
     finishWrite();
   }
 }
+// Canonical Saved Day receipts never consult localStorage rescue. A successful
+// fallback write is recoverable work, not proof that the day reached IndexedDB.
+async function verifyCanonicalDailyRecord(record){
+  const clean=sanitizeCurrentDailyRecord(record);
+  if(!clean||clean.degraded)throw new Error('Saved Day verification requires a canonical record.');
+  const stored=readableDailyRecord(await idbGetRecord(clean.date));
+  if(!stored||!sameDataValue(stored,clean))throw new Error('Canonical Saved Day read-back did not match the committed study evidence.');
+  return true;
+}
 async function storeDailyRecord(rec,options={}){
   const ownershipToken=issueWriteToken('saving the daily record');
   if(!rec||!isValidIsoDate(rec.date))throw new Error('Invalid daily record date');
@@ -1480,6 +1489,7 @@ async function runDataMaintenance(options={}){
     const local=LocalStorageContract;
     const dailyRecords=freeze({
       save:storeDailyRecord,
+      verifyCanonical:verifyCanonicalDailyRecord,
       saveBatch:storeDailyRecordBatch,
       restoreBatch:records=>storeDailyRecordBatch(records),
       get:getDailyRecord,
