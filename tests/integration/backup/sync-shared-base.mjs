@@ -1316,6 +1316,76 @@ for(const variant of ['unchanged','late','last-tick']){
   assert.equal(oldCopies().length,lateWork||finalTick?1:0,'replay of an already settled day cannot enqueue a second review');
 }
 
+// BF-C4: A local save-acknowledged session may differ from its full-record
+// ancestor only in control metadata. The *real* Saved Day evidence predicate
+// is the independent, content-based retirement proof. Unacknowledged work,
+// deletions, and a later genuinely divergent session never inherit that proof.
+for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-09-05',later='2026-09-06',a={
+    installationId:'inst_bfc4_a_'+variant,records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('bfc4'),activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null
+  },b={
+    installationId:'inst_bfc4_b_'+variant,records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null
+  };
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  a.activeSession=revisionedSession(day,'BF-C4-SHARED',{runningOn:a.installationId,revision:10,contentRevision:5,savedRevision:0});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  if(variant==='deleted')b.deletions=[{date:day,deletedAt:'2026-09-06T07:00:00.000Z'}];
+  else b.records.set(day,revisionedRecord(day,'saved on B before the new day',104,'2026-09-06T07:00:00.000Z'));
+  b.activeSession=revisionedSession(later,'BF-C4-NEXT',{runningOn:b.installationId,revision:13,contentRevision:1});
+  b.schedule=b.activeSession.scheduleText;b.running=true;await B.upload();
+  const old=a.activeSession,snapshot=freeze({...old.snapshot,
+    label:variant==='divergent'?'BF-C4-UNSAVED-LATE-WORK':old.snapshot.label,
+    contentRevision:variant==='divergent'?6:old.snapshot.contentRevision,
+    savedRevision:variant==='metadata-covered'||variant==='deleted'?5:0,
+    updatedAt:'2026-09-05T22:00:00.000Z'});
+  a.activeSession=freeze({...old,revision:11,snapshot,updatedAt:'2026-09-05T22:00:00.000Z'});
+  assert.notEqual(await processing.run('checksum',{value:CanonicalModule.signature(a.activeSession),algorithm:'sha256'}),
+    a.reconciliationBase.sessionFingerprint,'the full-record ancestor must differ in every BF-C4 case');
+  assert.equal((await A.sync()).cancelled,false);
+  const keptOld=a.reviews.open().filter(item=>item.subject==='session'&&item.kept?.date===day);
+  if(variant==='metadata-covered'){
+    assert.equal(a.activeSession?.date,later,'canonically acknowledged study evidence is retired despite changed control metadata');
+    assert.equal(keptOld.length,0,'control metadata must not manufacture an unsaved-study review');
+    assert.equal((await A.sync()).cancelled,false);
+    assert.equal(a.reviews.open().filter(item=>item.subject==='session'&&item.kept?.date===day).length,0,'repeated sync stays review-free');
+  }else if(variant==='deleted'){
+    assert.equal(a.activeSession?.date,day,'a deleted or absent Saved Day cannot prove that a local session is stored');
+    assert.equal(keptOld.length,0,'the live local session is retained rather than archived as an obsolete day');
+  }else{
+    assert.equal(a.activeSession?.date,later,'the newer-day session may display after preserving the old branch');
+    assert.equal(keptOld.length,1,variant==='divergent'
+      ?'genuine unsaved study progress must be kept for review'
+      :'a matching Day without a canonical save acknowledgement cannot prove retirement');
+  }
+}
+
+// BF-C4: when the verified descendant has *ended* the same-day session,
+// an acknowledged local copy need not exactly match its legacy full hash.
+// No new Saved Day fingerprint format or ownership authority is introduced.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-09-07',a={installationId:'inst_bfc4_end_a',records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('bfc4-end'),activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null},
+    b={installationId:'inst_bfc4_end_b',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  a.activeSession=revisionedSession(day,'BF-C4-ENDED',{runningOn:a.installationId,revision:7,contentRevision:3,savedRevision:0});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  b.records.set(day,revisionedRecord(day,'saved on B',501,'2026-09-07T19:00:00.000Z'));
+  b.activeSession=null;b.schedule='';b.running=false;await B.upload();
+  const previous=a.activeSession;
+  a.activeSession=freeze({...previous,revision:8,updatedAt:'2026-09-07T19:01:00.000Z',
+    snapshot:freeze({...previous.snapshot,savedRevision:3,updatedAt:'2026-09-07T19:01:00.000Z'})});
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession,null,'verified remote end and acknowledged matching Day may retire a metadata-changed session');
+  assert.equal(a.reviews.open().filter(item=>item.subject==='session').length,0,'an acknowledged end creates no phantom kept version');
+}
+
 // BF-1: Continue Here is fenced by the exact verified Drive session content.
 // The read is side-effect free: B may have a stale local copy, but it claims
 // the newest shared session without reconciling unrelated domains. Pure
