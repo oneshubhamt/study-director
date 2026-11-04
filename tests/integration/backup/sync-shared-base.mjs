@@ -796,7 +796,7 @@ for(const variant of ['unchanged','late','last-tick']){
   const lateWork=variant==='late',finalTick=variant==='last-tick';
   syncWorld.drive.clear();syncWorld.claims.clear();
   const {device,note}=syncWorld,day='2026-08-27',later='2026-08-28';
-  const suffix=variant;
+  const suffix=variant.replaceAll('-','_');
   const a={installationId:'inst_bf1r1_old_'+suffix,records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1r1'),activeSession:null,schedule:'',personal:personal('BF1R1 User'),journal:null};
   const b={installationId:'inst_bf1r1_new_'+suffix,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1R1 User'),journal:null};
   const A=device(a),B=device(b);
