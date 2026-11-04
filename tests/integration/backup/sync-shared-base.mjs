@@ -184,7 +184,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
     operations:freeze({canShare:()=>true,assertAuthority:()=>{if(injectedFailure==='ownership')throw new Error('QA_FIXTURE ownership failure');return true;},clearFault:fn,failClosed:message=>{throw new Error(String(message));},runExclusive:async(kind,operation)=>operation()}),
-    interactions:freeze({choose:async options=>{prompts.push(options);return options&&options.title==='Use this backup'?fileMode:options&&options.title==='Keep what isn’t in this backup?'?extrasMode:null;},configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('kept__')){out[group.id]=state.keptChoice||group.defaultValue;continue;}if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
+    interactions:freeze({choose:async options=>{prompts.push(options);return options&&options.title==='Use this backup'?fileMode:options&&options.title==='Keep what isn’t in this backup?'?extrasMode:null;},configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('kept__')){out[group.id]=state.keptSelections?.[group.id]||state.keptSelections?.[group.id.split('__').slice(2).join('__')]||state.keptChoice||group.defaultValue;continue;}if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
     environment:freeze({AbortController,clearTimeout:inertTimers?()=>{}:clearTimeout,yieldTask:async()=>{},setTimeout:inertTimers?()=>0:callback=>(callback(),1)}),diagnostics:freeze({capture:fn,start:()=>'',mark:(name,details={})=>(diagnosticMarks.push([String(name),details]),true),finish:()=>false,fail:()=>false})
   })}));
   return {runtime,prompts,statuses,events,diagnosticMarks,setPreflightFailure:value=>{injectedFailure=String(value||'');}};
@@ -680,6 +680,71 @@ let syncWorld=null;
   assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.activeSession.snapshot.label,'A-SESSION','an unsaved earlier session is not replaced by a new one from another device');
   assert.equal(a.reviews.open().filter(review=>review.subject==='session'&&review.kept?.snapshot?.label==='B-SESSION').length,1,'the independent later-day session is preserved exactly once for review');
+}
+
+// BF-2: With only a whole-Personal-Data fingerprint, no checkpoint-wide
+// timestamp can prove which individual setting changed last. Review permits
+// taking just the verified differing preference and preserves local edits.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,shared=personal('BF2 Shared');
+  const a={installationId:'inst_bf2_personal_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('BF2'),activeSession:null,schedule:'',personal:shared,journal:null};
+  const b={installationId:'inst_bf2_personal_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:shared,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,quote:'Keep working locally'})});
+  const before=b.personal;
+  assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual(b.personal,before,'unproven independent setting edits never select a whole-object timestamp winner');
+  const open=b.reviews.open().filter(review=>review.subject==='personal');
+  assert.equal(open.length,1,'the remote changed settings remain available for review');
+  assert.equal(open[0].kept.preferences.theme,'dark');
+  b.keptSelections={'preference:theme':'use'};
+  const choices=await B.reviewKept();
+  b.keptSelections=null;
+  assert.equal(choices.reviewed,1);
+  assert.equal(b.personal.preferences.theme,'dark','selecting one remote setting changes only that field');
+  assert.equal(b.personal.preferences.quote,'Keep working locally','independent local setting remains');
+  assert.deepEqual(b.reviews.open(),[],'successful verification resolves the original review');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.personal.preferences.quote,'Keep working locally','field-level user choice converges to the other device');
+  assert.equal(a.personal.preferences.theme,'dark');
+  assert.deepEqual(a.reviews.open(),[]);
+
+  // The saved-plan list and draft are independent choices, even though they
+  // are still encoded together in one canonical Personal Data review.
+  const plan=freeze({id:'plan-bf2-saved-0001',label:'Alternate',scheduleText:'09:00 | 60 | Revision | work | Ethics | pages | 12',createdAt:'2026-08-31T10:00:00.000Z',updatedAt:'2026-08-31T10:00:00.000Z'});
+  a.personal=freeze({...a.personal,plans:freeze({draft:'06:00 | 45 | Draft A | work | Polity | pages | 8',savedPlans:freeze([plan]),defaultId:plan.id})});
+  await A.upload();
+  b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,draft:'07:00 | 30 | Draft B | work | History | pages | 6'})});
+  assert.equal((await B.sync()).cancelled,false);
+  const planReview=b.reviews.open().find(review=>review.subject==='personal');
+  assert.ok(planReview,'saved-plan and working-draft divergence is reviewable');
+  b.keptSelections={['savedPlan:'+plan.id]:'use'};
+  await B.reviewKept();b.keptSelections=null;
+  assert.equal(b.personal.plans.draft,'07:00 | 30 | Draft B | work | History | pages | 6','accepting a saved plan does not overwrite the independent working draft');
+  assert.equal(b.personal.plans.savedPlans[0].id,plan.id,'the selected saved plan is added');
+  assert.equal(b.personal.plans.defaultId,null,'the default is not changed without selecting it');
+  assert.deepEqual(b.reviews.open(),[]);
+
+  // A remote review id referring to the same open semantic conflict must be
+  // retired as a replicated resolved tombstone, not duplicated as a prompt.
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,quote:'Different A quote'})});
+  await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,quote:'Different B quote'})});
+  assert.equal((await B.sync()).cancelled,false);
+  const first=b.reviews.open().find(review=>review.subject==='personal');
+  assert.ok(first);
+  const other=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:first.kept,base:first.base});
+  a.reviews= a.reviews||memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await a.reviews.ports.pendingReviewsMerge([other]);
+  await A.upload();
+  assert.equal((await B.sync()).cancelled,false);
+  const duplicates=b.reviews.open().filter(review=>review.subject==='personal'&&JSON.stringify(review.kept)===JSON.stringify(first.kept));
+  assert.equal(duplicates.length,1,'equivalent open semantic conflicts appear only once');
+  const tombstones=await b.reviews.ports.pendingReviewsList();
+  assert.ok(tombstones.some(review=>review.id===other.id&&review.resolvedAt),'duplicate incoming identity is resolved for all devices');
 }
 
 // Restoring an older version reaches every device: the restoring device makes
