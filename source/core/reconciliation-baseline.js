@@ -131,7 +131,23 @@ registry.define('reconciliation-baseline',1,()=>{
       return freeze(out);
     }
     const readDays=dates=>readDayHashes(dates);
-    const readSemanticDays=dates=>readDayHashes(dates,true);
+    // Ancestry is only safe when all month rows belong to the exact shared
+    // checkpoint being reconciled. Distinguish unreadable rows from absence.
+    async function readDayAncestry(dates,expectedCheckpointId){
+      const expected=String(expectedCheckpointId||''),before=await readHeader();
+      if(!before||!expected||before.checkpointId!==expected)throw new Error('Shared Saved-Day ancestor changed before it could be read.');
+      const wanted=new Set((Array.isArray(dates)?dates:[]).map(String).filter(date=>/^\d{4}-\d{2}-\d{2}$/u.test(date))),
+        months=[...new Set([...wanted].map(date=>date.slice(0,7)))],out=Object.create(null);
+      for(const [month,raw] of await Promise.all(months.map(async month=>[month,await meta.read(families.days,month)]))){
+        if(raw===null||raw===undefined)continue;
+        const row=codec.normalizeDays(raw,{suffix:month});
+        if(!row)throw new Error('Shared Saved-Day ancestor row is invalid.');
+        for(const [date,full] of Object.entries(row.days))if(wanted.has(date))out[date]=freeze({full,semantic:row.semanticDays?.[date]??null});
+      }
+      const after=await readHeader();
+      if(!after||after.checkpointId!==expected)throw new Error('Shared Saved-Day ancestor changed during reconciliation.');
+      return freeze(out);
+    }
         const SPEC_KEYS=['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','personalFields','sessionFingerprint','noteKeys','updates','deletes','days'];
     async function write(checkpointId,spec){
       const id=String(checkpointId||''),semantic=spec?.version===4;
@@ -190,7 +206,7 @@ registry.define('reconciliation-baseline',1,()=>{
     // Forgets what was last shared (the Drive library changed): the next sync
     // is a first sync, a two-way merge. The next full base rewrites the rows.
     function clear(){return meta.remove(families.header,'',{strict:true});}
-    return freeze({format:'study-director.reconciliation-baseline-store',contractVersion:1,readHeader,readNotes,readDays,readSemanticDays,write,clear});
+    return freeze({format:'study-director.reconciliation-baseline-store',contractVersion:1,readHeader,readNotes,readDays,readDayAncestry,write,clear});
   }
   return freeze({format:'study-director.reconciliation-baseline-module',contractVersion:1,createCodec,createStore});
 });
