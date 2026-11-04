@@ -1387,7 +1387,7 @@ async function reviewKeptVersions({ref=''}={}){
         confirmed++;
       }
     }catch(error){
-      OperationDiagnostics.mark('kept-review-incomplete',{confirmed,requested:done.length,reason:'commit-or-receipt-failed'});
+      OperationDiagnostics.mark('kept-review-incomplete',{completed:confirmed,total:done.length,reason:'error'});
       if(confirmed)throw new Error(`${confirmed} of ${done.length} kept versions confirmed. Earlier choices remain applied; other versions remain available. Retry after correcting the storage problem.`,{cause:error});
       throw error;
     }
