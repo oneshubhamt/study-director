@@ -1254,6 +1254,9 @@ async function reviewKeptVersions({ref=''}={}){
   for(const review of [...waiting].sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)))if(!first.has(review.subject+':'+review.ref)&&(review.subject!=='session'||!hasActiveSession()))first.set(review.subject+':'+review.ref,review);
   const reviews=[...first.values()],of=subject=>reviews.filter(review=>review.subject===subject);
   if(!reviews.length)return freeze({reviewed:0,left:waiting.length,changed:0});
+  // A debounced editor change is real local Personal Data even before IDB
+  // sees it. Never compare or replace that draft from an unflushed snapshot.
+  if(of('personal').length)await personalSettle();
   const noteIds=[...new Set(of('note').map(review=>review.ref))],noteRows=noteIds.length?await AppData.notes.readFreshItems(noteIds):[],notes=new Map(noteIds.map((id,index)=>[id,noteRows[index]||null]));
   const days=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref)):[]).map(record=>[record.date,record]));
   const personal=of('personal').length?await personalExport({flush:false}):null,session=of('session').length?(await readCanonicalActiveSession()).value||null:null;
@@ -1331,6 +1334,9 @@ async function reviewKeptVersions({ref=''}={}){
   const use=step=>picked[step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
   return runExclusive('review-kept-versions',()=>withPersistenceSuppressed(async()=>{
     requireBackupMutationControl('reviewing kept versions');
+    // Re-settle the draft after the modal, before testing the captured version
+    // for staleness. A new edit must postpone this review, not be overwritten.
+    if(of('personal').length)await personalSettle();
     // What another device or a sync changed while the person chose stays:
     // those reviews wait for the next look.
     const still=new Set((await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt).map(review=>review.id)),fresh=noteIds.length?await AppData.notes.readFreshItems(noteIds):[];
@@ -1971,24 +1977,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       // A side holding nothing the other lacks (a new device's start-up
       // state, say) takes the other's, and nothing is kept. Otherwise the
       // newer shows and the other is kept for review.
-      // A truly blank fresh device retains the established first-sync rule.
-      // But a known ancestor can prove an *intentional deletion* of one
-      // setting; mere absence of that value must not masquerade as startup.
-      if(!localPersonal||personalIsBlank(localPersonal))personal='replace';
-      else if(personalIsBlank(theirs))personal='keep';
+      // Field ancestry has precedence over every blank/subset heuristic:
+      // an intentionally cleared draft or setting is not a new installation.
+      const fieldResult=await reconcilePersonalFields(base,localPersonal,theirs);
+      if(fieldResult){
+        personal='keep';
+        autoPersonal=fieldResult.value;
+        if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+      }else if(!base&&(!localPersonal||personalIsBlank(localPersonal)))personal='replace';
+      else if(!base&&personalIsBlank(theirs))personal='keep';
+      else if(!base&&personalAddsNothing(localPersonal,theirs))personal='replace';
+      else if(!base&&personalAddsNothing(theirs,localPersonal))personal='keep';
       else{
-        const fieldResult=await reconcilePersonalFields(base,localPersonal,theirs);
-        if(fieldResult){
-          personal='keep';
-          autoPersonal=fieldResult.value;
-          if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
-        }else if(personalAddsNothing(localPersonal,theirs))personal='replace';
-        else if(personalAddsNothing(theirs,localPersonal))personal='keep';
-        else{
-          // Missing ancestry is unknown, not evidence of a newer value.
-          personal='keep';
-          if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
-        }
+        // A known shared base without field ancestry (for example v3) must
+        // not invent a first-start state from a later intentional deletion.
+        personal='keep';
+        if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
       }
     }
   }

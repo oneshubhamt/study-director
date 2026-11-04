@@ -5509,8 +5509,42 @@ async function verifySessionHandoffSafety(session){
   // The matching higher-epoch compensation returned ownership to the exact
   // former owner. An absent/released/superseded claim cannot start this device
   // either; clear only when the local canonical record still belongs elsewhere.
-  if(local.runningOn===me||local.revision!==marker.observedRevision)return false;
   if(claim?.ownedHere)return false; // a different same-device claim is not ours
+  // A later owner can supersede an interrupted claim after this device has
+  // already saved its proposed ownership locally. Until a matching newest
+  // checkpoint exists, keep the latch and the timer stopped. If it exists and
+  // contains precisely the same study evidence, adopt its remote owner with
+  // the existing conditional IDB write; never overwrite divergent progress.
+  if(claim?.applies===true&&claim.state==='owned'&&!claim.ownedHere&&
+      claim.handoffToken!==marker.handoffToken&&
+      Number(claim.revision)>=marker.proposedRevision&&
+      claim.observedContentFingerprint===marker.observedContentFingerprint){
+    const source=await BackupProviderRuntime.readSessionHandoffSource('google-drive');
+    const remote=source?.status==='completed'?ActiveSessionCodec.sanitizeCurrent(source.session):null;
+    if(!remote||remote.date!==marker.date||remote.runningOn===me||
+        source.observedOwnerToken!==claim.ownerToken||
+        await activeSessionContentFingerprint(remote)!==marker.observedContentFingerprint)return false;
+    // The claimed remote owner must still be current immediately before the
+    // local repair, and the original user's canonical work must be unchanged.
+    const latest=await BackupProviderRuntime.readSessionClaim('google-drive');
+    if(!latest?.applies||latest.epoch!==claim.epoch||latest.state!=='owned'||
+        latest.ownerToken!==claim.ownerToken||latest.ownedHere)return false;
+    if(local.runningOn===me&&local.revision===marker.proposedRevision){
+      if(!appCanMutate())return false;
+      const restored=await AppData.activeSession.save(remote,{strictDurability:true,expectedCanonical:local});
+      await requireCanonicalSessionWrite(restored,remote,'recovering a superseded ownership claim');
+      handleActiveSessionRepositoryResult(restored,'save');
+    }else if(local.runningOn===me||local.revision!==marker.observedRevision)return false;
+    // Even after a successful conditional commit, a newer remote claim
+    // remains a reason to block rather than speculate about ownership.
+    const verified=await BackupProviderRuntime.readSessionClaim('google-drive');
+    if(!verified?.applies||verified.epoch!==claim.epoch||verified.state!=='owned'||
+        verified.ownerToken!==claim.ownerToken||verified.ownedHere)return false;
+    clearSessionHandoffSafety();
+    notifyBackupChange({urgent:true,reason:'session-handoff-superseded'});
+    return true;
+  }
+  if(local.runningOn===me||local.revision!==marker.observedRevision)return false;
   if(claim?.handoffToken===marker.handoffToken&&claim.state==='owned'&&claim.ownerToken===marker.observedOwnerToken&&
       Number(claim.revision)===marker.observedRevision&&Number(claim.observedRevision)===marker.proposedRevision){
     clearSessionHandoffSafety();return true;
@@ -5625,7 +5659,7 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
         const current=loaded?.ok&&loaded.storage?.idb===true?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
         let localReverted=!!current&&CanonicalModule.same(current,previous);
         if(!localReverted&&current&&CanonicalModule.same(current,next)){
-          const restored=await AppData.activeSession.save(previous,{strictDurability:true});
+          const restored=await AppData.activeSession.save(previous,{strictDurability:true,expectedCanonical:current});
           await requireCanonicalSessionWrite(restored,previous,'compensating a failed ownership transfer');
           localReverted=true;
         }
