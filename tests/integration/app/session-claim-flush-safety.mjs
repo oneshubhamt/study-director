@@ -361,4 +361,80 @@ function acquiringHarness(fault=''){
   }
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:24,productionFunctions:true}));
+// BF-1R1: the Saved Day acknowledgement must survive strict canonical
+// readback before the app can declare this study revision saved.
+{
+  const src=[
+    productionFunction("async function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){"),
+    productionFunction('async function acknowledgeSavedStudyDay(date,revision){'),
+    productionFunction('async function clearCanonicalSessionAfterSavedDay(){')
+  ].join('\n');
+  const date='2026-08-27';
+  const prepare=(failure='')=>{
+    let recorded=null,acknowledged=0,clears=0;
+    const sessionState={savedRevision:0,contentRevision:7,studyDate:date};
+    const memory=new Set(['2026-08-27']);
+    const context=vm.createContext({
+      TASKS:[{}],TimerState:sessionState,savedRecordDates:memory,
+      getReviewDate:()=>date,
+      cleanDayRevision:value=>Math.max(0,Math.floor(Number(value)||0)),
+      writeLiveDraftNow:async options=>{
+        assert.equal(options.strictDurability,true);
+        assert.equal(options.markChanged,false);
+        recorded={date,snapshot:{savedRevision:sessionState.savedRevision,contentRevision:sessionState.contentRevision},revision:10};
+        if(failure==='no-receipt')return null;
+        if(failure==='local-only')return {ok:true,value:recorded,error:new Error('IndexedDB unavailable'),storage:{idb:false,local:true}};
+        return {ok:true,value:recorded,storage:{idb:true}};
+      },
+      clearSaveReminder:()=>{acknowledged++;},
+      requireUnused:()=>{},
+      AppData:{activeSession:{
+        load:async()=>failure==='mismatched-read'?{ok:true,value:{...recorded,revision:9},storage:{idb:true}}:
+          failure==='clear-shadow'?{ok:true,value:{date},storage:{idb:true}}:
+          {ok:true,value:recorded,storage:{idb:true}},
+        clear:async()=>{clears++;return failure==='clear-local-only'?{ok:true,storage:{idb:false},error:new Error('IndexedDB unavailable')}:{ok:true,storage:{idb:true}};}
+      }},
+      ActiveSessionCodec:{sanitizeCurrent:v=>v||null},
+      CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
+      Object
+    });
+    vm.runInContext(src+'\nglobalThis.ack=acknowledgeSavedStudyDay;globalThis.clearDay=clearCanonicalSessionAfterSavedDay;',context);
+    return {ack:()=>context.ack(date,7),clear:()=>context.clearDay(),state:()=>({saved:sessionState.savedRevision,acknowledged,clears,memory})};
+  };
+  const good=prepare();assert.equal(await good.ack(),true);
+  assert.equal(good.state().saved,7);assert.equal(good.state().acknowledged,1);
+  for(const fault of ['local-only','no-receipt','mismatched-read']){
+    const trial=prepare(fault);
+    await assert.rejects(trial.ack(),/IndexedDB unavailable|acknowledgement was not saved|read-back differs/u,fault);
+    assert.equal(trial.state().saved,0,fault+' must not mark session revision saved');
+    assert.equal(trial.state().acknowledged,0);
+    assert.equal(trial.state().memory.size,0,'invalidated saved-date cache cannot suppress a later reminder');
+  }
+  const localOnlyClear=prepare('clear-local-only');
+  await assert.rejects(localOnlyClear.clear(),/IndexedDB unavailable/u);
+  assert.equal(localOnlyClear.state().clears,1);
+  const mismatchedClear=prepare('clear-shadow');
+  await assert.rejects(mismatchedClear.clear(),/remained after its canonical deletion/u);
+}
+{
+  // A successful repository write receipt is not sufficient if the strict
+  // IDB read disagrees or the value exists only in local rescue storage.
+  const repo=fs.readFileSync(new URL('../../../source/core/repositories.js',import.meta.url),'utf8');
+  const signature='async function verifyCanonicalDailyRecord(record){';
+  const start=repo.indexOf(signature),end=start<0?-1:repo.indexOf('\n}',start);
+  assert.ok(start>=0&&end>start,'canonical Saved Day verifier must exist in production');
+  const fn=repo.slice(start,end+2),record={date:'2026-08-27',recordKind:'study',sourceRevision:7,reflection:'Saved'};
+  for(const actual of [record,{...record,reflection:'Unrelated'},null]){
+    const context=vm.createContext({
+      sanitizeCurrentDailyRecord:r=>r,
+      idbGetRecord:async()=>actual,
+      readableDailyRecord:r=>r,
+      sameDataValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b)
+    });
+    vm.runInContext(fn+'\nglobalThis.verify=verifyCanonicalDailyRecord;',context);
+    if(actual===record)assert.equal(await context.verify(record),true);
+    else await assert.rejects(context.verify(record),/read-back did not match/u);
+  }
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:32,productionFunctions:true}));
