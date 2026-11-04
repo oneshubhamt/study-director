@@ -1330,7 +1330,7 @@ async function reviewKeptVersions({ref=''}={}){
     const kept=review.kept;
     if(review.subject==='note'){
       const note=notes.get(review.ref);
-      if(!note)choice(review,'','Note · absent here',`The kept alternative refers to a note absent here. ${keptReviewProvenance(review)} Restore it from Recently deleted if you need its contents.`,{label:'Keep for later',description:'The alternative stays available.'},{label:'Discard kept version',description:'No note is changed here.'},true);
+      if(!note)choice(review,'','Note · absent here',`${kept?'A note alternative is kept while its local copy is absent. Restore the local note from Recently deleted to compare.':'Both the current note and its kept deletion are absent.'} ${keptReviewProvenance(review)}`,{label:'Keep for later',description:'The alternative stays available.'},{label:'Discard kept version',description:'No note is changed here.'},true);
       else if(!kept)choice(review,'',`Note · ${note.label}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
       else{
         if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Titles differ. ${keptReviewProvenance(review)}`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
@@ -1418,7 +1418,7 @@ async function reviewKeptVersions({ref=''}={}){
         ]):'';
       choice(review,'','Active / suspended session',`${differences} ${control} ${evidence} ${keptReviewProvenance(review)} Choosing the kept session suspends it here; it does not transfer a live timer.`,{
         label:session?'Keep current session':'Keep no session',description:sessionReviewSummary(here)
-      },{label:'Use kept session (suspended)',description:sessionReviewSummary(there)});
+      },{label:there?'Use kept session (suspended)':'Use kept absence (remove session)',description:sessionReviewSummary(there)});
     }
   }
   let picked=freeze({}),resolvedTexts=null;
@@ -1451,7 +1451,7 @@ async function reviewKeptVersions({ref=''}={}){
     const deletedDays=new Set(done.some(review=>review.subject==='savedDay'&&!review.kept&&chosen(review,''))?
       (await AppData.deletionRecovery.savedDays()).map(item=>item.date):[]);
     for(const review of done){
-      const noteItems=[],dayItems=[];let keptSession=null;
+      const noteItems=[],dayItems=[];let keptSession=null,clearSession=false;
       if(review.subject==='note'){
         const note=notes.get(review.ref);
         if(note){
@@ -1477,12 +1477,16 @@ async function reviewKeptVersions({ref=''}={}){
           // have written that tombstone before its review receipt failed.
           dayItems.push(freeze({date:review.ref,changed:true,state:'deleted',deletedAt:now}));
         }
-      }else if(review.subject==='session'&&chosen(review,'')&&!keptSessionAlreadyApplied(session,review.kept))keptSession=review.kept;
-      intents.push(freeze({review,noteItems:freeze(noteItems),dayItems:freeze(dayItems),keptSession}));
+      }else if(review.subject==='session'&&chosen(review,'')){
+        if(review.kept){
+          if(!keptSessionAlreadyApplied(session,review.kept))keptSession=review.kept;
+        }else if(session)clearSession=true;
+      }
+      intents.push(freeze({review,noteItems:freeze(noteItems),dayItems:freeze(dayItems),keptSession,clearSession}));
     }
     let confirmed=0;
     try{
-      for(const {review,noteItems,dayItems,keptSession} of intents){
+      for(const {review,noteItems,dayItems,keptSession,clearSession} of intents){
         if(noteItems.length)await applyResolvedNotes(freeze({notes:noteItems}));
         if(dayItems.length)await applyResolvedSavedDays(freeze({savedDays:dayItems,sourcePlan:freeze({savedDays:freeze([])})}),null,()=>{});
         if(review.subject==='personal'&&personalSelection&&!Canonical.same(personalSelection,personal)){
@@ -1492,6 +1496,11 @@ async function reviewKeptVersions({ref=''}={}){
             throw new Error('The selected Personal Data did not reach canonical storage. The review remains open.');
         }
         if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
+        if(clearSession){
+          await applyResolvedActiveSession(freeze({activeSession:freeze({value:session})}),{clear:true});
+          const cleared=await readCanonicalActiveSession();
+          if(cleared.value)throw new Error('The selected kept-session deletion did not clear canonical storage. Its review remains open.');
+        }
         await AppData.pendingReviews.resolve([review.id]);
         const [receipt]=await AppData.pendingReviews.readItems([review.id]);
         if(!receipt?.resolvedAt)throw new Error('The kept-version acknowledgement could not be verified. Reopen Kept Versions after storage recovers to check this decision.');
