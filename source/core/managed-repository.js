@@ -9,7 +9,7 @@ registry.define('managed-repository',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     configuration:freeze(['backupVersion','limits','logicalCaptureFormat','logicalCaptureVersion']),
-    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','personalFields','dayFingerprints','sessionFingerprint']),
+    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','personalFields','dayFingerprints','semanticDayFingerprints','sessionFingerprint','sessionContentFingerprint']),
     assets:freeze(['get','verifyAliases']),
     files:freeze(['protect','unprotect','run','scope']),
     checkpoint:freeze(['capture','beginPreparation','readPreparationUnits','finalizePreparation','establishPreparationBaseline','assertCurrent','inspectVerifiedCapture','verifyVerifiedCapture','currentImportSignal']),
@@ -28,7 +28,7 @@ registry.define('managed-repository',1,()=>{
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
     const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
-    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,personalFields:ports.persistence.personalFields,dayFingerprints:ports.persistence.dayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint})});
+    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,personalFields:ports.persistence.personalFields,dayFingerprints:ports.persistence.dayFingerprints,semanticDayFingerprints:ports.persistence.semanticDayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint,sessionContentFingerprint:ports.persistence.sessionContentFingerprint})});
     const AssetData=freeze({get:ports.assets.get,verifyAliases:ports.assets.verifyAliases});
     const Exports=ports.files;
     const captureLogicalCheckpoint=ports.checkpoint.capture,beginPreparationCapture=ports.checkpoint.beginPreparation,readPreparationUnits=ports.checkpoint.readPreparationUnits,finalizePreparationCapture=ports.checkpoint.finalizePreparation,establishPreparationBaseline=ports.checkpoint.establishPreparationBaseline,assertLogicalCheckpointCurrent=ports.checkpoint.assertCurrent,inspectVerifiedCapture=ports.checkpoint.inspectVerifiedCapture,verifyVerifiedCapture=ports.checkpoint.verifyVerifiedCapture,currentImportSignal=ports.checkpoint.currentImportSignal;
@@ -638,7 +638,11 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
   };
   const grouped=(items,dateKey)=>{const map=new Map();for(const item of items){const month=repositoryMonth(item&&item[dateKey]);if(!map.has(month))map.set(month,[]);map.get(month).push(item);}return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0]));};
   // The Saved-Day fingerprints of the months read here (null: none left).
-  const daysUpdate=async full=>{const out=Object.create(null);for(const [month,records] of readMonths){if(records===null){if(!full)out[month]=null;continue;}const months=await AppData.reconciliationBase.dayFingerprints(records);if(months[month])out[month]=months[month];}return freeze(out);};
+  const daysUpdate=async full=>{const days=Object.create(null),semanticDays=Object.create(null);for(const [month,records] of readMonths){
+      if(records===null){if(!full){days[month]=null;semanticDays[month]=null;}continue;}
+      const [fullMonths,semanticMonths]=await Promise.all([AppData.reconciliationBase.dayFingerprints(records),AppData.reconciliationBase.semanticDayFingerprints(records)]);
+      if(fullMonths[month]&&semanticMonths[month]){days[month]=fullMonths[month];semanticDays[month]=semanticMonths[month];}
+    }return freeze({days:freeze(days),semanticDays:freeze(semanticDays)});};
   try{
     if(plan){
       const readUnits=new Set(plan.structuredChanged);
@@ -647,6 +651,22 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
         // An unchanged Personal Data record in a legacy/unknown baseline is
         // reread from the fenced source once, not falsely inferred.
         if(!reconciliationBase?.personalFields)readUnits.add('personalData');
+        // Upgrade an older shared base using exactly the canonical checkpoint
+        // units being published. Do not infer missing semantic ancestors from
+        // their historical full-record hashes.
+        if(reconciliationBase?.version!==5){
+          let hasSession=false;
+          for(const entry of candidateEntries.values()){
+            if(!entry.present)continue;
+            if(entry.kind==='dailyRecordPack')readUnits.add(entry.unit);
+            if(entry.kind==='activeSession'){readUnits.add(entry.unit);hasSession=true;}
+          }
+          if(!hasSession)readSession=null;
+        }else if(reconciliationBase.sessionContentFingerprint===null){
+          let hasSession=false;
+          for(const entry of candidateEntries.values())if(entry.present&&entry.kind==='activeSession'){readUnits.add(entry.unit);hasSession=true;}
+          if(!hasSession)readSession=null;
+        }
       }
       for(const entry of candidateEntries.values()){
         if(!entry.present||repositoryPackableEntry(entry))continue;
@@ -667,7 +687,10 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,pendingReviewIds:inventory.pendingReviewIds,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
       const updates=Object.create(null),deletes=[];for(const [key,state] of readNoteStates){if(state===null)deletes.push(key);else updates[key]=state;}
       candidateIndex=await repositoryPreparationIndexCandidate(preparation.epochToken,preparation.stamps,candidateEntries);if(!candidateIndex)throw new Error('Incremental repository preparation index could not be rebuilt.');
-      if(plan.baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:3,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),personalFields:readPersonal===undefined?null:await AppData.reconciliationBase.personalFields(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:await daysUpdate(false)});
+      if(plan.baseUpdate){
+          const hashes=await daysUpdate(false);
+          reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:4,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),personalFields:readPersonal===undefined?null:await AppData.reconciliationBase.personalFields(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),sessionContentFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionContentFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:hashes.days,semanticDays:hashes.semanticDays});
+        }
     }else{
       capture=await captureLogicalCheckpoint(exportedAt,preparation?{includeAssetBlobs:false,assumeFlushed:true,requireCanonicalComplete:true}:{includeAssetBlobs:false,requireCanonicalComplete:true});
       for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));
@@ -677,7 +700,10 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       for(const review of capture.pendingReviewItems||[])await materializeStructured(PENDING_REVIEW_KIND,review.id,review);
       assetItems=[...(capture.assetItems||[])];
       const updates=Object.create(null),noteKeys=[];for(const note of capture.noteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
-      noteKeys.sort();if(baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:3,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),personalFields:await AppData.reconciliationBase.personalFields(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await daysUpdate(true)});
+      noteKeys.sort();if(baseUpdate){
+         const hashes=await daysUpdate(true);
+         reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:4,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),personalFields:await AppData.reconciliationBase.personalFields(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),sessionContentFingerprint:await AppData.reconciliationBase.sessionContentFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:hashes.days,semanticDays:hashes.semanticDays});
+       }
     }
     const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,note:3,[PENDING_REVIEW_KIND]:4});
     for(const entry of [...candidateEntries.values()].filter(entry=>entry.present&&!repositoryPackableEntry(entry)).sort((a,b)=>(structuredRank[a.kind]??9)-(structuredRank[b.kind]??9)||String(a.key).localeCompare(String(b.key)))){
