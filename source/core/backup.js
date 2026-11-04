@@ -617,7 +617,7 @@ function savedDayRecordPair(item){
 }
 function savedDayStudyState(record){
   if(!record||record.recordKind!=='study')return null;
-  const {reflection,updatedAt,...state}=record;return state;
+  const {reflection,savedAt,updatedAt,sourceRevision,...state}=record;return state;
 }
 function savedDayNeedsWholeDecision(item,settled=null){
   if(!item?.conflict||settled&&settled.has(item.date))return false;

@@ -2688,8 +2688,6 @@ let realTimeAwarenessRenderKey='';
 let executePanelsRenderKey='';
 let executeProgressPanelRenderKey='';
 let scheduleEndPromptKey='';
-const savedRecordDates=new Set();
-const savedRecordCheckPromises=new Map();
 const BACKUP_NUDGE_MS=7*24*60*60*1000;
 const BACKUP_NUDGE_CHECK_MS=60*60*1000;
 /* APPLICATION ACTIVATION CONTRACT */
@@ -4121,12 +4119,10 @@ function daySaveDirty(date=getReviewDate()){
 function markDayContentChanged(){
   if(!TimerState.studyDate&&!TASKS.length)return 0;
   TimerState.contentRevision=Math.max(cleanDayRevision(TimerState.contentRevision),cleanDayRevision(TimerState.savedRevision))+1;
-  savedRecordDates.delete(getReviewDate());
   return TimerState.contentRevision;
 }
 function markDayContentSaved(date,revision){
   if(date===getReviewDate())TimerState.savedRevision=Math.max(cleanDayRevision(TimerState.savedRevision),cleanDayRevision(revision));
-  if(!daySaveDirty(date))savedRecordDates.add(date);
   return !daySaveDirty(date);
 }
 function reviewDateTitle(iso){
@@ -4157,27 +4153,21 @@ function clearSessionSafetyMessage(match=''){
 }
 async function savedRecordExistsForDate(date){
   if(daySaveDirty(date))return false;
-  if(savedRecordDates.has(date))return true;
-  if(savedRecordCheckPromises.has(date))return savedRecordCheckPromises.get(date);
-  const check=(async()=>{
-    // Presence of an unrelated Day on the calendar cannot silence an unsaved
-    // session. Require its own acknowledgement and the verified canonical
-    // Saved Day covering that precise content.
+  try{
+    // The reminder is triggered at session end, not on each timer tick.
+    // A saved date is never cached: sync or import may replace its contents.
     const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value;
     const snapshot=session?.snapshot;
     if(!loaded?.ok||loaded.error||loaded.storage?.idb!==true||session?.date!==date||
         !snapshot||cleanDayRevision(snapshot.savedRevision)<cleanDayRevision(snapshot.contentRevision))return false;
     const records=await AppData.dailyRecords.documents([date],{requireCanonical:true});
     const record=records.find(item=>item.date===date);
-    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,session))return false;
+    // The Day may contain later work from another device: numeric revisions
+    // cannot compare across independent session lineages.
+    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,session,{allowAdvances:true}))return false;
     await AppData.dailyRecords.verifyCanonical(record);
-    if(daySaveDirty(date))return false;
-    savedRecordDates.add(date);
-    return true;
-  })().catch(error=>{AppDiagnostics.capture('session.saved-day-reminder',error,'warn');return false;})
-    .finally(()=>savedRecordCheckPromises.delete(date));
-  savedRecordCheckPromises.set(date,check);
-  return check;
+    return !daySaveDirty(date);
+  }catch(error){AppDiagnostics.capture('session.saved-day-reminder',error,'warn');return false;}
 }
 async function promptSaveToday(){
   const date=getReviewDate();
@@ -4220,7 +4210,6 @@ async function acknowledgeSavedStudyDay(date,revision){
     // A rejected acknowledgement must not teach later ordinary timer saves
     // to claim that content was saved. Keep the actual Saved Day in Library.
     TimerState.savedRevision=previous;
-    savedRecordDates.delete(date);
     throw error;
   }
 }
@@ -4637,7 +4626,7 @@ async function savedDayCoversActiveSession(session){
       !Number.isSafeInteger(savedRevision)||savedRevision<contentRevision)return false;
   try{
     const rows=await AppData.dailyRecords.documents([session.date],{requireCanonical:true}),record=rows.find(item=>item.date===session.date);
-    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,session))return false;
+    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,session,{allowAdvances:true}))return false;
     await AppData.dailyRecords.verifyCanonical(record);
     return true;
   }catch(error){
@@ -5135,7 +5124,6 @@ const CompatibilityCodecs=CompatibilityCodecsModule.create(Object.freeze({
 /* APPDATA REPOSITORY FACADE */
 function handleRepositoryDailyRecordsChanged(change){
   richAssetReferenceRevision++;
-  if(change&&change.type==='remove'&&isValidIsoDate(change.date))savedRecordDates.delete(change.date);
   LibraryView.invalidate();
   if(document.getElementById('pane-library')?.classList.contains('on'))setTimeout(()=>{if(document.getElementById('pane-library')?.classList.contains('on'))void LibraryView.render();},0);
 }

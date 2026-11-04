@@ -47,9 +47,21 @@ registry.define('reconciliation',1,input=>{
     return map;
   }
   function equivalentState(a,b){return !!a&&!!b&&a.kind===b.kind&&(a.kind==='deleted'||Canonical.same(a.value,b.value));}
-  function pairStateCandidates(identity,key,localSource,incomingSource,localState,incomingState){
+  // Save timestamps and sourceRevision describe a write, not study evidence.
+  // Both original canonical records remain intact; only equality ignores them.
+  function equivalentSavedDayState(a,b){
+    if(!a||!b||a.kind!==b.kind)return false;
+    if(a.kind==='deleted')return true;
+    if(a.kind!=='record'||!a.value||!b.value)return false;
+    const content=record=>{
+      const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...evidence}=record;
+      return evidence;
+    };
+    return Canonical.same(content(a.value),content(b.value));
+  }
+  function pairStateCandidates(identity,key,localSource,incomingSource,localState,incomingState,equivalent=equivalentState){
     if(!localState&&!incomingState)return freeze([]);
-    if(equivalentState(localState,incomingState)){
+    if(equivalent(localState,incomingState)){
       const kind=localState.kind,sources=candidateSources(localSource,incomingSource,'shared');
       const deletedAt=kind==='deleted'?(Date.parse(localState.deletedAt)>=Date.parse(incomingState.deletedAt)?localState.deletedAt:incomingState.deletedAt):null;
       return freeze([freeze({
@@ -74,7 +86,7 @@ registry.define('reconciliation',1,input=>{
     const options={records:source=>source.savedDays,deletions:source=>source.savedDayDeletions,keyOf:value=>validDate(value&&value.date)?value.date:'',entityLabel:'Saved-Day'};
     const localMap=buildStateMap(local,options),incomingMap=buildStateMap(incoming,options),dates=new Set([...localMap.keys(),...incomingMap.keys()]);
     return freeze([...dates].sort().map(date=>{
-      const candidates=pairStateCandidates(`saved-day_${date}`,date,local,incoming,localMap.get(date),incomingMap.get(date));
+      const candidates=pairStateCandidates(`saved-day_${date}`,date,local,incoming,localMap.get(date),incomingMap.get(date),equivalentSavedDayState);
       const localCandidate=candidates.find(candidate=>candidate.local)||null,conflict=candidates.length>1;
       return freeze({date,candidates,localCandidateId:localCandidate?.id||null,defaultCandidateId:localCandidate?.id||(candidates[0]?.id||null),conflict,identical:!conflict&&candidates.length===1&&candidates[0].sources.length===2,incomingOnly:!localCandidate&&candidates.length===1,decisionKey:`savedDay__${date.replaceAll('-','_')}`});
     }));

@@ -345,15 +345,14 @@ function sanitizeCurrentDailyRecord(record){
   const clean={version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind,date,savedAt,updatedAt,sourceRevision,quote,reflection,studyQuality,realTimeSnapshot,schedule,results,practiceRuns,carryForwardDraft};
   return sameDataValue(record,clean)?clean:null;
 }
-// BF-1R1: the common Saved Day / Active Session evidence comparison.
-// Exact mode permits retirement only on the acknowledged local lineage.
-// Coverage mode tests whether the Day retains the older shared evidence;
-// another device's sourceRevision is not an ancestry identifier.
+// Compare actual Saved Day evidence with recorded session work. Exact mode
+// requires equality of observed values; coverage mode permits demonstrable
+// later progress. The caller separately verifies a durable save acknowledgement
+// when required. Device-local source revisions are not ancestry identifiers.
 function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
   const snapshot=session?.snapshot;
   if(record?.recordKind!=='study'||!snapshot||record.date!==session.date||
       !Array.isArray(record.schedule)||!Array.isArray(record.practiceRuns)||!record.results)return false;
-  if(!allowAdvances&&record.sourceRevision!==snapshot.contentRevision)return false;
   const parsed=ScheduleModel.parseText(String(session.scheduleText||''));
   if(!parsed.ok)return false;
   const rows=record.schedule.map(row=>({
