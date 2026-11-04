@@ -5452,7 +5452,15 @@ function clearSessionHandoffSafety(){
 // Verification may adopt the already-accepted claim, but NEVER publishes a
 // replacement one. Unverifiable claims, source changes and divergent local
 // evidence keep the safety marker and timer stopped.
+let sessionHandoffRecoveryInFlight=null;
 async function resolveSessionHandoffSafety(session){
+  if(sessionHandoffRecoveryInFlight)return sessionHandoffRecoveryInFlight;
+  const pending=verifySessionHandoffSafety(session);
+  sessionHandoffRecoveryInFlight=pending;
+  try{return await pending;}
+  finally{if(sessionHandoffRecoveryInFlight===pending)sessionHandoffRecoveryInFlight=null;}
+}
+async function verifySessionHandoffSafety(session){
   const marker=pendingSessionHandoffSafety();
   if(!marker)return true;
   if(!validSessionHandoffSafety(marker,session)||
@@ -5611,7 +5619,8 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     await requireCanonicalSessionWrite(saved,next,'claiming Active Session ownership');
     localVerified=true;
     handleActiveSessionRepositoryResult(saved,'save');
-    if(!handoffClaimMatches(marker,await BackupProviderRuntime.readSessionClaim('google-drive')))
+    const verifiedClaim=await BackupProviderRuntime.readSessionClaim('google-drive');
+    if(!handoffClaimMatches(marker,verifiedClaim)||verifiedClaim.epoch!==ownershipClaim.epoch)
       throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN','Google Drive ownership changed before the handoff completed.');
     clearSessionHandoffSafety();
     backgroundHold.release();backgroundHold=null;
@@ -5710,6 +5719,7 @@ async function continueSessionHere(){
     try{
       const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value||null;
       if(!current)setSessionPanelMode('none');
+      else if(pendingSessionHandoffSafety())setSessionPanelMode('suspended',current);
       else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
       else if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
       else setSessionPanelMode('active',current);

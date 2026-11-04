@@ -223,7 +223,9 @@ const acquireRuntime=[
   productionFunction('function armSessionHandoffSafety(session,checkpointId,'),
   productionFunction('function validSessionHandoffSafety(marker,session){'),
   productionFunction('function handoffClaimMatches(marker,claim){'),
+  source.match(/^let sessionHandoffRecoveryInFlight=.*;$/mu)?.[0],
   productionFunction('async function resolveSessionHandoffSafety(session){'),
+  productionFunction('async function verifySessionHandoffSafety(session){'),
   productionFunction('function clearSessionHandoffSafety(){'),
   productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
   productionFunction('async function transferSessionOwnershipHere(session,')
@@ -436,6 +438,16 @@ for(const fault of ['claim-crash','claim-throws-after-remote']){
   assert.equal(await t.recover(),true);
   assert.equal(t.state().current.runningOn,'inst_handoff_old');
   assert.equal(t.state().claims,1);
+}
+// Concurrent recovery callers share the same verified strict commit.
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setFault('');t.reload();
+  const results=await Promise.all([t.recover(),t.recover()]);
+  assert.deepEqual(results,[true,true],'overlapping Verify actions agree on the same recovery result');
+  assert.equal(t.state().notify,1,'the same ownership recovery causes one durable change notification');
+  assert.equal(t.state().claims,1,'overlapping recovery never republishes the claim');
 }
 // A changed verified checkpoint, mismatching claim token, a divergent local
 // snapshot or offline Drive must keep recovery blocked with the marker intact.
