@@ -188,7 +188,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       dailyRecordRemove:async date=>(state.records.delete(date),true),dailyRecordTimestamp:value=>Date.parse(value?.updatedAt||value?.savedAt||'')||0,
       notesExportPayload:()=>state.notes,notesReadFreshPayload:async()=>state.notes,notesReadFreshItems:async keys=>verificationFault==='notes'&&verifying()?(keys||[]).map(()=>null):(keys||[]).map(key=>state.notes[key]||null),notesFlush:async()=>{events.push('preflight-notes-flush');if(injectedFailure==='notes')throw new Error('QA_FIXTURE notes preflight failure');return true;},notesNormalizePayload:normalizeNotes,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>({failed:false}),
       restoreJournalPrepare:async value=>(state.journal={state:{id:value.id},payload:value}),restoreJournalRead:async()=>state.journal,restoreJournalMark:async(id,phase)=>(state.journal.state.phase=phase,state.journal.state),restoreJournalClear:async()=>(state.journal=null,true),
-      personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(events.push('personal-import'),state.personal=value,true),personalVerify:async value=>{if(verificationFault==='personal'&&verifying())throw new Error('QA_FIXTURE personal verification failure');assert.deepEqual(state.personal,value);},
+      personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>{if(state.failPersonalImport)throw new Error('QA_FIXTURE rejected personal write');events.push('personal-import');state.personal=value;return true;},personalVerify:async value=>{if(verificationFault==='personal'&&verifying())throw new Error('QA_FIXTURE personal verification failure');assert.deepEqual(state.personal,value);},
       storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=>state.installationId||'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
       deletionRecoverySavedDays:async()=>verificationFault==='deletions'&&verifying()?[{date:'2026-01-01',deletedAt:'2026-01-01T00:00:00.000Z'}]:state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state),...state.reviews.ports,pendingReviewsReadItems:async ids=>verificationFault==='pending-reviews'&&verifying()?(ids||[]).map(()=>null):state.reviews.ports.pendingReviewsReadItems(ids)
     }),
@@ -772,6 +772,38 @@ let syncWorld=null;
   assert.equal(duplicates.length,1,'equivalent open semantic conflicts appear only once');
   const tombstones=await b.reviews.ports.pendingReviewsList();
   assert.ok(tombstones.some(review=>review.id===other.id&&review.resolvedAt),'duplicate incoming identity is resolved for all devices');
+}
+
+// BF-2: a same-setting conflict waits for an explicit field choice;
+// failed personal-data persistence cannot consume the review or lose the
+// authoritative local settings, and retry remains possible.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('BF2 Same-setting');
+  const a={installationId:'inst_bf2_same_a',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:origin,journal:null};
+  const b={installationId:'inst_bf2_same_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,theme:'light',quote:'Local note'})});
+  assert.equal((await B.sync()).cancelled,false);
+  const open=b.reviews.open().filter(review=>review.subject==='personal');
+  assert.equal(open.length,1,'same-setting divergence creates one meaningful review');
+  assert.equal(b.personal.preferences.theme,'light');
+  b.keptSelections={'preference:theme':'use'};
+  b.failPersonalImport=true;
+  await assert.rejects(B.reviewKept(),/QA_FIXTURE rejected personal write/u);
+  assert.equal(b.personal.preferences.theme,'light','failed import does not partially replace the local setting');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1,'failed import retains the unresolved review');
+  b.failPersonalImport=false;
+  assert.equal((await B.reviewKept()).reviewed,1,'the same review remains safely retryable');
+  b.keptSelections=null;
+  assert.equal(b.personal.preferences.theme,'dark');
+  assert.equal(b.personal.preferences.quote,'Local note','the independently authored setting remains unaffected');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.personal.preferences.theme,'dark');
+  assert.equal(a.personal.preferences.quote,'Local note');
+  assert.deepEqual(a.reviews.open(),[]);
 }
 
 // Restoring an older version reaches every device: the restoring device makes
