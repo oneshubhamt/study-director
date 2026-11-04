@@ -5534,7 +5534,10 @@ async function verifySessionHandoffSafety(session){
       const restored=await AppData.activeSession.save(remote,{strictDurability:true,expectedCanonical:local});
       await requireCanonicalSessionWrite(restored,remote,'recovering a superseded ownership claim');
       handleActiveSessionRepositoryResult(restored,'save');
-    }else if(local.runningOn===me||local.revision!==marker.observedRevision)return false;
+    }else if(local.runningOn===me||
+        local.revision!==marker.observedRevision&&!CanonicalModule.same(local,remote))return false;
+    // An interrupted prior repair can already equal this verified head:
+    // reread and retire its latch instead of repeating the same write.
     // Even after a successful conditional commit, a newer remote claim
     // remains a reason to block rather than speculate about ownership.
     const verified=await BackupProviderRuntime.readSessionClaim('google-drive');
