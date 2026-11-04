@@ -250,7 +250,7 @@ const acquireRuntime=[
 ].join('\n');
 function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
-  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,canMutate=true;
+  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,canMutate=true,readbackFailed=false,conditionalWrites=0;
   const storage=new Map();
   const app={
     document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
@@ -269,7 +269,8 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
       planData:{read:async()=>({draft:faultMode==='draft-mismatch'?'OTHER DRAFT':draft})},
       activeSession:{
         save:async(value,options={})=>{
-          if(faultMode==='concurrent-local'&&options.expectedCanonical){
+          if(options.expectedCanonical)conditionalWrites++;
+          if(['concurrent-local','compensation-race'].includes(faultMode)&&options.expectedCanonical){
             current={...current,snapshot:{label:'new unshared local work'}};
           }
           if(options.expectedCanonical&&JSON.stringify(current)!==JSON.stringify(options.expectedCanonical))
@@ -279,6 +280,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
           current=structuredClone(value);return {ok:true,value:current,storage:{idb:true,local:false}};
         },
         load:async()=>{
+          if(['compensation-readback','compensation-race'].includes(faultMode)&&current.runningOn==='inst_handoff_new'&&!readbackFailed){readbackFailed=true;return {ok:false,value:null,error:new Error('readback failed before compensation'),storage:{idb:true}};}
           const content=faultMode==='different-read'&&current.runningOn==='inst_handoff_new'?
             {...current,snapshot:{...current.snapshot,label:'unexpected concurrent progress'}}:current;
           return {ok:true,value:content,storage:{idb:true,local:false}};
@@ -289,7 +291,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     InstallationIdentity:{getId:()=> 'inst_handoff_new'},
     ActiveSessionCodec:{sanitizeCurrent:value=>value||null},
     CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
-    activeSessionContentFingerprint:async()=> 'f'.repeat(64),
+    activeSessionContentFingerprint:async session=>session?.snapshot?.label==='original'?'f'.repeat(64):'0'.repeat(64),
     BackupCodec:{assetIds:()=>[]},
     nextSessionRevision:value=>Number(value)+1,
     setPlanStatus:()=>{},handleActiveSessionRepositoryResult:()=>true,
@@ -298,7 +300,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     BackupProviderRuntime:{
       connected:()=>true,
       readSessionClaim:async()=>remoteClaim,
-      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:'e'.repeat(64),session:remoteSource}),
+      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:remoteSource?.runningOn==='inst_handoff_next'?'c'.repeat(64):remoteSource?.runningOn==='inst_handoff_new'?'d'.repeat(64):'e'.repeat(64),session:remoteSource}),
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
       claimSessionOwnership:async(_provider,request)=>{
         claims++;
@@ -331,7 +333,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     setFault:value=>{faultMode=value;},setHead:value=>{head=value;},setSourceSession:value=>{remoteSource=value;},setCanMutate:value=>{canMutate=value;},
     setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
     setOffline:value=>{app.navigator.onLine=!value;},
-    state:()=>({current,claim:remoteClaim,claims,compensations,backgroundReleases,notify,marker:storage.get('test-session-handoff')||null})};
+    state:()=>({current,claim:remoteClaim,claims,compensations,conditionalWrites,backgroundReleases,notify,marker:storage.get('test-session-handoff')||null})};
 }
 {
   const t=acquiringHarness();
