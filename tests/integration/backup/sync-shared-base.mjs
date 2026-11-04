@@ -1030,6 +1030,27 @@ let syncWorld=null;
   assert.deepEqual(state.reviews.open(),[]);
 }
 
+// A kept session can explicitly be absent: using it must clear the local
+// suspended session, not merely retire the review while doing nothing.
+{
+  const date='2026-08-16';
+  const state={installationId:'inst_c3_session_delete',records:new Map(),deletions:[],notes:{},noteDeletions:[],
+    activeSession:session(date,'LOCAL',{runningOn:'inst_device_local',status:'suspended'}),
+    running:false,personal:personal('Session deletion'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'session',ref:'session',kept:null})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.activeSession,null,'using a kept absence clears the canonical suspended session');
+  assert.equal(h.events.filter(event=>event==='session').length,1);
+  assert.equal(state.reviews.open().length,1,'the interrupted review acknowledgement remains pending');
+  const group=h.prompts.find(row=>row.title==='Kept versions').groups.find(row=>row.label==='Active / suspended session');
+  assert.match(group.choices[1].label,/remove session/u,'absence has an explicit destructive label');
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='session').length,1,'retry never repeats a canonical session clear');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+
 // Control revisions, save acknowledgement counters and timestamps may differ
 // even where two sessions contain identical study evidence. The dialog must
 // describe that as a control/ownership issue, not invented changed progress.
