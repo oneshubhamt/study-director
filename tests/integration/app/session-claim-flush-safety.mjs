@@ -459,6 +459,9 @@ function acquiringHarness(fault=''){
     ['different applied schedule',{...saved,schedule:[{...row,name:'Other Work'}]},snapshot,false],
     ['different practice evidence',{...saved,practiceRuns:[]},{...snapshot,practice:{runs:[{id:'unrecorded'}]}},false],
     ['unacknowledged session',saved,{...snapshot,savedRevision:6},false],
+    ['unrecorded schedule adjustment',saved,{...snapshot,scheduleAdjustments:{'ethics-1':{startMin:240}}},false],
+    ['covered schedule adjustment',{...saved,results:{'ethics-1':{...saved.results['ethics-1'],adjustedStart:'08:00'}}},{...snapshot,scheduleAdjustments:{'ethics-1':{startMin:240}}},true],
+    ['unrecorded wall-clock evidence',saved,{...snapshot,taskState:{'ethics-1':{...task,actual:{...task.actual,clock:{startedAt:'2026-08-27T07:00:00.000Z'}}}}},false],
     ['missing day',null,snapshot,false]
   ];
   for(const [label,record,snap,expected] of cases){
@@ -472,6 +475,7 @@ function acquiringHarness(fault=''){
       AppDiagnostics:{capture:()=>{}},
       parseScheduleDraftText:()=>({ok:true,parsed:[{...row,dur:row.duration}]}),
       scheduleFingerprintForRows:rows=>rows.map(r=>[r.start,r.dur,r.name,r.kind,r.area,r.measure,r.target].join('|')).join('|'),
+      studyMinuteToHHMM:()=> '08:00',
       CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
       Number,Object,Array
     });
@@ -486,10 +490,11 @@ function acquiringHarness(fault=''){
     AppDiagnostics:{capture:()=>{}},
     parseScheduleDraftText:()=>({ok:true,parsed:[{...row,dur:row.duration}]}),
     scheduleFingerprintForRows:rows=>rows.map(r=>[r.start,r.dur,r.name,r.kind,r.area,r.measure,r.target].join('|')).join('|'),
+      studyMinuteToHHMM:()=> '08:00',
     CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},Number,Object,Array
   });
   vm.runInContext(src+'\nglobalThis.covers=savedDayCoversActiveSession;',ctx);
   assert.equal(await ctx.covers(session),false,'fallback-only Day cannot retire old study evidence');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:41,productionFunctions:true}));
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:44,productionFunctions:true}));
