@@ -510,8 +510,13 @@ async function flushRestorePreflightState(signal){
     cancelLiveDraftSave();
     const snapshot=captureSessionSnapshot(),candidate=snapshot?activeSessionPayload(snapshot):null;
     if(!candidate)return false;
-    const result=await AppData.activeSession.save(candidate);
-    if(!result||!result.ok)throw result&&result.error||new Error('active session save failed');
+    const result=await AppData.activeSession.save(candidate,{strictDurability:true});
+    if(!result?.ok||result.error||result.storage?.idb!==true)
+      throw result?.error||new Error('Active Session reconciliation requires a canonical IndexedDB commit.');
+    const confirmed=await readCanonicalActiveSession();
+    if(confirmed.storage?.idb!==true||
+        !Canonical.same(ActiveSessionCodec.sanitizeCurrent(confirmed.value),ActiveSessionCodec.sanitizeCurrent(result.value)))
+      throw new Error('Active Session reconciliation did not read back the exact committed state.');
     return true;
   });
   await runRestorePreflightStage('session-settle','RESTORE_PREFLIGHT_SESSION_SETTLE_FAILED','The active session could not finish settling before reconciliation.',()=>AppData.activeSession.settled());
