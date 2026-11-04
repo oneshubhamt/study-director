@@ -986,8 +986,8 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   // ancestry. A separately acknowledged, canonically covered Saved Day can
   // also prove that retiring this local study evidence loses no work.
   // A raw cross-device revision or an unacknowledged coverage match cannot.
-  const hasSemanticAncestor=typeof contentShared==='string',unchangedFromShared=!!shared&&
-    (hasSemanticAncestor?!!contentShared&&contentMine===contentShared:mine===shared);
+  const hasSemanticAncestor=typeof contentShared==='string',unchangedFromShared=!!shared&&mine===shared,
+    semanticallyUnchanged=!!shared&&hasSemanticAncestor&&!!contentShared&&contentMine===contentShared;
   const durablyCoveredLocal=!!local&&savedCoversLocal&&sessionFullyAcknowledged(local);
 
   // This device is the old owner. The claim is the authoritative handoff
@@ -1059,7 +1059,7 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
       const merged=mergeSessionAcknowledgement(incoming,local);
       return merged&&!Canonical.same(merged,incoming)?sessionDecision('graft',merged):sessionDecision('incoming');
     }
-    if(unchangedFromShared||durablyCoveredLocal)return sessionDecision('incoming');
+    if(unchangedFromShared||semanticallyUnchanged||durablyCoveredLocal)return sessionDecision('incoming');
     return sessionDecision('yield');
   }
   if(hold&&!takenOver)return sessionDecision('hold');
