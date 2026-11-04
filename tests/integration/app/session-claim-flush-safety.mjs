@@ -448,6 +448,66 @@ for(const fault of ['claim-crash','claim-throws-after-remote']){
   assert.equal(t.state().current.runningOn,'inst_handoff_old');
   assert.equal(t.state().marker,null);
 }
+// A subsequent verified owner may supersede an interrupted acquisition.
+function supersedeHandoff(t){
+  const {claim,marker}=t.state();
+  const latest={...claim,epoch:claim.epoch+1,state:'owned',ownedHere:false,
+    ownerToken:'c'.repeat(64),observedOwnerToken:'d'.repeat(64),
+    observedContentFingerprint:marker.observedContentFingerprint,
+    observedRevision:marker.proposedRevision,revision:marker.proposedRevision+1,
+    handoffToken:'88888888-8888-4888-8888-888888888888'};
+  t.setClaim(latest);
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:latest.revision});
+  return latest;
+}
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'new remote owner releases an unadopted attempt');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.equal(t.state().marker,null);
+  assert.equal(t.state().claims,1);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'new remote owner supersedes the local pending owner');
+  assert.equal(t.state().current.runningOn,'inst_handoff_next');
+  assert.equal(t.state().conditionalWrites,1);
+  assert.equal(t.state().marker,null);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('concurrent-local');t.reload();
+  await assert.rejects(t.recover(),/Active Session changed before ownership recovery/u);
+  assert.equal(t.state().current.snapshot.label,'new unshared local work');
+  assert.ok(t.state().marker);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('clear-fail');t.reload();
+  await assert.rejects(t.recover(),/safety latch could not be cleared/u);
+  assert.equal(t.state().current.runningOn,'inst_handoff_next');
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'recovery recognizes an already committed remote owner');
+  assert.equal(t.state().conditionalWrites,1,'idempotent recovery does not repeat its CAS');
+  assert.equal(t.state().marker,null);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:12,snapshot:{label:'other study'}});
+  t.reload();
+  assert.equal(await t.recover(),false,'unrelated new study evidence cannot be overwritten');
+  assert.ok(t.state().marker);
+  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+}
+
 // A failed strict write during recovery does not consume the attempt.
 // Subsequent PRIMARY ownership and healthy persistence permit a retry.
 {
