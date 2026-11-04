@@ -235,6 +235,14 @@ metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:
 metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,label:'Ethics',text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
 assert.equal(metadataRows.get('reconciliationBase').value,currentBase,'a version 3 merge base is current');assert.equal(metadataRows.get(baseDays.key),baseDays,'its Saved Day rows stay with it');
+const semanticBase={...currentBase,version:5,personalFields:null,sessionContentFingerprint:''};
+const semanticMonth={...baseDays,value:{...baseDays.value,version:2,semanticDays:{'2026-09-20':'b'.repeat(64)}}};
+metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:semanticBase,updatedAt:'2026-09-20T00:00:00.000Z'});
+metadataRows.set(baseDays.key,semanticMonth);
+await Host.createFacade(malformedInput).migrateLive();
+assert.deepEqual(metadataRows.get('reconciliationBase').value,semanticBase,'compatibility cleanup must retain a valid v5 semantic baseline rather than delete shared ancestry');
+assert.deepEqual(metadataRows.get(baseDays.key),semanticMonth,'compatibility cleanup must preserve paired v2 monthly hashes');
+
 metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:{...currentBase,version:2,sessionFingerprint:undefined},updatedAt:'2026-09-20T00:00:00.000Z'});metadataRows.set(baseDays.key,baseDays);
 await Host.createFacade(malformedInput).migrateLive();
 assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'a version 2 base cannot tell an unknown Saved Day from a missing one, so it goes whole, Saved Day rows included');
