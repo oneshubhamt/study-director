@@ -5517,13 +5517,20 @@ async function verifySessionHandoffSafety(session){
   // the existing conditional IDB write; never overwrite divergent progress.
   if(claim?.applies===true&&claim.state==='owned'&&!claim.ownedHere&&
       claim.handoffToken!==marker.handoffToken&&
-      Number(claim.revision)>=marker.proposedRevision&&
+      Number(claim.observedRevision)>=marker.proposedRevision&&
+      Number(claim.revision)>=Number(claim.observedRevision)&&
       claim.observedContentFingerprint===marker.observedContentFingerprint){
     const source=await BackupProviderRuntime.readSessionHandoffSource('google-drive');
     const remote=source?.status==='completed'?ActiveSessionCodec.sanitizeCurrent(source.session):null;
     if(!remote||remote.date!==marker.date||remote.runningOn===me||
-        source.observedOwnerToken!==claim.ownerToken||
-        await activeSessionContentFingerprint(remote)!==marker.observedContentFingerprint)return false;
+        source.observedOwnerToken!==claim.ownerToken)return false;
+    // The successor observed this device's exact proposed handoff boundary.
+    // Later owner-side progress is safe to take only if the local evidence
+    // is unchanged and the verified head is at least the new claim revision.
+    // Rich attachments need ordinary sync to fetch their bytes first.
+    const remoteFingerprint=await activeSessionContentFingerprint(remote);
+    if(remoteFingerprint!==marker.observedContentFingerprint&&
+        (Number(remote.revision)<Number(claim.revision)||BackupCodec.assetIds(remote).length))return false;
     // The claimed remote owner must still be current immediately before the
     // local repair, and the original user's canonical work must be unchanged.
     const latest=await BackupProviderRuntime.readSessionClaim('google-drive');
