@@ -843,6 +843,40 @@ let syncWorld=null;
   assert.deepEqual(state.reviews.open(),[],'retry neither replays nor loses an earlier choice');
 }
 
+// A deliberate removal may make a previously populated device look blank.
+// Exact field ancestry must be considered before the first-install shortcut.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('Authored name');
+  const a={installationId:'inst_c2_blank_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const b={installationId:'inst_c2_blank_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,studentName:null})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.studentName,null,'intentional deletion survives a superficially blank local profile');
+  assert.equal(b.personal.preferences.theme,'dark','independent remote setting still merges');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.personal.preferences.studentName,null,'intentional deletion propagates after safe reconciliation');
+}
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('Known before deletion');
+  const a={installationId:'inst_c2_unknown_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const b={installationId:'inst_c2_unknown_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  b.reconciliationBase=freeze({...b.reconciliationBase,version:3,personalFields:null});
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,studentName:null})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.studentName,null,'unknown ancestry cannot erase local deletion');
+  assert.equal(b.personal.preferences.theme,null,'legacy ancestry cannot invent field causality');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1);
+}
+
 // BF-2: a legacy v3 shared base has no field ancestry. Independent
 // changes must remain reviewable, never guessed from timestamps.
 {
