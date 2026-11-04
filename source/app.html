@@ -4682,11 +4682,11 @@ async function retireCoveredPreviousActiveSession(session){
   if(!await savedDayCoversActiveSession(session))return false;
   const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
   if(!current||!CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session)))return false;
-  const cleared=await AppData.activeSession.clear();
-  handleActiveSessionRepositoryResult(cleared,'clear');
-  if(!cleared.ok){
-    const reason=cleared.error?(cleared.error.message||String(cleared.error)):'active session clear failed';
-    sessionSafetyMessage=`${prettyDate(session.date)} is already saved in Library, but its redundant recovery copy could not be cleared: ${reason}`;
+  try{
+    await clearCanonicalSessionAfterSavedDay();
+  }catch(error){
+    const reason=error?.message||String(error);
+    sessionSafetyMessage=`${prettyDate(session.date)} is saved in Library, but its redundant recovery copy could not be verified as cleared: ${reason}`;
     refreshStorageFallbackWarning();
     setPlanStatus(sessionSafetyMessage,false);
     return true;
