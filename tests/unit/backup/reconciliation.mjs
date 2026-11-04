@@ -109,4 +109,29 @@ assert.ok(Object.keys(configured).every(id=>id.length<=80));
 const collisionResolved=reconciliation.resolvePlan(collisionPlan,{notes:Object.fromEntries(collisionPlan.notes.map(item=>[item.key,configured[item.decisionKey]]))});
 collisionResolved.notes.forEach((item,index)=>assert.equal(item.state,index%2?'deleted':'record',`independent decision for ${item.key}`));
 
+// Saved Day equality ignores save metadata without discarding real differences.
+const savedStudyLocal=freeze({...day('2026-09-14','Finished Ethics'),recordKind:'study',
+  savedAt:'2026-09-14T11:00:00.000Z',sourceRevision:7,
+  schedule:freeze([{id:'t1',name:'Ethics',duration:60}]),
+  results:freeze({t1:freeze({completion:100,actualSeconds:3600})}),practiceRuns:freeze([])});
+const savedStudyOther=freeze({...savedStudyLocal,savedAt:'2026-09-14T12:00:00.000Z',
+  updatedAt:'2026-09-14T12:00:00.000Z',sourceRevision:5});
+const compareSavedDay=(left,right)=>reconciliation.createPlan({
+  local:{id:'local-day',savedDays:[left]},incoming:{id:'remote-day',savedDays:[right]}
+}).savedDays[0];
+const sameStudy=compareSavedDay(savedStudyLocal,savedStudyOther);
+assert.equal(sameStudy.conflict,false,'Source revision and save timestamps alone cannot generate a Saved Day conflict.');
+assert.equal(sameStudy.identical,true);
+assert.equal(compareSavedDay(savedStudyLocal,freeze({...savedStudyOther,reflection:'Changed reflection'})).conflict,true,
+  'A genuine reflection change remains reviewable.');
+assert.equal(compareSavedDay(savedStudyLocal,freeze({...savedStudyOther,results:freeze({t1:freeze({completion:80,actualSeconds:3600})})})).conflict,true,
+  'A genuine study-progress change remains reviewable.');
+const savedDiaryLocal=freeze({version:16,recordKind:'diary',date:'2026-09-15',reflection:'Diary entry',
+  savedAt:'2026-09-15T10:00:00.000Z',updatedAt:'2026-09-15T10:00:00.000Z',sourceRevision:1});
+const savedDiaryOther=freeze({...savedDiaryLocal,savedAt:'2026-09-15T11:00:00.000Z',
+  updatedAt:'2026-09-15T11:00:00.000Z',sourceRevision:12});
+assert.equal(compareSavedDay(savedDiaryLocal,savedDiaryOther).conflict,false,'Diary metadata differences alone cannot generate a review.');
+assert.equal(compareSavedDay(savedDiaryLocal,freeze({...savedDiaryOther,reflection:'Other diary'})).conflict,true,
+  'A genuinely different Diary reflection stays reviewable.');
+
 console.log(JSON.stringify({status:'PASS',suite:'reconciliation-domain',checks:38,coverage:['pairwise ReconciliationPlan','exact pairwise API guard','ResolvedPlan','Saved-Day deletion candidates','Note deletion candidates','per-key notes','Active Session presence rules','authoritative conflict summary','lean public API','no Reflection Draft reconciliation domain']},null,2));

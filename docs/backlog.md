@@ -86,6 +86,10 @@ Each pass must follow **(1) de novo production-source trace → (2) numbered obj
 
 **Deliberate scope limit:** No new capability, sweeping architectural overhaul, wholesale backup rewrite, compatibility retirement or data-topology redesign. If source evidence shows a topology change is strictly necessary, pause and ask rather than slipping it into a “small fix.” Refer to [study-session.md](areas/study-session.md), [backup-and-sync.md](areas/backup-and-sync.md), [data-and-storage.md](areas/data-and-storage.md) and [workflow.md](workflow.md) for established contracts; the current source still overrides every document.
 
+### BF-C1 — Data and acknowledgement consistency (2026-11-04)
+
+Source correction implemented: the shared Day/session comparator uses study evidence rather than device-local source revision; the current-day reminder and previous-day recovery allow verified later advances, with the existing durable per-session save acknowledgement still required. Removed the in-memory positive date cache instead of extending invalidation machinery. The Saved Day planner now collapses metadata-only differences, while real changes remain reviewable. Historical stored full-record fingerprints and schemas remain untouched. All three production uses of the comparator were traced (reminder, previous-day retirement, sync settlement). Targeted unit tests were added, with source reinspection and CI separate from browser/real-device acceptance. BF-C2 and BF-C3 remain outstanding.
+
 ## Bugs reported by the owner (2026-11-03)
 
 **Bugs come first** (owner, 2026-11-03). Fix every bug in this section before any new feature, performance work or other improvement in this file. The test programme below is the one exception: it finishes first. Each fix comes with a test that would have caught it. A de novo source audit reopened **#1, #2 and #5** after the earlier BF-1 changes; **#3 remains open** for BF-2. Existing green CI is not closure evidence. Follow the [CLEER corrective programme above](#bf-1--bf-2-corrective-programme--cleer-source-first-plan-2026-11-04) before declaring these reports fixed.
