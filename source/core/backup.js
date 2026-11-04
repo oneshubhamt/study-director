@@ -1231,14 +1231,30 @@ function keptReviewChanges(here,other,fields){
   return changed.length?`Differing: ${changed.slice(0,7).join(', ')}${changed.length>7?` (+${changed.length-7} more)`:''}.`:
     'Compared content matches.';
 }
-function savedDayReviewSummary(record){
+function savedDayReviewSummary(record,other=null){
   if(!record)return 'No Saved Day stored.';
-  if(record.recordKind==='diary')return `Diary · reflection: ${keptValueDescription(record.reflection).slice(0,100)}`;
-  const results=Object.values(record.results||{}),minutes=Math.round(results.reduce((sum,item)=>sum+(Number(item.actualSeconds)||0),0)/60),
-    parts=[`Study · ${record.schedule?.length||0} blocks`,`${results.length} task results`,`${minutes} min recorded`,`${record.practiceRuns?.length||0} practice runs`];
-  if(record.studyQuality!==null)parts.push(`quality ${record.studyQuality}/5`);
-  if(String(record.reflection||'').trim())parts.push(`reflection: ${keptValueDescription(record.reflection).slice(0,85)}`);
-  return parts.join(' · ');
+  const preview=value=>keptValueDescription(value).slice(0,65);
+  if(record.recordKind==='diary')return `Diary · reflection: ${preview(record.reflection)}`;
+  const results=record.results||{},entries=Object.entries(results),
+    minutes=Math.round(entries.reduce((sum,[,item])=>sum+(Number(item.actualSeconds)||0),0)/60),
+    parts=[`Study · ${record.schedule?.length||0} blocks`,`${entries.length} task results`,`${minutes} min recorded`,`${record.practiceRuns?.length||0} practice runs`];
+  if(Number.isInteger(record.studyQuality)&&record.studyQuality>=1&&record.studyQuality<=5)parts.push(`quality ${record.studyQuality}/5`);
+  if(other){
+    const ids=[...new Set([...Object.keys(results),...Object.keys(other.results||{})])]
+      .filter(id=>!Canonical.same(results[id],other.results?.[id]));
+    if(ids.length){
+      const names=new Map([...(other.schedule||[]),...(record.schedule||[])].map(row=>[row.id,row.name]));
+      const changes=ids.slice(0,2).map(id=>{
+        const outcome=results[id],title=String(names.get(id)||'Block').slice(0,28);
+        return `${title}: ${outcome?`${outcome.completion??'–'}% / ${Math.round((Number(outcome.actualSeconds)||0)/60)} min`:'absent'}`;
+      });
+      parts.push(`changed tasks ${changes.join('; ')}${ids.length>2?` (+${ids.length-2})`:''}`);
+    }
+  }
+  if(String(record.reflection||'').trim()||other&&String(other.reflection||'').trim())parts.push(`reflection: ${preview(record.reflection||'none')}`);
+  if(other&&record.quote!==other.quote)parts.push(`quote: ${preview(record.quote||'none')}`);
+  if(other&&record.carryForwardDraft!==other.carryForwardDraft)parts.push(`carry-forward: ${preview(record.carryForwardDraft||'none')}`);
+  return parts.join(' · ').slice(0,360);
 }
 function sessionReviewSummary(session){
   if(!session)return 'No Active Session stored.';
@@ -1247,8 +1263,10 @@ function sessionReviewSummary(session){
     seconds=tasks.reduce((sum,item)=>sum+(Number(item.actual?.seconds)||0),0),
     runs=snapshot.practice?.runs?.length||0;
   const parts=[session.date,session.status,`${tasks.length} tracked blocks`,`${done} done`,`${Math.round(seconds/60)} min recorded`,`${runs} practice runs`];
-  if(String(snapshot.review?.reflection||'').trim())parts.push('reflection saved');
-  return parts.join(' · ');
+  const firstPlanLine=String(session.scheduleText||'').split('\n').find(line=>line.trim());
+  if(firstPlanLine)parts.push(`plan: ${firstPlanLine.slice(0,68)}`);
+  if(String(snapshot.review?.reflection||'').trim())parts.push(`reflection: ${keptValueDescription(snapshot.review.reflection).slice(0,70)}`);
+  return parts.join(' · ').slice(0,330);
 }
 function keptSessionAlreadyApplied(current,kept){
   return !!current&&!!kept&&current.status==='suspended'&&current.date===kept.date&&
@@ -1330,8 +1348,8 @@ async function reviewKeptVersions({ref=''}={}){
           ['reflection','reflection'],['studyQuality','quality'],['quote','quote'],['carryForwardDraft','carry-forward']
         ]);
         choice(review,'',`Saved Day · ${review.ref}`,`${differences} ${keptReviewProvenance(review)}`,{
-          label:record?'Keep current Saved Day':'Keep absent',description:savedDayReviewSummary(record)
-        },{label:kept?'Use kept Saved Day':'Use kept deletion',description:savedDayReviewSummary(kept)});
+          label:record?'Keep current Saved Day':'Keep absent',description:savedDayReviewSummary(record,kept)
+        },{label:kept?'Use kept Saved Day':'Use kept deletion',description:savedDayReviewSummary(kept,record)});
       }
     }else if(review.subject==='personal'){
       if(!personal){steps.push({id:'',review,part:'',wait:true});continue;}
