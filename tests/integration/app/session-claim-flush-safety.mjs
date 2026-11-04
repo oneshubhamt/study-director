@@ -230,13 +230,13 @@ const acquireRuntime=[
 ].join('\n');
 function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
-  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),id=0;
+  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,canMutate=true;
   const storage=new Map();
   const app={
     document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
     navigator:{onLine:true},Date,Promise,Object,JSON,
     crypto:{randomUUID:()=>('00000000-0000-4000-8000-'+String(++id).padStart(12,'0'))},
-    appCanMutate:()=>true,
+    appCanMutate:()=>canMutate,
     getActiveDefaults:()=>({scheduleText:'FALLBACK DEFAULT'}),
     PlanDraftEditor:{flush:async()=>true},
     PlanData:{settled:async()=>{if(faultMode==='draft-fail')throw new Error('draft write failed');},readDraft:()=>draft},
@@ -273,7 +273,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     BackupProviderRuntime:{
       connected:()=>true,
       readSessionClaim:async()=>remoteClaim,
-      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:'e'.repeat(64),session:previous}),
+      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:'e'.repeat(64),session:remoteSource}),
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
       claimSessionOwnership:async(_provider,request)=>{
         claims++;
@@ -303,7 +303,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   };
   boot();
   return {previous,transfer:()=>context.takeOver(previous),reload:boot,recover:()=>context.recover(structuredClone(current)),
-    setFault:value=>{faultMode=value;},setHead:value=>{head=value;},
+    setFault:value=>{faultMode=value;},setHead:value=>{head=value;},setSourceSession:value=>{remoteSource=value;},setCanMutate:value=>{canMutate=value;},
     setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
     setOffline:value=>{app.navigator.onLine=!value;},
     state:()=>({current,claim:remoteClaim,claims,compensations,backgroundReleases,notify,marker:storage.get('test-session-handoff')||null})};
@@ -378,6 +378,44 @@ for(const fault of ['claim-crash','claim-throws-after-remote']){
   assert.equal(t.state().claims,1,'recovery must not publish a second claim');
   assert.equal(await t.recover(),true,'recovery is idempotent');
 }
+// An unrelated Notes/Personal Data checkpoint cannot prevent recovery if the
+// verified Active Session and claim themselves have not changed.
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setHead('cp_'+'b'.repeat(32));t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'an unrelated checkpoint may advance without changing the session');
+  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+}
+// A newer compensation epoch returned control to A; B must retire its marker
+// without ever claiming ownership or starting its clock.
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  const {marker,claim}=t.state();
+  t.setClaim({...claim,epoch:claim.epoch+1,state:'owned',ownedHere:false,
+    ownerToken:marker.observedOwnerToken,observedRevision:marker.proposedRevision,
+    revision:marker.observedRevision,observedContentFingerprint:''});
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'exact compensation is a distinct verified terminal state');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.equal(t.state().marker,null);
+}
+// A failed strict write during recovery does not consume the attempt.
+// Subsequent PRIMARY ownership and healthy persistence permit a retry.
+{
+  const t=acquiringHarness('claim-throws-after-remote');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setFault('local-only');t.reload();
+  await assert.rejects(t.recover(),/IndexedDB failed/u);
+  assert.ok(t.state().marker,'read-only recovery evidence survives another local failure');
+  t.setFault('');t.setCanMutate(false);t.reload();
+  assert.equal(await t.recover(),false,'a secondary or hydrating tab cannot commit recovered ownership');
+  t.setCanMutate(true);t.reload();
+  assert.equal(await t.recover(),true);
+  assert.equal(t.state().claims,1);
+}
+
 // Strict local commit succeeded, but the marker could not be cleared;
 // subsequent verification must not rewrite the already-committed session.
 {
@@ -404,7 +442,10 @@ for(const fault of ['claim-crash','claim-throws-after-remote']){
 for(const mode of ['changed-head','different-claim','divergent-local','offline']){
   const t=acquiringHarness('claim-crash');
   await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  if(mode==='changed-head')t.setHead('cp_'+'b'.repeat(32));
+  if(mode==='changed-head'){
+    t.setHead('cp_'+'b'.repeat(32));
+    t.setSourceSession({...t.previous,revision:11,updatedAt:'2026-10-27T10:00:00.000Z'});
+  }
   if(mode==='different-claim')t.setClaim({...t.state().claim,handoffToken:'ffffffff-ffff-4fff-8fff-ffffffffffff'});
   if(mode==='divergent-local')t.setCurrent({...t.state().current,snapshot:{label:'unpublished new work'}});
   if(mode==='offline')t.setOffline(true);

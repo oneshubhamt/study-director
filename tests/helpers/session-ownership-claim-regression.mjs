@@ -70,4 +70,12 @@ headId=HEAD_B;
 await assert.rejects(()=>a.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,handoffToken:HANDOFF_TOKEN,revision:52}),error=>error?.code==='REPOSITORY_SESSION_CLAIM_STALE','a takeover must fail if Drive advances after the verified head was observed but before the claim linearizes');
 assert.equal(await a.releaseSessionClaim('google-drive',claimed.claim),true,'a failed local takeover can restore the previous owner with a higher epoch');
 const rolledBack=await b.readSessionClaim('google-drive');assert.equal(rolledBack.handoffToken,HANDOFF_TOKEN,'compensation retains the exact attempt identity');assert.equal(rolledBack.state,'owned');assert.equal(rolledBack.applies,true);assert.equal(rolledBack.ownedHere,true);assert.equal(rolledBack.revision,50);
+// v3 claims have no transfer token. They remain readable as ownership
+// fences but cannot be adopted as a v2 local handoff attempt.
+const lastStored=[...files.values()].sort((p,q)=>p.id.localeCompare(q.id)).at(-1);
+const oldValue=JSON.parse(await lastStored.blob.text());oldValue.version=3;delete oldValue.handoffToken;
+const oldBlob=new Blob([JSON.stringify(oldValue)]);const oldDigest=await sha256(oldBlob);
+files.set(lastStored.id,freeze({...lastStored,blob:oldBlob,size:oldBlob.size,digest:oldDigest}));
+const oldProjected=await b.readSessionClaim('google-drive');
+assert.equal(oldProjected.handoffToken,'','unlinked legacy claims remain readable but are not recovery identities');
 console.log(JSON.stringify({status:'PASS',suite:'session-ownership-claim',opaque:true,contentAnchored:true,staleOwnerBlocked:true,staleHeadBlocked:true,rollbackEpoch:true},null,2));

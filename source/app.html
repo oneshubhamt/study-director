@@ -5484,9 +5484,11 @@ async function resolveSessionHandoffSafety(session){
     }
     if(local.runningOn!==me&&local.revision===marker.observedRevision){
       if(!appCanMutate())return false; // the HYDRATING tab cannot commit; Verify works once PRIMARY
+      // The checkpoint identity can advance for unrelated data; the exact
+      // source Active Session, ownership claim and causal evidence must not.
       const source=await BackupProviderRuntime.readSessionHandoffSource('google-drive');
       const previous=source?.status==='completed'?ActiveSessionCodec.sanitizeCurrent(source.session):null;
-      if(source?.checkpointId!==marker.checkpointId||source?.observedOwnerToken!==marker.observedOwnerToken||
+      if(!/^cp_[a-f0-9]{32}$/u.test(String(source?.checkpointId||''))||source?.observedOwnerToken!==marker.observedOwnerToken||
           !previous||previous.date!==marker.date||previous.runningOn!==local.runningOn||
           previous.revision!==marker.observedRevision||
           await activeSessionContentFingerprint(previous)!==marker.observedContentFingerprint||
@@ -5521,10 +5523,11 @@ async function resolveSessionHandoffSafety(session){
     clearSessionHandoffSafety();return true;
   }
   // If the claim is absent or belongs to someone else, verify the source
-  // still matches the interrupted attempt before allowing a fresh user action.
+  // session itself before allowing a fresh user action. A newer checkpoint
+  // for unrelated Notes or Personal Data must not strand the handoff.
   const source=await BackupProviderRuntime.readSessionHandoffSource('google-drive');
   const previous=source?.status==='completed'?ActiveSessionCodec.sanitizeCurrent(source.session):null;
-  if(source?.checkpointId!==marker.checkpointId||!previous||
+  if(!/^cp_[a-f0-9]{32}$/u.test(String(source?.checkpointId||''))||!previous||
       source?.observedOwnerToken!==marker.observedOwnerToken||
       !CanonicalModule.same(local,previous))return false;
   const latest=await BackupProviderRuntime.readSessionClaim('google-drive');
