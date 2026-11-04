@@ -47,17 +47,18 @@ registry.define('reconciliation',1,input=>{
     return map;
   }
   function equivalentState(a,b){return !!a&&!!b&&a.kind===b.kind&&(a.kind==='deleted'||Canonical.same(a.value,b.value));}
-  // Save timestamps and sourceRevision describe a write, not study evidence.
-  // Both original canonical records remain intact; only equality ignores them.
+  // Exactly one study-evidence projection for Saved Day equality and
+  // the separately versioned semantic baseline. Write metadata is excluded.
+  function savedDayContentValue(record){
+    if(!record||typeof record!=='object')return null;
+    const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...evidence}=record;
+    return evidence;
+  }
   function equivalentSavedDayState(a,b){
     if(!a||!b||a.kind!==b.kind)return false;
     if(a.kind==='deleted')return true;
     if(a.kind!=='record'||!a.value||!b.value)return false;
-    const content=record=>{
-      const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...evidence}=record;
-      return evidence;
-    };
-    return Canonical.same(content(a.value),content(b.value));
+    return Canonical.same(savedDayContentValue(a.value),savedDayContentValue(b.value));
   }
   function pairStateCandidates(identity,key,localSource,incomingSource,localState,incomingState,equivalent=equivalentState){
     if(!localState&&!incomingState)return freeze([]);
@@ -170,6 +171,6 @@ registry.define('reconciliation',1,input=>{
     const activeCandidate=selectedCandidate(plan.activeSession,decisions.activeSession,'Active Session'),activeSession=freeze({candidateId:activeCandidate?.id||null,value:activeCandidate?.value||null,changed:!!activeCandidate&&changedFromLocal(plan.activeSession,activeCandidate),hadLocal:!!plan.activeSession.localCandidateId,local:!!activeCandidate?.local,sources:activeCandidate?.sources||freeze([])});
     return freeze({format:RESOLVED_FORMAT,version:VERSION,sourcePlan:plan,savedDays,notes,activeSession});
   }
-  return freeze({format:'study-director.reconciliation-module',contractVersion:1,createPlan,resolvePlan,summarizePlan});
+  return freeze({format:'study-director.reconciliation-module',contractVersion:1,createPlan,resolvePlan,summarizePlan,savedDayContentValue});
 });
 })();
