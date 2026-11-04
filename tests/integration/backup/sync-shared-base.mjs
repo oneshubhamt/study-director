@@ -922,12 +922,17 @@ let syncWorld=null;
 // tombstone fails. Reopening and selecting that version again must acknowledge
 // the review without replaying an already-applied canonical write.
 {
-  const date='2026-08-12';
-  const state={installationId:'inst_c3_day_retry',records:new Map([[date,record(date,'Current reflection')]]),
+  const date='2026-08-12',row=freeze({id:'ethics-1',start:'08:00',duration:60,
+    name:'Ethics',kind:'work',area:'Ethics',measure:'pages',target:10});
+  const localDay=freeze({...record(date,'Current reflection'),schedule:freeze([row]),
+    results:freeze({'ethics-1':freeze({completion:50,actualSeconds:900})}),quote:'Current quote',carryForwardDraft:'Current next step'});
+  const keptDay=freeze({...localDay,reflection:'Kept reflection',
+    results:freeze({'ethics-1':freeze({completion:90,actualSeconds:1800})}),quote:'Kept quote',carryForwardDraft:'Kept next step'});
+  const state={installationId:'inst_c3_day_retry',records:new Map([[date,localDay]]),
     deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:personal('Day reviewer'),journal:null};
   state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
   await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({
-    subject:'savedDay',ref:date,kept:record(date,'Kept reflection')})]);
+    subject:'savedDay',ref:date,kept:keptDay})]);
   const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
   await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
   assert.equal(state.records.get(date).reflection,'Kept reflection');
@@ -936,10 +941,15 @@ let syncWorld=null;
   assert.equal(state.reviews.open().length,1,'a failed receipt leaves the review open');
   const prompt=h.prompts.find(prompt=>prompt.title==='Kept versions');
   const choice=prompt.groups.find(group=>group.label===`Saved Day · ${date}`);
-  assert.match(choice.description,/Differing: reflection/u);
+  assert.match(choice.description,/Differing: task results/u);
+  assert.match(choice.description,/reflection/u);
   assert.match(choice.description,/originating device and precise cause not recorded/u);
+  assert.match(choice.choices[0].description,/Ethics: 50% \/ 15 min/u);
+  assert.match(choice.choices[1].description,/Ethics: 90% \/ 30 min/u);
   assert.match(choice.choices[0].description,/Current reflection/u);
   assert.match(choice.choices[1].description,/Kept reflection/u);
+  assert.match(choice.choices[0].description,/Current quote/u);
+  assert.match(choice.choices[1].description,/Kept quote/u);
   assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
   assert.equal(h.events.filter(event=>event==='days-import').length,1,'retry does not write the already-applied Saved Day again');
   assert.equal(state.records.get(date).updatedAt,committedTime,'retry never manufactures a new save timestamp');
