@@ -537,4 +537,36 @@ function acquiringHarness(fault=''){
   }
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:53,productionFunctions:true}));
+// The real app-level suspended-Review adapter delegates the final canonical
+// deletion to ReviewSaveService, rather than separately writing a temporary
+// new owner session or resurrecting a stale suspended snapshot on failure.
+{
+  const src=productionFunction('async function saveDayRecord(){');
+  for(const [hasTasks,success] of [[false,true],[false,false],[true,true],[true,false]]){
+    const session={date:'2026-08-27',status:'suspended',snapshot:{token:'saved'}};
+    const events=[],state={tasks:hasTasks?[{}]:[]};
+    const context=vm.createContext({
+      TASKS:state.tasks,sessionPanelMode:'suspended',
+      AppData:{activeSession:{
+        load:async(_retry,options)=>{assert.equal(options.strict,true);return {ok:true,value:session};},
+        save:()=>{throw new Error('Suspended save must never perform a second Active Session save');},
+        clear:()=>{throw new Error('Suspended save must not duplicate the Review service clear');}
+      }},
+      isSuspendedActiveSession:row=>row===session,
+      appCanMutate:()=>true,activeSessionSnapshot:row=>row.snapshot,
+      applyStoredSessionSnapshot:(_row,_snapshot,options)=>{assert.equal(options.reviewOnly,true);events.push('review-only');return true;},
+      saveDayRecordCore:async options=>{events.push('core');assert.equal(options.closeSession,true);return success;},
+      setTimerMode:()=>events.push('finished'),setSessionPanelMode:value=>events.push('panel:'+value),
+      updateSessionControls:()=>events.push('controls'),setStatus:()=>{},
+      AppDiagnostics:{capture:()=>{}},TIMER_MODES:{DONE:'done'},Object
+    });
+    vm.runInContext(src+'\nglobalThis.reviewSave=saveDayRecord;',context);
+    assert.equal(await context.reviewSave(),success,'suspended save outcome must match canonical finalization');
+    assert.equal(events.includes('review-only'),!hasTasks,'only an unloaded suspended session requires review-only hydration');
+    assert.deepEqual(events.filter(x=>x==='core'),['core']);
+    assert.equal(events.includes('finished'),success);
+    assert.equal(events.includes(success?'panel:none':'panel:suspended'),true);
+  }
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:57,productionFunctions:true}));
