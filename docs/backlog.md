@@ -83,6 +83,27 @@ The full plan, its rules and live status are in [test-programme.md](test-program
   4. Not worth it here: content-defined chunking (attachments rarely change in place) and devices talking straight to each other (needs a server to introduce them, against the no-server rule).
 - **Suggested path:** measure, do option 1, then decide between 2 and 3 with the owner.
 
+### Owner's requirements for the new backup machinery (2026-11-04)
+
+A redesign must fit each kind of data, not one rule for all. Likely a fusion: merge-by-design (CRDT) records for small data, and today's fingerprinted-piece repository for large files. Settle per kind whether data lives in a shared history or in one stream per device.
+
+| Data | Expected size | Needs |
+|---|---|---|
+| Settings, plans, review records | Small | Merge automatically (CRDT or per-record merge). |
+| Active Session | Small, changes often | Fast handoff between devices: the biggest pain today. |
+| Notes | Many notes, some large | Merge per note (one CRDT document per note, not one for all), and sync only the notes that changed. |
+| Saved Days | 1,000–2,000 or more | Past days rarely change: store them in parts (per day or month), and sync only what changed. Never re-send the whole history. |
+| Attachments | Up to 300 MB (a PDF) | Upload and download in pieces, pausable and resumable, including after the app closes or reloads. An interrupted upload from the same device never starts again from zero. Keep the fingerprinted repository for these, referenced from the records by fingerprint. Check how far today's resumable chunks survive a reload. |
+
+- **Device Folder** uses the same machinery. It takes 2–3 s today: faster is welcome but not a concern.
+- **Goals, in order:** handoff speed, then sync speed, sized to the data actually saved.
+
+### Order of work (from Saturday 2026-11-07)
+
+1. Bug hunting: the open bugs above, the major ones first.
+2. Test suite refinement: resume [test-programme.md](test-programme.md) at step 4a.
+3. The new backup machinery: the options and requirements above, Device Folder included.
+
 
 ## Decided, not yet scheduled
 

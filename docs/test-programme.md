@@ -6,7 +6,7 @@ The owner approved this programme on 2026-11-02. It makes the suite faster, test
 
 Steps 1–3 and part of step 4 reached `main` through PRs #12 and #13. The owner merged #13 on 2026-11-03, before step 8, so the bug fixes below could ship. The rest of the programme continues on a new branch from `main`.
 
-**Paused until about 2026-11-10.** The owner paused the programme on 2026-11-03. Start where step 4 stopped ([Step 4 remaining](#step-4-remaining)); the first item is 4a, mutant-proving the post-restore backup test in `tests/integration/backup/repository-restore.mjs` and deleting the source checks it replaces. The bugs at the top of [backlog.md](backlog.md) come before any feature or performance work once the programme ends.
+**Paused; resumes after the bug hunt that starts on 2026-11-07** (owner, 2026-11-04). The owner paused the programme on 2026-11-03. Start where step 4 stopped ([Step 4 remaining](#step-4-remaining)); the first item is 4a, mutant-proving the post-restore backup test in `tests/integration/backup/repository-restore.mjs` and deleting the source checks it replaces. After it comes the new backup machinery ([backlog.md](backlog.md), order of work).
 
 **Done meanwhile, outside the programme** (bugs from the owner, on the same branch): Drive cleanup no longer blocked by abandoned upload markers (bug 10, with tests in `repository-checkpoint`, `drive-security` and `device-folder-storage`); the safe area at the top on iPhone and iPad (bug 7); stale Verification wording (bug 8). The Device Folder test helper now stamps a shared folder with the latest clock of the pages using it.
 
