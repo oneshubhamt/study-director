@@ -701,10 +701,14 @@ function activeSessionChoiceLabel(candidate){
 // What both sides last shared: the shared base this device last synced, when
 // the backup descends from it, else null.
 async function lastSharedBase(stored){
-  const snapshot=candidateSnapshotState(stored),manifest=snapshot&&snapshot.provenance&&snapshot.provenance.repositoryManifest,repositoryBaseId=String(manifest&&manifest.reconciliationBaseId||'');if(!repositoryBaseId)return null;
-  const ancestorIds=Array.isArray(manifest.reconciliationAncestorIds)&&manifest.reconciliationAncestorIds.length?manifest.reconciliationAncestorIds:[repositoryBaseId];
-  const localBase=await AppData.reconciliationBase.read().catch(()=>null);
-  return localBase&&ancestorIds.includes(String(localBase.checkpointId||''))?localBase:null;
+  const snapshot=candidateSnapshotState(stored),manifest=snapshot&&snapshot.provenance&&snapshot.provenance.repositoryManifest,
+    headId=String(manifest?.checkpoint?.checkpointId||''),repositoryBaseId=String(manifest?.reconciliationBaseId||'');
+  if(!/^cp_[a-f0-9]{32}$/u.test(headId))return null;
+  const ancestorIds=Array.isArray(manifest.reconciliationAncestorIds)&&manifest.reconciliationAncestorIds.length?manifest.reconciliationAncestorIds:repositoryBaseId?[repositoryBaseId]:[];
+  const localBase=await AppData.reconciliationBase.read().catch(()=>null),localId=String(localBase?.checkpointId||'');
+  // After catch-up the verified head itself is our shared base, even though
+  // its ancestry list correctly excludes its own checkpoint ID.
+  return localBase&&(localId===headId||ancestorIds.includes(localId))?localBase:null;
 }
 // Each note's title and text in the shared base.
 async function noteReconciliationAncestor(base,keys=[]){
