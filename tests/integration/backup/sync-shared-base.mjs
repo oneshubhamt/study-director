@@ -684,8 +684,11 @@ let syncWorld=null;
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   a.personal=startup(null);await A.upload();b.personal=freeze({...personal('Name on B, planned'),plans:freeze({draft:'08:00 | 30 | B plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});const mine=b.personal;
   assert.equal((await B.sync()).cancelled,false);
-  assert.deepEqual(b.personal,mine,'this device keeps its own when the other side holds nothing more');
-  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'nothing is kept from the other side either');
+  assert.deepEqual(b.personal,mine,'the independent local draft is never replaced by a remote clear');
+  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),true,
+    'competing edits since a common draft ancestor require an explicit choice, even if the remote draft became blank');
+  assert.equal((await B.reviewKept()).reviewed,1,'keeping the local authored draft resolves the genuine conflict');
+  assert.deepEqual(b.reviews.open(),[]);
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   // BF-1R2: independent authored drafts cannot be overwritten because
   // a whole-checkpoint sourceRevision is newer. The remote draft is kept.
