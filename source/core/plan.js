@@ -539,7 +539,9 @@ function applySchedule(options={}){
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
     ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
   const currentDraft=()=>explicitSchedule!==null||getPlanDraftText()===rawOriginal;
+  const canApply=()=>explicitSchedule!==null||ownership.canMutate();
   const finish=(preparation,draft,parsed)=>{
+    if(!canApply())return false;
     if(!currentDraft()){
       setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
       return false;
@@ -547,6 +549,7 @@ function applySchedule(options={}){
     return completeScheduleApply(preparation,parsed,rawOriginal,opts,draft);
   };
   const apply=()=>{
+    if(!canApply())return false;
     if(projection.status!=='valid'){renderInvalidScheduleApply(projection);return false;}
     if(!currentDraft()){
       setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
@@ -646,7 +649,8 @@ const PlanDraftEditor=(()=>{
       return false;
     }
     if(!await save({strictDurability:true}))return false;
-    if(!draftMode||!ownership.canMutate()||getPlanDraftText()!==draftText){
+    if(!draftMode)return false; // Cancel or an intervening session transition won.
+    if(!ownership.canMutate()||getPlanDraftText()!==draftText){
       setPlanStatus('The working draft changed while saving. Review it and press Done again.',false);
       return false;
     }

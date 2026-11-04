@@ -200,6 +200,21 @@ assert.equal(await pending,false);
 assert.equal(applyCount,beforeRaceApply);
 assert.equal(ids['plan-input'].value,'New unsaved draft');
 
+// Cancel wins over an in-flight Done save: its pending completion must
+// neither apply the old rows nor replace the Cancel feedback with an error.
+ids['plan-input'].value='Cancelled pending Done';
+plan.draft.preview({silent:true,enterDraft:true});
+let releaseDone;
+blockedWrite=new Promise(resolve=>{releaseDone=resolve;});
+const beforeCancelApply=applyCount;
+const pendingDone=plan.draft.confirm();
+plan.draft.cancel();
+releaseDone();blockedWrite=null;
+assert.equal(await pendingDone,false);
+assert.equal(applyCount,beforeCancelApply);
+assert.equal(state().label,'LIVE');
+assert.match(String(feedback.at(-1)?.message||''),/Edit closed.*working draft preserved/u);
+
 // Canonical Active Session restoration must stay synchronous and must not
 // commit the working draft, even when that draft is invalid.
 liveActivity=false; // restoring first resets the previous session's runtime
