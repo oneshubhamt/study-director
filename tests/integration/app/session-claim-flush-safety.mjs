@@ -504,6 +504,50 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
   assert.equal(t.state().claims,1,mode+' cannot publish a second claim');
 }
 
+// Exercise the real transactional compare-and-write primitive. Recovery may
+// replace an exact canonical predecessor, never a concurrently changed one.
+{
+  const repositorySource=fs.readFileSync(new URL('../../../source/core/repositories.js',import.meta.url),'utf8');
+  const begin=repositorySource.indexOf('async function idbPutActiveSession('),end=repositorySource.indexOf('\n}',begin);
+  assert.ok(begin>0&&end>begin,'production conditional IndexedDB writer exists');
+  const production=repositorySource.slice(begin,end+2);
+  const before={id:'active',date:'2026-10-27',runningOn:'inst_handoff_old',revision:10},
+    adopted={...before,runningOn:'inst_handoff_new',revision:11};
+  async function transactionCase(stored,expected){
+    let writes=0,aborted=false,actual=structuredClone(stored);
+    const run=(_stores,_mode,body)=>new Promise((resolve,reject)=>{
+      const finish=(ok,value)=>ok?resolve(value):reject(value);
+      const tx={oncomplete:null,onabort:null,abort:()=>{aborted=true;},
+        objectStore:()=>({
+          get:()=>{const req={result:null,onsuccess:null,onerror:null};queueMicrotask(()=>{req.result=actual;req.onsuccess?.();});return req;},
+          put:value=>{writes++;actual=structuredClone(value);const req={onerror:null};queueMicrotask(()=>tx.oncomplete?.());return req;}
+        })
+      };
+      body(tx,finish);
+    });
+    const context=vm.createContext({
+      ACTIVE_SESSION_ID:'active',DB_ACTIVE_SESSION_STORE:'sessions',DB_APP_META_STORE:'meta',
+      ActiveSessionCodec:{sanitizeCurrent:value=>value},
+      sameDataValue:(left,right)=>JSON.stringify(left)===JSON.stringify(right),
+      idbStrictTransaction:run,idbTransaction:run,stageCanonicalMutationEpoch:()=>{},
+      assertWriteToken:()=>{},canonicalRuntimeError:message=>new Error(message)
+    });
+    vm.runInContext(production+'\nglobalThis.write=idbPutActiveSession;',context);
+    let rejected=false;
+    try{await context.write(adopted,null,true,expected);}catch(error){rejected=true;}
+    return {writes,aborted,rejected,actual};
+  }
+  const exact=await transactionCase(before,before);
+  assert.equal(exact.writes,1,'unchanged canonical predecessor permits one strict write');
+  assert.equal(exact.rejected,false);
+  assert.equal(exact.actual.runningOn,'inst_handoff_new');
+  const concurrent=await transactionCase({...before,snapshot:{label:'late local study'}},before);
+  assert.equal(concurrent.writes,0,'changed canonical predecessor is never overwritten');
+  assert.equal(concurrent.aborted,true,'the transaction explicitly aborts on mismatch');
+  assert.equal(concurrent.rejected,true);
+  assert.equal(concurrent.actual.snapshot.label,'late local study','unshared work remains canonical');
+}
+
 // A normal cross-device sync must not stop/reset a local session if the
 // suspended evidence reached only the browser recovery envelope, not IndexedDB.
 {
