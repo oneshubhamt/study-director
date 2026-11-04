@@ -754,41 +754,46 @@ async function reconcilePersonalFields(base,local,incoming){
   if(!ancestry||ancestry.version!==1||!local||!incoming)return null;
   const mine=BackupCodec.normalizePersonalData(local),theirs=BackupCodec.normalizePersonalData(incoming);
   if(!mine||!theirs)return null;
+  // Hash all independent paths concurrently. Comparing their verified
+  // digests does not reread Personal Data or change the stored ancestor.
+  const [left,right,absent]=await Promise.all([personalFields(mine),personalFields(theirs),personalFieldFingerprint(false)]);
   let conflicts=0;
-  const choose=async(leftPresent,leftValue,rightPresent,rightValue,ancestor)=>{
-    const [leftHash,rightHash]=await Promise.all([
-      personalFieldFingerprint(leftPresent,leftValue),personalFieldFingerprint(rightPresent,rightValue)
-    ]);
-    if(leftHash===rightHash||rightHash===ancestor)return freeze({present:leftPresent,value:leftValue});
-    if(leftHash===ancestor)return freeze({present:rightPresent,value:rightValue});
-    conflicts++;return freeze({present:leftPresent,value:leftValue});
+  const choose=(localPresent,localValue,remotePresent,remoteValue,baseHash,localHash,remoteHash)=>{
+    if(localHash===remoteHash||remoteHash===baseHash)return freeze({present:localPresent,value:localValue});
+    if(localHash===baseHash)return freeze({present:remotePresent,value:remoteValue});
+    conflicts++;return freeze({present:localPresent,value:localValue});
   };
   const prefs={...mine.preferences},own=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key);
   for(const key of PERSONAL_PREFERENCE_KEYS){
-    const chosen=await choose(own(mine.preferences,key),mine.preferences[key],own(theirs.preferences,key),theirs.preferences[key],ancestry.preferences[key]);
+    const chosen=choose(own(mine.preferences,key),mine.preferences[key],own(theirs.preferences,key),theirs.preferences[key],
+      ancestry.preferences[key],left.preferences[key],right.preferences[key]);
     if(chosen.present)prefs[key]=chosen.value;else delete prefs[key];
   }
   const localNudge=mine.preferences.nudge,remoteNudge=theirs.preferences.nudge;
-  const present=(await choose(true,localNudge!==null,true,remoteNudge!==null,ancestry.nudge.present)).value;
+  const present=choose(true,localNudge!==null,true,remoteNudge!==null,
+    ancestry.nudge.present,left.nudge.present,right.nudge.present).value;
   if(!present)prefs.nudge=null;
   else{
     const nudge={};
     for(const key of PERSONAL_NUDGE_KEYS.slice(1)){
-      const l=localNudge!==null&&own(localNudge,key),i=remoteNudge!==null&&own(remoteNudge,key);
-      const chosen=await choose(l,l?localNudge[key]:null,i,i?remoteNudge[key]:null,ancestry.nudge[key]);
+      const l=localNudge!==null&&own(localNudge,key),i=remoteNudge!==null&&own(remoteNudge,key),
+        chosen=choose(l,l?localNudge[key]:null,i,i?remoteNudge[key]:null,
+          ancestry.nudge[key],left.nudge[key],right.nudge[key]);
       if(chosen.present)nudge[key]=chosen.value;
     }
     prefs.nudge=nudge;
   }
-  const draft=(await choose(true,mine.plans.draft,true,theirs.plans.draft,ancestry.draft)).value,
-    defaultId=(await choose(true,mine.plans.defaultId,true,theirs.plans.defaultId,ancestry.defaultId)).value,
+  const draft=choose(true,mine.plans.draft,true,theirs.plans.draft,
+      ancestry.draft,left.draft,right.draft).value,
+    defaultId=choose(true,mine.plans.defaultId,true,theirs.plans.defaultId,
+      ancestry.defaultId,left.defaultId,right.defaultId).value,
     localPlans=new Map(mine.plans.savedPlans.map(plan=>[plan.id,plan])),
     remotePlans=new Map(theirs.plans.savedPlans.map(plan=>[plan.id,plan])),plans=new Map(),
     allIds=new Set([...ancestry.order,...localPlans.keys(),...remotePlans.keys()]);
-  const absent=await personalFieldFingerprint(false);
   for(const id of allIds){
     const hasLocal=localPlans.has(id),hasRemote=remotePlans.has(id),
-      original=await choose(hasLocal,semanticSavedPlan(localPlans.get(id)),hasRemote,semanticSavedPlan(remotePlans.get(id)),ancestry.savedPlans[id]||absent);
+      original=choose(hasLocal,semanticSavedPlan(localPlans.get(id)),hasRemote,semanticSavedPlan(remotePlans.get(id)),
+        ancestry.savedPlans[id]||absent,left.savedPlans[id]||absent,right.savedPlans[id]||absent);
     if(original.present){
       const record=original.value&&original.value.id===id?
         (hasLocal&&Canonical.same(semanticSavedPlan(localPlans.get(id)),original.value)?localPlans.get(id):remotePlans.get(id)):null;
