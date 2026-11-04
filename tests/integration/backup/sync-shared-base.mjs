@@ -918,6 +918,108 @@ let syncWorld=null;
   assert.equal(state.reviews.open().length,1,'a failed local Plan write cannot consume the kept version');
 }
 
+// BF-C3: A selected domain write can commit immediately before its review
+// tombstone fails. Reopening and selecting that version again must acknowledge
+// the review without replaying an already-applied canonical write.
+{
+  const date='2026-08-12';
+  const state={installationId:'inst_c3_day_retry',records:new Map([[date,record(date,'Current reflection')]]),
+    deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:personal('Day reviewer'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({
+    subject:'savedDay',ref:date,kept:record(date,'Kept reflection')})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.records.get(date).reflection,'Kept reflection');
+  const committedTime=state.records.get(date).updatedAt;
+  assert.equal(h.events.filter(event=>event==='days-import').length,1);
+  assert.equal(state.reviews.open().length,1,'a failed receipt leaves the review open');
+  const prompt=h.prompts.find(prompt=>prompt.title==='Kept versions');
+  const choice=prompt.groups.find(group=>group.label===`Saved Day · ${date}`);
+  assert.match(choice.description,/Differing: reflection/u);
+  assert.match(choice.description,/originating device and precise cause not recorded/u);
+  assert.match(choice.choices[0].description,/Current reflection/u);
+  assert.match(choice.choices[1].description,/Kept reflection/u);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='days-import').length,1,'retry does not write the already-applied Saved Day again');
+  assert.equal(state.records.get(date).updatedAt,committedTime,'retry never manufactures a new save timestamp');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const date='2026-08-13';
+  const state={installationId:'inst_c3_delete_retry',records:new Map([[date,record(date,'To delete')]]),
+    deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:personal('Deletion reviewer'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'savedDay',ref:date,kept:null})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.records.has(date),false);
+  assert.equal(state.deletions.some(value=>value.date===date),true,'deletion receipt is stored independently');
+  const before=h.events.filter(event=>event==='days-remove'||event==='day-ledger').length;
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='days-remove'||event==='day-ledger').length,before,
+    'retry does not delete again or rewrite an already-published deletion tombstone');
+  assert.ok(h.prompts.filter(prompt=>prompt.title==='Kept versions').at(-1).groups.some(group=>group.label===`Saved Day · ${date}`),
+    'absence on both sides never silently consumes an unresolved deletion review');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const date='2026-08-14';
+  const current=session(date,'CURRENT',{runningOn:'inst_device_local',status:'suspended'});
+  const kept=session(date,'KEPT',{runningOn:'inst_kept_owner',status:'active'});
+  const state={installationId:'inst_c3_session_retry',records:new Map(),deletions:[],notes:{},noteDeletions:[],
+    activeSession:current,running:false,personal:personal('Session reviewer'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'session',ref:'session',kept})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.activeSession.snapshot.label,'KEPT');
+  assert.equal(state.activeSession.status,'suspended','using a kept session never starts another timer');
+  const revision=state.activeSession.revision;
+  assert.equal(h.events.filter(event=>event==='session').length,1);
+  const prompt=h.prompts.find(row=>row.title==='Kept versions');
+  const group=prompt.groups.find(row=>row.label==='Active / suspended session');
+  assert.match(group.description,/Differing: schedule/u);
+  assert.match(group.description,/originating device and precise cause not recorded/u);
+  assert.match(group.choices[0].description,/suspended/u);
+  assert.match(group.choices[1].description,/active/u);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='session').length,1,'the suspended session is not restored twice');
+  assert.equal(state.activeSession.revision,revision,'the retry does not advance control revision');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const here=normalizeArea({key:'Shared',label:'Current title',text:'Unchanged body'},'Shared');
+  const state={installationId:'inst_c3_note_retry',records:new Map(),deletions:[],
+    notes:{Shared:here},noteDeletions:[],activeSession:null,personal:personal('Note reviewer'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({
+    subject:'note',ref:'Shared',kept:{label:'Kept title'}})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.notes.Shared.label,'Kept title');
+  const storedAt=state.notes.Shared.updatedAt;
+  assert.equal(h.events.filter(event=>event==='notes').length,1);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(state.notes.Shared.updatedAt,storedAt,'already-applied note text/title does not generate a fresh revision');
+  assert.equal(h.events.filter(event=>event==='notes').length,1);
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const state={installationId:'inst_c3_personal_retry',records:new Map(),deletions:[],notes:{},noteDeletions:[],
+    activeSession:null,personal:personal('Current name'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({
+    subject:'personal',ref:'personal',kept:personal('Kept name')})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.personal.preferences.studentName,'Kept name');
+  assert.equal(h.events.filter(event=>event==='personal-import').length,1);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='personal-import').length,1);
+  assert.deepEqual(state.reviews.open(),[]);
+}
+
 // BF-2: a legacy v3 shared base has no field ancestry. Independent
 // changes must remain reviewable, never guessed from timestamps.
 {
