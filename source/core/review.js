@@ -482,7 +482,7 @@ async function saveReflectionOnlyRecord(){
     syncReviewSurfaceMode();
   }
 }
-async function saveDayRecord(){
+async function saveDayRecord(options={}){
   if(!reviewHasStudyDay())return saveReflectionOnlyRecord();
   if(saveDayInProgress)return false;
   if(!appCanMutate()){setStatus('save-status','Study control is in another tab. Take control here before saving.',false);return false;}
@@ -491,7 +491,8 @@ async function saveDayRecord(){
   const notice=notifications.begin({id:'save-study-day',surfaceId:'save-status',title:'Save Study Day',message:'Saving this day…'});
   let committed=null;
   const closesPriorDay=SessionEvidenceGateway.snapshot({includeRecords:false}).date<todayISO();
-  if(closesPriorDay){
+  const closesSession=closesPriorDay||options.closeSession===true;
+  if(closesSession){
     activeSessionPersistenceBlocked=true;
     stopTimerExecution();
     cancelPendingLiveDraftSave();
@@ -503,12 +504,14 @@ async function saveDayRecord(){
     const metrics=ReviewView.refresh({includeRecords:true,force:true});
     const {doc,rec}=await commitDailyRecord(metrics.evidence,'canonical daily record');committed=rec;
     markStorageHealthTimestamp('lastStudyDataSaveAt');
-    if(!closesPriorDay)await acknowledgeSavedStudyDay(rec.date,doc.sourceRevision);
+    if(!closesSession)await acknowledgeSavedStudyDay(rec.date,doc.sourceRevision);
     await refreshLibraryAfterSave(rec.date);
     ReviewView.sync();
-    if(closesPriorDay){
+    if(closesSession){
       await clearCanonicalSessionAfterSavedDay();
       clearSaveReminder(rec.date,doc.sourceRevision);
+    }
+    if(closesPriorDay){
       Runtime.setSafetyMessage(`Recovered ${prettyDate(rec.date)} was saved to Library. Apply the current study-day schedule when ready.`);
       resetRuntimeSessionState({source:'recovered-day-close',date:todayISO()});
       clearReviewForNewDay();

@@ -9167,30 +9167,30 @@ const {
 const {saveToday:saveDayRecordCore,isRolledOver:studyDayRolledOver}=ReviewSaveService;
 async function saveDayRecord(){
   let suspendedSession=null;
-  if(!TASKS.length){
-    const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
+  if(!TASKS.length||sessionPanelMode==='suspended'){
+    const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
     if(isSuspendedActiveSession(session)){
       if(!appCanMutate()){setStatus('save-status','Take control in this tab before saving the suspended session.',false);return false;}
-      const snapshot=activeSessionSnapshot(session);
-      if(!snapshot){setStatus('save-status','The suspended session could not be read safely. Restore it before saving.',false);return false;}
-      const reviewSnapshot={...snapshot,timerRuntime:null};
-      const restored=applyStoredSessionSnapshot(session,reviewSnapshot,{source:'suspended-session-review',reviewOnly:true});
-      if(restored===false){setStatus('save-status','The suspended session could not be loaded into Review safely.',false);return false;}
+      if(!TASKS.length){
+        const snapshot=activeSessionSnapshot(session);
+        if(!snapshot){setStatus('save-status','The suspended session could not be read safely. Restore it before saving.',false);return false;}
+        const restored=applyStoredSessionSnapshot(session,{...snapshot,timerRuntime:null},{source:'suspended-session-review',reviewOnly:true});
+        if(restored===false){setStatus('save-status','The suspended session could not be loaded into Review safely.',false);return false;}
+      }
       suspendedSession=session;
     }
   }
-  const saved=await saveDayRecordCore();
+  // The Review save owner commits the Day and closes this suspended session
+  // without creating an interim, incorrectly owned Active Session.
+  const saved=await saveDayRecordCore({closeSession:!!suspendedSession});
   if(!suspendedSession)return saved;
   if(!saved){
-    await AppData.activeSession.save(suspendedSession).catch(error=>AppDiagnostics.capture('review.suspended-session-restore',error,'warn'));
-    setSessionPanelMode('suspended');
+    try{
+      const loaded=await AppData.activeSession.load(0,{strict:true}),current=loaded?.value||null;
+      if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
+      else if(loaded?.ok&&!current)setSessionPanelMode('none');
+    }catch(error){AppDiagnostics.capture('review.suspended-session-status',error,'warn');}
     return false;
-  }
-  const cleared=await AppData.activeSession.clear();
-  handleActiveSessionRepositoryResult(cleared,'clear');
-  if(!cleared.ok){
-    setStatus('save-status','✓ Day saved to Library, but the suspended recovery copy could not be cleared. Use Reset Today after storage recovers.',false);
-    return true;
   }
   setTimerMode(TIMER_MODES.DONE,'suspended-session-saved');
   setSessionPanelMode('none');
