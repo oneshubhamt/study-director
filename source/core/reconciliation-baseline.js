@@ -68,9 +68,9 @@ registry.define('reconciliation-baseline',1,()=>{
       return freeze({format:'study-director.reconciliation-base',version,
         checkpointId:String(value.checkpointId),establishedAt:new Date(String(value.establishedAt)).toISOString(),
         noteCount,noteKeyFingerprint:String(value.noteKeyFingerprint),personalFingerprint:String(value.personalFingerprint),
-        sessionFingerprint:String(value.sessionFingerprint),...(semantic?{sessionContentFingerprint}:{}),personalFields:fields});
+        sessionFingerprint:String(value.sessionFingerprint),...(semantic?{sessionContentFingerprint}:{}),...(!legacy?{personalFields:fields}:{})});
     }
-        function normalizeNote(value,context={}){
+    function normalizeNote(value,context={}){
       if(!value||!exactKeys(value,['format','version','key','label','text'])||value.format!=='study-director.reconciliation-base-note'||Number(value.version)!==1)return null;
       const key=cleanKey(value.key),state=noteState({label:value.label,text:value.text}),suffix=String(context&&context.suffix||'');if(!key||!state||suffix!==encodeURIComponent(key))return null;
       return freeze({format:'study-director.reconciliation-base-note',version:1,key,label:state.label,text:state.text});
@@ -87,9 +87,9 @@ registry.define('reconciliation-baseline',1,()=>{
         value.format!=='study-director.reconciliation-base-days'||String(context&&context.suffix||'')!==String(value.month||''))return null;
       const month=String(value.month),days=monthDays(month,value.days),semanticDays=semantic?monthDays(month,value.semanticDays):null;
       if(!days||semantic&&(!semanticDays||!sameDayKeys(days,semanticDays)))return null;
-      return freeze({format:'study-director.reconciliation-base-days',version:value.version,month,days,semanticDays});
+      return freeze({format:'study-director.reconciliation-base-days',version:value.version,month,days,...(semantic?{semanticDays}:{})});
     }
-        // {month: {date: fingerprint}} to write, or null to remove that month.
+    // {month: {date: fingerprint}} to write, or null to remove that month.
     function normalizeDayUpdates(value,{full=false}={}){
       if(!value||typeof value!=='object'||Array.isArray(value))return null;const out=Object.create(null);
       for(const [month,raw] of Object.entries(value)){if(!MONTH.test(month))return null;if(raw===null&&!full){out[month]=null;continue;}const days=monthDays(month,raw);if(!days)return null;out[month]=days;}
@@ -145,7 +145,7 @@ registry.define('reconciliation-baseline',1,()=>{
       if(!after||after.checkpointId!==expected)throw new Error('Shared Saved-Day ancestor changed during reconciliation.');
       return freeze(out);
     }
-        const SPEC_KEYS=['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','personalFields','sessionFingerprint','noteKeys','updates','deletes','days'];
+    const SPEC_KEYS=['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','personalFields','sessionFingerprint','noteKeys','updates','deletes','days'];
     async function write(checkpointId,spec){
       const id=String(checkpointId||''),semantic=spec?.version===4;
       if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spec||![3,4].includes(spec.version)||
@@ -156,7 +156,7 @@ registry.define('reconciliation-baseline',1,()=>{
       if(!updates||!deletes||!days||semantic&&!semanticDays||(!full&&!/^cp_[a-f0-9]{32}$/u.test(baseCheckpointId)))return false;
       if(semantic&&(!sameDayKeys(days,semanticDays)||Object.entries(days).some(([month,values])=>
         values===null?semanticDays[month]!==null:semanticDays[month]===null||!sameDayKeys(values,semanticDays[month]))))return false;
-            let noteKeys=null,noteCount=Number(spec.noteCount),fingerprint=String(spec.noteKeyFingerprint||'');
+      let noteKeys=null,noteCount=Number(spec.noteCount),fingerprint=String(spec.noteKeyFingerprint||'');
       if(full){
         noteKeys=codec.normalizeKeys(spec.noteKeys);if(!noteKeys)return false;noteCount=noteKeys.length;fingerprint=await codec.keyFingerprint(noteKeys);
         const noteSet=new Set(noteKeys),deleteSet=new Set(deletes);for(const key of Object.keys(updates))if(!noteSet.has(key)||deleteSet.has(key))return false;for(const key of deletes)if(noteSet.has(key))return false;
