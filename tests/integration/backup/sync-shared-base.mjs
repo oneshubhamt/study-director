@@ -148,7 +148,13 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,starterSchedule:STARTER_SCHEDULE,limits:runtimeLimits}),
     
     persistence:freeze({
-      activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};if(verificationFault==='active-session'&&verifying())return {ok:true,value:null,error:null,storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
+      activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};if(verificationFault==='active-session'&&verifying())return {ok:true,value:null,error:null,storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{
+         events.push('preflight-session-save');
+         if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};
+         if(injectedFailure==='session-save-local-only')return {ok:true,value,error:new Error('IndexedDB unavailable'),storage:{local:true,idb:false}};
+         state.activeSession=injectedFailure==='session-save-readback-mismatch'?freeze({...value,revision:value.revision+1}):value;
+         return {ok:true,value,storage:{local:false,idb:true}};
+       },activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
       dailyRecordBackupDates:async()=>({dates:[...state.records.keys()].sort(),warning:''}),dailyRecordBackupMonth:async month=>[...state.records.values()].filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>verificationFault==='saved-days'&&verifying()?[]:dates.map(date=>state.records.get(date)).filter(Boolean),
       dailyRecordImportBatches:async values=>{for(const value of values){state.records.set(value.date,freeze({...value}));state.deletions=state.deletions.filter(item=>item.date!==value.date);}return {batches:values.length?1:0};},
       dailyRecordRemove:async date=>(state.records.delete(date),true),dailyRecordTimestamp:value=>Date.parse(value?.updatedAt||value?.savedAt||'')||0,
@@ -198,6 +204,8 @@ const preflightCases=[
   ['deletions-unknown','RESTORE_PREFLIGHT_DELETION_FAILED',false],
   ['personal','RESTORE_PREFLIGHT_PERSONAL_FAILED',false],
   ['session-save','RESTORE_PREFLIGHT_SESSION_SAVE_FAILED',true],
+  ['session-save-local-only','RESTORE_PREFLIGHT_SESSION_SAVE_FAILED',true],
+  ['session-save-readback-mismatch','RESTORE_PREFLIGHT_SESSION_SAVE_FAILED',true],
   ['session-settle','RESTORE_PREFLIGHT_SESSION_SETTLE_FAILED',true],
   ['session-read','RESTORE_PREFLIGHT_SESSION_READ_FAILED',false]
 ];
@@ -215,9 +223,9 @@ for(const [stage,code,hasLiveTasks] of preflightCases){
   const preflightCandidate=await preflightHarness.runtime.controller.inspect(blob,{filename:`preflight-${stage}.sdbackup`});
   preflightHarness.setPreflightFailure(stage);
   await assert.rejects(()=>preflightHarness.runtime.controller.restore(preflightCandidate),error=>{
-    assert.equal(error.code,code);assert.equal(error.backupStage,stage.startsWith('deletions')?'deletions':stage);return true;
+    assert.equal(error.code,code);assert.equal(error.backupStage,stage.startsWith('deletions')?'deletions':stage.startsWith('session-save')?'session-save':stage);return true;
   });
-  assert.equal(preflightHarness.diagnosticMarks.at(-1)[0],`restore-preflight-${stage.startsWith('deletions')?'deletions':stage}-failed`);
+  assert.equal(preflightHarness.diagnosticMarks.at(-1)[0],`restore-preflight-${stage.startsWith('deletions')?'deletions':stage.startsWith('session-save')?'session-save':stage}-failed`);
   assert.equal(preflightHarness.diagnosticMarks.at(-1)[1].errorCode,code);
 }
 
