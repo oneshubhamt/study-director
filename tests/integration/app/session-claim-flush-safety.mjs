@@ -437,27 +437,48 @@ function acquiringHarness(fault=''){
   }
 }
 
-// BF-1R1: previous-day cleanup verifies *content* and the canonical Day.
-// Matching calendar date or matching scalar sourceRevision alone is never
-// sufficient to delete an old Active Session.
+// BF-1R1: execute the real common Saved-Day evidence predicate and the
+// previous-day retirement gate together. Revisions across devices are not
+// content ancestry, and no local rescue copy is a canonical Saved Day.
 {
-  const src=[
-    productionFunction('function savedDayRepresentsSessionEvidence(record,session,snapshot){'),
-    productionFunction('async function savedDayCoversActiveSession(session){')
-  ].join('\n');
+  const sourceCodec=fs.readFileSync(new URL('../../../source/core/record-codecs.js',import.meta.url),'utf8');
+  const signature='function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){';
+  const start=sourceCodec.indexOf(signature),end=start<0?-1:sourceCodec.indexOf('\n}',start);
+  assert.ok(start>=0&&end>start,'production Saved-Day coverage predicate must exist');
+  const src=[sourceCodec.slice(start,end+2),productionFunction('async function savedDayCoversActiveSession(session){')].join('\n');
   const date='2026-08-27';
   const row={start:'07:00',duration:60,name:'Ethics',kind:'work',area:'Ethics',measure:'units',target:1,id:'ethics-1'};
   const task={completion:50,completionSource:'manual',progress:{done:1,total:2},actual:{seconds:300}};
   const snapshot={contentRevision:7,savedRevision:7,review:{reflection:'Reviewed',studyQuality:4},latestCarryForward:'',taskState:{'ethics-1':task},practice:{runs:[]}};
   const saved={recordKind:'study',date,sourceRevision:7,schedule:[row],practiceRuns:[],reflection:'Reviewed',studyQuality:4,carryForwardDraft:'',results:{'ethics-1':{completion:50,completionSource:'manual',done:1,total:2,actualSeconds:300}}};
   const session={date,scheduleText:'07:00 | 60 | Ethics | work | Ethics | units | 1',snapshot};
+  const createContext=(record,snap,{rejectRead=false}={})=>{
+    let checked=0;
+    const ctx=vm.createContext({
+      isPreviousActiveSessionRecord:()=>true,activeSessionSnapshot:()=>snap,
+      AppData:{dailyRecords:{
+        documents:async()=>record?[record]:[],
+        verifyCanonical:async value=>{checked++;if(rejectRead)throw new Error('IndexedDB unavailable');assert.equal(value,record);return true;}
+      }},
+      AppDiagnostics:{capture:()=>{}},
+      ScheduleModel:{
+        parseText:()=>({ok:true,parsed:[{...row,dur:row.duration}]}),
+        fingerprint:rows=>rows.map(r=>[r.start,r.dur,r.name,r.kind,r.area,r.measure,r.target].join('|')).join('|')
+      },
+      TimeModel:{studyMinuteToHHMM:()=> '08:00'},
+      sameDataValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b),
+      Number,Object,Array
+    });
+    vm.runInContext(src+'\nconst DailyRecordCodec={savedDayCoversSessionEvidence};globalThis.covers=savedDayCoversActiveSession;globalThis.covered=savedDayCoversSessionEvidence;',ctx);
+    return {ctx,checks:()=>checked};
+  };
   const cases=[
     ['exact',saved,snapshot,true],
     ['different reflection',{...saved,reflection:'Different'},snapshot,false],
     ['different focus',{...saved,results:{'ethics-1':{...saved.results['ethics-1'],actualSeconds:200}}},snapshot,false],
     ['different saved-day revision',{...saved,sourceRevision:8},snapshot,false],
     ['different applied schedule',{...saved,schedule:[{...row,name:'Other Work'}]},snapshot,false],
-    ['different practice evidence',{...saved,practiceRuns:[]},{...snapshot,practice:{runs:[{id:'unrecorded'}]}},false],
+    ['different practice evidence',saved,{...snapshot,practice:{runs:[{id:'unrecorded'}]}},false],
     ['unacknowledged session',saved,{...snapshot,savedRevision:6},false],
     ['unrecorded schedule adjustment',saved,{...snapshot,scheduleAdjustments:{'ethics-1':{startMin:240}}},false],
     ['covered schedule adjustment',{...saved,results:{'ethics-1':{...saved.results['ethics-1'],adjustedStart:'08:00'}}},{...snapshot,scheduleAdjustments:{'ethics-1':{startMin:240}}},true],
@@ -465,36 +486,17 @@ function acquiringHarness(fault=''){
     ['missing day',null,snapshot,false]
   ];
   for(const [label,record,snap,expected] of cases){
-    let checked=0;
-    const ctx=vm.createContext({
-      isPreviousActiveSessionRecord:()=>true,activeSessionSnapshot:()=>snap,
-      AppData:{dailyRecords:{
-        documents:async()=>record?[record]:[],
-        verifyCanonical:async row=>{assert.equal(row,record);checked++;return true;}
-      }},
-      AppDiagnostics:{capture:()=>{}},
-      parseScheduleDraftText:()=>({ok:true,parsed:[{...row,dur:row.duration}]}),
-      scheduleFingerprintForRows:rows=>rows.map(r=>[r.start,r.dur,r.name,r.kind,r.area,r.measure,r.target].join('|')).join('|'),
-      studyMinuteToHHMM:()=> '08:00',
-      CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
-      Number,Object,Array
-    });
-    vm.runInContext(src+'\nglobalThis.covers=savedDayCoversActiveSession;',ctx);
+    const {ctx,checks}=createContext(record,snap);
     assert.equal(await ctx.covers({...session,snapshot:snap}),expected,label);
-    assert.equal(checked,expected?1:0,label+' canonical receipt read');
+    assert.equal(checks(),expected?1:0,label+' strict canonical receipt');
   }
-  // A local emergency-only copy must not satisfy the strict Day readback.
-  const ctx=vm.createContext({
-    isPreviousActiveSessionRecord:()=>true,activeSessionSnapshot:()=>snapshot,
-    AppData:{dailyRecords:{documents:async()=>[saved],verifyCanonical:async()=>{throw new Error('IndexedDB failed');}}},
-    AppDiagnostics:{capture:()=>{}},
-    parseScheduleDraftText:()=>({ok:true,parsed:[{...row,dur:row.duration}]}),
-    scheduleFingerprintForRows:rows=>rows.map(r=>[r.start,r.dur,r.name,r.kind,r.area,r.measure,r.target].join('|')).join('|'),
-      studyMinuteToHHMM:()=> '08:00',
-    CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},Number,Object,Array
-  });
-  vm.runInContext(src+'\nglobalThis.covers=savedDayCoversActiveSession;',ctx);
-  assert.equal(await ctx.covers(session),false,'fallback-only Day cannot retire old study evidence');
+  const verified=createContext(saved,snapshot,{rejectRead:true});
+  assert.equal(await verified.ctx.covers(session),false,'emergency-only Saved Day cannot retire prior work');
+  const richer={...saved,sourceRevision:99,results:{'ethics-1':{...saved.results['ethics-1'],completion:75,done:2,actualSeconds:500}}};
+  const advanced=createContext(richer,snapshot);
+  assert.equal(advanced.ctx.covered(richer,session,{allowAdvances:true}),true,'a genuinely continuing session may exceed the shared evidence without matching unrelated revisions');
+  assert.equal(advanced.ctx.covered({...richer,results:{'ethics-1':{...richer.results['ethics-1'],actualSeconds:100}}},session,{allowAdvances:true}),false,'a Saved Day that drops previously recorded work does not cover the old session');
+  assert.equal(advanced.ctx.covered({...richer,schedule:[{...row,name:'Different plan'}]},session,{allowAdvances:true}),false,'a same-date Saved Day for another schedule is not a safe retirement receipt');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:44,productionFunctions:true}));
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:47,productionFunctions:true}));
