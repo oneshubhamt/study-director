@@ -158,17 +158,17 @@ const after={version:2,plans:{draft:'Another device draft',savedPlans:[],default
 const keys=['planDraft','planLibrary','personalPreferences'];
 const snapshot=()=>Object.fromEntries(keys.map(key=>[key,structuredClone(h.stores.meta.get(key))]));
 await h.app.planData.replacePortable(before);
-assert.deepEqual(await h.app.planData.read(),before.plans);
+assert.equal(JSON.stringify(await h.app.planData.read()),JSON.stringify(before.plans),'cross-realm Plan values match');
 const previous=snapshot(),strict=h.idbDurability.strict;
 controls.failNextMetaWrite=true;
 await assert.rejects(h.app.planData.replacePortable(after),/injected appMeta write failure/u,
   'portable Personal Data transaction rejects its failure instead of reporting success');
 assert.deepEqual(snapshot(),previous,'a failed Personal Data transaction preserves draft, saved Plans and preferences together');
-assert.deepEqual(await h.app.planData.read(),before.plans);
+assert.equal(JSON.stringify(await h.app.planData.read()),JSON.stringify(before.plans),'cross-realm Plan values match');
 assert.equal((await h.app.personalPreferences.read()).studentName,'Before');
 await h.app.planData.replacePortable(after);
 assert.equal(h.idbDurability.strict,strict+2,'each attempt uses one strict IndexedDB transaction, not three independent writes');
-assert.deepEqual(await h.app.planData.read(),after.plans,'both Plan records publish together');
+assert.equal(JSON.stringify(await h.app.planData.read()),JSON.stringify(after.plans),'both Plan records publish together');
 const preferences=await h.app.personalPreferences.read();
 for(const [key,value] of Object.entries(after.preferences))
   assert.deepEqual(preferences[key],value,`portable setting ${key} publishes with Plans`);
