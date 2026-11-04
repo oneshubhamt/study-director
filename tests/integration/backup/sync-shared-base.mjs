@@ -1020,6 +1020,30 @@ let syncWorld=null;
   assert.deepEqual(state.reviews.open(),[]);
 }
 
+// Control revisions, save acknowledgement counters and timestamps may differ
+// even where two sessions contain identical study evidence. The dialog must
+// describe that as a control/ownership issue, not invented changed progress.
+{
+  const date='2026-08-15';
+  const here=revisionedSession(date,'SAME',{runningOn:'inst_device_local',status:'suspended',
+    revision:7,contentRevision:3,savedRevision:2});
+  const kept=revisionedSession(date,'SAME',{runningOn:'inst_other_owner',status:'active',
+    revision:11,contentRevision:10,savedRevision:9,updatedAt:'2026-08-30T12:00:00.000Z'});
+  const state={installationId:'inst_c3_control_only',records:new Map(),deletions:[],notes:{},noteDeletions:[],
+    activeSession:here,running:false,personal:personal('Control review'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'session',ref:'session',kept})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  const group=h.prompts.find(p=>p.title==='Kept versions').groups.find(p=>p.label==='Active / suspended session');
+  assert.match(group.description,/Compared content matches/u);
+  assert.match(group.description,/Session status differs/u);
+  assert.match(group.description,/Recorded ownership differs/u);
+  assert.doesNotMatch(group.description,/Differing: study evidence/u,
+    'timestamp and revision-only differences cannot impersonate changed study progress');
+  assert.equal(h.events.filter(event=>event==='session').length,0,'keeping current control state performs no session write');
+}
+
 // BF-2: a legacy v3 shared base has no field ancestry. Independent
 // changes must remain reviewable, never guessed from timestamps.
 {
