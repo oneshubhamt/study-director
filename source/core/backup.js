@@ -1229,7 +1229,7 @@ function keptReviewChanges(here,other,fields){
   if(!here||!other)return 'One copy is absent or deleted.';
   const changed=fields.filter(([key])=>!Canonical.same(here[key],other[key])).map(([,label])=>label);
   return changed.length?`Differing: ${changed.slice(0,7).join(', ')}${changed.length>7?` (+${changed.length-7} more)`:''}.`:
-    'Recorded content matches; only save/control metadata may differ.';
+    'Compared content matches.';
 }
 function savedDayReviewSummary(record){
   if(!record)return 'No Saved Day stored.';
@@ -1381,18 +1381,24 @@ async function reviewKeptVersions({ref=''}={}){
           label:'Keep this default',description:localPlans.get(personal.plans.defaultId)?.label||'No default'
         },{label:'Use kept default',description:remotePlans.get(kept.plans.defaultId)?.label||'No default'});
     }else if(review.subject==='session'){
-      const here=session||null,there=kept||null;
-      const differences=keptReviewChanges(here,there,[
-        ['date','study date'],['scheduleText','schedule'],['status','session status'],
-        ['runningOn','recorded owner'],['snapshot','study progress and Review']
+      const here=session||null,there=kept||null,
+        hereContent=here?ActiveSessionCodec.contentValue(here):null,
+        keptContent=there?ActiveSessionCodec.contentValue(there):null;
+      const differences=keptReviewChanges(hereContent,keptContent,[
+        ['date','study date'],['scheduleText','schedule'],['snapshot','study evidence']
       ]);
-      const evidence=here&&there?keptReviewChanges(here.snapshot,there.snapshot,[
-        ['taskState','task outcomes'],['timerRuntime','timer state'],
-        ['practice','practice attempts'],['review','reflection/quality'],
-        ['scheduleAdjustments','schedule adjustments'],['latestCarryForward','carry-forward'],
-        ['currentTaskId','current block']
-      ]):'';
-      choice(review,'','Active / suspended session',`${differences} ${evidence} ${keptReviewProvenance(review)} Choosing the kept session suspends it here; it does not transfer a live timer.`,{
+      const control=here&&there?[
+        here.status!==there.status?'Session status differs.':'',
+        here.runningOn!==there.runningOn?'Recorded ownership differs.':''
+      ].filter(Boolean).join(' '):'';
+      const evidence=hereContent&&keptContent&&!Canonical.same(hereContent.snapshot,keptContent.snapshot)?
+        keptReviewChanges(hereContent.snapshot,keptContent.snapshot,[
+          ['taskState','task outcomes'],['timerRuntime','timer state'],
+          ['practice','practice attempts'],['review','reflection/quality'],
+          ['scheduleAdjustments','schedule adjustments'],['latestCarryForward','carry-forward'],
+          ['currentTaskId','current block']
+        ]):'';
+      choice(review,'','Active / suspended session',`${differences} ${control} ${evidence} ${keptReviewProvenance(review)} Choosing the kept session suspends it here; it does not transfer a live timer.`,{
         label:session?'Keep current session':'Keep no session',description:sessionReviewSummary(here)
       },{label:'Use kept session (suspended)',description:sessionReviewSummary(there)});
     }
