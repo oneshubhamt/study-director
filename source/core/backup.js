@@ -1069,6 +1069,28 @@ function syncNoteReviews(plan,state){
   }
   return freeze(reviews);
 }
+// Semantic identity only for OPEN versions. Resolved tombstones intentionally
+// contain no kept value: without persisted causal identity they must not be
+// used to suppress an independently recurring future conflict.
+function equivalentOpenReview(a,b){
+  if(!a||!b||a.resolvedAt||b.resolvedAt||a.subject!==b.subject||a.ref!==b.ref||
+      !Canonical.same(a.base,b.base))return false;
+  if(a.subject==='session'&&a.kept&&b.kept)
+    return Canonical.same(ActiveSessionCodec.contentValue(a.kept),ActiveSessionCodec.contentValue(b.kept));
+  return Canonical.same(a.kept,b.kept);
+}
+function deduplicateOpenReviews(reviews){
+  const open=reviews.filter(review=>!review.resolvedAt).sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)),retained=[];
+  const duplicateIds=new Set();
+  for(const review of open){
+    if(retained.some(previous=>equivalentOpenReview(previous,review)))duplicateIds.add(review.id);
+    else retained.push(review);
+  }
+  if(!duplicateIds.size)return freeze(reviews);
+  // Keep a bounded, replicable resolution for every duplicate id. Applying
+  // choices to the retained review will still resolve it on every device.
+  return freeze(PendingReviewCodec.merge([reviews.map(review=>duplicateIds.has(review.id)?PendingReviewCodec.resolved(review):review)],APP_LIMITS.maxPendingReviews));
+}
 // 5.2: the person reviews what a sync kept, for one note or day (ref) or
 // all. Choices come first, then note texts in the comparison dialog, where
 // Smart merge starts from what both last shared. Nothing is written until
@@ -1722,18 +1744,12 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
       else if(personalAddsNothing(theirs,localPersonal))personal='keep';
       else{
-        // A checkpoint's global timestamp is not proof that its working
-        // draft supersedes independently authored text on this device.
-        // Without a verified one-sided ancestor, preserve the local draft
-        // and offer the remote Personal Data for deliberate review. BF-2
-        // will reconcile separate settings without whole-object winners.
-        const localDraft=localPersonal?.plans?.draft??null,remoteDraft=theirs.plans?.draft??null;
-        if(localDraft!==null&&localDraft!==remoteDraft)personal='keep';
-        else{
-          const incomingTime=Date.parse(String(parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.sourceRevision||''))||0,localTime=Date.parse(String(await ports.persistence.sourceRevision()||''))||0;
-          personal=incomingTime>localTime?'replace':'keep';
-        }
-        if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(personal==='replace'?localPersonal:theirs)})))return needsDecision();
+        // A checkpoint-wide timestamp cannot establish ancestry for one
+        // particular setting, saved plan or independent working draft. If
+        // both sides have meaningful state and neither is proven unchanged
+        // from the shared base, preserve local values and review the remote.
+        personal='keep';
+        if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
       }
     }
   }
@@ -1780,10 +1796,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     // deleted here), so the backup's text comes back as it is.
     noteDecisionMap=restoredNote(String(noteRecord(false).value?.text||''));
   }
-  // Versions kept for review join this device's: the other side's and those
-  // this merge keeps. None is ever dropped; more than may wait stops a sync.
-  const incomingReviews=note?freeze([]):freeze([...(parsed.pendingReviews||[]),...keptReviews]);
-  const reviewSet=incomingReviews.length?PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews):freeze([]);
+  // Versions kept for review join this device's. A repeated observation
+  // of an already-open equivalent conflict must not create another review.
+  // If two different ids were *already* published for the same conflict,
+  // retain the oldest and replicate a resolved identity for the redundant
+  // id; otherwise resolving the retained review would leave an orphan open
+  // on another device.
+  const existingReviews=note?freeze([]):await AppData.pendingReviews.list();
+  const published=note?freeze([]):freeze(parsed.pendingReviews||[]);
+  const known=PendingReviewCodec.merge([existingReviews,published],APP_LIMITS.maxPendingReviews);
+  const generated=keptReviews.filter((review,index)=>![
+    ...known,...keptReviews.slice(0,index)
+  ].some(other=>equivalentOpenReview(review,other)));
+  const candidates=PendingReviewCodec.merge([known,generated],APP_LIMITS.maxPendingReviews);
+  const reviewSet=deduplicateOpenReviews(candidates);
+  const previousReviews=new Map(existingReviews.map(review=>[review.id,review]));
+  const incomingReviews=freeze(reviewSet.filter(review=>!Canonical.same(previousReviews.get(review.id)||null,review)));
   if(reviewSet.filter(item=>!item.resolvedAt).length>APP_LIMITS.maxPendingReviews){if(quiet)return needsDecision();throw new Error(`More than ${APP_LIMITS.maxPendingReviews} versions would wait for review. Review some under Library → Data first.`);}
   let resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap,settledDays));
   if(session==='graft'&&derivedSession){
