@@ -437,4 +437,59 @@ function acquiringHarness(fault=''){
   }
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:32,productionFunctions:true}));
+// BF-1R1: previous-day cleanup verifies *content* and the canonical Day.
+// Matching calendar date or matching scalar sourceRevision alone is never
+// sufficient to delete an old Active Session.
+{
+  const src=[
+    productionFunction('function savedDayRepresentsSessionEvidence(record,session,snapshot){'),
+    productionFunction('async function savedDayCoversActiveSession(session){')
+  ].join('\n');
+  const date='2026-08-27';
+  const row={start:'07:00',duration:60,name:'Ethics',kind:'work',area:'Ethics',measure:'units',target:1,id:'ethics-1'};
+  const task={completion:50,completionSource:'manual',progress:{done:1,total:2},actual:{seconds:300}};
+  const snapshot={contentRevision:7,savedRevision:7,review:{reflection:'Reviewed',studyQuality:4},latestCarryForward:'',taskState:{'ethics-1':task},practice:{runs:[]}};
+  const saved={recordKind:'study',date,sourceRevision:7,schedule:[row],practiceRuns:[],reflection:'Reviewed',studyQuality:4,carryForwardDraft:'',results:{'ethics-1':{completion:50,completionSource:'manual',done:1,total:2,actualSeconds:300}}};
+  const session={date,scheduleText:'07:00 | 60 | Ethics | work | Ethics | units | 1',snapshot};
+  const cases=[
+    ['exact',saved,snapshot,true],
+    ['different reflection',{...saved,reflection:'Different'},snapshot,false],
+    ['different focus',{...saved,results:{'ethics-1':{...saved.results['ethics-1'],actualSeconds:200}}},snapshot,false],
+    ['different saved-day revision',{...saved,sourceRevision:8},snapshot,false],
+    ['different applied schedule',{...saved,schedule:[{...row,name:'Other Work'}]},snapshot,false],
+    ['different practice evidence',{...saved,practiceRuns:[]},{...snapshot,practice:{runs:[{id:'unrecorded'}]}},false],
+    ['unacknowledged session',saved,{...snapshot,savedRevision:6},false],
+    ['missing day',null,snapshot,false]
+  ];
+  for(const [label,record,snap,expected] of cases){
+    let checked=0;
+    const ctx=vm.createContext({
+      isPreviousActiveSessionRecord:()=>true,activeSessionSnapshot:()=>snap,
+      AppData:{dailyRecords:{
+        documents:async()=>record?[record]:[],
+        verifyCanonical:async row=>{assert.equal(row,record);checked++;return true;}
+      }},
+      AppDiagnostics:{capture:()=>{}},
+      parseScheduleDraftText:()=>({ok:true,parsed:[{...row,dur:row.duration}]}),
+      scheduleFingerprintForRows:rows=>rows.map(r=>[r.start,r.dur,r.name,r.kind,r.area,r.measure,r.target].join('|')).join('|'),
+      CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
+      Number,Object,Array
+    });
+    vm.runInContext(src+'\nglobalThis.covers=savedDayCoversActiveSession;',ctx);
+    assert.equal(await ctx.covers({...session,snapshot:snap}),expected,label);
+    assert.equal(checked,expected?1:0,label+' canonical receipt read');
+  }
+  // A local emergency-only copy must not satisfy the strict Day readback.
+  const ctx=vm.createContext({
+    isPreviousActiveSessionRecord:()=>true,activeSessionSnapshot:()=>snapshot,
+    AppData:{dailyRecords:{documents:async()=>[saved],verifyCanonical:async()=>{throw new Error('IndexedDB failed');}}},
+    AppDiagnostics:{capture:()=>{}},
+    parseScheduleDraftText:()=>({ok:true,parsed:[{...row,dur:row.duration}]}),
+    scheduleFingerprintForRows:rows=>rows.map(r=>[r.start,r.dur,r.name,r.kind,r.area,r.measure,r.target].join('|')).join('|'),
+    CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},Number,Object,Array
+  });
+  vm.runInContext(src+'\nglobalThis.covers=savedDayCoversActiveSession;',ctx);
+  assert.equal(await ctx.covers(session),false,'fallback-only Day cannot retire old study evidence');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:41,productionFunctions:true}));
