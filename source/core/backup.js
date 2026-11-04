@@ -615,9 +615,17 @@ function savedDayRecordPair(item){
   const local=item.candidates.find(candidate=>candidate.local&&candidate.kind==='record')||null,incoming=item.candidates.find(candidate=>!candidate.local&&candidate.kind==='record')||null;
   return local&&incoming?freeze({local,incoming}):null;
 }
+// A review's selected Saved Day is already applied if the canonical study
+// content is identical. Save timestamps and source revisions are not study
+// changes and must never force a replay after an interrupted review receipt.
+function savedDayReviewContent(record){
+  if(!record)return null;
+  const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...content}=record;
+  return content;
+}
 function savedDayStudyState(record){
   if(!record||record.recordKind!=='study')return null;
-  const {reflection,savedAt,updatedAt,sourceRevision,...state}=record;return state;
+  const {reflection:_reflection,...state}=savedDayReviewContent(record);return state;
 }
 function savedDayNeedsWholeDecision(item,settled=null){
   if(!item?.conflict||settled&&settled.has(item.date))return false;
@@ -1210,6 +1218,42 @@ function keptPlanDescription(plan){
   if(!plan)return 'Not saved';
   const preview=String(plan.scheduleText||'');
   return `${plan.label} · ${preview.length>180?preview.slice(0,180)+'…':preview||'Empty schedule'}`;
+}
+// PendingReview.v1 proves the subject and kept-at time, but contains no
+// device-of-origin or reason code. Neither may be inferred from timestamps.
+function keptReviewProvenance(review){
+  const at=savedDayDecisionTimestamp(review.keptAt);
+  return `Kept for review${at?' '+at:''}; originating device and precise cause not recorded.`;
+}
+function keptReviewChanges(here,other,fields){
+  if(!here||!other)return 'One copy is absent or deleted.';
+  const changed=fields.filter(([key])=>!Canonical.same(here[key],other[key])).map(([,label])=>label);
+  return changed.length?`Differing: ${changed.slice(0,7).join(', ')}${changed.length>7?` (+${changed.length-7} more)`:''}.`:
+    'Recorded content matches; only save/control metadata may differ.';
+}
+function savedDayReviewSummary(record){
+  if(!record)return 'No Saved Day stored.';
+  if(record.recordKind==='diary')return `Diary · reflection: ${keptValueDescription(record.reflection).slice(0,100)}`;
+  const results=Object.values(record.results||{}),minutes=Math.round(results.reduce((sum,item)=>sum+(Number(item.actualSeconds)||0),0)/60),
+    parts=[`Study · ${record.schedule?.length||0} blocks`,`${results.length} task results`,`${minutes} min recorded`,`${record.practiceRuns?.length||0} practice runs`];
+  if(record.studyQuality!==null)parts.push(`quality ${record.studyQuality}/5`);
+  if(String(record.reflection||'').trim())parts.push(`reflection: ${keptValueDescription(record.reflection).slice(0,85)}`);
+  return parts.join(' · ');
+}
+function sessionReviewSummary(session){
+  if(!session)return 'No Active Session stored.';
+  const snapshot=session.snapshot||{},tasks=Object.values(snapshot.taskState||{}),
+    done=tasks.filter(item=>item.resolvedState==='done').length,
+    seconds=tasks.reduce((sum,item)=>sum+(Number(item.actual?.seconds)||0),0),
+    runs=snapshot.practice?.runs?.length||0;
+  const parts=[session.date,session.status,`${tasks.length} tracked blocks`,`${done} done`,`${Math.round(seconds/60)} min recorded`,`${runs} practice runs`];
+  if(String(snapshot.review?.reflection||'').trim())parts.push('reflection saved');
+  return parts.join(' · ');
+}
+function keptSessionAlreadyApplied(current,kept){
+  return !!current&&!!kept&&current.status==='suspended'&&current.date===kept.date&&
+    current.runningOn===kept.runningOn&&
+    Canonical.same(ActiveSessionCodec.contentValue(current),ActiveSessionCodec.contentValue(kept));
 }
 function selectedKeptPersonal(current,review,picked){
   const kept=review.kept,has=part=>picked[`kept__${review.id}__${part}`]==='use',
