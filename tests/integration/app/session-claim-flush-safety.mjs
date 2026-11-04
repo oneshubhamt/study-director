@@ -499,4 +499,42 @@ function acquiringHarness(fault=''){
   assert.equal(advanced.ctx.covered({...richer,schedule:[{...row,name:'Different plan'}]},session,{allowAdvances:true}),false,'a same-date Saved Day for another schedule is not a safe retirement receipt');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:47,productionFunctions:true}));
+// A saved calendar date is not enough to suppress the user's Save Today
+// reminder. The current Active Session must carry its own verified receipt.
+{
+  const src=productionFunction('async function savedRecordExistsForDate(date){');
+  const date='2026-08-27',record={date,recordKind:'study'};
+  for(const [label,mode,covered,expected] of [
+    ['canonical covered session','committed',true,true],
+    ['different study evidence','committed',false,false],
+    ['session not acknowledged','unsaved',true,false],
+    ['local-only session','rescue',true,false],
+    ['no session','missing',true,false],
+    ['strict Saved Day read fails','failed-day-read',true,false]
+  ]){
+    const cache=new Set(),pending=new Map(),session={date,snapshot:{contentRevision:7,savedRevision:mode==='unsaved'?6:7}};
+    let dayReads=0;
+    const context=vm.createContext({
+      daySaveDirty:()=>false,
+      savedRecordDates:cache,savedRecordCheckPromises:pending,
+      cleanDayRevision:v=>Number(v)||0,
+      AppData:{
+        activeSession:{load:async()=>({ok:true,value:mode==='missing'?null:session,storage:{idb:mode!=='rescue'}})},
+        dailyRecords:{
+          documents:async()=>{dayReads++;if(mode==='failed-day-read')throw new Error('IndexedDB failed');return [record];},
+          verifyCanonical:async()=>true
+        }
+      },
+      DailyRecordCodec:{savedDayCoversSessionEvidence:()=>covered},
+      AppDiagnostics:{capture:()=>{}},
+      Object
+    });
+    vm.runInContext(src+'\nglobalThis.hasSaved=savedRecordExistsForDate;',context);
+    assert.equal(await context.hasSaved(date),expected,label);
+    assert.equal(cache.has(date),expected,label+' memoization');
+    assert.equal(await context.hasSaved(date),expected,label+' replay');
+    assert.equal(dayReads,expected?1:mode==='failed-day-read'?2:mode==='committed'?2:0,label+' canonical query gate');
+  }
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:53,productionFunctions:true}));

@@ -4156,12 +4156,22 @@ async function savedRecordExistsForDate(date){
   if(daySaveDirty(date))return false;
   if(savedRecordDates.has(date))return true;
   if(savedRecordCheckPromises.has(date))return savedRecordCheckPromises.get(date);
-  const check=AppData.dailyRecords.get(date)
-    // A Saved Day proves persistence exists, not that its sourceRevision belongs
-    // to this Active Session lineage. savedRevision is acknowledged only by the
-    // session's own save path and travels with that session across devices.
-    .then(rec=>{const savedStudy=!!rec&&rec.recordKind==='study',covered=savedStudy&&!daySaveDirty(date);if(covered)savedRecordDates.add(date);return covered;})
-    .catch(()=>false)
+  const check=(async()=>{
+    // Presence of an unrelated Day on the calendar cannot silence an unsaved
+    // session. Require its own acknowledgement and the verified canonical
+    // Saved Day covering that precise content.
+    const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value;
+    const snapshot=session?.snapshot;
+    if(!loaded?.ok||loaded.error||loaded.storage?.idb!==true||session?.date!==date||
+        !snapshot||cleanDayRevision(snapshot.savedRevision)<cleanDayRevision(snapshot.contentRevision))return false;
+    const records=await AppData.dailyRecords.documents([date],{requireCanonical:true});
+    const record=records.find(item=>item.date===date);
+    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,session))return false;
+    await AppData.dailyRecords.verifyCanonical(record);
+    if(daySaveDirty(date))return false;
+    savedRecordDates.add(date);
+    return true;
+  })().catch(error=>{AppDiagnostics.capture('session.saved-day-reminder',error,'warn');return false;})
     .finally(()=>savedRecordCheckPromises.delete(date));
   savedRecordCheckPromises.set(date,check);
   return check;
