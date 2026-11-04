@@ -1318,6 +1318,58 @@ for(const variant of ['unchanged','late','last-tick']){
   assert.equal(oldCopies().length,lateWork||finalTick?1:0,'replay of an already settled day cannot enqueue a second review');
 }
 
+// BF-C4.1: a real shared semantic ancestor prevents false reviews when
+// local changes only touch save metadata and the other device changes study.
+for(const variant of ['remote-edit','remote-delete','local-edit','both-edit']){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const date='2026-09-12',a={installationId:'inst_sem_day_a_'+variant.replaceAll('-','_'),records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('semantic'),activeSession:null,schedule:'',personal:personal('Semantic QA'),journal:null},
+    b={installationId:'inst_sem_day_b_'+variant.replaceAll('-','_'),records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('Semantic QA'),journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  a.records.set(date,revisionedRecord(date,'shared study',17,'2026-09-12T09:00:00.000Z'));
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.ok(a.reconciliationBase.semanticDays[date], 'new checkpoint stores a distinct semantic Day fingerprint');
+  if(variant==='local-edit'||variant==='both-edit')a.records.set(date,freeze({...a.records.get(date),reflection:'A added content',sourceRevision:19}));
+  else a.records.set(date,freeze({...a.records.get(date),savedAt:'2026-09-12T11:00:00.000Z',updatedAt:'2026-09-12T11:00:00.000Z',sourceRevision:950}));
+  if(variant==='remote-delete'){
+    b.records.delete(date);b.deletions=[{date,deletedAt:'2026-09-12T12:00:00.000Z'}];
+  }else if(variant==='local-edit'){
+    b.records.set(date,freeze({...b.records.get(date),savedAt:'2026-09-12T12:00:00.000Z',updatedAt:'2026-09-12T12:00:00.000Z',sourceRevision:997}));
+  }else b.records.set(date,freeze({...b.records.get(date),reflection:'B added content',updatedAt:'2026-09-12T12:00:00.000Z'}));
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  const kept=a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date);
+  if(variant==='remote-delete')assert.equal(a.records.has(date),false,'remote deletion wins against local metadata-only refresh');
+  else assert.equal(a.records.get(date)?.reflection,variant==='local-edit'||variant==='both-edit'?'A added content':'B added content','one-sided meaningful study change wins');
+  assert.equal(kept.length,variant==='both-edit'?1:0,'only two different substantive edits create a kept version');
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date).length,variant==='both-edit'?1:0,'repeated sync remains idempotent');
+}
+// Session content ancestry must not hand the running clock to a device merely
+// because metadata differs. It allows the verified owner's actual progress
+// to replace an unmodified semantic branch without a false review.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const date='2026-09-13',a={installationId:'inst_sem_session_a',records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('session'),activeSession:null,schedule:'',personal:personal('Session QA'),journal:null},
+    b={installationId:'inst_sem_session_b',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('Session QA'),journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  a.activeSession=revisionedSession(date,'SHARED',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const before=a.activeSession,sharedFingerprint=a.reconciliationBase.sessionContentFingerprint;
+  assert.ok(sharedFingerprint&&sharedFingerprint!==a.reconciliationBase.sessionFingerprint,'semantic and full session hashes remain distinct');
+  a.activeSession=freeze({...before,revision:11,updatedAt:'2026-09-13T10:00:00.000Z'});
+  b.activeSession=revisionedSession(date,'B-PROGRESS',{runningOn:b.installationId,revision:12,contentRevision:8});
+  b.schedule=b.activeSession.scheduleText;b.running=true;await B.upload();
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession.snapshot.label,'B-PROGRESS','actual later study work is adopted');
+  assert.equal(a.activeSession.runningOn,b.installationId,'the remote execution owner retains ownership');
+  assert.equal(a.running,false,'old owner stops its clock');
+  assert.equal(a.reviews.open().filter(item=>item.subject==='session').length,0,'metadata-only ancestor does not manufacture a kept session');
+}
+
 // BF-C4: A local save-acknowledged session may differ from its full-record
 // ancestor only in control metadata. The *real* Saved Day evidence predicate
 // is the independent, content-based retirement proof. Unacknowledged work,
