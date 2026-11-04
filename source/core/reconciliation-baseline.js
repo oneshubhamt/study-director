@@ -9,6 +9,7 @@ registry.define('reconciliation-baseline',1,()=>{
   const freeze=Object.freeze;
   function exactKeys(value,keys){return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function hex(bytes){return [...new Uint8Array(bytes)].map(value=>value.toString(16).padStart(2,'0')).join('');}
+  function sameDayKeys(a,b){return !!a&&!!b&&Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(key=>Object.hasOwn(b,key));}
   function createCodec(input){
     exactObject(input,['limits','isNoteKey'],'Reconciliation baseline codec input');
     if(!Object.isFrozen(input.limits)||typeof input.isNoteKey!=='function')throw new TypeError('Reconciliation baseline codec dependencies are invalid.');
@@ -79,9 +80,6 @@ registry.define('reconciliation-baseline',1,()=>{
       if(!MONTH.test(String(month||''))||!raw||typeof raw!=='object'||Array.isArray(raw))return null;const out=Object.create(null);let count=0;
       for(const [date,value] of Object.entries(raw)){if(!/^\d{4}-\d{2}-\d{2}$/u.test(date)||date.slice(0,7)!==month||!HEX.test(String(value||''))||++count>31)return null;out[date]=String(value);}
       return count?freeze(out):null;
-    }
-    function sameDayKeys(a,b){
-      return Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(key=>Object.hasOwn(b,key));
     }
     function normalizeDays(value,context={}){
       const semantic=value?.version===2;
