@@ -453,6 +453,7 @@ function timerClockEls(){
   return cachedElements(timerClockEls,{cd:'cd',overflow:'cd-overflow',prog:'prog',pct:'prog-pct'});
 }
 function startCur(durationOverrideSec,options={}){
+  if(!appCanMutate())return false;
   if(!TASKS.length){showEmpty();return;}
   let nextIdx=TimerState.currentIndex;
   while(nextIdx<TASKS.length&&!isTrackableBlock(TASKS[nextIdx]))nextIdx++;
@@ -640,6 +641,7 @@ function finalizePauseEvent(){
   return pausedSec;
 }
 function resumeTimerFromPause(){
+  if(!appCanMutate())return false;
   if(TimerState.mode!==TIMER_MODES.PAUSED||!TimerState.paused)return false;
   finalizePauseEvent();
   TimerState.paused=false;

@@ -205,6 +205,24 @@ for(const bad of [
   assert.deepEqual(t.calls.syncs,['session-claim']);
 }
 
+// A pending interrupted handoff fences a primary-tab timer resume.
+{
+  const fn=productionFunction('function resumeTimerLoopAfterPrimaryRestore(){');
+  let calls=0,pending=true;
+  const c=vm.createContext({
+    sessionClaimFreeze:null,pendingSessionHandoffSafety:()=>pending,
+    TimerEngine:{resumeAfterPrimaryRestore:()=>{calls++;return true;}},
+    StartupLifecycle:{status:()=>({fullyInitialized:false})},
+    AppDiagnostics:{capture:()=>{}}
+  });
+  vm.runInContext(fn+'\nglobalThis.tryResume=resumeTimerLoopAfterPrimaryRestore;',c);
+  assert.equal(c.tryResume(),false,'unverified ownership stops the timer-resume path');
+  assert.equal(calls,0);
+  pending=false;
+  assert.equal(c.tryResume(),true);
+  assert.equal(calls,1);
+}
+
 // Independently exercise the acquiring device's production Continue Here
 // function. A success requires both a Drive claim and an exact canonical
 // IndexedDB receipt; a partial claim is never silently treated as success.

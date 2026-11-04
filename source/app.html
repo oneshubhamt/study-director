@@ -2853,7 +2853,7 @@ const TimerEngine=TimerEngineModule.createEngine(Object.freeze({ports:Object.fre
   reviewEvidence:Object.freeze({applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,recordCurrentActiveToTask,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}),
   clockEnvironment:Object.freeze({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
   userPreferences:Object.freeze({Pomodoro,notifications:NoticeCoordinator}),
-  ownership:Object.freeze({appCanMutate}),
+  ownership:Object.freeze({appCanMutate:()=>appCanMutate()&&!pendingSessionHandoffSafety()}),
   practice:Object.freeze({controller:PracticePacerController,model:PracticePacerModel})
 })}));
 if(!Object.isFrozen(TimerEngine)||TimerEngine.format!=='study-director.timer-engine'||TimerEngine.contractVersion!==2){
@@ -2870,7 +2870,7 @@ const {
   markDone:markDoneTimer, setPausedUI, setTimerIdentity, skipTask:skipTaskTimer, startCur, syncTimerAfterWake, toggleDone, togglePause:togglePauseTimer,
   updateBreakMeter, updateCD
 }=TimerEngine;
-function togglePause(){const result=togglePauseTimer();schedulePwaUpdateEvaluation(150);return result;}
+function togglePause(){if(pendingSessionHandoffSafety())return false;const result=togglePauseTimer();schedulePwaUpdateEvaluation(150);return result;}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
@@ -2932,7 +2932,7 @@ async function verifyFrozenSessionClaim(){
   }
 }
 function resumeAfterReleasedSessionClaim(session){
-  if(!sessionClaimFreeze?.localVerified||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
+  if(pendingSessionHandoffSafety()||!sessionClaimFreeze?.localVerified||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
   const frozenSinceMs=sessionClaimFreeze.frozenSinceMs;
   try{
     if(!TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs}))return false;
@@ -3477,7 +3477,7 @@ function dismissStorageWarning(){
 }
 function resumeTimerLoopAfterPrimaryRestore(){
   try{
-    if(sessionClaimFreeze)return false;
+    if(sessionClaimFreeze||pendingSessionHandoffSafety())return false;
     const resumed=TimerEngine.resumeAfterPrimaryRestore();
     if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{
       date:getReviewDate(),
@@ -4576,8 +4576,8 @@ function deriveRestoredBreakState(runtime,idx,now=DecisionClock.nowMs()){
     }
   };
 }
-function resumeRestoredPausedTimer(restoredBreak){return TimerEngine.resumeRestoredPaused(restoredBreak);}
-function resumeRestoredRunningTimer(){return TimerEngine.resumeRestoredRunning();}
+function resumeRestoredPausedTimer(restoredBreak){return pendingSessionHandoffSafety()?false:TimerEngine.resumeRestoredPaused(restoredBreak);}
+function resumeRestoredRunningTimer(){return pendingSessionHandoffSafety()?false:TimerEngine.resumeRestoredRunning();}
 function finalizeRestoredTimerPersistence(){
   updateBadges();
   flushLiveDraft({markChanged:false});
@@ -8734,8 +8734,8 @@ async function quiesceManagedRecoveryRuntime(operation){
     if(outer&&managedRecoverySessionQuiescenceDepth===0)void AppMutationCoordinator.settled().then(()=>{
       if(managedRecoverySessionQuiesced()||AppMutationCoordinator.status().active)return;
       const frozenSinceMs=managedRecoveryTimerFrozenSinceMs;managedRecoveryTimerFrozenSinceMs=null;
-      if(sessionClaimFreeze)return;
-      try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
+      if(sessionClaimFreeze||pendingSessionHandoffSafety())return;
+       try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
     });
   }
 }
