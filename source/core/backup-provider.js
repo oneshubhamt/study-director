@@ -1537,9 +1537,13 @@ registry.define('backup-provider',1,input=>{
     };
     if(!managedRecoveryHooks)throw new Error('Managed recovery transaction coordination is unavailable.');
     const repositorySnapshot=freeze({history:freeze([row.manifest]),availableObjectIds:freeze([...objectInventory.byId.keys()]),inventory,invalidCount:inventory.invalid.length});
+    const localEmpty=async()=>!!automaticHooks?.ready&&await automaticHooks.ready()===false;
     const managedRecovery=transaction=>managedRecoveryHooks.run(freeze({
-      kind:sync?'sync':mode,label:selected.label,keepsActiveSession:!!note||missingOnly||sync||review,apply:async()=>{applying=true;progress('apply',sync?`Taking in changes from ${selected.label}…`:mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
+      kind:sync?'sync':mode,label:selected.label,keepsActiveSession:!!note||missingOnly||sync||review,...(sync?{}:{verifyEmpty:localEmpty}),apply:async()=>{applying=true;progress('apply',sync?`Taking in changes from ${selected.label}…`:mode==='bring-in'?'Combining data locally…':'Applying selected backup locally…');const result=await transaction.apply();progress('verify-local','Verifying restored local data…');return result;},
       createSafety:sync?null:async()=>{
+        // A positively empty device has nothing to protect externally. The
+        // managed coordinator rechecks emptiness and revision before apply.
+        if(await localEmpty()){OperationDiagnostics.mark('external-safety-skipped-empty',{provider:selected.id});return freeze({verified:false,skipped:'local-empty'});}
         applying=true;OperationDiagnostics.mark('external-safety-publication-start',{provider:selected.id});
         progress('safety',`Creating safety version in ${selected.label}…`);
         const safetyPurpose=mode==='bring-in'?'before-combine':'before-restore';
