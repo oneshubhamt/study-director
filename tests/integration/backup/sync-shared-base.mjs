@@ -46,7 +46,8 @@ const dailyRecordCodec=freeze({
   sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,
   canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:16,recordKind:'study',date:String(item.date)}):null,
-  savedDayCoversSessionEvidence:(day,local)=>day?.recordKind==='study'&&day.date===local?.date&&/saved on B|saved after BF1 handoff|saved on B before the new day/i.test(String(day.reflection||'')),
+  savedDayCoversSessionEvidence:(day,local)=>day?.recordKind==='study'&&day.date===local?.date&&/saved on B|saved after BF1 handoff|saved on B before the new day/i.test(String(day.reflection||''))&&
+    (day.results?.focus?.actualSeconds===undefined||Number(day.results.focus.actualSeconds)>=Number(local.snapshot?.taskState?.focus?.actual?.seconds||0)),
   sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
 });
 const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item,version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,runningOn:item.runningOn||'inst_device_local'}):null;
@@ -287,7 +288,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     exports:freeze({...processing,followProtection:async value=>{(state.followed??=[]).push({...value});return false;},backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,dailyRecord:dailyRecordCodec,pendingReview:pendingReviewCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
-    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended',...(state.yieldAddsProgress?{snapshot:freeze({...state.activeSession.snapshot,label:'A-FINAL-TICK'})}:{})});state.running=false;return true;}}),
+    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended',...(state.yieldAddsProgress?{snapshot:freeze({...state.activeSession.snapshot,label:'A-FINAL-TICK',taskState:freeze({...state.activeSession.snapshot.taskState,focus:freeze({actual:freeze({seconds:(Number(state.activeSession.snapshot.taskState?.focus?.actual?.seconds)||0)+70})})})})}:{})});state.running=false;return true;}}),
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
@@ -1591,6 +1592,58 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   assert.equal(a.records.get(day).reflection,'saved after BF1 handoff');
   assert.equal(keptSessions(a).length,0,'a legitimate handoff and save leave no Active Session kept version');
 }
+
+// Post-handoff A can accrue focus before detecting B's claim. A verified Day
+ // covering those seconds must not create a redundant kept session. A shorter
+ // Day, or more time caught during the final yield, still requires review.
+ for(const variant of ['covered-active','covered-ended','shorter-day','final-tick-uncovered']){
+   syncWorld.drive.clear();syncWorld.claims.clear();
+   const day='2026-08-31',
+     a={installationId:'inst_late_covered_a',records:new Map(),deletions:[],noteDeletions:[],
+       notes:syncWorld.note('covered'),activeSession:null,schedule:'',personal:personal('Late focus QA'),journal:null},
+     b={installationId:'inst_late_covered_b',records:new Map(),deletions:[],noteDeletions:[],
+       notes:{},activeSession:null,schedule:'',personal:personal('Late focus QA'),journal:null};
+   const A=syncWorld.device(a,{claims:true}),B=syncWorld.device(b,{claims:true});
+   a.activeSession=revisionedSession(day,'SHARED',{runningOn:a.installationId,revision:10,
+     contentRevision:7,updatedAt:'2026-08-31T08:00:00.000Z'});
+   a.schedule=a.activeSession.scheduleText;a.running=true;
+   await A.upload();assert.equal((await B.sync()).cancelled,false);
+   const source=await B.handoffSource();
+   const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,
+     observedRevision:source.session.revision,
+     observedContentFingerprint:await sessionContentFingerprint(source.session),
+     expectedCheckpointId:source.checkpointId,handoffToken:'99999999-9999-4999-8999-999999999999',
+     revision:11});
+   assert.equal(claimed.status,'completed');
+   b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',
+     revision:11,suspendedAt:null,updatedAt:'2026-08-31T09:05:00.000Z'});
+   b.schedule=b.activeSession.scheduleText;b.running=true;
+   const old=a.activeSession;
+   a.activeSession=freeze({...old,revision:12,updatedAt:'2026-08-31T09:05:30.000Z',
+     snapshot:freeze({...old.snapshot,contentRevision:8,
+       taskState:freeze({focus:freeze({actual:freeze({seconds:60})})}),
+       updatedAt:'2026-08-31T09:05:30.000Z'})});
+   a.yieldAddsProgress=variant==='final-tick-uncovered';
+   b.records.set(day,freeze({...revisionedRecord(day,'saved on B',501,'2026-08-31T10:00:00.000Z'),
+     results:freeze({focus:freeze({actualSeconds:variant==='shorter-day'?40:90})})}));
+   if(variant==='covered-ended'){b.activeSession=null;b.schedule='';b.running=false;}
+   await B.upload();
+   assert.equal((await A.sync()).cancelled,false,variant);
+   assert.equal(a.running,false,variant+' old execution must stop');
+   assert.equal(a.activeSession?.runningOn,variant==='covered-ended'?undefined:b.installationId,
+     variant+' checkpoint ownership/end remains authoritative');
+   const kept=a.reviews.open().filter(row=>row.subject==='session'&&row.kept?.date===day);
+   const expectedKept=['shorter-day','final-tick-uncovered'].includes(variant)?1:0;
+   assert.equal(kept.length,expectedKept,
+     variant+' must retain only evidence not covered by the verified Saved Day');
+   if(expectedKept)assert.equal(kept[0].kept.snapshot.taskState?.focus?.actual?.seconds,
+     variant==='shorter-day'?60:130,'unsaved post-handoff time is retained');
+   else{
+     assert.equal((await A.sync()).cancelled,false,variant+' repeat sync');
+     assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,
+       variant+' must not manufacture a repeated review');
+   }
+ }
 
 // BF-1: a Drive claim that exists but cannot be verified is not an absent
 // claim. Sync must stop without applying the still-old shared checkpoint;
