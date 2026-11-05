@@ -131,7 +131,7 @@ const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze(
 
   const plan={id:'plan-semantic-aaa',label:'Morning',scheduleText:'08:00 | 45 | Focus | work | Polity | pages | 5',
     createdAt:'2026-08-28T08:00:00.000Z',updatedAt:'2026-08-28T09:00:00.000Z'};
-  const current=freeze({...personal('Study'),plans:freeze({draft:'Independent draft',defaultId:plan.id,savedPlans:freeze([plan])})}),
+  const current=freeze({...personal('Study'),plans:freeze({draft:'Independent draft',savedPlans:freeze([plan]),defaultId:plan.id})}),
     metadata=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([freeze({...plan,createdAt:'2026-08-27T08:00:00.000Z',updatedAt:'2026-08-29T10:00:00.000Z'})])})}),
     changedPlan=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([{...plan,scheduleText:plan.scheduleText+' changed'}])})});
   assert.equal(pendingReviewCodec.sameMeaning('personal',current,metadata),true);
