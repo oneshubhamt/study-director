@@ -5920,6 +5920,7 @@ async function yieldSessionToOtherDevice(options={}){
 }
 async function restoreSuspendedTodaySession(){
   if(!appCanMutate())return false;
+  let recoveredSafety=false;
   try{
     const loaded=await AppData.activeSession.load();let session=loaded&&loaded.value||null;
     if(pendingSessionHandoffSafety()){
@@ -5928,6 +5929,7 @@ async function restoreSuspendedTodaySession(){
       if(!verified?.ok||verified.error||verified.storage?.idb!==true)
         throw verified?.error||new Error('Canonical Active Session could not be verified after ownership recovery.');
       session=verified.value||null;
+      recoveredSafety=true;
     }
     // Date takes precedence over status and ownership after a safety repair.
     if(isPreviousActiveSessionRecord(session)){
@@ -5935,7 +5937,7 @@ async function restoreSuspendedTodaySession(){
       setPlanStatus('This session belongs to a previous study day. Review it without restarting its timer.',false);
       return false;
     }
-    if(isRestorableActiveSession(session))return attemptAutoRestoreActiveSession();
+    if(recoveredSafety&&session?.status==='active')return attemptAutoRestoreActiveSession();
     if(!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
     if(sessionFromElsewhere(session))return continueSessionHere();
     const snapshot=activeSessionSnapshot(session);
