@@ -1182,10 +1182,14 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     const unchanged=repositoryUnchangedVersion(history,prepared);
     if(unchanged){
       const checkpointId=unchanged.checkpoint.checkpointId,publication=freeze({name:checkpointId+'.sdcheckpoint',unchanged:true}),objectsReused=prepared.objects.length;
-      adoptRepositoryPreparation(prepared,checkpointId);if(options.shared)await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',()=>establishRepositoryBase(checkpointId));
+      adoptRepositoryPreparation(prepared,checkpointId);
+      const baseEstablished=!options.shared||await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',async()=>{
+        if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');
+        return true;
+      })===true;
       const context=freeze({prepared,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,unchanged:true});
-      const committedResult=typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
-      return freeze({checkpointId,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,committedResult,cleanupResult:null,unchanged:true,warning:warnings.join(' ')});
+      const committedResult=baseEstablished&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
+      return freeze({checkpointId,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,committedResult,cleanupResult:null,unchanged:true,sharedBaseEstablished:baseEstablished,warning:warnings.join(' ')});
     }
     let objectsWritten=0,objectsReused=0,writtenBytes=0,attachmentBytesWritten=0;
     const freshObjects=[];
@@ -1219,7 +1223,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     const context=freeze({prepared,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten});
     const committedResult=baseEstablished&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The checkpoint was saved and verified, but local backup status could not be updated. A later backup will retry completion bookkeeping.',()=>transport.onCommitted(context)):null;
     const cleanupResult=typeof transport.cleanup==='function'?await postCommit('retention-cleanup','The checkpoint was saved and verified, but repository retention cleanup did not complete.',()=>transport.cleanup(freeze({...context,committedResult}))):null;
-    return freeze({checkpointId:manifestFile.manifest.checkpoint.checkpointId,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten,committedResult,cleanupResult,warning:warnings.join(' ')});
+    return freeze({checkpointId:manifestFile.manifest.checkpoint.checkpointId,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten,committedResult,cleanupResult,sharedBaseEstablished:baseEstablished,warning:warnings.join(' ')});
   }catch(error){
     if(['BACKUP_POLICY_CHANGED','BACKUP_SOURCE_FENCE_CHANGED','BACKUP_REPOSITORY_BASE_CHANGED'].includes(String(error?.code||'')))state.invalidated=true;
     if(continuation&&state.prepared&&!state.invalidated&&!committed&&typeof transport.retainOnFailure==='function')try{retained=await transport.retainOnFailure(error)===true;}catch(retainError){AppDiagnostics.capture('repository.publication-retain',retainError,'warn');}
