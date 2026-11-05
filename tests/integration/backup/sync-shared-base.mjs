@@ -1725,24 +1725,31 @@ let mergeRuleCases=0;
   const note=normalizeArea({key:'Shared',label:'Note',text:'Finished note',updatedAt:'2026-08-29T09:00:00.000Z'});
   const saved=record(day,'Same content','2026-08-29T09:00:00.000Z');
   const older={...saved,savedAt:'2026-08-28T12:00:00.000Z',updatedAt:'2026-08-28T12:00:00.000Z',sourceRevision:4};
-  const state={installationId:'inst_c63_converged',records:new Map([[day,saved]]),deletions:[],
-    notes:{Shared:note},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  const deletedDate='2026-08-28',deletedAt='2026-08-30T12:00:00.000Z';
+  const state={installationId:'inst_c63_converged',records:new Map([[day,saved]]),
+    deletions:[{date:deletedDate,deletedAt}],
+    notes:{Shared:note},noteDeletions:[{key:'Deleted',deletedAt}],activeSession:null,personal:local,journal:null};
   state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
   const open=[
     pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote}),
     pendingReviewCodec.create({subject:'note',ref:'Shared',kept:{text:'Finished note'}}),
     pendingReviewCodec.create({subject:'savedDay',ref:day,kept:older}),
     pendingReviewCodec.create({subject:'note',ref:'Other',kept:null}),
-    pendingReviewCodec.create({subject:'personal',ref:'personal',kept:personal('Truly other')})
+    pendingReviewCodec.create({subject:'personal',ref:'personal',kept:personal('Truly other')}),
+    pendingReviewCodec.create({subject:'note',ref:'Deleted',kept:null}),
+    pendingReviewCodec.create({subject:'savedDay',ref:deletedDate,kept:null})
   ];
   await state.reviews.ports.pendingReviewsMerge(open);
   const h=createHarness(state);
-  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),3,
-    'semantic Personal/Note/Day equality retires each verified alternative exactly once');
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),5,
+    'semantic equality or a committed deletion tombstone retires each verified alternative exactly once');
   assert.equal(state.reviews.open().length,2,'unproved deletion and genuinely divergent Personal Data remain open');
   const rows=await state.reviews.ports.pendingReviewsReadItems(open.slice(0,3).map(review=>review.id));
   assert.ok(rows.every(row=>row.resolvedAt&&row.kept===null),
-    'all three converged alternatives have durable, content-free resolution receipts');
+    'the converged alternatives have durable, content-free resolution receipts');
+  const deletions=await state.reviews.ports.pendingReviewsReadItems(open.slice(-2).map(review=>review.id));
+  assert.ok(deletions.every(row=>row.resolvedAt&&row.kept===null),
+    'verified existing deletion tombstones allow resolving already-applied deletion choices');
   assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),0,'repeated convergence is idempotent');
 }
 {

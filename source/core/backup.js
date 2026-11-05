@@ -1375,12 +1375,18 @@ async function resolveConvergedKeptVersions(){
       let confirmed=0;
       for(const review of open){
         let matches=false;
-        if(review.subject==='note'&&review.kept){
+        if(review.subject==='note'){
           const [current]=await AppData.notes.readFreshItems([review.ref]);
-          matches=!!current&&Object.entries(review.kept).every(([key,value])=>Canonical.same(current[key],value));
-        }else if(review.subject==='savedDay'&&review.kept){
+          matches=review.kept
+            ?!!current&&Object.entries(review.kept).every(([key,value])=>Canonical.same(current[key],value))
+            :!current&&(await AppData.deletionRecovery.notes()).some(item=>
+              item.key===review.ref&&typeof item.deletedAt==='string');
+        }else if(review.subject==='savedDay'){
           const [current]=await getDailyRecordDocumentsByDates([review.ref],{requireCanonical:true});
-          matches=!!current&&Canonical.same(savedDayReviewContent(current),savedDayReviewContent(review.kept));
+          matches=review.kept
+            ?!!current&&Canonical.same(savedDayReviewContent(current),savedDayReviewContent(review.kept))
+            :!current&&(await AppData.deletionRecovery.savedDays()).some(item=>
+              item.date===review.ref&&typeof item.deletedAt==='string');
         }else if(review.subject==='personal'&&review.kept){
           await personalSettle();
           const current=await personalExport({flush:false});
@@ -1389,8 +1395,9 @@ async function resolveConvergedKeptVersions(){
           const current=(await readCanonicalActiveSession()).value;
           matches=keptSessionAlreadyApplied(current,review.kept)||!!current&&Canonical.same(current,review.kept);
         }
-        // A kept deletion has no positive tombstone proof in this generic
-        // path. Leave it available for deliberate review.
+        // A held deletion resolves only when a canonical absence AND its
+        // existing replicated deletion tombstone both prove that decision.
+        // Session absence has no comparable deletion receipt here.
         if(!matches)continue;
         const still=(await AppData.pendingReviews.readItems([review.id]))[0];
         if(!still||still.resolvedAt||!PendingReviewCodec.sameOpen(review,still))continue;
