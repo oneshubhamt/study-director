@@ -722,9 +722,6 @@ const semanticSavedPlan=PendingReviewCodec.savedPlanMeaning;
 // Personal reviews compare authored meaning, not Saved Plan bookkeeping dates.
 // The order itself remains significant only among identities present on
 // both sides; independently added plans are handled by identity.
-function personalReviewContent(value){
-  return PendingReviewCodec.meaningfulValue('personal',value);
-}
 function meaningfulSavedPlanOrderDiffers(local,other){
   const shared=new Set(local.filter(id=>other.includes(id)));
   return !Canonical.same(local.filter(id=>shared.has(id)),other.filter(id=>shared.has(id)));
@@ -1312,9 +1309,7 @@ function sessionReviewSummary(session){
   return parts.join(' · ').slice(0,330);
 }
 function keptSessionAlreadyApplied(current,kept){
-  return !!current&&!!kept&&current.status==='suspended'&&current.date===kept.date&&
-    current.runningOn===kept.runningOn&&
-    PendingReviewCodec.sameMeaning('session',current,kept);
+  return PendingReviewCodec.matchesCurrent('session',current,kept);
 }
 function selectedKeptPersonal(current,review,picked){
   const kept=review.kept,has=part=>picked[`kept__${review.id}__${part}`]==='use',
@@ -1365,7 +1360,27 @@ async function resolveConvergedKeptVersions(){
   try{
     return await runExclusive('resolve-converged-kept',async()=>{
       requireBackupMutationControl('resolving converged kept versions');
-      const open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
+      const stored=await AppData.pendingReviews.list();
+      let open=stored.filter(review=>!review.resolvedAt);
+      // An older local installation can already hold equivalent open IDs
+      // before the semantic codec was introduced. Repair those records using
+      // the existing strict PendingReview merge/tombstone transaction, rather
+      // than leaving users to resolve the same alternative repeatedly.
+      const prior=new Map(),hasDuplicates=open.some(review=>{
+        const key=review.subject+':'+review.ref,peers=prior.get(key)||[];
+        if(peers.some(candidate=>PendingReviewCodec.sameOpen(candidate,review)))return true;
+        peers.push(review);prior.set(key,peers);return false;
+      });
+      if(hasDuplicates){
+        const expected=PendingReviewCodec.merge([stored],APP_LIMITS.maxPendingReviews)
+          .filter(review=>review.resolvedAt&&!stored.find(before=>before.id===review.id)?.resolvedAt)
+          .map(review=>review.id);
+        await AppData.pendingReviews.merge([]);
+        const receipts=await AppData.pendingReviews.readItems(expected);
+        if(receipts.length!==expected.length||receipts.some(row=>!row?.resolvedAt||row.kept!==null))
+          throw new Error('Equivalent kept-version acknowledgements were not committed to canonical storage.');
+        open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
+      }
       let confirmed=0;
       for(const review of open){
         let matches=false;

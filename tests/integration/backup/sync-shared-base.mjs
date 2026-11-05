@@ -178,6 +178,10 @@ const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze(
   assert.equal(pendingReviewCodec.sameMeaning('session',s1,s2),true);
   assert.equal(pendingReviewCodec.sameMeaning('session',s1,s3),false);
   assert.equal(pendingReviewCodec.matchesCurrent('session',s1,s3),false);
+  const suspended=revisionedSession('2026-08-28','same',{status:'suspended'});
+  assert.equal(pendingReviewCodec.matchesCurrent('session',suspended,s1),true,'suspended content with same owner is applied');
+  assert.equal(pendingReviewCodec.matchesCurrent('session',s1,s2),false,'running canonical session cannot prove applied kept alternative');
+  assert.equal(pendingReviewCodec.matchesCurrent('session',{...suspended,runningOn:'inst_other'},s1),false,'ownership differences block automatic session resolution');
 }
 
 async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,pendingReviews=[],personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
@@ -1784,6 +1788,32 @@ let mergeRuleCases=0;
     'false ancestry write receipts must be reported');
   b.failBaseWrite='';
   assert.equal((await B.sync()).cancelled,false,'a later sync may establish the local ancestry');
+}
+
+
+// Older local repositories may already contain two semantically equivalent
+// *open* PendingReview identities. Refresh must atomically publish a
+// content-free tombstone for the redundant identity, retain the oldest, and
+// never suppress a distinct ancestor, without rewriting the user's Note.
+{
+  const older=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Other device note'},base:{text:'Shared ancestor'},keptAt:'2026-08-28T09:00:00.000Z'}),
+    newer=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Other device note'},base:{text:'Shared ancestor'},keptAt:'2026-08-28T10:00:00.000Z'}),
+    otherBase=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Other device note'},base:{text:'Different ancestor'},keptAt:'2026-08-28T11:00:00.000Z'});
+  const state={records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:personal('Existing'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  // Simulate durable rows written by a previous build before semantic dedup.
+  for(const row of [newer,older,otherBase])state.reviews.store.set(row.id,row);
+  const h=createHarness(state);
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),0,'no canonical Note exists to converge the actual retained alternatives');
+  const after=await state.reviews.ports.pendingReviewsList();
+  assert.equal(after.filter(row=>!row.resolvedAt).length,2,'one duplicate retired, distinct ancestry retained');
+  assert.ok(!after.find(row=>row.id===older.id).resolvedAt,'oldest open identity remains stable');
+  assert.ok(after.find(row=>row.id===newer.id).resolvedAt&&after.find(row=>row.id===newer.id).kept===null,
+    'a strict replicated tombstone retires the redundant older-format review');
+  assert.ok(!after.find(row=>row.id===otherBase.id).resolvedAt,'different merge base is not silently lost');
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),0,'legacy cleanup is idempotent');
+  await state.reviews.ports.pendingReviewsMerge([newer]);
+  assert.ok((await state.reviews.ports.pendingReviewsReadItems([newer.id]))[0].resolvedAt,'reimport does not resurrect a repaired duplicate');
 }
 
 // BF-C6.3: semantically matching Pending Reviews must be acknowledged as

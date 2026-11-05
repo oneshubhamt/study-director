@@ -930,6 +930,13 @@ function materializeDailyRecordSummary(summary){
         // A retained Note may hold only the title or text which differed.
         return Object.entries(kept).every(([field,value])=>sameDataValue(current[field],value));
       }
+      if(subject==='session'){
+        // Study-content equality may deduplicate redundant retained versions,
+        // but only a suspended, same-owner canonical session proves that a
+        // kept Active Session has actually been applied.
+        return current.status==='suspended'&&current.runningOn===kept.runningOn&&
+          sameMeaning(subject,current,kept);
+      }
       return sameMeaning(subject,current,kept);
     }
     // Equivalent open conflicts belong to one review, even if two devices
