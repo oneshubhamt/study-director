@@ -353,10 +353,12 @@ for(const spec of [
 // Captured notice evidence must be a committed same-date session with a
 // matching local content revision. A failed/partial canonical read can never
 // become proof used later to dismiss an alert.
-for(const [label,canonicalReady,revisionMatches,expectedEvidence] of [
-  ['canonical and matching',true,true,true],
-  ['rescue-only session',false,true,false],
-  ['lagging canonical session',true,false,false]
+for(const [label,canonicalReady,revisionMatches,runtimeReady,expectedEvidence] of [
+  ['canonical and matching',true,true,false,true],
+  ['rescue-only without live evidence',false,true,false,false],
+  ['rescue-only with live evidence',false,true,true,true],
+  ['lagging canonical without live evidence',true,false,false,false],
+  ['lagging canonical with live evidence',true,false,true,true]
 ]){
   const record={date:day,snapshot:{contentRevision:7}};
   const ctx=vm.createContext({
@@ -365,6 +367,8 @@ for(const [label,canonicalReady,revisionMatches,expectedEvidence] of [
     saveReminderDate:'',saveReminderEvidence:null,saveReminderGeneration:0,
     TimerState:{studyDate:day,contentRevision:7},
     cleanDayRevision:v=>Number(v)||0,
+    PlanRuntime:{appliedScheduleText:()=> 'valid plan'},
+    captureSessionSnapshot:()=>runtimeReady?{date:day,contentRevision:7}:null,
     AppData:{activeSession:{load:async()=>({
       ok:true,storage:{idb:canonicalReady},value:revisionMatches?record:{...record,snapshot:{contentRevision:6}}
     })}},
@@ -374,9 +378,10 @@ for(const [label,canonicalReady,revisionMatches,expectedEvidence] of [
     notifyUser:()=>{},setStatus:()=>{},setReviewDetailDisclosures:()=>{},
     sessionSafetyMessage:''
   });
-  vm.runInContext(prompt+'\nglobalThis.prompt=promptSaveToday;',ctx);
+  vm.runInContext(reminderLive+'\n'+prompt+'\nglobalThis.prompt=promptSaveToday;',ctx);
   await ctx.prompt();
   assert.equal(!!ctx.saveReminderEvidence,expectedEvidence,label);
+  if(runtimeReady&&!canonicalReady)assert.equal(ctx.saveReminderEvidence.scheduleText,'valid plan','memory-only evidence keeps authored schedule');
   assert.equal(ctx.saveReminderDate,day,label+' still displays an honest reminder');
 }
 
