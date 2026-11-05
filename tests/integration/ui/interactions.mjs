@@ -236,5 +236,27 @@ assert.equal(preRows.length,2,'opening and closing cannot duplicate comparison c
 assert.equal(controller.dismiss(),true);
 assert.equal(await comparePromise,null,'closing the comparison does not apply the kept alternative');
 
+// Null (never authored) and empty string (authored, then cleared) are distinct
+// canonical Plan-draft states, and a long saved-plan choice must show its full text.
+for(const [comparison,expectedStatus,expectedPanes,kind] of [
+  [{current:null,kept:''},/One side has no saved plan draft/u,['(not saved)','(saved, intentionally empty)'],'Plan draft'],
+  [{current:'Shared',kept:'Shared',currentLabel:'Old label',keptLabel:'New label'},/Plan names differ/u,['Shared','Shared'],'Saved Plan']
+]){
+  const prompt=controller.configure({title:'Kept versions',groups:[{
+    id:'review',label:kind==='Saved Plan'?'Saved plan · Sample':'Plan · Working draft',
+    comparison,choices:[{value:'keep',label:'Keep'},{value:'use',label:'Use kept'}]
+  }]});
+  const detail=findDescendant(document.dialog,node=>node.tagName==='DETAILS');
+  assert.ok(detail,'The '+kind+' offers a full comparison');
+  detail.open=true;detail.listeners.get('toggle')[0]();
+  const status=findDescendant(detail,node=>node.className==='interaction-comparison-status');
+  assert.match(status.textContent,expectedStatus,'A difference in authorship or Plan label must not appear identical');
+  const panes=[];const gather=node=>{if(node.tagName==='PRE')panes.push(node);node.children.forEach(gather);};
+  gather(detail);
+  assert.deepEqual(panes.map(node=>node.textContent),expectedPanes);
+  assert.ok(panes.every(node=>node.getAttribute('aria-label').includes('complete '+kind+' text')));
+  assert.equal(controller.dismiss(),true);assert.equal(await prompt,null);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'interaction-history',checks:['Back cancels once','Forward expires','explicit close consumes marker','sequential prompt traversal settlement','password cleared']},null,2));
 }

@@ -1920,6 +1920,32 @@ for(const changedAuthoredPlan of [false,true]){
     'Conflicting saved-plan order must remain reviewable without a shared base.');
 }
 
+// The original unsaved-versus-empty distinction and long Saved Plan bodies
+// must reach the same read-only comparison UI, without mutating Personal Data.
+{
+  const planId='plan-c82-comparison';
+  const schedule=Array.from({length:14},(_,i)=>'06:00 | 30 | Item '+i+' | work | Ethics | pages | 4').join('\n');
+  const oldPlan=freeze({id:planId,label:'First name',scheduleText:schedule,
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'});
+  const newPlan=freeze({...oldPlan,label:'Second name',
+    scheduleText:schedule+'\n08:00 | 30 | Additional | work | Ethics | pages | 4'});
+  const local=freeze({...personal('Plan inspector'),plans:freeze({draft:null,savedPlans:freeze([oldPlan]),defaultId:planId})});
+  const kept=freeze({...local,plans:freeze({draft:'',savedPlans:freeze([newPlan]),defaultId:planId})});
+  const state={installationId:'inst_c82_full_review',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  const groups=h.prompts.find(item=>item.title==='Kept versions').groups;
+  assert.deepEqual(groups.find(g=>g.label==='Plan · Working draft').comparison,{current:null,kept:''},
+    'An empty authored draft is not falsely presented as the same as never saved.');
+  assert.deepEqual(groups.find(g=>g.label.startsWith('Saved plan ·')).comparison,{
+    current:oldPlan.scheduleText,kept:newPlan.scheduleText,currentLabel:oldPlan.label,keptLabel:newPlan.label
+  },'Saved Plan decisions expose complete schedule texts and competing names.');
+  assert.deepEqual(state.personal,local,'Looking at Kept Versions does not alter canonical Plans.');
+}
+
 // The Kept Versions choice must offer full original text for an independently
 // authored Plan draft, not a preview truncated before the actual divergence.
 {

@@ -1495,7 +1495,7 @@ async function reviewKeptVersions({ref=''}={}){
       if(!Canonical.same(personal.plans.draft,kept.plans.draft))
         choice(review,'draft','Plan · Working draft','The working draft is independent of the applied Active Session.',{
           label:'Keep this draft',description:keptValueDescription(personal.plans.draft)
-        },{label:'Use kept draft',description:keptValueDescription(kept.plans.draft)},false,{current:personal.plans.draft||'',kept:kept.plans.draft||''});
+        },{label:'Use kept draft',description:keptValueDescription(kept.plans.draft)},false,{current:personal.plans.draft,kept:kept.plans.draft});
       const localPlans=new Map(personal.plans.savedPlans.map(plan=>[plan.id,plan])),
         remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan]));
       for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
@@ -1503,7 +1503,7 @@ async function reviewKeptVersions({ref=''}={}){
         if(Canonical.same(semanticSavedPlan(here),semanticSavedPlan(other)))continue;
         choice(review,'savedPlan:'+id,`Saved plan · ${here?.label||other?.label||id}`,'This saved-plan identity differs; selecting a version does not replace other saved plans.',{
           label:here?'Keep this plan':'Keep absent',description:keptPlanDescription(here)
-        },{label:other?'Use kept plan':'Remove this plan',description:keptPlanDescription(other)});
+        },{label:other?'Use kept plan':'Remove this plan',description:keptPlanDescription(other)},false,{current:here?.scheduleText??null,kept:other?.scheduleText??null,currentLabel:here?.label||'',keptLabel:other?.label||''});
       }
       if(meaningfulSavedPlanOrderDiffers(personal.plans.savedPlans.map(plan=>plan.id),kept.plans.savedPlans.map(plan=>plan.id)))
         choice(review,'savedPlanOrder','Saved plan · Order','Choose the order for retained plans; plans present on only one side still have their own choices.',{
