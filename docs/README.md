@@ -6,7 +6,8 @@ Start here. Read the page for the area you are changing; the code is the final a
 |---|---|
 | [architecture.md](architecture.md) | What the app is, how it is composed, where code lives, and the core safety rules |
 | [workflow.md](workflow.md) | How to work, choosing tests, commands, build, release, CI and real-device acceptance |
-| [backlog.md](backlog.md) | Current reported bugs, open acceptance, future merge intake, deferred decisions and unverified devices |
+| [backlog.md](backlog.md) | Current reported bugs, open acceptance, integration status, deferred decisions and unverified devices |
+| [Main → bug-fixes integration ledger](MAIN_TO_BUG_FIXES_LEDGER.md) | Independent `main` commits, source-level dispositions, safeguarded transfers and unresolved acceptance |
 | [test-programme.md](test-programme.md) | The test suite programme: full plan, rules and status (deleted when it ends) |
 | [history.md](history.md) | A short record of past work and dropped ideas |
 | [Durability risk register](BF-C7.4-STORAGE-DURABILITY-AUDIT.md) | Relevant storage failure boundaries and what automated QA does not certify |
