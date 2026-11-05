@@ -406,12 +406,15 @@ function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
   if(active){
     const finished=Array.isArray(active.unitMs)?active.unitMs:[],
       anchored=Number(active.anchorMs)>0;
-    let current=Math.max(0,Math.round(Number(active.currentMs)||0));
+    let current=Math.max(0,Number(active.currentMs)||0);
     if(anchored){
       const at=Date.parse(String(snapshot.updatedAt||'')),since=Number(active.anchorMs);
       if(!Number.isFinite(at)||at<since)return false;
-      current+=Math.max(0,Math.round(at-since));
+      current+=Math.max(0,at-since);
     }
+    // The live pacer clamps the ongoing unit to maxPracticeTargetMs before
+    // finalization. A covered Saved Day must not require impossible overtime.
+    current=Math.round(Math.min(APP_LIMITS.maxPracticeTargetMs,current));
     if(finished.length||current>0){
       const fields=['targetMs','taskId','sessionTargetMs','unitPlan','totalUnits'],
         expected=finished.length+(current>0?1:0);

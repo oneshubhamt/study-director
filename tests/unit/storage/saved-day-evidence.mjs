@@ -83,4 +83,21 @@ assert.equal(covers({...withPartial,practiceRuns:[{...savedPractice,unitMs:[6100
 assert.equal(covers(withPartial,{...stillRunning,snapshot:{...stillRunning.snapshot,updatedAt:null}},{allowAdvances:true}),false,
   'Missing snapshot clock evidence cannot prove a running attempt was recorded.');
 
+// The live Practice Pacer saturates its active unit at the 24-hour limit.
+// Evidence reconstruction must use that same limit, not demand impossible
+// overtime after a resumed near-limit attempt.
+const cap=limits.maxPracticeTargetMs;
+const nearLimit={...stillRunning,snapshot:{...stillRunning.snapshot,
+  practice:{runs:[],active:{...practiceActive,unitMs:[],currentMs:cap-500,
+    anchorMs:runningFrom}}}};
+const cappedRun={targetMs:practiceActive.targetMs,taskId:practiceActive.taskId,
+  totalUnits:practiceActive.totalUnits,partial:true,unitMs:[cap]};
+assert.equal(covers({...record,practiceRuns:[cappedRun]},nearLimit,{allowAdvances:true}),true,
+  'The canonical maximum-duration run covers a running attempt already saturated by the live pacer.');
+assert.equal(covers({...record,practiceRuns:[{...cappedRun,unitMs:[cap-1]}]},nearLimit,{allowAdvances:true}),false,
+  'A duration even one millisecond below the canonical saturation point must not be treated as covered.');
+assert.equal(covers({...record,practiceRuns:[cappedRun]},
+  {...nearLimit,snapshot:{...nearLimit.snapshot,updatedAt:null}},{allowAdvances:true}),false,
+  'A saturated unit cannot excuse a missing timestamp for a running attempt.');
+
 console.log(JSON.stringify({status:'PASS',suite:'saved-day-evidence',revisionsAreLocal:true,coveragePreservesActualWork:true}));
