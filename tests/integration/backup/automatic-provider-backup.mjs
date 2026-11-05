@@ -14,7 +14,7 @@ const freeze=Object.freeze,noop=()=>{},MINUTE=60*1000;
 // location with versions of its own, for the sync catch-up.
 // share: whether this device may upload to the shared location (no while it
 // holds data from a newer version).
-function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shared=both,driveList=null,driveDownload=null,sharedBase=async()=>null,share=()=>true,manual=false}={}){
+function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shared=both,driveList=null,driveDownload=null,sharedBase=async()=>null,share=()=>true,manual=false,localEmpty=false}={}){
   const clock=createFakeClock('2026-10-06T08:00:00.000Z'),emitted=[],publishedAt=[],publishedBy=[],diagnosticStarts=[],coveredBy=new Map();
   let current=new clock.Date().toISOString(),authorized=signedIn,expiresAt=clock.now()+expiresInMs,listener=null,publicationHook=noop,durable=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,Promise,Map,Set,TextEncoder,Uint8Array,console,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout};context.globalThis=context;vm.createContext(context);
@@ -44,7 +44,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   runtime.register(freeze({id:'google-drive',label:'Google Drive',...(shared?{shared:true}:{}),connected,backgroundAvailable:connected,connectionExpiresAt:()=>connected()?expiresAt:0,subscribeConnection:fn=>{listener=fn;},
     repository:freeze({scope:async()=>'repo-scope',list:driveList||(async()=>({items:[],overflow:false,ignored:0})),upload:unexpected,download:driveDownload||unexpected,delete:unexpected})}));
   runtime.configurePendingBackupRetry(freeze(pending));
-  runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current}));
+  runtime.configureAutomaticBackup(freeze({covered:id=>coveredBy.has(id)?coveredBy.get(id):covered,current:()=>current,ready:async()=>!localEmpty}));
   return {
     clock,runtime,presentation,policy:policy.protocol,publishedAt,publishedBy,diagnosticStarts,onPublication:fn=>{publicationHook=fn;},
     change:(urgent=false)=>{current=new clock.Date(clock.now()).toISOString();runtime.noteChange({urgent});},
@@ -130,6 +130,22 @@ const cases=[];
   t.publishedBy.length=0;t.change(true);await tick(t,t.policy.automaticUrgentMs+30*1000);
   assert.equal(t.publishedBy.length,2);assert.deepEqual(new Set(t.publishedBy.map(row=>row.by)),new Set(['device-folder','google-drive']));
   cases.push('both locations: each publishes canonical local state independently');
+}
+{
+  // A new empty device must still inspect Drive when its automatic upload
+  // is correctly skipped. It must neither publish an empty checkpoint nor
+  // report success without performing the catch-up.
+  const id='cp_'+'c'.repeat(32),item=kind=>freeze({kind,id,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),size:100,createdAt:'2026-10-06T07:30:00.000Z',modifiedAt:'2026-10-06T07:30:00.000Z',remoteId:kind+'-1'});
+  const reads=[];
+  let t=fixture({shared:true,localEmpty:true,driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
+    driveDownload:async()=>{reads.push(t.clock.now());throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
+  await tick(t,10*1000);
+  assert.ok(reads.length>0,'an empty device discovers Drive history on sign-in');
+  assert.equal(t.publishedAt.length,0,'an empty device does not overwrite Drive');
+  t=fixture({shared:true,localEmpty:true});await tick(t,10*1000);
+  assert.ok(t.runtime.locationStatus('google-drive').sync.syncedAt,'when Drive is also empty, its sync completes');
+  assert.equal(t.publishedAt.length,0,'an empty device publishes nothing');
+  cases.push('empty device: Drive catch-up or verified in-sync, never empty publication');
 }
 {
   // Drive holds a version this device has not taken in. A catch-up that fails

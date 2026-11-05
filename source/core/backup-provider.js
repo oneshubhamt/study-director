@@ -1366,8 +1366,10 @@ registry.define('backup-provider',1,input=>{
         // Catch up before backing up: Drive's newest version comes in first.
         // A backup due now checks this itself, so a separate look is only
         // for a check with nothing to back up, after Drive moved on, or
-        // while a review waits.
-        if(sync&&(sync.behind||sync.review||!owed&&!automaticNeeded(selected))){
+        // while a review waits. An untouched empty device must still inspect
+        // Drive: its automatic upload has nothing to publish.
+        const nothingToUpload=!owed&&(!automaticNeeded(selected)||!changeNoted&&!!automaticHooks?.ready&&await automaticHooks.ready()===false);
+        if(sync&&(sync.behind||sync.review||nothingToUpload)){
           sync.behind=false;
           const inventory=await repositoryProviderInventory(repositoryOperationSelected(selected,{signal:scope.signal}),{signal:scope.signal});rememberRecentHistory(selected,inventory);sync.checkedAt=Date.now();
           const ahead=await sharedAhead(inventory,selected),finish=(status,reason)=>{OperationDiagnostics.mark('background-transition',background.transition('convergence','running',status,{reason,actionable:false}),traceId);OperationDiagnostics.finish({status,reason},traceId);return freeze({status,reason});};
@@ -1379,7 +1381,7 @@ registry.define('backup-provider',1,input=>{
           if(ahead)return finish('idle','needs-review');
           if(sync.review){sync.review='';presentation.resolve(selected.id,'sync-review');}
           if(!sync.ancestryPending){sync.failed=false;sync.rolledBack=null;sync.syncedAt=new Date().toISOString();notifyStatus();}
-          if(!owed&&!automaticNeeded(selected)&&!sync.ancestryPending){resetConvergenceRetry(selected);return finish('completed','in-sync');}
+          if(nothingToUpload&&!sync.ancestryPending){resetConvergenceRetry(selected);return finish('completed','in-sync');}
         }
         OperationDiagnostics.mark('convergence-publication-start',{provider:selected.id},traceId);const result=await retryPendingProviderBackup(selected,{signal:scope.signal});{const state=syncState(selected);state.turnWaits=result.reason==='turn'?state.turnWaits+1:0;}OperationDiagnostics.mark('convergence-publication-complete',{provider:selected.id,status:String(result.status||''),maintenancePending:result.maintenancePending===true},traceId);OperationDiagnostics.mark('background-transition',background.transition('convergence','running',result.status==='completed'?'completed':'deferred',{reason:String(result.reason||''),actionable:false}),traceId);OperationDiagnostics.finish({status:String(result.status||'pending'),reason:String(result.reason||''),maintenancePending:result.maintenancePending===true},traceId);
         if(result.status==='completed'){resetConvergenceRetry(selected);background.wake('publication');scheduleAutomaticBackup(selected);}
