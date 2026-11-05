@@ -83,6 +83,20 @@ A newer database opens as it is, never upgraded or downgraded. If a store this b
 For this to keep working, a later build bumps a record's `version` when its shape changes, gives new appMeta families names an older build does not know, and treats removing or re-keying a store as a change that older builds meet by leaving the profile alone.
 
 ## Emergency copies
+## Local durability and failure domains
+
+**Authority.** IndexedDB is the working authority for canonical structured study data; attachment bytes live in OPFS and become referencable only after verification. UI state and browser-storage rescue copies are not independent archives. Canonical acknowledgements, revision/ownership checks, recovery journals and verified backup/restore protect different failure modes; none substitutes for the others.
+
+**IndexedDB commit strength.** `source/core/persistence.js` provides ordinary and selective strict transactions. Its strict transaction constructor requests `{durability:'strict'}` for read/write transactions; if the browser cannot confirm support it falls back to default durability and records a diagnostic warning. This does **not** imply that every write takes the strict path, nor that `strict` makes a device immune to physical loss. Evaluate important call sites and failure windows by their actual current implementation before extending strict usage. Older SDVB74J notes asserting no strict-transaction support are obsolete.
+
+**Browser persistence.** A browser-granted persistent-storage status (shown as Protected where available) primarily reduces normal quota-pressure eviction risk for the origin. It does **not** protect against clearing site data, removing the browser profile, app-origin changes, OS/browser corruption, device loss, or storage hardware failure. IndexedDB and OPFS belong to the same origin and generally share that loss domain. A new deployment under the same origin ordinarily retains application storage, subject to sound migrations and compatible formats.
+
+**Residual editing risks.** Autosave timers, cross-tab races and sudden process termination can affect the most recent *uncommitted* edit; a visible “saved” result must be tied to the relevant canonical write/verification, not an in-memory state change. The prior SDVB74J analysis of a distinct Reflection-draft autosave interval should not be copied into current requirements without validating the present data model and source. Never equate existence of a Saved Day with proof that it covers a particular unsaved Active Session branch.
+
+**Independent recovery.** Device Folder and/or Google Drive verified backups protect against total local-origin/device loss in a way local journals cannot. Version retention, verified checkpoint/read-back, a Before-restore backup and journaled restore provide additional protection, but coverage is only as recent as the last *successfully verified* backup; connected/queued/attempted is not equivalent to completed. A backup on the same physical disk is not fully independent against disk failure. Periodic restoration tests with disposable profiles are part of a credible durability claim.
+
+**Acceptance principle.** Preserve the strong local-first design; prioritize evidence of actual gaps, failure injection and honest UI status over blanket “data can never disappear” guarantees. The current follow-up is tracked in [BF-C7](../backlog.md#bf-c7--post-c6-correctness-follow-up-and-durability-gate-open-2026-11-05).
+
 
 **Emergency copies.** When IndexedDB fails, the session recovery copy, unsaved notes, delete recovery and fallback Saved Days share one browser-storage budget (`localRescueBytes`, 4 MiB) in that priority order. Each copy may use what the higher-priority copies leave, up to its own ceiling, so the most important copy is never crowded out.
 
