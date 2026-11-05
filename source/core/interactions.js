@@ -258,7 +258,34 @@ registry.define('interactions',1,()=>{
             choice.addEventListener('click',()=>{applyValue(id,option.value);applyConfiguredValues(option);});
             optionsHost.appendChild(choice);
           });
-          fieldset.appendChild(optionsHost);form.appendChild(fieldset);
+          fieldset.appendChild(optionsHost);
+          // A full comparison is an ephemeral, read-only view. Keep complete
+          // text out of radio labels and out of persistent modal state.
+          if(group.comparison&&typeof group.comparison==='object'){
+            const disclosure=document.createElement('details');disclosure.className='interaction-comparison';
+            const summary=document.createElement('summary');summary.textContent='Compare full drafts before choosing';
+            disclosure.appendChild(summary);fieldset.appendChild(disclosure);
+            disclosure.addEventListener('toggle',()=>{
+              if(!disclosure.open||disclosure.dataset.loaded)return;
+              disclosure.dataset.loaded='1';
+              const current=String(group.comparison.current??''),kept=String(group.comparison.kept??'');
+              const currentLines=current.split('\\n'),keptLines=kept.split('\\n');
+              let first=0;
+              while(first<Math.min(currentLines.length,keptLines.length)&&currentLines[first]===keptLines[first])first++;
+              const status=document.createElement('p');status.className='interaction-comparison-status';
+              status.textContent=current===kept?'Full drafts are identical.':
+                'First differing line: '+(first+1)+'. Both complete drafts are shown below; inspect them before selecting.';
+              const panes=document.createElement('div');panes.className='interaction-comparison-panes';
+              for(const [label,value] of [['This device',current],['Kept alternative',kept]]){
+                const pane=document.createElement('section'),heading=document.createElement('strong'),full=document.createElement('pre');
+                pane.className='interaction-comparison-pane';heading.textContent=label;
+                full.textContent=value||'(empty draft)';full.tabIndex=0;full.setAttribute('aria-label',label+' — complete Plan draft');
+                pane.append(heading,full);panes.appendChild(pane);
+              }
+              disclosure.append(status,panes);
+            });
+          }
+          form.appendChild(fieldset);
         });
         const checkboxRows=(Array.isArray(options.checkboxes)?options.checkboxes:[]).map(checkbox=>{
           const id=String(checkbox&&checkbox.id||''),label=cleanText(checkbox&&checkbox.label,180);return id&&label?{checkbox,id,label}:null;
@@ -293,6 +320,7 @@ registry.define('interactions',1,()=>{
       }
       shell.appendChild(actions);dialog.appendChild(shell);
       dialog.setAttribute('aria-labelledby','sd-interaction-title');dialog.className='interaction-dialog'+(options.danger?' danger':options.caution?' caution':'');
+      if(request.type==='configure'&&options.groups?.some(group=>group.comparison))dialog.classList.add('with-comparison');
       dialog.oncancel=event=>{event.preventDefault();settle(request.type==='confirm'?false:null);};
       const historyDescriptor=freeze({kind:'prompt',token:`prompt:${historyNonce}:${++historySequence}`});
       active={...request,dialog,historyDescriptor,restoreFocus:document.activeElement&&typeof document.activeElement.focus==='function'?document.activeElement:null};
