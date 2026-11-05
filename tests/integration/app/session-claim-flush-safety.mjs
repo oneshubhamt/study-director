@@ -758,13 +758,20 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
 {
   // A successful reminder check must never survive a later canonical Day
   // replacement as an in-memory positive cache.
-  const fn=productionFunction('async function savedRecordExistsForDate(date){');
+  const fn=[
+    productionFunction('function liveSaveReminderEvidence(date){'),
+    productionFunction('function savedDayCoversReminderEvidence(record,subjects){'),
+    productionFunction('async function savedDayHasUncoveredKeptSession(record,date){'),
+    productionFunction('async function savedRecordExistsForDate(date){')
+  ].join('\n');
   const date='2026-08-27',session={date,snapshot:{savedRevision:7,contentRevision:7}};
   let day={date,reflection:'Saved'},reads=0,coverageChecks=0;
   const context=vm.createContext({
     daySaveDirty:()=>false,cleanDayRevision:x=>Number(x),
+    TASKS:[],isTrackableBlock:()=>false,TimerState:{studyDate:date},getReviewDate:()=>date,
     AppData:{
       activeSession:{load:async()=>({ok:true,value:session,storage:{idb:true}})},
+      pendingReviews:{list:async()=>[]},
       dailyRecords:{documents:async()=>{reads++;return day?[day]:[];},
         verifyCanonical:async record=>{assert.equal(record,day);return true;}}
     },
