@@ -107,6 +107,79 @@ const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze(
   assert.equal(pendingReviewCodec.merge([[firstDay,differentDay]],limits.maxPendingReviews).filter(item=>!item.resolvedAt).length,2,'different Saved-Day content is never collapsed');
 }
 
+
+// Review equivalence is subject-specific across both IDB merge and import:
+// metadata-only twins coalesce with tombstone receipts; real edits survive.
+{
+  const date='2026-08-28',saved=revisionedRecord(date,'Evidence',4),
+    savedMetadata=freeze({...saved,savedAt:'2026-08-27T12:00:00.000Z',updatedAt:'2026-08-27T12:00:00.000Z',sourceRevision:92}),
+    savedChanged=freeze({...saved,reflection:'Different evidence'});
+  assert.equal(pendingReviewCodec.sameMeaning('savedDay',saved,savedMetadata),true);
+  assert.equal(pendingReviewCodec.sameMeaning('savedDay',saved,savedChanged),false);
+  const earlier=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:saved,keptAt:'2026-08-28T09:00:00.000Z'}),
+    later=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:savedMetadata,keptAt:'2026-08-28T10:00:00.000Z'}),
+    divergent=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:savedChanged});
+  const days=pendingReviewCodec.merge([[later,divergent,earlier]],limits.maxPendingReviews);
+  assert.equal(days.filter(review=>!review.resolvedAt).length,2);
+  assert.ok(!days.find(review=>review.id===earlier.id).resolvedAt,'oldest review ID is stable');
+  assert.ok(days.find(review=>review.id===later.id).resolvedAt,'duplicate is a replicated tombstone');
+  assert.ok(!days.find(review=>review.id===divergent.id).resolvedAt,'distinct evidence survives');
+  assert.equal(pendingReviewCodec.matchesCurrent('savedDay',saved,savedMetadata),true);
+  assert.equal(pendingReviewCodec.matchesCurrent('savedDay',saved,savedChanged),false);
+  const replay=pendingReviewCodec.merge([days,[earlier,later]],limits.maxPendingReviews);
+  assert.deepEqual(replay,days,'reimport and repeated merging do not reopen duplicate IDs');
+
+  const plan={id:'plan-semantic-aaa',label:'Morning',scheduleText:'08:00 | 45 | Focus | work | Polity | pages | 5',
+    createdAt:'2026-08-28T08:00:00.000Z',updatedAt:'2026-08-28T09:00:00.000Z'};
+  const current=freeze({...personal('Study'),plans:freeze({draft:'Independent draft',defaultId:plan.id,savedPlans:freeze([plan])})}),
+    metadata=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([freeze({...plan,createdAt:'2026-08-27T08:00:00.000Z',updatedAt:'2026-08-29T10:00:00.000Z'})])})}),
+    changedPlan=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([{...plan,scheduleText:plan.scheduleText+' changed'}])})});
+  assert.equal(pendingReviewCodec.sameMeaning('personal',current,metadata),true);
+  assert.equal(pendingReviewCodec.matchesCurrent('personal',current,metadata),true);
+  assert.equal(pendingReviewCodec.sameMeaning('personal',current,changedPlan),false);
+  const planA=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:current,keptAt:'2026-08-28T09:00:00.000Z'}),
+    planB=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:metadata,keptAt:'2026-08-28T10:00:00.000Z'}),
+    planC=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:changedPlan});
+  const plans=pendingReviewCodec.merge([[planB,planC,planA]],limits.maxPendingReviews);
+  assert.equal(plans.filter(review=>!review.resolvedAt).length,2,'Saved Plan dates alone cannot duplicate a Personal review');
+  assert.ok(plans.find(review=>review.id===planB.id).resolvedAt);
+  assert.ok(!plans.find(review=>review.id===planC.id).resolvedAt);
+
+  const extra={id:'plan-semantic-bbb',label:'Evening',scheduleText:'18:00 | 30 | Essay | work | Essay | pages | 3',
+    createdAt:plan.createdAt,updatedAt:plan.updatedAt};
+  const orderAB=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([plan,extra])})}),
+    orderBA=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([extra,plan])})});
+  assert.equal(pendingReviewCodec.sameMeaning('personal',orderAB,orderBA),false,'reordering shared plan identities remains meaningful');
+  assert.equal(pendingReviewCodec.sameMeaning('personal',current,orderAB),false,'independently added plan identity is never silently discarded');
+  assert.equal(pendingReviewCodec.sameMeaning('personal',current,freeze({...current,preferences:freeze({...current.preferences,quote:'Changed quote'})})),false);
+
+  const noteText={text:'Authored note'},noteTitle={label:'Authored note'},base={text:'Initial'};
+  const n1=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:noteText,base,keptAt:'2026-08-28T09:00:00.000Z'}),
+    n2=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Authored note'},base,keptAt:'2026-08-28T10:00:00.000Z'}),
+    nDifferent=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Other note'},base}),
+    nAncestor=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:noteText,base:{text:'Another ancestor'}}),
+    nTitle=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:noteTitle});
+  const notes=pendingReviewCodec.merge([[n2,n1,nDifferent,nAncestor,nTitle]],limits.maxPendingReviews);
+  assert.equal(notes.filter(review=>!review.resolvedAt).length,4,'different note fields and different ancestry must stay reviewable');
+  assert.ok(notes.find(review=>review.id===n2.id).resolvedAt);
+  assert.equal(pendingReviewCodec.matchesCurrent('note',{label:'Current title',text:'Authored note'},noteText),true);
+  assert.equal(pendingReviewCodec.matchesCurrent('note',{label:'Current title',text:'Authored note'},noteTitle),false);
+  assert.equal(pendingReviewCodec.matchesCurrent('note',null,noteText),false);
+
+  const deleteA=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:null,keptAt:'2026-08-28T09:00:00.000Z'}),
+    deleteB=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:null,keptAt:'2026-08-28T10:00:00.000Z'});
+  const deletion=pendingReviewCodec.merge([[deleteA,deleteB,earlier]],limits.maxPendingReviews);
+  assert.equal(deletion.filter(review=>!review.resolvedAt).length,2,'an unproven deletion must not merge with a record alternative');
+  assert.equal(pendingReviewCodec.matchesCurrent('savedDay',null,null),false,'absence alone is not a deletion receipt');
+
+  const s1=revisionedSession('2026-08-28','same',{revision:7}),
+    s2=revisionedSession('2026-08-28','same',{revision:9,updatedAt:'2026-08-29T10:00:00.000Z'}),
+    s3=revisionedSession('2026-08-28','different',{revision:9});
+  assert.equal(pendingReviewCodec.sameMeaning('session',s1,s2),true);
+  assert.equal(pendingReviewCodec.sameMeaning('session',s1,s3),false);
+  assert.equal(pendingReviewCodec.matchesCurrent('session',s1,s3),false);
+}
+
 async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,pendingReviews=[],personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
   const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});
   const plan=freeze({studentName:'Checkpoint User',installationId,exportedAt,sourceRevision:exportedAt,recordDates:freeze(records.map(item=>item.date).sort()),savedDayDeletions:freeze(deletions),noteItems:freeze(Object.values(notes)),noteDeletions:freeze(noteDeletions),counts});

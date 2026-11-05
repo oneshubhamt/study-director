@@ -619,9 +619,7 @@ function savedDayRecordPair(item){
 // content is identical. Save timestamps and source revisions are not study
 // changes and must never force a replay after an interrupted review receipt.
 function savedDayReviewContent(record){
-  if(!record)return null;
-  const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...content}=record;
-  return content;
+  return PendingReviewCodec.meaningfulValue('savedDay',record);
 }
 function savedDayStudyState(record){
   if(!record||record.recordKind!=='study')return null;
@@ -720,16 +718,12 @@ async function noteReconciliationAncestor(base,keys=[]){
 // snapshot. Absence, null, and an authored value have distinct hashes.
 const PERSONAL_PREFERENCE_KEYS=freeze(['studentName','theme','presentation','quote','practiceCueMode','fontScale','practiceTargetMs','soundMode']);
 const PERSONAL_NUDGE_KEYS=freeze(['present','enabled','sound','nudgeAfter','breakMinutes']);
-function semanticSavedPlan(plan){
-  return plan?{id:plan.id,label:plan.label,scheduleText:plan.scheduleText}:null;
-}
+const semanticSavedPlan=PendingReviewCodec.savedPlanMeaning;
 // Personal reviews compare authored meaning, not Saved Plan bookkeeping dates.
 // The order itself remains significant only among identities present on
 // both sides; independently added plans are handled by identity.
 function personalReviewContent(value){
-  if(!value)return null;
-  return {preferences:value.preferences,draft:value.plans.draft,defaultId:value.plans.defaultId,
-    savedPlans:value.plans.savedPlans.map(semanticSavedPlan)};
+  return PendingReviewCodec.meaningfulValue('personal',value);
 }
 function meaningfulSavedPlanOrderDiffers(local,other){
   const shared=new Set(local.filter(id=>other.includes(id)));
@@ -1320,7 +1314,7 @@ function sessionReviewSummary(session){
 function keptSessionAlreadyApplied(current,kept){
   return !!current&&!!kept&&current.status==='suspended'&&current.date===kept.date&&
     current.runningOn===kept.runningOn&&
-    Canonical.same(ActiveSessionCodec.contentValue(current),ActiveSessionCodec.contentValue(kept));
+    PendingReviewCodec.sameMeaning('session',current,kept);
 }
 function selectedKeptPersonal(current,review,picked){
   const kept=review.kept,has=part=>picked[`kept__${review.id}__${part}`]==='use',
@@ -1378,19 +1372,19 @@ async function resolveConvergedKeptVersions(){
         if(review.subject==='note'){
           const [current]=await AppData.notes.readFreshItems([review.ref]);
           matches=review.kept
-            ?!!current&&Object.entries(review.kept).every(([key,value])=>Canonical.same(current[key],value))
+            ?PendingReviewCodec.matchesCurrent('note',current,review.kept)
             :!current&&(await AppData.deletionRecovery.notes()).some(item=>
               item.key===review.ref&&typeof item.deletedAt==='string');
         }else if(review.subject==='savedDay'){
           const [current]=await getDailyRecordDocumentsByDates([review.ref],{requireCanonical:true});
           matches=review.kept
-            ?!!current&&Canonical.same(savedDayReviewContent(current),savedDayReviewContent(review.kept))
+            ?PendingReviewCodec.matchesCurrent('savedDay',current,review.kept)
             :!current&&(await AppData.deletionRecovery.savedDays()).some(item=>
               item.date===review.ref&&typeof item.deletedAt==='string');
         }else if(review.subject==='personal'&&review.kept){
           await personalSettle();
           const current=await personalExport({flush:false});
-          matches=!!current&&Canonical.same(personalReviewContent(current),personalReviewContent(review.kept));
+          matches=PendingReviewCodec.matchesCurrent('personal',current,review.kept);
         }else if(review.subject==='session'&&review.kept&&!hasActiveSession()){
           const current=(await readCanonicalActiveSession()).value;
           matches=keptSessionAlreadyApplied(current,review.kept)||!!current&&Canonical.same(current,review.kept);
@@ -1571,7 +1565,7 @@ async function reviewKeptVersions({ref=''}={}){
           // The selected content may already have been committed before an
           // interrupted pending-review acknowledgement. Never rewrite its
           // timestamp merely to retry the same explicit choice.
-          if(!Canonical.same(savedDayReviewContent(days.get(review.ref)),savedDayReviewContent(review.kept)))
+          if(!PendingReviewCodec.matchesCurrent('savedDay',days.get(review.ref),review.kept))
             dayItems.push(freeze({date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}));
         }else if(days.has(review.ref)||!deletedDays.has(review.ref)){
           // Absence alone is not a replicated deletion. Retry only if its

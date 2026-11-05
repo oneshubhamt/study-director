@@ -898,6 +898,40 @@ function materializeDailyRecordSummary(summary){
       const clean=normalize(review);if(!clean)throw new TypeError('The review to resolve is invalid.');
       return clean.resolvedAt?clean:normalize({...clean,kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
     }
+    // The PendingReview codec is the single authority for the meaning of
+    // kept alternatives. Saving metadata is not Saved Day evidence; Saved
+    // Plan timestamps are not authored plan content. Do not discard a note's
+    // retained field mask or a session's study evidence.
+    function savedPlanMeaning(plan){
+      return plan?{id:plan.id,label:plan.label,scheduleText:plan.scheduleText}:null;
+    }
+    function meaningfulValue(subject,value){
+      if(!value||typeof value!=='object')return null;
+      if(subject==='savedDay'){
+        const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...content}=value;
+        return content;
+      }
+      if(subject==='personal'){
+        return {preferences:value.preferences,draft:value.plans.draft,defaultId:value.plans.defaultId,
+          savedPlans:value.plans.savedPlans.map(savedPlanMeaning)};
+      }
+      if(subject==='session')return ActiveSessionCodec.contentValue(value);
+      if(subject==='note')return value; // Retained title/text fields only.
+      return null;
+    }
+    function sameMeaning(subject,a,b){
+      if(a===null||b===null)return a===null&&b===null;
+      const left=meaningfulValue(subject,a),right=meaningfulValue(subject,b);
+      return !!left&&!!right&&sameDataValue(left,right);
+    }
+    function matchesCurrent(subject,current,kept){
+      if(!current||!kept)return false;
+      if(subject==='note'){
+        // A retained Note may hold only the title or text which differed.
+        return Object.entries(kept).every(([field,value])=>sameDataValue(current[field],value));
+      }
+      return sameMeaning(subject,current,kept);
+    }
     // Equivalent open conflicts belong to one review, even if two devices
     // independently minted different ids for that same kept value and base.
     // Resolved reviews deliberately lack the kept content, so they cannot
@@ -905,11 +939,7 @@ function materializeDailyRecordSummary(summary){
     function sameOpen(a,b){
       if(!a||!b||a.resolvedAt||b.resolvedAt||a.subject!==b.subject||a.ref!==b.ref||
           !sameDataValue(a.base,b.base))return false;
-      if(a.subject==='session'&&a.kept&&b.kept){
-        const left=ActiveSessionCodec.contentValue(a.kept),right=ActiveSessionCodec.contentValue(b.kept);
-        return !!left&&!!right&&sameDataValue(left,right);
-      }
-      return sameDataValue(a.kept,b.kept);
+      return sameMeaning(a.subject,a.kept,b.kept);
     }
     // Reviews merge by id: a resolved one wins, so a review resolved on any
     // device ends everywhere. Equivalent open duplicates retain the oldest
@@ -938,7 +968,8 @@ function materializeDailyRecordSummary(summary){
       const values=review.subject==='note'?[kept.text,review.base&&review.base.text]:review.subject==='savedDay'?[kept.reflection]:review.subject==='session'?[kept.snapshot&&kept.snapshot.review&&kept.snapshot.review.reflection]:[];
       return values.filter(value=>typeof value==='string'&&value);
     }
-    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,normalize,create,resolved,merge,sameOpen,richTexts});
+    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,
+      normalize,create,resolved,merge,sameOpen,sameMeaning,matchesCurrent,meaningfulValue,savedPlanMeaning,richTexts});
   }
 
   return freeze({
