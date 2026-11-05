@@ -585,7 +585,7 @@ const PlanDraftEditor=(()=>{
   let draftDragIndex=null;
   let draftSaveTimer=null;
   let draftPreviewTimer=null;
-  let editEpoch=0;
+  let editEpoch=0,openedEpoch=0;
   let draftSaveWarningActive=false;
 
   function active(){return draftMode;}
@@ -673,13 +673,22 @@ const PlanDraftEditor=(()=>{
       currentEditor:()=>draftMode&&editEpoch===epoch});
   }
   async function cancel(){
-    // Close editing immediately, but claim preservation only after the latest
-    // working text completes its strict canonical IndexedDB write. A pending
-    // debounced write is subsumed by this one; the applied Plan is untouched.
+    // The displayed default is not an authored Plan draft when canonical
+    // storage still contains null. Opening then cancelling without editing
+    // must not manufacture a draft and create a false cross-device change.
+    const draftText=getPlanDraftText();
+    const untouchedFallback=editEpoch===openedEpoch&&!draftSaveTimer&&
+      persistence.readDraft()===null&&draftText===DefaultStore.active().scheduleText;
+    // Close immediately; only actual authored content needs a strict commit.
+    // A pending debounced write is subsumed by this one.
     deactivate();
-    const epoch=editEpoch,draftText=getPlanDraftText();
+    const epoch=editEpoch;
     setPlanComposerOpen(false);
     renderSched();
+    if(untouchedFallback){
+      setPlanStatus('Edit closed. Live plan kept; the unchanged default template remains unsaved.','cancelled');
+      return true;
+    }
     setPlanStatus('Edit closed. Saving the working draft…');
     const saved=await save({strictDurability:true});
     // Do not overwrite feedback belonging to an edit/import begun meanwhile.
@@ -693,7 +702,7 @@ const PlanDraftEditor=(()=>{
   function preview(options={}){
     const opts=options&&typeof options==='object'?options:{};
     clearTimer('preview');
-    if(opts.enterDraft===true){editEpoch++;draftMode=true;}
+    if(opts.enterDraft===true){editEpoch++;openedEpoch=editEpoch;draftMode=true;}
     else if(opts.enterDraft===false)deactivate();
     const projection=createPlanDraftProjection();
     if(projection.status!=='valid'){

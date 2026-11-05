@@ -350,6 +350,31 @@ assert.equal(breakEnds,beforeBreakEnds,'Cancel cannot end a break from a stale c
 assert.equal(breakActive,true);
 breakActive=false;
 
+// An untouched default is only a visible fallback, not an authored draft.
+// Cancel must not convert canonical null to the default text, causing an
+// artificial Personal Data change on the next Drive reconciliation.
+canonicalDraft=null;
+ids['plan-input'].value='Default';
+plan.draft.enter();
+const beforeFallbackWrites=draftWrites;
+assert.equal(await plan.draft.cancel(),true);
+assert.equal(draftWrites,beforeFallbackWrites,'untouched fallback Cancel must not manufacture a saved draft');
+assert.equal(canonicalDraft,null);
+assert.match(String(feedback.at(-1)?.message||''),/unchanged default template remains unsaved/u);
+
+// Deliberately editing and then returning to the same default counts as an
+// authored draft, and must not be mistaken for that untouched fallback.
+plan.draft.enter();
+ids['plan-input'].value='Modified default';
+plan.draft.composerInput();
+ids['plan-input'].value='Default';
+plan.draft.composerInput();
+const beforeAuthoredDefault=draftWrites;
+assert.equal(await plan.draft.cancel(),true);
+assert.equal(draftWrites,beforeAuthoredDefault+1);
+assert.equal(canonicalDraft,'Default');
+assert.equal(saveOptions.at(-1).strictDurability,true);
+
  // Canonical Active Session restoration must stay synchronous and must not
 // commit the working draft, even when that draft is invalid.
 liveActivity=false; // restoring first resets the previous session's runtime
@@ -378,4 +403,5 @@ console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
-    'cancel-during-modal','cancel-during-break-confirmation']}));
+    'cancel-during-modal','cancel-during-break-confirmation',
+    'untouched-null-draft-fallback','authored-default-cancel']}));

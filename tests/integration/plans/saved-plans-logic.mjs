@@ -152,9 +152,11 @@ draft.value='09:00 | 45 | Independent Draft | work | History | pages | 8';
 const preservedText=draft.value,writesBeforeCancel=draftWriteCalls.length;
 runtime.draft.enter();
 assert.equal(runtime.draft.active(),true,'Edit Plan deliberately opens the editor');
-runtime.draft.cancel();
+assert.equal(await runtime.draft.cancel(),true);
 assert.equal(runtime.draft.active(),false,'Cancel closes Plan editing');
 assert.equal(draft.value,preservedText,'Cancel must not replace the draft with the applied schedule');
-assert.equal(draftWriteCalls.length,writesBeforeCancel,'Cancel must not persist a replacement schedule');
+assert.equal(draftWriteCalls.length,writesBeforeCancel+1,'Cancel commits the independent text exactly once, not the applied schedule');
+assert.equal(draftWriteCalls.at(-1).value,preservedText,'Cancel saves the independent working draft rather than copying live Plan rows');
+assert.equal(draftWriteCalls.at(-1).options.strictDurability,true,'Cancel waits for a strict IndexedDB Plan draft write');
 
 console.log(JSON.stringify({status:'PASS',suite:'saved-plans-logic',checks:['empty state','save row rendering','ellipsis menu survives native popover default action and ownership heartbeat sync','default badge and redundant action omission','rename dialog contract keeps new-plan field independent','coordinator-owned success expiry','delete cleans default reference','backup flush is dirty-only and backupCapture-tagged']},null,2));
