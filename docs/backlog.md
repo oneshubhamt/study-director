@@ -1,5 +1,66 @@
 # Backlog
 
+## BF-C8 — Residual Saved Day evidence and Kept Versions completion (planned; 2026-11-05)
+
+**Status: plan only. No BF-C8 production code change or QA has been performed.** Baseline: branch bug-fixes at [643ada7](https://github.com/oneshubhamt/study-director/commit/643ada7f66ccd990a15eaaad80cd3cd0ebee2a52). Origin: owner's de novo BF-1/BF-2 source assessment of Bugs **#1, #2, #3 and #5**. This programme follows BF-C7; it does not reset completed work or override that programme's separate physical-device acceptance. Reinspect current HEAD at every implementation pass; findings from this baseline are not a substitute for new source inspection.
+
+**Scope:** Bug #1 (Plan editor after Continue Here) and #5 (draft loss on handoff) are already source-corrected and need actual device acceptance, not another speculative redesign. Bug #2's unfinished Practice Pacer question is a **coverage-proof gap, not demonstrated data loss**. Bug #3 has a concrete Saved Plan equality inconsistency plus review usability/provenance limits. Unrelated Bugs #4, #6 and other pending work remain separately scheduled.
+
+**Authority:** Follow [AGENTS.md](../AGENTS.md), [workflow](workflow.md), [backup and sync](areas/backup-and-sync.md), [study session](areas/study-session.md), [data and storage](areas/data-and-storage.md), [notes](areas/notes.md) and [test policy](../tests/README.md). Open work belongs here, lasting decisions in area docs, and actual pass-level objectives and QA receipts in the implementing PR rather than another historical implementation journal.
+
+### Source evidence checked for this plan
+
+- **Confirmed, medium — Personal Data fallback:** source/core/backup.js, personalAddsNothing(), compares full Saved Plan records using Canonical.same(plan, plans.get(plan.id)). Its own semanticSavedPlan alias is PendingReviewCodec.savedPlanMeaning, which excludes createdAt/updatedAt. That is inconsistent with the per-field merger and open-review semantic equivalence; timestamp-only twins can needlessly enter review in no-ancestry conditions.
+- **Confirmed predicate omission, impact unproven — Practice Pacer:** source/core/record-codecs.js, savedDayCoversSessionEvidence(), compares completed practice.runs but does not explicitly compare snapshot.practice.active; source/core/practice-pacer.js snapshots both active and runs. Verify the normal Save Today finalization path before choosing any equivalence rule. An unfinished active run must not be silently deemed covered without positive evidence.
+- **Confirmed UX gaps:** source/core/backup.js, reviewKeptVersions(), gives absent-local-Note alternatives retain/discard with a Recently Deleted instruction; keptValueDescription() truncates long draft previews at 240 characters. The complete retained draft is available but not comparably inspectable in that choice flow.
+- **Known data-contract limitation:** PendingReview.v1 lacks originating installation and typed conflict-reason fields. Existing wording accurately says device origin was not recorded. It must not be guessed from timestamps.
+- **Already addressed:** BF-C7.1–C7.3 corrected Plan application/date routing, review semantic dedup and receipts, ancestry warning and Save Today revalidation at the source/automated-test level; BF-C7.4 assessed storage durability separately. Do not duplicate these systems or misstate automated CI as physical-device proof.
+
+### Planned passes, objectives and verification gates
+
+**BF-C8.0 — Fresh audit, reproduction and smallest design (no premature edit)**
+
+1. Read current HEAD, area contracts and production call chain: Plan draft, Active Session, Practice Pacer, Save Today, sync, Personal Data reconciliation, PendingReview creation/display/resolution. Enumerate canonical writes, provenance evidence, transaction/race guards and failure paths.
+2. Reproduce each material allegation with an existing faithful unit/integration harness. Add an initially failing regression where feasible; clearly distinguish direct source defect, reproducible user failure and theoretical edge. Reuse authoritative tests including tests/integration/backup/sync-shared-base.mjs, tests/unit/storage/saved-day-evidence.mjs, tests/integration/app/previous-day-convergence.mjs and tests/integration/ui/kept-versions-c6.mjs.
+3. Identify genuinely duplicated/dead helpers and redundant wiring in the affected paths, including verifying the alleged duplicate deletionRecoveryReplaceSavedDays export in source/app.html. No deletion without non-use proof and preserved behavior coverage. **Gate:** source-anchored finding list, behavior/fault cases and minimal design, explicitly naming no new data authority.
+
+**BF-C8.1 — Semantic Saved Plan fallback (Bug #3)**
+
+1. Make personalAddsNothing() compare Saved Plan *authored meaning* through the existing semanticSavedPlan helper, retaining canonical input validation, plan identity and all other meaningful Personal Data fields. Do not create another comparator or reconciliation engine.
+2. Exercise both subsumption directions. Same plan ID, label and schedule with different createdAt/updatedAt must not produce a review. Different label/schedule, meaningful order, defaults, competing drafts, settings and one-sided additions must still be treated correctly.
+3. Test unknown/old shared ancestry, replayed Drive catch-up, conflict receipt convergence and reloading. **Gate:** metadata-only clones neither create nor reopen reviews; genuinely divergent authored plans remain accessible; no regression to independent merges and tombstones.
+
+**BF-C8.2 — Practice Pacer evidence proof (Bug #2)**
+
+1. Inspect the precise active-state shape, sanitizer, current-unit time accounting, pause/resume, handoff, Save Today partial-run finalization and canonical read-back. Establish whether/how a saved partial run can prove that an outstanding active attempt was incorporated.
+2. If a genuine hole exists, strengthen the existing savedDayCoversSessionEvidence() pathway using existing canonical practice codecs/conversion. Match attempts one-to-one, verify task/settings and units with observable duration/progress; do not mistake a similar run or a mere date/revision/clock for proof. If positive coverage cannot be established, fail closed and keep a warning/review. Do not create a second Save Today or reconciliation state machine.
+3. Cover no active run; zero-unit/zero-time active run; accrued active time; finalized partial run and later continuation; duplicate or similar runs; abort before commit; unreadable/stale canonical save; change during async revalidation; A→B→A handoff; date rollover; true divergence. **Gate:** no false dismissal of unsaved work, no repeated reminder after proven exact coverage, and no regression to the established Save Day / ownership invariants. A test-only conclusion is legitimate if implementation already proves sufficient.
+
+**BF-C8.3 — Usable Kept Versions decisions (Bug #3)**
+
+1. Give long working Plan drafts a way to inspect **both full candidate texts and actual differences before deciding**, preferably reusing the existing comparison presentation rather than instantiating another editor. Preserve present per-field selection, strict validation, concurrency fences, bounded rendering, accessibility and mobile usability; do not create new persisted duplicate text.
+2. For a missing local Note, first establish whether the retained alternative is a full recoverable document or only a partial title/text field mask. Where safely supported, use the existing Recently Deleted/note restoration mechanisms with explicit choice, duplicate-title and identity checks, attachment/deletion handling and canonical read-back. Where not provable, provide a clear existing recovery route and retain the alternative; never synthesize a complete note from a partial mask or discard real data.
+3. Display actual differences, meaningful choices and retained time; explain the reason only as far as known. Historical origin remains “not recorded.” Test stale modal choice, fail/interrupt/retry, replicated receipt, keyboard/screen reader, long drafts and phone width. **Gate:** no consequential choice without inspectable content, no data-loss regression and no fabricated device attribution.
+
+**BF-C8.4 — Provenance feasibility and informed product decision (Bug #3)**
+
+1. Trace review-creation paths, existing checkpoint/device metadata, codec, backup/restore, replication and diagnostics to see whether trustworthy origin and typed cause can already be derived at creation without adding a persisted format. Distinguish “recorded by this device,” “received from a particular repository” and “authored on another device”; those are not interchangeable.
+2. If persistent provenance requires extending PendingReview, **do not implement a schema change on this plan alone**. Present a minimal owner-approved contract proposal: installation identifier or privacy-preserving display reference, bounded reason code, creation/merge/restore semantics, historical unknown values, compatible old backups/readers, privacy and diagnostic exposure, failure injection and tests. Do not reconstruct old origins by timestamp.
+3. Keep diagnostics content-free: review kind, verified cause category and operational status rather than note text or Plan content. **Gate:** precise provenance wherever actually supported; otherwise an explicit truthful limitation and narrow approval decision.
+
+**BF-C8.5 — De novo closure, CLEER cleanup, QA and device acceptance**
+
+1. After source changes, re-read affected production paths and cumulative diff independent of green fixtures. Look for duplicate semantic predicates, overlapping save/notification authorities, unused exceptions, dead code, stale comments, excess work/size and unguarded writes. Remove only confirmed dead or duplicated logic within affected surfaces, preserving history/compatibility needed by current stored data. For every numbered objective report **met / partly met / not met** against code.
+2. Every implementation pass follows **(1) fresh source audit → (2) numbered objectives plus data-risk/failure matrix → (3) smallest coherent implementation → (4) direct source verification → (5) targeted QA**. Write regression tests at the lowest faithful layer, preferably in current test files; inject cancellation, failed strict commit, retry, competing devices and unknown reads as relevant. Run targeted unit/integration, relevant browser journeys, and source/build gates; respect the browser suite's “alone” rules. Never weaken tests for CI.
+3. When cumulative changes are substantial, run one governed broader/full fast + relevant browser/promotion pass, rather than indiscriminate full QA after each minor fix. Actual **Mac Safari, iPad/iPhone/Android and desktop Chromium** acceptance, with disposable profiles and independently verified backup, must exercise A→B→A; save on B/date rollover; genuinely divergent A; draft edit/Cancel/Continue Here; disjoint/same-field settings; long draft review; absent Note recovery; offline/interrupted sync; review replication and retry. Record unrun devices as open, not passed.
+4. Update the appropriate area docs for enduring rules and this backlog for residual work. Do not deploy, merge or release as part of this plan. A later source-changing PR follows the existing release-identity and regression-test rules. **Final gate:** no manufactured duplicate reviews, no suppressed genuine alternatives, no falsely acknowledged Practice Pacer evidence, no lost Plan draft/session ownership guarantees, no patchwork authority, and honest acceptance status.
+
+### Architecture freeze and closure policy
+
+No wholesale backup.js/app.html rewrite, second sync or reminder engine, new persistence store/key, speculative format migration, universal clocks, timestamp winner, generic schema framework or unrelated backup/durability redesign. Necessary persistent contract changes require their own owner decision with history and data-safety consequences. The small UI improvements are intended to use existing interfaces; if they cannot safely do so, document the blocker rather than improvising a second recovery route.
+
+Source correctness, automated QA, real browser QA and physical two-device acceptance are **separate gates**. Original #1/#5 keep their physical acceptance outstanding without speculative redesign; #2 requires active-practice proof; #3 requires the semantic fallback correction and comprehensible decisions, with provenance explicitly decided. Do not declare all four bugs closed merely because a test suite passes.
+
 ## BF-C7 — Post-C6 correctness follow-up and durability gate (open; 2026-11-05)
 
 **Baseline:** de novo production-source findings supplied against branch `bug-fixes` at commit `00c0d097bc6e5fa666dcf794d6be3284013296fd`. This entry supersedes any earlier BF-C6 “fully closed” statement *only for the gaps below*. The source and QA status of each corrective pass is recorded below; a passed fast suite is not a claim of real-browser or physical-device certification.
