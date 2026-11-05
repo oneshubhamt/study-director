@@ -282,6 +282,38 @@ for(const spec of [
   assert.equal(statusClears,spec.want&&!spec.newerStatus?1:0,spec.label+' stale inline status');
 }
 
+// A subsequent Save Today prompt uses the same canonical/live proof instead
+// of repeating a stale warning when a cross-device Saved Day covers the work.
+for(const spec of [
+  {name:'unacknowledged canonical session fully covered',dirty:false,runtime:true,want:true},
+  {name:'dirty counter but matching live work',dirty:true,runtime:true,want:true},
+  {name:'dirty with no live evidence',dirty:true,runtime:false,want:false},
+  {name:'live work diverges from saved evidence',dirty:true,runtime:true,uncovered:true,want:false},
+  {name:'pending divergent kept session',dirty:false,runtime:true,uncoveredReview:true,want:false},
+  {name:'canonical read unavailable',dirty:false,runtime:true,invalidRead:true,want:false}
+]){
+  let verifies=0;
+  const ctx=vm.createContext({
+    TASKS:spec.runtime?[{}]:[],isTrackableBlock:()=>true,
+    TimerState:{studyDate:day},getReviewDate:()=>day,daySaveDirty:()=>spec.dirty,
+    PlanRuntime:{appliedScheduleText:()=> 'valid plan'},
+    captureSessionSnapshot:()=>({date:day,uncovered:!!spec.uncovered}),
+    AppData:{
+      activeSession:{load:async()=>({ok:!spec.invalidRead,error:spec.invalidRead?new Error('read failure'):null,
+        storage:{idb:true},value:{date:day,snapshot:{contentRevision:5,savedRevision:0}}})},
+      dailyRecords:{documents:async()=>[{date:day}],verifyCanonical:async()=>{verifies++;return true;}},
+      pendingReviews:{list:async()=>spec.uncoveredReview?[{subject:'session',resolvedAt:'',kept:{date:day,uncovered:true}}]:[]}
+    },
+    DailyRecordCodec:{savedDayCoversSessionEvidence:(record,value)=>
+      !!record&&record.date===value.date&&!value.uncovered&&!value.snapshot?.uncovered},
+    AppDiagnostics:{capture:()=>{}}
+  });
+  vm.runInContext([reminderLive,reminderCovers,reminderPending,savedExists,
+    'globalThis.checkSaved=savedRecordExistsForDate;'].join('\n'),ctx);
+  assert.equal(await ctx.checkSaved(day),spec.want,spec.name);
+  assert.equal(verifies,spec.want?1:0,spec.name+' canonical readback');
+}
+
 // Captured notice evidence must be a committed same-date session with a
 // matching local content revision. A failed/partial canonical read can never
 // become proof used later to dismiss an alert.
