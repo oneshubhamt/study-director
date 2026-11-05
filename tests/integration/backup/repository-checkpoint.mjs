@@ -1181,5 +1181,43 @@ const ancestryPublicationCases=[];
 }
 assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','unchanged-recovered','new-throw','new-recovered']);
 
+// Run the production provider catch-up terminal transition with controlled
+// ports: an ancestry-warning result may never be relabelled as fully synced.
+{
+  const source=fs.readFileSync('source/core/backup-provider.js','utf8');
+  const begin=source.indexOf('  function settleCatchUp(');
+  const end=source.indexOf('\n  }\n  // The person enters the password',begin);
+  assert.ok(begin>=0&&end>begin,'source-backed provider catch-up function must be present');
+  const production=source.slice(begin,end+4);
+  for(const [name,result,warning,terminal] of [
+    ['missing ancestry',{cancelled:false,ancestryEstablished:false},true,'failed'],
+    ['verified ancestry',{cancelled:false,ancestryEstablished:true},false,'sync-complete']
+  ]){
+    const events=[],state={review:'prior',password:'prior',failed:true,ancestryPending:true,behind:false,rolledBack:{head:'prior'},syncedAt:''};
+    const ctx=vm.createContext({
+      syncState:()=>state,
+      sharedAncestryOutcome:(_selected,established)=>{
+        state.ancestryPending=established!==true;
+        state.failed=state.ancestryPending;
+        events.push(established?'ancestry-established':'ancestry-warning');
+      },
+      nextConvergenceRetryDelay:()=>20000,
+      schedulePendingProviderBackup:(_selected,delay,options)=>{events.push('retry:'+options.trigger);assert.equal(delay,20000);},
+      resetConvergenceRetry:()=>events.push('retry-reset'),
+      presentation:{resolve:(_id,key)=>events.push('resolved:'+key),notice:()=>events.push('review-notice')},
+      automaticWaiting:()=>false,notifyStatus:()=>events.push('status'),
+      summary:{finish:option=>{events.push(option.lifecycle||option.outcome||'unknown');events.push(option.message);}}
+    });
+    vm.runInContext(production+'\nglobalThis.finishCatchUp=settleCatchUp;',ctx);
+    ctx.finishCatchUp({id:'google-drive',label:'Google Drive'},'cp_'+('a'.repeat(32)),result,ctx.summary,'revision-a',{preserveAutomatic:true});
+    assert.equal(state.ancestryPending,warning,name+' ancestry status');
+    assert.equal(state.failed,warning,name+' failure status');
+    assert.ok(events.includes(terminal),name+' terminal outcome');
+    assert.equal(events.some(event=>event==='Synced with Google Drive.'),!warning,name+' honest user-facing status');
+    assert.equal(events.includes('retry:ancestry-incomplete'),warning,name+' retry must follow actual ancestry result');
+    assert.equal(events.includes('retry-reset'),!warning,name+' only proven ancestry resets retry');
+  }
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
 await import('../../helpers/session-ownership-claim-regression.mjs');
