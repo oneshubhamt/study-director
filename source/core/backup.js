@@ -870,7 +870,7 @@ function personalAddsNothing(side,other){
   if(a.plans.draft!==null&&a.plans.draft!==b.plans.draft)return false;
   if(a.plans.defaultId!==null&&a.plans.defaultId!==b.plans.defaultId)return false;
   const plans=new Map(b.plans.savedPlans.map(plan=>[plan.id,plan]));
-  return a.plans.savedPlans.every(plan=>plans.has(plan.id)&&Canonical.same(plan,plans.get(plan.id)));
+  return a.plans.savedPlans.every(plan=>plans.has(plan.id)&&Canonical.same(semanticSavedPlan(plan),semanticSavedPlan(plans.get(plan.id))));
 }
 // The base keeps one fingerprint per Saved Day and one for the Active
 // Session. Both sides are fingerprinted the same way, so a side whose
@@ -1435,13 +1435,13 @@ async function reviewKeptVersions({ref=''}={}){
   const personal=of('personal').length?await personalExport({flush:false}):null,session=of('session').length?(await readCanonicalActiveSession()).value||null:null;
   // Each choice: 'keep' leaves this device's as it is (wait: the review stays
   // open), 'use' takes the kept version.
-  const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
+  const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false,comparison=null)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,...(comparison?{comparison:freeze(comparison)}:{}),choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
   const when=review=>savedDayDecisionTimestamp(review.keptAt);
   for(const review of reviews){
     const kept=review.kept;
     if(review.subject==='note'){
       const note=notes.get(review.ref);
-      if(!note)choice(review,'','Note · absent here',`${kept?'A note alternative is kept while its local copy is absent. Restore the local note from Recently deleted to compare.':'Both the current note and its kept deletion are absent.'} ${keptReviewProvenance(review)}`,{label:'Keep for later',description:'The alternative stays available.'},{label:'Discard kept version',description:'No note is changed here.'},true);
+      if(!note)choice(review,'','Note · absent here',`${kept?'This alternative contains only the changed Note fields, not a guaranteed complete Note. It cannot safely recreate a missing Note. To compare it, close this dialog, open Library → Recently deleted and restore the original Note if available; then reopen Kept versions. Until you explicitly discard it, the alternative is preserved.':'Both the current Note and a retained deletion are absent. No Note will be changed here.'} ${keptReviewProvenance(review)}`,{label:'Keep for later',description:'The original alternative remains available; no Note is changed.'},{label:'Discard kept alternative',description:'Only this retained alternative is resolved; no Note is created or deleted.'},true);
       else if(!kept)choice(review,'',`Note · ${note.label}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
       else{
         if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Titles differ. ${keptReviewProvenance(review)}`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
@@ -1491,7 +1491,7 @@ async function reviewKeptVersions({ref=''}={}){
       if(!Canonical.same(personal.plans.draft,kept.plans.draft))
         choice(review,'draft','Plan · Working draft','The working draft is independent of the applied Active Session.',{
           label:'Keep this draft',description:keptValueDescription(personal.plans.draft)
-        },{label:'Use kept draft',description:keptValueDescription(kept.plans.draft)});
+        },{label:'Use kept draft',description:keptValueDescription(kept.plans.draft)},false,{current:personal.plans.draft||'',kept:kept.plans.draft||''});
       const localPlans=new Map(personal.plans.savedPlans.map(plan=>[plan.id,plan])),
         remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan]));
       for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
