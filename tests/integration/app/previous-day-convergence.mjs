@@ -245,7 +245,7 @@ for(const spec of [
   const evidence=spec.evidence===false?null:{date:day,snapshot:{contentRevision:7,savedRevision:0}};
   const record={date:day,recordKind:'study'};
   const context=vm.createContext({
-    saveReminderDate:day,saveReminderEvidence:evidence,
+    saveReminderDate:day,saveReminderEvidence:evidence,saveReminderGeneration:1,
     sessionSafetyMessage:'Review reminder: historical work is unsaved',
     daySaveDirty:()=>!!spec.dirty,
     TASKS:spec.runtime?[{}]:[],
@@ -280,6 +280,42 @@ for(const spec of [
   assert.equal(context.sessionSafetyMessage==='',spec.want,spec.label+' visible warning');
   assert.equal(verified,spec.want||spec.postReadDrift?1:0,spec.label+' canonical Day verification');
   assert.equal(statusClears,spec.want&&!spec.newerStatus?1:0,spec.label+' stale inline status');
+}
+
+// A concurrent newer reminder on the same study date cannot be dismissed
+// by an earlier canonical read-back. Null evidence is not a unique token.
+{
+  let resumeVerification,verificationEntered;
+  const blockingVerification=new Promise(resolve=>{resumeVerification=resolve;});
+  const entered=new Promise(resolve=>{verificationEntered=resolve;});
+  const dayRecord={date:day,recordKind:'study'};
+  const ctx=vm.createContext({
+    saveReminderDate:day,saveReminderEvidence:null,saveReminderGeneration:4,
+    sessionSafetyMessage:'Review reminder: keep my latest study work',
+    daySaveDirty:()=>false,TASKS:[],TimerState:{studyDate:day},
+    getReviewDate:()=>day,isTrackableBlock:()=>true,
+    AppData:{
+      activeSession:{load:async()=>({ok:true,value:{date:day,snapshot:{}},storage:{idb:true}})},
+      dailyRecords:{documents:async()=>[dayRecord],verifyCanonical:async()=>{verificationEntered();await blockingVerification;}},
+      pendingReviews:{list:async()=>[]}
+    },
+    DailyRecordCodec:{savedDayCoversSessionEvidence:()=>true},
+    clearSessionSafetyMessage:()=>{ctx.sessionSafetyMessage='';},
+    NoticeCoordinator:{eventStatus:()=>({events:[]})},
+    setStatus:()=>{throw new Error('newer reminder status should never be cleared');},
+    AppDiagnostics:{capture:()=>{}}
+  });
+  vm.runInContext([reminderLive,reminderCovers,reminderPending,reminder,
+    'globalThis.revalidate=revalidateSaveReminderAfterCanonicalConvergence;'].join('\n'),ctx);
+  const oldRevalidation=ctx.revalidate();
+  await entered;
+  ctx.saveReminderGeneration+=1;
+  ctx.saveReminderEvidence={date:day,snapshot:{newer:true}};
+  resumeVerification();
+  assert.equal(await oldRevalidation,false,'new same-day notice must invalidate earlier read-back');
+  assert.equal(ctx.saveReminderDate,day);
+  assert.equal(ctx.saveReminderGeneration,5);
+  assert.ok(ctx.sessionSafetyMessage.startsWith('Review reminder:'));
 }
 
 // A subsequent Save Today prompt uses the same canonical/live proof instead
@@ -326,7 +362,7 @@ for(const [label,canonicalReady,revisionMatches,expectedEvidence] of [
   const ctx=vm.createContext({
     TASKS:[{}],isTrackableBlock:()=>true,
     getReviewDate:()=>day,savedRecordExistsForDate:async()=>false,
-    saveReminderDate:'',saveReminderEvidence:null,
+    saveReminderDate:'',saveReminderEvidence:null,saveReminderGeneration:0,
     TimerState:{studyDate:day,contentRevision:7},
     cleanDayRevision:v=>Number(v)||0,
     AppData:{activeSession:{load:async()=>({
