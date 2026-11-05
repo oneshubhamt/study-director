@@ -1,14 +1,15 @@
 # Documentation
 
-Start here. Read the page for the area you are changing; the code is the final authority. Keep each page current: change it in the same pull request as the code it describes, and keep history out of it.
+Start here. Read the page for the area you are changing; the code is the final authority. **Current contracts belong in area pages; open work in the backlog; tests in the test programme; past implementation ledgers in Git history.** Keep each page current when its code changes.
 
 | Page | What it covers |
 |---|---|
 | [architecture.md](architecture.md) | What the app is, how it is composed, where code lives, and the core safety rules |
 | [workflow.md](workflow.md) | How to work, choosing tests, commands, build, release, CI and real-device acceptance |
-| [backlog.md](backlog.md) | Open work, decisions to make, and what has not been checked yet |
+| [backlog.md](backlog.md) | Current reported bugs, open acceptance, future merge intake, deferred decisions and unverified devices |
 | [test-programme.md](test-programme.md) | The test suite programme: full plan, rules and status (deleted when it ends) |
 | [history.md](history.md) | A short record of past work and dropped ideas |
+| [Durability risk register](BF-C7.4-STORAGE-DURABILITY-AUDIT.md) | Relevant storage failure boundaries and what automated QA does not certify |
 
 **Areas**
 
