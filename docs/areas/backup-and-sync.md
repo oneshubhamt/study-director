@@ -285,7 +285,7 @@ Manual Kept Versions calls the existing `personalSettle()` before reading Person
 
 **Ancestry establishment:** After verified local reconciliation, writing the shared base is a separate strict operation. A rejection (`false`), exception or checkpoint read-back mismatch now creates a visible warning distinct from failure of the already verified merge, and marks operation diagnostics. A later sync can retry base establishment. No fabricated ancestry, speculative rollback after committed data, or unqualified success acknowledgement is allowed.
 
-**QA and release boundary:** Source/fast-suite verification uses actual Backup-controller reconciliation, review/resolution/receipt paths and injected ancestry failures. Browser/real iPad/iPhone/desktop visuals and cross-device review convergence remain independent acceptance gates.
+**QA and release boundary:** Repository Checks on BF-C6.3 production source [`18e3765a`](https://github.com/oneshubhamt/study-director/commit/18e3765a06692186a07286889d2d977534ceb79d) passed **157 fast-suite files**, PWA deployment, build and generated syntax ([CI receipt](https://github.com/oneshubhamt/study-director/actions/runs/41973077852)). The actual Backup-controller reconciliation, selective review projection, replicated resolution receipts, deletion tombstone requirements, UI canonical counts and refused ancestry writes have targeted source-backed regressions. Browser/real iPad/iPhone/desktop visuals and physical cross-device review convergence remain **uncertified independent acceptance gates**.
 
 ## BF-C3 — Retry-safe kept decisions and honest comparisons (2026-11-04)
 
