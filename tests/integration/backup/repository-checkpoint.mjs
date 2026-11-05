@@ -1259,7 +1259,7 @@ assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','
   const recovered=await ctx.retry(selected);
   assert.equal(recovered.status,'completed');
   assert.equal(saved,2,'once storage recovers the same publication pathway repairs ancestry');
-  assert.equal(cleared,1);
+  assert.equal(cleared,0,'there was no durable retry marker to clear after storage recovered');
   assert.equal(state.ancestryPending,false);
   assert.match(events.at(-1).message,/Backed up to Google Drive/u);
   assert.equal((await ctx.retry(selected)).reason,'none','settled retry does not create another checkpoint');
