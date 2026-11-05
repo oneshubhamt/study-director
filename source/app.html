@@ -7195,7 +7195,9 @@ function tickClock(){
   setTextSafe('clock',n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}));
   const dd=document.getElementById('day-date');
   const autoDate=todayISO(n);
-  if(studyDayRolledOver(n)){handleStudyDayRollover();return;}
+  // Previous-day Review is an explicit recovery choice, not a live study
+  // session eligible for automatic rollover or a surprise Day save.
+  if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover();return;}
   if(dd&&dd.dataset.autoDate==='1'&&dd.value!==autoDate){
     SessionLifecycle.runSync('date-rollover',{date:autoDate,autoDate:true,},()=>{
       dd.value=autoDate;return true;
@@ -9471,6 +9473,7 @@ async function saveDayRecord(){
 }
 
 async function handleStudyDayRollover(...args){
+  if(sessionPanelMode==='previous')return false;
   const changed=await ReviewSaveService.handleRollover(...args);
   if(changed)AppActivation.publish(APP_ACTIVATION_KINDS.DATE_ROLLOVER,'study-day-rollover',{destructive:true});
   return changed;

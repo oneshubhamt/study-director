@@ -179,5 +179,37 @@ for(const [label,canonicalReady,revisionMatches,expectedEvidence] of [
   assert.equal(ctx.saveReminderDate,day,label+' still displays an honest reminder');
 }
 
+// Historical Review keeps yesterday's date deliberately. Neither the
+// second-by-second shell clock nor the timer's rollover callback may auto-save
+// or close it before the person has reviewed the evidence.
+{
+  const clock=production('function tickClock(){');
+  const rollover=production('async function handleStudyDayRollover(...args){');
+  for(const mode of ['previous','active']){
+    let clockRollover=0,serviceRollover=0,announced=0;
+    const ctx=vm.createContext({
+      sessionPanelMode:mode,
+      document:{getElementById:()=>null},
+      setTextSafe:()=>{},todayISO:()=>today,
+      studyDayRolledOver:()=>true,
+      handleStudyDayRollover:()=>{clockRollover++;},
+      maybePromptScheduleEndSave:()=>{},maybePromptBackupNudge:()=>{},
+      maybeAutoStartScheduledBlock:()=>true,
+      ReviewSaveService:{handleRollover:async()=>{serviceRollover++;return true;}},
+      AppActivation:{publish:()=>{announced++;}},
+      APP_ACTIVATION_KINDS:{DATE_ROLLOVER:'date-rollover'}
+    });
+    vm.runInContext(clock+'\nglobalThis.clock=tickClock;',ctx);
+    ctx.clock();
+    assert.equal(clockRollover,mode==='previous'?0:1,
+      mode+' clock must not schedule an automatic historical Review save');
+
+    vm.runInContext(rollover+'\nglobalThis.rollover=handleStudyDayRollover;',ctx);
+    assert.equal(await ctx.rollover(),mode!=='previous');
+    assert.equal(serviceRollover,mode==='previous'?0:1,'historical Review must not reach automatic rollover service');
+    assert.equal(announced,mode==='previous'?0:1,'no premature destructive rollover broadcast');
+  }
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'previous-day-convergence',
   scenarios:'previous-day routing, remote ownership, stored review actions, stale decisions, strict discard, save notice convergence, captured evidence'}));
