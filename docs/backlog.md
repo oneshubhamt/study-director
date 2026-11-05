@@ -1,5 +1,63 @@
 # Backlog
 
+## BF-C7 — Post-C6 correctness follow-up and durability gate (open; 2026-11-05)
+
+**Baseline:** de novo production-source findings supplied against branch `bug-fixes` at commit `00c0d097bc6e5fa666dcf794d6be3284013296fd`. This entry supersedes any earlier BF-C6 “fully closed” statement *only for the gaps below*. It is an implementation programme, not a claim that the scenarios have been browser-reproduced or repaired. No application code was changed in this documentation pass.
+
+**Scope and priority:** finish the owner's Bugs #1, #2, #3 and #5 correctly without disturbing their already-working pathways; record the separate question of single-origin PWA durability. First re-check source HEAD in each pass. The existing architecture, published contracts, strict canonical saves, mutation ownership and shared backup/reconciliation facilities remain the starting point; do not build parallel state machines or infer causality from wall-clock timestamps.
+
+| Finding | Current audit status | Required outcome |
+|---|---|---|
+| A — Plan Apply Draft | Confirmed inconsistent UI/action contract | The initial/imported valid draft can be applied through the enabled action, without an implicit editor-mode dependency or saving without applying. Original Composer/Done race remains fixed. |
+| B/K — historical session after ownership uncertainty | Conditional source-control-flow gap | Resolve a handoff-safety latch, then classify the verified session as *historical or today* before any restore, Continue Here or timer start. |
+| F — stale Save Today notice | Conservative false-warning risk; not demonstrated data loss | Revalidate against exact committed study evidence; do not require irrelevant local acknowledgement after independent canonical convergence, and do not clear a genuine unsaved branch. |
+| I (also H) — semantically duplicate Kept Versions | Confirmed equality mismatch between retention and UI | Use one subject-specific semantic equivalence policy for open-review deduplication, canonical convergence and decision presentation. Preserve genuinely distinct alternatives and resolution receipts. |
+| J — reconciliation ancestry receipts | Confirmed inconsistent unchanged-publication/foreground/background outcomes | Every false/failed ancestry establishment produces a non-success warning; subsequent background status must not overwrite it with “Synced” until durable establishment is verified. |
+| D — originating device / reason | Known information gap, not a newly introduced bug | Report “source device not recorded” for historical v1 reviews. Provenance format is a separate owner-approved product decision; never infer identity from timestamps. |
+
+**Already substantially addressed, not to be gratuitously rewritten:** C (narrowed Personal Data alternatives), E (Cancel durability), G (verified extended study evidence), H (saved-plan metadata display), and the original session/Composer fixes underlying A/B/K. Source inspection, fresh behavior tests and real-device testing still govern any final closure claim.
+
+### BF-C7.1 — Plan action and date-first post-safety routing
+
+1. Audit `source/core/plan.js` board action state versus `confirm()`/`draftMode`, and `source/app.html` `continueSessionHere()`, `restoreSuspendedTodaySession()` and handoff-safety resolution. Enumerate initial board, no live schedule, imported authored draft, no canonical draft/default template, active editor, concurrently edited draft and failed strict save.
+2. Make Apply Draft behavior match the enabled label/action, without silently writing a displayed default template or mutating the independent draft during a session handoff. After resolving persisted ownership uncertainty, re-read the canonical session and route an earlier-day session to Previous Day Needs Review *before* any today-only path; never start a historical clock.
+3. Acceptance: valid first-plan Apply Draft truly applies; failed/changed draft does not apply; Cancel/Done and an already live plan retain their established guarantees. Inject accepted-claim/reload across midnight, local/remote ownership, suspended/running and changed canonical records; no timer start, mistaken `none` panel, invisible historical work or duplicate takeover.
+
+### BF-C7.2 — Kept Versions semantic identity and convergence
+
+1. Trace `record-codecs.js`, `reconciliation.js`, `backup.js`, `reconciliation-ui.js` and existing PendingReview creation, display, resolution and replicated tombstones. Establish one reusable comparison policy by subject, reusing current semantic comparators rather than adding a new schema or a second competing equality engine.
+2. Deduplicate equivalent *open* retained alternatives (e.g., identical Saved Day evidence with different `updatedAt`, identical Saved Plans with different lifecycle metadata). Do not erase an independently meaningful alternative, cross-review history or a confirmed resolution receipt. Keep order and deterministic selection stable.
+3. Acceptance: metadata-only twins produce one unresolved decision; distinct study evidence produces separate decisions; current-canonical convergence retires only proven equivalents; repeated sync/reload and competing devices do not recreate resolved reviews. Test Saved Days, Personal Data/Saved Plans, notes, deletions and conservative Active Session handling.
+
+### BF-C7.3 — Ancestry warning and Save Today evidence
+
+1. Trace both publication branches in `managed-repository.js` (`establishRepositoryBase()` true/false/throw), foreground completion in `backup.js`, provider catch-up status in `backup-provider.js`, and `saveReminderEvidence`/`daySaveDirty` in `app.html`. Define a single truthful completion outcome: verified checkpoint and ancestry are distinct facts.
+2. Propagate a failed/false ancestry result through the same existing operation/status contract without generic background success masking it. Retain a retry path and never roll back an already verified merge simply because its ancestry receipt failed.
+3. Dismiss stale Save Today notices only when the *precise outstanding session evidence* is proven covered by a canonical Saved Day, including cases with a dirty runtime flag or an earlier null reminder snapshot; maintain a warning whenever divergence or incomplete evidence remains. Avoid a blanket “Saved Day exists” shortcut.
+4. Acceptance: unchanged/new checkpoint false, rejection and exception paths warn consistently; background catch-up cannot claim unqualified synced state; successful retry settles warning. Same-day save, reload, different-device convergence, null-capture and truly unsaved work yield correct notice lifecycle.
+
+### BF-C7.4 — Storage durability verification, not speculative redesign
+
+The older SDVB74J assessment correctly separates IndexedDB/OPFS local persistence, recoverable edits and independent external backups, but its blanket claim that IndexedDB writes never request strict durability is **stale**: current `source/core/persistence.js` already offers `strictTransaction`/`strictStoreTransaction` and requests `{durability:'strict'}` when supported, with explicit fallback diagnostics. Do not implement “add strict writes everywhere” as though that capability were missing.
+
+1. Inventory *current* authoritative write call sites (Notes, Saved Days, Plan, Active Session, PendingReview, recovery journals and attachment metadata), classify the actual strict/default transaction policy, flush/ack semantics, crash windows, read-back and fallback; check whether a gap matters before proposing any change.
+2. Test interruption at pending autosave, strict-transaction failure, canonical commit-before-UI acknowledgement, OPFS staged-byte failure, restore interruption, quota/storage denial and recovery on restart, using disposable isolated test profiles. Never assert that a browser `persist()` grant prevents deliberate site-data clearing, profile/device loss or disk failure.
+3. Gate: documentary risk classification and scenario-backed evidence first. Any source modification must be a separate, scoped, owner-approved reliability pass with tests and no new persistence topology absent demonstrated necessity. Real Safari/iOS, macOS, Android, cross-device and physical media failures remain separately unverified until actually exercised.
+
+### Cross-cutting execution and closure gates
+
+- **For every pass:** (1) fresh production-source audit, (2) numbered objectives/invariants and failure-boundary matrix, (3) minimal coherent fix, (4) source-level objective-by-objective recheck, (5) targeted unit/integration/browser QA for affected behavior and negative cases. Only then label the pass complete. Use actual observed results, never old green CI or static source assertions alone.
+- **Invariant — local authority:** canonical saved work and its exact evidence are not silently lost, changed or fabricated by sync, a reminder, or a review deduplication shortcut. Unknown remains unknown.
+- **Invariant — session ownership:** at most one valid executing owner; a previous-day session cannot start a timer; an uncertain handoff remains safely blocked/recoverable.
+- **Invariant — review and ancestry:** no semantically duplicate open reviews, no suppressed true conflict, replicated resolution receipts remain durable, and ancestry failure cannot be reported as full success.
+- **Invariant — storage and backup:** no new store, backup field/format, browser-storage key, OPFS entity, migration layer or independent subsystem without the owner's explicit informed approval. Local origin protection does not replace independent recovery copies.
+- After 7.1–7.3 run one fresh cross-surface audit of Plan → Session → Save Day → review/ancestry → provider status, then broader governed QA if cumulative code changes warrant it. Do not mark real-device/browser acceptance complete without it. Document met/partial/unmet for each gate, prune duplicated code instead of creating patches, and retire this backlog section once solved.
+
+**Separate decision (not included in BF-C7 implementation):** if exact source-device provenance is important, propose the minimum versioned creation-time metadata, integrity/privacy and migration implications, alternatives and UI policy for owner approval. Existing `PendingReview.v1` cannot reconstruct a device identifier retroactively.
+
+**Related lasting contract:** [Data and storage](areas/data-and-storage.md#local-durability-and-failure-domains); [Backup and sync](areas/backup-and-sync.md); [Study session](areas/study-session.md).
+
+---
 Open work, decisions still to make, and what has not been checked yet. Nothing here is started without the owner's go-ahead. When an item is done, remove it and record any lasting decision in its area's doc.
 
 ## BF-1 / BF-2 corrective programme — CLEER source-first plan (2026-11-04)
