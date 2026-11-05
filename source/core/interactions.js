@@ -269,7 +269,7 @@ registry.define('interactions',1,()=>{
               if(!disclosure.open||disclosure.dataset.loaded)return;
               disclosure.dataset.loaded='1';
               const current=String(group.comparison.current??''),kept=String(group.comparison.kept??'');
-              const currentLines=current.split('\\n'),keptLines=kept.split('\\n');
+              const currentLines=current.split('\n'),keptLines=kept.split('\n');
               let first=0;
               while(first<Math.min(currentLines.length,keptLines.length)&&currentLines[first]===keptLines[first])first++;
               const status=document.createElement('p');status.className='interaction-comparison-status';
