@@ -2450,7 +2450,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       added:count,replaced,kept,batches,
       savedDayDeletionsApplied:deleted,
       assetsRestored:assetResult.published,attachmentDeletionsApplied:assetResult.deleted,notesReconciled:noteResult.changed,
-      activeSessionReconciled:sessionResult.changed,personalDataRestored:personalChanged,reviewsKept:reviewResult.kept,changed,summary
+      activeSessionReconciled:sessionResult.changed,personalDataRestored:personalChanged,reviewsKept:reviewResult.kept,changed,ancestryEstablished:!ancestryWarning,summary
     });
   }catch(error){
     const failure=error instanceof Error?error:new Error(String(error));
