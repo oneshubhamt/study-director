@@ -2496,6 +2496,7 @@ function sessionShownElsewhere(){return sessionPanelMode==='elsewhere'&&!TASKS.l
 function sessionParkedHere(){return sessionPanelMode==='suspended'&&!TASKS.some(isTrackableBlock);}
 function executeSessionStatusModel(){
   const elsewhere=sessionShownElsewhere();
+  if(sessionPanelMode==='previous')return {state:'suspended',label:'PREVIOUS DAY'};
   if(elsewhere)return {state:'elsewhere',label:`RUNNING ${sessionDevice(elsewhere).toUpperCase()}`};
   if(sessionParkedHere())return {state:'suspended',label:'SUSPENDED'};
   if(!TASKS.length)return {state:'empty',label:'NO SESSION'};
@@ -2655,7 +2656,7 @@ let sessionSafetyMessage='';
 let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
-let saveReminderDate='';
+let saveReminderDate='',saveReminderEvidence=null;
 let restoreSessionPersistenceSuppressionDepth=0;
 let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
 let sessionClaimFreeze=null;
@@ -3581,6 +3582,9 @@ async function hydratePrimaryStateFromStorage(options={}){
     }
     session=await loadActiveSessionForRestore();
   }
+  // Historical sessions must never be offered today's Continue Here path,
+  // including suspended copies and those last owned on another device.
+  if(isPreviousActiveSessionRecord(session)&&!TASKS.length)return attemptAutoRestoreActiveSession();
   if(sessionRunsElsewhere(session)&&!TASKS.length){setSessionPanelMode('elsewhere',session);return false;}
   if(isRestorableActiveSession(session)){
     const snapshot=activeSessionSnapshot(session);
@@ -4174,7 +4178,19 @@ async function promptSaveToday(){
   if(!TASKS.some(isTrackableBlock)||saveReminderDate===date)return;
   if(await savedRecordExistsForDate(date))return;
   if(saveReminderDate===date)return;
-  saveReminderDate=date;
+  // Keep bounded, in-memory evidence of what this notice referred to.
+  // If sync legitimately retires the canonical session, a later Saved Day
+  // must still cover this precise evidence before the notice may disappear.
+  let evidence=null;
+  try{
+    const loaded=await AppData.activeSession.load(0,{strict:true});
+    if(loaded?.ok&&!loaded.error&&loaded.storage?.idb===true&&loaded.value?.date===date&&
+        TimerState.studyDate===date&&
+        cleanDayRevision(loaded.value.snapshot?.contentRevision)===cleanDayRevision(TimerState.contentRevision))
+      evidence=ActiveSessionCodec.sanitizeCurrent(loaded.value);
+  }catch(error){AppDiagnostics.capture('session.save-reminder-evidence',error,'warn');}
+  if(saveReminderDate===date)return;
+  saveReminderDate=date;saveReminderEvidence=evidence;
   sessionSafetyMessage=`Review reminder: ${prettyDate(date)} has unsaved study data. Open Review and Save Today to Library.`;
   refreshStorageFallbackWarning();
   notifyUser('Save today’s study record','Open Review and save today to Library.',`sdm-save-${date}`);
@@ -4182,10 +4198,45 @@ async function promptSaveToday(){
   setReviewDetailDisclosures(true);
 }
 function clearSaveReminder(date=getReviewDate(),revision=TimerState.contentRevision){
-  if(saveReminderDate===date)saveReminderDate='';
+  if(saveReminderDate===date){saveReminderDate='';saveReminderEvidence=null;}
   markDayContentSaved(date,revision);
   if(sessionSafetyMessage.includes('Review reminder'))sessionSafetyMessage='';
   refreshStorageFallbackWarning();
+}
+// This is a notice-only reconciliation: it does not alter savedRevision,
+ // the Active Session or any canonical record. In particular an unacknowledged
+ // current session cannot be called saved merely because a date exists.
+async function revalidateSaveReminderAfterCanonicalConvergence(){
+  const date=saveReminderDate,evidence=saveReminderEvidence;
+  if(!date||!sessionSafetyMessage.startsWith('Review reminder:')||daySaveDirty(date))return false;
+  try{
+    const loaded=await AppData.activeSession.load(0,{strict:true});
+    if(!loaded?.ok||loaded.error)return false;
+    const current=loaded.value||null;
+    if(current?.date===date&&loaded.storage?.idb!==true)return false;
+    const subject=current?.date===date?current:evidence;
+    if(!subject)return false;
+    if(current?.date===date){
+      const snapshot=current.snapshot;
+      if(!snapshot||cleanDayRevision(snapshot.savedRevision)<cleanDayRevision(snapshot.contentRevision))return false;
+    }
+    const records=await AppData.dailyRecords.documents([date],{requireCanonical:true});
+    const record=records.find(item=>item.date===date);
+    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,subject,{allowAdvances:true}))return false;
+    if(current?.date!==date){
+      // The old session was retired by reconciliation. A retained divergent
+      // version must also be covered before the earlier warning is dismissed.
+      const pending=await AppData.pendingReviews.list();
+      if(pending.some(review=>review.subject==='session'&&!review.resolvedAt&&
+          review.kept?.date===date&&
+          !DailyRecordCodec.savedDayCoversSessionEvidence(record,review.kept,{allowAdvances:true})))return false;
+    }
+    await AppData.dailyRecords.verifyCanonical(record);
+    if(saveReminderDate!==date||!sessionSafetyMessage.startsWith('Review reminder:')||daySaveDirty(date))return false;
+    saveReminderDate='';saveReminderEvidence=null;
+    clearSessionSafetyMessage('Review reminder:');
+    return true;
+  }catch(error){AppDiagnostics.capture('session.reminder-convergence',error,'warn');return false;}
 }
 async function acknowledgeSavedStudyDay(date,revision){
   // Do not acknowledge newer study content than the Saved Day actually
@@ -4612,9 +4663,6 @@ function isPreviousActiveSessionRecord(session){
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
 }
-function isRecoverablePreviousActiveSession(session){
-  return isPreviousActiveSessionRecord(session)&&!sessionRunsElsewhere(session)&&session.status!=='suspended';
-}
 // Verify the actual canonical Saved Day, not just a date match or two
 // unrelated devices' numeric revision counters. The session must first carry
 // its own durable save acknowledgement; its study evidence must still be
@@ -4643,11 +4691,12 @@ async function retireCoveredPreviousActiveSession(session){
   }catch(error){
     const reason=error?.message||String(error);
     sessionSafetyMessage=`${prettyDate(session.date)} is saved in Library, but its redundant recovery copy could not be verified as cleared: ${reason}`;
+    setSessionPanelMode('previous',session);
     refreshStorageFallbackWarning();
     setPlanStatus(sessionSafetyMessage,false);
     return true;
   }
-  if(saveReminderDate===session.date)saveReminderDate='';
+  if(saveReminderDate===session.date){saveReminderDate='';saveReminderEvidence=null;}
   if(sessionSafetyMessage.includes('unsaved')||sessionSafetyMessage.includes('Review reminder'))sessionSafetyMessage='';
   setSessionPanelMode('none');
   refreshStorageFallbackWarning();
@@ -4657,7 +4706,7 @@ async function retireCoveredPreviousActiveSession(session){
 }
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
-  sessionPanelSession=['suspended','elsewhere'].includes(sessionPanelMode)?session:null;
+  sessionPanelSession=['suspended','elsewhere','previous'].includes(sessionPanelMode)?session:null;
   if(!sessionPanelSession&&sessionHandoff.error)sessionHandoff={...sessionHandoff,error:''};
   // The Execute header names the device running the session, or stops doing
   // so. Before the panel's own controls, which the idle display disables.
@@ -4672,40 +4721,94 @@ async function recoverPreviousSessionForReview(session){
   if(restored===false)return false;
   sessionSafetyMessage=`Recovered unsaved ${prettyDate(session.date)} into Review. Its timer was not restarted. Save or discard it before applying a new study day.`;
   refreshStorageFallbackWarning();
+  setSessionPanelMode('previous',session);
   setPlanStatus('✓ Recovered the previous study day into Review without restarting its timer.');
   await goTab('review',{source:'session-recovery',history:'none'});
   return true;
 }
 async function handlePreviousActiveSession(session){
+  if(!isPreviousActiveSessionRecord(session))return false;
+  const remote=sessionFromElsewhere(session);
   const choice=await Interactions.choose({
-    title:'Unsaved previous study day found',
-    message:`Study Director found an unsaved session from ${prettyDate(session.date)}. Choose what to do before starting another day.`,
-    details:['Recover opens it in Review without restarting its timer.','Keep stored leaves it untouched so you can decide after exporting a backup.'],
+    title:'Previous study day needs review',
+    message:`Study Director found study evidence from ${prettyDate(session.date)}. It will not restart yesterday’s timer or transfer ownership.`,
+    details:[
+      'Recover opens the previous day in Review without restarting its timer.',
+      remote?'This copy was last owned on another device. Review it here without using Continue Here.':'Keep stored preserves the recovery copy for later.',
+      'A different or unproven Saved Day will never silently replace this evidence.'
+    ],
     cancelLabel:'Keep stored',
     choices:[
       {value:'recover',label:'Recover in Review',kind:'primary',description:'Review and save the previous study day.'},
-      {value:'discard',label:'Discard session',kind:'danger',description:'Permanently remove this unsaved recovery copy from current Study Director data.'}
+      ...(!remote?[{value:'discard',label:'Discard session',kind:'danger',description:'Remove this unsaved local recovery copy after an explicit decision.'}]:[])
     ]
   });
-  if(choice==='recover')return recoverPreviousSessionForReview(session);
-  if(choice==='discard'){
-    const result=await AppData.activeSession.clear();
-    handleActiveSessionRepositoryResult(result,'clear');
-    if(!result.ok){
-      const reason=result.error?(result.error.message||String(result.error)):'active session clear failed';
-      markStorageHealthError('activeSession',`Active-session recovery could not be cleared: ${reason}`);
-      setPlanStatus(`Could not discard the unsaved ${prettyDate(session.date)} session: ${reason}`,false);
+  // A dialog is not a storage lock. Reject choices against a session that
+  // changed while the person was deciding, and verify durable retirement.
+  let loaded=null;
+  try{loaded=await AppData.activeSession.load(0,{strict:true});}
+  catch(error){
+    setSessionPanelMode('previous',session);
+    setPlanStatus('Could not verify previous-day recovery: '+(error?.message||String(error)),false);
+    return false;
+  }
+  const current=loaded?.ok&&!loaded.error?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
+  if(!current||!CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session))){
+    setPlanStatus('Previous-day recovery changed while you were deciding. Review the latest saved state before proceeding.',false);
+    setSessionPanelMode(isPreviousActiveSessionRecord(current)?'previous':'none',current);
+    return false;
+  }
+  if(await retireCoveredPreviousActiveSession(current))return false;
+  if(choice==='recover')return recoverPreviousSessionForReview(current);
+  if(choice==='discard'&&!remote){
+    try{
+      // The repository's existing exclusive mutation owner serializes this
+      // deliberate deletion against backup/restore. Reread after acquiring
+      // that owner; the earlier dialog check is not a storage lock.
+      await AppMutationCoordinator.runExclusive('discard-previous-session',async()=>{
+        const latest=await AppData.activeSession.load(0,{strict:true});
+        if(!latest?.ok||latest.error||
+            !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(latest.value),current))
+          throw new Error('The previous-day session changed while discard was starting.');
+        const result=await AppData.activeSession.clear();
+        handleActiveSessionRepositoryResult(result,'clear');
+        if(!result?.ok||result.error||result.storage?.idb!==true)
+          throw result?.error||new Error('Canonical previous-day session deletion failed.');
+        const checked=await AppData.activeSession.load(0,{strict:true});
+        if(!checked?.ok||checked.error||checked.value)
+          throw checked?.error||new Error('Previous-day recovery still exists after deletion.');
+      });
+    }catch(error){
+      setSessionPanelMode('previous',current);
+      setPlanStatus('Could not verify deletion of the previous-day recovery copy: '+(error?.message||String(error)),false);
       return false;
     }
     setSessionPanelMode('none');
-    setPlanStatus(`Discarded the unsaved ${prettyDate(session.date)} session.`);
-    Interactions.notify({source:'session',kind:'success',key:'previous-session',title:'Unsaved session discarded',message:prettyDate(session.date)});
+    setPlanStatus(`Discarded the unsaved ${prettyDate(current.date)} session.`);
+    Interactions.notify({source:'session',kind:'success',key:'previous-session',title:'Unsaved session discarded',message:prettyDate(current.date)});
     return false;
   }
-  sessionSafetyMessage=`Unsaved ${prettyDate(session.date)} remains stored. Reload the app to recover it, or export a backup before discarding it.`;
+  setSessionPanelMode('previous',current);
+  sessionSafetyMessage=`Unsaved ${prettyDate(current.date)} remains stored. Choose Review Previous Day in Execute or Plan to recover it, or export a backup.`;
   refreshStorageFallbackWarning();
   setPlanStatus(sessionSafetyMessage,false);
   return false;
+}
+async function revisitPreviousStoredSession(){
+  if(!appCanMutate())return false;
+  try{
+    const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
+    if(!isPreviousActiveSessionRecord(session)){
+      setSessionPanelMode('none');
+      setPlanStatus('No previous-day recovery session remains. Open Library to review saved days.');
+      return false;
+    }
+    if(await retireCoveredPreviousActiveSession(session))return false;
+    return handlePreviousActiveSession(session);
+  }catch(error){
+    setPlanStatus('Could not read previous-day recovery safely: '+(error?.message||String(error)),false);
+    return false;
+  }
 }
 async function attemptAutoRestoreActiveSession(){
   try{
@@ -4723,8 +4826,8 @@ async function attemptAutoRestoreActiveSession(){
     // itself. If the canonical Saved Day covers its latest content revision,
     // retire the redundant recovery copy before considering ownership/UI.
     if(isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session))return false;
+    if(isPreviousActiveSessionRecord(session))return handlePreviousActiveSession(session);
     if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
-    if(isRecoverablePreviousActiveSession(session))return handlePreviousActiveSession(session);
     if(isSuspendedActiveSession(session)){setSessionPanelMode('suspended',session);return false;}
     if(!isRestorableActiveSession(session)){setSessionPanelMode('none');return false;}
     const snapshot=activeSessionSnapshot(session);
@@ -5189,6 +5292,8 @@ function handleCanonicalCommit(event){
     invalidateAttachmentLibrary();
   }
   if(event&&event.entityType==='pendingReview'&&StartupLifecycle.status().fullyInitialized)void KeptVersions.refresh();
+  if(event?.entityType==='dailyRecord'&&saveReminderDate)
+    void revalidateSaveReminderAfterCanonicalConvergence();
 }
 
 async function refreshPersistedSessionBadge(){
@@ -5734,6 +5839,11 @@ async function continueSessionHere(){
       }
       return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     }
+    if(isPreviousActiveSessionRecord(session)){
+      setSessionPanelMode('previous',session);
+      setPlanStatus('This session belongs to a previous study day. Review it without transferring or restarting its timer.',false);
+      return false;
+    }
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
@@ -5755,6 +5865,7 @@ async function continueSessionHere(){
       const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value||null;
       if(!current)setSessionPanelMode('none');
       else if(pendingSessionHandoffSafety())setSessionPanelMode('suspended',current);
+      else if(isPreviousActiveSessionRecord(current))setSessionPanelMode('previous',current);
       else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
       else if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
       else setSessionPanelMode('active',current);
@@ -9065,6 +9176,8 @@ function executeIdlePresentation(d=new Date(),options={}){
     return view;
   };
   const elsewhere=sessionShownElsewhere();
+  if(sessionPanelMode==='previous')return applyOverrides(executeIdleView('Previous Day Needs Review','PREVIOUS DAY','Previous Day Needs Review',
+    'This study day is stored for review. Its timer will not restart. Choose Review Previous Day to recover it safely.','NEXT: REVIEW'));
   if(sessionParkedHere()){
     const handed=sessionFromElsewhere(sessionPanelSession);
     return applyOverrides(executeIdleView('Session Suspended','SUSPENDED','Today’s Session Suspended',handed?`Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`:'Restore Session continues it here. Review → Save Today can also save its progress without restarting the timer.','NEXT: —'));
@@ -9195,15 +9308,17 @@ function updateSessionControls(){
   const active=TASKS.some(isTrackableBlock);
   const running=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
   const finished=active&&TimerState.mode===TIMER_MODES.DONE;
-  const suspended=sessionPanelMode==='suspended'&&!active,elsewhere=sessionPanelMode==='elsewhere'&&!active,handedOff=suspended&&sessionFromElsewhere(sessionPanelSession);
-  const visible=active||suspended||elsewhere;
+  const previous=sessionPanelMode==='previous',suspended=sessionPanelMode==='suspended'&&!active,elsewhere=sessionPanelMode==='elsewhere'&&!active,handedOff=suspended&&sessionFromElsewhere(sessionPanelSession);
+  const visible=active||suspended||elsewhere||previous;
   if(panel){
     panel.hidden=!visible;
-    panel.classList.toggle('suspended',suspended||elsewhere);
+    panel.classList.toggle('suspended',suspended||elsewhere||previous);
     const title=document.getElementById('session-panel-title');
     const note=document.getElementById('session-panel-note');
-    if(title)title.textContent=pendingSessionHandoffSafety()?'Session Ownership Needs Verification':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
-    if(note)note.textContent=pendingSessionHandoffSafety()?HANDOFF_UNCERTAIN_MESSAGE:elsewhere
+    if(title)title.textContent=pendingSessionHandoffSafety()?'Session Ownership Needs Verification':previous?'Previous Day Needs Review':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
+    if(note)note.textContent=pendingSessionHandoffSafety()?HANDOFF_UNCERTAIN_MESSAGE:previous
+      ? 'This historical session is preserved for Review. Its timer will not restart or transfer ownership. Open Review and Save Today to Library when ready.'
+      : elsewhere
       ? `Today’s session is running ${sessionDevice(sessionPanelSession)} (last update ${sessionUpdateTime(sessionPanelSession)}). Everything else works here as usual. Continue Here moves the session to this device.`
       : handedOff
       ? `Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`
@@ -9219,7 +9334,7 @@ function updateSessionControls(){
   if(progress){progress.hidden=!progressText;progress.classList.toggle('error',!continuing&&!!progressText);if(progress.textContent!==progressText)progress.textContent=progressText;}
   if(planControls){
     planControls.hidden=!visible;
-    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
+    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:previous?'Previous day needs review':elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
     if(state&&state.textContent!==(pendingSessionHandoffSafety()?'Ownership needs verification':label))state.textContent=pendingSessionHandoffSafety()?'Ownership needs verification':label;
   }
   // The same controls in Execute's status card, its session panel and Plan's
@@ -9227,10 +9342,10 @@ function updateSessionControls(){
   // running elsewhere offers only Continue Here.
   [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
     const action=btn.dataset.action;
-    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=continuing||!suspended&&!elsewhere;const label=continuing?'Continuing…':pendingSessionHandoffSafety()?'Verify ownership':elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
-    else if(action==='suspend-session'){btn.hidden=suspended||elsewhere;btn.disabled=!active;}
-    else if(action==='finish-session'){btn.hidden=elsewhere||suspended;btn.disabled=!active||finished;}
-    else if(action==='reset-session'){btn.hidden=elsewhere;btn.disabled=!visible||elsewhere;}
+    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere&&!previous;btn.disabled=continuing||!suspended&&!elsewhere&&!previous;const label=continuing?'Continuing…':pendingSessionHandoffSafety()?'Verify ownership':previous?(active?'Open Review':'Review Previous Day'):elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
+    else if(action==='suspend-session'){btn.hidden=previous||suspended||elsewhere;btn.disabled=!active||previous;}
+    else if(action==='finish-session'){btn.hidden=previous||elsewhere||suspended;btn.disabled=!active||finished||previous;}
+    else if(action==='reset-session'){btn.hidden=previous||elsewhere;btn.disabled=!visible||elsewhere||previous;}
   }));
   updateExecutePanels();
   refreshSessionSafetyUi();
@@ -10114,7 +10229,11 @@ async function restoreSessionStateThroughLifecycle(importedSession){
     if(session){
       const saved=await AppData.activeSession.save(session,{strictDurability:true});
       await requireCanonicalSessionWrite(saved,session,'restoring an Active Session');
-      if(session.status==='suspended'){
+      if(isPreviousActiveSessionRecord(session)){
+        resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date:todayISO()});
+        PlanDraftEditor.preview({silent:true,enterDraft:false});
+        setSessionPanelMode('previous',session);
+      }else if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('suspended',session);
         if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',tier:'news',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
@@ -10159,7 +10278,7 @@ function verifyRestoredTimerRuntimeSemantics(expectedRuntime){
 }
 async function verifyRestoredSessionRuntime(expected,scheduleText=''){
   const session=expected?ActiveSessionCodec.sanitizeCurrent(expected):null;
-  if(session&&session.status!=='suspended'&&!sessionRunsElsewhere(session)){
+  if(session&&session.status!=='suspended'&&!sessionRunsElsewhere(session)&&!isPreviousActiveSessionRecord(session)){
     const expectedFingerprint=activeSessionScheduleFingerprint(session);
     if(!TASKS.length||scheduleFingerprint()!==expectedFingerprint)throw new Error('Post-restore verification failed to apply the Active Session plan.');
     const expectedSnapshot=activeSessionSnapshot(session);
@@ -10353,7 +10472,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     renderSchedule:renderSched
   }),
   events:Object.freeze({
-    libraryChanged:()=>LibraryView.render(),
+    libraryChanged:()=>{LibraryView.render();if(saveReminderDate)void revalidateSaveReminderAfterCanonicalConvergence();},
     reconcileNotes:reconcileNotesThroughLifecycle,
     restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,
     restoreSessionState:restoreSessionStateThroughLifecycle,
@@ -11429,7 +11548,9 @@ const CLICK_ACTIONS=Object.freeze({
   'test-sound': ()=>NoticeCoordinator.testSound(),
   'test-system-alert': ()=>SystemNotifications.test(),
   'toggle-pomodoro': Pomodoro.configuration.toggleNudges,
-  'restore-session': ()=>sessionPanelMode==='elsewhere'?continueSessionHere():restoreSuspendedTodaySession(),
+  'restore-session': ()=>sessionPanelMode==='previous'
+    ? (TASKS.some(isTrackableBlock)?goTab('review',{source:'previous-day-review'}):revisitPreviousStoredSession())
+    : sessionPanelMode==='elsewhere'?continueSessionHere():restoreSuspendedTodaySession(),
   'suspend-session': suspendTodaySession,
   'finish-session': finishTodaySession,
   'reset-session': resetTodaySession,

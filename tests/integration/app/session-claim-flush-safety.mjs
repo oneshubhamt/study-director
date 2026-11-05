@@ -868,6 +868,45 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
   assert.equal(advanced.ctx.covered(richer,session,{allowAdvances:true}),true,'a genuinely continuing session may exceed the shared evidence without matching unrelated revisions');
   assert.equal(advanced.ctx.covered({...richer,results:{'ethics-1':{...richer.results['ethics-1'],actualSeconds:100}}},session,{allowAdvances:true}),false,'a Saved Day that drops previously recorded work does not cover the old session');
   assert.equal(advanced.ctx.covered({...richer,schedule:[{...row,name:'Different plan'}]},session,{allowAdvances:true}),false,'a same-date Saved Day for another schedule is not a safe retirement receipt');
+
+  // BF-C6.2 (G): a verified Day may contain later finish time only when
+  // the original start is unchanged AND the actual focus seconds increased.
+  const clockStart='2026-08-27T07:00:00.000Z',clockEnd='2026-08-27T07:05:00.000Z';
+  const timedSnapshot={...snapshot,taskState:{'ethics-1':{...task,actual:{
+    seconds:300,clock:{startedAt:clockStart,endedAt:clockEnd}}}}};
+  const extendedDay={...saved,results:{'ethics-1':{...saved.results['ethics-1'],
+    actualStart:clockStart,actualEnd:'2026-08-27T07:09:00.000Z',actualSeconds:540}}};
+  const timed=createContext(extendedDay,timedSnapshot);
+  const oldTimedSession={...session,snapshot:timedSnapshot};
+  assert.equal(timed.ctx.covered(extendedDay,oldTimedSession,{allowAdvances:true}),true,
+    'an actual longer focus interval with the same start is covered');
+  assert.equal(timed.ctx.covered({...extendedDay,results:{'ethics-1':{
+    ...extendedDay.results['ethics-1'],actualSeconds:300}}},oldTimedSession,{allowAdvances:true}),false,
+    'moving only the wall clock is not evidence of extended focus');
+  assert.equal(timed.ctx.covered({...extendedDay,results:{'ethics-1':{
+    ...extendedDay.results['ethics-1'],actualStart:'2026-08-27T07:01:00.000Z'}}},oldTimedSession,{allowAdvances:true}),false,
+    'a changed start remains a different recorded interval');
+  assert.equal(timed.ctx.covered({...extendedDay,results:{'ethics-1':{
+    ...extendedDay.results['ethics-1'],actualEnd:'2026-08-27T07:04:00.000Z'}}},oldTimedSession,{allowAdvances:true}),false,
+    'an earlier end is not a safe continuation');
+
+  // A partial Practice Pacer record can grow into a completed run only with
+  // an exact unit-prefix and identical identity, target and plan metadata.
+  const priorRun={targetMs:60000,unitMs:[61000],partial:true,taskId:'ethics-1',totalUnits:3};
+  const laterRun={targetMs:60000,unitMs:[61000,59000],taskId:'ethics-1',totalUnits:3};
+  const practiceSnap={...snapshot,practice:{runs:[priorRun]}};
+  const practiceDay={...saved,practiceRuns:[laterRun]};
+  const practice=createContext(practiceDay,practiceSnap);
+  const practiceSession={...session,snapshot:practiceSnap};
+  assert.equal(practice.ctx.covered(practiceDay,practiceSession,{allowAdvances:true}),true,
+    'later completed practice runs preserve prior partial units');
+  assert.equal(practice.ctx.covered({...practiceDay,practiceRuns:[{...laterRun,unitMs:[62000,59000]}]},practiceSession,{allowAdvances:true}),false,
+    'rewritten practice units never count as a continuation');
+  assert.equal(practice.ctx.covered({...practiceDay,practiceRuns:[{...laterRun,targetMs:70000}]},practiceSession,{allowAdvances:true}),false,
+    'a different practice pacing target is not the same run');
+  const doubled={...snapshot,practice:{runs:[priorRun,priorRun]}};
+  assert.equal(practice.ctx.covered(practiceDay,{...session,snapshot:doubled},{allowAdvances:true}),false,
+    'one saved run cannot cover two distinct earlier records');
 }
 
 // A saved calendar date is not enough to suppress the user's Save Today

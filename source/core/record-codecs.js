@@ -368,7 +368,25 @@ function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
   if((!allowAdvances||String(snapshot.latestCarryForward||''))&&
       String(record.carryForwardDraft||'')!==String(snapshot.latestCarryForward||''))return false;
   const runs=Array.isArray(snapshot.practice?.runs)?snapshot.practice.runs:[];
-  if(runs.some(run=>!record.practiceRuns.some(saved=>sameDataValue(run,saved))))return false;
+  // A partial Practice Pacer run may grow into a completed run. Its units
+  // already observed must remain an exact prefix; settings and task identity
+  // cannot change. Match records one-to-one so duplicates cannot prove work
+  // that the Saved Day contains only once.
+  const practiceRunCovered=(saved,prior)=>{
+    if(sameDataValue(saved,prior))return true;
+    if(!allowAdvances||prior?.partial!==true||!Array.isArray(prior.unitMs)||
+        !Array.isArray(saved?.unitMs)||saved.unitMs.length<prior.unitMs.length)return false;
+    const {unitMs:_savedUnits,partial:_savedPartial,...savedRest}=saved;
+    const {unitMs:_priorUnits,partial:_priorPartial,...priorRest}=prior;
+    return sameDataValue(savedRest,priorRest)&&
+      prior.unitMs.every((ms,index)=>saved.unitMs[index]===ms);
+  };
+  const consumedRuns=new Set();
+  for(const run of runs){
+    const index=record.practiceRuns.findIndex((saved,i)=>!consumedRuns.has(i)&&practiceRunCovered(saved,run));
+    if(index<0)return false;
+    consumedRuns.add(index);
+  }
   const observed=(value,prior)=>{
     if(prior===undefined)return true;
     if(value===undefined||!Number.isFinite(Number(value))||!Number.isFinite(Number(prior)))return false;
@@ -387,7 +405,17 @@ function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
         Number(result.total)!==Number(state.progress.total))return false;
     const clock=state.actual?.clock||{},actual=state.actual?.record||{};
     const start=clock.startedAt||actual.firstStartedAt,end=clock.endedAt||actual.lastEndedAt;
-    if(start&&result.actualStart!==start||end&&result.actualEnd!==end)return false;
+    if(start&&result.actualStart!==start)return false;
+    if(end&&result.actualEnd!==end){
+      // An end moving forward can be legitimate continued focus, but only
+      // with a stable start and strictly increased recorded focus duration.
+      // A missing/replaced start or a merely edited timestamp proves nothing.
+      const previousSeconds=Number(state.actual?.seconds);
+      if(!allowAdvances||!start||!Number.isFinite(previousSeconds)||
+          !(Number(result.actualSeconds)>previousSeconds)||
+          !Number.isFinite(Date.parse(end))||
+          !(Date.parse(result.actualEnd)>Date.parse(end)))return false;
+    }
     if(clock.startedAtLocalMinute!==undefined&&
         Number(result.actualStartLocalMinute)!==Number(clock.startedAtLocalMinute))return false;
     if(clock.startedAtUtcOffsetMinutes!==undefined&&
