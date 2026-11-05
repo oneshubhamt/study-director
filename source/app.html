@@ -9886,7 +9886,17 @@ const KeptVersions=(()=>{
   let count=0,notes=new Set(),generation=0,seen=null;
   async function refresh(){
     const token=++generation;let open;
-    try{open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);}catch(error){AppDiagnostics.capture('kept-versions.refresh',error,'warn');return false;}
+    try{
+      open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
+      if(open.length&&appCanMutate()&&!BackupController.status().busy){
+        // Resolve only verified, now-identical canonical alternatives. The
+        // Backup controller writes and reads back replicated tombstones;
+        // this view still reads the actual resulting count.
+        try{await BackupController.resolveConvergedKeptVersions();}
+        catch(error){AppDiagnostics.capture('kept-versions.convergence',error,'warn');}
+        open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
+      }
+    }catch(error){AppDiagnostics.capture('kept-versions.refresh',error,'warn');return false;}
     if(token!==generation)return false;
     const next=new Set(open.filter(review=>review.subject==='note').map(review=>review.ref)),notesChanged=[...next].sort().join('|')!==[...notes].sort().join('|');
     // Kept versions pop up once, when they first appear; those already here
@@ -9905,7 +9915,7 @@ const KeptVersions=(()=>{
     if(driveConnectCard)return;
     if(Date.now()-sessionYieldedAt<60000&&fresh.every(review=>review.subject==='session'))return;
     Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',
-      message:`${count===1?'One version was':`${count} versions were`} kept where two devices changed the same thing. Nothing is lost; choose what to keep when you’re ready.`,
+      message:`${count===1?'One alternative needs':`${count} alternatives need`} review because their differences could not be safely settled. Verified matching alternatives are cleared automatically; choose what to keep when ready.`,
       action:{label:'Review',opens:true,run:()=>void review()}});
   }
   async function review(ref=''){
@@ -9940,7 +9950,7 @@ async function checkUnsupportedUpdate(){
 function renderKeptVersions(){
   const row=document.getElementById('kept-versions'),text=document.getElementById('kept-versions-text'),count=KeptVersions.count();
   if(row)row.hidden=!count;
-  if(text)text.textContent=`${count} version${count===1?' was':'s were'} kept where two devices changed the same thing. Nothing is lost; choose what to keep when you are ready.`;
+  if(text)text.textContent=`${count} retained alternative${count===1?' needs':'s need'} review. Only differences not proven safely equivalent are kept; open Kept Versions to choose the remaining values.`;
 }
 const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   notifications:NoticeCoordinator.presentation('library',Object.freeze({label:'Open Library',run:()=>goTab('library')})),

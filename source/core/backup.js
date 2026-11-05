@@ -723,6 +723,18 @@ const PERSONAL_NUDGE_KEYS=freeze(['present','enabled','sound','nudgeAfter','brea
 function semanticSavedPlan(plan){
   return plan?{id:plan.id,label:plan.label,scheduleText:plan.scheduleText}:null;
 }
+// Personal reviews compare authored meaning, not Saved Plan bookkeeping dates.
+// The order itself remains significant only among identities present on
+// both sides; independently added plans are handled by identity.
+function personalReviewContent(value){
+  if(!value)return null;
+  return {preferences:value.preferences,draft:value.plans.draft,defaultId:value.plans.defaultId,
+    savedPlans:value.plans.savedPlans.map(semanticSavedPlan)};
+}
+function meaningfulSavedPlanOrderDiffers(local,other){
+  const shared=new Set(local.filter(id=>other.includes(id)));
+  return !Canonical.same(local.filter(id=>shared.has(id)),other.filter(id=>shared.has(id)));
+}
 async function personalFieldFingerprint(present,value=null){
   return valueFingerprint({present:present===true,value:present===true?value:null});
 }
@@ -769,47 +781,47 @@ async function reconcilePersonalFields(base,local,incoming){
   // Hash all independent paths concurrently. Comparing their verified
   // digests does not reread Personal Data or change the stored ancestor.
   const [left,right,absent]=await Promise.all([personalFields(mine),personalFields(theirs),personalFieldFingerprint(false)]);
-  let conflicts=0;
-  const choose=(localPresent,localValue,remotePresent,remoteValue,baseHash,localHash,remoteHash)=>{
+  let conflicts=0;const conflictParts=new Set();
+  const choose=(part,localPresent,localValue,remotePresent,remoteValue,baseHash,localHash,remoteHash)=>{
     if(localHash===remoteHash||remoteHash===baseHash)return freeze({present:localPresent,value:localValue});
     if(localHash===baseHash)return freeze({present:remotePresent,value:remoteValue});
-    conflicts++;return freeze({present:localPresent,value:localValue});
+    conflicts++;conflictParts.add(part);return freeze({present:localPresent,value:localValue});
   };
   const prefs={...mine.preferences},own=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key);
   for(const key of PERSONAL_PREFERENCE_KEYS){
-    const chosen=choose(own(mine.preferences,key),mine.preferences[key],own(theirs.preferences,key),theirs.preferences[key],
+    const chosen=choose('preference:'+key,own(mine.preferences,key),mine.preferences[key],own(theirs.preferences,key),theirs.preferences[key],
       ancestry.preferences[key],left.preferences[key],right.preferences[key]);
     if(chosen.present)prefs[key]=chosen.value;else delete prefs[key];
   }
   const localNudge=mine.preferences.nudge,remoteNudge=theirs.preferences.nudge;
-  const present=choose(true,localNudge!==null,true,remoteNudge!==null,
+  const present=choose('preference:nudge',true,localNudge!==null,true,remoteNudge!==null,
     ancestry.nudge.present,left.nudge.present,right.nudge.present).value;
   if(!present)prefs.nudge=null;
   else{
     const nudge={};
     for(const key of PERSONAL_NUDGE_KEYS.slice(1)){
       const l=localNudge!==null&&own(localNudge,key),i=remoteNudge!==null&&own(remoteNudge,key),
-        chosen=choose(l,l?localNudge[key]:null,i,i?remoteNudge[key]:null,
+        chosen=choose('nudge:'+key,l,l?localNudge[key]:null,i,i?remoteNudge[key]:null,
           ancestry.nudge[key],left.nudge[key],right.nudge[key]);
       if(chosen.present)nudge[key]=chosen.value;
     }
     prefs.nudge=nudge;
   }
-  const draft=choose(true,mine.plans.draft,true,theirs.plans.draft,
+  const draft=choose('draft',true,mine.plans.draft,true,theirs.plans.draft,
       ancestry.draft,left.draft,right.draft).value,
-    defaultId=choose(true,mine.plans.defaultId,true,theirs.plans.defaultId,
+    defaultId=choose('defaultPlan',true,mine.plans.defaultId,true,theirs.plans.defaultId,
       ancestry.defaultId,left.defaultId,right.defaultId).value,
     localPlans=new Map(mine.plans.savedPlans.map(plan=>[plan.id,plan])),
     remotePlans=new Map(theirs.plans.savedPlans.map(plan=>[plan.id,plan])),plans=new Map(),
     allIds=new Set([...ancestry.order,...localPlans.keys(),...remotePlans.keys()]);
   for(const id of allIds){
     const hasLocal=localPlans.has(id),hasRemote=remotePlans.has(id),
-      original=choose(hasLocal,semanticSavedPlan(localPlans.get(id)),hasRemote,semanticSavedPlan(remotePlans.get(id)),
+      original=choose('savedPlan:'+id,hasLocal,semanticSavedPlan(localPlans.get(id)),hasRemote,semanticSavedPlan(remotePlans.get(id)),
         ancestry.savedPlans[id]||absent,left.savedPlans[id]||absent,right.savedPlans[id]||absent);
     if(original.present){
       const record=original.value&&original.value.id===id?
         (hasLocal&&Canonical.same(semanticSavedPlan(localPlans.get(id)),original.value)?localPlans.get(id):remotePlans.get(id)):null;
-      if(!record){conflicts++;if(hasLocal)plans.set(id,localPlans.get(id));}
+      if(!record){conflicts++;conflictParts.add('savedPlan:'+id);if(hasLocal)plans.set(id,localPlans.get(id));}
       else plans.set(id,record);
     }
   }
@@ -824,17 +836,32 @@ async function reconcilePersonalFields(base,local,incoming){
     remoteRelative=remoteOrder.filter(id=>shared.has(id)),
     localReordered=!Canonical.same(localRelative,baselineOrder),
     remoteReordered=!Canonical.same(remoteRelative,baselineOrder);
-  if(localReordered&&remoteReordered&&!Canonical.same(localRelative,remoteRelative))conflicts++;
+  if(localReordered&&remoteReordered&&!Canonical.same(localRelative,remoteRelative)){conflicts++;conflictParts.add('savedPlanOrder');}
   const preferred=!localReordered&&remoteReordered?remoteOrder:localOrder,
     order=[...new Set([...preferred,...remoteOrder,...localOrder,...ancestry.order])].filter(id=>plans.has(id)),
     result={version:2,preferences:prefs,plans:{draft,defaultId,savedPlans:order.map(id=>plans.get(id))}};
   // A changed setting may be individually safe while its combined Plan
   // default or reminder settings are invalid. Leave both sides reviewable.
-  if(plans.size>100)return freeze({value:mine,conflict:true,valid:false});
+  if(plans.size>100)return freeze({value:mine,reviewKept:theirs,conflict:true,valid:false});
   let canonical=null;
   try{canonical=BackupCodec.normalizePersonalData(result);}catch{}
-  if(!canonical)return freeze({value:mine,conflict:true,valid:false});
-  return freeze({value:canonical,conflict:conflicts>0,valid:true});
+  if(!canonical)return freeze({value:mine,reviewKept:theirs,conflict:true,valid:false});
+  // Store the unresolved alternative relative to the *already merged*
+  // canonical value. Otherwise a legitimate one-sided change in a different
+  // setting is offered again as a false conflict in Kept Versions. This is a
+  // canonical Personal Data record, not a second mask/schema.
+  let reviewKept=null;
+  if(conflicts){
+    const selections=Object.fromEntries([...conflictParts].map(part=>['kept__projection__'+part,'use']));
+    try{reviewKept=selectedKeptPersonal(canonical,{id:'projection',kept:theirs},selections);}
+    catch{
+      // Plan deletion/default constraints can make an isolated alternate
+      // noncanonical. Retain the whole original alternative rather than
+      // silently drop genuinely competing work.
+      reviewKept=theirs;
+    }
+  }
+  return freeze({value:canonical,reviewKept,conflict:conflicts>0,valid:true});
 }
 // True when one side's plans and settings hold nothing the other's lack:
 // each setting unset or equal, the draft empty, the starter plan or equal,
@@ -1234,11 +1261,18 @@ function keptPlanDescription(plan){
   const preview=String(plan.scheduleText||'');
   return `${plan.label} · ${preview.length>180?preview.slice(0,180)+'…':preview||'Empty schedule'}`;
 }
-// PendingReview.v1 proves the subject and kept-at time, but contains no
-// device-of-origin or reason code. Neither may be inferred from timestamps.
+// PendingReview.v1 records neither an originating installation nor a
+// machine-readable conflict reason. The substantive difference is available
+// at presentation; the source device cannot be reconstructed from keptAt.
 function keptReviewProvenance(review){
   const at=savedDayDecisionTimestamp(review.keptAt);
-  return `Kept for review${at?' '+at:''}; originating device and precise cause not recorded.`;
+  const why=review.subject==='note'&&review.base
+    ?'Note changes could not be resolved from their shared content'
+    :review.subject==='savedDay'?'Saved Day evidence differed or could not be proven equivalent'
+    :review.subject==='personal'?'Plans or settings could not be safely merged'
+    :review.subject==='session'?'Session study evidence or ownership could not be safely settled'
+    :'An alternative could not be safely resolved';
+  return `${why}. Retained for review${at?' '+at:''}. The original device was not recorded; the date is not proof of origin.`;
 }
 function keptReviewChanges(here,other,fields){
   if(!here||!other)return 'One copy is absent or deleted.';
@@ -1310,7 +1344,10 @@ function selectedKeptPersonal(current,review,picked){
     remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan])),chosen=new Map(localPlans);
   for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
     if(!has('savedPlan:'+id))continue;
-    if(remotePlans.has(id))chosen.set(id,remotePlans.get(id));
+    if(remotePlans.has(id)){
+      const previous=localPlans.get(id);
+      chosen.set(id,previous&&Canonical.same(semanticSavedPlan(previous),semanticSavedPlan(remotePlans.get(id)))?previous:remotePlans.get(id));
+    }
     else chosen.delete(id);
   }
   const localOrder=current.plans.savedPlans.map(plan=>plan.id),remoteOrder=kept.plans.savedPlans.map(plan=>plan.id),
@@ -1322,6 +1359,49 @@ function selectedKeptPersonal(current,review,picked){
   catch(error){throw new Error('The selected Personal Data is invalid. If you choose a default saved plan, also keep that plan.',{cause:error});}
   if(!normalized)throw new Error('The selected Personal Data is invalid. If you choose a default saved plan, also keep that plan.');
   return normalized;
+}
+// Retire only alternatives whose substantive content is already present
+// in canonical storage. Resolutions are replicated tombstones, not deletion
+// of the alternative without a receipt. An unproven deletion or active
+// ownership difference is never treated as an equality.
+let convergedKeptReviewBusy=false;
+async function resolveConvergedKeptVersions(){
+  if(!appCanMutate()||convergedKeptReviewBusy)return 0;
+  convergedKeptReviewBusy=true;
+  try{
+    return await runExclusive('resolve-converged-kept',async()=>{
+      requireBackupMutationControl('resolving converged kept versions');
+      const open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
+      let confirmed=0;
+      for(const review of open){
+        let matches=false;
+        if(review.subject==='note'&&review.kept){
+          const [current]=await AppData.notes.readFreshItems([review.ref]);
+          matches=!!current&&Object.entries(review.kept).every(([key,value])=>Canonical.same(current[key],value));
+        }else if(review.subject==='savedDay'&&review.kept){
+          const [current]=await getDailyRecordDocumentsByDates([review.ref],{requireCanonical:true});
+          matches=!!current&&Canonical.same(savedDayReviewContent(current),savedDayReviewContent(review.kept));
+        }else if(review.subject==='personal'&&review.kept){
+          await personalSettle();
+          const current=await personalExport({flush:false});
+          matches=!!current&&Canonical.same(personalReviewContent(current),personalReviewContent(review.kept));
+        }else if(review.subject==='session'&&review.kept&&!hasActiveSession()){
+          const current=(await readCanonicalActiveSession()).value;
+          matches=keptSessionAlreadyApplied(current,review.kept)||!!current&&Canonical.same(current,review.kept);
+        }
+        // A kept deletion has no positive tombstone proof in this generic
+        // path. Leave it available for deliberate review.
+        if(!matches)continue;
+        const still=(await AppData.pendingReviews.readItems([review.id]))[0];
+        if(!still||still.resolvedAt||!PendingReviewCodec.sameOpen(review,still))continue;
+        await AppData.pendingReviews.resolve([review.id]);
+        const receipt=(await AppData.pendingReviews.readItems([review.id]))[0];
+        if(!receipt?.resolvedAt)throw new Error('Converged kept-version acknowledgement was not saved in canonical storage.');
+        confirmed++;
+      }
+      return confirmed;
+    });
+  }finally{convergedKeptReviewBusy=false;}
 }
 async function reviewKeptVersions({ref=''}={}){
   requireBackupMutationControl('reviewing kept versions');
@@ -1400,12 +1480,12 @@ async function reviewKeptVersions({ref=''}={}){
         remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan]));
       for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
         const here=localPlans.get(id)||null,other=remotePlans.get(id)||null;
-        if(Canonical.same(here,other))continue;
+        if(Canonical.same(semanticSavedPlan(here),semanticSavedPlan(other)))continue;
         choice(review,'savedPlan:'+id,`Saved plan · ${here?.label||other?.label||id}`,'This saved-plan identity differs; selecting a version does not replace other saved plans.',{
           label:here?'Keep this plan':'Keep absent',description:keptPlanDescription(here)
         },{label:other?'Use kept plan':'Remove this plan',description:keptPlanDescription(other)});
       }
-      if(!Canonical.same(personal.plans.savedPlans.map(plan=>plan.id),kept.plans.savedPlans.map(plan=>plan.id)))
+      if(meaningfulSavedPlanOrderDiffers(personal.plans.savedPlans.map(plan=>plan.id),kept.plans.savedPlans.map(plan=>plan.id)))
         choice(review,'savedPlanOrder','Saved plan · Order','Choose the order for retained plans; plans present on only one side still have their own choices.',{
           label:'Keep this order',description:personal.plans.savedPlans.map(plan=>plan.label).join(', ')||'No saved plans'
         },{label:'Use kept order',description:kept.plans.savedPlans.map(plan=>plan.label).join(', ')||'No saved plans'});
@@ -2112,7 +2192,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(fieldResult){
         personal='keep';
         autoPersonal=fieldResult.value;
-        if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+        if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:fieldResult.reviewKept||BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
       }else if(!base&&(!localPersonal||personalIsBlank(localPersonal)))personal='replace';
       else if(!base&&personalIsBlank(theirs))personal='keep';
       else if(!base&&personalAddsNothing(localPersonal,theirs))personal='replace';
@@ -2305,9 +2385,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     const changed=!!(dailyResult.changed||assetResult.changed||noteResult.changed||sessionResult.changed||personalChanged||reviewResult.changed);
     if(changed)await rebaseRepositoryPreparationAcceleration('combine');
     await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
+    let ancestryWarning='';
     if(sharedBase){
       const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'');
-      if(checkpointId)try{await AppData.reconciliationBase.write(checkpointId,sharedBase);}catch(error){AppDiagnostics.capture('backup.reconciliation-base-write',error,'warn');}
+      try{
+        // A false receipt (e.g. obsolete incremental ancestor) and a
+        // thrown failure both mean that future three-way merges lack proof.
+        if(!checkpointId||await AppData.reconciliationBase.write(checkpointId,sharedBase)!==true)
+          throw new Error('The local shared-ancestry checkpoint was not established.');
+        const established=await AppData.reconciliationBase.read();
+        if(established?.checkpointId!==checkpointId)
+          throw new Error('The shared-ancestry checkpoint could not be read back.');
+      }catch(error){
+        AppDiagnostics.capture('backup.reconciliation-base-write',error,'warn');
+        OperationDiagnostics.mark('reconciliation-ancestry-not-established',{checkpointIdPresent:!!checkpointId});
+        ancestryWarning=' Shared ancestry could not be saved locally. The merged data was verified, but a later sync may ask you to review differences again. Retry Drive sync after local storage recovers.';
+      }
     }
     if(portableAssets)AssetData.scheduleMaintenance(0);
     const compatibility=[];
@@ -2320,7 +2413,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     let summary='';
     if(!changed){
       const baseMsg=kept?`Combine made no changes. ${kept} divergent local Saved Day${kept===1?' was':'s were'} kept.`:(impact.savedDays.total?'Combine found no applicable Saved-Day changes.':'Combine made no changes: this device already has everything in the backup.');
-      summary=baseMsg+(compatibility.length?' '+compatibility.join(' · ')+'.':'');restoreSurfaceStatus(stored,summary,false,'local-warning');
+      summary=baseMsg+(compatibility.length?' '+compatibility.join(' · ')+'.':'')+ancestryWarning;restoreSurfaceStatus(stored,summary,false,'local-warning');
     }else{
       const parts=[];
       if(personalChanged)parts.push('plans or personal settings restored');
@@ -2332,7 +2425,8 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(batches>1)parts.push(batches+' committed record batches');
       if(reviewResult.kept)parts.push(reviewResult.kept+' version'+(reviewResult.kept===1?'':'s')+' kept for review');
       summary=`✓ ${currentCheckpoint?'Merged':'Imported'} `+(parts.join(' · ')||'backup data')+noteResult.message+sessionResult.message+(kept?' · kept '+kept+' divergent local Saved Day'+(kept===1?'':'s'):'')+(identical?' · '+identical+' identical Saved Day'+(identical===1?'':'s')+' unchanged':'')+(compatibility.length?' · '+compatibility.join(' · '):'')+'. Final verification passed.';
-      restoreSurfaceStatus(stored,summary,true,'local-complete');
+      if(ancestryWarning)summary+=ancestryWarning;
+      restoreSurfaceStatus(stored,summary,!ancestryWarning,ancestryWarning?'local-warning':'local-complete');
     }
     try{libraryChanged();}catch(error){AppDiagnostics.capture('backup.import-render',error,'warn');}
     return Object.freeze({
@@ -2670,6 +2764,7 @@ const controller=freeze({
   subscribeStatus,
   recoverInterruptedRestore:(...args)=>track(()=>recoverInterruptedRestore(...args),true),
   reviewKeptVersions:(...args)=>track(()=>reviewKeptVersions(...args),true),
+  resolveConvergedKeptVersions,
   status
 });
 const repository=freeze({

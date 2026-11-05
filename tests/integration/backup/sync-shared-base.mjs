@@ -150,6 +150,8 @@ function baseStore(state){
     reconciliationBaseReadDayAncestry:async(dates,checkpointId)=>{assert.equal(checkpointId,base()?.checkpointId,'a stale shared ancestor cannot be used');return freeze(Object.fromEntries((dates||[]).filter(date=>Object.hasOwn(base()?.days||{},date)).map(date=>[date,freeze({full:base().days[date],semantic:base()?.semanticDays?.[date]??null})])));},
     reconciliationBaseWrite:async(checkpointId,spec)=>{
       assert.equal(spec?.format,'study-director.reconciliation-base-update');assert.ok([3,4].includes(spec.version));
+      if(state.failBaseWrite==='false')return false;
+      if(state.failBaseWrite==='throw')throw new Error('QA_FIXTURE ancestry commit failed');
       const current=base();if(!spec.full&&current?.checkpointId!==spec.baseCheckpointId)return false;
       const notes=Object.assign(Object.create(null),spec.full?{}:current?.notes||{}),days=Object.assign(Object.create(null),spec.full?{}:current?.days||{}),semanticDays=Object.assign(Object.create(null),spec.full?{}:current?.semanticDays||{});
       for(const key of spec.deletes||[])delete notes[key];for(const [key,value] of Object.entries(spec.updates||{}))notes[key]=freeze({label:String(value.label),text:String(value.text)});
@@ -606,7 +608,8 @@ let syncWorld=null;
       reviewKept:(options={})=>harness.runtime.controller.reviewKeptVersions(options),
       noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options}),
       handoffSource:()=>providers.readSessionHandoffSource('drive'),
-      claim:request=>providers.claimSessionOwnership('drive',request)
+      claim:request=>providers.claimSessionOwnership('drive',request),
+      diagnostics:harness.diagnosticMarks
     });
   };
   const note=text=>freeze({Shared:freeze({version:2,key:'Shared',text,updatedAt:new Date().toISOString()})});
@@ -768,6 +771,12 @@ let syncWorld=null;
   assert.equal((await B.sync()).cancelled,false);
   const planReview=b.reviews.open().find(review=>review.subject==='personal');
   assert.ok(planReview,'only the competing working-draft edits require review');
+  assert.deepEqual(planReview.kept.plans.savedPlans,b.personal.plans.savedPlans,
+    'retained Personal Data must not reoffer a one-sided, already merged saved-plan addition');
+  assert.equal(planReview.kept.plans.defaultId,b.personal.plans.defaultId,
+    'a one-sided default selection is not an outstanding conflict');
+  assert.equal(planReview.kept.preferences.soundMode,b.personal.preferences.soundMode,
+    'independently kept local sound mode is preserved in the retained alternative');
   assert.equal(b.personal.plans.draft,'07:00 | 30 | Draft B | work | History | pages | 6','a conflicting draft stays local');
   assert.equal(b.personal.plans.savedPlans[0].id,plan.id,'the independent saved-plan addition merges automatically');
   assert.equal(b.personal.plans.defaultId,plan.id,'its one-sided default selection merges with the saved-plan entry');
@@ -1149,6 +1158,11 @@ let syncWorld=null;
   assert.equal(b.personal.preferences.nudge.nudgeAfter,60,'a true same-leaf reminder conflict keeps the local value');
   assert.equal(b.personal.preferences.nudge.breakMinutes,12,'a separate local reminder edit survives');
   assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1,'the one same-leaf reminder conflict remains reviewable');
+  const nudgeAlternative=b.reviews.open().find(review=>review.subject==='personal').kept.preferences.nudge;
+  assert.equal(nudgeAlternative.breakMinutes,b.personal.preferences.nudge.breakMinutes,
+    'the locally authored independent break length is not reintroduced as a review choice');
+  assert.notEqual(nudgeAlternative.nudgeAfter,b.personal.preferences.nudge.nudgeAfter,
+    'only the competing interval is retained as an alternative');
   b.keptSelections={'nudge:nudgeAfter':'use'};
   assert.equal((await B.reviewKept()).reviewed,1,'the review permits selecting exactly the other reminder interval');
   b.keptSelections=null;
@@ -1670,6 +1684,79 @@ let mergeRuleCases=0;
     assert.equal((await A.sync()).cancelled,false);assert.deepEqual(snapshot(a),settled,'a repeated sync changes nothing');
     assert.equal((await B.sync()).cancelled,false);assert.deepEqual(snapshot(b),settled,'nor does a sync of what this device uploaded');
   });
+}
+
+// BF-C6.3 (J): failed ancestry establishment is diagnosed and the
+// verified canonical merge is not misrepresented as a wholly established
+// three-way baseline. A false write receipt is as important as a throw.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,baseline=personal('Ancestry starting point');
+  const a={installationId:'inst_c63_base_a',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,personal:baseline,journal:null};
+  const b={installationId:'inst_c63_base_b',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,personal:baseline,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const previousId=b.reconciliationBase?.checkpointId;
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,quote:'Remote fact 1'})});
+  await A.upload();b.failBaseWrite='false';
+  const first=await B.sync();
+  assert.equal(first.cancelled,false,'a committed, verified merge is not rolled back because local ancestry is unavailable');
+  assert.equal(b.personal.preferences.quote,'Remote fact 1','reconciled Personal Data remains canonical');
+  assert.equal(b.reconciliationBase?.checkpointId,previousId,'a false base write cannot advance the ancestor');
+  assert.ok(B.diagnostics.some(([name])=>name==='reconciliation-ancestry-not-established'),
+    'false ancestry write receipts must be reported');
+  b.failBaseWrite='';
+  assert.equal((await B.sync()).cancelled,false,'a later sync may establish the local ancestry');
+}
+
+// BF-C6.3: semantically matching Pending Reviews must be acknowledged as
+// replicated tombstones, not left in the user-facing count. Content that
+// differs, deletions without a positive receipt, and running sessions wait.
+{
+  const day='2026-08-29';
+  const plan={id:'plan-c63-metadata-only',label:'Study',scheduleText:'06:00 | 45 | Focus | work | Polity | pages | 10',
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'};
+  const local=freeze({...personal('Converged'),plans:freeze({draft:'Draft',savedPlans:freeze([plan]),defaultId:plan.id})});
+  const remote=freeze({...local,plans:freeze({...local.plans,savedPlans:freeze([{...plan,updatedAt:'2026-08-30T09:00:00.000Z'}])})});
+  const note=normalizeArea({key:'Shared',label:'Note',text:'Finished note',updatedAt:'2026-08-29T09:00:00.000Z'});
+  const saved=record(day,'Same content','2026-08-29T09:00:00.000Z');
+  const older={...saved,savedAt:'2026-08-28T12:00:00.000Z',updatedAt:'2026-08-28T12:00:00.000Z',sourceRevision:4};
+  const state={installationId:'inst_c63_converged',records:new Map([[day,saved]]),deletions:[],
+    notes:{Shared:note},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  const open=[
+    pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote}),
+    pendingReviewCodec.create({subject:'note',ref:'Shared',kept:{text:'Finished note'}}),
+    pendingReviewCodec.create({subject:'savedDay',ref:day,kept:older}),
+    pendingReviewCodec.create({subject:'note',ref:'Other',kept:null}),
+    pendingReviewCodec.create({subject:'personal',ref:'personal',kept:personal('Truly other')})
+  ];
+  await state.reviews.ports.pendingReviewsMerge(open);
+  const h=createHarness(state);
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),3,
+    'semantic Personal/Note/Day equality retires each verified alternative exactly once');
+  assert.equal(state.reviews.open().length,2,'unproved deletion and genuinely divergent Personal Data remain open');
+  const rows=await state.reviews.ports.pendingReviewsReadItems(open.slice(0,3).map(review=>review.id));
+  assert.ok(rows.every(row=>row.resolvedAt&&row.kept===null),
+    'all three converged alternatives have durable, content-free resolution receipts');
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),0,'repeated convergence is idempotent');
+}
+{
+  const plan={id:'plan-c63-no-metadata',label:'Metadata neutral',scheduleText:'08:00 | 60 | Focus | work | Ethics | pages | 6',
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'};
+  const local=freeze({...personal('Same'),plans:freeze({draft:null,savedPlans:freeze([plan]),defaultId:plan.id})});
+  const remote=freeze({...local,plans:freeze({...local.plans,savedPlans:freeze([{...plan,updatedAt:'2026-08-30T09:00:00.000Z'}])})});
+  const state={records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1,
+    'an old metadata-only alternative can be resolved without a meaningless plan-choice dialog');
+  assert.equal(h.prompts.filter(item=>item.title==='Kept versions').length,0,
+    'updatedAt-only changes must never become saved-plan choices');
+  assert.deepEqual(state.personal,local,'metadata-only acknowledgement must not rewrite canonical Personal Data');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',mergeRuleCases,preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','a takeover is not undone by an upload saved before it','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
