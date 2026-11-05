@@ -649,6 +649,10 @@ const PlanDraftEditor=(()=>{
   async function confirm(){
     // The textarea is the authoring source of truth. A pending Composer
     // preview may not yet have copied its latest text into lastParsed.
+    // Apply Draft is a deliberate action even when the initial board has
+    // no editing session. Replacing a live Plan still requires Edit Draft.
+    const editing=draftMode;
+    if(!editing&&TASKS.length)return false;
     const draftText=getPlanDraftText();
     clearTimer('preview');
     const projection=createPlanDraftProjection(parseScheduleDraftText(draftText));
@@ -661,16 +665,17 @@ const PlanDraftEditor=(()=>{
     setParsedScheduleDraft(projection.draft.parsed);
     renderSched(projection);
     const epoch=editEpoch;
+    const stillCurrent=()=>editEpoch===epoch&&draftMode===editing&&(editing||TASKS.length===0);
     if(!await save({strictDurability:true}))return false;
-    if(!draftMode||epoch!==editEpoch)return false;
+    if(!stillCurrent())return false;
     if(!ownership.canMutate()||getPlanDraftText()!==draftText){
       setPlanStatus('The working draft changed while saving. Review it and press Done again.',false);
       return false;
     }
-    // Keep Cancel authoritative even while a replacement confirmation is
-    // pending. The existing apply guard rechecks this at final commit time.
+    // Cancel, a new editor session or an intervening live Plan invalidates
+    // this exact action, including while an Apply confirmation is pending.
     return applySchedule({skipNotify:true,source:'plan-board-edit',projection,persistDraft:false,
-      currentEditor:()=>draftMode&&editEpoch===epoch});
+      currentEditor:stillCurrent});
   }
   async function cancel(){
     // The displayed default is not an authored Plan draft when canonical

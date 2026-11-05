@@ -5826,7 +5826,7 @@ function sessionHandoffProblem(error){
 }
 async function continueSessionHere(){
   if(!appCanMutate()||sessionHandoff.step)return false;
-  let previous=null;
+  let recoveredSafety=false;
   // The "Today’s session is ready" pop-up has done its job.
   NoticeCoordinator.resolveEvent('session','session-handoff');
   setSessionHandoff('Checking today’s session…');
@@ -5838,6 +5838,16 @@ async function continueSessionHere(){
       const verified=await AppData.activeSession.load(0,{strict:true});
       session=verified?.ok&&!verified.error&&verified.storage?.idb===true?verified.value:null;
       if(!session)throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN',HANDOFF_UNCERTAIN_MESSAGE);
+      recoveredSafety=true;
+    }
+    // Recovery can adopt a different canonical session. Classify its date
+    // before any today-only continuation, restoration or ownership operation.
+    if(isPreviousActiveSessionRecord(session)){
+      setSessionPanelMode('previous',session);
+      setPlanStatus('This session belongs to a previous study day. Review it without transferring or restarting its timer.',false);
+      return false;
+    }
+    if(recoveredSafety){
       if(sessionFromElsewhere(session)){
         setSessionPanelMode('elsewhere',session);
         setPlanStatus('Earlier ownership uncertainty is resolved. Choose Continue Here again if you still want to move the session.');
@@ -5845,15 +5855,9 @@ async function continueSessionHere(){
       }
       return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     }
-    if(isPreviousActiveSessionRecord(session)){
-      setSessionPanelMode('previous',session);
-      setPlanStatus('This session belongs to a previous study day. Review it without transferring or restarting its timer.',false);
-      return false;
-    }
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
-    previous=ActiveSessionCodec.sanitizeCurrent(session);
     const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text)});
     setSessionHandoff('Starting here…');
     if(moved.previous.status==='suspended')return restoreSuspendedTodaySession();
@@ -5920,9 +5924,18 @@ async function restoreSuspendedTodaySession(){
     const loaded=await AppData.activeSession.load();let session=loaded&&loaded.value||null;
     if(pendingSessionHandoffSafety()){
       if(!await resolveSessionHandoffSafety(session)){setPlanStatus(HANDOFF_UNCERTAIN_MESSAGE,false);return false;}
-      const verified=await AppData.activeSession.load(0,{strict:true});session=verified?.value||null;
-      if(session?.status==='active')return attemptAutoRestoreActiveSession();
+      const verified=await AppData.activeSession.load(0,{strict:true});
+      if(!verified?.ok||verified.error||verified.storage?.idb!==true)
+        throw verified?.error||new Error('Canonical Active Session could not be verified after ownership recovery.');
+      session=verified.value||null;
     }
+    // Date takes precedence over status and ownership after a safety repair.
+    if(isPreviousActiveSessionRecord(session)){
+      setSessionPanelMode('previous',session);
+      setPlanStatus('This session belongs to a previous study day. Review it without restarting its timer.',false);
+      return false;
+    }
+    if(isRestorableActiveSession(session))return attemptAutoRestoreActiveSession();
     if(!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
     if(sessionFromElsewhere(session))return continueSessionHere();
     const snapshot=activeSessionSnapshot(session);
