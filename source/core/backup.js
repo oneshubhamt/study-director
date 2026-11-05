@@ -989,6 +989,14 @@ function syncSavedDayReviews(plan,settled){
   return freeze(reviews);
 }
 const sessionDecision=(state,value=null,kept=null)=>freeze({state:String(state||''),value:value||null,kept:kept||null});
+// Only the verified incoming checkpoint's actual Saved Day can prove that
+// the former owner's study evidence is already recorded. This comparison
+// remains valid after the old runtime yields and captures its final tick.
+function checkpointSavedDayCoversSession(parsed,session){
+  if(!session)return false;
+  const saved=(parsed?.records||[]).find(record=>record?.recordKind==='study'&&record.date===session.date);
+  return !!saved&&DailyRecordCodec.savedDayCoversSessionEvidence(saved,session,{allowAdvances:true});
+}
 // Active Session reconciliation has two independent dimensions:
 //   content ancestry -> semantic fingerprints
 //   execution ownership -> Drive's monotonic ownership claim
@@ -1003,7 +1011,7 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   const sameContent=!!contentMine&&contentMine===contentTheirs,claimApplies=!!(sessionClaim&&sessionClaim.applies),claimedHere=!!(claimApplies&&sessionClaim.state==='owned'&&sessionClaim.ownedHere),claimedAway=!!(claimApplies&&sessionClaim.state==='owned'&&!sessionClaim.ownedHere),releasedAway=!!(claimApplies&&sessionClaim.state==='released'&&!sessionClaim.ownedHere);
   const observed=claimApplies?String(sessionClaim.observedContentFingerprint||''):'',hasObserved=/^[a-f0-9]{64}$/u.test(observed);
   const savedLocalDay=local&&(parsed?.records||[]).find(record=>record?.recordKind==='study'&&record.date===local.date)||null;
-  const savedCoversLocal=!!savedLocalDay&&DailyRecordCodec.savedDayCoversSessionEvidence(savedLocalDay,local,{allowAdvances:true});
+  const savedCoversLocal=checkpointSavedDayCoversSession(parsed,local);
   // The legacy shared hash proves exact canonical identity, not semantic
   // ancestry. A separately acknowledged, canonically covered Saved Day can
   // also prove that retiring this local study evidence loses no work.
@@ -1021,7 +1029,10 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
     if(incoming&&String(incoming.runningOn||'')===me)return sessionDecision(local?'yield-hold':'local');
     if(!local)return sessionDecision('incoming');
     if((!incoming||incoming.date>local.date)&&!savedCoversLocal)return sessionDecision('yield');
-    return sessionDecision(contentMine===observed?'incoming':'yield');
+    // Post-handoff study on the old device need not become a false Kept
+    // Version when the verified new owner's Saved Day demonstrably includes
+    // it. The final quiescence check below still retains any later new tick.
+    return sessionDecision(contentMine===observed||savedCoversLocal?'incoming':'yield');
   }
   // A released claim is written only after the claimant published its ended
   // state. If that newest checkpoint has no Active Session, the old owner can
@@ -1029,7 +1040,7 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   // for review before clearing it.
   if(releasedAway&&hasObserved&&!incoming){
     if(!local)return sessionDecision('local');
-    return sessionDecision(contentMine===observed&&savedCoversLocal?'incoming':'yield');
+    return sessionDecision(savedCoversLocal?'incoming':'yield');
   }
 
   if(claimedHere){
@@ -1132,6 +1143,7 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     // Yield may capture previously unpersisted focus/timer progress. The
     // earlier settlement decision cannot silently discard that new evidence.
     if(frozen&&!Canonical.same(ActiveSessionCodec.contentValue(before),ActiveSessionCodec.contentValue(frozen))&&
+        !checkpointSavedDayCoversSession(parsed,frozen)&&
         !(await keepSession(frozen)))return freeze({needsDecision:true});
   }
   if(sync&&state==='claimed-conflict'){
