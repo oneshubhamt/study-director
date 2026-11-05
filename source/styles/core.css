@@ -1436,6 +1436,17 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .interaction-group{display:grid;gap:8px;min-width:0;margin:0;padding:11px;border:1px solid var(--sd-line-neutral-soft)}
 .interaction-group-title{padding:0 5px;color:var(--sd-color-info);letter-spacing:1.4px}
 .interaction-group-description{color:var(--sd-color-text-secondary);line-height:1.4}
+.interaction-dialog.with-comparison{width:min(900px,calc(100vw - 24px));max-width:900px}
+.interaction-comparison{min-width:0;padding:10px;border:1px solid var(--sd-line-neutral-soft);border-radius:var(--sd-shape-control-radius)}
+.interaction-comparison>summary{cursor:pointer;font-weight:600;color:var(--sd-color-info)}
+.interaction-comparison-status{margin:9px 0;color:var(--sd-color-text-secondary);font-size:var(--sd-type-role-copy-compact-size);line-height:1.45}
+.interaction-comparison-panes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;min-width:0}
+.interaction-comparison-pane{display:grid;gap:6px;min-width:0}
+.interaction-comparison-pane>strong{font-size:var(--sd-type-role-copy-compact-size);color:var(--sd-color-text-primary)}
+.interaction-comparison-pane>pre{max-height:min(45dvh,420px);min-height:110px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:10px;margin:0;border:1px solid var(--sd-line-neutral-soft);border-radius:var(--sd-shape-control-radius);background:var(--sd-color-surface-2);color:var(--sd-color-text-primary);font:400 var(--sd-type-role-copy-compact-size)/1.55 var(--sd-font-mono);user-select:text}
+.interaction-comparison-pane>pre:focus-visible{outline:2px solid var(--sd-color-info);outline-offset:2px}
+@media(max-width:600px){.interaction-comparison-panes{grid-template-columns:minmax(0,1fr)}.interaction-comparison-pane>pre{max-height:30dvh}}
+
 .interaction-checks{display:grid;gap:6px;margin-top:2px}
 .interaction-checkbox-row{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:start;gap:8px;padding:7px 9px;border:1px solid var(--sd-line-neutral-soft);background:rgba(var(--sd-rgb-neutral-overlay),.012);cursor:pointer}
 .interaction-checkbox{width:17px;height:17px;margin:1px 0 0;accent-color:var(--sd-color-accent-primary);cursor:pointer}
