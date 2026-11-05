@@ -398,6 +398,50 @@ plan.draft.preview({silent:true,enterDraft:false});
 assert.equal(state().label,'DRAFT INVALID');
 assert.equal(state().mode,'invalid');
 
+// Apply Draft on an initial board is a deliberate action, even without an
+// editor session. Failed storage commits and intervening edits still block it.
+canonicalDraft=null;
+ids['plan-input'].value='First authored plan';
+plan.draft.preview({silent:true,enterDraft:false});
+assert.equal(ids['plan-done-edit-btn'].textContent,'Apply Draft');
+assert.equal(ids['plan-done-edit-btn'].hidden,false);
+assert.equal(ids['plan-done-edit-btn'].disabled,false);
+const firstWrites=draftWrites,firstApplies=applyCount;
+writeFailure=true;
+assert.equal(await plan.draft.confirm(),false,'failed first draft save blocks application');
+assert.equal(draftWrites,firstWrites+1);
+assert.equal(applyCount,firstApplies);
+assert.equal(tasks.length,0);
+writeFailure=false;
+
+// An edit begun during the asynchronous write invalidates the old Apply.
+let releaseFirstApply;
+blockedWrite=new Promise(resolve=>{releaseFirstApply=resolve;});
+const pendingFirstApply=plan.draft.confirm();
+plan.draft.enter();
+releaseFirstApply();blockedWrite=null;
+assert.equal(await pendingFirstApply,false);
+assert.equal(tasks.length,0);
+assert.equal(await plan.draft.cancel(),true);
+
+// The displayed default is not persisted by merely viewing it. Explicitly
+// pressing Apply Draft is authorship, requiring one canonical strict write.
+canonicalDraft=null;
+ids['plan-input'].value='Default';
+plan.draft.preview({silent:true,enterDraft:false});
+assert.equal(ids['plan-done-edit-btn'].hidden,false);
+const beforeInitialWrites=draftWrites,beforeInitialApply=applyCount;
+assert.equal(await plan.draft.confirm(),true,'enabled Apply Draft must apply the first Plan');
+assert.equal(draftWrites,beforeInitialWrites+1);
+assert.equal(saveOptions.at(-1).strictDurability,true);
+assert.equal(canonicalDraft,'Default');
+assert.equal(applyCount,beforeInitialApply+1);
+assert.equal(tasks[0].name,'Default');
+assert.equal(state().label,'LIVE');
+const beforeHiddenDone=draftWrites;
+assert.equal(await plan.draft.confirm(),false,'closed live Plan cannot be replaced by hidden Done');
+assert.equal(draftWrites,beforeHiddenDone);
+
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
