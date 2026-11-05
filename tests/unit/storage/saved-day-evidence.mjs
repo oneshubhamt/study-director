@@ -69,4 +69,18 @@ const setupOnly={...withActive,snapshot:{...withActive.snapshot,practice:{runs:[
 assert.equal(covers(record,setupOnly,{allowAdvances:true}),true,
   'An untouched, zero-time setup is not saved study evidence.');
 
+// A running active attempt has accrued time since its anchor, even before
+// the next pause writes that time into currentMs. The persisted session
+// timestamp bounds that evidence; an unavailable clock fails closed.
+const runningFrom=Date.parse('2026-09-17T08:00:00.000Z');
+const stillRunning={...withActive,snapshot:{...withActive.snapshot,
+  updatedAt:'2026-09-17T08:00:10.000Z',
+  practice:{runs:[],active:{...practiceActive,anchorMs:runningFrom}}}};
+assert.equal(covers({...withPartial,practiceRuns:[{...savedPractice,unitMs:[61000,39000]}]},stillRunning,{allowAdvances:true}),false,
+  'Saved Day evidence must include elapsed time since the observed practice anchor.');
+assert.equal(covers({...withPartial,practiceRuns:[{...savedPractice,unitMs:[61000,40000]}]},stillRunning,{allowAdvances:true}),true,
+  'A finalized run with at least all observed elapsed time covers a running snapshot.');
+assert.equal(covers(withPartial,{...stillRunning,snapshot:{...stillRunning.snapshot,updatedAt:null}},{allowAdvances:true}),false,
+  'Missing snapshot clock evidence cannot prove a running attempt was recorded.');
+
 console.log(JSON.stringify({status:'PASS',suite:'saved-day-evidence',revisionsAreLocal:true,coveragePreservesActualWork:true}));
