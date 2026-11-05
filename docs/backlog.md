@@ -4,6 +4,16 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
 
 ## Bugs reported by the owner (2026-11-03)
 
+**Top priority (2026-11-05): local data disappears by itself on the phone and the iPad.** On F20, the phone lost its study data on 2026-11-05 (and probably on 2026-11-04) without browser data being cleared, and the iPad lost its data the same way, though Safari's data was never cleared. Syncing with Drive brought everything back. It did not happen before multi-device sync and profiles. An offline-first app must never lose local data by itself: deep audit first, before other bugs.
+
+- **Suspects to check, in this order:**
+  1. Profiles and per-profile storage: the app opening a different or new profile's (empty) storage, for example after a change of device id or a profile registry read that fails, so the data is still there but not shown.
+  2. Start-up and update paths: database upgrades, read-once migrations, and the compatibility removals, which might drop records an update no longer reads.
+  3. Code that clears or replaces local data: the storage-reset flow, Library clear and its recovery journal, restore rollback, sync apply or handoff ("Continue here") replacing local data with an empty or older state.
+  4. Browser eviction: Safari's 7-day limit on storage for sites used in a tab and not added to the Home Screen; whether persistent storage was really granted on each device.
+- **Evidence to capture next time, before syncing:** Copy diagnostics (Local storage health, Profiles, journals, Unsupported data); a screenshot of what the app showed (an empty app, the first-start form, or "No local study data found"); and, for each device, the browser and whether the app runs from the Home Screen or a browser tab.
+- **Then:** a test for each path found, at the right layer, and a guard so that no automatic path can leave local data emptier than it found it without the person's choice.
+
 **Bugs come first** (owner, 2026-11-03). Fix every bug in this section before any new feature, performance work or other improvement in this file. The test programme below is the one exception: it finishes first. Each fix comes with a test that would have caught it. None of these has been investigated yet.
 
 1. **Plan opens in editing mode after Continue here.** Taking over an active session from another device with Continue here leaves the Plan board in editing mode. The handed-over plan should simply be applied, with no edit in progress.
