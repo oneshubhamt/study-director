@@ -1871,4 +1871,64 @@ let mergeRuleCases=0;
   assert.deepEqual(state.personal,local,'metadata-only acknowledgement must not rewrite canonical Personal Data');
 }
 
+
+// BF-C8.1: an unknown shared ancestor must not manufacture a Personal Data
+// conflict solely because identical authored Saved Plans have new timestamps.
+for(const changedAuthoredPlan of [false,true]){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const basePlan=freeze({id:'plan-c81-semantic',label:'Reading',
+    scheduleText:'08:00 | 60 | Reading | work | Polity | pages | 20',
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'});
+  const remotePlan=freeze({...basePlan,createdAt:'2026-08-30T08:00:00.000Z',
+    updatedAt:'2026-08-30T09:00:00.000Z',
+    ...(changedAuthoredPlan?{scheduleText:'08:00 | 60 | Different | work | Polity | pages | 20'}:{})});
+  const here=freeze({...personal('Same author'),plans:freeze({draft:'My draft',
+    savedPlans:freeze([basePlan]),defaultId:basePlan.id})});
+  const there=freeze({...here,plans:freeze({...here.plans,savedPlans:freeze([remotePlan])})});
+  const a={installationId:'inst_c81_remote',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:there,journal:null};
+  const b={installationId:'inst_c81_local',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:here,journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.reviews.open().filter(item=>item.subject==='personal').length,
+    changedAuthoredPlan?1:0,'No-ancestry decisions must consider authored Saved Plan meaning, not dates.');
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.reviews.open().filter(item=>item.subject==='personal').length,
+    changedAuthoredPlan?1:0,'Repeated sync does not manufacture an additional kept Personal Data review.');
+}
+
+// The Kept Versions choice must offer full original text for an independently
+// authored Plan draft, not a preview truncated before the actual divergence.
+{
+  const firstLine='06:00 | 40 | Ethics | work | Ethics | pages | 4';
+  const localDraft=Array.from({length:12},(_,i)=>i===11?firstLine.replace('Ethics','Polity'):firstLine).join('\n');
+  const keptDraft=Array.from({length:12},()=>firstLine).join('\n');
+  const local=freeze({...personal('Draft reviewer'),plans:freeze({draft:localDraft,savedPlans:freeze([]),defaultId:null})});
+  const remote=freeze({...personal('Draft reviewer'),plans:freeze({draft:keptDraft,savedPlans:freeze([]),defaultId:null})});
+  const state={installationId:'inst_c81_draft_compare',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  const draftGroup=h.prompts.find(item=>item.title==='Kept versions').groups.find(item=>item.label==='Plan · Working draft');
+  assert.deepEqual(draftGroup.comparison,{current:localDraft,kept:keptDraft},
+    'An accessible full-text comparison can display the actual difference beyond the short preview.');
+  assert.equal(state.personal.plans.draft,localDraft,'Inspecting alternatives never changes the local draft.');
+}
+{
+  const state={installationId:'inst_c81_absent_note',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:personal('Missing note'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'note',ref:'AbsentNote',kept:{text:'Text preserved for later'}})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,0);
+  const group=h.prompts.find(item=>item.title==='Kept versions').groups.find(item=>item.label==='Note · absent here');
+  assert.match(group.description,/Recently deleted/u);
+  assert.match(group.description,/partial|incomplete|not enough/iu,
+    'The dialog explains why a retained field-only alternative cannot create a whole Note.');
+  assert.equal(state.reviews.open().length,1,'Keeping the alternative cannot silently discard its text.');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',mergeRuleCases,preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','a takeover is not undone by an upload saved before it','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));
