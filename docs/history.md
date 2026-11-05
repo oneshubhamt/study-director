@@ -18,6 +18,7 @@ A short record of past work. Current behaviour is in the area docs; this page ex
 | 1 Nov | Insights opens from an idle pre-computed model; a Drive sync that failed and looped on every catch-up fixed; Drive backups made faster; Version History hides Replace for versions missing attachments. |
 | 1–2 Nov | One sync and background status indicator; Continue Here feedback; the Connect Google Drive card; notifications as one stack with kinds, Recent and new sounds; clickable pop-ups; the refined profile panel. |
 | 2 Nov | Docs reorganised into area docs; the journal and per-pass ledgers retired. |
+| 3–5 Nov | BF-1/BF-2 and BF-C1–C8 separated Plan drafts from session handoff, strengthened Saved Day evidence and ownership recovery, and narrowed/clarified Kept Versions. Final source follow-ups included the 24-hour Practice Pacer cap and full saved-plan comparisons; physical cross-device/browser acceptance remained open. Detailed implementation ledgers live in Git history. |
 
 ## Ideas dropped or replaced
 
