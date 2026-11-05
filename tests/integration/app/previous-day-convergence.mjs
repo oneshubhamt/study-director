@@ -9,6 +9,8 @@ function production(signature){
   return app.slice(start,end+2);
 }
 const previous=production('function isPreviousActiveSessionRecord(session){');
+const continueHere=production('async function continueSessionHere(){');
+const restoreSuspended=production('async function restoreSuspendedTodaySession(){');
 const restore=production('async function attemptAutoRestoreActiveSession(){');
 const choose=production('async function handlePreviousActiveSession(session){');
 const reminder=production('async function revalidateSaveReminderAfterCanonicalConvergence(){');
@@ -49,6 +51,123 @@ for(const [label,state,covered,expected] of [
   vm.runInContext(previous+'\n'+restore+'\nglobalThis.restore=attemptAutoRestoreActiveSession;',context);
   await context.restore();
   assert.equal(events.at(-1),expected,label+' must not restart or transfer historical work');
+}
+
+// An ownership-safety recovery can adopt a different canonical session.
+// Classify that *verified* record before any Continue Here or Restore path.
+for(const status of ['active','suspended'])for(const owner of ['inst_here','inst_other']){
+  const restored=session(status,owner,day),events=[],handoff={step:'',error:''};
+  let current=session('active','inst_here',today),safety=true;
+  const ctx=vm.createContext({
+    appCanMutate:()=>true,sessionHandoff:handoff,
+    setSessionHandoff:(step='',error='')=>{handoff.step=step;handoff.error=error;},
+    NoticeCoordinator:{resolveEvent:()=>{}},
+    AppData:{activeSession:{load:async(_retry,options)=>{
+      if(options?.strict)events.push('strict-read');
+      return {ok:true,value:current,storage:{idb:true}};
+    }}},
+    pendingSessionHandoffSafety:()=>safety,
+    resolveSessionHandoffSafety:async()=>{events.push('resolve-safety');safety=false;current=restored;return true;},
+    isValidIsoDate:()=>true,todayISO:()=>today,isCanonicalScheduleText:()=>true,
+    activeSessionSnapshot:s=>s?.snapshot,
+    DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
+    sessionFromElsewhere:s=>s.runningOn!=='inst_here',
+    sessionRunsElsewhere:s=>s.status!=='suspended'&&s.runningOn!=='inst_here',
+    setSessionPanelMode:mode=>events.push(mode),setPlanStatus:()=>{},
+    attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},
+    restoreSuspendedTodaySession:async()=>{events.push('restore');return true;},
+    confirmSessionTakeover:async()=>true,
+    transferSessionOwnershipHere:async()=>{events.push('claim');return {previous:restored,session:restored};},
+    AppDiagnostics:{capture:()=>{}},sessionHandoffProblem:e=>String(e?.message||e),
+    Interactions:{notify:()=>{}},navigator:{onLine:true}
+  });
+  vm.runInContext(previous+'\n'+continueHere+'\nglobalThis.continueAfterSafety=continueSessionHere;',ctx);
+  assert.equal(await ctx.continueAfterSafety(),false,status+' / '+owner+' must not continue a historical timer');
+  assert.deepEqual(events.slice(0,2),['resolve-safety','strict-read']);
+  assert.ok(events.includes('previous'),'historical session must remain visible for Review');
+  assert.ok(!events.some(e=>['timer','restore','claim','elsewhere'].includes(e)),'no today-only execution');
+}
+
+for(const status of ['active','suspended'])for(const owner of ['inst_here','inst_other']){
+  const events=[],before=session('suspended','inst_here',today),after=session(status,owner,day);
+  let safety=true;
+  const ctx=vm.createContext({
+    appCanMutate:()=>true,
+    AppData:{activeSession:{load:async(_retry,options)=>{
+      if(options?.strict){events.push('strict-read');return {ok:true,value:after,storage:{idb:true}};}
+      return {ok:true,value:before,storage:{idb:true}};
+    }}},
+    pendingSessionHandoffSafety:()=>safety,
+    resolveSessionHandoffSafety:async()=>{events.push('resolve-safety');safety=false;return true;},
+    isValidIsoDate:()=>true,todayISO:()=>today,isCanonicalScheduleText:()=>true,
+    activeSessionSnapshot:s=>s?.snapshot,
+    DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
+    isSuspendedActiveSession:s=>s?.status==='suspended'&&s.date===today,
+    sessionFromElsewhere:s=>s?.runningOn!=='inst_here',
+    setSessionPanelMode:mode=>events.push(mode),setPlanStatus:()=>{},
+    attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},
+    continueSessionHere:async()=>{events.push('claim');return true;},
+    applyStoredSessionSnapshot:()=>{events.push('restore');return true;},
+    goTab:async()=>{},Interactions:{notify:()=>{}}
+  });
+  vm.runInContext(previous+'\n'+restoreSuspended+'\nglobalThis.restoreAfterSafety=restoreSuspendedTodaySession;',ctx);
+  assert.equal(await ctx.restoreAfterSafety(),false,status+' / '+owner+' must not restore historical session');
+  assert.deepEqual(events.slice(0,2),['resolve-safety','strict-read']);
+  assert.ok(events.includes('previous'),'recovered previous day must retain its Review action');
+  assert.ok(!events.some(e=>['none','timer','restore','claim'].includes(e)),'historical work must not vanish or execute');
+}
+
+// A successful latch resolution without a verified canonical IndexedDB read
+// cannot authorize a stale restored timer.
+{
+  const events=[];
+  const ctx=vm.createContext({
+    appCanMutate:()=>true,
+    AppData:{activeSession:{load:async(_retry,options)=>options?.strict
+      ?{ok:false,error:new Error('Injected canonical read failure'),value:session('active','inst_here',today),storage:{idb:false}}
+      :{ok:true,value:session('suspended','inst_here',today)}}},
+    pendingSessionHandoffSafety:()=>true,resolveSessionHandoffSafety:async()=>true,
+    isPreviousActiveSessionRecord:()=>false,isSuspendedActiveSession:()=>true,
+    setSessionPanelMode:mode=>events.push(mode),setPlanStatus:text=>events.push(text),
+    attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},
+    applyStoredSessionSnapshot:()=>{events.push('restore');return true;}
+  });
+  vm.runInContext(restoreSuspended+'\nglobalThis.restoreFailedRead=restoreSuspendedTodaySession;',ctx);
+  assert.equal(await ctx.restoreFailedRead(),false);
+  assert.ok(events.some(e=>String(e).includes('Injected canonical read failure')));
+  assert.ok(!events.includes('timer')&&!events.includes('restore'));
+}
+
+// An accepted safety resolution on the *current* day must preserve the
+// existing local restore and elsewhere outcomes, not regress to "none".
+for(const [status,owner,expected] of [
+  ['active','inst_here','timer'],
+  ['active','inst_other','timer'],
+  ['suspended','inst_here','restore'],
+  ['suspended','inst_other','claim']
+]){
+  const events=[],after=session(status,owner,today);
+  let safety=true;
+  const ctx=vm.createContext({
+    appCanMutate:()=>true,
+    AppData:{activeSession:{load:async(_retry,options)=>options?.strict
+      ?{ok:true,value:after,storage:{idb:true}}
+      :{ok:true,value:session('suspended','inst_here',today)}}},
+    pendingSessionHandoffSafety:()=>safety,resolveSessionHandoffSafety:async()=>{safety=false;return true;},
+    isPreviousActiveSessionRecord:()=>false,
+    isSuspendedActiveSession:s=>s?.status==='suspended'&&s.date===today,
+    sessionFromElsewhere:s=>s.runningOn!=='inst_here',
+    setSessionPanelMode:mode=>events.push(mode),setPlanStatus:()=>{},
+    attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},
+    continueSessionHere:async()=>{events.push('claim');return true;},
+    activeSessionSnapshot:()=>({}),
+    applyStoredSessionSnapshot:()=>{events.push('restore');return true;},
+    goTab:async()=>{},Interactions:{notify:()=>{}}
+  });
+  vm.runInContext(restoreSuspended+'\nglobalThis.restoreToday=restoreSuspendedTodaySession;',ctx);
+  await ctx.restoreToday();
+  assert.ok(events.includes(expected),status+' / '+owner+' current-day routing preserved');
+  assert.ok(!events.includes('none'));
 }
 
 // The choice dialog must expose a safe local recovery for a remote-owned
