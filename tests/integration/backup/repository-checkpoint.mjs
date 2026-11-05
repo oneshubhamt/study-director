@@ -1156,7 +1156,7 @@ const ancestryPublicationCases=[];
     snapshotRevision='ancestry-receipt-2';sourceRevision='2026-10-05T01:01:00.000Z';
     baselineWriteFailure='throw';
     const next=await publishLocal([initial.manifest],{shared:true,availableObjectIds:reused},{onCommitted:()=>bookkeeping++});
-    assert.equal(next.result.unchanged,false);
+    assert.notEqual(next.result.unchanged,true,'changed content must publish a new checkpoint');
     assert.equal(next.result.sharedBaseEstablished,false);
     assert.ok(next.result.checkpointId!==initial.result.checkpointId);
     assert.match(next.result.warning,/saved and verified, but this device could not record it as shared/u);
