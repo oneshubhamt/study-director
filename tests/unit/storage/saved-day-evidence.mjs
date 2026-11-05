@@ -35,4 +35,38 @@ assert.equal(covers({...record,results:{t1:{...record.results.t1,actualSeconds:1
   'Exact evidence mode rejects changed recorded time.');
 assert.equal(covers({...record,results:{t1:{...record.results.t1,actualSeconds:1900}}},session,{allowAdvances:true}),true,
   'Coverage mode can accept later recorded study time.');
+
+// An unfinished Practice Pacer attempt is actual study evidence, not merely
+// the already-finalized practice.runs array. Matching task/configuration and
+// completed units must be covered by a separate canonical finalized run.
+const practiceActive={taskId:'t1',targetMs:60000,unitMs:[61000],currentMs:30000,
+  anchorMs:null,pauseCause:'manual',cueStage:0,totalUnits:3};
+const withActive={...session,snapshot:{...session.snapshot,
+  practice:{runs:[],active:practiceActive}}};
+assert.equal(covers(record,withActive,{allowAdvances:true}),false,
+  'A Saved Day without the unfinished attempt cannot cover an active Practice Pacer run.');
+const savedPractice={targetMs:60000,unitMs:[61000,30000],partial:true,taskId:'t1',totalUnits:3};
+const withPartial={...record,practiceRuns:[savedPractice]};
+assert.equal(covers(withPartial,withActive),true,
+  'A finalized partial run with exact observed units covers the prior paused attempt.');
+assert.equal(covers({...withPartial,practiceRuns:[{...savedPractice,unitMs:[61000,40000]}]},withActive),false,
+  'Exact coverage does not silently accept progressed current units.');
+assert.equal(covers({...withPartial,practiceRuns:[{...savedPractice,unitMs:[61000,40000]}]},withActive,{allowAdvances:true}),true,
+  'Later completed practice time may cover recorded earlier active evidence.');
+for(const changed of [
+  {...savedPractice,taskId:'unrelated-task'},
+  {...savedPractice,targetMs:90000},
+  {...savedPractice,unitMs:[60000,30000]},
+  {...savedPractice,unitMs:[61000,20000]}
+])assert.equal(covers({...withPartial,practiceRuns:[changed]},withActive,{allowAdvances:true}),false,
+  'An unrelated task, changed settings, reduced time or changed finished unit never proves the same active work.');
+const withFinishedAndActive={...withActive,snapshot:{...withActive.snapshot,
+  practice:{runs:[savedPractice],active:practiceActive}}};
+assert.equal(covers(withPartial,withFinishedAndActive,{allowAdvances:true}),false,
+  'One Saved Day run cannot cover both an earlier distinct run and the active attempt.');
+const setupOnly={...withActive,snapshot:{...withActive.snapshot,practice:{runs:[],
+  active:{...practiceActive,unitMs:[],currentMs:0}}}};
+assert.equal(covers(record,setupOnly,{allowAdvances:true}),true,
+  'An untouched, zero-time setup is not saved study evidence.');
+
 console.log(JSON.stringify({status:'PASS',suite:'saved-day-evidence',revisionsAreLocal:true,coveragePreservesActualWork:true}));
