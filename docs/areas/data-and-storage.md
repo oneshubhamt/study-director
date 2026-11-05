@@ -82,7 +82,6 @@ A newer database opens as it is, never upgraded or downgraded. If a store this b
 
 For this to keep working, a later build bumps a record's `version` when its shape changes, gives new appMeta families names an older build does not know, and treats removing or re-keying a store as a change that older builds meet by leaving the profile alone.
 
-## Emergency copies
 ## Local durability and failure domains
 
 **Authority.** IndexedDB is the working authority for canonical structured study data; attachment bytes live in OPFS and become referencable only after verification. UI state and browser-storage rescue copies are not independent archives. Canonical acknowledgements, revision/ownership checks, recovery journals and verified backup/restore protect different failure modes; none substitutes for the others.
@@ -97,6 +96,10 @@ For this to keep working, a later build bumps a record's `version` when its shap
 
 **Acceptance principle.** Preserve the strong local-first design; prioritize evidence of actual gaps, failure injection and honest UI status over blanket “data can never disappear” guarantees. The current follow-up is tracked in [BF-C7](../backlog.md#bf-c7--post-c6-correctness-follow-up-and-durability-gate-open-2026-11-05).
 
+
+## Emergency copies
+
+**BF-C7.4 audit correction (2026-11-05):** Current Notes enter a 250-ms shared save lane immediately and are transactionally committed with strict IndexedDB durability, but an emergency localStorage note copy is **not** written on every keystroke. The rescue copy is created on a failed write and on page-exit protection; a hard termination inside the uncommitted write window may lose the very latest note edit. Debounced Plan-draft writes use default durability and explicit Apply/Done/Cancel barriers use strict durability. Reflection Drafts are no longer an independently persisted store in the current backup format; current Review work is protected through Active Session evidence and the strict, verified Saved Day commit. These are current-source findings, not the older SDVB74J timing/model assumptions. Full source and QA matrix: [BF-C7.4 audit](../BF-C7.4-STORAGE-DURABILITY-AUDIT.md).
 
 **Emergency copies.** When IndexedDB fails, the session recovery copy, unsaved notes, delete recovery and fallback Saved Days share one browser-storage budget (`localRescueBytes`, 4 MiB) in that priority order. Each copy may use what the higher-priority copies leave, up to its own ceiling, so the most important copy is never crowded out.
 
