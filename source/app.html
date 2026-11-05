@@ -4214,6 +4214,10 @@ async function promptSaveToday(){
         cleanDayRevision(loaded.value.snapshot?.contentRevision)===cleanDayRevision(TimerState.contentRevision))
       evidence=ActiveSessionCodec.sanitizeCurrent(loaded.value);
   }catch(error){AppDiagnostics.capture('session.save-reminder-evidence',error,'warn');}
+  // A temporarily inaccessible or lagging canonical session must not lose
+  // the exact live work that caused the reminder. This is memory-only
+  // evidence, not a claim of persisted Active Session data.
+  if(!evidence)evidence=liveSaveReminderEvidence(date);
   if(saveReminderDate===date)return;
   saveReminderDate=date;saveReminderEvidence=evidence;saveReminderGeneration+=1;
   sessionSafetyMessage=`Review reminder: ${prettyDate(date)} has unsaved study data. Open Review and Save Today to Library.`;
