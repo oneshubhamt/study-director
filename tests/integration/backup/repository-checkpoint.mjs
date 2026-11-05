@@ -1219,5 +1219,73 @@ assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','
   }
 }
 
+// A local ancestry write can fail at the same time as the durable retry
+// marker. The background provider must still attempt the verified checkpoint
+// completion while its in-memory ancestry debt is open, and it must not mark
+// the upload as fully synchronized until that receipt is repaired.
+{
+  const source=fs.readFileSync('source/core/backup-provider.js','utf8'),
+    start=source.indexOf('  async function retryPendingProviderBackup('),
+    end=source.indexOf('\n  }\n  // Opaque canonical timestamps',start);
+  assert.ok(start>=0&&end>start,'production automatic provider retry function exists');
+  const retrySource=source.slice(start,end+4),selected={id:'google-drive',label:'Google Drive',shared:true};
+  const state={ancestryPending:true},events=[];let marked=0,saved=0,cleared=0,ready=false;
+  const ctx=vm.createContext({
+    freeze:Object.freeze,
+    syncState:()=>state,pendingRetryState:async()=>null,providerPublications:new Map(),
+    automaticNeeded:()=>false,changeNoted:false,
+    automaticHooks:{ready:async()=>false},
+    presentation:{begin:()=>({finish:result=>events.push(result),update:()=>{}})},
+    saveRepositoryProvider:async()=>{
+      saved++;
+      if(ready)state.ancestryPending=false;
+      return {sharedBaseEstablished:ready,checkpointId:'cp_'+('b'.repeat(32)),sourceRevision:'2026-11-05T00:00:00.000Z'};
+    },
+    publicationCoversPending:()=>true,
+    clearPendingRetry:async()=>{cleared++;return true;},
+    markPendingRetry:async()=>{marked++;return false;}, // storage unavailable
+    notifyStatus:()=>{},AppDiagnostics:{capture:()=>{}}
+  });
+  vm.runInContext(retrySource+'\nglobalThis.retry=retryPendingProviderBackup;',ctx);
+  const incomplete=await ctx.retry(selected);
+  assert.equal(incomplete.status,'pending');
+  assert.equal(incomplete.reason,'ancestry');
+  assert.equal(saved,1,'in-memory ancestry debt bypasses an unavailable retry marker');
+  assert.equal(marked,1,'durable marker is attempted, not assumed');
+  assert.equal(cleared,0,'no retry marker may be cleared on an ancestry failure');
+  assert.match(events.at(-1).message,/shared ancestry still needs retry/u);
+  assert.equal(events.at(-1).lifecycle,'failed');
+  ready=true;
+  const recovered=await ctx.retry(selected);
+  assert.equal(recovered.status,'completed');
+  assert.equal(saved,2,'once storage recovers the same publication pathway repairs ancestry');
+  assert.equal(cleared,1);
+  assert.equal(state.ancestryPending,false);
+  assert.match(events.at(-1).message,/Backed up to Google Drive/u);
+  assert.equal((await ctx.retry(selected)).reason,'none','settled retry does not create another checkpoint');
+
+  const warningSource=source.slice(source.indexOf('  function sharedAncestryOutcome('),
+    source.indexOf('\n  function sharedSyncing(',source.indexOf('  function sharedAncestryOutcome(')));
+  const notices=[],repair={ancestryPending:false,failed:false,behind:false,syncedAt:''};
+  const warningCtx=vm.createContext({
+    syncState:()=>repair,
+    presentation:{notice:(_id,key,message)=>notices.push({key,message}),resolve:(_id,key)=>notices.push({key,cleared:true})},
+    notifyStatus:()=>{},
+    Date
+  });
+  vm.runInContext(warningSource+'\nglobalThis.record=sharedAncestryOutcome;',warningCtx);
+  warningCtx.record(selected,false);
+  assert.equal(repair.ancestryPending,true);
+  assert.equal(repair.failed,true);
+  assert.equal(repair.behind,true,'a failed ancestry receipt must trigger resynchronization even without the durable marker');
+  assert.equal(repair.syncedAt,'');
+  assert.equal(notices.at(-1).key,'sync-ancestry');
+  warningCtx.record(selected,true);
+  assert.equal(repair.ancestryPending,false);
+  assert.equal(repair.failed,false);
+  assert.ok(Number.isFinite(Date.parse(repair.syncedAt)),'success is timestamped only after ancestry establishment');
+  assert.equal(notices.at(-1).cleared,true);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
 await import('../../helpers/session-ownership-claim-regression.mjs');
