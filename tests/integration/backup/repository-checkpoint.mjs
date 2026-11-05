@@ -25,7 +25,7 @@ const AUDIO_BYTES=300*1024*1024,AUDIO_HASH='a'.repeat(64);
 class VirtualLargeBlob extends Blob{get size(){return AUDIO_BYTES;}}
 let audioBlob=new VirtualLargeBlob(['x'],{type:'audio/mpeg'}),publicationProtection=null;
 const releasedFiles=[];
-let dailyRecordCanonical=true;
+let dailyRecordCanonical=true,baselineWriteFailure='';
 let dailyRecords=[freeze({version:16,recordKind:'study',date:'2026-09-18',reflection:'one',savedAt:'2026-09-18T20:00:00.000Z',updatedAt:'2026-09-18T20:00:00.000Z'})];
 // N4 and Subject land in the same pack shard, so they share one pack.
 const stableSecondaryNote=freeze({version:2,key:'N4',text:'stable secondary note',updatedAt:'2026-09-18T20:00:00.000Z'});
@@ -57,6 +57,8 @@ const noop=()=>{},diagnosticFailures=[],operationEvents=[];
 async function baselineFingerprint(keys){return engine.run('checksum',{value:JSON.stringify([...keys].sort()),algorithm:'sha256'});}
 async function writeBaseline(checkpointId,spec){
   if(!spec||spec.format!=='study-director.reconciliation-base-update')throw new Error('Expected reconciliation baseline update.');
+  if(baselineWriteFailure==='false')return false;
+  if(baselineWriteFailure==='throw')throw new Error('Injected shared-ancestry IndexedDB write failure');
   if(!spec.full&&(!reconciliationBase||reconciliationBase.checkpointId!==spec.baseCheckpointId))return false;
   if(spec.full){const keep=new Set(spec.noteKeys||[]);for(const key of Object.keys(reconciliationBaseNotes))if(!keep.has(key))delete reconciliationBaseNotes[key];}
   for(const key of spec.deletes||[])delete reconciliationBaseNotes[key];for(const [key,state] of Object.entries(spec.updates||{}))reconciliationBaseNotes[key]=freeze({label:String(state.label),text:String(state.text)});
@@ -88,13 +90,13 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
 })}));
 
 const localRepositoryObjects=new Map();
-async function publishLocal(history,options={}){
+async function publishLocal(history,options={},hooks={}){
   const written=[];let manifestWrites=0,deadline;
   const publication=runtime.repository.publish(history,{interactive:false,...options},freeze({
     writeObject:async entry=>{if(entry.kind!=='attachment')await runtime.repository.verifyObject(entry.blob,entry);written.push(entry);localRepositoryObjects.set(entry.objectId,entry.blob);return freeze({id:entry.objectId});},
     writeManifest:async file=>{await runtime.repository.inspectManifest(file.blob,{interactive:false});manifestWrites+=1;return freeze({name:file.manifest.checkpoint.checkpointId+'.sdcheckpoint'});},
     commit:async marker=>{await runtime.repository.inspectCommit(marker.blob);return freeze({name:marker.checkpointId+'.sdcommit'});},
-    onCommitted:async()=>null,cleanup:async()=>null,onFailure:async()=>null
+    onCommitted:async()=>{hooks.onCommitted?.();return null;},cleanup:async()=>null,onFailure:async()=>null
   }));
   const result=await Promise.race([publication,new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Repository publication deadlocked during read-back verification.')),3000);})]).finally(()=>clearTimeout(deadline));
   assert.equal(exclusive.status().busy,false,'publication must release its exclusive file job after nested read-back verification');
@@ -1112,5 +1114,72 @@ const providerMetadataVerificationCases=[];
     }
   }finally{runtime.controller.invalidateRepositoryPreparation();notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;}
 }
+
+// A verified repository checkpoint and local shared ancestry are distinct.
+// A failed ancestry write must not acknowledge a fully synchronized backup.
+const ancestryPublicationCases=[];
+{
+  const original={notes,dailyRecords,assetDescriptor,snapshotRevision,sourceRevision,reconciliationBase,reconciliationBaseNotes,baselineWriteFailure};
+  try{
+    runtime.controller.invalidateRepositoryPreparation();dailyRecords=[];assetDescriptor=null;
+    notes={Subject:freeze({version:2,key:'Subject',text:'Ancestry receipt one',updatedAt:'2026-10-05T01:00:00.000Z'})};
+    snapshotRevision='ancestry-receipt-1';sourceRevision='2026-10-05T01:00:00.000Z';
+    reconciliationBase=null;reconciliationBaseNotes=Object.create(null);
+    let bookkeeping=0;
+    baselineWriteFailure='false';
+    const initial=await publishLocal(null,{shared:true},{onCommitted:()=>bookkeeping++});
+    assert.ok(initial.result.checkpointId,'remote checkpoint was committed');
+    assert.equal(initial.result.sharedBaseEstablished,false);
+    assert.match(initial.result.warning,/could not record it as shared/u);
+    assert.equal(bookkeeping,0,'false ancestry receipt blocks full-sync bookkeeping');
+    assert.equal(reconciliationBase,null);
+    const reused=new Set(initial.manifest.objects.map(entry=>entry.objectId));
+    for(const failure of ['false','throw']){
+      baselineWriteFailure=failure;
+      const unchanged=await publishLocal([initial.manifest],{shared:true,availableObjectIds:reused},{onCommitted:()=>bookkeeping++});
+      assert.equal(unchanged.result.unchanged,true);
+      assert.equal(unchanged.result.sharedBaseEstablished,false);
+      assert.match(unchanged.result.warning,/already up to date, but this device could not record it as shared/u);
+      assert.equal(bookkeeping,0);
+      assert.equal(reconciliationBase,null,'the ancestry receipt remains absent');
+      ancestryPublicationCases.push('unchanged-'+failure);
+    }
+    baselineWriteFailure='';
+    const recovered=await publishLocal([initial.manifest],{shared:true,availableObjectIds:reused},{onCommitted:()=>bookkeeping++});
+    assert.equal(recovered.result.unchanged,true);
+    assert.equal(recovered.result.sharedBaseEstablished,true);
+    assert.equal(recovered.result.warning,'');
+    assert.equal(reconciliationBase.checkpointId,initial.result.checkpointId);
+    assert.equal(bookkeeping,1,'only verified recovery reaches full-sync bookkeeping');
+    ancestryPublicationCases.push('unchanged-recovered');
+    notes={Subject:freeze({...notes.Subject,text:'Ancestry receipt two',updatedAt:'2026-10-05T01:01:00.000Z'})};
+    snapshotRevision='ancestry-receipt-2';sourceRevision='2026-10-05T01:01:00.000Z';
+    baselineWriteFailure='throw';
+    const next=await publishLocal([initial.manifest],{shared:true,availableObjectIds:reused},{onCommitted:()=>bookkeeping++});
+    assert.equal(next.result.unchanged,false);
+    assert.equal(next.result.sharedBaseEstablished,false);
+    assert.ok(next.result.checkpointId!==initial.result.checkpointId);
+    assert.match(next.result.warning,/saved and verified, but this device could not record it as shared/u);
+    assert.equal(reconciliationBase.checkpointId,initial.result.checkpointId);
+    assert.equal(bookkeeping,1);
+    ancestryPublicationCases.push('new-throw');
+    baselineWriteFailure='';
+    const newer=new Set(next.manifest.objects.map(entry=>entry.objectId));
+    const repaired=await publishLocal([initial.manifest,next.manifest],{shared:true,availableObjectIds:newer},{onCommitted:()=>bookkeeping++});
+    assert.equal(repaired.result.unchanged,true);
+    assert.equal(repaired.result.sharedBaseEstablished,true);
+    assert.equal(reconciliationBase.checkpointId,next.result.checkpointId);
+    assert.equal(bookkeeping,2);
+    ancestryPublicationCases.push('new-recovered');
+  }finally{
+    baselineWriteFailure=original.baselineWriteFailure;
+    reconciliationBase=original.reconciliationBase;reconciliationBaseNotes=original.reconciliationBaseNotes;
+    notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;
+    snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;
+    runtime.controller.invalidateRepositoryPreparation();
+  }
+}
+assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','unchanged-recovered','new-throw','new-recovered']);
+
 console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
 await import('../../helpers/session-ownership-claim-regression.mjs');
