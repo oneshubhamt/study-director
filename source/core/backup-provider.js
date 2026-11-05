@@ -1068,8 +1068,11 @@ registry.define('backup-provider',1,input=>{
     if(established===true){
       state.syncedAt=new Date().toISOString();
       presentation.resolve(selected.id,'sync-ancestry');
-    }else presentation.notice(selected.id,'sync-ancestry',
-      `The checkpoint is verified in ${selected.label}, but this device could not save shared ancestry. Sync will retry.`,{error:true});
+    }else{
+      state.behind=true;
+      presentation.notice(selected.id,'sync-ancestry',
+        `The checkpoint is verified in ${selected.label}, but this device could not save shared ancestry. Sync will retry.`,{error:true});
+    }
     notifyStatus();
   }
   function sharedSyncing(selected){return !!selected?.shared&&!!selected.repository&&!!pendingRetryHooks&&providerConnected(selected);}
@@ -1312,8 +1315,10 @@ registry.define('backup-provider',1,input=>{
   // Drive is the shared synchronization repository; Device Folder is a separate
   // destination and never waits for, downloads from, or backfills from Drive.
   async function retryPendingProviderBackup(selected,{signal=null}={}){
-    const pending=await pendingRetryState(selected),resuming=providerPublications.get(selected.id)?.continuation.status().pending===true;if(!pending&&!resuming&&!automaticNeeded(selected))return freeze({status:'idle',reason:'none',maintenancePending:false});
-    if(!pending&&!resuming&&!changeNoted&&automaticHooks?.ready&&await automaticHooks.ready()===false)return freeze({status:'idle',reason:'local-empty',maintenancePending:false});
+    const pending=await pendingRetryState(selected),resuming=providerPublications.get(selected.id)?.continuation.status().pending===true,
+      ancestryOwed=selected.shared===true&&syncState(selected).ancestryPending;
+    if(!pending&&!resuming&&!ancestryOwed&&!automaticNeeded(selected))return freeze({status:'idle',reason:'none',maintenancePending:false});
+    if(!pending&&!resuming&&!ancestryOwed&&!changeNoted&&automaticHooks?.ready&&await automaticHooks.ready()===false)return freeze({status:'idle',reason:'local-empty',maintenancePending:false});
     const summary=presentation.begin(selected.id,'backup',{id:'external-backup',label:selected.label,foreground:false,message:`Backing up to ${selected.label}…`});
     notifyStatus();
     try{
@@ -1344,7 +1349,9 @@ registry.define('backup-provider',1,input=>{
       let scope=null,traceId='';
       const attemptRevision=canonicalConvergenceRevision(),eligibleMs=Date.parse(String(eligibleAt||'')),preserveAutomatic=automaticOpportunityUnspent(selected,Number.isFinite(eligibleMs)?eligibleMs:Date.now());
       try{
-        const owed=!!await pendingRetryState(selected)||providerPublications.get(selected.id)?.continuation.status().pending===true,syncDue=syncCheckDue(selected,trigger),sync=sharedSyncing(selected)?syncState(selected):null;
+        const sync=sharedSyncing(selected)?syncState(selected):null,
+          owed=!!await pendingRetryState(selected)||providerPublications.get(selected.id)?.continuation.status().pending===true||!!sync?.ancestryPending,
+          syncDue=syncCheckDue(selected,trigger);
         if(sync)job.schedule(AUTOMATIC_QUIET_MS,'sync','earliest');
         if(!owed&&!automaticNeeded(selected)&&!syncDue){resetConvergenceRetry(selected);return freeze({status:'idle',reason:'none'});}
         // Any other wake-up before the waiting changes are due keeps their
