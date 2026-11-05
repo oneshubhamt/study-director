@@ -55,4 +55,21 @@ function createPrimitiveHarness({strictUnsupported=false}={}){
   assert.ok(captures.some(entry=>entry.scope==='storage.idb-strict-durability-unavailable'),'strict durability fallback must remain diagnosable');
 }
 
+// A strict write may have a successful put request but an aborted transaction.
+ // The caller must not interpret request success as a durable commit.
+{
+  const {api,calls}=createPrimitiveHarness();
+  let acknowledged=false;
+  await assert.rejects(()=>api.strictTransaction('meta','readwrite',(tx,finish)=>{
+    tx.oncomplete=()=>{acknowledged=true;finish(true,'committed');};
+    queueMicrotask(()=>tx.onabort?.());
+  },'injected strict transaction abort'),/injected strict transaction abort/u);
+  assert.equal(acknowledged,false,'aborted strict transaction cannot run oncomplete acknowledgement');
+  assert.equal(calls.at(-1).options?.durability,'strict');
+  assert.equal(await api.strictTransaction('meta','readwrite',(tx,finish)=>{
+    tx.oncomplete=()=>finish(true,'recovered');
+    queueMicrotask(()=>tx.oncomplete?.());
+  }),'recovered','a later healthy strict commit is still possible');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'indexeddb-durability',contracts:['default path unchanged','strict opt-in uses transaction options','unsupported option falls back safely']},null,2));
