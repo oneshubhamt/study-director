@@ -451,16 +451,19 @@ function renderInvalidScheduleApply(projection){
   setPlanComposerOpen(true);
   setPlanStatus(projection.firstActionableError||'Fix the schedule before applying.',false);
 }
-function closeActiveBreakForScheduleChange(){
+function closeActiveBreakForScheduleChange(stillCurrent=()=>true){
   if(!scheduleGateway.breakState())return true;
   return confirm({
     title:'End the current break?',
     message:'The revised Plan can be applied after the active timer break ends.',
     details:['Choose Keep break to return to Execute without changing the live Plan.'],
     confirmLabel:'End break and continue',cancelLabel:'Keep break'
-  }).then(ok=>{if(ok)scheduleGateway.breakState('end');return ok;});
+  }).then(ok=>{
+    if(!ok||!stillCurrent())return false;
+    scheduleGateway.breakState('end');return true;
+  });
 }
-function confirmScheduleChangeWillMigrateProgress(newRows){
+function confirmScheduleChangeWillMigrateProgress(newRows,stillCurrent=()=>true){
   if(!scheduleGateway.hasLiveState())return null;
   const snapshot=scheduleGateway.captureMigration(newRows||[]);
   const matched=snapshot.preview?snapshot.preview.matched:0;
@@ -475,11 +478,13 @@ function confirmScheduleChangeWillMigrateProgress(newRows){
     message:'Study Director will carry forward progress only where the block identity still matches.',
     details,confirmLabel:'Replace Plan',cancelLabel:'Keep current Plan'
   }).then(ok=>{
+    if(!stillCurrent())return false;
     if(!ok)setPlanStatus('Schedule change cancelled. Current tracking progress was kept.','cancelled');
     return ok?snapshot:false;
   });
 }
 function prepareScheduleApply(parsed,rawOriginal,opts){
+  const stillCurrent=()=>typeof opts.currentEditor!=='function'||opts.currentEditor();
   const hasApplied=TASKS.length>0;
   const scheduleChanged=hasApplied&&scheduleFingerprintForRows(parsed)!==scheduleGateway.read().fingerprint;
   if(hasApplied&&!scheduleChanged&&scheduleGateway.hasLiveState()&&!opts.forceReload&&!opts.reviewOnly){
@@ -487,11 +492,11 @@ function prepareScheduleApply(parsed,rawOriginal,opts){
   }
   if(!scheduleChanged)return {handled:false,cancelled:false,scheduleChanged:false,progressMigration:null};
   const finish=()=>{
-    const progressMigration=confirmScheduleChangeWillMigrateProgress(parsed);
+    const progressMigration=confirmScheduleChangeWillMigrateProgress(parsed,stillCurrent);
     if(progressMigration&&typeof progressMigration.then==='function')return progressMigration.then(value=>value===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration:value});
     return progressMigration===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration};
   };
-  const breakDecision=closeActiveBreakForScheduleChange();
+  const breakDecision=closeActiveBreakForScheduleChange(stillCurrent);
   if(breakDecision&&typeof breakDecision.then==='function')return breakDecision.then(ok=>ok?finish():{cancelled:true});
   return breakDecision?finish():{cancelled:true};
 }
@@ -539,7 +544,9 @@ function applySchedule(options={}){
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
     ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
   const currentDraft=()=>explicitSchedule!==null||getPlanDraftText()===rawOriginal;
-  const canApply=()=>explicitSchedule!==null||ownership.canMutate();
+  const canApply=()=>
+    (explicitSchedule!==null||ownership.canMutate())&&
+    (typeof opts.currentEditor!=='function'||opts.currentEditor());
   const finish=(preparation,draft,parsed)=>{
     if(!canApply())return false;
     if(!currentDraft()){
@@ -578,13 +585,14 @@ const PlanDraftEditor=(()=>{
   let draftDragIndex=null;
   let draftSaveTimer=null;
   let draftPreviewTimer=null;
-  let pendingPreviewProjection=null;
+  let editEpoch=0;
   let draftSaveWarningActive=false;
 
   function active(){return draftMode;}
   function deactivate(){
+    editEpoch++;
     draftMode=false;
-    clearTimer('preview');pendingPreviewProjection=null;
+    clearTimer('preview');
     clearDragState();
     return false;
   }
@@ -633,47 +641,61 @@ const PlanDraftEditor=(()=>{
   }
   function flush(options={}){return draftSaveTimer?save(options):true;}
   function enter(){
-    // Edit is a user action; the independent draft is never replaced with
-    // the applied session merely to open its editor.
-    draftMode=true;
-    renderSched();
+    // Always reconstruct editing rows from the latest authored text, not a
+    // cached board projection from before an import or a Composer change.
+    preview({silent:true,enterDraft:true});
+    return true;
   }
   async function confirm(){
-    if(!lastParsed.length)return false;
-    const input=document.getElementById('plan-input');
-    if(input)input.value=draftTextFromRows(lastParsed);
-    const draftText=getPlanDraftText(),projection=createPlanDraftProjection();
+    // The textarea is the authoring source of truth. A pending Composer
+    // preview may not yet have copied its latest text into lastParsed.
+    const draftText=getPlanDraftText();
+    clearTimer('preview');
+    const projection=createPlanDraftProjection(parseScheduleDraftText(draftText));
     if(projection.status!=='valid'){
-      updatePlanBoardState(projection);
+      setParsedScheduleDraft([]);
+      renderSched(projection);
       setPlanStatus(projection.firstActionableError||'Complete every required field before applying.',false);
       return false;
     }
+    setParsedScheduleDraft(projection.draft.parsed);
+    renderSched(projection);
+    const epoch=editEpoch;
     if(!await save({strictDurability:true}))return false;
-    if(!draftMode)return false; // Cancel or an intervening session transition won.
+    if(!draftMode||epoch!==editEpoch)return false;
     if(!ownership.canMutate()||getPlanDraftText()!==draftText){
       setPlanStatus('The working draft changed while saving. Review it and press Done again.',false);
       return false;
     }
-    // Exactly one draft commit; the ensuing schedule application consumes
-    // that saved version without launching a second asynchronous write.
-    return applySchedule({skipNotify:true,source:'plan-board-edit',projection,persistDraft:false});
+    // Keep Cancel authoritative even while a replacement confirmation is
+    // pending. The existing apply guard rechecks this at final commit time.
+    return applySchedule({skipNotify:true,source:'plan-board-edit',projection,persistDraft:false,
+      currentEditor:()=>draftMode&&editEpoch===epoch});
   }
-  function cancel(){
-    // Cancel means do not apply this draft to the live session. Autosaved
-    // working text remains available for later editing.
+  async function cancel(){
+    // Close editing immediately, but claim preservation only after the latest
+    // working text completes its strict canonical IndexedDB write. A pending
+    // debounced write is subsumed by this one; the applied Plan is untouched.
     deactivate();
+    const epoch=editEpoch,draftText=getPlanDraftText();
     setPlanComposerOpen(false);
     renderSched();
-    setPlanStatus('Edit closed. Live plan kept; working draft preserved.','cancelled');
+    setPlanStatus('Edit closed. Saving the working draft…');
+    const saved=await save({strictDurability:true});
+    // Do not overwrite feedback belonging to an edit/import begun meanwhile.
+    if(editEpoch!==epoch||draftMode||getPlanDraftText()!==draftText)return saved===true;
+    setPlanStatus(saved===true
+      ?'Edit closed. Live plan kept; working draft saved in this browser.'
+      :'Edit closed. Live plan kept, but the working draft was not saved. Keep this tab open and copy it before closing.',
+      saved===true?'cancelled':false);
+    return saved===true;
   }
   function preview(options={}){
     const opts=options&&typeof options==='object'?options:{};
     clearTimer('preview');
-    const supplied=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'?opts.projection:null;
-    if(opts.enterDraft===true)draftMode=true;
-    else if(opts.enterDraft===false){draftMode=false;clearDragState();}
-    const projection=supplied||createPlanDraftProjection();
-    pendingPreviewProjection=null;
+    if(opts.enterDraft===true){editEpoch++;draftMode=true;}
+    else if(opts.enterDraft===false)deactivate();
+    const projection=createPlanDraftProjection();
     if(projection.status!=='valid'){
       lastParsed=[];
       renderSched(projection);
@@ -691,18 +713,20 @@ const PlanDraftEditor=(()=>{
     if(!ownership.canMutate())return false;
     if(!boundDraftInput())return false;
     queueSave();
-    draftMode=true;
-    pendingPreviewProjection=createPlanDraftProjection();
-    updatePlanBoardControls(pendingPreviewProjection);
+    editEpoch++;draftMode=true;
+    updatePlanBoardControls(createPlanDraftProjection());
     clearTimer('preview');
+    // Read the textarea when the timer fires. A captured earlier projection
+    // could replace a newer row edit or imported draft.
     draftPreviewTimer=setTimeout(()=>{
       draftPreviewTimer=null;
-      const projection=pendingPreviewProjection;
-      preview({silent:true,projection});
+      if(draftMode)preview({silent:true});
     },PREVIEW_DELAY_MS);
     return true;
   }
   function syncTextFromRows(){
+    // Structured row editing supersedes any pending Composer preview.
+    editEpoch++;clearTimer('preview');
     const input=document.getElementById('plan-input');
     if(input)input.value=draftTextFromRows(lastParsed);
     queueSave();
@@ -1013,14 +1037,12 @@ const PlanDraftEditor=(()=>{
   }
   async function clear(){
     if(!ownership.requirePrimary(null,'clear the plan draft'))return false;
-    clearTimer('save');clearTimer('preview');pendingPreviewProjection=null;clearDragState();
-    const input=document.getElementById('plan-input');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
+    clearTimer('save');clearTimer('preview');clearDragState();
+    editEpoch++;const input=document.getElementById('plan-input');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
     const ok=await save();if(ok&&input?.value==='')setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return ok;
   }
   function reset(){
-    clearTimer('preview');clearDragState();
-    pendingPreviewProjection=null;
-    draftMode=false;
+    deactivate();
     setParsedScheduleDraft([]);
   }
   return Object.freeze({active,deactivate,enter,confirm,cancel,preview,composerInput,renderRows,save,flush,clear,reset,install});

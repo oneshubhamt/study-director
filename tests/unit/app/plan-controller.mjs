@@ -21,7 +21,8 @@ class Node {
   replaceChildren(...nodes){this.childNodes=[...nodes];}
   setAttribute(name,value){(this.attributes??={})[name]=String(value);}
   querySelectorAll(){return [];}
-  addEventListener(){}
+  addEventListener(type,handler){(this.handlers??={})[type]=handler;}
+  contains(node){return this===node||this.childNodes.some(child=>typeof child.contains==='function'?child.contains(node):child===node);}
 }
 const ids=Object.fromEntries([
   'plan-input','sched-list','plan-board','plan-board-state','plan-board-caption',
@@ -48,8 +49,19 @@ const scheduleTextFromRows=rows=>'ROW:'+JSON.stringify(rows);
 const fingerprint=rows=>JSON.stringify(rows);
 const tasks=[row('Live applied')];
 let currentFingerprint=fingerprint(tasks),liveActivity=false,applyCount=0,draftWrites=0,writeFailure=false;
+let breakActive=false,breakEnds=0;
 let blockedWrite=null,canonicalDraft=null;const saveOptions=[];
 const feedback=[];
+const timers=new Map();let nextTimer=0;
+const scheduleTimer=(callback,ms)=>{const id=++nextTimer;timers.set(id,{callback,ms});return id;};
+const clearScheduledTimer=id=>timers.delete(id);
+const fireTimers=ms=>{
+  const due=[...timers].filter(([,entry])=>entry.ms===ms);
+  for(const [id,entry] of due)if(timers.delete(id))entry.callback();
+};
+const pendingTimers=ms=>[...timers.values()].filter(entry=>entry.ms===ms).length;
+const nodeText=node=>String(node?.textContent||'')+(node?.childNodes||[]).map(nodeText).join('');
+let confirmGate=null,confirmRequested=false;
 const viewFunctions={
   on:()=>{},textEl:(tag,cls,value)=>{const node=new Node(tag);node.className=cls;node.textContent=value;return node;},
   updateRealTimeAwareness:()=>{}
@@ -74,7 +86,7 @@ const clockFunctions={
 const gateway={
   act:()=>true,
   apply:(rows)=>{applyCount++;tasks.splice(0,tasks.length,...rows);currentFingerprint=fingerprint(rows);return {migrationSummary:null};},
-  breakState:()=>false,
+  breakState:action=>{if(action==='end'){breakActive=false;breakEnds++;return true;}return breakActive;},
   captureMigration:()=>({preview:{matched:0,total:0,practiceTotal:0,practiceMatched:0}}),
   clearSafety:()=>{},flush:()=>{},hasLiveState:()=>liveActivity,
   markRender:()=>{},read:()=>({tasks,fingerprint:currentFingerprint,anchor:480}),
@@ -117,11 +129,14 @@ const ports=Object.freeze({
     window:{matchMedia:()=>({matches:false})}}),
   scheduleGateway:mk(Object.keys(gateway),gateway),
   ownership:Object.freeze({canMutate:()=>true,requirePrimary:()=>true}),
-  interactions:Object.freeze({confirm:async()=>true,input:async()=>({value:'Plan'})}),
+  interactions:Object.freeze({
+    confirm:()=>{confirmRequested=true;return confirmGate||Promise.resolve(true);},
+    input:async()=>({value:'Plan'})
+  }),
   notifications:Object.freeze({begin:()=>({read:()=>({lifecycle:'resolved'}),finish:()=>{}}),
     feedback:details=>{feedback.push(details);return true;}}),
   overlays:Object.freeze({createAnchoredPopover:()=>({destroy(){},hide(){}})}),
-  environment:Object.freeze({clearTimeout,setTimeout})
+  environment:Object.freeze({clearTimeout:clearScheduledTimer,setTimeout:scheduleTimer})
 });
 const plan=PlanModule.createController(Object.freeze({ports}));
 const state=()=>({label:ids['plan-board-state'].textContent,mode:ids['plan-board'].dataset.mode,
@@ -146,9 +161,10 @@ ids['plan-input'].value='Draft different';
 plan.draft.preview({silent:true,enterDraft:false});
 plan.draft.enter();
 assert.equal(state().label,'EDITING DRAFT');
-plan.draft.cancel();
+assert.equal(await plan.draft.cancel(),true);
 assert.equal(state().label,'LIVE');
 assert.equal(ids['plan-input'].value,'Draft different');
+assert.match(String(feedback.at(-1)?.message||''),/working draft saved in this browser/u);
 
 // Failed draft persistence is a hard barrier before an applied Plan is
 // replaced; the draft and old schedule remain available for another attempt.
@@ -208,14 +224,133 @@ let releaseDone;
 blockedWrite=new Promise(resolve=>{releaseDone=resolve;});
 const beforeCancelApply=applyCount;
 const pendingDone=plan.draft.confirm();
-plan.draft.cancel();
+const cancelling=plan.draft.cancel();
+assert.match(String(feedback.at(-1)?.message||''),/Saving the working draft/u,
+  'Cancel does not claim storage success before the strict commit');
 releaseDone();blockedWrite=null;
 assert.equal(await pendingDone,false);
+assert.equal(await cancelling,true);
 assert.equal(applyCount,beforeCancelApply);
 assert.equal(state().label,'LIVE');
-assert.match(String(feedback.at(-1)?.message||''),/Edit closed.*working draft preserved/u);
+assert.match(String(feedback.at(-1)?.message||''),/working draft saved in this browser/u);
 
-// Canonical Active Session restoration must stay synchronous and must not
+// Composer input is authoritative even when Done outruns the debounced
+// preview. Done must neither rewrite textarea bytes from stale row memory nor
+// apply the old Plan. The post-Done timer must also be cancelled.
+liveActivity=false;
+ids['plan-input'].value='ROW:'+JSON.stringify([row('Old Composer text')]);
+plan.draft.preview({silent:true,enterDraft:true});
+const latestComposer='ROW:'+JSON.stringify([row('Latest Composer text')]);
+ids['plan-input'].value=latestComposer;
+plan.draft.composerInput();
+assert.equal(pendingTimers(220),1,'Composer preview is pending');
+const beforeFastDone=applyCount;
+assert.equal(await plan.draft.confirm(),true);
+assert.equal(applyCount,beforeFastDone+1);
+assert.equal(tasks[0].name,'Latest Composer text');
+assert.equal(canonicalDraft,latestComposer);
+assert.equal(ids['plan-input'].value,latestComposer);
+assert.equal(pendingTimers(220),0,'Done cancels stale previews');
+
+// A queued preview always parses the *latest* text, even if it changes
+// without another Composer event. The board must show the newer rows.
+ids['plan-input'].value='ROW:'+JSON.stringify([row('Earlier queued preview')]);
+plan.draft.preview({silent:true,enterDraft:true});
+ids['plan-input'].value='ROW:'+JSON.stringify([row('Pending preview source')]);
+plan.draft.composerInput();
+ids['plan-input'].value='ROW:'+JSON.stringify([row('Newer independent text')]);
+fireTimers(220);
+assert.match(nodeText(ids['sched-list']),/Newer independent text/u);
+assert.doesNotMatch(nodeText(ids['sched-list']),/Earlier queued preview|Pending preview source/u);
+
+// Structured row edits supersede a delayed Composer preview. It must not
+// rerender the row and unexpectedly move focus after the row was edited.
+plan.draft.install();
+ids['plan-input'].value='ROW:'+JSON.stringify([row('Row before edit')]);
+plan.draft.preview({silent:true,enterDraft:true});
+ids['plan-input'].value='ROW:'+JSON.stringify([row('Composer pending')]);
+plan.draft.composerInput();
+assert.equal(pendingTimers(220),1);
+const editorRow=ids['sched-list'].childNodes[0];
+const editedField={
+  tagName:'INPUT',value:'Row wins',dataset:{draftField:'name'},
+  closest:selector=>selector==='[data-draft-field]'?editedField:
+    selector==='.si.draft[data-draft-idx]'?editorRow:null
+};
+ids['sched-list'].handlers.input({target:editedField});
+assert.equal(pendingTimers(220),0,'row edits cancel the stale Composer projection');
+assert.match(ids['plan-input'].value,/Row wins/u);
+
+// Cancel closes immediately but strictly commits the latest unsaved Composer
+// bytes rather than acknowledging an earlier row view or a queued timer.
+ids['plan-input'].value='Unsaved changed during debounce';
+plan.draft.composerInput();
+assert.equal(pendingTimers(300),1);
+const beforeCancelWrites=draftWrites,latestCancelText=ids['plan-input'].value;
+const pendingCancel=plan.draft.cancel();
+assert.equal(state().label,'LIVE');
+assert.match(String(feedback.at(-1)?.message||''),/Saving the working draft/u);
+assert.equal(await pendingCancel,true);
+assert.equal(draftWrites,beforeCancelWrites+1,'Cancel coalesces one debounced save into one strict commit');
+assert.equal(canonicalDraft,latestCancelText);
+assert.equal(saveOptions.at(-1).strictDurability,true);
+assert.equal(pendingTimers(300),0);
+assert.equal(pendingTimers(220),0);
+assert.match(String(feedback.at(-1)?.message||''),/working draft saved in this browser/u);
+
+// A cancelled edit remains closed when browser storage rejects that commit.
+// No success announcement, accidental Plan replacement or text deletion.
+ids['plan-input'].value='Draft to rescue after failed Cancel';
+plan.draft.preview({silent:true,enterDraft:true});
+writeFailure=true;
+const beforeFailedCancel=applyCount;
+assert.equal(await plan.draft.cancel(),false);
+assert.equal(applyCount,beforeFailedCancel);
+assert.equal(ids['plan-input'].value,'Draft to rescue after failed Cancel');
+assert.match(String(feedback.at(-1)?.message||''),/working draft was not saved/u);
+writeFailure=false;
+
+// Cancel while the Plan replacement dialog is open prevents applying it,
+// even if its text and the restored editor mode happen to match afterwards.
+liveActivity=true;
+ids['plan-input'].value='ROW:'+JSON.stringify([row('Before modal')]);
+plan.draft.preview({silent:true,enterDraft:true});
+let releaseConfirm;
+confirmGate=new Promise(resolve=>{releaseConfirm=resolve;});
+confirmRequested=false;
+const beforeModalApply=applyCount,pendingModalDone=plan.draft.confirm();
+for(let i=0;i<30&&!confirmRequested;i++)await Promise.resolve();
+assert.equal(confirmRequested,true,'the live-replacement confirmation is pending');
+const cancelWhileModal=plan.draft.cancel();
+releaseConfirm(true);confirmGate=null;
+assert.equal(await pendingModalDone,false,'a prior Done cannot apply after Cancel');
+assert.equal(await cancelWhileModal,true);
+assert.equal(applyCount,beforeModalApply);
+assert.equal(state().label,'LIVE');
+liveActivity=false;
+
+// A pending break-ending confirmation must not end the running break after
+// Cancel; it is a side effect separate from changing the Plan itself.
+ids['plan-input'].value='ROW:'+JSON.stringify([row('During break prompt')]);
+plan.draft.preview({silent:true,enterDraft:true});
+breakActive=true;
+let releaseBreak;
+confirmGate=new Promise(resolve=>{releaseBreak=resolve;});
+confirmRequested=false;
+const beforeBreakApply=applyCount,beforeBreakEnds=breakEnds;
+const pendingBreakDone=plan.draft.confirm();
+for(let i=0;i<30&&!confirmRequested;i++)await Promise.resolve();
+assert.equal(confirmRequested,true,'break-ending confirmation was requested');
+const cancelDuringBreak=plan.draft.cancel();
+releaseBreak(true);confirmGate=null;
+assert.equal(await pendingBreakDone,false);
+assert.equal(await cancelDuringBreak,true);
+assert.equal(applyCount,beforeBreakApply);
+assert.equal(breakEnds,beforeBreakEnds,'Cancel cannot end a break from a stale confirmation');
+assert.equal(breakActive,true);
+breakActive=false;
+
+ // Canonical Active Session restoration must stay synchronous and must not
 // commit the working draft, even when that draft is invalid.
 liveActivity=false; // restoring first resets the previous session's runtime
 ids['plan-input'].value='BAD';
@@ -241,4 +376,6 @@ assert.equal(state().mode,'invalid');
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
-    'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label']}));
+    'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
+    'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
+    'cancel-during-modal','cancel-during-break-confirmation']}));
