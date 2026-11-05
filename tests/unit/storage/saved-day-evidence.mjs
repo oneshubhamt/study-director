@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {Domain,dailyRecordCodec} from '../../helpers/current-codec-fixture.mjs';
+import {Domain,dailyRecordCodec,limits} from '../../helpers/current-codec-fixture.mjs';
 
 // A real production-codec test: device revisions cannot substitute for
 // evidence, and later coverage cannot conceal reduced/contradictory work.
