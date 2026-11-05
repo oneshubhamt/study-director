@@ -927,12 +927,17 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
 // A saved calendar date is not enough to suppress the user's Save Today
 // reminder. The current Active Session must carry its own verified receipt.
 {
-  const src=productionFunction('async function savedRecordExistsForDate(date){');
+  const src=[
+    productionFunction('function liveSaveReminderEvidence(date){'),
+    productionFunction('function savedDayCoversReminderEvidence(record,subjects){'),
+    productionFunction('async function savedDayHasUncoveredKeptSession(record,date){'),
+    productionFunction('async function savedRecordExistsForDate(date){')
+  ].join('\n');
   const date='2026-08-27',record={date,recordKind:'study'};
   for(const [label,mode,covered,expected] of [
     ['canonical covered session','committed',true,true],
     ['different study evidence','committed',false,false],
-    ['session not acknowledged','unsaved',true,false],
+    ['unacknowledged session covered by canonical study evidence','unsaved',true,true],
     ['local-only session','rescue',true,false],
     ['no session','missing',true,false],
     ['strict Saved Day read fails','failed-day-read',true,false]
@@ -942,8 +947,11 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
     const context=vm.createContext({
       daySaveDirty:()=>false,
       cleanDayRevision:v=>Number(v)||0,
+      TASKS:[],isTrackableBlock:()=>false,
+      TimerState:{studyDate:date},getReviewDate:()=>date,
       AppData:{
         activeSession:{load:async()=>({ok:true,value:mode==='missing'?null:session,storage:{idb:mode!=='rescue'}})},
+        pendingReviews:{list:async()=>[]},
         dailyRecords:{
           documents:async()=>{dayReads++;if(mode==='failed-day-read')throw new Error('IndexedDB failed');return [record];},
           verifyCanonical:async()=>true
@@ -956,7 +964,7 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
     vm.runInContext(src+'\nglobalThis.hasSaved=savedRecordExistsForDate;',context);
     assert.equal(await context.hasSaved(date),expected,label);
     assert.equal(await context.hasSaved(date),expected,label+' replay');
-    assert.equal(dayReads,['missing','unsaved','rescue'].includes(mode)?0:2,
+    assert.equal(dayReads,['missing','rescue'].includes(mode)?0:2,
       label+' must recheck canonical storage on every eligible reminder');
   }
 }

@@ -92,7 +92,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
 const localRepositoryObjects=new Map();
 async function publishLocal(history,options={},hooks={}){
   const written=[];let manifestWrites=0,deadline;
-  const publication=runtime.repository.publish(history,{interactive:false,...options},freeze({
+  const publication=runtime.repository.publish(history,{interactive:false,...options,...(options.shared===true?{baseUpdate:true}:{})},freeze({
     writeObject:async entry=>{if(entry.kind!=='attachment')await runtime.repository.verifyObject(entry.blob,entry);written.push(entry);localRepositoryObjects.set(entry.objectId,entry.blob);return freeze({id:entry.objectId});},
     writeManifest:async file=>{await runtime.repository.inspectManifest(file.blob,{interactive:false});manifestWrites+=1;return freeze({name:file.manifest.checkpoint.checkpointId+'.sdcheckpoint'});},
     commit:async marker=>{await runtime.repository.inspectCommit(marker.blob);return freeze({name:marker.checkpointId+'.sdcommit'});},
