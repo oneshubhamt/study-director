@@ -47,7 +47,9 @@ const dailyRecordCodec=freeze({
   canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:16,recordKind:'study',date:String(item.date)}):null,
   savedDayCoversSessionEvidence:(day,local)=>day?.recordKind==='study'&&day.date===local?.date&&/saved on B|saved after BF1 handoff|saved on B before the new day/i.test(String(day.reflection||''))&&
-    (day.results?.focus?.actualSeconds===undefined||Number(day.results.focus.actualSeconds)>=Number(local.snapshot?.taskState?.focus?.actual?.seconds||0)),
+    (local.snapshot?.taskState?.focus?.actual?.seconds===undefined||
+      (Number.isFinite(Number(day.results?.focus?.actualSeconds))&&
+        Number(day.results.focus.actualSeconds)>=Number(local.snapshot.taskState.focus.actual.seconds))),
   sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
 });
 const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item,version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,runningOn:item.runningOn||'inst_device_local'}):null;
