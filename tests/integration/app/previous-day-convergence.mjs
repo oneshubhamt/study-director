@@ -13,6 +13,10 @@ const continueHere=production('async function continueSessionHere(){');
 const restoreSuspended=production('async function restoreSuspendedTodaySession(){');
 const restore=production('async function attemptAutoRestoreActiveSession(){');
 const choose=production('async function handlePreviousActiveSession(session){');
+const reminderLive=production('function liveSaveReminderEvidence(date){');
+const reminderCovers=production('function savedDayCoversReminderEvidence(record,subjects){');
+const reminderPending=production('async function savedDayHasUncoveredKeptSession(record,date){');
+const savedExists=production('async function savedRecordExistsForDate(date){');
 const reminder=production('async function revalidateSaveReminderAfterCanonicalConvergence(){');
 const prompt=production('async function promptSaveToday(){');
 const day='2026-11-04',today='2026-11-05';
@@ -222,16 +226,20 @@ for(const [label,owner,selection,mutated,expected] of [
 for(const spec of [
   {label:'acknowledged current session',current:true,ack:true,covered:true,want:true},
   {label:'newer Review feedback is preserved',current:true,ack:true,covered:true,newerStatus:true,want:true},
-  {label:'current not acknowledged',current:true,ack:false,covered:true,want:false},
+  {label:'current unacknowledged but evidence covered',current:true,ack:false,covered:true,want:true},
   {label:'current only in rescue',current:true,ack:true,rescue:true,covered:true,want:false},
   {label:'current Day missing',current:true,ack:true,covered:false,want:false},
   {label:'remote retirement with captured evidence',current:false,covered:true,want:true},
   {label:'remote retirement without evidence',current:false,evidence:false,covered:true,want:false},
   {label:'retained divergent session uncovered',current:false,covered:true,uncoveredReview:true,want:false},
   {label:'failed canonical Day read',current:false,covered:true,readFailure:true,want:false},
-  {label:'local work changed',current:true,ack:true,covered:true,dirty:true,want:false}
+  {label:'local dirty with no runtime proof',current:true,ack:true,covered:true,dirty:true,want:false},
+  {label:'dirty counter but live evidence covered',current:true,ack:false,covered:true,dirty:true,runtime:true,want:true},
+  {label:'new unsaved live evidence remains',current:true,ack:true,covered:true,dirty:true,runtime:true,runtimeUncovered:true,want:false},
+  {label:'null capture, retired canonical session, live work covered',current:false,evidence:false,runtime:true,dirty:true,covered:true,want:true},
+  {label:'canonical session changed during readback',current:true,ack:true,covered:true,postReadDrift:true,want:false}
 ]){
-  let verified=0,statusClears=0;
+  let verified=0,statusClears=0,activeReads=0;
   const snapshot={contentRevision:7,savedRevision:spec.ack?7:0};
   const current=spec.current?{date:day,snapshot}:null;
   const evidence=spec.evidence===false?null:{date:day,snapshot:{contentRevision:7,savedRevision:0}};
@@ -240,9 +248,14 @@ for(const spec of [
     saveReminderDate:day,saveReminderEvidence:evidence,
     sessionSafetyMessage:'Review reminder: historical work is unsaved',
     daySaveDirty:()=>!!spec.dirty,
+    TASKS:spec.runtime?[{}]:[],
+    isTrackableBlock:()=>true,TimerState:{studyDate:day},getReviewDate:()=>day,
+    PlanRuntime:{appliedScheduleText:()=> 'valid plan'},
+    captureSessionSnapshot:()=>({date:day,uncovered:!!spec.runtimeUncovered}),
     cleanDayRevision:value=>Number(value)||0,
     AppData:{
-      activeSession:{load:async()=>({ok:true,value:current,storage:{idb:!spec.rescue}})},
+      activeSession:{load:async()=>({ok:true,value:++activeReads>1&&spec.postReadDrift
+        ?{date:day,snapshot:{...snapshot,uncovered:true}}:current,storage:{idb:!spec.rescue}})},
       dailyRecords:{
         documents:async()=>{if(spec.readFailure)throw new Error('Canonical IndexedDB read failed');return spec.covered?[record]:[];},
         verifyCanonical:async()=>{verified++;return true;}
@@ -252,7 +265,7 @@ for(const spec of [
       }]:[]}
     },
     DailyRecordCodec:{savedDayCoversSessionEvidence:(stored,value)=>{
-      return !!stored&&stored.date===value.date&&!value.uncovered;
+      return !!stored&&stored.date===value.date&&!value.uncovered&&!value.snapshot?.uncovered;
     }},
     clearSessionSafetyMessage:()=>{context.sessionSafetyMessage='';},
     NoticeCoordinator:{eventStatus:()=>({events:[{source:'review',id:'status-save-status',
@@ -260,11 +273,12 @@ for(const spec of [
     setStatus:(id,message)=>{assert.equal(id,'save-status');assert.equal(message,'');statusClears++;},
     AppDiagnostics:{capture:()=>{}}
   });
-  vm.runInContext(reminder+'\nglobalThis.revalidate=revalidateSaveReminderAfterCanonicalConvergence;',context);
+  vm.runInContext([reminderLive,reminderCovers,reminderPending,reminder,
+    'globalThis.revalidate=revalidateSaveReminderAfterCanonicalConvergence;'].join('\n'),context);
   assert.equal(await context.revalidate(),spec.want,spec.label);
   assert.equal(context.saveReminderDate,spec.want?'':day,spec.label+' reminder state');
   assert.equal(context.sessionSafetyMessage==='',spec.want,spec.label+' visible warning');
-  assert.equal(verified,spec.want?1:0,spec.label+' canonical Day verification');
+  assert.equal(verified,spec.want||spec.postReadDrift?1:0,spec.label+' canonical Day verification');
   assert.equal(statusClears,spec.want&&!spec.newerStatus?1:0,spec.label+' stale inline status');
 }
 
