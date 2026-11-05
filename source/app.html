@@ -4155,22 +4155,47 @@ function clearSessionSafetyMessage(match=''){
     refreshStorageFallbackWarning();
   }
 }
-async function savedRecordExistsForDate(date){
-  if(daySaveDirty(date))return false;
+// Reminder clearance is notice-only: never change the canonical session's
+// saved revision because another device supplied equivalent Saved Day evidence.
+// Capture the live state afresh, so a stale dirty counter can be disproved
+// without pretending that genuinely new, unsaved work was committed.
+function liveSaveReminderEvidence(date){
+  if(date!==getReviewDate()||TimerState.studyDate!==date||!TASKS.some(isTrackableBlock))return null;
   try{
-    // The reminder is triggered at session end, not on each timer tick.
-    // A saved date is never cached: sync or import may replace its contents.
+    const snapshot=captureSessionSnapshot(),scheduleText=PlanRuntime.appliedScheduleText();
+    return snapshot?.date===date&&typeof scheduleText==='string'&&scheduleText.trim()
+      ?{date,scheduleText,snapshot}:null;
+  }catch(error){AppDiagnostics.capture('session.reminder-runtime-evidence',error,'warn');return null;}
+}
+function savedDayCoversReminderEvidence(record,subjects){
+  return !!record&&subjects.length>0&&subjects.every(subject=>
+    !!subject&&DailyRecordCodec.savedDayCoversSessionEvidence(record,subject,{allowAdvances:true}));
+}
+async function savedDayHasUncoveredKeptSession(record,date){
+  const pending=await AppData.pendingReviews.list();
+  return pending.some(review=>review.subject==='session'&&!review.resolvedAt&&
+    review.kept?.date===date&&!DailyRecordCodec.savedDayCoversSessionEvidence(record,review.kept,{allowAdvances:true}));
+}
+async function savedRecordExistsForDate(date){
+  const runtime=liveSaveReminderEvidence(date);
+  if(daySaveDirty(date)&&!runtime)return false;
+  try{
+    // Strict canonical work, not a date-only match, establishes coverage.
     const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value;
-    const snapshot=session?.snapshot;
-    if(!loaded?.ok||loaded.error||loaded.storage?.idb!==true||session?.date!==date||
-        !snapshot||cleanDayRevision(snapshot.savedRevision)<cleanDayRevision(snapshot.contentRevision))return false;
+    if(!loaded?.ok||loaded.error||session?.date===date&&loaded.storage?.idb!==true)return false;
+    const subjects=[...(session?.date===date?[session]:[]),...(runtime?[runtime]:[])];
+    if(!subjects.length)return false;
     const records=await AppData.dailyRecords.documents([date],{requireCanonical:true});
     const record=records.find(item=>item.date===date);
-    // The Day may contain later work from another device: numeric revisions
-    // cannot compare across independent session lineages.
-    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,session,{allowAdvances:true}))return false;
+    if(!savedDayCoversReminderEvidence(record,subjects)||await savedDayHasUncoveredKeptSession(record,date))return false;
     await AppData.dailyRecords.verifyCanonical(record);
-    return !daySaveDirty(date);
+    const latest=liveSaveReminderEvidence(date);
+    if((runtime||latest)&&(!latest||!savedDayCoversReminderEvidence(record,[latest]))||
+        daySaveDirty(date)&&!latest)return false;
+    const checked=await AppData.activeSession.load(0,{strict:true});
+    if(!checked?.ok||checked.error||checked.value?.date===date&&
+        (checked.storage?.idb!==true||!savedDayCoversReminderEvidence(record,[checked.value])))return false;
+    return true;
   }catch(error){AppDiagnostics.capture('session.saved-day-reminder',error,'warn');return false;}
 }
 async function promptSaveToday(){
@@ -4208,35 +4233,35 @@ function clearSaveReminder(date=getReviewDate(),revision=TimerState.contentRevis
  // current session cannot be called saved merely because a date exists.
 async function revalidateSaveReminderAfterCanonicalConvergence(){
   const date=saveReminderDate,evidence=saveReminderEvidence;
-  if(!date||!sessionSafetyMessage.startsWith('Review reminder:')||daySaveDirty(date))return false;
+  if(!date||!sessionSafetyMessage.startsWith('Review reminder:'))return false;
+  const runtime=liveSaveReminderEvidence(date);
+  if(daySaveDirty(date)&&!runtime)return false;
   try{
     const loaded=await AppData.activeSession.load(0,{strict:true});
     if(!loaded?.ok||loaded.error)return false;
     const current=loaded.value||null;
     if(current?.date===date&&loaded.storage?.idb!==true)return false;
-    const subject=current?.date===date?current:evidence;
-    if(!subject)return false;
-    if(current?.date===date){
-      const snapshot=current.snapshot;
-      if(!snapshot||cleanDayRevision(snapshot.savedRevision)<cleanDayRevision(snapshot.contentRevision))return false;
-    }
+    // Both the originally captured notice and the latest canonical/runtime
+    // evidence must be covered; neither can silently supersede the other.
+    const subjects=[...(evidence?[evidence]:[]),...(current?.date===date?[current]:[]),...(runtime?[runtime]:[])];
+    if(!subjects.length)return false;
     const records=await AppData.dailyRecords.documents([date],{requireCanonical:true});
     const record=records.find(item=>item.date===date);
-    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,subject,{allowAdvances:true}))return false;
-    if(current?.date!==date){
-      // The old session was retired by reconciliation. A retained divergent
-      // version must also be covered before the earlier warning is dismissed.
-      const pending=await AppData.pendingReviews.list();
-      if(pending.some(review=>review.subject==='session'&&!review.resolvedAt&&
-          review.kept?.date===date&&
-          !DailyRecordCodec.savedDayCoversSessionEvidence(record,review.kept,{allowAdvances:true})))return false;
-    }
+    if(!savedDayCoversReminderEvidence(record,subjects)||await savedDayHasUncoveredKeptSession(record,date))return false;
     await AppData.dailyRecords.verifyCanonical(record);
-    if(saveReminderDate!==date||!sessionSafetyMessage.startsWith('Review reminder:')||daySaveDirty(date))return false;
+    // The timer, review text or canonical session may have moved during I/O.
+    // Recheck proof, not the unrelated numeric savedRevision or dirty flag.
+    const latest=liveSaveReminderEvidence(date);
+    if((runtime||latest)&&(!latest||!savedDayCoversReminderEvidence(record,[latest]))||
+        daySaveDirty(date)&&!latest)return false;
+    const checked=await AppData.activeSession.load(0,{strict:true});
+    if(!checked?.ok||checked.error||checked.value?.date===date&&
+        (checked.storage?.idb!==true||!savedDayCoversReminderEvidence(record,[checked.value])))return false;
+    if(await savedDayHasUncoveredKeptSession(record,date))return false;
+    if(saveReminderDate!==date||!sessionSafetyMessage.startsWith('Review reminder:'))return false;
     saveReminderDate='';saveReminderEvidence=null;
     clearSessionSafetyMessage('Review reminder:');
-    // Clear only the stale instruction produced by promptSaveToday. A more
-    // recent manual save success or error must keep its own Review feedback.
+    // Do not erase a newer manual-save result that is unrelated to this notice.
     const staleStatus=NoticeCoordinator.eventStatus().events.some(event=>
       event.source==='review'&&event.id==='status-save-status'&&
       event.message==='Review is ready. Save today to Library when you are done.');
