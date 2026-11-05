@@ -1898,6 +1898,28 @@ for(const changedAuthoredPlan of [false,true]){
     changedAuthoredPlan?1:0,'Repeated sync does not manufacture an additional kept Personal Data review.');
 }
 
+// No shared ancestry also means that an authored reordering cannot be
+// dismissed as bookkeeping, even if every Saved Plan body is identical.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const plan=(id,label)=>freeze({id,label,
+    scheduleText:'08:00 | 60 | '+label+' | work | Polity | pages | 20',
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'});
+  const p=plan('plan-c81-order-one','First'),q=plan('plan-c81-order-two','Second');
+  const local=freeze({...personal('Order owner'),plans:freeze({draft:null,savedPlans:freeze([p,q]),defaultId:null})});
+  const remote=freeze({...local,plans:freeze({...local.plans,savedPlans:freeze([q,p])})});
+  const a={installationId:'inst_c81_order_remote',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:remote,journal:null};
+  const b={installationId:'inst_c81_order_local',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual(b.personal.plans.savedPlans.map(row=>row.id),[p.id,q.id],
+    'Without ancestry the local authored order is not silently replaced.');
+  assert.equal(b.reviews.open().filter(row=>row.subject==='personal').length,1,
+    'Conflicting saved-plan order must remain reviewable without a shared base.');
+}
+
 // The Kept Versions choice must offer full original text for an independently
 // authored Plan draft, not a preview truncated before the actual divergence.
 {
@@ -1926,7 +1948,7 @@ for(const changedAuthoredPlan of [false,true]){
   assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,0);
   const group=h.prompts.find(item=>item.title==='Kept versions').groups.find(item=>item.label==='Note · absent here');
   assert.match(group.description,/Recently deleted/u);
-  assert.match(group.description,/partial|incomplete|not enough/iu,
+  assert.match(group.description,/only the changed Note fields|not a guaranteed complete/iu,
     'The dialog explains why a retained field-only alternative cannot create a whole Note.');
   assert.equal(state.reviews.open().length,1,'Keeping the alternative cannot silently discard its text.');
 }
