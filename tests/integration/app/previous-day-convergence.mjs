@@ -102,6 +102,7 @@ for(const [label,owner,selection,mutated,expected] of [
 // the old session without leaving an uncovered divergent review version.
 for(const spec of [
   {label:'acknowledged current session',current:true,ack:true,covered:true,want:true},
+  {label:'newer Review feedback is preserved',current:true,ack:true,covered:true,newerStatus:true,want:true},
   {label:'current not acknowledged',current:true,ack:false,covered:true,want:false},
   {label:'current only in rescue',current:true,ack:true,rescue:true,covered:true,want:false},
   {label:'current Day missing',current:true,ack:true,covered:false,want:false},
@@ -111,7 +112,7 @@ for(const spec of [
   {label:'failed canonical Day read',current:false,covered:true,readFailure:true,want:false},
   {label:'local work changed',current:true,ack:true,covered:true,dirty:true,want:false}
 ]){
-  let verified=0;
+  let verified=0,statusClears=0;
   const snapshot={contentRevision:7,savedRevision:spec.ack?7:0};
   const current=spec.current?{date:day,snapshot}:null;
   const evidence=spec.evidence===false?null:{date:day,snapshot:{contentRevision:7,savedRevision:0}};
@@ -135,6 +136,9 @@ for(const spec of [
       return !!stored&&stored.date===value.date&&!value.uncovered;
     }},
     clearSessionSafetyMessage:()=>{context.sessionSafetyMessage='';},
+    NoticeCoordinator:{eventStatus:()=>({events:[{source:'review',id:'status-save-status',
+      message:spec.newerStatus?'Newer user feedback':'Review is ready. Save today to Library when you are done.'}]})},
+    setStatus:(id,message)=>{assert.equal(id,'save-status');assert.equal(message,'');statusClears++;},
     AppDiagnostics:{capture:()=>{}}
   });
   vm.runInContext(reminder+'\nglobalThis.revalidate=revalidateSaveReminderAfterCanonicalConvergence;',context);
@@ -142,6 +146,7 @@ for(const spec of [
   assert.equal(context.saveReminderDate,spec.want?'':day,spec.label+' reminder state');
   assert.equal(context.sessionSafetyMessage==='',spec.want,spec.label+' visible warning');
   assert.equal(verified,spec.want?1:0,spec.label+' canonical Day verification');
+  assert.equal(statusClears,spec.want&&!spec.newerStatus?1:0,spec.label+' stale inline status');
 }
 
 // Captured notice evidence must be a committed same-date session with a

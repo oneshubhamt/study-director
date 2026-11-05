@@ -381,8 +381,18 @@ function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
     return sameDataValue(savedRest,priorRest)&&
       prior.unitMs.every((ms,index)=>saved.unitMs[index]===ms);
   };
-  const consumedRuns=new Set();
+  const consumedRuns=new Set(),unmatchedRuns=[];
+  // Exact finished runs are more specific than prefixes. Reserve them first
+  // so an earlier partial run cannot consume the only exact match of a
+  // separately completed run merely because the records are ordered apart.
   for(const run of runs){
+    const index=record.practiceRuns.findIndex((saved,i)=>!consumedRuns.has(i)&&sameDataValue(saved,run));
+    if(index<0)unmatchedRuns.push(run);
+    else consumedRuns.add(index);
+  }
+  // Longer prefixes constrain the assignment more strongly than shorter ones.
+  unmatchedRuns.sort((a,b)=>(b?.unitMs?.length||0)-(a?.unitMs?.length||0));
+  for(const run of unmatchedRuns){
     const index=record.practiceRuns.findIndex((saved,i)=>!consumedRuns.has(i)&&practiceRunCovered(saved,run));
     if(index<0)return false;
     consumedRuns.add(index);

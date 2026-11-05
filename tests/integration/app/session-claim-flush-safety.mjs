@@ -907,6 +907,14 @@ for(const mode of ['changed-head','different-claim','divergent-local','offline']
   const doubled={...snapshot,practice:{runs:[priorRun,priorRun]}};
   assert.equal(practice.ctx.covered(practiceDay,{...session,snapshot:doubled},{allowAdvances:true}),false,
     'one saved run cannot cover two distinct earlier records');
+  // Exact matches are reserved ahead of overlapping partial prefixes, or
+  // the first partial can steal the only complete-run match unnecessarily.
+  const completedRun={...laterRun};
+  const longerRun={...laterRun,unitMs:[61000,59000,57000]};
+  const overlappingDay={...saved,practiceRuns:[completedRun,longerRun]};
+  const overlappingSnap={...snapshot,practice:{runs:[priorRun,completedRun]}};
+  assert.equal(practice.ctx.covered(overlappingDay,{...session,snapshot:overlappingSnap},{allowAdvances:true}),true,
+    'exact-first matching avoids a spurious conflict between overlapping practice prefixes');
 }
 
 // A saved calendar date is not enough to suppress the user's Save Today

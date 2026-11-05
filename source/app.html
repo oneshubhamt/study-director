@@ -4235,6 +4235,12 @@ async function revalidateSaveReminderAfterCanonicalConvergence(){
     if(saveReminderDate!==date||!sessionSafetyMessage.startsWith('Review reminder:')||daySaveDirty(date))return false;
     saveReminderDate='';saveReminderEvidence=null;
     clearSessionSafetyMessage('Review reminder:');
+    // Clear only the stale instruction produced by promptSaveToday. A more
+    // recent manual save success or error must keep its own Review feedback.
+    const staleStatus=NoticeCoordinator.eventStatus().events.some(event=>
+      event.source==='review'&&event.id==='status-save-status'&&
+      event.message==='Review is ready. Save today to Library when you are done.');
+    if(staleStatus)setStatus('save-status','');
     return true;
   }catch(error){AppDiagnostics.capture('session.reminder-convergence',error,'warn');return false;}
 }
