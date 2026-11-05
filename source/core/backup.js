@@ -869,6 +869,10 @@ function personalAddsNothing(side,other){
   // equal the starter template. Only null proves the default is unsaved.
   if(a.plans.draft!==null&&a.plans.draft!==b.plans.draft)return false;
   if(a.plans.defaultId!==null&&a.plans.defaultId!==b.plans.defaultId)return false;
+  // Authored order is meaningful among identities that both devices hold.
+  // Independent additions are safe only when the common relative order agrees.
+  if(meaningfulSavedPlanOrderDiffers(a.plans.savedPlans.map(plan=>plan.id),
+      b.plans.savedPlans.map(plan=>plan.id)))return false;
   const plans=new Map(b.plans.savedPlans.map(plan=>[plan.id,plan]));
   return a.plans.savedPlans.every(plan=>plans.has(plan.id)&&Canonical.same(semanticSavedPlan(plan),semanticSavedPlan(plans.get(plan.id))));
 }
