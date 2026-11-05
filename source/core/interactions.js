@@ -320,7 +320,7 @@ registry.define('interactions',1,()=>{
       }
       shell.appendChild(actions);dialog.appendChild(shell);
       dialog.setAttribute('aria-labelledby','sd-interaction-title');dialog.className='interaction-dialog'+(options.danger?' danger':options.caution?' caution':'');
-      if(request.type==='configure'&&options.groups?.some(group=>group.comparison))dialog.classList.add('with-comparison');
+      if(request.type==='configure'&&Array.isArray(options.groups)&&options.groups.some(group=>group&&group.comparison))dialog.classList.add('with-comparison');
       dialog.oncancel=event=>{event.preventDefault();settle(request.type==='confirm'?false:null);};
       const historyDescriptor=freeze({kind:'prompt',token:`prompt:${historyNonce}:${++historySequence}`});
       active={...request,dialog,historyDescriptor,restoreFocus:document.activeElement&&typeof document.activeElement.focus==='function'?document.activeElement:null};
