@@ -397,6 +397,37 @@ function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
     if(index<0)return false;
     consumedRuns.add(index);
   }
+  // Practice Pacer also records an unfinished active attempt. Save Today
+  // finalizes that attempt as a partial run, so a Saved Day must contain
+  // its already-observed units and elapsed current unit as a distinct run.
+  // The ongoing clock is bounded by the snapshot's own persisted timestamp;
+  // a missing/inconsistent clock observation is not positive save evidence.
+  const active=snapshot.practice?.active;
+  if(active){
+    const finished=Array.isArray(active.unitMs)?active.unitMs:[],
+      anchored=Number(active.anchorMs)>0;
+    let current=Math.max(0,Math.round(Number(active.currentMs)||0));
+    if(anchored){
+      const at=Date.parse(String(snapshot.updatedAt||'')),since=Number(active.anchorMs);
+      if(!Number.isFinite(at)||at<since)return false;
+      current+=Math.max(0,Math.round(at-since));
+    }
+    if(finished.length||current>0){
+      const fields=['targetMs','taskId','sessionTargetMs','unitPlan','totalUnits'],
+        expected=finished.length+(current>0?1:0);
+      const index=record.practiceRuns.findIndex((saved,i)=>{
+        if(consumedRuns.has(i)||!Array.isArray(saved?.unitMs)||
+          fields.some(key=>!sameDataValue(saved[key],active[key]))||
+          (allowAdvances?saved.unitMs.length<expected:saved.unitMs.length!==expected)||
+          !finished.every((ms,pos)=>saved.unitMs[pos]===ms))return false;
+        return current===0||
+          (allowAdvances?saved.unitMs[finished.length]>=current:
+            saved.unitMs[finished.length]===current);
+      });
+      if(index<0)return false;
+      consumedRuns.add(index);
+    }
+  }
   const observed=(value,prior)=>{
     if(prior===undefined)return true;
     if(value===undefined||!Number.isFinite(Number(value))||!Number.isFinite(Number(prior)))return false;
