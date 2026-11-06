@@ -21,6 +21,25 @@
 
 Other main-only files: `docs/areas/backup-and-sync.md`, `docs/backlog.md`, `docs/test-programme.md`, `release.config.mjs`, and tests `automatic-provider-backup.mjs`, `repository-checkpoint.mjs`, `managed-recovery.mjs`. Current main-side Bug #12–#15 findings were already in the bug-fixes backlog; their live-device acceptance remains open. Main's test-programme scheduling change does not override the existing pause.
 
+## Source re-audit: 2026-11-06
+
+A fresh two-way GitHub comparison confirmed main `919a6980f27b9c216d6a5dddcb4bbbcff100493b`, bug-fixes `c826fec189582840a5a55e9df355578051151e41` and merge base `56b0ada6df7dae3d5307f305a34025a2d1ed52a2`. Main remains 10 commits ahead of that ancestor, bug-fixes 375. **Main has exactly nine net-changed files and only two production modules relative to the shared ancestor.** No further unassessed main-only production fix was found.
+
+| Main-only changed file | Current disposition on bug-fixes |
+| --- | --- |
+| `source/core/backup-provider.js` | Publication-heartbeat optimization; empty-device Drive discovery and ancestry; verified-empty restore shortcut all integrated and tested, with stronger safeguards than main |
+| `source/core/managed-recovery.js` | Empty-device skip accepted only with an explicit final emptiness proof and revision fence; normal verified-safety path unchanged |
+| `tests/integration/backup/automatic-provider-backup.mjs` | Main's empty-device/empty-Drive scenarios incorporated; newer ancestry and other cases preserved |
+| `tests/integration/backup/repository-checkpoint.mjs` | Short-upload marker, long renewal and removed-marker assertions incorporated |
+| `tests/unit/backup/managed-recovery.mjs` | Main's positive empty skip and invalid skip tests covered by stronger final-empty/revision/failed-read assertions |
+| `docs/areas/backup-and-sync.md` | Both main policy changes incorporated and clarified with stricter actual safety contract |
+| `docs/backlog.md` | All 15 reported items, phone log additions, detailed latency/design alternatives, five data-kind requirements and work order reconciled; broken table rows #12–#14 repaired |
+| `docs/test-programme.md` | Later 2026-11-07 bug-hunt-first instruction reconciled with earlier approximately 2026-11-10 pause; no automatic resumption |
+| `release.config.mjs` | Main's `SDVB75F22` intentionally not copied over the newer `SDVB75F23` on bug-fixes; release identity is not a missed production fix |
+
+Shared-ancestor fixes #7 (safe-area insets), #8 (Verification copy) and #10 (renewing stale-marker cleanup) are already present on bug-fixes; they are **not** additional main-only commits. Source ownership and test evidence for #1/#2/#3/#5 extend beyond main. [Repository Checks for the audited source revision](https://github.com/oneshubhamt/study-director/actions/runs/42086364608) passed 157 fast-suite files and PWA/build checks. This does not certify real Drive, Safari, multi-device or physical-device behavior.
+
+The integration intentionally does **not** merge histories, overwrite the branch with main, roll back the release number or import speculative backup architecture. The current backlog is the canonical status register; the copied source observations there remain explicitly identified as observations/proposals.
 ## Approved empty-device safety optimization
 
 The original `main` shortcut did not inspect unresolved Kept Versions or retain the final revision check. The approved `bug-fixes` implementation uses the existing recovery coordinator and local rollback journal, with these safeguards:
