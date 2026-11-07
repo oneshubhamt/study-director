@@ -4507,8 +4507,12 @@ function flushLiveDraft(options={}){
   liveDraftSaveTimer=null;liveDraftSaveDueAt=0;liveDraftPendingOptions=null;
   return writeLiveDraftNow({...pending,emergency:true});
 }
+// The once-a-minute snapshot waits while a restore, combine or sync runs: one
+// landing during its safety upload would read as local data changing and
+// start the whole recovery again (a second safety upload). The next tick
+// after it writes the snapshot; leaving the page still saves at once.
 function maybeSnapshotRunningTimer(){
-  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced())return;
+  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()||AppMutationCoordinator?.status().active==='managed-recovery')return;
   if(TimerState.paused||TimerState.inactiveGap||!TimerState.runtime||TimerState.runtime.startMs===null)return;
   const now=DecisionClock.nowMs();
   if(now-lastTimerSnapshotMs>=TIMER_SNAPSHOT_INTERVAL_MS)writeLiveDraftNow();
