@@ -928,6 +928,55 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
   driveBacklogCases.push({size,fault,retained:kept.size,exactObjects:true,progressReused:true});
  }finally{backgroundReady=false;runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
 }
+// A busy phone (bug 12): history reads are slow (3 s each, as on the phone)
+// and a new version lands every two minutes while cleanup works through a
+// large backlog. Each landing
+// changes the listing, so a planned pass defers and plans again. Cleanup
+// must still delete while uploads keep coming, read each obsolete version
+// once, and end with exactly the retained versions once uploads stop.
+{
+ const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=false;dailyRecords=[];assetDescriptor=null;
+ const size=200,id='drive-busy-backlog',warmId=id+'-seed',maintenance=new Map(),h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id:warmId,label:'Drive Busy Seed'}))});
+ const kind=file=>file.appProperties.studyDirectorRepositoryKind,step=async()=>{await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));await clock.advance(500);};
+ try{
+  await h.provider.prepare();await h.provider.authorize();snapshotRevision=id;sourceRevision='2026-10-03T11:00:00.000Z';notes={Subject:freeze({version:2,key:'Subject',text:'busy seed',updatedAt:sourceRevision})};
+  await runtime.providers.backupRepositoryProvider(warmId);
+  const seedFile=[...h.state.files.values()].find(file=>kind(file)==='checkpoint'),seed=JSON.parse(await seedFile.content.text());
+  for(let index=1;index<size;index++){
+   const checkpointId='cp_'+(70000+index).toString(16).padStart(32,'0'),date=new Date(clock.now()-Math.floor((size-index)/2)*86400000).toISOString().slice(0,10),exportedAt=date+`T${index%2?'10':'11'}:00:00.000Z`;
+   const manifest={...seed,checkpoint:{...seed.checkpoint,checkpointId,createdAt:exportedAt},exportedAt,sourceRevision:exportedAt,protectedCheckpointManifest:{...seed.protectedCheckpointManifest,checkpointId,sourceRevision:exportedAt},retention:{...seed.retention,calendar:{...retentionCalendar(date),utcOffsetMinutes:0}}};
+   const blob=new Blob([JSON.stringify(manifest)]);await h.provider.repository.upload({kind:'checkpoint',id:checkpointId,blob,digest:await engine.run('checksum',{value:blob}),exportedAt,historySummary:{logicalFingerprint:manifest.logicalFingerprint,counts:manifest.counts,retention:manifest.retention}});
+   const marker=await runtime.repository.inspectCommit(new Blob([JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision:exportedAt,manifestVersion:manifest.version})]));
+   const commitBlob=new Blob([JSON.stringify(marker)]);await h.provider.repository.upload({kind:'commit',id:checkpointId,blob:commitBlob,digest:await engine.run('checksum',{value:commitBlob})});
+  }
+  runtime.providers.configureRepositoryMaintenance(freeze({read:async providerId=>maintenance.get(providerId)||null,mark:async(providerId,value)=>{maintenance.set(providerId,freeze({...maintenance.get(providerId),...value}));return true;},clear:async providerId=>{maintenance.delete(providerId);return true;}}));
+  snapshotRevision=id+'-next';sourceRevision='2026-10-03T12:00:00.000Z';notes={Subject:freeze({version:2,key:'Subject',text:'busy current',updatedAt:sourceRevision})};
+  await runtime.providers.backupRepositoryProvider(warmId);
+  maintenance.set(id,maintenance.get(warmId));maintenance.delete(warmId);
+  runtime.providers.register(freeze({...h.provider,id,label:'Drive Busy Backlog QA'}));
+  const original=new Map([...h.state.files.values()].filter(file=>kind(file)==='checkpoint').map(file=>[file.id,file.appProperties.studyDirectorRepositoryId])),readStart=h.state.historyReadCompletions?.length||0;
+  // Versions kept at the start are read in full as well, by design.
+  const keptAtStart=new Set(runtime.repository.selectRetention(await Promise.all([...h.state.files.values()].filter(file=>kind(file)==='checkpoint').map(async file=>freeze({id:file.appProperties.studyDirectorRepositoryId,manifest:JSON.parse(await file.content.text())}))),{now:new Date(clock.now())}).retained.map(row=>row.id));
+  h.state.historyReadDelayMs=3000;backgroundReady=true;runtime.providers.wakeBackground('busy-backlog');
+  // Ten minutes of study: a new version every two minutes.
+  let uploads=0,landed=0,deletedWhileBusy=0;
+  for(let elapsed=500;elapsed<=600000;elapsed+=500){
+   if(elapsed%120000===0){uploads++;snapshotRevision=id+'-'+elapsed;sourceRevision=new Date(clock.now()).toISOString();notes={Subject:freeze({version:2,key:'Subject',text:'busy '+elapsed,updatedAt:sourceRevision})};void runtime.providers.backupRepositoryProvider(id).then(result=>{if(result&&result.cancelled!==true)landed++;},()=>{});}
+   await step();
+  }
+  deletedWhileBusy=[...original.keys()].filter(remoteId=>!h.state.files.has(remoteId)).length;
+  assert.ok(landed>=3,`new versions keep landing (${landed} of ${uploads})`);
+  assert.ok(deletedWhileBusy>0,'cleanup deletes while new versions keep landing');
+  for(let elapsed=0;elapsed<360000&&maintenance.has(id);elapsed+=500)await step();
+  assert.equal(maintenance.has(id),false,'cleanup finishes once uploads stop: '+JSON.stringify({intent:maintenance.get(id),errors:diagnosticFailures.slice(-3)}));
+  const rows=await Promise.all([...h.state.files.values()].filter(file=>kind(file)==='checkpoint').map(async file=>freeze({id:file.appProperties.studyDirectorRepositoryId,manifest:JSON.parse(await file.content.text()),remoteId:file.id})));
+  const kept=new Set(runtime.repository.selectRetention(rows,{now:new Date(clock.now())}).retained.map(row=>row.id));
+  assert.deepEqual(rows.map(row=>row.id).sort(),[...kept].sort(),'exactly the retained versions remain');
+  const completions=h.state.historyReadCompletions.slice(readStart);
+  for(const [remoteId,checkpointId] of original)if(!kept.has(checkpointId)&&!keptAtStart.has(checkpointId))assert.ok(completions.filter(read=>read===remoteId).length<=1,'each obsolete version is read once, however often cleanup plans again');
+  driveBacklogCases.push({size,fault:'busy',uploads:landed,deletedWhileBusy,retained:kept.size});
+ }finally{backgroundReady=false;runtime.providers.configureRepositoryMaintenance(null);await h.provider.disconnect();globalThis.Date=realDate;backgroundClock=null;}
+}
 
 // A continuation owns one sealed capture. Attempt signals and worker lifetimes
 // can change, but payload identity, encrypted bytes and live file leases cannot.
