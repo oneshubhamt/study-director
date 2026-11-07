@@ -200,6 +200,22 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['source/core/compatibility-host.js'])
     },
     {
+      id:'reconciliation-base-pre-v5',owner:'compatibility/host',kind:'live-migration',
+      source:'appMeta reconciliationBase header versions 3 (released builds) and 4 (bug-fixes builds), and reconciliationBaseDays version-1 rows without study-content fingerprints',
+      target:'none kept: the whole base is dropped and the next Drive sync records ReconciliationBase.v5 with ReconciliationBaseDays.v2 rows',
+      proof:'the ordinary baseline store reads and writes only header version 5 and day rows version 2; verifyCanonicalInstallation reports any older base row still present',
+      retirement:'after every supported installed build has crossed ReconciliationBase.v5 and the canonical baseline is verified',
+      sourceFiles:freeze(['source/core/compatibility-host.js','source/core/reconciliation-baseline.js'])
+    },
+    {
+      id:'handoff-safety-marker-v1',owner:'compatibility/host',kind:'cleanup',
+      source:'browser-storage sessionHandoffSafety value in its first form (format study-director.session-handoff-safety.v1), written only by bug-fixes builds',
+      target:'removed; the app reads only the version-2 marker',
+      proof:'only a value in exactly the first form is removed, under the compatibility write token; verifyCanonicalInstallation reports one still present',
+      retirement:'after every supported installed build writes the version-2 marker and the canonical baseline is verified',
+      sourceFiles:freeze(['source/core/compatibility-host.js','source/app.html'])
+    },
+    {
       id:'r10-indexeddb-topology-retirement',owner:'compatibility/persistence',kind:'schema-bridge',
       source:`historical IndexedDB topology containing retired ${OBSOLETE_INDEXED_DB.stores.syncQueue}/${OBSOLETE_INDEXED_DB.stores.tombstones}/${OBSOLETE_INDEXED_DB.stores.reflectionDrafts} stores`,
       target:`current IndexedDB v${INDEXED_DB.version} six-store topology`,
@@ -277,6 +293,14 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
   ]),
   protocolCompatibility:items([
+    {
+      id:'older-session-claims',owner:'backup-provider',kind:'protocol-bridge',
+      source:'Drive Active Session ownership claims written by devices on older builds: hashed version 2 (released), version 3 (bug-fixes builds) and the plain version 1 and 2 forms with a date and device ids',
+      target:'read as ActiveSessionClaim.v4 without the fields the older form lacks (no content fingerprint, no handoff token); this build writes only version 4',
+      proof:'the ordinary claim reader accepts only version 4; older forms pass through the one marked block in backup-provider.js, reached only through decodeSessionClaim, and an unknown form fails closed',
+      retirement:'after every supported installed build writes version-4 claims and older claim files on Drive have been compacted',
+      sourceFiles:freeze(['source/core/backup-provider.js'])
+    },
     {
       id:'legacy-service-worker-update-bridge',owner:'service-worker/pwa-lifecycle',kind:'protocol-bridge',
       source:'older page <-> Service Worker update protocol',

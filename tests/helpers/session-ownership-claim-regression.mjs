@@ -78,4 +78,19 @@ const oldBlob=new Blob([JSON.stringify(oldValue)]);const oldDigest=await sha256(
 files.set(lastStored.id,freeze({...lastStored,blob:oldBlob,size:oldBlob.size,digest:oldDigest}));
 const oldProjected=await b.readSessionClaim('google-drive');
 assert.equal(oldProjected.handoffToken,'','unlinked legacy claims remain readable but are not recovery identities');
+// Devices still on an older build write the hashed v2 form or the plain form
+// with a date and device ids. Both are read as v4 claims without the fields
+// they lack, through the one compatibility path.
+const replaceLast=async value=>{const blob=new Blob([JSON.stringify(value)]);files.set(lastStored.id,freeze({...lastStored,blob,size:blob.size,digest:await sha256(blob)}));};
+const v2Value={...oldValue,version:2};delete v2Value.observedContentFingerprint;
+await replaceLast(v2Value);
+const v2Projected=await b.readSessionClaim('google-drive');
+assert.equal(v2Projected.state,oldValue.state);assert.equal(v2Projected.applies,true,'a v2 claim from an older device still applies to today');
+assert.equal(v2Projected.revision,oldValue.revision);assert.equal(v2Projected.observedContentFingerprint,'');assert.equal(v2Projected.handoffToken,'');
+await replaceLast({format:'study-director.active-session-claim',version:1,date:DATE,epoch:oldValue.epoch,owner:A,observedRevision:50,claimedAt:'2026-10-27T09:00:00.000Z'});
+const plainProjected=await a.readSessionClaim('google-drive');
+assert.equal(plainProjected.applies,true);assert.equal(plainProjected.ownedHere,true,'a plain claim naming this device reads as owned here');
+assert.equal(plainProjected.state,'owned');assert.equal(plainProjected.revision,51,'a plain v1 claim implies the next revision');
+await replaceLast({...oldValue,version:9});
+await assert.rejects(()=>b.readSessionClaim('google-drive'),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN','an unknown claim form is not guessed at');
 console.log(JSON.stringify({status:'PASS',suite:'session-ownership-claim',opaque:true,contentAnchored:true,staleOwnerBlocked:true,staleHeadBlocked:true,rollbackEpoch:true},null,2));

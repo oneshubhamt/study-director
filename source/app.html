@@ -5523,7 +5523,6 @@ const sessionHandoffError=(code,message)=>Object.assign(new Error(message),{code
 // remote claim. It survives reload if Drive accepts a claim but the response,
 // local write or final verification fails. It never serves as session data.
 const HANDOFF_SAFETY_FORMAT='study-director.session-handoff-safety.v2';
-const HANDOFF_LEGACY_SAFETY_FORMAT='study-director.session-handoff-safety.v1';
 const HANDOFF_ATTEMPT_PATTERN=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const HANDOFF_FINGERPRINT_PATTERN=/^[a-f0-9]{64}$/u;
 const HANDOFF_UNCERTAIN_MESSAGE='Continue Here did not finish verifying ownership. Keep this device’s session stopped. Connect Google Drive and use Verify ownership / Continue Here to recover.';
@@ -5545,7 +5544,6 @@ function armSessionHandoffSafety(session,checkpointId,observedContentFingerprint
 function validSessionHandoffSafety(marker,session){
   if(!marker||typeof marker!=='object'||marker.installedOn!==InstallationIdentity.getId()||marker.date!==session?.date||
       !/^cp_[a-f0-9]{32}$/u.test(String(marker.checkpointId||'')))return false;
-  if(marker.format===HANDOFF_LEGACY_SAFETY_FORMAT&&marker.version===1)return true;
   return marker.format===HANDOFF_SAFETY_FORMAT&&marker.version===2&&
     HANDOFF_ATTEMPT_PATTERN.test(String(marker.handoffToken||''))&&
     HANDOFF_FINGERPRINT_PATTERN.test(String(marker.observedOwnerToken||''))&&
@@ -5611,17 +5609,6 @@ async function verifySessionHandoffSafetyStrictly(session){
   const local=loaded?.ok&&loaded.storage?.idb===true&&!loaded.error?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
   if(!local||!CanonicalModule.same(local,ActiveSessionCodec.sanitizeCurrent(session)))return false;
   const me=InstallationIdentity.getId();
-  if(marker.version===1){
-    // Old safety markers lack a claim identity. Preserve only their existing
-    // verified-success / verified-nonowner behavior, never infer adoption.
-    if(claim?.applies&&claim.state==='owned'&&claim.ownedHere&&local.runningOn===me&&Number(local.revision)>=Number(claim.revision)){
-      clearSessionHandoffSafety();return true;
-    }
-    if(local.runningOn!==me&&(!claim||claim.applies!==true||claim.state!=='owned'||!claim.ownedHere)){
-      clearSessionHandoffSafety();return true;
-    }
-    return false;
-  }
   if(await activeSessionContentFingerprint(local)!==marker.observedContentFingerprint)return false;
   if(handoffClaimMatches(marker,claim)){
     if(local.runningOn===me&&local.revision===marker.proposedRevision){
@@ -10154,7 +10141,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
   baselineId:APP_VERSION,
   facadeFactory:CompatibilityModule.createFacade,
   keys:Object.freeze({
-    storage:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale,storageHealth:STORAGE_KEYS.storageHealth}),
+    storage:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale,storageHealth:STORAGE_KEYS.storageHealth,sessionHandoffSafety:STORAGE_KEYS.sessionHandoffSafety}),
     renamedAppMeta:Object.freeze(Object.entries(RENAMED_APP_META_KEYS).flatMap(([name,from])=>[from].flat().map(old=>Object.freeze([old,APP_META_KEYS[name]])))),
     renamedLocal:Object.freeze([Object.freeze([OBSOLETE_STORAGE_KEYS.noteRescueLegacy,STORAGE_KEYS.noteRescue])]),
     renamedFormats:RENAMED_VALUE_FORMATS,

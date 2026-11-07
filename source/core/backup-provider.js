@@ -1130,31 +1130,40 @@ registry.define('backup-provider',1,input=>{
     if(!SESSION_CLAIM_TOKEN_PATTERN.test(String(digest||'')))throw new Error('Active-session ownership token could not be derived safely.');
     return String(digest);
   }
-  function normalizeSessionClaim(value){
-    if(!value||typeof value!=='object'||Array.isArray(value))return null;
-    const version=Number(value.version),keys=Object.keys(value).sort().join('|');
-    const v2=version===2&&keys==='claimedAt|epoch|format|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version';
-    const v3=version===3&&keys==='claimedAt|epoch|format|observedContentFingerprint|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version';
-    const v4=version===SESSION_CLAIM_VERSION&&keys==='claimedAt|epoch|format|handoffToken|observedContentFingerprint|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version';
-    if(!v2&&!v3&&!v4)return null;
-    const epoch=Number(value.epoch),revision=Number(value.revision),observedRevision=Number(value.observedRevision),state=String(value.state||''),claimedAt=String(value.claimedAt||''),sessionToken=String(value.sessionToken||''),ownerToken=String(value.ownerToken||''),observedOwnerToken=String(value.observedOwnerToken||''),observedContentFingerprint=v3||v4?String(value.observedContentFingerprint||''):'',handoffToken=v4?String(value.handoffToken||''):'';
+  // ActiveSessionClaim.v4: the only form this build reads directly or writes.
+  const SESSION_CLAIM_KEYS='claimedAt|epoch|format|handoffToken|observedContentFingerprint|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version';
+  function sessionClaimValue(value,{observedContentFingerprint,handoffToken}){
+    const epoch=Number(value.epoch),revision=Number(value.revision),observedRevision=Number(value.observedRevision),state=String(value.state||''),claimedAt=String(value.claimedAt||''),sessionToken=String(value.sessionToken||''),ownerToken=String(value.ownerToken||''),observedOwnerToken=String(value.observedOwnerToken||'');
     if(value.format!==SESSION_CLAIM_FORMAT||!Number.isSafeInteger(epoch)||epoch<1||!Number.isSafeInteger(revision)||revision<1||!Number.isSafeInteger(observedRevision)||observedRevision<1||!['owned','released'].includes(state)||!Number.isFinite(Date.parse(claimedAt))||!SESSION_CLAIM_TOKEN_PATTERN.test(sessionToken)||!SESSION_CLAIM_TOKEN_PATTERN.test(ownerToken)||!SESSION_CLAIM_TOKEN_PATTERN.test(observedOwnerToken)||(observedContentFingerprint&&!SESSION_CLAIM_TOKEN_PATTERN.test(observedContentFingerprint))||(handoffToken&&!SESSION_HANDOFF_TOKEN_PATTERN.test(handoffToken)))return null;
     return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state,ownerToken,revision,observedOwnerToken,observedRevision,observedContentFingerprint,handoffToken,claimedAt:new Date(claimedAt).toISOString()});
   }
-  function normalizePlainSessionClaim(value){
+  function normalizeSessionClaim(value){
+    if(!value||typeof value!=='object'||Array.isArray(value)||Number(value.version)!==SESSION_CLAIM_VERSION||Object.keys(value).sort().join('|')!==SESSION_CLAIM_KEYS)return null;
+    return sessionClaimValue(value,{observedContentFingerprint:String(value.observedContentFingerprint||''),handoffToken:String(value.handoffToken||'')});
+  }
+  async function decodeSessionClaim(value,{signal=null}={}){return normalizeSessionClaim(value)||upgradeOlderSessionClaim(value,{signal});}
+  /* COMPATIBILITY --- Devices still on an older build write ownership claims
+     in an earlier form: hashed v2 (released) or v3 (bug-fixes builds), or the
+     plain form with a date and device ids. Each is read as a v4 claim without
+     the fields it lacks. Retire with the compatibility layer once every device
+     writes v4 (registry: older-session-claims). */
+  async function upgradeOlderSessionClaim(value,{signal=null}={}){
     if(!value||typeof value!=='object'||Array.isArray(value))return null;
+    const version=Number(value.version),keys=Object.keys(value).sort().join('|');
+    if(version===2&&keys==='claimedAt|epoch|format|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version')return sessionClaimValue(value,{observedContentFingerprint:'',handoffToken:''});
+    if(version===3&&keys==='claimedAt|epoch|format|observedContentFingerprint|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version')return sessionClaimValue(value,{observedContentFingerprint:String(value.observedContentFingerprint||''),handoffToken:''});
+    const plain=plainSessionClaim(value);if(!plain)return null;
+    const [sessionToken,ownerToken,observedOwnerToken]=await Promise.all([sessionClaimToken('session',plain.date,{signal}),sessionClaimToken('owner',plain.owner,{signal}),sessionClaimToken('owner',plain.observedOwner,{signal})]);
+    return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch:plain.epoch,state:plain.state,ownerToken,revision:plain.revision,observedOwnerToken,observedRevision:plain.observedRevision,observedContentFingerprint:'',handoffToken:'',claimedAt:plain.claimedAt});
+  }
+  function plainSessionClaim(value){
     const version=Number(value.version),keys=Object.keys(value).sort().join('|'),v1=version===1&&keys==='claimedAt|date|epoch|format|observedRevision|owner|version',v2=version===2&&keys==='claimedAt|date|epoch|format|observedOwner|observedRevision|owner|revision|state|version';
     if(!v1&&!v2)return null;
     const date=String(value.date||''),epoch=Number(value.epoch),owner=String(value.owner||''),observedOwner=v1?owner:String(value.observedOwner||''),observedRevision=Number(value.observedRevision),revision=v1?observedRevision+1:Number(value.revision),state=v1?'owned':String(value.state||''),claimedAt=String(value.claimedAt||'');
     if(value.format!==SESSION_CLAIM_FORMAT||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!Number.isSafeInteger(epoch)||epoch<1||!SESSION_OWNER_PATTERN.test(owner)||!SESSION_OWNER_PATTERN.test(observedOwner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<1||!['owned','released'].includes(state)||!Number.isFinite(Date.parse(claimedAt)))return null;
     return freeze({date,epoch,state,owner,revision,observedOwner,observedRevision,claimedAt:new Date(claimedAt).toISOString()});
   }
-  async function decodeSessionClaim(value,{signal=null}={}){
-    const current=normalizeSessionClaim(value);if(current)return current;
-    const legacy=normalizePlainSessionClaim(value);if(!legacy)return null;
-    const [sessionToken,ownerToken,observedOwnerToken]=await Promise.all([sessionClaimToken('session',legacy.date,{signal}),sessionClaimToken('owner',legacy.owner,{signal}),sessionClaimToken('owner',legacy.observedOwner,{signal})]);
-    return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch:legacy.epoch,state:legacy.state,ownerToken,revision:legacy.revision,observedOwnerToken,observedRevision:legacy.observedRevision,observedContentFingerprint:'',handoffToken:'',claimedAt:legacy.claimedAt});
-  }
+  /* END COMPATIBILITY */
   async function readRepositorySessionClaim(selected,{signal=null}={}){
     if(!repositorySessionClaimCapable(selected))return null;
     const listed=await selected.repository.listSessionClaims(freeze({signal})),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0);

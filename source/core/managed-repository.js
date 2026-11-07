@@ -648,21 +648,11 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       const readUnits=new Set(plan.structuredChanged);
       if(plan.baseUpdate){
         for(const unit of plan.index.sinceBase)if(repositoryPreparationDescriptor(unit))readUnits.add(unit);
-        // An unchanged Personal Data record in a legacy/unknown baseline is
-        // reread from the fenced source once, not falsely inferred.
+        // Per-field ancestry of plans and settings, or the session's
+        // study-content ancestor, that the base does not know is filled in
+        // from the fenced source being published, never inferred.
         if(!reconciliationBase?.personalFields)readUnits.add('personalData');
-        // Upgrade an older shared base using exactly the canonical checkpoint
-        // units being published. Do not infer missing semantic ancestors from
-        // their historical full-record hashes.
-        if(reconciliationBase?.version!==5){
-          let hasSession=false;
-          for(const entry of candidateEntries.values()){
-            if(!entry.present)continue;
-            if(entry.kind==='dailyRecordPack')readUnits.add(entry.unit);
-            if(entry.kind==='activeSession'){readUnits.add(entry.unit);hasSession=true;}
-          }
-          if(!hasSession)readSession=null;
-        }else if(reconciliationBase.sessionContentFingerprint===null){
+        if(reconciliationBase?.sessionContentFingerprint===null){
           let hasSession=false;
           for(const entry of candidateEntries.values())if(entry.present&&entry.kind==='activeSession'){readUnits.add(entry.unit);hasSession=true;}
           if(!hasSession)readSession=null;

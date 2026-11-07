@@ -49,26 +49,26 @@ registry.define('reconciliation-baseline',1,()=>{
         draft:raw.draft,defaultId:raw.defaultId,savedPlanOrder:raw.savedPlanOrder,
         savedPlans:freeze(Object.fromEntries(Object.entries(plans).sort(([a],[b])=>a.localeCompare(b)))),order:freeze([...order])});
     }
+    // ReconciliationBase.v5. Older headers are dropped by the compatibility
+    // host before the app reads them; this reads only the current form.
+    const HEADER_KEYS=freeze(['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint','sessionFingerprint','personalFields','sessionContentFingerprint']);
     function normalizeHeader(value){
-      const version=value?.version,legacy=version===3,semantic=version===5,
-        keys=legacy?
-          ['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint','sessionFingerprint']:
-          ['format','version','checkpointId','establishedAt','noteCount','noteKeyFingerprint','personalFingerprint','sessionFingerprint','personalFields',...(semantic?['sessionContentFingerprint']:[])];
-      if(!value||![3,4,5].includes(version)||!exactKeys(value,keys)||value.format!=='study-director.reconciliation-base'||
+      if(!value||value.version!==5||!exactKeys(value,HEADER_KEYS)||value.format!=='study-director.reconciliation-base'||
         !/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||
         !Number.isFinite(Date.parse(String(value.establishedAt||''))))return null;
       const noteCount=Number(value.noteCount);
       if(!Number.isInteger(noteCount)||noteCount<0||noteCount>Number(limits.maxNotes||1000)||
         !HEX.test(String(value.noteKeyFingerprint||''))||!fingerprint(value.personalFingerprint)||!fingerprint(value.sessionFingerprint))return null;
-      const fields=legacy?null:normalizePersonalFields(value.personalFields);
-      if(!legacy&&value.personalFields!==null&&!fields||fields&&!value.personalFingerprint)return null;
-      const sessionContentFingerprint=semantic?value.sessionContentFingerprint:null;
-      if(semantic&&sessionContentFingerprint!==null&&
+      const fields=normalizePersonalFields(value.personalFields);
+      if(value.personalFields!==null&&!fields||fields&&!value.personalFingerprint)return null;
+      // null: the session's study-content ancestor is not known.
+      const sessionContentFingerprint=value.sessionContentFingerprint;
+      if(sessionContentFingerprint!==null&&
         (!fingerprint(sessionContentFingerprint)||Boolean(sessionContentFingerprint)!==Boolean(value.sessionFingerprint)))return null;
-      return freeze({format:'study-director.reconciliation-base',version,
+      return freeze({format:'study-director.reconciliation-base',version:5,
         checkpointId:String(value.checkpointId),establishedAt:new Date(String(value.establishedAt)).toISOString(),
         noteCount,noteKeyFingerprint:String(value.noteKeyFingerprint),personalFingerprint:String(value.personalFingerprint),
-        sessionFingerprint:String(value.sessionFingerprint),...(semantic?{sessionContentFingerprint}:{}),...(!legacy?{personalFields:fields}:{})});
+        sessionFingerprint:String(value.sessionFingerprint),sessionContentFingerprint,personalFields:fields});
     }
     function normalizeNote(value,context={}){
       if(!value||!exactKeys(value,['format','version','key','label','text'])||value.format!=='study-director.reconciliation-base-note'||Number(value.version)!==1)return null;
@@ -81,13 +81,14 @@ registry.define('reconciliation-baseline',1,()=>{
       for(const [date,value] of Object.entries(raw)){if(!/^\d{4}-\d{2}-\d{2}$/u.test(date)||date.slice(0,7)!==month||!HEX.test(String(value||''))||++count>31)return null;out[date]=String(value);}
       return count?freeze(out):null;
     }
+    // ReconciliationBaseDays.v2: whole-record and study-content fingerprints
+    // for the same dates.
     function normalizeDays(value,context={}){
-      const semantic=value?.version===2;
-      if(!value||![1,2].includes(value.version)||!exactKeys(value,['format','version','month','days',...(semantic?['semanticDays']:[])])||
+      if(!value||value.version!==2||!exactKeys(value,['format','version','month','days','semanticDays'])||
         value.format!=='study-director.reconciliation-base-days'||String(context&&context.suffix||'')!==String(value.month||''))return null;
-      const month=String(value.month),days=monthDays(month,value.days),semanticDays=semantic?monthDays(month,value.semanticDays):null;
-      if(!days||semantic&&(!semanticDays||!sameDayKeys(days,semanticDays)))return null;
-      return freeze({format:'study-director.reconciliation-base-days',version:value.version,month,days,...(semantic?{semanticDays}:{})});
+      const month=String(value.month),days=monthDays(month,value.days),semanticDays=monthDays(month,value.semanticDays);
+      if(!days||!semanticDays||!sameDayKeys(days,semanticDays))return null;
+      return freeze({format:'study-director.reconciliation-base-days',version:2,month,days,semanticDays});
     }
     // {month: {date: fingerprint}} to write, or null to remove that month.
     function normalizeDayUpdates(value,{full=false}={}){
@@ -115,14 +116,12 @@ registry.define('reconciliation-baseline',1,()=>{
     if(!meta||meta.format!=='study-director.app-meta-owner'||meta.contractVersion!==1)throw new TypeError('Reconciliation baseline appMeta capability is invalid.');
     for(const name of ['read','readEntry','write','remove','list','transaction','view'])if(typeof meta[name]!=='function')throw new TypeError('Reconciliation baseline appMeta capability is missing '+name+'.');
     const noteValue=(key,state)=>freeze({format:'study-director.reconciliation-base-note',version:1,key,label:state.label,text:state.text});
-    const dayValue=(month,days,semanticDays=null)=>freeze({format:'study-director.reconciliation-base-days',version:semanticDays?2:1,month,days,...(semanticDays?{semanticDays}:{})});
+    const dayValue=(month,days,semanticDays)=>freeze({format:'study-director.reconciliation-base-days',version:2,month,days,semanticDays});
     const sameDays=(a,b)=>!!a&&!!b&&Object.keys(a).length===Object.keys(b).length&&Object.entries(a).every(([date,value])=>b[date]===value);
     async function readHeader(){return codec.normalizeHeader(await meta.read(families.header).catch(()=>null));}
     async function readNotes(keys){
       const normalized=codec.normalizeKeys(keys);if(!normalized)return freeze({});const rows=await Promise.all(normalized.map(async key=>{const value=await meta.read(families.notes,encodeURIComponent(key)).catch(()=>null),note=codec.normalizeNote(value,{suffix:encodeURIComponent(key)});return note?freeze([key,freeze({label:note.label,text:note.text})]):null;})),out=Object.create(null);for(const row of rows)if(row)out[row[0]]=row[1];return freeze(out);
     }
-    // Full-record hashes keep their original meaning, including in v2 rows.
-    // For legacy v1 rows, semantic ancestry is explicitly unknown.
     async function readDays(dates){
       const wanted=new Set((Array.isArray(dates)?dates:[]).map(String).filter(date=>/^\d{4}-\d{2}-\d{2}$/u.test(date))),months=[...new Set([...wanted].map(date=>date.slice(0,7)))],out=Object.create(null);
       for(const row of await Promise.all(months.map(async month=>codec.normalizeDays(await meta.read(families.days,month).catch(()=>null),{suffix:month}))))if(row)for(const [date,value] of Object.entries(row.days))if(wanted.has(date))out[date]=value;
@@ -139,23 +138,22 @@ registry.define('reconciliation-baseline',1,()=>{
         if(raw===null||raw===undefined)continue;
         const row=codec.normalizeDays(raw,{suffix:month});
         if(!row)throw new Error('Shared Saved-Day ancestor row is invalid.');
-        for(const [date,full] of Object.entries(row.days))if(wanted.has(date))out[date]=freeze({full,semantic:row.semanticDays?.[date]??null});
+        for(const [date,full] of Object.entries(row.days))if(wanted.has(date))out[date]=freeze({full,semantic:row.semanticDays[date]});
       }
       const after=await readHeader();
       if(!after||after.checkpointId!==expected)throw new Error('Shared Saved-Day ancestor changed during reconciliation.');
       return freeze(out);
     }
-    const SPEC_KEYS=['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','personalFields','sessionFingerprint','noteKeys','updates','deletes','days'];
+    const SPEC_KEYS=['format','version','full','baseCheckpointId','noteCount','noteKeyFingerprint','personalFingerprint','personalFields','sessionFingerprint','noteKeys','updates','deletes','days','sessionContentFingerprint','semanticDays'];
     async function write(checkpointId,spec){
-      const id=String(checkpointId||''),semantic=spec?.version===4;
-      if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spec||![3,4].includes(spec.version)||
-        !exactKeys(spec,[...SPEC_KEYS,...(semantic?['sessionContentFingerprint','semanticDays']:[])])||
+      const id=String(checkpointId||'');
+      if(!/^cp_[a-f0-9]{32}$/u.test(id)||!spec||spec.version!==4||!exactKeys(spec,SPEC_KEYS)||
         spec.format!=='study-director.reconciliation-base-update')return false;
       const full=spec.full===true,updates=codec.normalizeUpdates(spec.updates),deletes=codec.normalizeKeys(spec.deletes||[]),days=codec.normalizeDayUpdates(spec.days,{full}),baseCheckpointId=String(spec.baseCheckpointId||''),
-        semanticDays=semantic?codec.normalizeDayUpdates(spec.semanticDays,{full}):null;
-      if(!updates||!deletes||!days||semantic&&!semanticDays||(!full&&!/^cp_[a-f0-9]{32}$/u.test(baseCheckpointId)))return false;
-      if(semantic&&(!sameDayKeys(days,semanticDays)||Object.entries(days).some(([month,values])=>
-        values===null?semanticDays[month]!==null:semanticDays[month]===null||!sameDayKeys(values,semanticDays[month]))))return false;
+        semanticDays=codec.normalizeDayUpdates(spec.semanticDays,{full});
+      if(!updates||!deletes||!days||!semanticDays||(!full&&!/^cp_[a-f0-9]{32}$/u.test(baseCheckpointId)))return false;
+      if(!sameDayKeys(days,semanticDays)||Object.entries(days).some(([month,values])=>
+        values===null?semanticDays[month]!==null:semanticDays[month]===null||!sameDayKeys(values,semanticDays[month])))return false;
       let noteKeys=null,noteCount=Number(spec.noteCount),fingerprint=String(spec.noteKeyFingerprint||'');
       if(full){
         noteKeys=codec.normalizeKeys(spec.noteKeys);if(!noteKeys)return false;noteCount=noteKeys.length;fingerprint=await codec.keyFingerprint(noteKeys);
@@ -170,17 +168,17 @@ registry.define('reconciliation-baseline',1,()=>{
       // the field ancestor rather than associating stale hashes with new data.
       const establishedAt=new Date().toISOString(),personal=spec.personalFingerprint,
         fields=spec.personalFields===null?null:codec.normalizePersonalFields(spec.personalFields),session=spec.sessionFingerprint,
-        semanticSession=semantic?spec.sessionContentFingerprint:null,
+        semanticSession=spec.sessionContentFingerprint,
         kept=(value,current)=>value===null?String(current||''):value;
       if(spec.personalFields!==null&&!fields||personal===null&&spec.personalFields!==null||
         personal!==null&&personal!==''&&fields===null||full&&(personal===null||session===null)||
-        semantic&&(session===null&&semanticSession!==null||session!==null&&
-          (typeof semanticSession!=='string'||semanticSession!==''&&!/^[a-f0-9]{64}$/u.test(semanticSession)||Boolean(session)!==Boolean(semanticSession))||full&&semanticSession===null))return false;
-      const headerFor=current=>codec.normalizeHeader({format:'study-director.reconciliation-base',version:semantic?5:4,checkpointId:id,establishedAt,noteCount,
+        session===null&&semanticSession!==null||session!==null&&
+          (typeof semanticSession!=='string'||semanticSession!==''&&!/^[a-f0-9]{64}$/u.test(semanticSession)||Boolean(session)!==Boolean(semanticSession))||full&&semanticSession===null)return false;
+      const headerFor=current=>codec.normalizeHeader({format:'study-director.reconciliation-base',version:5,checkpointId:id,establishedAt,noteCount,
         noteKeyFingerprint:fingerprint,personalFingerprint:kept(personal,current&&current.personalFingerprint),
         personalFields:personal===null?current?.personalFields||null:fields,
         sessionFingerprint:kept(session,current&&current.sessionFingerprint),
-        ...(semantic?{sessionContentFingerprint:session===null?current?.sessionContentFingerprint??null:semanticSession}:{})});
+        sessionContentFingerprint:session===null?current?.sessionContentFingerprint??null:semanticSession});
       if(!headerFor(null))return false;
       return meta.transaction('readwrite',(view,tx,finish)=>{
         const currentHandle=view.get(families.header),noteHandle=full?view.getAll(families.notes):null,dayHandle=full?view.getAll(families.days):null,handles=[currentHandle,noteHandle,dayHandle].filter(Boolean);let ready=0;
@@ -194,7 +192,7 @@ registry.define('reconciliation-baseline',1,()=>{
           if(full){const suffixes=new Set(noteKeys.map(key=>encodeURIComponent(key)));for(const suffix of noteRows.keys())if(!suffixes.has(suffix))view.remove(families.notes,suffix);for(const month of monthRows.keys())if(!Object.prototype.hasOwnProperty.call(days,month))view.remove(families.days,month);}
           for(const key of deletes)view.remove(families.notes,encodeURIComponent(key));
           for(const [key,state] of Object.entries(updates)){const suffix=encodeURIComponent(key),old=noteRows.get(suffix);if(old&&old.label===state.label&&old.text===state.text)continue;view.put(families.notes,noteValue(key,state),{suffix,updatedAt:establishedAt});}
-          for(const [month,value] of Object.entries(days)){if(value===null){view.remove(families.days,month);continue;}const before=monthRows.get(month),evidence=semantic?semanticDays[month]:null;if(sameDays(before?.days,value)&&(!semantic||before?.version===2&&sameDays(before?.semanticDays,evidence)))continue;view.put(families.days,dayValue(month,value,evidence),{suffix:month,updatedAt:establishedAt});}
+          for(const [month,value] of Object.entries(days)){if(value===null){view.remove(families.days,month);continue;}const before=monthRows.get(month),evidence=semanticDays[month];if(sameDays(before?.days,value)&&sameDays(before?.semanticDays,evidence))continue;view.put(families.days,dayValue(month,value,evidence),{suffix:month,updatedAt:establishedAt});}
           view.put(families.header,headerFor(current),{updatedAt:establishedAt});tx.oncomplete=()=>finish(true,true);
         };
         for(const handle of handles){handle.request.onerror=()=>fail(handle.request.error||new Error('Reconciliation baseline read failed.'));handle.request.onsuccess=apply;}

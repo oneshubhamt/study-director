@@ -229,7 +229,6 @@ for(const bad of [
 const handoffConstants=[
   source.match(/^const sessionHandoffError=.*;$/mu)?.[0],
   source.match(/^const HANDOFF_SAFETY_FORMAT=.*;$/mu)?.[0],
-  source.match(/^const HANDOFF_LEGACY_SAFETY_FORMAT=.*;$/mu)?.[0],
   source.match(/^const HANDOFF_ATTEMPT_PATTERN=.*;$/mu)?.[0],
   source.match(/^const HANDOFF_FINGERPRINT_PATTERN=.*;$/mu)?.[0],
   source.match(/^const HANDOFF_UNCERTAIN_MESSAGE=.*;$/mu)?.[0]

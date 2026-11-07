@@ -965,9 +965,9 @@ async function savedDaySettlement(plan,base){
     // deletion was unchanged: creation and deletion on different devices
     // are both post-base decisions and must remain reviewable.
     if(!ancestor)continue;
-    const semanticBase=ancestor.semantic,hasSemantic=typeof semanticBase==='string'&&/^[a-f0-9]{64}$/u.test(semanticBase),
-      baseValue=hasSemantic?semanticBase:String(ancestor?.full||''),
-      fingerprint=candidate=>candidate.kind!=='record'?'':hasSemantic?dayContentFingerprint(candidate.record):dayFingerprint(candidate.record),
+    // Study content only: a Saved Day saved again with the same work is unchanged.
+    const baseValue=String(ancestor.semantic),
+      fingerprint=candidate=>candidate.kind!=='record'?'':dayContentFingerprint(candidate.record),
       [mine,theirs]=await Promise.all([fingerprint(local),fingerprint(incoming)]);
     if(mine===baseValue)settled.set(item.date,incoming.id);else if(theirs===baseValue)settled.set(item.date,local.id);
   }
@@ -1012,8 +1012,8 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
   const observed=claimApplies?String(sessionClaim.observedContentFingerprint||''):'',hasObserved=/^[a-f0-9]{64}$/u.test(observed);
   const savedLocalDay=local&&(parsed?.records||[]).find(record=>record?.recordKind==='study'&&record.date===local.date)||null;
   const savedCoversLocal=checkpointSavedDayCoversSession(parsed,local);
-  // The legacy shared hash proves exact canonical identity, not semantic
-  // ancestry. A separately acknowledged, canonically covered Saved Day can
+  // The whole-record shared hash proves exact canonical identity, not
+  // study-content ancestry (unknown when the base has none). A separately acknowledged, canonically covered Saved Day can
   // also prove that retiring this local study evidence loses no work.
   // A raw cross-device revision or an unacknowledged coverage match cannot.
   const hasSemanticAncestor=typeof contentShared==='string',unchangedFromShared=!!shared&&mine===shared,
@@ -2230,8 +2230,8 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       else if(!base&&personalAddsNothing(localPersonal,theirs))personal='replace';
       else if(!base&&personalAddsNothing(theirs,localPersonal))personal='keep';
       else{
-        // A known shared base without field ancestry (for example v3) must
-        // not invent a first-start state from a later intentional deletion.
+        // A shared base without per-field ancestry must not invent a
+        // first-start state from a later intentional deletion.
         personal='keep';
         if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
       }

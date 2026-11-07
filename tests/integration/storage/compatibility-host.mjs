@@ -15,7 +15,7 @@ globalThis.IntegrityContinuationModule=registry.require('integrity-continuation'
 {const app=fs.readFileSync('source/app.html','utf8');vm.runInThisContext(app.slice(app.indexOf('function normalizeRepositoryIntegrityTarget('),app.indexOf('async function libraryClearSnapshot(')),{filename:'repository-integrity-normalizer'});}
 const freeze=Object.freeze;
 
-const current={theme:'theme',presentation:'presentation',fontScale:'fontScale',storageHealth:'storageHealth'};
+const current={theme:'theme',presentation:'presentation',fontScale:'fontScale',storageHealth:'storageHealth',sessionHandoffSafety:'sessionHandoffSafety'};
 const obsolete={
   schedule:'oldSchedule',defaults:'oldDefaults',quote:'oldQuote',nudge:'oldNudge',reflectionDrafts:'oldReflections',reflectionLegacy:'oldReflection',
   deviceId:'oldDevice',liveDraft:'oldLiveDraft',activeSession:'oldActiveSession',storageCapability:'oldStorageCapability',diagnostics:'oldDiagnostics',
@@ -228,20 +228,29 @@ metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',vers
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/backup verification state has an unknown shape and was preserved without modification/u);
 assert.equal(metadataRows.get('repositoryIntegrityScrub').value,malformedScrub,'an unknown historical shape is preserved untouched');
 metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:scrub,updatedAt:'2026-09-20T03:00:00.000Z'});
-// A current merge base (version 3, with Saved Day and session fingerprints) stays; an older one goes whole.
-const baseId=noteId('Ethics'),currentBase={format:'study-director.reconciliation-base',version:3,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId]),personalFingerprint:'',sessionFingerprint:''};
-const baseDays={key:'reconciliationBaseDays:2026-09',version:1,value:{format:'study-director.reconciliation-base-days',version:1,month:'2026-09',days:{'2026-09-20':'a'.repeat(64)}},updatedAt:'2026-09-20T00:00:00.000Z'};metadataRows.set(baseDays.key,baseDays);
-metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:currentBase,updatedAt:'2026-09-20T00:00:00.000Z'});
-metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,label:'Ethics',text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
+// A current merge base (version 5, Saved-Day rows version 2) stays; an older
+// one goes whole: header versions 3 and 4, or any version-1 Saved-Day row.
+const baseId=noteId('Ethics'),olderBase={format:'study-director.reconciliation-base',version:3,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId]),personalFingerprint:'',sessionFingerprint:''};
+const olderDays={key:'reconciliationBaseDays:2026-09',version:1,value:{format:'study-director.reconciliation-base-days',version:1,month:'2026-09',days:{'2026-09-20':'a'.repeat(64)}},updatedAt:'2026-09-20T00:00:00.000Z'};
+const currentBase={...olderBase,version:5,personalFields:null,sessionContentFingerprint:''};
+const baseDays={...olderDays,value:{...olderDays.value,version:2,semanticDays:{'2026-09-20':'b'.repeat(64)}}};
+const baseNote=()=>metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,label:'Ethics',text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
+const placeBase=(header,days)=>{metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:header,updatedAt:'2026-09-20T00:00:00.000Z'});metadataRows.set(days.key,days);baseNote();};
+const baseRows=()=>[...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase'));
+placeBase(currentBase,baseDays);
 await Host.createFacade(malformedInput).migrateLive();
-assert.equal(metadataRows.get('reconciliationBase').value,currentBase,'a version 3 merge base is current');assert.equal(metadataRows.get(baseDays.key),baseDays,'its Saved Day rows stay with it');
-const semanticBase={...currentBase,version:5,personalFields:null,sessionContentFingerprint:''};
-const semanticMonth={...baseDays,value:{...baseDays.value,version:2,semanticDays:{'2026-09-20':'b'.repeat(64)}}};
-metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:semanticBase,updatedAt:'2026-09-20T00:00:00.000Z'});
-metadataRows.set(baseDays.key,semanticMonth);
-await Host.createFacade(malformedInput).migrateLive();
-assert.deepEqual(metadataRows.get('reconciliationBase').value,semanticBase,'compatibility cleanup must retain a valid v5 semantic baseline rather than delete shared ancestry');
-assert.deepEqual(metadataRows.get(baseDays.key),semanticMonth,'compatibility cleanup must preserve paired v2 monthly hashes');
+assert.deepEqual(metadataRows.get('reconciliationBase').value,currentBase,'a version 5 merge base is current');
+assert.deepEqual(metadataRows.get(baseDays.key),baseDays,'its version 2 Saved Day rows stay with it');
+for(const [label,header,days] of [
+  ['a version 3 base',olderBase,baseDays],
+  ['a version 4 base (bug-fixes builds)',{...olderBase,version:4,personalFields:null},baseDays],
+  ['a version 5 base with a version 1 Saved Day row',currentBase,olderDays]
+]){
+  placeBase(header,days);
+  assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false,`${label} is not yet retired`);
+  await Host.createFacade(malformedInput).migrateLive();
+  assert.deepEqual(baseRows(),[],`${label} goes whole; the next Drive sync records a fresh one`);
+}
 
 metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:{...currentBase,version:2,sessionFingerprint:undefined},updatedAt:'2026-09-20T00:00:00.000Z'});metadataRows.set(baseDays.key,baseDays);
 await Host.createFacade(malformedInput).migrateLive();
@@ -255,6 +264,18 @@ metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:
 metadataRows.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:{format:'study-director.reconciliation-base',version:1,notes:['not a map']},updatedAt:'2026-09-21T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
 assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'any single-row base, whatever its shape, takes the whole base with it');
+// A Continue Here marker in its first form (bug-fixes builds) is removed;
+// the current form is left for the app to settle.
+const firstMarker={format:'study-director.session-handoff-safety.v1',version:1,date:'2026-11-03',checkpointId:'cp_'+'3'.repeat(32),installedOn:'inst_qa_device_01'};
+localRows.set('sessionHandoffSafety',JSON.stringify(firstMarker));
+assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false,'a first-form marker is not yet retired');
+await Host.createFacade(malformedInput).migrateLive();
+assert.equal(localRows.has('sessionHandoffSafety'),false,'a first-form Continue Here marker is removed');
+const currentMarker={...firstMarker,format:'study-director.session-handoff-safety.v2',version:2};
+localRows.set('sessionHandoffSafety',JSON.stringify(currentMarker));
+await Host.createFacade(malformedInput).migrateLive();
+assert.deepEqual(JSON.parse(localRows.get('sessionHandoffSafety')),currentMarker,'a current marker is left for the app');
+localRows.delete('sessionHandoffSafety');
 // An interrupted restore from an older build converts to the current journal before crash recovery reads it.
 const journalBlob=new Blob(['safety copy']),oldJournal={format:'study-director.restore-journal',version:2,id:'restore_qa-old-journal',blob:journalBlob,filename:'safety.sdbackup',scheduleText:'',savedDayDeletions:[{date:'2026-09-10',deletedAt:'2026-09-12T00:00:00.000Z'}]};
 metadataRows.set('restoreJournalPayload.v1',{key:'restoreJournalPayload.v1',version:1,value:oldJournal,updatedAt:'2026-09-12T00:00:00.000Z'});

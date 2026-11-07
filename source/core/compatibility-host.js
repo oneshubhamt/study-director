@@ -135,13 +135,16 @@ registry.define('compatibility-host',1,()=>{
     // A merge base from before permanent ids names notes by title (version 1
     // kept them all in one row), one from before titles, plans and settings
     // were kept holds only text, and one from before Saved Days and the
-    // session were kept (version 2) cannot tell their changes apart. It is
-    // dropped rather than converted: a base only lets Combine settle a
-    // difference without asking, and the next Drive sync records a fresh one.
+    // session were kept (version 2) cannot tell their changes apart, and one
+    // from before study-content and per-field ancestry (header versions 3 and
+    // 4, Saved-Day rows version 1) cannot tell a re-saved day or a single
+    // setting apart. It is dropped rather than converted: a base only lets
+    // Combine settle a difference without asking, and the next Drive sync
+    // records a fresh version-5 one. The app reads only version 5.
     function staleReconciliationRows(rows){
       const keyOf=row=>String(row&&row.key||''),noteRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseNotePrefix),dayRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseDayPrefix);
       const base=rows.filter(row=>keyOf(row)===appMeta.reconciliationBase||keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row)||dayRow(row));
-      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&![3,4,5].includes(Number(row.value?.version))||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
+      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&Number(row.value?.version)!==5||dayRow(row)&&Number(row.value?.version)!==2||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
     }
     async function migrateReconciliationBase(requireOwnership){
       let removed=0;
@@ -230,12 +233,20 @@ registry.define('compatibility-host',1,()=>{
       if(after.some(row=>renamedFrom(String(row&&row.key||''))||retiredStamp(row)))throw new Error('Renamed records could not be verified. The previous names were preserved.');
       return freeze({status:'migrated',renamed:count,dropped:stamps.length});
     }
+    const legacyHandoffMarker=value=>!!value&&typeof value==='object'&&value.format==='study-director.session-handoff-safety.v1';
     async function migrateHostMetadata(){
       let token;try{token=ownership.issueWriteToken('migrate historical host metadata',{allowHydrating:true});}
       catch(error){if(ownership.isOwnershipLostError(error))return freeze({status:'skipped',reason:'not-primary',migrated:0,removed:0});throw error;}
       const requireOwnership=()=>ownership.assertWriteToken(token,'migrate historical host metadata');
       let migrated=0,removed=0;
       const libraryClearMigration=await migrateLibraryClearJournal(requireOwnership);migrated+=Number(libraryClearMigration.migrated||0);removed+=Number(libraryClearMigration.removed||0);
+      // A Continue Here marker in its first form (before handoff tokens) cannot
+      // be checked against Drive by this build, so it is removed. A device that
+      // had not yet taken the session over runs no timer either way, and one
+      // that had saved its takeover only after Drive accepted the claim.
+      if(legacyHandoffMarker(local.getJson(storage.sessionHandoffSafety,null))){
+        requireOwnership();if(!local.remove(storage.sessionHandoffSafety))throw new Error('An earlier Continue Here marker could not be removed from browser storage.');removed++;
+      }
       const maintenance=await metadata.readRow(appMeta.dataMaintenance);
       // dataMaintenance is operational/rebuildable state, not user authority. Any
       // non-current value is safely retired so current maintenance can regenerate it.
@@ -302,6 +313,7 @@ registry.define('compatibility-host',1,()=>{
       for(const row of rows){const key=String(row&&row.key||'');if(renamedFrom(key)||retiredStamp(row))present.push(key);}
       for(const [from] of renamedLocal)if(local.getText(from,null)!==null)present.push(from);
       for(const row of staleReconciliationRows(rows))present.push(String(row.key));
+      if(legacyHandoffMarker(local.getJson(storage.sessionHandoffSafety,null)))present.push(`${storage.sessionHandoffSafety}:v1`);
       for(const field of retiredHealthFields(local.getJson(storage.storageHealth,null)))present.push(`${storage.storageHealth}:${field}`);
       const recovery=rows.find(row=>String(row&&row.key||'')===appMeta.verifiedRecoveryBackups);
       if(recovery&&Number(recovery.value&&recovery.value.version)!==3)present.push(`${appMeta.verifiedRecoveryBackups}:v${Number(recovery.value&&recovery.value.version)||'?'}`);

@@ -109,7 +109,8 @@ The layer is reached through a fixed set of entry points, pinned by `compatibili
 1. `compatibility.js`, `compatibility-host.js`, `compatibility-codecs.js` and their module loads.
 2. In `app.html`: the facade block, its three start-up uses (keeping a plain start-up path), `RuntimeBackupCodec.inspect` (back to the current reader), the IndexedDB upgrade bridge, its store rename and legacy store names, and the `compatibilityAppMeta`/`compatibilityCodec`/`legacyStores`/`legacyKeys` inputs to AppData.
 3. In the repositories: the marked block, which holds every Daily Record, Active Session and note conversion (the notes repository has none), and the namespace that closes it; the Insights conversions it calls (`migrateLegacyEnvelope`, `verifyCanonicalEnvelope`) and `AttachmentStorage.cleanupLegacy`.
-4. In the contracts: the compatibility registry, the obsolete and renamed identity lists and the `dailyRecordMigration` family.
-5. Their tests (`compatibility-*`, `retirement-readiness`) and legacy fixtures.
+4. In `backup-provider.js`: the marked block that reads ownership claims older devices write (`upgradeOlderSessionClaim`, `plainSessionClaim`); `decodeSessionClaim` then returns the current reader alone.
+5. In the contracts: the compatibility registry, the obsolete and renamed identity lists and the `dailyRecordMigration` family.
+6. Their tests (`compatibility-*`, `retirement-readiness`) and legacy fixtures.
 
 Readers for old backup files (`backup-codec` versions 7 to 20) and for repository checkpoints version 5 and older, the ones released builds wrote, are a separate choice: keep them while old `.sdbackup` files and checkpoints should still open. Version 20 differs from today's in note names and ids and has no versions kept for review (registry: `name-keyed-notes-in-backups`).
