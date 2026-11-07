@@ -1373,7 +1373,8 @@ registry.define('backup-provider',1,input=>{
     }catch(error){
       const code=String(error&&error.code||''),turn=code==='REPOSITORY_SYNC_TURN',behind=code==='REPOSITORY_SYNC_BEHIND',sessionAhead=code==='REPOSITORY_SESSION_OWNERSHIP_AHEAD',newer=code==='REPOSITORY_SYNC_NEEDS_UPDATE'||code==='STUDY_DIRECTOR_SHARE_HELD';
       summary.finish({message:newer?`Sync with ${selected.label} waits for an app update.`:behind?`Catching up with ${selected.label} first.`:sessionAhead?'Taking in the Active Session owner from the other device first.':turn?`Another device is saving to ${selected.label}; this backup goes next.`:'External backup update is pending.',lifecycle:signal?.aborted||behind||sessionAhead||turn||newer?'cancelled':'failed',outcome:'external-backup-pending'});
-      if(!behind&&!sessionAhead&&!turn&&!newer)AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');
+      // A foreground step paused this retry (the signal aborted): not a failure.
+      if(!signal?.aborted&&!behind&&!sessionAhead&&!turn&&!newer)AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');
       return freeze({status:'pending',reason:newer?'needs-update':behind?'behind':sessionAhead?'session-owner':turn?'turn':String(error&&error.message||error)});
     }finally{notifyStatus();}
   }

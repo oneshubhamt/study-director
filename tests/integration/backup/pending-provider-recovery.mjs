@@ -77,6 +77,19 @@ for(const blocker of ['control','authorization','lock']){
  t.onPublication(noop);if(blocker==='control')t.control(true);else if(blocker==='lock')t.lock(false);else{t.authorization(true);t.notify();}
  await tick(t,15000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);assert.equal(t.clock.pending(),0);cases.push('active transfer safely reconnects after '+blocker+' loss');
 }
+// A foreground step (Continue Here, an update, a safety copy) pauses a running
+// retry. That pause is not a failure: nothing is logged, the backup stays owed
+// and runs once the step releases it.
+{
+ const t=fixture();t.register();t.configure();let aborted=0;
+ t.onPublication(({signal})=>new Promise((_,reject)=>{signal.addEventListener('abort',()=>{aborted++;reject(signal.reason);},{once:true});}));
+ await tick(t,1000);assert.equal(t.status().busy,true);
+ const hold=t.runtime.suspendBackground('qa-session-ownership');await hold.settled;await t.clock.drainMicrotasks(240);
+ assert.equal(aborted,1);assert.ok(t.stats().durable,'the backup stays owed');
+ assert.deepEqual(t.captures.map(([source])=>source),[],'a pause for a foreground step is not logged as a failure');
+ t.onPublication(noop);hold.release();await tick(t,15000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);
+ cases.push('a foreground pause of a running retry logs nothing and resumes');
+}
 // Source and peer locations are independent durability obligations. Rebuilding
 // the runtime from the persisted marker must resume only the destination that
 // was unavailable before the crash, without replaying the already saved one.
