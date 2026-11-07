@@ -40,7 +40,7 @@ await coordinator.job(async()=>{
   const first=await coordinator.run('decode.next',{id:reader});assert.deepEqual(first.value.value,JSON.parse(chunk.line));
   assert.equal((await coordinator.run('decode.next',{id:reader})).done,true);
   const markup=await coordinator.run('markdown',{doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'bold',marks:{Strong:true}}]},{type:'SDImage',param:{assetId:'image',alt:'Diagram'}}]},text:'',paths:{image:'assets/a.png'}});
-  assert.equal(markup,'**bold**\n![Diagram](assets/a.png)\n');
+  assert.equal(markup,'**bold**\n\n![Diagram](assets/a.png)\n','blocks are kept apart by a blank line');
   const zip=await coordinator.run('zip',{files:[{name:'a.md',blob:new Blob([markup])},{name:'assets/a.png',blob:png}],date:'2026-09-06T00:00:00Z'});
   assert.equal(zip.type,'application/zip');assert.equal(new DataView(await zip.slice(0,4).arrayBuffer()).getUint32(0,true),0x04034b50);
   assert.equal(created,firstCreated+1,'one worker serves a complete job');

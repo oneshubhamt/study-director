@@ -116,8 +116,6 @@ The full plan, its rules and live status are in [test-programme.md](test-program
 
 **Notes: interface review and redesign.** Tags, links and other note features may be buried: someone could use the app and never find them, or never get their full use. Review how each is discovered and used, and whether the rest of the app makes the most of them. Then propose a redesign. Not started; after the test programme.
 
-**Notes: paste Markdown as formatted text.** Text copied from the web or from chat tools often arrives as Markdown, so the note shows `#`, `**`, `-` and the like instead of headings, bold and lists. Pasting it should turn it into formatted text, the way many editors do, and the result stays fully editable with Wordgard's own controls. Strip anything a note cannot hold. The Markdown file import already converts Markdown and passes it through the paste cleaner ([notes.md](areas/notes.md), import of text and Markdown files), so the paste could reuse it. To settle when building: how to detect Markdown in plain pasted text without mangling ordinary text, and a way to paste as plain text. Noted 2026-11-04; not started.
-
 **Backup and sync review.** Questions to settle first, as a report, before any building. In this order:
 
 1. **Is the repository design right, from first principles?** The point of the repository is that unchanged large files are never uploaded or downloaded again, which makes transfers faster and safer. Does it upload and download only what changed, and does each upload and restore land whole or not at all? Is it well optimised overall? The owner thinks the repository principle is good; propose a better one only if there is one.
