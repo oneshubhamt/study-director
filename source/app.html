@@ -10579,8 +10579,21 @@ async function restoreMissingAfterStorageReset(hold){
     message:days||files?`Your open work was kept. Added ${count(days,'past Saved Day')} and ${count(files,'attachment')} from ${source}.`:`Your open work was kept. Nothing was missing compared with ${source}.`});
   return true;
 }
+// The browser removed this profile's database while the app was closed: this
+// start made it anew, yet browser storage says study data was saved here. It
+// is handled as a clear seen while open: automatic uploads pause so the empty
+// copy cannot replace a backup, and the notice offers the restore. A fresh
+// install or a new profile has no such record, so it is never mistaken.
+function noteDatabaseRemovedWhileClosed(){
+  if(IndexedDb.lifecycle().startedFresh!==true||!appCanMutate())return false;
+  const health=readStorageHealth();if(!health.lastStudyDataSaveAt||health.browserDataClearedAt)return false;
+  AppDiagnostics.capture('storage.idb-missing-at-start',new Error('The browser database was missing at start although study data had been saved here.'),'warn');
+  writeStorageHealth({browserDataClearedAt:new Date().toISOString()});
+  return true;
+}
 // A reload or a takeover in another tab brings back an unresolved clear.
 function resumeUnresolvedStorageReset(){
+  noteDatabaseRemovedWhileClosed();
   const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),clearedAt=String(stored&&stored.browserDataClearedAt||readStorageHealth().browserDataClearedAt||'');
   if(!clearedAt||storageResetHold||!appCanMutate())return false;
   beginStorageResetHold(clearedAt).reloaded=true;showStorageResetDecision();return true;
@@ -11299,8 +11312,8 @@ async function readDataDiagnosticStates(){
     {job:'Profile storage',read:async()=>{
       const base=DATA_CONTRACT.storage.dbName,ours=name=>name===base||name.startsWith(base+ProfileScope.separator);
       const names=typeof indexedDB?.databases==='function'?(await indexedDB.databases()).map(row=>String(row?.name||'')).filter(ours):null;
-      return {names,listed:!!Profiles.current(),listPresent:LocalStorageContract.getText(ProfileScope.registryKey,null)!==null,fresh:IndexedDb.lifecycle().startedFresh===true};
-    },project:value=>({job:'Profile storage',state:value.names?'observed':'partial',scoped:!!ProfileScope.scope,profileListPresent:value.listPresent,pageProfileListed:value.listed,startedFresh:value.fresh,
+      return {names,listed:!!Profiles.current(),listPresent:LocalStorageContract.getText(ProfileScope.registryKey,null)!==null,fresh:IndexedDb.lifecycle().startedFresh===true,clearedAt:String(readStorageHealth().browserDataClearedAt||'')};
+    },project:value=>({job:'Profile storage',state:value.names?'observed':'partial',scoped:!!ProfileScope.scope,profileListPresent:value.listPresent,pageProfileListed:value.listed,startedFresh:value.fresh,...(value.clearedAt?{dataClearedAt:value.clearedAt}:{}),
       ...(value.names?{databases:value.names.length,otherDatabases:value.names.filter(name=>name!==DB_NAME).length}:{})})},
     {job:'Canonical maintenance record',read:()=>AppData.metadata.diagnostics(),project:value=>({job:'Canonical maintenance record',state:value.maintenanceStatus,pending:value.maintenanceStatus==='pending',completedAt:value.completedAt,queuedDeletions:value.deletions,localRecovery:value.localRecovery})},
     ...[['Restore journal',AppData.restoreJournal],['Library clear journal',AppData.libraryClearJournal]].map(([job,owner])=>({job,read:()=>owner.diagnostics(),project:value=>({job,state:value?'pending':'absent',pending:!!value,phase:value?.phase||'',updatedAt:value?.updatedAt||'',coverage:'journal-header'})})),

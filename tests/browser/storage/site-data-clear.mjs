@@ -107,6 +107,45 @@ try{
     }finally{if(page)await browser.closePage(page).catch(()=>{});await browser.close();}
   }
 
+  // The browser removes the database while the app is closed and keeps the
+  // rest of browser storage (Chrome can evict a site's database this way).
+  // The next start makes a new, empty database; because this device saved
+  // study data before, it shows the same notice and pause as a clear seen
+  // while open, and a later start does not repeat it once settled.
+  {
+    const browser=await launchChromium({profilePrefix:'study-director-qa-site-data-closed-'});let page=null;
+    try{
+      const appUrl=server.url('deployment','instrumented.html');
+      page=await browser.createPage(appUrl,{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});
+      await waitForStudyDirector(page,{instrumented:true});
+      await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'primary ownership'});
+      await page.evaluate(startSession('ClosedQA'));
+      assert.ok(await page.evaluate(`!!__PWA6.readStorageHealth().lastStudyDataSaveAt`),'saving notes records that study data was saved here');
+      noRuntimeErrors(page);await browser.closePage(page);page=null;
+      await new Promise(resolve=>setTimeout(resolve,500));
+      const cleaner=await browser.createPage(server.url('deployment','manifest.webmanifest'),{viewport:{width:800,height:600,mobile:false,scale:1}});
+      await cleaner.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb'});await browser.closePage(cleaner);
+      page=await browser.createPage(appUrl,{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});
+      await waitForStudyDirector(page,{instrumented:true});
+      await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership after reopening'});
+      await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice)`),{label:'notice after the database was removed'});
+      const found=await page.evaluate(read);
+      assert.equal(found.note,null,'the removed database took the notes with it');
+      assert.match(found.message,/Browser data was cleared on .*can be restored from your Device Folder, Google Drive or a backup file/);
+      assert.ok(found.cleared,'the clear is recorded, so a reload keeps the notice');
+      assert.deepEqual(found.notice.buttons,['Restore from backup','Continue with current data']);
+      assert.equal(found.paused,true,'automatic backups pause so the empty copy cannot replace one');
+      result.checks.databaseRemovedWhileClosed=true;
+      await click(page,'Continue with current data');
+      await waitFor(()=>page.evaluate(`${read}.then(state=>!state.notice&&!state.cleared)`),{label:'clear settled'});
+      await reload(page);await page.evaluate(`new Promise(resolve=>setTimeout(resolve,1000))`);
+      const later=await page.evaluate(read);
+      assert.equal(later.notice,null,'a settled clear is not found again on the next start');assert.equal(later.cleared,null);
+      result.checks.removedDatabaseSettles=true;
+      noRuntimeErrors(page);
+    }finally{if(page)await browser.closePage(page).catch(()=>{});await browser.close();}
+  }
+
   // With a connected Device Folder: past Saved Days come back without a question.
   {
     const browser=await launchChromium({profilePrefix:'study-director-qa-site-data-clear-folder-'});let page=null;
@@ -188,7 +227,9 @@ try{
       // A brand-new install has never saved study data here, so it gets no hint.
       await new Promise(resolve=>setTimeout(resolve,1500));
       assert.equal(await page.evaluate(`!!${hint}`),false,'a brand-new install sees no empty-data hint');
-      // Study data saved here and then lost with the database while the app was closed.
+      // Study data saved here and then lost with the database while the app
+      // was closed: the next start shows the clear notice (not the softer
+      // empty-data hint), offering Google Drive and a backup file.
       await page.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('medicine','Medicine','NoFolderQA lost note','');await d.AppData.notes.flush({strict:true});})()`);
       await page.navigate(server.url('deployment','license.html'));
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb,file_systems'});
@@ -196,14 +237,17 @@ try{
       await page.navigate(server.url('deployment','instrumented.html'));
       await waitForStudyDirector(page,{instrumented:true});
       await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'primary ownership after the loss'});
-      await waitFor(()=>page.evaluate(`!!${hint}`),{label:'empty-data hint'});
-      const hintText=await page.evaluate(`${hint}.textContent`);
-      assert.match(hintText,/restore from Google Drive or a backup file/);assert.doesNotMatch(hintText,/Device Folder/,'no folder is offered where folders are unsupported');
-      await page.evaluate(`[...${hint}.querySelectorAll('button')].find(button=>button.textContent.trim()==='Restore from backup').click()`);
+      await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice)`),{label:'clear notice after the loss'});
+      const lost=await page.evaluate(read);
+      assert.match(lost.message,/can be restored from Google Drive or a backup file/);assert.doesNotMatch(lost.message,/Device Folder/,'no folder is offered where folders are unsupported');
+      assert.equal(await page.evaluate(`!!${hint}`),false,'the clear notice replaces the empty-data hint');
+      await click(page,'Restore from backup');
       await waitFor(()=>page.evaluate(`${restoreView}.importButton`),{label:'restore choices in view'});
-      const fromHint=await page.evaluate(restoreView);
-      assert.deepEqual({...fromHint,folderRow:undefined},{tab:'pane-library',drawer:true,importButton:true,driveRow:true,folderRow:undefined},'Data & Backup opens with Google Drive and the backup file import in view');
-      result.checks.noFolderStartupHint=true;result.checks.freshInstallNoHint=true;
+      const fromNotice=await page.evaluate(restoreView);
+      assert.deepEqual({...fromNotice,folderRow:undefined},{tab:'pane-library',drawer:true,importButton:true,driveRow:true,folderRow:undefined},'Data & Backup opens with Google Drive and the backup file import in view');
+      await click(page,'Continue with current data');
+      await waitFor(()=>page.evaluate(`${read}.then(state=>!state.notice&&!state.cleared)`),{label:'the first clear settled'});
+      result.checks.noFolderStartupNotice=true;result.checks.freshInstallNoHint=true;
 
       await page.evaluate(`(async()=>{const d=__PWA6;d.goTab('plan');d.AppData.notes.update('medicine','Medicine','NoFolderQA note','');await d.AppData.notes.flush({strict:true});})()`);
       await page.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'all'});

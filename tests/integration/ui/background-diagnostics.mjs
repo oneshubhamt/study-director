@@ -18,6 +18,7 @@ Object.assign(context,{
   DATA_CONTRACT:{storage:{dbName:'StudyDirectorDB'}},DB_NAME:'StudyDirectorDB~prof_qa_abcdef_12345678',IndexedDb:{lifecycle:()=>({startedFresh:true})},
   ProfileScope:{scope:'prof_qa_abcdef_12345678',separator:'~',registryKey:'profiles'},LocalStorageContract:{getText:key=>key==='profiles'?'{"version":1}':null},
   indexedDB:{databases:async()=>[{name:'StudyDirectorDB'},{name:'StudyDirectorDB~prof_qa_abcdef_12345678'},{name:'another-site-db'}]},
+  readStorageHealth:()=>({browserDataClearedAt:'2026-10-01T06:00:00.000Z'}),
   UnsupportedData:{held:()=>false,summary:()=>({total:1,held:1,protected:0,blocked:false,items:{days:0,notes:0,attachments:0,sessions:0,settings:0}})},
   navigator:{clipboard:{writeText:async value=>copied.push(value)}},NoticeCoordinator:{presentation:()=>({begin:()=>({finish:(...args)=>notices.push(args)})})},AppDiagnostics:{capture:(...args)=>errors.push(args)}
 });
@@ -42,7 +43,7 @@ assert.match(text,/Current Profiles: state=pending[^\n]*removalPending=true[^\n]
 // Study Director database still exists means the data may still be on the device.
 {const line=text.split('\n').find(row=>row.startsWith('Current Profile storage'));
 assert.match(line,/state=observed/u);assert.match(line,/scoped=true/u);assert.match(line,/profileListPresent=true/u);assert.match(line,/pageProfileListed=true/u);assert.match(line,/startedFresh=true/u);
-assert.match(line,/databases=2/u,'only this app\'s databases are counted');assert.match(line,/otherDatabases=1/u);assert.doesNotMatch(line,/prof_qa|StudyDirectorDB/u,'no database or profile names');}
+assert.match(line,/databases=2/u,'only this app\'s databases are counted');assert.match(line,/dataClearedAt=2026-10-01T06:00:00\.000Z/u,'an unresolved clear shows when it was found');assert.match(line,/otherDatabases=1/u);assert.doesNotMatch(line,/prof_qa|StudyDirectorDB/u,'no database or profile names');}
 assert.match(text,/Current Unsupported data: state=replaceable[^\n]*held=1[^\n]*protectedCount=0/u,'data this build cannot read: only replaceable bookkeeping, so nothing waits');
 const savedRead=context.AppData.restoreJournal.diagnostics;context.AppData.restoreJournal.diagnostics=async()=>{throw new Error('PRIVATE DATA');};context.DeviceBackup.status=()=>{throw new Error('PRIVATE DATA');};
 assert.equal(await context.copyBackupDiagnostics(),true);assert.match(copied.at(-1),/Current Restore journal: state=unavailable.*reason=state-unavailable/u);assert.match(copied.at(-1),/Current Device backup: state=unavailable/u);assert.match(copied.at(-1),/Current Canonical maintenance record: state=pending/u);assert.doesNotMatch(copied.at(-1),/PRIVATE DATA/u);context.AppData.restoreJournal.diagnostics=savedRead;
