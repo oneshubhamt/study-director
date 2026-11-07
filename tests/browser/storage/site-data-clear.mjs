@@ -33,7 +33,7 @@ const startSession=(name)=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>se
   const input=document.getElementById('profile-name-input');input.value='${name}';document.getElementById('profile-dialog').dispatchEvent(new Event('close'));await wait(100);
   document.getElementById('plan-input').value=[fmt(m-5)+' | 60 | ${name} Block | work | Medicine | pages | 12',fmt(m+55)+' | 30 | Lunch | fixed | Meal | |'].join('\\n');await d.PlanDraftEditor.save();
   d.goTab('plan');await wait(100);document.getElementById('saved-plan-name').value='${name} plan';document.querySelector('[data-saved-plan="save"]').click();await wait(300);
-  if(!d.applySchedule({skipNotify:true}))throw new Error('schedule did not apply');d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(200);
+  if(!await d.applySchedule({skipNotify:true}))throw new Error('schedule did not apply');d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(200);
   d.AppData.notes.update('medicine','Medicine','${name} note before clearing','');await d.AppData.notes.flush({strict:true});await d.flushLiveDraft();})()`;
 // Right after a clear, Chromium may still be closing the cleared database, so
 // the first save can abort; the app keeps the edit and retries. Wait for the

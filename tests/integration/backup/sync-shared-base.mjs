@@ -1570,6 +1570,8 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   assert.equal(source.status,'completed');assert.equal(source.session.runningOn,a.installationId);assert.equal(source.session.snapshot.label,'BF1-SHARED');
   const bBefore=structuredClone(b.activeSession),observedContentFingerprint=await sessionContentFingerprint(source.session);
   assert.deepEqual(b.activeSession,bBefore,'reading the handoff source must not reconcile or mutate B');
+  assert.equal(source.sharedContentFingerprint,observedContentFingerprint,'the handoff read brings what B last shared through Drive, fingerprinted as Continue Here fingerprints its own copy');
+  assert.equal(await sessionContentFingerprint(b.activeSession),source.sharedContentFingerprint,'B\'s copy is exactly what it last shared, so a newer Drive session would only add to it');
   const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint,expectedCheckpointId:source.checkpointId,handoffToken:'11111111-1111-4111-8111-111111111111',revision:11});
   assert.equal(claimed.status,'completed');
   assert.equal(source.priorClaim,null,'with no claim on Drive yet, the handoff read brings none');

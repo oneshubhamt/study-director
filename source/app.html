@@ -5551,21 +5551,23 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     if(Number(previous.revision)<Number(requested.revision))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
     const [requestedContentFingerprint,observedContentFingerprint]=await Promise.all([activeSessionContentFingerprint(requested),activeSessionContentFingerprint(previous)]);
     if(requestedContentFingerprint!==observedContentFingerprint){
-      // The newest claim is the causal boundary: its observed content is what
-      // Drive held when it was made. If this device still holds exactly that
-      // content, Drive's newer session only adds to it. That holds for the
-      // current owner's claim and for this device's own claim from an earlier
-      // Continue Here that stopped part-way. Advance only Active Session, then
-      // transfer ownership. A real divergence, or content with attachments,
-      // uses normal sync.
+      // Drive's newer session only adds to this device's copy when this copy
+      // is exactly content Drive held before: what this device last shared
+      // through Drive (sync takes the newer session then too), or what the
+      // newest claim observed when it was made, whether that claim is the
+      // current owner's or this device's own from a Continue Here that
+      // stopped part-way. Advance only Active Session, then transfer
+      // ownership. A real divergence, or content with attachments, uses
+      // normal sync.
       const priorClaim=source.priorClaim||null;
       const causalContinuation=!!(
         priorClaim&&priorClaim.state==='owned'&&priorClaim.applies&&
         priorClaim.observedContentFingerprint===requestedContentFingerprint&&
         Number(priorClaim.revision)<=Number(previous.revision)
       );
+      const sharedContinuation=!!source.sharedContentFingerprint&&source.sharedContentFingerprint===requestedContentFingerprint;
       const referencedAssets=BackupCodec.assetIds(previous);
-      if(!causalContinuation||referencedAssets.length){
+      if(!causalContinuation&&!sharedContinuation||referencedAssets.length){
         BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
         throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
       }

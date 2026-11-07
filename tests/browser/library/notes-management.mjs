@@ -50,12 +50,12 @@ try{
     });
   })()`);
 
-  const prepared=await page.evaluate(`(()=>{
+  const prepared=await page.evaluate(`(async()=>{
     const d=__PWA6,now=new Date(),base=now.getHours()*60+now.getMinutes()-1;
     const fmt=value=>String(Math.floor((value+1440)%1440/60)).padStart(2,'0')+':'+String((value+1440)%1440%60).padStart(2,'0');
     const rows=[['Alpha Task','Alpha Empty'],['Zeta Task','Zeta Filled'],['Child Task','Parent > Child Empty']];
     document.getElementById('plan-input').value=rows.map((row,index)=>fmt(base+index*20)+' | 20 | '+row[0]+' | work | '+row[1]+' | pages | 10').join('\\n');
-    const applied=d.applySchedule({skipNotify:true});d.goTab('library');
+    const applied=await d.applySchedule({skipNotify:true});d.goTab('library');
     __PWA6.LibraryView.showSection('notes');
     return {applied};
   })()`);

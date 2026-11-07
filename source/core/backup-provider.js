@@ -1868,6 +1868,9 @@ registry.define('backup-provider',1,input=>{
       // together: the versions, the stored objects and the ownership claim.
       const objectListing=repositoryObjectInventory(scoped,{signal:foreground.signal});objectListing.catch(()=>{});
       const claimRead=readRepositorySessionClaim(scoped,{signal:foreground.signal}).then(current=>projectSessionClaim(current,{signal:foreground.signal}));claimRead.catch(()=>{});
+      // What this device last shared through Drive: when its session still
+      // equals that, a newer Drive session only adds to it (sync's own rule).
+      const baseRead=Promise.resolve().then(()=>RepositoryCheckpointPipeline.sharedBase()).catch(()=>null);
       const inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
       if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The current shared repository head could not be determined safely.');
       const head=sharedRepositoryHead(inventory),checkpointId=String(head&&head.item&&head.item.id||'');
@@ -1887,8 +1890,9 @@ registry.define('backup-provider',1,input=>{
         // unreadable reads as none, so Continue Here then syncs first.
         claimRead.catch(error=>{AppDiagnostics.capture('backup-provider.session-source-claim',error,'warn');return null;})
       ]);
+      const base=await baseRead,sharedContentFingerprint=base&&base.sessionFingerprint&&SESSION_CLAIM_TOKEN_PATTERN.test(String(base.sessionContentFingerprint||''))?String(base.sessionContentFingerprint):'';
       OperationDiagnostics.finish({status:'completed',checkpointId,activeSession:!!session},traceId);
-      return freeze({status:'completed',reason:'',checkpointId,session:session||null,priorClaim:priorClaim||null,observedOwnerToken:session?await sessionClaimToken('owner',session.runningOn,{signal:foreground.signal}):''});
+      return freeze({status:'completed',reason:'',checkpointId,session:session||null,priorClaim:priorClaim||null,sharedContentFingerprint,observedOwnerToken:session?await sessionClaimToken('owner',session.runningOn,{signal:foreground.signal}):''});
     }catch(error){OperationDiagnostics.fail(error,{},traceId);throw error;}
     finally{await release(selected,'session-source');setBusy(false);foreground.release();}
   }

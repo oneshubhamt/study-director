@@ -239,7 +239,7 @@ const acquireRuntime=[
 const OWN_CLAIM_OWNER='d'.repeat(64),OLD_OWNER='e'.repeat(64);
 function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
-  const syncs=[],requests=[];let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,readbackFailed=false,conditionalWrites=0;
+  const syncs=[],requests=[];let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,sharedContent='',id=0,readbackFailed=false,conditionalWrites=0;
   const app={
     document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
     navigator:{onLine:true},Date,Promise,Object,JSON,
@@ -282,7 +282,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     BackupProviderRuntime:{
       connected:()=>true,
       readSessionClaim:async()=>remoteClaim,
-      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:OLD_OWNER,session:remoteSource,priorClaim:remoteClaim}),
+      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:OLD_OWNER,session:remoteSource,priorClaim:remoteClaim,sharedContentFingerprint:sharedContent}),
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
       claimSessionOwnership:async(_provider,request)=>{
         if(faultMode==='claim-busy')return {status:'busy',reason:'busy'};
@@ -313,7 +313,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   };
   boot();
   return {previous,transfer:(session=current)=>context.takeOver(structuredClone(session)),reload:boot,
-    setFault:value=>{faultMode=value;},setSourceSession:value=>{remoteSource=value;},
+    setFault:value=>{faultMode=value;},setSourceSession:value=>{remoteSource=value;},setShared:value=>{sharedContent=value;},
     setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
     state:()=>({current,claim:remoteClaim,claims,requests:[...requests],compensations,conditionalWrites,backgroundReleases,notify,syncs:[...syncs]})};
 }
@@ -451,8 +451,30 @@ for(const fault of ['claim-crash','claim-throws-after-remote','claim-throws-befo
   assert.equal(result.session.snapshot.label,'more study on the other device','the owner\'s later study comes with it');
   assert.equal(t.state().claims,1);
 }
+// The other device studied on after this device last synced, with no claim
+// in between. This copy is still exactly what this device last shared through
+// Drive, so the newer session only adds to it: taken first, in one press.
 {
-  // Without a claim that proves it, a newer copy is synced first.
+  const t=acquiringHarness(),ahead={...t.previous,revision:12,snapshot:{label:'more study on the other device'}};
+  t.setSourceSession(ahead);t.setShared('f'.repeat(64));
+  const result=await t.transfer();
+  assert.equal(result.session.runningOn,'inst_handoff_new','Continue Here finishes in one press');
+  assert.equal(result.session.snapshot.label,'more study on the other device','the other device\'s later study comes with it');
+  assert.equal(t.state().requests[0].observedRevision,12,'the claim observes the newer session');
+  assert.deepEqual(t.state().syncs,['session-continue']);
+}
+for(const [label,shared,snapshot] of [
+  ['this copy changed since it was last shared','1'.repeat(64),{label:'more study on the other device'}],
+  ['the newer session needs attachment bytes','f'.repeat(64),{label:'remote with missing attachment'}]
+]){
+  const t=acquiringHarness();
+  t.setSourceSession({...t.previous,revision:12,snapshot});t.setShared(shared);
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_SYNC_REQUIRED',label+': sync first');
+  assert.equal(t.state().claims,0,label+': nothing is claimed');
+  assert.equal(t.state().current.snapshot.label,'original',label+': nothing here changes');
+}
+{
+  // Without a claim or a shared copy that proves it, a newer copy is synced first.
   const t=acquiringHarness();
   t.setSourceSession({...t.previous,revision:12,snapshot:{label:'more study on the other device'}});
   await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_SYNC_REQUIRED');
