@@ -16,9 +16,9 @@ registry.define('backup',1,input=>{
   const Canonical=input.canonical,ManagedRepositoryModule=input.managedRepository,BackupProviderModule=input.backupProvider,RepositoryBackgroundModule=input.repositoryBackground,BackupCaptureModule=input.backupCapture;
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion','backupVersion','limits','starterSchedule']),
-    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','scheduleRead','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseReadDays','reconciliationBaseWrite','pendingReviewsList','pendingReviewsReadItems','pendingReviewsMerge','pendingReviewsReplace','pendingReviewsResolve']),
-    codecs:freeze(['activeSession','backup','pendingReview']),
-    reconciliation:freeze(['createPlan','resolvePlan','summarizePlan']),
+    persistence:freeze(['activeSessionLoad','activeSessionSave','activeSessionClear','activeSessionSettled','dailyRecordBackupDates','dailyRecordBackupMonth','dailyRecordDocuments','dailyRecordImportBatches','dailyRecordRemove','dailyRecordTimestamp','notesExportPayload','notesReadFreshPayload','notesReadFreshItems','notesFlush','notesNormalizePayload','notesAlignByTitle','notesTrashKey','notesFailure','restoreJournalPrepare','restoreJournalRead','restoreJournalMark','restoreJournalClear','personalSettle','personalExport','personalImport','personalVerify','sourceRevision','snapshotRevision','storageGeneration','canonicalMutationEpochRead','canonicalPreparationRebase','preparationUnitStamps','preparationUnitReplace','installationId','deletionRecoveryFlush','deletionRecoverySavedDays','deletionRecoveryReplaceSavedDays','deletionRecoveryNotes','deletionRecoveryReplaceNotes','deletionRecoveryAttachments','deletionRecoveryReplaceAttachments','deletionRecoveryClearAttachment','reconciliationBaseRead','reconciliationBaseReadNotes','reconciliationBaseReadDayAncestry','reconciliationBaseWrite','pendingReviewsList','pendingReviewsReadItems','pendingReviewsMerge','pendingReviewsReplace','pendingReviewsResolve']),
+    codecs:freeze(['activeSession','backup','dailyRecord','pendingReview']),
+    reconciliation:freeze(['createPlan','resolvePlan','summarizePlan','savedDayContentValue']),
     noteReconciliation:freeze(['resolve','merge']),
     exports:freeze(['backgroundAvailable','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
@@ -61,7 +61,7 @@ registry.define('backup',1,input=>{
     // or no limit at all, so a missing one stops start-up.
     const missingLimits=REQUIRED_LIMITS.filter(key=>!(Number(ports.configuration.limits[key])>0));
     if(missingLimits.length)throw new TypeError(`Backup configuration is missing limits: ${missingLimits.join(', ')}.`);
-    if(!Object.isFrozen(ports.codecs.backup)||!Object.isFrozen(ports.codecs.activeSession)||!Object.isFrozen(ports.codecs.pendingReview)){
+    if(!Object.isFrozen(ports.codecs.backup)||!Object.isFrozen(ports.codecs.activeSession)||!Object.isFrozen(ports.codecs.dailyRecord)||typeof ports.codecs.dailyRecord.savedDayCoversSessionEvidence!=='function'||!Object.isFrozen(ports.codecs.pendingReview)){
       throw new TypeError('Backup codecs must be frozen.');
     }
     if(!Object.isFrozen(ports.view.presentation)||['begin','read','feedback','condition','detail','outcome','resolve','reset','subscribe'].some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
@@ -75,9 +75,9 @@ registry.define('backup',1,input=>{
       activeSessionLoad,activeSessionSave,activeSessionClear,activeSessionSettled,dailyRecordBackupDates,dailyRecordBackupMonth,dailyRecordDocuments,
       dailyRecordImportBatches,dailyRecordRemove,dailyRecordTimestamp,notesExportPayload,notesReadFreshPayload,notesReadFreshItems,notesFlush,
       notesNormalizePayload,notesAlignByTitle,notesTrashKey,notesFailure,restoreJournalPrepare,restoreJournalRead,
-      restoreJournalMark,restoreJournalClear,scheduleRead,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryNotes,deletionRecoveryReplaceNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseReadDays,reconciliationBaseWrite,pendingReviewsList,pendingReviewsReadItems,pendingReviewsMerge,pendingReviewsReplace,pendingReviewsResolve
+      restoreJournalMark,restoreJournalClear,personalSettle,personalExport,personalImport,personalVerify,canonicalMutationEpochRead,canonicalPreparationRebase,preparationUnitStamps,preparationUnitReplace,installationId,deletionRecoveryFlush,deletionRecoverySavedDays,deletionRecoveryReplaceSavedDays,deletionRecoveryNotes,deletionRecoveryReplaceNotes,deletionRecoveryAttachments,deletionRecoveryReplaceAttachments,deletionRecoveryClearAttachment,reconciliationBaseRead,reconciliationBaseReadNotes,reconciliationBaseReadDayAncestry,reconciliationBaseWrite,pendingReviewsList,pendingReviewsReadItems,pendingReviewsMerge,pendingReviewsReplace,pendingReviewsResolve
     }=ports.persistence;
-    const {activeSession:ActiveSessionCodec,backup:BackupCodec,pendingReview:PendingReviewCodec}=ports.codecs;
+    const {activeSession:ActiveSessionCodec,backup:BackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}=ports.codecs;
     const Reconciliation=ports.reconciliation;
     const NoteReconciliation=ports.noteReconciliation;
     const Exports=ports.exports;
@@ -97,7 +97,7 @@ registry.define('backup',1,input=>{
       notes:freeze({exportPayload:notesExportPayload,readFreshPayload:notesReadFreshPayload,readFreshItems:notesReadFreshItems,flush:notesFlush,normalizePayload:notesNormalizePayload,alignByTitle:notesAlignByTitle,failure:notesFailure}),
       restoreJournal:freeze({prepare:restoreJournalPrepare,read:restoreJournalRead,mark:restoreJournalMark,clear:restoreJournalClear}),
       pendingReviews:freeze({list:pendingReviewsList,readItems:pendingReviewsReadItems,merge:pendingReviewsMerge,replace:pendingReviewsReplace,resolve:pendingReviewsResolve}),
-      provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,notes:deletionRecoveryNotes,replaceNotes:deletionRecoveryReplaceNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,readDays:reconciliationBaseReadDays,write:reconciliationBaseWrite})
+      provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,notes:deletionRecoveryNotes,replaceNotes:deletionRecoveryReplaceNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,readDayAncestry:reconciliationBaseReadDayAncestry,write:reconciliationBaseWrite})
     });
     const AssetData=portableAssets?freeze({
       get:ports.assets.get,put:ports.assets.put,keys:ports.assets.keys,list:ports.assets.list,importAll:ports.assets.importAll,restoreAll:ports.assets.restoreAll,removeMany:ports.assets.removeMany,removeMetadata:ports.assets.removeMetadata,scheduleMaintenance:ports.assets.scheduleMaintenance
@@ -248,7 +248,7 @@ const ManagedRepository=ManagedRepositoryModule.createEngine(freeze({
   codec:BackupCodec,
   ports:freeze({
     configuration:freeze({backupVersion,limits:APP_LIMITS,logicalCaptureFormat:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,logicalCaptureVersion:LOGICAL_CHECKPOINT_CAPTURE_VERSION}),
-    persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:value=>personalFingerprint(value),dayFingerprints:records=>dayFingerprintMonths(records),sessionFingerprint:value=>sessionFingerprint(value)}),
+    persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:value=>personalFingerprint(value),personalFields:value=>personalFields(value),dayFingerprints:records=>dayFingerprintMonths(records),semanticDayFingerprints:records=>dayFingerprintMonths(records,{semantic:true}),sessionFingerprint:value=>sessionFingerprint(value),sessionContentFingerprint:value=>sessionContentFingerprint(value)}),
     assets:freeze({get:assetId=>AssetData.get(assetId),verifyAliases:(catalogue,assetIds)=>verifyAnomalousPhysicalAssetAliases(catalogue,assetIds)}),
     files:freeze({protect:Exports.protect,unprotect:Exports.unprotect,run:Exports.run,scope:Exports.scope}),
     checkpoint:freeze({
@@ -443,15 +443,16 @@ async function applyResolvedNotes(resolvedPlan){
 }
 async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
   const resolved=resolvedPlan&&resolvedPlan.activeSession;
-  // The other side ended the session this device had not changed since.
-  if(clear&&resolved&&resolved.value){requireBackupMutationControl('reconciling the active session');const scheduleText=scheduleRead();await restoreSessionState(null,scheduleText);return {message:' and active session',changed:true,expected:null,scheduleText};}
+  // Active Session reconciliation owns only session/runtime state. The Plan
+  // working draft is portable Personal Data and is never transported through
+  // this path.
+  if(clear&&resolved&&resolved.value){requireBackupMutationControl('reconciling the active session');await restoreSessionState(null);return {message:' and active session',changed:true,expected:null};}
   if(!resolved||!resolved.changed||!resolved.value)return {message:'',changed:false,expected:null};
   requireBackupMutationControl('reconciling the active session');
   const expected=ActiveSessionCodec.sanitizeCurrent(resolved.value);
   if(!expected)throw new Error('Resolved Active Session is invalid.');
-  const scheduleText=expected.scheduleText||scheduleRead();
-  await restoreSessionState(expected,scheduleText);
-  return {message:' and active session',changed:true,expected,scheduleText};
+  await restoreSessionState(expected);
+  return {message:' and active session',changed:true,expected};
 }
 function staleReconciliationError(){
   const error=new Error('Local Study Director data changed while differences were being reviewed. The comparison must be rebuilt from the latest saved state.');
@@ -509,8 +510,13 @@ async function flushRestorePreflightState(signal){
     cancelLiveDraftSave();
     const snapshot=captureSessionSnapshot(),candidate=snapshot?activeSessionPayload(snapshot):null;
     if(!candidate)return false;
-    const result=await AppData.activeSession.save(candidate);
-    if(!result||!result.ok)throw result&&result.error||new Error('active session save failed');
+    const result=await AppData.activeSession.save(candidate,{strictDurability:true});
+    if(!result?.ok||result.error||result.storage?.idb!==true)
+      throw result?.error||new Error('Active Session reconciliation requires a canonical IndexedDB commit.');
+    const confirmed=await readCanonicalActiveSession();
+    if(confirmed.storage?.idb!==true||
+        !Canonical.same(ActiveSessionCodec.sanitizeCurrent(confirmed.value),ActiveSessionCodec.sanitizeCurrent(result.value)))
+      throw new Error('Active Session reconciliation did not read back the exact committed state.');
     return true;
   });
   await runRestorePreflightStage('session-settle','RESTORE_PREFLIGHT_SESSION_SETTLE_FAILED','The active session could not finish settling before reconciliation.',()=>AppData.activeSession.settled());
@@ -609,9 +615,15 @@ function savedDayRecordPair(item){
   const local=item.candidates.find(candidate=>candidate.local&&candidate.kind==='record')||null,incoming=item.candidates.find(candidate=>!candidate.local&&candidate.kind==='record')||null;
   return local&&incoming?freeze({local,incoming}):null;
 }
+// A review's selected Saved Day is already applied if the canonical study
+// content is identical. Save timestamps and source revisions are not study
+// changes and must never force a replay after an interrupted review receipt.
+function savedDayReviewContent(record){
+  return PendingReviewCodec.meaningfulValue('savedDay',record);
+}
 function savedDayStudyState(record){
   if(!record||record.recordKind!=='study')return null;
-  const {reflection,updatedAt,...state}=record;return state;
+  const {reflection:_reflection,...state}=savedDayReviewContent(record);return state;
 }
 function savedDayNeedsWholeDecision(item,settled=null){
   if(!item?.conflict||settled&&settled.has(item.date))return false;
@@ -687,16 +699,58 @@ function activeSessionChoiceLabel(candidate){
 // What both sides last shared: the shared base this device last synced, when
 // the backup descends from it, else null.
 async function lastSharedBase(stored){
-  const snapshot=candidateSnapshotState(stored),manifest=snapshot&&snapshot.provenance&&snapshot.provenance.repositoryManifest,repositoryBaseId=String(manifest&&manifest.reconciliationBaseId||'');if(!repositoryBaseId)return null;
-  const ancestorIds=Array.isArray(manifest.reconciliationAncestorIds)&&manifest.reconciliationAncestorIds.length?manifest.reconciliationAncestorIds:[repositoryBaseId];
-  const localBase=await AppData.reconciliationBase.read().catch(()=>null);
-  return localBase&&ancestorIds.includes(String(localBase.checkpointId||''))?localBase:null;
+  const snapshot=candidateSnapshotState(stored),manifest=snapshot&&snapshot.provenance&&snapshot.provenance.repositoryManifest,
+    headId=String(manifest?.checkpoint?.checkpointId||''),repositoryBaseId=String(manifest?.reconciliationBaseId||'');
+  if(!/^cp_[a-f0-9]{32}$/u.test(headId))return null;
+  const ancestorIds=Array.isArray(manifest.reconciliationAncestorIds)&&manifest.reconciliationAncestorIds.length?manifest.reconciliationAncestorIds:repositoryBaseId?[repositoryBaseId]:[];
+  const localBase=await AppData.reconciliationBase.read().catch(()=>null),localId=String(localBase?.checkpointId||'');
+  // After catch-up the verified head itself is our shared base, even though
+  // its ancestry list correctly excludes its own checkpoint ID.
+  return localBase&&(localId===headId||ancestorIds.includes(localId))?localBase:null;
 }
 // Each note's title and text in the shared base.
 async function noteReconciliationAncestor(base,keys=[]){
   if(!base)return null;
   const notes=keys.length?await AppData.reconciliationBase.readNotes(keys).catch(()=>freeze({})):freeze({});
   return freeze({checkpointId:String(base.checkpointId),notes});
+}
+// Exact per-field causal evidence for one verified Portable Personal Data
+// snapshot. Absence, null, and an authored value have distinct hashes.
+const PERSONAL_PREFERENCE_KEYS=freeze(['studentName','theme','presentation','quote','practiceCueMode','fontScale','practiceTargetMs','soundMode']);
+const PERSONAL_NUDGE_KEYS=freeze(['present','enabled','sound','nudgeAfter','breakMinutes']);
+const semanticSavedPlan=PendingReviewCodec.savedPlanMeaning;
+// Personal reviews compare authored meaning, not Saved Plan bookkeeping dates.
+// The order itself remains significant only among identities present on
+// both sides; independently added plans are handled by identity.
+function meaningfulSavedPlanOrderDiffers(local,other){
+  const shared=new Set(local.filter(id=>other.includes(id)));
+  return !Canonical.same(local.filter(id=>shared.has(id)),other.filter(id=>shared.has(id)));
+}
+async function personalFieldFingerprint(present,value=null){
+  return valueFingerprint({present:present===true,value:present===true?value:null});
+}
+async function personalFields(value){
+  if(!value)return null;
+  const clean=BackupCodec.normalizePersonalData(value);if(!clean)throw new Error('Verified Personal Data is unavailable for field ancestry.');
+  const preferences=Object.create(null),nudge=Object.create(null),savedPlans=Object.create(null),
+    own=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key),nudged=clean.preferences.nudge!==null,
+    order=clean.plans.savedPlans.map(plan=>plan.id);
+  await Promise.all([
+    ...PERSONAL_PREFERENCE_KEYS.map(async key=>{preferences[key]=await personalFieldFingerprint(own(clean.preferences,key),clean.preferences[key]);}),
+    ...PERSONAL_NUDGE_KEYS.map(async key=>{
+      nudge[key]=key==='present'?await personalFieldFingerprint(true,nudged):
+        await personalFieldFingerprint(nudged&&own(clean.preferences.nudge,key),nudged?clean.preferences.nudge[key]:null);
+    }),
+    ...clean.plans.savedPlans.map(async plan=>{savedPlans[plan.id]=await personalFieldFingerprint(true,semanticSavedPlan(plan));})
+  ]);
+  const [draft,defaultId,savedPlanOrder]=await Promise.all([
+    personalFieldFingerprint(true,clean.plans.draft),
+    personalFieldFingerprint(true,clean.plans.defaultId),
+    personalFieldFingerprint(true,order)
+  ]);
+  return freeze({format:'study-director.reconciliation-personal-fields',version:1,
+    preferences:freeze(preferences),nudge:freeze(nudge),draft,defaultId,savedPlanOrder,
+    savedPlans:freeze(savedPlans),order:freeze(order)});
 }
 // Plans and settings are compared as one unit by fingerprint.
 async function personalFingerprint(value){return value?String(await Exports.run('checksum',{value:Canonical.signature(value),algorithm:'sha256'})):'';}
@@ -707,16 +761,120 @@ async function personalSettled(base,local,incoming){
   const [mine,theirs]=await Promise.all([personalFingerprint(local),personalFingerprint(incoming)]);
   return mine===theirs?null:mine===shared?'replace':theirs===shared?'keep':null;
 }
+// A three-way decision is possible only when the last verified shared
+// checkpoint retained the exact per-field hashes. An absent plan is hashed
+// as absence; a null, a missing optional field and an authored value differ.
+async function reconcilePersonalFields(base,local,incoming){
+  const ancestry=base?.personalFields;
+  if(!ancestry||ancestry.version!==1||!local||!incoming)return null;
+  const mine=BackupCodec.normalizePersonalData(local),theirs=BackupCodec.normalizePersonalData(incoming);
+  if(!mine||!theirs)return null;
+  // Hash all independent paths concurrently. Comparing their verified
+  // digests does not reread Personal Data or change the stored ancestor.
+  const [left,right,absent]=await Promise.all([personalFields(mine),personalFields(theirs),personalFieldFingerprint(false)]);
+  let conflicts=0;const conflictParts=new Set();
+  const choose=(part,localPresent,localValue,remotePresent,remoteValue,baseHash,localHash,remoteHash)=>{
+    if(localHash===remoteHash||remoteHash===baseHash)return freeze({present:localPresent,value:localValue});
+    if(localHash===baseHash)return freeze({present:remotePresent,value:remoteValue});
+    conflicts++;conflictParts.add(part);return freeze({present:localPresent,value:localValue});
+  };
+  const prefs={...mine.preferences},own=(obj,key)=>Object.prototype.hasOwnProperty.call(obj,key);
+  for(const key of PERSONAL_PREFERENCE_KEYS){
+    const chosen=choose('preference:'+key,own(mine.preferences,key),mine.preferences[key],own(theirs.preferences,key),theirs.preferences[key],
+      ancestry.preferences[key],left.preferences[key],right.preferences[key]);
+    if(chosen.present)prefs[key]=chosen.value;else delete prefs[key];
+  }
+  const localNudge=mine.preferences.nudge,remoteNudge=theirs.preferences.nudge;
+  const present=choose('preference:nudge',true,localNudge!==null,true,remoteNudge!==null,
+    ancestry.nudge.present,left.nudge.present,right.nudge.present).value;
+  if(!present)prefs.nudge=null;
+  else{
+    const nudge={};
+    for(const key of PERSONAL_NUDGE_KEYS.slice(1)){
+      const l=localNudge!==null&&own(localNudge,key),i=remoteNudge!==null&&own(remoteNudge,key),
+        chosen=choose('nudge:'+key,l,l?localNudge[key]:null,i,i?remoteNudge[key]:null,
+          ancestry.nudge[key],left.nudge[key],right.nudge[key]);
+      if(chosen.present)nudge[key]=chosen.value;
+    }
+    prefs.nudge=nudge;
+  }
+  const draft=choose('draft',true,mine.plans.draft,true,theirs.plans.draft,
+      ancestry.draft,left.draft,right.draft).value,
+    defaultId=choose('defaultPlan',true,mine.plans.defaultId,true,theirs.plans.defaultId,
+      ancestry.defaultId,left.defaultId,right.defaultId).value,
+    localPlans=new Map(mine.plans.savedPlans.map(plan=>[plan.id,plan])),
+    remotePlans=new Map(theirs.plans.savedPlans.map(plan=>[plan.id,plan])),plans=new Map(),
+    allIds=new Set([...ancestry.order,...localPlans.keys(),...remotePlans.keys()]);
+  for(const id of allIds){
+    const hasLocal=localPlans.has(id),hasRemote=remotePlans.has(id),
+      original=choose('savedPlan:'+id,hasLocal,semanticSavedPlan(localPlans.get(id)),hasRemote,semanticSavedPlan(remotePlans.get(id)),
+        ancestry.savedPlans[id]||absent,left.savedPlans[id]||absent,right.savedPlans[id]||absent);
+    if(original.present){
+      const record=original.value&&original.value.id===id?
+        (hasLocal&&Canonical.same(semanticSavedPlan(localPlans.get(id)),original.value)?localPlans.get(id):remotePlans.get(id)):null;
+      if(!record){conflicts++;conflictParts.add('savedPlan:'+id);if(hasLocal)plans.set(id,localPlans.get(id));}
+      else plans.set(id,record);
+    }
+  }
+  // Additions to the saved-plan list need not be mistaken for an ordering
+  // conflict. Compare relative order only for unchanged baseline identities
+  // still present on both sides, then append independent additions.
+  const shared=new Set(ancestry.order.filter(id=>localPlans.has(id)&&remotePlans.has(id))),
+    baselineOrder=ancestry.order.filter(id=>shared.has(id)),
+    localOrder=mine.plans.savedPlans.map(plan=>plan.id),
+    remoteOrder=theirs.plans.savedPlans.map(plan=>plan.id),
+    localRelative=localOrder.filter(id=>shared.has(id)),
+    remoteRelative=remoteOrder.filter(id=>shared.has(id)),
+    localReordered=!Canonical.same(localRelative,baselineOrder),
+    remoteReordered=!Canonical.same(remoteRelative,baselineOrder);
+  if(localReordered&&remoteReordered&&!Canonical.same(localRelative,remoteRelative)){conflicts++;conflictParts.add('savedPlanOrder');}
+  const preferred=!localReordered&&remoteReordered?remoteOrder:localOrder,
+    order=[...new Set([...preferred,...remoteOrder,...localOrder,...ancestry.order])].filter(id=>plans.has(id)),
+    result={version:2,preferences:prefs,plans:{draft,defaultId,savedPlans:order.map(id=>plans.get(id))}};
+  // A changed setting may be individually safe while its combined Plan
+  // default or reminder settings are invalid. Leave both sides reviewable.
+  if(plans.size>100)return freeze({value:mine,reviewKept:theirs,conflict:true,valid:false});
+  let canonical=null;
+  try{canonical=BackupCodec.normalizePersonalData(result);}catch{}
+  if(!canonical)return freeze({value:mine,reviewKept:theirs,conflict:true,valid:false});
+  // Store the unresolved alternative relative to the *already merged*
+  // canonical value. Otherwise a legitimate one-sided change in a different
+  // setting is offered again as a false conflict in Kept Versions. This is a
+  // canonical Personal Data record, not a second mask/schema.
+  let reviewKept=null;
+  if(conflicts){
+    const selections=Object.fromEntries([...conflictParts].map(part=>['kept__projection__'+part,'use']));
+    try{reviewKept=selectedKeptPersonal(canonical,{id:'projection',kept:theirs},selections);}
+    catch{
+      // Plan deletion/default constraints can make an isolated alternate
+      // noncanonical. Retain the whole original alternative rather than
+      // silently drop genuinely competing work.
+      reviewKept=theirs;
+    }
+  }
+  return freeze({value:canonical,reviewKept,conflict:conflicts>0,valid:true});
+}
 // True when one side's plans and settings hold nothing the other's lack:
 // each setting unset or equal, the draft empty, the starter plan or equal,
 // every saved plan present and identical, and the default plan unset or equal.
+function personalIsBlank(value){
+  let clean=null;try{clean=BackupCodec.normalizePersonalData(value);}catch{return false;}
+  return !!clean&&clean.plans.draft===null&&clean.plans.defaultId===null&&!clean.plans.savedPlans.length&&
+    Object.values(clean.preferences).every(setting=>setting===null||setting===undefined);
+}
 function personalAddsNothing(side,other){
   let a,b;try{a=BackupCodec.normalizePersonalData(side);b=BackupCodec.normalizePersonalData(other);}catch{return false;}if(!a||!b)return false;
   if(Object.entries(a.preferences).some(([key,value])=>value!==null&&!Canonical.same(value,b.preferences[key])))return false;
-  const draft=String(a.plans.draft||'').trim();if(draft&&draft!==String(STARTER_SCHEDULE).trim()&&a.plans.draft!==b.plans.draft)return false;
+  // A canonical non-null draft is authored data, even if it happens to
+  // equal the starter template. Only null proves the default is unsaved.
+  if(a.plans.draft!==null&&a.plans.draft!==b.plans.draft)return false;
   if(a.plans.defaultId!==null&&a.plans.defaultId!==b.plans.defaultId)return false;
+  // Authored order is meaningful among identities that both devices hold.
+  // Independent additions are safe only when the common relative order agrees.
+  if(meaningfulSavedPlanOrderDiffers(a.plans.savedPlans.map(plan=>plan.id),
+      b.plans.savedPlans.map(plan=>plan.id)))return false;
   const plans=new Map(b.plans.savedPlans.map(plan=>[plan.id,plan]));
-  return a.plans.savedPlans.every(plan=>plans.has(plan.id)&&Canonical.same(plan,plans.get(plan.id)));
+  return a.plans.savedPlans.every(plan=>plans.has(plan.id)&&Canonical.same(semanticSavedPlan(plan),semanticSavedPlan(plans.get(plan.id))));
 }
 // The base keeps one fingerprint per Saved Day and one for the Active
 // Session. Both sides are fingerprinted the same way, so a side whose
@@ -728,11 +886,63 @@ async function valueFingerprint(value){
   return [...new Uint8Array(digest)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 function dayFingerprint(record){return valueFingerprint(record?sanitizeCurrentDailyRecord(record)||record:null);}
+ function dayContentFingerprint(record){return valueFingerprint(Reconciliation.savedDayContentValue(record?sanitizeCurrentDailyRecord(record)||record:null));}
+// The persisted reconciliation baseline retains the exact canonical Active
+// Session fingerprint. Changing that meaning in place would corrupt ancestry.
+// Handoff causality has its own semantic-content fingerprint below.
 function sessionFingerprint(session){return valueFingerprint(session?ActiveSessionCodec.sanitizeCurrent(session)||session:null);}
+function sessionContentFingerprint(session){return valueFingerprint(session?ActiveSessionCodec.contentValue(session):null);}
+function sameSessionContent(a,b){
+  const left=ActiveSessionCodec.contentValue(a),right=ActiveSessionCodec.contentValue(b);
+  return !!left&&!!right&&Canonical.same(left,right);
+}
+function nextMergedSessionRevision(...values){
+  const current=Math.max(0,...values.map(value=>Math.max(0,Math.round(Number(value)||0))));
+  if(current>=Number.MAX_SAFE_INTEGER)throw new Error('Active Session revision space is exhausted.');
+  return current+1;
+}
+function sessionFullyAcknowledged(session){
+  const clean=ActiveSessionCodec.sanitizeCurrent(session),snapshot=clean&&clean.snapshot;
+  const contentRevision=Number(snapshot&&snapshot.contentRevision),savedRevision=Number(snapshot&&snapshot.savedRevision);
+  return !!clean&&Number.isSafeInteger(contentRevision)&&contentRevision>=0&&Number.isSafeInteger(savedRevision)&&savedRevision>=contentRevision;
+}
+// When semantic content is identical, a verified save acknowledgement is safe
+// to carry across control metadata/counter differences. This is not revision
+// arithmetic across branches: it means only "this exact semantic content has
+// already been materialized as a Saved Day".
+function mergeSessionAcknowledgement(control,peer){
+  const winner=ActiveSessionCodec.sanitizeCurrent(control),other=ActiveSessionCodec.sanitizeCurrent(peer);
+  if(!winner||!other||!sameSessionContent(winner,other)||sessionFullyAcknowledged(winner)||!sessionFullyAcknowledged(other))return winner;
+  const now=new Date().toISOString(),snapshot=freeze({...winner.snapshot,savedRevision:winner.snapshot.contentRevision,updatedAt:now});
+  return ActiveSessionCodec.sanitizeCurrent({...winner,revision:nextMergedSessionRevision(winner.revision,other.revision),snapshot,updatedAt:now});
+}
+// Incoming content can advance after a device has claimed ownership. Preserve
+// the current owner's control state while adopting that later pre-claim work,
+// and start a fresh local content revision so no foreign save acknowledgement
+// is mistaken for this derived state.
+function rebaseSessionContentToOwner(local,incoming){
+  const mine=ActiveSessionCodec.sanitizeCurrent(local),theirs=ActiveSessionCodec.sanitizeCurrent(incoming);
+  if(!mine||!theirs||mine.date!==theirs.date)return null;
+  const now=new Date().toISOString(),snapshot=freeze({
+    ...theirs.snapshot,
+    contentRevision:nextMergedSessionRevision(mine.snapshot.contentRevision,theirs.snapshot.contentRevision),
+    savedRevision:0,
+    updatedAt:now
+  });
+  return ActiveSessionCodec.sanitizeCurrent({
+    ...theirs,
+    revision:nextMergedSessionRevision(mine.revision,theirs.revision),
+    status:mine.status,
+    runningOn:mine.runningOn,
+    snapshot,
+    suspendedAt:mine.status==='suspended'?mine.suspendedAt:null,
+    updatedAt:now
+  });
+}
 // {month: {date: fingerprint}} for these Saved Days.
-async function dayFingerprintMonths(records){
+async function dayFingerprintMonths(records,{semantic=false}={}){
   const months=Object.create(null);
-  for(const record of records||[]){const date=String(record&&record.date||'');if(!/^\d{4}-\d{2}-\d{2}$/u.test(date))continue;const month=date.slice(0,7);(months[month]||(months[month]=Object.create(null)))[date]=await dayFingerprint(record);}
+  for(const record of records||[]){const date=String(record&&record.date||'');if(!/^\d{4}-\d{2}-\d{2}$/u.test(date))continue;const month=date.slice(0,7);(months[month]||(months[month]=Object.create(null)))[date]=await (semantic?dayContentFingerprint(record):dayFingerprint(record));}
   for(const month of Object.keys(months))months[month]=freeze(months[month]);
   return freeze(months);
 }
@@ -741,16 +951,24 @@ async function sharedBaseUpdate(parsed){
   const notes=AppData.notes.normalizePayload(parsed&&parsed.data&&parsed.data.notes||{}),noteKeys=Object.keys(notes).sort(),updates=Object.create(null);
   for(const key of noteKeys)updates[key]=freeze({label:String(notes[key].label||''),text:String(notes[key].text||'')});
   const records=normalizeImportedDailyRecordSet(parsed&&parsed.records||[]).records;
-  return freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await personalFingerprint(parsed&&parsed.importedPersonalData),sessionFingerprint:await sessionFingerprint(parsed&&parsed.importedActiveSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await dayFingerprintMonths(records)});
+  return freeze({format:'study-director.reconciliation-base-update',version:4,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await personalFingerprint(parsed&&parsed.importedPersonalData),personalFields:await personalFields(parsed&&parsed.importedPersonalData),sessionFingerprint:await sessionFingerprint(parsed&&parsed.importedActiveSession||null),sessionContentFingerprint:await sessionContentFingerprint(parsed&&parsed.importedActiveSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await dayFingerprintMonths(records),semanticDays:await dayFingerprintMonths(records,{semantic:true})});
 }
 // Saved Days that differ and that one side has not changed since the shared
 // base: that side takes the other's (a record or a deletion).
 async function savedDaySettlement(plan,base){
   const settled=new Map(),items=base?plan.savedDays.filter(item=>item.conflict):[];if(!items.length)return settled;
-  const shared=await AppData.reconciliationBase.readDays(items.map(item=>item.date)).catch(()=>freeze({}));
+  const shared=await AppData.reconciliationBase.readDayAncestry(items.map(item=>item.date),base.checkpointId);
   for(const item of items){
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);if(!local||!incoming)continue;
-    const baseValue=String(shared[item.date]||''),[mine,theirs]=await Promise.all([local,incoming].map(candidate=>candidate.kind==='record'?dayFingerprint(candidate.record):'' ));
+    const ancestor=shared[item.date];
+    // An absent date in the common base does not prove that an explicit
+    // deletion was unchanged: creation and deletion on different devices
+    // are both post-base decisions and must remain reviewable.
+    if(!ancestor)continue;
+    const semanticBase=ancestor.semantic,hasSemantic=typeof semanticBase==='string'&&/^[a-f0-9]{64}$/u.test(semanticBase),
+      baseValue=hasSemantic?semanticBase:String(ancestor?.full||''),
+      fingerprint=candidate=>candidate.kind!=='record'?'':hasSemantic?dayContentFingerprint(candidate.record):dayFingerprint(candidate.record),
+      [mine,theirs]=await Promise.all([fingerprint(local),fingerprint(incoming)]);
     if(mine===baseValue)settled.set(item.date,incoming.id);else if(theirs===baseValue)settled.set(item.date,local.id);
   }
   return settled;
@@ -770,46 +988,184 @@ function syncSavedDayReviews(plan,settled){
   }
   return freeze(reviews);
 }
-// The Active Session: 'same', 'incoming' or 'local' when one side has not
-// changed it since the shared base, 'conflict' when both have, '' without a
-// shared base, and, while it runs here during a sync or a review, 'hold' (this
-// device's stays and the other side's waits) or 'yield' when another device
-// took it over after this one changed it (this device stops and the person
-// reviews both). A copy of another device's session that this device has not
-// changed always follows the other side. In a sync, a session the other side
-// ended (it has none and saved the session's day since both last shared one)
-// counts as taken over too, or as 'ended' when it does not run here: the
-// other side's ending shows and this device's progress is kept for review.
-// claimedHere: Drive's newest ownership claim names this device, so a
-// version naming another device was saved before this device took over and
-// does not take the session back.
-async function sessionSettlement(base,parsed,{hold=false,sync=false,claimedHere=false}={}){
+const sessionDecision=(state,value=null,kept=null)=>freeze({state:String(state||''),value:value||null,kept:kept||null});
+// Only the verified incoming checkpoint's actual Saved Day can prove that
+// the former owner's study evidence is already recorded. This comparison
+// remains valid after the old runtime yields and captures its final tick.
+function checkpointSavedDayCoversSession(parsed,session){
+  if(!session)return false;
+  const saved=(parsed?.records||[]).find(record=>record?.recordKind==='study'&&record.date===session.date);
+  return !!saved&&DailyRecordCodec.savedDayCoversSessionEvidence(saved,session,{allowAdvances:true});
+}
+// Active Session reconciliation has two independent dimensions:
+//   content ancestry -> semantic fingerprints
+//   execution ownership -> Drive's monotonic ownership claim
+// A claim made by this device is also a causal boundary: its
+// observedContentFingerprint is exactly what this device saw when it took over.
+// Later content from the old owner can therefore be incorporated without giving
+// ownership back, while true two-sided divergence remains reviewable.
+async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim=null}={}){
   const loaded=await readCanonicalActiveSession(),local=loaded&&loaded.value||null,incoming=parsed&&parsed.importedActiveSession||null;
-  if(!local&&!incoming||local&&incoming&&Canonical.same(local,incoming))return 'same';
-  const me=installationId(),shared=String(base&&base.sessionFingerprint||'');
-  const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&await daySavedSinceBase(parsed,local.date);
-  const takenOver=hold&&(!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me&&!claimedHere||ended);
-  if(hold&&!takenOver)return 'hold';if(!base)return takenOver?'yield':'';
-  const [mine,theirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming)]);
-  if(takenOver)return mine===shared?'incoming':theirs===shared?'local':'yield';
-  if(ended)return mine===shared?'incoming':'ended';
-  return mine===shared?(local&&local.runningOn!==me||sessionFollows(local,incoming,parsed)?'incoming':'conflict'):theirs===shared?'local':'conflict';
+  const canonicallyEqual=!local&&!incoming||!!local&&!!incoming&&Canonical.same(local,incoming);
+  const me=installationId(),shared=String(base&&base.sessionFingerprint||''),contentShared=base?.sessionContentFingerprint,[mine,theirs,contentMine,contentTheirs]=await Promise.all([sessionFingerprint(local),sessionFingerprint(incoming),sessionContentFingerprint(local),sessionContentFingerprint(incoming)]);
+  const sameContent=!!contentMine&&contentMine===contentTheirs,claimApplies=!!(sessionClaim&&sessionClaim.applies),claimedHere=!!(claimApplies&&sessionClaim.state==='owned'&&sessionClaim.ownedHere),claimedAway=!!(claimApplies&&sessionClaim.state==='owned'&&!sessionClaim.ownedHere),releasedAway=!!(claimApplies&&sessionClaim.state==='released'&&!sessionClaim.ownedHere);
+  const observed=claimApplies?String(sessionClaim.observedContentFingerprint||''):'',hasObserved=/^[a-f0-9]{64}$/u.test(observed);
+  const savedLocalDay=local&&(parsed?.records||[]).find(record=>record?.recordKind==='study'&&record.date===local.date)||null;
+  const savedCoversLocal=checkpointSavedDayCoversSession(parsed,local);
+  // The legacy shared hash proves exact canonical identity, not semantic
+  // ancestry. A separately acknowledged, canonically covered Saved Day can
+  // also prove that retiring this local study evidence loses no work.
+  // A raw cross-device revision or an unacknowledged coverage match cannot.
+  const hasSemanticAncestor=typeof contentShared==='string',unchangedFromShared=!!shared&&mine===shared,
+    semanticallyUnchanged=!!shared&&hasSemanticAncestor&&!!contentShared&&contentMine===contentShared;
+  const durablyCoveredLocal=!!local&&savedCoversLocal&&sessionFullyAcknowledged(local);
+
+  // This device is the old owner. The claim is the authoritative handoff
+  // boundary even before the new owner has published its first checkpoint.
+  // A checkpoint that still names this installation is therefore stale
+  // control state: stop here, but hold the local recovery row until the new
+  // owner's canonical session (or ended state) arrives.
+  if(claimedAway&&hasObserved){
+    if(incoming&&String(incoming.runningOn||'')===me)return sessionDecision(local?'yield-hold':'local');
+    if(!local)return sessionDecision('incoming');
+    if((!incoming||incoming.date>local.date)&&!savedCoversLocal)return sessionDecision('yield');
+    // Post-handoff study on the old device need not become a false Kept
+    // Version when the verified new owner's Saved Day demonstrably includes
+    // it. The final quiescence check below still retains any later new tick.
+    return sessionDecision(contentMine===observed||savedCoversLocal?'incoming':'yield');
+  }
+  // A released claim is written only after the claimant published its ended
+  // state. If that newest checkpoint has no Active Session, the old owner can
+  // clear unchanged content immediately or preserve genuine late work once
+  // for review before clearing it.
+  if(releasedAway&&hasObserved&&!incoming){
+    if(!local)return sessionDecision('local');
+    return sessionDecision(savedCoversLocal?'incoming':'yield');
+  }
+
+  if(claimedHere){
+    // The claim survives the owner's final local transition to no Active
+    // Session until that ended state is published. Never resurrect the older
+    // pre-claim session merely because Drive has not received the ending yet.
+    if(!local)return sessionDecision('local');
+    // Drive's head can predate the claim. Absence there cannot end a session
+    // that this device has just legitimately claimed.
+    if(!incoming)return sessionDecision('hold');
+    if(sameContent){
+      const merged=mergeSessionAcknowledgement(local,incoming);
+      return merged&&!Canonical.same(merged,local)?sessionDecision('graft',merged):sessionDecision('local');
+    }
+    // Older claims lack the exact causal fingerprint. They remain safe by
+    // refusing to infer ancestry rather than guessing from scalar revisions.
+    if(!hasObserved)return sessionDecision('claimed-conflict');
+    if(contentMine===observed&&contentTheirs!==observed){
+      const rebased=rebaseSessionContentToOwner(local,incoming);
+      return rebased?sessionDecision('graft',rebased):sessionDecision('claimed-conflict');
+    }
+    if(contentMine!==observed&&contentTheirs===observed)return sessionDecision('local');
+    return sessionDecision('claimed-conflict');
+  }
+
+  // Even an identical checkpoint may predate a newer verified ownership claim.
+  if(canonicallyEqual)return sessionDecision('same');
+  // A newer study day on Drive may already include the canonical Saved Day
+  // for this device's older session. Decide that day-boundary transition
+  // BEFORE treating two Active Sessions as independent unsaved work.
+  const newerRemoteDay=sync&&!!local&&!!incoming&&incoming.date>local.date;
+  if(newerRemoteDay&&savedLocalDay){
+    // A common session ancestor and a Saved Day that actually covers its
+    // study evidence are both necessary to retire it without a review.
+    return sessionDecision(savedCoversLocal&&(unchangedFromShared||durablyCoveredLocal)?'incoming':'ended');
+  }
+  // The verified successor checkpoint ending its previously shared session
+  // is the transition proof. A Saved Day's full-record hash changing since
+  // base is NOT proof of new study: only its metadata may have changed.
+  const ended=(hold||sync)&&!!local&&!incoming&&!!shared&&!!savedLocalDay;
+  if(ended)return sessionDecision(savedCoversLocal&&(unchangedFromShared||durablyCoveredLocal)?'incoming':'ended');
+  // Two genuinely unsaved days are independent; never choose their owner
+  // by timestamp. No Saved Day above has justified ending the older one.
+  const differentSession=!!local&&!!incoming&&local.date!==incoming.date;
+  if(differentSession)return sync?sessionDecision('local',null,incoming):sessionDecision('conflict');
+  const takenOver=hold&&!!local&&!!incoming&&incoming.status!=='suspended'&&incoming.runningOn!==me;
+  if(takenOver){
+    if(sameContent){
+      const merged=mergeSessionAcknowledgement(incoming,local);
+      return merged&&!Canonical.same(merged,incoming)?sessionDecision('graft',merged):sessionDecision('incoming');
+    }
+    if(unchangedFromShared||semanticallyUnchanged||durablyCoveredLocal)return sessionDecision('incoming');
+    return sessionDecision('yield');
+  }
+  if(hold&&!takenOver)return sessionDecision('hold');
+  if(!local)return sessionDecision('incoming');
+  if(!incoming)return sessionDecision('local');
+  if(sameContent){
+    const incomingWins=sessionControlFollows(local,incoming),winner=incomingWins?incoming:local,other=incomingWins?local:incoming,merged=mergeSessionAcknowledgement(winner,other);
+    return merged&&!Canonical.same(merged,winner)?sessionDecision('graft',merged):sessionDecision(incomingWins?'incoming':'local');
+  }
+  if(!shared)return sessionDecision('');
+  if((hasSemanticAncestor?contentMine===contentShared:mine===shared))return sessionDecision('incoming');
+  if((hasSemanticAncestor?contentTheirs===contentShared:theirs===shared))return sessionDecision('local');
+  return sessionDecision('conflict');
 }
-// The other side saved this day since both last shared it. When the shared
-// state cannot be read, it did not (the session then stays, as before).
-async function daySavedSinceBase(parsed,date){
-  const record=(Array.isArray(parsed&&parsed.records)?parsed.records:[]).find(item=>item&&item.date===date);if(!record)return false;
-  let shared;try{shared=await AppData.reconciliationBase.readDays([date]);}catch(error){AppDiagnostics.capture('backup.session-ended-base',error,'warn');return false;}
-  return await dayFingerprint(record)!==String(shared&&shared[date]||'');
+// Complete Active Session reconciliation before touching another data domain.
+// Causal ancestry, execution quiescence and retained divergence form one result.
+async function resolveSessionForReconciliation(base,parsed,{sync=false,review=false,sessionClaim=null,keep}={}){
+  let decision=await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,sessionClaim});
+  let state=decision.state,value=decision.value,priorReviews=null;
+  const decisionReviews=[];
+  const keepSession=async candidate=>{
+    const kept=candidate&&ActiveSessionCodec.sanitizeCurrent(candidate);if(!kept)return false;
+    if(priorReviews===null)priorReviews=await AppData.pendingReviews.list();
+    if([...priorReviews,...decisionReviews].some(item=>item.subject==='session'&&!item.resolvedAt&&Canonical.same(item.kept,kept)))return true;
+    const item=PendingReviewCodec.create({subject:'session',ref:'session',kept});
+    if(!keep(()=>item))return false;
+    decisionReviews.push(item);return true;
+  };
+  if(sync&&decision.kept&&!(await keepSession(decision.kept)))return freeze({needsDecision:true});
+  if(state==='yield-hold'){
+    await yieldSession({deferReview:true});state='hold';value=null;
+  }else if(state==='yield'){
+    await yieldSession();
+    if(sync){
+      const mine=(await readCanonicalActiveSession()).value;
+      state='incoming';
+      if(mine&&!(await keepSession(mine)))return freeze({needsDecision:true});
+    }else{
+      decision=await sessionSettlement(base,parsed);state=decision.state;value=decision.value;
+    }
+  }
+  // Ownership transfer or a remote end cannot leave a former owner's timer
+  // running after its local canonical session was replaced.
+  if(sync&&hasActiveSession()&&(state==='ended'||state==='incoming'&&(!parsed.importedActiveSession||parsed.importedActiveSession.runningOn!==installationId()))){
+    const before=(await readCanonicalActiveSession()).value;
+    await yieldSession({deferReview:true});
+    const frozen=(await readCanonicalActiveSession()).value;
+    // Yield may capture previously unpersisted focus/timer progress. The
+    // earlier settlement decision cannot silently discard that new evidence.
+    if(frozen&&!Canonical.same(ActiveSessionCodec.contentValue(before),ActiveSessionCodec.contentValue(frozen))&&
+        !checkpointSavedDayCoversSession(parsed,frozen)&&
+        !(await keepSession(frozen)))return freeze({needsDecision:true});
+  }
+  if(sync&&state==='claimed-conflict'){
+    const other=parsed.importedActiveSession||null;
+    if(other&&!(await keepSession(other)))return freeze({needsDecision:true});
+    state='local';
+  }
+  if(sync&&(state==='conflict'||state===''||state==='ended')){
+    const mine=(await readCanonicalActiveSession()).value,theirs=parsed.importedActiveSession||null;
+    const time=item=>Date.parse(String(item&&item.updatedAt||''))||Number(item&&item.revision)||0;
+    const incomingShows=state==='ended'||!mine||!!theirs&&time(theirs)>time(mine);
+    const hidden=incomingShows?mine:theirs;
+    state=incomingShows?'incoming':'local';
+    if(hidden&&!(await keepSession(hidden)))return freeze({needsDecision:true});
+  }
+  return freeze({needsDecision:false,state,value});
 }
-// The other side's session replaces this device's without asking only when
-// it carries this one on (the same day, not behind it), or ends one that was
-// saved as that day's Saved Day there. Another device's own session, such as
-// a new day started while this one was left unsaved, is the person's choice.
-function sessionFollows(local,incoming,parsed){
-  if(!local)return true;
-  if(!incoming)return (Array.isArray(parsed&&parsed.records)?parsed.records:[]).some(record=>record&&record.date===local.date);
-  return incoming.date===local.date&&Number(incoming.revision)>=Number(local.revision);
+function sessionControlFollows(local,incoming){
+  if(!local)return true;if(!incoming||incoming.date!==local.date)return false;
+  const left=Number(local.revision)||0,right=Number(incoming.revision)||0;
+  if(right!==left)return right>left;
+  return Date.parse(String(incoming.updatedAt||''))>Date.parse(String(local.updatedAt||''));
 }
 function nextNoteRevision(...values){return new Date(Math.max(Date.now(),...values.map(value=>(Date.parse(String(value&&value.updatedAt||''))||0)+1))).toISOString();}
 // Combine settles a note difference without asking only when nothing on this
@@ -892,6 +1248,193 @@ function syncNoteReviews(plan,state){
 // both are confirmed, and nothing that changed meanwhile is overwritten. Each
 // choice is then an edit like any other, so it syncs, and the review ends on
 // every device. A session kept for review waits while a session runs here.
+// A whole Personal Data review is portable, but its decision is not a
+// whole-object winner. Every explicitly selected field is applied to the
+// current canonical object; unrelated changes remain untouched.
+const PERSONAL_REVIEW_LABELS=freeze({
+  studentName:'Student name',theme:'Theme',presentation:'Appearance',quote:'Quote',
+  practiceCueMode:'Practice pacing cues',fontScale:'Text size',
+  practiceTargetMs:'Practice target',nudge:'Reminders',soundMode:'Sound mode'
+});
+function keptValueDescription(value){
+  if(value===undefined)return 'Not present';
+  if(value===null)return 'Not set';
+  const description=typeof value==='object'?JSON.stringify(value):String(value);
+  // A working draft may be 100 KiB. Show a bounded preview in the choices.
+  return description.length>240?description.slice(0,240)+`… (${description.length} characters; complete version retained)`:description;
+}
+function keptPlanDescription(plan){
+  if(!plan)return 'Not saved';
+  const preview=String(plan.scheduleText||'');
+  return `${plan.label} · ${preview.length>180?preview.slice(0,180)+'…':preview||'Empty schedule'}`;
+}
+// PendingReview.v1 records neither an originating installation nor a
+// machine-readable conflict reason. The substantive difference is available
+// at presentation; the source device cannot be reconstructed from keptAt.
+function keptReviewProvenance(review){
+  const at=savedDayDecisionTimestamp(review.keptAt);
+  const why=review.subject==='note'&&review.base
+    ?'Note changes could not be resolved from their shared content'
+    :review.subject==='savedDay'?'Saved Day evidence differed or could not be proven equivalent'
+    :review.subject==='personal'?'Plans or settings could not be safely merged'
+    :review.subject==='session'?'Session study evidence or ownership could not be safely settled'
+    :'An alternative could not be safely resolved';
+  return `${why}. Retained for review${at?' '+at:''}. The original device was not recorded; the date is not proof of origin.`;
+}
+function keptReviewChanges(here,other,fields){
+  if(!here||!other)return 'One copy is absent or deleted.';
+  const changed=fields.filter(([key])=>!Canonical.same(here[key],other[key])).map(([,label])=>label);
+  return changed.length?`Differing: ${changed.slice(0,7).join(', ')}${changed.length>7?` (+${changed.length-7} more)`:''}.`:
+    'Compared content matches.';
+}
+function savedDayReviewSummary(record,other=null){
+  if(!record)return 'No Saved Day stored.';
+  const preview=value=>keptValueDescription(value).slice(0,65);
+  if(record.recordKind==='diary')return `Diary · reflection: ${preview(record.reflection)}`;
+  const results=record.results||{},entries=Object.entries(results),
+    minutes=Math.round(entries.reduce((sum,[,item])=>sum+(Number(item.actualSeconds)||0),0)/60),
+    parts=[`Study · ${record.schedule?.length||0} blocks`,`${entries.length} task results`,`${minutes} min recorded`,`${record.practiceRuns?.length||0} practice runs`];
+  if(Number.isInteger(record.studyQuality)&&record.studyQuality>=1&&record.studyQuality<=5)parts.push(`quality ${record.studyQuality}/5`);
+  if(other){
+    const ids=[...new Set([...Object.keys(results),...Object.keys(other.results||{})])]
+      .filter(id=>!Canonical.same(results[id],other.results?.[id]));
+    if(ids.length){
+      const names=new Map([...(other.schedule||[]),...(record.schedule||[])].map(row=>[row.id,row.name]));
+      const changes=ids.slice(0,2).map(id=>{
+        const outcome=results[id],title=String(names.get(id)||'Block').slice(0,28);
+        return `${title}: ${outcome?`${outcome.completion??'–'}% / ${Math.round((Number(outcome.actualSeconds)||0)/60)} min`:'absent'}`;
+      });
+      parts.push(`changed tasks ${changes.join('; ')}${ids.length>2?` (+${ids.length-2})`:''}`);
+    }
+  }
+  if(String(record.reflection||'').trim()||other&&String(other.reflection||'').trim())parts.push(`reflection: ${preview(record.reflection||'none')}`);
+  if(other&&record.quote!==other.quote)parts.push(`quote: ${preview(record.quote||'none')}`);
+  if(other&&record.carryForwardDraft!==other.carryForwardDraft)parts.push(`carry-forward: ${preview(record.carryForwardDraft||'none')}`);
+  return parts.join(' · ').slice(0,360);
+}
+function sessionReviewSummary(session){
+  if(!session)return 'No Active Session stored.';
+  const snapshot=session.snapshot||{},tasks=Object.values(snapshot.taskState||{}),
+    done=tasks.filter(item=>item.resolvedState==='done').length,
+    seconds=tasks.reduce((sum,item)=>sum+(Number(item.actual?.seconds)||0),0),
+    runs=snapshot.practice?.runs?.length||0;
+  const parts=[session.date,session.status,`${tasks.length} tracked blocks`,`${done} done`,`${Math.round(seconds/60)} min recorded`,`${runs} practice runs`];
+  const firstPlanLine=String(session.scheduleText||'').split('\n').find(line=>line.trim());
+  if(firstPlanLine)parts.push(`plan: ${firstPlanLine.slice(0,68)}`);
+  if(String(snapshot.review?.reflection||'').trim())parts.push(`reflection: ${keptValueDescription(snapshot.review.reflection).slice(0,70)}`);
+  return parts.join(' · ').slice(0,330);
+}
+function keptSessionAlreadyApplied(current,kept){
+  return PendingReviewCodec.matchesCurrent('session',current,kept);
+}
+function selectedKeptPersonal(current,review,picked){
+  const kept=review.kept,has=part=>picked[`kept__${review.id}__${part}`]==='use',
+    preferences={...current.preferences},plans={...current.plans};
+  for(const key of new Set([...Object.keys(current.preferences),...Object.keys(kept.preferences)])){
+    if(!has('preference:'+key))continue;
+    if(Object.hasOwn(kept.preferences,key))preferences[key]=kept.preferences[key];
+    else delete preferences[key]; // optional soundMode
+  }
+  if(current.preferences.nudge!==null&&kept.preferences.nudge!==null){
+    const nudge={...current.preferences.nudge};
+    for(const key of new Set([...Object.keys(current.preferences.nudge),...Object.keys(kept.preferences.nudge)])){
+      if(!has('nudge:'+key))continue;
+      if(Object.hasOwn(kept.preferences.nudge,key))nudge[key]=kept.preferences.nudge[key];
+      else delete nudge[key];
+    }
+    preferences.nudge=nudge;
+  }
+  if(has('draft'))plans.draft=kept.plans.draft;
+  const localPlans=new Map(current.plans.savedPlans.map(plan=>[plan.id,plan])),
+    remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan])),chosen=new Map(localPlans);
+  for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
+    if(!has('savedPlan:'+id))continue;
+    if(remotePlans.has(id)){
+      const previous=localPlans.get(id);
+      chosen.set(id,previous&&Canonical.same(semanticSavedPlan(previous),semanticSavedPlan(remotePlans.get(id)))?previous:remotePlans.get(id));
+    }
+    else chosen.delete(id);
+  }
+  const localOrder=current.plans.savedPlans.map(plan=>plan.id),remoteOrder=kept.plans.savedPlans.map(plan=>plan.id),
+    preferred=has('savedPlanOrder')?remoteOrder:localOrder;
+  plans.savedPlans=[...new Set([...preferred,...localOrder,...remoteOrder])].filter(id=>chosen.has(id)).map(id=>chosen.get(id));
+  plans.defaultId=has('defaultPlan')?kept.plans.defaultId:current.plans.defaultId;
+  let normalized=null;
+  try{normalized=BackupCodec.normalizePersonalData({version:2,plans,preferences});}
+  catch(error){throw new Error('The selected Personal Data is invalid. If you choose a default saved plan, also keep that plan.',{cause:error});}
+  if(!normalized)throw new Error('The selected Personal Data is invalid. If you choose a default saved plan, also keep that plan.');
+  return normalized;
+}
+// Retire only alternatives whose substantive content is already present
+// in canonical storage. Resolutions are replicated tombstones, not deletion
+// of the alternative without a receipt. An unproven deletion or active
+// ownership difference is never treated as an equality.
+let convergedKeptReviewBusy=false;
+async function resolveConvergedKeptVersions(){
+  if(!appCanMutate()||convergedKeptReviewBusy)return 0;
+  convergedKeptReviewBusy=true;
+  try{
+    return await runExclusive('resolve-converged-kept',async()=>{
+      requireBackupMutationControl('resolving converged kept versions');
+      const stored=await AppData.pendingReviews.list();
+      let open=stored.filter(review=>!review.resolvedAt);
+      // An older local installation can already hold equivalent open IDs
+      // before the semantic codec was introduced. Repair those records using
+      // the existing strict PendingReview merge/tombstone transaction, rather
+      // than leaving users to resolve the same alternative repeatedly.
+      const prior=new Map(),hasDuplicates=open.some(review=>{
+        const key=review.subject+':'+review.ref,peers=prior.get(key)||[];
+        if(peers.some(candidate=>PendingReviewCodec.sameOpen(candidate,review)))return true;
+        peers.push(review);prior.set(key,peers);return false;
+      });
+      if(hasDuplicates){
+        const expected=PendingReviewCodec.merge([stored],APP_LIMITS.maxPendingReviews)
+          .filter(review=>review.resolvedAt&&!stored.find(before=>before.id===review.id)?.resolvedAt)
+          .map(review=>review.id);
+        await AppData.pendingReviews.merge([]);
+        const receipts=await AppData.pendingReviews.readItems(expected);
+        if(receipts.length!==expected.length||receipts.some(row=>!row?.resolvedAt||row.kept!==null))
+          throw new Error('Equivalent kept-version acknowledgements were not committed to canonical storage.');
+        open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
+      }
+      let confirmed=0;
+      for(const review of open){
+        let matches=false;
+        if(review.subject==='note'){
+          const [current]=await AppData.notes.readFreshItems([review.ref]);
+          matches=review.kept
+            ?PendingReviewCodec.matchesCurrent('note',current,review.kept)
+            :!current&&(await AppData.deletionRecovery.notes()).some(item=>
+              item.key===review.ref&&typeof item.deletedAt==='string');
+        }else if(review.subject==='savedDay'){
+          const [current]=await getDailyRecordDocumentsByDates([review.ref],{requireCanonical:true});
+          matches=review.kept
+            ?PendingReviewCodec.matchesCurrent('savedDay',current,review.kept)
+            :!current&&(await AppData.deletionRecovery.savedDays()).some(item=>
+              item.date===review.ref&&typeof item.deletedAt==='string');
+        }else if(review.subject==='personal'&&review.kept){
+          await personalSettle();
+          const current=await personalExport({flush:false});
+          matches=PendingReviewCodec.matchesCurrent('personal',current,review.kept);
+        }else if(review.subject==='session'&&review.kept&&!hasActiveSession()){
+          const current=(await readCanonicalActiveSession()).value;
+          matches=keptSessionAlreadyApplied(current,review.kept)||!!current&&Canonical.same(current,review.kept);
+        }
+        // A held deletion resolves only when a canonical absence AND its
+        // existing replicated deletion tombstone both prove that decision.
+        // Session absence has no comparable deletion receipt here.
+        if(!matches)continue;
+        const still=(await AppData.pendingReviews.readItems([review.id]))[0];
+        if(!still||still.resolvedAt||!PendingReviewCodec.sameOpen(review,still))continue;
+        await AppData.pendingReviews.resolve([review.id]);
+        const receipt=(await AppData.pendingReviews.readItems([review.id]))[0];
+        if(!receipt?.resolvedAt)throw new Error('Converged kept-version acknowledgement was not saved in canonical storage.');
+        confirmed++;
+      }
+      return confirmed;
+    });
+  }finally{convergedKeptReviewBusy=false;}
+}
 async function reviewKeptVersions({ref=''}={}){
   requireBackupMutationControl('reviewing kept versions');
   // One review per note or day at a time, the oldest first: a second kept
@@ -900,67 +1443,206 @@ async function reviewKeptVersions({ref=''}={}){
   for(const review of [...waiting].sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)))if(!first.has(review.subject+':'+review.ref)&&(review.subject!=='session'||!hasActiveSession()))first.set(review.subject+':'+review.ref,review);
   const reviews=[...first.values()],of=subject=>reviews.filter(review=>review.subject===subject);
   if(!reviews.length)return freeze({reviewed:0,left:waiting.length,changed:0});
+  // A debounced editor change is real local Personal Data even before IDB
+  // sees it. Never compare or replace that draft from an unflushed snapshot.
+  if(of('personal').length)await personalSettle();
   const noteIds=[...new Set(of('note').map(review=>review.ref))],noteRows=noteIds.length?await AppData.notes.readFreshItems(noteIds):[],notes=new Map(noteIds.map((id,index)=>[id,noteRows[index]||null]));
-  const days=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref)):[]).map(record=>[record.date,record]));
+  const days=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref),{requireCanonical:true}):[]).map(record=>[record.date,record]));
   const personal=of('personal').length?await personalExport({flush:false}):null,session=of('session').length?(await readCanonicalActiveSession()).value||null:null;
   // Each choice: 'keep' leaves this device's as it is (wait: the review stays
   // open), 'use' takes the kept version.
-  const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
-  const when=review=>savedDayDecisionTimestamp(review.keptAt),day=(record,origin)=>record?savedDayChoiceDescription({kind:'record',record,local:origin==='here',sources:[{label:'Kept version',local:origin==='here'}]}):origin==='here'?'Not on this device.':'Deleted on the other device.';
+  const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false,comparison=null)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,...(comparison?{comparison:freeze(comparison)}:{}),choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
+  const when=review=>savedDayDecisionTimestamp(review.keptAt);
   for(const review of reviews){
     const kept=review.kept;
     if(review.subject==='note'){
       const note=notes.get(review.ref);
-      if(!note)choice(review,'','Note · deleted here',`Another device changed this note after it was deleted here (kept ${when(review)}). Restore it from Recently deleted to compare.`,{label:'Keep for later',description:'The kept version waits.'},{label:'Discard the kept version',description:'Nothing changes here.'},true);
-      else if(!kept)choice(review,'',`Note · ${note.label}`,'Deleted on another device while it was edited here. It stays until you choose.',{label:'Keep the note',description:'It stays as it is.'},{label:'Delete it',description:'It moves to Recently deleted.'});
+      if(!note)choice(review,'','Note · absent here',`${kept?'This alternative contains only the changed Note fields, not a complete Note. Restore the original from Library → Recently deleted (if available), then reopen Kept versions to compare. Until explicitly discarded, this alternative is preserved.':'Both the current Note and a retained deletion are absent. No Note will be changed here.'} ${keptReviewProvenance(review)}`,{label:'Keep for later',description:'The original alternative remains available; no Note is changed.'},{label:'Discard kept alternative',description:'Only this retained alternative is resolved; no Note is created or deleted.'},true);
+      else if(!kept)choice(review,'',`Note · ${note.label}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
       else{
-        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Renamed on both devices; “${kept.label}” was kept for review (${when(review)}).`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
+        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Titles differ. ${keptReviewProvenance(review)}`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
         if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:`Kept ${when(review)}`,ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
       }
     }else if(review.subject==='savedDay'){
       const record=days.get(review.ref)||null;
-      if(record||kept)choice(review,'',`Saved Day · ${review.ref}`,'Changed on both devices. The newer one shows; the other was kept for review.',{label:record?'Keep the current one':'Keep it deleted',description:day(record,'here')},{label:kept?'Use the kept version':'Delete it',description:day(kept,'kept')});
+      {
+        // Even if a previous attempt already deleted the local record, ask
+        // for an explicit decision while its review receipt remains open.
+        // A null kept copy is a deletion alternative, not an origin claim.
+        const differences=keptReviewChanges(savedDayReviewContent(record),savedDayReviewContent(kept),[
+          ['recordKind','record type'],['schedule','planned blocks'],['results','task results'],
+          ['practiceRuns','practice runs'],['realTimeSnapshot','time evidence'],
+          ['reflection','reflection'],['studyQuality','quality'],['quote','quote'],['carryForwardDraft','carry-forward']
+        ]);
+        choice(review,'',`Saved Day · ${review.ref}`,`${differences} ${keptReviewProvenance(review)}`,{
+          label:record?'Keep current Saved Day':'Keep absent',description:savedDayReviewSummary(record,kept)
+        },{label:kept?'Use kept Saved Day':'Use kept deletion',description:savedDayReviewSummary(kept,record)});
+      }
     }else if(review.subject==='personal'){
       if(!personal){steps.push({id:'',review,part:'',wait:true});continue;}
-      if(!Canonical.same(personal.plans,kept.plans))choice(review,'plans','Plan draft and saved plans','Changed on both devices; the other version was kept for review.',{label:'Keep current plans',description:''},{label:'Use kept plans',description:`The kept draft and saved plans (${kept.plans.savedPlans.length} saved plans).`});
-      if(!Canonical.same(personal.preferences,kept.preferences))choice(review,'settings','Personal and display settings','Changed on both devices; the other version was kept for review.',{label:'Keep current settings',description:''},{label:'Use kept settings',description:'The kept name, theme, text size and other preferences.'});
+      // The canonical PendingReview keeps the whole opposite Personal Data
+      // version. Render only truly differing paths, not a misleading whole
+      // Plans/Preferences toggle.
+      const bothNudge=personal.preferences.nudge!==null&&kept.preferences.nudge!==null;
+      for(const key of new Set([...Object.keys(personal.preferences),...Object.keys(kept.preferences)])){
+        if(key==='nudge'&&bothNudge)continue;
+        const here=personal.preferences[key],other=kept.preferences[key];
+        if(Canonical.same(here,other))continue;
+        const label=PERSONAL_REVIEW_LABELS[key]||key;
+        choice(review,'preference:'+key,`Setting · ${label}`,'Different values were kept. Neither checkpoint-wide timestamp establishes which is newer.',{
+          label:'Keep this device',description:keptValueDescription(here)
+        },{label:'Use kept value',description:keptValueDescription(other)});
+      }
+      if(bothNudge){
+        const labels={enabled:'Enabled',sound:'Sound',nudgeAfter:'Interval (minutes)',breakMinutes:'Break (minutes)'};
+        for(const key of new Set([...Object.keys(personal.preferences.nudge),...Object.keys(kept.preferences.nudge)])){
+          const here=personal.preferences.nudge[key],other=kept.preferences.nudge[key];
+          if(Canonical.same(here,other))continue;
+          choice(review,'nudge:'+key,`Reminder · ${labels[key]||key}`,
+            'Only this reminder field differs; choosing it leaves the other reminder settings unchanged.',{
+              label:'Keep this device',description:keptValueDescription(here)
+            },{label:'Use kept value',description:keptValueDescription(other)});
+        }
+      }
+      if(!Canonical.same(personal.plans.draft,kept.plans.draft))
+        choice(review,'draft','Plan · Working draft','The working draft is independent of the applied Active Session.',{
+          label:'Keep this draft',description:keptValueDescription(personal.plans.draft)
+        },{label:'Use kept draft',description:keptValueDescription(kept.plans.draft)},false,{current:personal.plans.draft,kept:kept.plans.draft});
+      const localPlans=new Map(personal.plans.savedPlans.map(plan=>[plan.id,plan])),
+        remotePlans=new Map(kept.plans.savedPlans.map(plan=>[plan.id,plan]));
+      for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
+        const here=localPlans.get(id)||null,other=remotePlans.get(id)||null;
+        if(Canonical.same(semanticSavedPlan(here),semanticSavedPlan(other)))continue;
+        choice(review,'savedPlan:'+id,`Saved plan · ${here?.label||other?.label||id}`,'This saved-plan identity differs; selecting a version does not replace other saved plans.',{
+          label:here?'Keep this plan':'Keep absent',description:keptPlanDescription(here)
+        },{label:other?'Use kept plan':'Remove this plan',description:keptPlanDescription(other)},false,{current:here?.scheduleText??null,kept:other?.scheduleText??null,currentLabel:here?.label||'',keptLabel:other?.label||''});
+      }
+      if(meaningfulSavedPlanOrderDiffers(personal.plans.savedPlans.map(plan=>plan.id),kept.plans.savedPlans.map(plan=>plan.id)))
+        choice(review,'savedPlanOrder','Saved plan · Order','Choose the order for retained plans; plans present on only one side still have their own choices.',{
+          label:'Keep this order',description:personal.plans.savedPlans.map(plan=>plan.label).join(', ')||'No saved plans'
+        },{label:'Use kept order',description:kept.plans.savedPlans.map(plan=>plan.label).join(', ')||'No saved plans'});
+      if(personal.plans.defaultId!==kept.plans.defaultId)
+        choice(review,'defaultPlan','Saved plan · Default','The selected default must exist among the plans you choose to retain.',{
+          label:'Keep this default',description:localPlans.get(personal.plans.defaultId)?.label||'No default'
+        },{label:'Use kept default',description:remotePlans.get(kept.plans.defaultId)?.label||'No default'});
     }else if(review.subject==='session'){
-      choice(review,'','Active / suspended session',`Both devices changed today’s session; the other was kept for review (${when(review)}).`,{label:session?'Keep the current session':'Keep no session',description:''},{label:'Use the kept session',description:'It is set aside here, ready to continue.'});
+      const here=session||null,there=kept||null,
+        hereContent=here?ActiveSessionCodec.contentValue(here):null,
+        keptContent=there?ActiveSessionCodec.contentValue(there):null;
+      const differences=keptReviewChanges(hereContent,keptContent,[
+        ['date','study date'],['scheduleText','schedule'],['snapshot','study evidence']
+      ]);
+      const control=here&&there?[
+        here.status!==there.status?'Session status differs.':'',
+        here.runningOn!==there.runningOn?'Recorded ownership differs.':''
+      ].filter(Boolean).join(' '):'';
+      const evidence=hereContent&&keptContent&&!Canonical.same(hereContent.snapshot,keptContent.snapshot)?
+        keptReviewChanges(hereContent.snapshot,keptContent.snapshot,[
+          ['taskState','task outcomes'],['timerRuntime','timer state'],
+          ['practice','practice attempts'],['review','reflection/quality'],
+          ['scheduleAdjustments','schedule adjustments'],['latestCarryForward','carry-forward'],
+          ['currentTaskId','current block']
+        ]):'';
+      choice(review,'','Active / suspended session',`${differences} ${control} ${evidence} ${keptReviewProvenance(review)} Choosing the kept session suspends it here; it does not transfer a live timer.`,{
+        label:session?'Keep current session':'Keep no session',description:sessionReviewSummary(here)
+      },{label:there?'Use kept session (suspended)':'Use kept absence (remove session)',description:sessionReviewSummary(there)});
     }
   }
   let picked=freeze({}),resolvedTexts=null;
-  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync kept these versions where both devices changed the same thing. The current one stays selected; choose where the kept one should replace it.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
+  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync retained differences it could not safely settle. Choose exactly which values to apply. Each kept version is saved and confirmed separately; if a later choice fails, earlier confirmed choices remain and the rest can be retried.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   if(texts.length){resolvedTexts=await NoteReconciliation.resolve(freeze({conflicts:freeze(texts),incomingAssets:freeze([]),purpose:'kept'}));if(!resolvedTexts)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   const use=step=>picked[step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
   return runExclusive('review-kept-versions',()=>withPersistenceSuppressed(async()=>{
     requireBackupMutationControl('reviewing kept versions');
+    // Re-settle the draft after the modal, before testing the captured version
+    // for staleness. A new edit must postpone this review, not be overwritten.
+    if(of('personal').length)await personalSettle();
     // What another device or a sync changed while the person chose stays:
     // those reviews wait for the next look.
     const still=new Set((await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt).map(review=>review.id)),fresh=noteIds.length?await AppData.notes.readFreshItems(noteIds):[];
     const changed=new Set(noteIds.filter((id,index)=>!Canonical.same(fresh[index]||null,notes.get(id))));
-    const freshDays=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref)):[]).map(record=>[record.date,record]));
+    const freshDays=new Map((of('savedDay').length?await getDailyRecordDocumentsByDates(of('savedDay').map(review=>review.ref),{requireCanonical:true}):[]).map(record=>[record.date,record]));
     for(const review of of('savedDay'))if(!Canonical.same(freshDays.get(review.ref)||null,days.get(review.ref)||null))changed.add(review.ref);
     if(personal&&!Canonical.same(await personalExport({flush:false}),personal))changed.add('personal');
     if(of('session').length&&(hasActiveSession()||!Canonical.same((await readCanonicalActiveSession()).value||null,session)))changed.add('session');
-    const done=reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&!changed.has(review.ref)),doneIds=new Set(done.map(review=>review.id)),chosen=(review,part)=>steps.some(step=>step.review===review&&step.part===part&&use(step));
-    const noteItems=[],dayItems=[],now=new Date().toISOString();let plans=false,settings=false,keptSession=null;
+    const done=reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&!changed.has(review.ref)),
+      chosen=(review,part)=>steps.some(step=>step.review===review&&step.part===part&&use(step));
+    // Validate cross-field saved-plan/default consistency before applying
+    // Notes or Saved Days. Invalid combinations cannot partially apply.
+    const personalSelection=done.some(review=>review.subject==='personal')?
+      selectedKeptPersonal(personal,done.find(review=>review.subject==='personal'),picked):null;
+    // A kept version is an independent decision, NOT an implicit transaction
+    // spanning unrelated domains. Prevalidate all choices; confirm the
+    // canonical write and its replicated tombstone before the next decision.
+    const now=new Date().toISOString(),intents=[];
+    const deletedDays=new Set(done.some(review=>review.subject==='savedDay'&&!review.kept&&chosen(review,''))?
+      (await AppData.deletionRecovery.savedDays()).map(item=>item.date):[]);
     for(const review of done){
+      const noteItems=[],dayItems=[];let keptSession=null,clearSession=false;
       if(review.subject==='note'){
-        const note=notes.get(review.ref);if(!note)continue;
-        if(!review.kept){if(chosen(review,''))noteItems.push(freeze({key:review.ref,changed:true,state:'deleted',deletedAt:now}));continue;}
-        const label=chosen(review,'label')?review.kept.label:note.label,text=resolvedTexts&&resolvedTexts.notes[review.ref]?String(resolvedTexts.notes[review.ref].text):note.text;
-        if(label!==note.label||text!==note.text)noteItems.push(freeze({key:review.ref,changed:true,state:'record',value:freeze({...note,label,text,updatedAt:nextNoteRevision(note)})}));
-      }else if(review.subject==='savedDay'&&chosen(review,''))dayItems.push(freeze(review.kept?{date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}:{date:review.ref,changed:true,state:'deleted',deletedAt:now}));
-      else if(review.subject==='personal'){plans=plans||chosen(review,'plans')&&review.kept.plans;settings=settings||chosen(review,'settings')&&review.kept.preferences;}
-      else if(review.subject==='session'&&chosen(review,''))keptSession=review.kept;
+        const note=notes.get(review.ref);
+        if(note){
+          if(!review.kept){
+            if(chosen(review,''))noteItems.push(freeze({key:review.ref,changed:true,state:'deleted',deletedAt:now}));
+          }else{
+            const label=chosen(review,'label')?review.kept.label:note.label,
+              text=resolvedTexts&&resolvedTexts.notes[review.ref]?String(resolvedTexts.notes[review.ref].text):note.text;
+            if(label!==note.label||text!==note.text)
+              noteItems.push(freeze({key:review.ref,changed:true,state:'record',value:freeze({...note,label,text,updatedAt:nextNoteRevision(note)})}));
+          }
+        }
+      }else if(review.subject==='savedDay'&&chosen(review,'')){
+        if(review.kept){
+          // The selected content may already have been committed before an
+          // interrupted pending-review acknowledgement. Never rewrite its
+          // timestamp merely to retry the same explicit choice.
+          if(!PendingReviewCodec.matchesCurrent('savedDay',days.get(review.ref),review.kept))
+            dayItems.push(freeze({date:review.ref,changed:true,state:'record',record:freeze({...review.kept,updatedAt:now}),hadLocal:days.has(review.ref)}));
+        }else if(days.has(review.ref)||!deletedDays.has(review.ref)){
+          // Absence alone is not a replicated deletion. Retry only if its
+          // canonical tombstone is also absent; the original operation may
+          // have written that tombstone before its review receipt failed.
+          dayItems.push(freeze({date:review.ref,changed:true,state:'deleted',deletedAt:now}));
+        }
+      }else if(review.subject==='session'&&chosen(review,'')){
+        if(review.kept){
+          if(!keptSessionAlreadyApplied(session,review.kept))keptSession=review.kept;
+        }else if(session)clearSession=true;
+      }
+      intents.push(freeze({review,noteItems:freeze(noteItems),dayItems:freeze(dayItems),keptSession,clearSession}));
     }
-    if(noteItems.length)await applyResolvedNotes(freeze({notes:freeze(noteItems)}));
-    if(dayItems.length)await applyResolvedSavedDays(freeze({savedDays:freeze(dayItems),sourcePlan:freeze({savedDays:freeze([])})}),null,()=>{});
-    if(plans||settings)await personalImport({version:2,plans:plans||personal.plans,preferences:settings||personal.preferences});
-    if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
-    if(doneIds.size)await AppData.pendingReviews.resolve([...doneIds]);
+    let confirmed=0;
+    try{
+      for(const {review,noteItems,dayItems,keptSession,clearSession} of intents){
+        if(noteItems.length)await applyResolvedNotes(freeze({notes:noteItems}));
+        if(dayItems.length)await applyResolvedSavedDays(freeze({savedDays:dayItems,sourcePlan:freeze({savedDays:freeze([])})}),null,()=>{});
+        if(review.subject==='personal'&&personalSelection&&!Canonical.same(personalSelection,personal)){
+          await personalImport(personalSelection);
+          const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));
+          if(!committed||!Canonical.same(committed,personalSelection))
+            throw new Error('The selected Personal Data did not reach canonical storage. The review remains open.');
+        }
+        if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
+        if(clearSession){
+          await applyResolvedActiveSession(freeze({activeSession:freeze({value:session})}),{clear:true});
+          const cleared=await readCanonicalActiveSession();
+          if(cleared.value)throw new Error('The selected kept-session deletion did not clear canonical storage. Its review remains open.');
+        }
+        await AppData.pendingReviews.resolve([review.id]);
+        const [receipt]=await AppData.pendingReviews.readItems([review.id]);
+        if(!receipt?.resolvedAt)throw new Error('The kept-version acknowledgement could not be verified. Reopen Kept Versions after storage recovers to check this decision.');
+        confirmed++;
+      }
+    }catch(error){
+      OperationDiagnostics.mark('kept-review-incomplete',{completed:confirmed,total:done.length,reason:'error'});
+      // Earlier choices may already be durable. Refresh instead of leaving
+      // Library showing stale review counts after an interrupted batch.
+      try{libraryChanged();}catch(refreshError){AppDiagnostics.capture('backup.kept-review-render',refreshError,'warn');}
+      if(confirmed)throw new Error(`${confirmed} of ${done.length} kept versions confirmed. Earlier choices remain applied. Reopen Kept Versions after storage recovers to check remaining decisions.`,{cause:error});
+      throw error;
+    }
     try{libraryChanged();}catch(error){AppDiagnostics.capture('backup.kept-review-render',error,'warn');}
-    return freeze({reviewed:doneIds.size,left:waiting.length-doneIds.size,changed:reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&changed.has(review.ref)).length});
+    return freeze({reviewed:confirmed,left:waiting.length-confirmed,changed:reviews.filter(review=>still.has(review.id)&&!waits.has(review.id)&&changed.has(review.ref)).length});
   }));
 }
 function noteTitleGroup(titles){
@@ -1241,7 +1923,7 @@ async function verifyRestoreCommit(expected,signal,authorityOptions=null){
     if(Array.isArray(expected.noteDeletions)){const stored=await AppData.deletionRecovery.notes();if(!Canonical.same(stored,expected.noteDeletions))throw new Error('Post-restore verification failed for note deletion history.');}
     if(Array.isArray(expected.attachmentDeletions)){const stored=await AppData.deletionRecovery.attachments();if(!Canonical.same(stored,expected.attachmentDeletions))throw new Error('Post-restore verification failed for Attachment deletion history.');}
   });
-  if(Object.prototype.hasOwnProperty.call(expected,'activeSession'))await verifyRestoreDomain('active-session',async()=>{await AppData.activeSession.settled();const loaded=await readCanonicalActiveSession(),stored=loaded&&loaded.value||null;if(!Canonical.same(ActiveSessionCodec.sanitizeCurrent(stored),expected.activeSession))throw new Error('Post-restore verification failed for the active session.');await verifyActiveSessionRuntime(expected.activeSession,expected.scheduleText||'');});
+  if(Object.prototype.hasOwnProperty.call(expected,'activeSession'))await verifyRestoreDomain('active-session',async()=>{await AppData.activeSession.settled();const loaded=await readCanonicalActiveSession(),stored=loaded&&loaded.value||null;if(!Canonical.same(ActiveSessionCodec.sanitizeCurrent(stored),expected.activeSession))throw new Error('Post-restore verification failed for the active session.');await verifyActiveSessionRuntime(expected.activeSession);});
   return true;
 }
 function sealVerifiedPortableSnapshot(parsed,{provenance=freeze({kind:'portable-file'}),release=null}={}){
@@ -1333,7 +2015,7 @@ async function inspectBackup(file,metadata={}){
   if(options.validateOnly){inspectedBackups.delete(candidate);await releaseVerifiedPortableSnapshot(snapshot);}
   return candidate;
 }
-async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deletionState=null,signal=null,restoreId='',requirePersonal=false,phasePrefix='restoring-version',authorityOptions=null}={}){
+async function replacePortableCanonicalSnapshot(snapshot,{deletionState=null,signal=null,restoreId='',requirePersonal=false,phasePrefix='restoring-version',authorityOptions=null}={}){
   const source=snapshot&&typeof snapshot==='object'?snapshot:null;
   if(!source)throw new Error('The portable restore snapshot is unavailable.');
   requireBackupMutationControl('replacing the portable Study Director state');
@@ -1368,7 +2050,7 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
     throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   }
   await mark('active-session');
-  await restoreSessionState(targetSession,String(scheduleText||''));
+  await restoreSessionState(targetSession);
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   if(targetPersonal){await mark('personal-data');await personalImport(targetPersonal);throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);}
   // The snapshot's versions kept for review, exactly (a version restore
@@ -1385,7 +2067,7 @@ async function replacePortableCanonicalSnapshot(snapshot,{scheduleText='',deleti
   await verifyRestoreCommit({
     personalData:targetPersonal,records,recordDatesExact:targetDates,notes:AppData.notes.normalizePayload(restoredNotes),
     assets:expectedAssets,assetIdsExact:Array.isArray(expectedAssets)?expectedAssets.map(item=>item.assetId):undefined,
-    activeSession:targetSession,scheduleText:String(scheduleText||''),savedDayDeletions:deletions.savedDays,noteDeletions:deletions.notes,attachmentDeletions:deletions.attachments,
+    activeSession:targetSession,savedDayDeletions:deletions.savedDays,noteDeletions:deletions.notes,attachmentDeletions:deletions.attachments,
     ...(targetReviews?{pendingReviews:targetReviews}:{})
   },signal,authorityOptions);
   for(const [scope,operation] of [['library',libraryChanged],['notes',refreshPnote],['review',()=>ReviewView.refresh()],['schedule',renderSched]])try{operation();}catch(error){AppDiagnostics.capture(`backup.version-restore-${scope}`,error,'warn');}
@@ -1413,12 +2095,12 @@ function rollbackDeletionState(snapshot,override=null){
   const value=(key,manifestKey)=>Array.isArray(provided[key])?provided[key]:Array.isArray(protectedManifest&&protectedManifest[manifestKey])?protectedManifest[manifestKey]:freeze([]);
   return freeze({savedDays:freeze([...value('savedDays','savedDayDeletions')]),notes:freeze([...value('notes','noteDeletions')]),attachments:freeze([...value('attachments','attachmentDeletions')])});
 }
-async function rollbackImportedState(journal,scheduleText='',deletionState=null){
+async function rollbackImportedState(journal,deletionState=null){
   const rollbackAuthority=freeze({allowDurableProtected:true});
   assertAuthority(rollbackAuthority);
   const snapshot=journal&&typeof journal==='object'?journal:null;
   if(!snapshot)throw new Error('The restore rollback journal is unavailable. Use the downloaded safety copy.');
-  const result=await replacePortableCanonicalSnapshot(snapshot,{scheduleText,deletionState:rollbackDeletionState(snapshot,deletionState),signal:null,requirePersonal:false,phasePrefix:'rollback',authorityOptions:rollbackAuthority});
+  const result=await replacePortableCanonicalSnapshot(snapshot,{deletionState:rollbackDeletionState(snapshot,deletionState),signal:null,requirePersonal:false,phasePrefix:'rollback',authorityOptions:rollbackAuthority});
   await rebaseRepositoryPreparationAcceleration('rollback',rollbackAuthority);
   return freeze({removedAddedRecords:result.removedRecords,restoredRecords:result.records});
 }
@@ -1496,34 +2178,15 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   await flushRestorePreflightState(signal);
   OperationDiagnostics.mark('restore-preflight-complete');
   const unchanged=reason=>Object.freeze({cancelled:true,reason,mode:'reconcile',added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0}),needsDecision=()=>unchanged('needs-decision');
-  // What both sides last shared, and the session: while one runs here a
-  // sync keeps it as it is; otherwise the side that did not change it since
-  // takes the other's.
-  // A review during a study session leaves the session as it is too.
+  // Active Session: one decision owns causal selection, stopping execution
+  // and retaining a divergent copy. All other domains reconcile afterwards.
   const review=!quiet&&!note&&options?.review===true,base=note?null:await lastSharedBase(stored);
-  let session=note||missingOnly?'same':await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,claimedHere:sync&&options?.sessionClaimedHere===true});
-  // Another device took the session over: stop it here, keeping what this
-  // device recorded, and let the person choose between the two (a sync shows
-  // the other device's, which runs there, and keeps this one's for review).
-  // Versions a sync keeps for review (5.2). One that cannot be kept leaves
-  // the difference for the person, so nothing is overwritten unkept.
   const keptReviews=[],keep=build=>{try{keptReviews.push(...[].concat(build()));return true;}catch(error){AppDiagnostics.capture('backup.sync-keep-review',error,'warn');return false;}};
-  const keepSession=value=>{const kept=value&&ActiveSessionCodec.sanitizeCurrent(value);return !!kept&&keep(()=>PendingReviewCodec.create({subject:'session',ref:'session',kept}));};
-  if(session==='yield'){
-    await yieldSession(parsed.importedActiveSession);
-    if(sync){const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null;session='incoming';if(mine&&!keepSession(mine))return needsDecision();}
-    else session=await sessionSettlement(base,parsed);
-  }
-  // Both sides changed the session since they last shared it (or never
-  // shared one): a sync shows the newer and keeps the other for review; one
-  // the other side ended shows ended. A side without a session has nothing
-  // to keep.
-  if(sync&&(session==='conflict'||session===''||session==='ended')){
-    const loaded=await readCanonicalActiveSession(),mine=loaded&&loaded.value||null,theirs=parsed.importedActiveSession||null,time=value=>Number(value&&value.revision)||Date.parse(String(value&&value.updatedAt||''))||0;
-    const incomingShows=session==='ended'||!mine||!!theirs&&time(theirs)>time(mine),hidden=incomingShows?mine:theirs;session=incomingShows?'incoming':'local';
-    if(hidden&&!keepSession(hidden))return needsDecision();
-  }
-  const holdSession=session==='hold'||session==='local',clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
+  const decision=note||missingOnly?sessionDecision('same'):
+    await resolveSessionForReconciliation(base,parsed,{sync,review,sessionClaim:sync?options?.sessionClaim||null:null,keep});
+  if(decision.needsDecision)return needsDecision();
+  const session=decision.state,derivedSession=decision.value;
+  const holdSession=['hold','local','graft'].includes(session),clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;
   if((quiet||note)&&!impact.reconciliationCapable)return needsDecision();
   // A one-note restore stops here when the backup has no copy of the note or
@@ -1545,7 +2208,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const differingNotes=note?[]:impact.reconciliationPlan.notes.filter(item=>item.conflict&&notesTrashKey(item.key)).map(item=>item.key);
   const noteState=noteReconciliationState(impact.reconciliationPlan,differingNotes.length?await noteReconciliationAncestor(base,differingNotes):null);
   const settledDays=note?null:await savedDaySettlement(impact.reconciliationPlan,base);
-  const localPersonal=await personalExport({flush:false});let personal=missingOnly?null:await personalSettled(base,localPersonal,parsed.importedPersonalData);
+  const localPersonal=await personalExport({flush:false});let personal=missingOnly?null:await personalSettled(base,localPersonal,parsed.importedPersonalData),autoPersonal=null;
   // A sync settles every remaining difference itself: the newer version
   // shows and the other is kept for review.
   if(sync){
@@ -1555,12 +2218,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       // A side holding nothing the other lacks (a new device's start-up
       // state, say) takes the other's, and nothing is kept. Otherwise the
       // newer shows and the other is kept for review.
-      if(!localPersonal||personalAddsNothing(localPersonal,theirs))personal='replace';
-      else if(personalAddsNothing(theirs,localPersonal))personal='keep';
+      // Field ancestry has precedence over every blank/subset heuristic:
+      // an intentionally cleared draft or setting is not a new installation.
+      const fieldResult=await reconcilePersonalFields(base,localPersonal,theirs);
+      if(fieldResult){
+        personal='keep';
+        autoPersonal=fieldResult.value;
+        if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:fieldResult.reviewKept||BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+      }else if(!base&&(!localPersonal||personalIsBlank(localPersonal)))personal='replace';
+      else if(!base&&personalIsBlank(theirs))personal='keep';
+      else if(!base&&personalAddsNothing(localPersonal,theirs))personal='replace';
+      else if(!base&&personalAddsNothing(theirs,localPersonal))personal='keep';
       else{
-        const incomingTime=Date.parse(String(parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.sourceRevision||''))||0,localTime=Date.parse(String(await ports.persistence.sourceRevision()||''))||0;
-        personal=incomingTime>localTime?'replace':'keep';
-        if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(personal==='replace'?localPersonal:theirs)})))return needsDecision();
+        // A known shared base without field ancestry (for example v3) must
+        // not invent a first-start state from a later intentional deletion.
+        personal='keep';
+        if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
       }
     }
   }
@@ -1607,12 +2280,29 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     // deleted here), so the backup's text comes back as it is.
     noteDecisionMap=restoredNote(String(noteRecord(false).value?.text||''));
   }
-  // Versions kept for review join this device's: the other side's and those
-  // this merge keeps. None is ever dropped; more than may wait stops a sync.
-  const incomingReviews=note?freeze([]):freeze([...(parsed.pendingReviews||[]),...keptReviews]);
-  const reviewSet=incomingReviews.length?PendingReviewCodec.merge([await AppData.pendingReviews.list(),incomingReviews],APP_LIMITS.maxPendingReviews):freeze([]);
+  // Versions kept for review join this device's. A repeated observation
+  // of an already-open equivalent conflict must not create another review.
+  // If two different ids were *already* published for the same conflict,
+  // retain the oldest and replicate a resolved identity for the redundant
+  // id; otherwise resolving the retained review would leave an orphan open
+  // on another device.
+  const existingReviews=note?freeze([]):await AppData.pendingReviews.list();
+  const published=note?freeze([]):freeze(parsed.pendingReviews||[]);
+  const known=PendingReviewCodec.merge([existingReviews,published],APP_LIMITS.maxPendingReviews);
+  const generated=keptReviews.filter((review,index)=>![
+    ...known,...keptReviews.slice(0,index)
+  ].some(other=>PendingReviewCodec.sameOpen(review,other)));
+  const candidates=PendingReviewCodec.merge([known,generated],APP_LIMITS.maxPendingReviews);
+  const reviewSet=candidates; // The codec owns semantic dedup for every import path.
+  const previousReviews=new Map(existingReviews.map(review=>[review.id,review]));
+  const incomingReviews=freeze(reviewSet.filter(review=>!Canonical.same(previousReviews.get(review.id)||null,review)));
   if(reviewSet.filter(item=>!item.resolvedAt).length>APP_LIMITS.maxPendingReviews){if(quiet)return needsDecision();throw new Error(`More than ${APP_LIMITS.maxPendingReviews} versions would wait for review. Review some under Library → Data first.`);}
-  const resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap,settledDays)),resolvedAssetReferences=await resolvedAssetReferenceIds(resolvedPlan,signal,reviewSet);
+  let resolvedPlan=Reconciliation.resolvePlan(impact.reconciliationPlan,reconciliationSelections(impact.reconciliationPlan,decisions,noteDecisionMap,reflectionDecisionMap,settledDays));
+  if(session==='graft'&&derivedSession){
+    const active=resolvedPlan.activeSession;
+    resolvedPlan=freeze({...resolvedPlan,activeSession:freeze({...active,candidateId:null,value:derivedSession,changed:true,hadLocal:true,local:true})});
+  }
+  const resolvedAssetReferences=await resolvedAssetReferenceIds(resolvedPlan,signal,reviewSet);
   let attachmentPlan=note?await noteAttachmentPlan(resolvedAssetReferences):await buildAttachmentDeletionPlan(parsed,resolvedPlan,stable.impact.assetAssessment||null,freeze({}),signal,resolvedAssetReferences);
   // A sync follows the deletion records: an attachment deleted on either side
   // and used by nothing is deleted.
@@ -1639,12 +2329,11 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored,{afterCapture:()=>assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope)});
   OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
   const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
-  let rollbackScheduleText='',rollbackDeletionState=null,committedDescription='',journalPrepared=false;
+  let rollbackDeletionState=null,committedDescription='',journalPrepared=false;
   try{
-    rollbackScheduleText=scheduleRead();
     rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
     OperationDiagnostics.mark('restore-journal-prepare-start');
-    await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
+    await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
     let assetResult=freeze({written:0,published:0,reused:0,deleted:0,changed:false,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
     if(portableAssets&&Number(parsed.formatVersion)>=10){
@@ -1694,10 +2383,15 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(result.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
       await AppData.restoreJournal.mark(restoreId,'active-session-committed');return result;
     });
-    const localPersonal=rollbackJournal.importedPersonalData,personalChanged=!!parsed.importedPersonalData&&(decisions.plans==='replace'||decisions.personalSettings==='replace');
+    const localPersonal=rollbackJournal.importedPersonalData,
+      selectedPersonal=autoPersonal|| (parsed.importedPersonalData?
+        BackupCodec.normalizePersonalData(localPersonal?{version:2,
+          plans:decisions.plans==='replace'?parsed.importedPersonalData.plans:localPersonal.plans,
+          preferences:decisions.personalSettings==='replace'?parsed.importedPersonalData.preferences:localPersonal.preferences}:parsed.importedPersonalData):null),
+      personalChanged=!!selectedPersonal&&!Canonical.same(localPersonal,selectedPersonal);
     let committedPersonal=null;
     if(personalChanged){
-      const intendedPersonal=BackupCodec.normalizePersonalData(localPersonal?{version:2,plans:decisions.plans==='replace'?parsed.importedPersonalData.plans:localPersonal.plans,preferences:decisions.personalSettings==='replace'?parsed.importedPersonalData.preferences:localPersonal.preferences}:parsed.importedPersonalData);
+      const intendedPersonal=selectedPersonal;
       if(!intendedPersonal)throw new Error('Resolved Personal Data is outside the current canonical schema.');
       committedPersonal=await runRestoreMutationStage('personal-data',async()=>{await AppData.restoreJournal.mark(restoreId,'applying-personal-data');await personalImport(intendedPersonal);const committed=BackupCodec.normalizePersonalData(await personalExport({flush:false}));if(!committed||!Canonical.same(committed,intendedPersonal))throw new Error('Personal-data reconciliation commit did not match the resolved state.');return freeze(committed);});
     }
@@ -1712,7 +2406,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       ...(Array.isArray(assetResult.expectedDeletions)?{attachmentDeletions:assetResult.expectedDeletions}:{}),
       ...(reviewResult.expectedItems?.length?{pendingReviewItems:reviewResult.expectedItems}:{})
     };
-    if(sessionResult.changed){expectedCommit.activeSession=sessionResult.expected;expectedCommit.scheduleText=sessionResult.scheduleText||'';}
+    if(sessionResult.changed)expectedCommit.activeSession=sessionResult.expected;
     await runRestoreMutationStage('verification',async()=>{
       await AppData.restoreJournal.mark(restoreId,'verifying');
       await verifyRestoreCommit(expectedCommit,signal);
@@ -1723,9 +2417,22 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     const changed=!!(dailyResult.changed||assetResult.changed||noteResult.changed||sessionResult.changed||personalChanged||reviewResult.changed);
     if(changed)await rebaseRepositoryPreparationAcceleration('combine');
     await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();
+    let ancestryWarning='';
     if(sharedBase){
       const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'');
-      if(checkpointId)try{await AppData.reconciliationBase.write(checkpointId,sharedBase);}catch(error){AppDiagnostics.capture('backup.reconciliation-base-write',error,'warn');}
+      try{
+        // A false receipt (e.g. obsolete incremental ancestor) and a
+        // thrown failure both mean that future three-way merges lack proof.
+        if(!checkpointId||await AppData.reconciliationBase.write(checkpointId,sharedBase)!==true)
+          throw new Error('The local shared-ancestry checkpoint was not established.');
+        const established=await AppData.reconciliationBase.read();
+        if(established?.checkpointId!==checkpointId)
+          throw new Error('The shared-ancestry checkpoint could not be read back.');
+      }catch(error){
+        AppDiagnostics.capture('backup.reconciliation-base-write',error,'warn');
+        OperationDiagnostics.mark('reconciliation-ancestry-not-established',{checkpointIdPresent:!!checkpointId});
+        ancestryWarning=' Shared ancestry could not be saved locally. The merged data was verified, but a later sync may ask you to review differences again. Retry Drive sync after local storage recovers.';
+      }
     }
     if(portableAssets)AssetData.scheduleMaintenance(0);
     const compatibility=[];
@@ -1738,7 +2445,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     let summary='';
     if(!changed){
       const baseMsg=kept?`Combine made no changes. ${kept} divergent local Saved Day${kept===1?' was':'s were'} kept.`:(impact.savedDays.total?'Combine found no applicable Saved-Day changes.':'Combine made no changes: this device already has everything in the backup.');
-      summary=baseMsg+(compatibility.length?' '+compatibility.join(' · ')+'.':'');restoreSurfaceStatus(stored,summary,false,'local-warning');
+      summary=baseMsg+(compatibility.length?' '+compatibility.join(' · ')+'.':'')+ancestryWarning;restoreSurfaceStatus(stored,summary,false,'local-warning');
     }else{
       const parts=[];
       if(personalChanged)parts.push('plans or personal settings restored');
@@ -1750,7 +2457,8 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(batches>1)parts.push(batches+' committed record batches');
       if(reviewResult.kept)parts.push(reviewResult.kept+' version'+(reviewResult.kept===1?'':'s')+' kept for review');
       summary=`✓ ${currentCheckpoint?'Merged':'Imported'} `+(parts.join(' · ')||'backup data')+noteResult.message+sessionResult.message+(kept?' · kept '+kept+' divergent local Saved Day'+(kept===1?'':'s'):'')+(identical?' · '+identical+' identical Saved Day'+(identical===1?'':'s')+' unchanged':'')+(compatibility.length?' · '+compatibility.join(' · '):'')+'. Final verification passed.';
-      restoreSurfaceStatus(stored,summary,true,'local-complete');
+      if(ancestryWarning)summary+=ancestryWarning;
+      restoreSurfaceStatus(stored,summary,!ancestryWarning,ancestryWarning?'local-warning':'local-complete');
     }
     try{libraryChanged();}catch(error){AppDiagnostics.capture('backup.import-render',error,'warn');}
     return Object.freeze({
@@ -1758,7 +2466,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       added:count,replaced,kept,batches,
       savedDayDeletionsApplied:deleted,
       assetsRestored:assetResult.published,attachmentDeletionsApplied:assetResult.deleted,notesReconciled:noteResult.changed,
-      activeSessionReconciled:sessionResult.changed,personalDataRestored:personalChanged,reviewsKept:reviewResult.kept,changed,summary
+      activeSessionReconciled:sessionResult.changed,personalDataRestored:personalChanged,reviewsKept:reviewResult.kept,changed,ancestryEstablished:!ancestryWarning,summary
     });
   }catch(error){
     const failure=error instanceof Error?error:new Error(String(error));
@@ -1767,7 +2475,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       try{
         OperationDiagnostics.mark('rollback-start');
         await AppData.restoreJournal.mark(restoreId,'rolling-back');
-        await rollbackImportedState(rollbackJournal,rollbackScheduleText,rollbackDeletionState);
+        await rollbackImportedState(rollbackJournal,rollbackDeletionState);
         await AppData.restoreJournal.mark(restoreId,'rolled-back');
         await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();OperationDiagnostics.mark('rollback-complete');
         Object.defineProperty(failure,'studyDirectorRollbackDescription',{value:'All recovery changes were rolled back from the verified safety copy.',configurable:true});
@@ -1930,16 +2638,15 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
     const {safetyFile,rollbackJournal}=await captureLocalSafetyCopy(stored);
     OperationDiagnostics.mark('local-safety-capture-complete',{bytes:Number(safetyFile&&safetyFile.blob&&safetyFile.blob.size)||0});
     const restoreId=`restore_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,14)}`;
-    let rollbackScheduleText='',rollbackDeletionState=null,journalPrepared=false,committedDescription='';
+    let rollbackDeletionState=null,journalPrepared=false,committedDescription='';
     try{
-      rollbackScheduleText=scheduleRead();
       rollbackDeletionState=freeze({savedDays:await AppData.deletionRecovery.savedDays(),notes:await AppData.deletionRecovery.notes(),attachments:await AppData.deletionRecovery.attachments()});
       OperationDiagnostics.mark('restore-journal-prepare-start');
-      await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,scheduleText:rollbackScheduleText,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
+      await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
       journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
-      const target=replacementSnapshot(parsed,rollbackJournal,plan,notes,keepExtras),targetDeletionState=replacementDeletions(parsed,rollbackDeletionState,target,removed),targetSchedule=String(parsed.importedPersonalData&&parsed.importedPersonalData.plans&&parsed.importedPersonalData.plans.draft||parsed.importedActiveSession&&parsed.importedActiveSession.scheduleText||'');
+      const target=replacementSnapshot(parsed,rollbackJournal,plan,notes,keepExtras),targetDeletionState=replacementDeletions(parsed,rollbackDeletionState,target,removed);
       OperationDiagnostics.mark('canonical-replacement-start');
-      const restored=await replacePortableCanonicalSnapshot(target,{scheduleText:targetSchedule,deletionState:targetDeletionState,signal,restoreId,requirePersonal:true,phasePrefix:'version-restore'});
+      const restored=await replacePortableCanonicalSnapshot(target,{deletionState:targetDeletionState,signal,restoreId,requirePersonal:true,phasePrefix:'version-restore'});
       OperationDiagnostics.mark('canonical-replacement-complete',{savedDays:Number(restored&&restored.records)||0,notes:Number(restored&&restored.notes)||0,assets:Number(restored&&restored.assets)||0});
       committedDescription='The selected portable version was written and verified';
       await AppData.restoreJournal.mark(restoreId,'verified');
@@ -1959,7 +2666,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
         try{
           OperationDiagnostics.mark('rollback-start');
           await AppData.restoreJournal.mark(restoreId,'rolling-back');
-          await rollbackImportedState(rollbackJournal,rollbackScheduleText,rollbackDeletionState);
+          await rollbackImportedState(rollbackJournal,rollbackDeletionState);
           await AppData.restoreJournal.mark(restoreId,'rolled-back');
           await AppData.restoreJournal.clear(restoreId);journalPrepared=false;clearFault();OperationDiagnostics.mark('rollback-complete');
           Object.defineProperty(failure,'studyDirectorRollbackDescription',{value:'All restore changes were rolled back from the verified safety copy.',configurable:true});
@@ -2003,7 +2710,7 @@ async function recoverInterruptedRestore(){
     try{
       const parsed=await BackupCodec.inspect(durable.payload.blob,{filename:durable.payload.filename});
       await AppData.restoreJournal.mark(durable.state.id,'startup-rolling-back');
-      await rollbackImportedState(parsed,durable.payload.scheduleText,{savedDays:durable.payload.savedDayDeletions,notes:durable.payload.noteDeletions,attachments:durable.payload.attachmentDeletions});
+      await rollbackImportedState(parsed,{savedDays:durable.payload.savedDayDeletions,notes:durable.payload.noteDeletions,attachments:durable.payload.attachmentDeletions});
       await AppData.restoreJournal.mark(durable.state.id,'startup-rolled-back');
       await AppData.restoreJournal.clear(durable.state.id);clearFault();
       recoveryNotice.finish({message:'Local recovery completed: the interrupted restore was rolled back and verified before Study Director became writable.',outcome:'local-recovery-completed'});
@@ -2089,6 +2796,7 @@ const controller=freeze({
   subscribeStatus,
   recoverInterruptedRestore:(...args)=>track(()=>recoverInterruptedRestore(...args),true),
   reviewKeptVersions:(...args)=>track(()=>reviewKeptVersions(...args),true),
+  resolveConvergedKeptVersions,
   status
 });
 const repository=freeze({
@@ -2113,6 +2821,7 @@ const repository=freeze({
   projectHistory:ManagedRepository.projectHistory,
   noteObject:ManagedRepository.noteObject,
   readNote:ManagedRepository.readNote,
+  readSession:ManagedRepository.readSession,
   markCompleted:controller.markCompleted,
   // What this device last shared through Drive, and recording a version
   // placed there as shared.

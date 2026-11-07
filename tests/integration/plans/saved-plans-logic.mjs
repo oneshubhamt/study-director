@@ -53,6 +53,8 @@ const name=document.add('saved-plan-name',new FakeElement('input'));panel.append
 const status=document.add('saved-plan-status');panel.append(status);
 const draft=document.add('plan-input',new FakeElement('textarea'));draft.value='07:00 | 60 | Study | work | Biology | pages | 10';
 document.add('pane-plan');
+document.add('sched-list');
+const liveTasks=[];
 
 let library={savedPlans:[],defaultId:null},renameAnswer={value:'Renamed plan'},timerCallback=null,canMutate=true,draftWriteCalls=[];
 const freeze=Object.freeze,fn=()=>false;
@@ -68,7 +70,7 @@ const ports=freeze({
   parser:freeze({isCanonicalScheduleText:()=>true,parseScheduleDraftText:()=>({ok:true,rows:[],warnings:[]}),scheduleTextFromRows:()=>''}),
   clock:freeze(Object.fromEntries(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso'].map(key=>[key,fn]))),
   view:freeze({document,on:()=>{},textEl:()=>{},updateRealTimeAwareness:()=>{},window:{}}),
-  scheduleGateway:freeze({act:fn,apply:fn,breakState:fn,captureMigration:fn,clearSafety:fn,flush:fn,hasLiveState:fn,markRender:fn,read:()=>({tasks:[],currentIndex:0,renderDirty:false}),reconcile:fn,renameAreas:fn,row:()=>({}),setAnchor:fn,timeline:()=>({realtime:{scheduledIdx:0,nowEff:0}})}),
+  scheduleGateway:freeze({act:fn,apply:fn,breakState:fn,captureMigration:fn,clearSafety:fn,flush:fn,hasLiveState:fn,markRender:fn,read:()=>({tasks:liveTasks,currentIndex:0,renderDirty:false}),reconcile:fn,renameAreas:fn,row:()=>({}),timeline:()=>({rows:[],realtime:{scheduledIdx:null,nowEff:0,first:0}})}),
   ownership:freeze({canMutate:()=>canMutate,requirePrimary:()=>canMutate}),
   interactions:freeze({confirm:async()=>true,input:async()=>renameAnswer}),
   overlays:freeze({createAnchoredPopover:popup=>{popup.hidden=true;let trigger=null;return {show:target=>{trigger=target;target.popoverTargetElement=popup;popup.hidden=false;},hide:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;},destroy:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;}};}}),
@@ -139,5 +141,22 @@ assert.equal(status.textContent,'','coordinator expires transient inline feedbac
 assert.equal(await runtime.savedPlans.act('delete',id),true);
 assert.equal(library.savedPlans.length,0);
 assert.equal(library.defaultId,null);
+
+// BF-1R2: startup preview and Cancel do not implicitly open editing or
+// copy the applied schedule over the independently authored working draft.
+runtime.draft.deactivate();
+runtime.draft.preview({silent:true});
+assert.equal(runtime.draft.active(),false,'an empty live session must not implicitly enter Plan editing');
+liveTasks.push({start:'08:00',dur:60,name:'Applied Session',kind:'work',area:'Ethics'});
+draft.value='09:00 | 45 | Independent Draft | work | History | pages | 8';
+const preservedText=draft.value,writesBeforeCancel=draftWriteCalls.length;
+runtime.draft.enter();
+assert.equal(runtime.draft.active(),true,'Edit Plan deliberately opens the editor');
+assert.equal(await runtime.draft.cancel(),true);
+assert.equal(runtime.draft.active(),false,'Cancel closes Plan editing');
+assert.equal(draft.value,preservedText,'Cancel must not replace the draft with the applied schedule');
+assert.equal(draftWriteCalls.length,writesBeforeCancel+1,'Cancel commits the independent text exactly once, not the applied schedule');
+assert.equal(draftWriteCalls.at(-1).value,preservedText,'Cancel saves the independent working draft rather than copying live Plan rows');
+assert.equal(draftWriteCalls.at(-1).options.strictDurability,true,'Cancel waits for a strict IndexedDB Plan draft write');
 
 console.log(JSON.stringify({status:'PASS',suite:'saved-plans-logic',checks:['empty state','save row rendering','ellipsis menu survives native popover default action and ownership heartbeat sync','default badge and redundant action omission','rename dialog contract keeps new-plan field independent','coordinator-owned success expiry','delete cleans default reference','backup flush is dirty-only and backupCapture-tagged']},null,2));

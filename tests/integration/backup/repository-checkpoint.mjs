@@ -25,7 +25,7 @@ const AUDIO_BYTES=300*1024*1024,AUDIO_HASH='a'.repeat(64);
 class VirtualLargeBlob extends Blob{get size(){return AUDIO_BYTES;}}
 let audioBlob=new VirtualLargeBlob(['x'],{type:'audio/mpeg'}),publicationProtection=null;
 const releasedFiles=[];
-let dailyRecordCanonical=true;
+let dailyRecordCanonical=true,baselineWriteFailure='';
 let dailyRecords=[freeze({version:16,recordKind:'study',date:'2026-09-18',reflection:'one',savedAt:'2026-09-18T20:00:00.000Z',updatedAt:'2026-09-18T20:00:00.000Z'})];
 // N4 and Subject land in the same pack shard, so they share one pack.
 const stableSecondaryNote=freeze({version:2,key:'N4',text:'stable secondary note',updatedAt:'2026-09-18T20:00:00.000Z'});
@@ -57,6 +57,8 @@ const noop=()=>{},diagnosticFailures=[],operationEvents=[];
 async function baselineFingerprint(keys){return engine.run('checksum',{value:JSON.stringify([...keys].sort()),algorithm:'sha256'});}
 async function writeBaseline(checkpointId,spec){
   if(!spec||spec.format!=='study-director.reconciliation-base-update')throw new Error('Expected reconciliation baseline update.');
+  if(baselineWriteFailure==='false')return false;
+  if(baselineWriteFailure==='throw')throw new Error('Injected shared-ancestry IndexedDB write failure');
   if(!spec.full&&(!reconciliationBase||reconciliationBase.checkpointId!==spec.baseCheckpointId))return false;
   if(spec.full){const keep=new Set(spec.noteKeys||[]);for(const key of Object.keys(reconciliationBaseNotes))if(!keep.has(key))delete reconciliationBaseNotes[key];}
   for(const key of spec.deletes||[])delete reconciliationBaseNotes[key];for(const [key,state] of Object.entries(spec.updates||{}))reconciliationBaseNotes[key]=freeze({label:String(state.label),text:String(state.text)});
@@ -74,10 +76,10 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
     dailyRecordBackupDates:async()=>({dates:dailyRecords.map(item=>item.date),warning:dailyRecordCanonical?'':'Saved-day IndexedDB unavailable; this backup contains only emergency fallback records.',canonical:dailyRecordCanonical}),dailyRecordBackupMonth:async(month,options={})=>{if(!dailyRecordCanonical&&options.requireCanonical===true)throw Object.assign(new Error('Canonical Daily Records are unavailable.'),{code:'DAILY_RECORDS_CANONICAL_UNAVAILABLE'});return dailyRecords.filter(item=>String(item.date).startsWith(String(month)+'-'));},dailyRecordDocuments:async(dates,options={})=>{if(!dailyRecordCanonical&&options.requireCanonical===true)throw Object.assign(new Error('Canonical Daily Records are unavailable.'),{code:'DAILY_RECORDS_CANONICAL_UNAVAILABLE'});return dates.map(date=>dailyRecords.find(item=>item.date===date)).filter(Boolean);},dailyRecordImportBatches:async()=>({batches:0}),dailyRecordRemove:async()=>true,dailyRecordTimestamp:()=>'',
     notesExportPayload:()=>notes,notesReadFreshPayload:async()=>notes,notesReadFreshItems:async keys=>(keys||[]).map(key=>notes[key]||null),notesFlush:async()=>true,notesNormalizePayload:value=>value,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>null,
     restoreJournalPrepare:async()=>true,restoreJournalRead:async()=>null,restoreJournalMark:async()=>true,restoreJournalClear:async()=>true,
-    scheduleRead:()=>'',personalSettle:async()=>true,personalExport:async()=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze(personalCodec.preferences({studentName:'Repo QA'}))}),personalImport:async()=>true,personalVerify:async()=>true,
-    storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async()=>snapshotRevision,canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_repository_qa',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>reconciliationBase,reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(reconciliationBaseNotes,key)).map(key=>[key,reconciliationBaseNotes[key]]))),reconciliationBaseReadDays:async()=>freeze({}),...keptReviews.ports,reconciliationBaseWrite:writeBaseline
+    personalSettle:async()=>true,personalExport:async()=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze(personalCodec.preferences({studentName:'Repo QA'}))}),personalImport:async()=>true,personalVerify:async()=>true,
+    storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async()=>snapshotRevision,canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=> 'inst_repository_qa',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>reconciliationBase,reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(reconciliationBaseNotes,key)).map(key=>[key,reconciliationBaseNotes[key]]))),...keptReviews.ports,reconciliationBaseReadDayAncestry:async()=>freeze({}),reconciliationBaseWrite:writeBaseline
   }),
-  codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec,pendingReview:pendingReviewCodec}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),exports:exportsPort,
+  codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec,dailyRecord:freeze({savedDayCoversSessionEvidence:()=>false}),pendingReview:pendingReviewCodec}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),exports:exportsPort,
   session:freeze({canMutate:()=>primary,cancelLiveDraftSave:noop,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:operation=>operation(),yieldSession:async()=>false}),
   domain:freeze({clampText:value=>String(value||''),filenameSafeStudentName:value=>String(value||'qa'),getStudentName:()=> 'Repo QA',materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:value=>value,todayISO:()=> '2026-09-19'}),
   view:freeze({presentation:backupPresentation,refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
@@ -88,13 +90,13 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
 })}));
 
 const localRepositoryObjects=new Map();
-async function publishLocal(history,options={}){
+async function publishLocal(history,options={},hooks={}){
   const written=[];let manifestWrites=0,deadline;
-  const publication=runtime.repository.publish(history,{interactive:false,...options},freeze({
+  const publication=runtime.repository.publish(history,{interactive:false,...options,...(options.shared===true?{baseUpdate:true}:{})},freeze({
     writeObject:async entry=>{if(entry.kind!=='attachment')await runtime.repository.verifyObject(entry.blob,entry);written.push(entry);localRepositoryObjects.set(entry.objectId,entry.blob);return freeze({id:entry.objectId});},
     writeManifest:async file=>{await runtime.repository.inspectManifest(file.blob,{interactive:false});manifestWrites+=1;return freeze({name:file.manifest.checkpoint.checkpointId+'.sdcheckpoint'});},
     commit:async marker=>{await runtime.repository.inspectCommit(marker.blob);return freeze({name:marker.checkpointId+'.sdcommit'});},
-    onCommitted:async()=>null,cleanup:async()=>null,onFailure:async()=>null
+    onCommitted:async()=>{hooks.onCommitted?.();return null;},cleanup:async()=>null,onFailure:async()=>null
   }));
   const result=await Promise.race([publication,new Promise((_,reject)=>{deadline=setTimeout(()=>reject(new Error('Repository publication deadlocked during read-back verification.')),3000);})]).finally(()=>clearTimeout(deadline));
   assert.equal(exclusive.status().busy,false,'publication must release its exclusive file job after nested read-back verification');
@@ -1116,5 +1118,178 @@ const providerMetadataVerificationCases=[];
     }
   }finally{runtime.controller.invalidateRepositoryPreparation();notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;}
 }
+
+// A verified repository checkpoint and local shared ancestry are distinct.
+// A failed ancestry write must not acknowledge a fully synchronized backup.
+const ancestryPublicationCases=[];
+{
+  const original={notes,dailyRecords,assetDescriptor,snapshotRevision,sourceRevision,reconciliationBase,reconciliationBaseNotes,baselineWriteFailure};
+  try{
+    runtime.controller.invalidateRepositoryPreparation();dailyRecords=[];assetDescriptor=null;
+    notes={Subject:freeze({version:2,key:'Subject',text:'Ancestry receipt one',updatedAt:'2026-10-05T01:00:00.000Z'})};
+    snapshotRevision='ancestry-receipt-1';sourceRevision='2026-10-05T01:00:00.000Z';
+    reconciliationBase=null;reconciliationBaseNotes=Object.create(null);
+    let bookkeeping=0;
+    baselineWriteFailure='false';
+    const initial=await publishLocal(null,{shared:true},{onCommitted:()=>bookkeeping++});
+    assert.ok(initial.result.checkpointId,'remote checkpoint was committed');
+    assert.equal(initial.result.sharedBaseEstablished,false);
+    assert.match(initial.result.warning,/could not record it as shared/u);
+    assert.equal(bookkeeping,0,'false ancestry receipt blocks full-sync bookkeeping');
+    assert.equal(reconciliationBase,null);
+    const reused=new Set(initial.manifest.objects.map(entry=>entry.objectId));
+    for(const failure of ['false','throw']){
+      baselineWriteFailure=failure;
+      const unchanged=await publishLocal([initial.manifest],{shared:true,availableObjectIds:reused},{onCommitted:()=>bookkeeping++});
+      assert.equal(unchanged.result.unchanged,true);
+      assert.equal(unchanged.result.sharedBaseEstablished,false);
+      assert.match(unchanged.result.warning,/already up to date, but this device could not record it as shared/u);
+      assert.equal(bookkeeping,0);
+      assert.equal(reconciliationBase,null,'the ancestry receipt remains absent');
+      ancestryPublicationCases.push('unchanged-'+failure);
+    }
+    baselineWriteFailure='';
+    const recovered=await publishLocal([initial.manifest],{shared:true,availableObjectIds:reused},{onCommitted:()=>bookkeeping++});
+    assert.equal(recovered.result.unchanged,true);
+    assert.equal(recovered.result.sharedBaseEstablished,true);
+    assert.equal(recovered.result.warning,'');
+    assert.equal(reconciliationBase.checkpointId,initial.result.checkpointId);
+    assert.equal(bookkeeping,1,'only verified recovery reaches full-sync bookkeeping');
+    ancestryPublicationCases.push('unchanged-recovered');
+    notes={Subject:freeze({...notes.Subject,text:'Ancestry receipt two',updatedAt:'2026-10-05T01:01:00.000Z'})};
+    snapshotRevision='ancestry-receipt-2';sourceRevision='2026-10-05T01:01:00.000Z';
+    baselineWriteFailure='throw';
+    const next=await publishLocal([initial.manifest],{shared:true,availableObjectIds:reused},{onCommitted:()=>bookkeeping++});
+    assert.notEqual(next.result.unchanged,true,'changed content must publish a new checkpoint');
+    assert.equal(next.result.sharedBaseEstablished,false);
+    assert.ok(next.result.checkpointId!==initial.result.checkpointId);
+    assert.match(next.result.warning,/saved and verified, but this device could not record it as shared/u);
+    assert.equal(reconciliationBase.checkpointId,initial.result.checkpointId);
+    assert.equal(bookkeeping,1);
+    ancestryPublicationCases.push('new-throw');
+    baselineWriteFailure='';
+    const newer=new Set(next.manifest.objects.map(entry=>entry.objectId));
+    const repaired=await publishLocal([initial.manifest,next.manifest],{shared:true,availableObjectIds:newer},{onCommitted:()=>bookkeeping++});
+    assert.equal(repaired.result.unchanged,true);
+    assert.equal(repaired.result.sharedBaseEstablished,true);
+    assert.equal(reconciliationBase.checkpointId,next.result.checkpointId);
+    assert.equal(bookkeeping,2);
+    ancestryPublicationCases.push('new-recovered');
+  }finally{
+    baselineWriteFailure=original.baselineWriteFailure;
+    reconciliationBase=original.reconciliationBase;reconciliationBaseNotes=original.reconciliationBaseNotes;
+    notes=original.notes;dailyRecords=original.dailyRecords;assetDescriptor=original.assetDescriptor;
+    snapshotRevision=original.snapshotRevision;sourceRevision=original.sourceRevision;
+    runtime.controller.invalidateRepositoryPreparation();
+  }
+}
+assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','unchanged-recovered','new-throw','new-recovered']);
+
+// Run the production provider catch-up terminal transition with controlled
+// ports: an ancestry-warning result may never be relabelled as fully synced.
+{
+  const source=fs.readFileSync('source/core/backup-provider.js','utf8');
+  const begin=source.indexOf('  function settleCatchUp(');
+  const end=source.indexOf('\n  }\n  // The person enters the password',begin);
+  assert.ok(begin>=0&&end>begin,'source-backed provider catch-up function must be present');
+  const production=source.slice(begin,end+4);
+  for(const [name,result,warning,terminal] of [
+    ['missing ancestry',{cancelled:false,ancestryEstablished:false},true,'failed'],
+    ['verified ancestry',{cancelled:false,ancestryEstablished:true},false,'sync-complete']
+  ]){
+    const events=[],state={review:'prior',password:'prior',failed:true,ancestryPending:true,behind:false,rolledBack:{head:'prior'},syncedAt:''};
+    const ctx=vm.createContext({
+      syncState:()=>state,
+      sharedAncestryOutcome:(_selected,established)=>{
+        state.ancestryPending=established!==true;
+        state.failed=state.ancestryPending;
+        events.push(established?'ancestry-established':'ancestry-warning');
+      },
+      nextConvergenceRetryDelay:()=>20000,
+      schedulePendingProviderBackup:(_selected,delay,options)=>{events.push('retry:'+options.trigger);assert.equal(delay,20000);},
+      resetConvergenceRetry:()=>events.push('retry-reset'),
+      presentation:{resolve:(_id,key)=>events.push('resolved:'+key),notice:()=>events.push('review-notice')},
+      automaticWaiting:()=>false,notifyStatus:()=>events.push('status'),
+      summary:{finish:option=>{events.push(option.lifecycle||option.outcome||'unknown');events.push(option.message);}}
+    });
+    vm.runInContext(production+'\nglobalThis.finishCatchUp=settleCatchUp;',ctx);
+    ctx.finishCatchUp({id:'google-drive',label:'Google Drive'},'cp_'+('a'.repeat(32)),result,ctx.summary,'revision-a',{preserveAutomatic:true});
+    assert.equal(state.ancestryPending,warning,name+' ancestry status');
+    assert.equal(state.failed,warning,name+' failure status');
+    assert.ok(events.includes(terminal),name+' terminal outcome');
+    assert.equal(events.some(event=>event==='Synced with Google Drive.'),!warning,name+' honest user-facing status');
+    assert.equal(events.includes('retry:ancestry-incomplete'),warning,name+' retry must follow actual ancestry result');
+    assert.equal(events.includes('retry-reset'),!warning,name+' only proven ancestry resets retry');
+  }
+}
+
+// A local ancestry write can fail at the same time as the durable retry
+// marker. The background provider must still attempt the verified checkpoint
+// completion while its in-memory ancestry debt is open, and it must not mark
+// the upload as fully synchronized until that receipt is repaired.
+{
+  const source=fs.readFileSync('source/core/backup-provider.js','utf8'),
+    start=source.indexOf('  async function retryPendingProviderBackup('),
+    end=source.indexOf('\n  }\n  // Opaque canonical timestamps',start);
+  assert.ok(start>=0&&end>start,'production automatic provider retry function exists');
+  const retrySource=source.slice(start,end+4),selected={id:'google-drive',label:'Google Drive',shared:true};
+  const state={ancestryPending:true},events=[];let marked=0,saved=0,cleared=0,ready=false;
+  const ctx=vm.createContext({
+    freeze:Object.freeze,
+    syncState:()=>state,pendingRetryState:async()=>null,providerPublications:new Map(),
+    automaticNeeded:()=>false,changeNoted:false,
+    automaticHooks:{ready:async()=>false},
+    presentation:{begin:()=>({finish:result=>events.push(result),update:()=>{}})},
+    saveRepositoryProvider:async()=>{
+      saved++;
+      if(ready)state.ancestryPending=false;
+      return {sharedBaseEstablished:ready,checkpointId:'cp_'+('b'.repeat(32)),sourceRevision:'2026-11-05T00:00:00.000Z'};
+    },
+    publicationCoversPending:()=>true,
+    clearPendingRetry:async()=>{cleared++;return true;},
+    markPendingRetry:async()=>{marked++;return false;}, // storage unavailable
+    notifyStatus:()=>{},AppDiagnostics:{capture:()=>{}}
+  });
+  vm.runInContext(retrySource+'\nglobalThis.retry=retryPendingProviderBackup;',ctx);
+  const incomplete=await ctx.retry(selected);
+  assert.equal(incomplete.status,'pending');
+  assert.equal(incomplete.reason,'ancestry');
+  assert.equal(saved,1,'in-memory ancestry debt bypasses an unavailable retry marker');
+  assert.equal(marked,1,'durable marker is attempted, not assumed');
+  assert.equal(cleared,0,'no retry marker may be cleared on an ancestry failure');
+  assert.match(events.at(-1).message,/shared ancestry still needs retry/u);
+  assert.equal(events.at(-1).lifecycle,'failed');
+  ready=true;
+  const recovered=await ctx.retry(selected);
+  assert.equal(recovered.status,'completed');
+  assert.equal(saved,2,'once storage recovers the same publication pathway repairs ancestry');
+  assert.equal(cleared,0,'there was no durable retry marker to clear after storage recovered');
+  assert.equal(state.ancestryPending,false);
+  assert.match(events.at(-1).message,/Backed up to Google Drive/u);
+  assert.equal((await ctx.retry(selected)).reason,'none','settled retry does not create another checkpoint');
+
+  const warningSource=source.slice(source.indexOf('  function sharedAncestryOutcome('),
+    source.indexOf('\n  function sharedSyncing(',source.indexOf('  function sharedAncestryOutcome(')));
+  const notices=[],repair={ancestryPending:false,failed:false,behind:false,syncedAt:''};
+  const warningCtx=vm.createContext({
+    syncState:()=>repair,
+    presentation:{notice:(_id,key,message)=>notices.push({key,message}),resolve:(_id,key)=>notices.push({key,cleared:true})},
+    notifyStatus:()=>{},
+    Date
+  });
+  vm.runInContext(warningSource+'\nglobalThis.record=sharedAncestryOutcome;',warningCtx);
+  warningCtx.record(selected,false);
+  assert.equal(repair.ancestryPending,true);
+  assert.equal(repair.failed,true);
+  assert.equal(repair.behind,true,'a failed ancestry receipt must trigger resynchronization even without the durable marker');
+  assert.equal(repair.syncedAt,'');
+  assert.equal(notices.at(-1).key,'sync-ancestry');
+  warningCtx.record(selected,true);
+  assert.equal(repair.ancestryPending,false);
+  assert.equal(repair.failed,false);
+  assert.ok(Number.isFinite(Date.parse(repair.syncedAt)),'success is timestamped only after ancestry establishment');
+  assert.equal(notices.at(-1).cleared,true);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'repository-checkpoint',providerMetadataVerificationCases,assembledUploadContinuations,publicationContinuationCases,assembledDriveCases,assembledDriveWallMs,incompleteInventoryCases,driveBacklogCases,firstAttachmentReads:1,secondAttachmentReads:0,simulatedAttachmentBytes:AUDIO_BYTES,identicalCheckpointAllObjectsReused:true,unchangedStructuredObjectsRecompressed:false,oldSavedDayEditFreshObjects:fresh,noteEditFreshObjects:noteFresh,attachmentMetadataZeroByteReads:true,savedDayDeletionNoResurrection:true,sealedCaptureSurvivesLaterMutation:true,providerTieredRetentionFoundation:true,providerCommitMarkerLatestAtomicity:true,retentionPolicy15Plus1:true,beforeRestorePublication:true,managedProviderProtectedPublication:true,orphanMaintenanceBackupRecovery:true,tierGraduation:true,sparseRetention:true,retentionDeletionFailureGcSafe:true,providerReconciliationConvergence:true,providerConvergenceFailureIsolated:true,providerSharedObjectGcSafe:true,publicationProtectedGcSafe:true,reclamationGraceSafe:true,providerLargeAttachmentUploadsBeforeSelfHeal:1,providerLaterAttachmentBytes:0,providerMissingObjectSelfHeal:true,providerOrphanGc:true,providerScrubSelfHeal:true,integrityScrubPriority:true,retainedAbaReuse:true,providerPostSealMutationAllowed:true,integrityScrubStableObjectsOnly:true,integrityScrubLeasesReleased:true,providerTemporaryDownloadsReleased:true,explicitProtectedRemoval:true,durableProviderRetry:true,metadataHistoryColdZeroDownloads:coldHistoryDownloads===0,metadataHistoryWarmZeroDownloads:warmHistoryAdditionalDownloads===0,metadataHistoryScopeIndependent:true,repositoryGenerationReset:true,metadataHistoryBodyVerificationDeferred:true,metadataHistoryUncertainZeroDownloads:uncertainColdDownloads===0,metadataHistoryListedRemoteFiles:coldHistoryRemoteFiles,postPublicationReceiptReuse:true,postPublicationReceiptPublications:2,postPublicationReceiptImmutableReadbacks:receiptDownloads.checkpoint.length+receiptDownloads.commit.length,postPublicationReceiptAdditionalHistoryDownloads:receiptDownloads.checkpoint.length+receiptDownloads.commit.length-4,stateDiscoveryObjectInventoryReuse:true,stateDiscoveryMatureObjectLists:objectListsDuringSecondReceipt,stateDiscoveryConservativeConcurrentObject:true,checksumOperations:checksumCounter},null,2));
 await import('../../helpers/session-ownership-claim-regression.mjs');

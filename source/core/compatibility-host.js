@@ -91,15 +91,21 @@ registry.define('compatibility-host',1,()=>{
     }
     // A restore journal written before version 5 calls its note deletion list
     // areaNoteDeletions, and one written before version 4 lacks the later lists.
-    // Each missing list becomes an empty one: rollback then restores no deletion
-    // history of that kind, as it did whenever the safety copy carried none.
-    const RESTORE_JOURNAL_VERSION=5;
+    // Version 6 removes scheduleText because the rollback image already carries
+    // portable Plan data; session recovery no longer owns the working draft.
+    const RESTORE_JOURNAL_VERSION=6;
     function legacyRestoreJournalPayload(value){
       const version=Number(value?.version);
       if(!value||typeof value!=='object'||value.format!=='study-director.restore-journal'||!(version>=1&&version<RESTORE_JOURNAL_VERSION))return null;
+      const storageKey=value.backupFile?'backupFile':'blob';
+      if(version===5){
+        const fields=['format','version','id',storageKey,'filename','scheduleText','savedDayDeletions','noteDeletions','attachmentDeletions'];
+        if(!exactKeys(value,fields)||!Array.isArray(value.savedDayDeletions)||!Array.isArray(value.noteDeletions)||!Array.isArray(value.attachmentDeletions))return null;
+        const {scheduleText,...rest}=value;return freeze({...rest,version:RESTORE_JOURNAL_VERSION});
+      }
       const lists=['savedDayDeletions','areaNoteDeletions','attachmentDeletions'].slice(0,version-1);
-      if(!exactKeys(value,['format','version','id',value.backupFile?'backupFile':'blob','filename','scheduleText',...lists])||lists.some(key=>!Array.isArray(value[key])))return null;
-      const {areaNoteDeletions,...rest}=value;
+      if(!exactKeys(value,['format','version','id',storageKey,'filename','scheduleText',...lists])||lists.some(key=>!Array.isArray(value[key])))return null;
+      const {areaNoteDeletions,scheduleText,...rest}=value;
       return freeze({...rest,version:RESTORE_JOURNAL_VERSION,savedDayDeletions:value.savedDayDeletions||[],noteDeletions:areaNoteDeletions||[],attachmentDeletions:value.attachmentDeletions||[]});
     }
     // Device Folder settings: version 1 kept the old backup slot, version 3 two
@@ -135,7 +141,7 @@ registry.define('compatibility-host',1,()=>{
     function staleReconciliationRows(rows){
       const keyOf=row=>String(row&&row.key||''),noteRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseNotePrefix),dayRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseDayPrefix);
       const base=rows.filter(row=>keyOf(row)===appMeta.reconciliationBase||keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row)||dayRow(row));
-      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&Number(row.value?.version)!==3||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
+      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&![3,4,5].includes(Number(row.value?.version))||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
     }
     async function migrateReconciliationBase(requireOwnership){
       let removed=0;

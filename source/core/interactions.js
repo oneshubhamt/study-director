@@ -258,7 +258,48 @@ registry.define('interactions',1,()=>{
             choice.addEventListener('click',()=>{applyValue(id,option.value);applyConfiguredValues(option);});
             optionsHost.appendChild(choice);
           });
-          fieldset.appendChild(optionsHost);form.appendChild(fieldset);
+          fieldset.appendChild(optionsHost);
+          // A full comparison is an ephemeral, read-only view. Keep complete
+          // text out of radio labels and out of persistent modal state.
+          if(group.comparison&&typeof group.comparison==='object'){
+            const disclosure=document.createElement('details');disclosure.className='interaction-comparison';
+            const savedPlan=String(group.label||'').startsWith('Saved plan ·');
+            const kind=savedPlan?'Saved Plan':'Plan draft';
+            const summary=document.createElement('summary');summary.textContent='Compare complete '+kind+' texts before choosing';
+            disclosure.appendChild(summary);fieldset.appendChild(disclosure);
+            disclosure.addEventListener('toggle',()=>{
+              if(!disclosure.open||disclosure.dataset.loaded)return;
+              disclosure.dataset.loaded='1';
+              const currentPresent=group.comparison.current!=null,keptPresent=group.comparison.kept!=null,
+                current=currentPresent?String(group.comparison.current):'',
+                kept=keptPresent?String(group.comparison.kept):'',
+                currentLabel=String(group.comparison.currentLabel||''),
+                keptLabel=String(group.comparison.keptLabel||'');
+              const currentLines=current.split('\n'),keptLines=kept.split('\n');
+              let first=0;
+              while(first<Math.min(currentLines.length,keptLines.length)&&currentLines[first]===keptLines[first])first++;
+              const status=document.createElement('p');status.className='interaction-comparison-status';
+              const namesDiffer=currentLabel!==keptLabel;
+              status.textContent=currentPresent!==keptPresent
+                ?'One side has no saved '+kind.toLowerCase()+'; the other has an authored version, even if its text is empty.'
+                :current===kept
+                  ?(namesDiffer?'Plan names differ; complete schedule texts match.':'Complete Plan texts are identical.')
+                  :(namesDiffer?'Plan names differ. ':'')+'First differing line: '+(first+1)+'. Both complete texts are shown below.';
+              const panes=document.createElement('div');panes.className='interaction-comparison-panes';
+              for(const [label,value,present,name] of [
+                ['This device',current,currentPresent,currentLabel],
+                ['Kept alternative',kept,keptPresent,keptLabel]
+              ]){
+                const pane=document.createElement('section'),heading=document.createElement('strong'),full=document.createElement('pre');
+                pane.className='interaction-comparison-pane';heading.textContent=label+(name?' · '+name:'');
+                full.textContent=!present?'(not saved)':value||'(saved, intentionally empty)';
+                full.tabIndex=0;full.setAttribute('aria-label',label+' — complete '+kind+' text');
+                pane.append(heading,full);panes.appendChild(pane);
+              }
+              disclosure.append(status,panes);
+            });
+          }
+          form.appendChild(fieldset);
         });
         const checkboxRows=(Array.isArray(options.checkboxes)?options.checkboxes:[]).map(checkbox=>{
           const id=String(checkbox&&checkbox.id||''),label=cleanText(checkbox&&checkbox.label,180);return id&&label?{checkbox,id,label}:null;
@@ -293,6 +334,7 @@ registry.define('interactions',1,()=>{
       }
       shell.appendChild(actions);dialog.appendChild(shell);
       dialog.setAttribute('aria-labelledby','sd-interaction-title');dialog.className='interaction-dialog'+(options.danger?' danger':options.caution?' caution':'');
+      if(request.type==='configure'&&Array.isArray(options.groups)&&options.groups.some(group=>group&&group.comparison))dialog.classList.add('with-comparison');
       dialog.oncancel=event=>{event.preventDefault();settle(request.type==='confirm'?false:null);};
       const historyDescriptor=freeze({kind:'prompt',token:`prompt:${historyNonce}:${++historySequence}`});
       active={...request,dialog,historyDescriptor,restoreFocus:document.activeElement&&typeof document.activeElement.focus==='function'?document.activeElement:null};

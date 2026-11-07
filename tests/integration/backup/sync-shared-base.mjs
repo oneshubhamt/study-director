@@ -46,9 +46,15 @@ const dailyRecordCodec=freeze({
   sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,
   canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:16,recordKind:'study',date:String(item.date)}):null,
+  savedDayCoversSessionEvidence:(day,local)=>day?.recordKind==='study'&&day.date===local?.date&&/saved on B|saved after BF1 handoff|saved on B before the new day/i.test(String(day.reflection||''))&&
+    (local.snapshot?.taskState?.focus?.actual?.seconds===undefined||
+      (Number.isFinite(Number(day.results?.focus?.actualSeconds))&&
+        Number(day.results.focus.actualSeconds)>=Number(local.snapshot.taskState.focus.actual.seconds))),
   sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate
 });
-const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item,version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,runningOn:item.runningOn||'inst_device_local'}):null});
+const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item,version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,runningOn:item.runningOn||'inst_device_local'}):null;
+const activeSessionCodec=freeze({sanitizeCurrent:sanitizeActiveSession,contentValue:item=>{const clean=sanitizeActiveSession(item);if(!clean)return null;const snapshot=clean.snapshot&&typeof clean.snapshot==='object'?clean.snapshot:{},{contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_updatedAt,...contentSnapshot}=snapshot;return freeze({date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot:freeze(contentSnapshot)});}});
+const sessionContentFingerprint=async item=>processing.run('checksum',{value:CanonicalModule.signature(activeSessionCodec.contentValue(item)),algorithm:'sha256'});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'}):null});
 const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.canonicalizeHistoricalDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)});
@@ -56,7 +62,7 @@ const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
-const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
+const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec,activeSessionCodec});
 const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord,
   entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
@@ -70,7 +76,116 @@ const startup=(draft=STARTER_SCHEDULE)=>freeze({version:2,plans:freeze({draft,sa
 const personal=(name='Checkpoint User')=>freeze({version:2,plans:freeze({draft:null,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:name,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})});
 const record=(date,reflection,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:16,recordKind:'study',date,reflection,studyQuality:4,savedAt:updatedAt,updatedAt});
 const session=(date,label,{runningOn='inst_device_local',status='suspended',revision=2}={})=>freeze({id:'current',type:'activeSession',version:RUNTIME_DATA_CONTRACT.schemas.ActiveSession.version,revision,date,status,runningOn,scheduleText:`08:00 | 60 | ${label} | work | Ethics | block | 1`,snapshot:freeze({label}),suspendedAt:'2026-08-20T13:00:00.000Z',updatedAt:'2026-08-20T13:00:00.000Z'});
+const revisionedSession=(date,label,{runningOn='inst_device_local',status='active',revision=2,contentRevision=1,savedRevision=0,updatedAt='2026-08-20T13:00:00.000Z'}={})=>{
+  const base=session(date,label,{runningOn,status,revision});
+  return freeze({...base,snapshot:freeze({...base.snapshot,contentRevision,savedRevision:Math.min(contentRevision,savedRevision),updatedAt}),updatedAt});
+};
+const revisionedRecord=(date,reflection,sourceRevision,updatedAt='2026-08-20T18:00:00.000Z')=>freeze({...record(date,reflection,updatedAt),sourceRevision});
 const draft=(date,text,revision=1,updatedAt='2026-08-20T12:00:00.000Z')=>freeze({version:1,date,reflection:text,studyQuality:3,revision,sessionRevision:0,updatedAt});
+
+// The canonical Pending Review codec owns the semantic identity across
+// every import, not only automatic sync. Distinct kept content remains
+// distinct, and resolved reviews never suppress a future independent one.
+{
+  const kept=personal('Codec baseline'),other=personal('Codec divergent');
+  const a=pendingReviewCodec.create({subject:'personal',ref:'personal',kept}),
+    duplicate=pendingReviewCodec.create({subject:'personal',ref:'personal',kept}),
+    distinct=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:other});
+  const merged=pendingReviewCodec.merge([[duplicate,a,distinct]],limits.maxPendingReviews);
+  assert.equal(merged.filter(item=>!item.resolvedAt).length,2,'identical open reviews coalesce without losing a genuinely different conflict');
+  const retained=merged.find(item=>!item.resolvedAt&&item.kept.preferences.studentName==='Codec baseline');
+  assert.ok(retained);
+  assert.ok(merged.some(item=>item.id!==retained.id&&item.resolvedAt),'the redundant identity is resolved for future devices');
+  const finished=pendingReviewCodec.resolved(retained),reimported=pendingReviewCodec.merge([[...merged,finished],[a,duplicate]],limits.maxPendingReviews);
+  assert.equal(reimported.filter(item=>!item.resolvedAt&&item.subject==='personal').length,1,'resolved aliases never re-open a completed conflict');
+  const recurrence=pendingReviewCodec.create({subject:'personal',ref:'personal',kept}),
+    reopened=pendingReviewCodec.merge([[...reimported,recurrence]],limits.maxPendingReviews);
+  assert.equal(reopened.filter(item=>!item.resolvedAt&&item.subject==='personal').length,2,'a fresh occurrence is not suppressed by a content-free resolved tombstone');
+  const firstSession=pendingReviewCodec.create({subject:'session',ref:'session',kept:revisionedSession('2026-08-29','same',{revision:7})}),
+    secondSession=pendingReviewCodec.create({subject:'session',ref:'session',kept:revisionedSession('2026-08-29','same',{revision:9,updatedAt:'2026-08-29T10:00:00.000Z'})});
+  const sessionMerged=pendingReviewCodec.merge([[firstSession,secondSession]],limits.maxPendingReviews);
+  assert.equal(sessionMerged.filter(item=>!item.resolvedAt).length,1,'session review dedup uses semantic study content, not ownership/control revisions');
+  const firstDay=pendingReviewCodec.create({subject:'savedDay',ref:'2026-08-28',kept:record('2026-08-28','same')}),
+    differentDay=pendingReviewCodec.create({subject:'savedDay',ref:'2026-08-28',kept:record('2026-08-28','changed')});
+  assert.equal(pendingReviewCodec.merge([[firstDay,differentDay]],limits.maxPendingReviews).filter(item=>!item.resolvedAt).length,2,'different Saved-Day content is never collapsed');
+}
+
+
+// Review equivalence is subject-specific across both IDB merge and import:
+// metadata-only twins coalesce with tombstone receipts; real edits survive.
+{
+  const date='2026-08-28',saved=revisionedRecord(date,'Evidence',4),
+    savedMetadata=freeze({...saved,savedAt:'2026-08-27T12:00:00.000Z',updatedAt:'2026-08-27T12:00:00.000Z',sourceRevision:92}),
+    savedChanged=freeze({...saved,reflection:'Different evidence'});
+  assert.equal(pendingReviewCodec.sameMeaning('savedDay',saved,savedMetadata),true);
+  assert.equal(pendingReviewCodec.sameMeaning('savedDay',saved,savedChanged),false);
+  const earlier=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:saved,keptAt:'2026-08-28T09:00:00.000Z'}),
+    later=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:savedMetadata,keptAt:'2026-08-28T10:00:00.000Z'}),
+    divergent=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:savedChanged});
+  const days=pendingReviewCodec.merge([[later,divergent,earlier]],limits.maxPendingReviews);
+  assert.equal(days.filter(review=>!review.resolvedAt).length,2);
+  assert.ok(!days.find(review=>review.id===earlier.id).resolvedAt,'oldest review ID is stable');
+  assert.ok(days.find(review=>review.id===later.id).resolvedAt,'duplicate is a replicated tombstone');
+  assert.ok(!days.find(review=>review.id===divergent.id).resolvedAt,'distinct evidence survives');
+  assert.equal(pendingReviewCodec.matchesCurrent('savedDay',saved,savedMetadata),true);
+  assert.equal(pendingReviewCodec.matchesCurrent('savedDay',saved,savedChanged),false);
+  const replay=pendingReviewCodec.merge([days,[earlier,later]],limits.maxPendingReviews);
+  assert.deepEqual(replay,days,'reimport and repeated merging do not reopen duplicate IDs');
+
+  const plan={id:'plan-semantic-aaa',label:'Morning',scheduleText:'08:00 | 45 | Focus | work | Polity | pages | 5',
+    createdAt:'2026-08-28T08:00:00.000Z',updatedAt:'2026-08-28T09:00:00.000Z'};
+  const current=freeze({...personal('Study'),plans:freeze({draft:'Independent draft',savedPlans:freeze([plan]),defaultId:plan.id})}),
+    metadata=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([freeze({...plan,createdAt:'2026-08-27T08:00:00.000Z',updatedAt:'2026-08-29T10:00:00.000Z'})])})}),
+    changedPlan=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([{...plan,scheduleText:plan.scheduleText+' changed'}])})});
+  assert.equal(pendingReviewCodec.sameMeaning('personal',current,metadata),true);
+  assert.equal(pendingReviewCodec.matchesCurrent('personal',current,metadata),true);
+  assert.equal(pendingReviewCodec.sameMeaning('personal',current,changedPlan),false);
+  const planA=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:current,keptAt:'2026-08-28T09:00:00.000Z'}),
+    planB=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:metadata,keptAt:'2026-08-28T10:00:00.000Z'}),
+    planC=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:changedPlan});
+  const plans=pendingReviewCodec.merge([[planB,planC,planA]],limits.maxPendingReviews);
+  assert.equal(plans.filter(review=>!review.resolvedAt).length,2,'Saved Plan dates alone cannot duplicate a Personal review');
+  assert.ok(plans.find(review=>review.id===planB.id).resolvedAt);
+  assert.ok(!plans.find(review=>review.id===planC.id).resolvedAt);
+
+  const extra={id:'plan-semantic-bbb',label:'Evening',scheduleText:'18:00 | 30 | Essay | work | Essay | pages | 3',
+    createdAt:plan.createdAt,updatedAt:plan.updatedAt};
+  const orderAB=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([plan,extra])})}),
+    orderBA=freeze({...current,plans:freeze({...current.plans,savedPlans:freeze([extra,plan])})});
+  assert.equal(pendingReviewCodec.sameMeaning('personal',orderAB,orderBA),false,'reordering shared plan identities remains meaningful');
+  assert.equal(pendingReviewCodec.sameMeaning('personal',current,orderAB),false,'independently added plan identity is never silently discarded');
+  assert.equal(pendingReviewCodec.sameMeaning('personal',current,freeze({...current,preferences:freeze({...current.preferences,quote:'Changed quote'})})),false);
+
+  const noteText={text:'Authored note'},noteTitle={label:'Authored note'},base={text:'Initial'};
+  const n1=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:noteText,base,keptAt:'2026-08-28T09:00:00.000Z'}),
+    n2=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Authored note'},base,keptAt:'2026-08-28T10:00:00.000Z'}),
+    nDifferent=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Other note'},base}),
+    nAncestor=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:noteText,base:{text:'Another ancestor'}}),
+    nTitle=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:noteTitle});
+  const notes=pendingReviewCodec.merge([[n2,n1,nDifferent,nAncestor,nTitle]],limits.maxPendingReviews);
+  assert.equal(notes.filter(review=>!review.resolvedAt).length,4,'different note fields and different ancestry must stay reviewable');
+  assert.ok(notes.find(review=>review.id===n2.id).resolvedAt);
+  assert.equal(pendingReviewCodec.matchesCurrent('note',{label:'Current title',text:'Authored note'},noteText),true);
+  assert.equal(pendingReviewCodec.matchesCurrent('note',{label:'Current title',text:'Authored note'},noteTitle),false);
+  assert.equal(pendingReviewCodec.matchesCurrent('note',null,noteText),false);
+
+  const deleteA=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:null,keptAt:'2026-08-28T09:00:00.000Z'}),
+    deleteB=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:null,keptAt:'2026-08-28T10:00:00.000Z'});
+  const deletion=pendingReviewCodec.merge([[deleteA,deleteB,earlier]],limits.maxPendingReviews);
+  assert.equal(deletion.filter(review=>!review.resolvedAt).length,2,'an unproven deletion must not merge with a record alternative');
+  assert.equal(pendingReviewCodec.matchesCurrent('savedDay',null,null),false,'absence alone is not a deletion receipt');
+
+  const s1=revisionedSession('2026-08-28','same',{revision:7}),
+    s2=revisionedSession('2026-08-28','same',{revision:9,updatedAt:'2026-08-29T10:00:00.000Z'}),
+    s3=revisionedSession('2026-08-28','different',{revision:9});
+  assert.equal(pendingReviewCodec.sameMeaning('session',s1,s2),true);
+  assert.equal(pendingReviewCodec.sameMeaning('session',s1,s3),false);
+  assert.equal(pendingReviewCodec.matchesCurrent('session',s1,s3),false);
+  const suspended=revisionedSession('2026-08-28','same',{status:'suspended'});
+  assert.equal(pendingReviewCodec.matchesCurrent('session',suspended,s1),true,'suspended content with same owner is applied');
+  assert.equal(pendingReviewCodec.matchesCurrent('session',s1,s2),false,'running canonical session cannot prove applied kept alternative');
+  assert.equal(pendingReviewCodec.matchesCurrent('session',{...suspended,runningOn:'inst_other'},s1),false,'ownership differences block automatic session resolution');
+}
 
 async function makeCheckpoint({records=[],deletions=[],notes={},noteDeletions=[],activeSession=null,pendingReviews=[],personalData=personal(),installationId='inst_checkpoint_a',exportedAt='2026-08-20T14:00:00.000Z'}={}){
   const counts=codec.countShape({checkpointManifest:1,personalData:1,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});
@@ -110,17 +225,20 @@ function createState({withActive=false}={}){
 function baseStore(state){
   const base=()=>state.reconciliationBase;
   return {
-    reconciliationBaseRead:async()=>base()?freeze({format:'study-director.reconciliation-base',version:3,checkpointId:base().checkpointId,establishedAt:base().establishedAt||new Date().toISOString(),noteCount:Number(base().noteCount??Object.keys(base().notes||{}).length),noteKeyFingerprint:String(base().noteKeyFingerprint||'0'.repeat(64)),personalFingerprint:String(base().personalFingerprint||''),sessionFingerprint:String(base().sessionFingerprint||'')}):null,
+    reconciliationBaseRead:async()=>base()?freeze({format:'study-director.reconciliation-base',version:base().version||3,checkpointId:base().checkpointId,establishedAt:base().establishedAt||new Date().toISOString(),noteCount:Number(base().noteCount??Object.keys(base().notes||{}).length),noteKeyFingerprint:String(base().noteKeyFingerprint||'0'.repeat(64)),personalFingerprint:String(base().personalFingerprint||''),sessionFingerprint:String(base().sessionFingerprint||''),sessionContentFingerprint:base().sessionContentFingerprint??null,personalFields:base().personalFields||null}):null,
     reconciliationBaseReadNotes:async keys=>freeze(Object.fromEntries(keys.filter(key=>Object.prototype.hasOwnProperty.call(base()?.notes||{},key)).map(key=>[key,freeze({label:String(base().notes[key]?.label??''),text:String(base().notes[key]?.text??'')})]))),
-    reconciliationBaseReadDays:async dates=>freeze(Object.fromEntries((dates||[]).filter(date=>Object.prototype.hasOwnProperty.call(base()?.days||{},date)).map(date=>[date,base().days[date]]))),
+    reconciliationBaseReadDayAncestry:async(dates,checkpointId)=>{assert.equal(checkpointId,base()?.checkpointId,'a stale shared ancestor cannot be used');return freeze(Object.fromEntries((dates||[]).filter(date=>Object.hasOwn(base()?.days||{},date)).map(date=>[date,freeze({full:base().days[date],semantic:base()?.semanticDays?.[date]??null})])));},
     reconciliationBaseWrite:async(checkpointId,spec)=>{
-      assert.equal(spec?.format,'study-director.reconciliation-base-update');assert.equal(spec.version,2);
+      assert.equal(spec?.format,'study-director.reconciliation-base-update');assert.ok([3,4].includes(spec.version));
+      if(state.failBaseWrite==='false')return false;
+      if(state.failBaseWrite==='throw')throw new Error('QA_FIXTURE ancestry commit failed');
       const current=base();if(!spec.full&&current?.checkpointId!==spec.baseCheckpointId)return false;
-      const notes=Object.assign(Object.create(null),spec.full?{}:current?.notes||{}),days=Object.assign(Object.create(null),spec.full?{}:current?.days||{});
+      const notes=Object.assign(Object.create(null),spec.full?{}:current?.notes||{}),days=Object.assign(Object.create(null),spec.full?{}:current?.days||{}),semanticDays=Object.assign(Object.create(null),spec.full?{}:current?.semanticDays||{});
       for(const key of spec.deletes||[])delete notes[key];for(const [key,value] of Object.entries(spec.updates||{}))notes[key]=freeze({label:String(value.label),text:String(value.text)});
       for(const [month,value] of Object.entries(spec.days||{})){for(const date of Object.keys(days))if(date.startsWith(month+'-'))delete days[date];Object.assign(days,value||{});}
+      for(const [month,value] of Object.entries(spec.semanticDays||{})){for(const date of Object.keys(semanticDays))if(date.startsWith(month+'-'))delete semanticDays[date];Object.assign(semanticDays,value||{});}
       const keys=spec.full?[...spec.noteKeys].sort():null,kept=(value,old)=>value===null?String(old||''):String(value);
-      state.reconciliationBase=freeze({checkpointId,establishedAt:new Date().toISOString(),noteCount:keys?keys.length:Number(spec.noteCount),noteKeyFingerprint:keys?await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'}):String(spec.noteKeyFingerprint),personalFingerprint:kept(spec.personalFingerprint,current?.personalFingerprint),sessionFingerprint:kept(spec.sessionFingerprint,current?.sessionFingerprint),notes:freeze(notes),days:freeze(days)});
+      state.reconciliationBase=freeze({version:spec.version===4?5:4,checkpointId,establishedAt:new Date().toISOString(),noteCount:keys?keys.length:Number(spec.noteCount),noteKeyFingerprint:keys?await processing.run('checksum',{value:JSON.stringify(keys),algorithm:'sha256'}):String(spec.noteKeyFingerprint),personalFingerprint:kept(spec.personalFingerprint,current?.personalFingerprint),personalFields:spec.personalFingerprint===null?current?.personalFields||null:spec.personalFields,sessionFingerprint:kept(spec.sessionFingerprint,current?.sessionFingerprint),sessionContentFingerprint:spec.version===4?(spec.sessionContentFingerprint===null?current?.sessionContentFingerprint??null:spec.sessionContentFingerprint):null,notes:freeze(notes),days:freeze(days),semanticDays:freeze(semanticDays)});
       return true;
     }
   };
@@ -141,32 +259,57 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     configuration:freeze({appVersion:'QA_B3',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,starterSchedule:STARTER_SCHEDULE,limits:runtimeLimits}),
     
     persistence:freeze({
-      activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};if(verificationFault==='active-session'&&verifying())return {ok:true,value:null,error:null,storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{events.push('preflight-session-save');if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};state.activeSession=value;return {ok:true,value};},activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
+      activeSessionLoad:async()=>{if(injectedFailure==='session-read')return {ok:false,value:null,error:new Error('QA_FIXTURE session read failure'),storage:{idb:true}};if(verificationFault==='active-session'&&verifying())return {ok:true,value:null,error:null,storage:{idb:true}};return {ok:true,value:state.activeSession,error:null,storage:{idb:true}};},activeSessionSave:async value=>{
+         events.push('preflight-session-save');
+         if(injectedFailure==='session-save')return {ok:false,value:null,error:new Error('QA_FIXTURE session save failure')};
+         if(injectedFailure==='session-save-local-only')return {ok:true,value,error:new Error('IndexedDB unavailable'),storage:{local:true,idb:false}};
+         state.activeSession=injectedFailure==='session-save-readback-mismatch'?freeze({...value,revision:value.revision+1}):value;
+         return {ok:true,value,storage:{local:false,idb:true}};
+       },activeSessionClear:async()=>(state.activeSession=null,{ok:true}),activeSessionSettled:async()=>{if(injectedFailure==='session-settle')throw new Error('QA_FIXTURE session settle failure');return true;},
       dailyRecordBackupDates:async()=>({dates:[...state.records.keys()].sort(),warning:''}),dailyRecordBackupMonth:async month=>[...state.records.values()].filter(record=>String(record.date).startsWith(String(month)+'-')).sort((a,b)=>a.date.localeCompare(b.date)),dailyRecordDocuments:async dates=>verificationFault==='saved-days'&&verifying()?[]:dates.map(date=>state.records.get(date)).filter(Boolean),
-      dailyRecordImportBatches:async values=>{for(const value of values){state.records.set(value.date,freeze({...value}));state.deletions=state.deletions.filter(item=>item.date!==value.date);}return {batches:values.length?1:0};},
-      dailyRecordRemove:async date=>(state.records.delete(date),true),dailyRecordTimestamp:value=>Date.parse(value?.updatedAt||value?.savedAt||'')||0,
+      dailyRecordImportBatches:async values=>{if(values.length)events.push('days-import');for(const value of values){state.records.set(value.date,freeze({...value}));state.deletions=state.deletions.filter(item=>item.date!==value.date);}return {batches:values.length?1:0};},
+      dailyRecordRemove:async date=>(events.push('days-remove'),state.records.delete(date),true),dailyRecordTimestamp:value=>Date.parse(value?.updatedAt||value?.savedAt||'')||0,
       notesExportPayload:()=>state.notes,notesReadFreshPayload:async()=>state.notes,notesReadFreshItems:async keys=>verificationFault==='notes'&&verifying()?(keys||[]).map(()=>null):(keys||[]).map(key=>state.notes[key]||null),notesFlush:async()=>{events.push('preflight-notes-flush');if(injectedFailure==='notes')throw new Error('QA_FIXTURE notes preflight failure');return true;},notesNormalizePayload:normalizeNotes,notesTrashKey:key=>String(key).startsWith('~')?'':'~deleted '+key,notesAlignByTitle:value=>value,notesFailure:()=>({failed:false}),
       restoreJournalPrepare:async value=>(state.journal={state:{id:value.id},payload:value}),restoreJournalRead:async()=>state.journal,restoreJournalMark:async(id,phase)=>(state.journal.state.phase=phase,state.journal.state),restoreJournalClear:async()=>(state.journal=null,true),
-      scheduleRead:()=>state.schedule,personalSettle:async()=>{if(injectedFailure==='personal')throw new Error('QA_FIXTURE personal preflight failure');return true;},personalExport:async()=>state.personal,personalImport:async value=>(events.push('personal-import'),state.personal=value,true),personalVerify:async value=>{if(verificationFault==='personal'&&verifying())throw new Error('QA_FIXTURE personal verification failure');assert.deepEqual(state.personal,value);},
+      personalSettle:async()=>{events.push('personal-settle');
+        if(injectedFailure==='personal'||state.failPersonalSettle)throw new Error('QA_FIXTURE personal preflight failure');
+        if(Object.prototype.hasOwnProperty.call(state,'pendingPlanDraft')){
+          state.personal=freeze({...state.personal,plans:freeze({...state.personal.plans,draft:state.pendingPlanDraft})});
+          delete state.pendingPlanDraft;
+        }
+        return true;},personalExport:async()=>state.personal,personalImport:async value=>{if(state.failPersonalImport)throw new Error('QA_FIXTURE rejected personal write');events.push('personal-import');state.personal=value;return true;},personalVerify:async value=>{if(verificationFault==='personal'&&verifying())throw new Error('QA_FIXTURE personal verification failure');assert.deepEqual(state.personal,value);},
       storageGeneration:()=>0,sourceRevision:async()=>'2026-08-23T00:00:00.000Z',snapshotRevision:async()=>'stable-b3',canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],installationId:()=>state.installationId||'inst_device_local',deletionRecoveryFlush:async()=>{events.push('preflight-deletion-flush');if(injectedFailure==='deletions')throw new Error('QA_FIXTURE deletion preflight failure');if(injectedFailure==='deletions-false')return false;if(injectedFailure==='deletions-unknown')return undefined;return true;},
-      deletionRecoverySavedDays:async()=>verificationFault==='deletions'&&verifying()?[{date:'2026-01-01',deletedAt:'2026-01-01T00:00:00.000Z'}]:state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state),...state.reviews.ports,pendingReviewsReadItems:async ids=>verificationFault==='pending-reviews'&&verifying()?(ids||[]).map(()=>null):state.reviews.ports.pendingReviewsReadItems(ids)
+      deletionRecoverySavedDays:async()=>verificationFault==='deletions'&&verifying()?[{date:'2026-01-01',deletedAt:'2026-01-01T00:00:00.000Z'}]:state.deletions.map(value=>({...value})),deletionRecoveryReplaceSavedDays:async values=>(events.push('day-ledger'),state.deletions=(values||[]).map(value=>({...value})),true),deletionRecoveryNotes:async()=>state.noteDeletions.map(value=>({...value})),deletionRecoveryReplaceNotes:async values=>(state.noteDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryAttachments:async()=>state.attachmentDeletions.map(value=>({...value})),deletionRecoveryReplaceAttachments:async values=>(state.attachmentDeletions=(values||[]).map(value=>({...value})),true),deletionRecoveryClearAttachment:async assetId=>(state.attachmentDeletions=state.attachmentDeletions.filter(item=>item.assetId!==assetId),true),...baseStore(state),...state.reviews.ports,
+      pendingReviewsResolve:async ids=>{
+        if(state.failReviewAck){state.failReviewAck=false;throw new Error('QA_FIXTURE review receipt failed');}
+        return state.reviews.ports.pendingReviewsResolve(ids);
+      },
+      pendingReviewsReadItems:async ids=>verificationFault==='pending-reviews'&&verifying()?(ids||[]).map(()=>null):state.reviews.ports.pendingReviewsReadItems(ids)
     }),
     assets:freeze({get:async()=>null,put:async()=>true,keys:async()=>[],list:async()=>{if(verificationFault==='attachments'&&verifying())throw new Error('QA_FIXTURE attachment verification failure');return [];},importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:fn}),
     exports:freeze({...processing,followProtection:async value=>{(state.followed??=[]).push({...value});return false;},backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
-    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,pendingReview:pendingReviewCodec}),
-    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
-    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended'});state.running=false;return true;}}),
+    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,dailyRecord:dailyRecordCodec,pendingReview:pendingReviewCodec}),
+    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
+    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended',...(state.yieldAddsProgress?{snapshot:freeze({...state.activeSession.snapshot,label:'A-FINAL-TICK',taskState:freeze({...state.activeSession.snapshot.taskState,focus:freeze({actual:freeze({seconds:(Number(state.activeSession.snapshot.taskState?.focus?.actual?.seconds)||0)+70})})})})}:{})});state.running=false;return true;}}),
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
       reconcileNotes:async(payload,deletions=[])=>{state.notes=normalizeNotes({...state.notes,...payload});const deletedKeys=new Set((deletions||[]).map(item=>String(item.key)));for(const key of deletedKeys)delete state.notes[key];state.noteDeletions=state.noteDeletions.filter(item=>!Object.hasOwn(state.notes,item.key)&&!Object.values(payload||{}).some(note=>note&&note.key===item.key));for(const item of deletions||[]){state.noteDeletions=state.noteDeletions.filter(existing=>existing.key!==item.key);state.noteDeletions.push({...item});}for(const note of Object.values(payload||{}))state.noteDeletions=state.noteDeletions.filter(item=>item.key!==note.key);events.push('notes');return state.notes;},
       restoreNotesSnapshot:async payload=>{state.notes=normalizeNotes(payload);events.push('notes-rollback');return state.notes;},
-      restoreSessionState:async(value,scheduleText)=>(state.activeSession=value,state.schedule=String(scheduleText||''),events.push('session'),true),
+      // This fixture's state.schedule is the applied runtime schedule, not
+      // the independent Plan working draft. Production restore derives it from
+      // the canonical Active Session; the backup layer no longer transports a
+      // second session→draft schedule argument.
+      restoreSessionState:async value=>(state.activeSession=value,state.schedule=String(value&&value.scheduleText||''),events.push('session'),true),
       verifyActiveSessionRuntime:async expected=>(assert.deepEqual(state.activeSession,expected),true),
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
     operations:freeze({canShare:()=>true,assertAuthority:()=>{if(injectedFailure==='ownership')throw new Error('QA_FIXTURE ownership failure');return true;},clearFault:fn,failClosed:message=>{throw new Error(String(message));},runExclusive:async(kind,operation)=>operation()}),
-    interactions:freeze({choose:async options=>{prompts.push(options);return options&&options.title==='Use this backup'?fileMode:options&&options.title==='Keep what isn’t in this backup?'?extrasMode:null;},configure:async config=>{prompts.push(config);const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('kept__')){out[group.id]=state.keptChoice||group.defaultValue;continue;}if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
+    interactions:freeze({choose:async options=>{prompts.push(options);return options&&options.title==='Use this backup'?fileMode:options&&options.title==='Keep what isn’t in this backup?'?extrasMode:null;},configure:async config=>{prompts.push(config);
+      if(config.title==='Kept versions'&&Object.prototype.hasOwnProperty.call(state,'draftEditedDuringReview')){
+        state.pendingPlanDraft=state.draftEditedDuringReview;delete state.draftEditedDuringReview;
+      }
+      const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('kept__')){out[group.id]=state.keptSelections?.[group.id]||state.keptSelections?.[group.id.split('__').slice(2).join('__')]||state.keptChoice||group.defaultValue;continue;}if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
     environment:freeze({AbortController,clearTimeout:inertTimers?()=>{}:clearTimeout,yieldTask:async()=>{},setTimeout:inertTimers?()=>0:callback=>(callback(),1)}),diagnostics:freeze({capture:fn,start:()=>'',mark:(name,details={})=>(diagnosticMarks.push([String(name),details]),true),finish:()=>false,fail:()=>false})
   })}));
   return {runtime,prompts,statuses,events,diagnosticMarks,setPreflightFailure:value=>{injectedFailure=String(value||'');}};
@@ -187,6 +330,8 @@ const preflightCases=[
   ['deletions-unknown','RESTORE_PREFLIGHT_DELETION_FAILED',false],
   ['personal','RESTORE_PREFLIGHT_PERSONAL_FAILED',false],
   ['session-save','RESTORE_PREFLIGHT_SESSION_SAVE_FAILED',true],
+  ['session-save-local-only','RESTORE_PREFLIGHT_SESSION_SAVE_FAILED',true],
+  ['session-save-readback-mismatch','RESTORE_PREFLIGHT_SESSION_SAVE_FAILED',true],
   ['session-settle','RESTORE_PREFLIGHT_SESSION_SETTLE_FAILED',true],
   ['session-read','RESTORE_PREFLIGHT_SESSION_READ_FAILED',false]
 ];
@@ -204,9 +349,9 @@ for(const [stage,code,hasLiveTasks] of preflightCases){
   const preflightCandidate=await preflightHarness.runtime.controller.inspect(blob,{filename:`preflight-${stage}.sdbackup`});
   preflightHarness.setPreflightFailure(stage);
   await assert.rejects(()=>preflightHarness.runtime.controller.restore(preflightCandidate),error=>{
-    assert.equal(error.code,code);assert.equal(error.backupStage,stage.startsWith('deletions')?'deletions':stage);return true;
+    assert.equal(error.code,code);assert.equal(error.backupStage,stage.startsWith('deletions')?'deletions':stage.startsWith('session-save')?'session-save':stage);return true;
   });
-  assert.equal(preflightHarness.diagnosticMarks.at(-1)[0],`restore-preflight-${stage.startsWith('deletions')?'deletions':stage}-failed`);
+  assert.equal(preflightHarness.diagnosticMarks.at(-1)[0],`restore-preflight-${stage.startsWith('deletions')?'deletions':stage.startsWith('session-save')?'session-save':stage}-failed`);
   assert.equal(preflightHarness.diagnosticMarks.at(-1)[1].errorCode,code);
 }
 
@@ -268,8 +413,10 @@ for(const group of savedDayGroups){
 }
 assert.ok(Object.keys(bulkGroup.choices[1].applyValues).every(id=>id.startsWith('savedDay__')),'Saved-Day bulk controls must never alter Note or Active-Session choices.');
 
-// P7: the bulk UX must remain bounded and atomic with many simultaneous Saved-Day conflicts.
-const manyDates=Array.from({length:28},(_,index)=>`2026-06-${String(index+1).padStart(2,'0')}`),manyState=createState();manyState.records=new Map(manyDates.map((date,index)=>[date,record(date,`local ${index+1}`,'2026-09-01T12:00:00.000Z')]));manyState.deletions=[];manyState.notes={};manyState.activeSession=null;manyState.schedule='';const manyIncoming=manyDates.map((date,index)=>record(date,`backup ${index+1}`,'2026-09-02T12:00:00.000Z')),manyBlob=await makeCheckpoint({records:manyIncoming,exportedAt:'2026-09-02T13:00:00.000Z'}),manyHarness=createHarness(manyState,{decisions:{dailyRecords:'replace',reflections:'incoming'}});await manyHarness.runtime.controller.restore(await manyHarness.runtime.controller.inspect(manyBlob,{filename:'many-saved-day-conflicts.sdbackup'}));const manyPrompt=manyHarness.prompts.find(prompt=>prompt.groups?.some(group=>group.id==='savedDaysBulk')),manyBulk=manyPrompt?.groups.find(group=>group.id==='savedDaysBulk'),manyGroups=manyPrompt?.groups.filter(group=>String(group.id||'').startsWith('savedDay__'))||[];assert.ok(manyPrompt,'Many Saved-Day conflicts must still use one consolidated conflict surface.');assert.equal(manyGroups.length,manyDates.length,'Every conflicting Saved Day must remain an individually overridable atomic decision.');assert.equal(Object.keys(manyBulk.choices[0].applyValues).length,manyDates.length);assert.equal(Object.keys(manyBulk.choices[1].applyValues).length,manyDates.length);assert.ok(Object.keys(manyBulk.choices[0].applyValues).every(id=>id.startsWith('savedDay__')));assert.deepEqual([...manyState.records.keys()].sort(),manyDates);for(const [index,date] of manyDates.entries())assert.equal(manyState.records.get(date).reflection,`backup ${index+1}`,'Bulk incoming choice must replace the complete Saved-Day record, not merge fields.');
+// Many genuinely different study-quality and reflection records must still
+// use one bounded bulk-decision surface. Reflection-only differences are
+// intentionally handled by the more focused text comparison, not bulk choice.
+const manyDates=Array.from({length:28},(_,index)=>`2026-06-${String(index+1).padStart(2,'0')}`),manyState=createState();manyState.records=new Map(manyDates.map((date,index)=>[date,record(date,`local ${index+1}`,'2026-09-01T12:00:00.000Z')]));manyState.deletions=[];manyState.notes={};manyState.activeSession=null;manyState.schedule='';const manyIncoming=manyDates.map((date,index)=>({...record(date,`backup ${index+1}`,'2026-09-02T12:00:00.000Z'),studyQuality:2})),manyBlob=await makeCheckpoint({records:manyIncoming,exportedAt:'2026-09-02T13:00:00.000Z'}),manyHarness=createHarness(manyState,{decisions:{dailyRecords:'replace',reflections:'incoming'}});await manyHarness.runtime.controller.restore(await manyHarness.runtime.controller.inspect(manyBlob,{filename:'many-saved-day-conflicts.sdbackup'}));const manyPrompt=manyHarness.prompts.find(prompt=>prompt.groups?.some(group=>group.id==='savedDaysBulk')),manyBulk=manyPrompt?.groups.find(group=>group.id==='savedDaysBulk'),manyGroups=manyPrompt?.groups.filter(group=>String(group.id||'').startsWith('savedDay__'))||[];assert.ok(manyPrompt,'Many Saved-Day conflicts must still use one consolidated conflict surface.');assert.equal(manyGroups.length,manyDates.length,'Every conflicting Saved Day must remain an individually overridable atomic decision.');assert.equal(Object.keys(manyBulk.choices[0].applyValues).length,manyDates.length);assert.equal(Object.keys(manyBulk.choices[1].applyValues).length,manyDates.length);assert.ok(Object.keys(manyBulk.choices[0].applyValues).every(id=>id.startsWith('savedDay__')));assert.deepEqual([...manyState.records.keys()].sort(),manyDates);for(const [index,date] of manyDates.entries())assert.equal(manyState.records.get(date).reflection,`backup ${index+1}`,'Bulk incoming choice must replace the complete Saved-Day record, not merge fields.');
 assert.ok(importHarness.events.includes('preflight-notes-flush')&&importHarness.events.includes('preflight-deletion-flush'),'Restore preflight must flush notes and deletion recovery before planning; Review state is carried by Active Session.');
 assert.equal(importState.records.get('2026-08-01').reflection,'local only');
 assert.equal(importState.records.get('2026-08-02').reflection,'local conflict newer','Reconciliation must keep a divergent local Saved Day by default.');
@@ -540,7 +687,9 @@ let syncWorld=null;
       combine:(id,checkpointId)=>providers.bringInRepositoryProvider(id,{checkpointId}),
       reviewKept:(options={})=>harness.runtime.controller.reviewKeptVersions(options),
       noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options}),
-      claim:request=>providers.claimSessionOwnership('drive',request)
+      handoffSource:()=>providers.readSessionHandoffSource('drive'),
+      claim:request=>providers.claimSessionOwnership('drive',request),
+      diagnostics:harness.diagnosticMarks
     });
   };
   const note=text=>freeze({Shared:freeze({version:2,key:'Shared',text,updatedAt:new Date().toISOString()})});
@@ -613,30 +762,495 @@ let syncWorld=null;
   const keptPersonal=b.reviews.open().find(review=>review.subject==='personal');assert.equal(keptPersonal.kept.preferences.studentName,'Name on A');
   b.keptChoice='use';await B.reviewKept();b.keptChoice='';assert.equal(b.personal.preferences.studentName,'Name on A','the review lets the person pick the kept settings');assert.deepEqual(b.reviews.open(),[]);
   await B.upload();assert.equal((await A.sync()).cancelled,false);
-  // A side holding nothing the other lacks takes the other's, and nothing is
-  // kept, whichever is newer (Entry 023): a device's start-up state never
-  // hides the plans and settings in use elsewhere.
-  a.personal=freeze({...personal('Name on A, planned'),plans:freeze({draft:'07:00 | 60 | A plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});await A.upload();b.personal=startup();
+  // After a verified shared base exists, clearing the name is authored
+  // deletion, not a brand-new device. The separately added remote draft
+  // still merges automatically under per-field ancestry.
+  a.personal=freeze({...personal('Name on A'),plans:freeze({draft:'07:00 | 60 | A plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});await A.upload();b.personal=startup(null);
   assert.equal((await B.sync()).cancelled,false);
-  assert.deepEqual(b.personal,a.personal,'the start-up side takes the plans and settings in use');
-  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'nothing is kept from the start-up side');
+  assert.equal(b.personal.preferences.studentName,null,'a cleared name survives a known shared-base edit');
+  assert.equal(b.personal.plans.draft,a.personal.plans.draft,'the independent remote draft merges');
+  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'disjoint proven edits require no review');
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   a.personal=startup(null);await A.upload();b.personal=freeze({...personal('Name on B, planned'),plans:freeze({draft:'08:00 | 30 | B plan | work | Ethics | block | 1',savedPlans:freeze([]),defaultId:null})});const mine=b.personal;
   assert.equal((await B.sync()).cancelled,false);
-  assert.deepEqual(b.personal,mine,'this device keeps its own when the other side holds nothing more');
-  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'nothing is kept from the other side either');
+  assert.deepEqual(b.personal,mine,'the independent local draft is never replaced by a remote clear');
+  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),true,
+    'competing edits since a common draft ancestor require an explicit choice, even if the remote draft became blank');
+  assert.equal((await B.reviewKept()).reviewed,1,'keeping the local authored draft resolves the genuine conflict');
+  assert.deepEqual(b.reviews.open(),[]);
   await B.upload();assert.equal((await A.sync()).cancelled,false);
+  // BF-1R2: independent authored drafts cannot be overwritten because
+  // a whole-checkpoint sourceRevision is newer. The remote draft is kept.
+  const remoteDraft='06:00 | 60 | Remote independent draft | work | Polity | pages | 10';
+  const localDraft='09:00 | 45 | Local independent draft | work | History | pages | 8';
+  a.personal=freeze({...a.personal,plans:freeze({...a.personal.plans,draft:remoteDraft})});await A.upload();
+  b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,draft:localDraft})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.plans.draft,localDraft,'sync never replaces an independently authored local draft by a global timestamp');
+  const keptDraft=b.reviews.open().find(review=>review.subject==='personal'&&review.kept?.plans?.draft===remoteDraft);
+  assert.ok(keptDraft,'the remote draft stays available for an explicit kept-version decision');
+  b.keptChoice='use';await B.reviewKept();b.keptChoice='';
+  assert.equal(b.personal.plans.draft,remoteDraft,'choosing the kept version deliberately imports its draft');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  // With verified common ancestry and only one side changed, the new draft
+  // still synchronizes automatically; safety must not disable normal sync.
+  const oneSidedDraft='07:00 | 75 | One-sided draft update | work | Geography | pages | 12';
+  a.personal=freeze({...a.personal,plans:freeze({...a.personal.plans,draft:oneSidedDraft})});await A.upload();
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.plans.draft,oneSidedDraft,'a proven one-sided draft update synchronizes normally');
   // A session running here keeps its own state; everything else merges.
   a.activeSession=session('2026-08-30','A-SESSION',{runningOn:a.installationId});a.schedule=a.activeSession.scheduleText;a.running=false;a.notes=note('edited on A again');await A.upload();
   b.activeSession=session('2026-08-31','B-SESSION',{runningOn:b.installationId});b.schedule=b.activeSession.scheduleText;
   assert.equal((await B.sync()).cancelled,false,'sync is never blocked by a running session');
   assert.equal(b.activeSession.snapshot.label,'B-SESSION','the session running here stays as it is');assert.equal(b.notes.Shared.text,'edited on A again','everything else merges as usual');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='session'&&review.kept?.snapshot?.label==='A-SESSION').length,1,'the remote earlier-day session is preserved once on B');
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.reviews.open().filter(review=>review.subject==='session'&&review.kept?.snapshot?.label==='A-SESSION').length,1,'repeated sync never generates the same session review twice');
   // Another device's own session never silently replaces one left unsaved
   // here: this one stays and the other is kept for review.
   await B.upload();
   assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.activeSession.snapshot.label,'A-SESSION','an unsaved earlier session is not replaced by a new one from another device');
-  assert.equal(a.reviews.open().find(review=>review.subject==='session').kept.snapshot.label,'B-SESSION','the other session is kept for review');
+  assert.equal(a.reviews.open().filter(review=>review.subject==='session'&&review.kept?.snapshot?.label==='B-SESSION').length,1,'the independent later-day session is preserved exactly once for review');
+}
+
+// BF-2: Verified per-field ancestors merge independent setting changes
+// without a whole-Personal-Data timestamp winner or an unnecessary review.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,shared=personal('BF2 Shared');
+  const a={installationId:'inst_bf2_personal_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('BF2'),activeSession:null,schedule:'',personal:shared,journal:null};
+  const b={installationId:'inst_bf2_personal_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:shared,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,quote:'Keep working locally'})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.theme,'dark','a remotely edited independent setting merges automatically');
+  assert.equal(b.personal.preferences.quote,'Keep working locally','the local independently changed setting survives');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0,'disjoint proven changes create no Personal Data review');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.personal.preferences.quote,'Keep working locally','the automatic merge converges on the other device');
+  assert.equal(a.personal.preferences.theme,'dark');
+  assert.deepEqual(a.reviews.open(),[]);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:null})});
+  await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,soundMode:'minimal'})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.theme,null,'a proven explicit preference removal is not mistaken for fresh-device startup');
+  assert.equal(b.personal.preferences.soundMode,'minimal','an unrelated optional setting addition survives');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+
+  // A saved-plan addition and default selection are automatic when only A
+  // made them; a competing edit to the same working draft is reviewable.
+  const plan=freeze({id:'plan-bf2-saved-0001',label:'Alternate',scheduleText:'09:00 | 60 | Revision | work | Ethics | pages | 12',createdAt:'2026-08-31T10:00:00.000Z',updatedAt:'2026-08-31T10:00:00.000Z'});
+  a.personal=freeze({...a.personal,plans:freeze({draft:'06:00 | 45 | Draft A | work | Polity | pages | 8',savedPlans:freeze([plan]),defaultId:plan.id})});
+  await A.upload();
+  b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,draft:'07:00 | 30 | Draft B | work | History | pages | 6'})});
+  assert.equal((await B.sync()).cancelled,false);
+  const planReview=b.reviews.open().find(review=>review.subject==='personal');
+  assert.ok(planReview,'only the competing working-draft edits require review');
+  assert.deepEqual(planReview.kept.plans.savedPlans,b.personal.plans.savedPlans,
+    'retained Personal Data must not reoffer a one-sided, already merged saved-plan addition');
+  assert.equal(planReview.kept.plans.defaultId,b.personal.plans.defaultId,
+    'a one-sided default selection is not an outstanding conflict');
+  assert.equal(planReview.kept.preferences.soundMode,b.personal.preferences.soundMode,
+    'independently kept local sound mode is preserved in the retained alternative');
+  assert.equal(b.personal.plans.draft,'07:00 | 30 | Draft B | work | History | pages | 6','a conflicting draft stays local');
+  assert.equal(b.personal.plans.savedPlans[0].id,plan.id,'the independent saved-plan addition merges automatically');
+  assert.equal(b.personal.plans.defaultId,plan.id,'its one-sided default selection merges with the saved-plan entry');
+  assert.equal((await B.reviewKept()).reviewed,1,'the draft conflict is resolved explicitly');
+  assert.equal(b.personal.plans.draft,'07:00 | 30 | Draft B | work | History | pages | 6');
+  assert.deepEqual(b.reviews.open(),[]);
+
+  // A remote review id referring to the same open semantic conflict must be
+  // retired as a replicated resolved tombstone, not duplicated as a prompt.
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,quote:'Different A quote'})});
+  await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,quote:'Different B quote'})});
+  assert.equal((await B.sync()).cancelled,false);
+  const first=b.reviews.open().find(review=>review.subject==='personal');
+  assert.ok(first);
+  const other=pendingReviewCodec.create({subject:'personal',ref:'personal',kept:first.kept,base:first.base});
+  a.reviews= a.reviews||memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await a.reviews.ports.pendingReviewsMerge([other]);
+  await A.upload();
+  assert.equal((await B.sync()).cancelled,false);
+  const duplicates=b.reviews.open().filter(review=>review.subject==='personal'&&JSON.stringify(review.kept)===JSON.stringify(first.kept));
+  assert.equal(duplicates.length,1,'equivalent open semantic conflicts appear only once');
+  const tombstones=await b.reviews.ports.pendingReviewsList();
+  assert.ok(tombstones.some(review=>review.id===other.id&&review.resolvedAt),'duplicate incoming identity is resolved for all devices');
+}
+
+// BF-2: a same-setting conflict waits for an explicit field choice;
+// failed personal-data persistence cannot consume the review or lose the
+// authoritative local settings, and retry remains possible.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('BF2 Same-setting');
+  const a={installationId:'inst_bf2_same_a',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:origin,journal:null};
+  const b={installationId:'inst_bf2_same_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,theme:'light',quote:'Local note'})});
+  assert.equal((await B.sync()).cancelled,false);
+  const open=b.reviews.open().filter(review=>review.subject==='personal');
+  assert.equal(open.length,1,'same-setting divergence creates one meaningful review');
+  assert.equal(b.personal.preferences.theme,'light');
+  b.keptSelections={'preference:theme':'use'};
+  b.failPersonalImport=true;
+  await assert.rejects(B.reviewKept(),/QA_FIXTURE rejected personal write/u);
+  assert.equal(b.personal.preferences.theme,'light','failed import does not partially replace the local setting');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1,'failed import retains the unresolved review');
+  b.failPersonalImport=false;
+  assert.equal((await B.reviewKept()).reviewed,1,'the same review remains safely retryable');
+  b.keptSelections=null;
+  assert.equal(b.personal.preferences.theme,'dark');
+  assert.equal(b.personal.preferences.quote,'Local note','the independently authored setting remains unaffected');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.personal.preferences.theme,'dark');
+  assert.equal(a.personal.preferences.quote,'Local note');
+  assert.deepEqual(a.reviews.open(),[]);
+}
+
+// BF-2 closure: a later-domain failure cannot hide earlier commits or
+// retire a review whose canonical Personal Data write did not succeed.
+{
+  const date='2026-08-01',local=personal('Local reviewer'),kept=personal('Kept reviewer');
+  const state={installationId:'inst_bf2_bulk_review',records:new Map([[date,record(date,'Local day')]]),
+    deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  const savedDay=pendingReviewCodec.create({subject:'savedDay',ref:date,kept:record(date,'Kept day'),
+    keptAt:'2026-08-20T10:00:00.000Z'});
+  const personalReview=pendingReviewCodec.create({subject:'personal',ref:'personal',kept,
+    keptAt:'2026-08-20T11:00:00.000Z'});
+  await state.reviews.ports.pendingReviewsMerge([savedDay,personalReview]);
+  const h=createHarness(state);state.keptChoice='use';state.failPersonalImport=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/1 of 2 kept versions confirmed/u,
+    'a later failed domain reports independently committed choices');
+  assert.equal(state.records.get(date)?.reflection,'Kept day');
+  const [receipt]=await state.reviews.ports.pendingReviewsReadItems([savedDay.id]);
+  assert.ok(receipt?.resolvedAt,'the completed day has a replicated acknowledgement');
+  assert.deepEqual(state.reviews.open().map(review=>review.id),[personalReview.id],
+    'the failed Personal Data version is the only outstanding review');
+  assert.equal(state.personal.preferences.studentName,'Local reviewer');
+  state.failPersonalImport=false;
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(state.personal.preferences.studentName,'Kept reviewer');
+  assert.deepEqual(state.reviews.open(),[],'retry neither replays nor loses an earlier choice');
+}
+
+// A deliberate removal may make a previously populated device look blank.
+// Exact field ancestry must be considered before the first-install shortcut.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('Authored name');
+  const a={installationId:'inst_c2_blank_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const b={installationId:'inst_c2_blank_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,studentName:null})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.studentName,null,'intentional deletion survives a superficially blank local profile');
+  assert.equal(b.personal.preferences.theme,'dark','independent remote setting still merges');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.personal.preferences.studentName,null,'intentional deletion propagates after safe reconciliation');
+}
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('Known before deletion');
+  const a={installationId:'inst_c2_unknown_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const b={installationId:'inst_c2_unknown_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  b.reconciliationBase=freeze({...b.reconciliationBase,version:3,personalFields:null});
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,studentName:null})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.studentName,null,'unknown ancestry cannot erase local deletion');
+  assert.equal(b.personal.preferences.theme,null,'legacy ancestry cannot invent field causality');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1);
+}
+
+// Manual Kept Versions must flush pending edits before showing a Personal
+// Data comparison and must reject a choice made stale by a new modal-time edit.
+{
+  const local=freeze({...personal('Manual reviewer'),plans:freeze({draft:'Original local',savedPlans:freeze([]),defaultId:null})});
+  const remote=freeze({...personal('Manual reviewer'),plans:freeze({draft:'Remote option',savedPlans:freeze([]),defaultId:null})});
+  const state={installationId:'inst_c2_manual_review',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote})]);
+  state.pendingPlanDraft='Local unsaved in editor';
+  const h=createHarness(state);state.keptChoice='use';
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(state.personal.plans.draft,'Remote option','the selected kept draft replaces only a flushed, visible local draft');
+  assert.equal(h.events.filter(x=>x==='personal-settle').length,2,'the editor settles before and after modal choices');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const local=freeze({...personal('Manual editor'),plans:freeze({draft:'Original local',savedPlans:freeze([]),defaultId:null})});
+  const remote=freeze({...personal('Manual editor'),plans:freeze({draft:'Remote option',savedPlans:freeze([]),defaultId:null})});
+  const state={installationId:'inst_c2_edit_during_modal',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote})]);
+  state.draftEditedDuringReview='New edit while choices are open';
+  const h=createHarness(state);state.keptChoice='use';
+  const result=await h.runtime.controller.reviewKeptVersions();
+  assert.equal(result.reviewed,0,'a newly edited Plan draft makes the modal comparison stale');
+  assert.equal(state.personal.plans.draft,'New edit while choices are open','intervening local work is retained');
+  assert.equal(state.reviews.open().length,1,'stale review remains available after a fresh comparison');
+  state.failPersonalSettle=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE personal preflight failure/u);
+  assert.equal(state.reviews.open().length,1,'a failed local Plan write cannot consume the kept version');
+}
+
+// BF-C3: A selected domain write can commit immediately before its review
+// tombstone fails. Reopening and selecting that version again must acknowledge
+// the review without replaying an already-applied canonical write.
+{
+  const date='2026-08-12',row=freeze({id:'ethics-1',start:'08:00',duration:60,
+    name:'Ethics',kind:'work',area:'Ethics',measure:'pages',target:10});
+  const localDay=freeze({...record(date,'Current reflection'),schedule:freeze([row]),
+    results:freeze({'ethics-1':freeze({completion:50,actualSeconds:900})}),quote:'Current quote',carryForwardDraft:'Current next step'});
+  const keptDay=freeze({...localDay,reflection:'Kept reflection',
+    results:freeze({'ethics-1':freeze({completion:90,actualSeconds:1800})}),quote:'Kept quote',carryForwardDraft:'Kept next step'});
+  const state={installationId:'inst_c3_day_retry',records:new Map([[date,localDay]]),
+    deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:personal('Day reviewer'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({
+    subject:'savedDay',ref:date,kept:keptDay})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.records.get(date).reflection,'Kept reflection');
+  const committedTime=state.records.get(date).updatedAt;
+  assert.equal(h.events.filter(event=>event==='days-import').length,1);
+  assert.equal(state.reviews.open().length,1,'a failed receipt leaves the review open');
+  const prompt=h.prompts.find(prompt=>prompt.title==='Kept versions');
+  const choice=prompt.groups.find(group=>group.label===`Saved Day · ${date}`);
+  assert.match(choice.description,/Differing: task results/u);
+  assert.match(choice.description,/reflection/u);
+  assert.match(choice.description,/Saved Day evidence differed or could not be proven equivalent/u);
+  assert.match(choice.description,/The original device was not recorded; the date is not proof of origin/u);
+  assert.match(choice.choices[0].description,/Ethics: 50% \/ 15 min/u);
+  assert.match(choice.choices[1].description,/Ethics: 90% \/ 30 min/u);
+  assert.match(choice.choices[0].description,/Current reflection/u);
+  assert.match(choice.choices[1].description,/Kept reflection/u);
+  assert.match(choice.choices[0].description,/Current quote/u);
+  assert.match(choice.choices[1].description,/Kept quote/u);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='days-import').length,1,'retry does not write the already-applied Saved Day again');
+  assert.equal(state.records.get(date).updatedAt,committedTime,'retry never manufactures a new save timestamp');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const date='2026-08-13';
+  const state={installationId:'inst_c3_delete_retry',records:new Map([[date,record(date,'To delete')]]),
+    deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:personal('Deletion reviewer'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'savedDay',ref:date,kept:null})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.records.has(date),false);
+  assert.equal(state.deletions.some(value=>value.date===date),true,'deletion receipt is stored independently');
+  const before=h.events.filter(event=>event==='days-remove'||event==='day-ledger').length;
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='days-remove'||event==='day-ledger').length,before,
+    'retry does not delete again or rewrite an already-published deletion tombstone');
+  assert.ok(h.prompts.filter(prompt=>prompt.title==='Kept versions').at(-1).groups.some(group=>group.label===`Saved Day · ${date}`),
+    'absence on both sides never silently consumes an unresolved deletion review');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const date='2026-08-14';
+  const current=session(date,'CURRENT',{runningOn:'inst_device_local',status:'suspended'});
+  const kept=session(date,'KEPT',{runningOn:'inst_kept_owner',status:'active'});
+  const state={installationId:'inst_c3_session_retry',records:new Map(),deletions:[],notes:{},noteDeletions:[],
+    activeSession:current,running:false,personal:personal('Session reviewer'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'session',ref:'session',kept})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.activeSession.snapshot.label,'KEPT');
+  assert.equal(state.activeSession.status,'suspended','using a kept session never starts another timer');
+  const revision=state.activeSession.revision;
+  assert.equal(h.events.filter(event=>event==='session').length,1);
+  const prompt=h.prompts.find(row=>row.title==='Kept versions');
+  const group=prompt.groups.find(row=>row.label==='Active / suspended session');
+  assert.match(group.description,/Differing: schedule/u);
+  assert.match(group.description,/Session study evidence or ownership could not be safely settled/u);
+  assert.match(group.description,/The original device was not recorded; the date is not proof of origin/u);
+  assert.match(group.choices[0].description,/suspended/u);
+  assert.match(group.choices[1].description,/active/u);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='session').length,1,'the suspended session is not restored twice');
+  assert.equal(state.activeSession.revision,revision,'the retry does not advance control revision');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const here=normalizeArea({key:'Shared',label:'Current title',text:'Unchanged body'},'Shared');
+  const state={installationId:'inst_c3_note_retry',records:new Map(),deletions:[],
+    notes:{Shared:here},noteDeletions:[],activeSession:null,personal:personal('Note reviewer'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({
+    subject:'note',ref:'Shared',kept:{label:'Kept title'}})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.notes.Shared.label,'Kept title');
+  const storedAt=state.notes.Shared.updatedAt;
+  assert.equal(h.events.filter(event=>event==='notes').length,1);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(state.notes.Shared.updatedAt,storedAt,'already-applied note text/title does not generate a fresh revision');
+  assert.equal(h.events.filter(event=>event==='notes').length,1);
+  assert.deepEqual(state.reviews.open(),[]);
+}
+{
+  const state={installationId:'inst_c3_personal_retry',records:new Map(),deletions:[],notes:{},noteDeletions:[],
+    activeSession:null,personal:personal('Current name'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({
+    subject:'personal',ref:'personal',kept:personal('Kept name')})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.personal.preferences.studentName,'Kept name');
+  assert.equal(h.events.filter(event=>event==='personal-import').length,1);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='personal-import').length,1);
+  assert.deepEqual(state.reviews.open(),[]);
+}
+
+// A kept session can explicitly be absent: using it must clear the local
+// suspended session, not merely retire the review while doing nothing.
+{
+  const date='2026-08-16';
+  const state={installationId:'inst_c3_session_delete',records:new Map(),deletions:[],notes:{},noteDeletions:[],
+    activeSession:session(date,'LOCAL',{runningOn:'inst_device_local',status:'suspended'}),
+    running:false,personal:personal('Session deletion'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'session',ref:'session',kept:null})]);
+  const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
+  await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
+  assert.equal(state.activeSession,null,'using a kept absence clears the canonical suspended session');
+  assert.equal(h.events.filter(event=>event==='session').length,1);
+  assert.equal(state.reviews.open().length,1,'the interrupted review acknowledgement remains pending');
+  const group=h.prompts.find(row=>row.title==='Kept versions').groups.find(row=>row.label==='Active / suspended session');
+  assert.match(group.choices[1].label,/remove session/u,'absence has an explicit destructive label');
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  assert.equal(h.events.filter(event=>event==='session').length,1,'retry never repeats a canonical session clear');
+  assert.deepEqual(state.reviews.open(),[]);
+}
+
+// Control revisions, save acknowledgement counters and timestamps may differ
+// even where two sessions contain identical study evidence. The dialog must
+// describe that as a control/ownership issue, not invented changed progress.
+{
+  const date='2026-08-15';
+  const here=revisionedSession(date,'SAME',{runningOn:'inst_device_local',status:'suspended',
+    revision:7,contentRevision:3,savedRevision:2});
+  const kept=revisionedSession(date,'SAME',{runningOn:'inst_other_owner',status:'active',
+    revision:11,contentRevision:10,savedRevision:9,updatedAt:'2026-08-30T12:00:00.000Z'});
+  const state={installationId:'inst_c3_control_only',records:new Map(),deletions:[],notes:{},noteDeletions:[],
+    activeSession:here,running:false,personal:personal('Control review'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'session',ref:'session',kept})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  const group=h.prompts.find(p=>p.title==='Kept versions').groups.find(p=>p.label==='Active / suspended session');
+  assert.match(group.description,/Compared content matches/u);
+  assert.match(group.description,/Session status differs/u);
+  assert.match(group.description,/Recorded ownership differs/u);
+  assert.doesNotMatch(group.description,/Differing: study evidence/u,
+    'timestamp and revision-only differences cannot impersonate changed study progress');
+  assert.equal(h.events.filter(event=>event==='session').length,0,'keeping current control state performs no session write');
+}
+
+// BF-2: a legacy v3 shared base has no field ancestry. Independent
+// changes must remain reviewable, never guessed from timestamps.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('Legacy ancestry');
+  const a={installationId:'inst_bf2_legacy_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const b={installationId:'inst_bf2_legacy_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  b.reconciliationBase=freeze({...b.reconciliationBase,version:3,personalFields:null});
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,theme:'dark'})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,quote:'Unshared locally'})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.theme,null,'v3 ancestry cannot falsely authorize a per-field automatic merge');
+  assert.equal(b.personal.preferences.quote,'Unshared locally');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1);
+}
+// Independently added saved-plan identities must merge, while competing
+// edits to one identity stay reviewable and preserve every unrelated plan.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,origin=personal('Saved-plan union'),
+    plan=(id,label)=>freeze({id,label,scheduleText:'08:00 | 60 | '+label+' | work | Ethics | pages | 8',
+      createdAt:'2026-08-31T10:00:00.000Z',updatedAt:'2026-08-31T10:00:00.000Z'});
+  const pA=plan('plan-bf2-independent-a','A plan'),pB=plan('plan-bf2-independent-b','B plan');
+  const a={installationId:'inst_bf2_plans_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const b={installationId:'inst_bf2_plans_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,plans:freeze({...a.personal.plans,savedPlans:freeze([pA])})});await A.upload();
+  b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,savedPlans:freeze([pB])})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual(new Set(b.personal.plans.savedPlans.map(x=>x.id)),new Set([pA.id,pB.id]),'distinct saved-plan additions merge without loss');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.personal.plans.savedPlans.length,2);
+  const change=(current,label)=>freeze({...current,label,scheduleText:'08:00 | 60 | '+label+' | work | Ethics | pages | 8',updatedAt:'2026-09-01T10:00:00.000Z'});
+  a.personal=freeze({...a.personal,plans:freeze({...a.personal.plans,
+    savedPlans:freeze(a.personal.plans.savedPlans.map(x=>x.id===pA.id?change(x,'A-side edit'):x))})});await A.upload();
+  b.personal=freeze({...b.personal,plans:freeze({...b.personal.plans,
+    savedPlans:freeze(b.personal.plans.savedPlans.map(x=>x.id===pA.id?change(x,'B-side edit'):x))})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.plans.savedPlans.find(x=>x.id===pA.id).label,'B-side edit');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1,'same-plan divergent edits remain reviewable');
+  b.keptSelections={['savedPlan:'+pA.id]:'use'};
+  assert.equal((await B.reviewKept()).reviewed,1);
+  b.keptSelections=null;
+  assert.equal(b.personal.plans.savedPlans.find(x=>x.id===pA.id).label,'A-side edit');
+  assert.equal(b.personal.plans.savedPlans.find(x=>x.id===pB.id).label,'B plan','another saved plan is untouched by the chosen version');
+}
+// Nested reminder values are independently reconciled, not treated as one
+// indivisible Personal Data field.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,original=personal('Nudge leaves'),
+    baseline=freeze({...original,preferences:freeze({...original.preferences,nudge:freeze({enabled:true,nudgeAfter:40,breakMinutes:6,sound:true})})});
+  const a={installationId:'inst_bf2_nudge_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:baseline,journal:null};
+  const b={installationId:'inst_bf2_nudge_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:baseline,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,nudge:freeze({...a.personal.preferences.nudge,nudgeAfter:50})})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,nudge:freeze({...b.personal.preferences.nudge,breakMinutes:10})})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.nudge.nudgeAfter,50);
+  assert.equal(b.personal.preferences.nudge.breakMinutes,10);
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,0,'independent nudge leaves do not cause a false conflict');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,nudge:freeze({...a.personal.preferences.nudge,nudgeAfter:55})})});await A.upload();
+  b.personal=freeze({...b.personal,preferences:freeze({...b.personal.preferences,nudge:freeze({...b.personal.preferences.nudge,nudgeAfter:60,breakMinutes:12})})});
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.personal.preferences.nudge.nudgeAfter,60,'a true same-leaf reminder conflict keeps the local value');
+  assert.equal(b.personal.preferences.nudge.breakMinutes,12,'a separate local reminder edit survives');
+  assert.equal(b.reviews.open().filter(review=>review.subject==='personal').length,1,'the one same-leaf reminder conflict remains reviewable');
+  const nudgeAlternative=b.reviews.open().find(review=>review.subject==='personal').kept.preferences.nudge;
+  assert.equal(nudgeAlternative.breakMinutes,b.personal.preferences.nudge.breakMinutes,
+    'the locally authored independent break length is not reintroduced as a review choice');
+  assert.notEqual(nudgeAlternative.nudgeAfter,b.personal.preferences.nudge.nudgeAfter,
+    'only the competing interval is retained as an alternative');
+  b.keptSelections={'nudge:nudgeAfter':'use'};
+  assert.equal((await B.reviewKept()).reviewed,1,'the review permits selecting exactly the other reminder interval');
+  b.keptSelections=null;
+  assert.equal(b.personal.preferences.nudge.nudgeAfter,55);
+  assert.equal(b.personal.preferences.nudge.breakMinutes,12,'accepting the remote interval cannot replace the unrelated break length');
+  assert.deepEqual(b.reviews.open(),[]);
 }
 
 // Restoring an older version reaches every device: the restoring device makes
@@ -764,10 +1378,303 @@ let syncWorld=null;
   const keptProgress=a.reviews.open().find(review=>review.subject==='session');assert.equal(keptProgress.kept.snapshot.label,'A-PROGRESS','its own progress is kept for review');assert.equal(keptProgress.kept.status,'suspended');
 }
 
-// Continue here pressed before this device took in the other's newest
-// upload. That upload, saved before the takeover, still names the other
-// device; Drive's claim names this one, so the sync keeps the session here.
-// A later takeover (a newer claim) still stops it.
+// BF-1R1: first catch-up after B saves the old day AND starts a newer day.
+// An unchanged A is already covered by the shared ancestor; A's genuinely
+// later work must survive as a single unresolved version, not an obsolete
+// Active Session that keeps triggering previous-day warnings.
+for(const variant of ['unchanged','late','last-tick']){
+  const lateWork=variant==='late',finalTick=variant==='last-tick';
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,day='2026-08-27',later='2026-08-28';
+  const suffix=variant.replaceAll('-','_');
+  const a={installationId:'inst_bf1r1_old_'+suffix,records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1r1'),activeSession:null,schedule:'',personal:personal('BF1R1 User'),journal:null};
+  const b={installationId:'inst_bf1r1_new_'+suffix,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1R1 User'),journal:null};
+  const A=device(a),B=device(b);
+  a.activeSession=session(day,'SHARED-OLD-DAY',{runningOn:a.installationId,revision:10});
+  a.schedule=a.activeSession.scheduleText;a.running=true;a.yieldAddsProgress=finalTick;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  b.records.set(day,record(day,'saved on B before the new day','2026-08-28T02:00:00.000Z'));
+  b.activeSession=session(later,'B-NEXT-DAY',{runningOn:b.installationId,revision:13});
+  b.schedule=b.activeSession.scheduleText;b.running=true;
+  await B.upload();
+  if(lateWork){
+    a.activeSession=session(day,'A-UNSYNCED-LATE-WORK',{runningOn:a.installationId,revision:14});
+    a.schedule=a.activeSession.scheduleText;
+  }
+  assert.equal((await A.sync()).cancelled,false,'a newer-day checkpoint and old Saved Day must converge together');
+  assert.equal(a.activeSession.date,later,'the obsolete previous-day Active Session cannot suppress the new day');
+  assert.equal(a.activeSession.snapshot.label,'B-NEXT-DAY');
+  assert.equal(a.running,false,'the old device must stop executing the prior day');
+  assert.equal(a.records.get(day)?.reflection,'saved on B before the new day');
+  const oldCopies=()=>a.reviews.open().filter(review=>review.subject==='session'&&review.kept?.date===day);
+  assert.equal(oldCopies().length,lateWork||finalTick?1:0,'only genuinely unsaved old work is retained');
+  if(lateWork||finalTick)assert.equal(oldCopies()[0].kept.snapshot.label,lateWork?'A-UNSYNCED-LATE-WORK':'A-FINAL-TICK');
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(oldCopies().length,lateWork||finalTick?1:0,'replay of an already settled day cannot enqueue a second review');
+}
+
+// A shared baseline that contained NO record does not justify treating an
+// explicit post-base deletion as unchanged against a separately created Day.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const date='2026-09-11',a={installationId:'inst_sem_absent_a',records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('absent'),activeSession:null,schedule:'',personal:personal('Absent QA'),journal:null},
+    b={installationId:'inst_sem_absent_b',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('Absent QA'),journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  a.records.set(date,record(date,'newly created on A','2026-09-11T10:00:00.000Z'));
+  b.deletions=[{date,deletedAt:'2026-09-11T18:00:00.000Z'}];
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  const pending=a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date);
+  assert.equal(pending.length,1,'independent creation versus explicit deletion stays reviewable without a shared record');
+  assert.equal(pending[0].kept?.reflection,'newly created on A','the newer deletion must not erase the only surviving study evidence');
+}
+// BF-C4.1: a real shared semantic ancestor prevents false reviews when
+// local changes only touch save metadata and the other device changes study.
+for(const variant of ['remote-edit','remote-delete','local-edit','both-edit']){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const date='2026-09-12',a={installationId:'inst_sem_day_a_'+variant.replaceAll('-','_'),records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('semantic'),activeSession:null,schedule:'',personal:personal('Semantic QA'),journal:null},
+    b={installationId:'inst_sem_day_b_'+variant.replaceAll('-','_'),records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('Semantic QA'),journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  a.records.set(date,revisionedRecord(date,'shared study',17,'2026-09-12T09:00:00.000Z'));
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.ok(a.reconciliationBase.semanticDays[date], 'new checkpoint stores a distinct semantic Day fingerprint');
+  if(variant==='local-edit'||variant==='both-edit')a.records.set(date,freeze({...a.records.get(date),reflection:'A added content',sourceRevision:19}));
+  else a.records.set(date,freeze({...a.records.get(date),savedAt:'2026-09-12T11:00:00.000Z',updatedAt:'2026-09-12T11:00:00.000Z',sourceRevision:950}));
+  if(variant==='remote-delete'){
+    b.records.delete(date);b.deletions=[{date,deletedAt:'2026-09-12T12:00:00.000Z'}];
+  }else if(variant==='local-edit'){
+    b.records.set(date,freeze({...b.records.get(date),savedAt:'2026-09-12T12:00:00.000Z',updatedAt:'2026-09-12T12:00:00.000Z',sourceRevision:997}));
+  }else b.records.set(date,freeze({...b.records.get(date),reflection:'B added content',updatedAt:'2026-09-12T12:00:00.000Z'}));
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  const kept=a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date);
+  if(variant==='remote-delete')assert.equal(a.records.has(date),false,'remote deletion wins against local metadata-only refresh');
+  else assert.equal(a.records.get(date)?.reflection,variant==='local-edit'?'A added content':'B added content','one-sided meaningful study change wins');
+  assert.equal(kept.length,variant==='both-edit'?1:0,'only two different substantive edits create a kept version');
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date).length,variant==='both-edit'?1:0,`repeated sync remains idempotent: ${variant}; local=${a.records.get(date)?.reflection||'absent'}; deleted=${a.deletions.map(x=>x.date)}; reviews=${a.reviews.open().filter(item=>item.subject==='savedDay'&&item.ref===date).map(x=>x.kept?.reflection||'deletion')}`);
+}
+// Session content ancestry must not hand the running clock to a device merely
+// because metadata differs. It allows the verified owner's actual progress
+// to replace an unmodified semantic branch without a false review.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const date='2026-09-13',a={installationId:'inst_sem_session_a',records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('session'),activeSession:null,schedule:'',personal:personal('Session QA'),journal:null},
+    b={installationId:'inst_sem_session_b',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('Session QA'),journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  a.activeSession=revisionedSession(date,'SHARED',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const before=a.activeSession,sharedFingerprint=a.reconciliationBase.sessionContentFingerprint;
+  assert.ok(sharedFingerprint&&sharedFingerprint!==a.reconciliationBase.sessionFingerprint,'semantic and full session hashes remain distinct');
+  a.activeSession=freeze({...before,revision:11,updatedAt:'2026-09-13T10:00:00.000Z'});
+  b.activeSession=revisionedSession(date,'B-PROGRESS',{runningOn:b.installationId,revision:12,contentRevision:8});
+  b.schedule=b.activeSession.scheduleText;b.running=true;await B.upload();
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession.snapshot.label,'B-PROGRESS','actual later study work is adopted');
+  assert.equal(a.activeSession.runningOn,b.installationId,'the remote execution owner retains ownership');
+  assert.equal(a.running,false,'old owner stops its clock');
+  assert.equal(a.reviews.open().filter(item=>item.subject==='session').length,0,'metadata-only ancestor does not manufacture a kept session');
+}
+
+// BF-C4: A local save-acknowledged session may differ from its full-record
+// ancestor only in control metadata. The *real* Saved Day evidence predicate
+// is the independent, content-based retirement proof. Unacknowledged work,
+// deletions, and a later genuinely divergent session never inherit that proof.
+for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-09-05',later='2026-09-06',a={
+    installationId:'inst_bfc4_a_'+variant.replaceAll('-','_'),records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('bfc4'),activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null
+  },b={
+    installationId:'inst_bfc4_b_'+variant.replaceAll('-','_'),records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null
+  };
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  a.activeSession=revisionedSession(day,'BF-C4-SHARED',{runningOn:a.installationId,revision:10,contentRevision:5,savedRevision:0});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  if(variant==='deleted')b.deletions=[{date:day,deletedAt:'2026-09-06T07:00:00.000Z'}];
+  else b.records.set(day,revisionedRecord(day,'saved on B before the new day',104,'2026-09-06T07:00:00.000Z'));
+  b.activeSession=revisionedSession(later,'BF-C4-NEXT',{runningOn:b.installationId,revision:13,contentRevision:1});
+  b.schedule=b.activeSession.scheduleText;b.running=true;await B.upload();
+  const old=a.activeSession,snapshot=freeze({...old.snapshot,
+    label:variant==='divergent'?'BF-C4-UNSAVED-LATE-WORK':old.snapshot.label,
+    contentRevision:variant==='divergent'?6:old.snapshot.contentRevision,
+    savedRevision:variant==='metadata-covered'||variant==='deleted'?5:0,
+    updatedAt:'2026-09-05T22:00:00.000Z'});
+  a.activeSession=freeze({...old,revision:11,snapshot,updatedAt:'2026-09-05T22:00:00.000Z'});
+  assert.notEqual(await processing.run('checksum',{value:CanonicalModule.signature(a.activeSession),algorithm:'sha256'}),
+    a.reconciliationBase.sessionFingerprint,'the full-record ancestor must differ in every BF-C4 case');
+  assert.equal((await A.sync()).cancelled,false);
+  const keptOld=a.reviews.open().filter(item=>item.subject==='session'&&item.kept?.date===day);
+  if(variant==='metadata-covered'){
+    assert.equal(a.activeSession?.date,later,'canonically acknowledged study evidence is retired despite changed control metadata');
+    assert.equal(keptOld.length,0,'control metadata must not manufacture an unsaved-study review');
+    assert.equal((await A.sync()).cancelled,false);
+    assert.equal(a.reviews.open().filter(item=>item.subject==='session'&&item.kept?.date===day).length,0,'repeated sync stays review-free');
+  }else if(variant==='deleted'){
+    assert.equal(a.activeSession?.date,day,'a deleted or absent Saved Day cannot prove that a local session is stored');
+    assert.equal(keptOld.length,0,'the live local session is retained rather than archived as an obsolete day');
+  }else{
+    assert.equal(a.activeSession?.date,later,'the newer-day session may display after preserving the old branch');
+    assert.equal(keptOld.length,1,variant==='divergent'
+      ?'genuine unsaved study progress must be kept for review'
+      :'a matching Day without a canonical save acknowledgement cannot prove retirement');
+  }
+}
+
+// BF-C4: when the verified descendant has *ended* the same-day session,
+// an acknowledged local copy need not exactly match its legacy full hash.
+// No new Saved Day fingerprint format or ownership authority is introduced.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-09-07',a={installationId:'inst_bfc4_end_a',records:new Map(),deletions:[],noteDeletions:[],
+    notes:syncWorld.note('bfc4-end'),activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null},
+    b={installationId:'inst_bfc4_end_b',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,schedule:'',personal:personal('BF-C4 User'),journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  a.activeSession=revisionedSession(day,'BF-C4-ENDED',{runningOn:a.installationId,revision:7,contentRevision:3,savedRevision:0});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  b.records.set(day,revisionedRecord(day,'saved on B',501,'2026-09-07T19:00:00.000Z'));
+  b.activeSession=null;b.schedule='';b.running=false;await B.upload();
+  const previous=a.activeSession;
+  a.activeSession=freeze({...previous,revision:8,updatedAt:'2026-09-07T19:01:00.000Z',
+    snapshot:freeze({...previous.snapshot,savedRevision:3,updatedAt:'2026-09-07T19:01:00.000Z'})});
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession,null,'verified remote end and acknowledged matching Day may retire a metadata-changed session');
+  assert.equal(a.reviews.open().filter(item=>item.subject==='session').length,0,'an acknowledged end creates no phantom kept version');
+}
+
+// BF-1: Continue Here is fenced by the exact verified Drive session content.
+// The read is side-effect free: B may have a stale local copy, but it claims
+// the newest shared session without reconciling unrelated domains. Pure
+// ownership changes create no review. When B saves/ends the session, A
+// converges to the Saved Day and no Active Session without an unsaved warning
+// or kept version.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,day='2026-08-31';
+  const a={installationId:'inst_bf1_session_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('bf1'),activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const b={installationId:'inst_bf1_session_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const A=device(a,{claims:true}),B=device(b,{claims:true}),keptSessions=state=>state.reviews.open().filter(review=>review.subject==='session');
+  a.activeSession=revisionedSession(day,'BF1-SHARED',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const source=await B.handoffSource();
+  assert.equal(source.status,'completed');assert.equal(source.session.runningOn,a.installationId);assert.equal(source.session.snapshot.label,'BF1-SHARED');
+  const bBefore=structuredClone(b.activeSession),observedContentFingerprint=await sessionContentFingerprint(source.session);
+  assert.deepEqual(b.activeSession,bBefore,'reading the handoff source must not reconcile or mutate B');
+  const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint,expectedCheckpointId:source.checkpointId,handoffToken:'11111111-1111-4111-8111-111111111111',revision:11});
+  assert.equal(claimed.status,'completed');
+  b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',revision:11,suspendedAt:null,updatedAt:'2026-08-31T09:01:00.000Z'});b.schedule=b.activeSession.scheduleText;b.running=true;
+
+  // Before B publishes its first owned checkpoint, Drive still names A. The
+  // claim stops A but that stale checkpoint must not create a review or revert
+  // ownership.
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.running,false,'the old owner stops from the handoff claim');
+  assert.equal(keptSessions(a).length,0,'a stale pre-claim checkpoint does not manufacture a session review');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession.runningOn,b.installationId,'A follows B once B publishes the owned session');
+  assert.equal(keptSessions(a).length,0,'ownership-only movement remains review-free');
+
+  // B saves and ends the exact session. The released ownership epoch plus the
+  // no-session checkpoint is the causal end transition; sourceRevision is data
+  // provenance, not cross-device ancestry proof.
+  b.records.set(day,revisionedRecord(day,'saved after BF1 handoff',7,'2026-08-31T09:05:00.000Z'));b.activeSession=null;b.schedule='';b.running=false;
+  await B.upload();
+  assert.equal((await A.sync()).cancelled,false,'the old owner must converge to the Saved Day without a decision');
+  assert.equal(a.activeSession,null,'A retires the obsolete Active Session after B ends it');
+  assert.equal(a.records.get(day).reflection,'saved after BF1 handoff');
+  assert.equal(keptSessions(a).length,0,'a legitimate handoff and save leave no Active Session kept version');
+}
+
+// Post-handoff A can accrue focus before detecting B's claim. A verified Day
+ // covering those seconds must not create a redundant kept session. A shorter
+ // Day, or more time caught during the final yield, still requires review.
+ for(const variant of ['covered-active','covered-ended','shorter-day','final-tick-uncovered']){
+   syncWorld.drive.clear();syncWorld.claims.clear();
+   const day='2026-08-31',
+     a={installationId:'inst_late_covered_a',records:new Map(),deletions:[],noteDeletions:[],
+       notes:syncWorld.note('covered'),activeSession:null,schedule:'',personal:personal('Late focus QA'),journal:null},
+     b={installationId:'inst_late_covered_b',records:new Map(),deletions:[],noteDeletions:[],
+       notes:{},activeSession:null,schedule:'',personal:personal('Late focus QA'),journal:null};
+   const A=syncWorld.device(a,{claims:true}),B=syncWorld.device(b,{claims:true});
+   a.activeSession=revisionedSession(day,'SHARED',{runningOn:a.installationId,revision:10,
+     contentRevision:7,updatedAt:'2026-08-31T08:00:00.000Z'});
+   a.schedule=a.activeSession.scheduleText;a.running=true;
+   await A.upload();assert.equal((await B.sync()).cancelled,false);
+   const source=await B.handoffSource();
+   const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,
+     observedRevision:source.session.revision,
+     observedContentFingerprint:await sessionContentFingerprint(source.session),
+     expectedCheckpointId:source.checkpointId,handoffToken:'99999999-9999-4999-8999-999999999999',
+     revision:11});
+   assert.equal(claimed.status,'completed');
+   b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',
+     revision:11,suspendedAt:null,updatedAt:'2026-08-31T09:05:00.000Z'});
+   b.schedule=b.activeSession.scheduleText;b.running=true;
+   const old=a.activeSession;
+   a.activeSession=freeze({...old,revision:12,updatedAt:'2026-08-31T09:05:30.000Z',
+     snapshot:freeze({...old.snapshot,contentRevision:8,
+       taskState:freeze({focus:freeze({actual:freeze({seconds:60})})}),
+       updatedAt:'2026-08-31T09:05:30.000Z'})});
+   a.yieldAddsProgress=variant==='final-tick-uncovered';
+   b.records.set(day,freeze({...revisionedRecord(day,'saved on B',501,'2026-08-31T10:00:00.000Z'),
+     results:freeze({focus:freeze({actualSeconds:variant==='shorter-day'?40:90})})}));
+   if(variant==='covered-ended'){b.activeSession=null;b.schedule='';b.running=false;}
+   await B.upload();
+   assert.equal((await A.sync()).cancelled,false,variant);
+   assert.equal(a.running,false,variant+' old execution must stop');
+   assert.equal(a.activeSession?.runningOn,variant==='covered-ended'?undefined:b.installationId,
+     variant+' checkpoint ownership/end remains authoritative');
+   const kept=a.reviews.open().filter(row=>row.subject==='session'&&row.kept?.date===day);
+   const expectedKept=['shorter-day','final-tick-uncovered'].includes(variant)?1:0;
+   assert.equal(kept.length,expectedKept,
+     variant+' must retain only evidence not covered by the verified Saved Day');
+   if(expectedKept)assert.equal(kept[0].kept.snapshot.taskState?.focus?.actual?.seconds,
+     variant==='shorter-day'?60:130,'unsaved post-handoff time is retained');
+   else{
+     assert.equal((await A.sync()).cancelled,false,variant+' repeat sync');
+     assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,
+       variant+' must not manufacture a repeated review');
+   }
+ }
+
+// BF-1: a Drive claim that exists but cannot be verified is not an absent
+// claim. Sync must stop without applying the still-old shared checkpoint;
+// repairing the remote claim then permits the original owner to yield.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note,claims}=syncWorld,day='2026-08-31';
+  const a={installationId:'inst_bf1_uncertain_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('claim'),activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const b={installationId:'inst_bf1_uncertain_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('BF1 User'),journal:null};
+  const A=device(a,{claims:true}),B=device(b,{claims:true});
+  a.activeSession=revisionedSession(day,'OWNER-A',{runningOn:a.installationId,revision:20,contentRevision:5});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const source=await B.handoffSource(),fingerprint=await sessionContentFingerprint(source.session);
+  const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:fingerprint,expectedCheckpointId:source.checkpointId,handoffToken:'22222222-2222-4222-8222-222222222222',revision:21});
+  assert.equal(claimed.status,'completed');
+  const [id,file]=[...claims.entries()].at(-1);
+  claims.set(id,freeze({...file,blob:new Blob(['invalid protected claim'])}));
+  await assert.rejects(A.sync(),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN','unverifiable ownership must fail closed rather than fall back to stale checkpoint ancestry');
+  assert.equal(a.activeSession.runningOn,a.installationId,'claim read failure must not replace local Active Session');
+  assert.equal(a.running,true,'failure to verify the remote ownership did not authorize a local state transition');
+  claims.set(id,file);
+  assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.running,false,'a verified remote owner stops the old runtime before changing the stored session');
+}
+
+// Continue Here reads Drive's newest session even when this device's local copy
+// is stale. Work made by the current owner after the claim stays current; work
+// the old owner records after the observed handoff boundary is kept exactly
+// once for review rather than stealing ownership back.
 {
   syncWorld.drive.clear();syncWorld.claims.clear();
   const {device,note}=syncWorld,day='2026-08-31';
@@ -775,30 +1682,35 @@ let syncWorld=null;
   const b={installationId:'inst_claim_sync_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Sync User'),journal:null};
   const A=device(a,{claims:true}),B=device(b,{claims:true}),running=(state,label,revision)=>{state.activeSession=session(day,label,{runningOn:state.installationId,status:'active',revision});state.schedule=state.activeSession.scheduleText;state.running=true;};
   const keptSessions=state=>state.reviews.open().filter(review=>review.subject==='session');
-  running(a,'A-1',10);await A.upload();
-  assert.equal((await B.sync()).cancelled,false);assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-1');
-  // A records more and uploads; B has not taken it in when it continues here.
+  running(a,'A-1',10);await A.upload();assert.equal((await B.sync()).cancelled,false);
   running(a,'A-2',11);await A.upload();
-  const claimed=await B.claim({date:day,observedOwner:a.installationId,observedRevision:10,revision:12});
-  assert.equal(claimed.status,'completed','B claims the session from its view of A-1');
-  running(b,'B-CONTINUED',12);
-  // A cannot upload past B's claim.
-  running(a,'A-3',13);await assert.rejects(A.upload(),error=>error?.code==='REPOSITORY_SESSION_OWNERSHIP_AHEAD','the device taken over cannot upload over the claim');
-  assert.equal((await B.sync()).cancelled,false,'B takes in A’s upload');
-  assert.equal(b.running,true,'the session keeps running on B');assert.equal(b.activeSession.runningOn,b.installationId);assert.equal(b.activeSession.snapshot.label,'B-CONTINUED','an upload saved before B took over does not take the session back');
-  assert.equal(keptSessions(b).length,0,'nothing is kept for review on B');
-  assert.equal(b.notes.Shared.text,'first','everything else merges as usual');
-  await B.upload();
-  assert.equal((await A.sync()).cancelled,false);
-  assert.equal(a.running,false,'A stops its timer');assert.equal(a.activeSession.runningOn,b.installationId,'A shows the session running on B');
-  assert.ok(keptSessions(a).some(review=>review.kept.snapshot.label==='A-3'),'A keeps what it recorded since for review');
-  // A takes it back with a newer claim: B, with progress of its own, stops.
-  const back=await A.claim({date:day,observedOwner:b.installationId,observedRevision:12,revision:14});
-  assert.equal(back.status,'completed');running(a,'A-BACK',14);await A.upload();
-  running(b,'B-PROGRESS',15);
+  const source=await B.handoffSource();
+  assert.equal(source.session.snapshot.label,'A-2','Continue Here reads the newest verified Drive session');
+  assert.equal(b.activeSession.snapshot.label,'A-1','the handoff read itself does not mutate B');
+  const claim=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,handoffToken:'33333333-3333-4333-8333-333333333333',revision:12});
+  assert.equal(claim.status,'completed');
+  b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',revision:12,suspendedAt:null,updatedAt:new Date().toISOString()});b.schedule=b.activeSession.scheduleText;b.running=true;
+  // Both devices may now make progress. A cannot publish through the ownership
+  // fence; B can continue locally without first importing unrelated data.
+  running(a,'A-3',13);await assert.rejects(A.upload(),error=>error?.code==='REPOSITORY_SESSION_OWNERSHIP_AHEAD','the old owner cannot publish past B’s claim');
+  running(b,'B-CONTINUED',13);
+  assert.equal((await B.sync()).cancelled,false,'B may reconcile the pre-claim Drive head without losing ownership');
+  assert.equal(b.running,true);assert.equal(b.activeSession.runningOn,b.installationId);assert.equal(b.activeSession.snapshot.label,'B-CONTINUED');
+  assert.equal(keptSessions(b).length,0,'the current owner does not review the stale pre-claim copy');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.running,false);assert.equal(a.activeSession.runningOn,b.installationId);assert.equal(a.activeSession.snapshot.label,'B-CONTINUED');
+  assert.equal(keptSessions(a).filter(review=>review.kept?.snapshot?.label==='A-3').length,1,'late old-owner progress is kept exactly once');
+
+  // A takes ownership back from the newest B state, then both sides diverge;
+  // B's late progress is likewise kept once.
+  const backSource=await A.handoffSource();
+  const back=await A.claim({date:day,observedOwner:backSource.session.runningOn,observedRevision:backSource.session.revision,observedContentFingerprint:await sessionContentFingerprint(backSource.session),expectedCheckpointId:backSource.checkpointId,handoffToken:'44444444-4444-4444-8444-444444444444',revision:14});
+  assert.equal(back.status,'completed');
+  a.activeSession=freeze({...backSource.session,runningOn:a.installationId,status:'active',revision:14,suspendedAt:null,updatedAt:new Date().toISOString()});a.schedule=a.activeSession.scheduleText;a.running=true;
+  running(a,'A-BACK',15);await A.upload();running(b,'B-PROGRESS',16);
   assert.equal((await B.sync()).cancelled,false);
-  assert.equal(b.running,false,'a takeover with a newer claim still stops B');assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-BACK');
-  assert.ok(keptSessions(b).some(review=>review.kept.snapshot.label==='B-PROGRESS'),'B keeps its progress for review');
+  assert.equal(b.running,false);assert.equal(b.activeSession.runningOn,a.installationId);assert.equal(b.activeSession.snapshot.label,'A-BACK');
+  assert.equal(keptSessions(b).filter(review=>review.kept?.snapshot?.label==='B-PROGRESS').length,1,'late B progress is kept exactly once after A takes ownership back');
 }
 
 // Taken over and already saved as that day's Saved Day on the other device
@@ -906,6 +1818,220 @@ let mergeRuleCases=0;
     assert.equal((await A.sync()).cancelled,false);assert.deepEqual(snapshot(a),settled,'a repeated sync changes nothing');
     assert.equal((await B.sync()).cancelled,false);assert.deepEqual(snapshot(b),settled,'nor does a sync of what this device uploaded');
   });
+}
+
+// BF-C6.3 (J): failed ancestry establishment is diagnosed and the
+// verified canonical merge is not misrepresented as a wholly established
+// three-way baseline. A false write receipt is as important as a throw.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,baseline=personal('Ancestry starting point');
+  const a={installationId:'inst_c63_base_a',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,personal:baseline,journal:null};
+  const b={installationId:'inst_c63_base_b',records:new Map(),deletions:[],noteDeletions:[],
+    notes:{},activeSession:null,personal:baseline,journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const previousId=b.reconciliationBase?.checkpointId;
+  a.personal=freeze({...a.personal,preferences:freeze({...a.personal.preferences,quote:'Remote fact 1'})});
+  await A.upload();b.failBaseWrite='false';
+  const first=await B.sync();
+  assert.equal(first.cancelled,false,'a committed, verified merge is not rolled back because local ancestry is unavailable');
+  assert.equal(b.personal.preferences.quote,'Remote fact 1','reconciled Personal Data remains canonical');
+  assert.equal(b.reconciliationBase?.checkpointId,previousId,'a false base write cannot advance the ancestor');
+  assert.ok(B.diagnostics.some(([name])=>name==='reconciliation-ancestry-not-established'),
+    'false ancestry write receipts must be reported');
+  b.failBaseWrite='';
+  assert.equal((await B.sync()).cancelled,false,'a later sync may establish the local ancestry');
+}
+
+
+// Older local repositories may already contain two semantically equivalent
+// *open* PendingReview identities. Refresh must atomically publish a
+// content-free tombstone for the redundant identity, retain the oldest, and
+// never suppress a distinct ancestor, without rewriting the user's Note.
+{
+  const older=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Other device note'},base:{text:'Shared ancestor'},keptAt:'2026-08-28T09:00:00.000Z'}),
+    newer=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Other device note'},base:{text:'Shared ancestor'},keptAt:'2026-08-28T10:00:00.000Z'}),
+    otherBase=pendingReviewCodec.create({subject:'note',ref:'Polity',kept:{text:'Other device note'},base:{text:'Different ancestor'},keptAt:'2026-08-28T11:00:00.000Z'});
+  const state={records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:personal('Existing'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  // Simulate durable rows written by a previous build before semantic dedup.
+  for(const row of [newer,older,otherBase])state.reviews.store.set(row.id,row);
+  const h=createHarness(state);
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),0,'no canonical Note exists to converge the actual retained alternatives');
+  const after=await state.reviews.ports.pendingReviewsList();
+  assert.equal(after.filter(row=>!row.resolvedAt).length,2,'one duplicate retired, distinct ancestry retained');
+  assert.ok(!after.find(row=>row.id===older.id).resolvedAt,'oldest open identity remains stable');
+  assert.ok(after.find(row=>row.id===newer.id).resolvedAt&&after.find(row=>row.id===newer.id).kept===null,
+    'a strict replicated tombstone retires the redundant older-format review');
+  assert.ok(!after.find(row=>row.id===otherBase.id).resolvedAt,'different merge base is not silently lost');
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),0,'legacy cleanup is idempotent');
+  await state.reviews.ports.pendingReviewsMerge([newer]);
+  assert.ok((await state.reviews.ports.pendingReviewsReadItems([newer.id]))[0].resolvedAt,'reimport does not resurrect a repaired duplicate');
+}
+
+// BF-C6.3: semantically matching Pending Reviews must be acknowledged as
+// replicated tombstones, not left in the user-facing count. Content that
+// differs, deletions without a positive receipt, and running sessions wait.
+{
+  const day='2026-08-29';
+  const plan={id:'plan-c63-metadata-only',label:'Study',scheduleText:'06:00 | 45 | Focus | work | Polity | pages | 10',
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'};
+  const local=freeze({...personal('Converged'),plans:freeze({draft:'Draft',savedPlans:freeze([plan]),defaultId:plan.id})});
+  const remote=freeze({...local,plans:freeze({...local.plans,savedPlans:freeze([{...plan,updatedAt:'2026-08-30T09:00:00.000Z'}])})});
+  const note=normalizeArea({key:'Shared',label:'Note',text:'Finished note',updatedAt:'2026-08-29T09:00:00.000Z'});
+  const saved=record(day,'Same content','2026-08-29T09:00:00.000Z');
+  const older={...saved,savedAt:'2026-08-28T12:00:00.000Z',updatedAt:'2026-08-28T12:00:00.000Z',sourceRevision:4};
+  const deletedDate='2026-08-28',deletedAt='2026-08-30T12:00:00.000Z';
+  const state={installationId:'inst_c63_converged',records:new Map([[day,saved]]),
+    deletions:[{date:deletedDate,deletedAt}],
+    notes:{Shared:note},noteDeletions:[{key:'Deleted',deletedAt}],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  const open=[
+    pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote}),
+    pendingReviewCodec.create({subject:'note',ref:'Shared',kept:{text:'Finished note'}}),
+    pendingReviewCodec.create({subject:'savedDay',ref:day,kept:older}),
+    pendingReviewCodec.create({subject:'note',ref:'Other',kept:null}),
+    pendingReviewCodec.create({subject:'personal',ref:'personal',kept:personal('Truly other')}),
+    pendingReviewCodec.create({subject:'note',ref:'Deleted',kept:null}),
+    pendingReviewCodec.create({subject:'savedDay',ref:deletedDate,kept:null})
+  ];
+  await state.reviews.ports.pendingReviewsMerge(open);
+  const h=createHarness(state);
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),5,
+    'semantic equality or a committed deletion tombstone retires each verified alternative exactly once');
+  assert.equal(state.reviews.open().length,2,'unproved deletion and genuinely divergent Personal Data remain open');
+  const rows=await state.reviews.ports.pendingReviewsReadItems(open.slice(0,3).map(review=>review.id));
+  assert.ok(rows.every(row=>row.resolvedAt&&row.kept===null),
+    'the converged alternatives have durable, content-free resolution receipts');
+  const deletions=await state.reviews.ports.pendingReviewsReadItems(open.slice(-2).map(review=>review.id));
+  assert.ok(deletions.every(row=>row.resolvedAt&&row.kept===null),
+    'verified existing deletion tombstones allow resolving already-applied deletion choices');
+  assert.equal(await h.runtime.controller.resolveConvergedKeptVersions(),0,'repeated convergence is idempotent');
+}
+{
+  const plan={id:'plan-c63-no-metadata',label:'Metadata neutral',scheduleText:'08:00 | 60 | Focus | work | Ethics | pages | 6',
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'};
+  const local=freeze({...personal('Same'),plans:freeze({draft:null,savedPlans:freeze([plan]),defaultId:plan.id})});
+  const remote=freeze({...local,plans:freeze({...local.plans,savedPlans:freeze([{...plan,updatedAt:'2026-08-30T09:00:00.000Z'}])})});
+  const state={records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1,
+    'an old metadata-only alternative can be resolved without a meaningless plan-choice dialog');
+  assert.equal(h.prompts.filter(item=>item.title==='Kept versions').length,0,
+    'updatedAt-only changes must never become saved-plan choices');
+  assert.deepEqual(state.personal,local,'metadata-only acknowledgement must not rewrite canonical Personal Data');
+}
+
+
+// BF-C8.1: an unknown shared ancestor must not manufacture a Personal Data
+// conflict solely because identical authored Saved Plans have new timestamps.
+for(const changedAuthoredPlan of [false,true]){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const basePlan=freeze({id:'plan-c81-semantic',label:'Reading',
+    scheduleText:'08:00 | 60 | Reading | work | Polity | pages | 20',
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'});
+  const remotePlan=freeze({...basePlan,createdAt:'2026-08-30T08:00:00.000Z',
+    updatedAt:'2026-08-30T09:00:00.000Z',
+    ...(changedAuthoredPlan?{scheduleText:'08:00 | 60 | Different | work | Polity | pages | 20'}:{})});
+  const here=freeze({...personal('Same author'),plans:freeze({draft:'My draft',
+    savedPlans:freeze([basePlan]),defaultId:basePlan.id})});
+  const there=freeze({...here,plans:freeze({...here.plans,savedPlans:freeze([remotePlan])})});
+  const a={installationId:'inst_c81_remote',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:there,journal:null};
+  const b={installationId:'inst_c81_local',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:here,journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.reviews.open().filter(item=>item.subject==='personal').length,
+    changedAuthoredPlan?1:0,'No-ancestry decisions must consider authored Saved Plan meaning, not dates.');
+  assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.reviews.open().filter(item=>item.subject==='personal').length,
+    changedAuthoredPlan?1:0,'Repeated sync does not manufacture an additional kept Personal Data review.');
+}
+
+// No shared ancestry also means that an authored reordering cannot be
+// dismissed as bookkeeping, even if every Saved Plan body is identical.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const plan=(id,label)=>freeze({id,label,
+    scheduleText:'08:00 | 60 | '+label+' | work | Polity | pages | 20',
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'});
+  const p=plan('plan-c81-order-one','First'),q=plan('plan-c81-order-two','Second');
+  const local=freeze({...personal('Order owner'),plans:freeze({draft:null,savedPlans:freeze([p,q]),defaultId:null})});
+  const remote=freeze({...local,plans:freeze({...local.plans,savedPlans:freeze([q,p])})});
+  const a={installationId:'inst_c81_order_remote',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:remote,journal:null};
+  const b={installationId:'inst_c81_order_local',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  const A=syncWorld.device(a),B=syncWorld.device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual(b.personal.plans.savedPlans.map(row=>row.id),[p.id,q.id],
+    'Without ancestry the local authored order is not silently replaced.');
+  assert.equal(b.reviews.open().filter(row=>row.subject==='personal').length,1,
+    'Conflicting saved-plan order must remain reviewable without a shared base.');
+}
+
+// The original unsaved-versus-empty distinction and long Saved Plan bodies
+// must reach the same read-only comparison UI, without mutating Personal Data.
+{
+  const planId='plan-c82-comparison';
+  const schedule=Array.from({length:14},(_,i)=>'06:00 | 30 | Item '+i+' | work | Ethics | pages | 4').join('\n');
+  const oldPlan=freeze({id:planId,label:'First name',scheduleText:schedule,
+    createdAt:'2026-08-29T08:00:00.000Z',updatedAt:'2026-08-29T09:00:00.000Z'});
+  const newPlan=freeze({...oldPlan,label:'Second name',
+    scheduleText:schedule+'\n08:00 | 30 | Additional | work | Ethics | pages | 4'});
+  const local=freeze({...personal('Plan inspector'),plans:freeze({draft:null,savedPlans:freeze([oldPlan]),defaultId:planId})});
+  const kept=freeze({...local,plans:freeze({draft:'',savedPlans:freeze([newPlan]),defaultId:planId})});
+  const state={installationId:'inst_c82_full_review',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  const groups=h.prompts.find(item=>item.title==='Kept versions').groups;
+  assert.deepEqual(groups.find(g=>g.label==='Plan · Working draft').comparison,{current:null,kept:''},
+    'An empty authored draft is not falsely presented as the same as never saved.');
+  assert.deepEqual(groups.find(g=>g.label.startsWith('Saved plan ·')).comparison,{
+    current:oldPlan.scheduleText,kept:newPlan.scheduleText,currentLabel:oldPlan.label,keptLabel:newPlan.label
+  },'Saved Plan decisions expose complete schedule texts and competing names.');
+  assert.deepEqual(state.personal,local,'Looking at Kept Versions does not alter canonical Plans.');
+}
+
+// The Kept Versions choice must offer full original text for an independently
+// authored Plan draft, not a preview truncated before the actual divergence.
+{
+  const firstLine='06:00 | 40 | Ethics | work | Ethics | pages | 4';
+  const localDraft=Array.from({length:12},(_,i)=>i===11?firstLine.replace('Ethics','Polity'):firstLine).join('\n');
+  const keptDraft=Array.from({length:12},()=>firstLine).join('\n');
+  const local=freeze({...personal('Draft reviewer'),plans:freeze({draft:localDraft,savedPlans:freeze([]),defaultId:null})});
+  const remote=freeze({...personal('Draft reviewer'),plans:freeze({draft:keptDraft,savedPlans:freeze([]),defaultId:null})});
+  const state={installationId:'inst_c81_draft_compare',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:local,journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'personal',ref:'personal',kept:remote})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
+  const draftGroup=h.prompts.find(item=>item.title==='Kept versions').groups.find(item=>item.label==='Plan · Working draft');
+  assert.deepEqual(draftGroup.comparison,{current:localDraft,kept:keptDraft},
+    'An accessible full-text comparison can display the actual difference beyond the short preview.');
+  assert.equal(state.personal.plans.draft,localDraft,'Inspecting alternatives never changes the local draft.');
+}
+{
+  const state={installationId:'inst_c81_absent_note',records:new Map(),deletions:[],
+    notes:{},noteDeletions:[],activeSession:null,personal:personal('Missing note'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'note',ref:'AbsentNote',kept:{text:'Text preserved for later'}})]);
+  const h=createHarness(state);
+  assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,0);
+  const group=h.prompts.find(item=>item.title==='Kept versions').groups.find(item=>item.label==='Note · absent here');
+  assert.match(group.description,/Recently deleted/u);
+  assert.match(group.description,/only the changed Note fields|not a guaranteed complete/iu,
+    'The dialog explains why a retained field-only alternative cannot create a whole Note.');
+  assert.equal(state.reviews.open().length,1,'Keeping the alternative cannot silently discard its text.');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',mergeRuleCases,preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','a takeover is not undone by an upload saved before it','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

@@ -25,7 +25,7 @@ function fixture({covered='',signedIn=true,expiresInMs=59*MINUTE,both=false,shar
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications}));
   const pending=registry.require('backup-recovery-host',1).createPendingStore(freeze({sourceRevision:()=>current,diagnostics:freeze({capture:noop}),storage:freeze({read:async()=>durable,write:async value=>{durable=value;},remove:async()=>{durable=null;}})}));
   const unexpected=()=>{throw new Error('Unexpected executor in the automatic backup test');};
-  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
+  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,readSession:unexpected,createPublication:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase,establishBase:unexpected,verifyObject:unexpected,inspectCommit:unexpected,
     publish:async(_history,options,executor)=>{
       const expectedInteractive=manual===true&&publishedAt.length===0;
       assert.equal(options.interactive,expectedInteractive,expectedInteractive?'the first publication in the manual-turn case must use the foreground interactive path':'automatic convergence publications never prompt');
@@ -132,21 +132,20 @@ const cases=[];
   cases.push('both locations: each publishes canonical local state independently');
 }
 {
-  // A new device with no study data signs in to Drive. Its backup is skipped
-  // (nothing to upload), so the sync check must still look at Drive: bring in
-  // what is there, or record that it is in step. Bug: it did neither, and the
-  // Connect card waited on "Bring in what's on Google Drive" for good.
+  // A new empty device must still inspect Drive when its automatic upload
+  // is correctly skipped. It must neither publish an empty checkpoint nor
+  // report success without performing the catch-up.
   const id='cp_'+'c'.repeat(32),item=kind=>freeze({kind,id,name:id+(kind==='commit'?'.sdcommit':'.sdcheckpoint'),size:100,createdAt:'2026-10-06T07:30:00.000Z',modifiedAt:'2026-10-06T07:30:00.000Z',remoteId:kind+'-1'});
   const reads=[];
   let t=fixture({shared:true,localEmpty:true,driveList:async({kind})=>({items:kind==='checkpoint'||kind==='commit'?[item(kind)]:[],overflow:false,ignored:0}),
     driveDownload:async()=>{reads.push(t.clock.now());throw Object.assign(new Error('network down'),{code:'DRIVE_NETWORK'});}});
   await tick(t,10*1000);
-  assert.ok(reads.length>0,'an empty device brings in what is on Drive as soon as it signs in');
-  assert.equal(t.publishedAt.length,0,'and uploads nothing');
+  assert.ok(reads.length>0,'an empty device discovers Drive history on sign-in');
+  assert.equal(t.publishedAt.length,0,'an empty device does not overwrite Drive');
   t=fixture({shared:true,localEmpty:true});await tick(t,10*1000);
-  assert.ok(t.runtime.locationStatus('google-drive').sync.syncedAt,'with Drive empty too, the sync is recorded as done');
-  assert.equal(t.publishedAt.length,0);
-  cases.push('an empty device signing in to Drive brings Drive in, or records it is in step');
+  assert.ok(t.runtime.locationStatus('google-drive').sync.syncedAt,'when Drive is also empty, its sync completes');
+  assert.equal(t.publishedAt.length,0,'an empty device publishes nothing');
+  cases.push('empty device: Drive catch-up or verified in-sync, never empty publication');
 }
 {
   // Drive holds a version this device has not taken in. A catch-up that fails

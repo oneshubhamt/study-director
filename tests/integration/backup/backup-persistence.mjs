@@ -75,7 +75,8 @@ const dailyRecordCodec=freeze({
   sanitizeCurrentNote:normalizeNote,
   isSupportedSavedDate:isDate
 });
-const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
+const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item}):null;
+const activeSessionCodec=freeze({sanitizeCurrent:sanitizeActiveSession,contentValue:item=>{const clean=sanitizeActiveSession(item);if(!clean)return null;const snapshot=clean.snapshot&&typeof clean.snapshot==='object'?clean.snapshot:{},{contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_updatedAt,...contentSnapshot}=snapshot;return freeze({date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot:freeze(contentSnapshot)});}});
 const compatibilityCodec=freeze({
   format:'study-director.compatibility-codecs',contractVersion:1,
   dailyRecord:item=>item&&isDate(item.date)?freeze({...item,date:item.date,version:15}):null,
@@ -191,13 +192,13 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
     restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);restoreJournal=null;return true;},
-    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=> '08:00 | 60 | Existing | work | Ethics | block | 1',
-    installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseReadDays:async()=>freeze({}),...keptReviews.ports,reconciliationBaseWrite:async()=>true
+    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],
+    installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),...keptReviews.ports,reconciliationBaseReadDayAncestry:async()=>freeze({}),reconciliationBaseWrite:async()=>true
   }),
   exports:freeze({...testProcessing,followProtection:async()=>false,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
   assets:freeze({get:async id=>{assetGetCalls+=1;return assetRows.some(row=>row.id===id)?(assetBlobOverrides.get(id)||duplicateAssetBlob):null;},put:async()=>true,keys:async()=>assetRows.map(row=>row.id),list:async()=>assetRows,importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:()=>true}),
-    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,pendingReview:pendingReviewCodec}),
-    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
+    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,dailyRecord:freeze({savedDayCoversSessionEvidence:()=>false}),pendingReview:pendingReviewCodec}),
+    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
   session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('cancel-save'),captureSnapshot:()=>null,hasActiveSession:()=>activeSessionBlocking,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:async operation=>{events.push('suppression:start');try{return await operation();}finally{events.push('suppression:end');}},yieldSession:async()=>false}),
   domain:freeze({
     clampText,filenameSafeStudentName:()=> 'student',getStudentName:()=> 'Student',
@@ -395,7 +396,7 @@ for(const [index,phase] of crashPhases.entries()){
   currentNotes=freeze({Corrupted:normalizeNote({key:'Corrupted',text:'interrupted '+phase},'Corrupted')});
   restoreJournal={
     state:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),phase},
-    payload:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
+    payload:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),blob:created.blob,filename:created.filename}
   };
   const result=await runtime.controller.recoverInterruptedRestore();
   assert.equal(result.recovered,true,phase+' must be recovered');
@@ -411,7 +412,7 @@ assert.equal(backupPresentation.read('file','startup-recovery').lifecycle,'succe
 importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'half-rolled-back',savedAt:'2026-08-04T20:00:00.000Z'}));
 restoreJournal={
   state:{id:'restore_crash_retry_12345678',phase:'startup-rolling-back'},
-  payload:{id:'restore_crash_retry_12345678',blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
+  payload:{id:'restore_crash_retry_12345678',blob:created.blob,filename:created.filename}
 };
 failStartupRollbackOnce=true;
 await assert.rejects(()=>runtime.controller.recoverInterruptedRestore(),/injected startup rollback interruption/u);

@@ -10,7 +10,7 @@ const CHECKPOINT='cp_'+'a'.repeat(32);
 
 function harness(options={}){
   const events=[],diagnostics=[],settles=[];
-  let suspended=0,activeLock=false,revision='2026-09-20T12:00:00.000Z';
+  let suspended=0,activeLock=false,revision=options.revision??'2026-09-20T12:00:00.000Z';
   const coordinator=module.createCoordinator(freeze({
     automaticBackup:freeze({
       suspend:async reason=>{events.push(`suspend:${reason}`);suspended+=1;if(options.failSuspend)throw new Error('suspend failed');return freeze({token:'s1'});},
@@ -55,20 +55,39 @@ function harness(options={}){
 
 // A safety version that is not verified, or names no real checkpoint or
 // source revision, stops the recovery before local data changes.
-for(const safety of [{verified:false},{checkpointId:'cp_short'},{sourceRevision:'not a time'},{verified:false,skipped:'unknown'}]){
+for(const safety of [{verified:false},{checkpointId:'cp_short'},{sourceRevision:'not a time'},{verified:false,skipped:'local-empty'},{verified:false,skipped:'unknown'}]){
   const h=harness({safety});
   await assert.rejects(()=>h.coordinator.execute(h.spec),/could not verify the Before restore safety version in Device Folder/,JSON.stringify(safety));
   assert.equal(h.events.includes('apply'),false,`an unverified safety version (${JSON.stringify(safety)}) never lets the restore apply`);
   assert.deepEqual(h.state(),{suspended:0,activeLock:false});
 }
 
-// A device with no study data skips the safety version (nothing to protect);
-// only that exact reason lets the restore go on without one.
+// An initially empty device is rechecked at final quiescence.
 {
-  const h=harness({safety:{verified:false,skipped:'local-empty'}});
-  await h.coordinator.execute(h.spec);
-  assert.equal(h.events.includes('apply'),true,'an empty device brings data in without a safety version');
+  const h=harness({revision:''});
+  let checks=0;
+  const spec=freeze({...h.spec,createSafety:async()=>freeze({verified:false,skipped:'local-empty'}),verifyEmpty:async()=>{checks++;return true;}});
+  const result=await h.coordinator.execute(spec);
+  assert.equal(result.managedRecovery.safety.skipped,'local-empty');
+  assert.equal(checks,1,'empty state is rechecked before applying');
+  assert.equal(h.events.includes('apply'),true);
+}
+for(const proof of [async()=>false,async()=>null,async()=>{throw new Error('unavailable local state');}]){
+  const h=harness(),spec=freeze({...h.spec,createSafety:async()=>freeze({verified:false,skipped:'local-empty'}),verifyEmpty:proof});
+  await assert.rejects(()=>h.coordinator.execute(spec),/Local data changed|unavailable local state/);
+  assert.equal(h.events.includes('apply'),false);
   assert.deepEqual(h.state(),{suspended:0,activeLock:false});
+}
+{
+  const h=harness({revision:'',changeDuringSafety:true,safety:{verified:false,skipped:'local-empty'}});
+  await assert.rejects(()=>h.coordinator.execute(freeze({...h.spec,verifyEmpty:async()=>true})),error=>error.code==='STUDY_DIRECTOR_RECOVERY_STALE_SAFETY');
+  assert.equal(h.events.includes('apply'),false);
+}
+{
+  const h=harness();
+  await assert.rejects(()=>h.coordinator.execute(freeze({...h.spec,verifyEmpty:false})),/Managed recovery callbacks/);
+  const result=await h.coordinator.execute(freeze({...h.spec,verifyEmpty:async()=>{throw Error('unexpected emptiness check');}}));
+  assert.equal(result.managedRecovery.safety.verified,true);
 }
 
 // Local data that changes while the safety version is made is not in it: the

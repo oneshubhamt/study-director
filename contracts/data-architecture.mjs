@@ -36,6 +36,7 @@ function containerSurface(role,owner,protection,lifecycle,schema,contains){retur
 // these through the build rather than minting persistence keys ad hoc.
 export const LOCAL_STORAGE_KEYS=freeze({
   recovery:'studyDirector.activeRecovery.v1',
+  sessionHandoffSafety:'studyDirector.sessionHandoffSafety.v1',
   appOwner:'studyDirector.appOwner.v1',
   mutationLock:'studyDirector.mutationLock.v1',
   storageHealth:'studyDirector.storageHealth.v2',
@@ -203,6 +204,7 @@ export const DATA_ARCHITECTURE=freeze({
   }),
   localStorage:freeze({
     recovery:surface('recovery','repositories','protect','until canonical session settles','',{protects:'indexedDb.activeSessions',created:'when live session state needs crash recovery',cleared:'after canonical session persistence/finalization settles',supersededBy:'newer canonical ActiveSession or canonical deletion'}),
+    sessionHandoffSafety:surface('recovery','host','protect-identifiers','until Drive ownership and canonical Active Session are verified or the claim is compensated','SessionHandoffSafety.v1',{protects:'ambiguous Active Session ownership after interrupted Continue Here',created:'before publishing ownership claim',cleared:'after strict local verification plus verified Drive ownership, or verified compensation',supersededBy:'newer verified Drive ownership epoch plus canonical IndexedDB Active Session read-back'}),
     appOwner:surface('coordination','ownership','operational','lease lifetime'),
     mutationLock:surface('coordination','host','operational','lease lifetime'),
     storageHealth:surface('operational','host','operational','bounded operational diagnostics; no user-content details'),
@@ -268,7 +270,7 @@ export const DATA_ARCHITECTURE=freeze({
       dataMaintenance:surface('operational','repositories','operational','replace on maintenance','DataMaintenance.v6'),
       libraryClearJournalState:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalState.v1',{protects:'Library clear mutation',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
       restoreJournalState:surface('recovery-journal','repository-journals','operational','until verified completion/rollback','RestoreJournalState.v1',{protects:'checkpoint restore mutation',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
-      restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v5',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
+      restoreJournalPayload:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','RestoreJournalPayload.v6',{protects:'canonical dataset rollback image',created:'before destructive restore commit',cleared:'after verified completion or rollback',supersededBy:'verified post-restore canonical state'}),
       mutationLease:surface('coordination','repository-journals','operational','lease lifetime','MutationLease.v1'),
       verifiedRecoveryBackups:surface('operational','host','operational','replace on every backup','VerifiedRecoveryBackups.v3'),
       backupProtection:surface('security-policy','exports','operational','while a backup password is set; holds a check value and the non-extractable key made from the password, never the password','BackupProtection.v3'),
@@ -277,7 +279,7 @@ export const DATA_ARCHITECTURE=freeze({
       repositoryIntegrityScrub:surface('derived-health','backup','operational','transactional progress/completion bound to repository identity; opaque quarantined object ids only; no user-content details','RepositoryIntegrityScrub.v7',{rebuildFrom:'external backup repository manifests and objects'}),
       managedProviderBackupPending:surface('operational','backup','operational','until the affected managed provider successfully publishes a later current backup or is explicitly disconnected','ManagedProviderBackupPending.v1'),
       repositoryMaintenancePending:surface('operational','backup','operational','until post-commit repository retention and safe orphan reclamation complete','RepositoryMaintenancePending.v4'),
-      reconciliationBase:surface('reconciliation-base','host','protect','advance atomically when a version this device shares through Drive is placed there or caught up to','ReconciliationBase.v3')
+      reconciliationBase:surface('reconciliation-base','host','protect','advance atomically when a version this device shares through Drive is placed there or caught up to','ReconciliationBase.v5')
     }),
     prefixes:freeze({
       backupPreparationUnitPrefix:surface('derived-performance','repositories','operational','disposable; rebuild from canonical data after loss, uncertainty or representation change','BackupPreparationUnit.v1',{rebuildFrom:'portable canonical IndexedDB state'}),
@@ -287,7 +289,7 @@ export const DATA_ARCHITECTURE=freeze({
       pendingReviewPrefix:surface('canonical','repositories','protect','a kept version stays until the person resolves it; a resolved one keeps only its id, so other devices learn of it, and the newest of those are kept','PendingReview.v1'),
       libraryClearJournalPayloadPrefix:surface('recovery-journal','repository-journals','protect','until verified completion/rollback','LibraryClearJournalChunk.v1',{protects:'canonical Library rollback chunks',created:'before destructive Library clear commit',cleared:'after verified completion or rollback',supersededBy:'verified post-operation canonical state'}),
       reconciliationBaseNotePrefix:surface('reconciliation-base','host','protect','update/delete only changed Note baselines; lazily read only for actual reconciliation conflicts','ReconciliationBaseNote.v1'),
-      reconciliationBaseDayPrefix:surface('reconciliation-base','host','protect','one row of Saved-Day fingerprints per month; update/delete only changed months; read only for differing Saved Days','ReconciliationBaseDays.v1')
+      reconciliationBaseDayPrefix:surface('reconciliation-base','host','protect','one row of Saved-Day fingerprints per month; update/delete only changed months; read only for differing Saved Days','ReconciliationBaseDays.v2')
     }),
     obsolete:freeze({
       reflectionDraftMigration:surface('legacy-residue','compatibility','operational','remove during compatibility migration','ReflectionDraftMigration.v1'),

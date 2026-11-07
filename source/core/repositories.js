@@ -443,6 +443,23 @@ const planData=freeze({
     const token=issueWriteToken('restore Plan documents');if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
     return Meta.transaction('readwrite',(meta,tx,finish)=>{assertWriteToken(token,'restore Plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();meta.put('planDraft',value.draft,{updatedAt});meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true);};},{strict:true,abortMessage:'Plan document restore aborted'});
   },
+  // Save the three existing portable Personal Data records in one strict
+  // transaction. Neither a failed import nor a kept review can split them.
+  replacePortable:value=>{
+    const token=issueWriteToken('restore portable Plans and Preferences');
+    const clean=PersonalDataCodec.normalize(value),now=new Date().toISOString(),
+      portable=PersonalDataCodec.portablePreferences({...clean.preferences,version:2,updatedAt:now});
+    if(new TextEncoder().encode(JSON.stringify(clean.plans)).length>1024*1024)
+      throw new RangeError('Plan data exceeds its storage allowance.');
+    return Meta.transaction('readwrite',(meta,tx,finish)=>{
+      assertWriteToken(token,'restore portable Plans and Preferences');
+      stageCanonicalMutationEpoch(tx,['personalData']);
+      meta.put('planDraft',clean.plans.draft,{updatedAt:now});
+      meta.put('planLibrary',{savedPlans:clean.plans.savedPlans,defaultId:clean.plans.defaultId},{updatedAt:now});
+      meta.put('personalPreferences',portable,{updatedAt:now});
+      tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,freeze(portable));};
+    },{strict:true,abortMessage:'Portable Plans and Preferences restore aborted'});
+  },
   read:async()=>{const [draft,library]=await Promise.all([Meta.read('planDraft'),Meta.read('planLibrary')]);return {draft:draft??null,savedPlans:library?.savedPlans||[],defaultId:library?.defaultId||null};},
   writeDraft:(value,options={})=>{if(value!==null&&(typeof value!=='string'||value.length>APP_LIMITS.maxScheduleChars))throw new RangeError('Plan draft exceeds its text limit.');return writePlanMeta('planDraft',value,options);},
   writeLibrary:(value,options={})=>writePlanMeta('planLibrary',value,{...options,strictDurability:true})
@@ -787,13 +804,31 @@ async function idbDelete(date,{trackDeletion=true,ownershipToken=null,deletedAt=
     tx.oncomplete=()=>{InsightsDatasetRevision.committed(revisionState);finish(true,{changed});};
   },'daily record deletion aborted');
 }
-async function idbPutActiveSession(session,ownershipToken=null,strictDurability=false){
+async function idbPutActiveSession(session,ownershipToken=null,strictDurability=false,expectedCanonical=null){
   const current=ActiveSessionCodec.sanitizeCurrent(session);if(!current)throw canonicalRuntimeError('Active Session write requires the current canonical schema.');session=current;
   return (strictDurability?idbStrictTransaction:idbTransaction)([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
     if(ownershipToken)assertWriteToken(ownershipToken,'the active-session transaction');
-    stageCanonicalMutationEpoch(tx,['activeSession']);const request=store.put(session);request.onerror=()=>finish(false,request.error||new Error('active session write failed'));
+    const put=()=>{
+      stageCanonicalMutationEpoch(tx,['activeSession']);
+      const request=store.put(session);request.onerror=()=>finish(false,request.error||new Error('active session write failed'));
+    };
     tx.oncomplete=()=>finish(true);
+    if(expectedCanonical){
+      // Compare and replace in one readwrite transaction: a competing local
+      // write between Drive verification and recovery cannot be overwritten.
+      const request=store.get(ACTIVE_SESSION_ID);
+      request.onerror=()=>finish(false,request.error||new Error('Active Session recovery precondition read failed'));
+      request.onsuccess=()=>{
+        const present=ActiveSessionCodec.sanitizeCurrent(request.result);
+        if(!present||!sameDataValue(present,expectedCanonical)){
+          try{tx.abort();}catch{}
+          finish(false,new Error('Active Session changed before ownership recovery.'));
+          return;
+        }
+        put();
+      };
+    }else put();
   },'active session write aborted');
 }
 function idbGetActiveSession(){return idbGet(DB_ACTIVE_SESSION_STORE,ACTIVE_SESSION_ID,'active session read failed');}
@@ -806,11 +841,14 @@ async function idbDeleteActiveSession(ownershipToken=null){
   },'active session delete aborted');
 }
 
-async function saveActiveSessionRecord(session,{emergency=false,backupCapture=false,strictDurability=false}={}){
+async function saveActiveSessionRecord(session,{emergency=false,backupCapture=false,strictDurability=false,expectedCanonical=null}={}){
   let ownershipToken;
   try{ownershipToken=issueWriteToken('saving the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
   if(!session||session.id!==ACTIVE_SESSION_ID||!session.snapshot)return {ok:false,value:null,error:new Error('invalid active session'),storage:{local:false,idb:false}};
+  const expected=expectedCanonical===null?null:ActiveSessionCodec.sanitizeCurrent(expectedCanonical);
+  if(expectedCanonical!==null&&(!expected||emergency))
+    return {ok:false,value:null,error:new Error('Conditional ownership recovery requires an exact canonical precondition without an emergency fallback.'),storage:{local:false,idb:false}};
   const revision=boundedNumber(session.revision,{min:1,max:Number.MAX_SAFE_INTEGER,fallback:nextSessionRevision()});
   lastSessionRevision=Math.max(lastSessionRevision,revision);
   const clean=ActiveSessionCodec.canonicalize({...session,version:DATA_CONTRACT.schemas.ActiveSession.version,revision,updatedAt:normalizeTimestamp(session.updatedAt,new Date().toISOString())});
@@ -830,13 +868,13 @@ async function saveActiveSessionRecord(session,{emergency=false,backupCapture=fa
     try{
       // Only explicit critical saves, page-exit flushes and suspension need
       // strict disk-commit semantics. Periodic timer snapshots stay default.
-      await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended');idbSaved=true;
+      await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended',expected);idbSaved=true;
       clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
       reportCanonicalCommit('activeSession','upsert',clean,{backupCapture});
     }catch(e){
       if(isOwnershipLostError(e))return {ok:false,value:clean,error:e,storage:{local:localSaved,idb:false}};
       idbError=e;
-      if(!localSaved&&writeEpoch===activeSessionMutationEpoch){
+      if(!expected&&!localSaved&&writeEpoch===activeSessionMutationEpoch){
         try{checkpoint();}catch(error){if(isOwnershipLostError(error))return {ok:false,value:clean,error,storage:{local:false,idb:false}};throw error;}
       }
     }
@@ -1022,6 +1060,15 @@ async function migrateFallbackDailyRecords(records,{strict=false}={}){
   finally{
     finishWrite();
   }
+}
+// Canonical Saved Day receipts never consult localStorage rescue. A successful
+// fallback write is recoverable work, not proof that the day reached IndexedDB.
+async function verifyCanonicalDailyRecord(record){
+  const clean=sanitizeCurrentDailyRecord(record);
+  if(!clean||clean.degraded)throw new Error('Saved Day verification requires a canonical record.');
+  const stored=readableDailyRecord(await idbGetRecord(clean.date));
+  if(!stored||!sameDataValue(stored,clean))throw new Error('Canonical Saved Day read-back did not match the committed study evidence.');
+  return true;
 }
 async function storeDailyRecord(rec,options={}){
   const ownershipToken=issueWriteToken('saving the daily record');
@@ -1480,6 +1527,7 @@ async function runDataMaintenance(options={}){
     const local=LocalStorageContract;
     const dailyRecords=freeze({
       save:storeDailyRecord,
+      verifyCanonical:verifyCanonicalDailyRecord,
       saveBatch:storeDailyRecordBatch,
       restoreBatch:records=>storeDailyRecordBatch(records),
       get:getDailyRecord,

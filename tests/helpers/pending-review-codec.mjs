@@ -14,7 +14,7 @@ export function testPendingReviewCodec(RecordCodecs,{dataContract=RUNTIME_DATA_C
       sanitizeNoteFields:noteFields,
       sanitizeCurrentDailyRecord:value=>dailyRecordCodec&&typeof dailyRecordCodec.sanitizeCurrentDailyRecord==='function'?dailyRecordCodec.sanitizeCurrentDailyRecord(value):value
     }),
-    activeSessionCodec:freeze({sanitizeCurrent:value=>activeSessionCodec&&typeof activeSessionCodec.sanitizeCurrent==='function'?activeSessionCodec.sanitizeCurrent(value):value}),
+    activeSessionCodec:freeze({sanitizeCurrent:value=>activeSessionCodec&&typeof activeSessionCodec.sanitizeCurrent==='function'?activeSessionCodec.sanitizeCurrent(value):value,contentValue:value=>activeSessionCodec&&typeof activeSessionCodec.contentValue==='function'?activeSessionCodec.contentValue(value):value?{date:value.date,scheduleText:value.scheduleText,snapshot:value.snapshot}:null}),
     personalDataCodec,
     helpers:freeze({sameDataValue,randomBytes:length=>globalThis.crypto.getRandomValues(new Uint8Array(length))})
   }));

@@ -10,7 +10,7 @@ function productionFunction(name){
 }
 const saveWarning=source.match(/^const SESSION_CLAIM_SAVE_WARNING=.*;$/mu)?.[0];
 assert.ok(saveWarning,'Production session-claim warning must exist.');
-const runtime=[saveWarning,productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){'),productionFunction('function snapshotWhileSessionClaimFrozen(){')].join('\n');
+const runtime=[saveWarning,productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation=\'active-session transition\'){'),productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){'),productionFunction('function snapshotWhileSessionClaimFrozen(){')].join('\n');
 
 const owned={epoch:2,applies:true,state:'owned',ownedHere:false};
 const session={runningOn:'inst_local',revision:4};
@@ -27,10 +27,10 @@ function harness(){
     TASKS:[{}],sessionPanelMode:'active',
     BackupProviderRuntime:{connected:()=>true,readSessionClaim:async()=>claim,scheduleSharedSync:(id,reason)=>{calls.syncs.push(reason);return true;}},
     AppData:{activeSession:{load:async()=>{const next=loads.length?loads.shift():loaded(sessionValue);return typeof next==='function'?await next():await next;}}},
-    ActiveSessionCodec:{sanitizeCurrent:value=>value},
+    ActiveSessionCodec:{sanitizeCurrent:value=>value},CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
     InstallationIdentity:{getId:()=> 'inst_local'},
     DecisionClock:{nowMs:()=>now},lastTimerSnapshotMs:0,
-    restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,
+    restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,pendingSessionHandoffSafety:()=>false,
     showLiveDraftSaveWarning:reason=>calls.warnings.push({key:'capture',message:reason}),
     TimerEngine:{stopExecution:()=>{calls.stops++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return resumeWorks;}},
     markDayContentChanged:()=>{calls.changed++;},
@@ -105,6 +105,7 @@ for(const [name,result] of [
 for(const bad of [
   {ok:false,value:null,error:new Error('read failed')},
   {ok:true,value:{...session,revision:3},storage:{idb:true}},
+  {ok:true,value:{...session,revision:5,unexpectedProgress:9},storage:{idb:true}},
   {ok:true,value:{...session,revision:5},storage:{idb:false}},
   ()=>Promise.reject(new Error('readback rejected'))
 ]){
@@ -204,4 +205,846 @@ for(const bad of [
   assert.deepEqual(t.calls.syncs,['session-claim']);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:18,productionFunctions:true}));
+// A pending interrupted handoff fences a primary-tab timer resume.
+{
+  const fn=productionFunction('function resumeTimerLoopAfterPrimaryRestore(){');
+  let calls=0,pending=true;
+  const c=vm.createContext({
+    sessionClaimFreeze:null,pendingSessionHandoffSafety:()=>pending,
+    TimerEngine:{resumeAfterPrimaryRestore:()=>{calls++;return true;}},
+    StartupLifecycle:{status:()=>({fullyInitialized:false})},
+    AppDiagnostics:{capture:()=>{}}
+  });
+  vm.runInContext(fn+'\nglobalThis.tryResume=resumeTimerLoopAfterPrimaryRestore;',c);
+  assert.equal(c.tryResume(),false,'unverified ownership stops the timer-resume path');
+  assert.equal(calls,0);
+  pending=false;
+  assert.equal(c.tryResume(),true);
+  assert.equal(calls,1);
+}
+
+// Independently exercise the acquiring device's production Continue Here
+// function. A success requires both a Drive claim and an exact canonical
+// IndexedDB receipt; a partial claim is never silently treated as success.
+const handoffConstants=[
+  source.match(/^const sessionHandoffError=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_SAFETY_FORMAT=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_LEGACY_SAFETY_FORMAT=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_ATTEMPT_PATTERN=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_FINGERPRINT_PATTERN=.*;$/mu)?.[0],
+  source.match(/^const HANDOFF_UNCERTAIN_MESSAGE=.*;$/mu)?.[0]
+];
+assert.ok(handoffConstants.every(Boolean));
+const acquireRuntime=[
+  ...handoffConstants,
+  productionFunction('function pendingSessionHandoffSafety(){'),
+  productionFunction('function armSessionHandoffSafety(session,checkpointId,'),
+  productionFunction('function validSessionHandoffSafety(marker,session){'),
+  productionFunction('function handoffClaimMatches(marker,claim){'),
+  source.match(/^let sessionHandoffRecoveryInFlight=.*;$/mu)?.[0],
+  productionFunction('async function resolveSessionHandoffSafety(session){'),
+  productionFunction('async function verifySessionHandoffSafety(session){'),
+  productionFunction('async function releaseIdleSessionHandoffSafety(){'),
+  productionFunction('async function verifySessionHandoffSafetyStrictly(session){'),
+  productionFunction('function clearSessionHandoffSafety(){'),
+  productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
+  productionFunction('async function transferSessionOwnershipHere(session,')
+].join('\n');
+function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
+  const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
+  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,canMutate=true,readbackFailed=false,conditionalWrites=0;
+  const storage=new Map();
+  const app={
+    document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
+    navigator:{onLine:true},Date,Promise,Object,JSON,
+    crypto:{randomUUID:()=>('00000000-0000-4000-8000-'+String(++id).padStart(12,'0'))},
+    appCanMutate:()=>canMutate,
+    getActiveDefaults:()=>({scheduleText:'FALLBACK DEFAULT'}),
+    PlanDraftEditor:{flush:async()=>true},
+    PlanData:{settled:async()=>{if(faultMode==='draft-fail')throw new Error('draft write failed');},readDraft:()=>draft},
+    AppData:{
+      local:{
+        setJson:(key,value)=>(storage.set(key,structuredClone(value)),true),
+        getJson:(key,fallback)=>storage.has(key)?storage.get(key):fallback,
+        remove:key=>faultMode==='clear-fail'?false:(storage.delete(key),true)
+      },
+      planData:{read:async()=>({draft:faultMode==='draft-mismatch'?'OTHER DRAFT':draft})},
+      activeSession:{
+        save:async(value,options={})=>{
+          if(options.expectedCanonical)conditionalWrites++;
+          if(['concurrent-local','compensation-race'].includes(faultMode)&&options.expectedCanonical){
+            current={...current,snapshot:{label:'new unshared local work'}};
+          }
+          if(options.expectedCanonical&&JSON.stringify(current)!==JSON.stringify(options.expectedCanonical))
+            return {ok:false,value,error:new Error('Active Session changed before ownership recovery.'),storage:{idb:false,local:false}};
+          if(['local-only','claim-crash'].includes(faultMode)&&value.runningOn==='inst_handoff_new')
+            return {ok:true,value,error:new Error('IndexedDB failed'),storage:{idb:false,local:true}};
+          current=structuredClone(value);return {ok:true,value:current,storage:{idb:true,local:false}};
+        },
+        load:async()=>{
+          if(['compensation-readback','compensation-race'].includes(faultMode)&&current.runningOn==='inst_handoff_new'&&!readbackFailed){readbackFailed=true;return {ok:false,value:null,error:new Error('readback failed before compensation'),storage:{idb:true}};}
+          const content=faultMode==='different-read'&&current.runningOn==='inst_handoff_new'?
+            {...current,snapshot:{...current.snapshot,label:'unexpected concurrent progress'}}:current;
+          return {ok:true,value:content,storage:{idb:true,local:false}};
+        }
+      }
+    },
+    STORAGE_KEYS:{sessionHandoffSafety:'test-session-handoff'},
+    InstallationIdentity:{getId:()=> 'inst_handoff_new'},
+    ActiveSessionCodec:{sanitizeCurrent:value=>value||null},
+    CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
+    activeSessionContentFingerprint:async session=>session?.snapshot?.label==='original'?'f'.repeat(64):'0'.repeat(64),
+    BackupCodec:{assetIds:session=>session?.snapshot?.label==='remote with missing attachment'?['img-unavailable']:[]},
+    nextSessionRevision:value=>Number(value)+1,
+    setPlanStatus:()=>{},handleActiveSessionRepositoryResult:()=>true,
+    AppDiagnostics:{capture:()=>{}},
+    notifyBackupChange:()=>{notify++;},
+    BackupProviderRuntime:{
+      connected:()=>true,
+      readSessionClaim:async()=>remoteClaim,
+      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:remoteSource?.runningOn==='inst_handoff_next'?'c'.repeat(64):remoteSource?.runningOn==='inst_handoff_new'?'d'.repeat(64):'e'.repeat(64),session:remoteSource}),
+      suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
+      claimSessionOwnership:async(_provider,request)=>{
+        if(faultMode==='claim-busy')return {status:'busy',reason:'busy'};
+        claims++;
+        if(faultMode==='claim-throws-before-remote')throw new Error('claim did not reach Drive');
+        remoteClaim={epoch:1,state:'owned',applies:true,ownedHere:true,ownerToken:'d'.repeat(64),
+          observedOwnerToken:'e'.repeat(64),observedRevision:request.observedRevision,
+          observedContentFingerprint:request.observedContentFingerprint,handoffToken:request.handoffToken,
+          revision:request.revision};
+        if(faultMode==='claim-throws-after-remote')throw new Error('claim accepted but response lost');
+        return {status:'completed',claim:remoteClaim};
+      },
+      releaseSessionClaim:async()=>{
+        compensations++;
+        if(faultMode==='claim-crash')return false;
+        remoteClaim={...remoteClaim,epoch:remoteClaim.epoch+1,ownedHere:false,ownerToken:'e'.repeat(64),
+          observedOwnerToken:'d'.repeat(64),observedRevision:remoteClaim.revision,
+          revision:previous.revision,observedContentFingerprint:''};
+        return true;
+      },
+      wakeBackground:()=>true,scheduleSharedSync:()=>true
+    }
+  };
+  let context;
+  const boot=()=>{
+    context=vm.createContext({...app});
+    vm.runInContext(acquireRuntime+'\nglobalThis.takeOver=transferSessionOwnershipHere;globalThis.recover=resolveSessionHandoffSafety;',context,{filename:'production-handoff-acquisition.js'});
+  };
+  boot();
+  return {previous,transfer:()=>context.takeOver(previous),reload:boot,recover:()=>context.recover(structuredClone(current)),
+    setFault:value=>{faultMode=value;},setHead:value=>{head=value;},setSourceSession:value=>{remoteSource=value;},setCanMutate:value=>{canMutate=value;},
+    setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
+    setOffline:value=>{app.navigator.onLine=!value;},
+    state:()=>({current,claim:remoteClaim,claims,compensations,conditionalWrites,backgroundReleases,notify,marker:storage.get('test-session-handoff')||null})};
+}
+{
+  const t=acquiringHarness();
+  const result=await t.transfer(),state=t.state();
+  assert.equal(result.session.runningOn,'inst_handoff_new');
+  assert.equal(state.current.runningOn,'inst_handoff_new');
+  assert.equal(state.claims,1);
+  assert.equal(state.compensations,0);
+  assert.equal(state.marker,null,'successful handoff clears its crash-recovery latch');
+  assert.equal(state.notify,1,'only verified ownership is published as a local change');
+  assert.equal(state.backgroundReleases,1);
+}
+// A local write can succeed before its read-back fails. Compensation must
+// conditionally compare inside IndexedDB, not trust an earlier standalone read.
+{
+  const t=acquiringHarness('compensation-readback');
+  await assert.rejects(t.transfer(),/readback failed before compensation/u);
+  assert.equal(t.state().conditionalWrites,1,'compensation must use canonical compare-and-write');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.equal(t.state().compensations,1);
+  assert.equal(t.state().marker,null);
+}
+{
+  const t=acquiringHarness('compensation-race');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  assert.equal(t.state().conditionalWrites,1);
+  assert.equal(t.state().current.snapshot.label,'new unshared local work',
+    'a competing write between read and compensation cannot be overwritten');
+  assert.equal(t.state().compensations,0);
+  assert.ok(t.state().marker);
+}
+
+// BF-1R2: a fresh installation displays its default without persisting
+// an independent Plan draft. Ownership transfer must accept canonical null.
+{
+  const t=acquiringHarness('',null);
+  const result=await t.transfer();
+  assert.equal(result.session.runningOn,'inst_handoff_new','Continue Here works with no saved Plan draft');
+  assert.equal(t.state().claims,1,'the default display is not silently written to draft storage');
+}
+// A changed visible draft or inconsistent canonical read-back stops before
+// any remote claim, rather than risking a silent draft overwrite.
+for(const fault of ['display-mismatch','draft-mismatch']){
+  const t=acquiringHarness(fault,null);
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_DRAFT_UNSAVED',fault+' must block an unsafe draft handoff');
+  assert.equal(t.state().claims,0,'no remote ownership claim precedes draft verification');
+}
+{
+  const t=acquiringHarness('local-only');
+  await assert.rejects(t.transfer(),/IndexedDB failed/u,'localStorage rescue is not an ownership commit');
+  const state=t.state();
+  assert.equal(state.claims,1);
+  assert.equal(state.compensations,1,'failed local commit compensates the remote claim');
+  assert.equal(state.current.runningOn,'inst_handoff_old');
+  assert.equal(state.marker,null,'verified compensation retires the safety latch');
+  assert.equal(state.notify,0);
+}
+{
+  const t=acquiringHarness('different-read');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN','unexpected same-revision content is not a verified handoff');
+  const state=t.state();
+  assert.equal(state.claims,1);
+  assert.equal(state.compensations,0,'divergent canonical progress is not overwritten by an unsafe rollback');
+  assert.ok(state.marker,'uncertain ownership is durably latched for recovery after reload');
+  assert.equal(state.notify,0);
+}
+{
+  const t=acquiringHarness('draft-fail');
+  await assert.rejects(t.transfer(),/draft write failed/u);
+  const state=t.state();
+  assert.equal(state.claims,0,'no remote claim is attempted before the Plan-draft write settles');
+  assert.equal(state.marker,null);
+  assert.equal(state.current.runningOn,'inst_handoff_old');
+}
+
+
+// BF-1R3: the exact interrupted claim can be adopted after a fresh VM boot,
+// without republishing it or silently recovering unrelated data.
+for(const fault of ['claim-crash','claim-throws-after-remote']){
+  const t=acquiringHarness(fault);
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.ok(t.state().marker,'the preclaim marker survives a failed/unknown acquisition');
+  assert.equal(t.state().claim?.handoffToken,t.state().marker.handoffToken,'remote and local evidence name the same attempt');
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'an identical remote claim is adoptable after reload');
+  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+  assert.equal(t.state().marker,null);
+  assert.equal(t.state().claims,1,'recovery must not publish a second claim');
+  assert.equal(await t.recover(),true,'recovery is idempotent');
+}
+// An unrelated Notes/Personal Data checkpoint cannot prevent recovery if the
+// verified Active Session and claim themselves have not changed.
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setHead('cp_'+'b'.repeat(32));t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'an unrelated checkpoint may advance without changing the session');
+  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+}
+// A newer compensation epoch returned control to A; B must retire its marker
+// without ever claiming ownership or starting its clock.
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  const {marker,claim}=t.state();
+  t.setClaim({...claim,epoch:claim.epoch+1,state:'owned',ownedHere:false,
+    ownerToken:marker.observedOwnerToken,observedRevision:marker.proposedRevision,
+    revision:marker.observedRevision,observedContentFingerprint:''});
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'exact compensation is a distinct verified terminal state');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.equal(t.state().marker,null);
+}
+// A subsequent verified owner may supersede an interrupted acquisition.
+function supersedeHandoff(t){
+  const {claim,marker}=t.state();
+  const latest={...claim,epoch:claim.epoch+1,state:'owned',ownedHere:false,
+    ownerToken:'c'.repeat(64),observedOwnerToken:'d'.repeat(64),
+    observedContentFingerprint:marker.observedContentFingerprint,
+    observedRevision:marker.proposedRevision,revision:marker.proposedRevision+1,
+    handoffToken:'88888888-8888-4888-8888-888888888888'};
+  t.setClaim(latest);
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:latest.revision});
+  return latest;
+}
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'new remote owner safely replaces an unadopted attempt');
+  assert.equal(t.state().current.runningOn,'inst_handoff_next',
+    'canonical control state follows the verified successor, not a stale previous owner');
+  assert.equal(t.state().conditionalWrites,1,'unadopted predecessor is conditionally updated');
+  assert.equal(t.state().marker,null);
+  assert.equal(t.state().claims,1);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'new remote owner supersedes the local pending owner');
+  assert.equal(t.state().current.runningOn,'inst_handoff_next');
+  assert.equal(t.state().conditionalWrites,1);
+  assert.equal(t.state().marker,null);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('concurrent-local');t.reload();
+  await assert.rejects(t.recover(),/Active Session changed before ownership recovery/u);
+  assert.equal(t.state().current.snapshot.label,'new unshared local work');
+  assert.ok(t.state().marker);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('clear-fail');t.reload();
+  await assert.rejects(t.recover(),/safety latch could not be cleared/u);
+  assert.equal(t.state().current.runningOn,'inst_handoff_next');
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'recovery recognizes an already committed remote owner');
+  assert.equal(t.state().conditionalWrites,1,'idempotent recovery does not repeat its CAS');
+  assert.equal(t.state().marker,null);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:12,snapshot:{label:'remote with missing attachment'}});
+  t.reload();
+  assert.equal(await t.recover(),false,'a new attachment must be fetched through ordinary reconciliation before adopting remote content');
+  assert.ok(t.state().marker);
+  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+}
+
+// A proved successor can contain later study work, not just ownership
+// metadata: the old device has contributed nothing since the causal boundary.
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:12,snapshot:{label:'new remote progress'}});
+  t.reload();
+  assert.equal(await t.recover(),true,'later successor work follows the verified causal handoff');
+  assert.equal(t.state().current.snapshot.label,'new remote progress');
+  assert.equal(t.state().current.runningOn,'inst_handoff_next');
+  assert.equal(t.state().conditionalWrites,1);
+}
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  supersedeHandoff(t);t.setFault('');
+  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:11,snapshot:{label:'unproved remote changes'}});
+  t.reload();
+  assert.equal(await t.recover(),false,'a source older than the successor claim cannot justify new study content');
+  assert.ok(t.state().marker);
+}
+
+// A failed strict write during recovery does not consume the attempt.
+// Subsequent PRIMARY ownership and healthy persistence permit a retry.
+{
+  const t=acquiringHarness('claim-throws-after-remote');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setFault('local-only');t.reload();
+  await assert.rejects(t.recover(),/IndexedDB failed/u);
+  assert.ok(t.state().marker,'read-only recovery evidence survives another local failure');
+  t.setFault('');t.setCanMutate(false);t.reload();
+  assert.equal(await t.recover(),false,'a secondary or hydrating tab cannot commit recovered ownership');
+  t.setCanMutate(true);t.reload();
+  assert.equal(await t.recover(),true);
+  assert.equal(t.state().claims,1);
+}
+
+// A second writer advancing the local session DURING Drive verification
+// cannot be overwritten by the recovered owner. The exact IDB precondition
+// fails without producing an emergency copy of the recovered session.
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setFault('concurrent-local');t.reload();
+  await assert.rejects(t.recover(),/Active Session changed before ownership recovery/u);
+  assert.equal(t.state().current.snapshot.label,'new unshared local work');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.ok(t.state().marker,'a local write conflict retains the safety marker');
+  assert.equal(t.state().claims,1,'recovery must never republish a claim');
+}
+// Strict local commit succeeded, but the marker could not be cleared;
+// subsequent verification must not rewrite the already-committed session.
+{
+  const t=acquiringHarness('clear-fail');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true);
+  assert.equal(t.state().marker,null);
+  assert.equal(t.state().claims,1);
+}
+// No claim accepted: verify the unchanged remote source, retire the latch,
+// but never start the timer or claim automatically.
+{
+  const t=acquiringHarness('claim-throws-before-remote');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),true);
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+  assert.equal(t.state().claims,1);
+}
+// An interrupted Continue Here must never lock this device's timer for good.
+// When Drive does not name this device as the owner and this device is not
+// running the session, or the session for that day is gone, the latch is
+// cleared without changing study data.
+{
+  // The claim never reached Drive, then the other device kept studying and
+  // sync brought its progress here: the strict checks can no longer match.
+  const t=acquiringHarness('claim-throws-before-remote');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  const advanced={...t.previous,revision:12,snapshot:{label:'more study on the other device'}};
+  t.setCurrent(advanced);t.setSourceSession(advanced);t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,'a handoff that never took effect does not block the timer');
+  assert.equal(t.state().marker,null);
+  assert.deepEqual(t.state().current,advanced,'study data is left as it is');
+  assert.equal(t.state().claims,1,'nothing is claimed again');
+}
+for(const [label,next] of [['a new day',{date:'2026-10-28'}],['the session ended elsewhere',null]]){
+  // The claim landed but its local commit failed; the day then changed, or
+  // sync ended the session. There is nothing left to guard.
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setCurrent(next&&{...t.previous,...next});t.setFault('');t.reload();
+  assert.equal(await t.recover(),true,`${label} clears the latch`);
+  assert.equal(t.state().marker,null);
+}
+{
+  // Drive answers busy before writing any claim: no latch is left behind.
+  const t=acquiringHarness('claim-busy');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_BUSY');
+  assert.equal(t.state().marker,null,'a busy reply leaves no latch');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+}
+{
+  // Still blocked while Drive names this device and the local commit was
+  // not verified: that is the case the latch exists for.
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setCurrent({...t.previous,revision:12,snapshot:{label:'more study on the other device'}});t.setFault('');t.reload();
+  assert.equal(await t.recover(),false,'a claim naming this device keeps the timer stopped');
+  assert.notEqual(t.state().marker,null);
+}
+// Concurrent recovery callers share the same verified strict commit.
+{
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  t.setFault('');t.reload();
+  const results=await Promise.all([t.recover(),t.recover()]);
+  assert.deepEqual(results,[true,true],'overlapping Verify actions agree on the same recovery result');
+  assert.equal(t.state().notify,1,'the same ownership recovery causes one durable change notification');
+  assert.equal(t.state().claims,1,'overlapping recovery never republishes the claim');
+}
+// A changed verified checkpoint, mismatching claim token, a divergent local
+// snapshot or offline Drive must keep recovery blocked with the marker intact.
+for(const mode of ['changed-head','different-claim','divergent-local','offline']){
+  const t=acquiringHarness('claim-crash');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  if(mode==='changed-head'){
+    t.setHead('cp_'+'b'.repeat(32));
+    t.setSourceSession({...t.previous,revision:11,updatedAt:'2026-10-27T10:00:00.000Z'});
+  }
+  if(mode==='different-claim')t.setClaim({...t.state().claim,handoffToken:'ffffffff-ffff-4fff-8fff-ffffffffffff'});
+  if(mode==='divergent-local')t.setCurrent({...t.state().current,snapshot:{label:'unpublished new work'}});
+  if(mode==='offline')t.setOffline(true);
+  t.setFault('');t.reload();
+  assert.equal(await t.recover(),false,mode+' must remain blocked');
+  assert.ok(t.state().marker,mode+' retains durable recovery evidence');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old',mode+' cannot steal ownership');
+  assert.equal(t.state().claims,1,mode+' cannot publish a second claim');
+}
+
+// Exercise the real transactional compare-and-write primitive. Recovery may
+// replace an exact canonical predecessor, never a concurrently changed one.
+{
+  const repositorySource=fs.readFileSync(new URL('../../../source/core/repositories.js',import.meta.url),'utf8');
+  const begin=repositorySource.indexOf('async function idbPutActiveSession('),end=repositorySource.indexOf('\n}',begin);
+  assert.ok(begin>0&&end>begin,'production conditional IndexedDB writer exists');
+  const production=repositorySource.slice(begin,end+2);
+  const before={id:'active',date:'2026-10-27',runningOn:'inst_handoff_old',revision:10},
+    adopted={...before,runningOn:'inst_handoff_new',revision:11};
+  async function transactionCase(stored,expected){
+    let writes=0,aborted=false,actual=structuredClone(stored);
+    const run=(_stores,_mode,body)=>new Promise((resolve,reject)=>{
+      const finish=(ok,value)=>ok?resolve(value):reject(value);
+      const tx={oncomplete:null,onabort:null,abort:()=>{aborted=true;},
+        objectStore:()=>({
+          get:()=>{const req={result:null,onsuccess:null,onerror:null};queueMicrotask(()=>{req.result=actual;req.onsuccess?.();});return req;},
+          put:value=>{writes++;actual=structuredClone(value);const req={onerror:null};queueMicrotask(()=>tx.oncomplete?.());return req;}
+        })
+      };
+      body(tx,finish);
+    });
+    const context=vm.createContext({
+      ACTIVE_SESSION_ID:'active',DB_ACTIVE_SESSION_STORE:'sessions',DB_APP_META_STORE:'meta',
+      ActiveSessionCodec:{sanitizeCurrent:value=>value},
+      sameDataValue:(left,right)=>JSON.stringify(left)===JSON.stringify(right),
+      idbStrictTransaction:run,idbTransaction:run,stageCanonicalMutationEpoch:()=>{},
+      assertWriteToken:()=>{},canonicalRuntimeError:message=>new Error(message)
+    });
+    vm.runInContext(production+'\nglobalThis.write=idbPutActiveSession;',context);
+    let rejected=false;
+    try{await context.write(adopted,null,true,expected);}catch(error){rejected=true;}
+    return {writes,aborted,rejected,actual};
+  }
+  const exact=await transactionCase(before,before);
+  assert.equal(exact.writes,1,'unchanged canonical predecessor permits one strict write');
+  assert.equal(exact.rejected,false);
+  assert.equal(exact.actual.runningOn,'inst_handoff_new');
+  const concurrent=await transactionCase({...before,snapshot:{label:'late local study'}},before);
+  assert.equal(concurrent.writes,0,'changed canonical predecessor is never overwritten');
+  assert.equal(concurrent.aborted,true,'the transaction explicitly aborts on mismatch');
+  assert.equal(concurrent.rejected,true);
+  assert.equal(concurrent.actual.snapshot.label,'late local study','unshared work remains canonical');
+}
+
+// A normal cross-device sync must not stop/reset a local session if the
+// suspended evidence reached only the browser recovery envelope, not IndexedDB.
+{
+  const src=[
+    productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
+    productionFunction('async function yieldSessionToOtherDevice(options={}){')
+  ].join('\n');
+  const oldSession={date:'2026-10-27',runningOn:'inst_local',revision:4,status:'suspended',snapshot:{review:'before yield'}};
+  for(const valid of [false,true]){
+    let resets=0,stops=0,panelChanges=0,notices=0;
+    const app={
+      Object,Date,Promise,
+      TASKS:[{}],todayISO:()=> '2026-10-27',TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
+      PracticePacer:{pauseForSessionEnd:()=>{stops++;}},
+      activeSessionPayload:()=>oldSession,
+      AppData:{activeSession:{
+        save:async()=>valid?{ok:true,value:oldSession,storage:{idb:true}}:
+          {ok:true,value:oldSession,storage:{idb:false,local:true},error:new Error('IndexedDB unavailable')},
+        load:async()=>({ok:true,value:oldSession,storage:{idb:true}})
+      }},
+      ActiveSessionCodec:{sanitizeCurrent:value=>value},
+      CanonicalModule:{same:(left,right)=>JSON.stringify(left)===JSON.stringify(right)},
+      resetRuntimeSessionState:()=>{resets++;},
+      setSessionPanelMode:()=>{panelChanges++;},
+      refreshPlanAfterSessionReset:()=>{},
+      setTimerMode:()=>{},
+      updateExecutePanels:()=>{},
+      Interactions:{notify:()=>{notices++;}},
+      sessionYieldedAt:0
+    };
+    const context=vm.createContext(app);
+    vm.runInContext(src+'\nglobalThis.yieldSession=yieldSessionToOtherDevice;',context);
+    if(!valid){
+      await assert.rejects(context.yieldSession(),/IndexedDB unavailable/u,'rescue-only session is not a safe cross-device yield');
+      assert.equal(resets,0,'failed canonical save cannot discard the local live state');
+      assert.equal(panelChanges,0,'failed canonical save does not announce a suspended session');
+      assert.equal(notices,0);
+    }else{
+      assert.equal(await context.yieldSession({deferReview:true}),true);
+      assert.equal(resets,1);
+      assert.equal(panelChanges,1);
+      assert.equal(notices,1);
+    }
+    assert.equal(stops,1,'the Practice Pacer is quiesced before the ownership transition');
+  }
+}
+
+// BF-1R1: the Saved Day acknowledgement must survive strict canonical
+// readback before the app can declare this study revision saved.
+{
+  const src=[
+    productionFunction("async function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){"),
+    productionFunction('async function acknowledgeSavedStudyDay(date,revision){'),
+    productionFunction('async function clearCanonicalSessionAfterSavedDay(){')
+  ].join('\n');
+  const date='2026-08-27';
+  const prepare=(failure='')=>{
+    let recorded=null,acknowledged=0,clears=0;
+    const sessionState={savedRevision:0,contentRevision:7,studyDate:date};
+    const context=vm.createContext({
+      TASKS:[{}],TimerState:sessionState,
+      getReviewDate:()=>date,
+      cleanDayRevision:value=>Math.max(0,Math.floor(Number(value)||0)),
+      writeLiveDraftNow:async options=>{
+        assert.equal(options.strictDurability,true);
+        assert.equal(options.markChanged,false);
+        recorded={date,snapshot:{savedRevision:sessionState.savedRevision,contentRevision:sessionState.contentRevision},revision:10};
+        if(failure==='no-receipt')return null;
+        if(failure==='local-only')return {ok:true,value:recorded,error:new Error('IndexedDB unavailable'),storage:{idb:false,local:true}};
+        return {ok:true,value:recorded,storage:{idb:true}};
+      },
+      clearSaveReminder:()=>{acknowledged++;},
+      requireUnused:()=>{},
+      AppData:{activeSession:{
+        load:async()=>failure==='mismatched-read'?{ok:true,value:{...recorded,revision:9},storage:{idb:true}}:
+          failure==='clear-shadow'?{ok:true,value:{date},storage:{idb:true}}:
+          {ok:true,value:recorded,storage:{idb:true}},
+        clear:async()=>{clears++;return failure==='clear-local-only'?{ok:true,storage:{idb:false},error:new Error('IndexedDB unavailable')}:{ok:true,storage:{idb:true}};}
+      }},
+      ActiveSessionCodec:{sanitizeCurrent:v=>v||null},
+      CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
+      Object
+    });
+    vm.runInContext(src+'\nglobalThis.ack=acknowledgeSavedStudyDay;globalThis.clearDay=clearCanonicalSessionAfterSavedDay;',context);
+    return {ack:()=>context.ack(date,7),clear:()=>context.clearDay(),state:()=>({saved:sessionState.savedRevision,acknowledged,clears})};
+  };
+  const good=prepare();assert.equal(await good.ack(),true);
+  assert.equal(good.state().saved,7);assert.equal(good.state().acknowledged,1);
+  for(const fault of ['local-only','no-receipt','mismatched-read']){
+    const trial=prepare(fault);
+    await assert.rejects(trial.ack(),/IndexedDB unavailable|acknowledgement was not saved|read-back differs/u,fault);
+    assert.equal(trial.state().saved,0,fault+' must not mark session revision saved');
+    assert.equal(trial.state().acknowledged,0);
+  }
+  const localOnlyClear=prepare('clear-local-only');
+  await assert.rejects(localOnlyClear.clear(),/IndexedDB unavailable/u);
+  assert.equal(localOnlyClear.state().clears,1);
+  const mismatchedClear=prepare('clear-shadow');
+  await assert.rejects(mismatchedClear.clear(),/remained after its canonical deletion/u);
+}
+{
+  // A successful reminder check must never survive a later canonical Day
+  // replacement as an in-memory positive cache.
+  const fn=[
+    productionFunction('function liveSaveReminderEvidence(date){'),
+    productionFunction('function savedDayCoversReminderEvidence(record,subjects){'),
+    productionFunction('async function savedDayHasUncoveredKeptSession(record,date){'),
+    productionFunction('async function savedDayCoversWork(date,captured=null){'),
+    productionFunction('async function savedRecordExistsForDate(date){')
+  ].join('\n');
+  const date='2026-08-27',session={date,snapshot:{savedRevision:7,contentRevision:7}};
+  let day={date,reflection:'Saved'},reads=0,coverageChecks=0;
+  const context=vm.createContext({
+    daySaveDirty:()=>false,cleanDayRevision:x=>Number(x),
+    TASKS:[],isTrackableBlock:()=>false,TimerState:{studyDate:date},getReviewDate:()=>date,
+    AppData:{
+      activeSession:{load:async()=>({ok:true,value:session,storage:{idb:true}})},
+      pendingReviews:{list:async()=>[]},
+      dailyRecords:{documents:async()=>{reads++;return day?[day]:[];},
+        verifyCanonical:async record=>{assert.equal(record,day);return true;}}
+    },
+    DailyRecordCodec:{savedDayCoversSessionEvidence:(value,sessionValue,options)=>{
+      coverageChecks++;assert.equal(sessionValue,session);
+      assert.equal(options.allowAdvances,true,'A later Day may cover the session without the same source revision');
+      return value?.reflection==='Saved';
+    }},
+    AppDiagnostics:{capture:()=>false}
+  });
+  vm.runInContext(fn+'\nglobalThis.checkSavedDay=savedRecordExistsForDate;',context);
+  assert.equal(await context.checkSavedDay(date),true);
+  day={date,reflection:'Other content'};
+  assert.equal(await context.checkSavedDay(date),false,
+    'A replaced Saved Day with different evidence must not be hidden by an earlier positive read.');
+  day=null;
+  assert.equal(await context.checkSavedDay(date),false,
+    'Deleting a previously verified Saved Day must be observed by the next reminder check.');
+  assert.equal(reads,3,'Each discrete reminder check must reread canonical storage.');
+  assert.equal(coverageChecks,3);
+}
+{
+  // A successful repository write receipt is not sufficient if the strict
+  // IDB read disagrees or the value exists only in local rescue storage.
+  const repo=fs.readFileSync(new URL('../../../source/core/repositories.js',import.meta.url),'utf8');
+  const signature='async function verifyCanonicalDailyRecord(record){';
+  const start=repo.indexOf(signature),end=start<0?-1:repo.indexOf('\n}',start);
+  assert.ok(start>=0&&end>start,'canonical Saved Day verifier must exist in production');
+  const fn=repo.slice(start,end+2),record={date:'2026-08-27',recordKind:'study',sourceRevision:7,reflection:'Saved'};
+  for(const actual of [record,{...record,reflection:'Unrelated'},null]){
+    const context=vm.createContext({
+      sanitizeCurrentDailyRecord:r=>r,
+      idbGetRecord:async()=>actual,
+      readableDailyRecord:r=>r,
+      sameDataValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b)
+    });
+    vm.runInContext(fn+'\nglobalThis.verify=verifyCanonicalDailyRecord;',context);
+    if(actual===record)assert.equal(await context.verify(record),true);
+    else await assert.rejects(context.verify(record),/read-back did not match/u);
+  }
+}
+
+// BF-1R1: execute the real common Saved-Day evidence predicate and the
+// previous-day retirement gate together. Revisions across devices are not
+// content ancestry, and no local rescue copy is a canonical Saved Day.
+{
+  const sourceCodec=fs.readFileSync(new URL('../../../source/core/record-codecs.js',import.meta.url),'utf8');
+  const signature='function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){';
+  const start=sourceCodec.indexOf(signature),end=start<0?-1:sourceCodec.indexOf('\n}',start);
+  assert.ok(start>=0&&end>start,'production Saved-Day coverage predicate must exist');
+  const src=[sourceCodec.slice(start,end+2),productionFunction('async function savedDayCoversActiveSession(session){')].join('\n');
+  const date='2026-08-27';
+  const row={start:'07:00',duration:60,name:'Ethics',kind:'work',area:'Ethics',measure:'units',target:1,id:'ethics-1'};
+  const task={completion:50,completionSource:'manual',progress:{done:1,total:2},actual:{seconds:300}};
+  const snapshot={contentRevision:7,savedRevision:7,review:{reflection:'Reviewed',studyQuality:4},latestCarryForward:'',taskState:{'ethics-1':task},practice:{runs:[]}};
+  const saved={recordKind:'study',date,sourceRevision:7,schedule:[row],practiceRuns:[],reflection:'Reviewed',studyQuality:4,carryForwardDraft:'',results:{'ethics-1':{completion:50,completionSource:'manual',done:1,total:2,actualSeconds:300}}};
+  const session={date,scheduleText:'07:00 | 60 | Ethics | work | Ethics | units | 1',snapshot};
+  const createContext=(record,snap,{rejectRead=false}={})=>{
+    let checked=0;
+    const ctx=vm.createContext({
+      isPreviousActiveSessionRecord:()=>true,activeSessionSnapshot:()=>snap,
+      AppData:{dailyRecords:{
+        documents:async()=>record?[record]:[],
+        verifyCanonical:async value=>{checked++;if(rejectRead)throw new Error('IndexedDB unavailable');assert.equal(value,record);return true;}
+      }},
+      AppDiagnostics:{capture:()=>{}},
+      ScheduleModel:{
+        parseText:()=>({ok:true,parsed:[{...row,dur:row.duration}]}),
+        fingerprint:rows=>rows.map(r=>[r.start,r.dur,r.name,r.kind,r.area,r.measure,r.target].join('|')).join('|')
+      },
+      TimeModel:{studyMinuteToHHMM:()=> '08:00'},
+      sameDataValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b),
+      Number,Object,Array
+    });
+    vm.runInContext(src+'\nconst DailyRecordCodec={savedDayCoversSessionEvidence};globalThis.covers=savedDayCoversActiveSession;globalThis.covered=savedDayCoversSessionEvidence;',ctx);
+    return {ctx,checks:()=>checked};
+  };
+  const cases=[
+    ['exact',saved,snapshot,true],
+    ['different reflection',{...saved,reflection:'Different'},snapshot,false],
+    ['different focus',{...saved,results:{'ethics-1':{...saved.results['ethics-1'],actualSeconds:200}}},snapshot,false],
+    ['different saved-day revision',{...saved,sourceRevision:8},snapshot,true],
+    ['later preserved progress',{...saved,sourceRevision:99,results:{'ethics-1':{...saved.results['ethics-1'],completion:75,done:2,actualSeconds:500}}},snapshot,true],
+    ['different applied schedule',{...saved,schedule:[{...row,name:'Other Work'}]},snapshot,false],
+    ['different practice evidence',saved,{...snapshot,practice:{runs:[{id:'unrecorded'}]}},false],
+    ['unacknowledged session',saved,{...snapshot,savedRevision:6},false],
+    ['unrecorded schedule adjustment',saved,{...snapshot,scheduleAdjustments:{'ethics-1':{startMin:240}}},false],
+    ['covered schedule adjustment',{...saved,results:{'ethics-1':{...saved.results['ethics-1'],adjustedStart:'08:00'}}},{...snapshot,scheduleAdjustments:{'ethics-1':{startMin:240}}},true],
+    ['unrecorded wall-clock evidence',saved,{...snapshot,taskState:{'ethics-1':{...task,actual:{...task.actual,clock:{startedAt:'2026-08-27T07:00:00.000Z'}}}}},false],
+    ['missing day',null,snapshot,false]
+  ];
+  for(const [label,record,snap,expected] of cases){
+    const {ctx,checks}=createContext(record,snap);
+    assert.equal(await ctx.covers({...session,snapshot:snap}),expected,label);
+    assert.equal(checks(),expected?1:0,label+' strict canonical receipt');
+  }
+  const verified=createContext(saved,snapshot,{rejectRead:true});
+  assert.equal(await verified.ctx.covers(session),false,'emergency-only Saved Day cannot retire prior work');
+  const richer={...saved,sourceRevision:99,results:{'ethics-1':{...saved.results['ethics-1'],completion:75,done:2,actualSeconds:500}}};
+  const advanced=createContext(richer,snapshot);
+  assert.equal(advanced.ctx.covered(richer,session,{allowAdvances:true}),true,'a genuinely continuing session may exceed the shared evidence without matching unrelated revisions');
+  assert.equal(advanced.ctx.covered({...richer,results:{'ethics-1':{...richer.results['ethics-1'],actualSeconds:100}}},session,{allowAdvances:true}),false,'a Saved Day that drops previously recorded work does not cover the old session');
+  assert.equal(advanced.ctx.covered({...richer,schedule:[{...row,name:'Different plan'}]},session,{allowAdvances:true}),false,'a same-date Saved Day for another schedule is not a safe retirement receipt');
+
+  // BF-C6.2 (G): a verified Day may contain later finish time only when
+  // the original start is unchanged AND the actual focus seconds increased.
+  const clockStart='2026-08-27T07:00:00.000Z',clockEnd='2026-08-27T07:05:00.000Z';
+  const timedSnapshot={...snapshot,taskState:{'ethics-1':{...task,actual:{
+    seconds:300,clock:{startedAt:clockStart,endedAt:clockEnd}}}}};
+  const extendedDay={...saved,results:{'ethics-1':{...saved.results['ethics-1'],
+    actualStart:clockStart,actualEnd:'2026-08-27T07:09:00.000Z',actualSeconds:540}}};
+  const timed=createContext(extendedDay,timedSnapshot);
+  const oldTimedSession={...session,snapshot:timedSnapshot};
+  assert.equal(timed.ctx.covered(extendedDay,oldTimedSession,{allowAdvances:true}),true,
+    'an actual longer focus interval with the same start is covered');
+  assert.equal(timed.ctx.covered({...extendedDay,results:{'ethics-1':{
+    ...extendedDay.results['ethics-1'],actualSeconds:300}}},oldTimedSession,{allowAdvances:true}),false,
+    'moving only the wall clock is not evidence of extended focus');
+  assert.equal(timed.ctx.covered({...extendedDay,results:{'ethics-1':{
+    ...extendedDay.results['ethics-1'],actualStart:'2026-08-27T07:01:00.000Z'}}},oldTimedSession,{allowAdvances:true}),false,
+    'a changed start remains a different recorded interval');
+  assert.equal(timed.ctx.covered({...extendedDay,results:{'ethics-1':{
+    ...extendedDay.results['ethics-1'],actualEnd:'2026-08-27T07:04:00.000Z'}}},oldTimedSession,{allowAdvances:true}),false,
+    'an earlier end is not a safe continuation');
+
+  // A partial Practice Pacer record can grow into a completed run only with
+  // an exact unit-prefix and identical identity, target and plan metadata.
+  const priorRun={targetMs:60000,unitMs:[61000],partial:true,taskId:'ethics-1',totalUnits:3};
+  const laterRun={targetMs:60000,unitMs:[61000,59000],taskId:'ethics-1',totalUnits:3};
+  const practiceSnap={...snapshot,practice:{runs:[priorRun]}};
+  const practiceDay={...saved,practiceRuns:[laterRun]};
+  const practice=createContext(practiceDay,practiceSnap);
+  const practiceSession={...session,snapshot:practiceSnap};
+  assert.equal(practice.ctx.covered(practiceDay,practiceSession,{allowAdvances:true}),true,
+    'later completed practice runs preserve prior partial units');
+  assert.equal(practice.ctx.covered({...practiceDay,practiceRuns:[{...laterRun,unitMs:[62000,59000]}]},practiceSession,{allowAdvances:true}),false,
+    'rewritten practice units never count as a continuation');
+  assert.equal(practice.ctx.covered({...practiceDay,practiceRuns:[{...laterRun,targetMs:70000}]},practiceSession,{allowAdvances:true}),false,
+    'a different practice pacing target is not the same run');
+  const doubled={...snapshot,practice:{runs:[priorRun,priorRun]}};
+  assert.equal(practice.ctx.covered(practiceDay,{...session,snapshot:doubled},{allowAdvances:true}),false,
+    'one saved run cannot cover two distinct earlier records');
+  // Exact matches are reserved ahead of overlapping partial prefixes, or
+  // the first partial can steal the only complete-run match unnecessarily.
+  const completedRun={...laterRun};
+  const longerRun={...laterRun,unitMs:[61000,59000,57000]};
+  const overlappingDay={...saved,practiceRuns:[completedRun,longerRun]};
+  const overlappingSnap={...snapshot,practice:{runs:[priorRun,completedRun]}};
+  assert.equal(practice.ctx.covered(overlappingDay,{...session,snapshot:overlappingSnap},{allowAdvances:true}),true,
+    'exact-first matching avoids a spurious conflict between overlapping practice prefixes');
+}
+
+// A saved calendar date is not enough to suppress the user's Save Today
+// reminder. The current Active Session must carry its own verified receipt.
+{
+  const src=[
+    productionFunction('function liveSaveReminderEvidence(date){'),
+    productionFunction('function savedDayCoversReminderEvidence(record,subjects){'),
+    productionFunction('async function savedDayHasUncoveredKeptSession(record,date){'),
+    productionFunction('async function savedDayCoversWork(date,captured=null){'),
+    productionFunction('async function savedRecordExistsForDate(date){')
+  ].join('\n');
+  const date='2026-08-27',record={date,recordKind:'study'};
+  for(const [label,mode,covered,expected] of [
+    ['canonical covered session','committed',true,true],
+    ['different study evidence','committed',false,false],
+    ['unacknowledged session covered by canonical study evidence','unsaved',true,true],
+    ['local-only session','rescue',true,false],
+    ['no session','missing',true,false],
+    ['strict Saved Day read fails','failed-day-read',true,false]
+  ]){
+    const session={date,snapshot:{contentRevision:7,savedRevision:mode==='unsaved'?6:7}};
+    let dayReads=0;
+    const context=vm.createContext({
+      daySaveDirty:()=>false,
+      cleanDayRevision:v=>Number(v)||0,
+      TASKS:[],isTrackableBlock:()=>false,
+      TimerState:{studyDate:date},getReviewDate:()=>date,
+      AppData:{
+        activeSession:{load:async()=>({ok:true,value:mode==='missing'?null:session,storage:{idb:mode!=='rescue'}})},
+        pendingReviews:{list:async()=>[]},
+        dailyRecords:{
+          documents:async()=>{dayReads++;if(mode==='failed-day-read')throw new Error('IndexedDB failed');return [record];},
+          verifyCanonical:async()=>true
+        }
+      },
+      DailyRecordCodec:{savedDayCoversSessionEvidence:(day,value,options)=>{assert.equal(options.allowAdvances,true);return covered;}},
+      AppDiagnostics:{capture:()=>{}},
+      Object
+    });
+    vm.runInContext(src+'\nglobalThis.hasSaved=savedRecordExistsForDate;',context);
+    assert.equal(await context.hasSaved(date),expected,label);
+    assert.equal(await context.hasSaved(date),expected,label+' replay');
+    assert.equal(dayReads,['missing','rescue'].includes(mode)?0:2,
+      label+' must recheck canonical storage on every eligible reminder');
+  }
+}
+
+// The real app-level suspended-Review adapter delegates the final canonical
+// deletion to ReviewSaveService, rather than separately writing a temporary
+// new owner session or resurrecting a stale suspended snapshot on failure.
+{
+  const src=productionFunction('async function saveDayRecord(){');
+  for(const [hasTasks,success] of [[false,true],[false,false],[true,true],[true,false]]){
+    const session={date:'2026-08-27',status:'suspended',snapshot:{token:'saved'}};
+    const events=[],state={tasks:hasTasks?[{}]:[]};
+    const context=vm.createContext({
+      TASKS:state.tasks,sessionPanelMode:'suspended',
+      AppData:{activeSession:{
+        load:async(_retry,options)=>{assert.equal(options.strict,true);return {ok:true,value:session};},
+        save:()=>{throw new Error('Suspended save must never perform a second Active Session save');},
+        clear:()=>{throw new Error('Suspended save must not duplicate the Review service clear');}
+      }},
+      isSuspendedActiveSession:row=>row===session,
+      appCanMutate:()=>true,activeSessionSnapshot:row=>row.snapshot,
+      applyStoredSessionSnapshot:(_row,_snapshot,options)=>{assert.equal(options.reviewOnly,true);events.push('review-only');return true;},
+      saveDayRecordCore:async options=>{events.push('core');assert.equal(options.closeSession,true);return success;},
+      setTimerMode:()=>events.push('finished'),setSessionPanelMode:value=>events.push('panel:'+value),
+      updateSessionControls:()=>events.push('controls'),setStatus:()=>{},
+      AppDiagnostics:{capture:()=>{}},TIMER_MODES:{DONE:'done'},Object
+    });
+    vm.runInContext(src+'\nglobalThis.reviewSave=saveDayRecord;',context);
+    assert.equal(await context.reviewSave(),success,'suspended save outcome must match canonical finalization');
+    assert.equal(events.includes('review-only'),!hasTasks,'only an unloaded suspended session requires review-only hydration');
+    assert.deepEqual(events.filter(x=>x==='core'),['core']);
+    assert.equal(events.includes('finished'),success);
+    assert.equal(events.includes(success?'panel:none':'panel:suspended'),true);
+  }
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'session-claim-flush-safety',scenarios:57,productionFunctions:true}));
