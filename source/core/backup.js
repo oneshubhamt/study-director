@@ -1498,7 +1498,10 @@ async function reviewKeptVersions({ref=''}={}){
   const personal=of('personal').length?await personalExport({flush:false}):null,session=of('session').length?(await readCanonicalActiveSession()).value||null:null;
   // Each choice: 'keep' leaves this device's as it is (wait: the review stays
   // open), 'use' takes the kept version.
-  const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false,comparison=null)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,...(comparison?{comparison:freeze(comparison)}:{}),choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
+  // The dialog gets a short control id (at most 80 characters are allowed,
+  // and a saved plan's key alone runs past that); answers are read back
+  // under the full key, which names the review and the part.
+  const groups=[],steps=[],texts=[],controlKeys=new Map(),choice=(review,part,label,description,keep,use,wait=false,comparison=null)=>{const key=`kept__${review.id}${part?`__${part}`:''}`,id=`kept_${groups.length+1}`;controlKeys.set(id,key);groups.push(freeze({id,key,label,defaultValue:'keep',description,...(comparison?{comparison:freeze(comparison)}:{}),choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id:key,review,part,wait});};
   const when=review=>savedDayDecisionTimestamp(review.keptAt),devices=reviews.map(review=>review.keptFrom).filter(Boolean);
   // The note comparison names the kept side: "Kept from iPad · Safari · 06 Nov, 21:40".
   const keptColumn=review=>{const from=keptDevice(review,devices),at=savedDayDecisionTimestamp(review.keptChangedAt);return from?`Kept from ${from}${at?' · '+at:''}`:`Kept ${when(review)}`;};
@@ -1598,7 +1601,7 @@ async function reviewKeptVersions({ref=''}={}){
     }
   }
   let picked=freeze({}),resolvedTexts=null;
-  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync retained differences it could not safely settle. Choose exactly which values to apply. Each kept version is saved and confirmed separately; if a later choice fails, earlier confirmed choices remain and the rest can be retried.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
+  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync retained differences it could not safely settle. Choose exactly which values to apply. Each kept version is saved and confirmed separately; if a later choice fails, earlier confirmed choices remain and the rest can be retried.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});picked=freeze(Object.fromEntries(Object.entries(picked).map(([id,value])=>[controlKeys.get(id)||id,value])));}
   if(texts.length){resolvedTexts=await NoteReconciliation.resolve(freeze({conflicts:freeze(texts),incomingAssets:freeze([]),purpose:'kept'}));if(!resolvedTexts)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   const use=step=>picked[step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
   return runExclusive('review-kept-versions',()=>withPersistenceSuppressed(async()=>{
