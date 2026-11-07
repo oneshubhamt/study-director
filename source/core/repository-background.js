@@ -24,7 +24,8 @@ registry.define('repository-background',1,input=>{
     // A started check keeps the slot this long against automatic sync and
     // cleanup: a full Drive check takes about a minute, mostly listing, and
     // was otherwise stopped by every upload of a study session. Anything a
-    // person starts, and any suspension, still stops it at once.
+    // person starts, any suspension, and pressing automatic work (an upload
+    // a person's action made urgent, or a flush) still stop it at once.
     protectedMs:60*1000,
     intervalMs:14*24*60*60*1000,
     retryMs:10*60*1000,
@@ -132,10 +133,10 @@ registry.define('repository-background',1,input=>{
       const settled=waitForSettlement(waiting);return freeze({token,reason:label,settled});
     }
     function resume(value){const token=String(value&&value.token||value||'');if(!token||!suspensions.has(token))return false;suspensions.delete(token);resumeTimers();wake('resume');return true;}
-    async function beginBackground(job,{externalSignal=null,budgetMs=0,budgetCode='REPOSITORY_BACKGROUND_BUDGET',budgetMessage='Repository background work reached its work limit.',preemptCode='REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage='Repository background work yielded to a higher-priority operation.'}={}){
+    async function beginBackground(job,{pressing=false,externalSignal=null,budgetMs=0,budgetCode='REPOSITORY_BACKGROUND_BUDGET',budgetMessage='Repository background work reached its work limit.',preemptCode='REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage='Repository background work yielded to a higher-priority operation.'}={}){
       if(String(job)==='convergence'&&Number(budgetMs)>0)throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');
       const name=String(job||''),rank=priority(name);if(!rank)throw new TypeError('Repository-background job is invalid.');if(foreground||suspensions.size||externalSignal?.aborted)return null;
-      const lower=[];for(const [activeJob,row] of active){if(priority(activeJob)>=rank)return null;if(activeJob==='integrity'&&!row.controller.signal.aborted){const age=nowMs()-row.startedAt;if(age>=0&&age<INTEGRITY.protectedMs)return null;}lower.push(row);}
+      const lower=[];for(const [activeJob,row] of active){if(priority(activeJob)>=rank)return null;if(activeJob==='integrity'&&!pressing&&!row.controller.signal.aborted){const age=nowMs()-row.startedAt;if(age>=0&&age<INTEGRITY.protectedMs)return null;}lower.push(row);}
       for(const row of lower)if(!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));
       if(lower.length){try{await waitForSettlement(lower.map(row=>row.settlement),externalSignal);}catch{return null;}}
       if(foreground||suspensions.size||externalSignal?.aborted)return null;

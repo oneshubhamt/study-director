@@ -103,6 +103,12 @@ assert.equal(module.maintenanceDefersAcrossObservation(freeze({reason:'publicati
   const higherPromise=bg.beginBackground('maintenance');await Promise.resolve();assert.equal(low.signal.aborted,true,'higher-priority maintenance must pre-empt integrity after its protected time');low.release();const higher=await higherPromise;assert.ok(higher);higher.release();
 }
 {
+  // Automatic work a person's action made pressing (an urgent change, a flush)
+  // stops even a fresh check at once.
+  const fake=clock(),bg=coordinator(fake),low=await bg.beginBackground('integrity');const pressing=bg.beginBackground('convergence',{pressing:true});await Promise.resolve();
+  assert.equal(low.signal.aborted,true,'a pressing upload does not wait for a fresh check');low.release();const scope=await pressing;assert.ok(scope);scope.release();
+}
+{
   // Anything a person starts, and any suspension, stops even a fresh check.
   const fake=clock(),bg=coordinator(fake);let low=await bg.beginBackground('integrity');const foreground=bg.beginForeground();
   assert.equal(low.signal.aborted,true,'foreground work stops a fresh check at once');low.release();await foreground.settled;foreground.release();
