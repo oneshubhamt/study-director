@@ -823,7 +823,7 @@ async function idbPutActiveSession(session,ownershipToken=null,strictDurability=
         const present=ActiveSessionCodec.sanitizeCurrent(request.result);
         if(!present||!sameDataValue(present,expectedCanonical)){
           try{tx.abort();}catch{}
-          finish(false,new Error('Active Session changed before ownership recovery.'));
+          finish(false,Object.assign(new Error('Active Session changed before this save.'),{code:'ACTIVE_SESSION_CHANGED'}));
           return;
         }
         put();

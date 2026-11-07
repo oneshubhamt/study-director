@@ -263,7 +263,7 @@ const acquireRuntime=[
 const OWN_CLAIM_OWNER='d'.repeat(64),OLD_OWNER='e'.repeat(64);
 function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
-  const syncs=[],requests=[];let current=structuredClone(previous),claims=0,reads=0,separateReads=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,sharedContent='',id=0,readbackFailed=false,conditionalWrites=0;
+  const syncs=[],requests=[];let current=structuredClone(previous),claims=0,reads=0,separateReads=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,sharedContent='',id=0,readbackFailed=false,conditionalWrites=0,compensationWrites=0;
   const app={
     document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
     navigator:{onLine:true},Date,Promise,Object,JSON,
@@ -276,12 +276,17 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
       planData:{read:async()=>({draft:faultMode==='draft-mismatch'?'OTHER DRAFT':draft})},
       activeSession:{
         save:async(value,options={})=>{
+          // Compensation puts the observed session back over this device's
+          // attempted one; every other handoff save replaces the copy the
+          // press started from.
+          const compensating=options.expectedCanonical?.runningOn==='inst_handoff_new';
           if(options.expectedCanonical)conditionalWrites++;
-          if(faultMode==='compensation-race'&&options.expectedCanonical){
+          if(compensating)compensationWrites++;
+          if(faultMode==='compensation-race'&&compensating||faultMode==='local-write-before-save'&&options.expectedCanonical&&!compensating){
             current={...current,snapshot:{label:'new unshared local work'}};
           }
           if(options.expectedCanonical&&JSON.stringify(current)!==JSON.stringify(options.expectedCanonical))
-            return {ok:false,value,error:new Error('Active Session changed before compensation.'),storage:{idb:false,local:false}};
+            return {ok:false,value,error:Object.assign(new Error('Active Session changed before this save.'),{code:'ACTIVE_SESSION_CHANGED'}),storage:{idb:false,local:false}};
           if(['local-only','claim-crash'].includes(faultMode)&&value.runningOn==='inst_handoff_new')
             return {ok:true,value,error:new Error('IndexedDB failed'),storage:{idb:false,local:true}};
           current=structuredClone(value);return {ok:true,value:current,storage:{idb:true,local:false}};
@@ -345,7 +350,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   return {previous,transfer:(session=current,options)=>context.takeOver(structuredClone(session),options),reload:boot,
     setFault:value=>{faultMode=value;},setSourceSession:value=>{remoteSource=value;},setShared:value=>{sharedContent=value;},
     setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
-    state:()=>({current,claim:remoteClaim,claims,reads,separateReads,requests:[...requests],compensations,conditionalWrites,backgroundReleases,notify,syncs:[...syncs]})};
+    state:()=>({current,claim:remoteClaim,claims,reads,separateReads,requests:[...requests],compensations,conditionalWrites,compensationWrites,backgroundReleases,notify,syncs:[...syncs]})};
 }
 {
   const t=acquiringHarness();
@@ -373,19 +378,42 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
 {
   const t=acquiringHarness('compensation-readback');
   await assert.rejects(t.transfer(),/readback failed before compensation/u);
-  assert.equal(t.state().conditionalWrites,1,'compensation must use canonical compare-and-write');
+  assert.equal(t.state().compensationWrites,1,'compensation must use canonical compare-and-write');
   assert.equal(t.state().current.runningOn,'inst_handoff_old');
   assert.equal(t.state().compensations,1);
 }
 {
   const t=acquiringHarness('compensation-race');
   await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_INCOMPLETE');
-  assert.equal(t.state().conditionalWrites,1);
+  assert.equal(t.state().compensationWrites,1);
   assert.equal(t.state().current.snapshot.label,'new unshared local work',
     'a competing write between read and compensation cannot be overwritten');
   assert.equal(t.state().compensations,0);
 }
 
+// Every handoff save replaces only the copy the press started from. A save
+// made here meanwhile is kept: before the claim nothing moves; after it the
+// press asks to be repeated, and nothing here is overwritten.
+{
+  const t=acquiringHarness();await t.transfer();
+  assert.equal(t.state().conditionalWrites,1,'the ownership save is conditional');
+  const s=acquiringHarness(),ahead={...s.previous,revision:12,snapshot:{label:'more study on the other device'}};
+  s.setSourceSession(ahead);s.setShared('f'.repeat(64));await s.transfer();
+  assert.equal(s.state().conditionalWrites,2,'taking Drive\'s newer copy first is conditional too');
+}
+{
+  const t=acquiringHarness('local-write-before-save');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_INCOMPLETE','after the claim, a changed copy asks for another press');
+  assert.equal(t.state().current.snapshot.label,'new unshared local work','the save made here meanwhile is kept');
+  assert.equal(t.state().compensations,0,'and is not rolled back over');
+}
+{
+  const t=acquiringHarness('local-write-before-save'),ahead={...t.previous,revision:12,snapshot:{label:'more study on the other device'}};
+  t.setSourceSession(ahead);t.setShared('f'.repeat(64));
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_CHANGED','before the claim, a changed copy stops the press');
+  assert.equal(t.state().claims,0,'nothing is claimed');
+  assert.equal(t.state().current.snapshot.label,'new unshared local work','Drive\'s copy does not replace the save made here');
+}
 // BF-1R2: a fresh installation displays its default without persisting
 // an independent Plan draft. Ownership transfer must accept canonical null.
 {

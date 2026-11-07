@@ -5534,7 +5534,8 @@ async function transferSessionOwnershipHere(session,{onStep=null,preread=null}={
   if(!BackupProviderRuntime.connected('google-drive'))throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
   const requested=ActiveSessionCodec.sanitizeCurrent(session);
   if(!requested)throw new Error('the transferred session state is invalid');
-  let previous=null,next=null,ownershipClaim=null,backgroundHold=null,claimAttempted=false,localVerified=false;
+  // localBefore: the session stored here that the next save may replace.
+  let previous=null,next=null,ownershipClaim=null,backgroundHold=null,claimAttempted=false,localVerified=false,localBefore=requested;
   try{
     // flush() starts a pending debounce write; settled() also waits for an
     // already-running write whose timer callback has finished.
@@ -5587,9 +5588,13 @@ async function transferSessionOwnershipHere(session,{onStep=null,preread=null}={
           BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
           throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
         }
-        const advanced=await AppData.activeSession.save(previous,{strictDurability:true});
+        // Only over the copy this press started from: a save made here in the
+        // meantime is never overwritten.
+        const advanced=await AppData.activeSession.save(previous,{strictDurability:true,expectedCanonical:requested});
+        if(advanced?.error?.code==='ACTIVE_SESSION_CHANGED')throw sessionHandoffError('SESSION_CONTINUE_CHANGED','Today’s session changed on this device while Continue Here was starting.');
         await requireCanonicalSessionWrite(advanced,previous,'advancing the handoff source');
         handleActiveSessionRepositoryResult(advanced,'save');
+        localBefore=previous;
       }
       planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
       if(!planned)throw new Error('the transferred session state is invalid');
@@ -5605,7 +5610,7 @@ async function transferSessionOwnershipHere(session,{onStep=null,preread=null}={
     ownershipClaim=claimed.claim;
     next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
     if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
-    const saved=await AppData.activeSession.save(next,{strictDurability:true});
+    const saved=await AppData.activeSession.save(next,{strictDurability:true,expectedCanonical:localBefore});
     await requireCanonicalSessionWrite(saved,next,'claiming Active Session ownership');
     localVerified=true;
     handleActiveSessionRepositoryResult(saved,'save');
@@ -5669,6 +5674,7 @@ function sessionHandoffProblem(error){
   if(code==='SESSION_CONTINUE_NOT_CONNECTED')return 'Google Drive isn’t connected. Sign in from your profile, then try again.';
   if(code==='SESSION_CONTINUE_SYNC_REQUIRED')return 'Today’s shared session advanced. This device is syncing it first; retry Continue Here after sync.';
   if(code==='SESSION_CONTINUE_INCOMPLETE')return HANDOFF_RETRY_MESSAGE;
+  if(code==='SESSION_CONTINUE_CHANGED')return 'Today’s session changed on this device while Continue Here was starting. Nothing moved; try again.';
   if(code==='REPOSITORY_SYNC_NEEDS_UPDATE')return String(error.message||'Update the app to continue here.');
   if(code==='REPOSITORY_SESSION_CLAIM_STALE')return 'Today’s session changed on another device. Wait for this device to catch up, then try again.';
   if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
