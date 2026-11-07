@@ -2653,7 +2653,7 @@ let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
 // storage health asks for a redraw during start-up.
-let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
+let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},sessionMovingHere=null,driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='',saveReminderEvidence=null,saveReminderGeneration=0;
@@ -5515,7 +5515,8 @@ const sessionHandoffError=(code,message)=>Object.assign(new Error(message),{code
 // the session as running elsewhere. Pressing Continue Here again finishes it.
 const HANDOFF_RETRY_MESSAGE='Couldn’t finish moving the session. Press Continue Here again to finish.';
 // onStep(text): each step, for Continue Here's progress line.
-async function transferSessionOwnershipHere(session,{onStep=null}={}){
+// preread: a readSessionHandoffSource started while the person confirmed.
+async function transferSessionOwnershipHere(session,{onStep=null,preread=null}={}){
   const step=text=>{try{onStep?.(text);}catch{}};
   if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
   if(!BackupProviderRuntime.connected('google-drive'))throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
@@ -5534,56 +5535,58 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     // canonical value until the person deliberately edits or loads a draft.
     const expectedDisplay=savedDraft===null?getActiveDefaults().scheduleText:savedDraft;
     if(canonicalDraft!==savedDraft||displayedDraft!==expectedDisplay)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The independent Plan draft changed or did not reach canonical storage before Continue Here.');
-    step('Pausing this device’s sync…');
+    // A read started while the person confirmed finishes first: it fills the
+    // verified session the claim reuses when Drive has not moved on.
+    if(preread)await preread;
+    step('Moving the session here…');
     backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
-    // Read only the newest verified Drive Active Session. Continue Here must
-    // not reconcile independent domains such as the Plan draft merely to
-    // establish session ownership.
-    step('Checking the latest Google Drive session…');
-    const source=await BackupProviderRuntime.readSessionHandoffSource('google-drive');
-    if(source?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
-    if(source?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
-    if(!source||source.status!=='completed')throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','The latest Google Drive session could not be verified before ownership transfer.');
-    const expectedCheckpointId=String(source.checkpointId||'');
-    if(!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive did not provide a verified current checkpoint for the handoff.');
-    previous=source.session?ActiveSessionCodec.sanitizeCurrent(source.session):null;
-    if(!previous||previous.date!==requested.date)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s shared session ended or changed while Continue Here was starting.');
-    if(previous.runningOn!==requested.runningOn)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership while Continue Here was starting.');
-    if(Number(previous.revision)<Number(requested.revision))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
-    const [requestedContentFingerprint,observedContentFingerprint]=await Promise.all([activeSessionContentFingerprint(requested),activeSessionContentFingerprint(previous)]);
-    if(requestedContentFingerprint!==observedContentFingerprint){
-      // Drive's newer session only adds to this device's copy when this copy
-      // is exactly content Drive held before: what this device last shared
-      // through Drive (sync takes the newer session then too), or what the
-      // newest claim observed when it was made, whether that claim is the
-      // current owner's or this device's own from a Continue Here that
-      // stopped part-way. Advance only Active Session, then transfer
-      // ownership. A real divergence, or content with attachments, uses
-      // normal sync.
-      const priorClaim=source.priorClaim||null;
-      const causalContinuation=!!(
-        priorClaim&&priorClaim.state==='owned'&&priorClaim.applies&&
-        priorClaim.observedContentFingerprint===requestedContentFingerprint&&
-        Number(priorClaim.revision)<=Number(previous.revision)
-      );
-      const sharedContinuation=!!source.sharedContentFingerprint&&source.sharedContentFingerprint===requestedContentFingerprint;
-      const referencedAssets=BackupCodec.assetIds(previous);
-      if(!causalContinuation&&!sharedContinuation||referencedAssets.length){
-        BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
-        throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
+    let planned=null;
+    // One Drive lease covers both steps. Under it the provider reads only the
+    // newest verified Drive Active Session (Continue Here never reconciles
+    // other data, such as the Plan draft, to move ownership), decide checks
+    // it and names the claim, and the claim is written. decide throwing
+    // writes nothing.
+    const decide=async source=>{
+      const expectedCheckpointId=String(source?.checkpointId||'');
+      if(!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive did not provide a verified current checkpoint for the handoff.');
+      previous=source.session?ActiveSessionCodec.sanitizeCurrent(source.session):null;
+      if(!previous||previous.date!==requested.date)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s shared session ended or changed while Continue Here was starting.');
+      if(previous.runningOn!==requested.runningOn)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership while Continue Here was starting.');
+      if(Number(previous.revision)<Number(requested.revision))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
+      const [requestedContentFingerprint,observedContentFingerprint]=await Promise.all([activeSessionContentFingerprint(requested),activeSessionContentFingerprint(previous)]);
+      if(requestedContentFingerprint!==observedContentFingerprint){
+        // Drive's newer session only adds to this device's copy when this copy
+        // is exactly content Drive held before: what this device last shared
+        // through Drive (sync takes the newer session then too), or what the
+        // newest claim observed when it was made, whether that claim is the
+        // current owner's or this device's own from a Continue Here that
+        // stopped part-way. Advance only Active Session, then transfer
+        // ownership. A real divergence, or content with attachments, uses
+        // normal sync.
+        const priorClaim=source.priorClaim||null;
+        const causalContinuation=!!(
+          priorClaim&&priorClaim.state==='owned'&&priorClaim.applies&&
+          priorClaim.observedContentFingerprint===requestedContentFingerprint&&
+          Number(priorClaim.revision)<=Number(previous.revision)
+        );
+        const sharedContinuation=!!source.sharedContentFingerprint&&source.sharedContentFingerprint===requestedContentFingerprint;
+        const referencedAssets=BackupCodec.assetIds(previous);
+        if(!causalContinuation&&!sharedContinuation||referencedAssets.length){
+          BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
+          throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
+        }
+        const advanced=await AppData.activeSession.save(previous,{strictDurability:true});
+        await requireCanonicalSessionWrite(advanced,previous,'advancing the handoff source');
+        handleActiveSessionRepositoryResult(advanced,'save');
       }
-      const advanced=await AppData.activeSession.save(previous,{strictDurability:true});
-      await requireCanonicalSessionWrite(advanced,previous,'advancing the handoff source');
-      handleActiveSessionRepositoryResult(advanced,'save');
-    }
-    const planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
-    if(!planned)throw new Error('the transferred session state is invalid');
-    next=planned;
-    setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
-    claimAttempted=true;
-    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:previous.date,observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,expectedCheckpointId,handoffToken:crypto.randomUUID(),revision:planned.revision});
+      planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
+      if(!planned)throw new Error('the transferred session state is invalid');
+      next=planned;
+      setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
+      return {observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,revision:planned.revision};
+    };
+    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:requested.date,handoffToken:crypto.randomUUID(),decide,onWrite:()=>{claimAttempted=true;}});
     // Busy and not connected are answered before any claim is written.
-    if(claimed?.status==='busy'||claimed?.status==='unavailable')claimAttempted=false;
     if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
     if(claimed?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
     if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
@@ -5636,6 +5639,16 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
 function setSessionHandoff(step='',error=''){
   sessionHandoff={step:String(step||''),error:String(error||'')};
   updateSessionControls();
+  try{refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-moving',error,'warn');}
+}
+// The block a stored session is on and how many of its blocks are done.
+function sessionProgressSummary(session){
+  const snapshot=activeSessionSnapshot(session),draft=parseScheduleDraftText(String(session&&session.scheduleText||''));
+  if(!snapshot||!draft.ok)return null;
+  const taskState=snapshot.taskState&&typeof snapshot.taskState==='object'?snapshot.taskState:{},finished=row=>['done','skipped'].includes(taskState[row.id]?.resolvedState);
+  const rows=draft.parsed.map((task,index)=>({task,id:String(task.id||makeTaskId(task,index))})).filter(row=>isTrackableBlock(row.task));
+  const current=rows.find(row=>row.id===String(snapshot.currentTaskId||''))||rows.find(row=>!finished(row));
+  return {block:current?shortTaskLabel(current.task):'',done:rows.filter(finished).length,total:rows.length};
 }
 function sessionHandoffProblem(error){
   const code=String(error&&error.code||'');
@@ -5664,9 +5677,15 @@ async function continueSessionHere(){
       return false;
     }
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
+    // Drive is read while the person confirms, so pressing Continue here
+    // waits only on the claim when Drive has not moved on. Nothing is written.
+    const preread=BackupProviderRuntime.readSessionHandoffSource('google-drive').catch(()=>null);
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
-    const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text)});
+    // From here Execute shows the session moving here; its timer starts only
+    // once Google Drive confirms the claim.
+    sessionMovingHere=session;setSessionHandoff('Moving the session here…');
+    const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text),preread});
     setSessionHandoff('Starting here…');
     if(moved.previous.status==='suspended')return restoreSuspendedTodaySession();
     // The timer runs here now: Resume, as Restore Session plays.
@@ -5690,7 +5709,7 @@ async function continueSessionHere(){
     setSessionHandoff('','Couldn’t continue here. '+problem);
     Interactions.notify({source:'session',kind:'error',key:'session-continue',title:'Couldn’t continue here',message:problem});
     return false;
-  }finally{if(sessionHandoff.step)setSessionHandoff('',sessionHandoff.error);}
+  }finally{sessionMovingHere=null;if(sessionHandoff.step)setSessionHandoff('',sessionHandoff.error);}
 }
 // From a pop-up or the profile panel: open Execute first, where the card
 // shows each Continue Here step.
@@ -9001,6 +9020,10 @@ function executeIdlePresentation(d=new Date(),options={}){
   if(sessionParkedHere()){
     const handed=sessionFromElsewhere(sessionPanelSession);
     return applyOverrides(executeIdleView('Session Suspended','SUSPENDED','Today’s Session Suspended',handed?`Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`:'Restore Session continues it here. Review → Save Today can also save its progress without restarting the timer.','NEXT: —'));
+  }
+  if(elsewhere&&sessionMovingHere&&sessionHandoff.step){
+    const summary=sessionProgressSummary(sessionMovingHere),done=summary&&summary.total?` (${summary.done} of ${summary.total} blocks done)`:'';
+    return applyOverrides(executeIdleView(summary?.block||'Moving Here…','MOVING HERE','Moving Here…',`Today’s session is moving to this device${done}. Its timer starts here as soon as Google Drive confirms.`,'NEXT: STARTING HERE'));
   }
   if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here moves it to this device.`,'NEXT: —'));
   if(!hasRows)return applyOverrides(executeIdleView('No Schedule Loaded','—','No Schedule Loaded','Open Plan and apply today’s schedule to begin.','NEXT: —'));

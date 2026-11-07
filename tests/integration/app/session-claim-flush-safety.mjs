@@ -239,7 +239,7 @@ const acquireRuntime=[
 const OWN_CLAIM_OWNER='d'.repeat(64),OLD_OWNER='e'.repeat(64);
 function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
-  const syncs=[],requests=[];let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,sharedContent='',id=0,readbackFailed=false,conditionalWrites=0;
+  const syncs=[],requests=[];let current=structuredClone(previous),claims=0,reads=0,separateReads=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,sharedContent='',id=0,readbackFailed=false,conditionalWrites=0;
   const app={
     document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
     navigator:{onLine:true},Date,Promise,Object,JSON,
@@ -282,11 +282,17 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     BackupProviderRuntime:{
       connected:()=>true,
       readSessionClaim:async()=>remoteClaim,
-      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:OLD_OWNER,session:remoteSource,priorClaim:remoteClaim,sharedContentFingerprint:sharedContent}),
+      readSessionHandoffSource:async()=>{separateReads++;return {status:'completed',checkpointId:head,observedOwnerToken:OLD_OWNER,session:remoteSource,priorClaim:remoteClaim,sharedContentFingerprint:sharedContent};},
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
-      claimSessionOwnership:async(_provider,request)=>{
+      // As the provider does: one lease covers the read and the claim; decide
+      // names the claim (or throws, and nothing is written), and onWrite marks
+      // the moment the claim goes to Drive.
+      claimSessionOwnership:async(_provider,ask)=>{
         if(faultMode==='claim-busy')return {status:'busy',reason:'busy'};
-        claims++;requests.push(request);
+        reads++;
+        const fields=await ask.decide({status:'completed',checkpointId:head,observedOwnerToken:OLD_OWNER,session:remoteSource,priorClaim:remoteClaim,sharedContentFingerprint:sharedContent});
+        const request={...fields,date:ask.date,handoffToken:ask.handoffToken,expectedCheckpointId:head};
+        claims++;requests.push(request);ask.onWrite?.();
         if(faultMode==='claim-throws-before-remote')throw new Error('claim did not reach Drive');
         remoteClaim={epoch:(remoteClaim?.epoch||0)+1,state:'owned',applies:true,ownedHere:true,ownerToken:OWN_CLAIM_OWNER,
           observedOwnerToken:OLD_OWNER,observedRevision:request.observedRevision,
@@ -312,10 +318,10 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     vm.runInContext(acquireRuntime+'\nglobalThis.takeOver=transferSessionOwnershipHere;',context,{filename:'production-handoff-acquisition.js'});
   };
   boot();
-  return {previous,transfer:(session=current)=>context.takeOver(structuredClone(session)),reload:boot,
+  return {previous,transfer:(session=current,options)=>context.takeOver(structuredClone(session),options),reload:boot,
     setFault:value=>{faultMode=value;},setSourceSession:value=>{remoteSource=value;},setShared:value=>{sharedContent=value;},
     setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
-    state:()=>({current,claim:remoteClaim,claims,requests:[...requests],compensations,conditionalWrites,backgroundReleases,notify,syncs:[...syncs]})};
+    state:()=>({current,claim:remoteClaim,claims,reads,separateReads,requests:[...requests],compensations,conditionalWrites,backgroundReleases,notify,syncs:[...syncs]})};
 }
 {
   const t=acquiringHarness();
@@ -328,6 +334,15 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   assert.equal(state.notify,1,'only verified ownership is published as a local change');
   assert.equal(state.backgroundReleases,1);
   assert.match(state.requests[0].handoffToken,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,'each attempt names itself');
+  assert.equal(state.reads,1);assert.equal(state.separateReads,0,'the session is read and claimed under one Drive lease, with no separate read');
+}
+// A read started while the person confirmed finishes before the claim starts.
+{
+  const t=acquiringHarness();let finished=false,claimedEarly=false;
+  const preread=new Promise(resolve=>setTimeout(()=>{finished=true;resolve(null);},5));
+  const original=t.state().claims;
+  await t.transfer(undefined,{preread:preread.then(value=>{claimedEarly=t.state().claims!==original;return value;})});
+  assert.equal(finished,true);assert.equal(claimedEarly,false,'no claim starts while the read ahead runs');assert.equal(t.state().claims,1);
 }
 // A local write can succeed before its read-back fails. Compensation must
 // conditionally compare inside IndexedDB, not trust an earlier standalone read.

@@ -126,6 +126,10 @@ try{
   await b.evaluate(`document.getElementById('execute-session-action').click()`);
   assert.equal(claimsBy('B'),returnClaims,'Continue Here has not committed while its ownership write is held');
   assert.notEqual((await screen(b)).mode,'running','Continue Here keeps the timer stopped before the small ownership claim is durable');
+  // Meanwhile Execute shows the session moving here, with its progress.
+  const moving=await screen(b),movingSub=await b.evaluate(`document.getElementById('execute-overlay-sub').textContent`);
+  assert.equal(moving.overlay,'Moving Here…','Execute shows the session moving here while Google Drive confirms');
+  assert.match(movingSub,/moving to this device \(\d+ of \d+ blocks done\)\. Its timer starts here as soon as Google Drive confirms\./u);
   releaseReturnClaim();
   await waitFor(async()=>claimsBy('B')>returnClaims&&(await screen(b)).mode==='running',{label:'Continue Here ownership claim',timeout:10000});
   await b.evaluate(`clearInterval(window.__acceptTimer)`);

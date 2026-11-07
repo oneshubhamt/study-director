@@ -1859,6 +1859,43 @@ registry.define('backup-provider',1,input=>{
   // This deliberately does not run the general sync/reconciliation pipeline:
   // ownership transfer must not have side effects on Plans, notes, Saved Days
   // or any other independent domain.
+  // The Active Session of a verified version, per location, so Continue Here
+  // need not download it again when Drive still holds that version. A version
+  // never changes, so its id and logical fingerprint name its session.
+  const handoffSessions=new Map();
+  // Continue Here's view of Drive: the newest verified version's Active
+  // Session, the current claim and what this device last shared. The caller
+  // has listed the versions; the stored objects and the claim are in flight.
+  async function handoffSource(selected,scoped,inventory,objectListing,claimRead,signal){
+    if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The current shared repository head could not be determined safely.');
+    const head=sharedRepositoryHead(inventory),checkpointId=String(head&&head.item&&head.item.id||'');
+    if(!checkpointId)return freeze({status:'empty',reason:'no-source',checkpointId:'',session:null});
+    const baseRead=Promise.resolve().then(()=>RepositoryCheckpointPipeline.sharedBase()).catch(()=>null);
+    // A version this device already verified is reused only when the fresh
+    // listing shows exactly the same file (id, version, size, digest).
+    const row=await verifyRepositoryInventoryPair(scoped,head,{interactive:false,signal});
+    const key=checkpointId+':'+String(row.manifest.logicalFingerprint||''),held=handoffSessions.get(selected.id);
+    const sessionRead=held&&held.key===key?Promise.resolve(held.session):objectListing.then(listedObjects=>{
+      const objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest);
+      const readObject=entry=>{
+        const item=objectInventory.byId.get(String(entry&&entry.objectId||''));
+        if(!item)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The verified Active Session object is unavailable.');
+        return scoped.repository.download(item,freeze({signal}));
+      };
+      return RepositoryCheckpointPipeline.readSession(row.manifest,readObject,{interactive:false,signal});
+    });
+    const [session,priorClaim]=await Promise.all([sessionRead,
+      // The current claim, for a waiting copy that is behind the owner's;
+      // unreadable reads as none, so Continue Here then syncs first.
+      claimRead.catch(error=>{AppDiagnostics.capture('backup-provider.session-source-claim',error,'warn');return null;})]);
+    handoffSessions.set(selected.id,freeze({key,session:session||null}));
+    // What this device last shared through Drive: when its session still
+    // equals that, a newer Drive session only adds to it (sync's own rule).
+    const base=await baseRead,sharedContentFingerprint=base&&base.sessionFingerprint&&SESSION_CLAIM_TOKEN_PATTERN.test(String(base.sessionContentFingerprint||''))?String(base.sessionContentFingerprint):'';
+    return freeze({status:'completed',reason:'',checkpointId,session:session||null,priorClaim:priorClaim||null,sharedContentFingerprint,observedOwnerToken:session?await sessionClaimToken('owner',session.runningOn,{signal}):''});
+  }
+  // Read ahead of Continue Here (while the person confirms it): no lease, and
+  // nothing is written; the claim reads Drive again under its lease.
   async function readSessionHandoffSource(id='google-drive',options={}){
     if(busy)return freeze({status:'busy',reason:'busy'});
     const selected=providers.get(safeId(id));
@@ -1874,51 +1911,49 @@ registry.define('backup-provider',1,input=>{
       // together: the versions, the stored objects and the ownership claim.
       const objectListing=repositoryObjectInventory(scoped,{signal:foreground.signal});objectListing.catch(()=>{});
       const claimRead=readRepositorySessionClaim(scoped,{signal:foreground.signal}).then(current=>projectSessionClaim(current,{signal:foreground.signal}));claimRead.catch(()=>{});
-      // What this device last shared through Drive: when its session still
-      // equals that, a newer Drive session only adds to it (sync's own rule).
-      const baseRead=Promise.resolve().then(()=>RepositoryCheckpointPipeline.sharedBase()).catch(()=>null);
-      const inventory=await repositoryProviderInventory(scoped,{signal:foreground.signal});
-      if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The current shared repository head could not be determined safely.');
-      const head=sharedRepositoryHead(inventory),checkpointId=String(head&&head.item&&head.item.id||'');
-      if(!checkpointId){OperationDiagnostics.finish({status:'empty'},traceId);return freeze({status:'empty',reason:'no-source',checkpointId:'',session:null});}
-      // A version this device already verified is reused only when the fresh
-      // listing shows exactly the same file (id, version, size, digest).
-      const row=await verifyRepositoryInventoryPair(scoped,head,{interactive:false,signal:foreground.signal});
-      const listedObjects=await objectListing,objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest);
-      const readObject=entry=>{
-        const item=objectInventory.byId.get(String(entry&&entry.objectId||''));
-        if(!item)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The verified Active Session object is unavailable.');
-        return scoped.repository.download(item,freeze({signal:foreground.signal}));
-      };
-      const [session,priorClaim]=await Promise.all([
-        RepositoryCheckpointPipeline.readSession(row.manifest,readObject,{interactive:false,signal:foreground.signal}),
-        // The current claim, for a waiting copy that is behind the owner's;
-        // unreadable reads as none, so Continue Here then syncs first.
-        claimRead.catch(error=>{AppDiagnostics.capture('backup-provider.session-source-claim',error,'warn');return null;})
-      ]);
-      const base=await baseRead,sharedContentFingerprint=base&&base.sessionFingerprint&&SESSION_CLAIM_TOKEN_PATTERN.test(String(base.sessionContentFingerprint||''))?String(base.sessionContentFingerprint):'';
-      OperationDiagnostics.finish({status:'completed',checkpointId,activeSession:!!session},traceId);
-      return freeze({status:'completed',reason:'',checkpointId,session:session||null,priorClaim:priorClaim||null,sharedContentFingerprint,observedOwnerToken:session?await sessionClaimToken('owner',session.runningOn,{signal:foreground.signal}):''});
+      const source=await handoffSource(selected,scoped,await repositoryProviderInventory(scoped,{signal:foreground.signal}),objectListing,claimRead,foreground.signal);
+      OperationDiagnostics.finish({status:source.status,checkpointId:source.checkpointId,activeSession:!!source.session},traceId);
+      return source;
     }catch(error){OperationDiagnostics.fail(error,{},traceId);throw error;}
     finally{await release(selected,'session-source');setBusy(false);foreground.release();}
+  }
+  // Continue Here's claim. With request.decide, one lease covers both steps:
+  // under it the session is read (decide(source) then returns the claim's
+  // fields, or throws and nothing is written), and the claim is written.
+  // Without decide, the request names the fields and the version they came
+  // from (expectedCheckpointId).
+  function claimRequestFields(request){
+    const date=String(request&&request.date||''),observedOwner=String(request&&request.observedOwner||''),observedRevision=Number(request&&request.observedRevision),observedContentFingerprint=String(request&&request.observedContentFingerprint||''),expectedCheckpointId=String(request&&request.expectedCheckpointId||''),handoffToken=String(request&&request.handoffToken||''),revision=Number(request&&request.revision),owner=String(sessionOwnershipHooks&&sessionOwnershipHooks.installationId()||'');
+    if(!sessionOwnershipHooks||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(observedOwner)||!SESSION_OWNER_PATTERN.test(owner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!SESSION_CLAIM_TOKEN_PATTERN.test(observedContentFingerprint)||!SESSION_HANDOFF_TOKEN_PATTERN.test(handoffToken)||!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId)||!Number.isSafeInteger(revision)||revision<=observedRevision)throw new TypeError('Active-session takeover request is invalid.');
+    return freeze({date,observedOwner,observedRevision,observedContentFingerprint,expectedCheckpointId,handoffToken,revision,owner});
   }
   async function claimSessionOwnership(id='google-drive',request={}){
     if(busy)return freeze({status:'busy',reason:'busy'});
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return freeze({status:'unavailable',reason:'not-connected'});
     if(!repositorySessionClaimCapable(selected))return freeze({status:'unavailable',reason:'unavailable'});
-    const date=String(request&&request.date||''),observedOwner=String(request&&request.observedOwner||''),observedRevision=Number(request&&request.observedRevision),observedContentFingerprint=String(request&&request.observedContentFingerprint||''),expectedCheckpointId=String(request&&request.expectedCheckpointId||''),handoffToken=String(request&&request.handoffToken||''),revision=Number(request&&request.revision),owner=String(sessionOwnershipHooks&&sessionOwnershipHooks.installationId()||'');
-    if(!sessionOwnershipHooks||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(observedOwner)||!SESSION_OWNER_PATTERN.test(owner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!SESSION_CLAIM_TOKEN_PATTERN.test(observedContentFingerprint)||!SESSION_HANDOFF_TOKEN_PATTERN.test(handoffToken)||!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId)||!Number.isSafeInteger(revision)||revision<=observedRevision)throw new TypeError('Active-session takeover request is invalid.');
+    const decide=typeof request?.decide==='function'?request.decide:null;
+    if(!decide)claimRequestFields(request);
     const foreground=beginForeground(selected,request&&request.signal||null);if(!foreground)return freeze({status:'busy',reason:'busy'});
     setBusy(true);let publicationLease=null;
     try{
       await foreground.settled;const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});await synchronizeRepositoryScope(scoped);
       publicationLease=await beginRepositoryPublication(scoped);
-      // The lease excludes another publisher. Under it, three independent
-      // reads go out together: the turn check, a fresh version listing (the
-      // claim is valid only if Drive is still exactly the verified head whose
-      // session content this device just reconciled) and the current claim.
-      const [,inventory,current,sessionToken,ownerToken,observedOwnerToken]=await Promise.all([assertSharedPublicationTurn(scoped,publicationLease),repositoryProviderInventory(scoped,{signal:foreground.signal}),readRepositorySessionClaim(scoped,{signal:foreground.signal}),sessionClaimToken('session',date,{signal:foreground.signal}),sessionClaimToken('owner',owner,{signal:foreground.signal}),sessionClaimToken('owner',observedOwner,{signal:foreground.signal})]);
+      // The lease excludes another publisher. Under it, the independent reads
+      // go out together: the turn check, a fresh version listing (the claim
+      // is valid only if Drive is still exactly the verified head whose
+      // session content this device reconciled), the current claim and, for
+      // decide, the stored objects.
+      const objectListing=decide?repositoryObjectInventory(scoped,{signal:foreground.signal}):null;objectListing?.catch(()=>{});
+      const [,inventory,current]=await Promise.all([assertSharedPublicationTurn(scoped,publicationLease),repositoryProviderInventory(scoped,{signal:foreground.signal}),readRepositorySessionClaim(scoped,{signal:foreground.signal})]);
       if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive changed or could not be read completely while Continue Here was confirming ownership.');
+      let source=null;
+      if(decide){
+        source=await handoffSource(selected,scoped,inventory,objectListing,projectSessionClaim(current,{signal:foreground.signal}),foreground.signal);
+        if(source.status!=='completed')throw syncError('REPOSITORY_SESSION_CLAIM_STALE','The latest Google Drive session could not be verified before ownership transfer.');
+      }
+      const fields=claimRequestFields(decide?{...await decide(source),date:request.date,handoffToken:request.handoffToken,expectedCheckpointId:source.checkpointId}:request);
+      const {date,observedOwner,observedRevision,observedContentFingerprint,expectedCheckpointId,handoffToken,revision,owner}=fields;
+      const [sessionToken,ownerToken,observedOwnerToken]=await Promise.all([sessionClaimToken('session',date,{signal:foreground.signal}),sessionClaimToken('owner',owner,{signal:foreground.signal}),sessionClaimToken('owner',observedOwner,{signal:foreground.signal})]);
       const head=sharedRepositoryHead(inventory);
       if(!head||head.item.id!==expectedCheckpointId)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Google Drive received a newer Study Director version before this takeover could be confirmed. Sync it, then continue here again.');
       if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='released'&&current.claim.revision>=observedRevision)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','The shared Active Session has already ended. Sync before starting it again.');
@@ -1926,8 +1961,10 @@ registry.define('backup-provider',1,input=>{
       // stop after its claim landed but before the session moved here. The
       // new claim then records what this device observes now.
       if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='owned'&&current.claim.ownerToken!==ownerToken&&(current.claim.ownerToken!==observedOwnerToken||current.claim.revision>observedRevision))throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Active Session ownership changed on another device before this takeover could be confirmed.');
-      const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state:'owned',ownerToken,revision,observedOwnerToken,observedRevision,observedContentFingerprint,handoffToken,claimedAt:new Date().toISOString()}),verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal,interactive:true});
-      return freeze({status:'completed',claim:verified.claim});
+      const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state:'owned',ownerToken,revision,observedOwnerToken,observedRevision,observedContentFingerprint,handoffToken,claimedAt:new Date().toISOString()});
+      request?.onWrite?.();
+      const verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal,interactive:true});
+      return freeze({status:'completed',claim:verified.claim,...(source?{source}:{})});
     }finally{
       // The claim is written and verified; ending the lease need not hold up
       // the handoff. This device's own markers never block it, and one left
@@ -2104,7 +2141,7 @@ registry.define('backup-provider',1,input=>{
   // Forgetting a location drops everything this device holds about it; its
   // backups stay where they are.
   async function forgetProvider(selected){
-    Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
+    Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
   }
   async function disconnectProvider(selected){
     if(busy||!selected||!selected.disconnect)return false;

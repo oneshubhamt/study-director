@@ -643,12 +643,12 @@ let syncWorld=null;
 // difference made on both waits for the person, and a session running here
 // keeps its own state while everything else merges.
 {
-  const drive=new Map(),key=(kind,id)=>kind+':'+id,keepAll={on:false};
+  const drive=new Map(),key=(kind,id)=>kind+':'+id,keepAll={on:false},counts={downloads:0,kinds:[]};
   const describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'remote-'+key(file.kind,file.id),...(file.historySummary?{history:freeze({...file.historySummary,exportedAt:file.exportedAt})}:{})});
   const store=files=>freeze({
     list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),
     upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},
-    download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('QA_FIXTURE missing backup file');return freeze({blob:stored.blob,release:async()=>{}});},
+    download:async ref=>{counts.downloads++;counts.kinds.push(ref.kind);const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('QA_FIXTURE missing backup file');return freeze({blob:stored.blob,release:async()=>{}});},
     // A test can hold on to every version (all of them fall in one hour, so
     // retention would keep only the newest).
     delete:async ref=>{if(!keepAll.on)files.delete(key(ref.kind,ref.id));}
@@ -698,7 +698,7 @@ let syncWorld=null;
   const A=device(a),B=device(b);
   // A new device takes in everything.
   const v1=await A.upload();assert.equal(a.reconciliationBase.checkpointId,v1.checkpointId,'a Drive backup is what this device shares');
-  syncWorld=freeze({drive,head,device,note,keepAll,versions,claims});
+  syncWorld=freeze({drive,head,device,note,keepAll,versions,claims,counts});
   assert.equal((await B.sync()).cancelled,false);
   assert.deepEqual([...b.records.keys()].sort(),['2026-08-01','2026-08-02']);assert.equal(b.notes.Shared.text,'first');
   assert.deepEqual(b.followed,[{protectionId:'',encrypted:false,removedElsewhere:false}],'a sync tells the backup password what the newest version uses');assert.equal(b.reconciliationBase.checkpointId,v1.checkpointId,'what a device takes in from Drive is what it shares');
@@ -1597,6 +1597,38 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   await C.upload();assert.equal((await D.sync()).cancelled,false);
   assert.deepEqual(ids(d),[planOnA.id,planOnB.id]);assert.equal(d.personal.preferences.studentName,'Name on D','this device\'s setting stays');
   assert.equal(d.reviews.open().find(review=>review.subject==='personal')?.kept?.preferences?.studentName,'Name on C','the other\'s is kept for review');
+}
+
+// Continue Here in one lease: decide gets the newest verified session under
+// it and names the claim; a refused decision writes nothing; a session this
+// device already read for that version is not downloaded again, and a newer
+// version is always read afresh.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note,counts}=syncWorld,day='2026-08-31';
+  const a={installationId:'inst_one_lease_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('lease'),activeSession:null,schedule:'',personal:personal('Lease User'),journal:null};
+  const b={installationId:'inst_one_lease_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Lease User'),journal:null};
+  const A=device(a,{claims:true}),B=device(b,{claims:true});
+  a.activeSession=revisionedSession(day,'LEASE-ONE',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const fields=async source=>({observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),revision:source.session.revision+1});
+  const ahead=await B.handoffSource();assert.equal(ahead.session.snapshot.label,'LEASE-ONE');
+  // The other device moves on after the read ahead: the claim reads the newer version.
+  a.activeSession=revisionedSession(day,'LEASE-TWO',{runningOn:a.installationId,revision:12,contentRevision:8,savedRevision:0,updatedAt:'2026-08-31T09:05:00.000Z'});a.schedule=a.activeSession.scheduleText;await A.upload();
+  let seen=null,wrote=false,downloads=counts.downloads;
+  await assert.rejects(B.claim({date:day,handoffToken:'44444444-4444-4444-8444-444444444444',onWrite:()=>{wrote=true;},decide:async source=>{seen=source;throw new Error('QA_FIXTURE not now');}}),/not now/u);
+  assert.notEqual(seen.checkpointId,ahead.checkpointId);assert.equal(seen.session.snapshot.label,'LEASE-TWO','a newer version is read afresh, never the one read ahead');
+  assert.ok(counts.kinds.slice(downloads).some(kind=>!['checkpoint','commit'].includes(kind)),'its session is downloaded');
+  assert.equal(wrote,false);assert.equal(syncWorld.claims.size,0,'a refused decision writes no claim');
+  // Drive unchanged since the read ahead: the claim reuses that session.
+  const again=await B.handoffSource();downloads=counts.downloads;
+  const claimed=await B.claim({date:day,handoffToken:'55555555-5555-4555-8555-555555555555',onWrite:()=>{wrote=true;},decide:async source=>{seen=source;return fields(source);}});
+  assert.equal(claimed.status,'completed');assert.equal(wrote,true);assert.equal(claimed.claim.revision,13);assert.equal(syncWorld.claims.size,1);
+  assert.equal(seen.checkpointId,again.checkpointId);assert.deepEqual(seen.session,again.session);
+  // (This Drive stand-in lists no file versions, so the version itself is
+  // verified again; a real Drive listing lets that be skipped too.)
+  assert.deepEqual(counts.kinds.slice(downloads).filter(kind=>!['checkpoint','commit'].includes(kind)),[],'with Drive unchanged, the session is not downloaded again');
+  assert.equal(claimed.source.checkpointId,again.checkpointId,'the claim names the version it was made on');
 }
 
 // BF-1: Continue Here is fenced by the exact verified Drive session content.
