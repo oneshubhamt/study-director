@@ -14,7 +14,10 @@ Object.assign(context,{
   
   pwaUpdateCheckDueAt:Date.parse('2026-10-02T00:00:00.000Z'),pwaUpdateCheckFailureCount:2,pwaLastUpdateCheckAt:()=>Date.parse('2026-10-01T00:00:00.000Z'),PwaLifecycle:{status:()=>({phase:'activating',applying:true,reloading:false,updateReady:true,message:'private editor text'})},
   BackupProviderRuntime:{status:()=>({busy:false,preparing:false}),diagnosticConnections:()=>[{id:'google-drive',connected:true,scopeBound:true,retryAttempt:4,retryBackoffCapped:true}],backgroundStatus:()=>[{job:'google-drive integrity',...scheduled},{job:'device-folder maintenance',state:'running',busy:true,pending:true}],diagnosticSync:()=>[{id:'google-drive',connected:true,syncedAt:'2026-10-01T10:42:00.000Z',checkedAt:'2026-10-01T11:00:00.000Z',nextEligibleAt:'2026-10-01T11:20:00.000Z',needsReview:false,needsPassword:false,behind:true,catchingUp:false,turnWaits:2,signInEndsAt:'2026-10-01T11:40:00.000Z'}]},
-  KeptVersions:{count:()=>3},Profiles:{list:()=>[{id:'a'},{id:'b'}],removalPending:()=>1,unsupported:()=>false},
+  KeptVersions:{count:()=>3},Profiles:{list:()=>[{id:'a'},{id:'b'}],current:()=>({id:'a'}),removalPending:()=>1,unsupported:()=>false},
+  DATA_CONTRACT:{storage:{dbName:'StudyDirectorDB'}},DB_NAME:'StudyDirectorDB~prof_qa_abcdef_12345678',IndexedDb:{lifecycle:()=>({startedFresh:true})},
+  ProfileScope:{scope:'prof_qa_abcdef_12345678',separator:'~',registryKey:'profiles'},LocalStorageContract:{getText:key=>key==='profiles'?'{"version":1}':null},
+  indexedDB:{databases:async()=>[{name:'StudyDirectorDB'},{name:'StudyDirectorDB~prof_qa_abcdef_12345678'},{name:'another-site-db'}]},
   UnsupportedData:{held:()=>false,summary:()=>({total:1,held:1,protected:0,blocked:false,items:{days:0,notes:0,attachments:0,sessions:0,settings:0}})},
   navigator:{clipboard:{writeText:async value=>copied.push(value)}},NoticeCoordinator:{presentation:()=>({begin:()=>({finish:(...args)=>notices.push(args)})})},AppDiagnostics:{capture:(...args)=>errors.push(args)}
 });
@@ -35,6 +38,11 @@ assert.match(text,/Current Device cleanup intent: state=pending.*reason=gc-grace
 // Sync and profiles: what to read first when a device does not sync.
 assert.match(text,/Current Drive sync: state=pending[^\n]*nextEligibleAt=2026-10-01T11:20:00\.000Z · completedAt=2026-10-01T10:42:00\.000Z · attemptedAt=2026-10-01T11:00:00\.000Z · signInEndsAt=2026-10-01T11:40:00\.000Z/u,'last synced, last checked, next check and when the sign-in ends');assert.match(text,/Current Drive sync: [^\n]*behind=true[^\n]*keptVersions=3[^\n]*turnWaits=2/u);
 assert.match(text,/Current Profiles: state=pending[^\n]*removalPending=true[^\n]*profiles=2/u,'a removed profile still waiting to be deleted');
+// Which storage the page opened: a new, empty database here while another
+// Study Director database still exists means the data may still be on the device.
+{const line=text.split('\n').find(row=>row.startsWith('Current Profile storage'));
+assert.match(line,/state=observed/u);assert.match(line,/scoped=true/u);assert.match(line,/profileListPresent=true/u);assert.match(line,/pageProfileListed=true/u);assert.match(line,/startedFresh=true/u);
+assert.match(line,/databases=2/u,'only this app\'s databases are counted');assert.match(line,/otherDatabases=1/u);assert.doesNotMatch(line,/prof_qa|StudyDirectorDB/u,'no database or profile names');}
 assert.match(text,/Current Unsupported data: state=replaceable[^\n]*held=1[^\n]*protectedCount=0/u,'data this build cannot read: only replaceable bookkeeping, so nothing waits');
 const savedRead=context.AppData.restoreJournal.diagnostics;context.AppData.restoreJournal.diagnostics=async()=>{throw new Error('PRIVATE DATA');};context.DeviceBackup.status=()=>{throw new Error('PRIVATE DATA');};
 assert.equal(await context.copyBackupDiagnostics(),true);assert.match(copied.at(-1),/Current Restore journal: state=unavailable.*reason=state-unavailable/u);assert.match(copied.at(-1),/Current Device backup: state=unavailable/u);assert.match(copied.at(-1),/Current Canonical maintenance record: state=pending/u);assert.doesNotMatch(copied.at(-1),/PRIVATE DATA/u);context.AppData.restoreJournal.diagnostics=savedRead;
