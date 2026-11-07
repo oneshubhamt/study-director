@@ -233,20 +233,12 @@ registry.define('compatibility-host',1,()=>{
       if(after.some(row=>renamedFrom(String(row&&row.key||''))||retiredStamp(row)))throw new Error('Renamed records could not be verified. The previous names were preserved.');
       return freeze({status:'migrated',renamed:count,dropped:stamps.length});
     }
-    const legacyHandoffMarker=value=>!!value&&typeof value==='object'&&value.format==='study-director.session-handoff-safety.v1';
     async function migrateHostMetadata(){
       let token;try{token=ownership.issueWriteToken('migrate historical host metadata',{allowHydrating:true});}
       catch(error){if(ownership.isOwnershipLostError(error))return freeze({status:'skipped',reason:'not-primary',migrated:0,removed:0});throw error;}
       const requireOwnership=()=>ownership.assertWriteToken(token,'migrate historical host metadata');
       let migrated=0,removed=0;
       const libraryClearMigration=await migrateLibraryClearJournal(requireOwnership);migrated+=Number(libraryClearMigration.migrated||0);removed+=Number(libraryClearMigration.removed||0);
-      // A Continue Here marker in its first form (before handoff tokens) cannot
-      // be checked against Drive by this build, so it is removed. A device that
-      // had not yet taken the session over runs no timer either way, and one
-      // that had saved its takeover only after Drive accepted the claim.
-      if(legacyHandoffMarker(local.getJson(storage.sessionHandoffSafety,null))){
-        requireOwnership();if(!local.remove(storage.sessionHandoffSafety))throw new Error('An earlier Continue Here marker could not be removed from browser storage.');removed++;
-      }
       const maintenance=await metadata.readRow(appMeta.dataMaintenance);
       // dataMaintenance is operational/rebuildable state, not user authority. Any
       // non-current value is safely retired so current maintenance can regenerate it.
@@ -313,7 +305,6 @@ registry.define('compatibility-host',1,()=>{
       for(const row of rows){const key=String(row&&row.key||'');if(renamedFrom(key)||retiredStamp(row))present.push(key);}
       for(const [from] of renamedLocal)if(local.getText(from,null)!==null)present.push(from);
       for(const row of staleReconciliationRows(rows))present.push(String(row.key));
-      if(legacyHandoffMarker(local.getJson(storage.sessionHandoffSafety,null)))present.push(`${storage.sessionHandoffSafety}:v1`);
       for(const field of retiredHealthFields(local.getJson(storage.storageHealth,null)))present.push(`${storage.storageHealth}:${field}`);
       const recovery=rows.find(row=>String(row&&row.key||'')===appMeta.verifiedRecoveryBackups);
       if(recovery&&Number(recovery.value&&recovery.value.version)!==3)present.push(`${appMeta.verifiedRecoveryBackups}:v${Number(recovery.value&&recovery.value.version)||'?'}`);

@@ -31,8 +31,8 @@ assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAG
 assert.match(app,/const OBSOLETE_STORAGE_KEYS=Object\.freeze\(@@SD_OBSOLETE_LOCAL_STORAGE_KEYS@@\);/u);
 assert.match(app,/const APP_META_KEYS=Object\.freeze\(@@SD_APP_META_KEYS@@\);/u);
 assert.match(app,/const OBSOLETE_APP_META_KEYS=Object\.freeze\(@@SD_OBSOLETE_APP_META_KEYS@@\);/u);
-assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,20,'current localStorage inventory includes one explicit session-handoff safety key; attachment cleanup still keeps no record of its own');
-assert.equal(LOCAL_STORAGE_KEYS.sessionHandoffSafety,'studyDirector.sessionHandoffSafety.v1','uncertain ownership survives reload in a profile-scoped key');
+assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,19,'current localStorage inventory; Continue Here keeps no record of its own, and nor does attachment cleanup');
+assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,'sessionHandoffSafety'),false,'Drive\'s claim, not a local marker, settles an interrupted Continue Here');
 assert.equal(LOCAL_STORAGE_KEYS.driveSession,'studyDirector.driveSession.v1');
 for(const key of ['attachmentMaintenancePending','attachmentMaintenanceDay']){assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,key),false,key+' is retired');assert.equal(Object.hasOwn(DATA_ARCHITECTURE.localStorage,key),false,key+' has no live surface');}
 assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.attachmentMaintenancePending,'studyDirector.attachmentMaintenancePending.v1');

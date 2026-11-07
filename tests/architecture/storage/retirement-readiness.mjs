@@ -38,7 +38,6 @@ const migrationEvidence=Object.freeze({
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
   'restore-journal-payload-v1-v5':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/repository-journals.mjs'],
   'reconciliation-base-pre-v5':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/reconciliation-baseline-v2.mjs'],
-  'handoff-safety-marker-v1':['tests/integration/storage/compatibility-host.mjs'],
   'older-session-claims':['tests/helpers/session-ownership-claim-regression.mjs','tests/integration/backup/drive-security.mjs'],
   'canonical-note-and-folder-names':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/indexeddb-topology-retirement.mjs'],
   'backup-repository-v1-v4':['tests/integration/backup/repository-restore.mjs'],

@@ -30,7 +30,7 @@ function harness(){
     ActiveSessionCodec:{sanitizeCurrent:value=>value},CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
     InstallationIdentity:{getId:()=> 'inst_local'},
     DecisionClock:{nowMs:()=>now},lastTimerSnapshotMs:0,
-    restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,pendingSessionHandoffSafety:()=>false,
+    restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,
     showLiveDraftSaveWarning:reason=>calls.warnings.push({key:'capture',message:reason}),
     TimerEngine:{stopExecution:()=>{calls.stops++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return resumeWorks;}},
     markDayContentChanged:()=>{calls.changed++;},
@@ -205,20 +205,20 @@ for(const bad of [
   assert.deepEqual(t.calls.syncs,['session-claim']);
 }
 
-// A pending interrupted handoff fences a primary-tab timer resume.
+// A frozen claim fences a primary-tab timer resume; nothing else does.
 {
   const fn=productionFunction('function resumeTimerLoopAfterPrimaryRestore(){');
-  let calls=0,pending=true;
+  let calls=0;
   const c=vm.createContext({
-    sessionClaimFreeze:null,pendingSessionHandoffSafety:()=>pending,
+    sessionClaimFreeze:{epoch:2},
     TimerEngine:{resumeAfterPrimaryRestore:()=>{calls++;return true;}},
     StartupLifecycle:{status:()=>({fullyInitialized:false})},
     AppDiagnostics:{capture:()=>{}}
   });
-  vm.runInContext(fn+'\nglobalThis.tryResume=resumeTimerLoopAfterPrimaryRestore;',c);
-  assert.equal(c.tryResume(),false,'unverified ownership stops the timer-resume path');
+  vm.runInContext(fn+'\nglobalThis.tryResume=resumeTimerLoopAfterPrimaryRestore;globalThis.unfreeze=()=>{sessionClaimFreeze=null;};',c);
+  assert.equal(c.tryResume(),false,'a session claimed elsewhere does not resume here');
   assert.equal(calls,0);
-  pending=false;
+  c.unfreeze();
   assert.equal(c.tryResume(),true);
   assert.equal(calls,1);
 }
@@ -228,54 +228,36 @@ for(const bad of [
 // IndexedDB receipt; a partial claim is never silently treated as success.
 const handoffConstants=[
   source.match(/^const sessionHandoffError=.*;$/mu)?.[0],
-  source.match(/^const HANDOFF_SAFETY_FORMAT=.*;$/mu)?.[0],
-  source.match(/^const HANDOFF_ATTEMPT_PATTERN=.*;$/mu)?.[0],
-  source.match(/^const HANDOFF_FINGERPRINT_PATTERN=.*;$/mu)?.[0],
-  source.match(/^const HANDOFF_UNCERTAIN_MESSAGE=.*;$/mu)?.[0]
+  source.match(/^const HANDOFF_RETRY_MESSAGE=.*;$/mu)?.[0]
 ];
 assert.ok(handoffConstants.every(Boolean));
 const acquireRuntime=[
   ...handoffConstants,
-  productionFunction('function pendingSessionHandoffSafety(){'),
-  productionFunction('function armSessionHandoffSafety(session,checkpointId,'),
-  productionFunction('function validSessionHandoffSafety(marker,session){'),
-  productionFunction('function handoffClaimMatches(marker,claim){'),
-  source.match(/^let sessionHandoffRecoveryInFlight=.*;$/mu)?.[0],
-  productionFunction('async function resolveSessionHandoffSafety(session){'),
-  productionFunction('async function verifySessionHandoffSafety(session){'),
-  productionFunction('async function releaseIdleSessionHandoffSafety(){'),
-  productionFunction('async function verifySessionHandoffSafetyStrictly(session){'),
-  productionFunction('function clearSessionHandoffSafety(){'),
   productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
   productionFunction('async function transferSessionOwnershipHere(session,')
 ].join('\n');
+const OWN_CLAIM_OWNER='d'.repeat(64),OLD_OWNER='e'.repeat(64);
 function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
-  const syncs=[];let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,canMutate=true,readbackFailed=false,conditionalWrites=0;
-  const storage=new Map();
+  const syncs=[],requests=[];let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,readbackFailed=false,conditionalWrites=0;
   const app={
     document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
     navigator:{onLine:true},Date,Promise,Object,JSON,
     crypto:{randomUUID:()=>('00000000-0000-4000-8000-'+String(++id).padStart(12,'0'))},
-    appCanMutate:()=>canMutate,
+    appCanMutate:()=>true,
     getActiveDefaults:()=>({scheduleText:'FALLBACK DEFAULT'}),
     PlanDraftEditor:{flush:async()=>true},
     PlanData:{settled:async()=>{if(faultMode==='draft-fail')throw new Error('draft write failed');},readDraft:()=>draft},
     AppData:{
-      local:{
-        setJson:(key,value)=>(storage.set(key,structuredClone(value)),true),
-        getJson:(key,fallback)=>storage.has(key)?storage.get(key):fallback,
-        remove:key=>faultMode==='clear-fail'?false:(storage.delete(key),true)
-      },
       planData:{read:async()=>({draft:faultMode==='draft-mismatch'?'OTHER DRAFT':draft})},
       activeSession:{
         save:async(value,options={})=>{
           if(options.expectedCanonical)conditionalWrites++;
-          if(['concurrent-local','compensation-race'].includes(faultMode)&&options.expectedCanonical){
+          if(faultMode==='compensation-race'&&options.expectedCanonical){
             current={...current,snapshot:{label:'new unshared local work'}};
           }
           if(options.expectedCanonical&&JSON.stringify(current)!==JSON.stringify(options.expectedCanonical))
-            return {ok:false,value,error:new Error('Active Session changed before ownership recovery.'),storage:{idb:false,local:false}};
+            return {ok:false,value,error:new Error('Active Session changed before compensation.'),storage:{idb:false,local:false}};
           if(['local-only','claim-crash'].includes(faultMode)&&value.runningOn==='inst_handoff_new')
             return {ok:true,value,error:new Error('IndexedDB failed'),storage:{idb:false,local:true}};
           current=structuredClone(value);return {ok:true,value:current,storage:{idb:true,local:false}};
@@ -288,11 +270,10 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
         }
       }
     },
-    STORAGE_KEYS:{sessionHandoffSafety:'test-session-handoff'},
     InstallationIdentity:{getId:()=> 'inst_handoff_new'},
     ActiveSessionCodec:{sanitizeCurrent:value=>value||null},
     CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
-    activeSessionContentFingerprint:async session=>session?.snapshot?.label==='original'?'f'.repeat(64):'0'.repeat(64),
+    activeSessionContentFingerprint:async session=>session?.snapshot?.label==='original'?'f'.repeat(64):session?.snapshot?.label==='changed here'?'1'.repeat(64):'0'.repeat(64),
     BackupCodec:{assetIds:session=>session?.snapshot?.label==='remote with missing attachment'?['img-unavailable']:[]},
     nextSessionRevision:value=>Number(value)+1,
     setPlanStatus:()=>{},handleActiveSessionRepositoryResult:()=>true,
@@ -301,14 +282,14 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     BackupProviderRuntime:{
       connected:()=>true,
       readSessionClaim:async()=>remoteClaim,
-      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:remoteSource?.runningOn==='inst_handoff_next'?'c'.repeat(64):remoteSource?.runningOn==='inst_handoff_new'?'d'.repeat(64):'e'.repeat(64),session:remoteSource,priorClaim:remoteClaim}),
+      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:OLD_OWNER,session:remoteSource,priorClaim:remoteClaim}),
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
       claimSessionOwnership:async(_provider,request)=>{
         if(faultMode==='claim-busy')return {status:'busy',reason:'busy'};
-        claims++;
+        claims++;requests.push(request);
         if(faultMode==='claim-throws-before-remote')throw new Error('claim did not reach Drive');
-        remoteClaim={epoch:1,state:'owned',applies:true,ownedHere:true,ownerToken:'d'.repeat(64),
-          observedOwnerToken:'e'.repeat(64),observedRevision:request.observedRevision,
+        remoteClaim={epoch:(remoteClaim?.epoch||0)+1,state:'owned',applies:true,ownedHere:true,ownerToken:OWN_CLAIM_OWNER,
+          observedOwnerToken:OLD_OWNER,observedRevision:request.observedRevision,
           observedContentFingerprint:request.observedContentFingerprint,handoffToken:request.handoffToken,
           revision:request.revision};
         if(faultMode==='claim-throws-after-remote')throw new Error('claim accepted but response lost');
@@ -317,8 +298,8 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
       releaseSessionClaim:async()=>{
         compensations++;
         if(faultMode==='claim-crash')return false;
-        remoteClaim={...remoteClaim,epoch:remoteClaim.epoch+1,ownedHere:false,ownerToken:'e'.repeat(64),
-          observedOwnerToken:'d'.repeat(64),observedRevision:remoteClaim.revision,
+        remoteClaim={...remoteClaim,epoch:remoteClaim.epoch+1,ownedHere:false,ownerToken:OLD_OWNER,
+          observedOwnerToken:OWN_CLAIM_OWNER,observedRevision:remoteClaim.revision,
           revision:previous.revision,observedContentFingerprint:''};
         return true;
       },
@@ -328,14 +309,13 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   let context;
   const boot=()=>{
     context=vm.createContext({...app});
-    vm.runInContext(acquireRuntime+'\nglobalThis.takeOver=transferSessionOwnershipHere;globalThis.recover=resolveSessionHandoffSafety;',context,{filename:'production-handoff-acquisition.js'});
+    vm.runInContext(acquireRuntime+'\nglobalThis.takeOver=transferSessionOwnershipHere;',context,{filename:'production-handoff-acquisition.js'});
   };
   boot();
-  return {previous,transfer:()=>context.takeOver(previous),reload:boot,recover:()=>context.recover(structuredClone(current)),
-    setFault:value=>{faultMode=value;},setHead:value=>{head=value;},setSourceSession:value=>{remoteSource=value;},setCanMutate:value=>{canMutate=value;},
+  return {previous,transfer:(session=current)=>context.takeOver(structuredClone(session)),reload:boot,
+    setFault:value=>{faultMode=value;},setSourceSession:value=>{remoteSource=value;},
     setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
-    setOffline:value=>{app.navigator.onLine=!value;},
-    state:()=>({current,claim:remoteClaim,claims,compensations,conditionalWrites,backgroundReleases,notify,syncs:[...syncs],marker:storage.get('test-session-handoff')||null})};
+    state:()=>({current,claim:remoteClaim,claims,requests:[...requests],compensations,conditionalWrites,backgroundReleases,notify,syncs:[...syncs]})};
 }
 {
   const t=acquiringHarness();
@@ -345,9 +325,9 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   assert.equal(state.current.runningOn,'inst_handoff_new');
   assert.equal(state.claims,1);
   assert.equal(state.compensations,0);
-  assert.equal(state.marker,null,'successful handoff clears its crash-recovery latch');
   assert.equal(state.notify,1,'only verified ownership is published as a local change');
   assert.equal(state.backgroundReleases,1);
+  assert.match(state.requests[0].handoffToken,/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u,'each attempt names itself');
 }
 // A local write can succeed before its read-back fails. Compensation must
 // conditionally compare inside IndexedDB, not trust an earlier standalone read.
@@ -357,16 +337,14 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   assert.equal(t.state().conditionalWrites,1,'compensation must use canonical compare-and-write');
   assert.equal(t.state().current.runningOn,'inst_handoff_old');
   assert.equal(t.state().compensations,1);
-  assert.equal(t.state().marker,null);
 }
 {
   const t=acquiringHarness('compensation-race');
-  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
+  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_INCOMPLETE');
   assert.equal(t.state().conditionalWrites,1);
   assert.equal(t.state().current.snapshot.label,'new unshared local work',
     'a competing write between read and compensation cannot be overwritten');
   assert.equal(t.state().compensations,0);
-  assert.ok(t.state().marker);
 }
 
 // BF-1R2: a fresh installation displays its default without persisting
@@ -391,16 +369,14 @@ for(const fault of ['display-mismatch','draft-mismatch']){
   assert.equal(state.claims,1);
   assert.equal(state.compensations,1,'failed local commit compensates the remote claim');
   assert.equal(state.current.runningOn,'inst_handoff_old');
-  assert.equal(state.marker,null,'verified compensation retires the safety latch');
   assert.equal(state.notify,0);
 }
 {
   const t=acquiringHarness('different-read');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN','unexpected same-revision content is not a verified handoff');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_INCOMPLETE','unexpected same-revision content is not a verified handoff');
   const state=t.state();
   assert.equal(state.claims,1);
   assert.equal(state.compensations,0,'divergent canonical progress is not overwritten by an unsafe rollback');
-  assert.ok(state.marker,'uncertain ownership is durably latched for recovery after reload');
   assert.equal(state.notify,0);
 }
 {
@@ -408,182 +384,58 @@ for(const fault of ['display-mismatch','draft-mismatch']){
   await assert.rejects(t.transfer(),/draft write failed/u);
   const state=t.state();
   assert.equal(state.claims,0,'no remote claim is attempted before the Plan-draft write settles');
-  assert.equal(state.marker,null);
   assert.equal(state.current.runningOn,'inst_handoff_old');
 }
+{
+  // Drive answers busy before writing any claim: the reason is shown as is.
+  const t=acquiringHarness('claim-busy');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_BUSY');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old');
+}
 
-
-// BF-1R3: the exact interrupted claim can be adopted after a fresh VM boot,
-// without republishing it or silently recovering unrelated data.
-for(const fault of ['claim-crash','claim-throws-after-remote']){
+// Continue Here stops after its claim may have reached Drive but before the
+// session is saved here. This device's copy still runs elsewhere, so no timer
+// starts here; the old owner stops on seeing the claim. Pressing Continue
+// Here again finishes the move with a fresh claim.
+for(const fault of ['claim-crash','claim-throws-after-remote','claim-throws-before-remote']){
   const t=acquiringHarness(fault);
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  assert.equal(t.state().current.runningOn,'inst_handoff_old');
-  assert.ok(t.state().marker,'the preclaim marker survives a failed/unknown acquisition');
-  assert.equal(t.state().claim?.handoffToken,t.state().marker.handoffToken,'remote and local evidence name the same attempt');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_INCOMPLETE'&&/Press Continue Here again/u.test(error.message),fault+' asks for another Continue Here');
+  assert.equal(t.state().current.runningOn,'inst_handoff_old',fault+' does not run the session here');
   t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,'an identical remote claim is adoptable after reload');
+  const result=await t.transfer();
+  assert.equal(result.session.runningOn,'inst_handoff_new',fault+': the second Continue Here finishes');
   assert.equal(t.state().current.runningOn,'inst_handoff_new');
-  assert.equal(t.state().marker,null);
-  assert.equal(t.state().claims,1,'recovery must not publish a second claim');
-  assert.equal(await t.recover(),true,'recovery is idempotent');
+  assert.equal(t.state().claims,2,'the second attempt writes its own claim');
+  assert.notEqual(t.state().requests[0].handoffToken,t.state().requests[1].handoffToken);
+  assert.equal(t.state().claim.observedContentFingerprint,'f'.repeat(64),'the claim records what this device observed');
 }
-// An unrelated Notes/Personal Data checkpoint cannot prevent recovery if the
-// verified Active Session and claim themselves have not changed.
+// Between the two attempts the old owner kept studying and published it
+// before it saw this device's claim. This device's copy is still exactly what
+// its own claim observed, so the newer session is taken first, as when
+// catching up with another owner.
 {
   const t=acquiringHarness('claim-crash');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  t.setHead('cp_'+'b'.repeat(32));t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,'an unrelated checkpoint may advance without changing the session');
-  assert.equal(t.state().current.runningOn,'inst_handoff_new');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_INCOMPLETE');
+  assert.equal(t.state().claim.ownedHere,true);
+  const ahead={...t.previous,revision:12,snapshot:{label:'more study on the other device'}};
+  t.setSourceSession(ahead);t.setFault('');t.reload();
+  const result=await t.transfer();
+  assert.equal(result.session.runningOn,'inst_handoff_new');
+  assert.equal(result.session.snapshot.label,'more study on the other device','the old owner\'s later study comes with it');
+  assert.equal(t.state().requests[1].observedRevision,12,'the new claim observes the newer session');
+  assert.equal(t.state().requests[1].observedContentFingerprint,'0'.repeat(64));
 }
-// A newer compensation epoch returned control to A; B must retire its marker
-// without ever claiming ownership or starting its clock.
+// If this device's copy changed since its own claim, Drive's newer session is
+// not provably a continuation: sync first.
 {
   const t=acquiringHarness('claim-crash');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  const {marker,claim}=t.state();
-  t.setClaim({...claim,epoch:claim.epoch+1,state:'owned',ownedHere:false,
-    ownerToken:marker.observedOwnerToken,observedRevision:marker.proposedRevision,
-    revision:marker.observedRevision,observedContentFingerprint:''});
-  t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,'exact compensation is a distinct verified terminal state');
-  assert.equal(t.state().current.runningOn,'inst_handoff_old');
-  assert.equal(t.state().marker,null);
-}
-// A subsequent verified owner may supersede an interrupted acquisition.
-function supersedeHandoff(t){
-  const {claim,marker}=t.state();
-  const latest={...claim,epoch:claim.epoch+1,state:'owned',ownedHere:false,
-    ownerToken:'c'.repeat(64),observedOwnerToken:'d'.repeat(64),
-    observedContentFingerprint:marker.observedContentFingerprint,
-    observedRevision:marker.proposedRevision,revision:marker.proposedRevision+1,
-    handoffToken:'88888888-8888-4888-8888-888888888888'};
-  t.setClaim(latest);
-  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:latest.revision});
-  return latest;
-}
-{
-  const t=acquiringHarness('claim-crash');
-  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  supersedeHandoff(t);t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,'new remote owner safely replaces an unadopted attempt');
-  assert.equal(t.state().current.runningOn,'inst_handoff_next',
-    'canonical control state follows the verified successor, not a stale previous owner');
-  assert.equal(t.state().conditionalWrites,1,'unadopted predecessor is conditionally updated');
-  assert.equal(t.state().marker,null);
-  assert.equal(t.state().claims,1);
-}
-{
-  const t=acquiringHarness('clear-fail');
-  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  supersedeHandoff(t);t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,'new remote owner supersedes the local pending owner');
-  assert.equal(t.state().current.runningOn,'inst_handoff_next');
-  assert.equal(t.state().conditionalWrites,1);
-  assert.equal(t.state().marker,null);
-}
-{
-  const t=acquiringHarness('clear-fail');
-  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  supersedeHandoff(t);t.setFault('concurrent-local');t.reload();
-  await assert.rejects(t.recover(),/Active Session changed before ownership recovery/u);
-  assert.equal(t.state().current.snapshot.label,'new unshared local work');
-  assert.ok(t.state().marker);
-}
-{
-  const t=acquiringHarness('clear-fail');
-  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  supersedeHandoff(t);t.setFault('clear-fail');t.reload();
-  await assert.rejects(t.recover(),/safety latch could not be cleared/u);
-  assert.equal(t.state().current.runningOn,'inst_handoff_next');
-  t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,'recovery recognizes an already committed remote owner');
-  assert.equal(t.state().conditionalWrites,1,'idempotent recovery does not repeat its CAS');
-  assert.equal(t.state().marker,null);
-}
-{
-  const t=acquiringHarness('clear-fail');
-  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  supersedeHandoff(t);t.setFault('');
-  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:12,snapshot:{label:'remote with missing attachment'}});
-  t.reload();
-  assert.equal(await t.recover(),false,'a new attachment must be fetched through ordinary reconciliation before adopting remote content');
-  assert.ok(t.state().marker);
-  assert.equal(t.state().current.runningOn,'inst_handoff_new');
-}
-
-// A proved successor can contain later study work, not just ownership
-// metadata: the old device has contributed nothing since the causal boundary.
-{
-  const t=acquiringHarness('clear-fail');
-  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  supersedeHandoff(t);t.setFault('');
-  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:12,snapshot:{label:'new remote progress'}});
-  t.reload();
-  assert.equal(await t.recover(),true,'later successor work follows the verified causal handoff');
-  assert.equal(t.state().current.snapshot.label,'new remote progress');
-  assert.equal(t.state().current.runningOn,'inst_handoff_next');
-  assert.equal(t.state().conditionalWrites,1);
-}
-{
-  const t=acquiringHarness('clear-fail');
-  await assert.rejects(t.transfer(),e=>e?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  supersedeHandoff(t);t.setFault('');
-  t.setSourceSession({...t.previous,runningOn:'inst_handoff_next',revision:11,snapshot:{label:'unproved remote changes'}});
-  t.reload();
-  assert.equal(await t.recover(),false,'a source older than the successor claim cannot justify new study content');
-  assert.ok(t.state().marker);
-}
-
-// A failed strict write during recovery does not consume the attempt.
-// Subsequent PRIMARY ownership and healthy persistence permit a retry.
-{
-  const t=acquiringHarness('claim-throws-after-remote');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  t.setFault('local-only');t.reload();
-  await assert.rejects(t.recover(),/IndexedDB failed/u);
-  assert.ok(t.state().marker,'read-only recovery evidence survives another local failure');
-  t.setFault('');t.setCanMutate(false);t.reload();
-  assert.equal(await t.recover(),false,'a secondary or hydrating tab cannot commit recovered ownership');
-  t.setCanMutate(true);t.reload();
-  assert.equal(await t.recover(),true);
-  assert.equal(t.state().claims,1);
-}
-
-// A second writer advancing the local session DURING Drive verification
-// cannot be overwritten by the recovered owner. The exact IDB precondition
-// fails without producing an emergency copy of the recovered session.
-{
-  const t=acquiringHarness('claim-crash');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  t.setFault('concurrent-local');t.reload();
-  await assert.rejects(t.recover(),/Active Session changed before ownership recovery/u);
-  assert.equal(t.state().current.snapshot.label,'new unshared local work');
-  assert.equal(t.state().current.runningOn,'inst_handoff_old');
-  assert.ok(t.state().marker,'a local write conflict retains the safety marker');
-  assert.equal(t.state().claims,1,'recovery must never republish a claim');
-}
-// Strict local commit succeeded, but the marker could not be cleared;
-// subsequent verification must not rewrite the already-committed session.
-{
-  const t=acquiringHarness('clear-fail');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  assert.equal(t.state().current.runningOn,'inst_handoff_new');
-  t.setFault('');t.reload();
-  assert.equal(await t.recover(),true);
-  assert.equal(t.state().marker,null);
-  assert.equal(t.state().claims,1);
-}
-// No claim accepted: verify the unchanged remote source, retire the latch,
-// but never start the timer or claim automatically.
-{
-  const t=acquiringHarness('claim-throws-before-remote');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  t.setFault('');t.reload();
-  assert.equal(await t.recover(),true);
-  assert.equal(t.state().current.runningOn,'inst_handoff_old');
-  assert.equal(t.state().claims,1);
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_INCOMPLETE');
+  const changed={...t.previous,snapshot:{label:'changed here'}};
+  t.setCurrent(changed);
+  t.setSourceSession({...t.previous,revision:12,snapshot:{label:'more study on the other device'}});t.setFault('');t.reload();
+  await assert.rejects(t.transfer(changed),error=>error?.code==='SESSION_CONTINUE_SYNC_REQUIRED');
+  assert.deepEqual(t.state().current,changed,'nothing here is overwritten');
+  assert.equal(t.state().claims,1,'nothing more is claimed');
 }
 // The usual case: this device's copy is behind the owner's, because the owner
 // kept studying after this device last synced. When the owner's claim shows it
@@ -592,7 +444,7 @@ function supersedeHandoff(t){
 {
   const t=acquiringHarness(),ahead={...t.previous,revision:12,snapshot:{label:'more study on the other device'}};
   t.setSourceSession(ahead);
-  t.setClaim({epoch:3,state:'owned',applies:true,ownedHere:false,ownerToken:'e'.repeat(64),observedOwnerToken:'d'.repeat(64),
+  t.setClaim({epoch:3,state:'owned',applies:true,ownedHere:false,ownerToken:OLD_OWNER,observedOwnerToken:OWN_CLAIM_OWNER,
     observedRevision:9,revision:10,observedContentFingerprint:'f'.repeat(64),handoffToken:'99999999-9999-4999-8999-999999999999'});
   const result=await t.transfer();
   assert.equal(result.session.runningOn,'inst_handoff_new','the handoff completes without a separate sync');
@@ -606,80 +458,18 @@ function supersedeHandoff(t){
   await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_SYNC_REQUIRED');
   assert.deepEqual(t.state().syncs,['session-handoff-source-advanced'],'a sync starts at once so Continue Here can be tried again');
   assert.equal(t.state().claims,0,'nothing is claimed');
-  assert.equal(t.state().marker,null,'and no marker is left');
 }
-// An interrupted Continue Here must never lock this device's timer for good.
-// When Drive does not name this device as the owner and this device is not
-// running the session, or the session for that day is gone, the latch is
-// cleared without changing study data.
 {
-  // The claim never reached Drive, then the other device kept studying and
-  // sync brought its progress here: the strict checks can no longer match.
-  const t=acquiringHarness('claim-throws-before-remote');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  const advanced={...t.previous,revision:12,snapshot:{label:'more study on the other device'}};
-  t.setCurrent(advanced);t.setSourceSession(advanced);t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,'a handoff that never took effect does not block the timer');
-  assert.equal(t.state().marker,null);
-  assert.deepEqual(t.state().current,advanced,'study data is left as it is');
-  assert.equal(t.state().claims,1,'nothing is claimed again');
-}
-for(const [label,next] of [['a new day',{date:'2026-10-28'}],['the session ended elsewhere',null]]){
-  // The claim landed but its local commit failed; the day then changed, or
-  // sync ended the session. There is nothing left to guard.
+  // A newer session that needs attachment bytes always goes through sync.
   const t=acquiringHarness('claim-crash');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  t.setCurrent(next&&{...t.previous,...next});t.setFault('');t.reload();
-  assert.equal(await t.recover(),true,`${label} clears the latch`);
-  assert.equal(t.state().marker,null);
-}
-{
-  // Drive answers busy before writing any claim: no latch is left behind.
-  const t=acquiringHarness('claim-busy');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_BUSY');
-  assert.equal(t.state().marker,null,'a busy reply leaves no latch');
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_INCOMPLETE');
+  t.setSourceSession({...t.previous,revision:12,snapshot:{label:'remote with missing attachment'}});t.setFault('');t.reload();
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_SYNC_REQUIRED');
   assert.equal(t.state().current.runningOn,'inst_handoff_old');
 }
-{
-  // Still blocked while Drive names this device and the local commit was
-  // not verified: that is the case the latch exists for.
-  const t=acquiringHarness('claim-crash');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  t.setCurrent({...t.previous,revision:12,snapshot:{label:'more study on the other device'}});t.setFault('');t.reload();
-  assert.equal(await t.recover(),false,'a claim naming this device keeps the timer stopped');
-  assert.notEqual(t.state().marker,null);
-}
-// Concurrent recovery callers share the same verified strict commit.
-{
-  const t=acquiringHarness('claim-crash');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  t.setFault('');t.reload();
-  const results=await Promise.all([t.recover(),t.recover()]);
-  assert.deepEqual(results,[true,true],'overlapping Verify actions agree on the same recovery result');
-  assert.equal(t.state().notify,1,'the same ownership recovery causes one durable change notification');
-  assert.equal(t.state().claims,1,'overlapping recovery never republishes the claim');
-}
-// A changed verified checkpoint, mismatching claim token, a divergent local
-// snapshot or offline Drive must keep recovery blocked with the marker intact.
-for(const mode of ['changed-head','different-claim','divergent-local','offline']){
-  const t=acquiringHarness('claim-crash');
-  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_ROLLBACK_UNCERTAIN');
-  if(mode==='changed-head'){
-    t.setHead('cp_'+'b'.repeat(32));
-    t.setSourceSession({...t.previous,revision:11,updatedAt:'2026-10-27T10:00:00.000Z'});
-  }
-  if(mode==='different-claim')t.setClaim({...t.state().claim,handoffToken:'ffffffff-ffff-4fff-8fff-ffffffffffff'});
-  if(mode==='divergent-local')t.setCurrent({...t.state().current,snapshot:{label:'unpublished new work'}});
-  if(mode==='offline')t.setOffline(true);
-  t.setFault('');t.reload();
-  assert.equal(await t.recover(),false,mode+' must remain blocked');
-  assert.ok(t.state().marker,mode+' retains durable recovery evidence');
-  assert.equal(t.state().current.runningOn,'inst_handoff_old',mode+' cannot steal ownership');
-  assert.equal(t.state().claims,1,mode+' cannot publish a second claim');
-}
 
-// Exercise the real transactional compare-and-write primitive. Recovery may
-// replace an exact canonical predecessor, never a concurrently changed one.
+// Exercise the real transactional compare-and-write primitive. Compensation
+// may replace an exact canonical predecessor, never a concurrently changed one.
 {
   const repositorySource=fs.readFileSync(new URL('../../../source/core/repositories.js',import.meta.url),'utf8');
   const begin=repositorySource.indexOf('async function idbPutActiveSession('),end=repositorySource.indexOf('\n}',begin);

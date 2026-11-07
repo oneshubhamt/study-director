@@ -41,7 +41,7 @@ assert.equal(MIGRATION_FACADE_CONTRACT.verification.backupCheck,'freshBackup');
 assert.equal(CANONICAL_BASELINE.policy.ordinaryRuntime,'current-canonical-only');
 
 const entries=allCompatibilityEntries();
-assert.equal(entries.length,28,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
+assert.equal(entries.length,27,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
 assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
 for(const entry of entries){
   for(const file of entry.sourceFiles)assert.ok(fs.existsSync(path.join(root,file)),`${entry.id} references missing source ${file}`);
@@ -70,7 +70,6 @@ const evidenceByCompatibilityId=Object.freeze({
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
   'restore-journal-payload-v1-v5':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/repository-journals.mjs'],
   'reconciliation-base-pre-v5':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/reconciliation-baseline-v2.mjs'],
-  'handoff-safety-marker-v1':['tests/integration/storage/compatibility-host.mjs'],
   'older-session-claims':['tests/helpers/session-ownership-claim-regression.mjs','tests/integration/backup/drive-security.mjs'],
   'canonical-note-and-folder-names':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/indexeddb-topology-retirement.mjs'],
   'backup-repository-v1-v4':['tests/integration/backup/repository-restore.mjs'],

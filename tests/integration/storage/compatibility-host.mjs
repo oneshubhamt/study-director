@@ -15,7 +15,7 @@ globalThis.IntegrityContinuationModule=registry.require('integrity-continuation'
 {const app=fs.readFileSync('source/app.html','utf8');vm.runInThisContext(app.slice(app.indexOf('function normalizeRepositoryIntegrityTarget('),app.indexOf('async function libraryClearSnapshot(')),{filename:'repository-integrity-normalizer'});}
 const freeze=Object.freeze;
 
-const current={theme:'theme',presentation:'presentation',fontScale:'fontScale',storageHealth:'storageHealth',sessionHandoffSafety:'sessionHandoffSafety'};
+const current={theme:'theme',presentation:'presentation',fontScale:'fontScale',storageHealth:'storageHealth'};
 const obsolete={
   schedule:'oldSchedule',defaults:'oldDefaults',quote:'oldQuote',nudge:'oldNudge',reflectionDrafts:'oldReflections',reflectionLegacy:'oldReflection',
   deviceId:'oldDevice',liveDraft:'oldLiveDraft',activeSession:'oldActiveSession',storageCapability:'oldStorageCapability',diagnostics:'oldDiagnostics',
@@ -264,18 +264,6 @@ metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:
 metadataRows.set('reconciliationBase.v1',{key:'reconciliationBase.v1',version:1,value:{format:'study-director.reconciliation-base',version:1,notes:['not a map']},updatedAt:'2026-09-21T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
 assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'any single-row base, whatever its shape, takes the whole base with it');
-// A Continue Here marker in its first form (bug-fixes builds) is removed;
-// the current form is left for the app to settle.
-const firstMarker={format:'study-director.session-handoff-safety.v1',version:1,date:'2026-11-03',checkpointId:'cp_'+'3'.repeat(32),installedOn:'inst_qa_device_01'};
-localRows.set('sessionHandoffSafety',JSON.stringify(firstMarker));
-assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false,'a first-form marker is not yet retired');
-await Host.createFacade(malformedInput).migrateLive();
-assert.equal(localRows.has('sessionHandoffSafety'),false,'a first-form Continue Here marker is removed');
-const currentMarker={...firstMarker,format:'study-director.session-handoff-safety.v2',version:2};
-localRows.set('sessionHandoffSafety',JSON.stringify(currentMarker));
-await Host.createFacade(malformedInput).migrateLive();
-assert.deepEqual(JSON.parse(localRows.get('sessionHandoffSafety')),currentMarker,'a current marker is left for the app');
-localRows.delete('sessionHandoffSafety');
 // An interrupted restore from an older build converts to the current journal before crash recovery reads it.
 const journalBlob=new Blob(['safety copy']),oldJournal={format:'study-director.restore-journal',version:2,id:'restore_qa-old-journal',blob:journalBlob,filename:'safety.sdbackup',scheduleText:'',savedDayDeletions:[{date:'2026-09-10',deletedAt:'2026-09-12T00:00:00.000Z'}]};
 metadataRows.set('restoreJournalPayload.v1',{key:'restoreJournalPayload.v1',version:1,value:oldJournal,updatedAt:'2026-09-12T00:00:00.000Z'});

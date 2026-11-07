@@ -50,7 +50,7 @@ registry.define('backup-provider',1,input=>{
   const formatsByProvider=new Map();
   // The versions each location's last complete scan could not read (by id).
   const unreadableByProvider=new Map();
-  const verifiedHistoryByProvider=new Map(),recentHistoryByProvider=new Map(),repositoryScopeByProvider=new Map(),connectedOnceByProvider=new Set();
+  const verifiedHistoryByProvider=new Map(),verifiedSessionClaimByProvider=new Map(),recentHistoryByProvider=new Map(),repositoryScopeByProvider=new Map(),connectedOnceByProvider=new Set();
   const repositoryOperationStateBySelection=new WeakMap();
   const providerPublications=new Map();
   const providerBackgroundCoordinators=new Map(),providerMaintenanceIntents=new Map(),providerMaintenanceSchedulers=new Map(),providerIntegritySchedulers=new Map(),providerConvergenceJobs=new Map(),providerConvergenceRetryAttempts=new Map();
@@ -1142,16 +1142,15 @@ registry.define('backup-provider',1,input=>{
     return sessionClaimValue(value,{observedContentFingerprint:String(value.observedContentFingerprint||''),handoffToken:String(value.handoffToken||'')});
   }
   async function decodeSessionClaim(value,{signal=null}={}){return normalizeSessionClaim(value)||upgradeOlderSessionClaim(value,{signal});}
-  /* COMPATIBILITY --- Devices still on an older build write ownership claims
-     in an earlier form: hashed v2 (released) or v3 (bug-fixes builds), or the
-     plain form with a date and device ids. Each is read as a v4 claim without
-     the fields it lacks. Retire with the compatibility layer once every device
-     writes v4 (registry: older-session-claims). */
+  /* COMPATIBILITY --- Released builds write ownership claims as hashed v2,
+     and Drive can still hold a newest claim in the earlier plain form with a
+     date and device ids. Each is read as a v4 claim without the fields it
+     lacks. Retire with the compatibility layer once every device writes v4
+     (registry: older-session-claims). */
   async function upgradeOlderSessionClaim(value,{signal=null}={}){
     if(!value||typeof value!=='object'||Array.isArray(value))return null;
     const version=Number(value.version),keys=Object.keys(value).sort().join('|');
     if(version===2&&keys==='claimedAt|epoch|format|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version')return sessionClaimValue(value,{observedContentFingerprint:'',handoffToken:''});
-    if(version===3&&keys==='claimedAt|epoch|format|observedContentFingerprint|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version')return sessionClaimValue(value,{observedContentFingerprint:String(value.observedContentFingerprint||''),handoffToken:''});
     const plain=plainSessionClaim(value);if(!plain)return null;
     const [sessionToken,ownerToken,observedOwnerToken]=await Promise.all([sessionClaimToken('session',plain.date,{signal}),sessionClaimToken('owner',plain.owner,{signal}),sessionClaimToken('owner',plain.observedOwner,{signal})]);
     return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch:plain.epoch,state:plain.state,ownerToken,revision:plain.revision,observedOwnerToken,observedRevision:plain.observedRevision,observedContentFingerprint:'',handoffToken:'',claimedAt:plain.claimedAt});
@@ -1164,6 +1163,14 @@ registry.define('backup-provider',1,input=>{
     return freeze({date,epoch,state,owner,revision,observedOwner,observedRevision,claimedAt:new Date(claimedAt).toISOString()});
   }
   /* END COMPATIBILITY */
+  // A claim file never changes once written; a new claim is a new file. The
+  // last verified claim is reused while the listing shows exactly the same
+  // file, so each ownership check is one listing rather than a listing and a
+  // download. Without full Drive identity the claim is always downloaded.
+  function sessionClaimIdentity(item){
+    if(!item.remoteId||!item.remoteVersion||!item.verificationScope||!item.size||!item.digest&&!item.serverDigest)return '';
+    return [item.id,item.remoteId,item.remoteVersion,item.verificationScope,item.size,item.digest,item.serverDigest].join('\u0000');
+  }
   async function readRepositorySessionClaim(selected,{signal=null}={}){
     if(!repositorySessionClaimCapable(selected))return null;
     const listed=await selected.repository.listSessionClaims(freeze({signal})),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0);
@@ -1171,6 +1178,8 @@ registry.define('backup-provider',1,input=>{
     let latest=null,latestEpoch=0;
     for(const raw of rows){const item=repositoryProviderItem(raw,'session-claim'),epoch=sessionClaimEpoch(item.id);if(!epoch)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state has an invalid identity.');if(epoch>latestEpoch){latest=item;latestEpoch=epoch;}}
     if(!latest)return null;
+    const identity=sessionClaimIdentity(latest),known=identity?verifiedSessionClaimByProvider.get(selected.id):null;
+    if(known&&known.identity===identity)return freeze({claim:known.claim,item:latest});
     const lease=repositoryDownloadLease(await selected.repository.downloadSessionClaim(latest,freeze({signal})));let decoded=null;
     try{
       if(lease.blob.size<=0||lease.blob.size>SESSION_CLAIM_MAX_BYTES||latest.size&&lease.blob.size!==latest.size)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state changed size unexpectedly.');
@@ -1180,6 +1189,7 @@ registry.define('backup-provider',1,input=>{
       if(!decoded||!(decoded.blob instanceof Blob))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state could not be opened safely.');
       let parsed=null;try{parsed=JSON.parse(await decoded.blob.text());}catch{}
       const claim=await decodeSessionClaim(parsed,{signal});if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
+      if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim}));
       return freeze({claim,item:latest});
     }finally{
       if(decoded&&decoded.blob instanceof Blob&&decoded.blob!==lease.blob)await Exports.run('file.release',{file:decoded.blob}).catch(()=>{});
@@ -1204,6 +1214,7 @@ registry.define('backup-provider',1,input=>{
       if(Math.max(0,Number(listed&&listed.ignored)||0)||listed&&listed.overflow===true)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state in the shared repository could not be verified safely.');
       let newest=null,newestEpoch=0;for(const raw of rows){const row=repositoryProviderItem(raw,'session-claim'),epoch=sessionClaimEpoch(row.id);if(!epoch)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state has an invalid identity.');if(epoch>newestEpoch){newest=row;newestEpoch=epoch;}}
       if(!newest||newest.id!==id||(newest.serverDigest||newest.digest)!==digest||newest.size&&newest.size!==protectedFile.blob.size)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','The active-session ownership claim could not be read back exactly.');
+      const identity=sessionClaimIdentity(newest);if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim:normalized}));
       return freeze({item:newest,claim:normalized});
     }finally{if(protectedFile&&protectedFile.blob instanceof Blob&&protectedFile.blob!==source)await Exports.run('file.release',{file:protectedFile.blob}).catch(()=>{});}
   }
@@ -1900,11 +1911,13 @@ registry.define('backup-provider',1,input=>{
       if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive changed or could not be read completely while Continue Here was confirming ownership.');
       const head=sharedRepositoryHead(inventory);
       if(!head||head.item.id!==expectedCheckpointId)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Google Drive received a newer Study Director version before this takeover could be confirmed. Sync it, then continue here again.');
-      if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='owned'&&current.claim.ownerToken===ownerToken&&current.claim.observedOwnerToken===observedOwnerToken&&current.claim.observedRevision===observedRevision&&current.claim.observedContentFingerprint===observedContentFingerprint&&current.claim.handoffToken===handoffToken&&current.claim.revision>=revision)return freeze({status:'completed',claim:current.claim,reused:true});
       if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='released'&&current.claim.revision>=observedRevision)throw syncError('REPOSITORY_SESSION_CLAIM_STALE','The shared Active Session has already ended. Sync before starting it again.');
-      if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='owned'&&(current.claim.ownerToken!==observedOwnerToken||current.claim.revision>observedRevision))throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Active Session ownership changed on another device before this takeover could be confirmed.');
+      // This device's own claim never blocks it: an earlier Continue Here can
+      // stop after its claim landed but before the session moved here. The
+      // new claim then records what this device observes now.
+      if(current&&current.claim.sessionToken===sessionToken&&current.claim.state==='owned'&&current.claim.ownerToken!==ownerToken&&(current.claim.ownerToken!==observedOwnerToken||current.claim.revision>observedRevision))throw syncError('REPOSITORY_SESSION_CLAIM_STALE','Active Session ownership changed on another device before this takeover could be confirmed.');
       const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state:'owned',ownerToken,revision,observedOwnerToken,observedRevision,observedContentFingerprint,handoffToken,claimedAt:new Date().toISOString()}),verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal,interactive:true});
-      return freeze({status:'completed',claim:verified.claim,reused:false});
+      return freeze({status:'completed',claim:verified.claim});
     }finally{
       // The claim is written and verified; ending the lease need not hold up
       // the handoff. This device's own markers never block it, and one left
