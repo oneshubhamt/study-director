@@ -8,7 +8,7 @@ import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
 // versions carry it, and never drops an open one: more than may wait stops
 // the write and leaves the stored set as it was.
 const commits=[],h=createHarness(new Map(),null,{onCanonicalCommit:event=>commits.push(event)});
-const id=noteId('ethics'),review=(n,keptAt='2026-10-18T09:00:00.000Z')=>({version:1,id:'pr_'+n.toString(16).padStart(32,'0'),subject:'note',ref:id,keptAt,kept:{text:`kept ${n}`},base:null,resolvedAt:''});
+const id=noteId('ethics'),review=(n,keptAt='2026-10-18T09:00:00.000Z')=>({version:2,id:'pr_'+n.toString(16).padStart(32,'0'),subject:'note',ref:id,keptAt,keptFrom:'inst_ipad_safari_mgx2k3a0_1a2b3c4d',keptChangedAt:keptAt,kept:{text:`kept ${n}`},base:null,resolvedAt:''});
 
 assert.deepEqual([...await h.app.pendingReviews.list()],[]);
 const first=review(1),second=review(2);

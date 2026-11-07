@@ -21,11 +21,11 @@ export const IDENTITIES=freeze({root:REPOSITORY_NAME,legacyRoot:LEGACY_ROOT,pref
 
 // Each world numbers its versions apart, as random ids would be.
 let worlds=0;
-// `manifestVersion` is the format this world's backups are written in (8 is
-// current; 1 to 5 are the released ones this build still reads).
+// `manifestVersion` is the format this world's backups are written in (9 is
+// current; 8 and 1 to 5 are the released ones this build still reads).
 // lock: a Web Lock shared with another world, as two tabs of one browser share it.
 export function sharedLock(){let chain=Promise.resolve();return work=>{const run=chain.then(()=>work());chain=run.catch(()=>{});return run;};}
-export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME,manifestVersion=8,lock=sharedLock()}={}){
+export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',supported=true,protection=null,device=QA_DEVICE,profile=QA_PROFILE,name=REPOSITORY_NAME,manifestVersion=9,lock=sharedLock()}={}){
   // Who this page is (profile and device), and the answer to "use one of the
   // backup folders already here?" (null cancels, '' starts a new one).
   const worldNumber=++worlds;
@@ -42,7 +42,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     codec:freeze({countShape:value=>value,utf8Bytes:value=>new TextEncoder().encode(String(value)),compressionSupported:()=>false,assetIds:()=>[]}),
     ports:freeze({
       configuration:freeze({backupVersion:1,limits:freeze({}),logicalCaptureFormat:'qa.capture',logicalCaptureVersion:1}),
-      persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused,personalFingerprint:unused,dayFingerprints:unused,sessionFingerprint:unused}),assets:freeze({get:unused,verifyAliases:unused}),
+      persistence:freeze({reconciliationBaseRead:unused,reconciliationBaseWrite:unused,personalFingerprint:unused,personalFields:unused,dayFingerprints:unused,semanticDayFingerprints:unused,sessionFingerprint:unused,sessionContentFingerprint:unused}),assets:freeze({get:unused,verifyAliases:unused}),
       files:freeze({protect:unused,unprotect:unused,run:unused,scope:unused}),
       checkpoint:freeze({capture:unused,beginPreparation:unused,readPreparationUnits:unused,finalizePreparation:unused,establishPreparationBaseline:unused,assertCurrent:unused,inspectVerifiedCapture:unused,verifyVerifiedCapture:unused,currentImportSignal:unused}),
       domain:freeze({clampText:value=>String(value)}),environment:freeze({throwIfAborted:unused,yieldTask:async()=>{}}),diagnostics:freeze({capture:()=>{}})
@@ -68,9 +68,9 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   // As the real reader does, a manifest this build cannot interpret is marked
   // unreadable (repositoryUnreadable); a locked one is not.
   const unreadable=error=>Object.assign(error,{repositoryUnreadable:true});
-  const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file;let value;try{value=JSON.parse(await opened.text());}catch(error){throw unreadable(error);}if(value.format!=='study-director.backup-repository-checkpoint')throw unreadable(new Error('not a manifest'));if(![1,2,3,4,5,8].includes(value.version))throw unreadable(new Error('Backup manifest version is not supported by this build.'));return value;};
+  const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file;let value;try{value=JSON.parse(await opened.text());}catch(error){throw unreadable(error);}if(value.format!=='study-director.backup-repository-checkpoint')throw unreadable(new Error('not a manifest'));if(![1,2,3,4,5,8,9].includes(value.version))throw unreadable(new Error('Backup manifest version is not supported by this build.'));return value;};
   const notSupported=()=>{throw new Error('Restore is covered by the browser and repository-restore suites.');};
-  const pipeline=freeze({noteObject:notSupported,readNote:notSupported,createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,sharedBase:async()=>null,establishBase:notSupported,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
+  const pipeline=freeze({noteObject:notSupported,readNote:notSupported,readSession:notSupported,createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,sharedBase:async()=>null,establishBase:notSupported,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
     retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,
     markCompleted:({copy})=>{if(copy)verified.set(copy.source,freeze({at:new clock.Date(clock.now()).toISOString(),sourceRevision:copy.sourceRevision}));}});
   const coordinator=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}));

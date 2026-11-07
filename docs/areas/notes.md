@@ -57,6 +57,13 @@ Each file becomes a new note named after the file, at the top level or inside th
 - **Images inside Markdown files:** not in the first version.
 - A title already in use gets " (2)". Files that are not .txt or .md, too large, or past the note limit are named in the result with the reason.
 
+### Pasting and copying Markdown
+
+- **Paste.** When the clipboard holds only plain text and it is clearly Markdown (`looksLikeMarkdown` in `rich-text/markdown.ts`), it is read like an imported Markdown file, with the same limits, and comes in formatted. Clearly means a strong signal: a `# ` heading, list markers on two or more lines, `**bold**`, a pair of code fences, a table, or a `[text](https://…)` link. A `#tag`, a single dash line, `__init__`, an emoticon or ordinary text is pasted as it is. A clipboard that also holds a formatted version (web pages, most chat apps) goes through the paste cleaner as before.
+- **Keep as plain text.** A converted paste shows "Formatted from Markdown · Keep as plain text" until anything else changes (12 seconds at most); the button puts the text back, unformatted, in the pasted range. On a computer, Ctrl/Cmd+Shift+V pastes plain text from the start.
+- **Copy.** When the selection has formatting, the clipboard's plain-text version is Markdown, so chat apps and Markdown editors keep headings, lists and bold; plain text copies as it is. The formatted version is unchanged, and this app reads it first, so copying and pasting inside the app gives back the same note.
+- **Blocks in Markdown** (copy and `.md` export) are separated by a blank line, so two paragraphs stay two and a paragraph after a list stays out of it.
+
 ### Linked notes bar
 
 Every note can carry a short list of other notes.

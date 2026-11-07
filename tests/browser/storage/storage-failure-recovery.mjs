@@ -148,7 +148,7 @@ try{
   const activeScenario=await page.evaluate(`(async()=>{
     const d=__StorageDebug,wait=ms=>new Promise(r=>setTimeout(r,ms));
     __storageFaults.write=false;__storageFaults.quota=false;
-    await d.PlanDraftEditor.save();d.applySchedule({skipNotify:true});
+    await d.PlanDraftEditor.save();await d.applySchedule({skipNotify:true});
     await d.writeLiveDraftNow({markChanged:false});await wait(50);
     const beforeHealth=d.readStorageHealth();
     const original=IDBDatabase.prototype.transaction;

@@ -24,6 +24,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('pwa-device-backup','tests/browser/backup/pwa-device-backup.mjs',['pwa','device-backup']),
     test('sync-and-profiles','tests/browser/backup/sync-and-profiles.mjs',['sync','google-drive','two-devices','reload','activation','profiles'],300000),
     test('sync-kept-reviews','tests/browser/backup/sync-kept-reviews.mjs',['sync','google-drive','two-devices','pending-reviews','restore'],300000),
+    test('cold-start-drive-recovery','tests/browser/backup/cold-start-drive-recovery.mjs',['sync','google-drive','site-data-clear','recovery','indexeddb'],300000,{alone:'Like site-data-clear: the app gives up opening IndexedDB after two 2.5 s attempts, and right after a storage clear that reopen can take longer on a busy CPU.'}),
     test('session-plan-sync','tests/browser/backup/session-plan-sync.mjs',['sync','google-drive','two-devices','active-session','plan','takeover'],300000,{alone:'Two-device ownership handoff has deliberate network gates and short post-claim timing assertions; unrelated Chromium CPU load can delay the local continuation path without testing a synchronization invariant.'}),
     test('insights-populated','tests/browser/insights/insights-populated-ui.mjs',['insights','populated-history']),
     test('pwa-update','tests/browser/pwa/pwa-update.mjs',['pwa','service-worker','trusted-types','multi-tab','offline','recovery','update'],0,{alone:'Chromium activates a new service worker only when the old one is idle and the CPU has time; diagnosed and fixed, kept alone as a safeguard.'}),

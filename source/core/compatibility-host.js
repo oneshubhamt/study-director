@@ -18,7 +18,7 @@ registry.define('compatibility-host',1,()=>{
     if(!validPairs(input.keys.renamedAppMeta))throw new TypeError('Compatibility-host renamed appMeta identities are invalid.');
     if(!validPairs(input.keys.renamedLocal)||input.keys.renamedLocal.some(([from])=>from.endsWith(':')))throw new TypeError('Compatibility-host renamed browser-storage keys are invalid.');
     if(!Object.isFrozen(input.keys.renamedFormats)||Object.entries(input.keys.renamedFormats).some(([from,to])=>!from||typeof to!=='string'||!to))throw new TypeError('Compatibility-host renamed value formats are invalid.');
-    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','attachmentIntegrityAudit','deviceFolder','restoreJournalPayload','repositoryIntegrityScrub','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix','reconciliationBaseLegacy','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy','backupPreparationUnitPrefix'],'Compatibility-host appMeta key contract');
+    exactObject(input.keys.appMeta,['personalPreferences','dataMaintenance','verifiedRecoveryBackups','attachmentIntegrityAudit','deviceFolder','restoreJournalPayload','repositoryIntegrityScrub','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix','reconciliationBaseLegacy','repositoryMaintenancePending','repositoryMaintenancePendingLegacy','libraryClearJournalState','libraryClearJournalPayloadPrefix','archiveClearJournalStateLegacy','archiveClearJournalPayloadPrefixLegacy','backupPreparationUnitPrefix','pendingReviewPrefix'],'Compatibility-host appMeta key contract');
     functions(input.local,['getText','getJson','setText','remove','lastError'],'Compatibility-host local storage');
     functions(input.ownership,['issueWriteToken','assertWriteToken','isOwnershipLostError'],'Compatibility-host ownership');
     functions(input.plan,['hydrate','library','readDraft','writeDraft','writeLibrary','settled','readCanonical'],'Compatibility-host Plan adapter');
@@ -26,7 +26,7 @@ registry.define('compatibility-host',1,()=>{
     for(const key of Object.keys(input.preferences))if(typeof input.preferences[key]!=='function')throw new TypeError(`Compatibility-host Preferences adapter ${key} must be a function.`);
     exactObject(input.identity,['getId','installationKey','legacyKey'],'Compatibility-host installation identity adapter');
     if(typeof input.identity.getId!=='function')throw new TypeError('Compatibility-host installation identity getId is required.');
-    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity','normalizeRepositoryIntegrityTarget','renameRows','updateStorageHealth'],'Compatibility-host metadata adapter');
+    functions(input.metadata,['readRow','listRows','isCurrentDataMaintenance','writeValue','removeRow','releaseBackupFile','normalizeVerifiedRecovery','normalizeAttachmentIntegrity','normalizeRepositoryIntegrity','normalizeRepositoryIntegrityTarget','legacyPendingReview','renameRows','updateStorageHealth'],'Compatibility-host metadata adapter');
     functions(input.live,['migrateActiveSession','migrateNotes','migrateNoteRecovery','migrateDeletionState','migrateDailyRecords','migrateInsightsRevisionEnvelope','cleanupLegacyAttachments','cleanupObsoleteMetadata','settleUnsupported'],'Compatibility-host live adapters');
     functions(input.topology,['retire'],'Compatibility-host topology adapter');
     functions(input.verification,['activeSession','notes','noteRecovery','deletionState','dailyRecords','insightsRevisionEnvelope','canonicalStores','legacyAttachments','obsoleteMetadata','topology','freshBackup'],'Compatibility-host verification adapters');
@@ -91,15 +91,21 @@ registry.define('compatibility-host',1,()=>{
     }
     // A restore journal written before version 5 calls its note deletion list
     // areaNoteDeletions, and one written before version 4 lacks the later lists.
-    // Each missing list becomes an empty one: rollback then restores no deletion
-    // history of that kind, as it did whenever the safety copy carried none.
-    const RESTORE_JOURNAL_VERSION=5;
+    // Version 6 removes scheduleText because the rollback image already carries
+    // portable Plan data; session recovery no longer owns the working draft.
+    const RESTORE_JOURNAL_VERSION=6;
     function legacyRestoreJournalPayload(value){
       const version=Number(value?.version);
       if(!value||typeof value!=='object'||value.format!=='study-director.restore-journal'||!(version>=1&&version<RESTORE_JOURNAL_VERSION))return null;
+      const storageKey=value.backupFile?'backupFile':'blob';
+      if(version===5){
+        const fields=['format','version','id',storageKey,'filename','scheduleText','savedDayDeletions','noteDeletions','attachmentDeletions'];
+        if(!exactKeys(value,fields)||!Array.isArray(value.savedDayDeletions)||!Array.isArray(value.noteDeletions)||!Array.isArray(value.attachmentDeletions))return null;
+        const {scheduleText,...rest}=value;return freeze({...rest,version:RESTORE_JOURNAL_VERSION});
+      }
       const lists=['savedDayDeletions','areaNoteDeletions','attachmentDeletions'].slice(0,version-1);
-      if(!exactKeys(value,['format','version','id',value.backupFile?'backupFile':'blob','filename','scheduleText',...lists])||lists.some(key=>!Array.isArray(value[key])))return null;
-      const {areaNoteDeletions,...rest}=value;
+      if(!exactKeys(value,['format','version','id',storageKey,'filename','scheduleText',...lists])||lists.some(key=>!Array.isArray(value[key])))return null;
+      const {areaNoteDeletions,scheduleText,...rest}=value;
       return freeze({...rest,version:RESTORE_JOURNAL_VERSION,savedDayDeletions:value.savedDayDeletions||[],noteDeletions:areaNoteDeletions||[],attachmentDeletions:value.attachmentDeletions||[]});
     }
     // Device Folder settings: version 1 kept the old backup slot, version 3 two
@@ -129,13 +135,16 @@ registry.define('compatibility-host',1,()=>{
     // A merge base from before permanent ids names notes by title (version 1
     // kept them all in one row), one from before titles, plans and settings
     // were kept holds only text, and one from before Saved Days and the
-    // session were kept (version 2) cannot tell their changes apart. It is
-    // dropped rather than converted: a base only lets Combine settle a
-    // difference without asking, and the next Drive sync records a fresh one.
+    // session were kept (version 2) cannot tell their changes apart, and one
+    // from before study-content and per-field ancestry (header versions 3 and
+    // 4, Saved-Day rows version 1) cannot tell a re-saved day or a single
+    // setting apart. It is dropped rather than converted: a base only lets
+    // Combine settle a difference without asking, and the next Drive sync
+    // records a fresh version-5 one. The app reads only version 5.
     function staleReconciliationRows(rows){
       const keyOf=row=>String(row&&row.key||''),noteRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseNotePrefix),dayRow=row=>keyOf(row).startsWith(appMeta.reconciliationBaseDayPrefix);
       const base=rows.filter(row=>keyOf(row)===appMeta.reconciliationBase||keyOf(row)===appMeta.reconciliationBaseLegacy||noteRow(row)||dayRow(row));
-      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&Number(row.value?.version)!==3||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
+      return base.some(row=>keyOf(row)===appMeta.reconciliationBaseLegacy||keyOf(row)===appMeta.reconciliationBase&&Number(row.value?.version)!==5||dayRow(row)&&Number(row.value?.version)!==2||noteRow(row)&&(!helpers.isNoteKey(row.value&&row.value.key)||typeof row.value.label!=='string'))?base:[];
     }
     async function migrateReconciliationBase(requireOwnership){
       let removed=0;
@@ -283,13 +292,32 @@ registry.define('compatibility-host',1,()=>{
         }else if(currentMaintenance){await metadata.removeRow(appMeta.repositoryMaintenancePending);removed++;}
         if(legacyMaintenance){requireOwnership();await metadata.removeRow(appMeta.repositoryMaintenancePendingLegacy);removed++;}
       }
+      const reviews=await migratePendingReviews(requireOwnership);migrated+=reviews;
       const reconciliation=await migrateReconciliationBase(requireOwnership);migrated+=reconciliation.migrated;removed+=reconciliation.removed;
       const rows=await metadata.listRows();
       for(const row of rows){const key=String(row&&row.key||'');if(!key.startsWith(LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX))continue;const fileName=String(row?.value?.backupFile?.name||'');requireOwnership();await metadata.removeRow(key);removed++;if(fileName){try{await metadata.releaseBackupFile(fileName);}catch{ /* stale compatibility scratch files are non-authoritative */ }}}
       return freeze({status:migrated||removed?'migrated':'not-needed',migrated,removed});
     }
+    // Versions kept for review in their v1 form (before they named the device
+    // whose copy held them) take the current form, unchanged otherwise, each
+    // checked back after writing. One of unknown shape stops the step with it
+    // left as it was.
+    const pendingReviewRows=rows=>rows.filter(row=>String(row&&row.key||'').startsWith(appMeta.pendingReviewPrefix)&&Number(row?.value?.version)===1);
+    async function migratePendingReviews(requireOwnership){
+      let migrated=0;
+      for(const row of pendingReviewRows(await metadata.listRows())){
+        const key=String(row.key),converted=metadata.legacyPendingReview(row.value);
+        if(!converted||converted.id!==key.slice(appMeta.pendingReviewPrefix.length))throw new Error('A version kept for review from an older version has an unknown shape and was preserved without modification.');
+        requireOwnership();await metadata.writeValue(key,converted,row.updatedAt);
+        const verified=await metadata.readRow(key);
+        if(!verified||!helpers.same(verified.value,converted))throw new Error('A version kept for review from an older version could not be verified after conversion.');
+        migrated++;
+      }
+      return migrated;
+    }
     async function verifyRetiredHostCompatibility(){
       const rows=await metadata.listRows(),present=[];
+      for(const row of pendingReviewRows(rows))present.push(`${String(row.key)}:v1`);
       for(const row of rows){const key=String(row&&row.key||'');if(key.startsWith(LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX))present.push(key);}
       const device=rows.find(row=>String(row&&row.key||'')===appMeta.deviceFolder);
       if(device&&Number(device.value?.version)!==4)present.push(`${appMeta.deviceFolder}:v${Number(device.value?.version)||'?'}`);

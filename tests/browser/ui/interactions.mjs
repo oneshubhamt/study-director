@@ -38,7 +38,7 @@ try{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=new Date(),minute=now.getHours()*60+now.getMinutes()+2;
     const start=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0')+':'+String((minute+1440)%1440%60).padStart(2,'0');
     d.goTab('plan');document.getElementById('plan-input').value=start+' | 20 | Permission-safe block | work | Safety | pages | 10';
-    const applied=d.applySchedule({skipNotify:true});
+    const applied=await d.applySchedule({skipNotify:true});
     d.goTab('execute');document.getElementById('ns-toggle-btn').click();document.getElementById('ns-toggle-btn').click();
     d.TimerEngine.startCur(3);await wait(30);d.TimerEngine.stopExecution();
     return {applied,requests:__notificationQA.permissionRequests,label:document.getElementById('system-alert-toggle').textContent.trim()};

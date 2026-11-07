@@ -345,6 +345,138 @@ function sanitizeCurrentDailyRecord(record){
   const clean={version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind,date,savedAt,updatedAt,sourceRevision,quote,reflection,studyQuality,realTimeSnapshot,schedule,results,practiceRuns,carryForwardDraft};
   return sameDataValue(record,clean)?clean:null;
 }
+// Compare actual Saved Day evidence with recorded session work. Exact mode
+// requires equality of observed values; coverage mode permits demonstrable
+// later progress. The caller separately verifies a durable save acknowledgement
+// when required. Device-local source revisions are not ancestry identifiers.
+function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
+  const snapshot=session?.snapshot;
+  if(record?.recordKind!=='study'||!snapshot||record.date!==session.date||
+      !Array.isArray(record.schedule)||!Array.isArray(record.practiceRuns)||!record.results)return false;
+  const parsed=ScheduleModel.parseText(String(session.scheduleText||''));
+  if(!parsed.ok)return false;
+  const rows=record.schedule.map(row=>({
+    start:row.start,dur:row.duration,name:row.name,kind:row.kind,
+    area:row.area,measure:row.measure,target:row.target
+  }));
+  if(ScheduleModel.fingerprint(parsed.parsed)!==ScheduleModel.fingerprint(rows))return false;
+  const review=snapshot.review||{};
+  if((!allowAdvances||String(review.reflection||''))&&
+      String(record.reflection||'')!==String(review.reflection||''))return false;
+  if((!allowAdvances||review.studyQuality!=null)&&
+      (record.studyQuality??null)!==(review.studyQuality??null))return false;
+  if((!allowAdvances||String(snapshot.latestCarryForward||''))&&
+      String(record.carryForwardDraft||'')!==String(snapshot.latestCarryForward||''))return false;
+  const runs=Array.isArray(snapshot.practice?.runs)?snapshot.practice.runs:[];
+  // A partial Practice Pacer run may grow into a completed run. Its units
+  // already observed must remain an exact prefix; settings and task identity
+  // cannot change. Match records one-to-one so duplicates cannot prove work
+  // that the Saved Day contains only once.
+  const practiceRunCovered=(saved,prior)=>{
+    if(sameDataValue(saved,prior))return true;
+    if(!allowAdvances||prior?.partial!==true||!Array.isArray(prior.unitMs)||
+        !Array.isArray(saved?.unitMs)||saved.unitMs.length<prior.unitMs.length)return false;
+    const {unitMs:_savedUnits,partial:_savedPartial,...savedRest}=saved;
+    const {unitMs:_priorUnits,partial:_priorPartial,...priorRest}=prior;
+    return sameDataValue(savedRest,priorRest)&&
+      prior.unitMs.every((ms,index)=>saved.unitMs[index]===ms);
+  };
+  const consumedRuns=new Set(),unmatchedRuns=[];
+  // Exact finished runs are more specific than prefixes. Reserve them first
+  // so an earlier partial run cannot consume the only exact match of a
+  // separately completed run merely because the records are ordered apart.
+  for(const run of runs){
+    const index=record.practiceRuns.findIndex((saved,i)=>!consumedRuns.has(i)&&sameDataValue(saved,run));
+    if(index<0)unmatchedRuns.push(run);
+    else consumedRuns.add(index);
+  }
+  // Longer prefixes constrain the assignment more strongly than shorter ones.
+  unmatchedRuns.sort((a,b)=>(b?.unitMs?.length||0)-(a?.unitMs?.length||0));
+  for(const run of unmatchedRuns){
+    const index=record.practiceRuns.findIndex((saved,i)=>!consumedRuns.has(i)&&practiceRunCovered(saved,run));
+    if(index<0)return false;
+    consumedRuns.add(index);
+  }
+  // Practice Pacer also records an unfinished active attempt. Save Today
+  // finalizes that attempt as a partial run, so a Saved Day must contain
+  // its already-observed units and elapsed current unit as a distinct run.
+  // The ongoing clock is bounded by the snapshot's own persisted timestamp;
+  // a missing/inconsistent clock observation is not positive save evidence.
+  const active=snapshot.practice?.active;
+  if(active){
+    const finished=Array.isArray(active.unitMs)?active.unitMs:[],
+      anchored=Number(active.anchorMs)>0;
+    let current=Math.max(0,Number(active.currentMs)||0);
+    if(anchored){
+      const at=Date.parse(String(snapshot.updatedAt||'')),since=Number(active.anchorMs);
+      if(!Number.isFinite(at)||at<since)return false;
+      current+=Math.max(0,at-since);
+    }
+    // The live pacer clamps the ongoing unit to maxPracticeTargetMs before
+    // finalization. A covered Saved Day must not require impossible overtime.
+    current=Math.round(Math.min(APP_LIMITS.maxPracticeTargetMs,current));
+    if(finished.length||current>0){
+      const fields=['targetMs','taskId','sessionTargetMs','unitPlan','totalUnits'],
+        expected=finished.length+(current>0?1:0);
+      const index=record.practiceRuns.findIndex((saved,i)=>{
+        if(consumedRuns.has(i)||!Array.isArray(saved?.unitMs)||
+          fields.some(key=>!sameDataValue(saved[key],active[key]))||
+          (allowAdvances?saved.unitMs.length<expected:saved.unitMs.length!==expected)||
+          !finished.every((ms,pos)=>saved.unitMs[pos]===ms))return false;
+        return current===0||
+          (allowAdvances?saved.unitMs[finished.length]>=current:
+            saved.unitMs[finished.length]===current);
+      });
+      if(index<0)return false;
+      consumedRuns.add(index);
+    }
+  }
+  const observed=(value,prior)=>{
+    if(prior===undefined)return true;
+    if(value===undefined||!Number.isFinite(Number(value))||!Number.isFinite(Number(prior)))return false;
+    return allowAdvances?Number(value)>=Number(prior):Number(value)===Number(prior);
+  };
+  for(const [id,state] of Object.entries(snapshot.taskState||{})){
+    const result=record.results[id]||null;
+    if(!result){if(Object.keys(state||{}).length)return false;continue;}
+    if(!observed(result.completion,state.completion))return false;
+    if(state.completionSource&&result.completionSource!==state.completionSource)return false;
+    if(state.resolvedState==='done'&&result.doneFlag!==true||
+        state.resolvedState==='skipped'&&result.skipped!==true)return false;
+    if(!observed(result.done,state.progress?.done)||
+        !observed(result.actualSeconds,state.actual?.seconds))return false;
+    if(state.progress?.total!==undefined&&
+        Number(result.total)!==Number(state.progress.total))return false;
+    const clock=state.actual?.clock||{},actual=state.actual?.record||{};
+    const start=clock.startedAt||actual.firstStartedAt,end=clock.endedAt||actual.lastEndedAt;
+    if(start&&result.actualStart!==start)return false;
+    if(end&&result.actualEnd!==end){
+      // An end moving forward can be legitimate continued focus, but only
+      // with a stable start and strictly increased recorded focus duration.
+      // A missing/replaced start or a merely edited timestamp proves nothing.
+      const previousSeconds=Number(state.actual?.seconds);
+      if(!allowAdvances||!start||!Number.isFinite(previousSeconds)||
+          !(Number(result.actualSeconds)>previousSeconds)||
+          !Number.isFinite(Date.parse(end))||
+          !(Date.parse(result.actualEnd)>Date.parse(end)))return false;
+    }
+    if(clock.startedAtLocalMinute!==undefined&&
+        Number(result.actualStartLocalMinute)!==Number(clock.startedAtLocalMinute))return false;
+    if(clock.startedAtUtcOffsetMinutes!==undefined&&
+        Number(result.actualStartUtcOffsetMinutes)!==Number(clock.startedAtUtcOffsetMinutes))return false;
+    if(clock.startedAtTimeZone&&result.actualStartTimeZone!==clock.startedAtTimeZone)return false;
+    const count=Number(actual.sessionCount)||actual.sessions?.length||0;
+    if(count&&!observed(result.sessionCount,count))return false;
+    const pauses=actual.pauseEvents||[];
+    if(pauses.length&&(!Array.isArray(result.pauseEvents)||
+        !sameDataValue(pauses,allowAdvances?result.pauseEvents.slice(0,pauses.length):result.pauseEvents)))return false;
+  }
+  for(const [id,adjustment] of Object.entries(snapshot.scheduleAdjustments||{})){
+    if(!record.results[id]||
+        record.results[id].adjustedStart!==TimeModel.studyMinuteToHHMM(adjustment.startMin))return false;
+  }
+  return true;
+}
 function createDiaryRecord(date,reflection,options={}){
   if(!isSupportedSavedDate(date))return null;
   const text=clampEditorContent(reflection,APP_LIMITS.maxReflectionChars);if(!String(text||'').trim()||!editorContentWithinLimits(text))return null;
@@ -483,7 +615,7 @@ function materializeDailyRecordSummary(summary){
       contractVersion:1,
       buildDailyRecordSummary,compactPauseEvents,compactRealTimeSnapshot,
       sanitizeTimerRuntimePayload,compactAdjustedSchedule,normalizeDailyResultEntry,
-      dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,createDiaryRecord,
+      dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,savedDayCoversSessionEvidence,createDiaryRecord,
       sanitizeCurrentNote,sanitizeNoteFields,noteKeys,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
     });
   }
@@ -686,7 +818,15 @@ function materializeDailyRecordSummary(summary){
     const clean=normalizeCurrentActiveSession(session);
     return clean&&sameDataValue(session,clean)?clean:null;
   }
-  return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession});
+  // Study content is distinct from ownership/control metadata. Revisions and
+  // timestamps establish persistence/order; runningOn/status establish control.
+  // Neither may make two otherwise identical study sessions conflict.
+  function contentValue(session){
+    const clean=sanitizeCurrentActiveSession(session);if(!clean)return null;
+    const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,...snapshot}=clean.snapshot;
+    return Object.freeze({date:clean.date,scheduleText:clean.scheduleText,snapshot:Object.freeze(snapshot)});
+  }
+  return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession,contentValue});
   }
   // Portable user data is an explicit allowlist, independent of sync destinations.
   function createPersonalDataCodec(limits){
@@ -753,14 +893,17 @@ function materializeDailyRecordSummary(summary){
   // session. kept is the other side's version, or null where that side had
   // deleted it (or had no session); for a note it holds only the title or
   // text that differed, and base what both last shared of them, for Smart
-  // merge. A resolved review keeps only its identity and resolvedAt, so
-  // every device learns it is done.
+  // merge. keptFrom names the device whose copy held the kept version (its
+  // installation ID) and keptChangedAt when that copy last changed it; both
+  // are '' where that was not recorded (kept before v2, or not known). A
+  // resolved review keeps only its identity and resolvedAt, so every device
+  // learns it is done.
   function createPendingReviewCodec(input){
     exactObject(input,['dataContract','dailyRecordCodec','activeSessionCodec','personalDataCodec','helpers'],'Pending-review codec input');
     functions(input.helpers,['sameDataValue','randomBytes'],'Pending-review codec helpers');
     const VERSION=Number(input.dataContract.schemas.PendingReview.version),DailyRecordCodec=input.dailyRecordCodec,ActiveSessionCodec=input.activeSessionCodec,PersonalDataCodec=input.personalDataCodec;
     const {sameDataValue,randomBytes}=input.helpers,NoteKeys=DailyRecordCodec.noteKeys;
-    const ID=/^pr_[a-f0-9]{32}$/u,DATE=/^\d{4}-\d{2}-\d{2}$/u,KEYS=['base','id','kept','keptAt','ref','resolvedAt','subject','version'].join('|');
+    const ID=/^pr_[a-f0-9]{32}$/u,DATE=/^\d{4}-\d{2}-\d{2}$/u,DEVICE=/^inst_[a-z0-9_]{8,128}$/iu,KEYS=['base','id','kept','keptAt','keptChangedAt','keptFrom','ref','resolvedAt','subject','version'].join('|');
     const iso=value=>{if(typeof value!=='string')return null;const ms=Date.parse(value);return Number.isFinite(ms)&&new Date(ms).toISOString()===value?value:null;};
     const refValid=(subject,ref)=>subject==='note'?NoteKeys.isId(ref):subject==='savedDay'?DATE.test(ref):subject==='personal'?ref==='personal':subject==='session'?ref==='session':false;
     // The other side's version; undefined when unsound.
@@ -774,27 +917,81 @@ function materializeDailyRecordSummary(summary){
     function normalize(value){
       // Only a canonical record passes: every field exactly as stored.
       if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join('|')!==KEYS||value.version!==VERSION||[value.id,value.subject,value.ref].some(field=>typeof field!=='string'))return null;
-      const id=value.id,subject=value.subject,ref=value.ref,keptAt=iso(value.keptAt);
+      const id=value.id,subject=value.subject,ref=value.ref,keptAt=iso(value.keptAt),keptFrom=value.keptFrom,keptChangedAt=value.keptChangedAt;
       if(!ID.test(id)||!keptAt||!refValid(subject,ref))return null;
-      if(value.resolvedAt!==''){const resolvedAt=iso(value.resolvedAt);return resolvedAt&&value.kept===null&&value.base===null?{version:VERSION,id,subject,ref,keptAt,kept:null,base:null,resolvedAt}:null;}
+      if(typeof keptFrom!=='string'||keptFrom!==''&&!DEVICE.test(keptFrom)||typeof keptChangedAt!=='string'||keptChangedAt!==''&&!iso(keptChangedAt))return null;
+      if(value.resolvedAt!==''){const resolvedAt=iso(value.resolvedAt);return resolvedAt&&value.kept===null&&value.base===null&&keptFrom===''&&keptChangedAt===''?{version:VERSION,id,subject,ref,keptAt,keptFrom:'',keptChangedAt:'',kept:null,base:null,resolvedAt}:null;}
       const kept=keptValue(subject,ref,value.kept);if(kept===undefined)return null;
       let base=null;
       if(value.base!==null){base=subject==='note'&&kept?DailyRecordCodec.sanitizeNoteFields(value.base):null;if(!base||Object.keys(base).some(key=>!(key in kept)))return null;}
-      return {version:VERSION,id,subject,ref,keptAt,kept,base,resolvedAt:''};
+      return {version:VERSION,id,subject,ref,keptAt,keptFrom,keptChangedAt,kept,base,resolvedAt:''};
     }
-    function create({subject,ref,kept,base=null,keptAt=new Date().toISOString()}){
+    // origin: {device, changedAt} of the copy that held the kept version.
+    function create({subject,ref,kept,base=null,keptAt=new Date().toISOString(),origin=null}){
       const id='pr_'+[...randomBytes(16)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
-      const clean=normalize({version:VERSION,id,subject,ref,keptAt:new Date(keptAt).toISOString(),kept,base,resolvedAt:''});
+      const device=String(origin&&origin.device||''),changed=Date.parse(String(origin&&origin.changedAt||''));
+      const clean=normalize({version:VERSION,id,subject,ref,keptAt:new Date(keptAt).toISOString(),keptFrom:DEVICE.test(device)?device:'',keptChangedAt:Number.isFinite(changed)?new Date(changed).toISOString():'',kept,base,resolvedAt:''});
       if(!clean)throw new TypeError('A version kept for review is invalid.');
       return clean;
     }
     function resolved(review,resolvedAt=new Date().toISOString()){
       const clean=normalize(review);if(!clean)throw new TypeError('The review to resolve is invalid.');
-      return clean.resolvedAt?clean:normalize({...clean,kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
+      return clean.resolvedAt?clean:normalize({...clean,keptFrom:'',keptChangedAt:'',kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
+    }
+    // The PendingReview codec is the single authority for the meaning of
+    // kept alternatives. Saving metadata is not Saved Day evidence; Saved
+    // Plan timestamps are not authored plan content. Do not discard a note's
+    // retained field mask or a session's study evidence.
+    function savedPlanMeaning(plan){
+      return plan?{id:plan.id,label:plan.label,scheduleText:plan.scheduleText}:null;
+    }
+    function meaningfulValue(subject,value){
+      if(!value||typeof value!=='object')return null;
+      if(subject==='savedDay'){
+        const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...content}=value;
+        return content;
+      }
+      if(subject==='personal'){
+        return {preferences:value.preferences,draft:value.plans.draft,defaultId:value.plans.defaultId,
+          savedPlans:value.plans.savedPlans.map(savedPlanMeaning)};
+      }
+      if(subject==='session')return ActiveSessionCodec.contentValue(value);
+      if(subject==='note')return value; // Retained title/text fields only.
+      return null;
+    }
+    function sameMeaning(subject,a,b){
+      if(a===null||b===null)return a===null&&b===null;
+      const left=meaningfulValue(subject,a),right=meaningfulValue(subject,b);
+      return !!left&&!!right&&sameDataValue(left,right);
+    }
+    function matchesCurrent(subject,current,kept){
+      if(!current||!kept)return false;
+      if(subject==='note'){
+        // A retained Note may hold only the title or text which differed.
+        return Object.entries(kept).every(([field,value])=>sameDataValue(current[field],value));
+      }
+      if(subject==='session'){
+        // Study-content equality may deduplicate redundant retained versions,
+        // but only a suspended, same-owner canonical session proves that a
+        // kept Active Session has actually been applied.
+        return current.status==='suspended'&&current.runningOn===kept.runningOn&&
+          sameMeaning(subject,current,kept);
+      }
+      return sameMeaning(subject,current,kept);
+    }
+    // Equivalent open conflicts belong to one review, even if two devices
+    // independently minted different ids for that same kept value and base.
+    // Resolved reviews deliberately lack the kept content, so they cannot
+    // suppress a separate future conflict that happens to look similar.
+    function sameOpen(a,b){
+      if(!a||!b||a.resolvedAt||b.resolvedAt||a.subject!==b.subject||a.ref!==b.ref||
+          !sameDataValue(a.base,b.base))return false;
+      return sameMeaning(a.subject,a.kept,b.kept);
     }
     // Reviews merge by id: a resolved one wins, so a review resolved on any
-    // device ends everywhere. Only the newest resolved ones are kept, as many
-    // as may wait at once.
+    // device ends everywhere. Equivalent open duplicates retain the oldest
+    // id and publish resolved tombstones for the others. This lets a
+    // subsequent resolution converge even when old devices saw both ids.
     function merge(lists,limit){
       const byId=new Map();
       for(const list of lists)for(const raw of list||[]){
@@ -802,8 +999,15 @@ function materializeDailyRecordSummary(summary){
         const held=byId.get(review.id);
         if(!held||review.resolvedAt&&(!held.resolvedAt||review.resolvedAt>held.resolvedAt))byId.set(review.id,review);
       }
-      const all=[...byId.values()],open=all.filter(review=>!review.resolvedAt),done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));
-      return [...open,...done].sort((a,b)=>a.id.localeCompare(b.id));
+      const open=[...byId.values()].filter(review=>!review.resolvedAt).sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)),bySubject=new Map();
+      for(const review of open){
+        const key=review.subject+':'+review.ref,peers=bySubject.get(key)||[];
+        if(peers.some(previous=>sameOpen(previous,review)))byId.set(review.id,resolved(review));
+        else{peers.push(review);bySubject.set(key,peers);}
+      }
+      const all=[...byId.values()],remaining=all.filter(review=>!review.resolvedAt),
+        done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));
+      return [...remaining,...done].sort((a,b)=>a.id.localeCompare(b.id));
     }
     // The rich texts a stored review holds, which may use attachments.
     function richTexts(review){
@@ -811,7 +1015,8 @@ function materializeDailyRecordSummary(summary){
       const values=review.subject==='note'?[kept.text,review.base&&review.base.text]:review.subject==='savedDay'?[kept.reflection]:review.subject==='session'?[kept.snapshot&&kept.snapshot.review&&kept.snapshot.review.reflection]:[];
       return values.filter(value=>typeof value==='string'&&value);
     }
-    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,normalize,create,resolved,merge,richTexts});
+    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,
+      normalize,create,resolved,merge,sameOpen,sameMeaning,matchesCurrent,meaningfulValue,savedPlanMeaning,richTexts});
   }
 
   return freeze({

@@ -10,11 +10,20 @@ const scheduled=lifecycle.snapshot({pending:true,scheduled:true,nextEligibleAt:n
 Object.assign(context,{
   OperationLifecycle:lifecycle,DataMaintenanceJob:{status:()=>lifecycle.snapshot()},AttachmentIntegrityJob:{status:()=>scheduled},BackupOperationDiagnostics:recorder,attachmentIntegrityView:{lastOutcome:'yielded',progress:{cursor:3,total:9},checkedAt:'2026-10-01T00:00:00.000Z'},repositoryIntegrityBoundScopes:{'device-folder':'device-qa'},repositoryIntegrityView:{version:7,locations:{'device-folder':{repositoryScope:'device-qa',partial:{stored:{offset:1048576}},completedAt:'2026-09-30T00:00:00.000Z',failedAt:'2026-10-01T00:00:00.000Z',history:[{at:'2026-10-01T00:00:00.000Z',outcome:'yielded',complete:false}]}}},
   StorageHealthController:{snapshot:()=>({hasIssues:true,issues:[{source:'indexedDB',level:'error',at:'2026-10-01T00:00:00.000Z',message:'PRIVATE DATA'},{source:'notes',level:'warn',at:'2026-10-01T00:00:00.000Z'}],lastStudyDataSaveAt:'2026-10-01T00:00:00.000Z'})},storageEstimate:{persisted:false,usageBytes:32,quotaBytes:1024},appCanMutate:()=>true,AppMutationCoordinator:{status:()=>({active:false,foreign:false,authorityHealthy:true,authorityDurableProtected:true,recoveryFault:''})},BackupController:{status:()=>({busy:false,importActive:false,standaloneExportActive:true})},DeviceBackup:{status:()=>({connected:true,permission:'granted',pending:true,stalePermissionResponses:2,retryAttempt:1,nextEligibleAt:'2026-10-02T00:00:00.000Z',folderName:'PRIVATE DATA'})},BackupProtection:{status:()=>({enabled:true,unlocked:false})},BackupAppMeta:{read:async key=>key==='repositoryMaintenancePending'?{entries:[{providerId:'device-folder',reason:'gc-grace',nextEligibleAt:'2026-10-02T00:00:00.000Z',repositoryScope:'PRIVATE DATA'}]}:key==='managedProviderBackupPending'?{entries:[{providerId:'google-drive'}]}:{file:{verifiedAt:'2026-10-01T00:00:00.000Z',filename:'PRIVATE DATA'}}},
-  AppData:{notes:{failure:()=>({failed:true,error:'PRIVATE DATA'})},metadata:{diagnostics:async()=>({maintenanceStatus:'pending',deletions:7,localRecovery:true})},restoreJournal:{diagnostics:async()=>({phase:'applying-assets',updatedAt:'2026-10-01T00:00:00.000Z',id:'PRIVATE DATA'})},libraryClearJournal:{diagnostics:async()=>null},maintenance:{status:()=>({busy:true})}},RichTextAssetMaintenance:{status:()=>scheduled},BackupFiles:{status:()=>lifecycle.snapshot({pending:true,suspended:true})},AttachmentIngest:{status:()=>({busy:false})},Exports:{status:()=>({busy:true,pending:1})},
+  AppData:{pendingReviews:{list:async()=>[
+    {version:2,id:'pr_'+'1'.repeat(32),subject:'note',ref:'note_private_id',keptAt:'2026-10-01T08:00:00.000Z',keptFrom:'inst_ipad_safari_mgx2k3a0_1a2b3c4d',keptChangedAt:'2026-09-30T21:40:00.000Z',kept:{text:'PRIVATE DATA'},base:null,resolvedAt:''},
+    {version:2,id:'pr_'+'2'.repeat(32),subject:'savedDay',ref:'2026-09-29',keptAt:'2026-10-01T07:00:00.000Z',keptFrom:'inst_qa_this_device',keptChangedAt:'',kept:null,base:null,resolvedAt:''},
+    {version:2,id:'pr_'+'3'.repeat(32),subject:'personal',ref:'personal',keptAt:'2026-10-01T06:00:00.000Z',keptFrom:'',keptChangedAt:'',kept:{preferences:{studentName:'PRIVATE DATA'}},base:null,resolvedAt:''},
+    {version:2,id:'pr_'+'4'.repeat(32),subject:'note',ref:'note_private_id',keptAt:'2026-10-01T05:00:00.000Z',keptFrom:'',keptChangedAt:'',kept:null,base:null,resolvedAt:'2026-10-01T09:00:00.000Z'}]},
+    notes:{failure:()=>({failed:true,error:'PRIVATE DATA'})},metadata:{diagnostics:async()=>({maintenanceStatus:'pending',deletions:7,localRecovery:true})},restoreJournal:{diagnostics:async()=>({phase:'applying-assets',updatedAt:'2026-10-01T00:00:00.000Z',id:'PRIVATE DATA'})},libraryClearJournal:{diagnostics:async()=>null},maintenance:{status:()=>({busy:true})}},RichTextAssetMaintenance:{status:()=>scheduled},BackupFiles:{status:()=>lifecycle.snapshot({pending:true,suspended:true})},AttachmentIngest:{status:()=>({busy:false})},Exports:{status:()=>({busy:true,pending:1})},
   
   pwaUpdateCheckDueAt:Date.parse('2026-10-02T00:00:00.000Z'),pwaUpdateCheckFailureCount:2,pwaLastUpdateCheckAt:()=>Date.parse('2026-10-01T00:00:00.000Z'),PwaLifecycle:{status:()=>({phase:'activating',applying:true,reloading:false,updateReady:true,message:'private editor text'})},
   BackupProviderRuntime:{status:()=>({busy:false,preparing:false}),diagnosticConnections:()=>[{id:'google-drive',connected:true,scopeBound:true,retryAttempt:4,retryBackoffCapped:true}],backgroundStatus:()=>[{job:'google-drive integrity',...scheduled},{job:'device-folder maintenance',state:'running',busy:true,pending:true}],diagnosticSync:()=>[{id:'google-drive',connected:true,syncedAt:'2026-10-01T10:42:00.000Z',checkedAt:'2026-10-01T11:00:00.000Z',nextEligibleAt:'2026-10-01T11:20:00.000Z',needsReview:false,needsPassword:false,behind:true,catchingUp:false,turnWaits:2,signInEndsAt:'2026-10-01T11:40:00.000Z'}]},
-  KeptVersions:{count:()=>3},Profiles:{list:()=>[{id:'a'},{id:'b'}],removalPending:()=>1,unsupported:()=>false},
+  KeptVersions:{count:()=>3},InstallationIdentity:{getId:()=>'inst_qa_this_device'},PersistenceModule:{deviceName:id=>/^inst_ipad_safari_/u.test(id)?'iPad · Safari':''},Profiles:{list:()=>[{id:'a'},{id:'b'}],current:()=>({id:'a'}),removalPending:()=>1,unsupported:()=>false},
+  DATA_CONTRACT:{storage:{dbName:'StudyDirectorDB'}},DB_NAME:'StudyDirectorDB~prof_qa_abcdef_12345678',IndexedDb:{lifecycle:()=>({startedFresh:true})},
+  ProfileScope:{scope:'prof_qa_abcdef_12345678',separator:'~',registryKey:'profiles'},LocalStorageContract:{getText:key=>key==='profiles'?'{"version":1}':null},
+  indexedDB:{databases:async()=>[{name:'StudyDirectorDB'},{name:'StudyDirectorDB~prof_qa_abcdef_12345678'},{name:'another-site-db'}]},
+  readStorageHealth:()=>({browserDataClearedAt:'2026-10-01T06:00:00.000Z'}),
   UnsupportedData:{held:()=>false,summary:()=>({total:1,held:1,protected:0,blocked:false,items:{days:0,notes:0,attachments:0,sessions:0,settings:0}})},
   navigator:{clipboard:{writeText:async value=>copied.push(value)}},NoticeCoordinator:{presentation:()=>({begin:()=>({finish:(...args)=>notices.push(args)})})},AppDiagnostics:{capture:(...args)=>errors.push(args)}
 });
@@ -35,6 +44,19 @@ assert.match(text,/Current Device cleanup intent: state=pending.*reason=gc-grace
 // Sync and profiles: what to read first when a device does not sync.
 assert.match(text,/Current Drive sync: state=pending[^\n]*nextEligibleAt=2026-10-01T11:20:00\.000Z · completedAt=2026-10-01T10:42:00\.000Z · attemptedAt=2026-10-01T11:00:00\.000Z · signInEndsAt=2026-10-01T11:40:00\.000Z/u,'last synced, last checked, next check and when the sign-in ends');assert.match(text,/Current Drive sync: [^\n]*behind=true[^\n]*keptVersions=3[^\n]*turnWaits=2/u);
 assert.match(text,/Current Profiles: state=pending[^\n]*removalPending=true[^\n]*profiles=2/u,'a removed profile still waiting to be deleted');
+// Which storage the page opened: a new, empty database here while another
+// Study Director database still exists means the data may still be on the device.
+{const line=text.split('\n').find(row=>row.startsWith('Current Profile storage'));
+assert.match(line,/state=observed/u);assert.match(line,/scoped=true/u);assert.match(line,/profileListPresent=true/u);assert.match(line,/pageProfileListed=true/u);assert.match(line,/startedFresh=true/u);
+assert.match(line,/databases=2/u,'only this app\'s databases are counted');assert.match(line,/dataClearedAt=2026-10-01T06:00:00\.000Z/u,'an unresolved clear shows when it was found');assert.match(line,/otherDatabases=1/u);assert.doesNotMatch(line,/prof_qa|StudyDirectorDB/u,'no database or profile names');}
+// Each open kept version: what it is, why, and which device's copy, never
+// its content or which note or day it is.
+{const kept=text.split('\n').filter(row=>row.startsWith('Current Kept version:'));
+assert.match(text,/Current Kept versions: state=pending[^\n]*count=3/u,'a resolved review is not counted');assert.equal(kept.length,3);
+assert.match(kept[0],/subject=note · cause=note-text · device=iPad · Safari · keptAt=2026-10-01T08:00:00\.000Z · changedAt=2026-09-30T21:40:00\.000Z/u,'newest first, with the device whose copy held it');
+assert.match(kept[1],/subject=savedDay · cause=saved-day-deletion · device=this device · keptAt=/u);assert.doesNotMatch(kept[1],/changedAt/u);
+assert.match(kept[2],/subject=personal · cause=settings · device=not recorded/u,'a version kept before devices were recorded says so');
+assert.doesNotMatch(kept.join('\n'),/PRIVATE|note_private_id|2026-09-29|inst_/u,'no content, note, day or installation ID');}
 assert.match(text,/Current Unsupported data: state=replaceable[^\n]*held=1[^\n]*protectedCount=0/u,'data this build cannot read: only replaceable bookkeeping, so nothing waits');
 const savedRead=context.AppData.restoreJournal.diagnostics;context.AppData.restoreJournal.diagnostics=async()=>{throw new Error('PRIVATE DATA');};context.DeviceBackup.status=()=>{throw new Error('PRIVATE DATA');};
 assert.equal(await context.copyBackupDiagnostics(),true);assert.match(copied.at(-1),/Current Restore journal: state=unavailable.*reason=state-unavailable/u);assert.match(copied.at(-1),/Current Device backup: state=unavailable/u);assert.match(copied.at(-1),/Current Canonical maintenance record: state=pending/u);assert.doesNotMatch(copied.at(-1),/PRIVATE DATA/u);context.AppData.restoreJournal.diagnostics=savedRead;
@@ -49,4 +71,17 @@ let stored;const health=context.createStorageHealthController({getJson:()=>null,
 let state=health.issue('repositoryIntegrity','Verification is unavailable. Previous findings are retained.',{level:'warn'});assert.equal(state.issues[0].label,'Backup verification');assert.equal(state.issues[0].level,'warn');
 health.issue('attachmentIntegrity','Attachment verification is unavailable.',{level:'warn'});assert.equal(stored,undefined,'an issue writes nothing to browser storage');
 state=health.recover('repositoryIntegrity');assert.equal(state.issues.some(row=>row.source==='repositoryIntegrity'),false);assert.equal(state.issues.length,1);
+// Two tabs share one record. A tab holding an older copy never moves a save
+// time back, whichever way it writes; the clear marker keeps its own rule.
+{
+  const shared=new Map(),local={getJson:key=>shared.has(key)?structuredClone(shared.get(key)):null,setJson:(key,value)=>{shared.set(key,structuredClone(value));return true;}};
+  const older=context.createStorageHealthController(local),newer=context.createStorageHealthController(local),record=()=>shared.get('health');
+  newer.updateHistory({lastLocalSaveAt:'2026-11-07T10:00:00.000Z'});newer.recover('notes',{lastStudyDataSaveAt:'2026-11-07T10:00:00.000Z'});
+  older.updateHistory({lastLocalSaveAt:'2026-11-07T09:00:00.000Z'});
+  assert.deepEqual([record().lastLocalSaveAt,record().lastStudyDataSaveAt],['2026-11-07T10:00:00.000Z','2026-11-07T10:00:00.000Z'],'an older tab keeps the later save times');
+  older.issue('indexedDB','The browser database failed.');assert.equal(record().lastStudyDataSaveAt,'2026-11-07T10:00:00.000Z','a database failure in an older tab does not erase that study data was saved');
+  assert.equal(older.snapshot().lastStudyDataSaveAt,'2026-11-07T10:00:00.000Z','and that tab now knows the later time');
+  older.updateHistory({lastLocalSaveAt:'2026-11-07T11:00:00.000Z'});assert.equal(record().lastLocalSaveAt,'2026-11-07T11:00:00.000Z','a later save still moves the time forward');
+  newer.updateHistory({browserDataClearedAt:'2026-11-07T12:00:00.000Z'});older.updateHistory({lastLocalSaveAt:'2026-11-07T12:30:00.000Z'});assert.equal(record().browserDataClearedAt,'2026-11-07T12:00:00.000Z','an unresolved clear set by another tab is kept');
+}
 console.log(JSON.stringify({status:'PASS',suite:'background-diagnostics',currentStates:true,clipboardSuccessAndFailure:true,privateContentExcluded:true,verificationLabels:true},null,2));

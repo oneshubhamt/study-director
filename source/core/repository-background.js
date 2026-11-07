@@ -21,6 +21,12 @@ registry.define('repository-background',1,input=>{
   });
   const INTEGRITY=freeze({
     workBudgetMs:120*1000,
+    // A started check keeps the slot this long against automatic sync and
+    // cleanup: a full Drive check takes about a minute, mostly listing, and
+    // was otherwise stopped by every upload of a study session. Anything a
+    // person starts, any suspension, and pressing automatic work (an upload
+    // a person's action made urgent, or a flush) still stop it at once.
+    protectedMs:60*1000,
     intervalMs:14*24*60*60*1000,
     retryMs:10*60*1000,
     continueMs:2*60*1000,
@@ -127,10 +133,10 @@ registry.define('repository-background',1,input=>{
       const settled=waitForSettlement(waiting);return freeze({token,reason:label,settled});
     }
     function resume(value){const token=String(value&&value.token||value||'');if(!token||!suspensions.has(token))return false;suspensions.delete(token);resumeTimers();wake('resume');return true;}
-    async function beginBackground(job,{externalSignal=null,budgetMs=0,budgetCode='REPOSITORY_BACKGROUND_BUDGET',budgetMessage='Repository background work reached its work limit.',preemptCode='REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage='Repository background work yielded to a higher-priority operation.'}={}){
+    async function beginBackground(job,{pressing=false,externalSignal=null,budgetMs=0,budgetCode='REPOSITORY_BACKGROUND_BUDGET',budgetMessage='Repository background work reached its work limit.',preemptCode='REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage='Repository background work yielded to a higher-priority operation.'}={}){
       if(String(job)==='convergence'&&Number(budgetMs)>0)throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');
       const name=String(job||''),rank=priority(name);if(!rank)throw new TypeError('Repository-background job is invalid.');if(foreground||suspensions.size||externalSignal?.aborted)return null;
-      const lower=[];for(const [activeJob,row] of active){if(priority(activeJob)>=rank)return null;lower.push(row);}
+      const lower=[];for(const [activeJob,row] of active){if(priority(activeJob)>=rank)return null;if(activeJob==='integrity'&&!pressing&&!row.controller.signal.aborted){const age=nowMs()-row.startedAt;if(age>=0&&age<INTEGRITY.protectedMs)return null;}lower.push(row);}
       for(const row of lower)if(!row.controller.signal.aborted)row.controller.abort(backgroundAbort(row.preemptCode,row.preemptMessage));
       if(lower.length){try{await waitForSettlement(lower.map(row=>row.settlement),externalSignal);}catch{return null;}}
       if(foreground||suspensions.size||externalSignal?.aborted)return null;
@@ -146,7 +152,7 @@ registry.define('repository-background',1,input=>{
       const allowance=Lifecycle.createWorkBudget({now:environment.now,check:()=>{if(controller.signal.aborted)throw controller.signal.reason;},yieldError:()=>backgroundAbort(budgetCode,budgetMessage)});
       const workBudget=freeze({...allowance,start:milliseconds=>{if(name==='convergence')throw new TypeError('Background transfers require progress watchdogs, not a total housekeeping deadline.');return !released&&!controller.signal.aborted&&allowance.start(milliseconds);}});
       if(Number(budgetMs)>0)workBudget.start(budgetMs);
-      const row={controller,settlement,preemptCode:String(preemptCode),preemptMessage:String(preemptMessage)};active.set(name,row);
+      const row={controller,settlement,startedAt:nowMs(),preemptCode:String(preemptCode),preemptMessage:String(preemptMessage)};active.set(name,row);
       return freeze({job:name,signal:controller.signal,controller,settlement,workBudget,release:()=>{if(released)return;released=true;if(externalSignal)externalSignal.removeEventListener('abort',relay);if(active.get(name)===row)active.delete(name);resolveSettlement?.();resumeTimers();notifyRelease(name);}});
     }
     function beginForeground({externalSignal=null,cancelCode='REPOSITORY_FOREGROUND_CANCELLED',cancelMessage='Repository foreground operation was cancelled.',respectBackgroundSuspension=false}={}){
@@ -349,7 +355,11 @@ registry.define('repository-background',1,input=>{
           const checkpoint=integrityCheckpoint(scope,target);
           stage='execute';const result=await input.execute(freeze({target,trigger,nextEligibleAt,signal:scope.signal,checkpoint}));stage='state-write';await input.writeResult(result);schedule(integrityResultDelay(result),result&&result.reason||result&&result.status||'completed');return result;
         }finally{scope.release();}
-      })().catch(error=>{const yielded=error?.name==='AbortError',budgeted=yielded&&String(error?.code||'')===String(input.budgetCode||''),preempted=yielded&&String(error?.code||'')===String(input.preemptCode||''),stateFailed=stage!=='execute'||error?.code==='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE',changed=error?.code==='REPOSITORY_CHANGED';if(!yielded)input.capture(error);schedule(changed||budgeted?INTEGRITY.continueMs:stateFailed?INTEGRITY.stateRetryMs:preempted?INTEGRITY.retryMs:INTEGRITY.failureRetryMs,changed?'repository-changed':budgeted?'budget':preempted?'preempted':stateFailed?'state-unavailable':'error');return freeze({status:yielded?'skipped':stateFailed||changed?'unavailable':'failed',reason:budgeted?'budget':preempted?'preempted':String(error&&error.message||error)});});
+      })().catch(error=>{const yielded=error?.name==='AbortError',budgeted=yielded&&String(error?.code||'')===String(input.budgetCode||''),preempted=yielded&&String(error?.code||'')===String(input.preemptCode||''),stateFailed=stage!=='execute'||error?.code==='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE',changed=error?.code==='REPOSITORY_CHANGED';if(!yielded)input.capture(error);
+        // Stopped by other work: start again as soon as that work releases the
+        // slot (slotReleased), so the next try gets the whole gap; the timer
+        // is only a fallback.
+        if(preempted)waitingForSlot=true;schedule(changed||budgeted?INTEGRITY.continueMs:stateFailed?INTEGRITY.stateRetryMs:preempted?INTEGRITY.retryMs:INTEGRITY.failureRetryMs,changed?'repository-changed':budgeted?'budget':preempted?'preempted':stateFailed?'state-unavailable':'error');return freeze({status:yielded?'skipped':stateFailed||changed?'unavailable':'failed',reason:budgeted?'budget':preempted?'preempted':String(error&&error.message||error)});});
     }
     async function install(){try{const target=await input.readTarget(),completed=Date.parse(String(target&&target.completedAt||'')),now=input.coordinator.now();schedule(integrityTargetDue(target,now)?45000:Math.max(1000,INTEGRITY.intervalMs-(now-completed)+1000),'install');return target;}catch(error){input.capture(error);schedule(INTEGRITY.stateRetryMs,'state-read-failed');return null;}}
     const job=input.coordinator.registerJob('integrity',{onUnregister:stopSlotRelease,initialDelayMs:45000,execute:runAttempt,isAvailable:input.isAvailable,capture:input.capture,retryMs:INTEGRITY.unavailableRetryMs});

@@ -6,7 +6,7 @@ const codec=dailyRecordCodec;
 const currentActiveSession=freeze({normalize:value=>value&&typeof value==='object'?freeze({...value,version:10}):null,sanitizeCurrent:value=>value&&Number(value.version)===10?freeze({...value}):null,sanitizeSessionSnapshot:value=>value||null});
 const personalDataCodec=freeze({normalize:value=>value});
 const compatibility=CompatibilityCodecs.create(freeze({
-  limits,dataContract,keyedRecord:freeze({create:()=>Object.create(null)}),dailyRecordCodec:codec,activeSessionCodec:currentActiveSession,personalDataCodec,
+  limits,dataContract,keyedRecord:freeze({create:()=>Object.create(null)}),dailyRecordCodec:codec,activeSessionCodec:currentActiveSession,personalDataCodec,pendingReviewCodec:freeze({version:2,normalize:()=>null}),
   helpers:freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue,sanitizePracticeRun:helpers.sanitizePracticeRun,activeSessionScheduleFingerprint:()=> 'fp',isValidIsoDate:value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value)),isCanonicalScheduleText:()=>true}),
   timestamps:freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_schema_device'
 }));

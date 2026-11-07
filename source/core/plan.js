@@ -15,7 +15,7 @@ registry.define('plan',1,()=>{
     parser:freeze(['isCanonicalScheduleText','parseScheduleDraftText','scheduleTextFromRows']),
     clock:freeze(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso']),
     view:freeze(['document','on','textEl','updateRealTimeAwareness','window']),
-    scheduleGateway:freeze(['act','apply','breakState','captureMigration','clearSafety','flush','hasLiveState','markRender','read','reconcile','renameAreas','row','setAnchor','timeline']),
+    scheduleGateway:freeze(['act','apply','breakState','captureMigration','clearSafety','flush','hasLiveState','markRender','read','reconcile','renameAreas','row','timeline']),
     ownership:freeze(['canMutate','requirePrimary']),
     interactions:freeze(['confirm','input']),
     notifications:freeze(['begin','feedback']),
@@ -325,9 +325,16 @@ function createPlanDraftProjection(result=null){
   const draft=immutableDraftResult(result||parseScheduleDraftText(getPlanDraftText()));
   const hasApplied=TASKS.length>0,editMode=PlanDraftEditor.active(),hasRows=draft.ok?draft.parsed.length>0:lastParsed.length>0;
   const status=draft.ok?'valid':draft.kind==='empty'||draft.kind==='no-tasks'?'empty':isIncompleteDraftResult(draft,hasRows)?'incomplete':'invalid';
-  const changed=draft.ok&&draft.parsed.length>0&&(!hasApplied||scheduleFingerprintForRows(draft.parsed)!==scheduleGateway.read().fingerprint);
+  const draftMatchesApplied=hasApplied&&draft.ok&&draft.parsed.length>0&&
+    scheduleFingerprintForRows(draft.parsed)===scheduleGateway.read().fingerprint;
+  const changed=draft.ok&&draft.parsed.length>0&&!draftMatchesApplied;
+  // The board describes what it actually draws. An independently authored
+  // (even invalid) working draft must not relabel an applied live schedule.
+  const draftSurfaceOpen=editMode||!hasApplied;
   let boardMode='empty',boardLabel='EMPTY',boardCaption='Paste or load a schedule to build the board.';
-  if(status==='invalid'){
+  if(!draftSurfaceOpen){
+    boardMode='live';boardLabel='LIVE';boardCaption='Applied plan. Timing and completion update here.';
+  }else if(status==='invalid'){
     boardMode='invalid';boardLabel='DRAFT INVALID';boardCaption='Fix the schedule text before Apply.';
   }else if(status==='incomplete'){
     boardMode='invalid';boardLabel='INCOMPLETE ROW';boardCaption='Complete Task, Minutes, Kind and Area before applying.';
@@ -337,15 +344,13 @@ function createPlanDraftProjection(result=null){
     boardMode='draft';boardLabel='EDITING PLAN';boardCaption='Review or edit today’s blocks, then apply the plan.';
   }else if(changed){
     boardMode='draft';boardLabel='DRAFT READY';boardCaption='Review or edit today’s blocks, then apply the plan.';
-  }else if(hasApplied){
-    boardMode='live';boardLabel='LIVE';boardCaption='Applied plan. Timing and completion update here.';
   }
-  const canMutate=ownership.canMutate(),draftSurfaceOpen=editMode||!hasApplied;
+  const canMutate=ownership.canMutate();
   const controls=freeze({
     showEdit:hasApplied&&!editMode,editEnabled:canMutate,
     showDone:hasRows&&draftSurfaceOpen,doneEnabled:canMutate&&status==='valid',
     showCancel:hasApplied&&editMode,cancelEnabled:canMutate,
-    applyEnabled:canMutate&&status==='valid',editLabel:changed?'Edit Draft':'Edit Plan',doneLabel:hasApplied?'Done':'Apply Draft'
+    applyEnabled:canMutate&&status==='valid',editLabel:draftMatchesApplied?'Edit Plan':'Edit Draft',doneLabel:hasApplied?'Done':'Apply Draft'
   });
   return freeze({
     format:'study-director.plan-draft-projection',contractVersion:1,status,changed,editMode,
@@ -356,13 +361,11 @@ function createPlanDraftProjection(result=null){
 }
 function setParsedScheduleDraft(rows){
   lastParsed=Array.isArray(rows)?rows.map(row=>({...row})):[];
-  scheduleGateway.setAnchor(lastParsed.length?clockMinuteToStudyMinute(t2m(lastParsed[0].start)):0);
 }
 function keepAppliedScheduleOnReapply(parsed,rawOriginal,options={}){
   setParsedScheduleDraft(parsed);
   PlanDraftEditor.deactivate();
   lastAppliedScheduleText=String(rawOriginal||scheduleTextFromRows(lastParsed)||'');
-  PlanDraftEditor.save();
   setPlanComposerOpen(false);
   scheduleGateway.reconcile(options.source||'schedule-reapply');
   renderSched();
@@ -448,16 +451,19 @@ function renderInvalidScheduleApply(projection){
   setPlanComposerOpen(true);
   setPlanStatus(projection.firstActionableError||'Fix the schedule before applying.',false);
 }
-function closeActiveBreakForScheduleChange(){
+function closeActiveBreakForScheduleChange(stillCurrent=()=>true){
   if(!scheduleGateway.breakState())return true;
   return confirm({
     title:'End the current break?',
     message:'The revised Plan can be applied after the active timer break ends.',
     details:['Choose Keep break to return to Execute without changing the live Plan.'],
     confirmLabel:'End break and continue',cancelLabel:'Keep break'
-  }).then(ok=>{if(ok)scheduleGateway.breakState('end');return ok;});
+  }).then(ok=>{
+    if(!ok||!stillCurrent())return false;
+    scheduleGateway.breakState('end');return true;
+  });
 }
-function confirmScheduleChangeWillMigrateProgress(newRows){
+function confirmScheduleChangeWillMigrateProgress(newRows,stillCurrent=()=>true){
   if(!scheduleGateway.hasLiveState())return null;
   const snapshot=scheduleGateway.captureMigration(newRows||[]);
   const matched=snapshot.preview?snapshot.preview.matched:0;
@@ -472,11 +478,13 @@ function confirmScheduleChangeWillMigrateProgress(newRows){
     message:'Study Director will carry forward progress only where the block identity still matches.',
     details,confirmLabel:'Replace Plan',cancelLabel:'Keep current Plan'
   }).then(ok=>{
+    if(!stillCurrent())return false;
     if(!ok)setPlanStatus('Schedule change cancelled. Current tracking progress was kept.','cancelled');
     return ok?snapshot:false;
   });
 }
 function prepareScheduleApply(parsed,rawOriginal,opts){
+  const stillCurrent=()=>typeof opts.currentEditor!=='function'||opts.currentEditor();
   const hasApplied=TASKS.length>0;
   const scheduleChanged=hasApplied&&scheduleFingerprintForRows(parsed)!==scheduleGateway.read().fingerprint;
   if(hasApplied&&!scheduleChanged&&scheduleGateway.hasLiveState()&&!opts.forceReload&&!opts.reviewOnly){
@@ -484,11 +492,11 @@ function prepareScheduleApply(parsed,rawOriginal,opts){
   }
   if(!scheduleChanged)return {handled:false,cancelled:false,scheduleChanged:false,progressMigration:null};
   const finish=()=>{
-    const progressMigration=confirmScheduleChangeWillMigrateProgress(parsed);
+    const progressMigration=confirmScheduleChangeWillMigrateProgress(parsed,stillCurrent);
     if(progressMigration&&typeof progressMigration.then==='function')return progressMigration.then(value=>value===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration:value});
     return progressMigration===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration};
   };
-  const breakDecision=closeActiveBreakForScheduleChange();
+  const breakDecision=closeActiveBreakForScheduleChange(stillCurrent);
   if(breakDecision&&typeof breakDecision.then==='function')return breakDecision.then(ok=>ok?finish():{cancelled:true});
   return breakDecision?finish():{cancelled:true};
 }
@@ -529,15 +537,45 @@ function completeScheduleApply(preparation,parsed,rawOriginal,opts,draft){
 }
 function applySchedule(options={}){
   const opts=options&&typeof options==='object'?options:{};
-  const rawOriginal=String(document.getElementById('plan-input')?.value||'');
+  // A canonical Active Session is already durable: restore it synchronously
+  // without writing or replacing the independent working Plan draft.
+  const explicitSchedule=typeof opts.scheduleText==='string'?opts.scheduleText:null;
+  const rawOriginal=explicitSchedule===null?getPlanDraftText():explicitSchedule;
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
     ?opts.projection:createPlanDraftProjection(parseScheduleDraftText(rawOriginal));
-  PlanDraftEditor.save();
-  if(projection.status!=='valid'){renderInvalidScheduleApply(projection);return false;}
-  const draft=projection.draft,parsed=draft.parsed;
-  const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
-  if(preparation&&typeof preparation.then==='function')return preparation.then(result=>completeScheduleApply(result,parsed,rawOriginal,opts,draft));
-  return completeScheduleApply(preparation,parsed,rawOriginal,opts,draft);
+  const currentDraft=()=>explicitSchedule!==null||getPlanDraftText()===rawOriginal;
+  const canApply=()=>
+    (explicitSchedule!==null||ownership.canMutate())&&
+    (typeof opts.currentEditor!=='function'||opts.currentEditor());
+  const finish=(preparation,draft,parsed)=>{
+    if(!canApply())return false;
+    if(!currentDraft()){
+      setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
+      return false;
+    }
+    return completeScheduleApply(preparation,parsed,rawOriginal,opts,draft);
+  };
+  const apply=()=>{
+    if(!canApply())return false;
+    if(projection.status!=='valid'){renderInvalidScheduleApply(projection);return false;}
+    if(!currentDraft()){
+      setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
+      return false;
+    }
+    const draft=projection.draft,parsed=draft.parsed;
+    const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
+    return preparation&&typeof preparation.then==='function'
+      ?preparation.then(result=>finish(result,draft,parsed))
+      :finish(preparation,draft,parsed);
+  };
+  if(opts.persistDraft===false)return apply();
+  // A user-authored Plan may apply only after its exact working text was
+  // committed. Preserve invalid text in storage too, even when Apply rejects
+  // its syntax. Never silently continue after a failed asynchronous save.
+  return Promise.resolve(PlanDraftEditor.save({strictDurability:true})).then(saved=>{
+    if(saved!==true||!ownership.canMutate())return false;
+    return apply();
+  });
 }
 
 const PlanDraftEditor=(()=>{
@@ -547,11 +585,17 @@ const PlanDraftEditor=(()=>{
   let draftDragIndex=null;
   let draftSaveTimer=null;
   let draftPreviewTimer=null;
-  let pendingPreviewProjection=null;
+  let editEpoch=0,openedEpoch=0;
   let draftSaveWarningActive=false;
 
   function active(){return draftMode;}
-  function deactivate(){draftMode=false;clearDragState();return false;}
+  function deactivate(){
+    editEpoch++;
+    draftMode=false;
+    clearTimer('preview');
+    clearDragState();
+    return false;
+  }
   function boundDraftInput(){
     const input=document.getElementById('plan-input');
     if(!input)return null;
@@ -596,61 +640,80 @@ const PlanDraftEditor=(()=>{
     return true;
   }
   function flush(options={}){return draftSaveTimer?save(options):true;}
-  function cloneAppliedRow(t){
-    return makeScheduleRow({
-      start:t&&t.start||'00:00',
-      dur:positiveMinutes(t&&t.dur)||1,
-      name:t&&t.name||'Task',
-      kind:t&&t.kind||'work',
-      area:taskAreaValue(t),
-      measure:taskMeasureValue(t,''),
-      target:taskTargetValue(t)
-    });
-  }
-  function syncFromApplied(){
-    if(!TASKS.length)return false;
-    setParsedScheduleDraft(TASKS.map(cloneAppliedRow));
-    const input=document.getElementById('plan-input');
-    if(input)input.value=lastAppliedScheduleText||scheduleTextFromRows(lastParsed);
-    save();
+  function enter(){
+    // Always reconstruct editing rows from the latest authored text, not a
+    // cached board projection from before an import or a Composer change.
+    preview({silent:true,enterDraft:true});
     return true;
   }
-  function enter(){
-    if(!lastParsed.length&&TASKS.length)syncFromApplied();
-    draftMode=true;
-    renderSched();
-  }
-  function confirm(){
-    if(!lastParsed.length)return false;
-    const input=document.getElementById('plan-input');
-    if(input)input.value=draftTextFromRows(lastParsed);
-    const projection=createPlanDraftProjection();
+  async function confirm(){
+    // The textarea is the authoring source of truth. A pending Composer
+    // preview may not yet have copied its latest text into lastParsed.
+    // Apply Draft is a deliberate action even when the initial board has
+    // no editing session. Replacing a live Plan still requires Edit Draft.
+    const editing=draftMode;
+    if(!editing&&TASKS.length)return false;
+    const draftText=getPlanDraftText();
+    clearTimer('preview');
+    const projection=createPlanDraftProjection(parseScheduleDraftText(draftText));
     if(projection.status!=='valid'){
-      updatePlanBoardState(projection);
+      setParsedScheduleDraft([]);
+      renderSched(projection);
       setPlanStatus(projection.firstActionableError||'Complete every required field before applying.',false);
       return false;
     }
-    save();
-    return applySchedule({skipNotify:true,source:'plan-board-edit',projection});
+    setParsedScheduleDraft(projection.draft.parsed);
+    renderSched(projection);
+    const epoch=editEpoch;
+    const stillCurrent=()=>editEpoch===epoch&&draftMode===editing&&(editing||TASKS.length===0);
+    if(!await save({strictDurability:true}))return false;
+    if(!stillCurrent())return false;
+    if(!ownership.canMutate()||getPlanDraftText()!==draftText){
+      setPlanStatus('The working draft changed while saving. Review it and press Done again.',false);
+      return false;
+    }
+    // Cancel, a new editor session or an intervening live Plan invalidates
+    // this exact action, including while an Apply confirmation is pending.
+    return applySchedule({skipNotify:true,source:'plan-board-edit',projection,persistDraft:false,
+      currentEditor:stillCurrent});
   }
-  function cancel(){
-    if(TASKS.length)syncFromApplied();
+  async function cancel(){
+    // The displayed default is not an authored Plan draft when canonical
+    // storage still contains null. Opening then cancelling without editing
+    // must not manufacture a draft and create a false cross-device change.
+    const draftText=getPlanDraftText();
+    const untouchedFallback=editEpoch===openedEpoch&&!draftSaveTimer&&
+      persistence.readDraft()===null&&draftText===DefaultStore.active().scheduleText;
+    // Close immediately; only actual authored content needs a strict commit.
+    // A pending debounced write is subsumed by this one.
     deactivate();
+    const epoch=editEpoch;
     setPlanComposerOpen(false);
     renderSched();
-    setPlanStatus('Edit cancelled. Live plan kept.','cancelled');
+    if(untouchedFallback){
+      setPlanStatus('Edit closed. Live plan kept; the unchanged default template remains unsaved.','cancelled');
+      return true;
+    }
+    setPlanStatus('Edit closed. Saving the working draft…');
+    const saved=await save({strictDurability:true});
+    // Do not overwrite feedback belonging to an edit/import begun meanwhile.
+    if(editEpoch!==epoch||draftMode||getPlanDraftText()!==draftText)return saved===true;
+    setPlanStatus(saved===true
+      ?'Edit closed. Live plan kept; working draft saved in this browser.'
+      :'Edit closed. Live plan kept, but the working draft was not saved. Keep this tab open and copy it before closing.',
+      saved===true?'cancelled':false);
+    return saved===true;
   }
   function preview(options={}){
     const opts=options&&typeof options==='object'?options:{};
     clearTimer('preview');
-    const supplied=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'?opts.projection:null;
-    if(opts.enterDraft||!TASKS.length)draftMode=true;
-    const projection=supplied||createPlanDraftProjection();
-    pendingPreviewProjection=null;
+    if(opts.enterDraft===true){editEpoch++;openedEpoch=editEpoch;draftMode=true;}
+    else if(opts.enterDraft===false)deactivate();
+    const projection=createPlanDraftProjection();
     if(projection.status!=='valid'){
       lastParsed=[];
       renderSched(projection);
-      setPlanStatus(projection.firstActionableError||'Fix the schedule before applying.',false);
+      if(!opts.silent)setPlanStatus(projection.firstActionableError||'Fix the schedule before applying.',false);
       return false;
     }
     setParsedScheduleDraft(projection.draft.parsed);
@@ -664,18 +727,20 @@ const PlanDraftEditor=(()=>{
     if(!ownership.canMutate())return false;
     if(!boundDraftInput())return false;
     queueSave();
-    draftMode=true;
-    pendingPreviewProjection=createPlanDraftProjection();
-    updatePlanBoardControls(pendingPreviewProjection);
+    editEpoch++;draftMode=true;
+    updatePlanBoardControls(createPlanDraftProjection());
     clearTimer('preview');
+    // Read the textarea when the timer fires. A captured earlier projection
+    // could replace a newer row edit or imported draft.
     draftPreviewTimer=setTimeout(()=>{
       draftPreviewTimer=null;
-      const projection=pendingPreviewProjection;
-      preview({silent:true,projection});
+      if(draftMode)preview({silent:true});
     },PREVIEW_DELAY_MS);
     return true;
   }
   function syncTextFromRows(){
+    // Structured row editing supersedes any pending Composer preview.
+    editEpoch++;clearTimer('preview');
     const input=document.getElementById('plan-input');
     if(input)input.value=draftTextFromRows(lastParsed);
     queueSave();
@@ -691,7 +756,6 @@ const PlanDraftEditor=(()=>{
       if(!duration)break;
       m+=duration;
     }
-    if(idx===0)scheduleGateway.setAnchor(clockMinuteToStudyMinute(t2m(lastParsed[0].start)));
   }
   function rowClass(t){return 'si draft'+scheduleKindClass(t);}
   function refreshRowVisual(idx){
@@ -824,7 +888,6 @@ const PlanDraftEditor=(()=>{
   function recalcTimes(){
     let m=lastParsed.length&&isValidHHMM(lastParsed[0].start)?clockMinuteToStudyMinute(t2m(lastParsed[0].start)):scheduleGateway.read().anchor;
     lastParsed.forEach(row=>{row.start=studyMinuteToHHMM(m);const duration=positiveMinutes(row.dur);if(duration)m+=duration;});
-    if(lastParsed.length)scheduleGateway.setAnchor(clockMinuteToStudyMinute(t2m(lastParsed[0].start)));
   }
   function commitRows(message,ok=true){
     syncTextFromRows();
@@ -850,7 +913,6 @@ const PlanDraftEditor=(()=>{
     const insertAt=lastParsed.length?Math.max(0,Math.min(safeIdx+1,lastParsed.length)):0;
     const row=defaultRowAfter(base);
     lastParsed.splice(insertAt,0,row);
-    if(insertAt===0)scheduleGateway.setAnchor(clockMinuteToStudyMinute(t2m(row.start)));
     commitRows('Blank row added. Complete Task, Minutes, Kind and Area before applying.','warn');
     return true;
   }
@@ -989,14 +1051,12 @@ const PlanDraftEditor=(()=>{
   }
   async function clear(){
     if(!ownership.requirePrimary(null,'clear the plan draft'))return false;
-    clearTimer('save');clearTimer('preview');pendingPreviewProjection=null;clearDragState();
-    const input=document.getElementById('plan-input');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
+    clearTimer('save');clearTimer('preview');clearDragState();
+    editEpoch++;const input=document.getElementById('plan-input');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
     const ok=await save();if(ok&&input?.value==='')setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return ok;
   }
   function reset(){
-    clearTimer('preview');clearDragState();
-    pendingPreviewProjection=null;
-    draftMode=false;
+    deactivate();
     setParsedScheduleDraft([]);
   }
   return Object.freeze({active,deactivate,enter,confirm,cancel,preview,composerInput,renderRows,save,flush,clear,reset,install});

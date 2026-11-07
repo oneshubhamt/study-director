@@ -192,12 +192,28 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['contracts/data-architecture.mjs','source/core/compatibility-host.js','source/core/host-metadata.js','source/app.html'])
     },
     {
-      id:'restore-journal-payload-v1-v4',owner:'compatibility/host',kind:'live-migration',
-      source:'appMeta restoreJournalPayload versions 1 to 4 left by a restore interrupted under an older build',
-      target:'restoreJournalPayload version 5 with explicit deletion lists (noteDeletions, formerly areaNoteDeletions), then resolved by restore crash recovery',
-      proof:'the converted payload is read back and verified before crash recovery runs; the ordinary journal reader accepts only version 5 and unknown shapes fail closed',
-      retirement:'after every supported installed build writes version-5 restore journals and the canonical baseline is verified',
+      id:'restore-journal-payload-v1-v5',owner:'compatibility/host',kind:'live-migration',
+      source:'appMeta restoreJournalPayload versions 1 to 5 left by a restore interrupted under an older build',
+      target:'restoreJournalPayload version 6 with explicit deletion lists and no obsolete Plan-draft scheduleText field, then resolved by restore crash recovery',
+      proof:'the converted payload is read back and verified before crash recovery runs; the ordinary journal reader accepts only version 6 and unknown shapes fail closed',
+      retirement:'after every supported installed build writes version-6 restore journals and the canonical baseline is verified',
       sourceFiles:freeze(['source/core/compatibility-host.js'])
+    },
+    {
+      id:'pending-review-v1',owner:'compatibility/host',kind:'live-migration',
+      source:'PendingReview.v1 versions kept for review, which name no device: appMeta pendingReview:* rows, portable backups v23 and backup-location manifests version 8, all written by released builds up to SDVB75F23',
+      target:'PendingReview.v2 with the same id, subject, kept content, base and times, and keptFrom and keptChangedAt empty (the device was not recorded)',
+      proof:'each stored v1 row is rewritten to v2 and read back before canonical appMeta verification, and an unknown shape is left as it was; a v23 file and a version-8 manifest read their reviews as v2; a v1 review in a v24 file or a version-9 manifest is refused',
+      retirement:'after every supported installation has crossed to PendingReview.v2 and no supported backup older than portable v24 or manifest 9 remains',
+      sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/compatibility-host.js','source/core/backup-codec.js','source/core/backup.js','source/core/managed-repository.js','source/app.html'])
+    },
+    {
+      id:'reconciliation-base-pre-v5',owner:'compatibility/host',kind:'live-migration',
+      source:'appMeta reconciliationBase headers older than version 5 (released builds write version 3) and reconciliationBaseDays version-1 rows without study-content fingerprints',
+      target:'none kept: the whole base is dropped and the next Drive sync records ReconciliationBase.v5 with ReconciliationBaseDays.v2 rows',
+      proof:'the ordinary baseline store reads and writes only header version 5 and day rows version 2; verifyCanonicalInstallation reports any older base row still present',
+      retirement:'after every supported installed build has crossed ReconciliationBase.v5 and the canonical baseline is verified',
+      sourceFiles:freeze(['source/core/compatibility-host.js','source/core/reconciliation-baseline.js'])
     },
     {
       id:'r10-indexeddb-topology-retirement',owner:'compatibility/persistence',kind:'schema-bridge',
@@ -277,6 +293,14 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
   ]),
   protocolCompatibility:items([
+    {
+      id:'older-session-claims',owner:'backup-provider',kind:'protocol-bridge',
+      source:'Drive Active Session ownership claims written by released builds: hashed version 2 and the plain version 1 and 2 forms with a date and device ids',
+      target:'read as ActiveSessionClaim.v4 without the fields the older form lacks (no content fingerprint, no handoff token); this build writes only version 4',
+      proof:'the ordinary claim reader accepts only version 4; older forms pass through the one marked block in backup-provider.js, reached only through decodeSessionClaim, and an unknown form fails closed',
+      retirement:'after every supported installed build writes version-4 claims and older claim files on Drive have been compacted',
+      sourceFiles:freeze(['source/core/backup-provider.js'])
+    },
     {
       id:'legacy-service-worker-update-bridge',owner:'service-worker/pwa-lifecycle',kind:'protocol-bridge',
       source:'older page <-> Service Worker update protocol',

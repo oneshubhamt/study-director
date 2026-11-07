@@ -30,13 +30,20 @@ const noop=()=>{};
 // Commit succeeds before refresh/cleanup. A later error must never say that the
 // locally committed record was not saved, or emit a success followed by failure.
 {
-  const {coordinator,port}=createNotifications('review');let failCommit=false,failFollowup=true;
-  const context={notifications:port,saveDayInProgress:false,activeSessionPersistenceBlocked:false,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,flushLiveDraft:async()=>{},ReviewView:{refresh:()=>({evidence:{}}),sync:noop},commitDailyRecord:async()=>{if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,clearSaveReminder:noop,writeLiveDraftNow:async()=>{},refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop};
-  vm.createContext(context);vm.runInContext(review.slice(review.indexOf('async function saveDayRecord(){'),review.indexOf('/* ROLLOVER SAVE ORCHESTRATION */')),context);
+  const {coordinator,port}=createNotifications('review');let failCommit=false,failFollowup=true,failAck=false,failClear=false,acknowledged=0,clears=0;
+  const context={notifications:port,saveDayInProgress:false,activeSessionPersistenceBlocked:false,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,flushLiveDraft:async()=>{},ReviewView:{refresh:()=>({evidence:{}}),sync:noop},commitDailyRecord:async()=>{if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,writeLiveDraftNow:async()=>{},refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop};
+  vm.createContext(context);vm.runInContext(review.slice(review.indexOf('async function saveDayRecord(options={}){'),review.indexOf('/* ROLLOVER SAVE ORCHESTRATION */')),context);
   assert.equal(await context.saveDayRecord(),false);
   let event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed');assert.match(event.message,/saved locally.*follow-up/i);assert.equal(coordinator.eventStatus().toasts.length,1);
   failFollowup=false;assert.equal(await context.saveDayRecord(),true);event=coordinator.readEvent('review','save-study-day');assert.equal(event.lifecycle,'succeeded');assert.equal(event.persistent,false);
-  failCommit=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-failed');assert.equal(event.persistent,true);assert.match(event.message,/Keep this tab open/);
+  assert.equal(acknowledged,2,'successful Save Today must pass the acknowledgement gate');
+   failAck=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed');failAck=false;
+   assert.equal(await context.saveDayRecord({closeSession:true}),true);
+   assert.equal(clears,1,'a suspended Study Day closes the original session in the save lifecycle');
+   assert.equal(acknowledged,2,'closing a suspended session must not publish an interim Active Session acknowledgement');
+   failClear=true;assert.equal(await context.saveDayRecord({closeSession:true}),false);
+   event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed','a saved Day with an uncleared suspended session is not called complete');failClear=false;
+   failCommit=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-failed');assert.equal(event.persistent,true);assert.match(event.message,/Keep this tab open/);
   coordinator.dismissEvent(event.key,event.deliveryId);assert.equal(await context.saveDayRecord(),false);assert.equal(coordinator.eventStatus().toasts.length,1,'a new failed attempt re-arms the dismissed warning');coordinator.clear();
 }
 

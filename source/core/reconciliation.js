@@ -47,14 +47,31 @@ registry.define('reconciliation',1,input=>{
     return map;
   }
   function equivalentState(a,b){return !!a&&!!b&&a.kind===b.kind&&(a.kind==='deleted'||Canonical.same(a.value,b.value));}
-  function pairStateCandidates(identity,key,localSource,incomingSource,localState,incomingState){
+  // Exactly one study-evidence projection for Saved Day equality and
+  // the separately versioned semantic baseline. Write metadata is excluded.
+  function savedDayContentValue(record){
+    if(!record||typeof record!=='object')return null;
+    const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...evidence}=record;
+    return evidence;
+  }
+  function equivalentSavedDayState(a,b){
+    if(!a||!b||a.kind!==b.kind)return false;
+    if(a.kind==='deleted')return true;
+    if(a.kind!=='record'||!a.value||!b.value)return false;
+    return Canonical.same(savedDayContentValue(a.value),savedDayContentValue(b.value));
+  }
+  function pairStateCandidates(identity,key,localSource,incomingSource,localState,incomingState,equivalent=equivalentState){
     if(!localState&&!incomingState)return freeze([]);
-    if(equivalentState(localState,incomingState)){
+    if(equivalent(localState,incomingState)){
       const kind=localState.kind,sources=candidateSources(localSource,incomingSource,'shared');
       const deletedAt=kind==='deleted'?(Date.parse(localState.deletedAt)>=Date.parse(incomingState.deletedAt)?localState.deletedAt:incomingState.deletedAt):null;
+      // If only Saved Day metadata differs, converge on the verified incoming
+      // canonical record so full-record shared-base hashes remain meaningful.
+      // For exactly equal Notes this changes nothing.
+      const sharedRecord=kind==='record'?incomingState.value:null;
       return freeze([freeze({
         id:`${identity}_${kind}_shared`,key,kind,local:true,sources,
-        value:kind==='record'?localState.value:null,record:kind==='record'?localState.value:null,
+        value:sharedRecord,record:sharedRecord,
         deletedAt,localDeletedAt:kind==='deleted'?localState.deletedAt:null
       })]);
     }
@@ -74,9 +91,12 @@ registry.define('reconciliation',1,input=>{
     const options={records:source=>source.savedDays,deletions:source=>source.savedDayDeletions,keyOf:value=>validDate(value&&value.date)?value.date:'',entityLabel:'Saved-Day'};
     const localMap=buildStateMap(local,options),incomingMap=buildStateMap(incoming,options),dates=new Set([...localMap.keys(),...incomingMap.keys()]);
     return freeze([...dates].sort().map(date=>{
-      const candidates=pairStateCandidates(`saved-day_${date}`,date,local,incoming,localMap.get(date),incomingMap.get(date));
+      const localState=localMap.get(date),incomingState=incomingMap.get(date);
+      const candidates=pairStateCandidates(`saved-day_${date}`,date,local,incoming,localState,incomingState,equivalentSavedDayState);
       const localCandidate=candidates.find(candidate=>candidate.local)||null,conflict=candidates.length>1;
-      return freeze({date,candidates,localCandidateId:localCandidate?.id||null,defaultCandidateId:localCandidate?.id||(candidates[0]?.id||null),conflict,identical:!conflict&&candidates.length===1&&candidates[0].sources.length===2,incomingOnly:!localCandidate&&candidates.length===1,decisionKey:`savedDay__${date.replaceAll('-','_')}`});
+      const metadataRefresh=!!localState&&!!incomingState&&localState.kind==='record'&&incomingState.kind==='record'&&
+        equivalentSavedDayState(localState,incomingState)&&!Canonical.same(localState.value,incomingState.value);
+      return freeze({date,candidates,localCandidateId:localCandidate?.id||null,defaultCandidateId:localCandidate?.id||(candidates[0]?.id||null),conflict,identical:!conflict&&candidates.length===1&&candidates[0].sources.length===2,metadataRefresh,incomingOnly:!localCandidate&&candidates.length===1,decisionKey:`savedDay__${date.replaceAll('-','_')}`});
     }));
   }
   function buildNotes(local,incoming){
@@ -133,10 +153,10 @@ registry.define('reconciliation',1,input=>{
       if(decision&&typeof decision==='object'&&!Array.isArray(decision)&&Object.prototype.hasOwnProperty.call(decision,'value')){
         const value=decision.value,localCandidate=item.candidates.find(candidate=>candidate.id===item.localCandidateId)||null;
         if(!value||typeof value!=='object'||Array.isArray(value)||String(value.date||'')!==item.date)throw new Error(`Saved Day ${item.date} reconciliation value is invalid.`);
-        return freeze({date:item.date,state:'record',candidateId:null,changed:!localCandidate||localCandidate.kind!=='record'||!Canonical.same(value,localCandidate.record),hadLocal:!!item.localCandidateId,record:value,deletedAt:null,local:false,sources:freeze(item.candidates.flatMap(candidate=>candidate.sources))});
+        return freeze({date:item.date,state:'record',candidateId:null,changed:item.metadataRefresh===true||!localCandidate||localCandidate.kind!=='record'||!Canonical.same(value,localCandidate.record),hadLocal:!!item.localCandidateId,record:value,deletedAt:null,local:false,sources:freeze(item.candidates.flatMap(candidate=>candidate.sources))});
       }
       const candidate=selectedCandidate(item,decision,`Saved Day ${item.date}`);if(!candidate)return freeze({date:item.date,state:'none',candidateId:null,changed:false,hadLocal:false});
-      const changed=changedFromLocal(item,candidate)||(candidate.kind==='deleted'&&candidate.local&&!!candidate.localDeletedAt&&candidate.deletedAt!==candidate.localDeletedAt);
+      const changed=changedFromLocal(item,candidate)||item.metadataRefresh===true||(candidate.kind==='deleted'&&candidate.local&&!!candidate.localDeletedAt&&candidate.deletedAt!==candidate.localDeletedAt);
       return freeze({date:item.date,state:candidate.kind,candidateId:candidate.id,changed,hadLocal:!!item.localCandidateId,record:candidate.kind==='record'?candidate.record:null,deletedAt:candidate.kind==='deleted'?candidate.deletedAt:null,local:candidate.local,sources:candidate.sources});
     }));
     const notes=freeze(plan.notes.map(item=>{
@@ -151,6 +171,6 @@ registry.define('reconciliation',1,input=>{
     const activeCandidate=selectedCandidate(plan.activeSession,decisions.activeSession,'Active Session'),activeSession=freeze({candidateId:activeCandidate?.id||null,value:activeCandidate?.value||null,changed:!!activeCandidate&&changedFromLocal(plan.activeSession,activeCandidate),hadLocal:!!plan.activeSession.localCandidateId,local:!!activeCandidate?.local,sources:activeCandidate?.sources||freeze([])});
     return freeze({format:RESOLVED_FORMAT,version:VERSION,sourcePlan:plan,savedDays,notes,activeSession});
   }
-  return freeze({format:'study-director.reconciliation-module',contractVersion:1,createPlan,resolvePlan,summarizePlan});
+  return freeze({format:'study-director.reconciliation-module',contractVersion:1,createPlan,resolvePlan,summarizePlan,savedDayContentValue});
 });
 })();

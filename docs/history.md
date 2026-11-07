@@ -18,6 +18,7 @@ A short record of past work. Current behaviour is in the area docs; this page ex
 | 1 Nov | Insights opens from an idle pre-computed model; a Drive sync that failed and looped on every catch-up fixed; Drive backups made faster; Version History hides Replace for versions missing attachments. |
 | 1–2 Nov | One sync and background status indicator; Continue Here feedback; the Connect Google Drive card; notifications as one stack with kinds, Recent and new sounds; clickable pop-ups; the refined profile panel. |
 | 2 Nov | Docs reorganised into area docs; the journal and per-pass ledgers retired. |
+| 3–7 Nov | From the bug-fixes branch: the Plan draft kept apart from the applied plan and from handoffs (bugs 1, 5); a "Save today" reminder clears only when a Saved Day holds that work (bug 2); plans and settings merged per item, so far fewer kept versions (bug 3); Continue Here reads only the session from Drive. An interrupted Continue Here no longer locks the timer. |
 
 ## Ideas dropped or replaced
 

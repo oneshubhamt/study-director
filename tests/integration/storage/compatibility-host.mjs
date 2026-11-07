@@ -28,7 +28,7 @@ const appMeta={
   repositoryMaintenancePending:'repositoryMaintenancePending',repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
   libraryClearJournalState:'libraryClearJournalState',libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
   archiveClearJournalStateLegacy:'archiveClearJournalState.v1',archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:',
-  backupPreparationUnitPrefix:'backupPreparationUnit:'
+  backupPreparationUnitPrefix:'backupPreparationUnit:',pendingReviewPrefix:'pendingReview:'
 };
 // Record names once carried a version; the first compatibility step moves them.
 const renamedAppMeta=Object.freeze([['reconciliationBase.v2','reconciliationBase'],['reconciliationBaseNote.v1:','reconciliationBaseNote:'],['restoreJournalPayload.v1','restoreJournalPayload'],['repositoryMaintenancePending.v2','repositoryMaintenancePending'],['libraryClearJournalState.v1','libraryClearJournalState'],['libraryClearJournalPayload.v1:','libraryClearJournalPayload:'],['areaNoteDeletion.v1:','noteDeletion:'],['areaNoteDeletion:','noteDeletion:'],['automaticDeviceBackup','deviceFolder']].map(pair=>Object.freeze(pair)));
@@ -99,6 +99,9 @@ const metadata=freeze({
   writeValue:async(key,value,updatedAt)=>{metadataRows.set(String(key),{key:String(key),version:1,value,updatedAt:String(updatedAt||'2026-09-20T00:00:00.000Z')});return true;},
   removeRow:async key=>{metadataRows.delete(String(key));return true;},releaseBackupFile:async()=>{legacyFileCollections++;return true;},normalizeVerifiedRecovery,normalizeAttachmentIntegrity,
   normalizeRepositoryIntegrity:normalizeRepositoryIntegrityState,normalizeRepositoryIntegrityTarget,
+  // The compatibility codec's conversion (tests/integration/backup/current-canonical-roundtrip.mjs):
+  // an exact v1 review gains an empty device and time.
+  legacyPendingReview:value=>value&&value.version===1&&Object.keys(value).sort().join('|')==='base|id|kept|keptAt|ref|resolvedAt|subject|version'?freeze({...value,version:2,keptFrom:'',keptChangedAt:''}):null,
   // One transaction in the app: a differing copy under the new name stops the whole move.
   renameRows:async(pairs,formats)=>{
     const moves=[],planned=new Map();
@@ -135,7 +138,16 @@ const facade=Host.createFacade(freeze({
   helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T00:00:00.000Z',isNoteKey:noteKeys.isKey})
 }));
 
+// Versions kept for review by a released build (v1) take the current form;
+// a current one is left alone.
+const reviewV1={version:1,id:'pr_'+'a'.repeat(32),subject:'note',ref:noteId('Ethics'),keptAt:'2026-09-19T08:00:00.000Z',kept:{text:'their text'},base:null,resolvedAt:''};
+const reviewV2={...reviewV1,version:2,id:'pr_'+'b'.repeat(32),keptFrom:'inst_ipad_safari_mgx2k3a0_1a2b3c4d',keptChangedAt:'2026-09-18T21:40:00.000Z'};
+for(const value of [reviewV1,reviewV2])metadataRows.set('pendingReview:'+value.id,{key:'pendingReview:'+value.id,version:1,value,updatedAt:value.keptAt});
+assert.equal((await facade.verifyCanonicalInstallation()).compatibilityRetired,false,'a v1 review keeps the compatibility facade in place');
 const report=await facade.migrateLive();
+assert.deepEqual(metadataRows.get('pendingReview:'+reviewV1.id).value,{...reviewV1,version:2,keptFrom:'',keptChangedAt:''},'a v1 review keeps everything it held and records no device');
+assert.equal(metadataRows.get('pendingReview:'+reviewV1.id).updatedAt,reviewV1.keptAt,'its row keeps its time');
+assert.equal(metadataRows.get('pendingReview:'+reviewV2.id).value,reviewV2,'a current review is left as it is');
 assert.equal(report.results.plan.status,'migrated');
 assert.equal(draft,'07:00 | 60 | Legacy Plan');
 assert.ok(planLibrary.savedPlans.some(row=>row.scheduleText==='08:00 | 45 | Legacy Default'));
@@ -228,13 +240,37 @@ metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',vers
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/backup verification state has an unknown shape and was preserved without modification/u);
 assert.equal(metadataRows.get('repositoryIntegrityScrub').value,malformedScrub,'an unknown historical shape is preserved untouched');
 metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:scrub,updatedAt:'2026-09-20T03:00:00.000Z'});
-// A current merge base (version 3, with Saved Day and session fingerprints) stays; an older one goes whole.
-const baseId=noteId('Ethics'),currentBase={format:'study-director.reconciliation-base',version:3,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId]),personalFingerprint:'',sessionFingerprint:''};
-const baseDays={key:'reconciliationBaseDays:2026-09',version:1,value:{format:'study-director.reconciliation-base-days',version:1,month:'2026-09',days:{'2026-09-20':'a'.repeat(64)}},updatedAt:'2026-09-20T00:00:00.000Z'};metadataRows.set(baseDays.key,baseDays);
-metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:currentBase,updatedAt:'2026-09-20T00:00:00.000Z'});
-metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,label:'Ethics',text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
+// A v1 review of unknown shape stops the step and stays exactly as it was.
+const oddReview={...reviewV1,id:'pr_'+'c'.repeat(32),unexpected:true};
+metadataRows.set('pendingReview:'+oddReview.id,{key:'pendingReview:'+oddReview.id,version:1,value:oddReview,updatedAt:oddReview.keptAt});
+await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/kept for review from an older version has an unknown shape and was preserved without modification/u);
+assert.equal(metadataRows.get('pendingReview:'+oddReview.id).value,oddReview,'an unknown kept version is preserved untouched');
+assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false,'and keeps the compatibility facade in place');
+metadataRows.delete('pendingReview:'+oddReview.id);
+// A current merge base (version 5, Saved-Day rows version 2) stays; an older
+// one goes whole: header versions 3 and 4, or any version-1 Saved-Day row.
+const baseId=noteId('Ethics'),olderBase={format:'study-director.reconciliation-base',version:3,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId]),personalFingerprint:'',sessionFingerprint:''};
+const olderDays={key:'reconciliationBaseDays:2026-09',version:1,value:{format:'study-director.reconciliation-base-days',version:1,month:'2026-09',days:{'2026-09-20':'a'.repeat(64)}},updatedAt:'2026-09-20T00:00:00.000Z'};
+const currentBase={...olderBase,version:5,personalFields:null,sessionContentFingerprint:''};
+const baseDays={...olderDays,value:{...olderDays.value,version:2,semanticDays:{'2026-09-20':'b'.repeat(64)}}};
+const baseNote=()=>metadataRows.set('reconciliationBaseNote:'+baseId,{key:'reconciliationBaseNote:'+baseId,version:1,value:{format:'study-director.reconciliation-base-note',version:1,key:baseId,label:'Ethics',text:'ethics base'},updatedAt:'2026-09-20T00:00:00.000Z'});
+const placeBase=(header,days)=>{metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:header,updatedAt:'2026-09-20T00:00:00.000Z'});metadataRows.set(days.key,days);baseNote();};
+const baseRows=()=>[...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase'));
+placeBase(currentBase,baseDays);
 await Host.createFacade(malformedInput).migrateLive();
-assert.equal(metadataRows.get('reconciliationBase').value,currentBase,'a version 3 merge base is current');assert.equal(metadataRows.get(baseDays.key),baseDays,'its Saved Day rows stay with it');
+assert.deepEqual(metadataRows.get('reconciliationBase').value,currentBase,'a version 5 merge base is current');
+assert.deepEqual(metadataRows.get(baseDays.key),baseDays,'its version 2 Saved Day rows stay with it');
+for(const [label,header,days] of [
+  ['a version 3 base',olderBase,baseDays],
+  ['a version 4 base (bug-fixes builds)',{...olderBase,version:4,personalFields:null},baseDays],
+  ['a version 5 base with a version 1 Saved Day row',currentBase,olderDays]
+]){
+  placeBase(header,days);
+  assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false,`${label} is not yet retired`);
+  await Host.createFacade(malformedInput).migrateLive();
+  assert.deepEqual(baseRows(),[],`${label} goes whole; the next Drive sync records a fresh one`);
+}
+
 metadataRows.set('reconciliationBase',{key:'reconciliationBase',version:1,value:{...currentBase,version:2,sessionFingerprint:undefined},updatedAt:'2026-09-20T00:00:00.000Z'});metadataRows.set(baseDays.key,baseDays);
 await Host.createFacade(malformedInput).migrateLive();
 assert.deepEqual([...metadataRows.keys()].filter(key=>key.startsWith('reconciliationBase')),[],'a version 2 base cannot tell an unknown Saved Day from a missing one, so it goes whole, Saved Day rows included');
@@ -253,12 +289,16 @@ metadataRows.set('restoreJournalPayload.v1',{key:'restoreJournalPayload.v1',vers
 assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false);
 await Host.createFacade(malformedInput).migrateLive();
 assert.equal(metadataRows.has('restoreJournalPayload.v1'),false);const currentJournal=metadataRows.get('restoreJournalPayload').value;
-assert.equal(currentJournal.version,5);assert.equal(currentJournal.blob,journalBlob);assert.deepEqual(currentJournal.savedDayDeletions,oldJournal.savedDayDeletions);assert.deepEqual([...currentJournal.noteDeletions],[]);assert.deepEqual([...currentJournal.attachmentDeletions],[]);
-// Version 4 named the note deletions areaNoteDeletions; version 5 calls them noteDeletions.
+assert.equal(currentJournal.version,6);assert.equal(currentJournal.blob,journalBlob);assert.equal(Object.hasOwn(currentJournal,'scheduleText'),false,'current restore journals do not own the Plan draft');assert.deepEqual(currentJournal.savedDayDeletions,oldJournal.savedDayDeletions);assert.deepEqual([...currentJournal.noteDeletions],[]);assert.deepEqual([...currentJournal.attachmentDeletions],[]);
+// Version 4 named the note deletions areaNoteDeletions; current version 6 calls them noteDeletions and has no scheduleText.
 const noteDeletion={key:'note_oldname0000000003',deletedAt:'2026-09-11T00:00:00.000Z'},v4Journal={...oldJournal,version:4,areaNoteDeletions:[noteDeletion],attachmentDeletions:[]};
 metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:v4Journal,updatedAt:'2026-09-12T00:00:00.000Z'});
 await Host.createFacade(malformedInput).migrateLive();
-const v5Journal=metadataRows.get('restoreJournalPayload').value;assert.equal(v5Journal.version,5);assert.equal(Object.hasOwn(v5Journal,'areaNoteDeletions'),false);assert.deepEqual([...v5Journal.noteDeletions],[noteDeletion],'version 4 note deletions carry over under their new name');assert.equal(v5Journal.blob,journalBlob);
+const v6Journal=metadataRows.get('restoreJournalPayload').value;assert.equal(v6Journal.version,6);assert.equal(Object.hasOwn(v6Journal,'areaNoteDeletions'),false);assert.equal(Object.hasOwn(v6Journal,'scheduleText'),false);assert.deepEqual([...v6Journal.noteDeletions],[noteDeletion],'version 4 note deletions carry over under their current name');assert.equal(v6Journal.blob,journalBlob);
+const v5Journal={format:'study-director.restore-journal',version:5,id:'restore_qa-v5-journal',blob:journalBlob,filename:'safety.sdbackup',scheduleText:'legacy draft must not return',savedDayDeletions:[],noteDeletions:[noteDeletion],attachmentDeletions:[]};
+metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:v5Journal,updatedAt:'2026-09-12T00:00:00.000Z'});
+await Host.createFacade(malformedInput).migrateLive();
+const migratedV5=metadataRows.get('restoreJournalPayload').value;assert.equal(migratedV5.version,6);assert.equal(Object.hasOwn(migratedV5,'scheduleText'),false,'version 5 scheduleText is deliberately retired during migration');assert.deepEqual([...migratedV5.noteDeletions],[noteDeletion]);
 const unknownJournal={...oldJournal,version:1,unexpected:true};
 metadataRows.set('restoreJournalPayload',{key:'restoreJournalPayload',version:1,value:unknownJournal,updatedAt:'2026-09-12T00:00:00.000Z'});
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/interrupted restore from an older version has an unknown shape/u);

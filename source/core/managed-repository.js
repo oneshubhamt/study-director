@@ -9,7 +9,7 @@ registry.define('managed-repository',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     configuration:freeze(['backupVersion','limits','logicalCaptureFormat','logicalCaptureVersion']),
-    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','dayFingerprints','sessionFingerprint']),
+    persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','personalFields','dayFingerprints','semanticDayFingerprints','sessionFingerprint','sessionContentFingerprint']),
     assets:freeze(['get','verifyAliases']),
     files:freeze(['protect','unprotect','run','scope']),
     checkpoint:freeze(['capture','beginPreparation','readPreparationUnits','finalizePreparation','establishPreparationBaseline','assertCurrent','inspectVerifiedCapture','verifyVerifiedCapture','currentImportSignal']),
@@ -28,7 +28,7 @@ registry.define('managed-repository',1,()=>{
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
     const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
-    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,dayFingerprints:ports.persistence.dayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint})});
+    const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,personalFields:ports.persistence.personalFields,dayFingerprints:ports.persistence.dayFingerprints,semanticDayFingerprints:ports.persistence.semanticDayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint,sessionContentFingerprint:ports.persistence.sessionContentFingerprint})});
     const AssetData=freeze({get:ports.assets.get,verifyAliases:ports.assets.verifyAliases});
     const Exports=ports.files;
     const captureLogicalCheckpoint=ports.checkpoint.capture,beginPreparationCapture=ports.checkpoint.beginPreparation,readPreparationUnits=ports.checkpoint.readPreparationUnits,finalizePreparationCapture=ports.checkpoint.finalizePreparation,establishPreparationBaseline=ports.checkpoint.establishPreparationBaseline,assertLogicalCheckpointCurrent=ports.checkpoint.assertCurrent,inspectVerifiedCapture=ports.checkpoint.inspectVerifiedCapture,verifyVerifiedCapture=ports.checkpoint.verifyVerifiedCapture,currentImportSignal=ports.checkpoint.currentImportSignal;
@@ -50,8 +50,11 @@ registry.define('managed-repository',1,()=>{
 // counts and the deletion list), and holds no versions kept for review. It is
 // verified under the names it was written with; its notes leave the reader
 // under the current name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8]));
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=9,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8,9]));
 const releasedRepositoryManifest=manifestVersion=>Number(manifestVersion)<=REPOSITORY_RELEASED_MANIFEST_VERSION;
+// Manifest 9 holds versions kept for review that name the device whose copy
+// held them (PendingReview v2); manifest 8 holds them in their v1 form.
+const REPOSITORY_REVIEW_ORIGIN_MANIFEST_VERSION=9;
 const PENDING_REVIEW_KIND='pendingReview',WRITTEN_NOTE_KIND='areaNote';
 const repositoryNoteKind=manifestVersion=>releasedRepositoryManifest(manifestVersion)?WRITTEN_NOTE_KIND:'note';
 const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';
@@ -297,6 +300,10 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   // retire: Version History and the next cleanup keep current ones only, so a
   // location ends up holding one format.
   const currentRows=everyNormal.filter(row=>Number(row.manifest.version)===REPOSITORY_MANIFEST_VERSION),normalRows=currentRows.length?currentRows:everyNormal;
+  // An older-format version newer than every current one (a device still on
+  // an older build published it) may hold work no current version has taken
+  // in yet, so it stays until a newer current version replaces it.
+  const newestCurrent=newestRepositoryRow(currentRows),newerOlderFormat=newestCurrent?everyNormal.filter(row=>Number(row.manifest.version)!==REPOSITORY_MANIFEST_VERSION&&newestRepositoryRow([newestCurrent,row])===row):[];
   const selected=new Map(),tiers=new Map();
   const keep=(row,tier)=>{if(!row)return;selected.set(row.id,row);if(!tiers.has(row.id))tiers.set(row.id,tier);};
   const latest=newestRepositoryRow(normalRows);keep(latest,'latest');
@@ -345,6 +352,7 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
       keep(row,'hourly');hourly+=1;after=row;
     }
   }
+  for(const row of newerOlderFormat)keep(row,'saved');
   for(const row of protectedRows)keep(row,'before-restore');
   const retained=rows.filter(row=>selected.has(row.id)),remove=rows.filter(row=>!selected.has(row.id));
   return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,currentFormat:currentRows.length>0,policy:REPOSITORY_RETENTION_POLICY});
@@ -638,11 +646,26 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
   };
   const grouped=(items,dateKey)=>{const map=new Map();for(const item of items){const month=repositoryMonth(item&&item[dateKey]);if(!map.has(month))map.set(month,[]);map.get(month).push(item);}return [...map.entries()].sort((a,b)=>a[0].localeCompare(b[0]));};
   // The Saved-Day fingerprints of the months read here (null: none left).
-  const daysUpdate=async full=>{const out=Object.create(null);for(const [month,records] of readMonths){if(records===null){if(!full)out[month]=null;continue;}const months=await AppData.reconciliationBase.dayFingerprints(records);if(months[month])out[month]=months[month];}return freeze(out);};
+  const daysUpdate=async full=>{const days=Object.create(null),semanticDays=Object.create(null);for(const [month,records] of readMonths){
+      if(records===null){if(!full){days[month]=null;semanticDays[month]=null;}continue;}
+      const [fullMonths,semanticMonths]=await Promise.all([AppData.reconciliationBase.dayFingerprints(records),AppData.reconciliationBase.semanticDayFingerprints(records)]);
+      if(fullMonths[month]&&semanticMonths[month]){days[month]=fullMonths[month];semanticDays[month]=semanticMonths[month];}
+    }return freeze({days:freeze(days),semanticDays:freeze(semanticDays)});};
   try{
     if(plan){
       const readUnits=new Set(plan.structuredChanged);
-      if(plan.baseUpdate)for(const unit of plan.index.sinceBase)if(repositoryPreparationDescriptor(unit))readUnits.add(unit);
+      if(plan.baseUpdate){
+        for(const unit of plan.index.sinceBase)if(repositoryPreparationDescriptor(unit))readUnits.add(unit);
+        // Per-field ancestry of plans and settings, or the session's
+        // study-content ancestor, that the base does not know is filled in
+        // from the fenced source being published, never inferred.
+        if(!reconciliationBase?.personalFields)readUnits.add('personalData');
+        if(reconciliationBase?.sessionContentFingerprint===null){
+          let hasSession=false;
+          for(const entry of candidateEntries.values())if(entry.present&&entry.kind==='activeSession'){readUnits.add(entry.unit);hasSession=true;}
+          if(!hasSession)readSession=null;
+        }
+      }
       for(const entry of candidateEntries.values()){
         if(!entry.present||repositoryPackableEntry(entry))continue;
         const old=reuseIndex.structured.get(repositoryUnitKey(entry.kind,entry.key)+'\u0000'+entry.fingerprint);
@@ -662,7 +685,10 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       capture=await finalizePreparationCapture(preparation,freeze({recordDates:inventory.recordDates,noteKeys:inventory.noteKeys,pendingReviewIds:inventory.pendingReviewIds,assetIds:assetItems.map(item=>item.descriptor.assetId),counts:inventory.counts}));
       const updates=Object.create(null),deletes=[];for(const [key,state] of readNoteStates){if(state===null)deletes.push(key);else updates[key]=state;}
       candidateIndex=await repositoryPreparationIndexCandidate(preparation.epochToken,preparation.stamps,candidateEntries);if(!candidateIndex)throw new Error('Incremental repository preparation index could not be rebuilt.');
-      if(plan.baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:await daysUpdate(false)});
+      if(plan.baseUpdate){
+          const hashes=await daysUpdate(false);
+          reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:4,full:false,baseCheckpointId:reconciliationBaseId,noteCount:candidateIndex.noteCount,noteKeyFingerprint:candidateIndex.noteKeyFingerprint,personalFingerprint:readPersonal===undefined?null:await AppData.reconciliationBase.personalFingerprint(readPersonal),personalFields:readPersonal===undefined?null:await AppData.reconciliationBase.personalFields(readPersonal),sessionFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionFingerprint(readSession),sessionContentFingerprint:readSession===undefined?null:await AppData.reconciliationBase.sessionContentFingerprint(readSession),noteKeys:null,updates:freeze(updates),deletes:freeze(deletes.sort()),days:hashes.days,semanticDays:hashes.semanticDays});
+        }
     }else{
       capture=await captureLogicalCheckpoint(exportedAt,preparation?{includeAssetBlobs:false,assumeFlushed:true,requireCanonicalComplete:true}:{includeAssetBlobs:false,requireCanonicalComplete:true});
       for(const [month,items] of grouped(capture.dailyDocuments,'date'))await materializeStructured('dailyRecordPack',month,freeze([...items]));
@@ -672,7 +698,10 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
       for(const review of capture.pendingReviewItems||[])await materializeStructured(PENDING_REVIEW_KIND,review.id,review);
       assetItems=[...(capture.assetItems||[])];
       const updates=Object.create(null),noteKeys=[];for(const note of capture.noteItems||[]){const key=String(note&&note.key||'').trim();if(!key)continue;noteKeys.push(key);updates[key]=baseNoteState(note);}
-      noteKeys.sort();if(baseUpdate)reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:2,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:await daysUpdate(true)});
+      noteKeys.sort();if(baseUpdate){
+         const hashes=await daysUpdate(true);
+         reconciliationUpdate=freeze({format:'study-director.reconciliation-base-update',version:4,full:true,baseCheckpointId:'',noteCount:noteKeys.length,noteKeyFingerprint:'',personalFingerprint:await AppData.reconciliationBase.personalFingerprint(capture.personalData||null),personalFields:await AppData.reconciliationBase.personalFields(capture.personalData||null),sessionFingerprint:await AppData.reconciliationBase.sessionFingerprint(capture.activeSession||null),sessionContentFingerprint:await AppData.reconciliationBase.sessionContentFingerprint(capture.activeSession||null),noteKeys:freeze(noteKeys),updates:freeze(updates),deletes:freeze([]),days:hashes.days,semanticDays:hashes.semanticDays});
+       }
     }
     const structuredRank=freeze({dailyRecordPack:0,activeSession:1,personalData:2,note:3,[PENDING_REVIEW_KIND]:4});
     for(const entry of [...candidateEntries.values()].filter(entry=>entry.present&&!repositoryPackableEntry(entry)).sort((a,b)=>(structuredRank[a.kind]??9)-(structuredRank[b.kind]??9)||String(a.key).localeCompare(String(b.key)))){
@@ -843,7 +872,10 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
   // In a recheck, quarantine remaining before the attempted cursor records a
   // confirmed bad outcome. Healthy verified progress remains a separate cursor.
   let corruption=recheck&&rows.slice(0,index).some(({entry})=>quarantinedPresent.has(entry.objectId));
-  const progress=()=>freeze({complete:false,cursor:lastCursor,recheckCursor:lastRecheckCursor,scanId:currentScanId,partial:checkpoint,checked,checkedBytes,attempted,total:rows.length,quarantined:freeze([...quarantinedPresent]),...(recheck?{corruption}:{} )});
+  // done: how many of all total objects this cycle has passed, for the
+  // "Checking… 12 of 38" line; checked counts only this run's healthy ones.
+  let done=index;
+  const progress=()=>freeze({complete:false,cursor:lastCursor,recheckCursor:lastRecheckCursor,scanId:currentScanId,partial:checkpoint,checked,checkedBytes,attempted,done,total:rows.length,quarantined:freeze([...quarantinedPresent]),...(recheck?{corruption}:{} )});
   try{for(;index<rows.length;index+=1){
     throwIfImportAborted(signal);
     // A location that keeps its own checksum of each stored object (Drive)
@@ -881,11 +913,14 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
     checkpoint=null;attempted+=reported?0:1;attemptedBytes+=reported?0:Number(entry.storedBytes)||0;
     if(recheck)lastRecheckCursor=entry.objectId;
     if(healthy){quarantinedPresent.delete(entry.objectId);checked+=1;checkedBytes+=Number(entry.storedBytes)||0;lastCursor=entry.objectId;}
+    done=index+1;
     if(!reported&&typeof onProgress==='function')await onProgress(progress());
     await yieldTask({priority:'background'});
   }}catch(error){error.repositoryScrubCursor=lastCursor;error.repositoryScrubProgress=progress();throw error;}
   const complete=index>=rows.length;
-  return freeze({...progress(),complete,cursor:complete?'':lastCursor,recheckCursor:complete?'':lastRecheckCursor,...(recheck?{recheckComplete:complete,status:complete?corruption?'failed':'completed':'yielded',reason:corruption?'corrupt':''}:{})});
+  // A run that stops at its batch limit says so (budget): it continues in
+  // the next run, and diagnostics then name the pause instead of guessing.
+  return freeze({...progress(),complete,cursor:complete?'':lastCursor,recheckCursor:complete?'':lastRecheckCursor,...(!complete&&!recheck?{reason:'budget'}:{}),...(recheck?{recheckComplete:complete,status:complete?corruption?'failed':'completed':'yielded',reason:corruption?'corrupt':''}:{})});
 }
 function repositoryReadPort(readObject){
   if(typeof readObject!=='function')throw new TypeError('Repository restore requires an object reader.');
@@ -981,19 +1016,32 @@ async function openRepositoryAttachment(manifest,entry,descriptor,readObject,opt
 // with the fingerprint of its stored record, so versions can be told apart
 // without reading them. Versions from before note ids name notes by title,
 // so they hold no earlier version of a note.
-function repositoryNoteObject(manifest,noteId){
-  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||releasedRepositoryManifest(manifest.version))return null;
+function repositoryStructuredMemberObject(manifest,kind,key){
+  const wantedKind=String(kind||''),wantedKey=String(key||'');if(!wantedKind||!wantedKey)return null;
   for(const entry of manifest.objects||[]){
-    if(entry.kind===noteKind&&entry.key===id)return freeze({entry,fingerprint:entry.fingerprint});
-    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members,manifest.version).find(item=>item.kind===noteKind&&item.key===id);if(member)return freeze({entry,fingerprint:member.fingerprint});}
+    if(entry.kind===wantedKind&&entry.key===wantedKey)return freeze({entry,fingerprint:entry.fingerprint});
+    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members,manifest.version).find(item=>item.kind===wantedKind&&item.key===wantedKey);if(member)return freeze({entry,fingerprint:member.fingerprint});}
   }
   return null;
+}
+function repositoryNoteObject(manifest,noteId){
+  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||releasedRepositoryManifest(manifest.version))return null;
+  return repositoryStructuredMemberObject(manifest,noteKind,id);
 }
 // Reads one note's stored record from a version, and nothing else.
 async function readRepositoryNote(manifest,readObject,noteId,options={}){
   const found=repositoryNoteObject(manifest,noteId);if(!found)return null;
   const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
   const row=rows.find(item=>item.kind===repositoryNoteKind(manifest.version)&&item.key===String(noteId));
+  return row?row.payload:null;
+}
+// Reads only the verified Active Session logical object. It may share a
+// structured pack with other small records, but no unrelated repository object
+// or attachment is opened.
+async function readRepositoryActiveSession(manifest,readObject,options={}){
+  const found=repositoryStructuredMemberObject(manifest,'activeSession','active');if(!found)return null;
+  const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
+  const row=rows.find(item=>item.kind==='activeSession'&&item.key==='active');
   return row?row.payload:null;
 }
 async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false}={}){
@@ -1138,10 +1186,14 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     const unchanged=repositoryUnchangedVersion(history,prepared);
     if(unchanged){
       const checkpointId=unchanged.checkpoint.checkpointId,publication=freeze({name:checkpointId+'.sdcheckpoint',unchanged:true}),objectsReused=prepared.objects.length;
-      adoptRepositoryPreparation(prepared,checkpointId);if(options.shared)await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',()=>establishRepositoryBase(checkpointId));
+      adoptRepositoryPreparation(prepared,checkpointId);
+      const baseEstablished=!options.shared||await postCommit('reconciliation-base','The backup was already up to date, but this device could not record it as shared.',async()=>{
+        if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');
+        return true;
+      })===true;
       const context=freeze({prepared,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,unchanged:true});
-      const committedResult=typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
-      return freeze({checkpointId,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,committedResult,cleanupResult:null,unchanged:true,warning:warnings.join(' ')});
+      const committedResult=baseEstablished&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The backup was already up to date, but local backup status could not be updated.',()=>transport.onCommitted(context)):null;
+      return freeze({checkpointId,manifest:unchanged,sourceRevision:prepared.sourceRevision,exportedAt:unchanged.exportedAt,publication,commitReceipt:null,objectsWritten:0,objectsReused,writtenBytes:0,attachmentBytesWritten:0,committedResult,cleanupResult:null,unchanged:true,sharedBaseEstablished:baseEstablished,warning:warnings.join(' ')});
     }
     let objectsWritten=0,objectsReused=0,writtenBytes=0,attachmentBytesWritten=0;
     const freshObjects=[];
@@ -1171,11 +1223,11 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
     commitReceipt=await transport.commit(commitMarker,prepared,publication);
     committed=true;
     const checkpointId=manifestFile.manifest.checkpoint.checkpointId;adoptRepositoryPreparation(prepared,checkpointId);
-    const baseEstablished=!options.shared||await postCommit('reconciliation-base','The checkpoint was saved and verified, but this device could not record it as shared. A later backup will retry completion bookkeeping.',async()=>{if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');return true;});
+    const baseEstablished=!options.shared||(await postCommit('reconciliation-base','The checkpoint was saved and verified, but this device could not record it as shared. A later backup will retry completion bookkeeping.',async()=>{if(!await establishRepositoryBase(checkpointId))throw new Error('The shared base could not be recorded.');return true;}))===true;
     const context=freeze({prepared,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten});
     const committedResult=baseEstablished&&typeof transport.onCommitted==='function'?await postCommit('bookkeeping','The checkpoint was saved and verified, but local backup status could not be updated. A later backup will retry completion bookkeeping.',()=>transport.onCommitted(context)):null;
     const cleanupResult=typeof transport.cleanup==='function'?await postCommit('retention-cleanup','The checkpoint was saved and verified, but repository retention cleanup did not complete.',()=>transport.cleanup(freeze({...context,committedResult}))):null;
-    return freeze({checkpointId:manifestFile.manifest.checkpoint.checkpointId,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten,committedResult,cleanupResult,warning:warnings.join(' ')});
+    return freeze({checkpointId:manifestFile.manifest.checkpoint.checkpointId,manifest:manifestFile.manifest,sourceRevision:manifestFile.sourceRevision,exportedAt:manifestFile.exportedAt,publication,commitReceipt,objectsWritten,objectsReused,writtenBytes,attachmentBytesWritten,committedResult,cleanupResult,sharedBaseEstablished:baseEstablished,warning:warnings.join(' ')});
   }catch(error){
     if(['BACKUP_POLICY_CHANGED','BACKUP_SOURCE_FENCE_CHANGED','BACKUP_REPOSITORY_BASE_CHANGED'].includes(String(error?.code||'')))state.invalidated=true;
     if(continuation&&state.prepared&&!state.invalidated&&!committed&&typeof transport.retainOnFailure==='function')try{retained=await transport.retainOnFailure(error)===true;}catch(retainError){AppDiagnostics.capture('repository.publication-retain',retainError,'warn');}
@@ -1188,8 +1240,8 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
 }
 
     return freeze({
-      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,
-      noteObject:repositoryNoteObject,readNote:readRepositoryNote,
+      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,reviewOriginManifestVersion:REPOSITORY_REVIEW_ORIGIN_MANIFEST_VERSION,
+      noteObject:repositoryNoteObject,readNote:readRepositoryNote,readSession:readRepositoryActiveSession,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase
     });

@@ -72,7 +72,7 @@ try{
     console.error('[session-plan-sync] takeover failure diagnostic',JSON.stringify(diagnostic));throw error;
   }
   const pcClaim=await latestClaim(),pc=await screen(a),pcProjection=await a.evaluate(`__PWA6.BackupProviderRuntime.readSessionClaim('google-drive')`);
-  assert.equal(pcClaim.state,'owned');assert.match(pcClaim.ownerToken,/^[a-f0-9]{64}$/u);assert.match(pcClaim.sessionToken,/^[a-f0-9]{64}$/u);assert.equal(Object.hasOwn(pcClaim,'owner'),false);assert.equal(Object.hasOwn(pcClaim,'date'),false);assert.equal(pcProjection.ownedHere,true);assert.equal(pcProjection.applies,true);assert.ok(pc.revision>=pcClaim.revision,'local session revision must cover the accepted ownership revision');
+  assert.equal(pcClaim.state,'owned');assert.match(pcClaim.ownerToken,/^[a-f0-9]{64}$/u);assert.match(pcClaim.sessionToken,/^[a-f0-9]{64}$/u);assert.match(pcClaim.observedContentFingerprint,/^[a-f0-9]{64}$/u,'the ownership claim is anchored to the exact semantic session content observed at handoff');assert.equal(Object.hasOwn(pcClaim,'owner'),false);assert.equal(Object.hasOwn(pcClaim,'date'),false);assert.equal(pcProjection.ownedHere,true);assert.equal(pcProjection.applies,true);assert.ok(pc.revision>=pcClaim.revision,'local session revision must cover the accepted ownership revision');
   assert.equal(uploadsBy('A'),before,'a full Drive checkpoint is not on the live ownership critical path');
   await releaseBackground(a,'__qaOwnershipHold');
   await waitFor(async()=>uploadsBy('A')>before&&!await waiting(a),{label:'the PC publishes its full state after ownership',timeout:45000});
@@ -100,6 +100,11 @@ try{
   // Continue Here, once the phone has finished taking in the plan (buttons
   // are locked while a sync applies changes).
   await waitFor(async()=>!markers()&&!await waiting(b)&&await b.evaluate(`(()=>{const button=[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden);return !!button&&!button.disabled;})()`)&&!(await sync(b)).catchingUp,{label:'the phone settles',timeout:90000});
+  // BF-1: keep a separate local Plan draft while the applied session belongs
+  // to the PC. Continue Here must apply the session without consuming,
+  // replacing or opening this draft.
+  const preservedDraft=await b.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms)),text=${sched('BF1 Draft')};d.goTab('plan');await wait(80);const input=document.getElementById('plan-input');input.value=text;input.dispatchEvent(new Event('input',{bubbles:true}));await wait(450);d.PlanDraftEditor.deactivate();d.goTab('execute');await wait(80);return text;})()`);
+  assert.equal(await b.evaluate(`__PWA6.PlanDraftEditor.active()`),false,'the preserved draft starts outside edit mode');
   await holdBackground(b,'__qaOwnershipHold');
   // The PC records more and uploads it before the phone takes it in. That
   // upload, saved before the phone takes over, still names the PC; it must
@@ -121,15 +126,24 @@ try{
   await b.evaluate(`document.getElementById('execute-session-action').click()`);
   assert.equal(claimsBy('B'),returnClaims,'Continue Here has not committed while its ownership write is held');
   assert.notEqual((await screen(b)).mode,'running','Continue Here keeps the timer stopped before the small ownership claim is durable');
+  // Meanwhile Execute shows the session moving here, with its progress.
+  const moving=await screen(b),movingSub=await b.evaluate(`document.getElementById('execute-overlay-sub').textContent`);
+  assert.equal(moving.overlay,'Moving Here…','Execute shows the session moving here while Google Drive confirms');
+  assert.match(movingSub,/moving to this device \(\d+ of \d+ blocks done\)\. Its timer starts here as soon as Google Drive confirms\./u);
   releaseReturnClaim();
   await waitFor(async()=>claimsBy('B')>returnClaims&&(await screen(b)).mode==='running',{label:'Continue Here ownership claim',timeout:10000});
   await b.evaluate(`clearInterval(window.__acceptTimer)`);
   const moved=await screen(b),phoneClaim=await latestClaim(),phoneProjection=await b.evaluate(`__PWA6.BackupProviderRuntime.readSessionClaim('google-drive')`),phoneClaimOwner=moved.owner;
   assert.equal(moved.mode,'running','Continue Here runs after the verified ownership claim');
-  assert.equal(phoneClaim.state,'owned');assert.match(phoneClaim.ownerToken,/^[a-f0-9]{64}$/u);assert.equal(Object.hasOwn(phoneClaim,'owner'),false);assert.equal(phoneProjection.ownedHere,true);assert.equal(phoneProjection.applies,true);assert.ok(moved.revision>=phoneClaim.revision);
+  assert.equal(phoneClaim.state,'owned');assert.match(phoneClaim.ownerToken,/^[a-f0-9]{64}$/u);assert.match(phoneClaim.observedContentFingerprint,/^[a-f0-9]{64}$/u);assert.equal(Object.hasOwn(phoneClaim,'owner'),false);assert.equal(phoneProjection.ownedHere,true);assert.equal(phoneProjection.applies,true);assert.ok(moved.revision>=phoneClaim.revision);
   assert.equal(uploadsBy('B'),returnUploads,'Continue Here does not wait for the full session checkpoint');
   assert.equal(moved.header,'LIVE SESSION','the header follows the session back to this device');
   assert.match(moved.now,/PC Block/u,'with the plan applied on the PC');
+  const draftAfterHandoff=await b.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));d.goTab('plan');await wait(100);const board=document.getElementById('plan-board');return {text:document.getElementById('plan-input').value,editing:d.PlanDraftEditor.active(),mode:board.dataset.mode,board:document.getElementById('sched-list').innerText};})()`);
+  assert.equal(draftAfterHandoff.text,preservedDraft,'Continue Here preserves the independent local Plan draft');
+  assert.equal(draftAfterHandoff.editing,false,'Continue Here does not enter Plan editing mode');
+  assert.equal(draftAfterHandoff.mode,'live','the Plan board stays in applied/live mode after handoff');
+  assert.match(draftAfterHandoff.board,/PC Block/u,'the live board shows the handed-over applied plan, not the preserved draft');
 
   // Hold A's ordinary sync so its stale local owner remains testable. Even an
   // artificially huge local revision must not beat B's newer ownership epoch.
@@ -149,19 +163,25 @@ try{
   assert.equal(kept.owner,phoneClaimOwner,'the phone still runs the session');
   assert.match(await b.evaluate(`String(__PWA6.AppData.notes.get('pc-late')?.text||'')`),/before the phone continued/u,'everything else in that upload came in');
 
-  // Ending the owner session publishes the no-session checkpoint first, then a
+  // Ending the owner session (Save Today, then Reset Today, as a person ends
+  // the day) publishes the no-session checkpoint first, then a
   // higher-epoch released claim. A stale frozen device must not interpret that
   // release as permission to resume its old timer.
-  const ended=await b.evaluate(`(async()=>{const d=__PWA6;d.TimerEngine.stopExecution();const cleared=await d.AppData.activeSession.clear();if(cleared?.ok===false)throw cleared.error||new Error('session clear failed');return d.BackupProviderRuntime.backupRepositoryProvider('google-drive',{interactive:false});})()`);
-  assert.ok(ended?.checkpointId,'the owner publishes the ended-session checkpoint');
+  const ended=await b.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));d.TimerEngine.stopExecution();d.goTab('review');await wait(150);d.ReviewView.refresh({force:true});if(!await d.saveDayRecord())throw new Error('Save Today failed');const record=await d.AppData.dailyRecords.get(d.todayISO()),session=(await d.AppData.activeSession.load()).value,sourceRevision=Number(record?.sourceRevision),contentRevision=Number(session?.snapshot?.contentRevision),savedRevision=Number(session?.snapshot?.savedRevision);if(!Number.isSafeInteger(sourceRevision)||!Number.isSafeInteger(contentRevision)||!Number.isSafeInteger(savedRevision)||sourceRevision<contentRevision||savedRevision<contentRevision)throw new Error('Save Today did not persist the session-local save acknowledgement');${acceptDialogs}await d.resetTodaySession();clearInterval(window.__acceptTimer);if((await d.AppData.activeSession.load(0,{strict:true})).value)throw new Error('Reset Today did not end the session');const publication=await d.BackupProviderRuntime.backupRepositoryProvider('google-drive',{interactive:false});return {checkpointId:publication?.checkpointId||'',sourceRevision,contentRevision,savedRevision};})()`);
+  assert.ok(ended?.checkpointId,'the owner saves the day and publishes the ended-session checkpoint');
+  assert.ok(ended.sourceRevision>=ended.contentRevision,'the Saved Day records the saved content revision');
+  assert.ok(ended.savedRevision>=ended.contentRevision,'the Active Session itself records that its content was saved; this acknowledgement travels with the session lineage');
   await waitFor(async()=>{const claim=await latestClaim();return claim?.state==='released';},{label:'released session ownership',timeout:10000});
   await a.evaluate(`__PWA6.checkSessionOwnershipClaim()`);
   assert.equal(await a.evaluate(`__PWA6.TimerEngine.status().loopActive`),false,'a released claim never restarts the stale frozen runtime clock');
   assert.equal((await screen(a)).mode,'running','release leaves stale canonical session semantics untouched until the ended-session checkpoint reconciles');
   await releaseBackground(a,'__qaClaimSyncHold');
-  a.evaluate(`__PWA6.BackupProviderRuntime.scheduleSharedSync('google-drive','qa-release')`);
+  await a.evaluate(`__PWA6.BackupProviderRuntime.scheduleSharedSync('google-drive','qa-release')`);
+  await waitFor(async()=>a.evaluate(`(async()=>!(await __PWA6.AppData.activeSession.load()).value)()`),{label:'the old device retires the ended Active Session',timeout:45000});
+  assert.equal(await a.evaluate(`(async()=>!!(await __PWA6.AppData.dailyRecords.get(__PWA6.todayISO())))()`),true,'the old device has the Saved Day after reconciliation');
+  assert.equal(await a.evaluate(`(async()=>!!(await __PWA6.AppData.activeSession.load()).value)()`),false,'the stale recovery row is gone, so it cannot produce a later unsaved-day reminder');
   for(const page of [a,b])assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[]);
   assert.deepEqual(faults,[]);
-  console.log(JSON.stringify({status:'PASS',checks:{asksBeforeTakeover:true,lightweightOwnershipBeforeTimer:true,planTakeoverUsesSameFence:true,staleOwnerFence:true,releasedClaimDoesNotResume:true,uploadsAtOnce:true,phoneShowsNewPlan:true,continueHere:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{asksBeforeTakeover:true,lightweightOwnershipBeforeTimer:true,planTakeoverUsesSameFence:true,staleOwnerFence:true,releasedClaimDoesNotResume:true,uploadsAtOnce:true,phoneShowsNewPlan:true,continueHere:true,draftSurvivesHandoff:true,handoffLeavesPlanLive:true,sessionLocalSaveAcknowledgement:true,oldDeviceRetiresEndedSession:true}}));
 }catch(error){console.error(ledger.slice(-30).join('\n'));throw error;}
 finally{for(const release of [...openUploadGates])release();drive.state.uploadPutGate=null;await first.close();await second.close();await server.close();}

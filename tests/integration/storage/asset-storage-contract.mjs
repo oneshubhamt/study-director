@@ -40,11 +40,11 @@ const ingest={
 };
 const validId=value=>/^att-[a-z]{20}$/.test(String(value));
 const validType=value=>['application/pdf','audio/mpeg'].includes(String(value));
-const commits=[];
+const commits=[];let failCommitOnce=false;
 const ports={name:'qa',protocol:'https:',storage:{getDirectory:async()=>root},locks,ingest,maxBytes:1024*1024,limitForType:type=>type==='audio/mpeg'?2048:4096,
   validId,validType,issueToken:()=>++tokenSeq,assertToken:token=>{if(!Number.isInteger(token))throw new Error('stale token');},canMutate:()=>mutating,
   read:async key=>metadata.get(key)??null,keys:async()=>[...metadata.keys()],entries:async()=>[...metadata.entries()],
-  commit:async(upserts,removes,token,guard=()=>true)=>{assert.ok(Number.isInteger(token));if(!guard())throw new Error('guard');commits.push({upserts:upserts.length,removes:removes.length});for(const [key,row] of upserts)metadata.set(key,row);for(const key of removes)metadata.delete(key);return true;}
+  commit:async(upserts,removes,token,guard=()=>true)=>{assert.ok(Number.isInteger(token));if(!guard())throw new Error('guard');if(failCommitOnce){failCommitOnce=false;throw new Error('injected strict attachment metadata commit failure');}commits.push({upserts:upserts.length,removes:removes.length});for(const [key,row] of upserts)metadata.set(key,row);for(const key of removes)metadata.delete(key);return true;}
 };
 const store=mod.create(ports),A='att-aaaaaaaaaaaaaaaaaaaa',B='att-bbbbbbbbbbbbbbbbbbbb',C='att-cccccccccccccccccccc',D='att-dddddddddddddddddddd';
 assert.equal(store.supported(),true);store.requireAvailable();await assert.rejects(()=>store.get('bad'),/Invalid attachment identity/);
@@ -58,6 +58,17 @@ const pdf=new Blob(['same-pdf-bytes'],{type:'application/pdf'}),audio=new Blob([
 await assert.rejects(()=>store.put(A,new Blob([],{type:'application/pdf'})),/supported file limits/);
 const a=await store.put(A,pdf,{name:' A\u0000.pdf ',library:false});assert.equal(a.name,'A.pdf');assert.equal((await store.get(A)).size,pdf.size);
 assert.equal((await store.list()).length,1);assert.equal((await store.rename(A,' renamed.pdf ')).name,'renamed.pdf');assert.equal((await store.setLibrary(A,true)).library,true);assert.equal((await store.setLibrary(A,true)).library,true);
+{
+  // OPFS may be written and hash-verified before the strict metadata
+  // transaction aborts. Reject the attachment, clean up staged bytes, and
+  // leave no visible metadata referring to an uncommitted write.
+  const key='att-gggggggggggggggggggg',before=new Set(files.keys());
+  failCommitOnce=true;
+  await assert.rejects(()=>store.put(key,new Blob(['uncommitted-bytes'],{type:'application/pdf'}),{name:'fault.pdf'}),
+    /injected strict attachment metadata commit failure/u);
+  assert.equal(metadata.has(key),false,'failed metadata commit cannot expose an attachment');
+  assert.deepEqual([...files.keys()].filter(name=>!before.has(name)),[],'failed metadata commit reclaims the staged OPFS blob');
+}
 const b=await store.put(B,pdf,{name:'B.pdf',library:true});assert.equal(metadata.get(A).file,b.file);assert.equal(metadata.get(B).file,b.file);verifyCalls=0;assert.equal(await store.verifyMetadata([{id:A,...metadata.get(A)},{id:B,...metadata.get(B)}]),2);assert.equal(verifyCalls,1,'metadata verification must hash one shared physical attachment source once per verification phase while validating both logical IDs');
 const staged=await store.put(C,audio,{name:'C.mp3',library:true,stage:true,token:77});assert.equal(metadata.has(C),false);await store.publish([[C,staged]],77,()=>{});assert.equal(metadata.has(C),true);
 const d=await store.put(D,audio,{name:'D.mp3',stage:true,token:78});assert.equal(await store.discard([d]),1);assert.equal(await store.discard([{bad:true}]),0);

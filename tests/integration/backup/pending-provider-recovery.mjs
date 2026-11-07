@@ -18,7 +18,7 @@ function fixture({durable=marker(),authorized=true,authorizedFolder=true,both=fa
     write:async value=>{durable=value;},remove:async()=>{clears++;durable=null;}
   })}));
   const unexpected=()=>{throw new Error('Unexpected executor in pending lifecycle test');};
-  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,createPublication:unexpected,publish:async(_history,options)=>{assert.equal(options.interactive,false,'automatic publication must never prompt for keys');writes++;await publicationHook(options);return {checkpointId:'cp_verified',sourceRevision:new clock.Date().toISOString(),publication:{name:'cp_verified'},manifest:{objects:[]}};},publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase:async()=>null,establishBase:unexpected,verifyObject:unexpected,scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>{cleanupPasses++;return {gcPending:false};},inspectCommit:unexpected,retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:noop});
+  const pipeline=freeze({noteObject:unexpected,readNote:unexpected,readSession:unexpected,createPublication:unexpected,publish:async(_history,options)=>{assert.equal(options.interactive,false,'automatic publication must never prompt for keys');writes++;await publicationHook(options);return {checkpointId:'cp_verified',sourceRevision:new clock.Date().toISOString(),publication:{name:'cp_verified'},manifest:{objects:[]}};},publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,sharedBase:async()=>null,establishBase:unexpected,verifyObject:unexpected,scrub:async()=>({status:'completed',complete:true}),cleanup:async()=>{cleanupPasses++;return {gcPending:false};},inspectCommit:unexpected,retention:freeze({}),validatePolicy:noop,classifyState:()=>({committed:[],uncommitted:[],orphanCommits:[],invalidPairs:[]}),activeProtected:()=>null,selectRetention:()=>({retained:[],remove:[]}),projectHistory:()=>[],markCompleted:noop});
   const runtime=registry.require('backup-provider',1,freeze({repositoryPolicy:registry.require('repository-policy',1)})).createRuntime(freeze({background:freeze({format:background.format,contractVersion:1,createCoordinator:background.createCoordinator,maintenance:background.maintenance,maintenanceActionable:background.maintenanceActionable}),repository:pipeline,ports:freeze({
     configuration:freeze({appVersion:'qa'}),controller:freeze({beginImport:noop,cancelImport:noop,finishImport:noop}),exports:freeze({followProtection:async()=>false,protect:async file=>{const value=typeof file==='function'?await file():file;return freeze({...value,encrypted:false,protectionId:'',checkProtection:async()=>{}});},unprotect:async blob=>freeze({blob,encrypted:false}),run:unexpected}),domain:freeze({clampText:value=>String(value||'')}),view:freeze({presentation}),ownership:freeze({canShare:()=>true,canRunBackground:()=>!control?'awaiting-control':locked?'locked':true,requireMutationControl:noop}),environment:freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),diagnostics:freeze({capture:(...args)=>captures.push(args),start:()=>{traces.push('start');return 'trace';},mark:noop,finish:()=>traces.push('finish'),fail:()=>traces.push('fail')})
   })}));
@@ -76,6 +76,19 @@ for(const blocker of ['control','authorization','lock']){
  await t.clock.drainMicrotasks(240);assert.equal(aborted,1);assert.equal(t.status().busy,false);assert.equal(t.status().pending,true);assert.equal(t.status().state,'paused');assert.equal(t.clock.pending(),0);assert.ok(t.stats().durable);
  t.onPublication(noop);if(blocker==='control')t.control(true);else if(blocker==='lock')t.lock(false);else{t.authorization(true);t.notify();}
  await tick(t,15000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);assert.equal(t.clock.pending(),0);cases.push('active transfer safely reconnects after '+blocker+' loss');
+}
+// A foreground step (Continue Here, an update, a safety copy) pauses a running
+// retry. That pause is not a failure: nothing is logged, the backup stays owed
+// and runs once the step releases it.
+{
+ const t=fixture();t.register();t.configure();let aborted=0;
+ t.onPublication(({signal})=>new Promise((_,reject)=>{signal.addEventListener('abort',()=>{aborted++;reject(signal.reason);},{once:true});}));
+ await tick(t,1000);assert.equal(t.status().busy,true);
+ const hold=t.runtime.suspendBackground('qa-session-ownership');await hold.settled;await t.clock.drainMicrotasks(240);
+ assert.equal(aborted,1);assert.ok(t.stats().durable,'the backup stays owed');
+ assert.deepEqual(t.captures.map(([source])=>source),[],'a pause for a foreground step is not logged as a failure');
+ t.onPublication(noop);hold.release();await tick(t,15000);assert.equal(t.stats().writes,2);assert.equal(t.stats().durable,null);
+ cases.push('a foreground pause of a running retry logs nothing and resumes');
 }
 // Source and peer locations are independent durability obligations. Rebuilding
 // the runtime from the persisted marker must resume only the destination that

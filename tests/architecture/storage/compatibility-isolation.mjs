@@ -52,6 +52,19 @@ for(const name of ['readLegacyBackupFile','readChunkedBackupFile','backupLooksCh
 for(const name of codecDefined){const uses=codecRest.match(new RegExp(`\\b${name}\\b`,'gu'))||[];assert.equal(uses.length,name==='inspectLegacyBackup'?1:0,`${name} is reached only through inspectLegacy`);}
 assert.match(codecRest,/inspectLegacy:\(\.\.\.args\)=>Processing\.scope\(\(\)=>inspectLegacyBackup\(\.\.\.args\)\)/u,'inspectLegacy is the one way in');
 
+// Ownership claims written by devices on older builds are read in one marked
+// block of the backup runtime, reached only through decodeSessionClaim; the
+// ordinary reader accepts only the current form.
+const provider=read('source/core/backup-provider.js'),providerStart=provider.indexOf('/* COMPATIBILITY ---'),providerEnd=provider.indexOf('/* END COMPATIBILITY */');
+assert.ok(providerStart>0&&providerEnd>providerStart,'the backup runtime keeps its older-claim readers in one marked block');
+assert.equal(provider.indexOf('/* COMPATIBILITY ---',providerEnd),-1,'the backup runtime has one compatibility block');
+const providerBlock=provider.slice(providerStart,providerEnd),providerRest=provider.slice(0,providerStart)+provider.slice(providerEnd);
+const providerDefined=[...providerBlock.matchAll(/^\s*(?:async )?function (\w+)\(/gmu)].map(match=>match[1]);
+assert.deepEqual(providerDefined.sort(),['plainSessionClaim','upgradeOlderSessionClaim'],'the block holds the older-claim readers');
+for(const name of providerDefined){const uses=providerRest.match(new RegExp(`\\b${name}\\b`,'gu'))||[];assert.equal(uses.length,name==='upgradeOlderSessionClaim'?1:0,`${name} is reached only through decodeSessionClaim`);}
+assert.match(providerRest,/async function decodeSessionClaim\(value,\{signal=null\}=\{\}\)\{return normalizeSessionClaim\(value\)\|\|upgradeOlderSessionClaim\(value,\{signal\}\);\}/u,'decodeSessionClaim is the one way in');
+assert.match(providerRest,/Number\(value\.version\)!==SESSION_CLAIM_VERSION/u,'the ordinary claim reader accepts only the current version');
+
 // The daily-record migration marker belongs to the compatibility layer: only its block reads it.
 assert.equal(/dailyRecordMigration/u.test(rest.replace(/^\s*dailyRecordMigration:value=>.*$/mu,'').replace(/exactObject\(input\.metaKeys,\[[^\]]*\]/u,'')),false,'ordinary repository code never reads the migration marker');
 

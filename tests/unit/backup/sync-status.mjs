@@ -48,6 +48,17 @@ check('Drive not set up, Device Folder on',{drive:drive({connected:false,setUp:f
 check('Signed out',{drive:drive({connected:false})},{ring:'signed-out',badge:'',label:/^Google Drive signed out · last synced 12:04$/u,action:'',items:['sign-in']});
 check('Offline',{online:false,drive:drive()},{ring:'offline',label:/^Offline · last synced 12:04$/u,action:''});
 check('First sync not finished',{drive:drive({},{syncedAt:''})},{ring:'pending',label:/^Connected · first sync not finished$/u});
+{
+  // A verified remote checkpoint with a missing local ancestry receipt is
+  // NOT "Synced", even if an older timestamp was once a success.
+  const pendingAncestry=check('Local ancestry still pending',{
+    drive:drive({waiting:true,nextEligibleAt:'2026-11-01T12:14:00.000Z'},
+      {syncedAt:'',failed:true})
+  },{ring:'pending',badge:'',action:'sync-now'});
+  assert.doesNotMatch(pendingAncestry.label,/^Synced /u);
+  assert.doesNotMatch(pendingAncestry.headline,/up to date/u);
+}
+
 check('Failing after retries',{drive:drive({retryBackoffCapped:true},{failed:true})},{ring:'error',badge:'error',label:/^Sync stopped · last synced 12:04$/u,action:'retry',items:['retry']});
 check('Uploads failing after retries',{drive:drive({retryBackoffCapped:true,waiting:true})},{ring:'error',badge:'error',label:/^Sync stopped · last synced 12:04$/u,action:'retry',items:['retry']});
 check('Retry running after retries ran out',{drive:drive({retryBackoffCapped:true},{failed:true,syncing:true})},{ring:'syncing'});

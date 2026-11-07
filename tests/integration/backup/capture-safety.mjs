@@ -241,6 +241,47 @@ for(const rescued of [false,true]){
 
 
 
+// The browser can remove the database while the app is closed and keep the
+// rest of its browser storage. The next start then makes a new, empty
+// database. When browser storage says study data was saved here, that start
+// is handled as a browser-data clear: recorded, uploads paused, notice shown.
+// A fresh install, a new profile and a secondary tab never take this path.
+{
+  const appSource=fs.readFileSync('source/app.html','utf8');
+  const start=appSource.indexOf('function noteDatabaseRemovedWhileClosed(){'),end=appSource.indexOf('// Continuing, any verified restore or combine',start);
+  assert.ok(start>=0&&end>start,'the cold-start detector sits beside the reload resume');
+  const run=({fresh,saved,primary=true,cleared=''})=>{
+    const health={lastStudyDataSaveAt:saved?'2026-11-04T20:00:00.000Z':null,browserDataClearedAt:cleared||null},calls={holds:[],decisions:0,writes:0,diagnostics:[]};
+    const sandbox={Date,Object,Error,String,
+      IndexedDb:{lifecycle:()=>({startedFresh:fresh})},appCanMutate:()=>primary,
+      readStorageHealth:()=>({...health}),writeStorageHealth:patch=>{calls.writes++;Object.assign(health,patch);return true;},
+      AppData:{local:{getJson:()=>({...health})}},STORAGE_KEYS:{storageHealth:'health'},
+      beginStorageResetHold:clearedAt=>{const hold={clearedAt,reloaded:false};calls.holds.push(hold);return hold;},
+      showStorageResetDecision:()=>{calls.decisions++;},
+      storageResetConnectionsChanged:()=>{calls.connections=(calls.connections||0)+1;return false;},
+      AppDiagnostics:{capture:(...args)=>calls.diagnostics.push(args)}
+    };
+    vm.createContext(sandbox);
+    vm.runInContext('let storageResetHold=null;\n'+appSource.slice(start,end)+'\nglobalThis.resume=resumeUnresolvedStorageReset;',sandbox);
+    return {resumed:sandbox.resume(),health,calls};
+  };
+  const lost=run({fresh:true,saved:true});
+  assert.equal(lost.resumed,true,'a new database where study data was saved before is a clear');
+  assert.ok(Number.isFinite(Date.parse(lost.health.browserDataClearedAt)),'it is recorded, so a reload brings the notice back');
+  assert.equal(lost.calls.holds.length,1);assert.equal(lost.calls.holds[0].clearedAt,lost.health.browserDataClearedAt);
+  assert.equal(lost.calls.holds[0].reloaded,true);assert.equal(lost.calls.decisions,1,'the restore notice is shown at once');
+  assert.equal(lost.calls.connections,1,'a Drive sign-in kept from before the clear is checked at once');
+  assert.ok(lost.calls.diagnostics.some(row=>row[0]==='storage.idb-missing-at-start'));
+  for(const [label,state] of [['a fresh install',{fresh:true,saved:false}],['a database that was already here',{fresh:false,saved:true}],['a secondary tab',{fresh:true,saved:true,primary:false}]]){
+    const result=run(state);
+    assert.equal(result.resumed,false,label+' is not a clear');
+    assert.equal(result.calls.writes,0,label+' records nothing');assert.equal(result.calls.holds.length,0,label+' pauses nothing');assert.equal(result.calls.decisions,0);
+  }
+  const earlier='2026-11-05T02:51:00.000Z',again=run({fresh:true,saved:true,cleared:earlier});
+  assert.equal(again.calls.writes,0,'an unresolved clear keeps the time it was first found');
+  assert.equal(again.calls.holds[0].clearedAt,earlier);assert.equal(again.calls.decisions,1);
+}
+
 // Removed profiles keep emergency browser rescue copies if IndexedDB/OPFS
 // deletion fails; the registry intent survives and retries are idempotent.
 {

@@ -22,5 +22,5 @@ export async function importRichTextNoteTextSource(){
   fs.writeFileSync(path.join(temp,'markdown.mjs'),strip('rich-text/markdown.ts').replace("from '../contracts/production-limits.mjs'",`from '${limits}'`).replace("from './wg1-codec';","from './wg1-codec.mjs';"));
   fs.writeFileSync(path.join(temp,'tags.mjs'),strip('rich-text/tags.ts'));
   const [tags,markdown]=await Promise.all([import(pathToFileURL(path.join(temp,'tags.mjs')).href),import(pathToFileURL(path.join(temp,'markdown.mjs')).href)]);
-  return {...tags,markdownToHtml:markdown.markdownToHtml};
+  return {...tags,markdownToHtml:markdown.markdownToHtml,looksLikeMarkdown:markdown.looksLikeMarkdown,markdownDocument:markdown.markdownDocument};
 }

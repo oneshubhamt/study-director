@@ -208,5 +208,55 @@ assert.equal((await passwordPromise),null);
 assert.equal(passwordField.value,'','Back cancellation clears password material immediately');
 assert.equal(controller.reconcileHistory(passwordDescriptor),null,'expired password prompt cannot replay');
 
+// A kept Plan draft is fully inspectable before the radio choice. The
+// expanded content is created lazily and never edits the underlying drafts.
+const fullLocal=Array.from({length:16},(_,i)=>i===15?'Distinct local line':'Shared line').join('\n');
+const fullKept=Array.from({length:16},()=> 'Shared line').join('\n');
+const comparePromise=controller.configure({title:'Kept versions',groups:[{
+  id:'kept__draft',label:'Plan · Working draft',defaultValue:'keep',
+  comparison:{current:fullLocal,kept:fullKept},
+  choices:[{value:'keep',label:'Keep this draft'},{value:'use',label:'Use kept draft'}]
+}]});
+const disclosure=findDescendant(document.dialog,node=>node.tagName==='DETAILS');
+assert.ok(disclosure,'the existing configuration modal offers a full comparison disclosure');
+assert.equal(findDescendant(disclosure,node=>node.tagName==='PRE'),null,
+  'large comparisons are not materialized until opened');
+disclosure.open=true;
+disclosure.listeners.get('toggle')[0]();
+const preRows=[];
+const collect=node=>{if(node.tagName==='PRE')preRows.push(node);for(const child of node.children)collect(child);};
+collect(disclosure);
+assert.deepEqual(preRows.map(node=>node.textContent),[fullLocal,fullKept],
+  'both complete draft texts are visible even when the difference is far beyond the short previews');
+assert.ok(preRows.every(node=>node.getAttribute('aria-label')?.includes('complete Plan draft')&&node.tabIndex===0),
+  'read-only panes are individually identifiable and keyboard inspectable');
+assert.match(findDescendant(disclosure,node=>node.className==='interaction-comparison-status').textContent,/First differing line: 16/u);
+disclosure.open=false;disclosure.listeners.get('toggle')[0]();disclosure.open=true;disclosure.listeners.get('toggle')[0]();
+assert.equal(preRows.length,2,'opening and closing cannot duplicate comparison content');
+assert.equal(controller.dismiss(),true);
+assert.equal(await comparePromise,null,'closing the comparison does not apply the kept alternative');
+
+// Null (never authored) and empty string (authored, then cleared) are distinct
+// canonical Plan-draft states, and a long saved-plan choice must show its full text.
+for(const [comparison,expectedStatus,expectedPanes,kind] of [
+  [{current:null,kept:''},/One side has no saved plan draft/u,['(not saved)','(saved, intentionally empty)'],'Plan draft'],
+  [{current:'Shared',kept:'Shared',currentLabel:'Old label',keptLabel:'New label'},/Plan names differ/u,['Shared','Shared'],'Saved Plan']
+]){
+  const prompt=controller.configure({title:'Kept versions',groups:[{
+    id:'review',label:kind==='Saved Plan'?'Saved plan · Sample':'Plan · Working draft',
+    comparison,choices:[{value:'keep',label:'Keep'},{value:'use',label:'Use kept'}]
+  }]});
+  const detail=findDescendant(document.dialog,node=>node.tagName==='DETAILS');
+  assert.ok(detail,'The '+kind+' offers a full comparison');
+  detail.open=true;detail.listeners.get('toggle')[0]();
+  const status=findDescendant(detail,node=>node.className==='interaction-comparison-status');
+  assert.match(status.textContent,expectedStatus,'A difference in authorship or Plan label must not appear identical');
+  const panes=[];const gather=node=>{if(node.tagName==='PRE')panes.push(node);node.children.forEach(gather);};
+  gather(detail);
+  assert.deepEqual(panes.map(node=>node.textContent),expectedPanes);
+  assert.ok(panes.every(node=>node.getAttribute('aria-label').includes('complete '+kind+' text')));
+  assert.equal(controller.dismiss(),true);assert.equal(await prompt,null);
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'interaction-history',checks:['Back cancels once','Forward expires','explicit close consumes marker','sequential prompt traversal settlement','password cleared']},null,2));
 }
