@@ -91,15 +91,39 @@ assert.equal(module.maintenanceDefersAcrossObservation(freeze({reason:'publicati
 }
 
 {
+  // A check that has just started keeps the slot for a short while against
+  // automatic work (bug 9: every session upload stopped it); after that,
+  // higher-priority automatic work stops it as before.
   const fake=clock(),bg=coordinator(fake);const low=await bg.beginBackground('integrity');assert.ok(low);
-  const higherPromise=bg.beginBackground('maintenance');await Promise.resolve();assert.equal(low.signal.aborted,true,'higher-priority maintenance must pre-empt integrity');low.release();const higher=await higherPromise;assert.ok(higher);higher.release();
+  for(const job of ['maintenance','convergence']){
+    assert.equal(await bg.beginBackground(job),null,job+' waits while a check has just started');
+    assert.equal(low.signal.aborted,false,'the fresh check keeps running');
+  }
+  await fake.advance(module.integrity.protectedMs);
+  const higherPromise=bg.beginBackground('maintenance');await Promise.resolve();assert.equal(low.signal.aborted,true,'higher-priority maintenance must pre-empt integrity after its protected time');low.release();const higher=await higherPromise;assert.ok(higher);higher.release();
+}
+{
+  // Anything a person starts, and any suspension, stops even a fresh check.
+  const fake=clock(),bg=coordinator(fake);let low=await bg.beginBackground('integrity');const foreground=bg.beginForeground();
+  assert.equal(low.signal.aborted,true,'foreground work stops a fresh check at once');low.release();await foreground.settled;foreground.release();
+  low=await bg.beginBackground('integrity');const suspension=bg.suspend('pwa-update');assert.equal(low.signal.aborted,true,'a suspension stops a fresh check at once');low.release();await suspension.settled;suspension.release?.();
+}
+{
+  // Only verification has a protected time: fresh cleanup still yields to sync at once.
+  const fake=clock(),bg=coordinator(fake),cleanup=await bg.beginBackground('maintenance');const syncing=bg.beginBackground('convergence');await Promise.resolve();
+  assert.equal(cleanup.signal.aborted,true,'sync stops a fresh cleanup at once');cleanup.release();(await syncing)?.release();
+}
+{
+  // A clock that moves backwards never protects a check for longer.
+  let now=Date.parse('2026-09-26T00:00:00.000Z');const fake=freeze({...clock(),now:()=>now}),bg=coordinator(fake),low=await bg.beginBackground('integrity');
+  now-=60*60*1000;const higherPromise=bg.beginBackground('convergence');await Promise.resolve();assert.equal(low.signal.aborted,true,'a negative age is not protected');low.release();(await higherPromise)?.release();
 }
 
 // Different contenders can await the same retiring executor. Admission must
 // recheck all current owners, and an aborted executor remains active until release.
 for(const pair of [['maintenance','convergence']]){
  for(const order of [pair,[...pair].reverse()]){
-  const fake=clock(),bg=coordinator(fake),original=await bg.beginBackground('integrity');
+  const fake=clock(),bg=coordinator(fake),original=await bg.beginBackground('integrity');await fake.advance(module.integrity.protectedMs);
   const requests=order.map(job=>bg.beginBackground(job));assert.equal(original.signal.aborted,true);original.release();
   const acquired=await Promise.all(requests),winner=acquired.find(Boolean),highest=pair[1];
   assert.equal(acquired.filter(Boolean).length,1,'only one contender may acquire after a shared wait');
@@ -110,7 +134,7 @@ for(const pair of [['maintenance','convergence']]){
  }
 }
 {
- const fake=clock(),bg=coordinator(fake),original=await bg.beginBackground('integrity');
+ const fake=clock(),bg=coordinator(fake),original=await bg.beginBackground('integrity');await fake.advance(module.integrity.protectedMs);
  const contenders=[bg.beginBackground('maintenance'),bg.beginBackground('convergence')],foreground=bg.beginForeground();
  original.release();assert.deepEqual(await Promise.all(contenders),[null,null],'foreground arrival must prevent pending contenders from acquiring');
  await foreground.settled;foreground.release();assert.deepEqual(fake.pending(),[]);
@@ -201,6 +225,19 @@ for(const pair of [['maintenance','convergence']]){
   const fake=clock(),bg=coordinator(fake);let target=freeze({completedAt:'',cycleStartedAt:'',cursor:'',quarantinedObjectIds:freeze([])}),seenSignal=null;
   const scheduler=bg.createIntegrityScheduler(freeze({budgetMs:20000,budgetCode:'TEST_INTEGRITY_BUDGET',budgetMessage:'budget',preemptCode:'TEST_INTEGRITY_PREEMPTED',preemptMessage:'preempted',capture:()=>{},execute:({signal})=>new Promise((resolve,reject)=>{seenSignal=signal;if(signal.aborted)return reject(signal.reason);signal.addEventListener('abort',()=>reject(signal.reason),{once:true});}),isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>target,writeResult:async()=>{},yieldTask:async()=>{}}));
   const task=scheduler.run();for(let i=0;i<8&&!seenSignal;i+=1)await Promise.resolve();assert.ok(seenSignal,'shared integrity scheduler must acquire a cancellable background scope before execution');const foreground=bg.beginForeground();assert.ok(foreground);const result=await task;assert.equal(result.status,'skipped');assert.equal(result.reason,'preempted');await foreground.settled;foreground.release();
+}
+{
+  // A check stopped by other work starts again about a second after that work
+  // finishes, not ten minutes later: the next try gets the whole gap before
+  // the next session upload (bug 9).
+  const fake=clock(),bg=coordinator(fake);let target=freeze({completedAt:'',cycleStartedAt:'',cursor:'',quarantinedObjectIds:freeze([])}),seenSignal=null;
+  const scheduler=bg.createIntegrityScheduler(freeze({budgetMs:20000,budgetCode:'TEST_INTEGRITY_BUDGET',budgetMessage:'budget',preemptCode:'TEST_INTEGRITY_PREEMPTED',preemptMessage:'preempted',capture:()=>{},execute:({signal})=>new Promise((resolve,reject)=>{seenSignal=signal;signal.addEventListener('abort',()=>reject(signal.reason),{once:true});}),isAvailable:()=>true,isUnsafe:()=>false,readTarget:async()=>target,writeResult:async()=>{},yieldTask:async()=>{}}));
+  const task=scheduler.run();for(let i=0;i<8&&!seenSignal;i+=1)await Promise.resolve();assert.ok(seenSignal);
+  await fake.advance(module.integrity.protectedMs);
+  const sync=bg.beginBackground('convergence');const result=await task;assert.equal(result.reason,'preempted');const scope=await sync;assert.ok(scope,'automatic sync takes the slot once the protected time is over');
+  assert.ok(fake.pending().includes(module.integrity.retryMs),'a fallback retry is kept');
+  scope.release();for(let i=0;i<8;i+=1)await Promise.resolve();
+  assert.ok(fake.pending().some(delay=>delay<=1000),'the check is due again a moment after the slot frees');
 }
 
 {
