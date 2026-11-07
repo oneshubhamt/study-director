@@ -5472,8 +5472,10 @@ async function suspendTodaySession(){
         session.status='suspended';
         session.suspendedAt=new Date().toISOString();
         session.updatedAt=session.suspendedAt;
+        // A built session takes its stored form when saved, so the check
+        // compares the strict read-back with what was saved.
         const saved=await AppData.activeSession.save(session,{strictDurability:true});
-        await requireCanonicalSessionWrite(saved,session,'suspending the Active Session');
+        await requireCanonicalSessionWrite(saved,saved?.value,'suspending the Active Session');
       }
       resetRuntimeSessionState({lifecycleManaged:true,source:'session-suspend',date:todayISO()});
       setSessionPanelMode('suspended');
@@ -5705,7 +5707,7 @@ async function yieldSessionToOtherDevice(options={}){
     const now=new Date().toISOString(),session=activeSessionPayload(null,{status:'suspended',suspendedAt:now});
     if(session){
       const saved=await AppData.activeSession.save(session,{strictDurability:true});
-      await requireCanonicalSessionWrite(saved,session,'yielding the Active Session during reconciliation');
+      await requireCanonicalSessionWrite(saved,saved?.value,'yielding the Active Session during reconciliation');
     }
     resetRuntimeSessionState({lifecycleManaged:true,source:'session-yield',date:todayISO()});
     setSessionPanelMode('suspended',session);

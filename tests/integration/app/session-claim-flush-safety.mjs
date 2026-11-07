@@ -559,6 +559,54 @@ for(const fault of ['claim-crash','claim-throws-after-remote','claim-throws-befo
   }
 }
 
+// A session built for Suspend or for handing over takes its stored form only
+// when saved (the codec accepts stored forms alone), so both must check the
+// strict read-back against what was saved, not against the built copy. A
+// built copy can never pass that check, which left Suspend failing every time
+// and a device that lost the session retrying its sync for good.
+{
+  const src=[
+    productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
+    productionFunction('async function yieldSessionToOtherDevice(options={}){'),
+    productionFunction('async function suspendTodaySession(){')
+  ].join('\n');
+  for(const readBack of ['exact','different']){
+    let stored=null,resets=0,statuses=[];
+    const built={date:'2026-10-27',runningOn:'inst_local',revision:4,status:'active',suspendedAt:null,snapshot:{review:'built'}};
+    const app={
+      Object,Date,Promise,Error,
+      TASKS:[{}],todayISO:()=> '2026-10-27',TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
+      PracticePacer:{pauseForSessionEnd:()=>{}},flushLiveDraft:async()=>true,appCanMutate:()=>true,
+      activeSessionPayload:(_snapshot,options={})=>({...structuredClone(built),status:options.status||built.status,suspendedAt:options.suspendedAt||null}),
+      AppData:{activeSession:{
+        save:async value=>{stored={...structuredClone(value),stored:true};return {ok:true,value:stored,storage:{idb:true}};},
+        load:async()=>({ok:true,value:readBack==='exact'?stored:{...stored,snapshot:{review:'other'}},storage:{idb:true}})
+      }},
+      // Like the real codec: only a stored form is current.
+      ActiveSessionCodec:{sanitizeCurrent:value=>value&&value.stored===true?value:null},
+      CanonicalModule:{same:(left,right)=>JSON.stringify(left)===JSON.stringify(right)},
+      resetRuntimeSessionState:()=>{resets++;},setSessionPanelMode:()=>{},refreshPlanAfterSessionReset:()=>{},
+      setTimerMode:()=>{},updateExecutePanels:()=>{},setPlanStatus:text=>{statuses.push(String(text));},
+      BackupProviderRuntime:{connected:()=>false},notifyBackupChange:()=>{},
+      Interactions:{notify:()=>{},confirm:async()=>true},sessionYieldedAt:0
+    };
+    const context=vm.createContext(app);
+    vm.runInContext(src+'\nglobalThis.yieldSession=yieldSessionToOtherDevice;globalThis.suspendSession=suspendTodaySession;',context);
+    if(readBack==='exact'){
+      assert.equal(await context.yieldSession({deferReview:true}),true,'handing over saves the suspended session and stops here');
+      assert.equal(stored.status,'suspended');
+      await context.suspendSession();
+      assert.equal(resets,2,'Suspend stops the session once it is saved');
+      assert.ok(!statuses.some(text=>/Could not suspend/u.test(text)),statuses.join(' / '));
+    }else{
+      await assert.rejects(context.yieldSession({deferReview:true}),/read-back differs/u,'a read-back that differs still stops the hand-over');
+      await context.suspendSession();
+      assert.equal(resets,0,'and keeps the live session');
+      assert.ok(statuses.some(text=>/Could not suspend/u.test(text)));
+    }
+  }
+}
+
 // BF-1R1: the Saved Day acknowledgement must survive strict canonical
 // readback before the app can declare this study revision saved.
 {
