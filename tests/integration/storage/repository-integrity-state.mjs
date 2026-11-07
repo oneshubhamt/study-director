@@ -123,10 +123,22 @@ await test('the recheck action is scoped, retains quarantine, and requires write
  assert.equal(await h.context.requestRepositoryIntegrityRecheck('google-drive'),true);assert.equal(h.state.durable.locations['google-drive'].recheckCursor,'');assert.equal(queued[0],'google-drive');assert.equal(h.state.durable.locations['google-drive'].recheck,true);assert.ok(h.state.durable.locations['google-drive'].requestId);assert.equal(h.state.durable.locations['google-drive'].quarantinedObjectIds.length,1);
  const before=h.state.durable;h.state.owner=false;assert.equal(await h.context.requestRepositoryIntegrityRecheck('device-folder'),false);assert.equal(h.state.durable,before);
 });
-await test('a new recheck rejects older results and clears quarantine only after successful verification',async()=>{
+await test('a new recheck is not settled by older results and clears quarantine only after successful verification',async()=>{
  const h=fixture(),before=h.state.durable.locations['google-drive'],requestId='00000000-0000-0000-0000-000000000001';
  await h.context.mutateRepositoryIntegrityTarget('google-drive',current=>({...current,requestId,recheck:true,cursor:'',scanId:'',partial:null,cycleStartedAt:stamp}));
- await assert.rejects(h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'completed',complete:true,quarantined:[]}),{code:'REPOSITORY_CHANGED'});assert.equal(h.state.durable.locations['google-drive'].recheck,true);assert.deepEqual(Array.from(h.state.durable.locations['google-drive'].quarantinedObjectIds),Array.from(before.quarantinedObjectIds));
+ // Partial or troubled results from the check that ran before Recheck are refused.
+ for(const older of [{status:'yielded',reason:'preempted',cursor:objectId('d'),scanId},{status:'failed',corruption:true,complete:true,quarantined:[objectId('e')]},{status:'unavailable',reason:'timeout'}]){
+  await assert.rejects(h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',...older}),{code:'REPOSITORY_CHANGED'},older.status+' from an older request is refused');
+ }
+ // A clean full pass that was already running is recorded as the last full
+ // scan (bug 9: it used to vanish), and the recheck still waits, untouched.
+ const pending=h.state.durable.locations['google-drive'];
+ await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',status:'completed',complete:true,quarantined:[]});
+ const shown=h.state.durable.locations['google-drive'];
+ assert.ok(shown.completedAt&&shown.completedAt!==pending.completedAt,'Verification shows the full scan that finished');
+ assert.equal(shown.lastOutcome,'completed');assert.equal(shown.recheck,true,'the recheck is still pending');assert.equal(shown.requestId,requestId);
+ assert.equal(shown.cursor,pending.cursor);assert.equal(shown.scanId,pending.scanId);assert.equal(shown.partial,pending.partial);
+ assert.deepEqual(Array.from(shown.quarantinedObjectIds),Array.from(before.quarantinedObjectIds),'an older pass does not clear quarantine');
  await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',requestId,status:'unavailable'});assert.equal(h.state.durable.locations['google-drive'].recheck,true);assert.ok(h.state.durable.locations['google-drive'].quarantinedObjectIds.length);
  await h.context.updateRepositoryIntegrityTarget('google-drive',{repositoryScope:'drive-one',requestId,status:'completed',complete:true,quarantined:[]});assert.equal(h.state.durable.locations['google-drive'].recheck,false);assert.equal(h.state.durable.locations['google-drive'].quarantinedObjectIds.length,0);assert.equal(h.state.durable.locations['google-drive'].history.length,1,'durable target history summarizes each day, not every segment');
 });

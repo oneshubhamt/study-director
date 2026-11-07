@@ -10752,11 +10752,19 @@ async function updateRepositoryIntegrityTarget(target,result){
   const bound=await readRepositoryIntegrityTarget(target);
   if(bound.repositoryScope!==result.repositoryScope)throw repositoryIntegrityChanged();
   return mutateRepositoryIntegrityTarget(target,current=>{
-    if(current.repositoryScope!==result.repositoryScope||current.requestId!==String(result.requestId||''))throw repositoryIntegrityChanged();
-    const now=new Date().toISOString(),quarantine=result.status==='unavailable'?[...new Set([...current.quarantinedObjectIds,...(result.quarantined||[])])]:result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
+    if(current.repositoryScope!==result.repositoryScope)throw repositoryIntegrityChanged();
+    const now=new Date().toISOString(),dailyHistory=current.history.at(-1)?.at.slice(0,10)===now.slice(0,10)?current.history.slice(0,-1):current.history;
+    // A check already running when Recheck was pressed belongs to the older
+    // request: its progress and findings do not settle the recheck, which
+    // stays pending as it is. A clean full pass is still recorded as the last
+    // full scan, so Verification shows it instead of the result vanishing.
+    if(current.requestId!==String(result.requestId||'')){
+      if(result.complete!==true||result.status!=='completed'||result.corruption||result.checkpointOnly)throw repositoryIntegrityChanged();
+      return {...current,attemptedAt:now,completedAt:now,lastOutcome:'completed',blockedReason:'',history:[...dailyHistory,{at:now,outcome:'completed',complete:true}].slice(-8)};
+    }
+    const quarantine=result.status==='unavailable'?[...new Set([...current.quarantinedObjectIds,...(result.quarantined||[])])]:result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
     const hasProgress=Object.hasOwn(result,'cursor')&&Object.hasOwn(result,'scanId');
     const progress=hasProgress?{cursor:result.cursor,scanId:result.scanId,...(Object.hasOwn(result,'recheckCursor')?{recheckCursor:result.recheckCursor}:{}),...(Object.hasOwn(result,'partial')?{partial:result.partial}:{} )}:{};
-    const dailyHistory=current.history.at(-1)?.at.slice(0,10)===now.slice(0,10)?current.history.slice(0,-1):current.history;
     const blockedReason=['locked','budget','preempted','permission'].includes(result.reason)?result.reason:result.status==='unavailable'?'unavailable':result.corruption?'corrupt':'';
     const outcome={attemptedAt:now,lastOutcome:result.status,blockedReason,history:result.checkpointOnly?current.history:[...dailyHistory,{at:now,outcome:result.status,complete:result.complete===true&&['completed','failed'].includes(result.status)}].slice(-8)};
     const finishedRecheck=current.recheck&&result.recheckComplete===true&&result.status==='failed'&&result.corruption===true;
