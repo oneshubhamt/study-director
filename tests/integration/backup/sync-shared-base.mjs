@@ -1629,6 +1629,14 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   // verified again; a real Drive listing lets that be skipped too.)
   assert.deepEqual(counts.kinds.slice(downloads).filter(kind=>!['checkpoint','commit'].includes(kind)),[],'with Drive unchanged, the session is not downloaded again');
   assert.equal(claimed.source.checkpointId,again.checkpointId,'the claim names the version it was made on');
+  // A claim a newer build wrote: sync waits for an app update (not "could not
+  // be verified"), and nothing is written to Drive.
+  const [claimId,claimFile]=[...syncWorld.claims.entries()][0],raw=JSON.parse(await claimFile.blob.text()),newerBlob=new Blob([JSON.stringify({...raw,version:9})]);
+  syncWorld.claims.set(claimId,freeze({...claimFile,blob:newerBlob,digest:await processing.run('checksum',{value:newerBlob})}));
+  const driveBefore=JSON.stringify([...syncWorld.drive.keys()].sort()),claimsBefore=syncWorld.claims.size;
+  await assert.rejects(A.sync(),error=>error?.code==='REPOSITORY_SYNC_NEEDS_UPDATE'&&/newer version of Study Director/u.test(error.message),'sync waits for an app update');
+  assert.equal(JSON.stringify([...syncWorld.drive.keys()].sort()),driveBefore,'nothing is written to Drive');assert.equal(syncWorld.claims.size,claimsBefore);
+  assert.equal(JSON.parse(await syncWorld.claims.get(claimId).blob.text()).version,9,'the newer claim is left as it is');
 }
 
 // BF-1: Continue Here is fenced by the exact verified Drive session content.

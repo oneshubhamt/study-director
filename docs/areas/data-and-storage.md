@@ -83,6 +83,27 @@ A newer database opens as it is, never upgraded or downgraded. If a store this b
 
 For this to keep working, a later build bumps a record's `version` when its shape changes, gives new appMeta families names an older build does not know, and treats removing or re-keying a store as a change that older builds meet by leaving the profile alone.
 
+### Synced data from a newer version
+
+What travels between devices is read inside a container whose version every build checks first: the backup file (`metadataVersion`), the Drive or Device Folder version (repository manifest) and the Continue Here claim. A build meeting a newer one keeps it, uploads nothing over it and asks for an update:
+
+| What it meets | What it does |
+|---|---|
+| A newer backup file | "This backup was created by a newer Study Director version. Update the app before importing it." |
+| A newer Drive version | Keeps it, uploads nothing over it: "Update the app to finish syncing" |
+| A newer claim (same format, higher version) | The timer here stops and the progress is saved and read back; "Another device runs a newer version of Study Director… Update the app to continue here." Continue Here and sync wait for the update; nothing is written to Drive. A claim of unknown form stays "could not be verified". |
+
+### Changing a synced form
+
+`contracts/format-ledger.mjs` lists the synced forms and the container versions they travel in, one row per set of forms, starting with the oldest build in use (F18); `tests/architecture/storage/format-ledger.mjs` fails until a change follows these steps:
+
+1. Raise the form's own version (`CURRENT_SCHEMA_VERSIONS`, or the codec's for personal data and the claim).
+2. Raise the backup version and the repository manifest version (a claim change raises only the claim version, keeping its format name).
+3. Read the older form through the compatibility layer, with a registry entry (`contracts/compatibility.mjs`), never in the current codec.
+4. Add a row to the ledger, and say in the pull request that every device must update at about the same time.
+
+A new kind of stored data is classed in the ledger as synced or local-only; a local-only form relies on its own version and the census above.
+
 ## Emergency copies
 
 **Emergency copies.** When IndexedDB fails, the session recovery copy, unsaved notes, delete recovery and fallback Saved Days share one browser-storage budget (`localRescueBytes`, 4 MiB) in that priority order. Each copy may use what the higher-priority copies leave, up to its own ceiling, so the most important copy is never crowded out.

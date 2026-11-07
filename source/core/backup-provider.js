@@ -1103,6 +1103,16 @@ registry.define('backup-provider',1,input=>{
     presentation.notice(selected.id,'sync-newer',`${selected.label} has a version this app can’t read, from a newer Study Director or damaged. Sync waits until the app is updated, or until you remove that version in Version History.`);
     notifyStatus();return true;
   }
+  // A claim in this format with a higher version comes from a newer Study
+  // Director. This build cannot read it, so it assumes that device may be
+  // running the session: Continue Here, sync and upload wait for an app
+  // update, and the claim watcher stops a timer running here (app.html).
+  function newerSessionClaim(selected,item){
+    const state=syncState(selected),id='claim:'+item.id;
+    if(state.newer!==id){state.newer=id;presentation.notice(selected.id,'sync-newer','Another device runs a newer version of Study Director. Sync and Continue Here wait until this app is updated.');notifyStatus();}
+    return Object.assign(syncError('REPOSITORY_SYNC_NEEDS_UPDATE','Another device runs a newer version of Study Director. Update this app to continue.'),{newerClaim:freeze({epoch:sessionClaimEpoch(item.id)})});
+  }
+  function newerSessionClaimGone(selected){if(String(syncState(selected).newer||'').startsWith('claim:'))newerVersionGone(selected);}
   function newerVersionGone(selected){
     const state=syncState(selected);if(!state.newer)return false;state.newer='';presentation.resolve(selected.id,'sync-newer');notifyStatus();return true;
   }
@@ -1179,7 +1189,7 @@ registry.define('backup-provider',1,input=>{
     for(const raw of rows){const item=repositoryProviderItem(raw,'session-claim'),epoch=sessionClaimEpoch(item.id);if(!epoch)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state has an invalid identity.');if(epoch>latestEpoch){latest=item;latestEpoch=epoch;}}
     if(!latest)return null;
     const identity=sessionClaimIdentity(latest),known=identity?verifiedSessionClaimByProvider.get(selected.id):null;
-    if(known&&known.identity===identity)return freeze({claim:known.claim,item:latest});
+    if(known&&known.identity===identity){if(known.newer)throw newerSessionClaim(selected,latest);newerSessionClaimGone(selected);return freeze({claim:known.claim,item:latest});}
     const lease=repositoryDownloadLease(await selected.repository.downloadSessionClaim(latest,freeze({signal})));let decoded=null;
     try{
       if(lease.blob.size<=0||lease.blob.size>SESSION_CLAIM_MAX_BYTES||latest.size&&lease.blob.size!==latest.size)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state changed size unexpectedly.');
@@ -1188,8 +1198,12 @@ registry.define('backup-provider',1,input=>{
       decoded=await Exports.unprotect(lease.blob,{interactive:false,signal});
       if(!decoded||!(decoded.blob instanceof Blob))throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state could not be opened safely.');
       let parsed=null;try{parsed=JSON.parse(await decoded.blob.text());}catch{}
+      if(parsed&&typeof parsed==='object'&&parsed.format===SESSION_CLAIM_FORMAT&&Number.isSafeInteger(parsed.version)&&parsed.version>SESSION_CLAIM_VERSION){
+        if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,newer:true}));
+        throw newerSessionClaim(selected,latest);
+      }
       const claim=await decodeSessionClaim(parsed,{signal});if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
-      if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim}));
+      if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim}));newerSessionClaimGone(selected);
       return freeze({claim,item:latest});
     }finally{
       if(decoded&&decoded.blob instanceof Blob&&decoded.blob!==lease.blob)await Exports.run('file.release',{file:decoded.blob}).catch(()=>{});
@@ -1249,6 +1263,7 @@ registry.define('backup-provider',1,input=>{
       const claim=await projectSessionClaim(await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal}),{signal});
       return claim&&claim.applies?claim:null;
     }catch(error){
+      if(error?.newerClaim)throw error;
       if(!signal?.aborted)AppDiagnostics.capture('backup-provider.sync-session-claim',error,'warn');
       // Unreadable is not absent. An older checkpoint cannot be reconciled
       // against an unverified ownership fence without risking owner rollback.
@@ -1990,7 +2005,12 @@ registry.define('backup-provider',1,input=>{
   }
   async function readSessionClaim(id='google-drive',options={}){
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected)||!repositorySessionClaimCapable(selected))return null;
-    const signal=options&&options.signal||null,current=await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal});return projectSessionClaim(current,{signal});
+    const signal=options&&options.signal||null;
+    // A newer build's claim reads as owned elsewhere, by a device this build
+    // cannot follow (newer: true).
+    let current;try{current=await readRepositorySessionClaim(repositoryOperationSelected(selected,{signal}),{signal});}
+    catch(error){if(error?.newerClaim)return freeze({state:'owned',applies:true,ownedHere:false,newer:true,epoch:error.newerClaim.epoch});throw error;}
+    return projectSessionClaim(current,{signal});
   }
   function scheduleSharedSync(id='google-drive',reason='shared-sync'){
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return false;

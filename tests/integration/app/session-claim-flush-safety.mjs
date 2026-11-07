@@ -10,7 +10,9 @@ function productionFunction(name){
 }
 const saveWarning=source.match(/^const SESSION_CLAIM_SAVE_WARNING=.*;$/mu)?.[0];
 assert.ok(saveWarning,'Production session-claim warning must exist.');
-const runtime=[saveWarning,productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation=\'active-session transition\'){'),productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){'),productionFunction('function snapshotWhileSessionClaimFrozen(){')].join('\n');
+const newerMessage=source.match(/^const SESSION_NEWER_CLAIM_MESSAGE=.*;$/mu)?.[0];
+assert.ok(newerMessage,'Production newer-claim message must exist.');
+const runtime=[saveWarning,newerMessage,productionFunction('function notifyNewerSessionClaim(){'),productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation=\'active-session transition\'){'),productionFunction('async function verifyFrozenSessionClaim(){'),productionFunction('function resumeAfterReleasedSessionClaim(session){'),productionFunction('async function checkSessionOwnershipClaim(){'),productionFunction('function writeLiveDraftNow(options={}){'),productionFunction('function snapshotWhileSessionClaimFrozen(){')].join('\n');
 
 const owned={epoch:2,applies:true,state:'owned',ownedHere:false};
 const session={runningOn:'inst_local',revision:4};
@@ -20,7 +22,7 @@ const failed={ok:false,value:{...session,revision:5},storage:{local:false,idb:fa
 const loaded=value=>({ok:true,value,storage:{local:false,idb:true}});
 function harness(){
   let claim={...owned},now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false,resumeWorks=true,reviewText='Retain the last edits';
-  const calls={stops:0,resumes:0,snapshots:[],captureEvidenceArgs:[],evidences:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
+  const calls={notices:[],updates:0,stops:0,resumes:0,snapshots:[],captureEvidenceArgs:[],evidences:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
   const app={
     document:{visibilityState:'visible'},navigator:{onLine:true},
     StartupLifecycle:{status:()=>({fullyInitialized:true})},
@@ -47,6 +49,7 @@ function harness(){
     markStorageHealthError:(key,message)=>{calls.warnings.push({key,message});},
     refreshStorageFallbackWarning:()=>{},
     setPlanStatus:(message,ok)=>calls.status.push({message,ok}),
+    Interactions:{notify:notice=>calls.notices.push(notice)},checkUnsupportedUpdate:async()=>{calls.updates++;},
     clearSessionSafetyMessage:()=>{vm.runInContext("sessionSafetyMessage='';",context);},
     Object,
     SESSION_CLAIM_SYNC_RETRY_MS:30000
@@ -77,6 +80,27 @@ const good=()=>loaded({...session,revision:5});
   assert.equal(t.calls.syncs.length,1,'unchanged claim obeys sync cooldown');
   t.setNow(131000);t.loads.push(loaded(session));await t.check();
   assert.equal(t.calls.syncs.length,2,'an existing frozen claim retains its 30 s sync cadence');
+}
+
+// A newer build's claim: the timer stops and the progress is saved, as for any
+// remote claim, but nothing here can follow it, so the app asks for an
+// update once and no sync is asked for.
+{
+  const t=harness();t.setClaim({...owned,newer:true});t.loads.push(loaded(session),good());t.saves.push(saved);
+  assert.equal(await t.check(),true);
+  assert.equal(t.calls.stops,1,'the timer stops');assert.equal(t.state().freeze.localVerified,true,'the progress is saved and read back');
+  assert.deepEqual(t.calls.syncs,[],'no sync is asked for');
+  assert.equal(t.calls.notices.length,1);assert.equal(t.calls.notices[0].title,'Update the app to continue');assert.match(t.calls.notices[0].message,/newer version of Study Director.*progress is saved.*Update the app/u);
+  t.calls.notices[0].action.run();assert.equal(t.calls.updates,1,'Update app looks for the new version');
+  t.setNow(200000);t.loads.push(loaded(session));assert.equal(await t.check(),true);
+  assert.equal(t.calls.stops,1);assert.equal(t.calls.notices.length,1,'it asks once');assert.deepEqual(t.calls.syncs,[]);
+}
+// The save failing first: the timer stays stopped and the update notice waits for a verified save.
+{
+  const t=harness();t.setClaim({...owned,newer:true});t.loads.push(loaded(session));t.saves.push(failed);
+  assert.equal(await t.check(),true);assert.equal(t.calls.stops,1);assert.equal(t.calls.notices.length,0);assert.match(t.state().warning,/Keep this tab open/u);
+  t.loads.push(loaded(session),good());t.saves.push(saved);assert.equal(await t.check(),true);
+  assert.equal(t.calls.notices.length,1,'asked once the progress is saved');assert.deepEqual(t.calls.syncs,[]);
 }
 
 // Failed, null, local-only and thrown writes keep the execution frozen and skip claim-triggered sync.

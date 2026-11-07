@@ -2938,6 +2938,14 @@ function resumeAfterReleasedSessionClaim(session){
     sessionClaimFreeze=null;setPlanStatus('✓ Session ownership remains on this device.');return true;
   }catch(error){AppDiagnostics.capture('session.claim-resume',error,'warn');return false;}
 }
+// Another device wrote today's ownership claim in a newer version's form:
+// it may be running the session. The timer here stopped and the progress is
+// saved; only an updated app can continue here.
+const SESSION_NEWER_CLAIM_MESSAGE='Another device runs a newer version of Study Director and may be running today’s session. The timer here stopped and your progress is saved. Update the app to continue here.';
+function notifyNewerSessionClaim(){
+  setPlanStatus(SESSION_NEWER_CLAIM_MESSAGE,false);
+  Interactions.notify({source:'session',kind:'warning',key:'session-newer-claim',title:'Update the app to continue',message:SESSION_NEWER_CLAIM_MESSAGE,action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
+}
 async function checkSessionOwnershipClaim(){
   if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
   if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
@@ -2966,8 +2974,12 @@ async function checkSessionOwnershipClaim(){
       // Retry the same frozen evidence; never add time spent waiting to study time.
       if(!sessionClaimFreeze.localVerified){
         if(!await verifyFrozenSessionClaim())return true;
-        setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
+        if(claim.newer)notifyNewerSessionClaim();
+        else setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
       }
+      // A newer build's claim: nothing here can follow it until the app is
+      // updated, so the timer stays stopped and no sync is asked for.
+      if(claim.newer)return true;
       const current=sessionClaimFreeze;
       if(current&&(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS)){
         sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
@@ -5657,6 +5669,7 @@ function sessionHandoffProblem(error){
   if(code==='SESSION_CONTINUE_NOT_CONNECTED')return 'Google Drive isn’t connected. Sign in from your profile, then try again.';
   if(code==='SESSION_CONTINUE_SYNC_REQUIRED')return 'Today’s shared session advanced. This device is syncing it first; retry Continue Here after sync.';
   if(code==='SESSION_CONTINUE_INCOMPLETE')return HANDOFF_RETRY_MESSAGE;
+  if(code==='REPOSITORY_SYNC_NEEDS_UPDATE')return String(error.message||'Update the app to continue here.');
   if(code==='REPOSITORY_SESSION_CLAIM_STALE')return 'Today’s session changed on another device. Wait for this device to catch up, then try again.';
   if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
   return String(error&&error.message||error||'Something went wrong.');

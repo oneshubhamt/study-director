@@ -106,8 +106,22 @@ await replaceLast({format:'study-director.active-session-claim',version:1,date:D
 const plainProjected=await a.readSessionClaim('google-drive');
 assert.equal(plainProjected.applies,true);assert.equal(plainProjected.ownedHere,true,'a plain claim naming this device reads as owned here');
 assert.equal(plainProjected.state,'owned');assert.equal(plainProjected.revision,51,'a plain v1 claim implies the next revision');
-await replaceLast({...oldValue,version:9});
+// A claim a newer build wrote (this format, a higher version) is not read:
+// it reads as owned elsewhere by a device this build cannot follow, and
+// Continue Here, sync and upload wait for an app update. Nothing is written.
+await replaceLast({...oldValue,version:9,someNewField:'x'});
+const newer=await b.readSessionClaim('google-drive');
+assert.deepEqual({...newer},{state:'owned',applies:true,ownedHere:false,newer:true,epoch:oldValue.epoch},'a newer claim reads as owned elsewhere, newer');
+assert.equal(b.diagnosticSync().find(row=>row.id==='google-drive')?.needsUpdate,true,'sync says the app needs an update');
+const filesBefore=files.size;
+await assert.rejects(()=>b.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:headId,handoffToken:OTHER_TOKEN,revision:57}),error=>error?.code==='REPOSITORY_SYNC_NEEDS_UPDATE'&&/newer version of Study Director\. Update this app to continue\./u.test(error.message),'Continue Here waits for an app update');
+assert.equal(files.size,filesBefore,'and writes no claim');
+const downloadsBefore=claimDownloads;await b.readSessionClaim('google-drive');assert.equal(claimDownloads,downloadsBefore,'an unchanged newer claim is not downloaded again');
+await replaceLast({...oldValue,format:'another.format',version:9});
 await assert.rejects(()=>b.readSessionClaim('google-drive'),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN','an unknown claim form is not guessed at');
+await replaceLast(oldValue);
+assert.equal((await b.readSessionClaim('google-drive')).newer,undefined,'a readable claim reads as before');
+assert.equal(b.diagnosticSync().find(row=>row.id==='google-drive')?.needsUpdate,false,'and the update notice goes');
 // Version 3 was written only by unreleased builds; it is refused like any unknown form.
 const v3Value={...oldValue,version:3};delete v3Value.handoffToken;
 await replaceLast(v3Value);
