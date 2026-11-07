@@ -147,6 +147,10 @@ let scrubCursor='',scrubScanId='',scrubChecked=0,scrubComplete=false;
 while(!scrubComplete){
   const progress=await runtime.repository.scrub([firstManifest],entry=>{scrubReadKinds.push(entry.kind);const blob=scrubObjectFiles.get(entry.objectId);if(!blob)throw new Error('missing scrub fixture object');return freeze({blob,release:async()=>{scrubReleased.push(entry.objectId);}});},{cursor:scrubCursor,scanId:scrubScanId,maxObjects:1,maxBytes:64*1024*1024});
   scrubChecked+=progress.checked;scrubCursor=progress.cursor;scrubScanId=progress.scanId;scrubComplete=progress.complete;
+  // Each run says how far the whole cycle has got, and a run that stops at
+  // its batch limit names that as the reason (it is not a failure).
+  assert.ok(progress.done>=1&&progress.done<=progress.total,'progress counts how many of all objects are done');
+  assert.equal(progress.reason,progress.complete?undefined:'budget',progress.complete?'a finished cycle gives no pause reason':'a batch stop is named');
 }
 const expectedScrubbed=firstManifest.objects.filter(entry=>entry.kind!=='activeSession');
 assert.equal(scrubChecked,expectedScrubbed.length,'integrity scrub must verify each stable repository object exactly once per cycle');

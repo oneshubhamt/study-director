@@ -864,7 +864,10 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
   // In a recheck, quarantine remaining before the attempted cursor records a
   // confirmed bad outcome. Healthy verified progress remains a separate cursor.
   let corruption=recheck&&rows.slice(0,index).some(({entry})=>quarantinedPresent.has(entry.objectId));
-  const progress=()=>freeze({complete:false,cursor:lastCursor,recheckCursor:lastRecheckCursor,scanId:currentScanId,partial:checkpoint,checked,checkedBytes,attempted,total:rows.length,quarantined:freeze([...quarantinedPresent]),...(recheck?{corruption}:{} )});
+  // done: how many of all total objects this cycle has passed, for the
+  // "Checking… 12 of 38" line; checked counts only this run's healthy ones.
+  let done=index;
+  const progress=()=>freeze({complete:false,cursor:lastCursor,recheckCursor:lastRecheckCursor,scanId:currentScanId,partial:checkpoint,checked,checkedBytes,attempted,done,total:rows.length,quarantined:freeze([...quarantinedPresent]),...(recheck?{corruption}:{} )});
   try{for(;index<rows.length;index+=1){
     throwIfImportAborted(signal);
     // A location that keeps its own checksum of each stored object (Drive)
@@ -902,11 +905,14 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
     checkpoint=null;attempted+=reported?0:1;attemptedBytes+=reported?0:Number(entry.storedBytes)||0;
     if(recheck)lastRecheckCursor=entry.objectId;
     if(healthy){quarantinedPresent.delete(entry.objectId);checked+=1;checkedBytes+=Number(entry.storedBytes)||0;lastCursor=entry.objectId;}
+    done=index+1;
     if(!reported&&typeof onProgress==='function')await onProgress(progress());
     await yieldTask({priority:'background'});
   }}catch(error){error.repositoryScrubCursor=lastCursor;error.repositoryScrubProgress=progress();throw error;}
   const complete=index>=rows.length;
-  return freeze({...progress(),complete,cursor:complete?'':lastCursor,recheckCursor:complete?'':lastRecheckCursor,...(recheck?{recheckComplete:complete,status:complete?corruption?'failed':'completed':'yielded',reason:corruption?'corrupt':''}:{})});
+  // A run that stops at its batch limit says so (budget): it continues in
+  // the next run, and diagnostics then name the pause instead of guessing.
+  return freeze({...progress(),complete,cursor:complete?'':lastCursor,recheckCursor:complete?'':lastRecheckCursor,...(!complete&&!recheck?{reason:'budget'}:{}),...(recheck?{recheckComplete:complete,status:complete?corruption?'failed':'completed':'yielded',reason:corruption?'corrupt':''}:{})});
 }
 function repositoryReadPort(readObject){
   if(typeof readObject!=='function')throw new TypeError('Repository restore requires an object reader.');

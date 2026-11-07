@@ -3279,6 +3279,11 @@ html,body,.app{max-width:100%;overflow-x:hidden}
 .backup-storage-state>.backup-status-meta~.backup-status-meta:not(:empty)::before{content:"· "}
 .library-danger>.mini-btn{flex:0 0 auto;white-space:nowrap}
 .backup-recheck[hidden]{display:none!important}
+/* Verification: a headline per location, then when it was last fully checked. */
+.verification-head{color:var(--sd-color-text-primary);font-weight:600}
+.verification-detail{display:block;color:var(--sd-color-text-secondary)}
+.verification-error .verification-head{color:var(--sd-color-danger,var(--sd-color-text-primary))}
+.verification-note{margin:4px 0 0;color:var(--sd-color-text-secondary);font-size:.92em}
 @media (min-width: 651px){
   #library-data .backup-security-group .backup-compact-row{grid-template-columns:minmax(max-content,.34fr) minmax(0,1fr)}
   #library-data .backup-location-heading{flex-wrap:nowrap}

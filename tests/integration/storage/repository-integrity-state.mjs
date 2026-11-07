@@ -93,10 +93,10 @@ await test('Drive executor quarantines confirmed corruption while retaining avai
   const source=fs.readFileSync('source/core/backup-provider.js','utf8'),start=source.indexOf('  async function runConfiguredIntegrityScrub('),end=source.indexOf('  async function backupRepositoryProvider(',start);
   let failure;const context={Object,String,freeze:Object.freeze,integrityScrubHooks:{},repositoryProviderObjectIds:rows=>Object.freeze([...new Set(rows)]),AppDiagnostics:{capture(){}},scrubRepositoryProvider:async()=>{throw failure;}};
   vm.createContext(context);vm.runInContext(source.slice(start,end),context);
-  for(const [code,name,status,quarantine] of [['DRIVE_TIMEOUT','Error','unavailable',false],['NotAllowedError','NotAllowedError','unavailable',false],['BACKUP_LOCKED','Error','unavailable',false],['REPOSITORY_INTEGRITY_CORRUPT','Error','failed',true],['REPOSITORY_OBJECT_MISSING','Error','failed',true],['REPOSITORY_INTEGRITY_BUDGET','AbortError','yielded',false]]){
+  for(const [code,name,status,quarantine,reason] of [['DRIVE_TIMEOUT','Error','unavailable',false,'unavailable'],['NotAllowedError','NotAllowedError','unavailable',false,'permission'],['FILE_BUSY','NotReadableError','unavailable',false,'busy'],['BACKUP_LOCKED','Error','unavailable',false,'locked'],['REPOSITORY_INTEGRITY_CORRUPT','Error','failed',true,'unavailable'],['REPOSITORY_OBJECT_MISSING','Error','failed',true,'unavailable'],['REPOSITORY_INTEGRITY_BUDGET','AbortError','yielded',false,'budget']]){
     failure=Object.assign(new Error('test failure'),{code,name,repositoryObjectId:objectId('d'),repositoryScrubProgress:{cursor:objectId('e'),scanId,checked:1,quarantined:[objectId('c')]}});
     const result=await context.runConfiguredIntegrityScrub({id:'google-drive',repository:{}},{repositoryScope:'drive-one',skipObjectIds:[objectId('c')]});
-    assert.equal(result.status,status,code);assert.equal(result.repositoryScope,'drive-one');assert.equal(result.cursor,objectId('e'));assert.equal(result.scanId,scanId);assert.equal(result.quarantined.includes(objectId('d')),quarantine,code);assert.ok(result.quarantined.includes(objectId('c')));
+    assert.equal(result.status,status,code);assert.equal(result.reason,reason,code+': a failure is named by its kind, never by its message');assert.equal(result.repositoryScope,'drive-one');assert.equal(result.cursor,objectId('e'));assert.equal(result.scanId,scanId);assert.equal(result.quarantined.includes(objectId('d')),quarantine,code);assert.ok(result.quarantined.includes(objectId('c')));
   }
 });
 await test('the ordinary validator accepts only the current record; older versions belong to the compatibility host',async()=>{
@@ -118,7 +118,7 @@ await test('the ordinary validator accepts only the current record; older versio
 });
 await test('the recheck action is scoped, retains quarantine, and requires write control',async()=>{
  const h=fixture(),queued=[];h.context.BackupProviderRuntime.locationStatus=()=>({connected:true});h.context.BackupProviderRuntime.requestIntegrity=id=>queued.push(id);h.context.setStatus=()=>{};
- const start=app.indexOf('async function requestRepositoryIntegrityRecheck('),end=app.indexOf('const ATTACHMENT_INTEGRITY_META_KEY=',start);vm.runInContext(app.slice(start,end),h.context);
+ const start=app.indexOf('async function requestRepositoryIntegrityRecheck('),end=app.indexOf('const ATTACHMENT_INTEGRITY_META_KEY=',start);vm.runInContext('const integrityRowError={},integrityRecheckAsked={};'+app.slice(start,end),h.context);
  await h.context.mutateRepositoryIntegrityTarget('google-drive',current=>({...current,recheck:true,recheckCursor:objectId('c')}));
  assert.equal(await h.context.requestRepositoryIntegrityRecheck('google-drive'),true);assert.equal(h.state.durable.locations['google-drive'].recheckCursor,'');assert.equal(queued[0],'google-drive');assert.equal(h.state.durable.locations['google-drive'].recheck,true);assert.ok(h.state.durable.locations['google-drive'].requestId);assert.equal(h.state.durable.locations['google-drive'].quarantinedObjectIds.length,1);
  const before=h.state.durable;h.state.owner=false;assert.equal(await h.context.requestRepositoryIntegrityRecheck('device-folder'),false);assert.equal(h.state.durable,before);
@@ -164,12 +164,51 @@ await test('a full unhealthy recheck ends its request and retains an explicit co
  await h.context.updateRepositoryIntegrityTarget('google-drive',{...base,complete:true,recheckComplete:true});const value=h.state.durable.locations['google-drive'];
  assert.equal(value.recheck,false);assert.equal(value.recheckCursor,'');assert.equal(value.cursor,'');assert.equal(value.scanId,'');assert.equal(value.partial,null);assert.ok(value.failedAt);assert.equal(value.completedAt,value.failedAt);assert.equal(value.lastOutcome,'failed');assert.equal(value.blockedReason,'corrupt');assert.equal(value.quarantinedObjectIds.length,1);assert.equal(value.history.at(-1).complete,true);assert.equal(h.state.health.at(-1).kind,'warn');
 });
-await test('recheck status distinguishes pending corruption, unavailability and terminal findings',async()=>{
- const h=fixture();vm.runInContext(app.slice(app.indexOf('function integrityStatusText('),app.indexOf('function renderIntegrityStatuses(')),h.context);
- assert.match(h.context.integrityStatusText({recheck:true,blockedReason:'corrupt'}),/^Recheck continuing; some objects remain corrupt/u);
- assert.match(h.context.integrityStatusText({recheck:true,lastOutcome:'unavailable',quarantinedObjectIds:[objectId('c')]}),/^Verification unavailable; previous findings retained/u);
- assert.match(h.context.integrityStatusText({recheck:false,lastOutcome:'failed',blockedReason:'corrupt',completedAt:stamp,quarantinedObjectIds:[objectId('c')]}),/^Objects need attention.*Last full scan/u);
- assert.match(h.context.integrityStatusText({recheck:true,blockedReason:'locked'}),/^Paused until backup encryption is unlocked/u);
+await test('Verification says in plain words what is happening and what the last result was',async()=>{
+ const h=fixture();vm.runInContext(app.slice(app.indexOf('const integrityLive='),app.indexOf('function renderIntegrityStatuses(')),h.context);
+ const text=(value,options)=>h.context.integrityStatusText(value,options);
+ assert.match(text({recheck:true,blockedReason:'corrupt'}),/^Recheck continuing; some backup files are still damaged/u);
+ assert.match(text({recheck:true,lastOutcome:'unavailable',quarantinedObjectIds:[objectId('c')]}),/^Recheck could not run this time; it will try again/u);
+ assert.match(text({recheck:false,lastOutcome:'failed',blockedReason:'corrupt',completedAt:stamp,quarantinedObjectIds:[objectId('c')]}),/^1 damaged backup file; the next backup writes fresh copies · Last full check: /u);
+ assert.match(text({recheck:true,blockedReason:'locked'}),/^Paused until backup encryption is unlocked/u);
+ assert.match(text({blockedReason:'preempted',completedAt:stamp}),/^Paused while another backup task runs; continues by itself · Last full check: /u);
+ assert.match(text({lastOutcome:'completed',completedAt:stamp},{running:true,live:{done:3,total:20}}),/^Checking… 3 of 20 backup files · Last full check: /u,'a running check shows its progress');
+ assert.match(text({cursor:objectId('d'),cycleStartedAt:stamp}),/^Checking in small steps; continues by itself · No full check yet/u,'between batches it says it continues');
+ assert.match(text({recheck:true}),/^Recheck requested; starts in a moment/u);
+ assert.match(text({lastOutcome:'completed',completedAt:stamp}),/^All backup files intact · Last full check: /u,'the final result is stated');
+ assert.match(text({checkedAt:stamp},{shallow:true}),/^All attachments present · Last full check: .* · File contents are not checked\.$/u);
+ assert.match(text({}),/^Not checked yet · No full check yet/u);
+});
+await test('Recheck answers at once in its own row, and a failure shows there',async()=>{
+ const h=fixture(),elements=new Map(),node=id=>{if(!elements.has(id))elements.set(id,{id,hidden:true,disabled:false,textContent:'',attrs:{},children:[],classes:new Set(),
+   setAttribute(key,value){this.attrs[key]=value;},replaceChildren(...children){this.children=children;this.textContent=children.map(child=>child.textContent).join('');},
+   classList:{toggle:(name,on)=>{const el=elements.get(id);if(on)el.classes.add(name);else el.classes.delete(name);}}});return elements.get(id);};
+ let jobs=[],location={repositoryScope:'drive-one',recheck:false,lastOutcome:'completed',completedAt:stamp,quarantinedObjectIds:[]};
+ Object.assign(h.context,{document:{getElementById:node,createElement:()=>({textContent:'',className:''})},
+   BackupProviderRuntime:{backgroundStatus:()=>jobs,locationStatus:()=>({connected:true}),requestIntegrity:()=>true},
+   appCanMutate:()=>true,attachmentIntegrityView:null,repositoryIntegrityBoundScopes:{'google-drive':'drive-one'}});
+ vm.runInContext('var repositoryIntegrityView;'+app.slice(app.indexOf('const integrityLive='),app.indexOf('const ATTACHMENT_INTEGRITY_META_KEY=')),h.context);
+ h.context.repositoryIntegrityView={locations:{'google-drive':location}};
+ h.context.readRepositoryIntegrityTarget=async()=>({repositoryScope:'drive-one'});
+ h.context.mutateRepositoryIntegrityTarget=async(_target,change)=>{location=change(location);h.context.repositoryIntegrityView={locations:{'google-drive':location}};h.context.renderIntegrityStatuses();return location;};
+ h.context.renderIntegrityStatuses();
+ const row=()=>node('drive-verification-status').textContent,button=node('recheck-google-drive');
+ assert.match(row(),/^Google Drive: All backup files intact/u);assert.equal(button.hidden,false);assert.equal(button.textContent,'Recheck Google Drive');
+ const asked=h.context.requestRepositoryIntegrityRecheck('google-drive');
+ assert.equal(button.disabled,true,'the button answers before anything is awaited');assert.equal(button.textContent,'Rechecking…');
+ assert.equal(await asked,true);assert.match(row(),/^Google Drive: Recheck requested; starts in a moment/u);assert.equal(button.disabled,true);
+ jobs=[{job:'google-drive integrity',running:true}];vm.runInContext("integrityLive['google-drive']={done:5,total:38}",h.context);h.context.renderIntegrityStatuses();
+ assert.match(row(),/^Google Drive: Checking… 5 of 38 backup files/u,'progress shows while it runs');
+ jobs=[];location={...location,recheck:false,cursor:objectId('d'),cycleStartedAt:stamp};h.context.repositoryIntegrityView={locations:{'google-drive':location}};h.context.renderIntegrityStatuses();
+ assert.match(row(),/^Google Drive: Checking in small steps; 5 of 38 backup files so far; continues by itself/u,'between batches it keeps how far it got');
+ vm.runInContext("delete integrityLive['google-drive']",h.context);
+ jobs=[];location={...location,recheck:false,lastOutcome:'completed',completedAt:new Date().toISOString(),cursor:'',recheckCursor:'',scanId:'',partial:null,cycleStartedAt:''};h.context.repositoryIntegrityView={locations:{'google-drive':location}};h.context.renderIntegrityStatuses();
+ assert.match(row(),/^Google Drive: All backup files intact Last full check: /u,'the final result replaces the progress');
+ assert.equal(button.disabled,false);assert.equal(button.textContent,'Recheck Google Drive');
+ h.context.BackupProviderRuntime.locationStatus=()=>({connected:false});
+ assert.equal(await h.context.requestRepositoryIntegrityRecheck('google-drive'),false);
+ assert.match(row(),/^Google Drive: Recheck did not start: Connect Google Drive before rechecking it\./u,'a failure shows in the row itself');
+ assert.equal(node('drive-verification-status').classes.has('verification-error'),true);assert.equal(button.disabled,false);
 });
 await test('activation refreshes Device permission without owning integrity scheduling',async()=>{
  const start=app.indexOf('async function refreshDeviceBackgroundPermission('),source=app.slice(start,app.indexOf('AppActivation.subscribe(',start));

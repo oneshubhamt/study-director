@@ -1243,7 +1243,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <span class="backup-status-meta">Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
                 </div>
               </div>
-              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-device-folder" type="button" data-action="recheck-device-integrity" hidden>Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-google-drive" type="button" data-action="recheck-drive-integrity" hidden>Recheck Google Drive</button></div>
+              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-device-folder" type="button" data-action="recheck-device-integrity" hidden>Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-google-drive" type="button" data-action="recheck-drive-integrity" hidden>Recheck Google Drive</button><p class="verification-note">Today’s live session is not part of these checks.</p></div>
               <div class="backup-compact-row backup-diagnostics-row">
                 <span class="backup-location-heading"><span class="ui-label">Data and backup diagnostics</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="backup-diagnostics-info" aria-label="About data and backup diagnostics" aria-expanded="false" aria-controls="backup-diagnostics-info">i</button><span class="pnote-info-popover" id="backup-diagnostics-info" role="note" hidden>Copies storage-health observations, backup and recovery stages, verification progress and pending cleanup for troubleshooting. Study content, note text, attachment names and backup payloads are not included.</span></span></span>
                 <div class="backup-security-state"><button class="mini-btn ui-btn" id="copy-backup-diagnostics" type="button" data-action="copy-backup-diagnostics">Copy diagnostics</button><span class="backup-status-meta" id="backup-diagnostics-status" role="status" aria-live="polite"></span></div>
@@ -9524,33 +9524,69 @@ const RichTextAttachmentPort=Object.freeze({upload:async(file,options={})=>{cons
 invalidateAttachmentLibrary=()=>AttachmentLibrary.invalidate();
 
 let attachmentIntegrityView=null,repositoryIntegrityView=null;const repositoryIntegrityBoundScopes=Object.create(null);
-function integrityStatusText(target,{shallow=false}={}){
-  const value=target||{},completed=value.completedAt||value.checkedAt||'',partial=value.partial||value.progress||value.cursor||value.cycleStartedAt;
-  const state=value.blockedReason==='locked'?'Paused until backup encryption is unlocked':value.blockedReason==='preempted'?'Paused for foreground work':value.lastOutcome==='unavailable'?'Verification unavailable; previous findings retained':value.recheck?value.blockedReason==='corrupt'?'Recheck continuing; some objects remain corrupt':'Recheck requested':value.quarantinedObjectIds?.length?'Objects need attention':partial?'Partly checked; will continue':completed?'Checked':'Not yet checked';
-  const progress=value.partial?` · ${Math.floor(value.partial.stored.offset/1048576)} of ${Math.ceil(value.partial.storedBytes/1048576)} MB downloaded${value.partial.phase==='plain'?'; verifying decrypted content':''}`:value.progress?` · ${value.progress.cursor} of ${value.progress.total} records`:'';
-  const history=completed?` · Last full ${shallow?'presence and size check':'scan'}: ${new Date(completed).toLocaleString()}`:'';
-  const quarantine=value.quarantinedObjectIds?.length?` · ${value.quarantinedObjectIds.length} quarantined object(s)`:'';
-  return state+progress+history+quarantine+(shallow?' · File contents are not checked.':' · Active sessions are excluded.');
+// Verification, one location per row: a plain headline for what is happening
+// now or the last result, then when the last full check finished. A running
+// check reports its progress live (integrityLive); a Recheck answers at once.
+const integrityLive=Object.create(null),integrityRecheckAsked=Object.create(null),integrityRowError=Object.create(null);
+function integrityStatus(target,{shallow=false,running=false,live=null}={}){
+  const value=target||{},completed=value.completedAt||value.checkedAt||'',files=shallow?'attachments':'backup files';
+  const between=!!(value.partial||value.progress||value.cursor||value.cycleStartedAt),damaged=value.quarantinedObjectIds?.length||0;
+  const count=live&&Number.isFinite(live.total)&&live.total>0?` ${Math.min(live.done||0,live.total)} of ${live.total} ${files}`:'';
+  const head=running?`Checking…${count}`
+    :value.blockedReason==='locked'?'Paused until backup encryption is unlocked'
+    :value.blockedReason==='preempted'?'Paused while another backup task runs; continues by itself'
+    :value.lastOutcome==='unavailable'?(value.recheck?'Recheck could not run this time; it will try again':'Could not check this time; it will try again')
+    :value.recheck?(value.blockedReason==='corrupt'?`Recheck continuing; some ${files} are still damaged`:'Recheck requested; starts in a moment')
+    :damaged?`${damaged} damaged backup file${damaged===1?'':'s'}; the next backup writes fresh copies`
+    :between?`Checking in small steps${count?`;${count} so far`:''}; continues by itself`
+    :completed?(shallow?'All attachments present':`All ${files} intact`)
+    :'Not checked yet';
+  const parts=[completed?`Last full check: ${new Date(completed).toLocaleString()}`:'No full check yet'];
+  if(value.partial)parts.push(`${Math.floor(value.partial.stored.offset/1048576)} of ${Math.ceil(value.partial.storedBytes/1048576)} MB of a large file read${value.partial.phase==='plain'?'; checking its decrypted content':''}`);
+  else if(value.progress)parts.push(`${value.progress.cursor} of ${value.progress.total} records`);
+  if(damaged&&value.recheck)parts.push(`${damaged} damaged`);
+  if(shallow)parts.push('File contents are not checked.');
+  return Object.freeze({head,detail:parts.join(' · ')});
 }
+// Kept for diagnostics-style callers: the headline and its detail in one line.
+function integrityStatusText(target,options={}){const status=integrityStatus(target,options);return status.head+' · '+status.detail;}
 function renderIntegrityStatuses(){
+  let jobs=[];try{jobs=BackupProviderRuntime.backgroundStatus();}catch{jobs=[];}
   for(const [id,label,location] of [['attachment-verification-status','Attachment presence and size',''],['device-verification-status','Device Folder','device-folder'],['drive-verification-status','Google Drive','google-drive']]){
     const element=document.getElementById(id);if(!element)continue;
     const value=location?repositoryIntegrityView?.locations?.[location]:attachmentIntegrityView,bound=!location||value?.repositoryScope&&repositoryIntegrityBoundScopes[location]===value.repositoryScope;
-    element.textContent=label+': '+(bound?integrityStatusText(value,{shallow:!location}):'Awaiting connection to the repository; no current scan confirmed.');
-    // Recheck is offered only for a location this device is connected to.
-    const recheck=location&&document.getElementById('recheck-'+location);if(recheck)recheck.hidden=!bound;
+    const running=!!location&&jobs.some(row=>row.job===location+' integrity'&&row.running===true);
+    if(location&&value?.recheck)integrityRecheckAsked[location]=false;
+    const status=bound?integrityStatus(value,{shallow:!location,running,live:location?integrityLive[location]:null}):Object.freeze({head:'Not connected',detail:'Connect it to check its backups.'});
+    const error=location?integrityRowError[location]||'':'';
+    const name=document.createElement('strong'),head=document.createElement('span'),detail=document.createElement('span');
+    name.textContent=label+': ';head.className='verification-head';head.textContent=error||status.head;
+    detail.className='verification-detail';detail.textContent=' '+status.detail;
+    element.classList.toggle('verification-error',!!error);element.replaceChildren(name,head,detail);
+    // Recheck is offered only for a location this device is connected to,
+    // and says it is working until the recheck finishes.
+    const recheck=location&&document.getElementById('recheck-'+location);
+    if(recheck){
+      const busy=bound&&(integrityRecheckAsked[location]===true||value?.recheck===true);
+      recheck.hidden=!bound;recheck.disabled=busy;recheck.setAttribute('aria-busy',busy?'true':'false');
+      const text=busy?'Rechecking…':`Recheck ${label}`;if(recheck.textContent!==text)recheck.textContent=text;
+    }
   }
 }
 async function requestRepositoryIntegrityRecheck(target){
   const label=target==='device-folder'?'Device Folder':'Google Drive';
+  integrityRowError[target]='';integrityRecheckAsked[target]=true;renderIntegrityStatuses();
   try{
     if(!appCanMutate())throw new Error('Use the primary tab to request backup verification.');
     if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error(`Connect ${label} before rechecking it.`);
     const bound=await readRepositoryIntegrityTarget(target);
     await mutateRepositoryIntegrityTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw repositoryIntegrityChanged();return {...current,requestId:crypto.randomUUID(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:new Date().toISOString()};});
     BackupProviderRuntime.requestIntegrity(target);
-    setStatus('library-status',`${label} recheck started. The result appears under Verification.`);return true;
-  }catch(error){setStatus('library-status',String(error?.message||error),false);AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
+    renderIntegrityStatuses();return true;
+  }catch(error){
+    integrityRecheckAsked[target]=false;integrityRowError[target]=`Recheck did not start: ${String(error?.message||error)}`;renderIntegrityStatuses();
+    AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;
+  }
 }
 const ATTACHMENT_INTEGRITY_META_KEY=APP_META_KEYS.attachmentIntegrityAudit;
 const ATTACHMENT_INTEGRITY_INTERVAL_MS=24*60*60*1000;
@@ -10792,8 +10828,9 @@ BackupProviderRuntime.configureSessionOwnership(Object.freeze({
 // Each location's integrity state is kept under its location id.
 BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
   readTarget:id=>readRepositoryIntegrityTarget(id),
-  writeResult:async(id,result)=>{await updateRepositoryIntegrityTarget(id,result);},
-  prepare:async(id,target,{trigger,nextEligibleAt})=>Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>updateRepositoryIntegrityTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId})}),
+  // How far the cycle has got stays shown between its batches, until it finishes.
+  writeResult:async(id,result)=>{if(result?.complete===true||!Number(result?.total))delete integrityLive[id];else integrityLive[id]=Object.freeze({done:Number(result.done)||0,total:Number(result.total)});await updateRepositoryIntegrityTarget(id,result);},
+  prepare:async(id,target,{trigger,nextEligibleAt})=>Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>{integrityLive[id]=Object.freeze({done:Number(progress?.done)||0,total:Number(progress?.total)||0});renderIntegrityStatuses();return updateRepositoryIntegrityTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId});}}),
   isAvailable:()=>backgroundBlocker()||true,
   isUnsafe:()=>!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy,
   yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),
@@ -11832,6 +11869,8 @@ function installApplicationDomBindings(){
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
   BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
+  // A check starting or stopping updates Verification as it happens.
+  BackupProviderRuntime.subscribeStatus(renderIntegrityStatuses);
   // The indicator also follows the network and keeps its times current.
   for(const type of ['online','offline'])window.addEventListener(type,scheduleSyncStatus);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleSyncStatus();});

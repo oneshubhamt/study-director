@@ -1773,7 +1773,10 @@ registry.define('backup-provider',1,input=>{
       const corrupt=['REPOSITORY_INTEGRITY_CORRUPT','REPOSITORY_OBJECT_MISSING'].includes(error?.code);
       const objectId=/^obj_[a-f0-9]{32}$/u.test(String(error?.repositoryObjectId||''))?String(error.repositoryObjectId):'';
       const progress=error.repositoryScrubProgress||{},prior=progress.quarantined||preparedOptions.skipObjectIds||[];
-      result=freeze({...progress,status:yielded?'yielded':corrupt?'failed':'unavailable',reason:yielded?(budgeted?'budget':'preempted'):locked?'locked':String(error?.message||error),
+      // A failed read is named by its kind, never by its message: a permission
+      // the browser withdrew, a file in use, or the location being unavailable.
+      const failure=['NotAllowedError','SecurityError'].includes(error?.name)?'permission':['NotReadableError','InvalidStateError','NoModificationAllowedError'].includes(error?.name)?'busy':'unavailable';
+      result=freeze({...progress,status:yielded?'yielded':corrupt?'failed':'unavailable',reason:yielded?(budgeted?'budget':'preempted'):locked?'locked':failure,
         objectId,objectKind:String(error?.repositoryObjectKind||''),corruption:corrupt,quarantined:repositoryProviderObjectIds([...prior,...(corrupt&&objectId?[objectId]:[])]),
         repaired:error?.repositoryRepaired===true,repairCheckpointId:String(error?.repositoryRepairCheckpointId||''),repairError:String(error?.repositoryRepairError||'')});
       if(!yielded)AppDiagnostics.capture('backup-provider.repository-integrity',error,'warn');
