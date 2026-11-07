@@ -165,12 +165,14 @@ registry.define('repositories',1,()=>{
     let changeClockMs=0;
     function nextChangeAt(){changeClockMs=Math.max(Date.now(),changeClockMs+1);return new Date(changeClockMs).toISOString();}
     function seedChangeClock(value){const ms=Date.parse(String(value||''));if(Number.isFinite(ms))changeClockMs=Math.max(changeClockMs,ms);return changeClockMs?new Date(changeClockMs).toISOString():'';}
-    function reportCanonicalCommit(entityType,operation='upsert',value=null,{backupCapture=false}={}){
+    // startup: written by the start-up compatibility step, not by the person
+    // or a sync.
+    function reportCanonicalCommit(entityType,operation='upsert',value=null,{backupCapture=false,startup=false}={}){
       try{
         onCanonicalCommit(freeze({
           format:'study-director.canonical-commit',contractVersion:1,
           entityType:String(entityType||''),operation:operation==='delete'?'delete':'upsert',
-          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true
+          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true,startup:startup===true
         }));
       }catch(error){capture('repository.canonical-commit-hook',error,'error');}
     }
@@ -435,7 +437,7 @@ function writePlanMeta(family,value,{strictDurability=false,ownershipToken=null,
   return Meta.transaction('readwrite',(meta,tx,finish)=>{
     assertWriteToken(token,'save plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const request=meta.put(family,value);request.onerror=()=>finish(false,request.error||new Error('plan document write failed'));
     request.onsuccess=()=>{try{assertWriteToken(token,'save plan documents');}catch(error){try{tx.abort();}catch{}finish(false,error);}};
-    tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture});finish(true);};
+    tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture,startup:allowHydrating===true});finish(true);};
   },{strict:strictDurability,abortMessage:'plan document write aborted'});
 }
 const planData=freeze({

@@ -71,4 +71,17 @@ let stored;const health=context.createStorageHealthController({getJson:()=>null,
 let state=health.issue('repositoryIntegrity','Verification is unavailable. Previous findings are retained.',{level:'warn'});assert.equal(state.issues[0].label,'Backup verification');assert.equal(state.issues[0].level,'warn');
 health.issue('attachmentIntegrity','Attachment verification is unavailable.',{level:'warn'});assert.equal(stored,undefined,'an issue writes nothing to browser storage');
 state=health.recover('repositoryIntegrity');assert.equal(state.issues.some(row=>row.source==='repositoryIntegrity'),false);assert.equal(state.issues.length,1);
+// Two tabs share one record. A tab holding an older copy never moves a save
+// time back, whichever way it writes; the clear marker keeps its own rule.
+{
+  const shared=new Map(),local={getJson:key=>shared.has(key)?structuredClone(shared.get(key)):null,setJson:(key,value)=>{shared.set(key,structuredClone(value));return true;}};
+  const older=context.createStorageHealthController(local),newer=context.createStorageHealthController(local),record=()=>shared.get('health');
+  newer.updateHistory({lastLocalSaveAt:'2026-11-07T10:00:00.000Z'});newer.recover('notes',{lastStudyDataSaveAt:'2026-11-07T10:00:00.000Z'});
+  older.updateHistory({lastLocalSaveAt:'2026-11-07T09:00:00.000Z'});
+  assert.deepEqual([record().lastLocalSaveAt,record().lastStudyDataSaveAt],['2026-11-07T10:00:00.000Z','2026-11-07T10:00:00.000Z'],'an older tab keeps the later save times');
+  older.issue('indexedDB','The browser database failed.');assert.equal(record().lastStudyDataSaveAt,'2026-11-07T10:00:00.000Z','a database failure in an older tab does not erase that study data was saved');
+  assert.equal(older.snapshot().lastStudyDataSaveAt,'2026-11-07T10:00:00.000Z','and that tab now knows the later time');
+  older.updateHistory({lastLocalSaveAt:'2026-11-07T11:00:00.000Z'});assert.equal(record().lastLocalSaveAt,'2026-11-07T11:00:00.000Z','a later save still moves the time forward');
+  newer.updateHistory({browserDataClearedAt:'2026-11-07T12:00:00.000Z'});older.updateHistory({lastLocalSaveAt:'2026-11-07T12:30:00.000Z'});assert.equal(record().browserDataClearedAt,'2026-11-07T12:00:00.000Z','an unresolved clear set by another tab is kept');
+}
 console.log(JSON.stringify({status:'PASS',suite:'background-diagnostics',currentStates:true,clipboardSuccessAndFailure:true,privateContentExcluded:true,verificationLabels:true},null,2));

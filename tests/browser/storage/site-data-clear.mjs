@@ -119,6 +119,10 @@ try{
       page=await browser.createPage(appUrl,{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});
       await waitForStudyDirector(page,{instrumented:true});
       await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'primary ownership'});
+      await page.evaluate(`new Promise(resolve=>setTimeout(resolve,1500))`);
+      assert.equal(await page.evaluate(`__PWA6.readStorageHealth().lastStudyDataSaveAt`),null,'a fresh install records no study data on its own');
+      await page.evaluate(`__PWA6.AppData.planData.writeLibrary({savedPlans:[{id:'plan-closedqa',label:'ClosedQA plan',scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}],defaultId:null})`);
+      assert.ok(await page.evaluate(`!!__PWA6.readStorageHealth().lastStudyDataSaveAt`),'saving only a plan records that study data was saved here');
       await page.evaluate(startSession('ClosedQA'));
       assert.ok(await page.evaluate(`!!__PWA6.readStorageHealth().lastStudyDataSaveAt`),'saving notes records that study data was saved here');
       noRuntimeErrors(page);await browser.closePage(page);page=null;

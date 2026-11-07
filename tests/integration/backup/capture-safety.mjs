@@ -258,6 +258,7 @@ for(const rescued of [false,true]){
       AppData:{local:{getJson:()=>({...health})}},STORAGE_KEYS:{storageHealth:'health'},
       beginStorageResetHold:clearedAt=>{const hold={clearedAt,reloaded:false};calls.holds.push(hold);return hold;},
       showStorageResetDecision:()=>{calls.decisions++;},
+      storageResetConnectionsChanged:()=>{calls.connections=(calls.connections||0)+1;return false;},
       AppDiagnostics:{capture:(...args)=>calls.diagnostics.push(args)}
     };
     vm.createContext(sandbox);
@@ -269,6 +270,7 @@ for(const rescued of [false,true]){
   assert.ok(Number.isFinite(Date.parse(lost.health.browserDataClearedAt)),'it is recorded, so a reload brings the notice back');
   assert.equal(lost.calls.holds.length,1);assert.equal(lost.calls.holds[0].clearedAt,lost.health.browserDataClearedAt);
   assert.equal(lost.calls.holds[0].reloaded,true);assert.equal(lost.calls.decisions,1,'the restore notice is shown at once');
+  assert.equal(lost.calls.connections,1,'a Drive sign-in kept from before the clear is checked at once');
   assert.ok(lost.calls.diagnostics.some(row=>row[0]==='storage.idb-missing-at-start'));
   for(const [label,state] of [['a fresh install',{fresh:true,saved:false}],['a database that was already here',{fresh:false,saved:true}],['a secondary tab',{fresh:true,saved:true,primary:false}]]){
     const result=run(state);
