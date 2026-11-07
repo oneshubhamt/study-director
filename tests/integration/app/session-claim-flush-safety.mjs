@@ -251,7 +251,7 @@ const acquireRuntime=[
 ].join('\n');
 function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
   const previous={date:'2026-10-27',runningOn:'inst_handoff_old',revision:10,status:'active',snapshot:{label:'original'},scheduleText:'07:00 | 30 | Work | work | Ethics | block | 1'};
-  let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,canMutate=true,readbackFailed=false,conditionalWrites=0;
+  const syncs=[];let current=structuredClone(previous),claims=0,compensations=0,backgroundReleases=0,notify=0,faultMode=fault,remoteClaim=null,head='cp_'+'a'.repeat(32),remoteSource=previous,id=0,canMutate=true,readbackFailed=false,conditionalWrites=0;
   const storage=new Map();
   const app={
     document:{getElementById:id=>id==='plan-input'?{value:faultMode==='display-mismatch'?'UNSAVED-UNMATCHED':draft===null?'FALLBACK DEFAULT':draft}:null},
@@ -301,7 +301,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     BackupProviderRuntime:{
       connected:()=>true,
       readSessionClaim:async()=>remoteClaim,
-      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:remoteSource?.runningOn==='inst_handoff_next'?'c'.repeat(64):remoteSource?.runningOn==='inst_handoff_new'?'d'.repeat(64):'e'.repeat(64),session:remoteSource}),
+      readSessionHandoffSource:async()=>({status:'completed',checkpointId:head,observedOwnerToken:remoteSource?.runningOn==='inst_handoff_next'?'c'.repeat(64):remoteSource?.runningOn==='inst_handoff_new'?'d'.repeat(64):'e'.repeat(64),session:remoteSource,priorClaim:remoteClaim}),
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>{backgroundReleases++;}}),
       claimSessionOwnership:async(_provider,request)=>{
         if(faultMode==='claim-busy')return {status:'busy',reason:'busy'};
@@ -322,7 +322,7 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
           revision:previous.revision,observedContentFingerprint:''};
         return true;
       },
-      wakeBackground:()=>true,scheduleSharedSync:()=>true
+      wakeBackground:()=>true,scheduleSharedSync:(_id,reason)=>{syncs.push(reason);return true;}
     }
   };
   let context;
@@ -335,11 +335,12 @@ function acquiringHarness(fault='',draft='SEPARATE-PLAN-DRAFT'){
     setFault:value=>{faultMode=value;},setHead:value=>{head=value;},setSourceSession:value=>{remoteSource=value;},setCanMutate:value=>{canMutate=value;},
     setCurrent:value=>{current=structuredClone(value);},setClaim:value=>{remoteClaim=value;},
     setOffline:value=>{app.navigator.onLine=!value;},
-    state:()=>({current,claim:remoteClaim,claims,compensations,conditionalWrites,backgroundReleases,notify,marker:storage.get('test-session-handoff')||null})};
+    state:()=>({current,claim:remoteClaim,claims,compensations,conditionalWrites,backgroundReleases,notify,syncs:[...syncs],marker:storage.get('test-session-handoff')||null})};
 }
 {
   const t=acquiringHarness();
   const result=await t.transfer(),state=t.state();
+  assert.deepEqual(state.syncs,['session-continue'],'once the session moves, notes and everything else sync at once in the background');
   assert.equal(result.session.runningOn,'inst_handoff_new');
   assert.equal(state.current.runningOn,'inst_handoff_new');
   assert.equal(state.claims,1);
@@ -583,6 +584,29 @@ function supersedeHandoff(t){
   assert.equal(await t.recover(),true);
   assert.equal(t.state().current.runningOn,'inst_handoff_old');
   assert.equal(t.state().claims,1);
+}
+// The usual case: this device's copy is behind the owner's, because the owner
+// kept studying after this device last synced. When the owner's claim shows it
+// took over from exactly this device's copy, the newer session is taken first
+// and ownership moves, in the same Continue Here.
+{
+  const t=acquiringHarness(),ahead={...t.previous,revision:12,snapshot:{label:'more study on the other device'}};
+  t.setSourceSession(ahead);
+  t.setClaim({epoch:3,state:'owned',applies:true,ownedHere:false,ownerToken:'e'.repeat(64),observedOwnerToken:'d'.repeat(64),
+    observedRevision:9,revision:10,observedContentFingerprint:'f'.repeat(64),handoffToken:'99999999-9999-4999-8999-999999999999'});
+  const result=await t.transfer();
+  assert.equal(result.session.runningOn,'inst_handoff_new','the handoff completes without a separate sync');
+  assert.equal(result.session.snapshot.label,'more study on the other device','the owner\'s later study comes with it');
+  assert.equal(t.state().claims,1);
+}
+{
+  // Without a claim that proves it, a newer copy is synced first.
+  const t=acquiringHarness();
+  t.setSourceSession({...t.previous,revision:12,snapshot:{label:'more study on the other device'}});
+  await assert.rejects(t.transfer(),error=>error?.code==='SESSION_CONTINUE_SYNC_REQUIRED');
+  assert.deepEqual(t.state().syncs,['session-handoff-source-advanced'],'a sync starts at once so Continue Here can be tried again');
+  assert.equal(t.state().claims,0,'nothing is claimed');
+  assert.equal(t.state().marker,null,'and no marker is left');
 }
 // An interrupted Continue Here must never lock this device's timer for good.
 // When Drive does not name this device as the owner and this device is not

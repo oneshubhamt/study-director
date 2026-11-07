@@ -16,7 +16,7 @@ const pipeline=freeze({
 const presentation=freeze({
   begin:()=>freeze({update:noop,finish:noop}),read:()=>null,feedback:noop,condition:noop,notice:noop,detail:noop,outcome:noop,locationLabel:()=>'',resolve:noop,reset:noop,subscribe:()=>noop
 });
-const files=new Map();let publicationId=0;
+const files=new Map();let publicationId=0,claimDownloads=0;
 const HEAD_A='cp_'+'a'.repeat(32),HEAD_B='cp_'+'b'.repeat(32),CONTENT_FINGERPRINT='c'.repeat(64),HANDOFF_TOKEN='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',OTHER_TOKEN='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';let headId=HEAD_A;
 const descriptor=file=>freeze({kind:'session-claim',id:file.id,name:file.name,size:file.blob.size,digest:file.digest,serverDigest:file.digest,createdAt:file.exportedAt,modifiedAt:file.exportedAt,remoteId:'claim-'+file.id});
 const headDescriptor=kind=>freeze({kind,id:headId,name:headId+(kind==='checkpoint'?'.sdcheckpoint':'.sdcommit'),size:1,digest:'d'.repeat(64),serverDigest:'d'.repeat(64),createdAt:'2026-10-27T08:00:00.000Z',modifiedAt:'2026-10-27T08:00:00.000Z',remoteId:kind+'-'+headId,...(kind==='checkpoint'?{history:freeze({format:15,logicalFingerprint:'e'.repeat(64),exportedAt:'2026-10-27T08:00:00.000Z',counts:freeze({dailyRecord:0,note:0}),encrypted:false,retention:freeze({role:'normal'}),origin:B})}:{})});
@@ -27,7 +27,7 @@ const repository=freeze({
   listPublications:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertPublication:async()=>true,endPublication:async()=>true,
   listSessionClaims:async()=>freeze({items:freeze([...files.values()].map(descriptor)),overflow:false,ignored:0}),
   uploadSessionClaim:async file=>{files.set(file.id,freeze({...file}));return descriptor(file);},
-  downloadSessionClaim:async item=>{const file=files.get(item.id);if(!file)throw new Error('missing claim');return freeze({blob:file.blob,release:async()=>{}});},
+  downloadSessionClaim:async item=>{claimDownloads++;const file=files.get(item.id);if(!file)throw new Error('missing claim');return freeze({blob:file.blob,release:async()=>{}});},
   deleteSessionClaim:async item=>files.delete(item.id)
 });
 function makeRuntime(installationId,read){
@@ -55,6 +55,7 @@ let sessionA=freeze({date:DATE,runningOn:B,revision:50}),sessionB=freeze({date:D
 const a=makeRuntime(A,()=>sessionA),b=makeRuntime(B,()=>sessionB);
 const claimed=await a.claimSessionOwnership('google-drive',{date:DATE,observedOwner:B,observedRevision:50,observedContentFingerprint:CONTENT_FINGERPRINT,expectedCheckpointId:HEAD_A,handoffToken:HANDOFF_TOKEN,revision:51});
 assert.equal(claimed.status,'completed');assert.equal(claimed.claim.state,'owned');assert.equal(claimed.claim.revision,51);
+assert.equal(claimDownloads,0,'a new claim is confirmed from one listing (Drive\'s checksum of the upload), not downloaded again');
 const stored=[...files.values()].sort((x,y)=>x.id.localeCompare(y.id)).at(-1),raw=JSON.parse(await stored.blob.text());
 assert.equal(raw.version,4);assert.equal(raw.handoffToken,HANDOFF_TOKEN);assert.equal(raw.state,'owned');assert.match(raw.sessionToken,/^[a-f0-9]{64}$/u);assert.match(raw.ownerToken,/^[a-f0-9]{64}$/u);assert.match(raw.observedOwnerToken,/^[a-f0-9]{64}$/u);assert.equal(raw.observedContentFingerprint,CONTENT_FINGERPRINT);
 assert.equal(raw.handoffToken,HANDOFF_TOKEN,'verified remote claim is tied to the local attempt');

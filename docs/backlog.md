@@ -113,6 +113,7 @@ The full plan, its rules and live status are in [test-programme.md](test-program
   3. Merge by design (CRDTs, as in Automerge, Yjs or Loro): devices exchange small change records that are guaranteed to merge the same way everywhere, notes merged character by character. Fewer "kept for review" items (bug 3), and live sync (item 2) becomes possible. The largest change: the editor's text and the stored formats would move to it.
   4. Not worth it here: content-defined chunking (attachments rarely change in place) and devices talking straight to each other (needs a server to introduce them, against the no-server rule).
 - **Suggested path:** measure, do option 1, then decide between 2 and 3 with the owner.
+- **Handoff, first pass (2026-11-07).** Continue Here's waiting path cut from about 17 Drive round trips in a row to about 7 ([study-session.md](areas/study-session.md#moving-a-session)), with a full background sync starting the moment the session runs. Bringing notes in before the rest was considered and not done: a sync takes in one whole version in one verified step and downloads only what changed, so the notes and the rest arrive together within seconds; splitting it would add a second, partial merge path for little gain. Next, if it is still slow on the phone: take the lease once for both the session read and the claim (about 5 round trips), then measure on the devices.
 
 ### Owner's requirements for the new backup machinery (2026-11-04)
 

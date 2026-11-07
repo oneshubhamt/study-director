@@ -5760,7 +5760,7 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
       // took over, Drive's newer session is a proven one-sided continuation:
       // advance only Active Session, then transfer ownership. A genuine
       // divergence—or content with attachment dependencies—uses normal sync.
-      const priorClaim=await BackupProviderRuntime.readSessionClaim('google-drive');
+      const priorClaim=source.priorClaim||null;
       const causalContinuation=!!(
         priorClaim&&priorClaim.state==='owned'&&priorClaim.applies&&!priorClaim.ownedHere&&
         priorClaim.observedContentFingerprint===requestedContentFingerprint&&
@@ -5795,12 +5795,17 @@ async function transferSessionOwnershipHere(session,{onStep=null}={}){
     await requireCanonicalSessionWrite(saved,next,'claiming Active Session ownership');
     localVerified=true;
     handleActiveSessionRepositoryResult(saved,'save');
-    const verifiedClaim=await BackupProviderRuntime.readSessionClaim('google-drive');
-    if(!handoffClaimMatches(marker,verifiedClaim)||verifiedClaim.epoch!==ownershipClaim.epoch)
-      throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN','Google Drive ownership changed before the handoff completed.');
+    // The claim was confirmed on Drive as the newest one, under the lease,
+    // before this save. A later claim by another device is caught by the
+    // ownership watcher, so the handoff does not wait to read it again.
+    if(ownershipClaim.handoffToken!==marker.handoffToken)
+      throw sessionHandoffError('SESSION_CONTINUE_ROLLBACK_UNCERTAIN','Google Drive returned a different ownership claim than this handoff wrote.');
     clearSessionHandoffSafety();
     backgroundHold.release();backgroundHold=null;
     notifyBackupChange({urgent:true,reason:'session-continue'});
+    // Only the session moved; notes, Saved Days and everything else come in
+    // by a full sync at once, in the background, while the timer runs here.
+    BackupProviderRuntime.scheduleSharedSync('google-drive','session-continue');
     return Object.freeze({previous,session:saved.value||next,claim:ownershipClaim});
   }catch(error){
     // Reversal is safe only if the strict canonical record is still exactly

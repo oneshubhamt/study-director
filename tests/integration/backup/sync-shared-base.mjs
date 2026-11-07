@@ -1572,6 +1572,10 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   assert.deepEqual(b.activeSession,bBefore,'reading the handoff source must not reconcile or mutate B');
   const claimed=await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint,expectedCheckpointId:source.checkpointId,handoffToken:'11111111-1111-4111-8111-111111111111',revision:11});
   assert.equal(claimed.status,'completed');
+  assert.equal(source.priorClaim,null,'with no claim on Drive yet, the handoff read brings none');
+  const seenByA=await A.handoffSource();
+  assert.equal(seenByA.priorClaim?.state,'owned','the same handoff read brings the current claim, so Continue Here needs no separate read');
+  assert.equal(seenByA.priorClaim.ownedHere,false);assert.equal(seenByA.priorClaim.observedContentFingerprint,observedContentFingerprint);
   b.activeSession=freeze({...source.session,runningOn:b.installationId,status:'active',revision:11,suspendedAt:null,updatedAt:'2026-08-31T09:01:00.000Z'});b.schedule=b.activeSession.scheduleText;b.running=true;
 
   // Before B publishes its first owned checkpoint, Drive still names A. The
