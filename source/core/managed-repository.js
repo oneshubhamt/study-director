@@ -50,8 +50,11 @@ registry.define('managed-repository',1,()=>{
 // counts and the deletion list), and holds no versions kept for review. It is
 // verified under the names it was written with; its notes leave the reader
 // under the current name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=8,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8]));
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=9,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8,9]));
 const releasedRepositoryManifest=manifestVersion=>Number(manifestVersion)<=REPOSITORY_RELEASED_MANIFEST_VERSION;
+// Manifest 9 holds versions kept for review that name the device whose copy
+// held them (PendingReview v2); manifest 8 holds them in their v1 form.
+const REPOSITORY_REVIEW_ORIGIN_MANIFEST_VERSION=9;
 const PENDING_REVIEW_KIND='pendingReview',WRITTEN_NOTE_KIND='areaNote';
 const repositoryNoteKind=manifestVersion=>releasedRepositoryManifest(manifestVersion)?WRITTEN_NOTE_KIND:'note';
 const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';
@@ -297,6 +300,10 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   // retire: Version History and the next cleanup keep current ones only, so a
   // location ends up holding one format.
   const currentRows=everyNormal.filter(row=>Number(row.manifest.version)===REPOSITORY_MANIFEST_VERSION),normalRows=currentRows.length?currentRows:everyNormal;
+  // An older-format version newer than every current one (a device still on
+  // an older build published it) may hold work no current version has taken
+  // in yet, so it stays until a newer current version replaces it.
+  const newestCurrent=newestRepositoryRow(currentRows),newerOlderFormat=newestCurrent?everyNormal.filter(row=>Number(row.manifest.version)!==REPOSITORY_MANIFEST_VERSION&&newestRepositoryRow([newestCurrent,row])===row):[];
   const selected=new Map(),tiers=new Map();
   const keep=(row,tier)=>{if(!row)return;selected.set(row.id,row);if(!tiers.has(row.id))tiers.set(row.id,tier);};
   const latest=newestRepositoryRow(normalRows);keep(latest,'latest');
@@ -345,6 +352,7 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
       keep(row,'hourly');hourly+=1;after=row;
     }
   }
+  for(const row of newerOlderFormat)keep(row,'saved');
   for(const row of protectedRows)keep(row,'before-restore');
   const retained=rows.filter(row=>selected.has(row.id)),remove=rows.filter(row=>!selected.has(row.id));
   return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,currentFormat:currentRows.length>0,policy:REPOSITORY_RETENTION_POLICY});
@@ -1232,7 +1240,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
 }
 
     return freeze({
-      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,
+      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,reviewOriginManifestVersion:REPOSITORY_REVIEW_ORIGIN_MANIFEST_VERSION,
       noteObject:repositoryNoteObject,readNote:readRepositoryNote,readSession:readRepositoryActiveSession,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase

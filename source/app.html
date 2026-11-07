@@ -5225,6 +5225,7 @@ const CompatibilityCodecs=CompatibilityCodecsModule.create(Object.freeze({
   dailyRecordCodec:DailyRecordCodec,
   activeSessionCodec:ActiveSessionCodec,
   personalDataCodec:PersonalDataCodec,
+  pendingReviewCodec:PendingReviewCodec,
   helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent,editorContentWithinLimits,sameDataValue,sanitizePracticeRun,activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText}),
   timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp}),
   domain:DomainModule,
@@ -9962,7 +9963,8 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
       reconciliationBaseLegacy:OBSOLETE_APP_META_KEYS.reconciliationBaseLegacy,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,repositoryMaintenancePendingLegacy:OBSOLETE_APP_META_KEYS.repositoryMaintenancePendingLegacy,
       libraryClearJournalState:APP_META_KEYS.libraryClearJournalState,libraryClearJournalPayloadPrefix:APP_META_KEYS.libraryClearJournalPayloadPrefix,
       archiveClearJournalStateLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalStateLegacy,archiveClearJournalPayloadPrefixLegacy:OBSOLETE_APP_META_KEYS.archiveClearJournalPayloadPrefixLegacy,
-      backupPreparationUnitPrefix:APP_META_KEYS.backupPreparationUnitPrefix
+      backupPreparationUnitPrefix:APP_META_KEYS.backupPreparationUnitPrefix,
+      pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix
     })
   }),
   local:Object.freeze({
@@ -9999,6 +10001,7 @@ const CompatibilityFacade=CompatibilityHostModule.createFacade(Object.freeze({
     removeRow:key=>IndexedDb.strictStoreTransaction(DB_APP_META_STORE,'readwrite',(store,tx,finish)=>{const request=store.delete(String(key));request.onerror=()=>finish(false,request.error||new Error('historical host metadata removal failed'));tx.oncomplete=()=>finish(true,true);},'historical host metadata removal aborted'),
     releaseBackupFile:async _name=>BackupFiles.collect(),normalizeVerifiedRecovery:value=>normalizeVerifiedRecoveryState(value),normalizeAttachmentIntegrity:value=>normalizeAttachmentIntegrityState(value),
     normalizeRepositoryIntegrity:value=>normalizeRepositoryIntegrityState(value),normalizeRepositoryIntegrityTarget:value=>normalizeRepositoryIntegrityTarget(value),
+    legacyPendingReview:value=>CompatibilityCodecs.pendingReview(value),
     updateStorageHealth:patch=>{writeStorageHealth(patch);return true;},
     // Moves every renamed record in one transaction, renaming its value format
     // with it; an old and a new copy that disagree stop the move with nothing
@@ -10335,7 +10338,8 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   view:Object.freeze({presentation:BackupPresentation,
     refreshPnote,
     refreshReview:()=>ReviewView.refresh(),
-    renderSchedule:renderSched
+    renderSchedule:renderSched,
+    deviceName:(id,others)=>deviceName(id,others)
   }),
   events:Object.freeze({
     libraryChanged:()=>{LibraryView.render();if(saveReminderDate)void revalidateSaveReminderAfterCanonicalConvergence();},

@@ -23,7 +23,7 @@ registry.define('backup',1,input=>{
     exports:freeze(['backgroundAvailable','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
-    view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule']),
+    view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule','deviceName']),
     events:freeze(['libraryChanged','backupCompleted','reconcileNotes','restoreNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
     operations:freeze(['assertAuthority','canShare','clearFault','failClosed','runExclusive']),
     interactions:freeze(['choose','configure','notify']),
@@ -47,7 +47,7 @@ registry.define('backup',1,input=>{
     requireFunctions(ports.noteReconciliation,PORT_FIELDS.noteReconciliation,'Backup note-reconciliation port');
     requireFunctions(ports.session,PORT_FIELDS.session,'Backup session port');
     requireFunctions(ports.domain,PORT_FIELDS.domain,'Backup domain port');
-    requireFunctions(ports.view,['refreshPnote','refreshReview','renderSchedule'],'Backup view port');
+    requireFunctions(ports.view,['refreshPnote','refreshReview','renderSchedule','deviceName'],'Backup view port');
     requireFunctions(ports.events,PORT_FIELDS.events,'Backup events port');
     requireFunctions(ports.operations,PORT_FIELDS.operations,'Backup operations port');
     requireFunctions(ports.interactions,PORT_FIELDS.interactions,'Backup interactions port');
@@ -83,7 +83,7 @@ registry.define('backup',1,input=>{
     const Exports=ports.exports;
     const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed,yieldSession}=ports.session;
     const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
-    const {refreshPnote,refreshReview,renderSchedule:renderSched}=ports.view;
+    const {refreshPnote,refreshReview,renderSchedule:renderSched,deviceName}=ports.view;
     const {libraryChanged,backupCompleted,reconcileNotes,restoreNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
     const {assertAuthority,clearFault,failClosed,runExclusive}=ports.operations;
     const {choose,configure,notify}=ports.interactions;
@@ -999,7 +999,7 @@ async function savedDaySettlement(plan,base){
 // 5.2: a Saved Day both sides changed since they last shared it (or that
 // differs with no shared history) shows the newer side in a sync; the other
 // is kept for review (null where that side deleted the day).
-function syncSavedDayReviews(plan,settled){
+function syncSavedDayReviews(plan,settled,parsed){
   if(!settled)return freeze([]);
   const reviews=[],time=candidate=>Date.parse(String(candidate.kind==='deleted'?candidate.deletedAt:candidate.record&&(candidate.record.updatedAt||candidate.record.savedAt)||''))||0;
   for(const item of plan.savedDays){
@@ -1007,7 +1007,8 @@ function syncSavedDayReviews(plan,settled){
     const local=item.candidates.find(candidate=>candidate.local),incoming=item.candidates.find(candidate=>!candidate.local);if(!local||!incoming)continue;
     const shown=time(incoming)>time(local)?incoming:local,other=shown===local?incoming:local;
     settled.set(item.date,shown.id);
-    reviews.push(PendingReviewCodec.create({subject:'savedDay',ref:item.date,kept:other.kind==='record'?sanitizeCurrentDailyRecord(other.record):null}));
+    reviews.push(PendingReviewCodec.create({subject:'savedDay',ref:item.date,kept:other.kind==='record'?sanitizeCurrentDailyRecord(other.record):null,
+      origin:keptOrigin(parsed,other.local,other.kind==='deleted'?other.deletedAt:other.record&&(other.record.updatedAt||other.record.savedAt))}));
   }
   return freeze(reviews);
 }
@@ -1140,7 +1141,8 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     const kept=candidate&&ActiveSessionCodec.sanitizeCurrent(candidate);if(!kept)return false;
     if(priorReviews===null)priorReviews=await AppData.pendingReviews.list();
     if([...priorReviews,...decisionReviews].some(item=>item.subject==='session'&&!item.resolvedAt&&Canonical.same(item.kept,kept)))return true;
-    const item=PendingReviewCodec.create({subject:'session',ref:'session',kept});
+    // A session names the device running it.
+    const item=PendingReviewCodec.create({subject:'session',ref:'session',kept,origin:{device:kept.runningOn,changedAt:kept.updatedAt}});
     if(!keep(()=>item))return false;
     decisionReviews.push(item);return true;
   };
@@ -1244,24 +1246,26 @@ function smartMerge(base,local,incoming){
 // review with what both last shared (for Smart merge then); a note edited on
 // one side and deleted on the other stays, and its review offers to delete
 // it. Times only choose what shows until the person reviews it.
-function syncNoteReviews(plan,state){
+function syncNoteReviews(plan,state,parsed){
   const reviews=[],byKey=new Map(),time=value=>Date.parse(String(value&&value.updatedAt||''))||0;
   const pair=key=>{const item=state.items.get(key),local=item&&item.candidates.find(candidate=>candidate.local),incoming=item&&item.candidates.find(candidate=>!candidate.local);return local&&incoming?{local,incoming,incomingNewer:time(incoming.value)>time(local.value)}:null;};
-  const entry=key=>{let value=byKey.get(key);if(!value){value={kept:{},base:{},hasBase:true};byKey.set(key,value);}return value;};
+  // The kept side is this device's when the incoming edit is newer.
+  const entry=(key,sides)=>{let value=byKey.get(key);if(!value){const kept=sides.incomingNewer?sides.local:sides.incoming;value={kept:{},base:{},hasBase:true,origin:keptOrigin(parsed,kept.local,kept.value&&kept.value.updatedAt)};byKey.set(key,value);}return value;};
   for(const conflict of state.conflicts){
     const sides=pair(conflict.key);if(!sides)continue;
     state.texts.set(conflict.key,sides.incomingNewer?conflict.incomingValue:conflict.localValue);
-    const held=entry(conflict.key);held.kept.text=sides.incomingNewer?conflict.localValue:conflict.incomingValue;if(conflict.ancestorAvailable)held.base.text=conflict.ancestorValue;else held.hasBase=false;
+    const held=entry(conflict.key,sides);held.kept.text=sides.incomingNewer?conflict.localValue:conflict.incomingValue;if(conflict.ancestorAvailable)held.base.text=conflict.ancestorValue;else held.hasBase=false;
   }
   for(const title of state.titles){
     const sides=pair(title.key);if(!sides)continue;
     state.labels.set(title.key,sides.incomingNewer?title.incoming:title.local);
-    const held=entry(title.key);held.kept.label=sides.incomingNewer?title.local:title.incoming;if(title.base!==null)held.base.label=title.base;else held.hasBase=false;
+    const held=entry(title.key,sides);held.kept.label=sides.incomingNewer?title.local:title.incoming;if(title.base!==null)held.base.label=title.base;else held.hasBase=false;
   }
-  for(const [key,held] of byKey)reviews.push(PendingReviewCodec.create({subject:'note',ref:key,kept:freeze(held.kept),base:held.hasBase&&Object.keys(held.base).length===Object.keys(held.kept).length?freeze(held.base):null}));
+  for(const [key,held] of byKey)reviews.push(PendingReviewCodec.create({subject:'note',ref:key,kept:freeze(held.kept),base:held.hasBase&&Object.keys(held.base).length===Object.keys(held.kept).length?freeze(held.base):null,origin:held.origin}));
   for(const item of state.deletions){
-    const record=item.candidates.find(candidate=>candidate.kind==='record');if(!record)continue;
-    state.settled.set(item.key,record.id);reviews.push(PendingReviewCodec.create({subject:'note',ref:item.key,kept:null}));
+    const record=item.candidates.find(candidate=>candidate.kind==='record'),deleting=item.candidates.find(candidate=>candidate.kind==='deleted');if(!record)continue;
+    // What is kept is the deletion, from the side that deleted the note.
+    state.settled.set(item.key,record.id);reviews.push(PendingReviewCodec.create({subject:'note',ref:item.key,kept:null,origin:deleting?keptOrigin(parsed,deleting.local,deleting.deletedAt):null}));
   }
   return freeze(reviews);
 }
@@ -1291,18 +1295,38 @@ function keptPlanDescription(plan){
   const preview=String(plan.scheduleText||'');
   return `${plan.label} · ${preview.length>180?preview.slice(0,180)+'…':preview||'Empty schedule'}`;
 }
-// PendingReview.v1 records neither an originating installation nor a
-// machine-readable conflict reason. The substantive difference is available
-// at presentation; the source device cannot be reconstructed from keptAt.
-function keptReviewProvenance(review){
-  const at=savedDayDecisionTimestamp(review.keptAt);
+// Where a kept version came from: the device whose copy held it, and when
+// that copy last changed it. This device for its own copy; for the version
+// being taken in, the device that made that version, and that version's last
+// change where the item itself does not say.
+function keptOrigin(parsed,local,changedAt=''){
+  return freeze({device:local?installationId():String(parsed?.manifest?.checkpoint?.originInstallationId||''),
+    changedAt:String(changedAt||(local?'':parsed?.protectedCheckpointManifest?.sourceRevision||''))});
+}
+// The device a kept version came from, named like backup folders ("iPad ·
+// Safari", "this device"); '' where that was not recorded (kept before v2).
+function keptDevice(review,devices=[]){
+  if(!review.keptFrom)return '';
+  const name=deviceName(review.keptFrom,devices);
+  return name==='This device'?'this device':name||'another device';
+}
+// "From iPad · Safari, changed 06 Nov, 21:40." A version kept before devices
+// were recorded says so, with when it was kept.
+function keptReviewOrigin(review,devices=[]){
+  const from=keptDevice(review,devices);
+  if(!from){const at=savedDayDecisionTimestamp(review.keptAt);return `Kept for review${at?' '+at:''}; which device it came from was not recorded.`;}
+  const at=savedDayDecisionTimestamp(review.keptChangedAt);
+  if(review.subject==='session')return `The session ran on ${from}${at?`, last changed ${at}`:''}.`;
+  return `From ${from}${at?`, changed ${at}`:''}.`;
+}
+function keptReviewProvenance(review,devices=[]){
   const why=review.subject==='note'&&review.base
     ?'Note changes could not be resolved from their shared content'
     :review.subject==='savedDay'?'Saved Day evidence differed or could not be proven equivalent'
     :review.subject==='personal'?'Plans or settings could not be safely merged'
     :review.subject==='session'?'Session study evidence or ownership could not be safely settled'
     :'An alternative could not be safely resolved';
-  return `${why}. Retained for review${at?' '+at:''}. The original device was not recorded; the date is not proof of origin.`;
+  return `${why}. ${keptReviewOrigin(review,devices)}`;
 }
 function keptReviewChanges(here,other,fields){
   if(!here||!other)return 'One copy is absent or deleted.';
@@ -1475,16 +1499,18 @@ async function reviewKeptVersions({ref=''}={}){
   // Each choice: 'keep' leaves this device's as it is (wait: the review stays
   // open), 'use' takes the kept version.
   const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false,comparison=null)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,...(comparison?{comparison:freeze(comparison)}:{}),choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
-  const when=review=>savedDayDecisionTimestamp(review.keptAt);
+  const when=review=>savedDayDecisionTimestamp(review.keptAt),devices=reviews.map(review=>review.keptFrom).filter(Boolean);
+  // The note comparison names the kept side: "Kept from iPad · Safari · 06 Nov, 21:40".
+  const keptColumn=review=>{const from=keptDevice(review,devices),at=savedDayDecisionTimestamp(review.keptChangedAt);return from?`Kept from ${from}${at?' · '+at:''}`:`Kept ${when(review)}`;};
   for(const review of reviews){
     const kept=review.kept;
     if(review.subject==='note'){
       const note=notes.get(review.ref);
-      if(!note)choice(review,'','Note · absent here',`${kept?'This alternative contains only the changed Note fields, not a complete Note. Restore the original from Library → Recently deleted (if available), then reopen Kept versions to compare. Until explicitly discarded, this alternative is preserved.':'Both the current Note and a retained deletion are absent. No Note will be changed here.'} ${keptReviewProvenance(review)}`,{label:'Keep for later',description:'The original alternative remains available; no Note is changed.'},{label:'Discard kept alternative',description:'Only this retained alternative is resolved; no Note is created or deleted.'},true);
-      else if(!kept)choice(review,'',`Note · ${note.label}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
+      if(!note)choice(review,'','Note · absent here',`${kept?'This alternative contains only the changed Note fields, not a complete Note. Restore the original from Library → Recently deleted (if available), then reopen Kept versions to compare. Until explicitly discarded, this alternative is preserved.':'Both the current Note and a retained deletion are absent. No Note will be changed here.'} ${keptReviewProvenance(review,devices)}`,{label:'Keep for later',description:'The original alternative remains available; no Note is changed.'},{label:'Discard kept alternative',description:'Only this retained alternative is resolved; no Note is created or deleted.'},true);
+      else if(!kept)choice(review,'',`Note · ${note.label}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review,devices)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
       else{
-        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Titles differ. ${keptReviewProvenance(review)}`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
-        if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:`Kept ${when(review)}`,ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
+        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Titles differ. ${keptReviewProvenance(review,devices)}`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
+        if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:keptColumn(review),ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
       }
     }else if(review.subject==='savedDay'){
       const record=days.get(review.ref)||null;
@@ -1497,7 +1523,7 @@ async function reviewKeptVersions({ref=''}={}){
           ['practiceRuns','practice runs'],['realTimeSnapshot','time evidence'],
           ['reflection','reflection'],['studyQuality','quality'],['quote','quote'],['carryForwardDraft','carry-forward']
         ]);
-        choice(review,'',`Saved Day · ${review.ref}`,`${differences} ${keptReviewProvenance(review)}`,{
+        choice(review,'',`Saved Day · ${review.ref}`,`${differences} ${keptReviewProvenance(review,devices)}`,{
           label:record?'Keep current Saved Day':'Keep absent',description:savedDayReviewSummary(record,kept)
         },{label:kept?'Use kept Saved Day':'Use kept deletion',description:savedDayReviewSummary(kept,record)});
       }
@@ -1512,7 +1538,7 @@ async function reviewKeptVersions({ref=''}={}){
         const here=personal.preferences[key],other=kept.preferences[key];
         if(Canonical.same(here,other))continue;
         const label=PERSONAL_REVIEW_LABELS[key]||key;
-        choice(review,'preference:'+key,`Setting · ${label}`,'Different values were kept. Neither checkpoint-wide timestamp establishes which is newer.',{
+        choice(review,'preference:'+key,`Setting · ${label}`,`Different values were kept. ${keptReviewOrigin(review,devices)}`,{
           label:'Keep this device',description:keptValueDescription(here)
         },{label:'Use kept value',description:keptValueDescription(other)});
       }
@@ -1522,13 +1548,13 @@ async function reviewKeptVersions({ref=''}={}){
           const here=personal.preferences.nudge[key],other=kept.preferences.nudge[key];
           if(Canonical.same(here,other))continue;
           choice(review,'nudge:'+key,`Reminder · ${labels[key]||key}`,
-            'Only this reminder field differs; choosing it leaves the other reminder settings unchanged.',{
+            `Only this reminder field differs; choosing it leaves the other reminder settings unchanged. ${keptReviewOrigin(review,devices)}`,{
               label:'Keep this device',description:keptValueDescription(here)
             },{label:'Use kept value',description:keptValueDescription(other)});
         }
       }
       if(!Canonical.same(personal.plans.draft,kept.plans.draft))
-        choice(review,'draft','Plan · Working draft','The working draft is independent of the applied Active Session.',{
+        choice(review,'draft','Plan · Working draft',`The working draft is independent of the applied Active Session. ${keptReviewOrigin(review,devices)}`,{
           label:'Keep this draft',description:keptValueDescription(personal.plans.draft)
         },{label:'Use kept draft',description:keptValueDescription(kept.plans.draft)},false,{current:personal.plans.draft,kept:kept.plans.draft});
       const localPlans=new Map(personal.plans.savedPlans.map(plan=>[plan.id,plan])),
@@ -1536,16 +1562,16 @@ async function reviewKeptVersions({ref=''}={}){
       for(const id of new Set([...localPlans.keys(),...remotePlans.keys()])){
         const here=localPlans.get(id)||null,other=remotePlans.get(id)||null;
         if(Canonical.same(semanticSavedPlan(here),semanticSavedPlan(other)))continue;
-        choice(review,'savedPlan:'+id,`Saved plan · ${here?.label||other?.label||id}`,'This saved-plan identity differs; selecting a version does not replace other saved plans.',{
+        choice(review,'savedPlan:'+id,`Saved plan · ${here?.label||other?.label||id}`,`This saved-plan identity differs; selecting a version does not replace other saved plans. ${keptReviewOrigin(review,devices)}`,{
           label:here?'Keep this plan':'Keep absent',description:keptPlanDescription(here)
         },{label:other?'Use kept plan':'Remove this plan',description:keptPlanDescription(other)},false,{current:here?.scheduleText??null,kept:other?.scheduleText??null,currentLabel:here?.label||'',keptLabel:other?.label||''});
       }
       if(meaningfulSavedPlanOrderDiffers(personal.plans.savedPlans.map(plan=>plan.id),kept.plans.savedPlans.map(plan=>plan.id)))
-        choice(review,'savedPlanOrder','Saved plan · Order','Choose the order for retained plans; plans present on only one side still have their own choices.',{
+        choice(review,'savedPlanOrder','Saved plan · Order',`Choose the order for retained plans; plans present on only one side still have their own choices. ${keptReviewOrigin(review,devices)}`,{
           label:'Keep this order',description:personal.plans.savedPlans.map(plan=>plan.label).join(', ')||'No saved plans'
         },{label:'Use kept order',description:kept.plans.savedPlans.map(plan=>plan.label).join(', ')||'No saved plans'});
       if(personal.plans.defaultId!==kept.plans.defaultId)
-        choice(review,'defaultPlan','Saved plan · Default','The selected default must exist among the plans you choose to retain.',{
+        choice(review,'defaultPlan','Saved plan · Default',`The selected default must exist among the plans you choose to retain. ${keptReviewOrigin(review,devices)}`,{
           label:'Keep this default',description:localPlans.get(personal.plans.defaultId)?.label||'No default'
         },{label:'Use kept default',description:remotePlans.get(kept.plans.defaultId)?.label||'No default'});
     }else if(review.subject==='session'){
@@ -1566,7 +1592,7 @@ async function reviewKeptVersions({ref=''}={}){
           ['scheduleAdjustments','schedule adjustments'],['latestCarryForward','carry-forward'],
           ['currentTaskId','current block']
         ]):'';
-      choice(review,'','Active / suspended session',`${differences} ${control} ${evidence} ${keptReviewProvenance(review)} Choosing the kept session suspends it here; it does not transfer a live timer.`,{
+      choice(review,'','Active / suspended session',`${differences} ${control} ${evidence} ${keptReviewProvenance(review,devices)} Choosing the kept session suspends it here; it does not transfer a live timer.`,{
         label:session?'Keep current session':'Keep no session',description:sessionReviewSummary(here)
       },{label:there?'Use kept session (suspended)':'Use kept absence (remove session)',description:sessionReviewSummary(there)});
     }
@@ -1997,8 +2023,10 @@ function managedParsedSnapshot(capture,metadata={}){
   const notes=managedSnapshotStage('notes','MANAGED_CHECKPOINT_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.noteItems||[]){const key=String(raw&&raw.key||''),clean=nameKeyedNotes?BackupCodec.legacyNote(raw,key):BackupCodec.normalizeNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
   const activeSession=managedSnapshotStage('active-session','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED',()=>{const clean=plan.activeSession?BackupCodec.normalizeImportedActiveSession(plan.activeSession,{legacy:Number(repositoryManifest.version)<=4}):null;if(plan.activeSession&&!clean)throw new Error('Managed repository Active Session failed schema verification.');return clean;});
   const personalData=managedSnapshotStage('personal-data','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED',()=>plan.personalData?BackupCodec.normalizePersonalData(plan.personalData):null);
-  // Versions kept for review (manifest 8 and later).
-  const pendingReviews=managedSnapshotStage('pending-reviews','MANAGED_CHECKPOINT_PENDING_REVIEWS_FAILED',()=>{const seen=new Set();return freeze((plan.pendingReviewItems||[]).map(raw=>{const clean=BackupCodec.normalizePendingReview(raw);if(!clean||seen.has(clean.id))throw new Error('Managed repository version kept for review failed current-schema verification.');seen.add(clean.id);return clean;}).sort((a,b)=>a.id.localeCompare(b.id)));});
+  // Versions kept for review (manifest 8 and later; manifest 8 holds them in
+  // their v1 form, without a device).
+  const reviewV1=Number(repositoryManifest.version)<ManagedRepository.reviewOriginManifestVersion;
+  const pendingReviews=managedSnapshotStage('pending-reviews','MANAGED_CHECKPOINT_PENDING_REVIEWS_FAILED',()=>{const seen=new Set();return freeze((plan.pendingReviewItems||[]).map(raw=>{const clean=reviewV1?BackupCodec.legacyPendingReview(raw):BackupCodec.normalizePendingReview(raw);if(!clean||seen.has(clean.id))throw new Error('Managed repository version kept for review failed current-schema verification.');seen.add(clean.id);return clean;}).sort((a,b)=>a.id.localeCompare(b.id)));});
   const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});if(!noteScope&&Number(repositoryManifest.version)>=5&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
   const attachmentState=managedSnapshotStage('attachments','MANAGED_CHECKPOINT_ATTACHMENTS_FAILED',()=>{
     const rawAssetItems=Array.isArray(plan.assetItems)?plan.assetItems:[],assetDescriptors=BackupCodec.normalizeAssetDescriptors(rawAssetItems.map(item=>item&&item.descriptor)),assetById=new Map(rawAssetItems.map(item=>[String(item&&item.descriptor&&item.descriptor.assetId||''),item])),importedAssets=[];
@@ -2235,7 +2263,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   // A sync settles every remaining difference itself: the newer version
   // shows and the other is kept for review.
   if(sync){
-    if(!keep(()=>[...syncNoteReviews(impact.reconciliationPlan,noteState),...syncSavedDayReviews(impact.reconciliationPlan,settledDays)]))return needsDecision();
+    if(!keep(()=>[...syncNoteReviews(impact.reconciliationPlan,noteState,parsed),...syncSavedDayReviews(impact.reconciliationPlan,settledDays,parsed)]))return needsDecision();
     const theirs=parsed.importedPersonalData||null;
     if(!personal&&theirs&&!(localPersonal&&Canonical.same(localPersonal,theirs))){
       // A side holding nothing the other lacks (a new device's start-up
@@ -2247,7 +2275,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(fieldResult){
         personal='keep';
         autoPersonal=fieldResult.value;
-        if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:fieldResult.reviewKept||BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+        if(fieldResult.conflict&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:fieldResult.reviewKept||BackupCodec.normalizePersonalData(theirs),origin:keptOrigin(parsed,false)})))return needsDecision();
       }else if(!base&&(!localPersonal||personalIsBlank(localPersonal)))personal='replace';
       else if(!base&&personalIsBlank(theirs))personal='keep';
       else if(!base&&personalAddsNothing(localPersonal,theirs))personal='replace';
@@ -2260,7 +2288,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
         // and no first-start state may be invented from it.
         const union=base?null:personalUnion(localPersonal,theirs);
         personal='keep';if(union)autoPersonal=union.value;
-        if((!union||union.clash)&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+        if((!union||union.clash)&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs),origin:keptOrigin(parsed,false)})))return needsDecision();
       }
     }
   }

@@ -59,7 +59,7 @@ const codec=RecordCodecs.createActiveSessionCodec(Object.freeze({
 const optionalText=(value,max)=>typeof value==='string'&&value.length<=max?value:null;
 const optionalBoundedNumber=(value,options={})=>{const n=boundedNumber(value,{...options,fallback:null});return options.integer&&n!==null&&!Number.isInteger(n)?null:n;};
 const compatibility=CompatibilityCodecs.create(Object.freeze({
-  limits,dataContract,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),dailyRecordCodec,activeSessionCodec:codec,
+  limits,dataContract,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),pendingReviewCodec:Object.freeze({version:2,normalize:()=>null}),dailyRecordCodec,activeSessionCodec:codec,
   helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue:helpers.sameDataValue,sanitizePracticeRun:value=>value,activeSessionScheduleFingerprint:helpers.activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText:helpers.isCanonicalScheduleText}),
   timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_review_device'
 }));

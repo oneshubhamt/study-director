@@ -40,6 +40,15 @@ try{
   assert.equal(await noteText(b,'ethics'),'Edited on A','B shows the newer edit');
   const kept=(await reviews(b)).filter(review=>!review.resolvedAt);
   assert.ok(kept.some(review=>review.subject==='note'&&review.kept?.text==='Edited on B'),'B keeps its own text for review');
+  // The kept version names the device whose copy held it, by its installation ID.
+  const ownKept=kept.find(review=>review.subject==='note');
+  assert.match(ownKept.keptFrom,/^inst_[a-z]+_[a-z]+_[a-z0-9]+_[a-f0-9]{8}$/u,'the kept version records its device');assert.ok(Number.isFinite(Date.parse(ownKept.keptChangedAt)),'and when that copy changed it');
+  // The review names it the way backup folders do: here, this device.
+  await b.evaluate(`void __PWA6.BackupController.reviewKeptVersions()`);
+  const keptLabel=`document.querySelector('.sd-note-reconcile-pane-incoming .sd-note-reconcile-pane-sub')?.textContent||''`;
+  await waitFor(async()=>/^Kept from this device · /u.test(await b.evaluate(keptLabel)),{label:'B’s review names this device',timeout:20000});
+  await b.evaluate(`[...document.querySelectorAll('button')].find(button=>button.textContent==='Cancel'&&button.offsetParent!==null)?.click()`);
+  await waitFor(async()=>!(await b.evaluate(keptLabel)),{label:'B closes the review',timeout:20000});
   // The profile indicator shows the review as a yellow badge on every screen size.
   await waitFor(()=>b.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.badge==='review')`),{label:'B shows the review badge',timeout:20000});
   assert.match(await b.evaluate(`document.getElementById('profile-badge').getAttribute('aria-label')`),/kept versions? to review/u,'the phone circle names what waits for review');

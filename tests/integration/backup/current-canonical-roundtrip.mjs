@@ -34,7 +34,7 @@ const algorithm=codec.checksumAlgorithm(),manifest=codec.createManifest(plan,{co
 const groups=[['checkpointManifest',[codec.createProtectedManifest(plan,manifest.checkpoint)]],['personalData',[personal]],['dailyRecord',[study,diary]],['note',[note]],['activeSession',[active]]];
 async function assemble(values=groups,assets=descriptors){const chunks=[];for(let i=0;i<values.length;i++)chunks.push(await codec.encodeChunk(i,values[i][0],values[i][1],algorithm));const completion=await codec.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,assets);return codec.createV10Container(new Blob([JSON.stringify(manifest)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});}
 const file=await assemble(),parsed=await codec.inspectCurrent(file);
-assert.equal(parsed.formatVersion,23);assert.deepEqual(parsed.records,[dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]);assert.deepEqual(parsed.data.notes[note.key],note);assert.deepEqual(parsed.importedActiveSession,active);assert.deepEqual(parsed.importedPersonalData,personal);assert.deepEqual(parsed.assetDescriptors,descriptors);assert.equal(parsed.assetBytes,blobs.reduce((n,b)=>n+b.size,0));
+assert.equal(parsed.formatVersion,24);assert.deepEqual(parsed.records,[dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]);assert.deepEqual(parsed.data.notes[note.key],note);assert.deepEqual(parsed.importedActiveSession,active);assert.deepEqual(parsed.importedPersonalData,personal);assert.deepEqual(parsed.assetDescriptors,descriptors);assert.equal(parsed.assetBytes,blobs.reduce((n,b)=>n+b.size,0));
 for(let i=0;i<4;i++)assert.equal(await parsed.importedAssets[i].blob.text(),await blobs[i===3?1:i].text());
 for(const key of ['savedDayDeletions','noteDeletions','attachmentDeletions'])assert.deepEqual(parsed.protectedCheckpointManifest[key],plan[key]);
 const key=await passwordKey('Current format test passphrase'),sealed=[],opened=[];
@@ -47,10 +47,10 @@ await assert.rejects(codec.inspectCurrent(file.slice(0,-1)),/truncated/);
 // A v20 file keeps notes and their deletion history under note names. Reading
 // it gives each note, and each deletion, the id the live conversion gives that
 // note, so older backups and this device agree on which note is which.
-const compatibility=CompatibilityCodecs.create(freeze({limits,dataContract,keyedRecord:freeze({create:()=>Object.create(null)}),dailyRecordCodec,activeSessionCodec,personalDataCodec,
+const compatibility=CompatibilityCodecs.create(freeze({limits,dataContract,keyedRecord:freeze({create:()=>Object.create(null)}),dailyRecordCodec,activeSessionCodec,personalDataCodec,pendingReviewCodec,
   helpers:freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue,sanitizePracticeRun:helpers.sanitizePracticeRun,activeSessionScheduleFingerprint:()=> 'fp',isValidIsoDate:value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value)),isCanonicalScheduleText:()=>true}),
   timestamps:freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_roundtrip_device'}));
-const reader=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,compatibilityCodec:freeze({...codecInput.compatibilityCodec,note:compatibility.note,noteKey:compatibility.noteKey})}));
+const reader=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,compatibilityCodec:freeze({...codecInput.compatibilityCodec,note:compatibility.note,noteKey:compatibility.noteKey,pendingReview:compatibility.pendingReview})}));
 // Files before v22 name the note entity areaNote (in chunks and counts) and
 // carry protected manifest version 2, whose authority and deletion list say
 // areaNotes and areaNoteDeletions. The fixture writes them exactly that way.
@@ -79,8 +79,33 @@ assert.equal(v20Parsed.formatVersion,20);
 assert.deepEqual({...v20Parsed.data.notes},{[note.key]:note},'a name-keyed note takes the id the live conversion gives it');
 assert.deepEqual(v20Parsed.protectedCheckpointManifest.noteDeletions,[{key:noteId('deleted note'),deletedAt:stamp}],'its deletion history takes ids too');
 assert.deepEqual(v20Parsed.records,parsed.records,'everything else reads as current');
+// Versions kept for review: a v23 file (released builds up to SDVB75F23)
+// holds them in their v1 form, and they read as v2 with no device recorded.
+// A v24 file holds only v2 ones, and a v23 file only v1 ones.
+async function writeWithReviews(version,reviews){
+  const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version})})})}));
+  const reviewCounts=writer.countShape({...counts,pendingReview:reviews.length}),reviewPlan={...plan,counts:reviewCounts},created=writer.createManifest(reviewPlan,{compression:'none',algorithm});
+  const values=[...groups.slice(1).map(group=>group),['pendingReview',reviews]],chunks=[await writer.encodeChunk(0,'checkpointManifest',[writer.createProtectedManifest(reviewPlan,created.checkpoint)],algorithm)];
+  for(let i=0;i<values.length;i++)chunks.push(await writer.encodeChunk(i+1,values[i][0],values[i][1],algorithm));
+  const completion=await writer.encodeCompletion(chunks.length,reviewCounts,chunks.map(c=>c.checksum),algorithm,descriptors);
+  return writer.createV10Container(new Blob([JSON.stringify(created)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});
+}
+const reviewV2=pendingReviewCodec.create({subject:'note',ref:note.key,kept:{text:'their text'},keptAt:stamp,origin:{device:'inst_ipad_safari_mgx2k3a0_1a2b3c4d',changedAt:stamp}});
+const {keptFrom:_from,keptChangedAt:_changed,...reviewV1Fields}=reviewV2,reviewV1={...reviewV1Fields,version:1};
+const resolvedV1={...pendingReviewCodec.resolved({...reviewV2,id:'pr_'+'d'.repeat(32)},stamp),version:1};delete resolvedV1.keptFrom;delete resolvedV1.keptChangedAt;
+const v23File=await writeWithReviews(23,[reviewV1,resolvedV1].sort((a,b)=>a.id.localeCompare(b.id)));
+await assert.rejects(codec.inspectCurrent(v23File),/compatibility adapter/u,'a v23 file is not current');
+const v23Parsed=await reader.inspectLegacy(v23File);
+assert.equal(v23Parsed.formatVersion,23);
+assert.deepEqual([...v23Parsed.pendingReviews],[{...reviewV1,version:2,keptFrom:'',keptChangedAt:''},{...resolvedV1,version:2,keptFrom:'',keptChangedAt:''}].sort((a,b)=>a.id.localeCompare(b.id)),'v1 reviews, open and resolved, read as v2 with everything kept and no device recorded');
+assert.deepEqual(v23Parsed.records,parsed.records,'everything else reads as current');
+await assert.rejects(reader.inspectLegacy(await writeWithReviews(23,[reviewV2])),/noncanonical pendingReview/u,'a v23 file holding a v2 review is refused');
+const v24Parsed=await codec.inspectCurrent(await writeWithReviews(24,[reviewV2]));
+assert.deepEqual([...v24Parsed.pendingReviews],[reviewV2],'a v24 file keeps the device and time');
+await assert.rejects(codec.inspectCurrent(await writeWithReviews(24,[reviewV1])),/noncanonical pendingReview/u,'a v1 review in a v24 file is refused');
+await assert.rejects(reader.inspectLegacy(await writeWithReviews(25,[reviewV2])),/newer Study Director version/u,'a newer file asks for an update');
 // A file that mixes the names fails closed: v20 with the current entity name.
 const mixed=await (async()=>{const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version:20})})})}));const created=writer.createManifest(plan,{compression:'none',algorithm});const chunks=[];for(let i=0;i<groups.length;i++)chunks.push(await writer.encodeChunk(i,groups[i][0],groups[i][1],algorithm));const completion=await writer.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,descriptors);return writer.createV10Container(new Blob([JSON.stringify(created)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});})();
 await assert.rejects(reader.inspectLegacy(mixed),'a v20 file written with current names is rejected');
 
-console.log(JSON.stringify({status:'PASS',suite:'current-canonical-roundtrip',backupVersion:23,unreleasedVersionsRefused:true,nameKeyedV20NotesConverted:true,dailyRecordVersion:16,activeSessionVersion:10,logicalAttachments:4,uniquePayloads:3,encryptedRoundtrip:true,strictCurrentCodecs:true}));
+console.log(JSON.stringify({status:'PASS',suite:'current-canonical-roundtrip',backupVersion:24,unreleasedVersionsRefused:true,nameKeyedV20NotesConverted:true,v23ReviewsConverted:true,dailyRecordVersion:16,activeSessionVersion:10,logicalAttachments:4,uniquePayloads:3,encryptedRoundtrip:true,strictCurrentCodecs:true}));

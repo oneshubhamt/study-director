@@ -49,7 +49,7 @@ await test('critical Device Folder scans distrust same-size and same-time cached
   const before=(await storage.list({kind:'checkpoint'})).items.find(item=>item.id===checkpointId);
   assert.ok(before?.history,'initial canonical version must be verified for listing');
   const root=await folder.getDirectoryHandle(IDENTITIES.root),directory=await root.getDirectoryHandle(IDENTITIES.checkpoints),handle=await directory.getFileHandle(checkpointId+'.sdcheckpoint');
-  const oldText=await (await handle.getFile()).text(),newText=oldText.replace('"version":5','"version":9');
+  const oldText=await (await handle.getFile()).text(),newText=oldText.replace('"version":5','"version":7');
   assert.notEqual(newText,oldText);assert.equal(newText.length,oldText.length);
   const writer=await handle.createWritable({keepExistingData:false});await writer.write(newText);await writer.close();
   const ordinary=(await storage.list({kind:'checkpoint'})).items.find(item=>item.id===checkpointId);
@@ -237,16 +237,23 @@ await test('Version History shows older-format versions only while the location 
   const ids=history=>Array.from(history.entries,entry=>entry.location.checkpointId);
   assert.deepEqual(ids(await older.runtime.history('device-folder',{interactive:false})),older.published.map(row=>row.checkpointId).reverse(),'with nothing newer, older versions are listed');
   // A current version arrives without a cleanup pass (another build wrote it).
-  const current=await older.plant(folder,{version:8,at:older.clock.now()+MINUTE});
+  const current=await older.plant(folder,{version:9,at:older.clock.now()+MINUTE});
   const listed=await older.runtime.history('device-folder',{interactive:false});
   assert.deepEqual(ids(listed),[current],'once a current version exists, older ones leave Version History before any cleanup');
   assert.equal((await older.commits(folder)).length,3,'nothing was removed to get there');
+  // An older-format version newer than every current one (a device still on
+  // the previous build published it) may hold work not yet taken in: it stays.
+  const unmerged=await older.plant(folder,{version:8,at:older.clock.now()+2*MINUTE});
+  assert.deepEqual(ids(await older.runtime.history('device-folder',{interactive:false})),[unmerged,current],'a newer older-format version stays beside the current one');
+  const replaced=await older.plant(folder,{version:9,at:older.clock.now()+3*MINUTE});
+  const after=ids(await older.runtime.history('device-folder',{interactive:false}));
+  assert.equal(after[0],replaced);assert.equal(after.includes(unmerged),false,'once a newer current version exists, it retires too');
 });
 
 await test('a version this app cannot read is listed with Remove, cleanup goes on around it, and Format cleanup waits for it',async()=>{
   const w=world(),folder=w.directory();await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
-  // A newer Study Director's version (manifest 9), newer than this device's.
-  const newer=await w.plant(folder,{version:9,at:w.clock.now()+MINUTE});
+  // A newer Study Director's version (manifest 10), newer than this device's.
+  const newer=await w.plant(folder,{version:10,at:w.clock.now()+MINUTE});
   const history=await w.runtime.history('device-folder',{interactive:false}),listed=history.entries.find(entry=>entry.location.checkpointId===newer);
   assert.equal(listed?.location.tier,'unreadable','it is listed as unreadable');assert.equal(listed.counts,null,'with no counts it cannot know');
   assert.equal(history.entries.filter(entry=>entry.location.tier==='latest').length,1,'a readable version is still Latest');

@@ -41,7 +41,7 @@ assert.equal(MIGRATION_FACADE_CONTRACT.verification.backupCheck,'freshBackup');
 assert.equal(CANONICAL_BASELINE.policy.ordinaryRuntime,'current-canonical-only');
 
 const entries=allCompatibilityEntries();
-assert.equal(entries.length,27,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
+assert.equal(entries.length,28,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
 assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
 for(const entry of entries){
   for(const file of entry.sourceFiles)assert.ok(fs.existsSync(path.join(root,file)),`${entry.id} references missing source ${file}`);
@@ -69,6 +69,7 @@ const evidenceByCompatibilityId=Object.freeze({
   'appmeta-stable-names':['tests/integration/storage/compatibility-host.mjs'],
   'l13e-repository-maintenance-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/repository-incremental-preparation.mjs','tests/integration/backup/repository-restore.mjs'],
   'restore-journal-payload-v1-v5':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/repository-journals.mjs'],
+  'pending-review-v1':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/current-canonical-roundtrip.mjs','tests/integration/backup/repository-restore.mjs'],
   'reconciliation-base-pre-v5':['tests/integration/storage/compatibility-host.mjs','tests/integration/backup/reconciliation-baseline-v2.mjs'],
   'older-session-claims':['tests/helpers/session-ownership-claim-regression.mjs','tests/integration/backup/drive-security.mjs'],
   'canonical-note-and-folder-names':['tests/integration/storage/compatibility-host.mjs','tests/integration/storage/indexeddb-topology-retirement.mjs'],
@@ -156,7 +157,7 @@ assert.doesNotMatch(drive,/SDENC02|\.sdbackup/u,'Drive repository transport must
 assert.equal(CACHE_STORAGE_IDENTITIES.updateBridge,'study-director-update-bridge-v2');
 assert.match(sw,/CompatibilityFacade\.installBridgeRequired\(\)/u);
 
-assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,23);
+assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,24);
 assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.protectedBackup.version,2);
 assert.match(attachments,/m\.format!=='study-director\.attachments'\|\|m\.version!==1/u);
 

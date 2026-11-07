@@ -28,7 +28,7 @@ const appMeta={
   repositoryMaintenancePending:'repositoryMaintenancePending',repositoryMaintenancePendingLegacy:'repositoryMaintenancePending.v1',
   libraryClearJournalState:'libraryClearJournalState',libraryClearJournalPayloadPrefix:'libraryClearJournalPayload:',
   archiveClearJournalStateLegacy:'archiveClearJournalState.v1',archiveClearJournalPayloadPrefixLegacy:'archiveClearJournalPayload.v1:',
-  backupPreparationUnitPrefix:'backupPreparationUnit:'
+  backupPreparationUnitPrefix:'backupPreparationUnit:',pendingReviewPrefix:'pendingReview:'
 };
 // Record names once carried a version; the first compatibility step moves them.
 const renamedAppMeta=Object.freeze([['reconciliationBase.v2','reconciliationBase'],['reconciliationBaseNote.v1:','reconciliationBaseNote:'],['restoreJournalPayload.v1','restoreJournalPayload'],['repositoryMaintenancePending.v2','repositoryMaintenancePending'],['libraryClearJournalState.v1','libraryClearJournalState'],['libraryClearJournalPayload.v1:','libraryClearJournalPayload:'],['areaNoteDeletion.v1:','noteDeletion:'],['areaNoteDeletion:','noteDeletion:'],['automaticDeviceBackup','deviceFolder']].map(pair=>Object.freeze(pair)));
@@ -99,6 +99,9 @@ const metadata=freeze({
   writeValue:async(key,value,updatedAt)=>{metadataRows.set(String(key),{key:String(key),version:1,value,updatedAt:String(updatedAt||'2026-09-20T00:00:00.000Z')});return true;},
   removeRow:async key=>{metadataRows.delete(String(key));return true;},releaseBackupFile:async()=>{legacyFileCollections++;return true;},normalizeVerifiedRecovery,normalizeAttachmentIntegrity,
   normalizeRepositoryIntegrity:normalizeRepositoryIntegrityState,normalizeRepositoryIntegrityTarget,
+  // The compatibility codec's conversion (tests/integration/backup/current-canonical-roundtrip.mjs):
+  // an exact v1 review gains an empty device and time.
+  legacyPendingReview:value=>value&&value.version===1&&Object.keys(value).sort().join('|')==='base|id|kept|keptAt|ref|resolvedAt|subject|version'?freeze({...value,version:2,keptFrom:'',keptChangedAt:''}):null,
   // One transaction in the app: a differing copy under the new name stops the whole move.
   renameRows:async(pairs,formats)=>{
     const moves=[],planned=new Map();
@@ -135,7 +138,16 @@ const facade=Host.createFacade(freeze({
   helpers:freeze({same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),randomUuid:()=> 'uuid',nowIso:()=> '2026-09-20T00:00:00.000Z',isNoteKey:noteKeys.isKey})
 }));
 
+// Versions kept for review by a released build (v1) take the current form;
+// a current one is left alone.
+const reviewV1={version:1,id:'pr_'+'a'.repeat(32),subject:'note',ref:noteId('Ethics'),keptAt:'2026-09-19T08:00:00.000Z',kept:{text:'their text'},base:null,resolvedAt:''};
+const reviewV2={...reviewV1,version:2,id:'pr_'+'b'.repeat(32),keptFrom:'inst_ipad_safari_mgx2k3a0_1a2b3c4d',keptChangedAt:'2026-09-18T21:40:00.000Z'};
+for(const value of [reviewV1,reviewV2])metadataRows.set('pendingReview:'+value.id,{key:'pendingReview:'+value.id,version:1,value,updatedAt:value.keptAt});
+assert.equal((await facade.verifyCanonicalInstallation()).compatibilityRetired,false,'a v1 review keeps the compatibility facade in place');
 const report=await facade.migrateLive();
+assert.deepEqual(metadataRows.get('pendingReview:'+reviewV1.id).value,{...reviewV1,version:2,keptFrom:'',keptChangedAt:''},'a v1 review keeps everything it held and records no device');
+assert.equal(metadataRows.get('pendingReview:'+reviewV1.id).updatedAt,reviewV1.keptAt,'its row keeps its time');
+assert.equal(metadataRows.get('pendingReview:'+reviewV2.id).value,reviewV2,'a current review is left as it is');
 assert.equal(report.results.plan.status,'migrated');
 assert.equal(draft,'07:00 | 60 | Legacy Plan');
 assert.ok(planLibrary.savedPlans.some(row=>row.scheduleText==='08:00 | 45 | Legacy Default'));
@@ -228,6 +240,13 @@ metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',vers
 await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/backup verification state has an unknown shape and was preserved without modification/u);
 assert.equal(metadataRows.get('repositoryIntegrityScrub').value,malformedScrub,'an unknown historical shape is preserved untouched');
 metadataRows.set('repositoryIntegrityScrub',{key:'repositoryIntegrityScrub',version:1,value:scrub,updatedAt:'2026-09-20T03:00:00.000Z'});
+// A v1 review of unknown shape stops the step and stays exactly as it was.
+const oddReview={...reviewV1,id:'pr_'+'c'.repeat(32),unexpected:true};
+metadataRows.set('pendingReview:'+oddReview.id,{key:'pendingReview:'+oddReview.id,version:1,value:oddReview,updatedAt:oddReview.keptAt});
+await assert.rejects(()=>Host.createFacade(malformedInput).migrateLive(),/kept for review from an older version has an unknown shape and was preserved without modification/u);
+assert.equal(metadataRows.get('pendingReview:'+oddReview.id).value,oddReview,'an unknown kept version is preserved untouched');
+assert.equal((await Host.createFacade(malformedInput).verifyCanonicalInstallation()).compatibilityRetired,false,'and keeps the compatibility facade in place');
+metadataRows.delete('pendingReview:'+oddReview.id);
 // A current merge base (version 5, Saved-Day rows version 2) stays; an older
 // one goes whole: header versions 3 and 4, or any version-1 Saved-Day row.
 const baseId=noteId('Ethics'),olderBase={format:'study-director.reconciliation-base',version:3,checkpointId:'cp_'+'2'.repeat(32),establishedAt:'2026-09-20T00:00:00.000Z',noteCount:1,noteKeyFingerprint:await ReconciliationCodec.keyFingerprint([baseId]),personalFingerprint:'',sessionFingerprint:''};

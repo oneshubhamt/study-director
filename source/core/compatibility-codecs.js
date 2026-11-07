@@ -8,13 +8,14 @@ const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 registry.define('compatibility-codecs',1,()=>{
   const freeze=Object.freeze;
   function create(input){
-    exactObject(input,['limits','dataContract','keyedRecord','dailyRecordCodec','activeSessionCodec','personalDataCodec','helpers','timestamps','domain','installationId'],'Compatibility codec input');
+    exactObject(input,['limits','dataContract','keyedRecord','dailyRecordCodec','activeSessionCodec','personalDataCodec','pendingReviewCodec','helpers','timestamps','domain','installationId'],'Compatibility codec input');
     if(typeof input.installationId!=='function')throw new TypeError('Compatibility codec installation identity is required.');
     if(!Object.isFrozen(input.limits)||!Object.isFrozen(input.dataContract)||!Object.isFrozen(input.keyedRecord)||!Object.isFrozen(input.dailyRecordCodec)||!Object.isFrozen(input.activeSessionCodec)||!Object.isFrozen(input.personalDataCodec)||!Object.isFrozen(input.domain))throw new TypeError('Compatibility codec contracts must be frozen.');
     functions(input.helpers,['boundedInt','boundedNumber','optionalBoundedNumber','optionalText','clampText','clampEditorContent','editorContentWithinLimits','sameDataValue','sanitizePracticeRun','activeSessionScheduleFingerprint','isValidIsoDate','isCanonicalScheduleText'],'Compatibility codec helpers');
     functions(input.timestamps,['normalizeTimestamp','normalizeImportedTimestamp'],'Compatibility timestamp contract');
     const APP_LIMITS=input.limits,DATA_CONTRACT=input.dataContract,KeyedRecord=input.keyedRecord;
-    const DailyRecordCodec=input.dailyRecordCodec,ActiveSessionCodec=input.activeSessionCodec,PersonalDataCodec=input.personalDataCodec;
+    const DailyRecordCodec=input.dailyRecordCodec,ActiveSessionCodec=input.activeSessionCodec,PersonalDataCodec=input.personalDataCodec,PendingReviewCodec=input.pendingReviewCodec;
+    if(!Object.isFrozen(PendingReviewCodec)||typeof PendingReviewCodec.normalize!=='function')throw new TypeError('Compatibility codec pending-review codec is invalid.');
     const {boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent,editorContentWithinLimits,sameDataValue,sanitizePracticeRun,activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText}=input.helpers;
     const {normalizeTimestamp,normalizeImportedTimestamp}=input.timestamps;
     const {TimeModel,ScheduleModel}=input.domain;
@@ -190,7 +191,16 @@ registry.define('compatibility-codecs',1,()=>{
       if(Number(value.version)!==1)throw new Error('Unsupported legacy personal-data version.');
       return {version:2,plans:PersonalDataCodec.plans(value.plans),preferences:PersonalDataCodec.preferences(value.preferences)};
     }
-    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,note,noteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData});
+    // A version kept for review in its v1 form (builds before kept versions
+    // named their device): the same review, its device and time not recorded.
+    // null unless it is an exact, sound v1 review; the current codec accepts
+    // only what it reads back unchanged, so nothing else changes.
+    const PENDING_REVIEW_V1_KEYS=['base','id','kept','keptAt','ref','resolvedAt','subject','version'].join('|');
+    function pendingReview(value){
+      if(!value||typeof value!=='object'||Array.isArray(value)||value.version!==1||Object.keys(value).sort().join('|')!==PENDING_REVIEW_V1_KEYS)return null;
+      return PendingReviewCodec.normalize({...value,version:PendingReviewCodec.version,keptFrom:'',keptChangedAt:''});
+    }
+    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,note,noteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData,pendingReview});
   }
   return freeze({format:'study-director.compatibility-codecs-module',contractVersion:1,create});
 });

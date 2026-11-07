@@ -29,13 +29,15 @@ registry.define('backup-codec',1,()=>{
     const LEGACY_TOMBSTONE_TYPE='tombstone',LEGACY_REFLECTION_DRAFT_TYPE='reflectionDraft',LEGACY_REFLECTION_DRAFT_LIMIT=Math.max(1,Number(APP_LIMITS.maxImportRecords)||10000);
     // Backup v23 added the versions kept for review (pendingReview), waiting
     // and resolved ones together.
-    const PENDING_REVIEW_VERSION=23,PENDING_REVIEW_TYPE='pendingReview',PENDING_REVIEW_LIMIT=2*Math.max(1,Number(APP_LIMITS.maxPendingReviews)||2000);
+    // Backup v24: they name the device whose copy held them (PendingReview
+    // v2); v23 holds them in their v1 form.
+    const PENDING_REVIEW_VERSION=23,REVIEW_ORIGIN_VERSION=24,PENDING_REVIEW_TYPE='pendingReview',PENDING_REVIEW_LIMIT=2*Math.max(1,Number(APP_LIMITS.maxPendingReviews)||2000);
     const BACKUP_ENTITY_TYPES_WITHOUT_REVIEWS=freeze([...SOURCE_ENTITY_TYPES,'personalData','checkpointManifest']);
     const BACKUP_ENTITY_TYPES=freeze([...BACKUP_ENTITY_TYPES_WITHOUT_REVIEWS,PENDING_REVIEW_TYPE]);
     // Released builds wrote backups up to v20, which name the note entity
     // areaNote. A file is checked under the names it was written with; what it
-    // holds reads under the current ones. Versions between v20 and the current
-    // one came only from unreleased builds, so nothing reads them.
+    // holds reads under the current ones. v21 and v22 came only from
+    // unreleased builds, so nothing reads them; released builds since write v23.
     const RELEASED_BACKUP_VERSION=20,WRITTEN_NOTE_ENTITY='areaNote';
     const currentBackupEntity=type=>type===WRITTEN_NOTE_ENTITY?'note':type;
     const writtenBackupEntities=types=>freeze(types.map(type=>type==='note'?WRITTEN_NOTE_ENTITY:type));
@@ -321,7 +323,7 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
   if(!manifest||manifest.type!=='manifest'||manifest.format!==DATA_CONTRACT.schemas.Backup.format)throw new Error('File is not a chunked Study Director backup.');
   const version=Number(manifest.version)||0;
   if(version>DATA_CONTRACT.schemas.Backup.version)throw new Error('This backup was created by a newer Study Director version. Update the app before importing it.');
-  if(!(Number.isInteger(version)&&version>=7&&version<=DATA_CONTRACT.schemas.Backup.version)||version>RELEASED_BACKUP_VERSION&&version<DATA_CONTRACT.schemas.Backup.version)throw new Error('This backup version is not supported by this build.');
+  if(!(Number.isInteger(version)&&version>=7&&version<=DATA_CONTRACT.schemas.Backup.version)||version>RELEASED_BACKUP_VERSION&&version<PENDING_REVIEW_VERSION)throw new Error('This backup version is not supported by this build.');
   if(version>=10&&!binaryV10)throw new Error('Backup v10 must use the binary-framed Study Director backup format.');
   if(version<10&&binaryV10)throw new Error('Binary backup framing is only valid for Study Director backup v10.');
   if(version>=10&&manifest.container!=='binary-v1')throw new Error('Backup v10 container metadata is invalid.');
@@ -357,7 +359,7 @@ function withNoteIdDeletions(manifest,nameKeyed){
   const noteDeletions=normalizeCheckpointNoteDeletions(manifest.noteDeletions.map(entry=>({key:CompatibilityCodec.noteKey(entry.key),deletedAt:entry.deletedAt})));
   return freeze({...manifest,noteDeletions});
 }
-function sanitizeChunkedBackupItem(entityType,item,{legacy=false}={}){
+function sanitizeChunkedBackupItem(entityType,item,{legacy=false,reviewV1=false}={}){
   if(jsonByteLength(item)>APP_LIMITS.backupMaxEntryBytes)throw new Error(`A ${entityType} entry exceeds the safe size limit.`);
   if(entityType==='personalData')return legacy?CompatibilityCodec.personalData(item):PersonalDataCodec.normalize(item);
   if(entityType==='dailyRecord'){assertSupportedSavedDate(item);return sanitizeImportedRecord(item,{legacy});}
@@ -365,7 +367,7 @@ function sanitizeChunkedBackupItem(entityType,item,{legacy=false}={}){
   if(entityType==='activeSession')return legacy||olderActiveSession(item)?CompatibilityCodec.activeSession(item):ActiveSessionCodec.sanitizeCurrent(item);
   if(entityType===LEGACY_REFLECTION_DRAFT_TYPE){if(!legacy||!item||typeof item!=='object'||Array.isArray(item)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(String(item.date||'')))return null;return freeze({date:String(item.date)});}
   if(entityType==='checkpointManifest')return validateProtectedCheckpointManifest(item);
-  if(entityType===PENDING_REVIEW_TYPE)return PendingReviewCodec.normalize(item);
+  if(entityType===PENDING_REVIEW_TYPE)return reviewV1?CompatibilityCodec.pendingReview(item):PendingReviewCodec.normalize(item);
   return null;
 }
 async function parseChunkedBackupMetadata(file,options={},context={}){
@@ -409,7 +411,7 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
       actual[entityType]++;
       if(kind==='tombstone'){report.ignoredTombstones++;continue;}
       const legacyItem=legacyBackupItem(manifest.version,kind);
-      const clean=sanitizeChunkedBackupItem(kind,item,{legacy:legacyItem});
+      const clean=sanitizeChunkedBackupItem(kind,item,{legacy:legacyItem,reviewV1:Number(manifest.version)<REVIEW_ORIGIN_VERSION});
       if(!clean){
         if(!legacyItem)throw new Error(`Current backup contains a noncanonical ${kind} entry.`);
         report.skipped++;
@@ -630,6 +632,7 @@ return Object.freeze({
   normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy||olderActiveSession(value)?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),
   normalizePendingReview:value=>{const clean=PendingReviewCodec.normalize(value);return clean?freeze(clean):null;},
+  legacyPendingReview:value=>{const clean=CompatibilityCodec.pendingReview(value);return clean?freeze(clean):null;},
   attachmentCoverage:backupAttachmentCoverage,
   missingAttachmentWarning:backupMissingAttachmentWarning,
   normalizeAssetDescriptors:backupSanitizeAssetDescriptors

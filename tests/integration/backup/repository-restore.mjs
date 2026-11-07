@@ -35,7 +35,10 @@ const dailyRecordCodec=freeze({
 const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item}):null;
 const activeSessionCodec=freeze({sanitizeCurrent:sanitizeActiveSession,contentValue:item=>{const clean=sanitizeActiveSession(item);if(!clean)return null;const snapshot=clean.snapshot&&typeof clean.snapshot==='object'?clean.snapshot:{},{contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_updatedAt,...contentSnapshot}=snapshot;return freeze({date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot:freeze(contentSnapshot)});}});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,reflection:String(item.reflection||'')}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,noteKey:legacyNoteKey,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+// The kept-version conversion records what it converted (the real one is in
+// tests/integration/backup/current-canonical-roundtrip.mjs).
+const convertedReviews=[];
+const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,pendingReview:item=>{if(!item||item.version!==1)return null;convertedReviews.push(item.id);return {...item,version:2,keptFrom:'',keptChangedAt:''};},dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,noteKey:legacyNoteKey,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)}),entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
@@ -91,7 +94,7 @@ const runtime=BackupModule.createRuntime(freeze({ports:freeze({
   codecs:freeze({activeSession:activeSessionCodec,backup:runtimeBackupCodec,dailyRecord:freeze({savedDayCoversSessionEvidence:()=>false}),pendingReview:pendingReviewCodec}),reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>{noteReconciliationCalls+=1;lastNoteConflicts=[...conflicts];return freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:noteChoice?noteChoice(item):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}}),exports:exportsPort,
   session:freeze({canMutate:()=>true,cancelLiveDraftSave:noop,captureSnapshot:()=>null,hasActiveSession:()=>false,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:operation=>operation(),yieldSession:async()=>false}),
   domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'repository-source',getStudentName:()=>currentPersonal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-09-19'}),
-  view:freeze({presentation:createBackupPresentation(),refreshPnote:noop,refreshReview:noop,renderSchedule:noop}),
+  view:freeze({presentation:createBackupPresentation(),refreshPnote:noop,refreshReview:noop,renderSchedule:noop,deviceName:()=>"iPad · Safari"}),
   events:freeze({
     libraryChanged:noop,backupCompleted:noop,
     reconcileNotes:async payload=>{notes={...notes,...payload};return notes;},
@@ -182,6 +185,18 @@ assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manife
     assert.ok(candidate,`a version ${version} checkpoint can still be inspected for restore`);await candidate.release?.();
     assert.equal(runtime.repository.noteObject(older,legacyNoteKey('Ethics')),null,`a version ${version} checkpoint names notes by title, so it offers no earlier version of a note`);
   }
+  // Manifest 8 (released builds up to SDVB75F23) holds versions kept for
+  // review in their v1 form, read through the compatibility conversion;
+  // manifest 9 holds only v2 ones (registry: pending-review-v1).
+  const reviewV1=freeze({version:1,id:'pr_'+'e'.repeat(32),subject:'note',ref:noteKey,keptAt:'2026-09-20T00:00:00.000Z',kept:freeze({text:'their text'}),base:null,resolvedAt:''});
+  const reviewV2=freeze({...reviewV1,version:2,id:'pr_'+'f'.repeat(32),keptFrom:'inst_ipad_safari_mgx2k3a0_1a2b3c4d',keptChangedAt:'2026-09-19T00:00:00.000Z'});
+  const withReview=async(version,review)=>freeze({...manifest,version,counts:freeze({...manifest.counts,pendingReview:Number(manifest.counts.pendingReview||0)+1}),
+    objects:freeze([...manifest.objects,await store({kind:'pendingReview',key:review.id},objectText('pendingReview',review.id,review))])});
+  const inspectWith=async(version,review)=>{const candidate=await runtime.repository.inspect(await withReview(version,review),readOlder,{interactive:false,committed:true});await candidate.release?.();return candidate;};
+  assert.ok(await inspectWith(8,reviewV1),'a version 8 checkpoint with a v1 review reads');assert.deepEqual(convertedReviews,[reviewV1.id],'its review goes through the compatibility conversion');
+  assert.ok(await inspectWith(9,reviewV2),'a version 9 checkpoint reads its v2 review as it is');assert.deepEqual(convertedReviews,[reviewV1.id],'without conversion');
+  await assert.rejects(inspectWith(9,reviewV1),/kept for review failed current-schema verification/u,'a v1 review in a version 9 checkpoint is refused');
+  await assert.rejects(inspectWith(8,reviewV2),/kept for review failed current-schema verification/u,'a v2 review in a version 8 checkpoint is refused');
   // A version 5 manifest file keeps the logical-state fingerprint it was
   // written with: the same fields, in the same order, under the old names.
   const olderIdentity=value=>{
@@ -191,13 +206,13 @@ assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manife
     const p=value.protectedCheckpointManifest,deletions=(list,key)=>list.map(entry=>({[key]:entry[key],deletedAt:entry.deletedAt})).sort((a,b)=>a[key].localeCompare(b[key])||a.deletedAt.localeCompare(b.deletedAt));
     return {format:'study-director.managed-backup-logical-state',version:1,counts:value.counts,objects:rows,assets,deletions:{savedDays:deletions(p.savedDayDeletions,'date'),areaNotes:deletions(p.areaNoteDeletions,'key'),attachments:deletions(p.attachmentDeletions,'assetId')}};
   };
-  const publishedV8=JSON.parse(await plainText(publishedManifestBlob,false));assert.equal(publishedV8.version,8);
-  const olderBase={...publishedV8,version:5,counts,protectedCheckpointManifest:protectedV2,objects:packedLayout},olderFingerprint=await sha256(JSON.stringify(olderIdentity(olderBase)));
-  assert.notEqual(olderFingerprint,publishedV8.logicalFingerprint,'the old names give a different fingerprint');
+  const publishedCurrent=JSON.parse(await plainText(publishedManifestBlob,false));assert.equal(publishedCurrent.version,9);
+  const olderBase={...publishedCurrent,version:5,counts,protectedCheckpointManifest:protectedV2,objects:packedLayout},olderFingerprint=await sha256(JSON.stringify(olderIdentity(olderBase)));
+  assert.notEqual(olderFingerprint,publishedCurrent.logicalFingerprint,'the old names give a different fingerprint');
   const olderManifest=await runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,logicalFingerprint:olderFingerprint})])),{interactive:false});
   assert.equal(olderManifest.version,5);assert.equal(olderManifest.logicalFingerprint,olderFingerprint,'a version 5 manifest verifies against the fingerprint it was written with');
   assert.equal(olderManifest.counts.note,manifest.counts.note,'its note count reads under the current name');assert.deepEqual(olderManifest.protectedCheckpointManifest.noteDeletions,current.noteDeletions);
-  await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,logicalFingerprint:publishedV8.logicalFingerprint})])),{interactive:false}),/logical-state fingerprint failed verification/u,'a version 5 manifest is not checked under the new names');
+  await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,logicalFingerprint:publishedCurrent.logicalFingerprint})])),{interactive:false}),/logical-state fingerprint failed verification/u,'a version 5 manifest is not checked under the new names');
   // Versions 6 and 7 were made only by unreleased builds: refused.
   for(const version of [6,7])await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,version,logicalFingerprint:olderFingerprint})])),{interactive:false}),/checkpoint is invalid/u,`a version ${version} manifest is refused`);
 }
@@ -210,7 +225,7 @@ const localAssetsBeforeLeaseCheck=new Map(assets);assets.clear();
 const managedPortableBefore=freeze({...portablePathMetrics}),candidate=await runtime.repository.inspect(manifest,leasedReadObject,{interactive:false,committed:true});
 assert.equal(portablePathMetrics.containers,managedPortableBefore.containers,'Managed repository inspection must not encode a temporary .sdbackup container.');
 assert.equal(portablePathMetrics.inspections,managedPortableBefore.inspections,'Managed repository inspection must not reopen/decode a temporary .sdbackup container.');
-assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,23);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
+assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,24);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
 for(const objectId of attachmentObjectIds)assert.equal(leaseReleaseCounts.get(objectId)||0,0,'Managed candidate inspection must retain verified attachment leases until candidate restore/release.');
 const forgedCandidate=freeze({kind:'study-director.backup-candidate',verified:true,preview:candidate.preview,release:async()=>{}});
 await assert.rejects(()=>runtime.repository.bringIn(forgedCandidate),/current verified Study Director inspection/i,'A look-alike candidate must not cross the private verified-snapshot seal.');

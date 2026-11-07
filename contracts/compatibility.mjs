@@ -200,6 +200,14 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['source/core/compatibility-host.js'])
     },
     {
+      id:'pending-review-v1',owner:'compatibility/host',kind:'live-migration',
+      source:'PendingReview.v1 versions kept for review, which name no device: appMeta pendingReview:* rows, portable backups v23 and backup-location manifests version 8, all written by released builds up to SDVB75F23',
+      target:'PendingReview.v2 with the same id, subject, kept content, base and times, and keptFrom and keptChangedAt empty (the device was not recorded)',
+      proof:'each stored v1 row is rewritten to v2 and read back before canonical appMeta verification, and an unknown shape is left as it was; a v23 file and a version-8 manifest read their reviews as v2; a v1 review in a v24 file or a version-9 manifest is refused',
+      retirement:'after every supported installation has crossed to PendingReview.v2 and no supported backup older than portable v24 or manifest 9 remains',
+      sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/compatibility-host.js','source/core/backup-codec.js','source/core/backup.js','source/core/managed-repository.js','source/app.html'])
+    },
+    {
       id:'reconciliation-base-pre-v5',owner:'compatibility/host',kind:'live-migration',
       source:'appMeta reconciliationBase headers older than version 5 (released builds write version 3) and reconciliationBaseDays version-1 rows without study-content fingerprints',
       target:'none kept: the whole base is dropped and the next Drive sync records ReconciliationBase.v5 with ReconciliationBaseDays.v2 rows',

@@ -292,7 +292,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
     session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended',...(state.yieldAddsProgress?{snapshot:freeze({...state.activeSession.snapshot,label:'A-FINAL-TICK',taskState:freeze({...state.activeSession.snapshot.taskState,focus:freeze({actual:freeze({seconds:(Number(state.activeSession.snapshot.taskState?.focus?.actual?.seconds)||0)+70})})})})}:{})});state.running=false;return true;}}),
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
-    view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
+    view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn,deviceName:()=>"iPad · Safari"}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
       reconcileNotes:async(payload,deletions=[])=>{state.notes=normalizeNotes({...state.notes,...payload});const deletedKeys=new Set((deletions||[]).map(item=>String(item.key)));for(const key of deletedKeys)delete state.notes[key];state.noteDeletions=state.noteDeletions.filter(item=>!Object.hasOwn(state.notes,item.key)&&!Object.values(payload||{}).some(note=>note&&note.key===item.key));for(const item of deletions||[]){state.noteDeletions=state.noteDeletions.filter(existing=>existing.key!==item.key);state.noteDeletions.push({...item});}for(const note of Object.values(payload||{}))state.noteDeletions=state.noteDeletions.filter(item=>item.key!==note.key);events.push('notes');return state.notes;},
       restoreNotesSnapshot:async payload=>{state.notes=normalizeNotes(payload);events.push('notes-rollback');return state.notes;},
@@ -380,7 +380,7 @@ for(const {domain,decisions} of verificationCases){
 
 // Format/protection boundary: public provenance is separate from integrity-covered authority/deletion metadata.
 const parsed=await codec.inspectCurrent(blob,{filename:'checkpoint.sdbackup'});
-assert.equal(parsed.formatVersion,23);
+assert.equal(parsed.formatVersion,24);
 assert.equal(parsed.manifest.protectedManifest.entityType,'checkpointManifest');
 assert.equal(Object.hasOwn(parsed.manifest,'authority'),false,'Checkpoint authority must not leak into the public provenance manifest.');
 assert.equal(Object.hasOwn(parsed.manifest,'savedDayDeletions'),false,'Saved-Day deletion history must stay behind the protected-manifest boundary.');
@@ -724,6 +724,7 @@ let syncWorld=null;
   assert.equal((await B.sync()).cancelled,false,'a difference made on both sides never stops a sync');
   assert.equal(b.records.get('2026-08-01').reflection,'day one by B','the newer one shows');assert.equal(b.reconciliationBase.checkpointId,v4.checkpointId,'the sync took in Drive’s version');
   const keptDay=b.reviews.open().find(review=>review.subject==='savedDay');assert.equal(keptDay.ref,'2026-08-01');assert.equal(keptDay.kept.reflection,'day one by A','the other is kept for review');
+  assert.deepEqual([keptDay.keptFrom,keptDay.keptChangedAt],[a.installationId,'2026-08-31T09:00:00.000Z'],'it names the device whose copy held it, and when that copy changed it');
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.records.get('2026-08-01').reflection,'day one by B');assert.deepEqual(a.reviews.open().map(review=>review.id),[keptDay.id],'the kept version reaches the other device');
   // Reviewed on either device: the choice is an ordinary edit, and the review ends everywhere.
@@ -731,6 +732,14 @@ let syncWorld=null;
   assert.equal(dayReview.reviewed,1);assert.equal(a.records.get('2026-08-01').reflection,'day one by A','the kept version is used');assert.deepEqual(a.reviews.open(),[]);
   await A.upload();assert.equal((await B.sync()).cancelled,false);
   assert.equal(b.records.get('2026-08-01').reflection,'day one by A');assert.deepEqual(b.reviews.open(),[],'a review resolved on one device ends on every device');
+  // When the other device's edit is the newer, this device's own copy is kept, and named as this device's.
+  b.records.set('2026-08-03',record('2026-08-03','day three by B','2026-08-31T11:00:00.000Z'));
+  a.records.set('2026-08-03',record('2026-08-03','day three by A','2026-08-31T12:00:00.000Z'));await A.upload();
+  assert.equal((await B.sync()).cancelled,false);assert.equal(b.records.get('2026-08-03').reflection,'day three by A');
+  const keptOwn=b.reviews.open().find(review=>review.subject==='savedDay');
+  assert.deepEqual([keptOwn.kept.reflection,keptOwn.keptFrom,keptOwn.keptChangedAt],['day three by B',b.installationId,'2026-08-31T11:00:00.000Z'],'this device’s own kept copy names this device');
+  b.keptChoice='keep';await B.reviewKept();b.keptChoice='';assert.deepEqual(b.reviews.open(),[]);
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
   // Notes changed on both: different paragraphs merge by themselves (Smart
   // merge); the same paragraph shows the newer edit and keeps the other with
   // what both last shared, for the review's Smart merge.
@@ -740,7 +749,8 @@ let syncWorld=null;
   await B.upload();assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.Shared.text,'one by A\n\ntwo by B');
   a.notes=note('one, A again\n\ntwo by B');await A.upload();await new Promise(resolve=>setTimeout(resolve,3));b.notes=note('one, B again\n\ntwo by B');
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Shared.text,'one, B again\n\ntwo by B','the newer edit shows');
-  const keptNote=b.reviews.open().find(review=>review.subject==='note');assert.equal(keptNote.kept.text,'one, A again\n\ntwo by B','the other edit is kept');assert.equal(keptNote.base.text,'one by A\n\ntwo by B','with what both last shared');
+  const keptNote=b.reviews.open().find(review=>review.subject==='note');assert.equal(keptNote.kept.text,'one, A again\n\ntwo by B','the other edit is kept');
+  assert.deepEqual([keptNote.keptFrom,keptNote.keptChangedAt],[a.installationId,a.notes.Shared.updatedAt],'a kept note edit names its device and edit time');assert.equal(keptNote.base.text,'one by A\n\ntwo by B','with what both last shared');
   let offered=null;b.reviewText=(item,options)=>{offered={item,purpose:options.purpose};return 'one, A and B\n\ntwo by B';};
   assert.equal((await B.reviewKept({ref:'Shared'})).reviewed,1);b.reviewText=null;
   assert.equal(offered.purpose,'kept');assert.equal(offered.item.localValue,'one, B again\n\ntwo by B');assert.equal(offered.item.incomingValue,'one, A again\n\ntwo by B');assert.equal(offered.item.ancestorValue,'one by A\n\ntwo by B','the review offers Smart merge from what both last shared');
@@ -753,6 +763,7 @@ let syncWorld=null;
   b.notes={...b.notes,Draft:draft('kept writing on B')};
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.notes.Draft.text,'kept writing on B','an edited note is never deleted by a sync');
   const keptDeletion=b.reviews.open().find(review=>review.subject==='note');assert.equal(keptDeletion.ref,'Draft');assert.equal(keptDeletion.kept,null,'the review offers the deletion');
+  assert.deepEqual([keptDeletion.keptFrom,keptDeletion.keptChangedAt],[a.installationId,a.noteDeletions[0].deletedAt],'a kept deletion names the device that deleted the note, and when');
   b.keptChoice='use';assert.equal((await B.reviewKept()).reviewed,1);b.keptChoice='';
   assert.equal(b.notes.Draft,undefined,'choosing it deletes the note');assert.ok(b.noteDeletions.some(item=>item.key==='Draft'));
   await B.upload();assert.equal((await A.sync()).cancelled,false);assert.deepEqual(a.reviews.open(),[]);
@@ -760,6 +771,7 @@ let syncWorld=null;
   a.personal=personal('Name on A');await A.upload();b.personal=personal('Name on B');
   assert.equal((await B.sync()).cancelled,false);assert.equal(b.personal.preferences.studentName,'Name on B');
   const keptPersonal=b.reviews.open().find(review=>review.subject==='personal');assert.equal(keptPersonal.kept.preferences.studentName,'Name on A');
+  assert.equal(keptPersonal.keptFrom,a.installationId,'kept settings name the device whose copy held them');assert.ok(Number.isFinite(Date.parse(keptPersonal.keptChangedAt)),'as of that copy’s last change');
   b.keptChoice='use';await B.reviewKept();b.keptChoice='';assert.equal(b.personal.preferences.studentName,'Name on A','the review lets the person pick the kept settings');assert.deepEqual(b.reviews.open(),[]);
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   // After a verified shared base exists, clearing the name is authored
@@ -1034,7 +1046,7 @@ let syncWorld=null;
   assert.match(choice.description,/Differing: task results/u);
   assert.match(choice.description,/reflection/u);
   assert.match(choice.description,/Saved Day evidence differed or could not be proven equivalent/u);
-  assert.match(choice.description,/The original device was not recorded; the date is not proof of origin/u);
+  assert.match(choice.description,/Kept for review .*; which device it came from was not recorded\./u,'a version kept before devices were recorded says so');
   assert.match(choice.choices[0].description,/Ethics: 50% \/ 15 min/u);
   assert.match(choice.choices[1].description,/Ethics: 90% \/ 30 min/u);
   assert.match(choice.choices[0].description,/Current reflection/u);
@@ -1071,7 +1083,7 @@ let syncWorld=null;
   const state={installationId:'inst_c3_session_retry',records:new Map(),deletions:[],notes:{},noteDeletions:[],
     activeSession:current,running:false,personal:personal('Session reviewer'),journal:null};
   state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
-  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'session',ref:'session',kept})]);
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'session',ref:'session',kept,origin:{device:kept.runningOn,changedAt:kept.updatedAt}})]);
   const h=createHarness(state);state.keptChoice='use';state.failReviewAck=true;
   await assert.rejects(h.runtime.controller.reviewKeptVersions(),/QA_FIXTURE review receipt failed/u);
   assert.equal(state.activeSession.snapshot.label,'KEPT');
@@ -1082,7 +1094,8 @@ let syncWorld=null;
   const group=prompt.groups.find(row=>row.label==='Active / suspended session');
   assert.match(group.description,/Differing: schedule/u);
   assert.match(group.description,/Session study evidence or ownership could not be safely settled/u);
-  assert.match(group.description,/The original device was not recorded; the date is not proof of origin/u);
+  // The harness names every other device "iPad · Safari", as the app names it from its installation ID.
+  assert.match(group.description,/The session ran on iPad · Safari, last changed /u,'a kept session names the device it ran on');
   assert.match(group.choices[0].description,/suspended/u);
   assert.match(group.choices[1].description,/active/u);
   assert.equal((await h.runtime.controller.reviewKeptVersions()).reviewed,1);
@@ -1376,6 +1389,7 @@ let syncWorld=null;
   assert.equal(yielded.cancelled,false,'a takeover never stops the sync');
   assert.equal(a.running,false,'the device that was taken over stops its timer');assert.equal(a.activeSession.snapshot.label,'B-TOOK-BACK','it shows the session running on the other device');
   const keptProgress=a.reviews.open().find(review=>review.subject==='session');assert.equal(keptProgress.kept.snapshot.label,'A-PROGRESS','its own progress is kept for review');assert.equal(keptProgress.kept.status,'suspended');
+  assert.deepEqual([keptProgress.keptFrom,keptProgress.keptChangedAt],[keptProgress.kept.runningOn,keptProgress.kept.updatedAt],'a kept session names the device it ran on, and its last change');assert.ok(keptProgress.keptFrom);
 }
 
 // BF-1R1: first catch-up after B saves the old day AND starts a newer day.

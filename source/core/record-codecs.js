@@ -893,14 +893,17 @@ function materializeDailyRecordSummary(summary){
   // session. kept is the other side's version, or null where that side had
   // deleted it (or had no session); for a note it holds only the title or
   // text that differed, and base what both last shared of them, for Smart
-  // merge. A resolved review keeps only its identity and resolvedAt, so
-  // every device learns it is done.
+  // merge. keptFrom names the device whose copy held the kept version (its
+  // installation ID) and keptChangedAt when that copy last changed it; both
+  // are '' where that was not recorded (kept before v2, or not known). A
+  // resolved review keeps only its identity and resolvedAt, so every device
+  // learns it is done.
   function createPendingReviewCodec(input){
     exactObject(input,['dataContract','dailyRecordCodec','activeSessionCodec','personalDataCodec','helpers'],'Pending-review codec input');
     functions(input.helpers,['sameDataValue','randomBytes'],'Pending-review codec helpers');
     const VERSION=Number(input.dataContract.schemas.PendingReview.version),DailyRecordCodec=input.dailyRecordCodec,ActiveSessionCodec=input.activeSessionCodec,PersonalDataCodec=input.personalDataCodec;
     const {sameDataValue,randomBytes}=input.helpers,NoteKeys=DailyRecordCodec.noteKeys;
-    const ID=/^pr_[a-f0-9]{32}$/u,DATE=/^\d{4}-\d{2}-\d{2}$/u,KEYS=['base','id','kept','keptAt','ref','resolvedAt','subject','version'].join('|');
+    const ID=/^pr_[a-f0-9]{32}$/u,DATE=/^\d{4}-\d{2}-\d{2}$/u,DEVICE=/^inst_[a-z0-9_]{8,128}$/iu,KEYS=['base','id','kept','keptAt','keptChangedAt','keptFrom','ref','resolvedAt','subject','version'].join('|');
     const iso=value=>{if(typeof value!=='string')return null;const ms=Date.parse(value);return Number.isFinite(ms)&&new Date(ms).toISOString()===value?value:null;};
     const refValid=(subject,ref)=>subject==='note'?NoteKeys.isId(ref):subject==='savedDay'?DATE.test(ref):subject==='personal'?ref==='personal':subject==='session'?ref==='session':false;
     // The other side's version; undefined when unsound.
@@ -914,23 +917,26 @@ function materializeDailyRecordSummary(summary){
     function normalize(value){
       // Only a canonical record passes: every field exactly as stored.
       if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join('|')!==KEYS||value.version!==VERSION||[value.id,value.subject,value.ref].some(field=>typeof field!=='string'))return null;
-      const id=value.id,subject=value.subject,ref=value.ref,keptAt=iso(value.keptAt);
+      const id=value.id,subject=value.subject,ref=value.ref,keptAt=iso(value.keptAt),keptFrom=value.keptFrom,keptChangedAt=value.keptChangedAt;
       if(!ID.test(id)||!keptAt||!refValid(subject,ref))return null;
-      if(value.resolvedAt!==''){const resolvedAt=iso(value.resolvedAt);return resolvedAt&&value.kept===null&&value.base===null?{version:VERSION,id,subject,ref,keptAt,kept:null,base:null,resolvedAt}:null;}
+      if(typeof keptFrom!=='string'||keptFrom!==''&&!DEVICE.test(keptFrom)||typeof keptChangedAt!=='string'||keptChangedAt!==''&&!iso(keptChangedAt))return null;
+      if(value.resolvedAt!==''){const resolvedAt=iso(value.resolvedAt);return resolvedAt&&value.kept===null&&value.base===null&&keptFrom===''&&keptChangedAt===''?{version:VERSION,id,subject,ref,keptAt,keptFrom:'',keptChangedAt:'',kept:null,base:null,resolvedAt}:null;}
       const kept=keptValue(subject,ref,value.kept);if(kept===undefined)return null;
       let base=null;
       if(value.base!==null){base=subject==='note'&&kept?DailyRecordCodec.sanitizeNoteFields(value.base):null;if(!base||Object.keys(base).some(key=>!(key in kept)))return null;}
-      return {version:VERSION,id,subject,ref,keptAt,kept,base,resolvedAt:''};
+      return {version:VERSION,id,subject,ref,keptAt,keptFrom,keptChangedAt,kept,base,resolvedAt:''};
     }
-    function create({subject,ref,kept,base=null,keptAt=new Date().toISOString()}){
+    // origin: {device, changedAt} of the copy that held the kept version.
+    function create({subject,ref,kept,base=null,keptAt=new Date().toISOString(),origin=null}){
       const id='pr_'+[...randomBytes(16)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
-      const clean=normalize({version:VERSION,id,subject,ref,keptAt:new Date(keptAt).toISOString(),kept,base,resolvedAt:''});
+      const device=String(origin&&origin.device||''),changed=Date.parse(String(origin&&origin.changedAt||''));
+      const clean=normalize({version:VERSION,id,subject,ref,keptAt:new Date(keptAt).toISOString(),keptFrom:DEVICE.test(device)?device:'',keptChangedAt:Number.isFinite(changed)?new Date(changed).toISOString():'',kept,base,resolvedAt:''});
       if(!clean)throw new TypeError('A version kept for review is invalid.');
       return clean;
     }
     function resolved(review,resolvedAt=new Date().toISOString()){
       const clean=normalize(review);if(!clean)throw new TypeError('The review to resolve is invalid.');
-      return clean.resolvedAt?clean:normalize({...clean,kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
+      return clean.resolvedAt?clean:normalize({...clean,keptFrom:'',keptChangedAt:'',kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
     }
     // The PendingReview codec is the single authority for the meaning of
     // kept alternatives. Saving metadata is not Saved Day evidence; Saved
