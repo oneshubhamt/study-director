@@ -63,6 +63,7 @@ check('Failing after retries',{drive:drive({retryBackoffCapped:true},{failed:tru
 check('Uploads failing after retries',{drive:drive({retryBackoffCapped:true,waiting:true})},{ring:'error',badge:'error',label:/^Sync stopped · last synced 12:04$/u,action:'retry',items:['retry']});
 check('Retry running after retries ran out',{drive:drive({retryBackoffCapped:true},{failed:true,syncing:true})},{ring:'syncing'});
 check('Another device saving',{drive:drive({},{turnWaits:1})},{ring:'syncing',slow:true,label:/^Waiting for another device/u});
+check('A named device saving',{drive:drive({},{turnWaits:1,turnDevice:'Windows · Chrome'})},{ring:'syncing',slow:true,label:/^Waiting for Windows · Chrome to finish saving/u});
 check('Connecting',{drive:{connecting:true}},{ring:'syncing',slow:false,label:/^Connecting Google Drive…$/u});
 check('Restoring a version',{drive:drive({busy:true,foregroundKind:'restore-version'})},{ring:'syncing',label:/^Restoring a version…$/u});
 check('Slow foreground work',{drive:drive({busy:true,stalled:true,foregroundKind:'backup'})},{ring:'syncing',label:/^Still working/u});

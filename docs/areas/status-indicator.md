@@ -28,7 +28,7 @@ shape or motion and always has text (hover tooltip and screen-reader label).
 |---|---|---|
 | `off` | None | Google Drive not set up on this profile |
 | `syncing` | Green arc travelling round | Connecting, bringing in changes, uploading, restoring, combining, reading versions, a Device Folder backup |
-| `syncing` (slow) | Green arc travelling slowly | Waiting for another device to finish saving |
+| `syncing` (slow) | Green arc travelling slowly | Waiting for another device to finish saving (named, as "Windows · Chrome", when known) |
 | `synced` | Solid green; settles from the arc with a brief glow | In step with Drive |
 | `pending` | Green with an open segment | Changes here not uploaded yet; last sync failed and is retrying; first sync not finished; sync review waiting |
 | `offline` | Grey dashed | No network; syncs when back online |

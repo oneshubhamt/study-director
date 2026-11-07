@@ -159,7 +159,7 @@ registry.define('backup-presentation',1,()=>{
         if(connected&&sync.syncing===true)return 'Syncing · bringing in changes…';
         if(connected&&drive.backingUp===true)return 'Syncing · uploading changes…';
         if(deviceBusy)return device.foregroundKind==='connect'?'Connecting the Device Folder…':['history','restore-version','bring-in','remove-version'].includes(String(device.foregroundKind||''))?'Working in the Device Folder…':'Backing up to the Device Folder…';
-        if(turn)return 'Waiting for another device to finish saving…';
+        if(turn)return `Waiting for ${String(sync.turnDevice||'')||'another device'} to finish saving…`;
         return 'Syncing…';
       }
       const items=[],add=(id,tone,short,text,action='',actionLabel='')=>items.push(freeze({id,tone,short,text,action,actionLabel}));

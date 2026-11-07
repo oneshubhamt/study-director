@@ -486,6 +486,22 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
     sourceRevision='2026-09-19T03:10:00.000Z';snapshotRevision='turn-2';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn two',updatedAt:sourceRevision})};
     await assert.rejects(()=>runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}),{code:'REPOSITORY_SYNC_TURN'},'another device\'s recent upload goes first');
     assert.equal([...markers.keys()].filter(id=>id!==other.id).length,0,'the refused upload removes its own marker');
+    markers.delete(other.id);
+    // An upload whose marker renews holds the turn only while it keeps
+    // renewing; a page closed or frozen mid-upload stops renewing. The
+    // waiting device says which device it waits for.
+    const minutes=value=>new Date(Date.now()-value*60*1000).toISOString(),writer='inst_windows_chrome_mgx2k3a0_1a2b3c4d';
+    const turnFor=marker=>{markers.set(marker.id,marker);return runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}).then(()=>'saved',error=>error?.code==='REPOSITORY_SYNC_TURN'?'waits':Promise.reject(error)).finally(()=>markers.delete(marker.id));};
+    snapshotRevision='turn-3';sourceRevision='2026-09-19T03:20:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn three',updatedAt:sourceRevision})};
+    assert.equal(await turnFor(freeze({id:'pub_'+'1'.repeat(32),startedAt:minutes(8),createdAt:minutes(1),renews:true,device:writer})),'waits','an upload that keeps renewing keeps its turn');
+    const waiting=runtime.providers.diagnosticSync().find(row=>row.id==='turn-drive');
+    assert.equal(waiting.waitingFor,writer,'the wait names the device');assert.ok(Math.abs(Date.parse(waiting.waitingSince)-Date.parse(minutes(8)))<5000,'and when its upload began');
+    assert.equal(runtime.providers.locationStatus('turn-drive').sync.turnDevice,writer);
+    assert.equal(await turnFor(freeze({id:'pub_'+'2'.repeat(32),startedAt:minutes(8),createdAt:minutes(6),renews:true,device:writer})),'saved','an upload that stopped renewing no longer holds the turn');
+    assert.equal(runtime.providers.diagnosticSync().find(row=>row.id==='turn-drive').waitingFor,'','nothing is waited for once it saves');
+    snapshotRevision='turn-4';sourceRevision='2026-09-19T03:30:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn four',updatedAt:sourceRevision})};
+    assert.equal(await turnFor(freeze({id:'pub_'+'3'.repeat(32),createdAt:minutes(8)})),'waits','an older build\'s marker, which never renews, keeps the full window');
+    assert.equal(await turnFor(freeze({id:'pub_'+'4'.repeat(32),createdAt:minutes(16)})),'saved','and stops holding the turn after it');
   }finally{reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
 }
 const retainedManifests=[];

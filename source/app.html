@@ -6640,7 +6640,7 @@ function syncStatusInput(){
   try{storage=readStorageHealth().issues;}catch{/* Not installed yet. */}
   return {
     online:navigator.onLine!==false,
-    drive:drive?{...drive,setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
+    drive:drive?{...drive,...(drive.sync?{sync:{...drive.sync,turnDevice:drive.sync.turnDevice?deviceName(drive.sync.turnDevice):''}}:{}),setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
     device:device&&device.supported?device:null,
     passwordNeeded:!!protection&&protection.enabled&&!protection.unlocked,
     newerData:UnsupportedData.held(),
@@ -11450,7 +11450,7 @@ function currentBackupDiagnosticStates(){
   });
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
-  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
+  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:KeptVersions.count()})));
   sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>[{job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
