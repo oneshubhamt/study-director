@@ -11351,6 +11351,14 @@ function currentBackupDiagnosticStates(){
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
 }
+// Why a version was kept, for diagnostics: the kind of difference, not its content.
+function keptReviewCause(review){
+  const kept=review.kept;
+  if(review.subject==='note')return !kept?'note-deletion':typeof kept.text==='string'&&typeof kept.label==='string'?'note-text-title':typeof kept.text==='string'?'note-text':'note-title';
+  if(review.subject==='savedDay')return kept?'saved-day':'saved-day-deletion';
+  if(review.subject==='session')return kept?'session':'session-absent';
+  return 'settings';
+}
 // The start-up check of this device's data (verifyCanonicalInstallation).
 let canonicalProof=null;
 async function readDataDiagnosticStates(){
@@ -11364,6 +11372,14 @@ async function readDataDiagnosticStates(){
       return {names,listed:!!Profiles.current(),listPresent:LocalStorageContract.getText(ProfileScope.registryKey,null)!==null,fresh:IndexedDb.lifecycle().startedFresh===true,clearedAt:String(readStorageHealth().browserDataClearedAt||'')};
     },project:value=>({job:'Profile storage',state:value.names?'observed':'partial',scoped:!!ProfileScope.scope,profileListPresent:value.listPresent,pageProfileListed:value.listed,startedFresh:value.fresh,...(value.clearedAt?{dataClearedAt:value.clearedAt}:{}),
       ...(value.names?{databases:value.names.length,otherDatabases:value.names.filter(name=>name!==DB_NAME).length}:{})})},
+    // Each version kept for review, newest first: what it is, why it was kept
+    // and which device's copy it came from (type and browser), never its
+    // content or which note or day it is.
+    {job:'Kept versions',read:()=>AppData.pendingReviews.list(),project:list=>{
+      const open=list.filter(review=>!review.resolvedAt).sort((a,b)=>b.keptAt.localeCompare(a.keptAt));
+      return [{job:'Kept versions',state:open.length?'pending':'none',count:open.length},...open.slice(0,12).map(review=>({job:'Kept version',state:'pending',subject:review.subject,cause:keptReviewCause(review),
+        device:!review.keptFrom?'not recorded':review.keptFrom===InstallationIdentity.getId()?'this device':PersistenceModule.deviceName(review.keptFrom)||'another device',keptAt:review.keptAt,...(review.keptChangedAt?{changedAt:review.keptChangedAt}:{})}))];
+    }},
     {job:'Canonical maintenance record',read:()=>AppData.metadata.diagnostics(),project:value=>({job:'Canonical maintenance record',state:value.maintenanceStatus,pending:value.maintenanceStatus==='pending',completedAt:value.completedAt,queuedDeletions:value.deletions,localRecovery:value.localRecovery})},
     ...[['Restore journal',AppData.restoreJournal],['Library clear journal',AppData.libraryClearJournal]].map(([job,owner])=>({job,read:()=>owner.diagnostics(),project:value=>({job,state:value?'pending':'absent',pending:!!value,phase:value?.phase||'',updatedAt:value?.updatedAt||'',coverage:'journal-header'})})),
     {job:'Repository cleanup intent',read:()=>BackupAppMeta.read('repositoryMaintenancePending'),project:value=>[{job:'Repository cleanup intent',state:value?.entries?.length?'pending':'absent',pending:!!value?.entries?.length,count:value?.entries?.length||0},...(value?.entries||[]).filter(entry=>['device-folder','google-drive'].includes(entry.providerId)).map(entry=>({job:entry.providerId==='device-folder'?'Device cleanup intent':'Drive cleanup intent',state:'pending',pending:true,reason:entry.reason,nextEligibleAt:entry.nextEligibleAt,scopeBound:!!entry.repositoryScope}))]},
