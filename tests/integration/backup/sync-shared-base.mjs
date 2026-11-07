@@ -1552,6 +1552,39 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   assert.equal(a.reviews.open().filter(item=>item.subject==='session').length,0,'an acknowledged end creates no phantom kept version');
 }
 
+// A device with no shared history (its database was removed, say) and plans
+// of its own keeps every saved plan either side holds. Otherwise it would
+// publish a copy without the other's saved plans, and the other device,
+// unchanged since it last shared, would take that copy and lose them.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device}=syncWorld,stamp='2026-08-30T08:00:00.000Z';
+  const planOnA=freeze({id:'plan-union-aaa',label:'A plan',scheduleText:'07:00 | 60 | A Block | work | Ethics | block | 1',createdAt:stamp,updatedAt:stamp});
+  const planOnB=freeze({id:'plan-union-bbb',label:'B plan',scheduleText:'08:00 | 30 | B Block | work | Polity | pages | 5',createdAt:stamp,updatedAt:stamp});
+  const holding=(...plans)=>freeze({...personal('Union User'),plans:freeze({draft:null,savedPlans:freeze(plans),defaultId:null})});
+  const draftOnA='06:00 | 45 | Draft on A | work | History | pages | 8';
+  const a={installationId:'inst_union_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:freeze({...holding(planOnA),plans:freeze({...holding(planOnA).plans,draft:draftOnA})}),journal:null};
+  const b={installationId:'inst_union_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:holding(planOnB),journal:null};
+  const A=device(a),B=device(b),ids=side=>side.personal.plans.savedPlans.map(plan=>plan.id).sort();
+  await A.upload();
+  assert.equal((await B.sync()).cancelled,false);
+  assert.deepEqual(ids(b),[planOnA.id,planOnB.id],'a device with no shared history keeps both sides\' saved plans');
+  assert.equal(b.personal.plans.draft,draftOnA,'what only the other side holds is taken');
+  assert.equal(b.reviews.open().some(review=>review.subject==='personal'),false,'saved plans that do not clash need no review');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.deepEqual(ids(a),[planOnA.id,planOnB.id],'the other device keeps its saved plan and gains the new one');
+  // A real clash (the same setting set differently) is still kept for review,
+  // and saved plans are still kept from both sides.
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const named=(plan,name)=>freeze({...holding(plan),preferences:freeze({...holding(plan).preferences,studentName:name})});
+  const c={installationId:'inst_union_device_c',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:named(planOnA,'Name on C'),journal:null};
+  const d={installationId:'inst_union_device_d',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:named(planOnB,'Name on D'),journal:null};
+  const C=device(c),D=device(d);
+  await C.upload();assert.equal((await D.sync()).cancelled,false);
+  assert.deepEqual(ids(d),[planOnA.id,planOnB.id]);assert.equal(d.personal.preferences.studentName,'Name on D','this device\'s setting stays');
+  assert.equal(d.reviews.open().find(review=>review.subject==='personal')?.kept?.preferences?.studentName,'Name on C','the other\'s is kept for review');
+}
+
 // BF-1: Continue Here is fenced by the exact verified Drive session content.
 // The read is side-effect free: B may have a stale local copy, but it claims
 // the newest shared session without reconciling unrelated domains. Pure

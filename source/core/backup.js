@@ -876,6 +876,29 @@ function personalAddsNothing(side,other){
   const plans=new Map(b.plans.savedPlans.map(plan=>[plan.id,plan]));
   return a.plans.savedPlans.every(plan=>plans.has(plan.id)&&Canonical.same(semanticSavedPlan(plan),semanticSavedPlan(plans.get(plan.id))));
 }
+// Without shared history no absence can be read as a deletion. Every saved
+// plan either side holds is kept; where both set the same thing, this
+// device's value stays and the difference is a clash for review; where only
+// the other sets it, the other's is taken. Otherwise a device with no shared
+// history (one whose database was removed, say) would publish a copy without
+// the other devices' saved plans, and they would take it and lose them.
+function personalUnion(local,incoming){
+  let mine,theirs;try{mine=BackupCodec.normalizePersonalData(local);theirs=BackupCodec.normalizePersonalData(incoming);}catch{return null;}
+  if(!mine||!theirs)return null;
+  let clash=false;
+  const unset=value=>value===null||value===undefined,pick=(own,other)=>{if(unset(own))return other;if(!unset(other)&&!Canonical.same(own,other))clash=true;return own;};
+  const preferences={...mine.preferences};
+  for(const [key,value] of Object.entries(theirs.preferences))preferences[key]=pick(preferences[key],value);
+  const own=new Map(mine.plans.savedPlans.map(plan=>[plan.id,plan])),savedPlans=[...mine.plans.savedPlans];
+  for(const plan of theirs.plans.savedPlans){
+    const held=own.get(plan.id);
+    if(!held)savedPlans.push(plan);else if(!Canonical.same(semanticSavedPlan(held),semanticSavedPlan(plan)))clash=true;
+  }
+  if(meaningfulSavedPlanOrderDiffers(mine.plans.savedPlans.map(plan=>plan.id),theirs.plans.savedPlans.map(plan=>plan.id)))clash=true;
+  const plans={...mine.plans,draft:pick(mine.plans.draft,theirs.plans.draft),defaultId:pick(mine.plans.defaultId,theirs.plans.defaultId),savedPlans};
+  let value=null;try{value=BackupCodec.normalizePersonalData({...mine,preferences,plans});}catch{value=null;}
+  return value?freeze({value,clash}):null;
+}
 // The base keeps one fingerprint per Saved Day and one for the Active
 // Session. Both sides are fingerprinted the same way, so a side whose
 // fingerprint matches the base has not changed it since.
@@ -2230,10 +2253,14 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       else if(!base&&personalAddsNothing(localPersonal,theirs))personal='replace';
       else if(!base&&personalAddsNothing(theirs,localPersonal))personal='keep';
       else{
-        // A shared base without per-field ancestry must not invent a
-        // first-start state from a later intentional deletion.
-        personal='keep';
-        if(!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
+        // Both sides hold something the other lacks. With no shared history,
+        // keep everything either holds (personalUnion); only a real clash is
+        // kept for review. A shared base without per-field ancestry keeps
+        // this device's whole copy: an empty field there may be a deletion,
+        // and no first-start state may be invented from it.
+        const union=base?null:personalUnion(localPersonal,theirs);
+        personal='keep';if(union)autoPersonal=union.value;
+        if((!union||union.clash)&&!keep(()=>PendingReviewCodec.create({subject:'personal',ref:'personal',kept:BackupCodec.normalizePersonalData(theirs)})))return needsDecision();
       }
     }
   }
