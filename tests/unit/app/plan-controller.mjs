@@ -442,10 +442,24 @@ const beforeHiddenDone=draftWrites;
 assert.equal(await plan.draft.confirm(),false,'closed live Plan cannot be replaced by hidden Done');
 assert.equal(draftWrites,beforeHiddenDone);
 
+// The sync and app-update safety checks save only the Plan draft the person
+// wrote. The default shown over no stored draft is not one: saving it made a
+// new device's first sync invent a draft that later clashed with another
+// device's real plan.
+canonicalDraft=null;ids['plan-input'].value='Default';
+assert.equal(plan.draft.authoredText(),null,'the displayed default over no stored draft is not authored');
+ids['plan-input'].value='Typed plan';
+assert.equal(plan.draft.authoredText(),'Typed plan');
+ids['plan-input'].value='Default';plan.draft.composerInput();
+assert.equal(plan.draft.authoredText(),'Default','typing back to the default before the save is still authored');
+fireTimers(300);await Promise.resolve();
+assert.equal(canonicalDraft,'Default');
+assert.equal(plan.draft.authoredText(),'Default','a stored draft is always authored');
+
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default']}));

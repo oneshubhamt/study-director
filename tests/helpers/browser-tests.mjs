@@ -6,6 +6,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
   smoke:Object.freeze([
     test('core-flow','tests/browser/app/core-flow.mjs',['plan','execute','review','library','indexeddb','backup']),
     test('session-draft-edit','tests/browser/app/session-draft-edit.mjs',['plan','execute','practice-pacer','backup']),
+    test('session-merge-timer','tests/browser/app/session-merge-timer.mjs',['execute','sync','active-session']),
     test('notes-management','tests/browser/library/notes-management.mjs',['library','notes']),
     test('attachment-editor','tests/browser/attachments/attachment-editor.mjs',['attachments','pdf','audio','rich-editor','overlay']),
     test('restore-session-safety','tests/browser/backup/restore-session-safety.mjs',['backup','restore','execute','library','recovery','multi-tab','ownership','reflection']),
@@ -26,6 +27,8 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('sync-kept-reviews','tests/browser/backup/sync-kept-reviews.mjs',['sync','google-drive','two-devices','pending-reviews','restore'],300000),
     test('cold-start-drive-recovery','tests/browser/backup/cold-start-drive-recovery.mjs',['sync','google-drive','site-data-clear','recovery','indexeddb'],300000,{alone:'Like site-data-clear: the app gives up opening IndexedDB after two 2.5 s attempts, and right after a storage clear that reopen can take longer on a busy CPU.'}),
     test('session-plan-sync','tests/browser/backup/session-plan-sync.mjs',['sync','google-drive','two-devices','active-session','plan','takeover'],300000,{alone:'Two-device ownership handoff has deliberate network gates and short post-claim timing assertions; unrelated Chromium CPU load can delay the local continuation path without testing a synchronization invariant.'}),
+    test('sync-journeys','tests/browser/backup/sync-journeys.mjs',['sync','google-drive','two-devices','active-session','takeover','offline','freeze','connect-card'],300000,{alone:'Two browsers through a day of handoffs with held, offline and frozen devices; it measures that the old owner stops within one 15 s claim check, which CPU load from another browser test would blur.'}),
+    test('session-handoff-journeys','tests/browser/backup/session-handoff-journeys.mjs',['sync','google-drive','three-devices','active-session','takeover','clock-skew'],300000,{alone:'Three browsers hand a running session back and forth within seconds and time each Continue Here; CPU load from another browser test would blur those timings.'}),
     test('insights-populated','tests/browser/insights/insights-populated-ui.mjs',['insights','populated-history']),
     test('pwa-update','tests/browser/pwa/pwa-update.mjs',['pwa','service-worker','trusted-types','multi-tab','offline','recovery','update'],0,{alone:'Chromium activates a new service worker only when the old one is idle and the CPU has time; diagnosed and fixed, kept alone as a safeguard.'}),
     test('image-clipboard-bridge','tests/browser/rich-text/image-bridge.mjs',['rich-editor','wordgard','native-file-selection','clipboard-image','selection','asset-storage']),

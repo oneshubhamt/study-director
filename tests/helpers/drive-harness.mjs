@@ -24,6 +24,9 @@ export const QA_PROFILE_ID='prof_qa_mve00000_abcdef01';
 const defaultBind=async info=>info.mine?'continue':'claim';
 export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,remoteState=null,addEventListener=()=>{},profileId=()=>QA_PROFILE_ID,profileName=()=>'',bind=defaultBind,email='qa@example.com',device=()=>'inst_qa_harness_mve00000_abcdef01'}={}){
   const state={email,folderProperties:new Map(),folderNames:new Map(),deletionMarkers:[],deletedSignals:[],libraryControl:null,binds:[],rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
+  // state.offline: the browser says it is offline (navigator.onLine).
+  // state.driveClockAheadMs: how far Drive's clock is ahead of this device's
+  // (negative: behind) for the files it creates without content (markers).
   // A new browser page has fresh JavaScript upload state, but Drive's remote
   // files and partially acknowledged sessions survive page termination.
   // Share only server-side fixtures; never share the provider's in-memory map.
@@ -87,7 +90,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       if(metadata.mimeType==='application/vnd.google-apps.folder'){
         const id=`folder-${state.nextFolderId++}`;state.folders.push(id);if(metadata.name)state.folderNames.set(id,String(metadata.name));const {studyDirectorFolder:_marker,...properties}=metadata.appProperties||{};state.folderProperties.set(id,properties);return json(folderMetadata(id));
       }
-      const id=`repo-${state.nextId++}`,stamp=new (clock?.Date||Date)().toISOString(),file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content:new Blob([]),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);
+      const id=`repo-${state.nextId++}`,stamp=new (clock?.Date||Date)((clock?.Date||Date).now()+(Number(state.driveClockAheadMs)||0)).toISOString(),file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content:new Blob([]),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);
       if(state.networkFailCoordinationPostOnce&&['publication','maintenance'].includes(String(metadata.appProperties?.studyDirectorRepositoryKind||''))){state.networkFailCoordinationPostOnce=false;throw new TypeError('simulated ambiguous coordination create');}
       return json(fileMetadata(file));
     }
@@ -188,6 +191,6 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       }catch(error){if(!this.controller.signal.aborted)this.onerror?.(error);}
     })();}
   }
-  const context=vm.createContext({Error,TypeError,Date:clock?.Date||Date,console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,XMLHttpRequest:uploadProgressTransport?MockXMLHttpRequest:undefined,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},localStorage,addEventListener,removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
+  const context=vm.createContext({navigator:{get onLine(){return state.offline!==true;}},Error,TypeError,Date:clock?.Date||Date,console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,XMLHttpRequest:uploadProgressTransport?MockXMLHttpRequest:undefined,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},localStorage,addEventListener,removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
   context.window=context;context.globalThis=context;context[Symbol.for('studyDirector.profileScope.v1')]=Object.freeze({scoped:name=>String(name)});vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context,fetch:mockFetch};
 }

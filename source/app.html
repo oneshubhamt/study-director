@@ -2809,7 +2809,10 @@ AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze
     try{renderOwnershipBanner();}catch{}
     if(mutationUiOperationActive&&!active&&!AppMutationCoordinator.blocksUi())queueProtectedMutationUiReconcile();
     mutationUiOperationActive=active;
-  },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)})
+  },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay),
+  // Another tab's lease ran out without being released (it was closed in the
+  // middle of a change): background work that waited for it goes now.
+  foreignReleased:()=>wakeBackgroundOperations('mutation-lease-ended')})
 }));
 if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='study-director.mutation-coordinator'||AppMutationCoordinator.contractVersion!==1)throw new Error('Study Director mutation coordinator is unavailable or incompatible.');
 /* TIMER NUDGE AND SOUND CUES */
@@ -2877,7 +2880,14 @@ const {
   markDone:markDoneTimer, setPausedUI, setTimerIdentity, skipTask:skipTaskTimer, startCur, syncTimerAfterWake, toggleDone, togglePause:togglePauseTimer,
   updateBreakMeter, updateCD
 }=TimerEngine;
-function togglePause(){const result=togglePauseTimer();schedulePwaUpdateEvaluation(150);return result;}
+// A pause, resume, finished or skipped block goes to the other devices
+// within seconds (an urgent change), not at the next quiet-period upload:
+// Continue Here elsewhere takes the timer from Drive's newest version, so a
+// pause still waiting here would count the paused time there as study.
+function sendSessionChangeSoon(reason){
+  void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.session-change-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason}));
+}
+function togglePause(){const result=togglePauseTimer();sendSessionChangeSoon(TimerState.paused?'timer-pause':'timer-resume');schedulePwaUpdateEvaluation(150);return result;}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
@@ -3010,9 +3020,12 @@ async function checkSessionOwnershipClaim(){
   }catch(error){AppDiagnostics.capture('session.claim-watch',error,'warn');return false;}
   finally{sessionClaimCheckActive=false;}
 }
-function wakeSessionOwnershipClaim(){
+// slackMs: the interval's own tick arrives a few milliseconds short of the
+// period after the check it started last time, so it allows a second;
+// coming back to the app or online waits out the whole period.
+function wakeSessionOwnershipClaim(slackMs=0){
   const now=Date.now();
-  if(sessionClaimLastAttemptAt&&now>=sessionClaimLastAttemptAt&&now-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS)return false;
+  if(sessionClaimLastAttemptAt&&now>=sessionClaimLastAttemptAt&&now-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS-slackMs)return false;
   return checkSessionOwnershipClaim();
 }
 function installSessionWatch(){
@@ -3023,7 +3036,7 @@ function installSessionWatch(){
     try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
-  sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim();},SESSION_CLAIM_WATCH_MS);
+  sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim(1000);},SESSION_CLAIM_WATCH_MS);
   // Existing interval owns the cadence. Foreground/online return only advances
   // an eligible missed attempt, never introducing a second polling timer.
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void wakeSessionOwnershipClaim();});
@@ -3038,10 +3051,10 @@ function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
 function markDone(){
   const finishWasAvailable=isTrackableBlock(TASKS[TimerState.currentIndex]);
   const result=markDoneTimer();
-  if(finishWasAvailable&&result!==false)notifyDeviceBackupIfStudyDayResolved();
+  if(finishWasAvailable&&result!==false){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-finished');}
   schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;
 }
-function skipTask(){const result=skipTaskTimer();if(result!==false)notifyDeviceBackupIfStudyDayResolved();schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;}
+function skipTask(){const result=skipTaskTimer();if(result!==false){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-skipped');}schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;}
 function finishPracticePacer(){
   const result=PracticePacer.finish();
   schedulePwaUpdateEvaluation(150);return result;
@@ -3181,7 +3194,7 @@ function setTaskSkippedState(idx){
 function emptyStorageHealth(){
   // lastLocalSaveAt: the change clock's fast copy for backup decisions.
   // lastStudyDataSaveAt: when study data (notes, Saved Days, sessions, plans,
-  // settings, kept versions) was last saved in this browser.
+  // kept versions; not settings alone) was last saved in this browser.
   // browserDataClearedAt: a browser-data clear still being resolved.
   return {version:3,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null};
 }
@@ -5311,11 +5324,11 @@ function handleCanonicalCommit(event){
   const referencesChanged=canonicalCommitChangesAttachmentReferences(event);
   if(referencesChanged)richAssetReferenceRevision++;
   const committedAt=event&&event.committedAt||new Date().toISOString();
-  // Study data was saved here: notes, Saved Days, sessions, plans and
-  // settings, kept versions, whether made here or taken in by a sync. The
-  // start-up compatibility step (settings rebuilt from browser storage on a
-  // fresh install) is not.
-  const studyData=!!event&&event.startup!==true&&STUDY_DATA_COMMITS.has(event.entityType);
+  // Study data was saved here: notes, Saved Days, sessions, plans, kept
+  // versions, whether made here or taken in by a sync: what the empty-device
+  // check counts. Settings alone (a name, a theme) and the start-up
+  // compatibility step are not.
+  const studyData=!!event&&event.startup!==true&&event.settingsOnly!==true&&STUDY_DATA_COMMITS.has(event.entityType);
   writeStorageHealth(studyData?{lastLocalSaveAt:committedAt,lastStudyDataSaveAt:committedAt}:{lastLocalSaveAt:committedAt});
   renderStorageHealth();
   if(NativeCapabilities&&event&&event.entityType==='activeSession'){
@@ -6067,6 +6080,14 @@ function installBackgroundOwners(){
   ])BackgroundOperations.register(id,owner);
   backgroundOwnersInstalled=true;
 }
+// A page closed in the middle of a change (a sync applying it, perhaps as
+// the phone put the app away) leaves its write lease until it runs out, at
+// most 20 s. This tab owns the app, so the lease is that closed page's:
+// start-up recovery waits for it to end rather than asking for a reload.
+async function waitForClosedTabLease(limitMs=25000){
+  for(let waited=0;waited<limitMs&&AppOwnership.canMutate()&&AppMutationCoordinator.foreignActive();waited+=250)await new Promise(resolve=>setTimeout(resolve,250));
+  return !AppMutationCoordinator.foreignActive();
+}
 function wakeBackgroundOperations(trigger='eligibility'){
   if(!StartupLifecycle.status().fullyInitialized)return false;
   installBackgroundOwners();BackgroundOperations.wake(trigger);return true;
@@ -6640,7 +6661,7 @@ function syncStatusInput(){
   try{storage=readStorageHealth().issues;}catch{/* Not installed yet. */}
   return {
     online:navigator.onLine!==false,
-    drive:drive?{...drive,setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
+    drive:drive?{...namedTurnDevice(drive),setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
     device:device&&device.supported?device:null,
     passwordNeeded:!!protection&&protection.enabled&&!protection.unlocked,
     newerData:UnsupportedData.held(),
@@ -6687,7 +6708,9 @@ function renderSyncStatusPanel(model){
   const headline=document.getElementById('profile-status-headline');if(headline&&headline.textContent!==model.headline)headline.textContent=model.headline;
   const detail=document.getElementById('profile-status-detail');if(detail)detail.textContent=model.detail;
   const primary=document.getElementById('profile-status-primary');
-  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;}}
+  // Sync now (shown only while waiting) is a quiet link beside the sentence;
+  // Try again keeps the full button.
+  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;primary.classList.toggle('profile-act-quiet',model.action.action==='sync-now');}}
   // Rebuilt only when the items change, so a focused button keeps focus.
   const list=document.getElementById('profile-status-items'),key=JSON.stringify(model.items);
   if(list&&list.dataset.key!==key){list.dataset.key=key;list.replaceChildren(...model.items.map(item=>{
@@ -6706,7 +6729,9 @@ async function syncStatusAction(ev){
   if(!['sync-now','retry','sign-in'].includes(kind))closeProfilePanel();
   try{
     switch(kind){
-      case 'sync-now':case 'retry':BackupProviderRuntime.scheduleSharedSync('google-drive',kind==='retry'?'sync-retry':'sync-now');scheduleSyncStatus();return true;
+      // Sync now (shown while waiting for another device) uploads without
+      // waiting for that device's turn; Try again keeps the usual turns.
+      case 'sync-now':case 'retry':BackupProviderRuntime.scheduleSharedSync('google-drive',kind==='retry'?'sync-retry':'sync-now',{skipTurn:kind==='sync-now'});scheduleSyncStatus();return true;
       case 'sign-in':return await connectDriveForProfile();
       case 'enter-password':return await CLICK_ACTIONS['backup-protection']();
       case 'unlock-sync':return await BackupProviderRuntime.unlockSync('google-drive');
@@ -6901,13 +6926,16 @@ function driveRunningOperation(){
   }
   return null;
 }
+// Drive reports the device whose upload this one waits for by its id; what
+// the person reads is its type and browser ("Windows · Chrome").
+function namedTurnDevice(drive){return drive?.sync?{...drive,sync:{...drive.sync,turnDevice:drive.sync.turnDevice?deviceName(drive.sync.turnDevice):''}}:drive;}
 function renderDriveConnectCard(){
   const node=id=>document.getElementById(id),root=node('drive-connect-card');if(!root)return;
   const state=driveConnectCard;
   if(!state){root.hidden=true;return;}
   let model;
   try{
-    const drive=BackupProviderRuntime.locationStatus('google-drive'),operation=driveRunningOperation();
+    const drive=namedTurnDevice(BackupProviderRuntime.locationStatus('google-drive')),operation=driveRunningOperation();
     if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
     if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
     model=BackupPresentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
@@ -6916,16 +6944,24 @@ function renderDriveConnectCard(){
   setTextSafe('drive-connect-title',model.title);
   // Screen readers hear the sentence when it changes, not every count.
   if(state.lastStatus!==model.status){state.lastStatus=model.status;setTextSafe('drive-connect-status',model.status);}
-  const list=node('drive-connect-steps'),key=JSON.stringify(model.steps);
+  // Sync now and Try now sit on the line of the step that waits, as a quiet
+  // link; any other action is the card's button.
+  const inline=model.action?.step?model.action:null,list=node('drive-connect-steps'),key=JSON.stringify([model.steps,inline]);
   if(list&&list.dataset.key!==key){
     list.dataset.key=key;
-    list.replaceChildren(...model.steps.map(step=>{const item=document.createElement('li');item.dataset.state=step.state;item.textContent=step.label;if(step.state==='active')item.setAttribute('aria-current','step');return item;}));
+    list.replaceChildren(...model.steps.map(step=>{
+      const item=document.createElement('li');item.dataset.state=step.state;if(step.state==='active')item.setAttribute('aria-current','step');
+      const label=document.createElement('span');label.textContent=step.label;item.append(label);
+      if(inline&&inline.step===step.id){const link=document.createElement('button');link.type='button';link.className='drive-connect-step-action';link.dataset.action='sync-status-action';link.dataset.syncAction=inline.action;link.textContent=inline.label;item.append(link);}
+      return item;
+    }));
   }
-  const bar=node('drive-connect-bar'),showBar=model.tone==='working'&&state.phase!=='signing-in';
+  // No moving bar while a step only waits (for another device, or a retry).
+  const bar=node('drive-connect-bar'),showBar=model.tone==='working'&&state.phase!=='signing-in'&&!model.steps.some(step=>step.state==='waiting');
   if(bar){bar.hidden=!showBar;bar.dataset.mode=model.fraction===null?'indeterminate':'determinate';bar.firstElementChild.style.width=model.fraction===null?'':`${Math.round(model.fraction*100)}%`;}
   const detail=node('drive-connect-detail');if(detail){detail.hidden=!model.detail;if(detail.textContent!==model.detail)detail.textContent=model.detail;}
   const action=node('drive-connect-action');
-  if(action){action.hidden=!model.action;if(model.action){action.dataset.syncAction=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
+  if(action){action.hidden=!model.action||!!inline;if(model.action&&!inline){action.dataset.syncAction=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
   // Synced closes on its own; anything that needs the person stays.
   if(model.done&&!driveConnectCardHide)driveConnectCardHide=setTimeout(()=>{if(driveConnectCard===state)endDriveConnectCard();},6000);
 }
@@ -7480,9 +7516,10 @@ const paneEntranceTimers=new Map();
 function markPaneEntrance(pane){
   // Presentation-owned entrance: CSS animates the arriving pane's sections for
   // one beat. The marker is cleared afterwards so later re-renders stay still.
-  // Insights renders progressively behind its own loading panel; animating it
-  // at the same time made that render about 300 ms slower, so it arrives still.
-  if(pane.id==='pane-insights')return;
+  // Insights renders progressively behind its own loading panel the first
+  // time; animating that render made it about 300 ms slower, so a first open
+  // arrives still. Reopened, it shows the view it kept and animates like any pane.
+  if(pane.id==='pane-insights'&&(!pane.firstElementChild||pane.querySelector('.plugin-loading-panel')))return;
   clearTimeout(paneEntranceTimers.get(pane.id));
   pane.setAttribute('data-sd-enter','');
   paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));
@@ -10147,12 +10184,16 @@ async function restoreNotesSnapshotThroughLifecycle(snapshotNotes){
     date:getReviewDate(),
   },()=>AppData.notes.replace(snapshotNotes));
 }
-async function restoreSessionStateThroughLifecycle(importedSession){
+async function restoreSessionStateThroughLifecycle(importedSession,options={}){
   const session=importedSession?ActiveSessionCodec.sanitizeCurrent(importedSession):null;
+  // A sync merge into the session running here keeps the timer running: when
+  // the merged session has no timer (the other device had stopped), the
+  // current block runs on here. A pause the other device made stays paused.
+  const keepRunning=options.keepRunning===true&&TimerState.mode===TIMER_MODES.RUNNING&&!TimerState.paused;let runOn=false;
   const date=session&&isValidIsoDate(session.date)?session.date:todayISO();
   const snapshot=session?activeSessionSnapshot(session):null;
   if(session&&!snapshot)throw new Error('The rollback active-session snapshot is incompatible.');
-  return SessionLifecycle.run('restore-journal-rollback',{
+  const result=await SessionLifecycle.run('restore-journal-rollback',{
     scheduleIdentity:true,date,autoDate:date===todayISO(),sessionRevision:session&&session.revision||0,
     snapshotReview:snapshot&&snapshot.review
   },async()=>{
@@ -10174,6 +10215,7 @@ async function restoreSessionStateThroughLifecycle(importedSession){
         const restored=applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
         if(restored===false)throw new Error('Rollback active-session runtime could not be applied.');
         setSessionPanelMode('active');
+        runOn=keepRunning&&!snapshot.timerRuntime;
       }
       return saved;
     }
@@ -10183,6 +10225,9 @@ async function restoreSessionStateThroughLifecycle(importedSession){
     PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('none');
     return cleared;
   });
+  const idx=TimerState.currentIndex;
+  if(runOn&&!TimerState.runtime?.startMs&&idx<TASKS.length&&isTrackableBlock(TASKS[idx])&&!isTaskResolved(idx))TimerEngine.startCur();
+  return result;
 }
 function verifyRestoredTimerRuntimeSemantics(expectedRuntime){
   if(!expectedRuntime)return true;
@@ -10814,7 +10859,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     activeSessionIssue:loaded=>pwaRecoveryReadBackIssue(loaded),activeSessionLoad:()=>AppData.activeSession.load(0,{strict:true}),activeSessionSettled:()=>AppData.activeSession.settled(),
     attachmentBusy:()=>imagePreparationCount>0||AttachmentIngest.status().busy,canonicalPlanDraft:async()=>(await AppData.planData.read()).draft,deletionRecoveryFlush:()=>AppData.deletionRecovery.flush(),
     flushNotes:()=>AppData.notes.flush({strict:true}),flushPlanDraft:()=>PlanDraftEditor.flush(),hasTasks:()=>TASKS.length>0,noteFailure:()=>AppData.notes.failure(),
-    planDraft:()=>PlanData.readDraft(),planInputValue:()=>document.getElementById('plan-input')?.value??null,quiesce:operation=>quiesceManagedRecoveryRuntime(operation),
+    planDraft:()=>PlanData.readDraft(),planInputValue:()=>PlanDraftEditor.authoredText(),quiesce:operation=>quiesceManagedRecoveryRuntime(operation),
     savePlanDraft:options=>PlanDraftEditor.save(options),settleAttachmentWriters:()=>settleAttachmentWriters(),settlePlan:()=>PlanData.settled(),writeLiveDraft:()=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:true})
   }),
   managedRecovery:Object.freeze({createCoordinator:input=>ManagedRecoveryModule.createCoordinator(input)}),
@@ -11075,15 +11120,16 @@ async function prepareApplicationUpdate(context={}){
     check();
     if(await PlanDraftEditor.flush()===false)return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
     check();
-    const planInput=document.getElementById('plan-input');
-    if(planInput&&(PlanData.readDraft()??'')!==planInput.value&&await PlanDraftEditor.save()===false){
+    // The default plan shown over no stored draft is not saved as a draft.
+    const planText=PlanDraftEditor.authoredText();
+    if(planText!==null&&(PlanData.readDraft()??'')!==planText&&await PlanDraftEditor.save()===false){
       return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
     }
     await PlanData.settled();
     check();
-    const storedPlan=planInput?await AppData.planData.read():null;
+    const storedPlan=planText!==null?await AppData.planData.read():null;
     check();
-    if(planInput&&storedPlan.draft!==planInput.value){
+    if(planText!==null&&storedPlan.draft!==planText){
       return Object.freeze({ok:false,reason:'The Plan draft did not pass the update read-back check.'});
     }
     if(flushPendingReviewSave({strict:true})===false)return Object.freeze({ok:false,reason:'The pending reflection could not be saved. Keep this tab open and retry.'});
@@ -11450,7 +11496,7 @@ function currentBackupDiagnosticStates(){
   });
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
-  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
+  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:KeptVersions.count()})));
   sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>[{job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
@@ -11998,6 +12044,9 @@ function installApplicationDomBindings(){
   BackupProviderRuntime.subscribeStatus(storageResetConnectionsChanged);
   // The indicator also follows the network and keeps its times current.
   for(const type of ['online','offline'])window.addEventListener(type,scheduleSyncStatus);
+  // Background sync waits while offline (Drive reports it unavailable); back
+  // online, it goes at once rather than at its next retry.
+  window.addEventListener('online',()=>{try{BackupProviderRuntime.wakeBackground('online');}catch(error){AppDiagnostics.capture('backup-provider.online-wake',error,'warn');}});
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleSyncStatus();});
   setInterval(()=>{if(document.visibilityState==='visible')scheduleSyncStatus();},30*1000);
   // The indicator, the panel's counts and the Connect card follow each step
@@ -12081,7 +12130,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     },
     bindDom:installApplicationDomBindings,
     recoverInterruptedLibraryClear:()=>LibraryClearCoordinator.recoverInterrupted(),
-    recoverInterruptedRestore:async()=>{await PlanData.hydrate();return BackupController.recoverInterruptedRestore();},
+    recoverInterruptedRestore:async()=>{await PlanData.hydrate();if(await AppData.restoreJournal.read().catch(()=>null))await waitForClosedTabLease();return BackupController.recoverInterruptedRestore();},
     loadNotes:()=>AppData.notes.load(),
     hydrateDrafts:hydrateSavedDrafts,
     previewPlan:()=>PlanDraftEditor.preview({silent:true}),

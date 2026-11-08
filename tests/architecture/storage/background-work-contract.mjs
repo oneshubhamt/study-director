@@ -143,7 +143,7 @@ for(const mode of [{busy:true},{backingUp:true},{lockRace:true}]){
  assert.equal(t.calls.update,0);assert.equal(t.calls.lock,0);
 }
 const claimRuntime=productionFunction('async function checkSessionOwnershipClaim(){')+'\n'
- +productionFunction('function wakeSessionOwnershipClaim(){')+'\n'
+ +productionFunction('function wakeSessionOwnershipClaim(slackMs=0){')+'\n'
  +productionFunction('function installSessionWatch(){');
 function claimHarness(){
  let now=100000,remote=0,local=0,connected=true,online=true,ready=true;
@@ -182,10 +182,34 @@ function claimHarness(){
  t.setVisible(false);t.shift(60000);await t.poll();assert.equal(t.remote,121);
  t.setVisible(true);await t.event('document:visibilitychange');assert.equal(t.remote,122,'foreground return checks immediately after missed interval');
  await t.poll();assert.equal(t.remote,122,'immediate scheduled tick does not double the foreground return poll');
+ // The interval's tick lands a few milliseconds short of 15 s after the
+ // check it started; it still checks, so the cadence is 15 s, not 30 s.
+ t.shift(14990);await t.poll();assert.equal(t.remote,123,'a tick a few milliseconds early still checks');
+ t.shift(14990);await t.poll();assert.equal(t.remote,124,'every tick, not every other one');
 }
 // BS11/17 retain safety-critical boundaries: read-only planning precedes the
 // destructive lease, and startup orphan collection is not replaced by a wake.
 assert.match(app,/installBackgroundOwners\(\);scheduleDataMaintenance\(\);BackgroundOperations\.wake\('startup'\);installSessionWatch\(\)/u);
 assert.match(app,/void BackupFiles\.collect\(\)\.catch/u,'cold startup must discover orphan scratch bytes even without a pending job');
+// An app killed while a sync applied changes leaves an interrupted-step
+// journal and its write lease (at most 20 s). Reopened at once, start-up
+// recovery waits for that closed page's lease to end instead of locking the
+// app until a reload; a live owner elsewhere, or a lease that never ends,
+// still leaves recovery to its fail-closed path.
+{
+ const run=async({owner=true,foreignPolls=0}={})=>{
+  let polls=0,waits=0;
+  const context=vm.createContext({AppOwnership:{canMutate:()=>owner},AppMutationCoordinator:{foreignActive:()=>polls++<foreignPolls},setTimeout:(fn)=>{waits++;fn();return waits;},Promise});
+  vm.runInContext(productionFunction('async function waitForClosedTabLease(limitMs=25000){')+'\nglobalThis.wait=waitForClosedTabLease;',context);
+  const ended=await context.wait();return {ended,waits};
+ };
+ assert.deepEqual(await run({foreignPolls:3}),{ended:true,waits:3},'a closed page\'s lease: start-up waits until it ends, then recovers');
+ assert.deepEqual(await run({foreignPolls:0}),{ended:true,waits:0},'no lease: no wait');
+ const stuck=await run({foreignPolls:1000});assert.equal(stuck.ended,false,'a lease that never ends is not waited for forever');assert.equal(stuck.waits,100,'at most 25 s');
+ assert.equal((await run({owner:false,foreignPolls:3})).waits,0,'without control this tab does not wait: recovery reports it');
+ assert.match(app,/recoverInterruptedRestore:async\(\)=>\{await PlanData\.hydrate\(\);if\(await AppData\.restoreJournal\.read\(\)\.catch\(\(\)=>null\)\)await waitForClosedTabLease\(\);/u,'start-up waits only when an interrupted step must be recovered');
+}
+// Background sync waits while offline; coming back online wakes it at once.
+assert.match(app,/window\.addEventListener\('online',\(\)=>\{try\{BackupProviderRuntime\.wakeBackground\('online'\);/u,'back online, background sync goes at once rather than at its next retry');
 
 console.log(JSON.stringify({status:'PASS',suite:'background-work-contract',sharedStateMachine:true,maintenanceEligibility:true,maintenanceClassification:true,blockedBackoff:true,foregroundPreemption:true,suspensionSettlement:true,opportunityDrivenIntegrity:true,leanProviderPort:true,clearLibrarySafetyForeground:true,backgroundDiagnostics:true,authoritativeRebase:true,persistenceHardening:true,sharedRepositoryPolicy:true},null,2));
