@@ -117,7 +117,14 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
     - *So the content is not the cause:* the same text saved later. The first save most likely collided with something running at that moment, and the deletion did not hold.
     - *In the diagnostics:* a Drive sync at 18:09:05 found the laptop behind, brought in 8 objects, settled one Saved Day difference with Drive's copy (`savedDayConflicts=1`) and rewrote the local Saved Day state. Three session versions were kept for review within five minutes (18:04:35, 18:07:09, 18:09:12, each "this device", changed about two minutes before), so something kept writing the session to Drive after the handoff: most likely the phone's last uploads before it locked.
     - *Leads:* (1) Save Day refused because a sync, restore or settlement was rewriting the Saved Day at the same time (a guard on the expected local state, or the restore lock), and the notice gave no retry; (2) the settlement bringing back an older reflection over the person's deletion; (3) the Diary reflection editor remounting (item 19) handing the save a stale value; (4) the F24 change that writes a stored Saved Day only with its stored fields (`storedDailyRecordFields`). Also find why a session version was kept three times after a handoff, against the rule that only different decisions on both devices are kept.
+    - *Most likely reading so far:* the sync at 18:09:05 settled the day with Drive's copy, which still held the older reflection, so the older text came back over the deletion. The phone's last uploads after the handoff most likely put that copy on Drive.
+    - *Later diagnostics (18:13:19, after the saves):* the save that worked reached Drive with a backup given priority at 18:13:06 and the Device Folder too; no new kept versions. Around it, the laptop's cleanup and uploads blocked each other and paused background Drive sync for half an hour (item 18).
     - *Fix:* Save Day never fails because background work is running (it waits, or retries by itself), never drops what the person wrote, and a deleted reflection stays deleted. A test that saves a day with a reflection while a sync settles that day, and one that saves with the reflection cleared.
+21. **Finish Today does not end the session** (owner, F24, 2026-11-08). After Finish Today, Execute looks as before ("Forward Plan Complete" on the timer, the Practice Pacer as it was), the plan is not back in draft, and a session kept for review still says it waits until the session ends, so it cannot be opened. The owner expects Finish Today to end the session for good: like Reset Today, but with the day kept for saving.
+    - *What the code does today:* `finishTodaySession` (`app.html`) stops the timer, records a running block as partial, sets the timer to done and opens Review; the day's session stays until Save Today to Library. A kept session review is offered only when no session is here (`reviewKeptVersions` in `backup.js`: `review.subject!=='session'||!hasActiveSession()`), and `hasBlockingActiveSession` (`app.html`) counts any plan with trackable blocks as a session, finished or not. So after Finish Today the review stays blocked until Save Today. Execute shows "Forward Plan Complete" because untouched later blocks stay unattempted, by design.
+    - *Decide with the owner:* what Finish Today leaves behind. Proposal: it ends the live session (Execute and the Pacer go back to their idle state, as after Reset Today, and the plan returns to draft), and the finished day waits in Review, unsaved, until Save Today to Library. A finished day is no longer a running session, so a kept session review can be opened at once. At the least, a finished session must not block that review.
+    - *Check with it:* whether the day saved later still carries everything Finish Today recorded; what happens on another device that takes the day in after Finish Today (sync and Continue Here); and whether item 20's failed save is connected (Save Today refused while kept session reviews were waiting and the finished session was still here).
+    - *Tests:* Finish Today, then the kept session review opens; Finish Today, then Execute and the Pacer look idle; Finish Today, then Save Today stores the same day.
 
 ## Owner's observations (noted 2026-10-25)
 
@@ -183,6 +190,20 @@ A redesign must fit each kind of data, not one rule for all. Likely a fusion: me
 - **Goals, in order:** handoff speed, then sync speed, sized to the data actually saved.
 
 ### Order of work (from Saturday 2026-11-07)
+
+**Bug hunt, next session (owner's reports from 2026-11-08):**
+
+| Order | Item | Why first |
+|---|---|---|
+| 1 | Data loss on the phone (top of this page) with the 4 GB storage figure (item 11) | Data at risk. Measure what the app stores on the phone, then check whether that use invites the browser to remove the database. |
+| 2 | Save Day fails and an older reflection comes back (item 20), with the reflection editor remounting (item 19) | A person's words lost. Find the write that refused, and the settlement that brought back the older text. |
+| 3 | Finish Today does not end the session (item 21) | Blocks kept session reviews; needs the owner's decision first. |
+| 4 | Cleanup and uploads blocking each other, and the 30-minute pause (item 18) | Background backups stop; on one device too. Related: item 12, item 14. |
+| 5 | Session versions kept three times after a handoff (item 20) | May break the rule that only different decisions on both devices are kept; they also wait on item 21. |
+| 6 | Practice Pacer start (item 17), then the rest | Smaller. |
+
+How they connect: items 19, 20 and 21 all touch the Review page and the end of the day; items 18 and 20 both came after a handoff with the phone left open and locked; the phone loss and item 11 are one investigation.
+
 
 1. Bug hunting: the open bugs above, the major ones first.
 2. Test suite refinement: resume [test-programme.md](test-programme.md) at step 4a.
