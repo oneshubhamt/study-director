@@ -1,6 +1,6 @@
 # TypeScript conversion — execution control record
 
-**Current checkpoint: main integration ACTIVE, 2026-11-09 (Asia/Calcutta).** The production intake below must close before P5.1 starts. Original conversion baseline: Phase 4 is implemented and verified within its recorded targeted scope at [`4136ba5`](https://github.com/oneshubhamt/study-director/commit/4136ba513479f0e0e0c01e0cef2495bcf61e0a2e): 34 Phase 4 modules, 126 files admitted to strict checks, zero unchecked existing TS. This is not whole-application certification. **Phase 5 is ACTIVE: P5.0 is VERIFIED — TARGETED.** Next is P5.1; strict feature conversions remain unstarted.
+**Current checkpoint: main integration VERIFIED — TARGETED, 2026-11-09 (Asia/Calcutta).** Production `main` through `2638619` is merged and published on `TS-Conversion` at [`0564e8e`](https://github.com/oneshubhamt/study-director/commit/0564e8e0b6e240371507ad35c728501f503c9fe2). Full certification remains Phase 7. Original conversion baseline: Phase 4 is implemented and verified within its recorded targeted scope at [`4136ba5`](https://github.com/oneshubhamt/study-director/commit/4136ba513479f0e0e0c01e0cef2495bcf61e0a2e): 34 Phase 4 modules, 126 files admitted to strict checks, zero unchecked existing TS. This is not whole-application certification. **Phase 5 is ACTIVE: P5.0 is VERIFIED — TARGETED.** Next is P5.1; strict feature conversions remain unstarted.
 
 ## Read first and document ownership
 
@@ -142,9 +142,9 @@ No TypeScript admission count changed: this is mechanical preparation, not new s
 
 **Handoff:** P5.0 complete within targeted scope; next is P5.1 foundation modules and their allocated host adapters. Establish a fresh baseline and bounded objectives before editing those implementations. Preserve the current canonical model and immutable Wordgard. Commit containing this worklog identifies the completion revision (`git log -1 --format=%H -- TS-CONVERSION-EXECUTION.md`); verify `git ls-remote origin refs/heads/TS-Conversion` before claiming push. No main/Practice Desk edits or deployment.
 
-## Active durable worklog — MAIN-2026-11-08
+## Recent closed worklog — MAIN-2026-11-08
 
-**State: ACTIVE.** Owner requests integration of latest production main before P5.1; explicitly excludes all migration/compatibility code and assumes every installation already uses the latest canonical topology. Baseline TS `d36c32e97506324f7305b22f0bb3c4bcdb1778a3`; fetched main `26386198a5c5b283d8adb97cf60aabeb8f6ebb9c`; last inspected main `9afbda7`; actual shared Git ancestor `a3c94d9`. Temporary pad `/tmp/study-director-main-intake/WORKLOG.md`.
+**State: VERIFIED — TARGETED.** Published merge [`0564e8e`](https://github.com/oneshubhamt/study-director/commit/0564e8e0b6e240371507ad35c728501f503c9fe2); branch-only publication verified against GitHub. Owner requested integration of latest production main before P5.1; explicitly excludes all migration/compatibility code and assumes every installation already uses the latest canonical topology. Baseline TS `d36c32e97506324f7305b22f0bb3c4bcdb1778a3`; fetched main `26386198a5c5b283d8adb97cf60aabeb8f6ebb9c`; last inspected main `9afbda7`; actual shared Git ancestor `a3c94d9`. Temporary pad `/tmp/study-director-main-intake/WORKLOG.md`.
 
 **Objectives:** MAIN-A inventory all production deltas and exclusions; MAIN-B integrate untouched runtime/features and port overlapping implementation into strict TS, preserving host extraction; MAIN-C adopt current-only topology (backup24, PendingReview2 and corresponding manifest/claim/metadata), never historical converters; MAIN-D reconcile source and run affected strict/build/behavior checks; MAIN-E update current docs/ownership and commit/push only TS-Conversion.
 
@@ -176,9 +176,11 @@ No TypeScript admission count changed: this is mechanical preparation, not new s
 | MAIN-B | Production features/host integration ported; all 126 admitted TS files remain checked; targeted source/behavior reconciliation and Chromium evidence above |
 | MAIN-C | Current backup24 / manifest9 / claim4 / PendingReview2 and metadata topology; one ledger row; unsupported-input preservation retained; no historical converters or folder movement |
 | MAIN-D | 75 selected files passed after targeted reruns; nine Chromium files; strict/type/lint/negative/build/deployment/minified checks; two selected mutants killed; one explicitly scoped coverage run |
-| MAIN-E | Programme snapshot, current guides, imported history/backlog/tests/journeys/scripts reconciled; current links and immutable archives/vendor verified; publication is the next operation |
+| MAIN-E | Programme snapshot, current guides, imported history/backlog/tests/journeys/scripts reconciled; current links and immutable archives/vendor verified; published merge `0564e8e`, remote verified; main unchanged |
 
-**Next concrete action:** create the reviewed merge commit, push only `TS-Conversion`, verify its remote identity and record the publication SHA. Fresh fetch confirms main remains `2638619` and remote TS remains `d36c32e`. Integration stays ACTIVE until publication. P5.1 remains unstarted; its first action must refresh the explicitly historical host anchors. Full certification remains Phase 7. Temporary evidence remains under `/tmp/study-director-main-intake/` and `/tmp/main-*.log`.
+**Publication:** merge `0564e8e0b6e240371507ad35c728501f503c9fe2` has parents `81ecdd8` (TS preparation checkpoint) and `2638619` (production endpoint). `git push origin HEAD:TS-Conversion` succeeded; `git ls-remote` confirmed TS at that merge and main unchanged at `26386198a5c5b283d8adb97cf60aabeb8f6ebb9c`. This closing documentation checkpoint records that verified publication; its containing commit is discoverable with `git log -1 --format=%H -- TS-CONVERSION-EXECUTION.md`. No deployment, PR, history rewrite or vendor edit occurred.
+
+**Handoff:** main intake MAIN-A–MAIN-E is closed within the recorded targeted scope. All earlier TS programme documents remain active in their original roles, with four exact pre-intake snapshots and the prior archives preserved. P5.1 is unstarted; begin its eventual implementation by refreshing the explicitly historical host anchors under F-001, while retaining the existing objective owners. This intake does not revise the pass schedule or start another conversion phase. Full suite/coverage/mutation/release-performance/physical-device certification remains Phase 7; local generated-build checks and selected Chromium journeys are not that certification. Temporary evidence remains under `/tmp/study-director-main-intake/` and `/tmp/main-*.log`.
 
 
 ## Worklog template — replace the active block when starting the next pass
