@@ -132,6 +132,7 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
       5. Save Today to Library stores the day; the finished day then closes. Until then it is never lost: it stays here and on Drive, and the existing "Unsaved previous study day" prompt catches it if a new day starts first.
       6. Other devices see the day as finished: Continue Here does not bring back a timer for it; their Review shows the same finished day.
       7. Save Today before Finish Today stays a mid-day save: the day is stored and the session carries on (owner's choice).
+      8. One Saved Day per day (owner, 2026-11-08): saving the same day again, mid-day or after Finish Today, however many times, replaces that day's one Saved Day and never adds a copy. The owner believes this is already so; confirm it in the code and keep a test for it.
     - *Check with it:* whether the day saved later still carries everything Finish Today recorded; what happens on another device that takes the day in after Finish Today (sync and Continue Here); and whether item 20's failed save is connected (Save Today refused while kept session reviews were waiting and the finished session was still here).
     - *Tests:* after Finish Today, nothing is in Library yet; Execute and the Pacer are idle and the plan is a draft; Review shows the day and can edit, rate and save it, and the saved day carries everything recorded; the kept session review opens; a reload keeps the finished day; another device takes it in as finished, without a timer.
 
