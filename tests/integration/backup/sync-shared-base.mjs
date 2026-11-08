@@ -300,7 +300,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       // the independent Plan working draft. Production restore derives it from
       // the canonical Active Session; the backup layer no longer transports a
       // second session→draft schedule argument.
-      restoreSessionState:async value=>(state.activeSession=value,state.schedule=String(value&&value.scheduleText||''),events.push('session'),true),
+      restoreSessionState:async (value,options)=>(state.activeSession=value,state.restoreOptions=options||null,state.schedule=String(value&&value.scheduleText||''),events.push('session'),true),
       verifyActiveSessionRuntime:async expected=>(assert.deepEqual(state.activeSession,expected),true),
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
@@ -309,7 +309,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       if(config.title==='Kept versions'&&Object.prototype.hasOwnProperty.call(state,'draftEditedDuringReview')){
         state.pendingPlanDraft=state.draftEditedDuringReview;delete state.draftEditedDuringReview;
       }
-      const out={...decisions};for(const group of config.groups||[]){if(group.id.startsWith('kept__')){out[group.id]=state.keptSelections?.[group.id]||state.keptSelections?.[group.id.split('__').slice(2).join('__')]||state.keptChoice||group.defaultValue;continue;}if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
+      const out={...decisions};for(const group of config.groups||[]){const name=String(group.key||group.id);if(name.startsWith('kept__')){assert.ok(group.id.length<=80,'every dialog control id fits the 80-character limit');out[group.id]=state.keptSelections?.[name]||state.keptSelections?.[name.split('__').slice(2).join('__')]||state.keptChoice||group.defaultValue;continue;}if(group.id.startsWith('savedDay__')){const remoteRecord=group.choices.find(choice=>String(choice.label||'').startsWith('Use '));const remoteDeletion=group.choices.find(choice=>String(choice.label||'').startsWith('Apply deletion'));if(decisions.dailyRecords==='replace'&&remoteRecord)out[group.id]=remoteRecord.value;else if(decisions.savedDayDeletions==='apply'&&remoteDeletion)out[group.id]=remoteDeletion.value;else out[group.id]=group.defaultValue;}else if(String(group.label||'').startsWith('Note · ')){const remoteDeletion=group.choices.find(choice=>choice.label==='Delete it');out[group.id]=(decisions.noteByKey?.[String(group.label).slice('Note · '.length)]||decisions.noteDeletions)==='apply'&&remoteDeletion?remoteDeletion.value:group.defaultValue;}else if(group.id==='activeSession'){const incoming=group.choices.find(choice=>String(choice.label||'').startsWith('Use session'));out.activeSession=decisions.activeSession==='checkpoint'&&incoming?incoming.value:group.defaultValue;}}return freeze(out);},notify:fn}),
     environment:freeze({AbortController,clearTimeout:inertTimers?()=>{}:clearTimeout,yieldTask:async()=>{},setTimeout:inertTimers?()=>0:callback=>(callback(),1)}),diagnostics:freeze({capture:fn,start:()=>'',mark:(name,details={})=>(diagnosticMarks.push([String(name),details]),true),finish:()=>false,fail:()=>false})
   })}));
   return {runtime,prompts,statuses,events,diagnosticMarks,setPreflightFailure:value=>{injectedFailure=String(value||'');}};
@@ -643,11 +643,13 @@ let syncWorld=null;
 // difference made on both waits for the person, and a session running here
 // keeps its own state while everything else merges.
 {
-  const drive=new Map(),key=(kind,id)=>kind+':'+id,keepAll={on:false},counts={downloads:0,kinds:[]};
+  // gate.before(file), when set, runs before a file is stored: a test can
+  // hold one device's upload at its commit while another device acts.
+  const drive=new Map(),key=(kind,id)=>kind+':'+id,keepAll={on:false},counts={downloads:0,kinds:[]},gate={before:null};
   const describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'remote-'+key(file.kind,file.id),...(file.historySummary?{history:freeze({...file.historySummary,exportedAt:file.exportedAt})}:{})});
   const store=files=>freeze({
     list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),
-    upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},
+    upload:async file=>{if(files===drive&&gate.before)await gate.before(file);const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},
     download:async ref=>{counts.downloads++;counts.kinds.push(ref.kind);const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('QA_FIXTURE missing backup file');return freeze({blob:stored.blob,release:async()=>{}});},
     // A test can hold on to every version (all of them fall in one hour, so
     // retention would keep only the newest).
@@ -657,14 +659,22 @@ let syncWorld=null;
   // Session ownership claims on Drive, shared by the devices that use them.
   const claims=new Map(),claimItem=file=>freeze({kind:'session-claim',id:file.id,name:file.name,size:file.blob.size,digest:file.digest,serverDigest:file.digest,createdAt:file.exportedAt,modifiedAt:file.exportedAt,remoteId:'claim-'+file.id});
   const claimTransport=freeze({...transport,
-    listSessionClaims:async()=>freeze({items:freeze([...claims.values()].map(claimItem)),overflow:false,ignored:0}),
+    // Drive lists claims newest first.
+    listSessionClaims:async()=>freeze({items:freeze([...claims.values()].reverse().map(claimItem)),overflow:false,ignored:0}),
     uploadSessionClaim:async file=>{claims.set(file.id,freeze({...file}));return claimItem(file);},
     downloadSessionClaim:async item=>{const file=claims.get(item.id);if(!file)throw new Error('QA_FIXTURE missing session claim');return freeze({blob:file.blob,release:async()=>{}});},
     deleteSessionClaim:async item=>claims.delete(item.id)
   });
   // folder: this device also backs up to a Device Folder of its own.
   // claims: it takes part in session ownership claims (Continue here).
-  const device=(state,{folder=null,claims:claiming=false}={})=>{
+  // markers: upload markers on Drive this device sees (other devices' and its
+  // own), for turn-taking.
+  const markerTransport=markers=>freeze({...claimTransport,
+    beginPublication:async()=>{const row=freeze({id:'pub_'+crypto.randomUUID().replace(/-/gu,''),createdAt:new Date().toISOString()});markers.set(row.id,row);return row;},
+    listPublications:async()=>{markers.onList?.();return freeze({items:freeze([...markers.values()]),overflow:false,ignored:0});},assertPublication:async row=>row,endPublication:async row=>{markers.delete(row.id);return true;},
+    beginMaintenance:async()=>freeze({id:'mnt_'+crypto.randomUUID().replace(/-/gu,''),createdAt:new Date().toISOString()}),listMaintenances:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertMaintenance:async row=>row,endMaintenance:async()=>true
+  });
+  const device=(state,{folder=null,claims:claiming=false,markers=null}={})=>{
     // A review of kept versions takes state.keptChoice ('use' or the default)
     // and, for note texts, state.reviewText(conflict) or the current text.
     const reviewTexts=(options,current)=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:typeof current.reviewText==='function'?current.reviewText(item,options):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))});
@@ -673,7 +683,7 @@ let syncWorld=null;
       lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'2026-08-23T00:00:00.000Z',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
     }));
     providers.configureManagedRecovery(freeze({run:spec=>recovery.execute(spec)}));
-    assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:claiming?claimTransport:transport})),true);
+    assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:markers?markerTransport(markers):claiming?claimTransport:transport})),true);
     if(claiming)providers.configureSessionOwnership(freeze({installationId:()=>state.installationId,read:async()=>state.activeSession,today:()=>'2026-08-31'}));
     // The change clock: every capture in this harness has the same source revision.
     if(folder){assert.equal(providers.register(freeze({id:'folder',label:'Device Folder',connected:()=>true,repository:store(folder)})),true);providers.configureAutomaticBackup(freeze({covered:()=>'',current:()=>'2026-08-23T00:00:00.000Z'}));providers.configurePendingBackupRetry(freeze({read:async()=>null,mark:async()=>true,clear:async()=>true}));}
@@ -689,6 +699,7 @@ let syncWorld=null;
       noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options}),
       handoffSource:()=>providers.readSessionHandoffSource('drive'),
       claim:request=>providers.claimSessionOwnership('drive',request),
+      readClaim:()=>providers.readSessionClaim('drive'),
       diagnostics:harness.diagnosticMarks
     });
   };
@@ -698,7 +709,7 @@ let syncWorld=null;
   const A=device(a),B=device(b);
   // A new device takes in everything.
   const v1=await A.upload();assert.equal(a.reconciliationBase.checkpointId,v1.checkpointId,'a Drive backup is what this device shares');
-  syncWorld=freeze({drive,head,device,note,keepAll,versions,claims,counts});
+  syncWorld=freeze({drive,head,device,note,keepAll,versions,claims,counts,gate});
   assert.equal((await B.sync()).cancelled,false);
   assert.deepEqual([...b.records.keys()].sort(),['2026-08-01','2026-08-02']);assert.equal(b.notes.Shared.text,'first');
   assert.deepEqual(b.followed,[{protectionId:'',encrypted:false,removedElsewhere:false}],'a sync tells the backup password what the newest version uses');assert.equal(b.reconciliationBase.checkpointId,v1.checkpointId,'what a device takes in from Drive is what it shares');
@@ -1204,7 +1215,9 @@ let syncWorld=null;
   const {device}=syncWorld,origin=personal('Saved-plan union'),
     plan=(id,label)=>freeze({id,label,scheduleText:'08:00 | 60 | '+label+' | work | Ethics | pages | 8',
       createdAt:'2026-08-31T10:00:00.000Z',updatedAt:'2026-08-31T10:00:00.000Z'});
-  const pA=plan('plan-bf2-independent-a','A plan'),pB=plan('plan-bf2-independent-b','B plan');
+  // Plan A is named as the app names plans ('plan-' and a UUID): its review
+  // key once ran past the dialog's 80-character limit, so the review failed.
+  const pA=plan('plan-3f2b8c1e-9d4a-4b6e-8f1c-2a7d5e9b0c44','A plan'),pB=plan('plan-bf2-independent-b','B plan');
   const a={installationId:'inst_bf2_plans_a',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
   const b={installationId:'inst_bf2_plans_b',records:new Map(),deletions:[],notes:{},noteDeletions:[],activeSession:null,personal:origin,journal:null};
   const A=device(a),B=device(b);
@@ -1599,6 +1612,106 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   assert.equal(d.reviews.open().find(review=>review.subject==='personal')?.kept?.preferences?.studentName,'Name on C','the other\'s is kept for review');
 }
 
+// Continue Here is the person's own action: it goes ahead at once, without
+// waiting for another device's running upload (the claim is small, and a
+// late upload cannot take the session back).
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,day='2026-08-31',markers=new Map();
+  const a={installationId:'inst_turn_claim_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('turn claim'),activeSession:null,schedule:'',personal:personal('Turn User'),journal:null};
+  const b={installationId:'inst_turn_claim_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Turn User'),journal:null};
+  const A=device(a,{claims:true}),B=device(b,{claims:true,markers});
+  a.activeSession=revisionedSession(day,'TURN-CLAIM',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const fields=async source=>({observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),revision:source.session.revision+1});
+  const ago=minutes=>new Date(Date.now()-minutes*60*1000).toISOString();
+  // Each check for other devices' uploads lists the markers.
+  let checks=0;markers.onList=()=>{checks++;};
+  const live=freeze({id:'pub_'+'a'.repeat(32),startedAt:ago(1),createdAt:ago(0.5),renews:true,device:'inst_windows_chrome_mgx2k3a0_1a2b3c4d'});markers.set(live.id,live);
+  const claimed=await B.claim({date:day,handoffToken:'66666666-6666-4666-8666-666666666666',decide:fields});
+  assert.equal(claimed.status,'completed','Continue Here completes while another device uploads');assert.equal(checks,0,'it does not wait for, or even look at, another device\'s upload');
+  markers.onList=null;assert.deepEqual([...markers.keys()],[live.id],'the claim releases its own marker and leaves the other device\'s');markers.delete(live.id);
+}
+
+// Two devices press Continue Here at the same moment. Drive lists the newest
+// claim first, and every device follows that one: exactly one device owns
+// the session, the other's Continue Here stops (or, if it finished first,
+// its claim check stops its timer).
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,day='2026-08-31';
+  const make=id=>({installationId:id,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Race User'),journal:null});
+  const a={...make('inst_race_claim_device_a'),notes:note('race')},b=make('inst_race_claim_device_b'),c=make('inst_race_claim_device_c');
+  const A=device(a,{claims:true}),B=device(b,{claims:true}),C=device(c,{claims:true});
+  a.activeSession=revisionedSession(day,'RACE',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();for(const D of [B,C])assert.equal((await D.sync()).cancelled,false);
+  const fields=async source=>({observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),revision:source.session.revision+1});
+  const results=await Promise.allSettled([B.claim({date:day,handoffToken:'99999999-9999-4999-8999-999999999991',decide:fields}),C.claim({date:day,handoffToken:'99999999-9999-4999-8999-999999999992',decide:fields})]);
+  const completed=results.filter(row=>row.status==='fulfilled'&&row.value?.status==='completed').length;
+  assert.ok(completed>=1,`at least one Continue Here completes (${JSON.stringify(results.map(row=>row.status==='fulfilled'?row.value?.status:String(row.reason?.code||row.reason)))})`);
+  const views=await Promise.all([A,B,C].map(D=>D.readClaim()));
+  assert.equal(views.filter(view=>view?.ownedHere===true).length,1,'every device reads the same claim: exactly one owns the session');
+  assert.equal(views[0].ownedHere,false,'the old owner does not');
+}
+
+// Two uploads overlap: another device's Sync now during this device's
+// upload, or this device frozen mid-upload past its turn. B's version lands
+// while A's upload is held: before A's last check (A stops before its
+// commit, catches up and uploads again), or in the last instant after it
+// (both commit on the same base). Either way nothing either device wrote is
+// lost: the same note edited on both shows the newer edit and keeps the
+// other for review, on both devices.
+for(const late of [false,true]){
+  syncWorld.drive.clear();syncWorld.claims.clear();syncWorld.keepAll.on=true;
+  const {device,gate}=syncWorld,row=(key,text)=>freeze({version:2,key,text,updatedAt:new Date().toISOString()}),pause=()=>new Promise(resolve=>setTimeout(resolve,3));
+  const start=()=>({Shared:row('Shared','base text'),Other:row('Other','other base'),Both:row('Both','both base')});
+  const a={installationId:'inst_overlap_a_'+late,records:new Map(),deletions:[],noteDeletions:[],notes:start(),activeSession:null,schedule:'',personal:personal('Overlap'),journal:null};
+  const b={installationId:'inst_overlap_b_'+late,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Overlap'),journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  await pause();a.notes={...a.notes,Shared:row('Shared','edited on A'),FromA:row('FromA','new on A'),Both:row('Both','both by A')};
+  await pause();b.notes={...b.notes,Other:row('Other','edited on B'),FromB:row('FromB','new on B'),Both:row('Both','both by B')};
+  let release,holding=false;const held=new Promise(resolve=>{release=resolve;});
+  gate.before=async file=>{if(file.kind===(late?'commit':'checkpoint')&&!holding){holding=true;await held;}};
+  const aUpload=A.upload().then(value=>({value}),error=>({error}));
+  for(let n=0;n<400&&!holding;n++)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(holding,true,'A reached the held step');gate.before=null;
+  const bUpload=await B.upload().then(value=>({value}),error=>({error}));assert.equal(bUpload.error,undefined,'B uploads while A is held');
+  release();const aResult=await aUpload;
+  if(late)assert.equal(aResult.error,undefined,'a version landing after the last check is not seen: both commit');
+  else assert.equal(aResult.error?.code,'REPOSITORY_SYNC_BEHIND','an upload Drive moved past stops before its commit');
+  for(let round=0;round<3;round++)for(const D of [A,B]){assert.equal((await D.sync()).cancelled,false);await D.upload();}
+  const shown=state=>Object.fromEntries(Object.entries(state.notes).map(([key,value])=>[key,value.text]).sort());
+  const kept=state=>state.reviews.open().filter(review=>review.subject==='note').map(review=>review.ref+': '+review.kept?.text).sort();
+  for(const [name,state] of [['A',a],['B',b]]){
+    assert.deepEqual(shown(state),{Both:'both by B',FromA:'new on A',FromB:'new on B',Other:'edited on B',Shared:'edited on A'},`${name} shows both devices' edits`);
+    assert.ok(kept(state).includes('Both: both by A'),`${name} keeps the older edit of the note changed on both for review`);
+    if(!late)assert.deepEqual(kept(state),['Both: both by A'],`${name} keeps nothing else: the versions never forked`);
+  }
+  gate.before=null;syncWorld.keepAll.on=false;
+}
+
+// A device clock that is wrong by hours (behind or ahead): Drive's newest
+// version is the one with the latest time, so each version is stamped after
+// the one it is built on. Every change still reaches the other device, and
+// nothing uploads again and again.
+for(const skew of [-2*3600e3,2*3600e3]){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,head}=syncWorld,RealDate=Date,row=(key,text,at=RealDate.now())=>freeze({version:2,key,text,updatedAt:new RealDate(at).toISOString()});
+  const skewed=async work=>{class Skewed extends RealDate{constructor(...args){super(...(args.length?args:[RealDate.now()+skew]));}static now(){return RealDate.now()+skew;}}globalThis.Date=Skewed;try{return await work();}finally{globalThis.Date=RealDate;}};
+  const a={installationId:'inst_clock_right_'+(skew<0?'b':'a'),records:new Map(),deletions:[],noteDeletions:[],notes:{Shared:row('Shared','base')},activeSession:null,schedule:'',personal:personal('Clock'),journal:null};
+  const b={installationId:'inst_clock_wrong_'+(skew<0?'b':'a'),records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Clock'),journal:null};
+  const A=device(a),B=device(b),label=skew<0?'behind':'ahead';
+  await A.upload();assert.equal((await skewed(()=>B.sync())).cancelled,false);
+  b.notes={...b.notes,FromB:row('FromB','new on B',RealDate.now()+skew)};
+  const fromB=await skewed(()=>B.upload());assert.equal(head(),fromB.checkpointId,`a version from a clock ${label} becomes Drive's newest`);
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.FromB?.text,'new on B','its change reaches the other device');
+  await new Promise(resolve=>setTimeout(resolve,3));a.notes={...a.notes,FromA:row('FromA','new on A')};
+  const fromA=await A.upload();assert.equal(head(),fromA.checkpointId,`a version built on one from a clock ${label} becomes the newest`);
+  assert.equal((await skewed(()=>B.sync())).cancelled,false);assert.equal(b.notes.FromA?.text,'new on A');
+  const again=await skewed(()=>B.upload());assert.equal(again.checkpointId,fromA.checkpointId,'nothing new to upload: the device in step uploads no new version');
+}
+
 // Continue Here in one lease: decide gets the newest verified session under
 // it and names the claim; a refused decision writes nothing; a session this
 // device already read for that version is not downloaded again, and a newer
@@ -1688,9 +1801,10 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   assert.equal(keptSessions(a).length,0,'a legitimate handoff and save leave no Active Session kept version');
 }
 
-// Post-handoff A can accrue focus before detecting B's claim. A verified Day
- // covering those seconds must not create a redundant kept session. A shorter
- // Day, or more time caught during the final yield, still requires review.
+// Post-handoff A can accrue focus before detecting B's claim. Time alone is
+ // never a choice: whether B's Saved Day covers those seconds or is shorter,
+ // and with more time caught during the final yield, A follows B and keeps
+ // no session for review.
  for(const variant of ['covered-active','covered-ended','shorter-day','final-tick-uncovered']){
    syncWorld.drive.clear();syncWorld.claims.clear();
    const day='2026-08-31',
@@ -1728,17 +1842,113 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
    assert.equal(a.activeSession?.runningOn,variant==='covered-ended'?undefined:b.installationId,
      variant+' checkpoint ownership/end remains authoritative');
    const kept=a.reviews.open().filter(row=>row.subject==='session'&&row.kept?.date===day);
-   const expectedKept=['shorter-day','final-tick-uncovered'].includes(variant)?1:0;
-   assert.equal(kept.length,expectedKept,
-     variant+' must retain only evidence not covered by the verified Saved Day');
-   if(expectedKept)assert.equal(kept[0].kept.snapshot.taskState?.focus?.actual?.seconds,
-     variant==='shorter-day'?60:130,'unsaved post-handoff time is retained');
-   else{
-     assert.equal((await A.sync()).cancelled,false,variant+' repeat sync');
-     assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,
-       variant+' must not manufacture a repeated review');
-   }
+   assert.equal(kept.length,0,variant+': time alone keeps no session for review');
+   assert.equal((await A.sync()).cancelled,false,variant+' repeat sync');
+   assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,
+     variant+' must not manufacture a repeated review');
  }
+
+// After a handoff, a copy further along in what was decided is taken in on
+// either side with no review: the old owner finished a block the new owner
+// had not seen (it hands the decision over), or the new owner finished one.
+// The owner keeps its timer and time. Both deciding differently is kept.
+// A manual completion is an assessment either device may raise or lower, not a
+// counter: 30% on one and 90% on the other are different decisions.
+for(const variant of ['old-owner-finished','new-owner-finished','both-decided','both-manual']){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-08-31',
+    a={installationId:'inst_decided_a',records:new Map(),deletions:[],noteDeletions:[],notes:syncWorld.note('decided'),activeSession:null,schedule:'',personal:personal('Decided QA'),journal:null},
+    b={installationId:'inst_decided_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Decided QA'),journal:null};
+  const A=syncWorld.device(a,{claims:true}),B=syncWorld.device(b,{claims:true});
+  const withTasks=(item,taskState,updatedAt)=>freeze({...item,revision:item.revision+1,updatedAt,snapshot:freeze({...item.snapshot,contentRevision:item.snapshot.contentRevision+1,taskState:freeze(taskState),updatedAt})});
+  a.activeSession=withTasks(revisionedSession(day,'DECIDED',{runningOn:a.installationId,revision:10,contentRevision:7,updatedAt:'2026-08-31T08:00:00.000Z'}),{warmup:freeze({actual:freeze({seconds:30})}),focus:freeze({actual:freeze({seconds:30})})},'2026-08-31T08:00:00.000Z');
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const source=await B.handoffSource();
+  assert.equal((await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,
+    observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,
+    handoffToken:'77777777-7777-4777-8777-777777777777',revision:20})).status,'completed');
+  b.activeSession=withTasks(freeze({...source.session,runningOn:b.installationId,status:'active',revision:20,suspendedAt:null}),
+    {warmup:freeze(variant==='both-decided'?{resolvedState:'skipped',actual:freeze({seconds:30})}:variant==='both-manual'?{completionSource:'manual',completion:30,actual:freeze({seconds:30})}:{actual:freeze({seconds:30})}),focus:freeze({actual:freeze({seconds:240})}),
+      ...(variant==='new-owner-finished'?{review:freeze({resolvedState:'done',actual:freeze({seconds:20})})}:{})},'2026-08-31T09:10:00.000Z');
+  b.schedule=b.activeSession.scheduleText;b.running=true;
+  // A, not yet stopped by the claim, finishes the warm-up block and a
+  // practice run.
+  a.activeSession=withTasks(a.activeSession,{warmup:freeze(variant==='new-owner-finished'?{actual:freeze({seconds:45})}:variant==='both-manual'?{completionSource:'manual',completion:90,actual:freeze({seconds:45})}:{resolvedState:'done',actual:freeze({seconds:45})}),focus:freeze({actual:freeze({seconds:30})})},'2026-08-31T09:05:00.000Z');
+  if(variant==='old-owner-finished')a.activeSession=freeze({...a.activeSession,snapshot:freeze({...a.activeSession.snapshot,practice:freeze({active:null,runs:freeze([freeze({taskId:'warmup',targetMs:60000,unitMs:freeze([55000,61000])})])})})});
+  await B.upload();
+  assert.equal((await A.sync()).cancelled,false,variant);
+  assert.equal(a.running,false,variant+': the old owner stops');
+  assert.equal(a.activeSession.runningOn,b.installationId,variant+': the new owner keeps control');
+  const keptOnA=a.reviews.open().filter(row=>row.subject==='session');
+  if(variant==='both-decided'){
+    assert.equal(keptOnA.length,1,'both deciding differently keeps the old owner\'s copy for review');
+    assert.equal(keptOnA[0].kept.snapshot.taskState.warmup.resolvedState,'done');
+    continue;
+  }
+  if(variant==='both-manual'){
+    assert.equal(keptOnA.length,1,'a different manual completion on each device is kept for review, not overwritten');
+    assert.equal(keptOnA[0].kept.snapshot.taskState.warmup.completion,90);
+    continue;
+  }
+  assert.equal(keptOnA.length,0,variant+': no session kept for review on the old owner');
+  if(variant==='new-owner-finished'){
+    assert.equal(a.activeSession.snapshot.taskState.review.resolvedState,'done','the old owner takes the new owner\'s copy');
+    assert.equal(a.activeSession.snapshot.taskState.warmup.resolvedState,undefined);
+    continue;
+  }
+  assert.equal(a.activeSession.snapshot.taskState.warmup.resolvedState,'done','the old owner hands its finished block over');
+  assert.equal(a.activeSession.snapshot.taskState.focus.actual.seconds,240,'under the new owner\'s time');
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.running,true,'the new owner keeps running');
+  assert.equal(b.activeSession.runningOn,b.installationId);
+  assert.equal(b.activeSession.snapshot.taskState.warmup.resolvedState,'done','the new owner takes the finished block in');
+  assert.equal(b.activeSession.snapshot.taskState.warmup.actual.seconds,45,'with the time it was finished in');
+  assert.equal(b.activeSession.snapshot.taskState.focus.actual.seconds,240,'and keeps its own time on its block');
+  assert.deepEqual(b.activeSession.snapshot.practice?.runs?.map(run=>run.unitMs.length),[2],'the practice run finished on the old owner comes too');
+  assert.equal(b.reviews.open().filter(row=>row.subject==='session').length,0,'no session kept for review on the new owner');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,'and none comes back to the old owner');
+}
+
+// The old owner finished the block the new owner was on and moved to the
+// next before it saw the claim. The new owner takes that in under its own
+// control: the old owner's timer comes with its block but carries the new
+// owner's later tick (it ran all along, so the old device's last tick is no
+// time away), and the restore is told to keep this device's timer running.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-08-31',
+    a={installationId:'inst_moved_on_a',records:new Map(),deletions:[],noteDeletions:[],notes:syncWorld.note('moved'),activeSession:null,schedule:'',personal:personal('Moved QA'),journal:null},
+    b={installationId:'inst_moved_on_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Moved QA'),journal:null};
+  const A=syncWorld.device(a,{claims:true}),B=syncWorld.device(b,{claims:true});
+  const runtime=(taskId,lastTickMs)=>freeze({version:2,taskId,mode:'running',paused:false,updatedAt:'2026-08-31T09:00:00.000Z',
+    timerState:freeze({startMs:lastTickMs-60000,durationSec:1800,totalPausedMs:0,pausedStartedMs:null,recordedSec:60,overtimeNotified:false,lastTickMs,sleepPausedMs:0})});
+  const at=(item,{taskState,current,timer,updatedAt})=>freeze({...item,revision:item.revision+1,updatedAt,
+    snapshot:freeze({...item.snapshot,contentRevision:item.snapshot.contentRevision+1,taskState:freeze(taskState),currentTaskId:current,timerRuntime:timer,updatedAt})});
+  a.activeSession=at(revisionedSession(day,'MOVED',{runningOn:a.installationId,revision:10,contentRevision:7,updatedAt:'2026-08-31T08:00:00.000Z'}),
+    {taskState:{},current:'warmup',timer:runtime('warmup',1000),updatedAt:'2026-08-31T08:00:00.000Z'});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const source=await B.handoffSource();
+  assert.equal((await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,
+    observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,
+    handoffToken:'88888888-8888-4888-8888-888888888888',revision:20})).status,'completed');
+  b.activeSession=at(freeze({...source.session,runningOn:b.installationId,status:'active',revision:20,suspendedAt:null}),
+    {taskState:{warmup:freeze({actual:freeze({seconds:300})})},current:'warmup',timer:runtime('warmup',5000),updatedAt:'2026-08-31T09:10:00.000Z'});
+  b.schedule=b.activeSession.scheduleText;b.running=true;
+  a.activeSession=at(a.activeSession,{taskState:{warmup:freeze({resolvedState:'done',actual:freeze({seconds:120})})},current:'focus',timer:runtime('focus',2000),updatedAt:'2026-08-31T09:05:00.000Z'});
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession.runningOn,b.installationId,'the old owner hands its finished block over');
+  assert.equal(a.activeSession.snapshot.currentTaskId,'focus');
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.activeSession.runningOn,b.installationId);
+  assert.equal(b.activeSession.snapshot.taskState.warmup.resolvedState,'done','the new owner takes the finished block in');
+  assert.equal(b.activeSession.snapshot.timerRuntime.taskId,'focus','and moves on to the next block with its timer');
+  assert.equal(b.activeSession.snapshot.timerRuntime.timerState.lastTickMs,5000,'carrying this device\'s own later tick, so no time away is asked about');
+  assert.equal(b.restoreOptions?.keepRunning,true,'the restore keeps this device\'s timer running');
+  assert.equal(b.reviews.open().filter(row=>row.subject==='session').length,0);
+}
 
 // BF-1: a Drive claim that exists but cannot be verified is not an absent
 // claim. Sync must stop without applying the still-old shared checkpoint;

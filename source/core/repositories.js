@@ -131,7 +131,7 @@ registry.define('repositories',1,()=>{
     const getInstallationId=InstallationIdentity.getId;
     const {
       buildDailyRecordSummary,sanitizeCurrentDailyRecord,sanitizeCurrentNote,
-      materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary
+      materializeDailyRecordView,storedDailyRecordFields,sanitizeDailyRecordSummary,materializeDailyRecordSummary
     }=DailyRecordCodec;
     const FALLBACK_DAILY_RECORD_LIMIT=14;
     let fallbackDailyRecordsActive=false;
@@ -166,13 +166,13 @@ registry.define('repositories',1,()=>{
     function nextChangeAt(){changeClockMs=Math.max(Date.now(),changeClockMs+1);return new Date(changeClockMs).toISOString();}
     function seedChangeClock(value){const ms=Date.parse(String(value||''));if(Number.isFinite(ms))changeClockMs=Math.max(changeClockMs,ms);return changeClockMs?new Date(changeClockMs).toISOString():'';}
     // startup: written by the start-up compatibility step, not by the person
-    // or a sync.
-    function reportCanonicalCommit(entityType,operation='upsert',value=null,{backupCapture=false,startup=false}={}){
+    // or a sync. settingsOnly: personal settings alone, no plans.
+    function reportCanonicalCommit(entityType,operation='upsert',value=null,{backupCapture=false,startup=false,settingsOnly=false}={}){
       try{
         onCanonicalCommit(freeze({
           format:'study-director.canonical-commit',contractVersion:1,
           entityType:String(entityType||''),operation:operation==='delete'?'delete':'upsert',
-          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true,startup:startup===true
+          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true,startup:startup===true,settingsOnly:settingsOnly===true
         }));
       }catch(error){capture('repository.canonical-commit-hook',error,'error');}
     }
@@ -437,7 +437,7 @@ function writePlanMeta(family,value,{strictDurability=false,ownershipToken=null,
   return Meta.transaction('readwrite',(meta,tx,finish)=>{
     assertWriteToken(token,'save plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const request=meta.put(family,value);request.onerror=()=>finish(false,request.error||new Error('plan document write failed'));
     request.onsuccess=()=>{try{assertWriteToken(token,'save plan documents');}catch(error){try{tx.abort();}catch{}finish(false,error);}};
-    tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture,startup:allowHydrating===true});finish(true);};
+    tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture,startup:allowHydrating===true,settingsOnly:family==='personalPreferences'});finish(true);};
   },{strict:strictDurability,abortMessage:'plan document write aborted'});
 }
 const planData=freeze({
@@ -1080,7 +1080,8 @@ async function storeDailyRecord(rec,options={}){
   try{
   assertWriteToken(ownershipToken,'preparing the daily record');
   const updatedAt=normalizeTimestamp(rec.updatedAt,normalizeTimestamp(rec.savedAt,new Date().toISOString()));
-  const candidate={...rec,version:DATA_CONTRACT.schemas.DailyRecord.version,updatedAt};
+  // A record read from here comes back as its view; it is saved as its stored fields.
+  const candidate={...storedDailyRecordFields(rec),version:DATA_CONTRACT.schemas.DailyRecord.version,updatedAt};
   for(const key of ['entityType','entityId','schemaVersion','deviceId','createdAt','deleted','syncStatus'])delete candidate[key];
   const clean=sanitizeCurrentDailyRecord(candidate);
   if(!clean||clean.degraded)throw new Error('New daily record failed its canonical validation.');
@@ -1110,7 +1111,7 @@ async function storeDailyRecord(rec,options={}){
 }
 async function storeDailyRecordBatch(records){
   const ownershipToken=issueWriteToken('saving the daily-record batch');
-  const docs=currentDailyRecordDocuments(records,'Daily Record batch');
+  const docs=currentDailyRecordDocuments((Array.isArray(records)?records:[]).map(storedDailyRecordFields),'Daily Record batch');
   if(!docs.length)return true;
   const finishWrite=beginAuthoritativeWrite();
   try{

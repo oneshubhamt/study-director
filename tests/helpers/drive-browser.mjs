@@ -18,6 +18,10 @@ export const GIS=`window.__gisTokenRequests=0;window.google={accounts:{oauth2:{
 export const CORS=[{name:'Access-Control-Allow-Origin',value:'*'},{name:'Access-Control-Allow-Headers',value:'*'},{name:'Access-Control-Allow-Methods',value:'GET,POST,PUT,PATCH,DELETE'},{name:'Access-Control-Expose-Headers',value:'*'}];
 
 export const drive=createDriveHarness(),faults=[];
+// hooks.before({who,method,url,text}): runs before each request to Drive from
+// either browser; it may wait (hold or slow a device's upload) or return
+// 'fail' (that device's network is down). text: the start of the body.
+export const hooks={before:null};
 // Every request to Google from either browser goes to the one simulated Drive.
 // The ledger lists who uploaded and deleted what, for the steps and on failure.
 export const ledger=[];
@@ -29,13 +33,19 @@ export async function attachDrive(page,who='?'){
       const headers=request.headers||{},type=String(Object.entries(headers).find(([name])=>name.toLowerCase()==='content-type')?.[1]||'');
       const bytes=request.postDataEntries?Buffer.concat(request.postDataEntries.map(entry=>Buffer.from(entry.bytes||'','base64'))):request.postData!==undefined?Buffer.from(request.postData):null;
       const body=bytes===null?undefined:request.method==='PUT'||/multipart/u.test(type)?new Blob([bytes]):bytes.toString('utf8');
+      if(hooks.before&&await hooks.before({who,method:request.method,url:request.url,text:bytes?bytes.subarray(0,4096).toString('latin1'):''})==='fail'){await page.send('Fetch.failRequest',{requestId,errorReason:'InternetDisconnected'});return;}
       const target=drive.state.files.get(decodeURIComponent(new URL(request.url).pathname.split('/').at(-1)));
       if(request.method==='DELETE')ledger.push(`${new Date().toISOString().slice(11,23)} ${who} DELETE ${target?.name||'?'} ${target?.appProperties?.studyDirectorRepositoryKind||''}`);
       const response=await drive.fetch(request.url,{method:request.method,headers,body});
       if(request.method==='POST'||request.method==='PUT'){try{const meta=await response.clone().json();if(meta&&meta.name)ledger.push(`${new Date().toISOString().slice(11,23)} ${who} ${request.method} ${meta.id} ${meta.name} ${meta.appProperties?.studyDirectorRepositoryKind||''} ${meta.appProperties?.studyDirectorDevice||meta.appProperties?.studyDirectorRepositoryDevice||''}`);}catch{}}
       const out=Buffer.from(await response.arrayBuffer());
       await page.send('Fetch.fulfillRequest',{requestId,responseCode:response.status,responseHeaders:[...CORS,...[...response.headers].map(([name,value])=>({name,value}))],body:out.toString('base64')});
-    }catch(error){faults.push(`${request.method} ${request.url}: ${error.message}`);await page.send('Fetch.failRequest',{requestId,errorReason:'Failed'}).catch(()=>{});}
+    }catch(error){
+      // The page cancelled the request (an aborted fetch, or the page closed)
+      // before its answer: nothing to answer, and not a fault of the harness.
+      if(/Invalid InterceptionId/u.test(String(error?.message||''))){ledger.push(`${new Date().toISOString().slice(11,23)} ${who} ${request.method} cancelled by the page`);return;}
+      faults.push(`${request.method} ${request.url}: ${error.message}`);await page.send('Fetch.failRequest',{requestId,errorReason:'Failed'}).catch(()=>{});
+    }
   });
   await page.send('Fetch.enable',{patterns:[{urlPattern:'https://accounts.google.com/*'},{urlPattern:'https://www.googleapis.com/*'}]});
 }

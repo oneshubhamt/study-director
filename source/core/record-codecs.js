@@ -309,12 +309,14 @@ function sanitizeCurrentScheduleEntry(row){
   const clean={id,start,duration,name,kind,area,measure,target};
   return sameDataValue(row,clean)?clean:null;
 }
+// The stored fields of a Saved Day, in the order sanitizeCurrentDailyRecord writes them.
+const DIARY_RECORD_FIELDS=freeze(['version','recordKind','date','savedAt','updatedAt','sourceRevision','reflection']);
+const STUDY_RECORD_FIELDS=freeze(['version','recordKind','date','savedAt','updatedAt','sourceRevision','quote','reflection','studyQuality','realTimeSnapshot','schedule','results','practiceRuns','carryForwardDraft']);
 function sanitizeCurrentDailyRecord(record){
   if(!record||typeof record!=='object'||Array.isArray(record)||Number(record.version)!==DATA_CONTRACT.schemas.DailyRecord.version||!isSupportedSavedDate(record.date))return null;
   const recordKind=record.recordKind==='diary'?'diary':record.recordKind==='study'?'study':null;if(!recordKind)return null;
-  const commonExpected=['version','recordKind','date','savedAt','updatedAt','sourceRevision','reflection'];
-  const expected=recordKind==='diary'?commonExpected:[...commonExpected,'quote','studyQuality','realTimeSnapshot','schedule','results','practiceRuns','carryForwardDraft'];
-  if(Object.keys(record).sort().join('|')!==expected.sort().join('|'))return null;
+  const expected=recordKind==='diary'?DIARY_RECORD_FIELDS:STUDY_RECORD_FIELDS;
+  if(Object.keys(record).sort().join('|')!==[...expected].sort().join('|'))return null;
   const date=String(record.date),savedAt=normalizeImportedTimestamp(record.savedAt,null),updatedAt=normalizeImportedTimestamp(record.updatedAt,null),sourceRevision=optionalBoundedNumber(record.sourceRevision,{min:0,max:Number.MAX_SAFE_INTEGER,integer:true});
   const reflection=optionalEditorContent(record.reflection,APP_LIMITS.maxReflectionChars);
   if(savedAt===null||updatedAt===null||sourceRevision===null||reflection===null)return null;
@@ -450,7 +452,11 @@ function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
     const clock=state.actual?.clock||{},actual=state.actual?.record||{};
     const start=clock.startedAt||actual.firstStartedAt,end=clock.endedAt||actual.lastEndedAt;
     if(start&&result.actualStart!==start)return false;
-    if(end&&result.actualEnd!==end){
+    // A block started but stopped within its first second recorded no time:
+    // the Saved Day keeps no end for it, and there is nothing to lose.
+    const noTime=!(Number(state.actual?.seconds)>0)&&!(Number(actual.activeSeconds)>0)&&
+      result.actualEnd===undefined&&!(Number(result.actualSeconds)>0);
+    if(end&&result.actualEnd!==end&&!noTime){
       // An end moving forward can be legitimate continued focus, but only
       // with a stable start and strictly increased recorded focus duration.
       // A missing/replaced start or a merely edited timestamp proves nothing.
@@ -541,6 +547,19 @@ function dailyResultAdjustedEnd(entry,result){
   const start=result&&result.adjustedStart||entry.start;
   return studyMinuteToHHMM(clockMinuteToStudyMinute(t2m(start))+entry.duration);
 }
+// A Saved Day read from the repository is its view: the stored fields plus
+// fields worked out from them (materializeDailyRecordView). Handed back to be
+// saved, with a stored field changed such as the reflection, it is saved as
+// its stored fields; the worked-out ones are rebuilt on every read. Anything
+// else is returned unchanged, so a field the view does not have is refused.
+function storedDailyRecordFields(value){
+  if(!value||typeof value!=='object'||Array.isArray(value))return value;
+  const fields=value.recordKind==='diary'?DIARY_RECORD_FIELDS:value.recordKind==='study'?STUDY_RECORD_FIELDS:null;
+  if(!fields||Object.keys(value).every(key=>fields.includes(key)))return value;
+  const stored={};for(const key of fields)if(Object.prototype.hasOwnProperty.call(value,key))stored[key]=value[key];
+  const view=materializeDailyRecordView(stored);
+  return view&&Object.keys(value).every(key=>Object.prototype.hasOwnProperty.call(view,key))?stored:value;
+}
 function materializeDailyRecordView(record){
   const doc=sanitizeCurrentDailyRecord(record);
   if(!doc)return null;
@@ -616,7 +635,7 @@ function materializeDailyRecordSummary(summary){
       buildDailyRecordSummary,compactPauseEvents,compactRealTimeSnapshot,
       sanitizeTimerRuntimePayload,compactAdjustedSchedule,normalizeDailyResultEntry,
       dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,savedDayCoversSessionEvidence,createDiaryRecord,
-      sanitizeCurrentNote,sanitizeNoteFields,noteKeys,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
+      sanitizeCurrentNote,sanitizeNoteFields,noteKeys,materializeDailyRecordView,storedDailyRecordFields,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
     });
   }
   function createActiveSessionCodec(input){

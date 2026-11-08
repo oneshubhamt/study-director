@@ -441,7 +441,7 @@ async function applyResolvedNotes(resolvedPlan){
   const parts=[count?`${count} note${count===1?'':'s'} updated`:'',deleted?`${deleted} note${deleted===1?'':'s'} moved to Recently deleted`:''].filter(Boolean);
   return {message:parts.length?` · ${parts.join(' · ')}`:'',changed:true,expectedItems,expectedDeletions,count,deleted};
 }
-async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
+async function applyResolvedActiveSession(resolvedPlan,{clear=false,keepRunning=false}={}){
   const resolved=resolvedPlan&&resolvedPlan.activeSession;
   // Active Session reconciliation owns only session/runtime state. The Plan
   // working draft is portable Personal Data and is never transported through
@@ -451,7 +451,7 @@ async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
   requireBackupMutationControl('reconciling the active session');
   const expected=ActiveSessionCodec.sanitizeCurrent(resolved.value);
   if(!expected)throw new Error('Resolved Active Session is invalid.');
-  await restoreSessionState(expected);
+  await restoreSessionState(expected,{keepRunning});
   return {message:' and active session',changed:true,expected};
 }
 function staleReconciliationError(){
@@ -939,6 +939,98 @@ function mergeSessionAcknowledgement(control,peer){
   const now=new Date().toISOString(),snapshot=freeze({...winner.snapshot,savedRevision:winner.snapshot.contentRevision,updatedAt:now});
   return ActiveSessionCodec.sanitizeCurrent({...winner,revision:nextMergedSessionRevision(winner.revision,other.revision),snapshot,updatedAt:now});
 }
+// What the person decided in a day's session, without the time recorded:
+// the blocks done or skipped, a completion they gave or counted, progress
+// counts, schedule shifts, practice runs finished, the carry-forward, the
+// day's review and the block it is on. Seconds on blocks, completions worked out from them and the
+// timer's own state are left out: two devices' timers always differ a
+// little, and that is never a choice.
+const AUTOMATIC_COMPLETION_SOURCES=new Set(['time','finished-time','finished-unverified']);
+function sessionDecisions(session){
+  const clean=ActiveSessionCodec.sanitizeCurrent(session);if(!clean)return null;
+  const snapshot=clean.snapshot||{},tasks=Object.create(null);
+  for(const [id,row] of Object.entries(snapshot.taskState||{})){
+    const task=Object.create(null);
+    if(row.resolvedState)task.resolved=row.resolvedState;
+    if(row.completionSource&&!AUTOMATIC_COMPLETION_SOURCES.has(row.completionSource)){task.completionSource=row.completionSource;task.completion=Number(row.completion)||0;}
+    if(row.progress)task.progress=row.progress;
+    if(Object.keys(task).length)tasks[id]=task;
+  }
+  const review=snapshot.review&&(snapshot.review.reflection||snapshot.review.studyQuality)?JSON.stringify([String(snapshot.review.reflection||''),snapshot.review.studyQuality||null]):'';
+  const shifts=Object.create(null);for(const [id,row] of Object.entries(snapshot.scheduleAdjustments||{}))shifts[id]=JSON.stringify([row.startMin,row.endMin,row.reason]);
+  const runs=(snapshot.practice?.runs||[]).map(run=>Canonical.signature(run));
+  return freeze({date:clean.date,schedule:String(clean.scheduleText||'')+'\u0000'+String(snapshot.fingerprint||''),current:String(snapshot.currentTaskId||''),tasks,shifts,runs,carryForward:String(snapshot.latestCarryForward||''),review});
+}
+// Whether copy x holds every decision copy y holds: 'equal', 'ahead' (x
+// also decided more, such as a block y had not finished yet) or 'no'.
+function sessionDecisionsCover(x,y){
+  if(!x||!y||x.date!==y.date||x.schedule!==y.schedule)return 'no';
+  let ahead=false,fails=false;
+  const value=(a,b)=>{if(a===b)return;if(!b){ahead=true;return;}fails=true;};
+  value(x.carryForward,y.carryForward);value(x.review,y.review);
+  for(const id of new Set([...Object.keys(x.shifts),...Object.keys(y.shifts)]))value(x.shifts[id]||'',y.shifts[id]||'');
+  if(y.runs.some(run=>!x.runs.includes(run)))fails=true;else if(x.runs.some(run=>!y.runs.includes(run)))ahead=true;
+  for(const id of new Set([...Object.keys(x.tasks),...Object.keys(y.tasks)])){
+    const a=x.tasks[id]||{},b=y.tasks[id]||{};
+    value(a.resolved||'',b.resolved||'');
+    // A manual completion is an assessment that can go down as well as up, so
+    // two different ones are different decisions; one counted from units only
+    // grows as more units are done.
+    if(b.completionSource){if(a.completionSource!==b.completionSource||(b.completionSource==='manual'?a.completion!==b.completion:a.completion<b.completion))fails=true;else if(a.completion>b.completion)ahead=true;}
+    else if(a.completionSource)ahead=true;
+    if(b.progress){if(!a.progress||Number(a.progress.total||0)!==Number(b.progress.total||0)||Number(a.progress.done||0)<Number(b.progress.done||0))fails=true;else if(Number(a.progress.done||0)>Number(b.progress.done||0))ahead=true;}
+    else if(a.progress)ahead=true;
+  }
+  // x is on the same block, or moved past the block y is on by finishing it.
+  if(x.current!==y.current){if(y.current&&x.tasks[y.current]?.resolved&&!y.tasks[y.current]?.resolved||!y.current)ahead=true;else fails=true;}
+  return fails?'no':ahead?'ahead':'equal';
+}
+// How two copies of the same day's session relate in what was decided:
+// 'same' (only time differs), 'local' or 'incoming' (that copy holds all
+// the other decided and more), or 'diverged' (each decided something the
+// other did not: only then does the person choose).
+function sessionProgressRelation(local,incoming){
+  const mine=sessionDecisions(local),theirs=sessionDecisions(incoming);if(!mine||!theirs)return 'diverged';
+  const forward=sessionDecisionsCover(mine,theirs),back=sessionDecisionsCover(theirs,mine);
+  return forward==='equal'&&back==='equal'?'same':forward==='ahead'?'local':back==='ahead'?'incoming':'diverged';
+}
+// The owner's copy with what only the other copy decided (the other holds
+// every decision the owner's does): blocks done or skipped, completions and
+// counts, schedule shifts, the carry-forward and the review. The owner keeps
+// its timer and the time it recorded; a block finished only on the other copy
+// comes with its time. When the other copy moved past the owner's block by
+// finishing it, the other copy's content leads, under the owner's control.
+function sessionWithDecisions(owner,other){
+  const mine=ActiveSessionCodec.sanitizeCurrent(owner),theirs=ActiveSessionCodec.sanitizeCurrent(other);
+  if(!mine||!theirs||mine.date!==theirs.date)return null;
+  const own=mine.snapshot,their=theirs.snapshot;
+  if(String(own.currentTaskId||'')!==String(their.currentTaskId||'')){
+    // The other copy's timer comes with its block. The owner has been running
+    // all along, so its own later tick carries over: the other device's last
+    // tick is no gap this device was away for.
+    const rebased=rebaseSessionContentToOwner(mine,theirs),runtime=rebased?.snapshot?.timerRuntime,ownTick=Number(own.timerRuntime?.timerState?.lastTickMs)||0;
+    if(!runtime||runtime.paused||!own.timerRuntime||own.timerRuntime.paused||!(ownTick>(Number(runtime.timerState?.lastTickMs)||0)))return rebased;
+    return ActiveSessionCodec.sanitizeCurrent({...rebased,snapshot:{...rebased.snapshot,timerRuntime:{...runtime,timerState:{...runtime.timerState,lastTickMs:ownTick}}}})||rebased;
+  }
+  const taskState=Object.assign(Object.create(null),own.taskState);
+  for(const [id,row] of Object.entries(their.taskState||{})){
+    const kept=taskState[id];
+    if(row.resolvedState&&!kept?.resolvedState){taskState[id]=row;continue;}
+    const next=Object.assign(Object.create(null),kept||{});
+    if(row.completionSource&&!AUTOMATIC_COMPLETION_SOURCES.has(row.completionSource)){next.completion=row.completion;next.completionSource=row.completionSource;}
+    if(row.progress)next.progress=row.progress;
+    if(Object.keys(next).length)taskState[id]=next;
+  }
+  const decided=review=>!!(review&&(review.reflection||review.studyQuality)),now=new Date().toISOString();
+  const ownRuns=own.practice?.runs||[],signatures=new Set(ownRuns.map(run=>Canonical.signature(run))),extraRuns=(their.practice?.runs||[]).filter(run=>!signatures.has(Canonical.signature(run)));
+  const snapshot={...own,taskState,
+    ...(extraRuns.length?{practice:{active:own.practice?.active||null,runs:[...ownRuns,...extraRuns]}}:{}),
+    scheduleAdjustments:Object.assign(Object.create(null),own.scheduleAdjustments,their.scheduleAdjustments),
+    latestCarryForward:their.latestCarryForward||own.latestCarryForward,
+    review:decided(their.review)?their.review:own.review,
+    contentRevision:nextMergedSessionRevision(own.contentRevision,their.contentRevision),savedRevision:0,updatedAt:now};
+  return ActiveSessionCodec.sanitizeCurrent({...mine,revision:nextMergedSessionRevision(mine.revision,theirs.revision),snapshot,updatedAt:now});
+}
 // Incoming content can advance after a device has claimed ownership. Preserve
 // the current owner's control state while adopting that later pre-claim work,
 // and start a fresh local content revision so no foreign save acknowledgement
@@ -1056,7 +1148,12 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
     // Post-handoff study on the old device need not become a false Kept
     // Version when the verified new owner's Saved Day demonstrably includes
     // it. The final quiescence check below still retains any later new tick.
-    return sessionDecision(contentMine===observed||savedCoversLocal?'incoming':'yield');
+    if(contentMine===observed||savedCoversLocal)return sessionDecision('incoming');
+    // Time alone is never a choice: the new owner's copy is taken in. What
+    // only this device decided is handed over to it; both deciding differently
+    // is kept for review.
+    const relation=sessionProgressRelation(local,incoming);
+    return sessionDecision(relation==='same'||relation==='incoming'?'incoming':relation==='local'?'hand-over':'yield');
   }
   // A released claim is written only after the claimant published its ended
   // state. If that newest checkpoint has no Active Session, the old owner can
@@ -1081,13 +1178,13 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
     }
     // Older claims lack the exact causal fingerprint. They remain safe by
     // refusing to infer ancestry rather than guessing from scalar revisions.
-    if(!hasObserved)return sessionDecision('claimed-conflict');
+    if(!hasObserved)return claimedRelation(local,incoming);
     if(contentMine===observed&&contentTheirs!==observed){
       const rebased=rebaseSessionContentToOwner(local,incoming);
       return rebased?sessionDecision('graft',rebased):sessionDecision('claimed-conflict');
     }
     if(contentMine!==observed&&contentTheirs===observed)return sessionDecision('local');
-    return sessionDecision('claimed-conflict');
+    return claimedRelation(local,incoming);
   }
 
   // Even an identical checkpoint may predate a newer verified ownership claim.
@@ -1117,7 +1214,8 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
       return merged&&!Canonical.same(merged,incoming)?sessionDecision('graft',merged):sessionDecision('incoming');
     }
     if(unchangedFromShared||semanticallyUnchanged||durablyCoveredLocal)return sessionDecision('incoming');
-    return sessionDecision('yield');
+    const relation=sync?sessionProgressRelation(local,incoming):'diverged';
+    return sessionDecision(relation==='same'||relation==='incoming'?'incoming':relation==='local'?'hand-over':'yield');
   }
   if(hold&&!takenOver)return sessionDecision('hold');
   if(!local)return sessionDecision('incoming');
@@ -1126,10 +1224,31 @@ async function sessionSettlement(base,parsed,{hold=false,sync=false,sessionClaim
     const incomingWins=sessionControlFollows(local,incoming),winner=incomingWins?incoming:local,other=incomingWins?local:incoming,merged=mergeSessionAcknowledgement(winner,other);
     return merged&&!Canonical.same(merged,winner)?sessionDecision('graft',merged):sessionDecision(incomingWins?'incoming':'local');
   }
-  if(!shared)return sessionDecision('');
-  if((hasSemanticAncestor?contentMine===contentShared:mine===shared))return sessionDecision('incoming');
-  if((hasSemanticAncestor?contentTheirs===contentShared:theirs===shared))return sessionDecision('local');
-  return sessionDecision('conflict');
+  if(shared&&(hasSemanticAncestor?contentMine===contentShared:mine===shared))return sessionDecision('incoming');
+  if(shared&&(hasSemanticAncestor?contentTheirs===contentShared:theirs===shared))return sessionDecision('local');
+  // A sync settles copies that differ only in time, or where one holds all
+  // the other decided, without asking: control follows as for equal content,
+  // with the further copy's decisions.
+  if(sync){
+    const relation=sessionProgressRelation(local,incoming);
+    if(relation!=='diverged'){
+      const incomingWins=sessionControlFollows(local,incoming),ahead=relation==='local'?local:relation==='incoming'?incoming:null;
+      if(!ahead||ahead===(incomingWins?incoming:local))return sessionDecision(incomingWins?'incoming':'local');
+      const merged=incomingWins?sessionWithDecisions(incoming,local):sessionWithDecisions(local,incoming);
+      if(merged)return sessionDecision('graft',merged);
+    }
+  }
+  return sessionDecision(shared?'conflict':'');
+}
+// This device claimed the session and both copies changed since: the owner
+// keeps its copy when the other differs only in time or decided nothing
+// more, and takes in what only the other decided. Different decisions on
+// both are kept for review.
+function claimedRelation(local,incoming){
+  const relation=sessionProgressRelation(local,incoming);
+  if(relation==='same'||relation==='local')return sessionDecision('local');
+  const merged=relation==='incoming'?sessionWithDecisions(local,incoming):null;
+  return merged?sessionDecision('graft',merged):sessionDecision('claimed-conflict');
 }
 // Complete Active Session reconciliation before touching another data domain.
 // Causal ancestry, execution quiescence and retained divergence form one result.
@@ -1149,7 +1268,18 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
   if(sync&&decision.kept&&!(await keepSession(decision.kept)))return freeze({needsDecision:true});
   if(state==='yield-hold'){
     await yieldSession({deferReview:true});state='hold';value=null;
-  }else if(state==='yield'){
+  }else if(state==='hand-over'&&sync){
+    // The timer here stops first, so the copy handed over is final: what
+    // only this device decided goes to the owner, under its control.
+    if(hasActiveSession())await yieldSession({deferReview:true});
+    const mine=(await readCanonicalActiveSession()).value,theirs=parsed.importedActiveSession||null;
+    const relation=mine&&theirs?sessionProgressRelation(mine,theirs):'diverged',merged=relation==='local'?sessionWithDecisions(theirs,mine):null;
+    if(merged){state='graft';value=merged;}
+    else{
+      state='incoming';
+      if(mine&&relation!=='same'&&relation!=='incoming'&&!(await keepSession(mine)))return freeze({needsDecision:true});
+    }
+  }else if(state==='yield'||state==='hand-over'){
     await yieldSession();
     if(sync){
       const mine=(await readCanonicalActiveSession()).value;
@@ -1167,8 +1297,10 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     const frozen=(await readCanonicalActiveSession()).value;
     // Yield may capture previously unpersisted focus/timer progress. The
     // earlier settlement decision cannot silently discard that new evidence.
+    // Time alone, or decisions the incoming copy also holds, lose nothing.
     if(frozen&&!Canonical.same(ActiveSessionCodec.contentValue(before),ActiveSessionCodec.contentValue(frozen))&&
         !checkpointSavedDayCoversSession(parsed,frozen)&&
+        !['same','incoming'].includes(parsed.importedActiveSession?sessionProgressRelation(frozen,parsed.importedActiveSession):'diverged')&&
         !(await keepSession(frozen)))return freeze({needsDecision:true});
   }
   if(sync&&state==='claimed-conflict'){
@@ -1498,7 +1630,10 @@ async function reviewKeptVersions({ref=''}={}){
   const personal=of('personal').length?await personalExport({flush:false}):null,session=of('session').length?(await readCanonicalActiveSession()).value||null:null;
   // Each choice: 'keep' leaves this device's as it is (wait: the review stays
   // open), 'use' takes the kept version.
-  const groups=[],steps=[],texts=[],choice=(review,part,label,description,keep,use,wait=false,comparison=null)=>{const id=`kept__${review.id}${part?`__${part}`:''}`;groups.push(freeze({id,label,defaultValue:'keep',description,...(comparison?{comparison:freeze(comparison)}:{}),choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id,review,part,wait});};
+  // The dialog gets a short control id (at most 80 characters are allowed,
+  // and a saved plan's key alone runs past that); answers are read back
+  // under the full key, which names the review and the part.
+  const groups=[],steps=[],texts=[],controlKeys=new Map(),choice=(review,part,label,description,keep,use,wait=false,comparison=null)=>{const key=`kept__${review.id}${part?`__${part}`:''}`,id=`kept_${groups.length+1}`;controlKeys.set(id,key);groups.push(freeze({id,key,label,defaultValue:'keep',description,...(comparison?{comparison:freeze(comparison)}:{}),choices:freeze([freeze({value:'keep',...keep}),freeze({value:'use',...use})])}));steps.push({id:key,review,part,wait});};
   const when=review=>savedDayDecisionTimestamp(review.keptAt),devices=reviews.map(review=>review.keptFrom).filter(Boolean);
   // The note comparison names the kept side: "Kept from iPad · Safari · 06 Nov, 21:40".
   const keptColumn=review=>{const from=keptDevice(review,devices),at=savedDayDecisionTimestamp(review.keptChangedAt);return from?`Kept from ${from}${at?' · '+at:''}`:`Kept ${when(review)}`;};
@@ -1598,7 +1733,7 @@ async function reviewKeptVersions({ref=''}={}){
     }
   }
   let picked=freeze({}),resolvedTexts=null;
-  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync retained differences it could not safely settle. Choose exactly which values to apply. Each kept version is saved and confirmed separately; if a later choice fails, earlier confirmed choices remain and the rest can be retried.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
+  if(groups.length){picked=await configure({title:'Kept versions',message:'A sync retained differences it could not safely settle. Choose exactly which values to apply. Each kept version is saved and confirmed separately; if a later choice fails, earlier confirmed choices remain and the rest can be retried.',groups,confirmLabel:'Apply choices',cancelLabel:'Later'});if(!picked)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});picked=freeze(Object.fromEntries(Object.entries(picked).map(([id,value])=>[controlKeys.get(id)||id,value])));}
   if(texts.length){resolvedTexts=await NoteReconciliation.resolve(freeze({conflicts:freeze(texts),incomingAssets:freeze([]),purpose:'kept'}));if(!resolvedTexts)return freeze({cancelled:true,reviewed:0,left:waiting.length,changed:0});}
   const use=step=>picked[step.id]==='use',waits=new Set(steps.filter(step=>step.wait&&!use(step)).map(step=>step.review.id));
   return runExclusive('review-kept-versions',()=>withPersistenceSuppressed(async()=>{
@@ -2434,7 +2569,9 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     }
     const sessionResult=await runRestoreMutationStage('active-session',async()=>{
       await AppData.restoreJournal.mark(restoreId,'applying-active-session');
-      const result=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession});
+      // A sync that merges another device's decisions into the session this
+      // device runs never stops its timer.
+      const result=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession,keepRunning:sync&&session==='graft'});
       if(result.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
       await AppData.restoreJournal.mark(restoreId,'active-session-committed');return result;
     });

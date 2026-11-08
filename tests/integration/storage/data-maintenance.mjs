@@ -47,7 +47,7 @@ preemptionControls.onStorageRead=null;blocked=false;preemptionControls.onAreaRea
 assert.equal((await preemption.app.maintenance.run()).status,'completed');assert.equal(notesReads,2,'foreground interruption invalidates the phase continuation');
 console.log(JSON.stringify({status:'PASS',suite:'data-maintenance-preemption',yielded,metadataRetry:true}));
 
-const readerContext={fallbackDailyRecordsGet:()=>[],filterPendingDeletedEntities:value=>value,mergeDailyRecordSets:()=>[],idbAllRecords:async()=>{throw new Error('storage unavailable');},isCanonicalRuntimeError:()=>false,showStorageFallbackWarning(){},materializeDailyRecordView:value=>value};
+const readerContext={fallbackDailyRecordsGet:()=>[],filterPendingDeletedEntities:value=>value,mergeDailyRecordSets:()=>[],idbAllRecords:async()=>{throw new Error('storage unavailable');},isCanonicalRuntimeError:()=>false,showStorageFallbackWarning(){},materializeDailyRecordView:value=>value,storedDailyRecordFields:value=>value};
 vm.createContext(readerContext);vm.runInContext(source.slice(source.indexOf('async function getDailyRecords('),source.indexOf('async function removeDailyRecord(')),readerContext);
 assert.equal((await readerContext.getDailyRecords()).length,0,'interactive read retains its fallback policy');
 await assert.rejects(readerContext.getDailyRecords({strict:true}),/storage unavailable/);

@@ -79,6 +79,7 @@ registry.define('backup-recovery-host',1,()=>{
       if(input.lifecycle.attachmentBusy())throw new Error('An attachment is still being prepared or saved. Finish that operation before recovery.');
       await input.lifecycle.settleAttachmentWriters();
       if(await input.lifecycle.flushPlanDraft()===false)throw new Error('The current Plan draft could not be saved before recovery.');
+      // The Plan box's draft, or null when it only shows the default plan.
       const planInput=input.lifecycle.planInputValue();
       if(planInput!==null&&(input.lifecycle.planDraft()??'')!==planInput&&await input.lifecycle.savePlanDraft()===false)throw new Error('The current Plan draft could not be saved before recovery.');
       await input.lifecycle.settlePlan();

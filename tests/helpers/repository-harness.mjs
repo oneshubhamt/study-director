@@ -75,7 +75,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
     sanitizeCurrentDailyRecord:v=>v&&typeof v==='object'&&Number(v.version)===1?v:null,
     sanitizeCurrentNote:(source,key)=>{if(!source||typeof source!=='object'||Number(source.version)!==3)return null;const clean={version:3,key:String(source.key||key||''),label:String(source.label??''),text:String(source.text??''),updatedAt:String(source.updatedAt??'')},linked='links' in source,links=linked?source.links:null;if(linked&&(!Array.isArray(links)||!links.length||new Set(links).size!==links.length||links.some(id=>!noteKeys.isId(id)||id===noteKeys.id(clean.key))))return null;if(linked)clean.links=[...links];return noteKeys.isKey(clean.key)&&clean.label.trim()&&Object.keys(source).length===(linked?6:5)?clean:null;},
     noteKeys:noteKeys,
-    materializeDailyRecordView:v=>v,
+    materializeDailyRecordView:v=>v,storedDailyRecordFields:v=>v,
     sanitizeDailyRecordSummary:v=>v,
     materializeDailyRecordSummary:v=>v
   });

@@ -28,7 +28,7 @@ shape or motion and always has text (hover tooltip and screen-reader label).
 |---|---|---|
 | `off` | None | Google Drive not set up on this profile |
 | `syncing` | Green arc travelling round | Connecting, bringing in changes, uploading, restoring, combining, reading versions, a Device Folder backup |
-| `syncing` (slow) | Green arc travelling slowly | Waiting for another device to finish saving |
+| `syncing` (slow) | Green arc travelling slowly | Waiting for another device to finish saving (named, as "Windows · Chrome", when known) |
 | `synced` | Solid green; settles from the arc with a brief glow | In step with Drive |
 | `pending` | Green with an open segment | Changes here not uploaded yet; last sync failed and is retrying; first sync not finished; sync review waiting |
 | `offline` | Grey dashed | No network; syncs when back online |
@@ -58,8 +58,9 @@ the indicator; `tests/unit/backup/sync-status.mjs` checks every row.
 | Old text | When | Ring | Badge | Label starts | Panel action |
 |---|---|---|---|---|---|
 | Syncing… | Sync catch-up or upload running | syncing | — | Syncing… (or the specific activity) | — |
-| Synced 12:04 | In step | synced | — | Synced 12:04 | Sync now |
-| Changes since 12:04 | Local edits waiting | pending | — | Changes since 12:04 | Sync now |
+| Waiting for another device | Drive's latest is here; this device's upload waits its turn | syncing (slow) | — | Waiting for Windows · Chrome to finish saving… | Sync now |
+| Synced 12:04 | In step | synced | — | Synced 12:04 | — |
+| Changes since 12:04 | Local edits waiting | pending | — | Changes since 12:04 | — |
 | Last synced 12:04 | Last sync failed, retrying | pending | — | Last synced 12:04 · retrying | Sync now |
 | Needs password | Password set or changed on another device | blocked | lock | Enter backup password to sync | Enter password |
 | Needs review (sync) | Drive has changes needing a decision | pending | review | Google Drive has changes to review | Review |
@@ -77,7 +78,7 @@ session running on another device, app update ready, no backup in over a week.
 - **Headline:** one sentence, for example "Synced at 12:04. This device is up to date."
 - **When next:** "Uploads by 12:24, or when you leave the app" (from the
   automatic-backup schedule), "Next try at 12:10", or "Checks Google Drive again
-  when you return to the app". **Sync now** whenever Drive is connected and idle.
+  when you return to the app". A button only when something waits (owner, 2026-11-08): **Sync now** while this device waits for another device's upload (it uploads without waiting for that turn) or retries after a failure, and **Try again** once retries ran out. None while syncing works normally. The first-sync card shows the same Sync now on its upload step while waiting.
 - **Needs you:** one row per item with its own button — Sign in, Enter password,
   Update app, Review (sync), Review (kept versions), Allow access (Device Folder),
   Details (storage, backup check, Device Folder failing), Go to Execute (session
@@ -139,7 +140,7 @@ one compact button (32 px, 36 px on touch screens).
 
 - **When.** From any Connect or Sign in (profile panel, Library → Data, first start, the permission notice) until that first sync ends, on every tab.
 - **Where.** A card of the notification stack (top right on a laptop, above the bottom bar on a phone): first after the pinned cards, counted in "+N more", closed by Clear all.
-- **What.** Three steps — sign in to Google, bring in what's on Google Drive, upload this device's data — each waiting, working (spinner), done (✓) or failed (×); one sentence for where it is; the running stage with its counts ("Downloading backup data… · 2 of 5 complete · 150 KB of 300 KB") and a bar (a sweep when there are no counts yet).
+- **What.** Three steps — sign in to Google, bring in what's on Google Drive, upload this device's data — each waiting, working (spinner), done (✓) or failed (×); one sentence for where it is; the running stage with its counts ("Downloading backup data… · 2 of 5 complete · 150 KB of 300 KB") and a bar (a sweep when there are no counts yet). While this device's upload waits for another device, the step line reads amber, the sentence names that device by type and browser ("Waiting for Windows · Chrome to finish saving…") and **Sync now** sits at the end of that step's line as a quiet link; a retry's **Try now** sits the same way on its step. No bar moves while a step only waits. Every other action (Enter password, Review, Sign in, Update) is the card's button.
 - **Endings.** Synced (closes itself after 6 s; offers Review when the sync kept versions for review); needs the backup password, a review or an app update (stays, with the button); offline (continues when back online); couldn't finish (says when it tries again, with Try now); sign-in didn't finish (Try again). Declining or refusing a library closes it; the existing toast explains.
 - **×** hides it; syncing carries on and the indicator still shows it.
 - **Model.** `backup-presentation.connectProgress` decides; the host only remembers when the card started and whether a catch-up or upload ran since.

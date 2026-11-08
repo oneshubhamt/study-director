@@ -50,14 +50,26 @@ try{
   // BF-1: a previous-day Active Session is only an unsaved recovery candidate
   // when its content is newer than the Saved Day. Seed yesterday with an exact
   // saved acknowledgement, reload, and require startup to retire the redundant
-  // recovery copy without asking to save the day again.
-  const coveredPrevious=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));d.TimerEngine.stopExecution();d.goTab('review');await wait(120);d.setStudyQuality(4,{save:false});if(!await d.saveDayRecord())throw new Error('BF1 fixture Save Today failed');const today=d.todayISO(),dateObject=new Date(today+'T12:00:00');dateObject.setDate(dateObject.getDate()-1);const yesterday=[dateObject.getFullYear(),String(dateObject.getMonth()+1).padStart(2,'0'),String(dateObject.getDate()).padStart(2,'0')].join('-'),record=await d.AppData.dailyRecords.get(today),loaded=await d.AppData.activeSession.load(),session=structuredClone(loaded.value);if(!record||!session)throw new Error('BF1 fixture state missing');const stamp=new Date().toISOString(),saved={...record,date:yesterday,savedAt:stamp,updatedAt:stamp},snapshot={...session.snapshot,date:yesterday},previous={...session,date:yesterday,snapshot,status:'active',updatedAt:stamp};await d.AppData.dailyRecords.save(saved);const stored=await d.AppData.activeSession.save(previous,{strictDurability:true});if(stored?.ok===false)throw stored.error||new Error('BF1 previous session save failed');return {yesterday,sourceRevision:Number(saved.sourceRevision),contentRevision:Number(snapshot.contentRevision)};})()`);
+  // recovery copy without asking to save the day again. Today's session is
+  // reset first: the page saves its live session as it unloads, which would
+  // replace the seeded one.
+  const coveredPrevious=await page.evaluate(`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));d.TimerEngine.stopExecution();d.goTab('review');await wait(120);d.setStudyQuality(4,{save:false});if(!await d.saveDayRecord())throw new Error('BF1 fixture Save Today failed');const today=d.todayISO(),dateObject=new Date(today+'T12:00:00');dateObject.setDate(dateObject.getDate()-1);const yesterday=[dateObject.getFullYear(),String(dateObject.getMonth()+1).padStart(2,'0'),String(dateObject.getDate()).padStart(2,'0')].join('-'),record=await d.AppData.dailyRecords.get(today),loaded=await d.AppData.activeSession.load(),session=structuredClone(loaded.value);if(!record||!session)throw new Error('BF1 fixture state missing');const reset=d.resetTodaySession();await wait(150);document.querySelector('#sd-interaction-dialog .interaction-actions .danger')?.click();await reset;if((await d.AppData.activeSession.load()).value)throw new Error('BF1 fixture could not end today\\'s session');const stamp=new Date().toISOString(),saved={...record,date:yesterday,savedAt:stamp,updatedAt:stamp},snapshot={...session.snapshot,date:yesterday},previous={...session,date:yesterday,snapshot,status:'active',updatedAt:stamp};await d.AppData.dailyRecords.save(saved);const stored=await d.AppData.activeSession.save(previous,{strictDurability:true});if(stored?.ok===false)throw stored.error||new Error('BF1 previous session save failed');return {yesterday,sourceRevision:Number(saved.sourceRevision),contentRevision:Number(snapshot.contentRevision)};})()`);
   assert.ok(coveredPrevious.sourceRevision>=coveredPrevious.contentRevision,'the previous-day Saved Day covers the recovery content revision');
   await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership after covered previous-day reload'});
   await waitFor(()=>page.evaluate(`__PWA6.AppData.activeSession.load().then(result=>result.value===null)`),{label:'covered previous-day recovery retired'});
   assert.equal(await page.evaluate(`document.getElementById('sd-interaction-dialog')?.textContent.includes('Unsaved previous study day found')||false`),false,'a Saved Day that covers the recovery session is not reported as unsaved again');
 
+  // The Diary edits a day saved with Save Today: the repository reads the
+  // day as its view and saves it back as its stored fields (this failed with
+  // "New daily record failed its canonical validation").
+  const diaryEdit=await page.evaluate(`(async()=>{const d=__PWA6,date=d.todayISO(),o=new Date(date+'T12:00:00');o.setDate(o.getDate()-1);
+    const yesterday=[o.getFullYear(),String(o.getMonth()+1).padStart(2,'0'),String(o.getDate()).padStart(2,'0')].join('-'),before=await d.AppData.dailyRecords.get(yesterday);
+    const later='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'Edited later in the Diary'}]}]}});
+    try{await d.DailyReflectionPersistence.commit(yesterday,later,{expectedCanonical:String(before?.reflection||'')});}catch(error){return {kind:before?.recordKind,error:String(error?.message||error)};}
+    const after=await d.AppData.dailyRecords.get(yesterday);return {kind:after?.recordKind,edited:after?.reflection===later,results:Object.keys(after?.results||{}).length};})()`);
+  assert.deepEqual(diaryEdit,{kind:'study',edited:true,results:2},'the Diary edit of a saved study day saves, and keeps the day');
+
   assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[],'no session save failed');
   assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/iu.test(event.text||'')),[]);
-  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true,popUpsWaitOnlyDuringWorkBlocks:true,coveredPreviousDayRetired:true}}));
+  console.log(JSON.stringify({status:'PASS',checks:{appliedPlanKept:true,pacerSaved:true,backupComplete:true,popUpsWaitOnlyDuringWorkBlocks:true,coveredPreviousDayRetired:true,diaryEditsSavedStudyDay:true}}));
 }finally{await browser.close();await server.close();}

@@ -79,7 +79,10 @@
     URLSearchParams:globalThis.URLSearchParams,
     Blob:globalThis.Blob,
     Uint8Array:globalThis.Uint8Array,
-    crypto:globalThis.crypto
+    crypto:globalThis.crypto,
+    // Offline (the browser says so): background work waits for the network
+    // instead of failing and backing off.
+    online:()=>globalThis.navigator?.onLine!==false
   });
 
   // JSON metadata is consumed once, inside the request's timeout/abort lifetime.
@@ -645,7 +648,8 @@
   function publicationDescriptor(file,parent){
     if(!validPublicationMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director publication metadata.'));
     const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),device=thisDevice();
-    return Object.freeze({kind:PUBLICATION_KIND,id,sameDevice:!!device&&file.appProperties[PUBLICATION_DEVICE_MARKER]===device,renews:file.appProperties[PUBLICATION_RENEWS_MARKER]==='1',startedAt:Number.isFinite(Date.parse(String(file.appProperties[PUBLICATION_STARTED_MARKER]||'')))?new Date(Date.parse(file.appProperties[PUBLICATION_STARTED_MARKER])).toISOString():createdAt,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
+    const writer=String(file.appProperties[PUBLICATION_DEVICE_MARKER]||'');
+    return Object.freeze({kind:PUBLICATION_KIND,id,device:DEVICE_PATTERN.test(writer)?writer:'',sameDevice:!!device&&writer===device,renews:file.appProperties[PUBLICATION_RENEWS_MARKER]==='1',startedAt:Number.isFinite(Date.parse(String(file.appProperties[PUBLICATION_STARTED_MARKER]||'')))?new Date(Date.parse(file.appProperties[PUBLICATION_STARTED_MARKER])).toISOString():createdAt,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
   }
   function trustedCoordinationRemoteId(ref,parent,kind,idValid){
     const id=String(ref&&ref.id||''),remoteId=String(ref&&ref.remoteId||''),scope=String(ref&&ref.verificationScope||'');
@@ -689,18 +693,31 @@
     if(payload&&payload.nextPageToken||files.length>1)throw noRetry(new Error('Duplicate Study Director backup publication markers were found. Maintenance stopped safely.'));
     return files[0]||null;
   }
+  // Drive's clock, learned from the markers this device creates (Drive
+  // stamps their creation time). Marker ages are measured on it, so a device
+  // whose own clock is wrong neither removes another device's live upload
+  // marker nor waits for one that ended long ago. Until a marker is created
+  // it is this device's clock.
+  let driveClockOffset=0;
+  function learnDriveClock(file,sentAt,receivedAt){
+    const created=Date.parse(String(file&&file.createdTime||''));
+    if(Number.isFinite(created)&&receivedAt>=sentAt&&receivedAt-sentAt<=30000)driveClockOffset=created-(sentAt+receivedAt)/2;
+  }
+  function driveNow(){return Date.now()+driveClockOffset;}
   async function beginRepositoryPublication(baseContext=EMPTY_DRIVE_OPERATION,startedAt=''){
-    const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id='pub_'+Platform.crypto.randomUUID().replace(/-/gu,''),now=new Date().toISOString(),started=Number.isFinite(Date.parse(String(startedAt||'')))?new Date(Date.parse(startedAt)).toISOString():now;
+    // An upload's first marker records no start of its own: its creation
+    // time on Drive is the start. Renewals carry that time forward.
+    const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id='pub_'+Platform.crypto.randomUUID().replace(/-/gu,''),now=new Date().toISOString(),started=Number.isFinite(Date.parse(String(startedAt||'')))?new Date(Date.parse(startedAt)).toISOString():'';
     const metadata={name:publicationFilename(id),parents:[parent],mimeType:'application/octet-stream',appProperties:{
       [REPOSITORY_MARKER.key]:REPOSITORY_MARKER.value,[REPOSITORY_VERSION_MARKER]:REPOSITORY_VERSION,[REPOSITORY_KIND_MARKER]:PUBLICATION_KIND,[REPOSITORY_ID_MARKER]:id,
-      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now,[PUBLICATION_RENEWS_MARKER]:'1',[PUBLICATION_STARTED_MARKER]:started,
+      [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now,[PUBLICATION_RENEWS_MARKER]:'1',...(started?{[PUBLICATION_STARTED_MARKER]:started}:{}),
       ...(thisDevice()?{[PUBLICATION_DEVICE_MARKER]:thisDevice()}:{})
     }};
-    let response=null,file=null;
+    let response=null,file=null;const sentAt=Date.now();
     try{response=await authorizedFetch(`${DRIVE_API}/files?fields=${encodeURIComponent(REPOSITORY_FIELDS)}`,{method:'POST',headers:{'Content-Type':'application/json; charset=UTF-8'},body:JSON.stringify(metadata)},API_TIMEOUT_MS,context);}
     catch(error){file=await recoverCreatedCoordinationMarker(parent,id,findRepositoryPublication,context,error);}
     if(response&&!response.ok){const retryable=await retryableResponse(response),error=await apiError(response,'Could not establish a safe Google Drive backup publication marker.');if(!retryable)throw error;file=await findRepositoryPublication(parent,id,context);if(!file)throw error;}
-    if(response&&response.ok){file=await jsonResponse(response);if(!file||!validPublicationMetadata(file,parent)){const remoteId=String(file&&file.id||'');file=remoteId?await getFileMetadata(remoteId,context):await findRepositoryPublication(parent,id,context);}}
+    if(response&&response.ok){file=await jsonResponse(response);learnDriveClock(file,sentAt,Date.now());if(!file||!validPublicationMetadata(file,parent)){const remoteId=String(file&&file.id||'');file=remoteId?await getFileMetadata(remoteId,context):await findRepositoryPublication(parent,id,context);}}
     if(!file||!validPublicationMetadata(file,parent))throw noRetry(new Error('Google Drive did not confirm the backup publication marker.'));
     return publicationDescriptor(file,parent);
   }
@@ -719,7 +736,7 @@
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');let metadata=null;
     if(ref&&ref.remoteId){const candidate=await getFileMetadata(ref.remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;});if(candidate&&validPublicationMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryPublication(parent,id,context);if(!metadata)throw noRetry(new Error('The Google Drive backup publication marker disappeared before commit. Retry the backup.'));
-    const descriptor=publicationDescriptor(metadata,parent),created=Date.parse(descriptor.createdAt);if(!Number.isFinite(created)||Date.now()-created>=PUBLICATION_MAX_AGE_MS-PUBLICATION_ASSERTION_MARGIN_MS)throw noRetry(new Error('The Google Drive backup publication marker is too old to safely begin another commit step. Retry the backup.'));
+    const descriptor=publicationDescriptor(metadata,parent),created=Date.parse(descriptor.createdAt);if(!Number.isFinite(created)||driveNow()-created>=PUBLICATION_MAX_AGE_MS-PUBLICATION_ASSERTION_MARGIN_MS)throw noRetry(new Error('The Google Drive backup publication marker is too old to safely begin another commit step. Retry the backup.'));
     return descriptor;
   }
   async function endRepositoryPublication(ref,baseContext=EMPTY_DRIVE_OPERATION){
@@ -743,7 +760,7 @@
       const previous=remoteId?await getFileMetadata(remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;}):await findRepositoryPublication(parent,id,context);
       const created=previous&&validPublicationMetadata(previous,parent)&&previous.appProperties[REPOSITORY_ID_MARKER]===id?Date.parse(String(previous.createdTime||'')):NaN;
       if(!Number.isFinite(created))throw noRetry(new Error('The Google Drive backup publication marker disappeared before commit. Retry the backup.'));
-      if(Date.now()-created>=PUBLICATION_STALE_MS-PUBLICATION_RENEW_MS)throw noRetry(new Error('The Google Drive backup publication marker went too long without renewal. Retry the backup.'));
+      if(driveNow()-created>=PUBLICATION_STALE_MS-PUBLICATION_RENEW_MS)throw noRetry(new Error('The Google Drive backup publication marker went too long without renewal. Retry the backup.'));
       await endRepositoryPublication(ref,context);return next;
     }catch(error){
       await endRepositoryPublication(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
@@ -786,11 +803,11 @@
       [FILE_SECURITY_MARKER]:FILE_SECURITY_VERSION,[REPOSITORY_IDENTITIES.driveAppVersionMarker]:PLUGIN_VERSION,[REPOSITORY_IDENTITIES.driveExportedAtMarker]:now,
       ...(thisDevice()?{[MAINTENANCE_DEVICE_MARKER]:thisDevice()}:{})
     }};
-    let response=null,file=null;
+    let response=null,file=null;const sentAt=Date.now();
     try{response=await authorizedFetch(`${DRIVE_API}/files?fields=${encodeURIComponent(REPOSITORY_FIELDS)}`,{method:'POST',headers:{'Content-Type':'application/json; charset=UTF-8'},body:JSON.stringify(metadata)},API_TIMEOUT_MS,context);}
     catch(error){file=await recoverCreatedCoordinationMarker(parent,id,findRepositoryMaintenance,context,error);}
     if(response&&!response.ok){const retryable=await retryableResponse(response),error=await apiError(response,'Could not establish safe Google Drive repository maintenance.');if(!retryable)throw error;file=await findRepositoryMaintenance(parent,id,context);if(!file)throw error;}
-    if(response&&response.ok){file=await jsonResponse(response);if(!file||!validMaintenanceMetadata(file,parent)){const remoteId=String(file&&file.id||'');file=remoteId?await getFileMetadata(remoteId,context):await findRepositoryMaintenance(parent,id,context);}}
+    if(response&&response.ok){file=await jsonResponse(response);learnDriveClock(file,sentAt,Date.now());if(!file||!validMaintenanceMetadata(file,parent)){const remoteId=String(file&&file.id||'');file=remoteId?await getFileMetadata(remoteId,context):await findRepositoryMaintenance(parent,id,context);}}
     if(!file||!validMaintenanceMetadata(file,parent))throw noRetry(new Error('Google Drive did not confirm the repository-maintenance marker.'));
     return maintenanceDescriptor(file,parent);
   }
@@ -809,7 +826,7 @@
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');let metadata=null;
     if(ref&&ref.remoteId){const candidate=await getFileMetadata(ref.remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;});if(candidate&&validMaintenanceMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryMaintenance(parent,id,context);if(!metadata)throw noRetry(new Error('The Google Drive repository-maintenance marker disappeared during cleanup. Maintenance stopped safely.'));
-    const descriptor=maintenanceDescriptor(metadata,parent),expires=Date.parse(descriptor.expiresAt),margin=metadata.appProperties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION?MAINTENANCE_ASSERTION_MARGIN_MS:LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS;if(!Number.isFinite(expires)||Date.now()>=expires-margin)throw noRetry(new Error('The Google Drive repository-maintenance marker is too old to continue destructive cleanup safely.'));
+    const descriptor=maintenanceDescriptor(metadata,parent),expires=Date.parse(descriptor.expiresAt),margin=metadata.appProperties[REPOSITORY_VERSION_MARKER]===MAINTENANCE_VERSION?MAINTENANCE_ASSERTION_MARGIN_MS:LEGACY_MAINTENANCE_ASSERTION_MARGIN_MS;if(!Number.isFinite(expires)||driveNow()>=expires-margin)throw noRetry(new Error('The Google Drive repository-maintenance marker is too old to continue destructive cleanup safely.'));
     return descriptor;
   }
   async function endRepositoryMaintenance(ref,baseContext=EMPTY_DRIVE_OPERATION){
@@ -829,7 +846,7 @@
       const remoteId=trustedCoordinationRemoteId(ref,parent,MAINTENANCE_KIND,maintenanceIdValid);
       const previous=remoteId?await getFileMetadata(remoteId,context).catch(error=>{if(Number(error&&error.driveStatus)===404)return null;throw error;}):await findRepositoryMaintenance(parent,id,context);
       const expires=previous&&validMaintenanceMetadata(previous,parent)?Date.parse(maintenanceDescriptor(previous,parent).expiresAt):NaN;
-      if(!Number.isFinite(expires)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||Date.now()>=expires)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
+      if(!Number.isFinite(expires)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||driveNow()>=expires)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
       await endRepositoryMaintenance(ref,context);return next;
     }catch(error){
       await endRepositoryMaintenance(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
@@ -1022,6 +1039,7 @@
       listMaintenances:()=>listRepositoryMaintenances(base),
       assertMaintenance:ref=>assertRepositoryMaintenance(ref,base),
       renewMaintenance:ref=>renewRepositoryMaintenance(ref,base),
+      now:driveNow,
       endMaintenance:ref=>endRepositoryMaintenance(ref,driveOperationContext({folderState:base.folderState})),
       listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'}),base),
       uploadSessionClaim:file=>repositoryUpload(file,base),
@@ -1196,14 +1214,14 @@
       shared:true,
       prepare,
       authorize,
-      backgroundAvailable:()=>tokenValid(),
+      backgroundAvailable:()=>tokenValid()&&Platform.online(),
       connected:()=>tokenValid(),
       automaticConfigured:()=>tokenValid()||signedInBefore,
       connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,
       subscribeConnection,
       disconnect,
       release,
-      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:()=>beginRepositoryPublication(),listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,renewPublication:renewRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
+      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:()=>beginRepositoryPublication(),listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,renewPublication:renewRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,now:driveNow,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }
 

@@ -6,15 +6,17 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 // "Study data was saved here" (lastStudyDataSaveAt) is what lets a start that
 // finds the database removed show the clear notice instead of starting as
-// new. It covers every kind of person-made data, not only notes and Saved
-// Days, and the start-up compatibility step never sets it on a fresh install.
+// new. It covers notes, Saved Days, sessions, plans and kept versions (what
+// the empty-device check counts), not settings alone, and the start-up
+// compatibility step never sets it on a fresh install.
 
 // Repository: plan and settings writes say whether the start-up step made them.
 const clock=createFakeClock('2026-11-07T09:00:00.000Z'),commits=[];
 const {app}=createHarness(new Map(),null,{clock,onCanonicalCommit:event=>commits.push(event)});
 await app.planData.writeDraft('07:00 | 30 | Work | work | Ethics | block | 1');
 await app.personalPreferences.write({version:2,studentName:null,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null},{allowHydrating:true});
-assert.deepEqual(commits.map(event=>[event.entityType,event.startup]),[['planData',false],['planData',true]],'only the start-up write is marked as such');
+await app.personalPreferences.write({version:2,studentName:'QA',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null});
+assert.deepEqual(commits.map(event=>[event.entityType,event.startup,event.settingsOnly]),[['planData',false,false],['planData',true,true],['planData',false,true]],'the start-up write and settings alone are marked as such');
 
 // App: which commits record study data.
 const source=fs.readFileSync(new URL('../../../source/app.html',import.meta.url),'utf8');
@@ -30,6 +32,7 @@ const committedAt='2026-11-07T09:30:00.000Z',marked=event=>{writes.length=0;cont
 for(const entityType of ['note','dailyRecord','activeSession','planData','pendingReview'])
   assert.equal(marked({entityType}),true,`a ${entityType} save records study data`);
 assert.equal(marked({entityType:'planData',startup:true}),false,'settings rebuilt by the start-up step on a fresh install do not');
+assert.equal(marked({entityType:'planData',settingsOnly:true}),false,'settings alone (a name or a theme) do not: the empty-device check does not count them either');
 assert.equal(marked({entityType:'activeSession',operation:'delete'}),true,'removing a session still says study data was here');
 assert.equal(writes[0].lastLocalSaveAt,committedAt,'every commit still moves the change clock');
 

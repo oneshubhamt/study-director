@@ -109,13 +109,18 @@ registry.define('persistence',1,()=>{
     const n=Date.parse(value||'');
     return Number.isFinite(n)?new Date(n).toISOString():fallback;
   }
+  // A time later than this device's clock by more than this is damaged. It
+  // is two days, not minutes: another device's clock can be hours ahead of
+  // this one (a wrong time zone, a dual-boot PC), and its data must still
+  // read here. Times only choose what shows before a review.
+  const IMPORTED_TIME_AHEAD_MS=48*60*60*1000;
   function normalizeImportedTimestamp(value,fallback=null,nowMs=Date.now()){
     const n=Date.parse(value||'');
-    return !Number.isFinite(n)||n>Number(nowMs)+10*60*1000?fallback:new Date(n).toISOString();
+    return !Number.isFinite(n)||n>Number(nowMs)+IMPORTED_TIME_AHEAD_MS?fallback:new Date(n).toISOString();
   }
   function normalizeImportedEpochMillis(value,fallback=null,nowMs=Date.now()){
     const n=Number(value);
-    return !Number.isFinite(n)||n<0||n>Number(nowMs)+10*60*1000?fallback:Math.round(n);
+    return !Number.isFinite(n)||n<0||n>Number(nowMs)+IMPORTED_TIME_AHEAD_MS?fallback:Math.round(n);
   }
   function jsonByteLength(value){
     const text=typeof value==='string'?value:JSON.stringify(value);

@@ -139,6 +139,14 @@ try{
   assert.match(phone.text,/interpretation uses all eligible Pacer evidence/i);
   assert.deepEqual(page.events,[]);
 
+  // Reopened, Insights shows the view it kept and animates like every other
+  // pane (Glass and Director skins); only a first open, rendering behind its
+  // loading panel, arrives still.
+  const reopened=await page.evaluate(`(async()=>{const d=__InsightsUiDebug,pane=document.getElementById('pane-insights'),wait=ms=>new Promise(r=>setTimeout(r,ms));
+    d.goTab('plan');await wait(1000);d.goTab('insights');let entered=false;for(let i=0;i<20&&!entered;i++){entered=pane.hasAttribute('data-sd-enter');if(!entered)await wait(10);}
+    return {entered,kept:!!pane.querySelector('.insights-wrap'),loading:!!pane.querySelector('.plugin-loading-panel')};})()`);
+  assert.deepEqual(reopened,{entered:true,kept:true,loading:false},'reopened Insights animates its kept view');
+
   const evidence={status:'PASS',release:manifest.release,denseHistoryDays:590,desktop:{renderMilliseconds:Number(desktop.elapsed.toFixed(2)),window:desktop.window,workTrend:desktop.workTrend,practiceSummary:desktop.practiceSummary,overflow:desktop.documentOverflow,profile:desktop.profile},phone};
   writeArtifact('insights-ui.json',`${JSON.stringify(evidence,null,2)}\n`);
   console.log(JSON.stringify(evidence,null,2));

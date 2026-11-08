@@ -24,7 +24,7 @@ Decisions (owner, 2026-10-18):
 
 Principal persisted domains include:
 
-- Saved Days / daily records;
+- Saved Days / daily records (read as a view: the stored fields plus fields worked out from them; a view handed back to be saved, such as by a Diary edit, an attachment removal or its rollback, is saved as its stored fields, `storedDailyRecordFields`, and any other unknown field is refused);
 - Notes;
 - Plans and preferences;
 - Active Session and timer recovery state;
@@ -64,7 +64,7 @@ The store is renamed in place inside the upgrade (rows are never copied): an old
 
 ## Storage health
 
-**Storage health** keeps three facts in browser storage: the change clock's fast copy (`lastLocalSaveAt`), when study data was last saved here (`lastStudyDataSaveAt`: notes, Saved Days, sessions, plans, settings or kept versions, made here or taken in by a sync; the start-up compatibility step that rebuilds settings on a fresh install does not count) and an unresolved browser-data clear. The two save times only move forward: each tab writes the later of the stored time and its own, so an older tab never hides a newer save. Issues are shown live and never stored. The browser's storage estimate is measured at launch and again on returning to the app (at most hourly), and kept in memory for diagnostics. When the database fails, the record is rewritten once to show at once whether browser storage can still be written. The Device Folder settings record (version 4) holds only the folder handle and `baseline`, the change from which it backs up on its own.
+**Storage health** keeps three facts in browser storage: the change clock's fast copy (`lastLocalSaveAt`), when study data was last saved here (`lastStudyDataSaveAt`: notes, Saved Days, sessions, plans or kept versions, made here or taken in by a sync, the same things the empty-device check counts; settings alone, such as a name or theme, and the start-up compatibility step do not) and an unresolved browser-data clear. The two save times only move forward: each tab writes the later of the stored time and its own, so an older tab never hides a newer save. Issues are shown live and never stored. The browser's storage estimate is measured at launch and again on returning to the app (at most hourly), and kept in memory for diagnostics. When the database fails, the record is rewritten once to show at once whether browser storage can still be written. The Device Folder settings record (version 4) holds only the folder handle and `baseline`, the change from which it backs up on its own.
 
 ## Data this version cannot read
 

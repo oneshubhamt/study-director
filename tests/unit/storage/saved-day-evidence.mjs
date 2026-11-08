@@ -100,4 +100,15 @@ assert.equal(covers({...record,practiceRuns:[cappedRun]},
   {...nearLimit,snapshot:{...nearLimit.snapshot,updatedAt:null}},{allowAdvances:true}),false,
   'A saturated unit cannot excuse a missing timestamp for a running attempt.');
 
+// Save Today while a block had just started: no time on it, so the Saved Day
+// keeps its start but no end, and still covers the session (startup asked
+// about an "unsaved previous study day" every time).
+{
+  const started={...session,snapshot:{...session.snapshot,taskState:{...session.snapshot.taskState,t2:{progress:{total:1},actual:{
+    clock:{startedAt:'2026-09-17T10:00:00.000Z'},record:{firstStartedAt:'2026-09-17T10:00:00.000Z',lastEndedAt:'2026-09-17T10:00:00.600Z',activeSeconds:0,sessionCount:1}}}}}};
+  const saved={...record,results:{...record.results,t2:{completion:0,total:1,actualStart:'2026-09-17T10:00:00.000Z',sessionCount:1}}};
+  assert.equal(covers(saved,started,{allowAdvances:true}),true,'a block with no time recorded is covered without an end');
+  const timed={...started,snapshot:{...started.snapshot,taskState:{...started.snapshot.taskState,t2:{...started.snapshot.taskState.t2,actual:{...started.snapshot.taskState.t2.actual,seconds:30}}}}};
+  assert.equal(covers(saved,timed,{allowAdvances:true}),false,'time on the block still needs the Saved Day to hold it');
+}
 console.log(JSON.stringify({status:'PASS',suite:'saved-day-evidence',revisionsAreLocal:true,coveragePreservesActualWork:true}));
