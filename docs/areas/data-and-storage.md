@@ -24,7 +24,7 @@ Decisions (owner, 2026-10-18):
 
 Principal persisted domains include:
 
-- Saved Days / daily records;
+- Saved Days / daily records (read as a view: the stored fields plus fields worked out from them; a view handed back to be saved, such as by a Diary edit, an attachment removal or its rollback, is saved as its stored fields, `storedDailyRecordFields`, and any other unknown field is refused);
 - Notes;
 - Plans and preferences;
 - Active Session and timer recovery state;

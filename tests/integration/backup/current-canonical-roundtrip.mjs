@@ -21,6 +21,21 @@ const text='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Para
 const study={version:16,recordKind:'study',date:'2026-09-10',savedAt:stamp,updatedAt:stamp,sourceRevision:9,quote:'',reflection:text,studyQuality:4,realTimeSnapshot:null,schedule:[],results:{},practiceRuns:[],carryForwardDraft:''};
 const diary=dailyRecordCodec.createDiaryRecord('2026-09-09','Diary-only reflection',{savedAt:stamp,updatedAt:stamp});
 assert.ok(dailyRecordCodec.sanitizeCurrentDailyRecord(study));assert.ok(diary);
+// A Saved Day read as its view and handed back with its reflection changed is
+// saved as its stored fields (a Diary edit of a saved study day failed with
+// "New daily record failed its canonical validation"). A field the view does
+// not have is still refused.
+for(const record of [dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]){
+  const later='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'Edited later in the Diary'}]}]}});
+  const view=dailyRecordCodec.materializeDailyRecordView(record),edited={...view,reflection:later};
+  assert.ok(Object.keys(view).length>Object.keys(record).length,'the view adds worked-out fields');
+  assert.equal(dailyRecordCodec.sanitizeCurrentDailyRecord(view),null,'a view is not a stored record');
+  assert.deepEqual(dailyRecordCodec.storedDailyRecordFields(edited),{...record,reflection:later});
+  assert.ok(dailyRecordCodec.sanitizeCurrentDailyRecord(dailyRecordCodec.storedDailyRecordFields(edited)));
+  const unknown={...edited,notAField:1};
+  assert.equal(dailyRecordCodec.storedDailyRecordFields(unknown),unknown,'an unknown field is left for validation to refuse');
+  assert.equal(dailyRecordCodec.storedDailyRecordFields(record),record,'a stored record is unchanged');
+}
 const note={version:3,key:noteId('ethics'),label:'Ethics',text,updatedAt:stamp};assert.ok(dailyRecordCodec.sanitizeCurrentNote(note));
 const active=activeSessionCodec.canonicalize({id:'current',type:'activeSession',version:10,revision:12,date:'2026-09-10',status:'suspended',runningOn:'inst_roundtrip_device',scheduleText:'07:00 | 60 | A | Study | Ethics | pages | 10',snapshot:{version:6,date:'2026-09-10',fingerprint:'fp',review:{reflection:'Unsaved Review',studyQuality:4},updatedAt:stamp},suspendedAt:stamp,updatedAt:stamp});assert.ok(active);assert.ok(activeSessionCodec.sanitizeCurrent(active));
 const personal={version:2,plans:{draft:'07:00 | 60 | A | Study | Ethics | pages | 10',savedPlans:[{id:'plan-current-qa',label:'Current plan',scheduleText:'08:00 | 60 | B | Study | Polity | pages | 10',createdAt:stamp,updatedAt:stamp}],defaultId:'plan-current-qa'},preferences:{studentName:'Current User',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,soundMode:'minimal'}};

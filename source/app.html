@@ -7509,9 +7509,10 @@ const paneEntranceTimers=new Map();
 function markPaneEntrance(pane){
   // Presentation-owned entrance: CSS animates the arriving pane's sections for
   // one beat. The marker is cleared afterwards so later re-renders stay still.
-  // Insights renders progressively behind its own loading panel; animating it
-  // at the same time made that render about 300 ms slower, so it arrives still.
-  if(pane.id==='pane-insights')return;
+  // Insights renders progressively behind its own loading panel the first
+  // time; animating that render made it about 300 ms slower, so a first open
+  // arrives still. Reopened, it shows the view it kept and animates like any pane.
+  if(pane.id==='pane-insights'&&(!pane.firstElementChild||pane.querySelector('.plugin-loading-panel')))return;
   clearTimeout(paneEntranceTimers.get(pane.id));
   pane.setAttribute('data-sd-enter','');
   paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));

@@ -131,7 +131,7 @@ registry.define('repositories',1,()=>{
     const getInstallationId=InstallationIdentity.getId;
     const {
       buildDailyRecordSummary,sanitizeCurrentDailyRecord,sanitizeCurrentNote,
-      materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary
+      materializeDailyRecordView,storedDailyRecordFields,sanitizeDailyRecordSummary,materializeDailyRecordSummary
     }=DailyRecordCodec;
     const FALLBACK_DAILY_RECORD_LIMIT=14;
     let fallbackDailyRecordsActive=false;
@@ -1080,7 +1080,8 @@ async function storeDailyRecord(rec,options={}){
   try{
   assertWriteToken(ownershipToken,'preparing the daily record');
   const updatedAt=normalizeTimestamp(rec.updatedAt,normalizeTimestamp(rec.savedAt,new Date().toISOString()));
-  const candidate={...rec,version:DATA_CONTRACT.schemas.DailyRecord.version,updatedAt};
+  // A record read from here comes back as its view; it is saved as its stored fields.
+  const candidate={...storedDailyRecordFields(rec),version:DATA_CONTRACT.schemas.DailyRecord.version,updatedAt};
   for(const key of ['entityType','entityId','schemaVersion','deviceId','createdAt','deleted','syncStatus'])delete candidate[key];
   const clean=sanitizeCurrentDailyRecord(candidate);
   if(!clean||clean.degraded)throw new Error('New daily record failed its canonical validation.');
@@ -1110,7 +1111,7 @@ async function storeDailyRecord(rec,options={}){
 }
 async function storeDailyRecordBatch(records){
   const ownershipToken=issueWriteToken('saving the daily-record batch');
-  const docs=currentDailyRecordDocuments(records,'Daily Record batch');
+  const docs=currentDailyRecordDocuments((Array.isArray(records)?records:[]).map(storedDailyRecordFields),'Daily Record batch');
   if(!docs.length)return true;
   const finishWrite=beginAuthoritativeWrite();
   try{
