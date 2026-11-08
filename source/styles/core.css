@@ -1716,6 +1716,8 @@ button.profile-row:disabled{cursor:default;opacity:.55;background:none}
 .profile-status-next{display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-caption-size)/1.4 var(--sd-font-body)}
 .profile-status-next:has(>.profile-status-detail:empty):has(>button[hidden]){display:none}
 .profile-status-next>button{margin-left:auto}
+/* The sentence wraps in its own space, so its button stays beside it. */
+.profile-status-detail{flex:1 1 14em;min-width:0}
 .profile-status-items{display:grid;gap:6px;margin:0;padding:0;list-style:none}
 .profile-status-items:empty{display:none}
 .profile-status-item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px 10px;padding:7px 8px 7px 10px;border:1px solid var(--sd-line-neutral-soft);border-radius:var(--sd-shape-field-radius)}

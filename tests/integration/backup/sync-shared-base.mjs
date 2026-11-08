@@ -664,7 +664,14 @@ let syncWorld=null;
   });
   // folder: this device also backs up to a Device Folder of its own.
   // claims: it takes part in session ownership claims (Continue here).
-  const device=(state,{folder=null,claims:claiming=false}={})=>{
+  // markers: upload markers on Drive this device sees (other devices' and its
+  // own), for turn-taking.
+  const markerTransport=markers=>freeze({...claimTransport,
+    beginPublication:async()=>{const row=freeze({id:'pub_'+crypto.randomUUID().replace(/-/gu,''),createdAt:new Date().toISOString()});markers.set(row.id,row);return row;},
+    listPublications:async()=>{markers.onList?.();return freeze({items:freeze([...markers.values()]),overflow:false,ignored:0});},assertPublication:async row=>row,endPublication:async row=>{markers.delete(row.id);return true;},
+    beginMaintenance:async()=>freeze({id:'mnt_'+crypto.randomUUID().replace(/-/gu,''),createdAt:new Date().toISOString()}),listMaintenances:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertMaintenance:async row=>row,endMaintenance:async()=>true
+  });
+  const device=(state,{folder=null,claims:claiming=false,markers=null}={})=>{
     // A review of kept versions takes state.keptChoice ('use' or the default)
     // and, for note texts, state.reviewText(conflict) or the current text.
     const reviewTexts=(options,current)=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:typeof current.reviewText==='function'?current.reviewText(item,options):item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))});
@@ -673,7 +680,7 @@ let syncWorld=null;
       lifecycle:freeze({settle:async()=>{},quiesce:async operation=>operation(),revision:()=>'2026-08-23T00:00:00.000Z',rebuild:async()=>{}}),mutation:freeze({run:async(_kind,operation)=>operation()})
     }));
     providers.configureManagedRecovery(freeze({run:spec=>recovery.execute(spec)}));
-    assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:claiming?claimTransport:transport})),true);
+    assert.equal(providers.register(freeze({id:'drive',label:'Google Drive',shared:true,connected:()=>true,repository:markers?markerTransport(markers):claiming?claimTransport:transport})),true);
     if(claiming)providers.configureSessionOwnership(freeze({installationId:()=>state.installationId,read:async()=>state.activeSession,today:()=>'2026-08-31'}));
     // The change clock: every capture in this harness has the same source revision.
     if(folder){assert.equal(providers.register(freeze({id:'folder',label:'Device Folder',connected:()=>true,repository:store(folder)})),true);providers.configureAutomaticBackup(freeze({covered:()=>'',current:()=>'2026-08-23T00:00:00.000Z'}));providers.configurePendingBackupRetry(freeze({read:async()=>null,mark:async()=>true,clear:async()=>true}));}
@@ -1599,6 +1606,33 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   await C.upload();assert.equal((await D.sync()).cancelled,false);
   assert.deepEqual(ids(d),[planOnA.id,planOnB.id]);assert.equal(d.personal.preferences.studentName,'Name on D','this device\'s setting stays');
   assert.equal(d.reviews.open().find(review=>review.subject==='personal')?.kept?.preferences?.studentName,'Name on C','the other\'s is kept for review');
+}
+
+// Continue Here gives another device's running upload a short while to
+// finish (polls 3 s apart, at most 10), never waits for one that stopped
+// renewing (a laptop shut mid-upload), and goes ahead after the limit: the
+// claim is small, and a late upload cannot take the session back.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,day='2026-08-31',markers=new Map();
+  const a={installationId:'inst_turn_claim_device_a',records:new Map(),deletions:[],noteDeletions:[],notes:note('turn claim'),activeSession:null,schedule:'',personal:personal('Turn User'),journal:null};
+  const b={installationId:'inst_turn_claim_device_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Turn User'),journal:null};
+  const A=device(a,{claims:true}),B=device(b,{claims:true,markers});
+  a.activeSession=revisionedSession(day,'TURN-CLAIM',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const fields=async source=>({observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),revision:source.session.revision+1});
+  const ago=minutes=>new Date(Date.now()-minutes*60*1000).toISOString(),other=(id,startedAt,createdAt)=>freeze({id:'pub_'+id.repeat(32),startedAt,createdAt,renews:true,device:'inst_windows_chrome_mgx2k3a0_1a2b3c4d'});
+  // The harness's timers fire at once; each check lists the markers, and
+  // the other upload finishes (its marker goes) after finishAfter checks.
+  let checks=0;
+  const claimWith=async(marker,finishAfter,token)=>{checks=0;markers.onList=()=>{checks++;if(checks>finishAfter)markers.delete(marker.id);};markers.set(marker.id,marker);const claimed=await B.claim({date:day,handoffToken:token,decide:fields});markers.onList=null;markers.delete(marker.id);return claimed;};
+  let claimed=await claimWith(other('a',ago(1),ago(0.5)),2,'66666666-6666-4666-8666-666666666666');
+  assert.equal(claimed.status,'completed');assert.equal(checks,3,'a running upload is given the moment it needs to finish (two waits)');
+  claimed=await claimWith(other('b',ago(8),ago(6)),Infinity,'77777777-7777-4777-8777-777777777777');
+  assert.equal(claimed.status,'completed');assert.equal(checks,1,'an upload that stopped renewing is not waited for');
+  claimed=await claimWith(other('c',ago(1),ago(0.5)),Infinity,'88888888-8888-4888-8888-888888888888');
+  assert.equal(claimed.status,'completed');assert.equal(checks,10,'past the limit (10 checks, 3 s apart), Continue Here goes ahead');
+  assert.equal(markers.size,0,'the claim releases its own marker');
 }
 
 // Continue Here in one lease: decide gets the newest verified session under

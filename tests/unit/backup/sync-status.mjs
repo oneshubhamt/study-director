@@ -30,8 +30,8 @@ function check(name,input,expected){
 // Every case the sidebar text line covered.
 check('Syncing… (catch-up)',{drive:drive({},{syncing:true})},{ring:'syncing',badge:'',label:/^Syncing/u,action:''});
 check('Syncing… (upload)',{drive:drive({backingUp:true})},{ring:'syncing',label:/^Syncing · uploading/u,action:''});
-check('Synced 12:04',{drive:drive()},{ring:'synced',badge:'',label:/^Synced 12:04$/u,headline:/up to date/u,detail:/return to the app/u,action:'sync-now',items:[]});
-check('Changes since 12:04',{drive:drive({waiting:true,nextEligibleAt:'2026-11-01T12:24:00.000Z'})},{ring:'pending',badge:'',label:/^Changes since 12:04$/u,detail:/^Uploads by 12:24, or when you leave the app\.$/u,action:'sync-now'});
+check('Synced 12:04',{drive:drive()},{ring:'synced',badge:'',label:/^Synced 12:04$/u,headline:/up to date/u,detail:/return to the app/u,action:'',items:[]});
+check('Changes since 12:04',{drive:drive({waiting:true,nextEligibleAt:'2026-11-01T12:24:00.000Z'})},{ring:'pending',badge:'',label:/^Changes since 12:04$/u,detail:/^Uploads by 12:24, or when you leave the app\.$/u,action:''});
 check('Last synced 12:04',{drive:drive({nextEligibleAt:'2026-11-01T12:10:00.000Z'},{failed:true})},{ring:'pending',badge:'',label:/^Last synced 12:04 · retrying$/u,detail:/Next try at 12:10/u,action:'sync-now'});
 check('Needs password (changed on another device)',{drive:drive({},{password:true})},{ring:'blocked',badge:'lock',label:/^Needs password$/u,action:'',items:['unlock-sync']});
 check('Needs review (sync)',{drive:drive({},{review:true})},{ring:'pending',badge:'review',count:1,label:/^Needs review · Last synced 12:04$/u,items:['review-sync']});
@@ -63,7 +63,10 @@ check('Failing after retries',{drive:drive({retryBackoffCapped:true},{failed:tru
 check('Uploads failing after retries',{drive:drive({retryBackoffCapped:true,waiting:true})},{ring:'error',badge:'error',label:/^Sync stopped · last synced 12:04$/u,action:'retry',items:['retry']});
 check('Retry running after retries ran out',{drive:drive({retryBackoffCapped:true},{failed:true,syncing:true})},{ring:'syncing'});
 check('Another device saving',{drive:drive({},{turnWaits:1})},{ring:'syncing',slow:true,label:/^Waiting for another device/u});
-check('A named device saving',{drive:drive({},{turnWaits:1,turnDevice:'Windows · Chrome'})},{ring:'syncing',slow:true,label:/^Waiting for Windows · Chrome to finish saving/u});
+check('A named device saving',{drive:drive({},{turnWaits:1,turnDevice:'Windows · Chrome'})},{ring:'syncing',slow:true,label:/^Waiting for Windows · Chrome to finish saving/u,detail:/latest is on this device/u,action:'sync-now'});
+// Sync now shows only while something waits: never while syncing works.
+check('No button while catching up',{drive:drive({},{syncing:true,turnWaits:1})},{action:''});
+check('No button while waiting offline',{online:false,drive:drive({},{turnWaits:1})},{action:''});
 check('Connecting',{drive:{connecting:true}},{ring:'syncing',slow:false,label:/^Connecting Google Drive…$/u});
 check('Restoring a version',{drive:drive({busy:true,foregroundKind:'restore-version'})},{ring:'syncing',label:/^Restoring a version…$/u});
 check('Slow foreground work',{drive:drive({busy:true,stalled:true,foregroundKind:'backup'})},{ring:'syncing',label:/^Still working/u});
@@ -124,6 +127,7 @@ checkCard('Bringing in, with counts',{phase:'signed-in',drive:linked({busy:true,
 checkCard('An opening line is not repeated',{phase:'signed-in',drive:linked({busy:true,foregroundKind:'sync',waiting:true},{syncing:true}),operation:{kind:'sync',message:'Syncing with Google Drive…',progress:null}},{status:/^Bringing in changes/u,detail:/^$/u});
 checkCard('Between catch-up and upload',{phase:'signed-in',seen:{sync:true},drive:linked({waiting:true},{syncedAt:LATER})},{status:/^Uploading this device’s data/u,steps:'done,done,active',labels:['Signed in to Google','Brought in changes from Google Drive','Upload this device’s data']});
 checkCard('Uploading, with counts',{phase:'signed-in',seen:{sync:true},drive:linked({backingUp:true,waiting:true},{syncedAt:LATER}),operation:{kind:'upload',message:'Uploading backup data to Google Drive…',progress:{stage:'upload',current:3,total:4}}},{status:/^Uploading/u,steps:'done,done,active',fraction:0.75,detail:/3 of 4 complete/u});
+checkCard('Waiting for another device\'s turn',{phase:'signed-in',drive:linked({waiting:true},{turnWaits:2,turnDevice:'iPad · Safari'})},{tone:'working',status:/^Waiting for iPad · Safari to finish saving/u,steps:'done,done,waiting',action:'sync-now'});
 checkCard('Synced, new library',{phase:'signed-in',seen:{upload:true},drive:linked({},{syncedAt:LATER})},{tone:'done',done:true,status:/^Synced at 12:04\. This device is up to date\.$/u,steps:'done,done,done',labels:['Signed in to Google','Nothing new on Google Drive','Uploaded this device’s data'],action:''});
 checkCard('Synced, joined library',{phase:'signed-in',seen:{sync:true,upload:true},drive:linked({},{syncedAt:LATER})},{tone:'done',labels:['Signed in to Google','Brought in changes from Google Drive','Uploaded this device’s data']});
 checkCard('Synced with versions kept for review',{phase:'signed-in',seen:{sync:true},keptNew:2,drive:linked({},{syncedAt:LATER})},{tone:'done',done:true,status:/2 versions kept for you to review/u,action:'review-kept'});

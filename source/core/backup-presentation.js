@@ -190,7 +190,8 @@ registry.define('backup-presentation',1,()=>{
       let primary='',headline='',detail='';
       switch(ring){
         case 'off':primary=deviceOn?`Only on this device${device.lastBackupAt?` · Device Folder backup ${timeText(device.lastBackupAt)}`:''}`:'Only on this device';headline=deviceOn?'Not syncing. This device backs up to its Device Folder.':'Only on this device. Connect Google Drive to sync your devices.';break;
-        case 'syncing':primary=activity();headline=primary;detail=operationText(value.operation);break;
+        // Waiting only for this device's own upload: Drive's latest is here.
+        case 'syncing':primary=activity();headline=primary;detail=slow?'Google Drive’s latest is on this device. Its own changes upload next.':operationText(value.operation);break;
         case 'synced':primary=`Synced ${syncedAt}`;headline=`Synced at ${syncedAt}. This device is up to date.`;detail='Checks Google Drive again when you return to the app.';break;
         case 'pending':
           if(failed){primary=syncedAt?`Last synced ${syncedAt} · retrying`:'Not synced yet · retrying';headline=syncedAt?`Last synced at ${syncedAt}. Syncing will retry.`:'Not synced yet. Syncing will retry.';const next=timeText(drive.nextEligibleAt);detail=next?`Next try at ${next}.`:'Syncing will try again shortly.';}
@@ -207,7 +208,10 @@ registry.define('backup-presentation',1,()=>{
       // thing that needs the person, then sync health, then the rest.
       const urgent=items.filter(item=>item.tone!=='info'&&item.short!==primary&&!primary.startsWith(item.short));
       const label=[...urgent.slice(0,2).map(item=>item.short),primary,...items.filter(item=>item.tone==='info').slice(0,1).map(item=>item.short),unseenText].filter(Boolean).join(' · ');
-      const action=connected&&online&&!connecting&&!lockHere&&!syncPassword&&!newer&&ring!=='syncing'?freeze({action:ring==='error'?'retry':'sync-now',label:ring==='error'?'Try again':'Sync now'}):null;
+      // A button only when something waits: another device's turn (Sync now
+      // goes ahead without it), a retry, or a stop. None while syncing works.
+      const ready=connected&&online&&!connecting&&!lockHere&&!syncPassword&&!newer;
+      const action=!ready?null:ring==='error'?freeze({action:'retry',label:'Try again'}):slow||ring==='pending'&&failed?freeze({action:'sync-now',label:'Sync now'}):null;
       return freeze({ring,slow,badge,count,unseen,label,primary,headline,detail,action,items:freeze(items)});
     }
     // The card shown from Connect (or Sign in) until the first sync ends:
@@ -236,8 +240,9 @@ registry.define('backup-presentation',1,()=>{
       if(phase==='failed')return result('error','Google Drive wasn’t connected',String(value.error||'Sign-in didn’t finish.'),'sign-in',{failed:'sign-in',action:act('sign-in','Try again')});
       if(phase==='signing-in')return result('working','Connecting Google Drive','Signing in to Google…','sign-in');
       if(!drive?.connected)return result('attention','Google Drive signed out','Sign in again to finish syncing.','bring-in',{failed:'bring-in',waiting:true,action:act('sign-in','Sign in')});
-      // After a catch-up, what remains is this device's upload.
-      const active=uploading||seen.sync&&!syncing?'upload':'bring-in';
+      // After a catch-up, what remains is this device's upload. Waiting for
+      // another device's turn comes only after Drive's latest is here.
+      const turn=Number(sync.turnWaits)>0,active=uploading||turn||seen.sync&&!syncing?'upload':'bring-in';
       if(!online)return result('attention','Syncing with Google Drive','Offline. Syncing continues when you’re back online.',active);
       if(sync.password)return result('attention','Enter your backup password','Another device encrypts this library. Enter its password to finish syncing.','bring-in',{action:act('unlock-sync','Enter password')});
       if(drive.locked)return result('attention','Enter your backup password','Your backups are encrypted. Enter the password on this device to finish syncing.',active,{action:act('enter-password','Enter password')});
@@ -253,6 +258,7 @@ registry.define('backup-presentation',1,()=>{
         if(kept)return result('done','Synced with Google Drive',`Synced at ${when}. ${kept} version${kept===1?'':'s'} kept for you to review.`,'done',{done:true,action:act('review-kept','Review')});
         return result('done','Synced with Google Drive',`Synced at ${when}. This device is up to date.`,'done',{done:true});
       }
+      if(!working&&turn)return result('working','Syncing with Google Drive',`Waiting for ${String(sync.turnDevice||'')||'another device'} to finish saving…`,'upload',{failed:'upload',waiting:true,action:act('sync-now','Sync now')});
       const status=active==='upload'?'Uploading this device’s data…':syncing?'Bringing in changes from Google Drive…':'Checking Google Drive…';
       return result('working','Syncing with Google Drive',status,active,{detail:opDetail,fraction});
     }

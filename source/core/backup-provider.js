@@ -824,10 +824,13 @@ registry.define('backup-provider',1,input=>{
       // version: one without that data would read as its deletion elsewhere.
       if(shared&&ports.ownership.canShare()!==true)throw Object.assign(new Error(`This device has data from a newer version of Study Director, so it does not upload to ${selected.label} until the app is updated.`),{code:'STUDY_DIRECTOR_SHARE_HELD'});
       if(shared){
-        await turnTask;
+        // Drive's newer changes come in first and never wait for another
+        // device's turn; only this device's own upload does, unless the
+        // person pressed Sync now.
         const ahead=base.inventory?await sharedAhead(base.inventory,selected):null;
         if(ahead?.unreadable){waitForNewerVersion(selected,ahead.item.id);throw syncError('REPOSITORY_SYNC_NEEDS_UPDATE',`${selected.label} has a version this app can’t read. Update the app, or remove that version in Version History, to sync again.`);}
         if(ahead)throw syncError('REPOSITORY_SYNC_BEHIND',`${selected.label} has newer changes to take in first.`);
+        if(!takeTurnOverride(selected))await turnTask;
         sessionOwnershipState=await sessionTask;
       }
       OperationDiagnostics.mark('provider-repository-scan-complete',{provider:selected.id,history:history.length,invalid:Number(base.invalidCount)||0,reused:!!repositorySnapshot});
@@ -1057,8 +1060,8 @@ registry.define('backup-provider',1,input=>{
   // A marker that renews (every PUBLICATION_RENEW_MS) holds the turn only
   // while it keeps renewing: two and a half missed renewals mean the page
   // that wrote it closed or froze mid-upload.
-  const SYNC_RECHECK_MS=60*1000,SYNC_TURN_WINDOW_MS=15*60*1000,SYNC_TURN_RENEWED_MS=Math.round(PUBLICATION_RENEW_MS*2.5),SYNC_TURN_RETRY_DELAYS=freeze([15*1000,60*1000,5*60*1000]),syncByProvider=new Map();
-  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,failed:false,ancestryPending:false,rolledBack:null,syncedAt:'',turnWaits:0,turnHolder:null};syncByProvider.set(id,state);}return state;}
+  const SYNC_RECHECK_MS=60*1000,SYNC_TURN_WINDOW_MS=15*60*1000,SYNC_TURN_RENEWED_MS=Math.round(PUBLICATION_RENEW_MS*2.5),SYNC_TURN_RETRY_DELAYS=freeze([15*1000,30*1000,60*1000,2*60*1000]),SESSION_CLAIM_TURN_POLLS=10,SESSION_CLAIM_TURN_POLL_MS=3000,SYNC_NOW_OVERRIDE_MS=2*60*1000,syncByProvider=new Map();
+  function syncState(selected){const id=safeId(selected&&selected.id);let state=syncByProvider.get(id);if(!state){state={checkedAt:0,review:'',password:'',newer:'',catching:false,behind:false,failed:false,ancestryPending:false,rolledBack:null,syncedAt:'',turnWaits:0,turnHolder:null,turnOverrideUntil:0};syncByProvider.set(id,state);}return state;}
   function syncView(selected){const state=syncState(selected);return freeze({syncedAt:state.ancestryPending?'':state.syncedAt,review:!!state.review,password:!!state.password,newer:!!state.newer,failed:!!state.failed||state.ancestryPending,syncing:state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0),turnDevice:String(state.turnHolder?.device||'')});}
   // A verified Drive checkpoint is not a verified shared-ancestry receipt.
   // Keep warning state separate; the existing canonical retry intent owns
@@ -1240,15 +1243,30 @@ registry.define('backup-provider',1,input=>{
   // createdAt is its last renewal); one from an older build, for the window.
   // Turns only save wasted work: each upload still checks before its commit
   // that Drive has not moved on.
-  async function assertSharedPublicationTurn(selected,publicationLease){
-    if(!publicationLease||!repositoryPublicationCapable(selected))return true;
+  async function sharedPublicationTurnHolder(selected,publicationLease){
+    if(!publicationLease||!repositoryPublicationCapable(selected))return null;
     const listed=await selected.repository.listPublications(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],began=row=>Date.parse(String(row&&(row.startedAt||row.createdAt)||'')),mine=began(publicationLease),now=Date.now();
     const holders=rows.filter(row=>{const id=String(row&&row.id||''),at=began(row),renewedAt=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&now-at<SYNC_TURN_WINDOW_MS&&(row.renews!==true||Number.isFinite(renewedAt)&&now-renewedAt<SYNC_TURN_RENEWED_MS)&&(at<mine||at===mine&&id<publicationLease.id);}).sort((a,b)=>began(a)-began(b));
-    const state=syncState(selected),holder=holders[0];
-    state.turnHolder=holder?freeze({device:String(holder.device||''),startedAt:new Date(began(holder)).toISOString(),renewedAt:Number.isFinite(Date.parse(String(holder.createdAt||'')))?new Date(holder.createdAt).toISOString():'',renews:holder.renews===true}):null;
+    const holder=holders[0];
+    return holder?freeze({device:String(holder.device||''),startedAt:new Date(began(holder)).toISOString(),renewedAt:Number.isFinite(Date.parse(String(holder.createdAt||'')))?new Date(holder.createdAt).toISOString():'',renews:holder.renews===true}):null;
+  }
+  async function assertSharedPublicationTurn(selected,publicationLease){
+    const holder=await sharedPublicationTurnHolder(selected,publicationLease);syncState(selected).turnHolder=holder;
     if(holder)throw syncError('REPOSITORY_SYNC_TURN',`Another device is saving to ${selected.label}.`);
     return true;
   }
+  // Continue Here and its release write only the small ownership claim. They
+  // give a running upload a short while to finish, then go ahead: a late
+  // upload from the old owner cannot take the session back (sync keeps the
+  // claim's owner and takes in, or keeps for review, the extra progress).
+  async function waitForSharedPublicationTurn(selected,publicationLease,{signal=null}={}){
+    for(let poll=0;poll<SESSION_CLAIM_TURN_POLLS&&await sharedPublicationTurnHolder(selected,publicationLease);poll++)await waitAbortable(SESSION_CLAIM_TURN_POLL_MS,signal);
+    return true;
+  }
+  // A person's Sync now: the next upload goes ahead without waiting for
+  // another device's turn. Its own check before commit still refuses it if
+  // Drive moved on meanwhile.
+  function takeTurnOverride(selected){const state=syncState(selected);if(Number(state.turnOverrideUntil)>Date.now()){state.turnOverrideUntil=0;return true;}return false;}
   async function localSessionOwnership(){
     if(!sessionOwnershipHooks)return null;
     const raw=await sessionOwnershipHooks.read(),today=String(sessionOwnershipHooks.today()||'');
@@ -1971,7 +1989,7 @@ registry.define('backup-provider',1,input=>{
       // session content this device reconciled), the current claim and, for
       // decide, the stored objects.
       const objectListing=decide?repositoryObjectInventory(scoped,{signal:foreground.signal}):null;objectListing?.catch(()=>{});
-      const [,inventory,current]=await Promise.all([assertSharedPublicationTurn(scoped,publicationLease),repositoryProviderInventory(scoped,{signal:foreground.signal}),readRepositorySessionClaim(scoped,{signal:foreground.signal})]);
+      const [,inventory,current]=await Promise.all([waitForSharedPublicationTurn(scoped,publicationLease,{signal:foreground.signal}),repositoryProviderInventory(scoped,{signal:foreground.signal}),readRepositorySessionClaim(scoped,{signal:foreground.signal})]);
       if(inventory.overflow||inventory.ignored||inventory.invalid.length)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive changed or could not be read completely while Continue Here was confirming ownership.');
       let source=null;
       if(decide){
@@ -2007,7 +2025,7 @@ registry.define('backup-provider',1,input=>{
     const foreground=beginForeground(selected);if(!foreground)return false;setBusy(true);let publicationLease=null;
     try{
       await foreground.settled;const scoped=repositoryOperationSelected(selected,{signal:foreground.signal});await synchronizeRepositoryScope(scoped);
-      publicationLease=await beginRepositoryPublication(scoped);await assertSharedPublicationTurn(scoped,publicationLease);
+      publicationLease=await beginRepositoryPublication(scoped);await waitForSharedPublicationTurn(scoped,publicationLease,{signal:foreground.signal});
       const current=await readRepositorySessionClaim(scoped,{signal:foreground.signal});
       if(!current||current.item.id!==sessionClaimId(expected.epoch)||current.claim.ownerToken!==expected.ownerToken||current.claim.state!=='owned'||JSON.stringify(current.claim)!==JSON.stringify(expected))return false;
       const rollback=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken:expected.sessionToken,epoch:expected.epoch+1,state:'owned',ownerToken:expected.observedOwnerToken,revision:expected.observedRevision,observedOwnerToken:expected.ownerToken,observedRevision:expected.revision,observedContentFingerprint:'',handoffToken:expected.handoffToken,claimedAt:new Date().toISOString()});
@@ -2024,10 +2042,11 @@ registry.define('backup-provider',1,input=>{
     catch(error){if(error?.newerClaim)return freeze({state:'owned',applies:true,ownedHere:false,newer:true,epoch:error.newerClaim.epoch});throw error;}
     return projectSessionClaim(current,{signal});
   }
-  function scheduleSharedSync(id='google-drive',reason='shared-sync'){
+  function scheduleSharedSync(id='google-drive',reason='shared-sync',{skipTurn=false}={}){
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return false;
     const job=providerConvergenceJob(selected);if(!job)return false;
-    syncState(selected).behind=true;job.schedule(0,'flush:'+String(reason||'shared-sync'),'replace');return true;
+    const state=syncState(selected);state.behind=true;if(skipTurn===true)state.turnOverrideUntil=Date.now()+SYNC_NOW_OVERRIDE_MS;
+    job.schedule(0,'flush:'+String(reason||'shared-sync'),'replace');return true;
   }
 
   async function backupProvider(id=''){

@@ -6687,7 +6687,9 @@ function renderSyncStatusPanel(model){
   const headline=document.getElementById('profile-status-headline');if(headline&&headline.textContent!==model.headline)headline.textContent=model.headline;
   const detail=document.getElementById('profile-status-detail');if(detail)detail.textContent=model.detail;
   const primary=document.getElementById('profile-status-primary');
-  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;}}
+  // Sync now (shown only while waiting) is a quiet link beside the sentence;
+  // Try again keeps the full button.
+  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;primary.classList.toggle('profile-act-quiet',model.action.action==='sync-now');}}
   // Rebuilt only when the items change, so a focused button keeps focus.
   const list=document.getElementById('profile-status-items'),key=JSON.stringify(model.items);
   if(list&&list.dataset.key!==key){list.dataset.key=key;list.replaceChildren(...model.items.map(item=>{
@@ -6706,7 +6708,9 @@ async function syncStatusAction(ev){
   if(!['sync-now','retry','sign-in'].includes(kind))closeProfilePanel();
   try{
     switch(kind){
-      case 'sync-now':case 'retry':BackupProviderRuntime.scheduleSharedSync('google-drive',kind==='retry'?'sync-retry':'sync-now');scheduleSyncStatus();return true;
+      // Sync now (shown while waiting for another device) uploads without
+      // waiting for that device's turn; Try again keeps the usual turns.
+      case 'sync-now':case 'retry':BackupProviderRuntime.scheduleSharedSync('google-drive',kind==='retry'?'sync-retry':'sync-now',{skipTurn:kind==='sync-now'});scheduleSyncStatus();return true;
       case 'sign-in':return await connectDriveForProfile();
       case 'enter-password':return await CLICK_ACTIONS['backup-protection']();
       case 'unlock-sync':return await BackupProviderRuntime.unlockSync('google-drive');

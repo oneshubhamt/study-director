@@ -502,6 +502,24 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
     snapshotRevision='turn-4';sourceRevision='2026-09-19T03:30:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn four',updatedAt:sourceRevision})};
     assert.equal(await turnFor(freeze({id:'pub_'+'3'.repeat(32),createdAt:minutes(8)})),'waits','an older build\'s marker, which never renews, keeps the full window');
     assert.equal(await turnFor(freeze({id:'pub_'+'4'.repeat(32),createdAt:minutes(16)})),'saved','and stops holding the turn after it');
+    // A person's Sync now goes ahead once without waiting for a running
+    // upload; the next automatic upload waits again.
+    const live=()=>freeze({id:'pub_'+'5'.repeat(32),startedAt:minutes(1),createdAt:minutes(1),renews:true,device:writer});
+    snapshotRevision='turn-5';sourceRevision='2026-09-19T03:40:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn five',updatedAt:sourceRevision})};
+    assert.equal(runtime.providers.scheduleSharedSync('turn-drive','sync-now',{skipTurn:true}),true);
+    assert.equal(await turnFor(live()),'saved','Sync now does not wait for another device\'s running upload');
+    snapshotRevision='turn-6';sourceRevision='2026-09-19T03:50:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn six',updatedAt:sourceRevision})};
+    assert.equal(await turnFor(live()),'waits','one press, one upload: the next one takes its turn again');
+    // Drive's newer changes come in without waiting for a turn: a device
+    // behind Drive is sent to catch up, not to wait.
+    const head=[...files.values()].filter(file=>file.kind==='checkpoint').map(file=>file.id).sort();
+    const reference=files.get(key('checkpoint',head.at(-1))),commitRef=files.get(key('commit',head.at(-1))),newerId='cp_'+'f'.repeat(32);
+    const newerManifest=JSON.parse(await reference.blob.text());newerManifest.checkpoint={...newerManifest.checkpoint,checkpointId:newerId,createdAt:new Date().toISOString()};newerManifest.exportedAt=new Date().toISOString();newerManifest.protectedCheckpointManifest={...newerManifest.protectedCheckpointManifest,checkpointId:newerId};
+    files.set(key('checkpoint',newerId),freeze({...reference,id:newerId,blob:new Blob([JSON.stringify(newerManifest)]),createdAt:new Date().toISOString()}));
+    files.set(key('commit',newerId),freeze({...commitRef,id:newerId,blob:new Blob([JSON.stringify({...JSON.parse(await commitRef.blob.text()),checkpointId:newerId,exportedAt:newerManifest.exportedAt})]),createdAt:new Date().toISOString()}));
+    markers.set(live().id,live());
+    await assert.rejects(()=>runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}),{code:'REPOSITORY_SYNC_BEHIND'},'a device behind Drive is sent to catch up, not held by another device\'s turn');
+    markers.delete(live().id);files.delete(key('checkpoint',newerId));files.delete(key('commit',newerId));
   }finally{reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
 }
 const retainedManifests=[];

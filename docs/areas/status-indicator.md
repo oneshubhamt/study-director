@@ -58,8 +58,9 @@ the indicator; `tests/unit/backup/sync-status.mjs` checks every row.
 | Old text | When | Ring | Badge | Label starts | Panel action |
 |---|---|---|---|---|---|
 | Syncing… | Sync catch-up or upload running | syncing | — | Syncing… (or the specific activity) | — |
-| Synced 12:04 | In step | synced | — | Synced 12:04 | Sync now |
-| Changes since 12:04 | Local edits waiting | pending | — | Changes since 12:04 | Sync now |
+| Waiting for another device | Drive's latest is here; this device's upload waits its turn | syncing (slow) | — | Waiting for Windows · Chrome to finish saving… | Sync now |
+| Synced 12:04 | In step | synced | — | Synced 12:04 | — |
+| Changes since 12:04 | Local edits waiting | pending | — | Changes since 12:04 | — |
 | Last synced 12:04 | Last sync failed, retrying | pending | — | Last synced 12:04 · retrying | Sync now |
 | Needs password | Password set or changed on another device | blocked | lock | Enter backup password to sync | Enter password |
 | Needs review (sync) | Drive has changes needing a decision | pending | review | Google Drive has changes to review | Review |
@@ -77,7 +78,7 @@ session running on another device, app update ready, no backup in over a week.
 - **Headline:** one sentence, for example "Synced at 12:04. This device is up to date."
 - **When next:** "Uploads by 12:24, or when you leave the app" (from the
   automatic-backup schedule), "Next try at 12:10", or "Checks Google Drive again
-  when you return to the app". **Sync now** whenever Drive is connected and idle.
+  when you return to the app". A button only when something waits (owner, 2026-11-08): **Sync now** while this device waits for another device's upload (it uploads without waiting for that turn) or retries after a failure, and **Try again** once retries ran out. None while syncing works normally. The first-sync card shows the same Sync now on its upload step while waiting.
 - **Needs you:** one row per item with its own button — Sign in, Enter password,
   Update app, Review (sync), Review (kept versions), Allow access (Device Folder),
   Details (storage, backup check, Device Folder failing), Go to Execute (session
