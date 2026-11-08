@@ -94,6 +94,29 @@ assert.equal((await h.app.deletionRecovery.attachments()).some(row=>row.assetId=
 assert.equal(await h.app.deletionRecovery.clearAttachment(deletedAttachmentId),true);
 assert.equal((await h.app.deletionRecovery.attachments()).some(row=>row.assetId===deletedAttachmentId),false,'Recreating/restoring an Attachment Library identity must retire its deletion marker.');
 
+
+// Selective durability is a performance contract: timer snapshots default to
+// normal durability; suspension, explicit lifecycle barriers and page-exit
+// rescue request strict IndexedDB commit whenever the browser supports it.
+{
+  const local=new Map(),h=createHarness(local);
+  const base={id:'active',version:1,revision:100,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
+  const save=(revision,options={})=>h.app.activeSession.save({...base,revision,updatedAt:new Date(Date.UTC(2026,8,17,11,revision%59)).toISOString()},options);
+  const startStrict=h.idbDurability.strict,startNormal=h.idbDurability.normal;
+  assert.equal((await save(101)).ok,true);
+  assert.equal((await save(102)).ok,true);
+  assert.equal(h.idbDurability.normal-startNormal,2,'ordinary timer snapshots do not force strict durability');
+  assert.equal(h.idbDurability.strict-startStrict,0);
+  assert.equal((await h.app.activeSession.save({...base,revision:103,status:'suspended',updatedAt:'2026-09-17T11:03:00.000Z'})).ok,true);
+  assert.equal((await save(104,{strictDurability:true})).ok,true,'explicit critical transition is durably committed');
+  assert.equal((await save(105,{emergency:true})).ok,true,'page-exit snapshot remains protected');
+  assert.equal(h.idbDurability.strict-startStrict,3,'critical writes alone use strict durability');
+  assert.equal((await save(106)).ok,true);
+  assert.equal(h.idbDurability.normal-startNormal,3,'normal saving resumes after critical writes');
+  assert.equal((await h.app.activeSession.clear()).ok,true);
+  assert.ok(h.idbDurability.strict-startStrict>=4,'Active Session deletion remains a strict durable mutation');
+}
+
 const session={id:'active',version:1,revision:1,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
 await h.app.activeSession.save(session);
 controls.failSessionWrite=true;
@@ -313,4 +336,40 @@ for(const executor of ['migration','deletion-recovery'])for(const arrival of ['u
   assert.equal((await current.app.maintenance.run({force:true})).status,'completed');
   assert.deepEqual(stores.daily.get(incoming.date),incoming);assert.equal(local.get('fallback').length,0);
 }
+
+// Critical Active Session saves request strict durability, while ordinary
+// timer snapshots retain the lighter default transaction policy.
+{
+  const h=createHarness(),session={id:'active',version:1,revision:1,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
+  const count=kind=>h.idbDurability[kind+'Stores'].filter(names=>names.includes('session')).length;
+  assert.equal((await h.app.activeSession.save(session)).ok,true);
+  assert.equal(count('normal'),1,'ordinary timer snapshot uses default durability');
+  assert.equal(count('strict'),0);
+  assert.equal((await h.app.activeSession.save({...session,revision:2},{emergency:true})).ok,true);
+  assert.equal(count('strict'),1,'page-exit emergency flush uses strict commit');
+  assert.equal((await h.app.activeSession.save({...session,revision:3,status:'suspended'})).ok,true);
+  assert.equal(count('strict'),2,'suspension is a critical Session transition');
+  assert.equal((await h.app.activeSession.save({...session,revision:4},{strictDurability:true})).ok,true);
+  assert.equal(count('strict'),3,'explicit transfer/restore write is durable');
+  assert.equal((await h.app.activeSession.save({...session,revision:5})).ok,true);
+  assert.equal(count('normal'),2,'later ordinary timer write avoids strict durability');
+}
+
+
+{
+  const warnings=[],h=createHarness(new Map(),null,{onStorageError:(source,message)=>warnings.push({source,message})});
+  await h.app.notes.load();
+  const first='a'.repeat(600*1024),second='b'.repeat(600*1024);
+  assert.equal(h.app.notes.update('large one','Large one',first,'').status,'changed');
+  assert.equal(h.app.notes.update('large two','Large two',second,'').status,'changed');
+  assert.equal(h.app.notes.protectUnsaved(),false,'two valid large Notes cannot silently overflow the bounded browser rescue');
+  const rescueWarning=warnings.find(row=>row.source==='notes'&&/emergency copy could not hold unsaved/u.test(row.message));
+  assert.ok(rescueWarning,'even before IndexedDB reports a failure, the uncovered note must produce visible warning');
+  assert.doesNotMatch(rescueWarning.message,/Notes could not be saved in this browser session/u,'rescue-capacity risk must not claim canonical persistence has failed');
+  assert.equal(h.app.notes.failure().failed,false,'capacity risk alone does not prove the canonical save failed');
+  assert.match(rescueWarning.message,/Large one|Large two/u);
+  await h.app.notes.flush({strict:true});
+  assert.equal(h.app.notes.failure().failed,false,'successful canonical flush clears the emergency exposure');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'rescue-reconciliation',committedSavesAcknowledged:true,cleanupDiagnosed:true,staleReplayProtected:true,concurrentCopiesPreserved:true,cases:7}));

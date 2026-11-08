@@ -19,6 +19,7 @@ function write(target,value){
 }
 
 const build=renderBuild();validateBuild(build);
+if(!/^[a-f0-9]{40}$/u.test(String(build.identity.sourceCommit||'')))throw new Error('Firebase staging requires exact source commit provenance. Run from a Git checkout or set SD_SOURCE_COMMIT to the 40-hex source commit.');
 if(fs.existsSync(stage))fs.rmSync(stage,{recursive:true,force:true});
 fs.mkdirSync(publicDir,{recursive:true});
 for(const [name,value] of build.deployment){
@@ -69,4 +70,4 @@ if(process.argv.includes('--minified')){
   fs.rmSync(leanFile,{force:true});
   if(minified.status!==0)throw new Error(minified.stderr||minified.stdout||'Minified Firebase staging failed.');
 }
-console.log(JSON.stringify({status:'PASS',release:releaseIdentity().release,stage,minifiedStage,publicFiles:publicFiles.length,project:firebaseProjectId,supportFiles:['firebase.json','firebase.enforcement-candidate.json','.firebaserc',supportName,...supportDocs]},null,2));
+console.log(JSON.stringify({status:'PASS',release:releaseIdentity().release,sourceCommit:build.identity.sourceCommit,stage,minifiedStage,publicFiles:publicFiles.length,project:firebaseProjectId,supportFiles:['firebase.json','firebase.enforcement-candidate.json','.firebaserc',supportName,...supportDocs]},null,2));

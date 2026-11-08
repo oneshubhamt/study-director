@@ -18,6 +18,12 @@ Start with [the product guide](PRODUCT.md) for what the app is and [architecture
 | Test selection and QA procedure | [Verification](VERIFICATION.md), [test guide](../tests/README.md) |
 | Build, contribution and repository constraints | [README](../README.md), [CONTRIBUTING](../CONTRIBUTING.md), [AGENTS](../AGENTS.md) |
 
+The owner-requested [protected pre-intake programme snapshot](typescript/snapshots/main-intake-2026-11-08/README.md) preserves the original execution record, phase plan, decisions and tooling documentation exactly. It does not replace the active versions.
+
+## Additional feature references
+
+[Storage operations](areas/data-and-storage.md), [study sessions](areas/study-session.md), [status indicator](areas/status-indicator.md), [updates](areas/app-updates.md), and [UI](areas/ui.md) give current feature detail. [Production history](history/PRODUCTION-MAIN-HISTORY.md), [the earlier production test programme](history/PRODUCTION-TEST-PROGRAMME.md), and [backlog context](backlog.md) preserve imported observations without changing programme status.
+
 ## Current versus historical documents
 
 [HANDOFF](HANDOFF.md) is a short resume pointer. Current feature guides describe implemented contracts, while [product history](history/PRODUCT-DEVELOPMENT.md) preserves the original handoff, notes plan, five old audits and earlier technical snapshots at `4136ba5`. The previous loose audit files were consolidated there without discarding their contents. TypeScript history is [separate](typescript/HISTORY-PREPARATION-PHASE-4.md). Old relative links inside preserved text refer to its original tree, linked from each archive's inventory.

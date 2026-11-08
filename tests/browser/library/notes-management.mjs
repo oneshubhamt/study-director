@@ -50,12 +50,12 @@ try{
     });
   })()`);
 
-  const prepared=await page.evaluate(`(()=>{
+  const prepared=await page.evaluate(`(async()=>{
     const d=__PWA6,now=new Date(),base=now.getHours()*60+now.getMinutes()-1;
     const fmt=value=>String(Math.floor((value+1440)%1440/60)).padStart(2,'0')+':'+String((value+1440)%1440%60).padStart(2,'0');
     const rows=[['Alpha Task','Alpha Empty'],['Zeta Task','Zeta Filled'],['Child Task','Parent > Child Empty']];
     document.getElementById('plan-input').value=rows.map((row,index)=>fmt(base+index*20)+' | 20 | '+row[0]+' | work | '+row[1]+' | pages | 10').join('\\n');
-    const applied=d.applySchedule({skipNotify:true});d.goTab('library');
+    const applied=await d.applySchedule({skipNotify:true});d.goTab('library');
     __PWA6.LibraryView.showSection('notes');
     return {applied};
   })()`);
@@ -337,12 +337,26 @@ try{
   // The list's edge resizes it (arrow keys here), the width is remembered, and Enter resets it.
   const resized=await page.evaluate(`(async()=>{
     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),handle=document.getElementById('library-notes-resizer'),nav=document.querySelector('#library-notes .library-notes-nav'),width=()=>Math.round(nav.getBoundingClientRect().width),saved=()=>JSON.parse(localStorage.getItem('studyDirector.library.view.v1')).listWidth;
-    const before=width();handle.focus();handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',shiftKey:true,bubbles:true}));await wait(30);
-    const narrower=width(),remembered=saved();handle.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true}));await wait(30);const minimum=width();
+    const grid=document.querySelector('#library-notes .library-notes-grid'),before=width();handle.focus();handle.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',shiftKey:true,bubbles:true}));await wait(30);
+    const narrowerWidth=width(),savedWidth=saved();handle.dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true}));await wait(30);const minimum=width();
     handle.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await wait(30);
-    return {narrower:before-narrower,remembered:remembered===narrower,minimum,reset:Math.abs(width()-before)<=1,cleared:saved()===undefined};
+    // Recalculate the default from the *current* grid width: a concurrent
+    // reflow/viewport change can make the pre-drag pixel width stale even
+    // though Enter correctly restores the 1fr/2fr default.
+    const resetWidth=width(),expectedDefaultWidth=Math.max(240,grid.clientWidth/3);
+    return {before,narrowerWidth,savedWidth,minimum,resetWidth,expectedDefaultWidth,
+      reset:Math.abs(resetWidth-expectedDefaultWidth)<=1,
+      customWidth: grid.classList.contains('custom-width'),
+      inlineWidth:grid.style.getPropertyValue('--library-notes-list-width'),
+      cleared:saved()===undefined};
   })()`);
-  assert.deepEqual(resized,{narrower:64,remembered:true,minimum:200,reset:true,cleared:true});
+  assert.ok(Math.abs((resized.before-resized.narrowerWidth)-64)<=2,`Shift+ArrowLeft should narrow the list by about 64 CSS px (got ${resized.before-resized.narrowerWidth}).`);
+  assert.ok(Number.isFinite(resized.savedWidth)&&Math.abs(resized.savedWidth-resized.narrowerWidth)<=2,`remembered list width should match the rendered track within CSS-grid rounding (saved ${resized.savedWidth}, rendered ${resized.narrowerWidth}).`);
+  assert.ok(Math.abs(resized.minimum-200)<=2,`Home should clamp the rendered notes list to the 200 px minimum within CSS-grid rounding (got ${resized.minimum}).`);
+  assert.equal(resized.reset,true,`Enter must restore the *current* one-third layout: ${JSON.stringify(resized)}`);
+  assert.equal(resized.customWidth,false,'Enter must remove the custom-width grid class.');
+  assert.equal(resized.inlineWidth,'','Enter must remove the custom-width inline style.');
+  assert.equal(resized.cleared,true,`Enter must remove the persisted custom list width: ${JSON.stringify(resized)}`);
   await page.click('#library-notes-resizer');
   result.checks.notesListResizable=true;
 

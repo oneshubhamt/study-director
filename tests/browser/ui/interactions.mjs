@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import {root,startReleaseServer,launchChromium,waitForStudyDirector,waitFor,slee
 // Browser interaction-system contract: full-app guidance/safety plus real History API traversal ordering.
 
 { // interaction-guidance
-const axeSource=fs.readFileSync(path.join(root,'node_modules','axe-core','axe.min.js'),'utf8');
+const axeSource=readRuntimeSource(path.join(root,'node_modules','axe-core','axe.min.js'));
 
 const identity=`(()=>{
   if(localStorage.getItem('__qaIdentitySeeded'))return;localStorage.setItem('__qaIdentitySeeded','1');
@@ -38,7 +39,7 @@ try{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=new Date(),minute=now.getHours()*60+now.getMinutes()+2;
     const start=String(Math.floor((minute+1440)%1440/60)).padStart(2,'0')+':'+String((minute+1440)%1440%60).padStart(2,'0');
     d.goTab('plan');document.getElementById('plan-input').value=start+' | 20 | Permission-safe block | work | Safety | pages | 10';
-    const applied=d.applySchedule({skipNotify:true});
+    const applied=await d.applySchedule({skipNotify:true});
     d.goTab('execute');document.getElementById('ns-toggle-btn').click();document.getElementById('ns-toggle-btn').click();
     d.TimerEngine.startCur(3);await wait(30);d.TimerEngine.stopExecution();
     return {applied,requests:__notificationQA.permissionRequests,label:document.getElementById('system-alert-toggle').textContent.trim()};
@@ -61,6 +62,9 @@ try{
     __PWA6.Interactions.confirm({title:'Delete saved day?',message:'Only this saved day will be removed.',danger:true,confirmLabel:'Delete saved day',cancelLabel:'Keep saved day'}).then(value=>{window.__confirmValue=value;});
   })()`);
   await waitFor(()=>page.evaluate(`document.getElementById('sd-interaction-dialog').open`),{label:'themed confirmation'});
+  // Contrast is measured on the settled dialog: mid-entry, its opacity is below 1
+  // and axe's colour-contrast result depends on the exact frame it samples.
+  await settleMotion(page);
   await page.evaluate(axeSource,{returnByValue:false});
   const accessibility=await page.evaluate(`axe.run(document,{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21a','wcag21aa','wcag22aa']}}).then(value=>value.violations.filter(item=>item.impact==='serious'||item.impact==='critical').map(item=>({id:item.id,impact:item.impact,nodes:item.nodes.length})))`);
   assert.deepEqual(accessibility,[]);
@@ -182,9 +186,9 @@ console.log(JSON.stringify(result,null,2));
 }
 
 { // interaction-history
-const internal=fs.readFileSync('source/core/internal.js','utf8');
-const interactions=fs.readFileSync('source/core/interactions.js','utf8');
-const notices=fs.readFileSync('source/core/notice-coordinator.js','utf8');
+const internal=readRuntimeSource('source/core/internal.js');
+const interactions=readRuntimeSource('source/core/interactions.js');
+const notices=readRuntimeSource('source/core/notice-coordinator.js');
 const browser=await launchChromium({profilePrefix:'qa-interaction-history-'});let page;
 try{
   page=await browser.createPage('about:blank',{viewport:{width:800,height:600,mobile:false,scale:1}});
@@ -197,7 +201,7 @@ try{
     history.replaceState({workspace:null},'');window.__historyEvents=[];
     const notices=registry.require('notice-coordinator',1).createCoordinator(Object.freeze({}));
     const controller=mod.createController(Object.freeze({ports:Object.freeze({
-      notifications:Object.freeze({notify:notices.notify,subscribe:notices.subscribe,dismissEvent:notices.dismissEvent,pauseEvent:notices.pauseEvent,setHidden:notices.setHidden}),
+      notifications:Object.freeze({notify:notices.notify,subscribe:notices.subscribe,dismissEvent:notices.dismissEvent,dismissAll:notices.dismissAll,pauseEvent:notices.pauseEvent,setPaused:notices.setPaused,setHidden:notices.setHidden}),
       environment:Object.freeze({clearTimeout:id=>clearTimeout(id),document,nativeConfirm:()=>false,nativePrompt:()=>null,requestAnimationFrame:callback=>requestAnimationFrame(callback),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
       diagnostics:Object.freeze({capture:(scope,error)=>__historyEvents.push({type:'error',scope,message:String(error&&error.message||error)})}),
       history:Object.freeze({

@@ -1,8 +1,9 @@
+import type {PracticeRun} from '../../types/record-models.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {TaskKind,TaskInput,TaskOutcome} from '../../types/domain.ts';
 import type {DailyTaskView,DailyInput,ActiveInput,PendingReviewInput,Limits,PauseEvent,RealTimeSnapshot,TimerPayload,Adjustment,DailyResult,StoredSchedule,DailyRecord,NoteRecord,NoteFields,AreaSummary,ClockRecord,ActualRecord,SessionTaskState,SessionSnapshot,ActiveSession,PersonalPreferences,SavedPlans,PersonalData,PendingReview,ReviewSubject} from '../../types/record-models.ts';
 // Raw property inspection carries unknown values until existing validators narrow them.
-type RawFields=Partial<Record<'practiceCueMode'|'presentation'|'studentName'|'theme'|'fontScale'|'practiceTargetMs'|'ActiveSession'|'COMPLETION_SOURCES'|'CompletionModel'|'DailyRecord'|'DailySummary'|'FINISHED_UNVERIFIED'|'FULL'|'MAX_SAFE_INTEGER'|'NONE'|'Note'|'PARTIAL'|'PAUSED'|'PendingReview'|'RUNNING'|'SKIPPED'|'SessionSnapshot'|'ZERO_OUTPUT'|'abs'|'active'|'activeBreak'|'activeSeconds'|'activeSessionCodec'|'activeSessionId'|'activityBlocks'|'actual'|'actualEnd'|'actualFocusMinutes'|'actualSeconds'|'actualStart'|'actualStartLocalMinute'|'actualStartTimeZone'|'actualStartUtcOffsetMinutes'|'actualTrackedMinutes'|'add'|'adjustedStart'|'area'|'areaSummary'|'areaValue'|'averageBlockCompletion'|'base'|'breakMinutes'|'byId'|'call'|'capturedAt'|'carryForwardDraft'|'changedAt'|'clampPercent'|'classify'|'clean'|'clock'|'clockMinuteToStudyMinute'|'clockToMinute'|'commonExpected'|'compactPauseEvents'|'completed'|'completedEquivalentMinutes'|'completedMinutes'|'completion'|'completionPercent'|'completionSource'|'contentRevision'|'contracts'|'count'|'create'|'createdAt'|'cueIssuedAt'|'currentIdx'|'currentName'|'currentTaskId'|'daily'|'dailyRecordCodec'|'dataContract'|'date'|'dayName'|'dayOfWeek'|'defaultBreakSeconds'|'defaultId'|'define'|'delete'|'derivedMetrics'|'detectedAtMs'|'displayArea'|'doc'|'domain'|'done'|'doneFlag'|'doneNotified'|'draft'|'driftKind'|'driftLabel'|'driftMinutes'|'dur'|'duration'|'durationSec'|'enabled'|'encode'|'endMin'|'endedAt'|'enteredTotal'|'entries'|'entry'|'every'|'filter'|'find'|'fingerprint'|'firstStartedAt'|'for'|'forEach'|'format'|'freeze'|'gapMs'|'get'|'has'|'hasAdjustment'|'hasOwn'|'hasOwnProperty'|'hasReflection'|'helpers'|'id'|'includes'|'internal'|'internalModules'|'isArray'|'isFinite'|'isFrozen'|'isId'|'isInteger'|'isKey'|'isSafeInteger'|'isTrackable'|'isTrash'|'isValidHHMM'|'isValidIsoDate'|'isWork'|'join'|'js'|'kept'|'keptAt'|'key'|'keyedRecord'|'keys'|'kind'|'label'|'lastEndedAt'|'lastMs'|'lastStartedAt'|'lastTickMs'|'latestCarryForward'|'length'|'limits'|'links'|'localeCompare'|'map'|'match'|'max'|'maxAreaNameChars'|'maxCarryForwardChars'|'maxDurationMinutes'|'maxLiveSessionsPerTask'|'maxNoteChars'|'maxNoteLinks'|'maxNotes'|'maxPauseEventsPerTask'|'maxPracticeRunsPerDay'|'maxPracticeUnitsPerRun'|'maxQuoteChars'|'maxReflectionChars'|'maxScheduleChars'|'maxStudentNameChars'|'maxTaskNameChars'|'maxTasksPerDay'|'maxUnitChars'|'measure'|'min'|'minSupportedSavedDate'|'mode'|'modes'|'name'|'next'|'normalize'|'normalizeArea'|'normalizeHHMM'|'normalizeKind'|'normalizeSource'|'noteKeys'|'nudge'|'nudgeAfter'|'nudgeCycle'|'open'|'originalPlannedStudyMinutes'|'outcomeCounts'|'overtimeNotified'|'padStart'|'parse'|'parseProgressNumber'|'pauseCount'|'pauseEvents'|'paused'|'pausedSeconds'|'pausedStartedMs'|'pending'|'pendingInactiveGap'|'personalDataCodec'|'planned'|'plannedMinutes'|'plannedSeconds'|'plans'|'practice'|'practiceRuns'|'preferences'|'progress'|'promptMs'|'prototype'|'push'|'quote'|'randomBytes'|'realTimeSnapshot'|'reason'|'record'|'recordKind'|'recordedSec'|'reduce'|'ref'|'reflection'|'resolvedAt'|'resolvedState'|'result'|'results'|'review'|'revision'|'round'|'row'|'runningOn'|'runs'|'sanitizeCounts'|'sanitizeCurrent'|'sanitizeCurrentDailyRecord'|'sanitizeNoteFields'|'sanitizeTimerRuntimePayload'|'savedAt'|'savedPlans'|'savedRevision'|'schedule'|'scheduleAdjustments'|'scheduleShifts'|'scheduleText'|'scheduledIdx'|'scheduledKind'|'scheduledName'|'schemas'|'seconds'|'sessionCount'|'sessions'|'set'|'shiftedStudyBlocks'|'size'|'skipped'|'sleepPausedMs'|'slice'|'snapshot'|'some'|'sort'|'sound'|'soundMode'|'source'|'sourceRevision'|'start'|'startMin'|'startMs'|'startSec'|'startedAt'|'startedAtLocalMinute'|'startedAtMs'|'startedAtTimeZone'|'startedAtUtcOffsetMinutes'|'startsWith'|'status'|'stringify'|'studyMinuteToHHMM'|'studyQuality'|'subject'|'summaryVersion'|'suspendedAt'|'target'|'taskId'|'taskState'|'tasks'|'test'|'text'|'textFromRows'|'timer'|'timerRuntime'|'timerState'|'timestamps'|'toISOString'|'toLowerCase'|'toString'|'total'|'totalPausedMs'|'trashKeyPrefix'|'trim'|'type'|'updatedAt'|'v1'|'value'|'values'|'version'|'weightedCompletion',unknown>>;
+type RawFields=Partial<Record<'keptFrom'|'keptChangedAt'|'practiceCueMode'|'presentation'|'studentName'|'theme'|'fontScale'|'practiceTargetMs'|'ActiveSession'|'COMPLETION_SOURCES'|'CompletionModel'|'DailyRecord'|'DailySummary'|'FINISHED_UNVERIFIED'|'FULL'|'MAX_SAFE_INTEGER'|'NONE'|'Note'|'PARTIAL'|'PAUSED'|'PendingReview'|'RUNNING'|'SKIPPED'|'SessionSnapshot'|'ZERO_OUTPUT'|'abs'|'active'|'activeBreak'|'activeSeconds'|'activeSessionCodec'|'activeSessionId'|'activityBlocks'|'actual'|'actualEnd'|'actualFocusMinutes'|'actualSeconds'|'actualStart'|'actualStartLocalMinute'|'actualStartTimeZone'|'actualStartUtcOffsetMinutes'|'actualTrackedMinutes'|'add'|'adjustedStart'|'area'|'areaSummary'|'areaValue'|'averageBlockCompletion'|'base'|'breakMinutes'|'byId'|'call'|'capturedAt'|'carryForwardDraft'|'changedAt'|'clampPercent'|'classify'|'clean'|'clock'|'clockMinuteToStudyMinute'|'clockToMinute'|'commonExpected'|'compactPauseEvents'|'completed'|'completedEquivalentMinutes'|'completedMinutes'|'completion'|'completionPercent'|'completionSource'|'contentRevision'|'contracts'|'count'|'create'|'createdAt'|'cueIssuedAt'|'currentIdx'|'currentName'|'currentTaskId'|'daily'|'dailyRecordCodec'|'dataContract'|'date'|'dayName'|'dayOfWeek'|'defaultBreakSeconds'|'defaultId'|'define'|'delete'|'derivedMetrics'|'detectedAtMs'|'displayArea'|'doc'|'domain'|'done'|'doneFlag'|'doneNotified'|'draft'|'driftKind'|'driftLabel'|'driftMinutes'|'dur'|'duration'|'durationSec'|'enabled'|'encode'|'endMin'|'endedAt'|'enteredTotal'|'entries'|'entry'|'every'|'filter'|'find'|'fingerprint'|'firstStartedAt'|'for'|'forEach'|'format'|'freeze'|'gapMs'|'get'|'has'|'hasAdjustment'|'hasOwn'|'hasOwnProperty'|'hasReflection'|'helpers'|'id'|'includes'|'internal'|'internalModules'|'isArray'|'isFinite'|'isFrozen'|'isId'|'isInteger'|'isKey'|'isSafeInteger'|'isTrackable'|'isTrash'|'isValidHHMM'|'isValidIsoDate'|'isWork'|'join'|'js'|'kept'|'keptAt'|'key'|'keyedRecord'|'keys'|'kind'|'label'|'lastEndedAt'|'lastMs'|'lastStartedAt'|'lastTickMs'|'latestCarryForward'|'length'|'limits'|'links'|'localeCompare'|'map'|'match'|'max'|'maxAreaNameChars'|'maxCarryForwardChars'|'maxDurationMinutes'|'maxLiveSessionsPerTask'|'maxNoteChars'|'maxNoteLinks'|'maxNotes'|'maxPauseEventsPerTask'|'maxPracticeRunsPerDay'|'maxPracticeUnitsPerRun'|'maxQuoteChars'|'maxReflectionChars'|'maxScheduleChars'|'maxStudentNameChars'|'maxTaskNameChars'|'maxTasksPerDay'|'maxUnitChars'|'measure'|'min'|'minSupportedSavedDate'|'mode'|'modes'|'name'|'next'|'normalize'|'normalizeArea'|'normalizeHHMM'|'normalizeKind'|'normalizeSource'|'noteKeys'|'nudge'|'nudgeAfter'|'nudgeCycle'|'open'|'originalPlannedStudyMinutes'|'outcomeCounts'|'overtimeNotified'|'padStart'|'parse'|'parseProgressNumber'|'pauseCount'|'pauseEvents'|'paused'|'pausedSeconds'|'pausedStartedMs'|'pending'|'pendingInactiveGap'|'personalDataCodec'|'planned'|'plannedMinutes'|'plannedSeconds'|'plans'|'practice'|'practiceRuns'|'preferences'|'progress'|'promptMs'|'prototype'|'push'|'quote'|'randomBytes'|'realTimeSnapshot'|'reason'|'record'|'recordKind'|'recordedSec'|'reduce'|'ref'|'reflection'|'resolvedAt'|'resolvedState'|'result'|'results'|'review'|'revision'|'round'|'row'|'runningOn'|'runs'|'sanitizeCounts'|'sanitizeCurrent'|'sanitizeCurrentDailyRecord'|'sanitizeNoteFields'|'sanitizeTimerRuntimePayload'|'savedAt'|'savedPlans'|'savedRevision'|'schedule'|'scheduleAdjustments'|'scheduleShifts'|'scheduleText'|'scheduledIdx'|'scheduledKind'|'scheduledName'|'schemas'|'seconds'|'sessionCount'|'sessions'|'set'|'shiftedStudyBlocks'|'size'|'skipped'|'sleepPausedMs'|'slice'|'snapshot'|'some'|'sort'|'sound'|'soundMode'|'source'|'sourceRevision'|'start'|'startMin'|'startMs'|'startSec'|'startedAt'|'startedAtLocalMinute'|'startedAtMs'|'startedAtTimeZone'|'startedAtUtcOffsetMinutes'|'startsWith'|'status'|'stringify'|'studyMinuteToHHMM'|'studyQuality'|'subject'|'summaryVersion'|'suspendedAt'|'target'|'taskId'|'taskState'|'tasks'|'test'|'text'|'textFromRows'|'timer'|'timerRuntime'|'timerState'|'timestamps'|'toISOString'|'toLowerCase'|'toString'|'total'|'totalPausedMs'|'trashKeyPrefix'|'trim'|'type'|'updatedAt'|'v1'|'value'|'values'|'version'|'weightedCompletion',unknown>>;
 const sdRecordCodecsFactory=(()=>{
 'use strict';
 const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'record-codecs','study-director.record-codecs'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
@@ -319,13 +320,15 @@ function sanitizeCurrentScheduleEntry(rawInput:unknown):StoredSchedule|null{
   const clean={id,start,duration,name,kind,area,measure,target};
   return sameDataValue(row,clean)?clean:null;
 }
+// The stored fields of a Saved Day, in the order sanitizeCurrentDailyRecord writes them.
+const DIARY_RECORD_FIELDS=freeze(['version','recordKind','date','savedAt','updatedAt','sourceRevision','reflection']);
+const STUDY_RECORD_FIELDS=freeze(['version','recordKind','date','savedAt','updatedAt','sourceRevision','quote','reflection','studyQuality','realTimeSnapshot','schedule','results','practiceRuns','carryForwardDraft']);
 function sanitizeCurrentDailyRecord(rawInput:unknown):DailyRecord|null{
   const record=rawInput as RawFields|null|undefined;
   if(!record||typeof record!=='object'||Array.isArray(record)||Number(record.version)!==DATA_CONTRACT.schemas.DailyRecord.version||!isSupportedSavedDate(record.date))return null;
   const recordKind=record.recordKind==='diary'?'diary':record.recordKind==='study'?'study':null;if(!recordKind)return null;
-  const commonExpected=['version','recordKind','date','savedAt','updatedAt','sourceRevision','reflection'];
-  const expected=recordKind==='diary'?commonExpected:[...commonExpected,'quote','studyQuality','realTimeSnapshot','schedule','results','practiceRuns','carryForwardDraft'];
-  if(Object.keys(record).sort().join('|')!==expected.sort().join('|'))return null;
+  const expected=recordKind==='diary'?DIARY_RECORD_FIELDS:STUDY_RECORD_FIELDS;
+  if(Object.keys(record).sort().join('|')!==[...expected].sort().join('|'))return null;
   const date=String(record.date),savedAt=normalizeImportedTimestamp(record.savedAt,null),updatedAt=normalizeImportedTimestamp(record.updatedAt,null),sourceRevision=optionalBoundedNumber(record.sourceRevision,{min:0,max:Number.MAX_SAFE_INTEGER,integer:true});
   const reflection=optionalEditorContent(record.reflection,APP_LIMITS.maxReflectionChars);
   if(savedAt===null||updatedAt===null||sourceRevision===null||reflection===null)return null;
@@ -355,6 +358,142 @@ function sanitizeCurrentDailyRecord(rawInput:unknown):DailyRecord|null{
   if(record.realTimeSnapshot!==null){realTimeSnapshot=compactRealTimeSnapshot(record.realTimeSnapshot);if(!realTimeSnapshot||!sameDataValue(record.realTimeSnapshot,realTimeSnapshot))return null;}
   const clean:DailyRecord={version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind,date,savedAt,updatedAt,sourceRevision,quote,reflection,studyQuality,realTimeSnapshot,schedule,results,practiceRuns,carryForwardDraft};
   return sameDataValue(record,clean)?clean:null;
+}
+// Compare actual Saved Day evidence with recorded session work. Exact mode
+// requires equality of observed values; coverage mode permits demonstrable
+// later progress. The caller separately verifies a durable save acknowledgement
+// when required. Device-local source revisions are not ancestry identifiers.
+function savedDayCoversSessionEvidence(record:DailyRecord|null|undefined,session:ActiveSession|null|undefined,{allowAdvances=false}={}){
+  const snapshot=session?.snapshot;
+  if(record?.recordKind!=='study'||!snapshot||record.date!==session.date||
+      !Array.isArray(record.schedule)||!Array.isArray(record.practiceRuns)||!record.results)return false;
+  const parsed=ScheduleModel.parseText(String(session.scheduleText||''));
+  if(!parsed.ok)return false;
+  const rows=record.schedule.map(row=>({
+    start:row.start,dur:row.duration,name:row.name,kind:row.kind,
+    area:row.area,measure:row.measure,target:row.target
+  }));
+  if(ScheduleModel.fingerprint(parsed.parsed)!==ScheduleModel.fingerprint(rows))return false;
+  const review=snapshot.review||{};
+  if((!allowAdvances||String(review.reflection||''))&&
+      String(record.reflection||'')!==String(review.reflection||''))return false;
+  if((!allowAdvances||review.studyQuality!=null)&&
+      (record.studyQuality??null)!==(review.studyQuality??null))return false;
+  if((!allowAdvances||String(snapshot.latestCarryForward||''))&&
+      String(record.carryForwardDraft||'')!==String(snapshot.latestCarryForward||''))return false;
+  const runs=Array.isArray(snapshot.practice?.runs)?snapshot.practice.runs:[];
+  // A partial Practice Pacer run may grow into a completed run. Its units
+  // already observed must remain an exact prefix; settings and task identity
+  // cannot change. Match records one-to-one so duplicates cannot prove work
+  // that the Saved Day contains only once.
+  const practiceRunCovered=(saved:PracticeRun,prior:PracticeRun)=>{
+    if(sameDataValue(saved,prior))return true;
+    if(!allowAdvances||prior?.partial!==true||!Array.isArray(prior.unitMs)||
+        !Array.isArray(saved?.unitMs)||saved.unitMs.length<prior.unitMs.length)return false;
+    const {unitMs:_savedUnits,partial:_savedPartial,...savedRest}=saved;
+    const {unitMs:_priorUnits,partial:_priorPartial,...priorRest}=prior;
+    return sameDataValue(savedRest,priorRest)&&
+      prior.unitMs.every((ms,index)=>saved.unitMs[index]===ms);
+  };
+  const consumedRuns=new Set(),unmatchedRuns=[];
+  // Exact finished runs are more specific than prefixes. Reserve them first
+  // so an earlier partial run cannot consume the only exact match of a
+  // separately completed run merely because the records are ordered apart.
+  for(const run of runs){
+    const index=record.practiceRuns.findIndex((saved,i)=>!consumedRuns.has(i)&&sameDataValue(saved,run));
+    if(index<0)unmatchedRuns.push(run);
+    else consumedRuns.add(index);
+  }
+  // Longer prefixes constrain the assignment more strongly than shorter ones.
+  unmatchedRuns.sort((a,b)=>(b?.unitMs?.length||0)-(a?.unitMs?.length||0));
+  for(const run of unmatchedRuns){
+    const index=record.practiceRuns.findIndex((saved,i)=>!consumedRuns.has(i)&&practiceRunCovered(saved,run));
+    if(index<0)return false;
+    consumedRuns.add(index);
+  }
+  // Practice Pacer also records an unfinished active attempt. Save Today
+  // finalizes that attempt as a partial run, so a Saved Day must contain
+  // its already-observed units and elapsed current unit as a distinct run.
+  // The ongoing clock is bounded by the snapshot's own persisted timestamp;
+  // a missing/inconsistent clock observation is not positive save evidence.
+  const active=snapshot.practice?.active;
+  if(active){
+    const finished=Array.isArray(active.unitMs)?active.unitMs:[],
+      anchored=Number(active.anchorMs)>0;
+    let current=Math.max(0,Number(active.currentMs)||0);
+    if(anchored){
+      const at=Date.parse(String(snapshot.updatedAt||'')),since=Number(active.anchorMs);
+      if(!Number.isFinite(at)||at<since)return false;
+      current+=Math.max(0,at-since);
+    }
+    // The live pacer clamps the ongoing unit to maxPracticeTargetMs before
+    // finalization. A covered Saved Day must not require impossible overtime.
+    current=Math.round(Math.min(APP_LIMITS.maxPracticeTargetMs,current));
+    if(finished.length||current>0){
+      const fields=['targetMs','taskId','sessionTargetMs','unitPlan','totalUnits'] as const,
+        expected=finished.length+(current>0?1:0);
+      const index=record.practiceRuns.findIndex((saved,i)=>{
+        if(consumedRuns.has(i)||!Array.isArray(saved?.unitMs)||
+          fields.some(key=>!sameDataValue(saved[key],active[key]))||
+          (allowAdvances?saved.unitMs.length<expected:saved.unitMs.length!==expected)||
+          !finished.every((ms,pos)=>saved.unitMs[pos]===ms))return false;
+        return current===0||
+          (allowAdvances?saved.unitMs[finished.length]!>=current:
+            saved.unitMs[finished.length]===current);
+      });
+      if(index<0)return false;
+      consumedRuns.add(index);
+    }
+  }
+  const observed=(value:unknown,prior:unknown)=>{
+    if(prior===undefined)return true;
+    if(value===undefined||!Number.isFinite(Number(value))||!Number.isFinite(Number(prior)))return false;
+    return allowAdvances?Number(value)>=Number(prior):Number(value)===Number(prior);
+  };
+  for(const [id,state] of Object.entries(snapshot.taskState||{})){
+    const result=record.results[id]||null;
+    if(!result){if(Object.keys(state||{}).length)return false;continue;}
+    if(!observed(result.completion,state.completion))return false;
+    if(state.completionSource&&result.completionSource!==state.completionSource)return false;
+    if(state.resolvedState==='done'&&result.doneFlag!==true||
+        state.resolvedState==='skipped'&&result.skipped!==true)return false;
+    if(!observed(result.done,state.progress?.done)||
+        !observed(result.actualSeconds,state.actual?.seconds))return false;
+    if(state.progress?.total!==undefined&&
+        Number(result.total)!==Number(state.progress.total))return false;
+    const clock=state.actual?.clock||{},actual=state.actual?.record||{};
+    const start=clock.startedAt||actual.firstStartedAt,end=clock.endedAt||actual.lastEndedAt;
+    if(start&&result.actualStart!==start)return false;
+    // A block started but stopped within its first second recorded no time:
+    // the Saved Day keeps no end for it, and there is nothing to lose.
+    const noTime=!(Number(state.actual?.seconds)>0)&&!(Number(actual.activeSeconds)>0)&&
+      result.actualEnd===undefined&&!(Number(result.actualSeconds)>0);
+    if(end&&result.actualEnd!==end&&!noTime){
+      // An end moving forward can be legitimate continued focus, but only
+      // with a stable start and strictly increased recorded focus duration.
+      // A missing/replaced start or a merely edited timestamp proves nothing.
+      const previousSeconds=Number(state.actual?.seconds);
+      if(!allowAdvances||!start||!Number.isFinite(previousSeconds)||
+          !(Number(result.actualSeconds)>previousSeconds)||
+          !Number.isFinite(Date.parse(end))||
+          !(Date.parse(String(result.actualEnd))>Date.parse(end)))return false;
+    }
+    if(clock.startedAtLocalMinute!==undefined&&
+        Number(result.actualStartLocalMinute)!==Number(clock.startedAtLocalMinute))return false;
+    if(clock.startedAtUtcOffsetMinutes!==undefined&&
+        Number(result.actualStartUtcOffsetMinutes)!==Number(clock.startedAtUtcOffsetMinutes))return false;
+    if(clock.startedAtTimeZone&&result.actualStartTimeZone!==clock.startedAtTimeZone)return false;
+    const count=Number(actual.sessionCount)||actual.sessions?.length||0;
+    if(count&&!observed(result.sessionCount,count))return false;
+    const pauses=actual.pauseEvents||[];
+    if(pauses.length&&(!Array.isArray(result.pauseEvents)||
+        !sameDataValue(pauses,allowAdvances?result.pauseEvents.slice(0,pauses.length):result.pauseEvents)))return false;
+  }
+  for(const [id,adjustment] of Object.entries(snapshot.scheduleAdjustments||{})){
+    if(!record.results[id]||
+        record.results[id].adjustedStart!==TimeModel.studyMinuteToHHMM(adjustment.startMin))return false;
+  }
+  return true;
 }
 function createDiaryRecord(date:unknown,reflection:unknown,options:{updatedAt?:unknown;savedAt?:unknown;sourceRevision?:unknown}={}){
   if(!isSupportedSavedDate(date))return null;
@@ -422,6 +561,22 @@ function sanitizeNoteFields(rawInput:unknown):NoteFields|null{
 function dailyResultAdjustedEnd(entry:StoredSchedule,result:DailyResult|null){
   const start=result&&result.adjustedStart||entry.start;
   return studyMinuteToHHMM(clockMinuteToStudyMinute(t2m(start))+entry.duration);
+}
+// A Saved Day read from the repository is its view: the stored fields plus
+// fields worked out from them (materializeDailyRecordView). Handed back to be
+// saved, with a stored field changed such as the reflection, it is saved as
+// its stored fields; the worked-out ones are rebuilt on every read. Anything
+// else is returned unchanged, so a field the view does not have is refused.
+function storedDailyRecordFields(value:object):object;
+function storedDailyRecordFields(value:unknown):unknown;
+function storedDailyRecordFields(value:unknown){
+  if(!value||typeof value!=='object'||Array.isArray(value))return value;
+  const record=value as RawFields;
+  const fields=record.recordKind==='diary'?DIARY_RECORD_FIELDS:record.recordKind==='study'?STUDY_RECORD_FIELDS:null;
+  if(!fields||Object.keys(value).every(key=>fields.includes(key)))return value;
+  const stored:Record<string,unknown>={};for(const key of fields)if(Object.prototype.hasOwnProperty.call(value,key))stored[key]=(value as Record<string,unknown>)[key];
+  const view=materializeDailyRecordView(stored);
+  return view&&Object.keys(value).every(key=>Object.prototype.hasOwnProperty.call(view,key))?stored:value;
 }
 function materializeDailyRecordView(record:unknown){
   const doc=sanitizeCurrentDailyRecord(record);
@@ -498,8 +653,8 @@ function materializeDailyRecordSummary(summary:unknown){
       contractVersion:1,
       buildDailyRecordSummary,compactPauseEvents,compactRealTimeSnapshot,
       sanitizeTimerRuntimePayload,compactAdjustedSchedule,normalizeDailyResultEntry,
-      dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,createDiaryRecord,
-      sanitizeCurrentNote,sanitizeNoteFields,noteKeys,materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
+      dailyRecordMetricsFromEvidence,sanitizeCurrentDailyRecord,savedDayCoversSessionEvidence,createDiaryRecord,
+      sanitizeCurrentNote,sanitizeNoteFields,noteKeys,materializeDailyRecordView,storedDailyRecordFields,sanitizeDailyRecordSummary,materializeDailyRecordSummary,isSupportedSavedDate
     });
   }
   function createActiveSessionCodec(input:ActiveInput){
@@ -646,7 +801,7 @@ function materializeDailyRecordSummary(summary:unknown){
       studyQuality:normalizeStudyQuality(value.studyQuality)
     };
   }
-  function normalizeCurrentSessionSnapshot(rawInput:unknown,expectedDate:string,expectedFingerprint='',expectedSessionRevision:number|null=null):SessionSnapshot|null{
+  function normalizeCurrentSessionSnapshot(rawInput:unknown,expectedDate:string,expectedFingerprint:string='',expectedSessionRevision:number|null=null):SessionSnapshot|null{
   const snapshot=rawInput as RawFields|null|undefined;
     if(!snapshot||typeof snapshot!=='object'||Number(snapshot.version)!==DATA_CONTRACT.schemas.SessionSnapshot.version||snapshot.date!==expectedDate)return null;
     const fingerprint=clampText(snapshot.fingerprint||'',APP_LIMITS.maxScheduleChars);
@@ -711,7 +866,15 @@ function materializeDailyRecordSummary(summary:unknown){
     const clean=normalizeCurrentActiveSession(session);
     return clean&&sameDataValue(session,clean)?clean:null;
   }
-  return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession});
+  // Study content is distinct from ownership/control metadata. Revisions and
+  // timestamps establish persistence/order; runningOn/status establish control.
+  // Neither may make two otherwise identical study sessions conflict.
+  function contentValue(session:unknown){
+    const clean=sanitizeCurrentActiveSession(session);if(!clean)return null;
+    const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,...snapshot}=clean.snapshot;
+    return Object.freeze({date:clean.date,scheduleText:clean.scheduleText,snapshot:Object.freeze(snapshot)});
+  }
+  return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession,contentValue});
   }
   // Portable user data is an explicit allowlist, independent of sync destinations.
   function createPersonalDataCodec(limits:Pick<Limits,'maxScheduleChars'|'maxStudentNameChars'>){
@@ -786,7 +949,7 @@ function materializeDailyRecordSummary(summary:unknown){
     functions(input.helpers,['sameDataValue','randomBytes'],'Pending-review codec helpers');
     const VERSION=Number(input.dataContract.schemas.PendingReview.version),DailyRecordCodec=input.dailyRecordCodec,ActiveSessionCodec=input.activeSessionCodec,PersonalDataCodec=input.personalDataCodec;
     const {sameDataValue,randomBytes}=input.helpers,NoteKeys=DailyRecordCodec.noteKeys;
-    const ID=/^pr_[a-f0-9]{32}$/u,DATE=/^\d{4}-\d{2}-\d{2}$/u,KEYS=['base','id','kept','keptAt','ref','resolvedAt','subject','version'].join('|');
+    const ID=/^pr_[a-f0-9]{32}$/u,DATE=/^\d{4}-\d{2}-\d{2}$/u,DEVICE=/^inst_[a-z0-9_]{8,128}$/iu,KEYS=['base','id','kept','keptAt','keptChangedAt','keptFrom','ref','resolvedAt','subject','version'].join('|');
     const iso=(value:unknown)=>{if(typeof value!=='string')return null;const ms=Date.parse(value);return Number.isFinite(ms)&&new Date(ms).toISOString()===value?value:null;};
     const refValid=(subject:unknown,ref:string)=>subject==='note'?NoteKeys.isId(ref):subject==='savedDay'?DATE.test(ref):subject==='personal'?ref==='personal':subject==='session'?ref==='session':false;
     // The other side's version; undefined when unsound.
@@ -801,24 +964,76 @@ function materializeDailyRecordSummary(summary:unknown){
       const value=rawInput as RawFields|null|undefined;
       // Only a canonical record passes: every field exactly as stored.
       if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join('|')!==KEYS||value.version!==VERSION||[value.id,value.subject,value.ref].some(field=>typeof field!=='string'))return null;
-      const id=value.id as string,subject=value.subject as ReviewSubject,ref=value.ref as string,keptAt=iso(value.keptAt);
+      const id=value.id as string,subject=value.subject as ReviewSubject,ref=value.ref as string,keptAt=iso(value.keptAt),keptFrom=value.keptFrom,keptChangedAt=value.keptChangedAt;
       if(!ID.test(id)||!keptAt||!refValid(subject,ref))return null;
-      if(value.resolvedAt!==''){const resolvedAt=iso(value.resolvedAt);return resolvedAt&&value.kept===null&&value.base===null?{version:VERSION,id,subject,ref,keptAt,kept:null,base:null,resolvedAt}:null;}
+      if(typeof keptFrom!=='string'||keptFrom!==''&&!DEVICE.test(keptFrom)||typeof keptChangedAt!=='string'||keptChangedAt!==''&&!iso(keptChangedAt))return null;
+      if(value.resolvedAt!==''){const resolvedAt=iso(value.resolvedAt);return resolvedAt&&value.kept===null&&value.base===null&&keptFrom===''&&keptChangedAt===''?{version:VERSION,id,subject,ref,keptAt,keptFrom:'',keptChangedAt:'',kept:null,base:null,resolvedAt}:null;}
       const kept=keptValue(subject,ref,value.kept);if(kept===undefined)return null;
       let base=null;
       if(value.base!==null){base=subject==='note'&&kept?DailyRecordCodec.sanitizeNoteFields(value.base):null;if(!base||Object.keys(base).some(key=>!(key in kept!)))return null;}
       // keptValue validates the payload against this exact subject.
-      return {version:VERSION,id,subject,ref,keptAt,kept,base,resolvedAt:''} as PendingReview;
+      return {version:VERSION,id,subject,ref,keptAt,keptFrom,keptChangedAt,kept,base,resolvedAt:''} as PendingReview;
     }
-    function create({subject,ref,kept,base=null,keptAt=new Date().toISOString()}:{subject:ReviewSubject;ref:string;kept:PendingReview['kept'];base?:NoteFields|null;keptAt?:string}){
+    function create({subject,ref,kept,base=null,keptAt=new Date().toISOString(),origin=null}:{subject:ReviewSubject;ref:string;kept:PendingReview['kept'];base?:NoteFields|null;keptAt?:string;origin?:{device?:string;changedAt?:unknown}|null}){
       const id='pr_'+[...randomBytes(16)].map(byte=>byte.toString(16).padStart(2,'0')).join('');
-      const clean=normalize({version:VERSION,id,subject,ref,keptAt:new Date(keptAt).toISOString(),kept,base,resolvedAt:''});
+      const device=String(origin&&origin.device||''),changed=Date.parse(String(origin&&origin.changedAt||''));
+      const clean=normalize({version:VERSION,id,subject,ref,keptAt:new Date(keptAt).toISOString(),keptFrom:DEVICE.test(device)?device:'',keptChangedAt:Number.isFinite(changed)?new Date(changed).toISOString():'',kept,base,resolvedAt:''});
       if(!clean)throw new TypeError('A version kept for review is invalid.');
       return clean;
     }
     function resolved(review:unknown,resolvedAt=new Date().toISOString()){
       const clean=normalize(review);if(!clean)throw new TypeError('The review to resolve is invalid.');
-      return clean.resolvedAt?clean:normalize({...clean,kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
+      return clean.resolvedAt?clean:normalize({...clean,keptFrom:'',keptChangedAt:'',kept:null,base:null,resolvedAt:new Date(resolvedAt).toISOString()});
+    }
+    // The PendingReview codec is the single authority for the meaning of
+    // kept alternatives. Saving metadata is not Saved Day evidence; Saved
+    // Plan timestamps are not authored plan content. Do not discard a note's
+    // retained field mask or a session's study evidence.
+    function savedPlanMeaning(plan:PersonalData['plans']['savedPlans'][number]|null|undefined){
+      return plan?{id:plan.id,label:plan.label,scheduleText:plan.scheduleText}:null;
+    }
+    function meaningfulValue(subject:ReviewSubject,value:PendingReview['kept']){
+      if(!value||typeof value!=='object')return null;
+      if(subject==='savedDay'){
+        const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...content}=value as DailyRecord;
+        return content;
+      }
+      if(subject==='personal'){
+        const personal=value as PersonalData;
+        return {preferences:personal.preferences,draft:personal.plans.draft,defaultId:personal.plans.defaultId,savedPlans:personal.plans.savedPlans.map(savedPlanMeaning)};
+      }
+      if(subject==='session')return ActiveSessionCodec.contentValue(value);
+      if(subject==='note')return value; // Retained title/text fields only.
+      return null;
+    }
+    function sameMeaning(subject:ReviewSubject,a:PendingReview['kept'],b:PendingReview['kept']){
+      if(a===null||b===null)return a===null&&b===null;
+      const left=meaningfulValue(subject,a),right=meaningfulValue(subject,b);
+      return !!left&&!!right&&sameDataValue(left,right);
+    }
+    function matchesCurrent(subject:ReviewSubject,current:PendingReview['kept']|undefined,kept:PendingReview['kept']){
+      if(!current||!kept)return false;
+      if(subject==='note'){
+        // A retained Note may hold only the title or text which differed.
+        return Object.entries(kept).every(([field,value])=>sameDataValue((current as NoteFields)[field as keyof NoteFields],value));
+      }
+      if(subject==='session'){
+        // Study-content equality may deduplicate redundant retained versions,
+        // but only a suspended, same-owner canonical session proves that a
+        // kept Active Session has actually been applied.
+        return (current as ActiveSession).status==='suspended'&&(current as ActiveSession).runningOn===(kept as ActiveSession).runningOn&&
+          sameMeaning(subject,current,kept);
+      }
+      return sameMeaning(subject,current,kept);
+    }
+    // Equivalent open conflicts belong to one review, even if two devices
+    // independently minted different ids for that same kept value and base.
+    // Resolved reviews deliberately lack the kept content, so they cannot
+    // suppress a separate future conflict that happens to look similar.
+    function sameOpen(a:PendingReview|null|undefined,b:PendingReview|null|undefined){
+      if(!a||!b||a.resolvedAt||b.resolvedAt||a.subject!==b.subject||a.ref!==b.ref||
+          !sameDataValue(a.base,b.base))return false;
+      return sameMeaning(a.subject,a.kept,b.kept);
     }
     // Reviews merge by id: a resolved one wins, so a review resolved on any
     // device ends everywhere. Only the newest resolved ones are kept, as many
@@ -830,8 +1045,14 @@ function materializeDailyRecordSummary(summary:unknown){
         const held=byId.get(review.id);
         if(!held||review.resolvedAt&&(!held.resolvedAt||review.resolvedAt>held.resolvedAt))byId.set(review.id,review);
       }
-      const all=[...byId.values()],open=all.filter(review=>!review.resolvedAt),done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));
-      return [...open,...done].sort((a,b)=>a.id.localeCompare(b.id));
+      const open=[...byId.values()].filter(review=>!review.resolvedAt).sort((a,b)=>a.keptAt.localeCompare(b.keptAt)||a.id.localeCompare(b.id)),bySubject=new Map<string,PendingReview[]>();
+      for(const review of open){
+        const key=review.subject+':'+review.ref,peers=bySubject.get(key)||[];
+        if(peers.some((previous:PendingReview)=>sameOpen(previous,review)))byId.set(review.id,resolved(review)!);
+        else{peers.push(review);bySubject.set(key,peers);}
+      }
+      const all=[...byId.values()],remaining=all.filter(review=>!review.resolvedAt),done=all.filter(review=>review.resolvedAt).sort((a,b)=>b.resolvedAt.localeCompare(a.resolvedAt)||a.id.localeCompare(b.id)).slice(0,Math.max(0,Number(limit)||0));
+      return [...remaining,...done].sort((a,b)=>a.id.localeCompare(b.id));
     }
     // The rich texts a stored review holds, which may use attachments.
     function richTexts(review:PendingReview|null|undefined){
@@ -839,7 +1060,7 @@ function materializeDailyRecordSummary(summary:unknown){
       const values=review.subject==='note'?[(kept as NoteFields).text,review.base&&review.base.text]:review.subject==='savedDay'?[(kept as DailyRecord).reflection]:review.subject==='session'?[(kept as ActiveSession).snapshot&&(kept as ActiveSession).snapshot.review&&(kept as ActiveSession).snapshot.review.reflection]:[];
       return values.filter(value=>typeof value==='string'&&value);
     }
-    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,normalize,create,resolved,merge,richTexts});
+    return freeze({format:'study-director.pending-review-codec',contractVersion:1,version:VERSION,normalize,create,resolved,merge,sameOpen,sameMeaning,matchesCurrent,meaningfulValue,savedPlanMeaning,richTexts});
   }
 
   return freeze({

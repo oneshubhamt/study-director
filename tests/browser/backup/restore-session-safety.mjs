@@ -77,7 +77,7 @@ try{
   const active=await page1.evaluate(`(async()=>{
     const d=__RestoreSafetyQA,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=new Date(),m=now.getHours()*60+now.getMinutes()-1,fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');
     document.getElementById('plan-input').value=fmt(m)+' | 60 | Restore safety QA | work | Ethics | pages | 10';
-    if(!d.applySchedule({skipNotify:true}))throw new Error('QA schedule did not apply');
+    if(!await d.applySchedule({skipNotify:true}))throw new Error('QA schedule did not apply');
     d.TimerEngine.startCur(2);if(d.TimerState.snapshot().mode!=='running')throw new Error('QA running timer did not start');await wait(120);await d.flushLiveDraft();
     d.goTab('review');await wait(100);
     const reflection=document.getElementById('daily-reflection');reflection.value='ACTIVE SESSION REVIEW';d.setStudyQuality(4,{save:false});d.ReviewEditor.saveReview({strict:true});await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();await d.flushLiveDraft();

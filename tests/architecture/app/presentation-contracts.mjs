@@ -65,7 +65,7 @@ assert.match(glassCss,/\[data-theme="dark"\]\[data-sd-area="execute"\] body::bef
 // the document made every tab change restyle the whole page each frame.
 assert.doesNotMatch(glassCss,/@property --sd-aurora-[abcd]\{[^}]*inherits:true/u,'aurora colours must not inherit.');
 assert.match(glassCss,/html\[data-material="glass"\] body::before\{\s*transition:--sd-aurora-a/u,'the aurora glide runs on the background layer.');
-assert.match(html,/function markPaneEntrance\(pane\)\{[\s\S]*?if\(pane\.id==='pane-insights'\)return;/u,'Insights renders progressively and arrives without the pane entrance.');
+assert.match(html,/function markPaneEntrance\(pane\)\{[\s\S]*?if\(pane\.id==='pane-insights'&&\(!pane\.firstElementChild\|\|pane\.querySelector\('\.plugin-loading-panel'\)\)\)return;/u,'Insights arrives still only while it renders behind its loading panel; a kept view animates like any pane.');
 assert.match(html,/markPaneEntrance\(pane\);\n\s*document\.documentElement\.dataset\.sdArea=tabName;/u,'navigation publishes the active area for presentation atmospheres.');
 assert.doesNotMatch(coreCss,/--row-name-color:rgba\(/u,'plan row names must not be dimmed with alpha below readable contrast.');
 

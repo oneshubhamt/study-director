@@ -26,7 +26,9 @@ const preflightIndex=applyBody.indexOf('ignoreActiveTimers:true');
 const pauseIndex=applyBody.indexOf('togglePause()');
 assert.ok(preflightIndex>=0&&pauseIndex>preflightIndex,'Pause & Update must preflight non-timer blockers before pausing the timer');
 
-assert.match(sw,/const PRECACHE_CONCURRENCY=4;/,'Service Worker precache concurrency must be explicitly bounded at four');
-assert.match(sw,/Promise\.allSettled/,'concurrent precache batches must settle before fail-closed cleanup');
+assert.match(sw,/const PRECACHE_CONCURRENCY=8;/,'Service Worker precache concurrency must be explicitly bounded at eight');
+assert.match(sw,/const worker=async\(\)=>\{[\s\S]*while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');
+assert.match(sw,/Promise\.all\(Array\.from\(\{length:Math\.min\(PRECACHE_CONCURRENCY,PRECACHE\.length\)\},\(\)=>worker\(\)\)\)/u,'precache worker count must be bounded by both the concurrency limit and asset count');
+assert.match(sw,/if\(failure\)throw failure;/,'worker-queue failures must still fail the installation before release metadata is committed');
 
-console.log(JSON.stringify({status:'PASS',suite:'pwa-updater-contract',checks:{cooldown24h:true,successTimestamp:true,boundedBackoff:true,eventDrivenWaiting:true,preflightBeforePause:true,precacheConcurrency4:true}},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'pwa-updater-contract',checks:{cooldown24h:true,successTimestamp:true,boundedBackoff:true,eventDrivenWaiting:true,preflightBeforePause:true,precacheConcurrency8:true,workerQueue:true}},null,2));

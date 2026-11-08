@@ -132,7 +132,7 @@ function assertStorageGeneration(expected:number|undefined){
   if(storageGeneration()!==expected)throw backupPreparationError('BACKUP_STORAGE_CLEARED','checkpoint-source-fence','Browser data was cleared while this backup was being prepared. Nothing was saved.');
   return true;
 }
-async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),options:CaptureOptions={}):Promise<FullLogicalCapture>{
+async function captureLogicalCheckpoint(exportedAt:string=new Date().toISOString(),options:CaptureOptions={}):Promise<FullLogicalCapture>{
   const generation=storageGeneration();
   const includeAssetBlobs=options&&options.includeAssetBlobs!==false;
   let yieldedAt=Date.now();
@@ -229,12 +229,15 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   assertStorageGeneration(generation);
   const installationId=AppData.provenance.installationId();
   const checkpointMetadata=BackupCodec.createCheckpointMetadata(installationId,exportedAt);
+  const attachmentCoverage=BackupCodec.attachmentCoverage(assetItems.map(item=>item.descriptor));
+  const attachmentWarning=BackupCodec.missingAttachmentWarning(assetItems.map(item=>item.descriptor));
+  const captureCompleteness=freeze({...completeness,attachments:attachmentCoverage.fullyRecoverable?'complete':'missing',fullyRecoverable:completeness.complete&&attachmentCoverage.fullyRecoverable});
   const captureBase:Omit<FullLogicalCapture,'protectedCheckpointManifest'>={
     format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,
     dailyDocuments:freeze([...dailyDocuments]),exportedAt,sourceRevision,studentName:getStudentNameFromDisplay(),installationId,checkpoint:checkpointMetadata,
     recordDates:freeze([...recordDates]),noteItems:freeze([...noteItems]),activeSession,personalData,pendingReviewItems:freeze([...pendingReviewItems]),
     savedDayDeletions:freeze([...(savedDayDeletions||[])]),noteDeletions:freeze([...(noteDeletions||[])]),attachmentDeletions:freeze([...(attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),
-    warning:[sessionResult.warning,recordSource.warning,recoveryWarning,noteRecoveryWarning].filter(Boolean).join(' '),completeness
+    warning:[sessionResult.warning,recordSource.warning,recoveryWarning,noteRecoveryWarning,attachmentWarning].filter(Boolean).join(' '),completeness:captureCompleteness
   };
   const protectedCheckpointManifest=BackupCodec.createProtectedManifest(captureBase,checkpointMetadata);
   const capture=freeze({...captureBase,protectedCheckpointManifest});

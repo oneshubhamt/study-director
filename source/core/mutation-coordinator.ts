@@ -21,7 +21,7 @@ const createModule=()=>{
     functions(input.durable,['acquire','release'],'Mutation coordinator durable lease port');
     exactObject(input.environment,['AbortController','addStorageListener','clearInterval','locks','now','randomIdPart','setInterval','setTimeout'],'Mutation coordinator environment');
     if(typeof input.environment.AbortController!=='function'||typeof input.environment.addStorageListener!=='function'||typeof input.environment.clearInterval!=='function'||typeof input.environment.now!=='function'||typeof input.environment.randomIdPart!=='function'||typeof input.environment.setInterval!=='function'||typeof input.environment.setTimeout!=='function')throw new TypeError('Mutation coordinator environment is invalid.');
-    functions(input.hooks,['refreshUi','scheduleUpdate'],'Mutation coordinator hooks');
+    functions(input.hooks,['foreignReleased','refreshUi','scheduleUpdate'],'Mutation coordinator hooks');
     functions(input.identity,['canMutate','status'],'Mutation coordinator identity port');
     functions(input.local,['getJson','remove','setJson'],'Mutation coordinator local lease port');
     const LEASE_MS=Math.max(5000,Number(configuration.leaseMs)||20000),HEARTBEAT_MS=Math.max(1000,Number(configuration.heartbeatMs)||5000),LOCK_NAME=String(configuration.lockName||''),STORAGE_KEY=String(configuration.storageKey||'');
@@ -32,7 +32,15 @@ const createModule=()=>{
     function ownerIdentity(){const own=identity();return `tab_${own.tabId}_${own.pageId}_${own.claimId}`.replace(/[^a-z0-9_-]/gi,'_').slice(0,164);}
     function lease(){const value=input.local.getJson(STORAGE_KEY,null) as LocalLease|null|undefined;return value&&value.version===1?value:null;}
     function sameOwner(value:LocalLease|null|undefined):boolean{const own=identity();return !!(value&&value.tabId===own.tabId&&value.pageId===own.pageId&&value.claimId===own.claimId);}
-    function foreignActive(){const value=lease();return !!(value&&!sameOwner(value)&&Number(value.expiresAt)>nowMs());}
+    // A tab closed in the middle of a change leaves its lease until it runs
+    // out, and nothing announces that: a tab that finds one looks again when
+    // it ends (a live tab renews it first, and the look then waits again).
+    let foreignExpiry:number|null=null;
+    function watchForeignExpiry(value:LocalLease){
+      if(foreignExpiry!==null)return;
+      foreignExpiry=input.environment.setTimeout(()=>{foreignExpiry=null;if(foreignActive())return;refreshUi();input.hooks.foreignReleased();},Math.max(50,Number(value.expiresAt)-nowMs()+50));
+    }
+    function foreignActive(){const value=lease(),foreign=!!(value&&!sameOwner(value)&&Number(value.expiresAt)>nowMs());if(foreign)watchForeignExpiry(value);return foreign;}
     function writesBlocked(){return foreignActive()||!!(recoveryFault&&!(active&&isRecoveryKind(active.kind)));}
     function writeLease(kind:string,id:string){
       const own=identity(),value={version:1,...own,kind,id,expiresAt:nowMs()+LEASE_MS};

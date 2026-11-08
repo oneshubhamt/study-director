@@ -45,7 +45,7 @@ preemptionControls.onStorageRead=null;blocked=false;preemptionControls.onAreaRea
 assert.equal((await preemption.app.maintenance.run()).status,'completed');assert.equal(notesReads,2,'foreground interruption invalidates the phase continuation');
 console.log(JSON.stringify({status:'PASS',suite:'data-maintenance-preemption',yielded,metadataRetry:true}));
 
-const readerContext={fallbackDailyRecordsGet:()=>[],filterPendingDeletedEntities:value=>value,mergeDailyRecordSets:()=>[],idbAllRecords:async()=>{throw new Error('storage unavailable');},isCanonicalRuntimeError:()=>false,showStorageFallbackWarning(){},materializeDailyRecordView:value=>value};
+const readerContext={fallbackDailyRecordsGet:()=>[],filterPendingDeletedEntities:value=>value,mergeDailyRecordSets:()=>[],idbAllRecords:async()=>{throw new Error('storage unavailable');},isCanonicalRuntimeError:()=>false,showStorageFallbackWarning(){},materializeDailyRecordView:value=>value,storedDailyRecordFields:value=>value};
 vm.createContext(readerContext);vm.runInContext(source.slice(source.indexOf('async function getDailyRecords('),source.indexOf('async function removeDailyRecord(')),readerContext);
 assert.equal((await readerContext.getDailyRecords()).length,0,'interactive read retains its fallback policy');
 await assert.rejects(readerContext.getDailyRecords({strict:true}),/storage unavailable/);
@@ -204,17 +204,19 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-recovery-progress',pr
  console.log(JSON.stringify({status:'PASS',suite:'upkeep-foreground-watcher',namedWait:true,oneWatcher:true,wakeOnRelease:true}));
 }
 
-// A file backup or import the person starts holds background backup work in
-// every location until it ends; automatic backups never set those flags.
+// A person-started file import/export holds every provider. An automatic
+// Drive catch-up shares the import controller but never suspends itself.
 {
- const status={importActive:false,standaloneExportActive:false,busy:false},holds=[],listeners=[];let changes=0;
+ const status={importActive:false,importHoldsBackground:false,standaloneExportActive:false,busy:false},holds=[],listeners=[];let changes=0;
  const context={BackupController:{status:()=>({...status}),subscribeStatus:fn=>listeners.push(fn)},BackupProviderRuntime:{suspendBackground:reason=>{const hold={reason,released:0,settled:Promise.resolve(),release(){hold.released++;}};holds.push(hold);return hold;}},AppDiagnostics:{capture:error=>assert.fail(error)},foregroundChanged:()=>{changes++;}};
  vm.createContext(context);const start=hostSource.indexOf('let fileWorkHold=null;'),marker='BackupController.subscribeStatus(holdBackgroundForFileWork);';
  vm.runInContext(hostSource.slice(start,hostSource.indexOf(marker,start)+marker.length),context);assert.equal(listeners.length,1);const notify=()=>listeners[0]();
  status.busy=true;notify();assert.equal(holds.length,0,'an automatic backup does not hold itself');
  status.standaloneExportActive=true;notify();notify();assert.equal(holds.length,1,'one hold while the file backup runs');assert.equal(holds[0].reason,'file-backup');
- status.standaloneExportActive=false;status.importActive=true;notify();assert.equal(holds.length,1,'an import that follows keeps the same hold');assert.equal(holds[0].released,0);
- status.importActive=false;status.busy=false;notify();assert.equal(holds[0].released,1,'released when the person-started work ends');notify();assert.equal(holds[0].released,1);
- assert.equal(changes,6,'each status change lets the upkeep watcher check at once');
+ status.standaloneExportActive=false;status.importActive=true;status.importHoldsBackground=true;notify();assert.equal(holds.length,1,'a manual import that follows keeps the same hold');assert.equal(holds[0].released,0);
+ status.importActive=false;status.importHoldsBackground=false;status.busy=false;notify();assert.equal(holds[0].released,1,'released when the person-started work ends');notify();assert.equal(holds[0].released,1);
+ status.importActive=true;notify();assert.equal(holds.length,1,'an automatic provider sync must not acquire a fresh file-backup hold');
+ status.importActive=false;notify();assert.equal(holds[0].released,1,'an automatic sync cannot release someone else\'s completed hold');
+ assert.equal(changes,8,'each status change lets the upkeep watcher check at once');
  console.log(JSON.stringify({status:'PASS',suite:'file-work-hold',holdsOnlyPersonStartedWork:true,singleHold:true,releasesOnEnd:true}));
 }

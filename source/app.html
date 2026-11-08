@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="study-director-build" content="@@SD_BUILD_ID@@">
+<meta name="study-director-source-commit" content="@@SD_SOURCE_COMMIT@@">
 <meta name="study-director-assets" content="__SD_PAGE_ASSET_ID__">
 <meta name="theme-color" content="#04050a" data-sd-theme-color>
 <meta name="mobile-web-app-capable" content="yes">
@@ -17,6 +18,7 @@
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="assets/icons/favicon-16.png">
+<link rel="preload" as="script" href="@@SD_RICH_TEXT_FILENAME@@">
 <title>STUDY DIRECTOR · sd@@SD_RELEASE_ID@@</title>
 <script><!-- @SD_HOST_INSTALL_CAPTURE@ --></script>
 <script><!-- @SD_HOST_PROFILE_SCOPE@ --></script>
@@ -38,15 +40,14 @@
   <div class="mobile-brand ui-label">Study Director</div>
   <div class="sb-head">
     <div class="sb-eyebrow ui-label">Study Director</div>
-    <button class="sb-name profile-tag" id="profile-tag" type="button" data-action="open-profile" aria-haspopup="dialog" aria-controls="profile-dialog" title="Profile, Google Drive and backup password"><span class="profile-tag-name" data-student-name>Student</span><span class="profile-tag-caret" aria-hidden="true"></span></button>
+    <button class="sb-name profile-tag status-host" id="profile-tag" type="button" data-action="open-profile" data-ring="off" aria-haspopup="dialog" aria-controls="profile-dialog" title="Profile, Google Drive and backup password"><span class="profile-tag-name" data-student-name>Student</span><span class="profile-tag-caret" aria-hidden="true"></span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="11" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="11" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></button>
     <div class="sb-race ui-mono" id="sb-date">—</div>
-    <button class="sb-sync ui-mono" id="sb-sync" type="button" data-action="show-drive-sync" aria-label="Google Drive sync status" hidden></button>
   </div>
   <div class="sb-clock">
     <div class="sb-clock-lbl ui-label">Local Time</div>
     <div id="clock">00:00:00</div>
   </div>
-  <button class="profile-badge" id="profile-badge" type="button" data-action="open-profile" aria-haspopup="dialog" aria-controls="profile-dialog" aria-label="Profile: Student"><span class="profile-badge-letter" aria-hidden="true">S</span><span class="profile-badge-dot" id="profile-badge-dot" hidden></span></button>
+  <button class="profile-badge status-host" id="profile-badge" type="button" data-action="open-profile" data-ring="off" aria-haspopup="dialog" aria-controls="profile-dialog" aria-label="Profile: Student"><span class="profile-badge-letter" aria-hidden="true">S</span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="50%" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="50%" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></button>
   <div class="sb-nav" role="tablist" aria-label="Primary navigation">
     <button class="nav-item ui-label on" id="tab-plan" type="button" role="tab" data-tab="plan" aria-controls="pane-plan" aria-selected="true" tabindex="0"><span class="nav-icon" aria-hidden="true">▦</span>Plan</button>
     <button class="nav-item ui-label" id="tab-execute" type="button" role="tab" data-tab="execute" aria-controls="pane-execute" aria-selected="false" tabindex="-1"><span class="nav-icon" aria-hidden="true">⏱</span>Execute</button>
@@ -115,7 +116,9 @@
           <div class="execute-overlay-kicker ui-label" id="execute-overlay-kicker">Execute Status</div>
           <div class="execute-overlay-title" id="execute-overlay-title">No Schedule Loaded</div>
           <div class="execute-overlay-sub ui-mono" id="execute-overlay-sub">Open Plan and apply today’s schedule to begin.</div>
+          <div class="execute-overlay-progress ui-label" id="execute-session-progress" role="status" aria-live="polite" hidden></div>
           <button class="execute-overlay-action ui-btn" id="execute-open-plan" type="button" data-tab="plan">Open Plan</button>
+          <button class="execute-overlay-action ui-btn primary" id="execute-session-action" type="button" data-action="restore-session" hidden disabled>Continue Here</button>
         </div>
         <div class="break-meter ui-inset" id="break-meter">
           <span class="break-meter-label ui-label" id="break-label">Break elapsed</span>
@@ -360,12 +363,9 @@
         <div class="session-panel-title ui-label" id="session-panel-title">Live Session Active</div>
         <div class="session-panel-note ui-body" id="session-panel-note">Today’s live schedule is active. These controls affect only the live session; saved Library records and notes are kept.</div>
         <div class="session-actions">
-          <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
           <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
-          <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
-        </div>
-        <div class="session-finish-action">
           <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
+          <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
         </div>
       </div>
     </section>
@@ -570,15 +570,15 @@
           <button class="mini-btn ui-btn" id="review-kept-versions" type="button" data-action="review-kept-versions">Review</button>
         </div>
         <div class="backup-location-row unsupported-data-row" id="unsupported-data" role="status" hidden>
-          <div class="backup-row-copy"><span class="ui-label">From a newer version</span><span class="ui-helper" id="unsupported-data-text"></span></div>
-          <button class="mini-btn ui-btn" type="button" data-action="check-unsupported-update">Check for update</button>
+          <div class="backup-row-copy"><span class="ui-label">Data from a newer app version</span><span class="ui-helper" id="unsupported-data-text"></span></div>
+          <button class="mini-btn ui-btn" type="button" data-action="check-unsupported-update">Update app</button>
         </div>
         <div class="library-data-group ui-panel">
           <details class="backup-model-disclosure ui-disclosure">
             <summary><span class="backup-model-summary"><span class="backup-model-summary-title">Backup model</span><span class="backup-model-summary-copy">Local-first · syncs through Drive</span></span></summary>
             <div class="backup-model-body ui-helper">
               <dl class="backup-model-explainer">
-                <div><dt>Versions</dt><dd>The Device Folder keeps verified versions in a folder you choose on this device; Google Drive keeps the same history off this device. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
+                <div><dt>Versions</dt><dd>The Device Folder and Google Drive each keep verified versions independently, using the same retention rules. Each version is a complete copy of your data, even though unchanged parts are stored once.</dd></div>
                 <div><dt>Several devices</dt><dd>While a device is signed in to Google Drive it syncs: it takes in what your other devices changed, then uploads its own changes. A change made on one side only is taken for you. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you. Saved data and the Active Session travel too; changes to a session running here wait until it ends. Without Drive, each device keeps working on its own.</dd></div>
                 <div><dt>Portable backup</dt><dd>Export backup creates one complete <span class="ui-mono">.sdbackup</span> file for manual transfer or safekeeping. Restore it on any Study Director device when needed; it is not part of Version History.</dd></div>
               </dl>
@@ -595,13 +595,13 @@
                 <button class="mini-btn ui-btn" id="open-version-history" type="button" data-action="open-version-history" aria-haspopup="dialog" aria-controls="managed-version-history">Version History</button>
               </div>
             </div>
-            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive keep the same history.</p>
+            <p class="ui-helper" id="backup-retention-note">Your backups keep 15 versions: the latest, 6 daily, 4 weekly and 4 monthly, so about four to five months back. They also keep one version per hour from the last 24 hours when your notes changed, up to 10 more. Before a restore, each device also keeps a safety version for 7 days. The Device Folder and Google Drive use the same retention rules but keep independent version histories.</p>
             <div class="backup-location-stack" aria-label="Automatic backup locations">
               <div class="backup-location-row backup-device-row">
                 <div class="backup-row-copy">
                   <div class="backup-location-heading">
                     <span class="ui-label">Device Folder</span>
-                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, both keep the same history. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
+                    <span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="device-backup-info" aria-label="About Device Folder backup" aria-expanded="false" aria-controls="device-backup-info">i</button><span class="pnote-info-popover" id="device-backup-info" role="note" hidden>Versions saved automatically in a folder you choose on this device. With Google Drive connected too, each destination backs up this device’s canonical data independently. Use a folder only this device uses, not one that Dropbox, OneDrive or iCloud syncs between devices.</span></span>
                   </div>
                 </div>
                 <strong class="backup-status-value standard ui-mono" id="device-backup-status">Off</strong>
@@ -723,10 +723,10 @@
                 <div class="backup-storage-state ui-mono">
                   <strong class="backup-status-value standard" id="local-data-status" role="status" aria-live="polite">Checking…</strong>
                   <button class="backup-storage-action mini-btn ui-btn" id="protect-local-data" type="button" data-action="protect-local-data" hidden>Try protection</button>
-                  <span class="backup-status-meta">· Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
+                  <span class="backup-status-meta">Saved <span id="last-local-save">Never</span></span><span class="backup-status-meta" id="local-storage-use"></span>
                 </div>
               </div>
-              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-device-integrity">Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn" type="button" data-action="recheck-drive-integrity">Recheck Google Drive</button></div>
+              <div class="backup-inline-note ui-helper"><strong>Verification</strong><p id="attachment-verification-status" role="status">Attachment presence and size: not yet checked. This check does not verify file contents.</p><p id="device-verification-status" role="status">Device Folder: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-device-folder" type="button" data-action="recheck-device-integrity" hidden>Recheck Device Folder</button><p id="drive-verification-status" role="status">Google Drive: not yet verified.</p><button class="mini-btn ui-btn backup-recheck" id="recheck-google-drive" type="button" data-action="recheck-drive-integrity" hidden>Recheck Google Drive</button><p class="verification-note">Today’s live session is not part of these checks.</p></div>
               <div class="backup-compact-row backup-diagnostics-row">
                 <span class="backup-location-heading"><span class="ui-label">Data and backup diagnostics</span><span class="pnote-info"><button class="pnote-info-btn" type="button" data-action="toggle-backup-info" data-backup-info-target="backup-diagnostics-info" aria-label="About data and backup diagnostics" aria-expanded="false" aria-controls="backup-diagnostics-info">i</button><span class="pnote-info-popover" id="backup-diagnostics-info" role="note" hidden>Copies storage-health observations, backup and recovery stages, verification progress and pending cleanup for troubleshooting. Study content, note text, attachment names and backup payloads are not included.</span></span></span>
                 <div class="backup-security-state"><button class="mini-btn ui-btn" id="copy-backup-diagnostics" type="button" data-action="copy-backup-diagnostics">Copy diagnostics</button><span class="backup-status-meta" id="backup-diagnostics-status" role="status" aria-live="polite"></span></div>
@@ -793,6 +793,15 @@
       </div>
     </details>
     <div class="plan-status ui-status" id="plan-status"></div>
+    <div class="plan-session-strip ui-surface" id="plan-board-session-actions" role="group" aria-labelledby="plan-session-state" hidden>
+      <div class="plan-session-state ui-label" id="plan-session-state">Today’s session</div>
+      <div class="plan-session-buttons">
+        <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
+        <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
+        <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
+        <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
+      </div>
+    </div>
     <div class="plan-board ui-panel" id="plan-board" data-mode="empty">
       <div class="plan-board-head">
         <div class="plan-board-title-stack">
@@ -831,18 +840,19 @@
       </div>
       <div class="sched-list" id="sched-list"></div>
     </div>
-    <div class="plan-board-session-actions" id="plan-board-session-actions" hidden>
-      <button class="plan-btn ui-btn primary" type="button" data-action="restore-session" hidden disabled>Restore Session</button>
-      <button class="plan-btn ui-btn warn" type="button" data-action="suspend-session" disabled>Suspend Today</button>
-      <button class="plan-btn ui-btn finish" type="button" data-action="finish-session" disabled>Finish Today</button>
-      <button class="plan-btn ui-btn danger" type="button" data-action="reset-session" disabled>Reset Today</button>
-    </div>
     <div class="ui-helper">Applying during a current trackable window starts its remaining time automatically; later trackable blocks start at their scheduled wall-clock windows. Reordering or changing duration recalculates later starts and closes following gaps.</div>
   </div>
 </main>
 </div>
 <!-- GLOBAL INTERACTIONS: decisions, structured input, brief feedback -->
-<div class="sd-toast-region" id="sd-toast-region" role="region" aria-label="Study Director notifications" aria-live="polite" aria-atomic="false"></div>
+<div class="sd-toast-region" id="sd-toast-region" role="region" aria-label="Study Director notifications" aria-live="polite" aria-atomic="false"><section class="drive-connect-card" id="drive-connect-card" aria-labelledby="drive-connect-title" aria-live="off" data-tone="working" data-toast-card hidden>
+  <div class="drive-connect-head"><strong class="drive-connect-title ui-label" id="drive-connect-title">Connecting Google Drive</strong><button class="drive-connect-close" type="button" data-action="close-drive-connect" data-card-close aria-label="Hide (syncing continues)" title="Hide (syncing continues)">×</button></div>
+  <p class="drive-connect-status ui-body" id="drive-connect-status" role="status"></p>
+  <ol class="drive-connect-steps" id="drive-connect-steps"></ol>
+  <div class="drive-connect-bar" id="drive-connect-bar" aria-hidden="true" hidden><span></span></div>
+  <p class="drive-connect-detail ui-body" id="drive-connect-detail" hidden></p>
+  <button class="drive-connect-action mini-btn ui-btn" id="drive-connect-action" type="button" data-action="sync-status-action" hidden></button>
+</section></div>
 <dialog class="interaction-dialog" id="sd-interaction-dialog"></dialog>
 <dialog class="interaction-dialog danger library-clear-dialog" id="library-clear-dialog" aria-labelledby="library-clear-title">
   <div class="interaction-shell">
@@ -940,28 +950,46 @@
 <dialog class="interaction-dialog profile-dialog" id="profile-dialog" aria-labelledby="profile-dialog-title">
   <div class="interaction-shell">
     <div class="interaction-header profile-header">
-      <span class="profile-avatar" id="profile-avatar" aria-hidden="true">S</span>
+      <span class="profile-avatar status-host" id="profile-avatar" data-ring="off" aria-hidden="true"><span class="profile-avatar-letter">S</span><svg class="status-ring" aria-hidden="true" focusable="false"><rect class="status-ring-track" width="100%" height="100%" rx="50%" pathLength="100"/><rect class="status-ring-arc" width="100%" height="100%" rx="50%" pathLength="100"/></svg><span class="status-badge" aria-hidden="true"></span></span>
       <div class="profile-heading">
-        <div class="interaction-eyebrow ui-label">Profile</div>
-        <h2 class="interaction-title ui-title profile-title" id="profile-dialog-title" data-student-name>Student</h2>
-        <div class="profile-subtitle" id="profile-subtitle"></div>
+        <h2 class="interaction-title ui-title profile-title" id="profile-dialog-title"><span class="sr-only">Profile: </span><button class="profile-name" id="profile-name-button" type="button" data-action="rename-profile" title="Rename"><span class="profile-name-text" data-student-name>Student</span><svg class="profile-name-pencil" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M11.2 2.3a1.6 1.6 0 0 1 2.3 2.3l-7.9 7.9-3.1.8.8-3.1z"/></svg></button></h2>
+        <input class="ui-field profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" maxlength="80" aria-label="Your name" data-keydown="profile-name" data-blur="profile-name" hidden>
+        <div class="profile-subtitle" id="profile-subtitle" hidden></div>
       </div>
     </div>
     <div class="interaction-body profile-body">
-      <div class="profile-rows">
-        <label class="profile-row profile-name-row"><span class="profile-row-label ui-label">Name</span><input class="ui-field interaction-input profile-name-input" id="profile-name-input" type="text" autocomplete="name" spellcheck="false" data-keydown="profile-name" data-blur="profile-name"></label>
-        <div class="profile-row"><span class="profile-row-label ui-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></span></div>
-        <div class="profile-row"><span class="profile-row-label ui-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span><span class="profile-row-actions"><button class="mini-btn ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></span></div>
-      </div>
+      <section class="profile-section profile-status" id="profile-status" aria-labelledby="profile-status-title">
+        <h3 class="profile-section-title ui-label" id="profile-status-title">Sync &amp; backups</h3>
+        <div class="profile-group">
+          <div class="profile-status-block">
+            <p class="profile-status-headline" id="profile-status-headline" role="status" aria-live="polite"></p>
+            <div class="profile-status-next"><span class="profile-status-detail" id="profile-status-detail"></span><button class="profile-act ui-btn" id="profile-status-primary" type="button" data-action="sync-status-action" hidden></button></div>
+            <ul class="profile-status-items" id="profile-status-items"></ul>
+          </div>
+          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Google Drive</span><span class="profile-row-value" id="profile-drive-value">Not connected</span></span><button class="profile-act ui-btn" id="profile-drive-action" type="button" data-action="profile-drive">Connect</button></div>
+          <div class="profile-row"><span class="profile-row-text"><span class="profile-row-label">Backup password</span><span class="profile-row-value" id="profile-password-value">Off</span></span><button class="profile-act ui-btn" id="profile-password-action" type="button" data-action="backup-protection">Set…</button></div>
+          <button class="profile-row profile-link-row" type="button" data-action="sync-status-action" data-sync-action="open-data"><span class="profile-row-text"><span class="profile-row-label">Backup details</span><span class="profile-row-value">Versions and backup files in Library → Data</span></span><span class="profile-chevron" aria-hidden="true"></span></button>
+        </div>
+      </section>
       <section class="profile-section" aria-labelledby="profile-list-title">
         <h3 class="profile-section-title ui-label" id="profile-list-title">Profiles on this device</h3>
-        <ul class="profile-list" id="profile-list"></ul>
+        <div class="profile-group">
+          <ul class="profile-list" id="profile-list"></ul>
+          <button class="profile-row profile-add" id="profile-add" type="button" data-action="add-profile"><span class="profile-add-mark" aria-hidden="true">+</span><span class="profile-row-label">Add profile</span></button>
+        </div>
         <p class="profile-note" id="profile-unsupported" hidden>This profile list was saved by a newer version of Study Director. Update the app to add, switch or remove profiles; the list stays as it is.</p>
-        <button class="mini-btn ui-btn ghost profile-add" id="profile-add" type="button" data-action="add-profile">+ Add profile</button>
+        <p class="profile-caption" id="profile-device"></p>
+      </section>
+      <section class="profile-section profile-recent" id="profile-recent" aria-labelledby="profile-recent-title">
+        <div class="profile-section-head"><h3 class="profile-section-title ui-label" id="profile-recent-title">Recent</h3><button class="profile-act profile-act-quiet ui-btn" id="profile-recent-clear" type="button" data-action="clear-recent" hidden>Clear</button></div>
+        <p class="profile-recent-empty" id="profile-recent-empty">Nothing yet today.</p>
+        <div class="profile-group" id="profile-recent-group" hidden>
+          <ol class="profile-recent-list" id="profile-recent-list"></ol>
+          <button class="profile-row profile-more-row" id="profile-recent-more" type="button" data-action="recent-more" aria-expanded="false" aria-controls="profile-recent-list" hidden></button>
+        </div>
       </section>
     </div>
     <div class="interaction-actions profile-actions">
-      <span class="profile-device" id="profile-device"></span>
       <button class="interaction-action ui-btn primary" type="button" data-action="close-profile" autofocus>Done</button>
     </div>
   </div>

@@ -51,22 +51,34 @@ const createModule=(input:ReconciliationInput)=>{
     return map;
   }
   function equivalentState<T>(a:EntityState<T>|undefined,b:EntityState<T>|undefined){return !!a&&!!b&&a.kind===b.kind&&(a.kind==='deleted'||Canonical.same(a.value,b.value));}
-  function pairStateCandidates<T>(identity:string,key:string,localSource:SourceRef,incomingSource:SourceRef,localState:EntityState<T>|undefined,incomingState:EntityState<T>|undefined):readonly EntityCandidate<T>[]{
-    if(!localState&&!incomingState)return freeze([]);
-    function candidate(origin:'shared'|'local'|'incoming',state:EntityState<T>,deletedAt?:string):EntityCandidate<T>{
-      const kind=state.kind,base={id:`${identity}_${kind}_${origin}`,key,kind,local:origin!=='incoming',sources:candidateSources(localSource,incomingSource,origin)};
-      return state.kind==='record'
-        ?freeze({...base,kind:'record',value:state.value,record:state.value,deletedAt:null,localDeletedAt:null})
-        :freeze({...base,kind:'deleted',value:null,record:null,deletedAt:deletedAt||state.deletedAt,localDeletedAt:origin!=='incoming'?state.deletedAt:null});
-    }
-    if(localState&&incomingState&&equivalentState(localState,incomingState)){
-      const deletedAt=localState.kind==='deleted'&&incomingState.kind==='deleted'
-        ?(Date.parse(localState.deletedAt)>=Date.parse(incomingState.deletedAt)?localState.deletedAt:incomingState.deletedAt):undefined;
-      return freeze([candidate('shared',localState,deletedAt)]);
+  // Exactly one study-evidence projection for Saved Day equality and
+  // the separately versioned semantic baseline. Write metadata is excluded.
+  function savedDayContentValue(record:DailyRecord|null|undefined){
+    if(!record||typeof record!=='object')return null;
+    const {savedAt:_savedAt,updatedAt:_updatedAt,sourceRevision:_sourceRevision,...evidence}=record;
+    return evidence;
+  }
+  function equivalentSavedDayState(a:EntityState<DailyRecord>|undefined,b:EntityState<DailyRecord>|undefined){
+    if(!a||!b||a.kind!==b.kind)return false;
+    if(a.kind==='deleted')return true;
+    if(a.kind!=='record'||!a.value||!b.value)return false;
+    return Canonical.same(savedDayContentValue(a.value),savedDayContentValue(b.value));
+  }
+  function pairStateCandidates<T>(identity:string,key:string,localSource:SourceRef,incomingSource:SourceRef,localState:EntityState<T>|undefined,incomingState:EntityState<T>|undefined,equivalent:(a:EntityState<T>|undefined,b:EntityState<T>|undefined)=>boolean=equivalentState):readonly EntityCandidate<T>[]{
+    const source=(origin:'local'|'incoming'|'shared')=>candidateSources(localSource,incomingSource,origin);
+    if(localState&&incomingState&&equivalent(localState,incomingState)){
+      const sources=source('shared');
+      if(localState.kind==='record'&&incomingState.kind==='record')return freeze([freeze({id:`${identity}_record_shared`,key,kind:'record' as const,local:true,sources,value:incomingState.value,record:incomingState.value,deletedAt:null,localDeletedAt:null})]);
+      if(localState.kind==='deleted'&&incomingState.kind==='deleted'){
+        const deletedAt=Date.parse(localState.deletedAt)>=Date.parse(incomingState.deletedAt)?localState.deletedAt:incomingState.deletedAt;
+        return freeze([freeze({id:`${identity}_deleted_shared`,key,kind:'deleted' as const,local:true,sources,value:null,record:null,deletedAt,localDeletedAt:localState.deletedAt})]);
+      }
     }
     const out:EntityCandidate<T>[]=[];
     for(const [origin,state] of [['local',localState],['incoming',incomingState]] as const){
-      if(state)out.push(candidate(origin,state));
+      if(!state)continue;
+      const base={id:`${identity}_${state.kind}_${origin}`,key,local:origin==='local',sources:source(origin)};
+      out.push(state.kind==='record'?freeze({...base,kind:'record' as const,value:state.value,record:state.value,deletedAt:null,localDeletedAt:null}):freeze({...base,kind:'deleted' as const,value:null,record:null,deletedAt:state.deletedAt,localDeletedAt:origin==='local'?state.deletedAt:null}));
     }
     return freeze(out);
   }
@@ -74,9 +86,12 @@ const createModule=(input:ReconciliationInput)=>{
     const options:StateMapOptions<DailyRecord,SavedDayDeletion>={records:source=>source.savedDays,deletions:source=>source.savedDayDeletions,keyOf:value=>validDate(value&&value.date)?value.date:'',entityLabel:'Saved-Day'};
     const localMap=buildStateMap(local,options),incomingMap=buildStateMap(incoming,options),dates=new Set([...localMap.keys(),...incomingMap.keys()]);
     return freeze([...dates].sort().map(date=>{
-      const candidates=pairStateCandidates(`saved-day_${date}`,date,local,incoming,localMap.get(date),incomingMap.get(date));
+      const localState=localMap.get(date),incomingState=incomingMap.get(date);
+      const candidates=pairStateCandidates(`saved-day_${date}`,date,local,incoming,localState,incomingState,equivalentSavedDayState);
       const localCandidate=candidates.find(candidate=>candidate.local)||null,conflict=candidates.length>1;
-      return freeze({date,candidates,localCandidateId:localCandidate?.id||null,defaultCandidateId:localCandidate?.id||(candidates[0]?.id||null),conflict,identical:!conflict&&candidates.length===1&&candidates[0]!.sources.length===2,incomingOnly:!localCandidate&&candidates.length===1,decisionKey:`savedDay__${date.replaceAll('-','_')}`});
+      const metadataRefresh=!!localState&&!!incomingState&&localState.kind==='record'&&incomingState.kind==='record'&&
+        equivalentSavedDayState(localState,incomingState)&&!Canonical.same(localState.value,incomingState.value);
+      return freeze({date,candidates,localCandidateId:localCandidate?.id||null,defaultCandidateId:localCandidate?.id||(candidates[0]?.id||null),conflict,identical:!conflict&&candidates.length===1&&candidates[0]!.sources.length===2,metadataRefresh,incomingOnly:!localCandidate&&candidates.length===1,decisionKey:`savedDay__${date.replaceAll('-','_')}`});
     }));
   }
   function buildNotes(local:ReconciliationSource,incoming:ReconciliationSource){
@@ -133,10 +148,10 @@ const createModule=(input:ReconciliationInput)=>{
       if(decision&&typeof decision==='object'&&!Array.isArray(decision)&&Object.prototype.hasOwnProperty.call(decision,'value')){
         const value=decision.value,localCandidate=item.candidates.find(candidate=>candidate.id===item.localCandidateId)||null;
         if(!value||typeof value!=='object'||Array.isArray(value)||String(value.date||'')!==item.date)throw new Error(`Saved Day ${item.date} reconciliation value is invalid.`);
-        return freeze({date:item.date,state:'record',candidateId:null,changed:!localCandidate||localCandidate.kind!=='record'||!Canonical.same(value,localCandidate.record),hadLocal:!!item.localCandidateId,record:value,deletedAt:null,local:false,sources:freeze(item.candidates.flatMap(candidate=>candidate.sources))});
+        return freeze({date:item.date,state:'record',candidateId:null,changed:item.metadataRefresh===true||!localCandidate||localCandidate.kind!=='record'||!Canonical.same(value,localCandidate.record),hadLocal:!!item.localCandidateId,record:value,deletedAt:null,local:false,sources:freeze(item.candidates.flatMap(candidate=>candidate.sources))});
       }
       const candidate=selectedCandidate(item,decision,`Saved Day ${item.date}`);if(!candidate)return freeze({date:item.date,state:'none',candidateId:null,changed:false,hadLocal:false});
-      const changed=changedFromLocal(item,candidate)||(candidate.kind==='deleted'&&candidate.local&&!!candidate.localDeletedAt&&candidate.deletedAt!==candidate.localDeletedAt);
+      const changed=changedFromLocal(item,candidate)||item.metadataRefresh===true||(candidate.kind==='deleted'&&candidate.local&&!!candidate.localDeletedAt&&candidate.deletedAt!==candidate.localDeletedAt);
       return freeze({date:item.date,state:candidate.kind,candidateId:candidate.id,changed,hadLocal:!!item.localCandidateId,record:candidate.kind==='record'?candidate.record:null,deletedAt:candidate.kind==='deleted'?candidate.deletedAt:null,local:candidate.local,sources:candidate.sources});
     }));
     const notes=freeze(plan.notes.map(item=>{
@@ -151,7 +166,7 @@ const createModule=(input:ReconciliationInput)=>{
     const activeCandidate=selectedCandidate(plan.activeSession,decisions.activeSession,'Active Session'),activeSession=freeze({candidateId:activeCandidate?.id||null,value:activeCandidate?.value||null,changed:!!activeCandidate&&changedFromLocal(plan.activeSession,activeCandidate),hadLocal:!!plan.activeSession.localCandidateId,local:!!activeCandidate?.local,sources:activeCandidate?.sources||freeze([])});
     return freeze({format:RESOLVED_FORMAT,version:VERSION,sourcePlan:plan,savedDays,notes,activeSession});
   }
-  return freeze({format:'study-director.reconciliation-module',contractVersion:1,createPlan,resolvePlan,summarizePlan});
+  return freeze({format:'study-director.reconciliation-module',contractVersion:1,createPlan,resolvePlan,summarizePlan,savedDayContentValue});
 };
 registry.define('reconciliation',1,createModule);
 return createModule;

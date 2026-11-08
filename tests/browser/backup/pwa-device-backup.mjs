@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {withoutPwaChecks,launchChromium} from '../../helpers/browser-harness.mjs';
 import assert from 'node:assert/strict';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
@@ -6,11 +7,13 @@ import http from 'node:http';
 import path from 'node:path';
 
 const root=process.cwd();
-const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.json'),'utf8'));
+// The manifest version this build writes (raised whenever the format changes).
+const MANIFEST_VERSION=Number(readRuntimeSource(path.join(root,'source/core/managed-repository.ts')).match(/REPOSITORY_MANIFEST_VERSION=(\d+)/u)?.[1]);
+const manifest=JSON.parse(readRuntimeSource(path.join(root,'dist/build-manifest.json')));
 const deployment=path.join(root,'dist/deployment');
 const marker='/* PUBLIC PLUGIN API */';
 const exposure=`window.__DeviceBackupDebug=Object.freeze({DeviceBackup,BackupProviderRuntime,BackupController,RepositoryCheckpointPipeline,StartupLifecycle,TimerState,TIMER_MODES,AppData,pwaUpdateBlockReason,integrity:()=>repositoryIntegrityView?.locations?.['device-folder']||null});\n`;
-let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
+let main=readRuntimeSource(path.join(deployment,manifest.main));
 if(!main.includes(marker))throw new Error('Device-backup browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
 main=withoutPwaChecks(main);
@@ -100,7 +103,7 @@ try{
     return {checkpointNames,objectNames:objectNames.sort(),size:file.size,format:manifest.format,version:manifest.version,pickerCalls:__devicePickerCalls(),status:document.getElementById('device-backup-status').textContent.trim()};
   })()`);
   assert.equal(first.checkpointNames.length,1);assert.match(first.checkpointNames[0],/^cp_[a-f0-9]{32}\.sdcheckpoint$/u);
-  assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.equal(first.version,8);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);
+  assert.ok(first.size>0);assert.equal(first.format,'study-director.backup-repository-checkpoint');assert.ok(MANIFEST_VERSION>0);assert.equal(first.version,MANIFEST_VERSION);assert.ok(first.objectNames.length>0);assert.equal(first.pickerCalls,1);
   // Maintenance may run just after the first backup; the row then settles on On.
   await waitFor(()=>page.evaluate(`/^On(?:\\s|$)/.test(document.getElementById('device-backup-status').textContent.trim())`),{timeout:60000,label:'Device Folder row at rest after the first backup',describe:rowState});
   // The Device Folder's integrity check reads every object back in ranges and

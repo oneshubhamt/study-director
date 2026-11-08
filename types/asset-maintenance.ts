@@ -4,7 +4,7 @@ export interface AssetMaintenanceResult extends JobResult{status:string;reason:s
 export type AssetLease={protect(id:unknown):string;release(id:unknown):boolean;isProtected(id:unknown):boolean};
 export type LiveField={readonly value:unknown;readonly isConnected:boolean};
 export type LiveValues=readonly (readonly [LiveField,string])[];
-export type ReferenceScan={signature:string;references:Set<string>;phase:number;index:number;values:unknown[]|null};
+export type ReferenceScan={signature:string;references:Set<string>;remaining:Set<string>;phase:number;index:number;values:unknown[]|null};
 export type MaintenanceDiagnosticDetails={background?:boolean;trigger?:string;nextEligibleAt?:string;actionable?:boolean;status?:string;reason?:string;removed?:number};
 export interface AssetMaintenancePorts{
  canMutate():boolean;mutationActive():boolean;

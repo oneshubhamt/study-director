@@ -6,7 +6,7 @@ import type {ReconciliationBaselineModule} from '../source/core/reconciliation-b
 import type {FullLogicalCapture,LogicalCapture,ManagedCapture,PreparationStamp,CapturedAsset} from './backup-capture.ts';
 import type {Checkpoint,Counts,ProtectedManifest} from './backup-models.ts';
 import type {Limits,DailyRecord,NoteRecord,ActiveSession,PersonalData,PendingReview} from './record-models.ts';
-import type {BaselineHeader,BaselineNote,BaselineDays,BaselineUpdate} from './reconciliation-baseline.ts';
+import type {BaselineHeader,BaselineNote,BaselineDays,BaselineUpdate,PersonalFields} from './reconciliation-baseline.ts';
 import type {ExportProcessing,ProtectionOptions,ExportOptions} from './exports.ts';
 import type {AssetRow} from './asset-storage.ts';
 import type {WorkBudget} from './lifecycle.ts';
@@ -50,7 +50,7 @@ export type Continuation={status():{pending:boolean;busy:boolean;invalidated:boo
 export type BlobLease={blob:Blob;release:Release};
 export type ReadObject=(entry:ObjectEntry)=>Promise<Blob|BlobLease|null>;
 export type Copy={manifestBlob:Blob;checkpointId:string;current?:boolean;readObject(entry:ObjectEntry):Promise<BlobLease>};
-export type PrepareOptions={interactive?:boolean;availableObjectIds?:ReadonlySet<string>|null;excludedObjectIds?:readonly string[]|null;retention?:RetentionInput|null;signal?:AbortSignal|null|undefined;baseUpdate?:boolean};
+export type PrepareOptions={interactive?:boolean;availableObjectIds?:ReadonlySet<string>|null;excludedObjectIds?:readonly string[]|null;retention?:RetentionInput|null;signal?:AbortSignal|null|undefined;baseUpdate?:boolean;reuse?:readonly Manifest[]|null};
 export type PublishOptions=PrepareOptions&{continuation?:Continuation|null;copy?:Copy|null;shared?:boolean};
 export type PublicationContext<P,C>={prepared:Prepared;manifest:Manifest;sourceRevision:string;exportedAt:string;publication:P|{name:string;unchanged:true};commitReceipt:C|null;objectsWritten:number;objectsReused:number;writtenBytes:number;attachmentBytesWritten:number;unchanged?:boolean};
 export type Transport<W,P,C,B,L>={writeObject(entry:PreparedObject,prepared:Prepared):Promise<W>;writeManifest(file:ManifestFile,prepared:Prepared):Promise<P>;commit(file:CommitFile,prepared:Prepared,publication:P):Promise<C>;onCommitted?(context:PublicationContext<P,C>):Promise<B>;cleanup?(context:PublicationContext<P,C>&{committedResult:B|null}):Promise<L>;retainOnFailure?(error:unknown):boolean|Promise<boolean>;onFailure?(error:unknown,context:{prepared:Prepared|null;publication:P|null;commitReceipt:C|null;committed:boolean;retained:boolean;written:readonly {entry:PreparedObject;receipt:W}[]}):Promise<unknown>};
@@ -65,7 +65,7 @@ export type VerifiedOptions={signal:AbortSignal|null;sourceEncrypted:boolean;rep
 export interface ManagedRepositoryInput<I,V>{
  codec:ReturnType<BackupCodecModule['createBackupCodec']>;
  ports:{configuration:{backupVersion:number;limits:Limits;logicalCaptureFormat:'study-director.logical-checkpoint-capture';logicalCaptureVersion:1};
- persistence:{reconciliationBaseRead:Baseline['readHeader'];reconciliationBaseWrite:Baseline['write'];personalFingerprint(value:unknown):Promise<string>;dayFingerprints(records:readonly DailyRecord[]):Promise<Readonly<Record<string,BaselineDays>>>;sessionFingerprint(value:unknown):Promise<string>};
+ persistence:{reconciliationBaseRead:Baseline['readHeader'];reconciliationBaseWrite:Baseline['write'];personalFingerprint(value:unknown):Promise<string>;personalFields(value:unknown):Promise<PersonalFields|null>;semanticDayFingerprints(records:readonly DailyRecord[]):Promise<Readonly<Record<string,BaselineDays>>>;sessionContentFingerprint(value:unknown):Promise<string>;dayFingerprints(records:readonly DailyRecord[]):Promise<Readonly<Record<string,BaselineDays>>>;sessionFingerprint(value:unknown):Promise<string>};
  assets:{get(id:string):Promise<Blob|null>;verifyAliases(rows:readonly AssetRow[],ids:readonly string[]):Promise<unknown>};
  files:Pick<Protection,'protect'|'unprotect'>&Pick<ExportProcessing,'run'|'scope'>;
  checkpoint:{capture:CaptureApi['captureLogicalCheckpoint'];beginPreparation:CaptureApi['beginManagedPreparationCapture'];readPreparationUnits:CaptureApi['readManagedPreparationUnits'];finalizePreparation:CaptureApi['finalizeManagedPreparationCapture'];establishPreparationBaseline:CaptureApi['establishManagedPreparationBaseline'];assertCurrent:CaptureApi['assertLogicalCheckpointCurrent'];currentImportSignal():AbortSignal|null;inspectVerifiedCapture(capture:ReconstructedCapture,options:VerifiedOptions&{release:Release;repositoryCommitted:boolean;sharedHead:boolean;managedRecovery:((transaction:ManagedTransaction&{kind?:string})=>Promise<RecoveryOutcome>)|null;managedProgress:((value:Progress)=>void)|null}):Promise<I>;verifyVerifiedCapture(capture:ReconstructedCapture,options:VerifiedOptions):Promise<V>};

@@ -9,7 +9,9 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
 const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 const createModule=()=>{
   const freeze=Object.freeze;
-  const RESTORE_JOURNAL_VERSION=5;
+  // Version 5 renamed the note deletion list to noteDeletions; version 6
+  // removes the obsolete Plan-draft scheduleText field.
+  const RESTORE_JOURNAL_VERSION=6;
   function exactValue<K extends string>(value:unknown,keys:readonly K[]):value is Record<K,unknown>{return !!(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join('|')===[...keys].sort().join('|'));}
   function createAppMetaValidators(input:{limits:Limits}){
     exactObject(input,['limits'],'Repository journal appMeta validators input');
@@ -21,18 +23,19 @@ const createModule=()=>{
     const noteDeletions=(value:unknown)=>Array.isArray(value)&&value.length<=APP_LIMITS.maxNotes&&(value as unknown[]).every(entry=>entry&&exactValue(entry,['key','deletedAt'])&&String(entry.key||'').trim()&&iso(entry.deletedAt));
     const attachmentDeletions=(value:unknown)=>Array.isArray(value)&&value.length<=50000&&(value as unknown[]).every(entry=>entry&&exactValue(entry,['assetId','deletedAt'])&&/^(?:att|img)-[a-z0-9-]{20,80}$/u.test(String(entry.assetId||''))&&iso(entry.deletedAt));
     return freeze({
-      libraryClearJournalState:(value:unknown)=>!!(value&&exactValue(value,['format','version','id','phase','chunkCount','byteLength','sha256','signatureHash','createdAt','updatedAt'])&&value.format==='study-director.library-clear-journal'&&Number(value.version)===1&&/^libraryclear_[a-z0-9_-]{8,96}$/u.test(String(value.id||''))&&/^[a-z][a-z0-9-]{1,48}$/u.test(String(value.phase||''))&&typeof value.chunkCount==='number'&&Number.isSafeInteger(value.chunkCount)&&value.chunkCount>0&&typeof value.byteLength==='number'&&Number.isSafeInteger(value.byteLength)&&value.byteLength>0&&/^[a-f0-9]{64}$/u.test(String(value.sha256||''))&&/^[a-f0-9]{64}$/u.test(String(value.signatureHash||''))&&iso(value.createdAt)&&iso(value.updatedAt)),
+      libraryClearJournalState:(value:unknown)=>!!(value&&exactValue(value,['format','version','id','phase','chunkCount','byteLength','sha256','signatureHash','createdAt','updatedAt'])&&value.format==='study-director.library-clear-journal'&&Number(value.version)===1&&/^libraryclear_[a-z0-9_-]{8,96}$/u.test(String(value.id||''))&&/^[a-z][a-z0-9-]{1,48}$/u.test(String(value.phase||''))&&Number.isSafeInteger(value.chunkCount)&&Number(value.chunkCount)>0&&Number.isSafeInteger(value.byteLength)&&Number(value.byteLength)>0&&/^[a-f0-9]{64}$/u.test(String(value.sha256||''))&&/^[a-f0-9]{64}$/u.test(String(value.signatureHash||''))&&iso(value.createdAt)&&iso(value.updatedAt)),
       libraryClearJournalPayloadPrefix:(value:unknown,context:MetaContext)=>!!(value&&exactValue(value,['format','version','id','index','bytes'])&&value.format==='study-director.library-clear-journal'&&Number(value.version)===1&&/^libraryclear_[a-z0-9_-]{8,96}$/u.test(String(value.id||''))&&Number.isSafeInteger(Number(value.index))&&Number(value.index)>=0&&(value.bytes instanceof Uint8Array||value.bytes instanceof ArrayBuffer)&&context.suffix===`${String(value.id)}:${String(value.index).padStart(8,'0')}`),
       restoreJournalState:(value:unknown)=>!!(value&&exactValue(value,['format','version','id','phase','createdAt','updatedAt'])&&value.format==='study-director.restore-journal'&&Number(value.version)===1&&/^restore_[a-z0-9_-]{8,96}$/u.test(String(value.id||''))&&/^[a-z][a-z0-9-]{1,48}$/u.test(String(value.phase||''))&&iso(value.createdAt)&&iso(value.updatedAt)),
       restoreJournalPayload:(input:unknown)=>{
-        const value=input as JournalFields|null;
-        if(!value||value.format!=='study-director.restore-journal'||!/^restore_[a-z0-9_-]{8,96}$/u.test(String(value.id||''))||(!backupFile(value.backupFile)&&!blob(value.blob))||typeof value.filename!=='string'||value.filename.length>APP_LIMITS.maxBackupFilenameChars||typeof value.scheduleText!=='string'||value.scheduleText.length>APP_LIMITS.maxScheduleChars)return false;
+        const value=fields(input);
+        if(!value||value.format!=='study-director.restore-journal'||!/^restore_[a-z0-9_-]{8,96}$/u.test(String(value.id||''))||(!backupFile(value.backupFile)&&!blob(value.blob))||typeof value.filename!=='string'||value.filename.length>APP_LIMITS.maxBackupFilenameChars)return false;
         const storageKey=value.backupFile?'backupFile':'blob';
-        return Number(value.version)===RESTORE_JOURNAL_VERSION&&exactValue(value,['format','version','id',storageKey,'filename','scheduleText','savedDayDeletions','noteDeletions','attachmentDeletions'])&&savedDeletions(value.savedDayDeletions)&&noteDeletions(value.noteDeletions)&&attachmentDeletions(value.attachmentDeletions);
+        return Number(value.version)===RESTORE_JOURNAL_VERSION&&exactValue(value,['format','version','id',storageKey,'filename','savedDayDeletions','noteDeletions','attachmentDeletions'])&&savedDeletions(value.savedDayDeletions)&&noteDeletions(value.noteDeletions)&&attachmentDeletions(value.attachmentDeletions);
       },
       mutationLease:(value:unknown)=>!!(value&&exactValue(value,['format','version','id','owner','kind','expiresAt','updatedAt'])&&value.format==='study-director.mutation-lease'&&Number(value.version)===1&&/^mutation_[a-z0-9_-]{8,96}$/u.test(String(value.id||''))&&/^tab_[a-z0-9_-]{8,160}$/u.test(String(value.owner||''))&&/^[a-z][a-z0-9-]{0,47}$/u.test(String(value.kind||''))&&Number.isFinite(Number(value.expiresAt))&&Number(value.expiresAt)>0&&iso(value.updatedAt))
     });
   }
+  const fields=(input:unknown):JournalFields|null=>input&&typeof input==='object'&&!Array.isArray(input)?input as JournalFields:null;
   function create(input:JournalInput){
     exactObject(input,['appMeta','limits','helpers','clock'],'Repository journals input');
     if(!Object.isFrozen(input.appMeta)||!Object.isFrozen(input.limits))throw new TypeError('Repository journal contracts must be frozen.');
@@ -89,14 +92,74 @@ const createModule=()=>{
     function cleanKeyedDeletions(values:unknown,{kind='entry',keyName='key',limit=10000}:{kind?:string;keyName?:string;limit?:number}={}){const source=values===undefined?[]:values;if(!Array.isArray(source)||source.length>limit)throw new Error(`Restore rollback ${kind} deletion ledger is invalid.`);const byKey=new Map<string,{[key:string]:string;deletedAt:string}>();for(const value of source as ({[key:string]:unknown;deletedAt?:unknown}|null)[]){const key=String(value&&value[keyName]||'').trim(),deletedAt=String(value&&value.deletedAt||'');if(!key||!Number.isFinite(Date.parse(deletedAt)))throw new Error(`Restore rollback ${kind} deletion ledger is invalid.`);const previous=byKey.get(key),clean={[keyName]:key,deletedAt:new Date(Date.parse(deletedAt)).toISOString()};if(!previous||Date.parse(clean.deletedAt)>Date.parse(previous.deletedAt))byKey.set(key,clean);}return freeze([...byKey.values()].sort((a,b)=>String(a[keyName]).localeCompare(String(b[keyName]))).map(value=>freeze(value)));}
     async function prepareRestoreJournal(value:RestorePreparation={}){
       const id=String(value.id||''),blob=value.blob,backupFile=value.backupFile,fileValid=backupFile&&/^backup-[a-f0-9-]{36}$/u.test(backupFile.name)&&Number.isSafeInteger(backupFile.size)&&backupFile.size>0&&/^[a-f0-9]{64}$/u.test(backupFile.hash);if(!validRestoreJournalId(id)||(!fileValid&&(!blob||typeof blob.arrayBuffer!=='function'||!Number.isFinite(Number(blob.size))||Number(blob.size)>(APP_LIMITS.backupMaxFileBytes||APP_LIMITS.backupMaxCompressedBytes))))throw new Error('Restore rollback journal input is invalid. No restore changes were made.');
-      const savedDayDeletions=cleanSavedDayDeletions(value.savedDayDeletions),noteDeletions=cleanKeyedDeletions(value.noteDeletions,{kind:'Note',keyName:'key',limit:APP_LIMITS.maxNotes}),attachmentDeletions=cleanKeyedDeletions(value.attachmentDeletions,{kind:'Attachment',keyName:'assetId',limit:50000}),now=new Date().toISOString(),state={format:RESTORE_JOURNAL_FORMAT,version:1,id,phase:'prepared',createdAt:now,updatedAt:now},payload={format:RESTORE_JOURNAL_FORMAT,version:RESTORE_JOURNAL_VERSION,id,...(fileValid?{backupFile}:{blob}),filename:clampText(value.filename||'safety-copy.sdbackup',APP_LIMITS.maxBackupFilenameChars),scheduleText:clampText(value.scheduleText||'',APP_LIMITS.maxScheduleChars),savedDayDeletions,noteDeletions,attachmentDeletions};
-      return Meta.transaction<Readonly<{state:RestoreJournalState;payload:typeof payload}>>('readwrite',(meta,tx,finish)=>{meta.put('restoreJournalState',state,{updatedAt:now});meta.put('restoreJournalPayload',payload,{updatedAt:now});tx.oncomplete=()=>finish(true,freeze({state,payload}));},{strict:true,abortMessage:'restore journal preparation aborted'});
+      const savedDayDeletions=cleanSavedDayDeletions(value.savedDayDeletions),noteDeletions=cleanKeyedDeletions(value.noteDeletions,{kind:'Note',keyName:'key',limit:APP_LIMITS.maxNotes}),attachmentDeletions=cleanKeyedDeletions(value.attachmentDeletions,{kind:'Attachment',keyName:'assetId',limit:50000}),now=new Date().toISOString(),state={format:RESTORE_JOURNAL_FORMAT,version:1,id,phase:'prepared',createdAt:now,updatedAt:now},payload={format:RESTORE_JOURNAL_FORMAT,version:RESTORE_JOURNAL_VERSION,id,...(fileValid?{backupFile}:{blob}),filename:clampText(value.filename||'safety-copy.sdbackup',APP_LIMITS.maxBackupFilenameChars),savedDayDeletions,noteDeletions,attachmentDeletions};
+      return Meta.transaction('readwrite',(meta,tx,finish)=>{
+        // Both halves are checked inside the same durable transaction. Even an
+        // orphaned half must stop preparation: it may be the only recovery proof.
+        const header=meta.get('restoreJournalState'),body=meta.get('restoreJournalPayload');
+        let read=0;
+        const fail=(error:unknown)=>{try{tx.abort();}catch{}finish(false,error);};
+        const check=()=>{
+          if(++read!==2)return;
+          let currentHeader,currentBody;
+          try{currentHeader=header.value();currentBody=body.value();}catch(error){fail(error);return;}
+          if(currentHeader||currentBody){fail(new Error('An interrupted restore still requires recovery. No new restore journal was started.'));return;}
+          try{
+            meta.put('restoreJournalState',state,{updatedAt:now});
+            meta.put('restoreJournalPayload',payload,{updatedAt:now});
+            tx.oncomplete=()=>finish(true,freeze({state,payload}));
+          }catch(error){fail(error);}
+        };
+        header.request.onsuccess=check;body.request.onsuccess=check;
+        header.request.onerror=()=>fail(header.request.error||new Error('Restore journal state read failed.'));
+        body.request.onerror=()=>fail(body.request.error||new Error('Restore journal payload read failed.'));
+      },{strict:true,abortMessage:'restore journal preparation aborted'});
     }
     async function readRestoreJournal(){
-      const [state,payload]=await Promise.all([Meta.read('restoreJournalState'),Meta.read('restoreJournalPayload')]) as [JournalFields|null,JournalFields|null];if(!state&&!payload)return null;if(!state||!payload||state.format!==RESTORE_JOURNAL_FORMAT||payload.format!==RESTORE_JOURNAL_FORMAT||state.version!==1||Number(payload.version)!==RESTORE_JOURNAL_VERSION||!validRestoreJournalId(state.id)||state.id!==payload.id||(!payload.backupFile&&(!payload.blob||typeof (payload.blob as {arrayBuffer?:unknown}).arrayBuffer!=='function')))throw new Error('The interrupted-restore journal is incomplete or corrupted. Preserve browser storage and use an external backup before making changes.');const savedDayDeletions=cleanSavedDayDeletions(payload.savedDayDeletions),noteDeletions=cleanKeyedDeletions(payload.noteDeletions,{kind:'Note',keyName:'key',limit:APP_LIMITS.maxNotes}),attachmentDeletions=cleanKeyedDeletions(payload.attachmentDeletions,{kind:'Attachment',keyName:'assetId',limit:50000});return freeze({state:freeze({...state}),payload:freeze({...payload,savedDayDeletions,noteDeletions,attachmentDeletions})});
+      return Meta.transaction('readonly',(meta,tx,finish)=>{
+        const header=meta.get('restoreJournalState'),body=meta.get('restoreJournalPayload');
+        let read=0;
+        const fail=(error:unknown)=>finish(false,error);
+        const check=()=>{
+          if(++read!==2)return;
+          try{
+            const state=fields(header.value()),payload=fields(body.value());
+            if(!state&&!payload){tx.oncomplete=()=>finish(true,null);return;}
+            if(!state||!payload||state.format!==RESTORE_JOURNAL_FORMAT||payload.format!==RESTORE_JOURNAL_FORMAT||state.version!==1||Number(payload.version)!==RESTORE_JOURNAL_VERSION||!validRestoreJournalId(state.id)||state.id!==payload.id||(!payload.backupFile&&(!payload.blob||typeof (payload.blob as {arrayBuffer?:unknown}).arrayBuffer!=='function')))throw new Error('The interrupted-restore journal is incomplete or corrupted. Preserve browser storage and use an external backup before making changes.');
+            const savedDayDeletions=cleanSavedDayDeletions(payload.savedDayDeletions),noteDeletions=cleanKeyedDeletions(payload.noteDeletions,{kind:'Note',keyName:'key',limit:APP_LIMITS.maxNotes}),attachmentDeletions=cleanKeyedDeletions(payload.attachmentDeletions,{kind:'Attachment',keyName:'assetId',limit:50000});
+            const result=freeze({state:freeze({...state}),payload:freeze({...payload,savedDayDeletions,noteDeletions,attachmentDeletions})});
+            tx.oncomplete=()=>finish(true,result);
+          }catch(error){fail(error);}
+        };
+        header.request.onsuccess=check;body.request.onsuccess=check;
+        header.request.onerror=()=>fail(header.request.error||new Error('Restore journal state read failed.'));
+        body.request.onerror=()=>fail(body.request.error||new Error('Restore journal payload read failed.'));
+      },{abortMessage:'Restore journal read aborted'});
     }
-    async function markRestoreJournal(id:unknown,phase:unknown){const journalId=String(id||''),cleanPhase=String(phase||'').trim();if(!validRestoreJournalId(journalId)||!/^[a-z][a-z0-9-]{1,48}$/u.test(cleanPhase))throw new Error('Restore journal phase is invalid.');return Meta.transaction<Readonly<JournalFields&{phase:string;updatedAt:string}>>('readwrite',(meta,tx,finish)=>{const handle=meta.get('restoreJournalState');handle.request.onerror=()=>finish(false,handle.request.error||new Error('restore journal phase read failed'));handle.request.onsuccess=()=>{let current;try{current=handle.value() as JournalFields|null;}catch(error){finish(false,error);return;}if(!current||current.id!==journalId){finish(false,new Error('Restore journal identity changed unexpectedly.'));return;}const updated={...current,phase:cleanPhase,updatedAt:new Date().toISOString()};meta.put('restoreJournalState',updated,{updatedAt:updated.updatedAt});tx.oncomplete=()=>finish(true,freeze(updated));};},{strict:true,abortMessage:'restore journal phase update aborted'});}
-    async function clearRestoreJournal(id=''){const expected=String(id||'');return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{const remove=()=>{meta.remove('restoreJournalState');meta.remove('restoreJournalPayload');tx.oncomplete=()=>finish(true,undefined);};if(!expected){remove();return;}const handle=meta.get('restoreJournalState');handle.request.onerror=()=>finish(false,handle.request.error||new Error('restore journal clear read failed'));handle.request.onsuccess=()=>{let current;try{current=handle.value() as JournalFields|null;}catch(error){finish(false,error);return;}if(current&&current.id!==expected){finish(false,new Error('Restore journal identity changed before cleanup.'));return;}remove();};},{strict:true,abortMessage:'restore journal cleanup aborted'});}
+    async function markRestoreJournal(id:unknown,phase:unknown){const journalId=String(id||''),cleanPhase=String(phase||'').trim();if(!validRestoreJournalId(journalId)||!/^[a-z][a-z0-9-]{1,48}$/u.test(cleanPhase))throw new Error('Restore journal phase is invalid.');return Meta.transaction('readwrite',(meta,tx,finish)=>{const handle=meta.get('restoreJournalState');handle.request.onerror=()=>finish(false,handle.request.error||new Error('restore journal phase read failed'));handle.request.onsuccess=()=>{let current;try{current=fields(handle.value());}catch(error){finish(false,error);return;}if(!current||current.id!==journalId){finish(false,new Error('Restore journal identity changed unexpectedly.'));return;}const updated={...current,phase:cleanPhase,updatedAt:new Date().toISOString()};meta.put('restoreJournalState',updated,{updatedAt:updated.updatedAt});tx.oncomplete=()=>finish(true,freeze(updated));};},{strict:true,abortMessage:'restore journal phase update aborted'});}
+    async function clearRestoreJournal(id=''){
+      const expected=String(id||'');
+      return Meta.transaction('readwrite',(meta,tx,finish)=>{
+        const header=meta.get('restoreJournalState'),body=meta.get('restoreJournalPayload');
+        let read=0;
+        const fail=(error:unknown)=>{try{tx.abort();}catch{}finish(false,error);};
+        const check=()=>{
+          if(++read!==2)return;
+          let state,payload;
+          try{state=fields(header.value());payload=fields(body.value());}catch(error){fail(error);return;}
+          if(!!state!==!!payload||state&&payload&&state.id!==payload.id){fail(new Error('Restore journal is incomplete or mismatched. Recovery evidence was preserved.'));return;}
+          if(expected&&!state){fail(new Error('Restore journal disappeared before cleanup. Recovery status is uncertain.'));return;}
+          if(expected&&state?.id!==expected){fail(new Error('Restore journal identity changed before cleanup.'));return;}
+          try{
+            if(state){meta.remove('restoreJournalState');meta.remove('restoreJournalPayload');}
+            tx.oncomplete=()=>finish(true,true);
+          }catch(error){fail(error);}
+        };
+        header.request.onsuccess=check;body.request.onsuccess=check;
+        header.request.onerror=()=>fail(header.request.error||new Error('Restore journal state cleanup read failed.'));
+        body.request.onerror=()=>fail(body.request.error||new Error('Restore journal payload cleanup read failed.'));
+      },{strict:true,abortMessage:'restore journal cleanup aborted'});
+    }
     return freeze({format:'study-director.repository-journal-set',contractVersion:1,restoreJournal:freeze({prepare:prepareRestoreJournal,read:readRestoreJournal,diagnostics:()=>Meta.read('restoreJournalState'),mark:markRestoreJournal,clear:clearRestoreJournal}),libraryClearJournal:freeze({prepare:prepareLibraryClearJournal,read:readLibraryClearJournal,diagnostics:()=>Meta.read('libraryClearJournalState'),mark:markLibraryClearJournal,clear:clearLibraryClearJournal}),mutationLease:freeze({acquire:acquireMutationLease,release:releaseMutationLease})});
   }
   return freeze({format:'study-director.repository-journals',contractVersion:1,createAppMetaValidators,create});

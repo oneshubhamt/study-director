@@ -625,26 +625,33 @@
     const rows=(Array.isArray(examples)?examples:[]).filter(row=>Array.isArray(row.x)&&Number.isFinite(row.y)&&row.y>=0&&row.y<=1);
     if(rows.length<minimumRows)return {ready:false,rows:rows.length,reason:`Need ${Math.max(0,minimumRows-rows.length)} more eligible observations.`};
     const dimension=rows[0].x.length+1;
+    // The design vector and observation weight are invariant across Newton
+    // iterations. Materialize them once, then accumulate only one triangle of
+    // the symmetric Hessian before mirroring it.
+    const design=rows.map(row=>({x:[1,...row.x.map(num)],y:row.y,weight:Math.max(.05,num(row.weight,1))}));
     let coefficients=Array(dimension).fill(0);
     coefficients[0]=logit(clamp(mean(rows.map(row=>row.y)),.02,.98));
     let hessian=null;
     for(let iteration=0;iteration<10;iteration+=1){
       hessian=zeroMatrix(dimension);const gradient=Array(dimension).fill(0);
-      rows.forEach(row=>{
-        const x=[1,...row.x.map(num)],weight=Math.max(.05,num(row.weight,1));
-        const probability=sigmoid(sum(x.map((value,index)=>value*coefficients[index])));
-        const variance=Math.max(1e-5,probability*(1-probability))*weight;
+      for(const row of design){
+        const {x,weight}=row;let eta=0;
+        for(let index=0;index<dimension;index+=1)eta+=x[index]*coefficients[index];
+        const probability=sigmoid(eta),variance=Math.max(1e-5,probability*(1-probability))*weight,residual=(row.y-probability)*weight;
         for(let left=0;left<dimension;left+=1){
-          gradient[left]+=x[left]*(row.y-probability)*weight;
-          for(let right=0;right<dimension;right+=1)hessian[left][right]+=x[left]*x[right]*variance;
+          gradient[left]+=x[left]*residual;
+          const weightedLeft=x[left]*variance;
+          for(let right=left;right<dimension;right+=1)hessian[left][right]+=weightedLeft*x[right];
         }
-      });
+      }
+      for(let left=1;left<dimension;left+=1)for(let right=0;right<left;right+=1)hessian[left][right]=hessian[right][left];
       for(let index=1;index<dimension;index+=1){hessian[index][index]+=lambda;gradient[index]-=lambda*coefficients[index];}
       hessian[0][0]+=.05;
       const step=solveLinearSystem(hessian,gradient);
       if(!step)break;
-      coefficients=coefficients.map((value,index)=>clamp(value+step[index],-20,20));
-      if(Math.max(...step.map(Math.abs))<1e-6)break;
+      let maximumStep=0;
+      for(let index=0;index<dimension;index+=1){const delta=step[index];maximumStep=Math.max(maximumStep,Math.abs(delta));coefficients[index]=clamp(coefficients[index]+delta,-20,20);}
+      if(maximumStep<1e-6)break;
     }
     const covariance=hessian&&invertMatrix(hessian);
     const positives=rows.filter(row=>row.y>=.5).length;
@@ -652,7 +659,8 @@
   }
   function predictRegularizedLogistic(fit,features,interval=.95){
     if(!fit||!fit.ready)return {mean:null,low:null,high:null,width:null};
-    const x=[1,...features.map(num)],eta=sum(x.map((value,index)=>value*num(fit.coefficients[index])));
+    const x=[1,...features.map(num)];let eta=0;
+    for(let index=0;index<x.length;index+=1)eta+=x[index]*num(fit.coefficients[index]);
     const multiplier=interval>=.95?1.96:1.282;
     const standardError=Math.sqrt(Math.max(0,quadraticForm(x,fit.covariance)));
     const low=sigmoid(eta-multiplier*standardError),high=sigmoid(eta+multiplier*standardError);
@@ -824,6 +832,20 @@
       .forEach(record=>byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record)));
     return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
   }
+  async function normalizeRecordsAsync(records,yieldTask=null,batchSize=64){
+    const source=Array.isArray(records)?records:[],byDate=new Map(),size=Math.max(8,Math.min(256,Math.floor(Number(batchSize)||64)));
+    for(let start=0;start<source.length;start+=size){
+      const end=Math.min(source.length,start+size);
+      for(let index=start;index<end;index+=1){
+        const row=source[index];
+        if(!row||typeof row!=='object'||!isIsoDate(row.date))continue;
+        const record={...row,tasks:Array.isArray(row.tasks)?row.tasks.filter(task=>task&&typeof task==='object'&&taskPlanned(task)>0):[]};
+        byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record));
+      }
+      if(end<source.length&&typeof yieldTask==='function')await yieldTask();
+    }
+    return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
+  }
   function normalizeSummaries(summaries){
     return (Array.isArray(summaries)?summaries:[]).filter(s=>s&&typeof s==='object'&&isIsoDate(s.date)).sort((a,b)=>a.date.localeCompare(b.date));
   }
@@ -887,7 +909,7 @@
     });
   }
     return Object.freeze({
-      filterCanonicalRecordsForInsightWindow,filterSummariesForInsightWindow,insightWindowByKey,normalizeRecords,
+      filterCanonicalRecordsForInsightWindow,filterSummariesForInsightWindow,insightWindowByKey,normalizeRecords,normalizeRecordsAsync,
       normalizeInsightWindowKey,normalizeSummaries,recordsRevisionKey,summariesRevisionKey
     });
   })(InsightsConfig,InsightsPrimitives);
@@ -3007,12 +3029,13 @@
       const load=(row.planned-loadMean)/loadSd,state=(row.priorState-stateMean)/stateSd;
       return [load,load*load-1,state];
     };
-    const completionFit=fitRegularizedLogistic(rows.map(row=>({x:features(row),y:clamp(row.completion/100,.001,.999)})),{lambda:3,minimumRows:minimumDays});
+    const preparedRows=rows.map(row=>({row,x:features(row)}));
+    const completionFit=fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:clamp(row.completion/100,.001,.999)})),{lambda:3,minimumRows:minimumDays});
     const strongDays=rows.filter(row=>row.strong).length,nonStrongDays=rows.length-strongDays;
     const strongFit=strongDays>=5&&nonStrongDays>=5
-      ? fitRegularizedLogistic(rows.map(row=>({x:features(row),y:row.strong?1:0})),{lambda:3.5,minimumRows:minimumDays})
+      ? fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:row.strong?1:0})),{lambda:3.5,minimumRows:minimumDays})
       : {ready:false,rows:rows.length,strongDays,nonStrongDays,reason:'Need five strong and five non-strong days.'};
-    const residuals=completionFit.ready?rows.map(row=>row.completion/100-predictRegularizedLogistic(completionFit,features(row),.8).mean):[];
+    const residuals=completionFit.ready?preparedRows.map(({row,x})=>row.completion/100-predictRegularizedLogistic(completionFit,x,.8).mean):[];
     return {
       ready:!!completionFit.ready,completionReady:!!completionFit.ready,strongReady:!!strongFit.ready,
       rows:rows.length,span,loadMean,loadSd,stateMean,stateSd,features,completionFit,strongFit,strongDays,nonStrongDays,
@@ -3077,12 +3100,13 @@
       const load=(row.planned-loadMean)/loadSd;
       return [load,load*load-1,...stateKeys.map(key=>(row.fitness[key]-stateMeans[key])/stateSds[key])];
     };
-    const completionFit=fitRegularizedLogistic(complete.map(row=>({x:features(row),y:clamp(row.completion/100,.001,.999)})),{lambda:6,minimumRows:minimumDays});
+    const preparedRows=complete.map(row=>({row,x:features(row)}));
+    const completionFit=fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:clamp(row.completion/100,.001,.999)})),{lambda:6,minimumRows:minimumDays});
     const strongDays=complete.filter(row=>row.strong).length,nonStrongDays=complete.length-strongDays;
     const strongFit=strongDays>=5&&nonStrongDays>=5
-      ? fitRegularizedLogistic(complete.map(row=>({x:features(row),y:row.strong?1:0})),{lambda:6.5,minimumRows:minimumDays})
+      ? fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:row.strong?1:0})),{lambda:6.5,minimumRows:minimumDays})
       : {ready:false,rows:complete.length,strongDays,nonStrongDays,reason:'Need five strong and five non-strong state-complete days.'};
-    const residuals=completionFit.ready?complete.map(row=>row.completion/100-predictRegularizedLogistic(completionFit,features(row),.8).mean):[];
+    const residuals=completionFit.ready?preparedRows.map(({row,x})=>row.completion/100-predictRegularizedLogistic(completionFit,x,.8).mean):[];
     return {
       ready:!!completionFit.ready,completionReady:!!completionFit.ready,strongReady:!!strongFit.ready,rows:complete.length,span,
       loadMean,loadSd,stateKeys,stateMeans,stateSds,features,completionFit,strongFit,strongDays,nonStrongDays,
@@ -3169,11 +3193,18 @@
       : {ready:false,rows:strongPredictions.length,reason:`Need ${MIN_FORECAST_BACKTESTS}+ rolling strong-day forecasts with both outcomes.`};
     const foldCounters={0:0,1:0};
     const foldAssignments=strongPredictions.map(row=>{const key=row.actualStrong?1:0;return foldCounters[key]++%FORECAST_CALIBRATION_FOLDS;});
-    const crossCalibrated=calibrator.ready?strongPredictions.map((row,index)=>{
-      const training=strongPredictions.filter((candidate,candidateIndex)=>foldAssignments[candidateIndex]!==foldAssignments[index]);
+    // Every row assigned to the same fold has the exact same cross-fit
+    // training set. Fit that set once per fold instead of recomputing an
+    // identical regularized model for every held-out prediction.
+    const foldFits=calibrator.ready?Array.from({length:FORECAST_CALIBRATION_FOLDS},(_,fold)=>{
+      const training=strongPredictions.filter((_candidate,candidateIndex)=>foldAssignments[candidateIndex]!==fold);
       if(training.filter(candidate=>candidate.actualStrong).length<2||training.filter(candidate=>!candidate.actualStrong).length<2)return null;
-      const foldFit=fitRegularizedLogistic(training.map(candidate=>({x:[logit(candidate.rawStrongProbability)],y:candidate.actualStrong})),{lambda:4,minimumRows:Math.max(10,Math.floor(MIN_FORECAST_BACKTESTS*2/3))});
-      return foldFit.ready?predictRegularizedLogistic(foldFit,[logit(row.rawStrongProbability)],.8).mean:null;
+      const fit=fitRegularizedLogistic(training.map(candidate=>({x:[logit(candidate.rawStrongProbability)],y:candidate.actualStrong})),{lambda:4,minimumRows:Math.max(10,Math.floor(MIN_FORECAST_BACKTESTS*2/3))});
+      return fit.ready?fit:null;
+    }):[];
+    const crossCalibrated=calibrator.ready?strongPredictions.map((row,index)=>{
+      const foldFit=foldFits[foldAssignments[index]];
+      return foldFit?predictRegularizedLogistic(foldFit,[logit(row.rawStrongProbability)],.8).mean:null;
     }):[];
     const crossFitReady=strongPredictions.length>=MIN_FORECAST_BACKTESTS&&crossCalibrated.length===strongPredictions.length&&crossCalibrated.every(Number.isFinite);
     const evaluated=strongPredictions.map((row,index)=>({...row,calibrated:crossFitReady?crossCalibrated[index]:row.rawStrongProbability}));
@@ -3916,7 +3947,7 @@
       dateDay,dateFromDay,isIsoDate,localIsoDate,mean,num,pct,round
     }=Primitives;
     const {
-      filterCanonicalRecordsForInsightWindow,insightWindowByKey,normalizeRecords,normalizeSummaries,
+      filterCanonicalRecordsForInsightWindow,insightWindowByKey,normalizeRecords,normalizeRecordsAsync,normalizeSummaries,
       recordsRevisionKey,summariesRevisionKey
     }=Records;
     const {
@@ -3998,11 +4029,11 @@
     const fitness=computeStudyFitness({...dynamicsModel,dynamics},modelEvidence,{performanceState});
     return Object.freeze({dynamics,fitness:detail?fitness:compactFitnessResult(fitness)});
   }
-  function buildInsightsFromCanonical(records,options,allHistory,classifyTaskOutcome,summarizePracticeRuns){
-    const evidence=createEvidenceIndex(records,classifyTaskOutcome);
+  function buildInsightsFromCanonical(records,options,allHistory,classifyTaskOutcome,summarizePracticeRuns,reusable=null){
+    const evidence=reusable&&reusable.evidence||createEvidenceIndex(records,classifyTaskOutcome);
     const work=evidence.work;
-    const planned=rowsPlanned(work),completed=rowsCompleted(work),actual=rowsActual(work);
-    const quality=records.map(r=>Number(r.studyQuality)).filter(v=>Number.isFinite(v)&&v>0);
+    const planned=reusable?.overview?.planned??rowsPlanned(work),completed=reusable?.overview?.completed??rowsCompleted(work),actual=reusable?.overview?.actual??rowsActual(work);
+    const quality=reusable?.overview?null:records.map(r=>Number(r.studyQuality)).filter(v=>Number.isFinite(v)&&v>0);
     const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
     const windowEndDay=isIsoDate(options.windowTo)?dateDay(options.windowTo):null;
     const currentStudyDay=dateDay(currentStudyDate);
@@ -4016,8 +4047,8 @@
       ?records.filter(record=>{const day=dateDay(record.date);return Number.isFinite(day)&&day>=trendBasis.fromDay&&day<=trendBasis.toDay;})
       :records;
     const analyticalEvidence=analyticalRecords===records?evidence:createEvidenceIndex(analyticalRecords,classifyTaskOutcome);
-    const daily=computeDailySeries(analyticalEvidence);
-    const trendDaily=filterDailyForDirectionalBasis(daily,trendBasis);
+    const daily=reusable&&analyticalEvidence===evidence&&reusable.daily?reusable.daily:computeDailySeries(analyticalEvidence);
+    const trendDaily=reusable&&reusable.advanced?null:filterDailyForDirectionalBasis(daily,trendBasis);
     const strongDays=records.reduce((count,record)=>{
       const rows=recordRows(evidence,record,'work'),completion=pct(rowsCompleted(rows),rowsPlanned(rows));
       return count+(Number.isFinite(completion)&&Math.round(completion)>=80?1:0);
@@ -4029,14 +4060,14 @@
       dateRange:{start:records[0]?.date||null,end:records[records.length-1]?.date||null},
       calendarRange:{start:analyticalRecords[0]?.date||null,end:analyticalRecords[analyticalRecords.length-1]?.date||null},
       daily,
-      overview:{planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null},
+      overview:{planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:reusable?.overview?reusable.overview.averageQuality:(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)},
       streak:streakSummaries.length?computeSummaryStreak(streakSummaries,currentStudyDate):computeStreak(evidence,currentStudyDate),
-      subjects:computeSubjects(evidence,subjectReferenceDate,options.subjectReferenceSummaries),startDelays:computeStartDelayBuckets(evidence),blockOrder:computeBlockOrder(evidence),
-      interruption:computeInterruption(evidence),frictionSources:computeFocusFrictionSources(evidence),completionSources:computeCompletionSources(evidence),progressEvidence:computeProgressEvidence(evidence),
-      outcomes:computeOutcomes(evidence),qualityEvidence:computeQualityEvidence(daily),sampleAudit:computeSampleAudit(evidence),support:computeKindSummary(evidence.support),fixed:computeKindSummary(evidence.fixed),
-      resourceMix:computeResourceMix(evidence),practice:computePracticePacer(records,summarizePracticeRuns,trendBasis),schedule:computeScheduleSummary(records)
+      subjects:reusable?.subjects||computeSubjects(evidence,subjectReferenceDate,options.subjectReferenceSummaries),startDelays:computeStartDelayBuckets(evidence),blockOrder:computeBlockOrder(evidence),
+      interruption:reusable?.interruption||computeInterruption(evidence),frictionSources:computeFocusFrictionSources(evidence),completionSources:computeCompletionSources(evidence),progressEvidence:computeProgressEvidence(evidence),
+      outcomes:computeOutcomes(evidence),qualityEvidence:computeQualityEvidence(daily),sampleAudit:reusable?.sampleAudit||computeSampleAudit(evidence),support:computeKindSummary(evidence.support),fixed:computeKindSummary(evidence.fixed),
+      resourceMix:computeResourceMix(evidence),practice:computePracticePacer(records,summarizePracticeRuns,trendBasis),schedule:reusable?.schedule||computeScheduleSummary(records)
     };
-    model.advanced=computeAdvanced(daily,trendDaily);
+    model.advanced=reusable?.advanced||computeAdvanced(daily,trendDaily);
     model.dynamics=allHistory.dynamics;
     model.fitness=allHistory.fitness;
     model.guardrails={sample:sampleStrength(records.length,work.length),trend:trendStrength(model.advanced.completionSlopePerWeek,model.advanced.trendCompletionDayCount),variability:model.advanced.outputStability,progress:progressEvidenceStrength(model.progressEvidence)};
@@ -4056,14 +4087,30 @@
       const clean=String(value||'').trim();
       return clean&&clean.length<=160?`dataset:${clean}`:'';
     };
-    const prepare=(recordsInput,revisionHint=null)=>{
-      const external=trustedRevision(revisionHint);
-      if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
-      const records=normalizeRecords(recordsInput),revision=external||recordsRevisionKey(records);
-      const cached=preparedRevisions.get(revision);
+    const finishPrepared=(records,external='')=>{
+      const revision=external||recordsRevisionKey(records),cached=preparedRevisions.get(revision);
       return cached
         ?remember(preparedRevisions,revision,cached,PREPARED_REVISION_CACHE_LIMIT)
         :remember(preparedRevisions,revision,Object.freeze({records:Object.freeze(records),revision}),PREPARED_REVISION_CACHE_LIMIT);
+    };
+    const prepare=(recordsInput,revisionHint=null)=>{
+      const external=trustedRevision(revisionHint);
+      if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
+      return finishPrepared(normalizeRecords(recordsInput),external);
+    };
+    const prepareAsync=async(recordsInput,revisionHint=null,yieldTask=null)=>{
+      const external=trustedRevision(revisionHint);
+      if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
+      return finishPrepared(await normalizeRecordsAsync(recordsInput,yieldTask),external);
+    };
+    // A worker receives records already normalized by this same engine on the
+    // host. Re-walking and copying the full history there buys no additional
+    // canonicalization, so preserve that prepared representation directly.
+    const reusePrepared=(recordsInput,revision)=>{
+      if(!Array.isArray(recordsInput))throw new TypeError('Prepared Insights records are invalid.');
+      const key=String(revision||'').trim();
+      if(!key||key.length>200)throw new TypeError('Prepared Insights revision is invalid.');
+      return Object.freeze({records:Object.freeze(recordsInput),revision:key});
     };
     const historyEntry=(prepared,options={})=>{
       const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
@@ -4071,12 +4118,23 @@
       if(historyCache.has(key))return remember(historyCache,key,historyCache.get(key),HISTORY_CACHE_LIMIT);
       const contextOptions=Object.freeze({currentStudyDate,subjectReferenceSummaries:options.subjectReferenceSummaries});
       const context=createAllHistoryContext(prepared.records,contextOptions,classifyTaskOutcome);
-      return remember(historyCache,key,{prepared,contextOptions,compact:buildAllHistoryInsights(context,false),audit:null},HISTORY_CACHE_LIMIT);
+      return remember(historyCache,key,{prepared,contextOptions,compact:buildAllHistoryInsights(context,false),reusable:context,audit:null},HISTORY_CACHE_LIMIT);
     };
     const labEvidence=entry=>entry.audit||(entry.audit=buildAllHistoryInsights(createAllHistoryContext(entry.prepared.records,entry.contextOptions,classifyTaskOutcome),true));
     const releaseTransient=()=>{historyCache.forEach(entry=>{entry.audit=null;});};
     const buildPrepared=(records,prepared,options={})=>{
-      const entry=historyEntry(prepared,options),model=buildInsightsFromCanonical(records,options,entry.compact,classifyTaskOutcome,summarizePracticeRuns);
+      const entry=historyEntry(prepared,options),context=entry.reusable;
+      const reusable=context&&records===prepared.records&&context.historyMeta.capped===false
+        ?{
+          evidence:context.modelEvidence,daily:context.dynamicsModel.daily,
+          overview:context.dynamicsModel.overview,subjects:context.dynamicsModel.subjects,
+          advanced:context.dynamicsModel.advanced,interruption:context.dynamicsModel.interruption,
+          sampleAudit:context.dynamicsModel.sampleAudit,schedule:context.dynamicsModel.schedule
+        }
+        :null;
+      let model;
+      try{model=buildInsightsFromCanonical(records,options,entry.compact,classifyTaskOutcome,summarizePracticeRuns,reusable);}
+      finally{entry.reusable=null;}
       Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:()=>labEvidence(entry)});
       return model;
     };
@@ -4087,6 +4145,8 @@
         return buildPrepared(records,prepared,options);
       },
       prepare,
+      prepareAsync,
+      reusePrepared,
       buildPrepared,
       releaseTransient,
       getLabEvidence:(prepared,options)=>labEvidence(historyEntry(prepared,options)),

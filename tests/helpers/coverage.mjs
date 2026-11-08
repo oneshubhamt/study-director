@@ -8,7 +8,11 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {COVERAGE_FLOORS,CRITICAL_PATHS,nonFastCoverageOwner} from './coverage-risk.mjs';
 import {externalOutputPath} from './output-paths.mjs';
 
-const selection=coverageSelection(process.argv.slice(2));
+const selectionArgs=process.argv.slice(2),keepRawIndex=selectionArgs.indexOf('--keep-raw');
+const keepRaw=keepRawIndex>=0?selectionArgs[keepRawIndex+1]:null;
+if(keepRawIndex>=0&&(!keepRaw||keepRaw.startsWith('--')))throw new Error('--keep-raw requires a directory outside the repository.');
+if(keepRawIndex>=0)selectionArgs.splice(keepRawIndex,2);
+const selection=coverageSelection(selectionArgs);
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const runtimeRoots=['source','rich-text','portable'];
 const extensions=new Set(['.js','.mjs','.ts']);
@@ -169,6 +173,13 @@ function printTable(rows){
   }
 }
 
+// Explicit selected tests, or the unit/integration layers for full coverage,
+// supply correctness evidence and V8 measurements without a duplicate run.
+// --keep-raw <dir> keeps the raw V8 data so branch-coverage.mjs --from <dir> can
+// report branch edges without running the suite again.
+// A reused folder would mix an earlier run's files into the branch report.
+const keepRawTarget=keepRaw?externalOutputPath(keepRaw,'Raw coverage directory'):null;
+if(keepRawTarget&&fs.existsSync(keepRawTarget)&&fs.readdirSync(keepRawTarget).length)throw new Error(`--keep-raw needs a new or empty directory; ${keepRawTarget} already has files.`);
 const coverageDir=fs.mkdtempSync(path.join(os.tmpdir(),'study-director-coverage-'));
 try{
   const runs=selection.targeted?[['targeted',...selection.tests]]:[['unit'],['integration']];
@@ -178,6 +189,10 @@ try{
     });
     if(result.error)throw result.error;
     if(result.status!==0)process.exit(result.status??1);
+  }
+  if(keepRawTarget){
+    fs.mkdirSync(keepRawTarget,{recursive:true});
+    for(const file of fs.readdirSync(coverageDir))fs.copyFileSync(path.join(coverageDir,file),path.join(keepRawTarget,file));
   }
   const scripts=loadCoverage(coverageDir);
   const rows=[...scripts].map(([file,script])=>summarize(file,script));

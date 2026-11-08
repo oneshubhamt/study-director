@@ -1,3 +1,4 @@
+import {readRuntimeSource} from './runtime-source.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -31,7 +32,7 @@ export async function settleMotion(page,{timeout=5000}={}){
 }
 
 function readBuildManifest(){
-  return JSON.parse(fs.readFileSync(path.join(root,'dist','build-manifest.json'),'utf8'));
+  return JSON.parse(readRuntimeSource(path.join(root,'dist','build-manifest.json')));
 }
 
 function contentType(name){
@@ -56,10 +57,10 @@ export function withoutPwaChecks(html){
 
 export function instrumentedHtml(kind='deployment',options={}){
   const manifest=readBuildManifest();
-  let html=fs.readFileSync(path.join(root,'dist',kind,manifest.main),'utf8');
+  let html=readRuntimeSource(path.join(root,'dist',kind,manifest.main));
   const marker='/* PUBLIC PLUGIN API */';
   if(!html.includes(marker))throw new Error(`PWA6 instrumentation marker missing from ${kind}.`);
-  const exposure=`window.__PWA6=Object.freeze({StartupLifecycle,SessionLifecycle,AppOwnership,TimerState,TimerEngine,PracticePacer,Interactions,SystemNotifications,Pomodoro,NoticeCoordinator,AppData,IndexedDb,UnsupportedData,Profiles,BackupController,BackupProviderRuntime,DeviceBackup,NativeCapabilities,PwaLifecycle,SessionEvidenceGateway,ReviewModel,ReviewView,ReviewEditor,LibraryView,PlanDraftEditor,applySchedule,goTab,commitTaskNoteEditor,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO,readStorageHealth,loadScheduleIntoDraft,resetTodaySession,markDone,togglePause,setCurrentTask,refreshPnote,RichTextRuntime,RichTextAssets,withRichTextAssetMaintenancePaused,renderRichTextContent});\n`;
+  const exposure=`window.__PWA6=Object.freeze({StartupLifecycle,SessionLifecycle,AppOwnership,TimerState,TimerEngine,PracticePacer,Interactions,SystemNotifications,Pomodoro,NoticeCoordinator,AppData,PlanData,DailyReflectionPersistence,restoreSessionStateThroughLifecycle,IndexedDb,UnsupportedData,Profiles,BackupController,BackupProviderRuntime,DeviceBackup,NativeCapabilities,PwaLifecycle,SessionEvidenceGateway,ReviewModel,ReviewView,ReviewEditor,LibraryView,PlanDraftEditor,applySchedule,goTab,commitTaskNoteEditor,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO,readStorageHealth,loadScheduleIntoDraft,resetTodaySession,markDone,togglePause,setCurrentTask,refreshPnote,checkSessionOwnershipClaim,RichTextRuntime,RichTextAssets,withRichTextAssetMaintenancePaused,renderRichTextContent});\n`;
   html=html.replace(marker,exposure+marker);
   if(options.disablePwa!==false)html=withoutPwaChecks(html);
   return html;
@@ -258,7 +259,7 @@ export function resolveChromiumExecutable(preferred=''){
 // read until the file holds one; under CPU load that gap gets longer.
 export async function devToolsPort(profile,{timeout=20000}={}){
   const file=path.join(profile,'DevToolsActivePort');
-  return waitFor(()=>{try{const value=fs.readFileSync(file,'utf8').split(/\r?\n/)[0].trim();return /^[1-9]\d{0,4}$/u.test(value)?value:'';}catch{return '';}},{timeout,label:'Chromium DevTools port'});
+  return waitFor(()=>{try{const value=readRuntimeSource(file).split(/\r?\n/)[0].trim();return /^[1-9]\d{0,4}$/u.test(value)?value:'';}catch{return '';}},{timeout,label:'Chromium DevTools port'});
 }
 
 export async function launchChromium(options={}){

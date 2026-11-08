@@ -81,6 +81,10 @@ try{
         assert.equal(await page.evaluate(`__PWA6.UnsupportedData.held()`),true,'protected data is held, so clean-up and Drive uploads wait');
         assert.equal(await page.evaluate(`__PWA6.NoticeCoordinator.eventStatus().events.some(event=>event.source==='unsupported-data'&&event.id==='held')`),true,'the person is told once');
         assert.equal(await page.evaluate(`!document.getElementById('unsupported-data').hidden&&/newer version/u.test(document.getElementById('unsupported-data-text').textContent)`),true,'Library → Data says what is kept');
+      }else if(!testCase.blocked){
+        // Nothing held: the Library → Data row stays out of sight (its layout
+        // once overrode the hidden attribute and showed an empty row).
+        assert.equal(await page.evaluate(`(()=>{const row=document.getElementById('unsupported-data');return row.hidden&&getComputedStyle(row).display==='none';})()`),true,'Library → Data shows no newer-version row when nothing is held');
       }
       if(testCase.write){
         const refused=await page.evaluate(`(async()=>{try{await __PWA6.IndexedDb.strictStoreTransaction(${JSON.stringify(testCase.write.store)},'readwrite',(store,tx,finish)=>{store.put((${testCase.write.value.toString()})(${JSON.stringify(key)}));tx.oncomplete=()=>finish(true,true);});return 'written';}catch(error){return String(error&&error.code||error&&error.message||error);}})()`);

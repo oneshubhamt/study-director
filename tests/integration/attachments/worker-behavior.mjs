@@ -8,18 +8,18 @@ const MiB=1048576;
 class MemoryFileHandle{
   constructor(mode='sync'){this.mode=mode;this.bytes=new Uint8Array(0)}
   async createSyncAccessHandle(){
-    if(this.mode==='fallback')throw new DOMException('sync unavailable','NotAllowedError');
+    if(this.mode.startsWith('fallback'))throw new DOMException('sync unavailable','NotAllowedError');
     const handle=this;
     return {
       truncate(size){const next=new Uint8Array(size);next.set(handle.bytes.subarray(0,Math.min(size,handle.bytes.length)));handle.bytes=next},
-      write(bytes,{at=0}={}){const end=at+bytes.byteLength;if(end>handle.bytes.length){const next=new Uint8Array(end);next.set(handle.bytes);handle.bytes=next}handle.bytes.set(bytes,at);return bytes.byteLength},
-      read(view,{at=0}={}){const available=Math.max(0,Math.min(view.byteLength,handle.bytes.length-at));view.set(handle.bytes.subarray(at,at+available));return available},
+      write(bytes,{at=0}={}){if(handle.mode==='sync-write-fault')throw new DOMException('injected OPFS write failure','QuotaExceededError');const end=at+bytes.byteLength;if(end>handle.bytes.length){const next=new Uint8Array(end);next.set(handle.bytes);handle.bytes=next}handle.bytes.set(bytes,at);return bytes.byteLength},
+      read(view,{at=0}={}){const available=Math.max(0,Math.min(view.byteLength,handle.bytes.length-at));view.set(handle.bytes.subarray(at,at+available));if(handle.mode==='sync-corrupt-read'&&at===0&&available)view[0]^=1;return available},
       getSize(){return handle.bytes.length},flush(){},close(){}
     };
   }
   async createWritable(){
     const handle=this;let parts=[],aborted=false;
-    return {async write(bytes){if(aborted)throw new Error('aborted');parts.push(new Uint8Array(bytes))},async close(){if(aborted)return;const size=parts.reduce((n,p)=>n+p.byteLength,0),next=new Uint8Array(size);let at=0;for(const part of parts){next.set(part,at);at+=part.byteLength}handle.bytes=next;parts=[]},async abort(){aborted=true;parts=[]}};
+    return {async write(bytes){if(aborted)throw new Error('aborted');if(handle.mode==='fallback-write-fault')throw new DOMException('injected OPFS quota failure','QuotaExceededError');parts.push(new Uint8Array(bytes))},async close(){if(aborted)return;const size=parts.reduce((n,p)=>n+p.byteLength,0),next=new Uint8Array(size);let at=0;for(const part of parts){next.set(part,at);at+=part.byteLength}if(handle.mode==='fallback-corrupt-read'&&next.length)next[0]^=1;handle.bytes=next;parts=[]},async abort(){aborted=true;parts=[]}};
   }
   async getFile(){return new Blob([this.bytes])}
 }
@@ -51,6 +51,15 @@ const digest=async blob=>Array.from(new Uint8Array(await webcrypto.subtle.digest
   const h=createHarness('sync'),file=new Blob([new Uint8Array(9*MiB).fill(11)]),name='attblob-32345678-1234-1234-1234-123456789012';
   const result=await h.request('ingest',{file,storageName:name},{cancelAfterFirstCopy:true});assert.equal(result.error?.name,'AbortError');assert.equal(h.files.has(name),false,'cancelled staged file must be deleted');
   console.log('ok - built worker cancellation removes partial staged bytes');
+}
+// Both OPFS modes must reject an uncommitted write or corrupted read-back,
+ // remove staged bytes, and never emit a completed attachment descriptor.
+for(const mode of ['sync-write-fault','sync-corrupt-read','fallback-write-fault','fallback-corrupt-read']){
+  const h=createHarness(mode),name='attblob-52345678-1234-1234-1234-123456789012';
+  const result=await h.request('ingest',{file:new Blob([new Uint8Array(2048).fill(13)]),storageName:name});
+  assert.ok(result.error,mode+' must fail ingestion rather than publish a metadata candidate');
+  assert.equal(result.value,undefined,mode+' must not expose a verified attachment descriptor');
+  assert.equal(h.files.has(name),false,mode+' must delete staged incomplete/corrupt OPFS bytes');
 }
 {
   // Profiles: each request names its profile's folder; any other folder is refused.

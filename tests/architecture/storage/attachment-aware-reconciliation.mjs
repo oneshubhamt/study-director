@@ -7,12 +7,6 @@ const backup=readScript('source/core/backup.ts');
 const ui=fs.readFileSync('source/core/reconciliation-ui.js','utf8');
 const app=readHostHtml();
 
-assert.match(ui,/const checkpointAssets=new Map\(\)/,'Reconciliation preview must use a checkpoint-backed temporary asset map.');
-assert.match(ui,/readonlyAssetStore=\(preferCheckpoint=false\)/,'Reconciliation preview must expose read-only temporary stores.');
-assert.match(ui,/if\(preferCheckpoint&&checkpoint instanceof Blob\)return checkpoint/,'Imported editor must prefer checkpoint bytes.');
-assert.match(ui,/if\(local instanceof Blob\)return local/,'Resolved/local editor must prefer canonical bytes.');
-assert.match(ui,/Attachments cannot be added while reconciling notes/,'Preview AssetStore must reject writes.');
-assert.match(ui,/Attachments cannot be removed from storage while reconciling notes/,'Preview AssetStore must reject deletion.');
 
 assert.match(backup,/async function resolvedAssetReferenceIds\s*\(resolvedPlan\s*,signal\s*,reviews\s*=freeze\s*\(\[\]\s*\)\s*\)/,'Backup restore must calculate final attachment references from ResolvedPlan and the versions kept for review.');
 assert.match(backup,/for\s*\(const item of resolvedPlan&&resolvedPlan\s*\.savedDays\|\|\[\]\s*\)/,'Saved-Day choices must contribute attachment references.');

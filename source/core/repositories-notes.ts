@@ -88,7 +88,7 @@ const repository=(()=>{
   let saveFailed=false;
   let saveMessage='';
   // Unsaved notes the last browser copy could not hold.
-  let rescueShortfall:string[]=[];
+  let rescueShortfall:string[]=[],lastRescueShortfallNotice='';
   let snapshotRevision=0,metadataSnapshotCache:NoteMetadataSnapshot|null=null,searchSnapshotCache:NoteSearchSnapshot|null=null;
 
   // A collection over the note limit is refused whole; cutting it would drop
@@ -141,7 +141,7 @@ const repository=(()=>{
     return out;
   }
   // The note a title names, started in memory for its first edit.
-  function ensureEntry(title:unknown,label=''){
+  function ensureEntry(title:unknown,label:string=''){
     const safeTitle=normalizeAreaName(title);
     if(!safeTitle||NoteKeys.isKey(safeTitle))return null;
     let id=idForTitle(safeTitle);
@@ -157,7 +157,7 @@ const repository=(()=>{
   }
   function failure(){return Object.freeze({failed:saveFailed,message:saveMessage});}
   function size(){return Object.keys(notes).length;}
-  function canonicalEntrySnapshot(entry:DraftNote|null|undefined,key=''):NoteRecord|null{
+  function canonicalEntrySnapshot(entry:DraftNote|null|undefined,key:string|string | undefined=''):NoteRecord|null{
     const safeKey=String((entry&&entry.key)||key||'');
     if(!safeKey||!entry)return null;
     return {
@@ -180,7 +180,7 @@ const repository=(()=>{
     const documents=Object.freeze(Object.values(notes).filter(entry=>hasContent(entry)&&!isTrashKey(entry.key)).map(entry=>Object.freeze({key:titleOf(entry),revision:String(entry.updatedAt||''),value:String(entry.text||'')})));
     searchSnapshotCache=Object.freeze({revision:snapshotRevision,documents});return searchSnapshotCache;
   }
-  function clearFailure(){saveFailed=false;saveMessage='';rescueShortfall=[];}
+  function clearFailure(){saveFailed=false;saveMessage='';rescueShortfall=[];lastRescueShortfallNotice='';}
   function recordFailure(reason:unknown){
     saveFailed=true;
     const labels=rescueShortfall.map(key=>displayAreaName(notes[key]&&notes[key]!.label||key)),named=labels.length>3?`${labels.slice(0,3).join(', ')} and ${labels.length-3} more`:labels.join(', ');
@@ -216,7 +216,7 @@ const repository=(()=>{
   }
   // Clearing keeps the copy's own ceiling; protecting new notes uses its share
   // of the emergency budget.
-  function persistIndependentRescue(entries:Record<string,NoteDelta>,room=APP_LIMITS.noteRescueBytes){
+  function persistIndependentRescue(entries:Record<string,NoteDelta>,room:number=APP_LIMITS.noteRescueBytes){
     const updatedAt=new Date().toISOString(),envelope={format:NOTE_RESCUE_FORMAT,version:1,updatedAt,entries};
     if(jsonByteLength(envelope)>room)return false;
     return LocalStorageContract.setJson(STORAGE_KEYS.noteRescue,envelope);
@@ -238,6 +238,17 @@ const repository=(()=>{
     }
     const written=Object.keys(entries).length?persistIndependentRescue(entries,room):true;
     rescueShortfall=candidates.filter(entry=>!('deleted' in entry&&entry.deleted)&&(!written||!entries[entry.key])).map(entry=>entry.key);
+    // A page-exit rescue can fail before its async IndexedDB save is known to
+    // have failed. Name the exposed notes immediately, without claiming that
+    // the canonical save has failed or enlarging the shared localStorage cap.
+    const risk=rescueShortfall.join('|');
+    if(risk!==lastRescueShortfallNotice){
+      lastRescueShortfallNotice=risk;
+      if(risk){
+        const labels=rescueShortfall.map(key=>displayAreaName(notes[key]?.label||key));
+        showSubjectNoteSaveWarning(freeze({kind:'rescue-capacity',message:`The browser's ${Math.round(APP_LIMITS.noteRescueBytes/104857.6)/10} MiB emergency copy could not hold unsaved ${labels.length===1?'Note':'Notes'}: ${labels.slice(0,3).join(', ')}${labels.length>3?` and ${labels.length-3} more`:''}. Keep this tab open until Notes finish saving; otherwise these edits may be lost.`}));
+      }
+    }
     if(!written||!complete)AppDiagnostics.capture('notes.rescue-write',LocalStorageContract.lastError||new Error(`Unsaved notes exceed the ${Math.round(APP_LIMITS.noteRescueBytes/1024)} KB browser copy.`),'error');
     return written&&complete;
   }
@@ -528,7 +539,7 @@ const repository=(()=>{
   // An edit names the note by its title (plan Areas, Execute and the Library
   // find notes that way) or by its stored key. A title without a note starts
   // one; the label follows the spelling given as long as the title stays.
-  function updateInternal(ref:unknown,label:unknown,value:unknown,expectedRevision='',validatedRich=false):NoteUpdate{
+  function updateInternal(ref:unknown,label:unknown,value:unknown,expectedRevision:string='',validatedRich:boolean=false):NoteUpdate{
     if(!appCanMutate())return {status:'rejected',revision:''};
     const raw=String(ref||''),byKey=NoteKeys.isKey(raw),title=byKey?'':normalizeAreaName(raw);
     if(!byKey&&!title)return {status:'rejected',revision:''};
@@ -825,7 +836,7 @@ const repository=(()=>{
     const marker=`#note=${key}`;
     return freeze(Object.values(notes).filter(entry=>!isTrashKey(entry.key)&&entry.key!==key&&((entry.links||[]).includes(key)||String(entry.text||'').includes(marker))).map(noteView).sort((a,b)=>a!.label.localeCompare(b!.label)));
   }
-  function trashExpired(entry:DraftNote|undefined,now=decisionNowMs()){return timestamp(entry)<=now-TRASH_RETENTION_MS;}
+  function trashExpired(entry:DraftNote|undefined,now:number=decisionNowMs()){return timestamp(entry)<=now-TRASH_RETENTION_MS;}
   function trashSnapshot(){
     const now=decisionNowMs();
     return freeze(Object.values(notes).filter(entry=>isTrashKey(entry.key)&&!trashExpired(entry,now)).map(entry=>freeze({key:entry.key,id:NoteKeys.id(entry.key),label:String(entry.label||''),deletedAt:String(entry.updatedAt||''),hasNote:hasContent(entry)})).sort((a,b)=>b.deletedAt.localeCompare(a.deletedAt)));

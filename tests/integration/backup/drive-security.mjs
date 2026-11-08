@@ -47,7 +47,16 @@ async function waitFor(predicate,message){
   const plain=createHarness();await plain.provider.prepare();await plain.provider.authorize();assert.equal(plain.provider.connected(),true,'without browser storage Drive still signs in');
 }
 
-const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSource=async()=>{})=>{const blob=new Blob([text],{type:'application/octet-stream'});return {kind,id,name:id+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':'.sdcheckpoint'),blob,size:blob.size,digest:await digest(blob),exportedAt:'2026-09-19T00:00:00.000Z',appVersion:'QA_FIXTURE',checkProtection,checkSource};};
+const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSource=async()=>{})=>{const blob=new Blob([text],{type:'application/octet-stream'});return {kind,id,name:id+(kind==='object'?'.sdobject':kind==='commit'?'.sdcommit':kind==='session-claim'?'.sdsessionclaim':'.sdcheckpoint'),blob,size:blob.size,digest:await digest(blob),exportedAt:'2026-09-19T00:00:00.000Z',appVersion:'QA_FIXTURE',checkProtection,checkSource};};
+
+{
+  const {provider}=createHarness();await provider.prepare();await provider.authorize();
+  const id='sc_'+'1'.padStart(16,'0'),text=JSON.stringify({format:'study-director.active-session-claim',version:1,date:'2026-09-19',epoch:1,owner:'inst_qa_laptop_mve00000_aaaaaaaa',observedRevision:7,claimedAt:'2026-09-19T12:00:00.000Z'}),file=await makeRepositoryFile('session-claim',id,text);
+  const uploaded=await provider.repository.uploadSessionClaim(file),listed=await provider.repository.listSessionClaims();
+  assert.equal(listed.overflow,false);assert.equal(listed.items.length,1);assert.equal(listed.items[0].id,id);assert.equal(listed.items[0].digest,file.digest);
+  const opened=await provider.repository.downloadSessionClaim(listed.items[0]);try{assert.equal(await opened.blob.text(),text);}finally{await opened.release();}
+  assert.equal(await provider.repository.deleteSessionClaim(uploaded),true);assert.equal((await provider.repository.listSessionClaims()).items.length,0);
+}
 
 // Complete history discovery is independent of retention capacity. Page work
 // stays bounded, while incomplete searches and repeated tokens cannot certify it.
@@ -95,7 +104,12 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   await assert.rejects(()=>provider.repository.delete({...uploaded,digest:'f'.repeat(64)}),/changed before deletion/u);assert.equal(state.deletions.length,0,'digest mismatch must fail closed before deletion');
   remote.version=Number(uploaded.remoteVersion)+1;await assert.rejects(()=>provider.repository.delete(uploaded),/changed version before deletion/u);assert.equal(state.deletions.length,0,'remote-version mismatch must fail closed before deletion even when digest metadata is unchanged');remote.version=Number(uploaded.remoteVersion);
   assert.equal(await provider.repository.delete(uploaded),true);assert.equal((await provider.repository.list({kind:'object'})).items.length,0);
-  const historyCheckpointId='cp_'+'b'.repeat(32),historyCheckpoint={...(await makeRepositoryFile('checkpoint',historyCheckpointId,'history-metadata-proof')),historySummary:{logicalFingerprint:'c'.repeat(64),counts:{dailyRecord:4,note:3},encrypted:false,retention:{role:'normal',protectedUntil:'',calendar:{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0}}}},uploadedHistoryCheckpoint=await provider.repository.upload(historyCheckpoint),listedHistoryCheckpoints=await provider.repository.list({kind:'checkpoint'});assert.equal(listedHistoryCheckpoints.items.length,1);assert.deepEqual(JSON.parse(JSON.stringify(listedHistoryCheckpoints.items[0].history.retention.calendar)),{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0},'Drive checkpoint metadata must round-trip the retention calendar so history can be tiered without downloading manifests');assert.equal(await provider.repository.delete(uploadedHistoryCheckpoint),true);
+  const historyCheckpointId='cp_'+'b'.repeat(32),historyCheckpoint={...(await makeRepositoryFile('checkpoint',historyCheckpointId,'history-metadata-proof')),historySummary:{logicalFingerprint:'c'.repeat(64),counts:{dailyRecord:4,note:3},encrypted:false,retention:{role:'normal',protectedUntil:'',calendar:{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0}},attachmentsMissing:2}},uploadedHistoryCheckpoint=await provider.repository.upload(historyCheckpoint),listedHistoryCheckpoints=await provider.repository.list({kind:'checkpoint'});assert.equal(listedHistoryCheckpoints.items.length,1);
+  // Version History hides Replace for a version missing attachment bytes, so the
+  // count travels with the version's Drive properties; a version without it reads 0.
+  const storedHistoryCheckpoint=state.files.get(uploadedHistoryCheckpoint.remoteId);assert.equal(storedHistoryCheckpoint.appProperties.sdHistoryAttachmentsMissing,'2');assert.equal(listedHistoryCheckpoints.items[0].history.attachmentsMissing,2,'Drive must round-trip the missing-attachment count');
+  delete storedHistoryCheckpoint.appProperties.sdHistoryAttachmentsMissing;assert.equal((await provider.repository.list({kind:'checkpoint'})).items[0].history.attachmentsMissing,0);storedHistoryCheckpoint.appProperties.sdHistoryAttachmentsMissing='2';
+  assert.deepEqual(JSON.parse(JSON.stringify(listedHistoryCheckpoints.items[0].history.retention.calendar)),{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0},'Drive checkpoint metadata must round-trip the retention calendar so history can be tiered without downloading manifests');assert.equal(await provider.repository.delete(uploadedHistoryCheckpoint),true);
   const checkpointId='cp_'+'9'.repeat(32),commit=await makeRepositoryFile('commit',checkpointId,JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt:'2026-09-19T00:00:00.000Z',sourceRevision:'2026-09-19T00:00:00.000Z',manifestVersion:2})),uploadedCommit=await provider.repository.upload(commit);assert.equal(uploadedCommit.kind,'commit');assert.equal(uploadedCommit.name,checkpointId+'.sdcommit');const listedCommits=await provider.repository.list({kind:'commit'});assert.equal(listedCommits.items.length,1);assert.equal(listedCommits.items[0].id,checkpointId);const downloadedCommit=await provider.repository.download(uploadedCommit);assert.equal(JSON.parse(await downloadedCommit.blob.text()).checkpointId,checkpointId);await downloadedCommit.release();assert.equal(await provider.repository.delete(uploadedCommit),true);assert.equal((await provider.repository.list({kind:'commit'})).items.length,0,'Drive commit markers must use the same exact-identity transport lifecycle as manifests and objects');
   assert.ok(state.requests.filter(request=>request.authorization).every(request=>request.authorization.startsWith('Bearer token-')));
 }
@@ -123,6 +137,11 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   const operation=provider.repository.beginOperation();assert.equal(operation.historyReadConcurrency,8,'scoped Drive operations must retain the shared eight-read immutable-history ceiling');const scopedBefore=folderVerificationCount();
   await operation.list({kind:'checkpoint'});await operation.list({kind:'commit'});await operation.list({kind:'object'});
   const scopedChecks=folderVerificationCount()-scopedBefore;assert.equal(scopedChecks,1,'one Drive repository operation must reuse one verified folder receipt');
+
+  const controller=new AbortController(),preemptible=provider.repository.beginOperation({signal:controller.signal}),publication=await preemptible.beginPublication();
+  controller.abort(Object.assign(new Error('foreground preemption'),{name:'AbortError',code:'REPOSITORY_BACKGROUND_PREEMPTED'}));
+  assert.equal(await preemptible.endPublication(publication),true,'publication-marker retirement must survive an expected operation abort');
+  assert.equal((await provider.repository.listPublications()).items.some(row=>row.id===publication.id),false,'preempted publication marker must be physically retired');
 
   const invalidated=provider.repository.beginOperation();await invalidated.list({kind:'object'});const beforeContradiction=folderVerificationCount();
   state.folderShared=true;await assert.rejects(()=>provider.repository.list({kind:'object'}),/no longer private and owned/u,'contradictory folder metadata must fail closed and invalidate prior receipts');
@@ -240,6 +259,61 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   device='inst_qa_laptop_mve00000_aaaaaaaa';const listed=new Map((await provider.repository.listPublications()).items.map(row=>[row.id,row.sameDevice]));
   assert.equal(listed.get(mine.id),true,'a marker this device started reads as its own');assert.equal(listed.get(theirs.id),false,'another device\'s marker does not');assert.equal(listed.get('pub_'+'c'.repeat(32)),false,'a marker from an older build, with no device, counts as another device\'s');
   device='';assert.equal((await provider.repository.listPublications()).items.every(row=>row.sameDevice===false),true,'without a known device nothing reads as its own');
+}
+
+{
+  // Offline, background work waits for the network instead of failing and
+  // backing off; back online it may run again.
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  assert.equal(provider.backgroundAvailable(),true,'signed in and online, background work may run');
+  state.offline=true;assert.equal(provider.backgroundAvailable(),false,'offline, background work waits');
+  state.offline=false;assert.equal(provider.backgroundAvailable(),true,'back online, it may run again');
+}
+{
+  // An upload renews its marker while it runs: Drive markers never change, so
+  // renewal puts a fresh marker in place and removes the old one. Cleanup
+  // treats a renewing marker left unrenewed as abandoned, so renewal must
+  // fail once the old marker is gone or too close to looking abandoned.
+  let device='inst_qa_laptop_mve00000_aaaaaaaa';const {state,provider}=createHarness({device:()=>device});await provider.prepare();await provider.authorize();
+  const markers=()=>[...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='publication'),markerFile=id=>markers().find(file=>file.appProperties.studyDirectorRepositoryId===id);
+  const first=await provider.repository.beginPublication();
+  assert.equal(first.renews,true,'a new upload marker says it renews');assert.ok(Number.isFinite(Date.parse(first.startedAt)),'a new upload marker records when its upload began');
+  assert.equal((await provider.repository.listPublications()).items.find(row=>row.id===first.id).renews,true,'cleanup sees that the marker renews');
+  const second=await provider.repository.renewPublication(first);
+  assert.notEqual(second.id,first.id,'renewal puts a fresh marker in place');assert.equal(second.renews,true);assert.equal(second.sameDevice,true,'the fresh marker still names this device');
+  assert.equal(second.startedAt,first.startedAt,'the fresh marker keeps the upload\'s start, so taking turns goes by when uploads began');
+  assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[second.id],'the old marker goes once the fresh one is in place');
+  const operation=provider.repository.beginOperation(),third=await operation.renewPublication(second);assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[third.id],'an operation view renews the same way');
+  // Cleanup removed it as abandoned: the upload must stop, and leave nothing behind.
+  state.files.delete(markerFile(third.id).id);
+  await assert.rejects(()=>provider.repository.renewPublication(third),/disappeared before commit/u,'renewal fails once cleanup has removed the marker');
+  assert.equal(markers().length,0,'a failed renewal removes the fresh marker it made');
+  // Unrenewed too long: cleanup may be about to take it for abandoned.
+  const late=await provider.repository.beginPublication();markerFile(late.id).createdTime=new Date(Date.now()-14*60*1000).toISOString();
+  await assert.rejects(()=>provider.repository.renewPublication(late),/too long without renewal/u,'renewal refuses a marker close to looking abandoned');
+  assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[late.id],'a refused renewal leaves only the old marker, for cleanup to judge');
+  // A marker from an older build does not renew; cleanup gives it the full day.
+  const legacy=markerFile(late.id);delete legacy.appProperties.sdPublicationRenews;delete legacy.appProperties.sdPublicationStartedAt;
+  const listed=(await provider.repository.listPublications()).items.find(row=>row.id===late.id);
+  assert.equal(listed.renews,false,'an older build\'s marker does not renew');assert.equal(listed.startedAt,listed.createdAt,'an older build\'s marker began when it was made');
+}
+{
+  // This device's clock runs 20 minutes ahead of Drive's. The adapter learns
+  // Drive's clock from the markers it creates and measures their ages on it,
+  // so a marker made a moment ago is not "too long without renewal". An
+  // upload's start is Drive's time too.
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  state.driveClockAheadMs=-20*60*1000;
+  const first=await provider.repository.beginPublication();
+  assert.equal(first.startedAt,first.createdAt,'an upload begins at its marker\'s creation time on Drive');
+  assert.ok(Math.abs(provider.repository.now()-(Date.now()-20*60*1000))<5000,'the adapter reads Drive\'s clock');
+  const second=await provider.repository.renewPublication(first);
+  assert.equal(second.startedAt,first.startedAt,'renewal keeps the start');
+  assert.equal((await provider.repository.assertPublication(second)).id,second.id,'a fresh marker is not too old to commit');
+  await provider.repository.endPublication(second);
+  const maintenance=await provider.repository.beginMaintenance();
+  assert.equal((await provider.repository.assertMaintenance(maintenance)).id,maintenance.id,'nor is a fresh maintenance marker');
+  await provider.repository.endMaintenance(maintenance);
 }
 
 {
@@ -467,4 +541,49 @@ for(const boundary of ['payload-change','repository-change','expired-session','r
  }
  await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push(boundary);
 }
-console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',resumableUploadCases,productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));
+// A second browser page has no upload session memory. It must not create a
+// duplicate logical file if the prior page's response/receipt was lost.
+const restartCases=[];
+{
+ const first=createHarness();await first.provider.prepare();await first.provider.authorize();
+ const kindIds=[['object','obj_'+'1'.repeat(32)],['checkpoint','cp_'+'2'.repeat(32)],['commit','cp_'+'3'.repeat(32)]];
+ for(const [kind,id] of kindIds){
+  const original=await makeRepositoryFile(kind,id,'restart-'+kind+'-stable-contents');
+  const sent=await first.provider.repository.upload({...original,knownAbsent:true});
+  const page2=createHarness({remoteState:first.state});await page2.provider.prepare();await page2.provider.authorize();
+  const duplicate=await page2.provider.repository.upload({...original,knownAbsent:true});
+  assert.equal(duplicate.remoteId,sent.remoteId,'a reload replay must reuse the exact existing '+kind+' identity');
+  const matching=[...page2.state.files.values()].filter(row=>row.appProperties?.studyDirectorRepositoryKind===kind&&row.appProperties?.studyDirectorRepositoryId===id);
+  assert.equal(matching.length,1,'a reload replay must not create duplicate '+kind+' identities');
+  const changed=await makeRepositoryFile(kind,id,'CHANGED-'+kind+'-stable-contents');
+  await assert.rejects(()=>page2.provider.repository.upload({...changed,knownAbsent:true}),/different content|identity|checksum/u,'replayed '+kind+' conflicts must preserve the original');
+  const remote=page2.state.files.get(sent.remoteId);
+  assert.equal(remote.sha256Checksum,original.digest);
+  remote.ownedByMe=false;
+  await assert.rejects(()=>page2.provider.repository.upload({...original,knownAbsent:true}),/unsafe metadata/u,'a marked but untrusted existing identity cannot be treated as absent');
+  remote.ownedByMe=true;
+  remote.sha256Checksum='f'.repeat(64);
+  await assert.rejects(()=>page2.provider.repository.upload({...original,knownAbsent:true}),/different content/u,'server-reported wrong SHA-256 must forbid reuse');
+  remote.sha256Checksum=original.digest;
+  assert.equal([...page2.state.files.values()].filter(row=>row.appProperties?.studyDirectorRepositoryKind===kind&&row.appProperties?.studyDirectorRepositoryId===id).length,1,'unsafe metadata and server SHA-256 cannot produce a duplicate');
+  restartCases.push('completed '+kind+' replay, malformed identity and checksum collision rejected');
+ }
+}
+{
+ const clock=createFakeClock(),first=createHarness({clock});first.clock=clock;await first.provider.prepare();await first.provider.authorize();
+ const file=await makeRepositoryFile('object','obj_'+'4'.repeat(32),new Blob([new Uint8Array(6*1048576)]));
+ first.state.uploadProgressSteps=14;first.state.uploadProgressStepMs=90000;
+ const controller=new AbortController(),upload=first.provider.repository.upload({...file,knownAbsent:true},{signal:controller.signal});
+ for(let steps=0;![...first.state.uploads.values()].some(row=>row.received===2*1048576)&&steps<1300;steps++){await new Promise(resolve=>setImmediate(resolve));if(!first.state.nativeUploadReplies)await clock.advance(1000);}
+ assert.equal([...first.state.uploads.values()][0]?.received,2*1048576,'first page must hold only a partially acknowledged server-side upload');
+ controller.abort(Object.assign(new Error('page closed during upload'),{name:'AbortError'}));await assert.rejects(upload,{name:'AbortError'});
+ assert.equal(first.state.files.size,0,'partial remote object is not committed');
+ const second=createHarness({clock,remoteState:first.state});second.clock=clock;await second.provider.prepare();await second.provider.authorize();
+ second.state.uploadProgressSteps=1;second.state.uploadProgressStepMs=0;
+ const result=await settleUpload(second.provider.repository.upload({...file,knownAbsent:true}),second);
+ assert.equal(result.ok,true,result.error?.message);assert.equal(result.value.serverDigest,file.digest);
+ assert.equal(second.state.files.size,1,'restart creates one verified committed remote object');
+ assert.equal(second.state.uploads.size,2,'page-local upload URL is not falsely reconstructed from the remote orphan session');
+ restartCases.push('interrupted large upload restarts from canonical bytes without false receipt');
+}
+console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',resumableUploadCases,restartCases,productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));

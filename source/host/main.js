@@ -255,11 +255,19 @@ function createStorageHealthController(local){
       issue(source,`Browser storage could not be ${action}: ${error.message||error}. Changes may not survive a reload.`,{mirror:false});
     }else if(issueMap.has(source))recover(source,null,{mirror:false});
   }
+  // Save times only move forward: another tab may have stored a later one
+  // than this tab holds, and writing back an older copy would hide that save.
+  function laterTime(own,other){
+    const ownAt=Date.parse(String(own||'')),otherAt=Date.parse(String(other||''));
+    return Number.isFinite(otherAt)&&(!Number.isFinite(ownAt)||otherAt>ownAt)?other:own??null;
+  }
   function mirror({marker=false}={}){
     if(mirroring)return false;
     mirroring=true;
     try{
-      if(!clearMarkerOwned&&!marker){const stored=local.getJson(STORAGE_KEYS.storageHealth,null);history=Object.assign({},history,{browserDataClearedAt:stored&&stored.browserDataClearedAt||null});}
+      const stored=local.getJson(STORAGE_KEYS.storageHealth,null),known=stored&&typeof stored==='object'?stored:{};
+      history=Object.assign({},history,{lastLocalSaveAt:laterTime(history.lastLocalSaveAt,known.lastLocalSaveAt),lastStudyDataSaveAt:laterTime(history.lastStudyDataSaveAt,known.lastStudyDataSaveAt)});
+      if(!clearMarkerOwned&&!marker)history=Object.assign({},history,{browserDataClearedAt:known.browserDataClearedAt||null});
       return local.setJson(STORAGE_KEYS.storageHealth,history);
     }
     finally{mirroring=false;}
@@ -327,7 +335,7 @@ const Profiles=ProfilesModule.createController(Object.freeze({ports:Object.freez
   }),
   names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key))}),
   platform:Object.freeze({
-    deleteDatabase:name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));}),
+    deleteDatabase:name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));request.onblocked=()=>reject(new Error('Profile deletion is waiting for another open Study Director tab. Close the other tabs and retry; your recovery data remains protected.'));}),
     listen:handler=>{const listener=event=>{if(event.storageArea===localStorage)handler(event.key);};window.addEventListener('storage',listener);return ()=>window.removeEventListener('storage',listener);},
     now:()=>Date.now(),random:bytes=>randomIdPart(bytes),reload:()=>location.reload(),
     removeDirectory:async name=>{const root=await navigator.storage?.getDirectory?.();if(!root)return;await root.removeEntry(name,{recursive:true}).catch(error=>{if(error?.name!=='NotFoundError')throw error;});}
@@ -495,8 +503,68 @@ const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze(
 if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-director.notice-coordinator'||NoticeCoordinator.contractVersion!==1){
   throw new Error('Study Director notice coordinator is unavailable or incompatible.');
 }
+// Recent (docs/areas/notifications.md): today's pop-ups and banners in the profile
+// panel. Kept for this window across a reload (sessionStorage), tied to the
+// profile; never uploaded or backed up. Opening the panel marks news seen.
+const NotificationRecent=(()=>{
+  // The three newest show; Show all lists the rest while the panel is open.
+  const SHOWN=3;
+  let highlight=new Set(),all=false;
+  function restore(){
+    try{
+      const value=JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEYS.notifications)||'null');
+      if(value&&value.version===1&&value.scope===ProfileScope.scope&&Array.isArray(value.entries))NoticeCoordinator.restoreRecent(value.entries);
+    }catch(error){AppDiagnostics.capture('notifications.recent-restore',error,'warn');}
+  }
+  function save(state){
+    try{
+      if(!state.entries.length){sessionStorage.removeItem(SESSION_STORAGE_KEYS.notifications);return;}
+      const entries=state.entries.map(({id,source,tier,severity,title,message,at,outcome,seen})=>({id,source,tier,severity,title,message,at,outcome,seen}));
+      sessionStorage.setItem(SESSION_STORAGE_KEYS.notifications,JSON.stringify({version:1,scope:ProfileScope.scope,entries}));
+    }catch(error){AppDiagnostics.capture('notifications.recent-save',error,'warn');}
+  }
+  function changed(state){save(state);scheduleSyncStatus();render(state);}
+  function time(at){try{return new Date(at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch{return '';}}
+  // Rebuilt only when the entries change, so a focused button keeps focus.
+  function render(state=NoticeCoordinator.recent()){
+    const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
+    const list=document.getElementById('profile-recent-list'),empty=document.getElementById('profile-recent-empty'),clear=document.getElementById('profile-recent-clear');
+    const group=document.getElementById('profile-recent-group'),more=document.getElementById('profile-recent-more'),total=state.entries.length;
+    if(empty)empty.hidden=!!total;if(clear)clear.hidden=!total;if(group)group.hidden=!total;
+    if(more){
+      more.hidden=total<=SHOWN;more.setAttribute('aria-expanded',all?'true':'false');
+      const label=all?'Show fewer':`Show all (${total})`;if(more.textContent!==label)more.textContent=label;
+    }
+    const shown=all?state.entries:state.entries.slice(0,SHOWN);
+    const key=JSON.stringify([shown,[...highlight]]);if(!list||list.dataset.key===key)return;list.dataset.key=key;
+    list.replaceChildren(...shown.map(entry=>{
+      const row=document.createElement('li');row.className='profile-recent-item';row.dataset.tone=entry.severity;row.dataset.tier=entry.tier;
+      if(highlight.has(entry.id))row.dataset.unseen='true';
+      // A live pop-up whose button opens something opens from anywhere on its row.
+      if(entry.actionOpens){row.dataset.action='recent-action';row.dataset.recentId=entry.id;row.dataset.opens='true';}
+      const mark=document.createElement('span');mark.className='profile-recent-mark';mark.setAttribute('aria-hidden','true');
+      const text=document.createElement('span');text.className='profile-recent-text';
+      const title=document.createElement('strong');title.className='profile-recent-title';title.textContent=entry.title;text.append(title);
+      if(entry.message){const message=document.createElement('span');message.className='profile-recent-message';message.textContent=entry.message;text.append(message);}
+      const when=document.createElement('time');when.className='profile-recent-time';when.dateTime=new Date(entry.at).toISOString();when.textContent=time(entry.at);
+      row.append(mark,text,when);
+      if(entry.actionLabel){const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset.action='recent-action';button.dataset.recentId=entry.id;button.textContent=entry.actionLabel;row.append(button);}
+      return row;
+    }));
+  }
+  // News that faded unseen stays marked while the panel is open.
+  function opened(){const state=NoticeCoordinator.recent();highlight=new Set(state.entries.filter(entry=>entry.tier==='news'&&entry.outcome==='expired'&&!entry.seen).map(entry=>entry.id));render(state);NoticeCoordinator.markRecentSeen();}
+  function closed(){highlight=new Set();all=false;}
+  function toggle(){all=!all;render();return true;}
+  function run(ev){
+    const id=String(ev?.target?.closest?.('[data-recent-id]')?.dataset.recentId||'');if(!id)return false;
+    closeProfilePanel();return NoticeCoordinator.runRecentAction(id);
+  }
+  restore();
+  return Object.freeze({changed,render,opened,closed,run,toggle,clear:()=>{NoticeCoordinator.clearRecent();return true;}});
+})();
 async function showBackupPresentation(source,kind){
-  if(source==='device-folder'&&kind==='permission')return DeviceBackup?.connect();
+  if(source==='device-folder'&&kind==='permission')return DeviceBackup?connectDeviceBackupWithRecovery():undefined;
   // Reconnecting straight from the toast keeps it to one click.
   if(kind==='permission'&&source!=='file'&&await (source==='google-drive'?connectDriveForProfile():BackupProviderRuntime.connect(source)))return true;
   if(['history','restore-version','bring-in','remove-version'].includes(kind))return BackupRecoveryHost?.history.open();
@@ -538,7 +606,7 @@ function renderNotificationSurfaces(state){
   }
 }
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
-const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',run:()=>showBackupPresentation(source,kind)})}));
+const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',opens:true,run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),document,
@@ -549,7 +617,7 @@ const Interactions=InteractionsModule.createController(Object.freeze({ports:Obje
   }),
   diagnostics:Object.freeze({capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')}),
   history:WorkspaceHistoryBridge,
-  notifications:Object.freeze({notify:NoticeCoordinator.notify,subscribe:NoticeCoordinator.subscribe,dismissEvent:NoticeCoordinator.dismissEvent,pauseEvent:NoticeCoordinator.pauseEvent,setHidden:NoticeCoordinator.setHidden})
+  notifications:Object.freeze({notify:NoticeCoordinator.notify,subscribe:NoticeCoordinator.subscribe,dismissEvent:NoticeCoordinator.dismissEvent,dismissAll:NoticeCoordinator.dismissAll,pauseEvent:NoticeCoordinator.pauseEvent,setPaused:NoticeCoordinator.setPaused,setHidden:NoticeCoordinator.setHidden})
 })}));
 if(!Object.isFrozen(Interactions)||Interactions.format!=='study-director.interactions'||Interactions.contractVersion!==1){
   throw new Error('Study Director interaction controller is unavailable or incompatible.');
@@ -567,22 +635,73 @@ function prepareNativePdfWindow(){
   if(!prefersNativePdfNavigation())return null;
   try{const opened=window.open('about:blank','_blank');if(opened)opened.opener=null;return opened||null;}catch{return null;}
 }
+// Blob URLs and OPFS reader leases must outlive an external viewer handoff,
+// but must never become ownerless if the browser hides that viewer's lifetime.
+const PDF_DOWNLOAD_HANDOFF_MS=2*60*1000,PDF_UNTRACKED_VIEWER_MS=10*60*1000;
+function retainPdfUrl(url,releaseReader=()=>{}){
+  let released=false,poll=null,expiry=null;
+  const release=()=>{
+    if(released)return false;
+    released=true;
+    if(poll!==null)clearInterval(poll);
+    if(expiry!==null)clearTimeout(expiry);
+    window.removeEventListener('pagehide',release);
+    try{URL.revokeObjectURL(url);}finally{releaseReader();}
+    return true;
+  };
+  const expireAfter=delay=>{
+    if(released)return false;
+    if(expiry!==null)clearTimeout(expiry);
+    expiry=setTimeout(release,delay);
+    return true;
+  };
+  const track=opened=>{
+    if(!opened)return expireAfter(PDF_UNTRACKED_VIEWER_MS);
+    if(poll!==null)clearInterval(poll);
+    poll=setInterval(()=>{
+      try{if(opened.closed)release();}
+      catch{clearInterval(poll);poll=null;expireAfter(PDF_UNTRACKED_VIEWER_MS);}
+    },1000);
+    return true;
+  };
+  window.addEventListener('pagehide',release);
+  return Object.freeze({release,expireAfter,track});
+}
 function openPdfFallback(row,url,releaseReader=()=>{}){
-  const content=document.createElement('div'),message=document.createElement('p'),actions=document.createElement('div'),open=document.createElement('a'),download=document.createElement('a');let released=false;
+  const lease=retainPdfUrl(url,releaseReader);
+  const content=document.createElement('div'),message=document.createElement('p'),actions=document.createElement('div'),open=document.createElement('a'),download=document.createElement('a');
   content.className='workspace-pdf-fallback';message.className='ui-helper';message.textContent='This browser could not open the PDF automatically. Open it in the browser viewer or download it.';actions.className='workspace-pdf-fallback-actions';
   open.className='mini-btn ui-btn primary';open.textContent='Open PDF';open.href=url;open.target='_blank';open.rel='noopener noreferrer';
   download.className='mini-btn ui-btn';download.textContent='Download';download.href=url;download.download=String(row?.name||'document.pdf');actions.append(open,download);content.append(message,actions);
-  let handedOff=false;for(const action of [open,download])action.addEventListener('click',()=>{handedOff=true;});
-  const release=()=>{if(released)return;released=true;if(!handedOff){URL.revokeObjectURL(url);releaseReader();}};
-  let handle;try{handle=WorkspaceOverlay.open({label:String(row?.name||'PDF'),content,className:'workspace-overlay-pdf-fallback',closeLabel:'Close PDF options',onBeforeClose:release});}catch(error){release();throw error}
-  if(!handle){release();Interactions.notify({source:'attachments',key:'pdf-open-failed',kind:'error',title:'PDF could not open',message:'Use the attachment Download action to save the PDF.'});return false;}
+  let handedOff=false,handle=null;
+  const closeOnPagehide=()=>handle?.close();
+  const closeAfterClick=()=>setTimeout(()=>handle?.close(),0);
+  open.addEventListener('click',event=>{
+    let opened=null;
+    try{
+      opened=window.open('about:blank','_blank');
+      if(opened){opened.opener=null;opened.location.replace(url);}
+    }catch{try{opened?.close();}catch{}opened=null;}
+    if(opened)event.preventDefault(); // A tracked viewer replaces the noopener anchor.
+    handedOff=true;lease.track(opened);closeAfterClick();
+  });
+  download.addEventListener('click',()=>{handedOff=true;lease.expireAfter(PDF_DOWNLOAD_HANDOFF_MS);closeAfterClick();});
+  try{handle=WorkspaceOverlay.open({label:String(row?.name||'PDF'),content,className:'workspace-overlay-pdf-fallback',closeLabel:'Close PDF options',onBeforeClose:()=>{window.removeEventListener('pagehide',closeOnPagehide);if(!handedOff)lease.release();}});}
+  catch(error){lease.release();throw error;}
+  if(!handle){lease.release();Interactions.notify({source:'attachments',key:'pdf-open-failed',kind:'error',title:'PDF could not open',message:'Use the attachment Download action to save the PDF.'});return false;}
+  // If the opener enters BFCache, do not return to options with a dead Blob URL.
+  window.addEventListener('pagehide',closeOnPagehide);
   NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');
   return true;
 }
 function openPdfDirect(row,file,reservedWindow=null,releaseReader=()=>{}){
   const url=URL.createObjectURL(file);let opened=reservedWindow;
   if(!opened)try{opened=window.open('about:blank','_blank');if(opened)opened.opener=null;}catch{opened=null;}
-  if(opened)try{opened.location.replace(url);const poll=setInterval(()=>{if(opened.closed){clearInterval(poll);URL.revokeObjectURL(url);releaseReader();}},1000);NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');return true;}catch{try{opened.close();}catch{}}
+  if(opened)try{
+    opened.location.replace(url);
+    retainPdfUrl(url,releaseReader).track(opened);
+    NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');return true;
+  }catch{try{opened.close();}catch{}}
   return openPdfFallback(row,url,releaseReader);
 }
 async function reopenPdfWorkspace(id,descriptor){
@@ -820,9 +939,13 @@ function updateExecutePanels(state=null,options={}){
 }
 // Today's session as another device runs it, while this one shows it there.
 function sessionShownElsewhere(){return sessionPanelMode==='elsewhere'&&!TASKS.length?sessionPanelSession:null;}
+// Today's session parked on this device (Suspend Today, or handed over by another).
+function sessionParkedHere(){return sessionPanelMode==='suspended'&&!TASKS.some(isTrackableBlock);}
 function executeSessionStatusModel(){
   const elsewhere=sessionShownElsewhere();
+  if(sessionPanelMode==='previous')return {state:'suspended',label:'PREVIOUS DAY'};
   if(elsewhere)return {state:'elsewhere',label:`RUNNING ${sessionDevice(elsewhere).toUpperCase()}`};
+  if(sessionParkedHere())return {state:'suspended',label:'SUSPENDED'};
   if(!TASKS.length)return {state:'empty',label:'NO SESSION'};
   if(TimerState.mode===TIMER_MODES.SUSPENDED)return {state:'suspended',label:'SUSPENDED'};
   if(TimerState.mode===TIMER_MODES.DONE)return {state:'complete',label:'COMPLETE'};
@@ -866,10 +989,14 @@ function buildLiveTimeline(){
   return chronologicalRows(rows);
 }
 /* RUNTIME STATE · PRIVATE TIMER CONTROLLER */
+// While the timer runs on a work block here, pop-ups that block nothing
+// wait; support and fixed blocks, a pause or the end let them show
+// (docs/areas/status-indicator.md, noise rules).
+function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING&&isWorkBlock(TASKS[TimerState.currentIndex]));}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
 const TimerState=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();}})
+  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
 }));
 const {
   session:SessionState, tasks:TASKS, modes:TIMER_MODES, taskIdentity:TaskIdentity, setMode:setTimerMode
@@ -971,12 +1098,15 @@ const TIMER_SNAPSHOT_INTERVAL_MS=60*1000;
 let lastTimerSnapshotMs=0;
 let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
-let backupNudgeMessage='';
+// The profile indicator's state (renderSyncStatus); declared early because
+// storage health asks for a redraw during start-up.
+let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},sessionMovingHere=null,driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
-let saveReminderDate='';
+let saveReminderDate='',saveReminderEvidence=null,saveReminderGeneration=0;
 let restoreSessionPersistenceSuppressionDepth=0;
 let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
+let sessionClaimFreeze=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return restoreSessionPersistenceSuppressionDepth>0;}
 function managedRecoverySessionQuiesced(){return managedRecoverySessionQuiescenceDepth>0;}
@@ -1006,8 +1136,6 @@ let realTimeAwarenessRenderKey='';
 let executePanelsRenderKey='';
 let executeProgressPanelRenderKey='';
 let scheduleEndPromptKey='';
-const savedRecordDates=new Set();
-const savedRecordCheckPromises=new Map();
 const BACKUP_NUDGE_MS=7*24*60*60*1000;
 const BACKUP_NUDGE_CHECK_MS=60*60*1000;
 /* APPLICATION ACTIVATION CONTRACT */
@@ -1120,7 +1248,10 @@ AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze
     try{renderOwnershipBanner();}catch{}
     if(mutationUiOperationActive&&!active&&!AppMutationCoordinator.blocksUi())queueProtectedMutationUiReconcile();
     mutationUiOperationActive=active;
-  },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)})
+  },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay),
+  // Another tab's lease ran out without being released (it was closed in the
+  // middle of a change): background work that waited for it goes now.
+  foreignReleased:()=>wakeBackgroundOperations('mutation-lease-ended')})
 }));
 if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='study-director.mutation-coordinator'||AppMutationCoordinator.contractVersion!==1)throw new Error('Study Director mutation coordinator is unavailable or incompatible.');
 /* TIMER NUDGE AND SOUND CUES */
@@ -1188,7 +1319,14 @@ const {
   markDone:markDoneTimer, setPausedUI, setTimerIdentity, skipTask:skipTaskTimer, startCur, syncTimerAfterWake, toggleDone, togglePause:togglePauseTimer,
   updateBreakMeter, updateCD
 }=TimerEngine;
-function togglePause(){const result=togglePauseTimer();schedulePwaUpdateEvaluation(150);return result;}
+// A pause, resume, finished or skipped block goes to the other devices
+// within seconds (an urgent change), not at the next quiet-period upload:
+// Continue Here elsewhere takes the timer from Drive's newest version, so a
+// pause still waiting here would count the paused time there as study.
+function sendSessionChangeSoon(reason){
+  void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.session-change-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason}));
+}
+function togglePause(){const result=togglePauseTimer();sendSessionChangeSoon(TimerState.paused?'timer-pause':'timer-resume');schedulePwaUpdateEvaluation(150);return result;}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
@@ -1224,19 +1362,124 @@ function uploadSoonAfterPlanApply(result){
   const done=applied=>{if(applied)void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason:'plan-apply'}));return applied;};
   return result&&typeof result.then==='function'?result.then(done):done(result);
 }
-// While today's session runs here or on another device and the app is open,
-// look at Drive every two minutes instead of every twenty, so a plan applied
-// or a session moved on the other device shows up here without a reload.
-const SESSION_WATCH_MS=2*60*1000;
-let sessionWatchTimer=null;
+// During a live session, a tiny ownership claim is checked frequently while
+// full checkpoint reconciliation keeps its ordinary cadence. A remote claim
+// stops only this runtime clock; canonical progress stays untouched until the
+// verified full checkpoint arrives and ordinary reconciliation preserves it.
+const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
+let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
+const SESSION_CLAIM_SAVE_WARNING='The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.';
+async function verifyFrozenSessionClaim(){
+  const frozen=sessionClaimFreeze;
+  try{
+    if(!frozen?.snapshot)throw new Error('The frozen Active Session snapshot is unavailable.');
+    const saved=await writeActiveSessionNow(snapshotWhileSessionClaimFrozen(),{emergency:true,strictDurability:true});
+    await requireCanonicalSessionWrite(saved,saved?.value,'yielding a transferred session');
+    if(sessionClaimFreeze!==frozen)return false;
+    sessionClaimFreeze=Object.freeze({...frozen,localVerified:true});
+    if(sessionSafetyMessage===SESSION_CLAIM_SAVE_WARNING)clearSessionSafetyMessage(SESSION_CLAIM_SAVE_WARNING);
+    return true;
+  }catch(error){
+    AppDiagnostics.capture('session.claim-flush',error,'warn');
+    markStorageHealthError('activeSession',SESSION_CLAIM_SAVE_WARNING);
+    sessionSafetyMessage=SESSION_CLAIM_SAVE_WARNING;refreshStorageFallbackWarning();
+    setPlanStatus('CRITICAL: Session handoff is waiting for a verified local save. Keep this tab open.',false);
+    return false;
+  }
+}
+function resumeAfterReleasedSessionClaim(session){
+  if(!sessionClaimFreeze?.localVerified||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
+  const frozenSinceMs=sessionClaimFreeze.frozenSinceMs;
+  try{
+    if(!TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs}))return false;
+    sessionClaimFreeze=null;setPlanStatus('✓ Session ownership remains on this device.');return true;
+  }catch(error){AppDiagnostics.capture('session.claim-resume',error,'warn');return false;}
+}
+// Another device wrote today's ownership claim in a newer version's form:
+// it may be running the session. The timer here stopped and the progress is
+// saved; only an updated app can continue here.
+const SESSION_NEWER_CLAIM_MESSAGE='Another device runs a newer version of Study Director and may be running today’s session. The timer here stopped and your progress is saved. Update the app to continue here.';
+function notifyNewerSessionClaim(){
+  setPlanStatus(SESSION_NEWER_CLAIM_MESSAGE,false);
+  Interactions.notify({source:'session',kind:'warning',key:'session-newer-claim',title:'Update the app to continue',message:SESSION_NEWER_CLAIM_MESSAGE,action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
+}
+async function checkSessionOwnershipClaim(){
+  if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
+  if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
+  if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
+  sessionClaimLastAttemptAt=Date.now();sessionClaimCheckActive=true;
+  try{
+    const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
+    if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
+    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.applies&&claim.state==='owned'&&!claim.ownedHere),mine=!!(session&&session.runningOn===me);
+    if(remote&&mine&&TASKS.length){
+      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
+      if(!same){
+        // Stop duplicate execution before awaiting a potentially slow/failed disk write.
+        const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
+        let snapshot=null,evidence=null;
+        try{
+          markDayContentChanged();
+          evidence=captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true});
+          snapshot=captureSessionSnapshot(evidence);
+        }catch(error){AppDiagnostics.capture('session.claim-snapshot',error,'warn');}
+        cancelPendingLiveDraftSave();
+        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0,localVerified:false,snapshot,evidence});
+      }
+      // A local emergency envelope is useful for recovery, but the managed
+      // reconciliation preflight requires a strict canonical commit and read-back.
+      // Retry the same frozen evidence; never add time spent waiting to study time.
+      if(!sessionClaimFreeze.localVerified){
+        if(!await verifyFrozenSessionClaim())return true;
+        if(claim.newer)notifyNewerSessionClaim();
+        else setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
+      }
+      // A newer build's claim: nothing here can follow it until the app is
+      // updated, so the timer stays stopped and no sync is asked for.
+      if(claim.newer)return true;
+      const current=sessionClaimFreeze;
+      if(current&&(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS)){
+        sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
+        BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim');
+      }
+      return true;
+    }
+    if(sessionClaimFreeze){
+      if(!mine||!TASKS.length){sessionClaimFreeze=null;return false;}
+      if(!sessionClaimFreeze.localVerified&&!await verifyFrozenSessionClaim())return true;
+      if(claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeAfterReleasedSessionClaim(session);
+      const now=DecisionClock.nowMs(),current=sessionClaimFreeze;
+      if(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS){
+        sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
+        BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim-release');
+      }
+      return true;
+    }
+    return false;
+  }catch(error){AppDiagnostics.capture('session.claim-watch',error,'warn');return false;}
+  finally{sessionClaimCheckActive=false;}
+}
+// slackMs: the interval's own tick arrives a few milliseconds short of the
+// period after the check it started last time, so it allows a second;
+// coming back to the app or online waits out the whole period.
+function wakeSessionOwnershipClaim(slackMs=0){
+  const now=Date.now();
+  if(sessionClaimLastAttemptAt&&now>=sessionClaimLastAttemptAt&&now-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS-slackMs)return false;
+  return checkSessionOwnershipClaim();
+}
 function installSessionWatch(){
-  if(sessionWatchTimer)return false;
+  if(sessionWatchTimer||sessionClaimWatchTimer)return false;
   sessionWatchTimer=setInterval(()=>{
     if(document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return;
     if(!TASKS.length&&sessionPanelMode!=='elsewhere')return;
     try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
+  sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim(1000);},SESSION_CLAIM_WATCH_MS);
+  // Existing interval owns the cadence. Foreground/online return only advances
+  // an eligible missed attempt, never introducing a second polling timer.
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void wakeSessionOwnershipClaim();});
+  window.addEventListener('online',()=>{void wakeSessionOwnershipClaim();});
   return true;
 }
 function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
@@ -1247,10 +1490,10 @@ function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
 function markDone(){
   const finishWasAvailable=isTrackableBlock(TASKS[TimerState.currentIndex]);
   const result=markDoneTimer();
-  if(finishWasAvailable&&result!==false)notifyDeviceBackupIfStudyDayResolved();
+  if(finishWasAvailable&&result!==false){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-finished');}
   schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;
 }
-function skipTask(){const result=skipTaskTimer();if(result!==false)notifyDeviceBackupIfStudyDayResolved();schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;}
+function skipTask(){const result=skipTaskTimer();if(result!==false){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-skipped');}schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;}
 function finishPracticePacer(){
   const result=PracticePacer.finish();
   schedulePwaUpdateEvaluation(150);return result;
@@ -1260,6 +1503,7 @@ function setCurrentTask(idx,options={}){
   const next=boundedInt(idx,{min:0,max:Math.max(0,TASKS.length),fallback:0});
   if(options.notifyPractice!==false)PracticePacer.onMainTaskChanging(next<TASKS.length?TaskIdentity.idAt(next):null);
   TimerState.currentIndex=next;
+  syncStudyQuiet();
   return TimerState.currentIndex;
 }
 function resetCountdownRuntime(){return TimerEngine.resetCountdownRuntime();}
@@ -1388,7 +1632,8 @@ function setTaskSkippedState(idx){
 
 function emptyStorageHealth(){
   // lastLocalSaveAt: the change clock's fast copy for backup decisions.
-  // lastStudyDataSaveAt: when Saved Days or notes were last saved in this browser.
+  // lastStudyDataSaveAt: when study data (notes, Saved Days, sessions, plans,
+  // kept versions; not settings alone) was last saved in this browser.
   // browserDataClearedAt: a browser-data clear still being resolved.
   return {version:3,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null};
 }
@@ -1421,6 +1666,7 @@ function storageHealthClass(health){
   return 'ok';
 }
 function renderStorageHealth(health=readStorageHealth()){
+  scheduleSyncStatus();
   const el=document.getElementById('storage-health');
   const lastSaved=document.getElementById('last-local-save');
   if(lastSaved){lastSaved.textContent=health.lastLocalSaveAt?storageHealthTime(health.lastLocalSaveAt):'Never';lastSaved.title=health.lastLocalSaveAt||'';}
@@ -1517,7 +1763,7 @@ function renderFileBackup(){
   const button=node('download-backup'),cancel=node('cancel-standalone-import'),importCancel=node('cancel-backup-import'),note=node('backup-file-status');
   if(button){button.disabled=exporting;button.setAttribute('aria-busy',exporting?'true':'false');button.textContent=exporting?'Preparing backup…':'Export backup…';}
   if(cancel)cancel.hidden=!(exporting||Exports.status().fileBusy);
-  if(importCancel)importCancel.hidden=!state.importActive;
+  if(importCancel)importCancel.hidden=!state.importHoldsBackground;
   if(note){const event=BackupPresentation.current('file'),message=BackupPresentation.summary(event);note.hidden=!message;if(note.textContent!==message)note.textContent=message;note.dataset.state=event?.severity==='error'?'error':'ok';}
 }
 // Each location row opens its settings in place: 'device' or 'drive'.
@@ -1539,8 +1785,6 @@ function renderDriveBackup(){
   if(panel&&!connected)panel.hidden=true;
   if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last backup ${storageHealthTime(at)}`:'No backup yet';}
   if(disconnect)disconnect.disabled=state.engineBusy;
-  // Kept versions waiting for review show as Needs review too.
-  const sync=node('sb-sync');if(sync){const syncing=state.connected&&UnsupportedData.held()?'Needs app update':BackupPresentation.syncLabel(state),kept=KeptVersions.count()>0&&!['Syncing…','Needs password','Needs app update'].includes(syncing),label=kept?'Needs review':syncing;sync.hidden=!label;if(sync.textContent!==label)sync.textContent=label;sync.dataset.state=state.sync?.review||state.sync?.password||kept||label==='Needs app update'?'review':'';}
   renderBackupActions();renderProfile();if(FirstStart.isOpen())FirstStart.render();
 }
 // One Back up now and one Version History for every location, shown while
@@ -1555,7 +1799,8 @@ function renderBackupActions(){
   if(backupNow){backupNow.disabled=busy;backupNow.title=busy&&syncText?syncText:rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
   if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':busy&&syncText?syncText:'';}
 }
-// The Device Folder backs up first, so Drive can take its version.
+// Back up each enabled destination independently. The sequential UI action
+// avoids overlapping foreground operations; neither destination consumes the other.
 async function backUpEverywhere(){
   let done=false;
   if(DeviceBackup.status().connected)done=await DeviceBackup.backupNow()!==false||done;
@@ -1564,6 +1809,7 @@ async function backUpEverywhere(){
 }
 function renderDeviceBackup(state){
   if(!state)return;
+  scheduleSyncStatus();
   const status=document.getElementById('device-backup-status');
   const actions=document.getElementById('device-backup-actions');
   const connect=document.getElementById('connect-device-backup');
@@ -1644,7 +1890,7 @@ async function inspectStorageCapability(){
   const usage=Number(estimate&&estimate.usage),quota=Number(estimate&&estimate.quota);
   const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
   const use=document.getElementById('local-storage-use');
-  if(use)use.textContent=Number.isFinite(usage)?` · Using ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
+  if(use)use.textContent=Number.isFinite(usage)?`Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
   const payload={version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()};
   storageEstimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
   if(ratio!==null&&ratio>=APP_LIMITS.storageCriticalRatio){
@@ -1703,6 +1949,7 @@ function dismissStorageWarning(){
 }
 function resumeTimerLoopAfterPrimaryRestore(){
   try{
+    if(sessionClaimFreeze)return false;
     const resumed=TimerEngine.resumeAfterPrimaryRestore();
     if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{
       date:getReviewDate(),
@@ -1772,36 +2019,39 @@ function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,li
   const ta=document.getElementById('plan-input');
   if(!session||!snapshot||!ta)return false;
   const transitionSource=source||'stored-session-apply';
-  const preserveDraft=true;
-  const pendingDraft=preserveDraft?String(ta.value||''):'';
-  const restorePendingDraft=preserveDraft&&PlanData.readDraft()!==null&&pendingDraft!==String(session.scheduleText||'');
+  const lifecycleContext={scheduleIdentity:true,date:session.date,autoDate:session.date===todayISO(),snapshotReview:snapshot.review};
+  // The Plan draft is independent authoring state. Applying a canonical
+  // Active Session must neither persist its schedule as that draft nor open
+  // the draft editor. Keep the exact local text in place while the live
+  // schedule is restored from the explicit session schedule.
+  const pendingDraft=String(ta.value||'');
   const applySnapshot=()=>{
     resetRuntimeSessionState({lifecycleManaged:true,source:transitionSource,date:session.date});
-    ta.value=String(session.scheduleText||'');
-    if(appCanMutate())void PlanData.writeDraft(ta.value);
     const dd=document.getElementById('day-date');
     if(dd){dd.value=session.date;dd.dataset.autoDate=session.date===todayISO()?'1':'0';}
     const restored=applySchedule({
       source:transitionSource,skipNotify:true,studyDate:session.date,reviewOnly,forceReload:true,
-      sessionSnapshot:snapshot,lifecycleManaged:true
+      sessionSnapshot:snapshot,lifecycleManaged:true,scheduleText:String(session.scheduleText||''),persistDraft:false
     });
-    if(restored!==false&&restorePendingDraft){
+    if(restored!==false){
       ta.value=pendingDraft;
-      if(appCanMutate())void PlanData.writeDraft(pendingDraft);
-      PlanDraftEditor.preview({silent:true,enterDraft:true});
+      // Rehydrate the draft projection without entering draft mode; the Plan
+      // board continues to show the applied session until the person edits it.
+      PlanDraftEditor.preview({silent:true,enterDraft:false});
     }
     return restored;
   };
   if(lifecycleManaged)return applySnapshot();
-  return SessionLifecycle.runSync(transitionSource,{
-    scheduleIdentity:true,date:session.date,autoDate:session.date===todayISO(),snapshotReview:snapshot.review
-  },applySnapshot);
+  return SessionLifecycle.runSync(transitionSource,lifecycleContext,applySnapshot);
 }
 async function hydratePrimaryStateFromStorage(options={}){
   const sameTabReload=!!options.sameTabReload||performance.getEntriesByType('navigation')[0]?.type==='reload'||performance.navigation?.type===1;
   const notesReloaded=await AppData.notes.reloadFresh();
   if(!notesReloaded)throw new Error('The latest notes could not be reloaded before ownership transfer.');
   const session=await loadActiveSessionForRestore();
+  // Historical sessions must never be offered today's Continue Here path,
+  // including suspended copies and those last owned on another device.
+  if(isPreviousActiveSessionRecord(session)&&!TASKS.length)return attemptAutoRestoreActiveSession();
   if(sessionRunsElsewhere(session)&&!TASKS.length){setSessionPanelMode('elsewhere',session);return false;}
   if(isRestorableActiveSession(session)){
     const snapshot=activeSessionSnapshot(session);
@@ -2216,6 +2466,7 @@ function applyRows(rows,options={}){
   TimerState.loadSchedule(buildTasks(rows),{
     studyDate:isValidIsoDate(options.studyDate)?options.studyDate:todayISO()
   });
+  TimerState.scheduleAnchorMin=rows.length&&isValidHHMM(rows[0].start)?clockMinuteToStudyMinute(t2m(rows[0].start)):0;
   invalidateScheduleDerived({identity:true,render:true});
   resetScheduleLayers();setCurrentTask(0);resetCountdownRuntime();setTimerMode(TIMER_MODES.READY,'schedule-apply');clearProgressRuntime();latestCarryForward='';
   const restoredLiveDraft=options.progressMigration?false:(options.sessionSnapshot?applySessionSnapshot(options.sessionSnapshot):restoreLiveDraftIfAny());
@@ -2252,7 +2503,6 @@ function applyRows(rows,options={}){
       renderDirty:!!ScheduleDerivedState.renderDirty
     });
   }
-  function setAnchor(value){TimerState.scheduleAnchorMin=Number(value)||0;return TimerState.scheduleAnchorMin;}
   function timeline(){return Object.freeze({rows:buildLiveTimeline(),realtime:getRealTimeState()});}
   function row(index){
     const i=Number(index);
@@ -2302,7 +2552,7 @@ function applyRows(rows,options={}){
     throw new TypeError('Unknown Plan render state.');
   }
   return Object.freeze({
-    read,setAnchor,timeline,row,act,hasLiveState,
+    read,timeline,row,act,hasLiveState,
     captureMigration:snapshotScheduleProgressForMigration,
     breakState,apply,reconcile,renameAreas,
     flush:flushLiveDraft,
@@ -2321,12 +2571,10 @@ function daySaveDirty(date=getReviewDate()){
 function markDayContentChanged(){
   if(!TimerState.studyDate&&!TASKS.length)return 0;
   TimerState.contentRevision=Math.max(cleanDayRevision(TimerState.contentRevision),cleanDayRevision(TimerState.savedRevision))+1;
-  savedRecordDates.delete(getReviewDate());
   return TimerState.contentRevision;
 }
 function markDayContentSaved(date,revision){
   if(date===getReviewDate())TimerState.savedRevision=Math.max(cleanDayRevision(TimerState.savedRevision),cleanDayRevision(revision));
-  if(!daySaveDirty(date))savedRecordDates.add(date);
   return !daySaveDirty(date);
 }
 function reviewDateTitle(iso){
@@ -2355,23 +2603,75 @@ function clearSessionSafetyMessage(match=''){
     refreshStorageFallbackWarning();
   }
 }
+// Reminder clearance is notice-only: never change the canonical session's
+// saved revision because another device supplied equivalent Saved Day evidence.
+// Capture the live state afresh, so a stale dirty counter can be disproved
+// without pretending that genuinely new, unsaved work was committed.
+function liveSaveReminderEvidence(date){
+  if(date!==getReviewDate()||TimerState.studyDate!==date||!TASKS.some(isTrackableBlock))return null;
+  try{
+    const snapshot=captureSessionSnapshot(),scheduleText=PlanRuntime.appliedScheduleText();
+    return snapshot?.date===date&&typeof scheduleText==='string'&&scheduleText.trim()
+      ?{date,scheduleText,snapshot}:null;
+  }catch(error){AppDiagnostics.capture('session.reminder-runtime-evidence',error,'warn');return null;}
+}
+function savedDayCoversReminderEvidence(record,subjects){
+  return !!record&&subjects.length>0&&subjects.every(subject=>
+    !!subject&&DailyRecordCodec.savedDayCoversSessionEvidence(record,subject,{allowAdvances:true}));
+}
+async function savedDayHasUncoveredKeptSession(record,date){
+  const pending=await AppData.pendingReviews.list();
+  return pending.some(review=>review.subject==='session'&&!review.resolvedAt&&
+    review.kept?.date===date&&!DailyRecordCodec.savedDayCoversSessionEvidence(record,review.kept,{allowAdvances:true}));
+}
+// True only when the canonical Saved Day for this date covers all the work it
+// must: the evidence a reminder captured (if any), the strict canonical session
+// for that date and the live timer, with no retained kept session left
+// uncovered. Work can move during the reads, so it is checked again after them.
+async function savedDayCoversWork(date,captured=null){
+  const runtime=liveSaveReminderEvidence(date);
+  if(daySaveDirty(date)&&!runtime)return false;
+  const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
+  if(!loaded?.ok||loaded.error||session?.date===date&&loaded.storage?.idb!==true)return false;
+  const subjects=[...(captured?[captured]:[]),...(session?.date===date?[session]:[]),...(runtime?[runtime]:[])];
+  if(!subjects.length)return false;
+  const record=(await AppData.dailyRecords.documents([date],{requireCanonical:true})).find(item=>item.date===date);
+  if(!savedDayCoversReminderEvidence(record,subjects)||await savedDayHasUncoveredKeptSession(record,date))return false;
+  await AppData.dailyRecords.verifyCanonical(record);
+  const latest=liveSaveReminderEvidence(date);
+  if((runtime||latest)&&(!latest||!savedDayCoversReminderEvidence(record,[latest]))||
+      daySaveDirty(date)&&!latest)return false;
+  const checked=await AppData.activeSession.load(0,{strict:true});
+  if(!checked?.ok||checked.error||checked.value?.date===date&&
+      (checked.storage?.idb!==true||!savedDayCoversReminderEvidence(record,[checked.value])))return false;
+  return !await savedDayHasUncoveredKeptSession(record,date);
+}
 async function savedRecordExistsForDate(date){
-  if(daySaveDirty(date))return false;
-  if(savedRecordDates.has(date))return true;
-  if(savedRecordCheckPromises.has(date))return savedRecordCheckPromises.get(date);
-  const check=AppData.dailyRecords.get(date)
-    .then(rec=>{const savedStudy=!!rec&&rec.recordKind==='study';if(savedStudy)markDayContentSaved(date,rec.sourceRevision);return savedStudy&&!daySaveDirty(date);})
-    .catch(()=>false)
-    .finally(()=>savedRecordCheckPromises.delete(date));
-  savedRecordCheckPromises.set(date,check);
-  return check;
+  try{return await savedDayCoversWork(date);}
+  catch(error){AppDiagnostics.capture('session.saved-day-reminder',error,'warn');return false;}
 }
 async function promptSaveToday(){
   const date=getReviewDate();
   if(!TASKS.some(isTrackableBlock)||saveReminderDate===date)return;
   if(await savedRecordExistsForDate(date))return;
   if(saveReminderDate===date)return;
-  saveReminderDate=date;
+  // Keep bounded, in-memory evidence of what this notice referred to.
+  // If sync legitimately retires the canonical session, a later Saved Day
+  // must still cover this precise evidence before the notice may disappear.
+  let evidence=null;
+  try{
+    const loaded=await AppData.activeSession.load(0,{strict:true});
+    if(loaded?.ok&&!loaded.error&&loaded.storage?.idb===true&&loaded.value?.date===date&&
+        TimerState.studyDate===date&&
+        cleanDayRevision(loaded.value.snapshot?.contentRevision)===cleanDayRevision(TimerState.contentRevision))
+      evidence=ActiveSessionCodec.sanitizeCurrent(loaded.value);
+  }catch(error){AppDiagnostics.capture('session.save-reminder-evidence',error,'warn');}
+  // A temporarily inaccessible or lagging canonical session must not lose
+  // the exact live work that caused the reminder. This is memory-only
+  // evidence, not a claim of persisted Active Session data.
+  if(!evidence)evidence=liveSaveReminderEvidence(date);
+  if(saveReminderDate===date)return;
+  saveReminderDate=date;saveReminderEvidence=evidence;saveReminderGeneration+=1;
   sessionSafetyMessage=`Review reminder: ${prettyDate(date)} has unsaved study data. Open Review and Save Today to Library.`;
   refreshStorageFallbackWarning();
   notifyUser('Save today’s study record','Open Review and save today to Library.',`sdm-save-${date}`);
@@ -2379,17 +2679,68 @@ async function promptSaveToday(){
   setReviewDetailDisclosures(true);
 }
 function clearSaveReminder(date=getReviewDate(),revision=TimerState.contentRevision){
-  if(saveReminderDate===date)saveReminderDate='';
+  if(saveReminderDate===date){saveReminderDate='';saveReminderEvidence=null;saveReminderGeneration+=1;}
   markDayContentSaved(date,revision);
   if(sessionSafetyMessage.includes('Review reminder'))sessionSafetyMessage='';
   refreshStorageFallbackWarning();
+}
+// This is a notice-only reconciliation: it does not alter savedRevision,
+ // the Active Session or any canonical record. In particular an unacknowledged
+ // current session cannot be called saved merely because a date exists.
+async function revalidateSaveReminderAfterCanonicalConvergence(){
+  const date=saveReminderDate,evidence=saveReminderEvidence,generation=saveReminderGeneration;
+  if(!date||!sessionSafetyMessage.startsWith('Review reminder:'))return false;
+  try{
+    // Both the originally captured notice and the latest canonical/runtime
+    // evidence must be covered; neither can silently supersede the other.
+    if(!await savedDayCoversWork(date,evidence))return false;
+    if(saveReminderDate!==date||saveReminderGeneration!==generation||
+        !sessionSafetyMessage.startsWith('Review reminder:'))return false;
+    saveReminderDate='';saveReminderEvidence=null;saveReminderGeneration+=1;
+    clearSessionSafetyMessage('Review reminder:');
+    // Do not erase a newer manual-save result that is unrelated to this notice.
+    const staleStatus=NoticeCoordinator.eventStatus().events.some(event=>
+      event.source==='review'&&event.id==='status-save-status'&&
+      event.message==='Review is ready. Save today to Library when you are done.');
+    if(staleStatus)setStatus('save-status','');
+    return true;
+  }catch(error){AppDiagnostics.capture('session.reminder-convergence',error,'warn');return false;}
+}
+async function acknowledgeSavedStudyDay(date,revision){
+  // Do not acknowledge newer study content than the Saved Day actually
+  // captured. Keep the same lineage's savedRevision in its canonical session.
+  const covered=cleanDayRevision(revision),previous=TimerState.savedRevision;
+  if(!TASKS.length||getReviewDate()!==date||TimerState.studyDate!==date||
+      !Number.isSafeInteger(Number(revision))||Number(revision)<0||
+      covered>cleanDayRevision(TimerState.contentRevision)||covered<cleanDayRevision(previous)){
+    throw new Error('The Saved Day and Active Session revision no longer identify the same study evidence.');
+  }
+  TimerState.savedRevision=covered;
+  try{
+    const saved=await writeLiveDraftNow({markChanged:false,strictDurability:true});
+    if(!saved?.value||saved.value.date!==date||
+        cleanDayRevision(saved.value.snapshot?.savedRevision)<covered){
+      throw saved?.error||new Error('The Saved Day acknowledgement was not saved in the Active Session.');
+    }
+    await requireCanonicalSessionWrite(saved,saved.value,'acknowledging the Saved Day');
+    clearSaveReminder(date,covered);
+    return true;
+  }catch(error){
+    // A rejected acknowledgement must not teach later ordinary timer saves
+    // to claim that content was saved. Keep the actual Saved Day in Library.
+    TimerState.savedRevision=previous;
+    throw error;
+  }
 }
 async function maybePromptBackupNudge(force=false){
   if(!appCanMutate())return;
   const now=Date.now();
   if(!force&&now-backupNudgeCheckedAt<BACKUP_NUDGE_CHECK_MS)return;
   backupNudgeCheckedAt=now;
-  const health=readStorageHealth(),backups=await readVerifiedRecoveryState(),entries=verifiedRecoveryEntries(backups);
+  let backups;
+  try{backups=await readVerifiedRecoveryState();}
+  catch(error){AppDiagnostics.capture('backup.nudge-receipt-read',error,'warn');return;}
+  const health=readStorageHealth(),entries=verifiedRecoveryEntries(backups);
   // One reminder for every kind of backup, counted from the latest backup
   // anywhere: a verified file, a download, the Device Folder or Drive. It stays away while an
   // automatic backup is able to run, and while a backup already holds the latest
@@ -2457,7 +2808,22 @@ function captureSessionSnapshot(evidence=null){
     practice:PracticePacer.snapshot(),updatedAt:new Date().toISOString()
   }));
 }
+// Keep elapsed time and practice progress at the ownership boundary while
+// retaining any later text, completion or reflection edits for reconciliation.
+function snapshotWhileSessionClaimFrozen(){
+  const frozen=sessionClaimFreeze;
+  if(!frozen?.snapshot)return captureSessionSnapshot();
+  const recent=captureSessionSnapshot(frozen.evidence);
+  return Object.freeze({...recent,timerRuntime:frozen.snapshot.timerRuntime,practice:frozen.snapshot.practice});
+}
 function nextSessionRevision(seed=0){return AppData.activeSession.nextRevision(seed);}
+async function activeSessionContentFingerprint(session){
+  const content=ActiveSessionCodec.contentValue(session);
+  if(!content)throw new Error('Active Session content is invalid.');
+  const fingerprint=String(await Exports.run('checksum',{value:CanonicalModule.signature(content),algorithm:'sha256'}));
+  if(!/^[a-f0-9]{64}$/u.test(fingerprint))throw new Error('Active Session content fingerprint could not be derived safely.');
+  return fingerprint;
+}
 function activeSessionPayload(snapshot=null,options={}){
   if(!TASKS.length)return null;
   const scheduleText=clampText(PlanRuntime.appliedScheduleText(),APP_LIMITS.maxScheduleChars);
@@ -2490,19 +2856,45 @@ function handleActiveSessionRepositoryResult(result,action='save'){
   }
   return false;
 }
+// One canonical durability barrier for an ownership transfer in either direction,
+// session suspension and restore. Local rescue alone does not establish control.
+async function clearCanonicalSessionAfterSavedDay(){
+  const cleared=await AppData.activeSession.clear();
+  if(!cleared?.ok||cleared.error||cleared.storage?.idb!==true)
+    throw cleared?.error||new Error('The saved study session was not deleted from canonical IndexedDB.');
+  const loaded=await AppData.activeSession.load(0,{strict:true});
+  if(!loaded?.ok||loaded.error||loaded.value)
+    throw loaded?.error||new Error('The saved study session remained after its canonical deletion.');
+  return cleared;
+}
+async function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){
+  const intended=ActiveSessionCodec.sanitizeCurrent(expected);
+  if(!intended||!saved?.ok||saved.storage?.idb!==true||saved.error||
+      !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(saved.value),intended)){
+    throw saved?.error||new Error('Canonical IndexedDB commit is required before '+operation+'.');
+  }
+  const checked=await AppData.activeSession.load(0,{strict:true});
+  if(!checked?.ok||checked.error||checked.storage?.idb!==true||
+      !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(checked.value),intended)){
+    throw checked?.error||new Error('Canonical Active Session read-back differs after '+operation+'.');
+  }
+  return saved;
+}
 function writeActiveSessionNow(snapshot,options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return Promise.resolve(null);
   if(!appCanMutate())return Promise.resolve(null);
   if(ReviewSaveService.status().activeSessionPersistenceBlocked)return Promise.resolve(null);
   const session=activeSessionPayload(snapshot);if(!session)return Promise.resolve(null);
-  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
+  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
 }
 function writeLiveDraftNow(options={}){
   if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
   if(!appCanMutate())return null;
   try{
+    // Preserve the frozen clock even if a managed sync settles the latest
+    // reflection or edits after the remote ownership claim.
     if(options.markChanged!==false)markDayContentChanged();
-    const snapshot=captureSessionSnapshot();if(!snapshot)return null;
+    const snapshot=sessionClaimFreeze?.snapshot?snapshotWhileSessionClaimFrozen():captureSessionSnapshot();if(!snapshot)return null;
     lastTimerSnapshotMs=DecisionClock.nowMs();
     return writeActiveSessionNow(snapshot,options);
   }catch(e){
@@ -2547,8 +2939,12 @@ function flushLiveDraft(options={}){
   liveDraftSaveTimer=null;liveDraftSaveDueAt=0;liveDraftPendingOptions=null;
   return writeLiveDraftNow({...pending,emergency:true});
 }
+// The once-a-minute snapshot waits while a restore, combine or sync runs: one
+// landing during its safety upload would read as local data changing and
+// start the whole recovery again (a second safety upload). The next tick
+// after it writes the snapshot; leaving the page still saves at once.
 function maybeSnapshotRunningTimer(){
-  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced())return;
+  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()||AppMutationCoordinator?.status().active==='managed-recovery')return;
   if(TimerState.paused||TimerState.inactiveGap||!TimerState.runtime||TimerState.runtime.startMs===null)return;
   const now=DecisionClock.nowMs();
   if(now-lastTimerSnapshotMs>=TIMER_SNAPSHOT_INTERVAL_MS)writeLiveDraftNow();
@@ -2731,20 +3127,62 @@ function isSuspendedActiveSession(session){
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
 }
-function isRecoverablePreviousActiveSession(session){
-  if(!session||typeof session!=='object'||sessionRunsElsewhere(session)||session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
-  if(session.status&&session.status!=='active')return false;
+function isPreviousActiveSessionRecord(session){
+  if(!session||typeof session!=='object'||session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
+  if(session.status&&!['active','suspended'].includes(session.status))return false;
   if(!isValidIsoDate(session.date)||session.date>=todayISO())return false;
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
 }
+// Verify the actual canonical Saved Day, not just a date match or two
+// unrelated devices' numeric revision counters. The session must first carry
+// its own durable save acknowledgement; its study evidence must still be
+// represented by the Day presently in Library.
+async function savedDayCoversActiveSession(session){
+  if(!isPreviousActiveSessionRecord(session))return false;
+  const snapshot=activeSessionSnapshot(session),contentRevision=Number(snapshot?.contentRevision),savedRevision=Number(snapshot?.savedRevision);
+  if(!Number.isSafeInteger(contentRevision)||contentRevision<0||
+      !Number.isSafeInteger(savedRevision)||savedRevision<contentRevision)return false;
+  try{
+    const rows=await AppData.dailyRecords.documents([session.date],{requireCanonical:true}),record=rows.find(item=>item.date===session.date);
+    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,session,{allowAdvances:true}))return false;
+    await AppData.dailyRecords.verifyCanonical(record);
+    return true;
+  }catch(error){
+    AppDiagnostics.capture('session.previous-day-saved-check',error,'warn');
+    return false;
+  }
+}
+async function retireCoveredPreviousActiveSession(session){
+  if(!await savedDayCoversActiveSession(session))return false;
+  const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
+  if(!current||!CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session)))return false;
+  try{
+    await clearCanonicalSessionAfterSavedDay();
+  }catch(error){
+    const reason=error?.message||String(error);
+    sessionSafetyMessage=`${prettyDate(session.date)} is saved in Library, but its redundant recovery copy could not be verified as cleared: ${reason}`;
+    setSessionPanelMode('previous',session);
+    refreshStorageFallbackWarning();
+    setPlanStatus(sessionSafetyMessage,false);
+    return true;
+  }
+  if(saveReminderDate===session.date){saveReminderDate='';saveReminderEvidence=null;saveReminderGeneration+=1;}
+  if(sessionSafetyMessage.includes('unsaved')||sessionSafetyMessage.includes('Review reminder'))sessionSafetyMessage='';
+  setSessionPanelMode('none');
+  refreshStorageFallbackWarning();
+  setPlanStatus(`✓ ${prettyDate(session.date)} is already saved in Library.`);
+  notifyBackupChange({urgent:true,reason:'saved-session-retired'});
+  return true;
+}
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
-  sessionPanelSession=['suspended','elsewhere'].includes(sessionPanelMode)?session:null;
+  sessionPanelSession=['suspended','elsewhere','previous'].includes(sessionPanelMode)?session:null;
+  if(!sessionPanelSession&&sessionHandoff.error)sessionHandoff={...sessionHandoff,error:''};
   // The Execute header names the device running the session, or stops doing
   // so. Before the panel's own controls, which the idle display disables.
   try{updateExecuteSessionStatus();refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-elsewhere-header',error,'warn');}
-  updateSessionControls();
+  updateSessionControls();scheduleSyncStatus();
 }
 async function recoverPreviousSessionForReview(session){
   const snapshot=activeSessionSnapshot(session);
@@ -2754,48 +3192,106 @@ async function recoverPreviousSessionForReview(session){
   if(restored===false)return false;
   sessionSafetyMessage=`Recovered unsaved ${prettyDate(session.date)} into Review. Its timer was not restarted. Save or discard it before applying a new study day.`;
   refreshStorageFallbackWarning();
+  setSessionPanelMode('previous',session);
   setPlanStatus('✓ Recovered the previous study day into Review without restarting its timer.');
   await goTab('review',{source:'session-recovery',history:'none'});
   return true;
 }
 async function handlePreviousActiveSession(session){
+  if(!isPreviousActiveSessionRecord(session))return false;
+  const remote=sessionFromElsewhere(session);
   const choice=await Interactions.choose({
-    title:'Unsaved previous study day found',
-    message:`Study Director found an unsaved session from ${prettyDate(session.date)}. Choose what to do before starting another day.`,
-    details:['Recover opens it in Review without restarting its timer.','Keep stored leaves it untouched so you can decide after exporting a backup.'],
+    title:'Previous study day needs review',
+    message:`Study Director found study evidence from ${prettyDate(session.date)}. It will not restart yesterday’s timer or transfer ownership.`,
+    details:[
+      'Recover opens the previous day in Review without restarting its timer.',
+      remote?'This copy was last owned on another device. Review it here without using Continue Here.':'Keep stored preserves the recovery copy for later.',
+      'A different or unproven Saved Day will never silently replace this evidence.'
+    ],
     cancelLabel:'Keep stored',
     choices:[
       {value:'recover',label:'Recover in Review',kind:'primary',description:'Review and save the previous study day.'},
-      {value:'discard',label:'Discard session',kind:'danger',description:'Permanently remove this unsaved recovery copy from current Study Director data.'}
+      ...(!remote?[{value:'discard',label:'Discard session',kind:'danger',description:'Remove this unsaved local recovery copy after an explicit decision.'}]:[])
     ]
   });
-  if(choice==='recover')return recoverPreviousSessionForReview(session);
-  if(choice==='discard'){
-    const result=await AppData.activeSession.clear();
-    handleActiveSessionRepositoryResult(result,'clear');
-    if(!result.ok){
-      const reason=result.error?(result.error.message||String(result.error)):'active session clear failed';
-      markStorageHealthError('activeSession',`Active-session recovery could not be cleared: ${reason}`);
-      setPlanStatus(`Could not discard the unsaved ${prettyDate(session.date)} session: ${reason}`,false);
+  // A dialog is not a storage lock. Reject choices against a session that
+  // changed while the person was deciding, and verify durable retirement.
+  let loaded=null;
+  try{loaded=await AppData.activeSession.load(0,{strict:true});}
+  catch(error){
+    setSessionPanelMode('previous',session);
+    setPlanStatus('Could not verify previous-day recovery: '+(error?.message||String(error)),false);
+    return false;
+  }
+  const current=loaded?.ok&&!loaded.error?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
+  if(!current||!CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session))){
+    setPlanStatus('Previous-day recovery changed while you were deciding. Review the latest saved state before proceeding.',false);
+    setSessionPanelMode(isPreviousActiveSessionRecord(current)?'previous':'none',current);
+    return false;
+  }
+  if(await retireCoveredPreviousActiveSession(current))return false;
+  if(choice==='recover')return recoverPreviousSessionForReview(current);
+  if(choice==='discard'&&!remote){
+    try{
+      // The repository's existing exclusive mutation owner serializes this
+      // deliberate deletion against backup/restore. Reread after acquiring
+      // that owner; the earlier dialog check is not a storage lock.
+      await AppMutationCoordinator.runExclusive('discard-previous-session',async()=>{
+        const latest=await AppData.activeSession.load(0,{strict:true});
+        if(!latest?.ok||latest.error||
+            !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(latest.value),current))
+          throw new Error('The previous-day session changed while discard was starting.');
+        const result=await AppData.activeSession.clear();
+        handleActiveSessionRepositoryResult(result,'clear');
+        if(!result?.ok||result.error||result.storage?.idb!==true)
+          throw result?.error||new Error('Canonical previous-day session deletion failed.');
+        const checked=await AppData.activeSession.load(0,{strict:true});
+        if(!checked?.ok||checked.error||checked.value)
+          throw checked?.error||new Error('Previous-day recovery still exists after deletion.');
+      });
+    }catch(error){
+      setSessionPanelMode('previous',current);
+      setPlanStatus('Could not verify deletion of the previous-day recovery copy: '+(error?.message||String(error)),false);
       return false;
     }
     setSessionPanelMode('none');
-    setPlanStatus(`Discarded the unsaved ${prettyDate(session.date)} session.`);
-    Interactions.notify({source:'session',kind:'success',key:'previous-session',title:'Unsaved session discarded',message:prettyDate(session.date)});
+    setPlanStatus(`Discarded the unsaved ${prettyDate(current.date)} session.`);
+    Interactions.notify({source:'session',kind:'success',key:'previous-session',title:'Unsaved session discarded',message:prettyDate(current.date)});
     return false;
   }
-  sessionSafetyMessage=`Unsaved ${prettyDate(session.date)} remains stored. Reload the app to recover it, or export a backup before discarding it.`;
+  setSessionPanelMode('previous',current);
+  sessionSafetyMessage=`Unsaved ${prettyDate(current.date)} remains stored. Choose Review Previous Day in Execute or Plan to recover it, or export a backup.`;
   refreshStorageFallbackWarning();
   setPlanStatus(sessionSafetyMessage,false);
   return false;
+}
+async function revisitPreviousStoredSession(){
+  if(!appCanMutate())return false;
+  try{
+    const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
+    if(!isPreviousActiveSessionRecord(session)){
+      setSessionPanelMode('none');
+      setPlanStatus('No previous-day recovery session remains. Open Library to review saved days.');
+      return false;
+    }
+    if(await retireCoveredPreviousActiveSession(session))return false;
+    return handlePreviousActiveSession(session);
+  }catch(error){
+    setPlanStatus('Could not read previous-day recovery safely: '+(error?.message||String(error)),false);
+    return false;
+  }
 }
 async function attemptAutoRestoreActiveSession(){
   try{
     if(TASKS.length||PlanScheduleGateway.hasLiveState())return false;
     const session=await loadActiveSessionForRestore();
     if(TASKS.length||PlanScheduleGateway.hasLiveState())return false;
+    // A previous-day recovery row is not evidence of an unsaved day by
+    // itself. If the canonical Saved Day covers its latest content revision,
+    // retire the redundant recovery copy before considering ownership/UI.
+    if(isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session))return false;
+    if(isPreviousActiveSessionRecord(session))return handlePreviousActiveSession(session);
     if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
-    if(isRecoverablePreviousActiveSession(session))return handlePreviousActiveSession(session);
     if(isSuspendedActiveSession(session)){setSessionPanelMode('suspended',session);return false;}
     if(!isRestorableActiveSession(session)){setSessionPanelMode('none');return false;}
     const snapshot=activeSessionSnapshot(session);
@@ -2893,20 +3389,20 @@ const UnsupportedData=(()=>{
   let noticeShown=false;
   function announce(){
     const state=summary();if(!state.total||noticeShown)return false;noticeShown=true;
-    NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:true,cue:'none',
+    NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:true,
       title:'Some data is from a newer version',
       message:`This device has ${describe(state)} saved by a newer version of Study Director. This version leaves them exactly as they are and works with everything else; Drive sync waits until the app is updated.`,
-      action:{label:'Check for update',run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))}});
+      action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
     return true;
   }
   // The profile cannot be opened: shown instead of the start-up failure.
   function reportBlocked(){
     if(!blocked)return false;
     const others=Profiles.list().filter(row=>row.scope!==ProfileScope.scope);
-    NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
+    NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:false,
       title:'This profile needs a newer version',
       message:'This profile was saved by a newer version of Study Director, which changed how its data is stored. This version leaves it exactly as it is. Update the app to open it, or use another profile meanwhile.',
-      action:{label:'Check for update',run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
+      action:{label:'Check for update',opens:true,run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
       secondaryAction:others.length?{label:`Open ${others[0].name||'another profile'}`,run:()=>{try{Profiles.switchTo(others[0].id);}catch(error){AppDiagnostics.capture('unsupported-data.switch-profile',error,'warn');}}}:{label:'Start a new profile',run:()=>{try{Profiles.add();}catch(error){AppDiagnostics.capture('unsupported-data.add-profile',error,'warn');}}}});
     return true;
   }
@@ -3059,7 +3555,7 @@ async function readHostAppMetaValue(key){return HostAppMeta.read(exactAppMetaFam
 function writeHostAppMetaValue(key,value,options={}){return HostAppMeta.write(exactAppMetaFamily(HostAppMeta,key,'host app metadata'),value,options);}
 async function readReconciliationBase(){return ReconciliationBaselineStore.readHeader();}
 async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
-async function readReconciliationBaseDays(dates){return ReconciliationBaselineStore.readDays(dates);}
+async function readReconciliationBaseDayAncestry(dates,checkpointId){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
 async function writeReconciliationBase(checkpointId,spec){return ReconciliationBaselineStore.write(checkpointId,spec);}
 const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
 // The one record of past backups (version 3). Each entry is a copy: when it was
@@ -3087,17 +3583,17 @@ function verifiedRecoveryEntries(state=verifiedRecoveryState){return [state.file
 function lastBackupTime(state=verifiedRecoveryState){return Math.max(-Infinity,...verifiedRecoveryEntries(state).map(entry=>Date.parse(entry.at)).filter(Number.isFinite));}
 // Decisions read the record fresh; a failed read falls back to the copy in memory.
 async function readVerifiedRecoveryState(){
-  return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY).catch(error=>{AppDiagnostics.capture('backup.freshness-read',error,'warn');return verifiedRecoveryState;}));
+  return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));
 }
-// The copy in memory changes at once, so a decision made right after a backup
-// (whether a location still has changes waiting) already sees it; the durable
-// record follows.
+// A receipt becomes visible only after its durable metadata write commits.
+// A provider may have published successfully even when this local receipt fails;
+// keep its real external outcome, but never represent the receipt as durable.
 function updateVerifiedRecoveryState(change){
-  verifiedRecoveryState=normalizeVerifiedRecoveryState(change(verifiedRecoveryState));BackupProviderRuntime.refresh();
   const run=async()=>{
     const next=normalizeVerifiedRecoveryState(change(await readVerifiedRecoveryState()));
+    try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}
+    catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');throw error;}
     verifiedRecoveryState=next;BackupProviderRuntime.refresh();
-    try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');}
     return true;
   };
   const next=verifiedRecoveryWriteChain.catch(()=>{}).then(run);verifiedRecoveryWriteChain=next;return next;
@@ -3106,7 +3602,9 @@ function updateVerifiedRecoveryState(change){
 function recordBackupCopy(copy){
   const source=String(copy?.source||''),sourceRevision=backupTime(copy?.sourceRevision);
   if(!sourceRevision||!/^[a-z][a-z0-9-]{0,40}$/u.test(source))return Promise.resolve(false);
-  const entry={at:new Date().toISOString(),sourceRevision,format:DATA_CONTRACT.schemas.Backup.version};
+  // Known missing attachment bytes may be archived, but cannot be used as
+  // proof of a fully recoverable, current-format external safety copy.
+  const entry={at:new Date().toISOString(),sourceRevision,format:copy.attachmentsComplete===false?null:DATA_CONTRACT.schemas.Backup.version};
   return updateVerifiedRecoveryState(prior=>source==='file'?{...prior,file:{...entry,verified:copy.verified===true}}:{...prior,providers:{...prior.providers,[source]:entry}});
 }
 // Every save writes the change clock inside its own transaction (the
@@ -3116,13 +3614,37 @@ function recordBackupCopy(copy){
 // backed up. Seeding the clock also keeps later saves later after a reload.
 async function reconcileChangeClock(){
   const recorded=String(readStorageHealth().lastLocalSaveAt||'');let latest=recorded;
-  try{latest=await AppData.mutationEpoch.latestChangeAt(recorded);}catch(error){AppDiagnostics.capture('backup.change-clock-read',error,'warn');return false;}
+  try{latest=await AppData.mutationEpoch.latestChangeAt(recorded);}catch(error){AppDiagnostics.capture('backup.change-clock-read',error,'error');throw error;}
   if(latest===recorded)return false;
   writeStorageHealth({lastLocalSaveAt:latest});return true;
+}
+let startupChangeClockReady=null;
+function reconcileStartupChangeClock(){
+  // An unknown durable clock cannot authorize automatic provider work.
+  // Do not memoize a transient failure as a successful startup check.
+  if(!startupChangeClockReady)startupChangeClockReady=reconcileChangeClock().catch(error=>{startupChangeClockReady=null;throw error;});
+  return startupChangeClockReady;
 }
 async function installVerifiedRecoveryFreshness(){
   verifiedRecoveryState=await readVerifiedRecoveryState();
   BackupProviderRuntime.refresh();return verifiedRecoveryState;
+}
+async function verifyFreshCurrentBackup(){
+  const unknown=()=>Object.freeze({ok:false,verifiedCopies:0,latestVerifiedAt:''});
+  let currentRevision;
+  try{
+    // Canonical commits write the mutation epoch inside their transaction;
+    // the localStorage health clock alone is not proof of the latest change.
+    currentRevision=await AppData.mutationEpoch.latestChangeAt(currentBackupSourceRevision());
+  }catch(error){AppDiagnostics.capture('backup.freshness-epoch-read',error,'warn');return unknown();}
+  const currentSave=Date.parse(String(currentRevision||''));
+  if(!Number.isFinite(currentSave))return unknown();
+  let state;
+  try{state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));}
+  catch(error){AppDiagnostics.capture('backup.freshness-receipt-read',error,'warn');return unknown();}
+  // A missing, invalid or untrusted clock cannot authorize destructive work.
+  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&Date.parse(entry.sourceRevision)>=currentSave);
+  return Object.freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates.sort((a,b)=>Date.parse(b.at)-Date.parse(a.at))[0]?.at||''});
 }
 // Compare policy identity and ownership inside the same typed metadata transaction.
 function mutateBackupProtection(value,options){
@@ -3142,7 +3664,6 @@ function mutateBackupProtection(value,options){
 /* APPDATA REPOSITORY FACADE */
 function handleRepositoryDailyRecordsChanged(change){
   richAssetReferenceRevision++;
-  if(change&&change.type==='remove'&&isValidIsoDate(change.date))savedRecordDates.delete(change.date);
   LibraryView.invalidate();
   if(document.getElementById('pane-library')?.classList.contains('on'))setTimeout(()=>{if(document.getElementById('pane-library')?.classList.contains('on'))void LibraryView.render();},0);
 }
@@ -3189,11 +3710,17 @@ function canonicalCommitChangesAttachmentReferences(event){
   canonicalAttachmentReferenceSignatures.set(descriptor.key,signature);
   return prior===undefined||prior!==signature;
 }
+const STUDY_DATA_COMMITS=Object.freeze(new Set(['note','dailyRecord','activeSession','planData','pendingReview']));
 function handleCanonicalCommit(event){
   const referencesChanged=canonicalCommitChangesAttachmentReferences(event);
   if(referencesChanged)richAssetReferenceRevision++;
   const committedAt=event&&event.committedAt||new Date().toISOString();
-  writeStorageHealth({lastLocalSaveAt:committedAt});
+  // Study data was saved here: notes, Saved Days, sessions, plans, kept
+  // versions, whether made here or taken in by a sync: what the empty-device
+  // check counts. Settings alone (a name, a theme) and canonical hydration
+  // do not count as authored study data.
+  const studyData=!!event&&event.startup!==true&&event.settingsOnly!==true&&STUDY_DATA_COMMITS.has(event.entityType);
+  writeStorageHealth(studyData?{lastLocalSaveAt:committedAt,lastStudyDataSaveAt:committedAt}:{lastLocalSaveAt:committedAt});
   renderStorageHealth();
   if(NativeCapabilities&&event&&event.entityType==='activeSession'){
     const badgeActive=event.operation==='delete'?false:persistedActiveSessionUnfinished(event.value);
@@ -3208,6 +3735,8 @@ function handleCanonicalCommit(event){
     invalidateAttachmentLibrary();
   }
   if(event&&event.entityType==='pendingReview'&&StartupLifecycle.status().fullyInitialized)void KeptVersions.refresh();
+  if(event?.entityType==='dailyRecord'&&saveReminderDate)
+    void revalidateSaveReminderAfterCanonicalConvergence();
 }
 
 async function refreshPersistedSessionBadge(){
@@ -3340,7 +3869,8 @@ function resetRuntimeSessionState(options={}){
   PracticePacer.reset();
 }
 function refreshPlanAfterSessionReset(emptyMessage='',emptyTitle=''){
-  PlanDraftEditor.preview({silent:true});
+  // A session reset, suspension or remote handoff is not an edit action.
+  PlanDraftEditor.preview({silent:true,enterDraft:false});
   renderSched();
   updateBadges();
   updateHeaderInfo();
@@ -3371,8 +3901,10 @@ async function suspendTodaySession(){
         session.status='suspended';
         session.suspendedAt=new Date().toISOString();
         session.updatedAt=session.suspendedAt;
-        const saved=await AppData.activeSession.save(session);
-        if(!saved.ok)throw saved.error||new Error('active session save failed');
+        // A built session takes its stored form when saved, so the check
+        // compares the strict read-back with what was saved.
+        const saved=await AppData.activeSession.save(session,{strictDurability:true});
+        await requireCanonicalSessionWrite(saved,saved?.value,'suspending the Active Session');
       }
       resetRuntimeSessionState({lifecycleManaged:true,source:'session-suspend',date:todayISO()});
       setSessionPanelMode('suspended');
@@ -3404,32 +3936,236 @@ async function confirmSessionTakeover(session,{replace=false}={}){
     confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
   });
 }
+const sessionHandoffError=(code,message)=>Object.assign(new Error(message),{code});
+// Ownership moves by Drive's claim first, then this device's strict local
+// save. If Continue Here stops between the two, neither device runs the
+// timer: the old owner stops on seeing the claim, and this device still has
+// the session as running elsewhere. Pressing Continue Here again finishes it.
+const HANDOFF_RETRY_MESSAGE='Couldn’t finish moving the session. Press Continue Here again to finish.';
+// onStep(text): each step, for Continue Here's progress line.
+// preread: a readSessionHandoffSource started while the person confirmed.
+async function transferSessionOwnershipHere(session,{onStep=null,preread=null}={}){
+  const step=text=>{try{onStep?.(text);}catch{}};
+  if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
+  if(!BackupProviderRuntime.connected('google-drive'))throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
+  const requested=ActiveSessionCodec.sanitizeCurrent(session);
+  if(!requested)throw new Error('the transferred session state is invalid');
+  // localBefore: the session stored here that the next save may replace.
+  let previous=null,next=null,ownershipClaim=null,backgroundHold=null,claimAttempted=false,localVerified=false,localBefore=requested;
+  try{
+    // flush() starts a pending debounce write; settled() also waits for an
+    // already-running write whose timer callback has finished.
+    const displayedDraft=String(document.getElementById('plan-input')?.value||'');
+    const draftFlushed=await Promise.resolve(PlanDraftEditor.flush());
+    if(draftFlushed===false)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
+    await PlanData.settled();
+    const savedDraft=PlanData.readDraft(),canonicalDraft=(await AppData.planData.read()).draft;
+    // A displayed default is not a saved Plan draft. Null is a valid
+    // canonical value until the person deliberately edits or loads a draft.
+    const expectedDisplay=savedDraft===null?getActiveDefaults().scheduleText:savedDraft;
+    if(canonicalDraft!==savedDraft||displayedDraft!==expectedDisplay)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The independent Plan draft changed or did not reach canonical storage before Continue Here.');
+    // A read started while the person confirmed finishes first: it fills the
+    // verified session the claim reuses when Drive has not moved on.
+    if(preread)await preread;
+    step('Moving the session here…');
+    backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
+    let planned=null;
+    // One Drive lease covers both steps. Under it the provider reads only the
+    // newest verified Drive Active Session (Continue Here never reconciles
+    // other data, such as the Plan draft, to move ownership), decide checks
+    // it and names the claim, and the claim is written. decide throwing
+    // writes nothing.
+    const decide=async source=>{
+      const expectedCheckpointId=String(source?.checkpointId||'');
+      if(!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive did not provide a verified current checkpoint for the handoff.');
+      previous=source.session?ActiveSessionCodec.sanitizeCurrent(source.session):null;
+      if(!previous||previous.date!==requested.date)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s shared session ended or changed while Continue Here was starting.');
+      if(previous.runningOn!==requested.runningOn)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership while Continue Here was starting.');
+      if(Number(previous.revision)<Number(requested.revision))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
+      const [requestedContentFingerprint,observedContentFingerprint]=await Promise.all([activeSessionContentFingerprint(requested),activeSessionContentFingerprint(previous)]);
+      if(requestedContentFingerprint!==observedContentFingerprint){
+        // Drive's newer session only adds to this device's copy when this copy
+        // is exactly content Drive held before: what this device last shared
+        // through Drive (sync takes the newer session then too), or what the
+        // newest claim observed when it was made, whether that claim is the
+        // current owner's or this device's own from a Continue Here that
+        // stopped part-way. Advance only Active Session, then transfer
+        // ownership. A real divergence, or content with attachments, uses
+        // normal sync.
+        const priorClaim=source.priorClaim||null;
+        const causalContinuation=!!(
+          priorClaim&&priorClaim.state==='owned'&&priorClaim.applies&&
+          priorClaim.observedContentFingerprint===requestedContentFingerprint&&
+          Number(priorClaim.revision)<=Number(previous.revision)
+        );
+        const sharedContinuation=!!source.sharedContentFingerprint&&source.sharedContentFingerprint===requestedContentFingerprint;
+        const referencedAssets=BackupCodec.assetIds(previous);
+        if(!causalContinuation&&!sharedContinuation||referencedAssets.length){
+          BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
+          throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
+        }
+        // Only over the copy this press started from: a save made here in the
+        // meantime is never overwritten.
+        const advanced=await AppData.activeSession.save(previous,{strictDurability:true,expectedCanonical:requested});
+        if(advanced?.error?.code==='ACTIVE_SESSION_CHANGED')throw sessionHandoffError('SESSION_CONTINUE_CHANGED','Today’s session changed on this device while Continue Here was starting.');
+        await requireCanonicalSessionWrite(advanced,previous,'advancing the handoff source');
+        handleActiveSessionRepositoryResult(advanced,'save');
+        localBefore=previous;
+      }
+      planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
+      if(!planned)throw new Error('the transferred session state is invalid');
+      next=planned;
+      setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
+      return {observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,revision:planned.revision};
+    };
+    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:requested.date,handoffToken:crypto.randomUUID(),decide,onWrite:()=>{claimAttempted=true;}});
+    // Busy and not connected are answered before any claim is written.
+    if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
+    if(claimed?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
+    if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
+    ownershipClaim=claimed.claim;
+    next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
+    if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
+    const saved=await AppData.activeSession.save(next,{strictDurability:true,expectedCanonical:localBefore});
+    await requireCanonicalSessionWrite(saved,next,'claiming Active Session ownership');
+    localVerified=true;
+    handleActiveSessionRepositoryResult(saved,'save');
+    // The claim was confirmed on Drive as the newest one, under the lease,
+    // before this save. A later claim by another device is caught by the
+    // ownership watcher, so the handoff does not wait to read it again.
+    backgroundHold.release();backgroundHold=null;
+    notifyBackupChange({urgent:true,reason:'session-continue'});
+    // Only the session moved; notes, Saved Days and everything else come in
+    // by a full sync at once, in the background, while the timer runs here.
+    BackupProviderRuntime.scheduleSharedSync('google-drive','session-continue');
+    return Object.freeze({previous,session:saved.value||next,claim:ownershipClaim});
+  }catch(error){
+    // Reversal is safe only if the strict canonical record is still exactly
+    // the attempted state, or is already the observed previous state. An
+    // unrelated concurrent write is never overwritten during compensation.
+    let compensated=false;
+    if(ownershipClaim&&!localVerified&&previous&&next){
+      try{
+        const loaded=await AppData.activeSession.load(0,{strict:true});
+        const current=loaded?.ok&&loaded.storage?.idb===true?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
+        let localReverted=!!current&&CanonicalModule.same(current,previous);
+        if(!localReverted&&current&&CanonicalModule.same(current,next)){
+          const restored=await AppData.activeSession.save(previous,{strictDurability:true,expectedCanonical:current});
+          await requireCanonicalSessionWrite(restored,previous,'compensating a failed ownership transfer');
+          localReverted=true;
+        }
+        if(localReverted)compensated=await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
+      }catch(rollbackError){AppDiagnostics.capture('session.takeover-compensation',rollbackError,'warn');}
+    }
+    try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
+    // Drive may hold this device's claim while the session here is not yet
+    // saved as running here. No device runs the timer meanwhile; Continue
+    // Here again finishes the move. An unexpected local record is never
+    // overwritten to pretend that the previous owner kept the session.
+    if(claimAttempted&&!compensated)throw Object.assign(sessionHandoffError('SESSION_CONTINUE_INCOMPLETE',HANDOFF_RETRY_MESSAGE),{cause:error});
+    throw error;
+  }finally{backgroundHold?.release();}
+}
+// Continue Here in progress: every Continue Here button says so and the
+// Execute card shows the step; a failure stays in the card until the next
+// try or until the session moves on.
+function setSessionHandoff(step='',error=''){
+  sessionHandoff={step:String(step||''),error:String(error||'')};
+  updateSessionControls();
+  try{refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-moving',error,'warn');}
+}
+// The block a stored session is on and how many of its blocks are done.
+function sessionProgressSummary(session){
+  const snapshot=activeSessionSnapshot(session),draft=parseScheduleDraftText(String(session&&session.scheduleText||''));
+  if(!snapshot||!draft.ok)return null;
+  const taskState=snapshot.taskState&&typeof snapshot.taskState==='object'?snapshot.taskState:{},finished=row=>['done','skipped'].includes(taskState[row.id]?.resolvedState);
+  const rows=draft.parsed.map((task,index)=>({task,id:String(task.id||makeTaskId(task,index))})).filter(row=>isTrackableBlock(row.task));
+  const current=rows.find(row=>row.id===String(snapshot.currentTaskId||''))||rows.find(row=>!finished(row));
+  return {block:current?shortTaskLabel(current.task):'',done:rows.filter(finished).length,total:rows.length};
+}
+function sessionHandoffProblem(error){
+  const code=String(error&&error.code||'');
+  if(navigator.onLine===false)return 'You’re offline. Connect to the internet, then try again.';
+  if(code==='SESSION_CONTINUE_BUSY')return 'Google Drive is busy with another backup or restore. Try again in a moment.';
+  if(code==='SESSION_CONTINUE_NOT_CONNECTED')return 'Google Drive isn’t connected. Sign in from your profile, then try again.';
+  if(code==='SESSION_CONTINUE_SYNC_REQUIRED')return 'Today’s shared session advanced. This device is syncing it first; retry Continue Here after sync.';
+  if(code==='SESSION_CONTINUE_INCOMPLETE')return HANDOFF_RETRY_MESSAGE;
+  if(code==='SESSION_CONTINUE_CHANGED')return 'Today’s session changed on this device while Continue Here was starting. Nothing moved; try again.';
+  if(code==='REPOSITORY_SYNC_NEEDS_UPDATE')return String(error.message||'Update the app to continue here.');
+  if(code==='REPOSITORY_SESSION_CLAIM_STALE')return 'Today’s session changed on another device. Wait for this device to catch up, then try again.';
+  if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
+  return String(error&&error.message||error||'Something went wrong.');
+}
 async function continueSessionHere(){
-  if(!appCanMutate())return false;
+  if(!appCanMutate()||sessionHandoff.step)return false;
+  // The "Today’s session is ready" pop-up has done its job.
+  NoticeCoordinator.resolveEvent('session','session-handoff');
+  setSessionHandoff('Checking today’s session…');
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
+    // Classify the date before any today-only continuation, restoration or
+    // ownership operation.
+    if(isPreviousActiveSessionRecord(session)){
+      setSessionPanelMode('previous',session);
+      setPlanStatus('This session belongs to a previous study day. Review it without transferring or restarting its timer.',false);
+      return false;
+    }
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
+    // Drive is read while the person confirms, so pressing Continue here
+    // waits only on the claim when Drive has not moved on. Nothing is written.
+    const preread=BackupProviderRuntime.readSessionHandoffSource('google-drive').catch(()=>null);
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
-    const claimed=await AppData.activeSession.save({...session,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(session.revision),updatedAt:new Date().toISOString()});
-    if(!handleActiveSessionRepositoryResult(claimed,'save'))throw claimed.error||new Error('the session could not be moved to this device');
-    notifyBackupChange({urgent:true,reason:'session-continue'});
-    return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
+    // From here Execute shows the session moving here; its timer starts only
+    // once Google Drive confirms the claim.
+    sessionMovingHere=session;setSessionHandoff('Moving the session here…');
+    const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text),preread});
+    setSessionHandoff('Starting here…');
+    if(moved.previous.status==='suspended')return restoreSuspendedTodaySession();
+    // The timer runs here now: Resume, as Restore Session plays.
+    const restored=await attemptAutoRestoreActiveSession();
+    if(restored)NoticeCoordinator.emit({source:'session',id:'session-continued',surface:'quiet',foreground:false,cue:'resume',occurrence:String(Date.now())});
+    return restored;
   }catch(error){
-    setPlanStatus('Could not continue today’s session here: '+(error&&error.message?error.message:error),false);
+    const problem=sessionHandoffProblem(error);
+    setPlanStatus('Could not continue today’s session here: '+problem,false);
+    // Catch-up may legitimately have advanced or ended the session before a
+    // later claim fence rejected the takeover. Re-project from canonical
+    // storage; never redraw the stale object captured before Continue Here.
+    try{
+      const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value||null;
+      if(!current)setSessionPanelMode('none');
+      else if(isPreviousActiveSessionRecord(current))setSessionPanelMode('previous',current);
+      else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
+      else if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
+      else setSessionPanelMode('active',current);
+    }catch(renderError){AppDiagnostics.capture('session.continue-failure-refresh',renderError,'warn');}
+    setSessionHandoff('','Couldn’t continue here. '+problem);
+    Interactions.notify({source:'session',kind:'error',key:'session-continue',title:'Couldn’t continue here',message:problem});
     return false;
-  }
+  }finally{sessionMovingHere=null;if(sessionHandoff.step)setSessionHandoff('',sessionHandoff.error);}
+}
+// From a pop-up or the profile panel: open Execute first, where the card
+// shows each Continue Here step.
+async function continueSessionOnExecute(source){
+  if(sessionHandoff.step)return false;
+  await goTab('execute',{source});
+  return continueSessionHere();
 }
 // Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
-async function yieldSessionToOtherDevice(){
+async function yieldSessionToOtherDevice(options={}){
   if(!TASKS.length)return false;
+  const deferReview=options&&options.deferReview===true;
   await SessionLifecycle.run('session-yield',{scheduleIdentity:true,date:todayISO(),autoDate:true},async()=>{
     PracticePacer.pauseForSessionEnd({persist:false});
     const now=new Date().toISOString(),session=activeSessionPayload(null,{status:'suspended',suspendedAt:now});
-    if(session){const saved=await AppData.activeSession.save(session);if(!saved.ok)throw saved.error||new Error('active session save failed');}
+    if(session){
+      const saved=await AppData.activeSession.save(session,{strictDurability:true});
+      await requireCanonicalSessionWrite(saved,saved?.value,'yielding the Active Session during reconciliation');
+    }
     resetRuntimeSessionState({lifecycleManaged:true,source:'session-yield',date:todayISO()});
     setSessionPanelMode('suspended',session);
     refreshPlanAfterSessionReset();
@@ -3437,13 +4173,22 @@ async function yieldSessionToOtherDevice(){
     updateExecutePanels();
     return true;
   });
-  Interactions.notify({source:'session',key:'session-yield',title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.'});
+  sessionYieldedAt=Date.now();
+  if(deferReview)Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. Any late progress on this device will be compared when the new owner’s session arrives.'});
+  else Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.',
+    action:{label:'Review',opens:true,run:()=>void KeptVersions.review()}});
   return true;
 }
 async function restoreSuspendedTodaySession(){
   if(!appCanMutate())return false;
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
+    // Date takes precedence over status and ownership.
+    if(isPreviousActiveSessionRecord(session)){
+      setSessionPanelMode('previous',session);
+      setPlanStatus('This session belongs to a previous study day. Review it without restarting its timer.',false);
+      return false;
+    }
     if(!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
     if(sessionFromElsewhere(session))return continueSessionHere();
     const snapshot=activeSessionSnapshot(session);
@@ -3452,7 +4197,7 @@ async function restoreSuspendedTodaySession(){
     if(restored===false)throw new Error('The suspended session could not be restored.');
     setSessionPanelMode('active');
     setPlanStatus('✓ Suspended session restored.');
-    Interactions.notify({source:'session',kind:'success',key:'session-restore',title:'Session restored',message:'Today’s suspended session is active again.'});
+    Interactions.notify({source:'session',kind:'success',key:'session-restore',cue:'resume',title:'Session restored',message:'Today’s suspended session is active again.'});
     await goTab('execute',{source:'session-restore'});
     return true;
   }catch(error){
@@ -3488,7 +4233,7 @@ async function finishTodaySession(){
     setTimerMode(TIMER_MODES.DONE,'manual-finish-day');
     resetBreakState();
     refreshCoreUi();
-    const saved=await writeLiveDraftNow({markChanged:true});
+    const saved=await writeLiveDraftNow({markChanged:true,emergency:true});
     if(saved&&saved.ok===false)throw saved.error||new Error('live session save failed');
     setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
     await goTab('review',{source:'finish-today'});
@@ -3718,6 +4463,14 @@ function installBackgroundOwners(){
     ['backup-locations',Object.freeze({wake:BackupProviderRuntime.wakeBackground})]
   ])BackgroundOperations.register(id,owner);
   backgroundOwnersInstalled=true;
+}
+// A page closed in the middle of a change (a sync applying it, perhaps as
+// the phone put the app away) leaves its write lease until it runs out, at
+// most 20 s. This tab owns the app, so the lease is that closed page's:
+// start-up recovery waits for it to end rather than asking for a reload.
+async function waitForClosedTabLease(limitMs=25000){
+  for(let waited=0;waited<limitMs&&AppOwnership.canMutate()&&AppMutationCoordinator.foreignActive();waited+=250)await new Promise(resolve=>setTimeout(resolve,250));
+  return !AppMutationCoordinator.foreignActive();
 }
 function wakeBackgroundOperations(trigger='eligibility'){
   if(!StartupLifecycle.status().fullyInitialized)return false;
@@ -4274,24 +5027,115 @@ function profileLabel(row,rows=Profiles.list()){
   const name=row?.name||'New profile',alike=rows.some(other=>other.scope!==row.scope&&(other.name||'New profile')===name);
   return {name,meta:row?.email||(alike&&profileSince(row)?`since ${profileSince(row)}`:'')};
 }
-function driveSyncLabel(){
-  const status=BackupProviderRuntime.locationStatus('google-drive');if(!status?.connected)return '';
-  if(UnsupportedData.held())return 'Needs app update';
-  return KeptVersions.count()>0&&!status.sync?.syncing?'Needs review':BackupPresentation.syncLabel(status)||'Connected';
-}
 function renderProfileBadge(){
-  let label='',locked=false;
-  try{label=driveSyncLabel();const protection=BackupProtection.status();locked=protection.enabled&&!protection.unlocked;}catch{/* Drawn again once backups are set up. */}
-  const name=getStudentNameFromDisplay(),letter=profileInitial(name),problem=['Needs review','Needs password','Needs attention','Needs app update'].includes(label)||locked;
-  const badge=document.getElementById('profile-badge');
-  if(badge){const glyph=badge.querySelector('.profile-badge-letter');if(glyph&&glyph.textContent!==letter)glyph.textContent=letter;badge.setAttribute('aria-label',`Profile: ${name}${problem?` · ${label||'Needs password'}`:''}`);}
-  const dot=document.getElementById('profile-badge-dot');if(dot)dot.hidden=!problem;
-  const avatar=document.getElementById('profile-avatar');if(avatar&&avatar.textContent!==letter)avatar.textContent=letter;
+  const letter=profileInitial(getStudentNameFromDisplay());
+  for(const glyph of document.querySelectorAll('.profile-badge-letter,.profile-avatar-letter'))if(glyph.textContent!==letter)glyph.textContent=letter;
+  scheduleSyncStatus();
+}
+// One status for the phone circle, the sidebar name and the profile panel:
+// a ring for sync health and a badge for what needs the person
+// (docs/areas/status-indicator.md). Drawn after the current task, so every input
+// below is initialised and bursts of changes draw once.
+function scheduleSyncStatus(){if(syncStatusTimer===null)syncStatusTimer=setTimeout(renderSyncStatus,0);}
+function syncStatusInput(){
+  const drive=BackupProviderRuntime.locationStatus('google-drive'),email=Profiles.current()?.email||'';
+  let device=null,protection=null,storage=[];
+  try{device=DeviceBackup.status();}catch{/* Not installed yet. */}
+  try{protection=BackupProtection.status();}catch{/* Not installed yet. */}
+  try{storage=readStorageHealth().issues;}catch{/* Not installed yet. */}
+  return {
+    online:navigator.onLine!==false,
+    drive:drive?{...namedTurnDevice(drive),setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
+    device:device&&device.supported?device:null,
+    passwordNeeded:!!protection&&protection.enabled&&!protection.unlocked,
+    newerData:UnsupportedData.held(),
+    kept:KeptVersions.count(),
+    storage:storage.map(issue=>({source:issue.source,label:issue.label,message:issue.message,level:issue.level})),
+    reminder:backupNudgeMessage,
+    updateReady:!!(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying),
+    sessionElsewhere:sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):'',
+    sessionReady:sessionParkedHere()&&sessionFromElsewhere(sessionPanelSession)?sessionDevice(sessionPanelSession):'',
+    operation:driveRunningOperation(),
+    unseen:NoticeCoordinator.recent().unseen
+  };
+}
+function drawStatusHost(host,model){
+  if(!host)return;
+  if(host.dataset.ring!==model.ring)host.dataset.ring=model.ring;
+  if((host.dataset.badge||'')!==model.badge)host.dataset.badge=model.badge;
+  host.toggleAttribute('data-slow',model.slow);
+  const many=value=>value>9?'9+':String(value);
+  const badge=host.querySelector('.status-badge'),text=model.badge==='review'&&model.count>1?many(model.count):model.badge==='info'&&model.unseen>1?many(model.unseen):['error','warning'].includes(model.badge)?'!':model.badge==='update'?'↑':'';
+  if(badge&&badge.textContent!==text)badge.textContent=text;
+}
+function renderSyncStatus(){
+  syncStatusTimer=null;
+  let model;
+  try{model=BackupPresentation.status(syncStatusInput());}
+  catch(error){AppDiagnostics.capture('sync-status.render',error,'warn');return;}
+  const hosts=['profile-tag','profile-badge','profile-avatar'].map(id=>document.getElementById(id));
+  // Syncing settles into the green ring with a brief glow.
+  if(syncStatusRing==='syncing'&&model.ring==='synced'){
+    clearTimeout(syncStatusSettle);for(const host of hosts)host?.classList.add('status-settle');
+    syncStatusSettle=setTimeout(()=>{for(const host of hosts)host?.classList.remove('status-settle');},1400);
+  }
+  syncStatusRing=model.ring;
+  for(const host of hosts)drawStatusHost(host,model);
+  const name=getStudentNameFromDisplay();
+  const tag=document.getElementById('profile-tag');if(tag){tag.title=`${model.label} — profile and sync`;tag.setAttribute('aria-label',`Profile: ${name} · ${model.label}`);}
+  const badge=document.getElementById('profile-badge');if(badge){badge.title=model.label;badge.setAttribute('aria-label',`Profile: ${name} · ${model.label}`);}
+  renderSyncStatusPanel(model);
+  renderDriveConnectCard();
+}
+function renderSyncStatusPanel(model){
+  const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
+  const headline=document.getElementById('profile-status-headline');if(headline&&headline.textContent!==model.headline)headline.textContent=model.headline;
+  const detail=document.getElementById('profile-status-detail');if(detail)detail.textContent=model.detail;
+  const primary=document.getElementById('profile-status-primary');
+  // Sync now (shown only while waiting) is a quiet link beside the sentence;
+  // Try again keeps the full button.
+  if(primary){primary.hidden=!model.action;if(model.action){primary.textContent=model.action.label;primary.dataset.syncAction=model.action.action;primary.classList.toggle('profile-act-quiet',model.action.action==='sync-now');}}
+  // Rebuilt only when the items change, so a focused button keeps focus.
+  const list=document.getElementById('profile-status-items'),key=JSON.stringify(model.items);
+  if(list&&list.dataset.key!==key){list.dataset.key=key;list.replaceChildren(...model.items.map(item=>{
+    const row=document.createElement('li');row.className='profile-status-item';row.dataset.tone=item.tone;row.dataset.item=item.id;
+    const mark=document.createElement('span');mark.className='profile-status-mark';mark.setAttribute('aria-hidden','true');
+    const text=document.createElement('span');text.className='profile-status-text';text.textContent=item.text;
+    const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset.action='sync-status-action';button.dataset.syncAction=item.action;button.textContent=item.actionLabel;
+    row.append(mark,text,button);return row;
+  }));}
+}
+// Each panel action calls the feature's own action; the indicator never
+// starts work by itself. Sync now, Try again and Sign in keep the panel open
+// so the ring shows the work; the others close it for their own dialog or view.
+async function syncStatusAction(ev){
+  const kind=String(ev?.target?.closest?.('[data-sync-action]')?.dataset.syncAction||'');
+  if(!['sync-now','retry','sign-in'].includes(kind))closeProfilePanel();
+  try{
+    switch(kind){
+      // Sync now (shown while waiting for another device) uploads without
+      // waiting for that device's turn; Try again keeps the usual turns.
+      case 'sync-now':case 'retry':BackupProviderRuntime.scheduleSharedSync('google-drive',kind==='retry'?'sync-retry':'sync-now',{skipTurn:kind==='sync-now'});scheduleSyncStatus();return true;
+      case 'sign-in':return await connectDriveForProfile();
+      case 'enter-password':return await CLICK_ACTIONS['backup-protection']();
+      case 'unlock-sync':return await BackupProviderRuntime.unlockSync('google-drive');
+      case 'check-update':return await checkUnsupportedUpdate();
+      case 'apply-update':return await applyPwaUpdateFromUi();
+      case 'review-sync':return await BackupProviderRuntime.reviewSync('google-drive');
+      case 'review-kept':return await KeptVersions.review();
+      case 'device-permission':return await connectDeviceBackupWithRecovery();
+      case 'open-execute':return await goTab('execute',{source:'sync-status'});
+      case 'continue-session':return await continueSessionOnExecute('sync-status');
+      case 'open-data':if(!await goTab('library',{source:'sync-status'}))return false;LibraryView.showSection('data');return true;
+      default:return false;
+    }
+  }catch(error){AppDiagnostics.capture('sync-status.action',error,'warn');return false;}
 }
 function renderProfilePanel(){
   const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
-  const mine=Profiles.current(),rows=Profiles.list(),drive=BackupProviderRuntime.locationStatus('google-drive'),email=mine?.email||'',sync=driveSyncLabel(),protection=BackupProtection.status();
-  const subtitle=document.getElementById('profile-subtitle');if(subtitle)subtitle.textContent=drive?.connected?[email,sync].filter(Boolean).join(' · '):email?`${email} · Signed out`:'Only on this device';
+  const mine=Profiles.current(),rows=Profiles.list(),drive=BackupProviderRuntime.locationStatus('google-drive'),email=mine?.email||'',protection=BackupProtection.status();
+  // Sync state is the Sync & backups section's; the subtitle names the account.
+  const subtitle=document.getElementById('profile-subtitle');if(subtitle){subtitle.textContent=email;subtitle.hidden=!email;}
   const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
   if(driveValue)driveValue.textContent=drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
   if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.disabled=!!drive?.engineBusy;}
@@ -4310,7 +5154,7 @@ function renderProfilePanel(){
       if(meta){const small=document.createElement('small');small.textContent=meta;text.append(small);}
       let end;
       if(current){end=document.createElement('span');end.className='profile-item-tag ui-label';end.textContent='This profile';}
-      else{end=document.createElement('button');end.type='button';end.className='mini-btn ui-btn profile-switch';end.textContent='Switch';end.dataset.action='switch-profile';end.dataset.profile=row.id;end.setAttribute('aria-label',`Switch to ${name}`);end.disabled=locked;}
+      else{end=document.createElement('button');end.type='button';end.className='profile-act ui-btn profile-switch';end.textContent='Switch';end.dataset.action='switch-profile';end.dataset.profile=row.id;end.setAttribute('aria-label',`Switch to ${name}`);end.disabled=locked;}
       item.append(avatar,text,end);return item;
     }));
   }
@@ -4321,14 +5165,14 @@ function renderProfile(){renderProfileBadge();renderProfilePanel();}
 function openProfilePanel(){
   const dialog=document.getElementById('profile-dialog');if(!dialog||dialog.open)return false;
   const input=document.getElementById('profile-name-input');if(input)input.value=getStudentNameFromDisplay();
-  dialog.showModal();renderProfilePanel();return true;
+  dialog.showModal();renderProfilePanel();NotificationRecent.opened();return true;
 }
 function closeProfilePanel(){const dialog=document.getElementById('profile-dialog');if(dialog?.open)dialog.close();}
 function installProfileDialogs(){
   const form=document.getElementById('first-start-form');form?.addEventListener('submit',event=>event.preventDefault());
   // First start stays until Skip, Cancel or Continue; Escape does not drop it.
   document.getElementById('first-start-dialog')?.addEventListener('cancel',event=>event.preventDefault());
-  document.getElementById('profile-dialog')?.addEventListener('close',()=>saveProfileName());
+  document.getElementById('profile-dialog')?.addEventListener('close',()=>{finishProfileRename();NotificationRecent.closed();});
 }
 function saveProfileName(){
   const input=document.getElementById('profile-name-input');if(!input)return;
@@ -4336,9 +5180,25 @@ function saveProfileName(){
   if(normalizeStudentName(raw)===getStudentNameFromDisplay())return;
   const clean=applyStudentName(raw);input.value=clean;persistUserDefaultName(clean);
 }
+// The name in the panel's header renames in place, as a note title does:
+// Enter or leaving the field saves, Escape keeps the old name.
+function startProfileRename(){
+  const button=document.getElementById('profile-name-button'),input=document.getElementById('profile-name-input');
+  if(!button||!input)return false;
+  input.value=getStudentNameFromDisplay();button.hidden=true;input.hidden=false;input.focus();input.select();
+  return true;
+}
+function finishProfileRename(){
+  saveProfileName();
+  const button=document.getElementById('profile-name-button'),input=document.getElementById('profile-name-input');
+  if(input)input.hidden=true;if(button)button.hidden=false;
+}
 function handleProfileNameKey(e){
-  if(e.key==='Enter'){e.preventDefault();saveProfileName();e.currentTarget.blur();return false;}
-  if(e.key==='Escape'){e.currentTarget.value=getStudentNameFromDisplay();}
+  // Key handlers are delegated from the document, so the field is the target.
+  const input=e.target,button=document.getElementById('profile-name-button');
+  if(e.key==='Enter'){e.preventDefault();input.blur();button?.focus();return false;}
+  // Escape leaves the name as it was and keeps the panel open.
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();input.value=getStudentNameFromDisplay();input.blur();button?.focus();return false;}
   return true;
 }
 async function profileDriveAction(){
@@ -4422,7 +5282,73 @@ async function driveProfileDeleted(info){
 // a background sync) never does.
 let driveConnectRequestedAt=0,driveLibraryQuestion=null;
 const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
-function connectDriveForProfile(){driveConnectRequestedAt=Date.now();return BackupProviderRuntime.connect('google-drive');}
+// The indicator shows Connecting… from the click until the sign-in settles,
+// and the Connect card follows the first sync to its end.
+function connectDriveForProfile(){
+  driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard();scheduleSyncStatus();
+  const settled=ok=>{
+    driveConnecting=false;
+    if(driveConnectCard&&driveConnectCard.phase==='signing-in'){
+      if(ok===true)driveConnectCard.phase='signed-in';
+      else{const said=BackupPresentation.read('google-drive','backup-status');driveConnectCard.phase='failed';driveConnectCard.error=String(said?.message||'').replace(/^Connection failed:\s*/u,'')||'Sign-in didn’t finish.';}
+    }
+    scheduleSyncStatus();
+  };
+  const result=BackupProviderRuntime.connect('google-drive');Promise.resolve(result).then(settled,()=>settled(false));return result;
+}
+// The Connect card (docs/areas/status-indicator.md, Connect card): it reads what Drive
+// reports and decides nothing itself.
+function startDriveConnectCard(){
+  clearTimeout(driveConnectCardHide);driveConnectCardHide=null;
+  driveConnectCard={startedAt:Date.now(),phase:'signing-in',error:'',seen:{sync:false,upload:false},kept:KeptVersions.count(),lastStatus:''};
+}
+function endDriveConnectCard(){clearTimeout(driveConnectCardHide);driveConnectCardHide=null;driveConnectCard=null;renderDriveConnectCard();}
+function driveRunningOperation(){
+  for(const [id,kind] of [['external-sync','sync'],['backup-operation',''],['external-backup','upload']]){
+    const event=BackupPresentation.read('google-drive',id);
+    if(event&&event.lifecycle==='running')return {kind:kind||(event.kind==='sync'?'sync':'upload'),message:String(event.message||''),progress:event.progress||null};
+  }
+  return null;
+}
+// Drive reports the device whose upload this one waits for by its id; what
+// the person reads is its type and browser ("Windows · Chrome").
+function namedTurnDevice(drive){return drive?.sync?{...drive,sync:{...drive.sync,turnDevice:drive.sync.turnDevice?deviceName(drive.sync.turnDevice):''}}:drive;}
+function renderDriveConnectCard(){
+  const node=id=>document.getElementById(id),root=node('drive-connect-card');if(!root)return;
+  const state=driveConnectCard;
+  if(!state){root.hidden=true;return;}
+  let model;
+  try{
+    const drive=namedTurnDevice(BackupProviderRuntime.locationStatus('google-drive')),operation=driveRunningOperation();
+    if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
+    if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
+    model=BackupPresentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
+  }catch(error){AppDiagnostics.capture('drive-connect-card.render',error,'warn');root.hidden=true;return;}
+  root.hidden=false;root.dataset.tone=model.tone;
+  setTextSafe('drive-connect-title',model.title);
+  // Screen readers hear the sentence when it changes, not every count.
+  if(state.lastStatus!==model.status){state.lastStatus=model.status;setTextSafe('drive-connect-status',model.status);}
+  // Sync now and Try now sit on the line of the step that waits, as a quiet
+  // link; any other action is the card's button.
+  const inline=model.action?.step?model.action:null,list=node('drive-connect-steps'),key=JSON.stringify([model.steps,inline]);
+  if(list&&list.dataset.key!==key){
+    list.dataset.key=key;
+    list.replaceChildren(...model.steps.map(step=>{
+      const item=document.createElement('li');item.dataset.state=step.state;if(step.state==='active')item.setAttribute('aria-current','step');
+      const label=document.createElement('span');label.textContent=step.label;item.append(label);
+      if(inline&&inline.step===step.id){const link=document.createElement('button');link.type='button';link.className='drive-connect-step-action';link.dataset.action='sync-status-action';link.dataset.syncAction=inline.action;link.textContent=inline.label;item.append(link);}
+      return item;
+    }));
+  }
+  // No moving bar while a step only waits (for another device, or a retry).
+  const bar=node('drive-connect-bar'),showBar=model.tone==='working'&&state.phase!=='signing-in'&&!model.steps.some(step=>step.state==='waiting');
+  if(bar){bar.hidden=!showBar;bar.dataset.mode=model.fraction===null?'indeterminate':'determinate';bar.firstElementChild.style.width=model.fraction===null?'':`${Math.round(model.fraction*100)}%`;}
+  const detail=node('drive-connect-detail');if(detail){detail.hidden=!model.detail;if(detail.textContent!==model.detail)detail.textContent=model.detail;}
+  const action=node('drive-connect-action');
+  if(action){action.hidden=!model.action||!!inline;if(model.action&&!inline){action.dataset.syncAction=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
+  // Synced closes on its own; anything that needs the person stays.
+  if(model.done&&!driveConnectCardHide)driveConnectCardHide=setTimeout(()=>{if(driveConnectCard===state)endDriveConnectCard();},6000);
+}
 async function recordDriveLibrary(email,folder){
   const mine=Profiles.current();if(!mine)return;
   // Another Drive library than the one last synced with: what was shared
@@ -4446,14 +5372,14 @@ function askToJoinLibrary(email,library){
 async function bindDriveLibrary(info){
   const mine=Profiles.current();if(!mine)return 'refuse';
   const email=String(info?.email||''),folder=String(info?.folder||''),found=String(info?.found||''),others=Profiles.list().filter(row=>row.scope!==mine.scope);
-  const refuse=message=>{Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
+  const refuse=message=>{endDriveConnectCard();Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
   const owner=others.find(row=>email&&row.email===email||found&&row.id===found);
   if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
   if(info?.mine){await recordDriveLibrary(email,folder);return 'continue';}
   if(!found&&(!info?.library||!others.length)){await recordDriveLibrary(email,folder);return 'claim';}
   if(Date.now()-driveConnectRequestedAt>DRIVE_CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
   driveLibraryQuestion??=askToJoinLibrary(email,info.library).finally(()=>{driveLibraryQuestion=null;});
-  if(!await driveLibraryQuestion){renderProfile();return 'refuse';}
+  if(!await driveLibraryQuestion){endDriveConnectCard();renderProfile();return 'refuse';}
   if(found&&!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
   FirstStart.joined();
   await recordDriveLibrary(email,folder);
@@ -4558,7 +5484,9 @@ function tickClock(){
   setTextSafe('clock',n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}));
   const dd=document.getElementById('day-date');
   const autoDate=todayISO(n);
-  if(studyDayRolledOver(n)){handleStudyDayRollover();return;}
+  // Previous-day Review is an explicit recovery choice, not a live study
+  // session eligible for automatic rollover or a surprise Day save.
+  if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover();return;}
   if(dd&&dd.dataset.autoDate==='1'&&dd.value!==autoDate){
     SessionLifecycle.runSync('date-rollover',{date:autoDate,autoDate:true,},()=>{
       dd.value=autoDate;return true;
@@ -4903,6 +5831,20 @@ const PluginRuntime=(()=>{
   }
   return Object.freeze({registerPlaceholders,requestTab,register,status});
 })();
+// Insights prepares a long saved history in idle time so its first opening
+// does not wait on a cold worker. Load its file only after start-up
+// housekeeping has had its turn, while the page is visible and idle.
+const INSIGHTS_PRELOAD_DELAY_MS=4000;
+function scheduleInsightsPreload(){
+  setTimeout(()=>{
+    const load=()=>{
+      if(document.visibilityState==='hidden'){document.addEventListener('visibilitychange',load,{once:true});return;}
+      // requestTab reports load failures in plugin status and never rejects.
+      void PluginRuntime.requestTab('insights');
+    };
+    if(typeof requestIdleCallback==='function')requestIdleCallback(load,{timeout:10000});else load();
+  },INSIGHTS_PRELOAD_DELAY_MS);
+}
 function registerStudyDirectorPlugin(plugin){
   return PluginRuntime.register(plugin);
 }
@@ -4958,9 +5900,10 @@ const paneEntranceTimers=new Map();
 function markPaneEntrance(pane){
   // Presentation-owned entrance: CSS animates the arriving pane's sections for
   // one beat. The marker is cleared afterwards so later re-renders stay still.
-  // Insights renders progressively behind its own loading panel; animating it
-  // at the same time made that render about 300 ms slower, so it arrives still.
-  if(pane.id==='pane-insights')return;
+  // Insights renders progressively behind its own loading panel the first
+  // time; animating that render made it about 300 ms slower, so a first open
+  // arrives still. Reopened, it shows the view it kept and animates like any pane.
+  if(pane.id==='pane-insights'&&(!pane.firstElementChild||pane.querySelector('.plugin-loading-panel')))return;
   clearTimeout(paneEntranceTimers.get(pane.id));
   pane.setAttribute('data-sd-enter','');
   paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));
@@ -6235,7 +7178,8 @@ async function quiesceManagedRecoveryRuntime(operation){
     if(outer&&managedRecoverySessionQuiescenceDepth===0)void AppMutationCoordinator.settled().then(()=>{
       if(managedRecoverySessionQuiesced()||AppMutationCoordinator.status().active)return;
       const frozenSinceMs=managedRecoveryTimerFrozenSinceMs;managedRecoveryTimerFrozenSinceMs=null;
-      try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
+      if(sessionClaimFreeze)return;
+       try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
     });
   }
 }
@@ -6268,8 +7212,8 @@ const PlanData=(()=>{
       if(libraryBytes+new TextEncoder().encode(JSON.stringify(value)).length+9>PersonalDataCodec.maxBytes)throw new RangeError('Plans and draft exceed the 1 MiB allowance.');
       // The cache only proves what this page wrote; a forced write (or a browser
       // data clear, which resets the cache) must reach storage again.
-      if(persistedDraft===value&&options.force!==true){failure=null;return true;}
-      await AppData.planData.writeDraft(value,{ownershipToken:token,allowHydrating:!!options.allowHydrating,backupCapture:options.backupCapture===true});persistedDraft=value;failure=null;return true;
+      if(persistedDraft===value&&options.force!==true&&options.strictDurability!==true){failure=null;return true;}
+      await AppData.planData.writeDraft(value,{ownershipToken:token,allowHydrating:!!options.allowHydrating,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true});persistedDraft=value;failure=null;return true;
     },options);
   }
   // Browser data was cleared while this page stayed open. Write back the draft
@@ -6296,20 +7240,22 @@ const PlanData=(()=>{
     if(flush&&appCanMutate()){if(await PlanDraftEditor.flush({backupCapture})===false)throw new Error('Save the current Plan draft before exporting.');await settled({backupCapture});}
     return PersonalDataCodec.normalize({version:2,plans:await AppData.planData.read(),preferences:await preferences()});
   }
-  async function applyPreferences(raw){
-    const clean=PersonalDataCodec.preferences(raw);
-    const portable=await AppData.personalPreferences.write({...clean,version:2,updatedAt:new Date().toISOString()});
-    acceptProtectedPreferences(portable);
-    refreshAppearanceMirrors(portable);
-    applyPortablePreferencesToRuntime(portable);
-  }
   async function importData(value){
-    const clean=PersonalDataCodec.normalize(value);await settled().catch(()=>{});
-    await enqueue(async()=>{await AppData.planData.replace(clean.plans);state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;});await applyPreferences(clean.preferences);
+    const clean=PersonalDataCodec.normalize(value);
+    // A failed local edit cannot be overwritten by an import. The canonical
+    // Plans and Preferences commit together before the runtime adopts them.
+    await settled();
+    await enqueue(async()=>{
+      const portable=await AppData.planData.replacePortable(clean);
+      state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;
+      acceptProtectedPreferences(portable);
+      refreshAppearanceMirrors(portable);
+      applyPortablePreferencesToRuntime(portable);
+      return true;
+    });
     const input=document.getElementById('plan-input'),draftText=String(clean.plans.draft??getActiveDefaults().scheduleText);if(input)input.value=draftText;
-    const restored=parseScheduleDraftText(draftText),matchesApplied=!!TASKS.length&&restored.ok&&scheduleFingerprintForRows(restored.parsed)===scheduleFingerprint();
-    if(matchesApplied)PlanDraftEditor.deactivate();
-    PlanDraftEditor.preview({silent:true,enterDraft:!matchesApplied});PlanRuntime.savedPlans.render();
+    // An imported draft never applies a session or enters edit mode.
+    PlanDraftEditor.preview({silent:true,enterDraft:false});PlanRuntime.savedPlans.render();
   }
   async function verify(value){
     await settled();const actual={version:2,plans:await AppData.planData.read(),preferences:await preferences()};
@@ -6528,7 +7474,17 @@ function executeIdlePresentation(d=new Date(),options={}){
     return view;
   };
   const elsewhere=sessionShownElsewhere();
-  if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here, below, moves it to this device.`,'NEXT: —'));
+  if(sessionPanelMode==='previous')return applyOverrides(executeIdleView('Previous Day Needs Review','PREVIOUS DAY','Previous Day Needs Review',
+    'This study day is stored for review. Its timer will not restart. Choose Review Previous Day to recover it safely.','NEXT: REVIEW'));
+  if(sessionParkedHere()){
+    const handed=sessionFromElsewhere(sessionPanelSession);
+    return applyOverrides(executeIdleView('Session Suspended','SUSPENDED','Today’s Session Suspended',handed?`Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`:'Restore Session continues it here. Review → Save Today can also save its progress without restarting the timer.','NEXT: —'));
+  }
+  if(elsewhere&&sessionMovingHere&&sessionHandoff.step){
+    const summary=sessionProgressSummary(sessionMovingHere),done=summary&&summary.total?` (${summary.done} of ${summary.total} blocks done)`:'';
+    return applyOverrides(executeIdleView(summary?.block||'Moving Here…','MOVING HERE','Moving Here…',`Today’s session is moving to this device${done}. Its timer starts here as soon as Google Drive confirms.`,'NEXT: STARTING HERE'));
+  }
+  if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here moves it to this device.`,'NEXT: —'));
   if(!hasRows)return applyOverrides(executeIdleView('No Schedule Loaded','—','No Schedule Loaded','Open Plan and apply today’s schedule to begin.','NEXT: —'));
   if(!hasTrackable)return applyOverrides(executeIdleView('Plan Has No Study Blocks','FIXED / NON-TRACKABLE ONLY','No Trackable Blocks','This plan has no work or support blocks for the timer to run. Edit it in Plan before starting.','NEXT: —'));
   if(TimerState.mode===TIMER_MODES.DONE){
@@ -6650,19 +7606,21 @@ function updateBadges(){
   updateSessionControls();
 }
 function updateSessionControls(){
-  const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions');
+  const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions'),cardAction=document.getElementById('execute-session-action');
   const active=TASKS.some(isTrackableBlock);
   const running=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
   const finished=active&&TimerState.mode===TIMER_MODES.DONE;
-  const suspended=sessionPanelMode==='suspended'&&!active,elsewhere=sessionPanelMode==='elsewhere'&&!active,handedOff=suspended&&sessionFromElsewhere(sessionPanelSession);
-  const visible=active||suspended||elsewhere;
+  const previous=sessionPanelMode==='previous',suspended=sessionPanelMode==='suspended'&&!active,elsewhere=sessionPanelMode==='elsewhere'&&!active,handedOff=suspended&&sessionFromElsewhere(sessionPanelSession);
+  const visible=active||suspended||elsewhere||previous;
   if(panel){
     panel.hidden=!visible;
-    panel.classList.toggle('suspended',suspended||elsewhere);
+    panel.classList.toggle('suspended',suspended||elsewhere||previous);
     const title=document.getElementById('session-panel-title');
     const note=document.getElementById('session-panel-note');
-    if(title)title.textContent=elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
-    if(note)note.textContent=elsewhere
+    if(title)title.textContent=previous?'Previous Day Needs Review':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
+    if(note)note.textContent=previous
+      ? 'This historical session is preserved for Review. Its timer will not restart or transfer ownership. Open Review and Save Today to Library when ready.'
+      : elsewhere
       ? `Today’s session is running ${sessionDevice(sessionPanelSession)} (last update ${sessionUpdateTime(sessionPanelSession)}). Everything else works here as usual. Continue Here moves the session to this device.`
       : handedOff
       ? `Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`
@@ -6674,13 +7632,22 @@ function updateSessionControls(){
       ? 'The timer is actively tracking a block. Suspend or reset only if you intentionally want to stop this live session.'
       : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and notes are kept.';
   }
-  if(planControls)planControls.hidden=!visible;
-  [panel,planControls].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
+  const continuing=!!sessionHandoff.step,progress=document.getElementById('execute-session-progress'),progressText=continuing?sessionHandoff.step:sessionHandoff.error;
+  if(progress){progress.hidden=!progressText;progress.classList.toggle('error',!continuing&&!!progressText);if(progress.textContent!==progressText)progress.textContent=progressText;}
+  if(planControls){
+    planControls.hidden=!visible;
+    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:previous?'Previous day needs review':elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
+    if(state&&state.textContent!==label)state.textContent=label;
+  }
+  // The same controls in Execute's status card, its session panel and Plan's
+  // strip: the next step first, then Suspend, Finish and Reset. A session
+  // running elsewhere offers only Continue Here.
+  [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
     const action=btn.dataset.action;
-    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere;btn.disabled=!suspended&&!elsewhere;const label=elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;}
-    else if(action==='suspend-session'){btn.hidden=suspended||elsewhere;btn.disabled=!active;}
-    else if(action==='finish-session')btn.disabled=!active||finished;
-    else if(action==='reset-session')btn.disabled=!visible||elsewhere;
+    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere&&!previous;btn.disabled=continuing||!suspended&&!elsewhere&&!previous;const label=continuing?'Continuing…':previous?(active?'Open Review':'Review Previous Day'):elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
+    else if(action==='suspend-session'){btn.hidden=previous||suspended||elsewhere;btn.disabled=!active||previous;}
+    else if(action==='finish-session'){btn.hidden=previous||elsewhere||suspended;btn.disabled=!active||finished||previous;}
+    else if(action==='reset-session'){btn.hidden=previous||elsewhere;btn.disabled=!visible||elsewhere||previous;}
   }));
   updateExecutePanels();
   refreshSessionSafetyUi();
@@ -6725,6 +7692,7 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
       resolveTaskCompletion,storeResolvedCompletion,syncProgressInputsToState,updateTimerFocusMetrics
     }),
     session:Object.freeze({
+      acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
       cancelPendingLiveDraftSave,clearSaveReminder,flushLiveDraft,
       getLifecycleRevision:()=>SessionLifecycle.revision,getOwnershipRevision:()=>AppOwnership.revision,getReviewDate,
       handleActiveSessionRepositoryResult,
@@ -6767,30 +7735,30 @@ const {
 const {saveToday:saveDayRecordCore,isRolledOver:studyDayRolledOver}=ReviewSaveService;
 async function saveDayRecord(){
   let suspendedSession=null;
-  if(!TASKS.length){
-    const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
+  if(!TASKS.length||sessionPanelMode==='suspended'){
+    const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
     if(isSuspendedActiveSession(session)){
       if(!appCanMutate()){setStatus('save-status','Take control in this tab before saving the suspended session.',false);return false;}
-      const snapshot=activeSessionSnapshot(session);
-      if(!snapshot){setStatus('save-status','The suspended session could not be read safely. Restore it before saving.',false);return false;}
-      const reviewSnapshot={...snapshot,timerRuntime:null};
-      const restored=applyStoredSessionSnapshot(session,reviewSnapshot,{source:'suspended-session-review',reviewOnly:true});
-      if(restored===false){setStatus('save-status','The suspended session could not be loaded into Review safely.',false);return false;}
+      if(!TASKS.length){
+        const snapshot=activeSessionSnapshot(session);
+        if(!snapshot){setStatus('save-status','The suspended session could not be read safely. Restore it before saving.',false);return false;}
+        const restored=applyStoredSessionSnapshot(session,{...snapshot,timerRuntime:null},{source:'suspended-session-review',reviewOnly:true});
+        if(restored===false){setStatus('save-status','The suspended session could not be loaded into Review safely.',false);return false;}
+      }
       suspendedSession=session;
     }
   }
-  const saved=await saveDayRecordCore();
+  // The Review save owner commits the Day and closes this suspended session
+  // without creating an interim, incorrectly owned Active Session.
+  const saved=await saveDayRecordCore({closeSession:!!suspendedSession});
   if(!suspendedSession)return saved;
   if(!saved){
-    await AppData.activeSession.save(suspendedSession).catch(error=>AppDiagnostics.capture('review.suspended-session-restore',error,'warn'));
-    setSessionPanelMode('suspended');
+    try{
+      const loaded=await AppData.activeSession.load(0,{strict:true}),current=loaded?.value||null;
+      if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
+      else if(loaded?.ok&&!current)setSessionPanelMode('none');
+    }catch(error){AppDiagnostics.capture('review.suspended-session-status',error,'warn');}
     return false;
-  }
-  const cleared=await AppData.activeSession.clear();
-  handleActiveSessionRepositoryResult(cleared,'clear');
-  if(!cleared.ok){
-    setStatus('save-status','✓ Day saved to Library, but the suspended recovery copy could not be cleared. Use Reset Today after storage recovers.',false);
-    return true;
   }
   setTimerMode(TIMER_MODES.DONE,'suspended-session-saved');
   setSessionPanelMode('none');
@@ -6799,6 +7767,7 @@ async function saveDayRecord(){
 }
 
 async function handleStudyDayRollover(...args){
+  if(sessionPanelMode==='previous')return false;
   const changed=await ReviewSaveService.handleRollover(...args);
   if(changed)AppActivation.publish(APP_ACTIVATION_KINDS.DATE_ROLLOVER,'study-day-rollover',{destructive:true});
   return changed;
@@ -7038,30 +8007,69 @@ const RichTextAttachmentPort=Object.freeze({upload:async(file,options={})=>{cons
 invalidateAttachmentLibrary=()=>AttachmentLibrary.invalidate();
 
 let attachmentIntegrityView=null,repositoryIntegrityView=null;const repositoryIntegrityBoundScopes=Object.create(null);
-function integrityStatusText(target,{shallow=false}={}){
-  const value=target||{},completed=value.completedAt||value.checkedAt||'',partial=value.partial||value.progress||value.cursor||value.cycleStartedAt;
-  const state=value.blockedReason==='locked'?'Paused until backup encryption is unlocked':value.blockedReason==='preempted'?'Paused for foreground work':value.lastOutcome==='unavailable'?'Verification unavailable; previous findings retained':value.recheck?value.blockedReason==='corrupt'?'Recheck continuing; some objects remain corrupt':'Recheck requested':value.quarantinedObjectIds?.length?'Objects need attention':partial?'Partly checked; will continue':completed?'Checked':'Not yet checked';
-  const progress=value.partial?` · ${Math.floor(value.partial.stored.offset/1048576)} of ${Math.ceil(value.partial.storedBytes/1048576)} MB downloaded${value.partial.phase==='plain'?'; verifying decrypted content':''}`:value.progress?` · ${value.progress.cursor} of ${value.progress.total} records`:'';
-  const history=completed?` · Last full ${shallow?'presence and size check':'scan'}: ${new Date(completed).toLocaleString()}`:'';
-  const quarantine=value.quarantinedObjectIds?.length?` · ${value.quarantinedObjectIds.length} quarantined object(s)`:'';
-  return state+progress+history+quarantine+(shallow?' · File contents are not checked.':' · Active sessions are excluded.');
+// Verification, one location per row: a plain headline for what is happening
+// now or the last result, then when the last full check finished. A running
+// check reports its progress live (integrityLive); a Recheck answers at once.
+const integrityLive=Object.create(null),integrityRecheckAsked=Object.create(null),integrityRowError=Object.create(null);
+function integrityStatus(target,{shallow=false,running=false,live=null}={}){
+  const value=target||{},completed=value.completedAt||value.checkedAt||'',files=shallow?'attachments':'backup files';
+  const between=!!(value.partial||value.progress||value.cursor||value.cycleStartedAt),damaged=value.quarantinedObjectIds?.length||0;
+  const count=live&&Number.isFinite(live.total)&&live.total>0?` ${Math.min(live.done||0,live.total)} of ${live.total} ${files}`:'';
+  const head=running?`Checking…${count}`
+    :value.blockedReason==='locked'?'Paused until backup encryption is unlocked'
+    :value.blockedReason==='preempted'?'Paused while another backup task runs; continues by itself'
+    :value.lastOutcome==='unavailable'?(value.recheck?'Recheck could not run this time; it will try again':'Could not check this time; it will try again')
+    :value.recheck?(value.blockedReason==='corrupt'?`Recheck continuing; some ${files} are still damaged`:'Recheck requested; starts in a moment')
+    :damaged?`${damaged} damaged backup file${damaged===1?'':'s'}; the next backup writes fresh copies`
+    :between?`Checking in small steps${count?`;${count} so far`:''}; continues by itself`
+    :completed?(shallow?'All attachments present':`All ${files} intact`)
+    :'Not checked yet';
+  const parts=[completed?`Last full check: ${new Date(completed).toLocaleString()}`:'No full check yet'];
+  if(value.partial)parts.push(`${Math.floor(value.partial.stored.offset/1048576)} of ${Math.ceil(value.partial.storedBytes/1048576)} MB of a large file read${value.partial.phase==='plain'?'; checking its decrypted content':''}`);
+  else if(value.progress)parts.push(`${value.progress.cursor} of ${value.progress.total} records`);
+  if(damaged&&value.recheck)parts.push(`${damaged} damaged`);
+  if(shallow)parts.push('File contents are not checked.');
+  return Object.freeze({head,detail:parts.join(' · ')});
 }
+// Kept for diagnostics-style callers: the headline and its detail in one line.
+function integrityStatusText(target,options={}){const status=integrityStatus(target,options);return status.head+' · '+status.detail;}
 function renderIntegrityStatuses(){
+  let jobs=[];try{jobs=BackupProviderRuntime.backgroundStatus();}catch{jobs=[];}
   for(const [id,label,location] of [['attachment-verification-status','Attachment presence and size',''],['device-verification-status','Device Folder','device-folder'],['drive-verification-status','Google Drive','google-drive']]){
     const element=document.getElementById(id);if(!element)continue;
     const value=location?repositoryIntegrityView?.locations?.[location]:attachmentIntegrityView,bound=!location||value?.repositoryScope&&repositoryIntegrityBoundScopes[location]===value.repositoryScope;
-    element.textContent=label+': '+(bound?integrityStatusText(value,{shallow:!location}):'Awaiting connection to the repository; no current scan confirmed.');
+    const running=!!location&&jobs.some(row=>row.job===location+' integrity'&&row.running===true);
+    if(location&&value?.recheck)integrityRecheckAsked[location]=false;
+    const status=bound?integrityStatus(value,{shallow:!location,running,live:location?integrityLive[location]:null}):Object.freeze({head:'Not connected',detail:'Connect it to check its backups.'});
+    const error=location?integrityRowError[location]||'':'';
+    const name=document.createElement('strong'),head=document.createElement('span'),detail=document.createElement('span');
+    name.textContent=label+': ';head.className='verification-head';head.textContent=error||status.head;
+    detail.className='verification-detail';detail.textContent=' '+status.detail;
+    element.classList.toggle('verification-error',!!error);element.replaceChildren(name,head,detail);
+    // Recheck is offered only for a location this device is connected to,
+    // and says it is working until the recheck finishes.
+    const recheck=location&&document.getElementById('recheck-'+location);
+    if(recheck){
+      const busy=bound&&(integrityRecheckAsked[location]===true||value?.recheck===true);
+      recheck.hidden=!bound;recheck.disabled=busy;recheck.setAttribute('aria-busy',busy?'true':'false');
+      const text=busy?'Rechecking…':`Recheck ${label}`;if(recheck.textContent!==text)recheck.textContent=text;
+    }
   }
 }
 async function requestRepositoryIntegrityRecheck(target){
+  const label=target==='device-folder'?'Device Folder':'Google Drive';
+  integrityRowError[target]='';integrityRecheckAsked[target]=true;renderIntegrityStatuses();
   try{
     if(!appCanMutate())throw new Error('Use the primary tab to request backup verification.');
-    if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error('Connect this backup location before requesting verification.');
+    if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error(`Connect ${label} before rechecking it.`);
     const bound=await readRepositoryIntegrityTarget(target);
     await mutateRepositoryIntegrityTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw repositoryIntegrityChanged();return {...current,requestId:crypto.randomUUID(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:new Date().toISOString()};});
     BackupProviderRuntime.requestIntegrity(target);
-    setStatus('Backup recheck requested. Quarantined objects remain hidden until they pass full verification.');return true;
-  }catch(error){setStatus(String(error?.message||error),false);AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;}
+    renderIntegrityStatuses();return true;
+  }catch(error){
+    integrityRecheckAsked[target]=false;integrityRowError[target]=`Recheck did not start: ${String(error?.message||error)}`;renderIntegrityStatuses();
+    AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;
+  }
 }
 const ATTACHMENT_INTEGRITY_META_KEY=APP_META_KEYS.attachmentIntegrityAudit;
 const ATTACHMENT_INTEGRITY_INTERVAL_MS=24*60*60*1000;
@@ -7107,7 +8115,7 @@ function applyAttachmentIntegrityState(state){
   return normalized;
 }
 function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){
-  return AttachmentIntegrityJob.schedule(delay,trigger,'replace');
+  return AttachmentIntegrityJob.schedule(delay,trigger,'earliest');
 }
 function attachmentIntegrityDeferredError(message='Attachment integrity audit deferred.',code='ATTACHMENT_INTEGRITY_DEFERRED'){const error=new Error(message);error.code=code;return error;}
 async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){
@@ -7122,9 +8130,9 @@ async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){
     const check=()=>{if(!appCanMutate())throw attachmentIntegrityDeferredError('Attachment integrity audit is awaiting primary-tab control.','ATTACHMENT_INTEGRITY_NOT_PRIMARY');if(backgroundMaintenanceForegroundBusy())throw attachmentIntegrityDeferredError();};
     await BackgroundTasks.yieldTask({priority:'background'});check();
     const referenceRevision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();
-    const sources=await AttachmentReferences.sources({includeLive:false,priority:'background'}),references=new Set();
-    for(const source of sources||[])for(const id of source.ids||[])if(AttachmentsModule.validId(id))references.add(id);
-    const audit=await AttachmentStorage.shallowAudit([...references],{
+    const references=await AttachmentReferences.sources({includeLive:false,priority:'background',referencesOnly:true});
+    if(Object.prototype.toString.call(references)!=='[object Set]')throw new Error('Attachment reference inventory could not be verified.');
+    const audit=await AttachmentStorage.shallowAudit([...references].filter(AttachmentsModule.validId),{
       progress:prior.progress,workMs:5000,maxEntries:128,shouldYield:BackgroundTasks.budget(),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),check
     });
     check();if(referenceRevision!==richAssetReferenceRevision||dataset!==await AppData.dailyRecords.datasetRevision())throw attachmentIntegrityDeferredError();
@@ -7205,15 +8213,40 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
 // count shows in Library → Data and the sidebar; a note with one carries a
 // quiet "Needs review" mark. Reviewing never opens by itself.
 const KeptVersions=(()=>{
-  let count=0,notes=new Set(),generation=0;
+  let count=0,notes=new Set(),generation=0,seen=null;
   async function refresh(){
     const token=++generation;let open;
-    try{open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);}catch(error){AppDiagnostics.capture('kept-versions.refresh',error,'warn');return false;}
+    try{
+      open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
+      if(open.length&&appCanMutate()&&!BackupController.status().busy){
+        // Resolve only verified, now-identical canonical alternatives. The
+        // Backup controller writes and reads back replicated tombstones;
+        // this view still reads the actual resulting count.
+        try{await BackupController.resolveConvergedKeptVersions();}
+        catch(error){AppDiagnostics.capture('kept-versions.convergence',error,'warn');}
+        open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
+      }
+    }catch(error){AppDiagnostics.capture('kept-versions.refresh',error,'warn');return false;}
     if(token!==generation)return false;
     const next=new Set(open.filter(review=>review.subject==='note').map(review=>review.ref)),notesChanged=[...next].sort().join('|')!==[...notes].sort().join('|');
+    // Kept versions pop up once, when they first appear; those already here
+    // at start-up do not.
+    const fresh=seen?open.filter(review=>!seen.has(review.id)):[];
+    seen=new Set([...(seen||[]),...open.map(review=>review.id)]);
     count=open.length;notes=next;renderKeptVersions();renderDriveBackup();
     if(notesChanged)LibraryView.refreshNotes();
+    if(!count)NoticeCoordinator.resolveEvent('sync','kept-new');
+    else if(fresh.length)announce(fresh);
     return true;
+  }
+  function announce(fresh){
+    // The Connect card reports what its sync kept, and the pop-up for a
+    // session that moved to another device says this device's was kept.
+    if(driveConnectCard)return;
+    if(Date.now()-sessionYieldedAt<60000&&fresh.every(review=>review.subject==='session'))return;
+    Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',
+      message:`${count===1?'One alternative needs':`${count} alternatives need`} review because their differences could not be safely settled. Verified matching alternatives are cleared automatically; choose what to keep when ready.`,
+      action:{label:'Review',opens:true,run:()=>void review()}});
   }
   async function review(ref=''){
     try{
@@ -7232,14 +8265,22 @@ const KeptVersions=(()=>{
 })();
 // Library → Data says what this device holds from a newer version.
 function renderUnsupportedData(){
+  scheduleSyncStatus();
   const state=UnsupportedData.summary(),row=document.getElementById('unsupported-data'),text=document.getElementById('unsupported-data-text');
   if(row)row.hidden=!state.total;
-  if(text&&state.total)text.textContent=`${UnsupportedData.describe(state)} ${state.total===1?'was':'were'} saved by a newer version of Study Director. This version leaves ${state.total===1?'it':'them'} exactly as ${state.total===1?'it is':'they are'} and does not show ${state.total===1?'it':'them'}; Drive sync waits until the app is updated.`;
+  if(text)text.textContent=state.total?`${UnsupportedData.describe(state)} on this device ${state.total===1?'was':'were'} saved by a newer version of Study Director. ${state.total===1?'It is':'They are'} kept safe but hidden here, and Drive sync is paused until you update the app.`:'';
+}
+// Update app: look for the newer version; say so when there is none yet.
+async function checkUnsupportedUpdate(){
+  try{
+    await PwaLifecycle.checkForUpdate();
+    if(!PwaLifecycle.status().updateReady)Interactions.notify({source:'unsupported-data',key:'no-update',title:'No newer version yet',message:'This device has the newest version it can get right now. The data stays safe and hidden until an update arrives.'});
+  }catch(error){AppDiagnostics.capture('unsupported-data.update-check',error,'warn');}
 }
 function renderKeptVersions(){
   const row=document.getElementById('kept-versions'),text=document.getElementById('kept-versions-text'),count=KeptVersions.count();
   if(row)row.hidden=!count;
-  if(text)text.textContent=`${count} version${count===1?' was':'s were'} kept where two devices changed the same thing. Nothing is lost; choose what to keep when you are ready.`;
+  if(text)text.textContent=`${count} retained alternative${count===1?' needs':'s need'} review. Only differences not proven safely equivalent are kept; open Kept Versions to choose the remaining values.`;
 }
 const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   notifications:NoticeCoordinator.presentation('library',Object.freeze({label:'Open Library',run:()=>goTab('library')})),
@@ -7391,43 +8432,50 @@ async function restoreNotesSnapshotThroughLifecycle(snapshotNotes){
     date:getReviewDate(),
   },()=>AppData.notes.replace(snapshotNotes));
 }
-async function restoreSessionStateThroughLifecycle(importedSession,scheduleText=''){
+async function restoreSessionStateThroughLifecycle(importedSession,options={}){
   const session=importedSession?ActiveSessionCodec.sanitizeCurrent(importedSession):null;
+  // A sync merge into the session running here keeps the timer running: when
+  // the merged session has no timer (the other device had stopped), the
+  // current block runs on here. A pause the other device made stays paused.
+  const keepRunning=options.keepRunning===true&&TimerState.mode===TIMER_MODES.RUNNING&&!TimerState.paused;let runOn=false;
   const date=session&&isValidIsoDate(session.date)?session.date:todayISO();
   const snapshot=session?activeSessionSnapshot(session):null;
   if(session&&!snapshot)throw new Error('The rollback active-session snapshot is incompatible.');
-  return SessionLifecycle.run('restore-journal-rollback',{
+  const result=await SessionLifecycle.run('restore-journal-rollback',{
     scheduleIdentity:true,date,autoDate:date===todayISO(),sessionRevision:session&&session.revision||0,
     snapshotReview:snapshot&&snapshot.review
   },async()=>{
     if(session){
-      const saved=await AppData.activeSession.save(session);
-      if(!saved.ok)throw saved.error||new Error('Rollback active-session save failed.');
-      if(session.status==='suspended'){
+      const saved=await AppData.activeSession.save(session,{strictDurability:true});
+      await requireCanonicalSessionWrite(saved,session,'restoring an Active Session');
+      if(isPreviousActiveSessionRecord(session)){
+        resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date:todayISO()});
+        PlanDraftEditor.preview({silent:true,enterDraft:false});
+        setSessionPanelMode('previous',session);
+      }else if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-        const input=document.getElementById('plan-input');if(input)input.value=session.scheduleText;
-        void PlanData.writeDraft(session.scheduleText);
-        PlanDraftEditor.preview({silent:true,enterDraft:true});setSessionPanelMode('suspended',session);
-        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionHere()}});
+        PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('suspended',session);
+        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',tier:'news',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
       }else if(sessionRunsElsewhere(session)){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-        setSessionPanelMode('elsewhere',session);
+        PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('elsewhere',session);
       }else{
         const restored=applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
         if(restored===false)throw new Error('Rollback active-session runtime could not be applied.');
         setSessionPanelMode('active');
+        runOn=keepRunning&&!snapshot.timerRuntime;
       }
       return saved;
     }
     const cleared=await AppData.activeSession.clear();
     if(!cleared.ok)throw cleared.error||new Error('Rollback active-session clear failed.');
     resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-    const bounded=clampText(scheduleText,APP_LIMITS.maxScheduleChars),input=document.getElementById('plan-input');
-    if(input)input.value=bounded;
-    void PlanData.writeDraft(bounded);
-    PlanDraftEditor.preview({silent:true,enterDraft:true});setSessionPanelMode('none');
+    PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('none');
     return cleared;
   });
+  const idx=TimerState.currentIndex;
+  if(runOn&&!TimerState.runtime?.startMs&&idx<TASKS.length&&isTrackableBlock(TASKS[idx])&&!isTaskResolved(idx))TimerEngine.startCur();
+  return result;
 }
 function verifyRestoredTimerRuntimeSemantics(expectedRuntime){
   if(!expectedRuntime)return true;
@@ -7453,7 +8501,7 @@ function verifyRestoredTimerRuntimeSemantics(expectedRuntime){
 }
 async function verifyRestoredSessionRuntime(expected,scheduleText=''){
   const session=expected?ActiveSessionCodec.sanitizeCurrent(expected):null;
-  if(session&&session.status!=='suspended'&&!sessionRunsElsewhere(session)){
+  if(session&&session.status!=='suspended'&&!sessionRunsElsewhere(session)&&!isPreviousActiveSessionRecord(session)){
     const expectedFingerprint=activeSessionScheduleFingerprint(session);
     if(!TASKS.length||scheduleFingerprint()!==expectedFingerprint)throw new Error('Post-restore verification failed to apply the Active Session plan.');
     const expectedSnapshot=activeSessionSnapshot(session);
@@ -7490,8 +8538,12 @@ async function importBackupAttachments(items,{signal,replace=false}={}){
   });
 }
 function currentBackupSourceRevision(){
-  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null);
-  return stored&&stored.lastLocalSaveAt||readStorageHealth().lastLocalSaveAt||'';
+  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),memory=readStorageHealth();let latest='',latestAt=NaN;
+  for(const value of [stored&&stored.lastLocalSaveAt,memory.lastLocalSaveAt]){
+    const revision=String(value||''),at=Date.parse(revision);
+    if(Number.isFinite(at)&&(!Number.isFinite(latestAt)||at>latestAt)){latest=revision;latestAt=at;}
+  }
+  return latest;
 }
 async function fullBackupSnapshotRevision(){
   return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.notes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
@@ -7515,13 +8567,16 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   configuration:Object.freeze({
     appVersion:APP_VERSION,
     backupVersion:DATA_CONTRACT.schemas.Backup.version,
+    starterSchedule:FACTORY_DEFAULTS.scheduleText,
     limits:Object.freeze({
       backupChunkItems:APP_LIMITS.backupChunkItems,
       backupMaxCompressedBytes:APP_LIMITS.backupMaxCompressedBytes,
       backupMaxFileBytes:APP_LIMITS.backupMaxFileBytes,
       backupMaxAssetDescriptors:APP_LIMITS.backupMaxAssetDescriptors,
       maxImportRecords:APP_LIMITS.maxImportRecords,
-      maxNotes:APP_LIMITS.maxNotes
+      maxNoteLinks:APP_LIMITS.maxNoteLinks,
+      maxNotes:APP_LIMITS.maxNotes,
+      maxPendingReviews:APP_LIMITS.maxPendingReviews
     })
   }),
   persistence:Object.freeze({
@@ -7543,11 +8598,30 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     notesAlignByTitle:(value,deletedIds)=>AppData.notes.alignByTitle(value,deletedIds),
     notesTrashKey:key=>DailyRecordCodec.noteKeys.trash(key),
     notesFailure:()=>AppData.notes.failure(),
-    restoreJournalPrepare:async value=>{const backupFile=await Exports.run('file.persist',{file:value.blob});const {blob,...metadata}=value;return AppData.restoreJournal.prepare({...metadata,backupFile});},
+    restoreJournalPrepare:async value=>{
+      const backupFile=await Exports.run('file.persist',{file:value.blob}),{blob,...metadata}=value;
+      try{return await AppData.restoreJournal.prepare({...metadata,backupFile});}
+      catch(error){
+        // A failed/ambiguous commit must never discard the only rollback bytes.
+        // Release an unused producer only after a fresh journal read proves
+        // that no durable reference points to this file.
+        try{
+          const journal=await AppData.restoreJournal.read();
+          if(journal?.payload?.backupFile?.name!==backupFile.name)await BackupFiles.release(backupFile.name);
+        }catch(probeError){AppDiagnostics.capture('backup.restore-journal-orphan-check',probeError,'warn');}
+        throw error;
+      }
+    },
     restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},
     restoreJournalMark:async(id,phase)=>{const marked=await AppData.restoreJournal.mark(id,phase);if(phase==='verified')settleStorageReset();return marked;},
-    restoreJournalClear:async id=>{const journal=await AppData.restoreJournal.read();await AppData.restoreJournal.clear(id);if(journal?.payload.backupFile)await BackupFiles.release(journal.payload.backupFile.name);},
-    scheduleRead:()=>PlanData.readDraft()??'',
+    restoreJournalClear:async id=>{
+      const journal=await AppData.restoreJournal.read();
+      await AppData.restoreJournal.clear(id);
+      // Once the durable journal is retired, failed scratch disposal must not
+      // convert a verified restore into a failed restore/second rollback.
+      if(journal?.payload.backupFile)try{await BackupFiles.release(journal.payload.backupFile.name);}
+      catch(error){AppDiagnostics.capture('backup.restore-journal-file-release',error,'warn');}
+    },
     personalSettle:async options=>{
       const backupCapture=options&&options.backupCapture===true;
       if(appCanMutate()&&await PlanDraftEditor.flush({backupCapture})===false)throw new Error('The current Plan draft could not be safely settled before backup.');
@@ -7575,7 +8649,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     deletionRecoveryClearAttachment:assetId=>AppData.deletionRecovery.clearAttachment(assetId),
     reconciliationBaseRead:()=>readReconciliationBase(),
     reconciliationBaseReadNotes:keys=>readReconciliationBaseNotes(keys),
-    reconciliationBaseReadDays:dates=>readReconciliationBaseDays(dates),
+    reconciliationBaseReadDayAncestry:(dates,checkpointId)=>readReconciliationBaseDayAncestry(dates,checkpointId),
     reconciliationBaseWrite:(checkpointId,spec)=>writeReconciliationBase(checkpointId,spec),
     pendingReviewsList:()=>AppData.pendingReviews.list(),
     pendingReviewsReadItems:ids=>AppData.pendingReviews.readItems(ids),
@@ -7594,8 +8668,8 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     removeMetadata:assetIds=>AttachmentLibrary.removeMetadata(assetIds),
     scheduleMaintenance:delay=>scheduleRichTextAssetMaintenance(delay)
   }),
-  codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,pendingReview:PendingReviewCodec}),
-  reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),
+  codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}),
+  reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),
   noteReconciliation:Object.freeze({resolve:options=>withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve(options)),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
   exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,cancel:Exports.cancel,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,followProtection:BackupProtection.follow,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
   session:Object.freeze({
@@ -7608,7 +8682,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     hasTasks:()=>TASKS.length>0,
     toActiveSession:activeSessionPayload,
     withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),
-    yieldSession:()=>yieldSessionToOtherDevice()
+    yieldSession:options=>yieldSessionToOtherDevice(options)
   }),
   domain:Object.freeze({
     clampText,filenameSafeStudentName,
@@ -7618,10 +8692,11 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   view:Object.freeze({presentation:BackupPresentation,
     refreshPnote,
     refreshReview:()=>ReviewView.refresh(),
-    renderSchedule:renderSched
+    renderSchedule:renderSched,
+    deviceName:(id,others)=>deviceName(id,others)
   }),
   events:Object.freeze({
-    libraryChanged:()=>LibraryView.render(),
+    libraryChanged:()=>{LibraryView.render();if(saveReminderDate)void revalidateSaveReminderAfterCanonicalConvergence();},
     reconcileNotes:reconcileNotesThroughLifecycle,
     restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,
     restoreSessionState:restoreSessionStateThroughLifecycle,
@@ -7634,7 +8709,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
       backupNudgeCheckedAt=Date.now();
       backupNudgeNotifiedDate='';
       refreshStorageFallbackWarning();
-      if(context?.copy)void recordBackupCopy(context.copy);
+      if(context?.copy)void recordBackupCopy(context.copy).catch(error=>AppDiagnostics.capture('backup.freshness-receipt',error,'warn'));
       schedulePwaUpdateEvaluation(250);
     }
   }),
@@ -7668,13 +8743,12 @@ const {
 // Each location row has one inline note, drawn from the presentation's current event.
 // The controller owns execution; the coordinator owns the immutable presentation event.
 fileBackupRowReady=true;BackupController.subscribeStatus(renderFileBackup);renderFileBackup();
-// A file backup or file import the person starts holds every location's
-// background work (integrity checks, automatic backups) until it ends, so it
-// never queues behind a background hash in the shared file worker. Automatic
-// backups never set these flags, so they cannot hold themselves.
+// A user-started file backup/import holds background locations until it ends.
+// An automatic Drive catch-up also uses the shared import controller but is
+// already suspension-aware; treating it as manual file work cancels itself.
 let fileWorkHold=null;
 function holdBackgroundForFileWork(){
-  const status=BackupController.status(),active=!!(status.importActive||status.standaloneExportActive);
+  const status=BackupController.status(),active=!!(status.importHoldsBackground||status.standaloneExportActive);
   if(active&&!fileWorkHold){try{fileWorkHold=BackupProviderRuntime.suspendBackground('file-backup');void Promise.resolve(fileWorkHold.settled).catch(()=>{});}catch(error){fileWorkHold=null;AppDiagnostics.capture('backup.file-hold',error,'warn');}}
   else if(!active&&fileWorkHold){const hold=fileWorkHold;fileWorkHold=null;try{hold.release();}catch(error){AppDiagnostics.capture('backup.file-hold-release',error,'warn');}}
   foregroundChanged();
@@ -7734,16 +8808,17 @@ const clearRepositoryMaintenancePending=(providerId,expected=undefined)=>mutateR
 BackupProviderRuntime.configureRepositoryMaintenance(Object.freeze({read:repositoryMaintenanceState,mark:markRepositoryMaintenancePending,clear:clearRepositoryMaintenancePending}));
 async function canonicalLocalRecoveryEmpty(){
   try{
-    const [records,notePayload,active,plans,assets]=await Promise.all([
-      AppData.dailyRecords.list({strict:true}),AppData.notes.readFreshPayload(),AppData.activeSession.load(0,{strict:true}),AppData.planData.read(),AttachmentStorage.list()
+    const [records,notePayload,active,plans,assets,reviews]=await Promise.all([
+      AppData.dailyRecords.list({strict:true}),AppData.notes.readFreshPayload(),AppData.activeSession.load(0,{strict:true}),AppData.planData.read(),AttachmentStorage.list(),AppData.pendingReviews.list()
     ]);
     if(!active||active.ok!==true||active.error)throw active?.error||new Error('Active Session could not be read completely.');
+    if(!Array.isArray(reviews))throw new Error('Kept Versions could not be read completely.');
     const hasPlan=!!(plans&&(String(plans.draft||'').trim()||(plans.savedPlans||[]).length));
-    return !(records||[]).length&&!Object.keys(notePayload||{}).length&&!active?.value&&!hasPlan&&!(assets||[]).length;
+    return !(records||[]).length&&!Object.keys(notePayload||{}).length&&!active?.value&&!hasPlan&&!(assets||[]).length&&!reviews.some(review=>!review.resolvedAt);
   }catch(error){AppDiagnostics.capture('backup.device-recovery-empty-check',error,'warn');return null;}
 }
 // The empty-data hint is for a browser that lost study data. Storage health
-// remembers when Saved Days or notes were last saved here, so a brand-new
+// remembers when study data was last saved here, so a brand-new
 // install never sees it, and data the person deleted leaves deletion history
 // that explains the emptiness. An unresolved clear has its own notice.
 async function studyDataLostHere(){
@@ -7757,7 +8832,7 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
   if(!await canonicalLocalRecoveryEmpty())return false;
   const state=DeviceBackup.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
   if(!state.connected){
-    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',run:()=>void openBackupRestore()}});}
+    if(options.reason==='startup'&&!deviceRecoveryHintNotified&&await studyDataLostHere()){deviceRecoveryHintNotified=true;Interactions.notify({key:'device-recovery-empty-local',tier:'news',title:'No local study data found',message:`If browser data was cleared, restore from ${backupRestoreChoices()}.`,action:{label:'Restore from backup',opens:true,run:()=>void openBackupRestore()}});}
     return false;
   }
   deviceRecoveryOfferRunning=true;
@@ -7780,13 +8855,54 @@ async function offerDeviceRecoveryIfLocalEmpty(options={}){
 async function connectDeviceBackupWithRecovery(){
   const startedAt=Date.now(),result=await DeviceBackup.connect();
   if(DeviceBackup.status().connected){
-    // Reconnecting after a browser data clear adds back what is missing, as the
-    // open tab would have done had the folder still been connected.
-    const hold=storageResetHold;
-    if(hold){if(!(await restoreMissingAfterStorageReset(hold))&&storageResetHold===hold)showStorageResetDecision();}
+    if(storageResetHold)await recoverAfterStorageResetOnConnect('device-folder');
     else await offerDeviceRecoveryIfLocalEmpty({reason:'connect',latestBefore:startedAt-1});
   }
   return result;
+}
+// Google Drive or the Device Folder connected while a browser-data clear is
+// unresolved. A device that wrote back what its open tab held adds only what
+// is missing, as the open tab would have done had the location been
+// connected. A device holding nothing (its database was removed while the
+// app was closed, so nothing was in memory) takes its library back in full:
+// from Drive by a sync, which is a first sync after the clear, so nothing is
+// deleted on either side; from the Device Folder by offering its newest
+// version from before the clear. Uploads stay paused until that is verified;
+// anything that fails, or is declined, leaves the notice.
+async function recoverAfterStorageResetOnConnect(id){
+  const hold=storageResetHold;if(!hold||!appCanMutate())return false;
+  (hold.tried??=new Set()).add(id);
+  const empty=await canonicalLocalRecoveryEmpty()===true;
+  if(storageResetHold!==hold)return false;
+  let recovered=false;
+  if(!empty)recovered=await restoreMissingAfterStorageReset(hold,id);
+  else if(id==='device-folder')recovered=await offerDeviceRecoveryIfLocalEmpty({reason:'connect',latestBefore:Date.parse(hold.clearedAt)});
+  else{
+    let synced=null;
+    try{synced=await BackupProviderRuntime.syncRepositoryProvider(id);}catch(error){AppDiagnostics.capture('storage-reset.sync-recovery',error,'warn');}
+    recovered=!!synced&&synced.cancelled===false&&synced.verified===true;
+    if(recovered){
+      // A verified sync settles the clear itself (restore journal); this
+      // covers one that changed nothing.
+      if(storageResetHold===hold)settleStorageReset();
+      const label=BackupProviderRuntime.list().find(item=>item.id===id)?.label||'Google Drive';
+      NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',
+        title:'Browser data was cleared',message:`Your library was brought back from ${label}.`});
+    }
+  }
+  if(!recovered&&storageResetHold===hold)showStorageResetDecision();
+  return recovered;
+}
+// Google Drive connected while a clear is unresolved, at start with a sign-in
+// kept in browser storage or by signing in: tried once per connection, after
+// the clear's own handling and once Drive is free.
+function storageResetConnectionsChanged(){
+  const hold=storageResetHold;if(!hold||storageResetHandling)return false;
+  const tried=hold.tried??=new Set(),drive=BackupProviderRuntime.locationStatus('google-drive');
+  if(!drive?.connected){tried.delete('google-drive');return false;}
+  if(tried.has('google-drive')||drive.engineBusy)return false;
+  void recoverAfterStorageResetOnConnect('google-drive').catch(error=>AppDiagnostics.capture('storage-reset.connect-recovery',error,'warn'));
+  return true;
 }
 /* BROWSER DATA CLEARING · keep what an open tab still holds */
 // Clearing site data deletes IndexedDB, localStorage and OPFS even with persistent
@@ -7810,17 +8926,33 @@ function showStorageResetDecision({unsaved=[],retrying=false}={}){
   const backingUp=DeviceBackup.status().connected||BackupProviderRuntime.connected('google-drive');
   parts.push(backingUp?'Past Saved Days and attachments need a restore from backup.':`Past Saved Days and attachments can be restored from ${backupRestoreChoices()}.`);
   if(backingUp)parts.push('Automatic backups are paused until you choose.');
-  NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,surface:'toast',persistent:true,dismissible:false,cue:'none',
+  NoticeCoordinator.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'critical',surface:'toast',dismissible:false,
     title:'Browser data was cleared',message:parts.join(' '),
     action:{label:'Restore from backup',run:()=>void restoreAfterStorageReset()},
     secondaryAction:{label:'Continue with current data',run:()=>settleStorageReset()}});
 }
 // Pausing is synchronous: scheduling stops at once, and waiting only lets a
 // running automatic backup wind down.
+let deviceBackupInstallPromise=null;
+function ensureDeviceBackupInstalled(){
+  // Startup and reset recovery share the same installation/permission read.
+  // A second caller must not mistake an in-flight installation for readiness.
+  if(!deviceBackupInstallPromise)deviceBackupInstallPromise=reconcileStartupChangeClock().then(()=>DeviceBackup.install()).catch(error=>{deviceBackupInstallPromise=null;throw error;});
+  return deviceBackupInstallPromise;
+}
 function beginStorageResetHold(clearedAt){
   if(storageResetHold)return storageResetHold;
-  const hold={provider:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
+  const hold={provider:null,deviceReady:null,reloaded:false,clearedAt:String(clearedAt||new Date().toISOString())};storageResetHold=hold;storageResetSince=Date.now();
   try{hold.provider=BackupProviderRuntime.suspendBackground('storage-reset');}catch(error){AppDiagnostics.capture('storage-reset.provider-suspend',error,'warn');}
+  // Permission may have changed while the site data was cleared. Never prompt
+  // automatically: a denied or disconnected folder falls through to Drive or
+  // the explicit restore decision. The timeout bounds a stalled browser API.
+  hold.deviceReady=new Promise(resolve=>{
+    let finished=false;
+    const complete=value=>{if(finished)return;finished=true;clearTimeout(timer);resolve(value);};
+    const timer=setTimeout(()=>{AppDiagnostics.capture('storage-reset.device-ready',new Error('Device Folder readiness did not finish in time.'),'warn');complete(false);},8000);
+    void ensureDeviceBackupInstalled().then(()=>DeviceBackup.refreshPermission()).then(()=>complete(DeviceBackup.status().connected)).catch(error=>{AppDiagnostics.capture('storage-reset.device-ready',error,'warn');complete(false);});
+  });
   if(readStorageHealth().browserDataClearedAt!==hold.clearedAt)writeStorageHealth({browserDataClearedAt:hold.clearedAt});
   return hold;
 }
@@ -7864,12 +8996,14 @@ async function handleBrowserStorageReset(event={}){
   return storageResetHandling;
 }
 // Add back only what this device lacks, from the newest version saved before
-// the clear: the Device Folder first, otherwise Google Drive if it is already
-// connected (this never asks to sign in). Anything needing a decision falls
-// back to the notice.
-async function restoreMissingAfterStorageReset(hold){
+// the clear: from the location named (one that just connected), otherwise the
+// Device Folder first, then Google Drive if it is already connected (this
+// never asks to sign in). Anything needing a decision falls back to the
+// notice.
+async function restoreMissingAfterStorageReset(hold,id=''){
   if(!appCanMutate())return false;
-  const locations=BackupProviderRuntime.list(),location=locations.find(item=>item.id==='device-folder'&&item.connected)||locations.find(item=>item.connected);if(!location)return false;
+  const locations=BackupProviderRuntime.list(),location=id?locations.find(item=>item.id===id&&item.connected):locations.find(item=>item.id==='device-folder'&&item.connected)||locations.find(item=>item.connected);if(!location)return false;
+  (hold.tried??=new Set()).add(location.id);
   const options={missingOnly:true,quiet:true,before:hold.clearedAt};let outcome=null;
   try{const restored=await BackupProviderRuntime.bringInRepositoryProvider(location.id,options);if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:location.label};}
   catch(error){AppDiagnostics.capture('storage-reset.missing-restore',error,'warn');}
@@ -7877,16 +9011,29 @@ async function restoreMissingAfterStorageReset(hold){
   settleStorageReset();
   const at=Date.parse(String(outcome.exportedAt||'')),days=Math.max(0,Number(outcome.result?.added)||0),files=Math.max(0,Number(outcome.result?.assetsRestored)||0);
   const source=`your ${outcome.label} backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}`,count=(value,word)=>`${value} ${word}${value===1?'':'s'}`;
-  NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,surface:'toast',duration:12000,cue:'none',
+  NoticeCoordinator.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',
     title:'Browser data was cleared',
     message:days||files?`Your open work was kept. Added ${count(days,'past Saved Day')} and ${count(files,'attachment')} from ${source}.`:`Your open work was kept. Nothing was missing compared with ${source}.`});
   return true;
 }
+// The browser removed this profile's database while the app was closed: this
+// start made it anew, yet browser storage says study data was saved here. It
+// is handled as a clear seen while open: automatic uploads pause so the empty
+// copy cannot replace a backup, and the notice offers the restore. A fresh
+// install or a new profile has no such record, so it is never mistaken.
+function noteDatabaseRemovedWhileClosed(){
+  if(IndexedDb.lifecycle().startedFresh!==true||!appCanMutate())return false;
+  const health=readStorageHealth();if(!health.lastStudyDataSaveAt||health.browserDataClearedAt)return false;
+  AppDiagnostics.capture('storage.idb-missing-at-start',new Error('The browser database was missing at start although study data had been saved here.'),'warn');
+  writeStorageHealth({browserDataClearedAt:new Date().toISOString()});
+  return true;
+}
 // A reload or a takeover in another tab brings back an unresolved clear.
 function resumeUnresolvedStorageReset(){
+  noteDatabaseRemovedWhileClosed();
   const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),clearedAt=String(stored&&stored.browserDataClearedAt||readStorageHealth().browserDataClearedAt||'');
   if(!clearedAt||storageResetHold||!appCanMutate())return false;
-  beginStorageResetHold(clearedAt).reloaded=true;showStorageResetDecision();return true;
+  beginStorageResetHold(clearedAt).reloaded=true;showStorageResetDecision();storageResetConnectionsChanged();return true;
 }
 // Continuing, any verified restore or combine (restoreJournalMark), and any
 // backup the user makes to a file, the Device Folder or Drive lift the pause.
@@ -7944,7 +9091,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
-    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
+    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }))
 }));
 if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
@@ -7960,7 +9107,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     activeSessionIssue:loaded=>pwaRecoveryReadBackIssue(loaded),activeSessionLoad:()=>AppData.activeSession.load(0,{strict:true}),activeSessionSettled:()=>AppData.activeSession.settled(),
     attachmentBusy:()=>imagePreparationCount>0||AttachmentIngest.status().busy,canonicalPlanDraft:async()=>(await AppData.planData.read()).draft,deletionRecoveryFlush:()=>AppData.deletionRecovery.flush(),
     flushNotes:()=>AppData.notes.flush({strict:true}),flushPlanDraft:()=>PlanDraftEditor.flush(),hasTasks:()=>TASKS.length>0,noteFailure:()=>AppData.notes.failure(),
-    planDraft:()=>PlanData.readDraft(),planInputValue:()=>document.getElementById('plan-input')?.value??null,quiesce:operation=>quiesceManagedRecoveryRuntime(operation),
+    planDraft:()=>PlanData.readDraft(),planInputValue:()=>PlanDraftEditor.authoredText(),quiesce:operation=>quiesceManagedRecoveryRuntime(operation),
     savePlanDraft:options=>PlanDraftEditor.save(options),settleAttachmentWriters:()=>settleAttachmentWriters(),settlePlan:()=>PlanData.settled(),writeLiveDraft:()=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:true})
   }),
   managedRecovery:Object.freeze({createCoordinator:input=>ManagedRecoveryModule.createCoordinator(input)}),
@@ -7969,7 +9116,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),
     configureManagedRecovery:config=>BackupProviderRuntime.configureManagedRecovery(config),configurePendingBackupRetry:config=>BackupProviderRuntime.configurePendingBackupRetry(config),
     history:(id,options)=>BackupProviderRuntime.history(id,options),list:()=>BackupProviderRuntime.list(),noteVersions:(id,noteId,options)=>BackupProviderRuntime.noteVersions(id,noteId,options),removeRepositoryProviderVersion:(id,checkpointId)=>BackupProviderRuntime.removeRepositoryProviderVersion(id,checkpointId),
-    restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
+    restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:(reason,options)=>BackupProviderRuntime.suspendBackground(reason,options)
   }),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession()}),
   sourceRevision:()=>currentBackupSourceRevision(),
@@ -7994,7 +9141,9 @@ async function readRepositoryIntegrityState(){
 }
 function applyRepositoryIntegrityHealth(state){
   repositoryIntegrityView=state;renderIntegrityStatuses();
-  const targets=Object.values(state?.locations||{}),quarantined=targets.some(target=>target?.quarantinedObjectIds?.length),failed=targets.some(target=>target?.failedAt);
+  const targets=Object.entries(state?.locations||{}).filter(([id,target])=>!!target?.repositoryScope&&repositoryIntegrityBoundScopes[id]===target.repositoryScope).map(([,target])=>target);
+  const quarantined=targets.some(target=>target.quarantinedObjectIds?.length);
+  const failed=targets.some(target=>{const failure=Date.parse(String(target.failedAt||'')),completed=Date.parse(String(target.completedAt||''));return Number.isFinite(failure)&&(!Number.isFinite(completed)||failure>=completed);});
   if(quarantined)markStorageHealthError('repositoryIntegrity','Some backup objects failed integrity verification. Keep the local copy and use a healthy backup version.',{level:'warn'});
   else if(failed)markStorageHealthError('repositoryIntegrity','Backup verification is incomplete or unavailable. Study Director will retry; keep the local copy until verification succeeds.',{level:'warn'});
   else markStorageHealthOk('repositoryIntegrity');
@@ -8025,26 +9174,34 @@ function repositoryIntegrityChanged(){const error=new Error('The backup reposito
 async function readRepositoryIntegrityTarget(target){
   const actual=await BackupProviderRuntime.repositoryScope(target);
   if(!actual)throw new Error('The backup repository identity is unavailable.');
-  const prior=(await readRepositoryIntegrityState()).locations[target]||normalizeRepositoryIntegrityTarget(null);
+  const state=await readRepositoryIntegrityState(),prior=state.locations[target]||normalizeRepositoryIntegrityTarget(null);
   const same=prior.repositoryScope===actual;
-  if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;renderIntegrityStatuses();return prior;}
+  if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;applyRepositoryIntegrityHealth(state);return prior;}
   const repositoryScope=String(actual);
   const bound=await mutateRepositoryIntegrityTarget(target,current=>{
     if(current.repositoryScope!==prior.repositoryScope)throw repositoryIntegrityChanged();
     return {...normalizeRepositoryIntegrityTarget(null),repositoryScope};
   });
-  repositoryIntegrityBoundScopes[target]=bound.repositoryScope;renderIntegrityStatuses();return bound;
+  repositoryIntegrityBoundScopes[target]=bound.repositoryScope;applyRepositoryIntegrityHealth(await readRepositoryIntegrityState());return bound;
 }
 async function updateRepositoryIntegrityTarget(target,result){
   if(!result?.repositoryScope)throw new Error('Integrity results require their repository identity.');
   const bound=await readRepositoryIntegrityTarget(target);
   if(bound.repositoryScope!==result.repositoryScope)throw repositoryIntegrityChanged();
   return mutateRepositoryIntegrityTarget(target,current=>{
-    if(current.repositoryScope!==result.repositoryScope||current.requestId!==String(result.requestId||''))throw repositoryIntegrityChanged();
-    const now=new Date().toISOString(),quarantine=result.status==='unavailable'?[...new Set([...current.quarantinedObjectIds,...(result.quarantined||[])])]:result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
+    if(current.repositoryScope!==result.repositoryScope)throw repositoryIntegrityChanged();
+    const now=new Date().toISOString(),dailyHistory=current.history.at(-1)?.at.slice(0,10)===now.slice(0,10)?current.history.slice(0,-1):current.history;
+    // A check already running when Recheck was pressed belongs to the older
+    // request: its progress and findings do not settle the recheck, which
+    // stays pending as it is. A clean full pass is still recorded as the last
+    // full scan, so Verification shows it instead of the result vanishing.
+    if(current.requestId!==String(result.requestId||'')){
+      if(result.complete!==true||result.status!=='completed'||result.corruption||result.checkpointOnly)throw repositoryIntegrityChanged();
+      return {...current,attemptedAt:now,completedAt:now,lastOutcome:'completed',blockedReason:'',history:[...dailyHistory,{at:now,outcome:'completed',complete:true}].slice(-8)};
+    }
+    const quarantine=result.status==='unavailable'?[...new Set([...current.quarantinedObjectIds,...(result.quarantined||[])])]:result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
     const hasProgress=Object.hasOwn(result,'cursor')&&Object.hasOwn(result,'scanId');
     const progress=hasProgress?{cursor:result.cursor,scanId:result.scanId,...(Object.hasOwn(result,'recheckCursor')?{recheckCursor:result.recheckCursor}:{}),...(Object.hasOwn(result,'partial')?{partial:result.partial}:{} )}:{};
-    const dailyHistory=current.history.at(-1)?.at.slice(0,10)===now.slice(0,10)?current.history.slice(0,-1):current.history;
     const blockedReason=['locked','budget','preempted','permission'].includes(result.reason)?result.reason:result.status==='unavailable'?'unavailable':result.corruption?'corrupt':'';
     const outcome={attemptedAt:now,lastOutcome:result.status,blockedReason,history:result.checkpointOnly?current.history:[...dailyHistory,{at:now,outcome:result.status,complete:result.complete===true&&['completed','failed'].includes(result.status)}].slice(-8)};
     const finishedRecheck=current.recheck&&result.recheckComplete===true&&result.status==='failed'&&result.corruption===true;
@@ -8063,12 +9220,18 @@ AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTI
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
-BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>await canonicalLocalRecoveryEmpty()===false}));
+BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>{const empty=await canonicalLocalRecoveryEmpty();return empty===null?null:!empty;}}));
+BackupProviderRuntime.configureSessionOwnership(Object.freeze({
+  installationId:()=>InstallationIdentity.getId(),
+  today:()=>todayISO(),
+  read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
+}));
 // Each location's integrity state is kept under its location id.
 BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
   readTarget:id=>readRepositoryIntegrityTarget(id),
-  writeResult:async(id,result)=>{await updateRepositoryIntegrityTarget(id,result);},
-  prepare:async(id,target,{trigger,nextEligibleAt})=>Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>updateRepositoryIntegrityTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId})}),
+  // How far the cycle has got stays shown between its batches, until it finishes.
+  writeResult:async(id,result)=>{if(result?.complete===true||!Number(result?.total))delete integrityLive[id];else integrityLive[id]=Object.freeze({done:Number(result.done)||0,total:Number(result.total)});await updateRepositoryIntegrityTarget(id,result);},
+  prepare:async(id,target,{trigger,nextEligibleAt})=>Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>{integrityLive[id]=Object.freeze({done:Number(progress?.done)||0,total:Number(progress?.total)||0});renderIntegrityStatuses();return updateRepositoryIntegrityTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId});}}),
   isAvailable:()=>backgroundBlocker()||true,
   isUnsafe:()=>!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy,
   yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),
@@ -8205,15 +9368,16 @@ async function prepareApplicationUpdate(context={}){
     check();
     if(await PlanDraftEditor.flush()===false)return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
     check();
-    const planInput=document.getElementById('plan-input');
-    if(planInput&&(PlanData.readDraft()??'')!==planInput.value&&await PlanDraftEditor.save()===false){
+    // The default plan shown over no stored draft is not saved as a draft.
+    const planText=PlanDraftEditor.authoredText();
+    if(planText!==null&&(PlanData.readDraft()??'')!==planText&&await PlanDraftEditor.save()===false){
       return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
     }
     await PlanData.settled();
     check();
-    const storedPlan=planInput?await AppData.planData.read():null;
+    const storedPlan=planText!==null?await AppData.planData.read():null;
     check();
-    if(planInput&&storedPlan.draft!==planInput.value){
+    if(planText!==null&&storedPlan.draft!==planText){
       return Object.freeze({ok:false,reason:'The Plan draft did not pass the update read-back check.'});
     }
     if(flushPendingReviewSave({strict:true})===false)return Object.freeze({ok:false,reason:'The pending reflection could not be saved. Keep this tab open and retry.'});
@@ -8314,7 +9478,7 @@ function renderPwaUpdateStatus(state){
   const message=document.getElementById('pwa-update-message');
   if(!control||!button||!message)return;
   const previous=pwaLatestUpdateState;
-  pwaLatestUpdateState=state;
+  pwaLatestUpdateState=state;scheduleSyncStatus();
   button.disabled=!!state.applying||!!state.checking;
   button.textContent=state.applying?'Updating…':state.checking?'Checking…':!state.updateReady&&state.bootState==='pending'?'Retry confirmation':state.registrationError||state.checkError&&!state.updateReady?'Retry update check':pwaUpdateActionLabel();
   const progress=document.getElementById('pwa-update-progress-message');if(progress)progress.textContent=state.message||'Preparing the update…';
@@ -8371,15 +9535,21 @@ function schedulePwaUpdateCheck(minimumDelay=0){
   pwaUpdateCheckDueAt=now+delay;pwaUpdateCheckTimer=setTimeout(()=>{pwaUpdateCheckTimer=null;pwaUpdateCheckDueAt=0;void checkPwaUpdateIfDue();},delay);
   return true;
 }
+function pwaProviderNetworkBusy(){return BackupProviderRuntime.status().busy===true||BackupProviderRuntime.locationStatus('google-drive')?.backingUp===true;}
 async function checkPwaUpdateIfDue({force=false}={}){
   const lifecycle=PwaLifecycle.status();
   if(!lifecycle.supported||pwaUpdateCheckRunning||!force&&(lifecycle.registered&&!lifecycle.checkError&&!pwaUpdateCheckDue()||pwaUpdateCheckRetryAt>Date.now()))return false;
   const ownership=AppOwnership.status();
   if(ownership.state!==OWNERSHIP_STATES.PRIMARY)return false;
   if(navigator.onLine===false)return false;
-  pwaUpdateCheckRunning=true;
+  // Automatic update discovery must not compete with an active provider transfer.
+  // Manual checks remain explicit user actions; they are never delayed here.
+  if(!force&&pwaProviderNetworkBusy()){schedulePwaUpdateCheck(30000);return false;}
+  pwaUpdateCheckRunning=true;let deferredForProvider=false;
   const perform=async()=>{
     if(!force&&(PwaLifecycle.status().registered&&!PwaLifecycle.status().checkError&&!pwaUpdateCheckDue()||pwaUpdateCheckRetryAt>Date.now()))return false;
+    // A transfer may have started while waiting for the cross-tab update lock.
+    if(!force&&pwaProviderNetworkBusy()){deferredForProvider=true;return false;}
     const success=await PwaLifecycle.checkForUpdate();
     if(success){markPwaUpdateCheck();clearPwaUpdateCheckFailure();return true;}
     recordPwaUpdateCheckFailure();
@@ -8391,7 +9561,7 @@ async function checkPwaUpdateIfDue({force=false}={}){
     }
     return await perform();
   }catch(error){recordPwaUpdateCheckFailure();AppDiagnostics.capture('pwa.update-check-scheduler',error,'warn');return false;}
-  finally{pwaUpdateCheckRunning=false;schedulePwaUpdateCheck();}
+  finally{pwaUpdateCheckRunning=false;schedulePwaUpdateCheck(deferredForProvider?30000:0);}
 }
 const PwaLifecycle=PwaLifecycleModule.createCoordinator(Object.freeze({
   configuration:Object.freeze({assetId:'__SD_PAGE_ASSET_ID__',buildId:'@@SD_BUILD_ID@@',scope:'./',workerUrl:trustedAssetURL('./sw.js'),reloadSessionKey:SESSION_STORAGE_KEYS.pwaReload}),
@@ -8513,6 +9683,12 @@ const PreviewRuntime=(()=>{
   return Object.freeze({registerProvider,useSample,setRecords,clear,clearExcept,status,summaries,records});
 })();
 const InsightsDataSource=Object.freeze({
+  async getDailySnapshot(){
+    const previewRecords=PreviewRuntime.records('insights',{});
+    if(previewRecords)return Object.freeze({records:previewRecords,summaries:PreviewRuntime.summaries('insights')||[]});
+    const snapshot=await AppData.dailyRecords.insightsSnapshot({yieldProjection:true});
+    return Object.freeze({records:snapshot.records,summaries:snapshot.summaries.filter(summary=>summary?.recordKind==='study')});
+  },
   async getDailySummaries(){
     const preview=PreviewRuntime.summaries('insights');
     if(preview)return preview;
@@ -8521,7 +9697,7 @@ const InsightsDataSource=Object.freeze({
   async getDailyRecords(options={}){
     const preview=PreviewRuntime.records('insights',options);
     if(preview)return preview;
-    return AppData.dailyRecords.window(options);
+    return AppData.dailyRecords.window({...options,yieldProjection:true});
   },
   getRecordSource(){
     return PreviewRuntime.status('insights');
@@ -8549,7 +9725,7 @@ function currentBackupDiagnosticStates(){
   sample('Note saving',()=>AppData.notes.failure(),value=>[{job:'Note saving',state:value.failed?'failed':'observed',failed:value.failed===true}]);
   sample('Write ownership',()=>({primary:appCanMutate(),...AppMutationCoordinator.status()}),value=>[{job:'Write ownership',state:value.active?'running':value.recoveryFault?'blocked':value.primary?'primary':'secondary',busy:!!value.active,pending:!!value.recoveryFault,foreign:value.foreign,authorityHealthy:value.authorityHealthy,authorityDurableProtected:value.authorityDurableProtected}]);
   sample('Backup controller',()=>BackupController.status(),value=>[{job:'Backup controller',...OperationLifecycle.snapshot(value),importActive:value.importActive,importCancelled:value.importCancelled,exportActive:value.standaloneExportActive}]);
-  sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}]);
+  sample('Device backup',()=>DeviceBackup.status(),value=>[{job:'Device backup',...OperationLifecycle.snapshot({busy:value.busy||value.backingUp,pending:value.pending,nextEligibleAt:value.nextEligibleAt}),connected:value.connected,permission:value.permission,stalePermissionResponses:value.stalePermissionResponses,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped,completedAt:value.lastBackupAt||''}]);
   sample('Provider operation',()=>BackupProviderRuntime.status(),value=>[{job:'Provider operation',...OperationLifecycle.snapshot(value)}]);
   sample('Provider connection',()=>BackupProviderRuntime.diagnosticConnections(),values=>values.map(value=>({job:value.id==='google-drive'?'Google Drive connection':'External provider connection',state:value.connected?'connected':'disconnected',connected:value.connected,scopeBound:value.scopeBound,retryAttempt:value.retryAttempt,retryBackoffCapped:value.retryBackoffCapped})));
   sample('Backup encryption',()=>BackupProtection.status(),value=>[{job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}]);
@@ -8560,14 +9736,39 @@ function currentBackupDiagnosticStates(){
   for(const [target,value] of Object.entries(repositoryIntegrityView?.locations||{})){const bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
-  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,waitingForDeviceFolder:value.waitingForDeviceFolder,turnWaits:value.turnWaits,keptVersions:KeptVersions.count()})));
+  sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:KeptVersions.count()})));
   sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>[{job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
 }
+// Why a version was kept, for diagnostics: the kind of difference, not its content.
+function keptReviewCause(review){
+  const kept=review.kept;
+  if(review.subject==='note')return !kept?'note-deletion':typeof kept.text==='string'&&typeof kept.label==='string'?'note-text-title':typeof kept.text==='string'?'note-text':'note-title';
+  if(review.subject==='savedDay')return kept?'saved-day':'saved-day-deletion';
+  if(review.subject==='session')return kept?'session':'session-absent';
+  return 'settings';
+}
 // The start-up check of this device's data (verifyCanonicalInstallation).
 async function readDataDiagnosticStates(){
   const samples=[
+    // Which storage this page opened. It tells a browser wipe (no profile
+    // list, one new database) from the app opening an empty profile while
+    // another database on this site still holds the data. Counts, not names.
+    {job:'Profile storage',read:async()=>{
+      const base=DATA_CONTRACT.storage.dbName,ours=name=>name===base||name.startsWith(base+ProfileScope.separator);
+      const names=typeof indexedDB?.databases==='function'?(await indexedDB.databases()).map(row=>String(row?.name||'')).filter(ours):null;
+      return {names,listed:!!Profiles.current(),listPresent:LocalStorageContract.getText(ProfileScope.registryKey,null)!==null,fresh:IndexedDb.lifecycle().startedFresh===true,clearedAt:String(readStorageHealth().browserDataClearedAt||'')};
+    },project:value=>({job:'Profile storage',state:value.names?'observed':'partial',scoped:!!ProfileScope.scope,profileListPresent:value.listPresent,pageProfileListed:value.listed,startedFresh:value.fresh,...(value.clearedAt?{dataClearedAt:value.clearedAt}:{}),
+      ...(value.names?{databases:value.names.length,otherDatabases:value.names.filter(name=>name!==DB_NAME).length}:{})})},
+    // Each version kept for review, newest first: what it is, why it was kept
+    // and which device's copy it came from (type and browser), never its
+    // content or which note or day it is.
+    {job:'Kept versions',read:()=>AppData.pendingReviews.list(),project:list=>{
+      const open=list.filter(review=>!review.resolvedAt).sort((a,b)=>b.keptAt.localeCompare(a.keptAt));
+      return [{job:'Kept versions',state:open.length?'pending':'none',count:open.length},...open.slice(0,12).map(review=>({job:'Kept version',state:'pending',subject:review.subject,cause:keptReviewCause(review),
+        device:!review.keptFrom?'not recorded':review.keptFrom===InstallationIdentity.getId()?'this device':PersistenceModule.deviceName(review.keptFrom)||'another device',keptAt:review.keptAt,...(review.keptChangedAt?{changedAt:review.keptChangedAt}:{})}))];
+    }},
     {job:'Canonical maintenance record',read:()=>AppData.metadata.diagnostics(),project:value=>({job:'Canonical maintenance record',state:value.maintenanceStatus,pending:value.maintenanceStatus==='pending',completedAt:value.completedAt,queuedDeletions:value.deletions,localRecovery:value.localRecovery})},
     ...[['Restore journal',AppData.restoreJournal],['Library clear journal',AppData.libraryClearJournal]].map(([job,owner])=>({job,read:()=>owner.diagnostics(),project:value=>({job,state:value?'pending':'absent',pending:!!value,phase:value?.phase||'',updatedAt:value?.updatedAt||'',coverage:'journal-header'})})),
     {job:'Repository cleanup intent',read:()=>BackupAppMeta.read('repositoryMaintenancePending'),project:value=>[{job:'Repository cleanup intent',state:value?.entries?.length?'pending':'absent',pending:!!value?.entries?.length,count:value?.entries?.length||0},...(value?.entries||[]).filter(entry=>['device-folder','google-drive'].includes(entry.providerId)).map(entry=>({job:entry.providerId==='device-folder'?'Device cleanup intent':'Drive cleanup intent',state:'pending',pending:true,reason:entry.reason,nextEligibleAt:entry.nextEligibleAt,scopeBound:!!entry.repositoryScope}))]},
@@ -8595,7 +9796,7 @@ const CLICK_ACTIONS=Object.freeze({
   'apply-pwa-update': applyPwaUpdateFromUi,
   'protect-local-data': protectLocalData,
   'install-notice-action': ()=>runInstallationAction({dismissNotice:true}),
-  'check-unsupported-update': ()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn')),
+  'check-unsupported-update': ()=>void checkUnsupportedUpdate(),
   'dismiss-install-notice': ()=>NativeCapabilities.dismissInstallNotice(),
   'toggle-system-alerts': ()=>SystemNotifications.toggle(),
   'connect-device-backup': ()=>connectDeviceBackupWithRecovery(),
@@ -8654,7 +9855,9 @@ const CLICK_ACTIONS=Object.freeze({
   'test-sound': ()=>NoticeCoordinator.testSound(),
   'test-system-alert': ()=>SystemNotifications.test(),
   'toggle-pomodoro': Pomodoro.configuration.toggleNudges,
-  'restore-session': ()=>sessionPanelMode==='elsewhere'?continueSessionHere():restoreSuspendedTodaySession(),
+  'restore-session': ()=>sessionPanelMode==='previous'
+    ? (TASKS.some(isTrackableBlock)?goTab('review',{source:'previous-day-review'}):revisitPreviousStoredSession())
+    : sessionPanelMode==='elsewhere'?continueSessionHere():restoreSuspendedTodaySession(),
   'suspend-session': suspendTodaySession,
   'finish-session': finishTodaySession,
   'reset-session': resetTodaySession,
@@ -8662,7 +9865,19 @@ const CLICK_ACTIONS=Object.freeze({
   'confirm-plan-edit': ()=>uploadSoonAfterPlanApply(PlanDraftEditor.confirm()),
   'cancel-plan-edit': PlanDraftEditor.cancel,
   'load-default': loadDefaultPlan,
-  'apply-schedule': async()=>{if(sessionPanelMode==='elsewhere'&&!TASKS.length&&!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;const result=uploadSoonAfterPlanApply(applySchedule());if(result&&typeof result.finally==='function')return result.finally(()=>schedulePwaUpdateEvaluation(250));schedulePwaUpdateEvaluation(250);return result;},
+  'apply-schedule': async()=>{
+    let takeover=null;
+    if(sessionPanelMode==='elsewhere'&&!TASKS.length){
+      if(!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;
+      try{takeover=await transferSessionOwnershipHere(sessionPanelSession);}
+      catch(error){setPlanStatus('Could not move today’s session here: '+(error&&error.message?error.message:error),false);return false;}
+    }
+    try{
+      let result=uploadSoonAfterPlanApply(applySchedule(takeover?{source:'ownership-takeover'}:{}));if(result&&typeof result.then==='function')result=await result;
+      if(result===false&&takeover)await attemptAutoRestoreActiveSession();
+      return result;
+    }finally{schedulePwaUpdateEvaluation(250);}
+  },
   'clear-schedule-draft': PlanDraftEditor.clear,
   'open-notes': openNotesLibrary,
   'toggle-pnote-info': togglePnoteInfo,
@@ -8679,7 +9894,13 @@ const CLICK_ACTIONS=Object.freeze({
   'gap-ignore': ()=>classifyInactiveGap('ignore'),
   'gap-apply': applyInactiveGapSplit,
   'dismiss-storage-warning': dismissStorageWarning,
-  'show-drive-sync': ()=>BackupProviderRuntime.locationStatus('google-drive')?.sync?.password?BackupProviderRuntime.unlockSync('google-drive'):BackupProviderRuntime.locationStatus('google-drive')?.sync?.review?showBackupPresentation('google-drive','sync-review'):KeptVersions.count()?KeptVersions.review():showBackupPresentation('google-drive','status'),
+  'sync-status-action': syncStatusAction,
+  // Hiding the card leaves the work running; the indicator still shows it.
+  'close-drive-connect': ()=>{endDriveConnectCard();return true;},
+  'recent-action': ev=>NotificationRecent.run(ev),
+  'recent-more': ()=>NotificationRecent.toggle(),
+  'rename-profile': startProfileRename,
+  'clear-recent': ()=>NotificationRecent.clear(),
   'review-kept-versions': ()=>KeptVersions.review(),
   'open-profile': openProfilePanel,
   'close-profile': closeProfilePanel,
@@ -8716,7 +9937,7 @@ const INPUT_ACTIONS=Object.freeze({
   'practice-setup': ()=>PracticePacer.previewSetup()
 });
 const BLUR_ACTIONS=Object.freeze({
-  'profile-name': saveProfileName,
+  'profile-name': finishProfileRename,
   'save-reflection': ()=>flushPendingReviewSave()
 });
 const KEYDOWN_ACTIONS=Object.freeze({
@@ -9049,7 +10270,7 @@ function installApplicationDomBindings(){
   NoteSyncPopover.install();
   AttachmentLibrary.install();
   void installAttachmentIntegrityAudit();
-  void installVerifiedRecoveryFreshness();
+  void installVerifiedRecoveryFreshness().catch(error=>AppDiagnostics.capture('backup.freshness-startup',error,'warn'));
   OwnershipUiProjection.install();
   BlockedActionHint.install();
   RichTextRuntime.install();
@@ -9057,7 +10278,21 @@ function installApplicationDomBindings(){
   NativeCapabilities.install();
   void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);
   BackupProviderRuntime.subscribeStatus(renderDriveBackup);renderDriveBackup();
-  void reconcileChangeClock().catch(()=>false).then(()=>DeviceBackup.install()).then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
+  // A check starting or stopping updates Verification as it happens.
+  BackupProviderRuntime.subscribeStatus(renderIntegrityStatuses);
+  BackupProviderRuntime.subscribeStatus(storageResetConnectionsChanged);
+  // The indicator also follows the network and keeps its times current.
+  for(const type of ['online','offline'])window.addEventListener(type,scheduleSyncStatus);
+  // Background sync waits while offline (Drive reports it unavailable); back
+  // online, it goes at once rather than at its next retry.
+  window.addEventListener('online',()=>{try{BackupProviderRuntime.wakeBackground('online');}catch(error){AppDiagnostics.capture('backup-provider.online-wake',error,'warn');}});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleSyncStatus();});
+  setInterval(()=>{if(document.visibilityState==='visible')scheduleSyncStatus();},30*1000);
+  // The indicator, the panel's counts and the Connect card follow each step
+  // and count of a sync or upload.
+  BackupPresentation.subscribe(scheduleSyncStatus);
+  NoticeCoordinator.subscribeRecent(NotificationRecent.changed);
+  void ensureDeviceBackupInstalled().then(()=>installRepositoryIntegrityScrub()).catch(error=>AppDiagnostics.capture('backup.repository-integrity-install',error,'warn'));
   updateFullscreenButton();
   PlanDraftEditor.install();
   UiTabRegistry.updateOrientation();
@@ -9134,7 +10369,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     },
     bindDom:installApplicationDomBindings,
     recoverInterruptedLibraryClear:()=>LibraryClearCoordinator.recoverInterrupted(),
-    recoverInterruptedRestore:async()=>{await PlanData.hydrate();return BackupController.recoverInterruptedRestore();},
+    recoverInterruptedRestore:async()=>{await PlanData.hydrate();if(await AppData.restoreJournal.read().catch(()=>null))await waitForClosedTabLease();return BackupController.recoverInterruptedRestore();},
     loadNotes:()=>AppData.notes.load(),
     hydrateDrafts:hydrateSavedDrafts,
     previewPlan:()=>PlanDraftEditor.preview({silent:true}),
@@ -9160,6 +10395,9 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
         try{await AppData.mutationEpoch.reseed();backupFastFenceReady=true;}
         catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
       }
+      // The durable mutation epoch must repair the fast mirror before the
+      // startup gate opens any automatic provider work.
+      await reconcileStartupChangeClock();
       resumeUnresolvedStorageReset();
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
@@ -9170,6 +10408,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       NoticeCoordinator.dismiss('startup-failure');
       window.dispatchEvent(new CustomEvent('studydirector:canonicalstatus',{detail:proof}));
       window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION,canonical:proof.canonical})}));
+      scheduleInsightsPreload();
       void PwaLifecycle.confirmBoot().catch(error=>AppDiagnostics.capture('pwa.boot-confirmation',error,'warn'));
       setTimeout(()=>{void offerDeviceRecoveryIfLocalEmpty({reason:'startup'}).catch(error=>AppDiagnostics.capture('backup.device-recovery-offer',error,'warn'));},0);
       return proof;

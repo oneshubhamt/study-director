@@ -14,7 +14,7 @@ The phase has 17 bounded work units, not 17 promised sessions. P5.0 precedes con
 
 | ID | Status | Primary scope and host responsibility | Required evidence for targeted closure |
 | --- | --- | --- | --- |
-| P5.0 | [VERIFIED — TARGETED](../../TS-CONVERSION-EXECUTION.md#active-durable-worklog--p50) | Mechanically extract all five inline scripts at their existing positions/scopes; manifest/build integration and shared test readers. Inventory every main-host responsibility and consumer | Executable equivalence of extraction except documented build glue; script order/scope, CSP/hash/precache consistency; build/generated syntax, startup/core-flow and affected source-reader tests; close F-001/F-002 within their stated scope |
+| P5.0 | [VERIFIED — TARGETED](../../TS-CONVERSION-EXECUTION.md#recent-closed-worklog--p50) | Mechanically extract all five inline scripts at their existing positions/scopes; manifest/build integration and shared test readers. Inventory every main-host responsibility and consumer | Executable equivalence of extraction except documented build glue; script order/scope, CSP/hash/precache consistency; build/generated syntax, startup/core-flow and affected source-reader tests; close F-001/F-002 within their stated scope |
 | P5.1 | NOT STARTED | `internal`, `interactions`, `workspace-overlay`, `notice-coordinator`, `navigation`, `audio-engine`, `backup-presentation`; shared DOM/scalar/capability helpers | Strict registry/ports and DOM/event handling; dialogs, keyboard/focus, navigation, notices, sound and overlay checks |
 | P5.2 | NOT STARTED | `profiles`, `startup`, `native-capabilities`; early profile-scope script, configuration, installation identity, persistence/repository construction and activation | Startup/restore ordering, profile isolation/switching, storage-failure and ownership startup paths; capabilities/fallbacks remain valid |
 | P5.3 | NOT STARTED | `plan`; plan editor, schedule/defaults, saved-plan composition and host adapters | Editing/applying plans, draft durability, saved-plan save/reload and relevant UI |
@@ -69,7 +69,9 @@ The five authored scripts in `source/host/`, inserted inline into `source/app.ht
 | Install/update/offline handlers and service-worker communication | P5.12 | Background backup, storage and session settlement |
 | Final cross-feature assembly, public exports, top-level bindings and start invocation | P5.13 | All completed feature contracts |
 
-## Extracted host ownership — P5.0 baseline
+## Extracted host ownership — historical P5.0 baseline
+
+Production intake `2638619` changes host line positions and adds responsibilities. The ranges below preserve the verified P5.0 accounting and must not be used as current line anchors. Feature ownership above still applies; refresh the statement/range inventory against the integration commit before P5.1 implementation. MAIN-E owns this explicit handoff, not a claim that P5.0 audited new production behavior.
 
 Extraction baseline `8d9c525`; paths/lines below refer to the mechanically extracted bodies. These ranges are exhaustive ownership assignments, not a behavior audit or strict-type completion claim. Nested functions/closures inherit their enclosing range's owner; shared callback contracts require the adjacent owners' source reconciliation. Keep this map current when later passes move/split code. P5.13 owns only the explicitly allocated assembly, not unassigned feature code.
 

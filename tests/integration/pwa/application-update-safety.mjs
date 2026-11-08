@@ -15,7 +15,7 @@ function deferred(){let resolve;const promise=new Promise(yes=>{resolve=yes;});r
 function fixture(){
   const calls=[],listeners=new Map(),elements=[],holds=new Set();
   const state={owner:{state:'primary',revision:1},mutation:{active:'',foreign:false},lifecycle:{ready:true,revision:1},
-    startup:true,timer:false,pacer:false,attachment:false,providerBusy:false,dialog:false,diary:true,planFlush:true,reflection:true,
+    startup:true,timer:false,pacer:false,attachment:false,providerBusy:false,providerBackingUp:false,dialog:false,diary:true,planFlush:true,reflection:true,
     deletionFlush:true,draft:'edited plan',storedDraft:'edited plan',noteFailure:null,loaded:{value:{revision:7},storage:{idb:true}},
     live:{ok:true,value:{revision:7},storage:{idb:true}},maintenance:Promise.resolve(),backups:Promise.resolve(),
     diaryWait:Promise.resolve(),lockCount:0,quiesced:0,updates:0,checkSuccess:true,online:true,now:1000000,
@@ -23,7 +23,7 @@ function fixture(){
   function element(tag){const node={tag,children:[],open:false,removed:false,setAttribute(){},addEventListener(type,fn){this[type]=fn;},append(...nodes){this.children.push(...nodes);},contains(target){return target===this||this.children.some(n=>n.contains(target));},showModal(){this.open=true;},close(){this.open=false;},remove(){this.removed=true;}};elements.push(node);return node;}
   const window={addEventListener(type,fn){const set=listeners.get(type)||new Set();set.add(fn);listeners.set(type,set);},removeEventListener(type,fn){listeners.get(type)?.delete(fn);}};
   const record=async label=>{calls.push(label);};
-  const sandbox={console,AbortController,Promise,Date:class extends Date{static now(){return state.now;}},Object,backUpBeforeUpdate:async()=>{calls.push('backup');},
+  const sandbox={console,AbortController,Promise,Date:class extends Date{static now(){return state.now;}},Object,backUpBeforeUpdate:async()=>{calls.push('backup');},scheduleSyncStatus(){},
     pwaUpdateReservation:null,pwaWorkRevision:0,pwaUpdateRetryTimer:null,pwaLatestUpdateState:{updateReady:true},pwaLastEditableInputAt:0,PWA_EDIT_IDLE_MS:1800,PWA_UPDATE_SAFETY_RETRY_MS:300000,PWA_UPDATE_EXTERNAL_RETRY_MS:5000,evaluateAutomaticPwaUpdate:()=>calls.push('automatic-update'),imagePreparationCount:0,attachmentIntegrityRunning:Promise.resolve(),
     OWNERSHIP_STATES:{PRIMARY:'primary',SECONDARY:'secondary'},TIMER_MODES:{RUNNING:'running'},TimerState:{paused:false,mode:'running'},TASKS:[{}],
     document:{body:element('body'),createElement:element,querySelector:()=>state.dialog?{}:null,getElementById:()=>({value:state.draft})},window,
@@ -33,14 +33,14 @@ function fixture(){
       try{return await run({assert(){assert.equal(state.owner.state,'primary');}});}finally{state.mutation.active='';state.lockCount--;calls.push('unlock');}
     }},
     ReviewSaveService:{status:()=>({})},AttachmentLibrary:{status:()=>({busy:state.attachment})},AttachmentIngest:{status:()=>({busy:false})},Exports:{status:()=>({busy:false})},BackupController:{status:()=>({busy:false})},
-    BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:state.backups,release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
+    BackupProviderRuntime:{status:()=>({busy:state.providerBusy}),locationStatus:id=>{assert.equal(id,'google-drive');return {backingUp:state.providerBackingUp};},suspendBackground:()=>{calls.push('provider-suspend');holds.add('provider');return {settled:state.backups,release:()=>{holds.delete('provider');calls.push('provider-resume');}};}},
     DeviceBackup:{status:()=>({busy:false})},
     AttachmentIntegrityJob:{settled:()=>Promise.resolve()},RichTextAssetMaintenance:{settled:()=>state.maintenance},OwnershipUiProjection:{apply(){calls.push('project');}},
     RichTextRuntime:{quiesce:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}}},
     quiesceManagedRecoveryRuntime:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}},
     PracticePacer:{status:()=>({running:state.pacer})},isLiveTrackableTimer:()=>state.timer,appCanMutate:()=>state.owner.state==='primary',pwaRecentEditableInput:()=>false,
     LibraryView:{settleDiary:async()=>{await state.diaryWait;calls.push('diary');return state.diary;}},
-    PlanDraftEditor:{flush:async()=>{calls.push('plan-flush');return state.planFlush;},save:async()=>{calls.push('plan-save');return true;}},PlanData:{readDraft:()=>state.draft,settled:()=>record('plan-settled')},
+    PlanDraftEditor:{flush:async()=>{calls.push('plan-flush');return state.planFlush;},save:async()=>{calls.push('plan-save');return true;},authoredText:()=>state.draft},PlanData:{readDraft:()=>state.draft,settled:()=>record('plan-settled')},
     flushPendingReviewSave:()=>{calls.push('reflection');return state.reflection;},ReviewEditor:{settled:()=>record('review-settled')},
     writeLiveDraftNow:async options=>{assert.equal(options.allowDuringRecoveryQuiescence,true);calls.push('live');return state.live;},
     AppData:{maintenance:{settled:()=>Promise.resolve()},planData:{read:async()=>({draft:state.storedDraft})},
@@ -129,6 +129,18 @@ await test('missing registration retries despite prior success; failures back of
   assert.equal([...h.state.timers.values()][0].delay,86400000);assert.equal(await h.sandbox.checkPwaUpdateIfDue(),false);
   assert.equal(await h.sandbox.checkPwaUpdateIfDue({force:true}),true);assert.equal(h.state.updates,3);
 });
+await test('automatic PWA checks defer around active provider or Drive transfers, then resume without forcing an update',async()=>{
+  for(const flag of ['providerBusy','providerBackingUp']){
+    const h=fixture();h.state[flag]=true;
+    assert.equal(await h.sandbox.checkPwaUpdateIfDue(),false,flag+' must defer automatic checks');
+    assert.equal(h.state.updates,0,'no network update check while '+flag);
+    assert.equal(h.state.lastCheck,0,'deferral must not stamp a successful check');
+    assert.ok([...h.state.timers.values()].some(({delay})=>delay===30000),'deferred check is rescheduled');
+    h.state[flag]=false;h.state.now+=30000;
+    assert.equal(await h.sandbox.checkPwaUpdateIfDue(),true,'check succeeds when '+flag+' clears');
+    assert.equal(h.state.updates,1);
+  }
+});
 await test('unsupported, secondary and offline windows do not register through the scheduler',async()=>{
   for(const mode of ['unsupported','secondary','offline']){const h=fixture();if(mode==='unsupported')h.state.status.supported=false;if(mode==='secondary')h.state.owner.state='secondary';if(mode==='offline')h.state.online=false;assert.equal(await h.sandbox.checkPwaUpdateIfDue(),false);assert.equal(h.state.updates,0);if(mode!=='offline'){assert.equal(h.sandbox.schedulePwaUpdateCheck(),false);assert.equal(h.state.timers.size,0);}}
 });
@@ -181,7 +193,7 @@ await test('an external activation retries within seconds; an ordinary waiting u
 await test('pending boot confirmation has a visible retry action and clears only after proof',async()=>{
  const elements=new Map(['pwa-update-control','pwa-update-apply','pwa-update-message','pwa-update-progress-message'].map(id=>[id,{}])),notices=[],checks=[],evaluations=[];
  const state={supported:true,registered:true,updateReady:false,applying:false,checking:false,bootState:'pending',phase:'boot-pending',message:'Update confirmation is pending.'};
- const context={Object,String,backUpBeforeUpdate:async()=>{},document:{getElementById:id=>elements.get(id)},pwaLatestUpdateState:null,pwaAutomaticBlockMessage:'old automatic block',pwaUpdateCheckRunning:false,pwaUpdateRetryTimer:null,PWA_UPDATE_READY_DELAY_MS:1500,PWA_UPDATE_SAFETY_RETRY_MS:1000,pwaUpdateRetryDelay:()=>1000,
+ const context={Object,String,backUpBeforeUpdate:async()=>{},scheduleSyncStatus(){},document:{getElementById:id=>elements.get(id)},pwaLatestUpdateState:null,pwaAutomaticBlockMessage:'old automatic block',pwaUpdateCheckRunning:false,pwaUpdateRetryTimer:null,PWA_UPDATE_READY_DELAY_MS:1500,PWA_UPDATE_SAFETY_RETRY_MS:1000,pwaUpdateRetryDelay:()=>1000,
   NoticeCoordinator:{publish:(_,value)=>notices.push(value)},pwaUpdateActionLabel:()=> 'Update Now',clearTimeout(){},schedulePwaUpdateEvaluation:delay=>evaluations.push(delay),recordPwaUpdateCheckFailure(){},schedulePwaUpdateCheck(){},clearPwaUpdateCheckFailure(){},checkPwaUpdateIfDue:async options=>{checks.push(options);return true;},PwaLifecycle:{status:()=>state}};
  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('async function applyPwaUpdateFromUi('),source.indexOf('function pwaLastUpdateCheckAt(')),context);
  context.renderPwaUpdateStatus(state);assert.equal(notices.at(-1).visible,true);assert.equal(notices.at(-1).title,'Update confirmation pending');assert.equal(elements.get('pwa-update-apply').textContent,'Retry confirmation');assert.equal(elements.get('pwa-update-message').textContent,state.message);assert.equal(evaluations.length,0);

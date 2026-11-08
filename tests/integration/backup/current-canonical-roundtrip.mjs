@@ -21,6 +21,21 @@ const text='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Para
 const study={version:16,recordKind:'study',date:'2026-09-10',savedAt:stamp,updatedAt:stamp,sourceRevision:9,quote:'',reflection:text,studyQuality:4,realTimeSnapshot:null,schedule:[],results:{},practiceRuns:[],carryForwardDraft:''};
 const diary=dailyRecordCodec.createDiaryRecord('2026-09-09','Diary-only reflection',{savedAt:stamp,updatedAt:stamp});
 assert.ok(dailyRecordCodec.sanitizeCurrentDailyRecord(study));assert.ok(diary);
+// A Saved Day read as its view and handed back with its reflection changed is
+// saved as its stored fields (a Diary edit of a saved study day failed with
+// "New daily record failed its canonical validation"). A field the view does
+// not have is still refused.
+for(const record of [dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]){
+  const later='WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'Edited later in the Diary'}]}]}});
+  const view=dailyRecordCodec.materializeDailyRecordView(record),edited={...view,reflection:later};
+  assert.ok(Object.keys(view).length>Object.keys(record).length,'the view adds worked-out fields');
+  assert.equal(dailyRecordCodec.sanitizeCurrentDailyRecord(view),null,'a view is not a stored record');
+  assert.deepEqual(dailyRecordCodec.storedDailyRecordFields(edited),{...record,reflection:later});
+  assert.ok(dailyRecordCodec.sanitizeCurrentDailyRecord(dailyRecordCodec.storedDailyRecordFields(edited)));
+  const unknown={...edited,notAField:1};
+  assert.equal(dailyRecordCodec.storedDailyRecordFields(unknown),unknown,'an unknown field is left for validation to refuse');
+  assert.equal(dailyRecordCodec.storedDailyRecordFields(record),record,'a stored record is unchanged');
+}
 const note={version:3,key:noteId('ethics'),label:'Ethics',text,updatedAt:stamp};assert.ok(dailyRecordCodec.sanitizeCurrentNote(note));
 const coercedLink={toString:()=>noteId('linked'),toJSON:()=>noteId('linked')};
 assert.equal(dailyRecordCodec.sanitizeCurrentNote({...note,links:[coercedLink]}),null,'note links must contain canonical string identities, not coercible objects');
@@ -36,7 +51,7 @@ const algorithm=codec.checksumAlgorithm(),manifest=codec.createManifest(plan,{co
 const groups=[['checkpointManifest',[codec.createProtectedManifest(plan,manifest.checkpoint)]],['personalData',[personal]],['dailyRecord',[study,diary]],['note',[note]],['activeSession',[active]]];
 async function assemble(values=groups,assets=descriptors){const chunks=[];for(let i=0;i<values.length;i++)chunks.push(await codec.encodeChunk(i,values[i][0],values[i][1],algorithm));const completion=await codec.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,assets);return codec.createV10Container(new Blob([JSON.stringify(manifest)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});}
 const file=await assemble(),parsed=await codec.inspectCurrent(file);
-assert.equal(parsed.formatVersion,23);assert.deepEqual(parsed.records,[dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]);assert.deepEqual(parsed.data.notes[note.key],note);assert.deepEqual(parsed.importedActiveSession,active);assert.deepEqual(parsed.importedPersonalData,personal);assert.deepEqual(parsed.assetDescriptors,descriptors);assert.equal(parsed.assetBytes,blobs.reduce((n,b)=>n+b.size,0));
+assert.equal(parsed.formatVersion,24);assert.deepEqual(parsed.records,[dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]);assert.deepEqual(parsed.data.notes[note.key],note);assert.deepEqual(parsed.importedActiveSession,active);assert.deepEqual(parsed.importedPersonalData,personal);assert.deepEqual(parsed.assetDescriptors,descriptors);assert.equal(parsed.assetBytes,blobs.reduce((n,b)=>n+b.size,0));
 for(let i=0;i<4;i++)assert.equal(await parsed.importedAssets[i].blob.text(),await blobs[i===3?1:i].text());
 for(const key of ['savedDayDeletions','noteDeletions','attachmentDeletions'])assert.deepEqual(parsed.protectedCheckpointManifest[key],plan[key]);
 const key=await passwordKey('Current format test passphrase'),sealed=[],opened=[];

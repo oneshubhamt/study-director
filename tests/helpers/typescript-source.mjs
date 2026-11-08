@@ -1,9 +1,10 @@
+import {readRuntimeSource} from './runtime-source.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {stripTypeScriptTypes} from 'node:module';
 
-function strip(file){return stripTypeScriptTypes(fs.readFileSync(file,'utf8'),{mode:'strip',sourceMap:false});}
+function strip(file){return stripTypeScriptTypes(readRuntimeSource(file),{mode:'strip',sourceMap:false});}
 
 export async function importRichTextReconciliationSource(){
   const temp=fs.mkdtempSync(path.join(process.env.TMPDIR||'/tmp','sd-rte-reconcile-'));
@@ -22,5 +23,5 @@ export async function importRichTextNoteTextSource(){
   fs.writeFileSync(path.join(temp,'markdown.mjs'),strip('rich-text/markdown.ts').replace("from '../contracts/production-limits.mjs'",`from '${limits}'`).replace("from './wg1-codec';","from './wg1-codec.mjs';"));
   fs.writeFileSync(path.join(temp,'tags.mjs'),strip('rich-text/tags.ts'));
   const [tags,markdown]=await Promise.all([import(pathToFileURL(path.join(temp,'tags.mjs')).href),import(pathToFileURL(path.join(temp,'markdown.mjs')).href)]);
-  return {...tags,markdownToHtml:markdown.markdownToHtml};
+  return {...tags,markdownToHtml:markdown.markdownToHtml,looksLikeMarkdown:markdown.looksLikeMarkdown,markdownDocument:markdown.markdownDocument};
 }

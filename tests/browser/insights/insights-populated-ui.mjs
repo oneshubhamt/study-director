@@ -95,19 +95,25 @@ try{
     const practiceTab=[...pane.querySelectorAll('.insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));practiceTab?.click();
     const practiceDetails=pane.querySelector('.insights-practice');if(practiceDetails&&practiceDetails.tagName==='DETAILS')practiceDetails.open=true;
     const calculation=practiceDetails?.querySelector('.insights-calculation-disclosure')||null;
-    const practiceCopy=pane.querySelector('.insights-practice-trend-card')?.innerText||'';
-    const calculationClosed=calculation?!calculation.open:false;if(calculation)calculation.open=true;
+    // Sections below the first screen are laid out only near the viewport, so
+    // bring this one into view, as a reader would, before reading rendered text.
+    (practiceDetails||pane.querySelector('.insights-practice-trend-card'))?.scrollIntoView({block:'start'});
+    const calculationClosed=calculation?!calculation.open:false;
     return {
       elapsed:performance.now()-${seeded.started},window:pane.querySelector('.insights-window-note')?.textContent||'',
       workTrend:evidence.find(item=>item.label==='Work trend')||null,
       practiceSummary:pane.querySelector('.insights-practice-summary-meta')?.textContent||'',
-      practiceCopy,calculationClosed,calculationCopy:calculation?.innerText||'',
+      calculationClosed,
       documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
       profile:window.__StudyDirectorInsightsLastProfile||null
     };
   })()`);
   await page.settle(2);
+  desktop.practiceCopy=await page.evaluate(`document.querySelector('#pane-insights .insights-practice-trend-card')?.innerText||''`);
+  await page.evaluate(`(()=>{const calculation=document.querySelector('.insights-practice .insights-calculation-disclosure');if(calculation)calculation.open=true;})()`);
+  await page.settle(2);
   desktop.calculationCopy=await page.evaluate(`document.querySelector('.insights-practice .insights-calculation-disclosure')?.innerText||''`);
+  assert.ok(desktop.practiceCopy.trim().length>0,'the Practice trend card must render readable text once in view');
   assert.match(desktop.window,/totals, averages and counts use the full window/i);
   assert.match(desktop.workTrend?.note||'',/All records/i);
   assert.match(desktop.workTrend?.note||'',/590 completion days/i);
@@ -131,6 +137,14 @@ try{
   assert.ok(phone.windowWidth>0&&phone.windowWidth<=390);
   assert.match(phone.text,/interpretation uses all eligible Pacer evidence/i);
   assert.deepEqual(page.events,[]);
+
+  // Reopened, Insights shows the view it kept and animates like every other
+  // pane (Glass and Director skins); only a first open, rendering behind its
+  // loading panel, arrives still.
+  const reopened=await page.evaluate(`(async()=>{const d=__InsightsUiDebug,pane=document.getElementById('pane-insights'),wait=ms=>new Promise(r=>setTimeout(r,ms));
+    d.goTab('plan');await wait(1000);d.goTab('insights');let entered=false;for(let i=0;i<20&&!entered;i++){entered=pane.hasAttribute('data-sd-enter');if(!entered)await wait(10);}
+    return {entered,kept:!!pane.querySelector('.insights-wrap'),loading:!!pane.querySelector('.plugin-loading-panel')};})()`);
+  assert.deepEqual(reopened,{entered:true,kept:true,loading:false},'reopened Insights animates its kept view');
 
   const evidence={status:'PASS',release:manifest.release,denseHistoryDays:590,desktop:{renderMilliseconds:Number(desktop.elapsed.toFixed(2)),window:desktop.window,workTrend:desktop.workTrend,practiceSummary:desktop.practiceSummary,overflow:desktop.documentOverflow,profile:desktop.profile},phone};
   writeArtifact('insights-ui.json',`${JSON.stringify(evidence,null,2)}\n`);

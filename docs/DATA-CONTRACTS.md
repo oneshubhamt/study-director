@@ -4,7 +4,7 @@ This document owns the app's data-authority and preservation model. Executable i
 
 ## Current canonical topology
 
-At source checkpoint `4136ba5`, IndexedDB is version **9** with six stores:
+After production intake `2638619`, IndexedDB remains version **9** with six stores:
 
 | Store | Key | Record schema | Authority |
 | --- | --- | --- | --- |
@@ -17,7 +17,9 @@ At source checkpoint `4136ba5`, IndexedDB is version **9** with six stores:
 
 `appMeta` names are stable; individual values have family-specific versions. Do not treat the whole store as disposable metadata. Plans/preferences, deletion ledgers, kept reviews, journals, leases and diagnostic progress have different authority and retention rules. `contracts/data-architecture.mjs` classifies these families; `record-codecs.ts` and `host-metadata.ts` validate them.
 
-Current standalone backup metadata is v23 inside the `SDBK10` binary container; encrypted backup framing is v2 (`SDENC02`); attachment archive framing is v1 (`SDAT01`). Managed repository checkpoint manifests are v8, validated in `managed-repository.ts`. Container framing versions and domain schema versions are different concepts. Do not infer historical-format support from a magic string or a field named `older` in diagnostics.
+Current standalone backup metadata is v24 inside the `SDBK10` binary container; encrypted backup framing is v2 (`SDENC02`); attachment archive framing is v1 (`SDAT01`). Managed repository checkpoint manifests are v9, validated in `managed-repository.ts`. Container framing versions and domain schema versions are different concepts. Do not infer historical-format support from a magic string or a field named `older` in diagnostics.
+
+PendingReview is v2 (including `keptFrom` and `keptChangedAt`), Active Session ownership claims are v4, reconciliation headers are v5 with day rows v2/update specs v4, and restore-journal payloads are v6. The [current format ledger](../contracts/format-ledger.mjs) contains one supported set of formats. [Storage operations](areas/data-and-storage.md) describes their use.
 
 ## Canonical-only support and unsupported input
 

@@ -18,7 +18,7 @@ export type AttachmentFile=Blob&{name?:string};
 export type AttachmentOccurrence={id:string;kind:'inline-image'|'inline-audio'|'link'};
 export type ReferenceScan={trusted:boolean;assetIds:readonly string[];occurrences?:readonly AttachmentOccurrence[]};
 export type AttachmentSource={kind:string;key:string;label:string;ids:ReadonlySet<string>;occurrences:readonly AttachmentOccurrence[];value:string};
-export type SourceOptions={includeLive?:boolean;priority?:'background'|'user-visible'};
+export type SourceOptions={referencesOnly?:boolean;includeLive?:boolean;priority?:'background'|'user-visible'};
 export type ReferenceSnapshot={notes:NoteRecord[];days:DailyView[];session:ActiveSession|null};
 export type ReferenceChange={changed:boolean;sources:number;rollback:(()=>Promise<boolean>)|null};
 export interface ReferenceCoordinatorInput{

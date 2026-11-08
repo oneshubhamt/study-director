@@ -7,6 +7,13 @@ export const PERFORMANCE_BUDGETS=Object.freeze({
   insightsMaxMainThreadTaskMs:100,
   insightsTargetMainThreadTaskMs:50,
   insightsMaxDomChunkMs:100,
+  // The budgets above hold every settled opening, which draws the model idle
+  // pre-computation prepared. An opening that must itself read and compute the
+  // whole history (at start-up before that work, or right after a day changed)
+  // is about 0.4 s on a fast machine and roughly 2.4 times that on CI runners,
+  // so it has its own ceiling: it catches a doubling of that path without
+  // depending on the speed of the machine running it.
+  insightsComputedOpenMs:2000,
   // Search gates are catastrophic-regression guards, not byte/latency targets.
   notesWorkerCold1000x100Ms:350,
   notesWorkerHotP95Ms:25,

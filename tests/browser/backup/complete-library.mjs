@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {chooseIncomingBackup,configureFixtureHook} from '../../helpers/backup-fixture-choices.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,10 +14,10 @@ if(process.env.SD_MINIFIED_TEST==='1'){
  const root=path.resolve('dist',deploymentDirectoryName,'public');
  for(const name of fs.readdirSync(root))if(fs.statSync(path.join(root,name)).isFile())server.setOverride('deployment',name,fs.readFileSync(path.join(root,name)));
  const expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];
- html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'').replace('configure:options=>Interactions.configure(options)',configureFixtureHook);
+ html=readRuntimeSource(path.join(root,'index.html')).replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'').replace('configure:options=>Interactions.configure(options)',configureFixtureHook);
 }
 // Use actual deployment policy with hashes recalculated solely for harness instrumentation.
-const headers=JSON.parse(fs.readFileSync(process.env.SD_MINIFIED_TEST==='1'?path.join('dist',deploymentDirectoryName,'firebase-hosting-headers.merge.json'):'dist/deployment/firebase-hosting-headers.merge.json','utf8'));
+const headers=JSON.parse(readRuntimeSource(process.env.SD_MINIFIED_TEST==='1'?path.join('dist',deploymentDirectoryName,'firebase-hosting-headers.merge.json'):'dist/deployment/firebase-hosting-headers.merge.json'));
 let csp=headers.hosting.headers.find(r=>r.source==='/**').headers.find(h=>h.key==='Content-Security-Policy').value;
 csp=csp.replace(/ 'sha256-[^']*'/g,'').replace("script-src 'self'", "script-src 'self' "+[...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(m=>"'sha256-"+createHash('sha256').update(m[1]).digest('base64')+"'").join(' '));
 html=html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+csp.replace(/frame-ancestors[^;]*;?/,'').replace('upgrade-insecure-requests;','')+'">');server.setOverride('deployment','complete74.html',html);
@@ -48,7 +49,15 @@ await page.evaluate(`window.hashAbort=new AbortController();window.holdHash=true
 await page.evaluate(`(async()=>{const a=__PWA6,decoded=await a.BackupProtection.unprotect(complete.blob),backupFile=await a.Exports.run('file.persist',{file:decoded.blob});await a.AppData.restoreJournal.prepare({id:'restore_complete-libraryrestart',backupFile,filename:'restart.sdbackup',scheduleText:''});a.AppData.notes.update('portability','Portability','interrupted import');await a.AppData.notes.flush();await a.AttachmentStorage.removeMetadata((await a.AttachmentStorage.list()).map(r=>r.id));await a.Exports.run('file.release',{file:decoded.blob});await a.BackupFiles.collect();return true})()`);
 await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate('__PWA6.AppOwnership.status().hasControl'));
 const recovered=await page.evaluate(`(async()=>({note:__PWA6.AppData.notes.get('portability').text,rows:await __PWA6.AttachmentStorage.list(),journal:await __PWA6.AppData.restoreJournal.read()}))()`);assert.equal(recovered.note,restore.expectedNote);assert.equal(recovered.journal,null);assert.deepEqual(recovered.rows.map(({file,...r})=>r).sort((a,b)=>a.id.localeCompare(b.id)),catalogue.map(({file,...r})=>r).sort((a,b)=>a.id.localeCompare(b.id)));pass('restart recovery restores the complete library from OPFS journal bytes');
-await page.evaluate('__PWA6.goTab("guide")');await waitFor(()=>page.evaluate('!!document.querySelector(".guide-wrap")'));await page.evaluate('__PWA6.goTab("insights")');pass('Guide and Insights open under enforcement');
+await page.evaluate('__PWA6.goTab("guide")');await waitFor(()=>page.evaluate('!!document.querySelector(".guide-wrap")'));
+// The Guide explains backups in the app's own words: local-first, Drive sync, and the same four choices the restore dialog offers.
+{const guideText=await page.evaluate(`(async()=>{
+   const find=()=>document.querySelector('[data-guide-reference="data-tools"]');
+   for(const node of document.querySelectorAll('.guide-life-node')){if(find())break;node.click();await new Promise(resolve=>setTimeout(resolve,50));}
+   find()?.click();await new Promise(resolve=>setTimeout(resolve,50));return {text:document.querySelector('.guide-wrap').textContent,keys:[...document.querySelectorAll('.guide-field-key')].map(node=>node.textContent)};})()`);
+ for(const phrase of ['Local-first: each device keeps all its data','While a device is signed in to Google Drive, it syncs','Keep current, Add only what’s missing, Combine with current data, or Replace current data'])assert.ok(guideText.text.includes(phrase),`the Guide says "${phrase}"`);
+ for(const heading of ['Recover','Add only what’s missing','Replace current data','Combine with current data'])assert.ok(guideText.keys.includes(heading),`the Guide has an entry for ${heading}`);}
+await page.evaluate('__PWA6.goTab("insights")');pass('Guide and Insights open under enforcement');
 assert.deepEqual(await page.evaluate('ttViolations'),[]);pass('no Trusted Types/CSP violations during tested editor, worker and complete-backup paths');
 report.errors=page.events.filter(e=>!/favicon|ResizeObserver loop|could not be decoded|audio|media resource|ERR_BLOCKED_BY_CLIENT/i.test(e.text));console.log(JSON.stringify(report,null,2));
 } catch(error){console.error('Browser events',page?.events,'stderr',browser.stderr());throw error;}finally{if(page)await browser.closePage(page);await browser.close();await server.close();}

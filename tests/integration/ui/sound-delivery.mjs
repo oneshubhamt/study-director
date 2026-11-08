@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -40,7 +41,7 @@ foreground=false;cue('pomodoro',{system:true,title:'Break'});assert.equal(os.len
 owner=false;c.setSoundMode('full');cue('overtime',{system:true});assert.equal(attempts.length,quiet);owner=true;cue('pause');const hiddenCue=attempts.at(-1);c.setHidden(true);assert.equal(hiddenCue.options.isCurrent(),false);c.setHidden(false);assert.equal(attempts.at(-1),hiddenCue);await drain();c.clear();n.clear();
 
 // Playback uses actual engine behavior with a controllable browser audio boundary.
-vm.runInThisContext(fs.readFileSync('source/core/audio-engine.js','utf8'),{filename:'source/core/audio-engine.js'});
+vm.runInThisContext(readRuntimeSource('source/core/audio-engine.js'),{filename:'source/core/audio-engine.js'});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('audio-engine',1);
 let context,starts=0,disconnections=0,made=0,failMake=false;const sources=[],listeners=new Map(),idle=[];
 class Context {
@@ -58,8 +59,8 @@ await engine.unlock();assert.equal(starts,0,'unlock must never drain a backlog')
 let eligible=false;assert.equal(await engine.play('begin',{isCurrent:()=>eligible}),false);assert.equal(starts,0,'an expired cue never plays');
 eligible=true;const playing=engine.play('begin',{isCurrent:()=>eligible});await settle();assert.equal(starts,1);assert.equal(made,1);engine.stop();await playing;assert.equal(disconnections,2,'both the source and gain are released');
 const explicit=engine.play('pause',{explicit:true});engine.stop();assert.equal(await explicit,false);assert.equal(starts,1,'mute fences pending playback');
-runIdle();assert.equal(made,13,'every cue is made once; the one already made is kept');
-const again=engine.play('begin');await settle();sources.at(-1).onended();assert.equal(await again,true);assert.equal(made,13,'made cues are reused');
+runIdle();assert.equal(made,module.cues.length,'every cue is made once; the one already made is kept');
+const again=engine.play('begin');await settle();sources.at(-1).onended();assert.equal(await again,true);assert.equal(made,module.cues.length,'made cues are reused');
 const engine2=module.createEngine({window:{AudioContext:Context,requestIdleCallback:step=>idle.push(step)},document:{addEventListener(){},removeEventListener(){}}});
 await engine2.unlock();idle.length=0;failMake=true;assert.equal(await engine2.play('confirm'),false,'a cue that cannot be made stays silent');
 const retry=engine2.play('confirm');await settle();sources.at(-1).onended();assert.equal(await retry,true,'it is made again for a new event');engine2.dispose();

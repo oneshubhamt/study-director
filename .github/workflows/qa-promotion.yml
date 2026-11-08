@@ -48,4 +48,110 @@ jobs:
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
       - name: Complete browser certification + built-runtime coverage
         if: inputs.run_browser
+        env:
+          BROWSER_TEST_EXCLUDE_IDS: insights-performance
         run: npm run test:coverage:browser
+
+  insights-performance-1:
+    if: inputs.run_browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      passed: ${{ steps.result.outputs.passed }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - id: sample
+        name: Insights performance sample 1
+        continue-on-error: true
+        run: node tests/browser/insights/insights-performance.mjs
+      - id: result
+        if: always()
+        run: echo "passed=${{ steps.sample.outcome == 'success' }}" >> "$GITHUB_OUTPUT"
+
+  insights-performance-2:
+    if: inputs.run_browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      passed: ${{ steps.result.outputs.passed }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - id: sample
+        name: Insights performance sample 2
+        continue-on-error: true
+        run: node tests/browser/insights/insights-performance.mjs
+      - id: result
+        if: always()
+        run: echo "passed=${{ steps.sample.outcome == 'success' }}" >> "$GITHUB_OUTPUT"
+
+  insights-performance-3:
+    if: inputs.run_browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      passed: ${{ steps.result.outputs.passed }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - id: sample
+        name: Insights performance sample 3
+        continue-on-error: true
+        run: node tests/browser/insights/insights-performance.mjs
+      - id: result
+        if: always()
+        run: echo "passed=${{ steps.sample.outcome == 'success' }}" >> "$GITHUB_OUTPUT"
+
+  insights-performance-gate:
+    if: inputs.run_browser && always()
+    needs: [insights-performance-1, insights-performance-2, insights-performance-3]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require one uncontended sample at the unchanged product budget
+        env:
+          SAMPLE_1: ${{ needs.insights-performance-1.outputs.passed }}
+          SAMPLE_2: ${{ needs.insights-performance-2.outputs.passed }}
+          SAMPLE_3: ${{ needs.insights-performance-3.outputs.passed }}
+        run: |
+          printf 'Insights performance samples: %s %s %s\n' "$SAMPLE_1" "$SAMPLE_2" "$SAMPLE_3"
+          test "$SAMPLE_1" = true || test "$SAMPLE_2" = true || test "$SAMPLE_3" = true

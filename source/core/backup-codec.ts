@@ -34,7 +34,7 @@ const createModule=()=>{
     const BACKUP_V10_FLAG_GZIP=1;
     const BACKUP_MAX_FILE_BYTES=Math.max(Number(APP_LIMITS.backupMaxFileBytes)||0,Number(APP_LIMITS.backupMaxCompressedBytes)||0);
     const BACKUP_MAX_ASSET_DESCRIPTORS=Math.max(1,Number(APP_LIMITS.backupMaxAssetDescriptors)||50000);
-    function backupMaxAssetBytes(mimeType=''){
+    function backupMaxAssetBytes(mimeType:string=''){
       const key=String(mimeType||'').startsWith('image/')?'richAssetMaxBytes':'attachmentPdfAudioMaxBytes';
       const fallback=key==='richAssetMaxBytes'?12*1024*1024:2*1024*1024*1024;
       const value=Number(APP_LIMITS[key]??fallback);
@@ -57,9 +57,9 @@ function backupChecksumAlgorithm(){
   if(typeof crypto!=='undefined'&&crypto.subtle&&typeof crypto.subtle.digest==='function')return 'sha256';
   throw new Error('This browser cannot create a cryptographically verified backup. Update the browser and retry.');
 }
-async function backupChecksumText(value:unknown,algorithm=backupChecksumAlgorithm()){return Processing.run('checksum',{value,algorithm});}
+async function backupChecksumText(value:unknown,algorithm:string=backupChecksumAlgorithm()){return Processing.run('checksum',{value,algorithm});}
 async function backupChecksumBlob(blob:Blob,options:ProcessingOptions={}){if(!(blob instanceof Blob))throw new TypeError('Backup asset is not a Blob.');return Processing.run('checksum',{value:blob},options);}
-function backupCollectRichAssetIds(value:unknown,target=new Set<string>()){
+function backupCollectRichAssetIds(value:unknown,target:Set<string>=new Set<string>()){
   const inspect=(current:unknown):void=>{
     if(typeof current==='string'){
       for(const rawId of richTextAssetIds(current)){const id=String(rawId||'');if(richTextAssetIdValid(id))target.add(id);}
@@ -86,6 +86,19 @@ function backupSanitizeAssetDescriptors(value:unknown):readonly AssetDescriptor[
     out.push(freeze({assetId,mimeType,size,checksum,name,library:raw.library===true}));
   }
   return freeze(out);
+}
+// Recoverability is derived from the verified asset descriptor inventory,
+ // not from the canonical-record completeness proof. Missing bytes do not
+ // invalidate the readable Saved Days and Notes in a rescue checkpoint.
+function backupAttachmentCoverage(descriptors:readonly AssetDescriptor[]=[]){
+  const rows=Array.isArray(descriptors)?descriptors as readonly AssetDescriptor[]:[],missingIds=freeze(rows.filter(row=>row?.missing===true).map(row=>String(row.assetId||'')));
+  return freeze({total:rows.length,missing:missingIds.length,missingIds,fullyRecoverable:missingIds.length===0});
+}
+function backupMissingAttachmentWarning(descriptors:readonly AssetDescriptor[]=[]){
+  const coverage=backupAttachmentCoverage(descriptors);
+  if(!coverage.missing)return '';
+  const examples=coverage.missingIds.slice(0,3).join(', '),rest=coverage.missing>3?` and ${coverage.missing-3} more`:'';
+  return `Partial attachment recovery: ${coverage.missing} attachment${coverage.missing===1?'':'s'} missing (${examples}${rest}). Saved Days and Notes are preserved, but missing files cannot be restored from this backup.`;
 }
 function backupCountShape(value:unknown={},types:readonly string[]=BACKUP_ENTITY_TYPES):Counts{
   return Object.fromEntries(types.map(type=>[type,boundedInt((value as Record<string,unknown>)[type],{min:0,max:backupEntityLimit(type),fallback:0})]));
@@ -216,7 +229,7 @@ async function encodeBackupCompletion(chunkCount:number,counts:Counts,chunkHashe
 function portableBackupCompressionSupported(){return typeof CompressionStream==='function'&&typeof DecompressionStream==='function';}
 function sanitizeImportedRecord(record:unknown){return sanitizeCurrentDailyRecord(record);}
 function backupImportReport(base:{sourceVersion?:unknown}={}){
-  return Object.assign({sourceVersion:null,degraded:0,warnings:[]},base||{});
+  return Object.assign({sourceVersion:null,warnings:[]},base||{});
 }
 async function backupFileHasGzipMagic(file:Blob){
   try{const bytes=new Uint8Array(await file.slice(0,2).arrayBuffer());return bytes.length===2&&bytes[0]===0x1f&&bytes[1]===0x8b;}catch(e){return false;}
@@ -335,7 +348,6 @@ async function parseChunkedBackupMetadata(file:BackupFile,options:BackupOptions=
         else if(clean.kind==='activeSession')activeSession=clean.value;
         else if(clean.kind===PENDING_REVIEW_TYPE)pendingReviews.push(freeze(clean.value));
       }
-      if('degraded' in clean.value&&clean.value.degraded===true)report.degraded++;
     }
   }
   if(!complete)throw new Error('Backup is incomplete: completion marker is missing.');
@@ -420,7 +432,7 @@ async function readV10BackupFile(file:BackupFile,options:BackupOptions={}){
   if(!options.validateOnly)for(const descriptor of parsed.assetDescriptors){if(descriptor.missing===true)continue;const content=contents.get(descriptor.checksum+':'+descriptor.size)!;importedAssets.push(freeze({...descriptor,blob:content.slice(0,content.size,descriptor.mimeType)}));}
   return {...parsed,importedAssets:freeze(importedAssets),assetBytes,uncompressedBytes:Number(parsed.uncompressedBytes||0)+assetBytes};
 }
-function unsupportedBackupError(message='Backup uses a retired Study Director format.'){
+function unsupportedBackupError(message:string='Backup uses a retired Study Director format.'){
   return Object.assign(new Error(message),{code:'STUDY_DIRECTOR_UNSUPPORTED_BACKUP'});
 }
 async function inspectCurrentBackup(file:BackupFile,options:BackupOptions={}){
@@ -449,6 +461,8 @@ return Object.freeze({
   inspectCurrent:(...args:Parameters<typeof inspectCurrentBackup>)=>Processing.scope(()=>inspectCurrentBackup(...args)),
   normalizeRecord:sanitizeImportedRecord,
   normalizeNote:sanitizeCurrentNote,
+  attachmentCoverage:backupAttachmentCoverage,
+  missingAttachmentWarning:backupMissingAttachmentWarning,
   normalizeImportedActiveSession:(value:unknown)=>ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:(value:unknown)=>PersonalDataCodec.normalize(value),
   normalizePendingReview:(value:unknown)=>{const clean=PendingReviewCodec.normalize(value);return clean?freeze(clean):null;},

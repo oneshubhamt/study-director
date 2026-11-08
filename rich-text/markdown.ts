@@ -1,4 +1,6 @@
-/* Shared DOM-free Markdown rendering for editor and portable exports. */
+/* Shared DOM-free Markdown rendering for editor and portable exports.
+   Top-level blocks are separated by a blank line, as Markdown needs: without
+   one, two paragraphs read as one and a paragraph after a list joins the list. */
 import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
 import {normalizePlainText} from './wg1-codec';
 // JSON document supplied by the schema decoder. Params stay unknown until their use.
@@ -23,7 +25,22 @@ function markdownBlock(node:MarkdownNode,options:{assetPath?:(assetId:string)=>s
   return (node.content||[]).map((child:MarkdownNode)=>markdownBlock(child,options,depth)).join('')
 }
 
-export function markdownDocument(doc:MarkdownNode|null|undefined,text='',options:{assetPath?:(assetId:string)=>string}={}){if(!doc){const plain=normalizePlainText(text).trimEnd();return plain?escapeMarkdownText(plain)+'\n':''}const markdown=(doc.content||[]).map((node:MarkdownNode)=>markdownBlock(node,options)).join('').replace(/\n{3,}/g,'\n\n').trimEnd();return markdown?markdown+'\n':''}
+export function markdownDocument(doc:MarkdownNode|null|undefined,text='',options:{assetPath?:(assetId:string)=>string}={}){if(!doc){const plain=normalizePlainText(text).trimEnd();return plain?escapeMarkdownText(plain)+'\n':''}const markdown=(doc.content||[]).map((node:MarkdownNode)=>markdownBlock(node,options)).join('\n').replace(/\n{3,}/g,'\n\n').trimEnd();return markdown?markdown+'\n':''}
+
+// Plain pasted text that is clearly Markdown, as chat tools and many web
+// editors copy it: a `# ` heading, list markers on two or more lines,
+// **bold**, a code fence pair, a table, or a [link](https://…). A #tag, a
+// single dash line, `__init__`, an emoticon or ordinary text is not.
+const MD_PASTE_HEADING=/^ {0,3}#{1,6}[ \t]+\S/,MD_PASTE_ITEM=/^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S/,MD_PASTE_FENCE=/^ {0,3}(?:`{3,}|~{3,})/;
+const MD_PASTE_TABLE_RULE=/^ {0,3}\|?[ \t]*:?-{3,}:?[ \t]*(?:\|[ \t]*:?-{3,}:?[ \t]*)+\|?[ \t]*$/,MD_PASTE_BOLD=/\*\*(?=\S)[^*\n]*\S\*\*/,MD_PASTE_LINK=/\[[^\]\n]+\]\((?:https?:\/\/|mailto:)[^)\s]+\)/i;
+export function looksLikeMarkdown(text:unknown){
+  const source=String(text??''),lines=source.split(/\r\n?|\n/);
+  if(lines.some(line=>MD_PASTE_HEADING.test(line)))return true;
+  if(lines.filter(line=>MD_PASTE_ITEM.test(line)).length>=2)return true;
+  if(lines.filter(line=>MD_PASTE_FENCE.test(line)).length>=2)return true;
+  for(let index=1;index<lines.length;index++)if(lines[index-1]!.includes('|')&&MD_PASTE_TABLE_RULE.test(lines[index]!))return true;
+  return MD_PASTE_BOLD.test(source)||MD_PASTE_LINK.test(source);
+}
 
 // Markdown read for import. Headings, paragraphs (their line breaks kept),
 // lists, quotes, rules, tables and inline styles become HTML for the editor's

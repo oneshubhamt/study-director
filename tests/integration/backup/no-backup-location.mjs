@@ -16,7 +16,7 @@ const source=[
   slice('function notifyBackupChange(change){','document.addEventListener(\'visibilitychange\',()=>{if(document.hidden'),
   slice('const PWA_UPDATE_BACKUP_WAIT_MS=','function notifyDeviceBackupIfStudyDayResolved('),
   slice('async function openBackupRestore(){','function backupRestoreChoices(){'),
-  slice('async function restoreMissingAfterStorageReset(hold){','// A reload or a takeover in another tab brings back an unresolved clear.')
+  slice('async function restoreMissingAfterStorageReset(hold,id=\'\'){','// A reload or a takeover in another tab brings back an unresolved clear.')
 ].join('\n');
 const run=new Function('BackupProviderRuntime','DeviceBackup','AppDiagnostics','appCanMutate','showBackupPresentation','renderPwaUpdateStatus','PwaLifecycle','settleStorageReset','NoticeCoordinator','setTimeout','clearTimeout',
   `let pwaAutomaticBlockMessage='';${source};return {notifyBackupChange,flushAutomaticBackups,automaticBackupsWaiting,backUpBeforeUpdate,openBackupRestore,restoreMissingAfterStorageReset,blockMessage:()=>pwaAutomaticBlockMessage};`);

@@ -10,11 +10,14 @@ registry.define('interactions',1,()=>{
     environment:freeze(['clearTimeout','document','nativeConfirm','nativePrompt','requestAnimationFrame','setTimeout','window']),
     diagnostics:freeze(['capture']),
     history:freeze(['closed','opened','requestClose']),
-    notifications:freeze(['dismissEvent','notify','pauseEvent','setHidden','subscribe'])
+    notifications:freeze(['dismissAll','dismissEvent','notify','pauseEvent','setHidden','setPaused','subscribe'])
   });
   // Correctness fallback only. Normal removal follows transition completion;
   // this intentionally does not mirror any presentation duration token.
   const TOAST_REMOVE_FALLBACK_MS=1000;
+  // Stack layout: cards peeking behind the front one, the sideways distance
+  // that closes a card, and the phone width (matches the stylesheet).
+  const PEEK_LIMIT=2,SWIPE_DISTANCE=80,PHONE_QUERY='(max-width: 560px)';
   function exactObject(value,keys,label){
     const actual=value&&typeof value==='object'?Object.keys(value).sort():[];
     const expected=[...keys].sort();
@@ -255,7 +258,48 @@ registry.define('interactions',1,()=>{
             choice.addEventListener('click',()=>{applyValue(id,option.value);applyConfiguredValues(option);});
             optionsHost.appendChild(choice);
           });
-          fieldset.appendChild(optionsHost);form.appendChild(fieldset);
+          fieldset.appendChild(optionsHost);
+          // A full comparison is an ephemeral, read-only view. Keep complete
+          // text out of radio labels and out of persistent modal state.
+          if(group.comparison&&typeof group.comparison==='object'){
+            const disclosure=document.createElement('details');disclosure.className='interaction-comparison';
+            const savedPlan=String(group.label||'').startsWith('Saved plan ·');
+            const kind=savedPlan?'Saved Plan':'Plan draft';
+            const summary=document.createElement('summary');summary.textContent='Compare complete '+kind+' texts before choosing';
+            disclosure.appendChild(summary);fieldset.appendChild(disclosure);
+            disclosure.addEventListener('toggle',()=>{
+              if(!disclosure.open||disclosure.dataset.loaded)return;
+              disclosure.dataset.loaded='1';
+              const currentPresent=group.comparison.current!=null,keptPresent=group.comparison.kept!=null,
+                current=currentPresent?String(group.comparison.current):'',
+                kept=keptPresent?String(group.comparison.kept):'',
+                currentLabel=String(group.comparison.currentLabel||''),
+                keptLabel=String(group.comparison.keptLabel||'');
+              const currentLines=current.split('\n'),keptLines=kept.split('\n');
+              let first=0;
+              while(first<Math.min(currentLines.length,keptLines.length)&&currentLines[first]===keptLines[first])first++;
+              const status=document.createElement('p');status.className='interaction-comparison-status';
+              const namesDiffer=currentLabel!==keptLabel;
+              status.textContent=currentPresent!==keptPresent
+                ?'One side has no saved '+kind.toLowerCase()+'; the other has an authored version, even if its text is empty.'
+                :current===kept
+                  ?(namesDiffer?'Plan names differ; complete schedule texts match.':'Complete Plan texts are identical.')
+                  :(namesDiffer?'Plan names differ. ':'')+'First differing line: '+(first+1)+'. Both complete texts are shown below.';
+              const panes=document.createElement('div');panes.className='interaction-comparison-panes';
+              for(const [label,value,present,name] of [
+                ['This device',current,currentPresent,currentLabel],
+                ['Kept alternative',kept,keptPresent,keptLabel]
+              ]){
+                const pane=document.createElement('section'),heading=document.createElement('strong'),full=document.createElement('pre');
+                pane.className='interaction-comparison-pane';heading.textContent=label+(name?' · '+name:'');
+                full.textContent=!present?'(not saved)':value||'(saved, intentionally empty)';
+                full.tabIndex=0;full.setAttribute('aria-label',label+' — complete '+kind+' text');
+                pane.append(heading,full);panes.appendChild(pane);
+              }
+              disclosure.append(status,panes);
+            });
+          }
+          form.appendChild(fieldset);
         });
         const checkboxRows=(Array.isArray(options.checkboxes)?options.checkboxes:[]).map(checkbox=>{
           const id=String(checkbox&&checkbox.id||''),label=cleanText(checkbox&&checkbox.label,180);return id&&label?{checkbox,id,label}:null;
@@ -290,6 +334,7 @@ registry.define('interactions',1,()=>{
       }
       shell.appendChild(actions);dialog.appendChild(shell);
       dialog.setAttribute('aria-labelledby','sd-interaction-title');dialog.className='interaction-dialog'+(options.danger?' danger':options.caution?' caution':'');
+      if(request.type==='configure'&&Array.isArray(options.groups)&&options.groups.some(group=>group&&group.comparison))dialog.classList.add('with-comparison');
       dialog.oncancel=event=>{event.preventDefault();settle(request.type==='confirm'?false:null);};
       const historyDescriptor=freeze({kind:'prompt',token:`prompt:${historyNonce}:${++historySequence}`});
       active={...request,dialog,historyDescriptor,restoreFocus:document.activeElement&&typeof document.activeElement.focus==='function'?document.activeElement:null};
@@ -335,7 +380,8 @@ registry.define('interactions',1,()=>{
     function removeToast(toast){
       if(!toast||!toast.parentNode)return false;
       if(toast.classList.contains('leaving'))return false;
-      toast.classList.add('leaving');
+      // A closing card takes no more clicks: its button cannot run twice.
+      toast.classList.add('leaving');toast.inert=true;
       let timer=0,done=false;
       const finish=()=>{
         if(done)return;done=true;
@@ -348,14 +394,221 @@ registry.define('interactions',1,()=>{
       timer=setTimeout(finish,TOAST_REMOVE_FALLBACK_MS);
       return true;
     }
+    // The pop-up stack (docs/areas/notifications.md, stack). Collapsed: pinned
+    // cards in full (two, or one on a phone), the newest of the rest in full
+    // with up to two cards peeking behind it, and "+N more". Expanded: one
+    // scrolling column over a see-through backdrop. Every card stays in the
+    // page; the layout only places it.
     const renderedToasts=new Map();
+    let toastRows=[],stackExpanded=false,stackBar=null,moreButton=null,clearButton=null,backdrop=null,announcer=null,frontObserver=null,observedFront=null,watchingRegion=null,phoneQuery=null;
+    // Writes only real changes: the stack watches the hidden attribute to follow the
+    // Connect card, and every write is a change record.
+    function setHiddenFlag(element,value){if(element.hidden!==value)element.hidden=value;}
+    function phoneLayout(){return !!phoneQuery?.matches;}
+    function externalCards(region){return [...region.querySelectorAll(':scope>[data-toast-card]')].filter(card=>!card.hidden);}
+    function isStackCard(node){
+      if(!node||node.nodeType!==1)return false;
+      if(node.classList.contains('interaction-toast'))return !node.classList.contains('leaving');
+      return node.dataset.toastCard!==undefined&&!node.hidden;
+    }
+    function nextStackCard(node){let next=node;while(next&&!isStackCard(next))next=next.nextSibling;return next||null;}
+    function cardClamped(card){const message=card.querySelector('.interaction-toast-message');return !!message&&!message.hidden&&message.scrollHeight>message.clientHeight+1;}
+    function setStackHeight(region,front){
+      if(front&&front.offsetHeight)region.style.setProperty('--sd-stack-front',`${front.offsetHeight}px`);
+      else region.style.removeProperty('--sd-stack-front');
+    }
+    function watchFront(region,front){
+      if(observedFront===front)return;
+      frontObserver?.disconnect();observedFront=front;
+      if(!front)return;
+      frontObserver=new window.ResizeObserver(()=>setStackHeight(region,observedFront));frontObserver.observe(front);
+    }
+    function ensureBar(region){
+      if(stackBar)return stackBar;
+      stackBar=document.createElement('div');stackBar.className='sd-toast-bar';stackBar.setAttribute('aria-live','off');
+      moreButton=document.createElement('button');moreButton.type='button';moreButton.className='sd-toast-more';
+      moreButton.setAttribute('aria-controls',region.id||'sd-toast-region');
+      moreButton.addEventListener('click',()=>setExpanded(!stackExpanded));
+      clearButton=document.createElement('button');clearButton.type='button';clearButton.className='sd-toast-clear';clearButton.textContent='Clear all';
+      clearButton.addEventListener('click',clearAll);
+      stackBar.append(moreButton,clearButton);
+      return stackBar;
+    }
+    function announce(text){
+      const region=toastRegion();if(!region||!text)return;
+      if(!announcer){
+        announcer=document.createElement('div');announcer.className='sd-toast-announcer';announcer.setAttribute('role','status');announcer.setAttribute('aria-live','polite');
+        region.after(announcer);
+      }
+      announcer.textContent='';requestAnimationFrame(()=>{announcer.textContent=text;});
+    }
+    function layoutStack(){
+      const region=toastRegion();if(!region)return;
+      const card=row=>renderedToasts.get(row.key)?.toast||null;
+      const pinned=toastRows.filter(row=>row.pinned).map(card).filter(Boolean);
+      const stream=[...externalCards(region),...toastRows.filter(row=>!row.pinned).map(card).filter(Boolean)];
+      const order=[...pinned,...stream],total=order.length;
+      // Cards follow the stack's order in the page, moving only those out of place.
+      let reference=nextStackCard(region.firstChild);
+      for(const item of order){
+        if(item===reference){reference=nextStackCard(item.nextSibling);continue;}
+        region.insertBefore(item,reference);
+      }
+      const clamped=!stackExpanded&&order.some(cardClamped);
+      if(stackExpanded&&total<2&&!order.some(cardClamped))setExpanded(false,{layout:false});
+      region.dataset.stack=stackExpanded?'expanded':'collapsed';
+      const showPinned=Math.min(pinned.length,phoneLayout()?1:2);
+      let hiddenCount=0,front=null;
+      const place=(item,where,row)=>{
+        if(item.dataset.stackPlace!==where)item.dataset.stackPlace=where;
+        item.style.gridRow=row?String(row):'';
+      };
+      if(stackExpanded)for(const item of order)place(item,'open',0);
+      else{
+        pinned.forEach((item,index)=>{if(index<showPinned)place(item,'full',index+1);else{place(item,'hidden',0);hiddenCount++;}});
+        const row=showPinned+1;
+        stream.forEach((item,index)=>{
+          if(index===0){front=item;place(item,'front',row);}
+          else if(index<=PEEK_LIMIT){place(item,`behind-${index}`,row);hiddenCount++;}
+          else{place(item,'hidden',0);hiddenCount++;}
+        });
+      }
+      region.dataset.peek=String(stackExpanded?0:Math.min(PEEK_LIMIT,Math.max(0,stream.length-1)));
+      setStackHeight(region,front);watchFront(region,front);
+      // The bar: "+N more" or Show less, and Clear all, once two cards show.
+      const needBar=total>=2||stackExpanded||clamped&&total>0;
+      if(needBar){
+        ensureBar(region);
+        const more=stackExpanded?'Show less':hiddenCount?`+${hiddenCount} more`:'Show all';
+        if(moreButton.textContent!==more)moreButton.textContent=more;
+        setHiddenFlag(moreButton,!stackExpanded&&!hiddenCount&&!clamped);
+        moreButton.setAttribute('aria-expanded',stackExpanded?'true':'false');
+        moreButton.setAttribute('aria-label',stackExpanded?'Show fewer notifications':hiddenCount?`Show ${hiddenCount} more notification${hiddenCount===1?'':'s'}`:'Show notifications in full');
+        setHiddenFlag(clearButton,total<2);
+        if(stackBar.parentNode!==region||region.lastChild!==stackBar)region.appendChild(stackBar);
+        stackBar.style.gridRow=stackExpanded?'':String(showPinned+(stream.length?2:1));
+        setHiddenFlag(stackBar,moreButton.hidden&&clearButton.hidden);
+      }else if(stackBar?.parentNode)stackBar.remove();
+    }
+    // Expanding stops every pop-up's clock; Escape, a click outside or Show
+    // less folds the stack again.
+    function setExpanded(value,{layout=true}={}){
+      const region=toastRegion();value=!!value&&!!region;
+      if(stackExpanded===value){if(layout)layoutStack();return;}
+      stackExpanded=value;
+      notifications.setPaused('expanded',value);
+      if(value){
+        if(!backdrop){
+          backdrop=document.createElement('div');backdrop.className='sd-toast-backdrop';backdrop.setAttribute('aria-hidden','true');
+          backdrop.addEventListener('click',()=>setExpanded(false));
+        }
+        region.prepend(backdrop);
+      }else{
+        backdrop?.remove();
+        region?.scrollTo(0,0);
+      }
+      if(layout)layoutStack();
+      // Focus left inside a card that folded away moves to "+N more".
+      const focused=document.activeElement;
+      if(!value&&region&&focused&&region.contains(focused)&&focused.closest('[data-stack-place="hidden"],[data-stack-place^="behind"]'))moreButton?.focus({preventScroll:true});
+    }
+    function clearAll(){
+      notifications.dismissAll();
+      const region=toastRegion();
+      if(region)for(const card of externalCards(region))card.querySelector('[data-card-close]')?.click();
+      setExpanded(false);
+    }
+    // Closing a card by hand: an app pop-up through the coordinator, the
+    // Connect card through its own close button.
+    function closeCard(card){
+      for(const [key,entry] of renderedToasts)if(entry.toast===card){if(entry.row.dismissible===false)return false;return notifications.dismissEvent(key,entry.row.deliveryId);}
+      const close=card.querySelector('[data-card-close]');if(close){close.click();return true;}
+      return false;
+    }
+    function cardDismissible(card){
+      for(const entry of renderedToasts.values())if(entry.toast===card)return entry.row.dismissible!==false;
+      return !!card.querySelector('[data-card-close]');
+    }
+    function stackCardFrom(target){
+      const region=toastRegion(),card=target.closest('.interaction-toast,[data-toast-card]');
+      return card&&card.parentNode===region&&isStackCard(card)?card:null;
+    }
+    // A card in full view whose button only opens something does the same
+    // when clicked anywhere (docs/areas/notifications.md, stack); other cards, and
+    // cards behind the front one, expand the stack.
+    function openCard(card){
+      if(card.dataset.opens!=='true')return false;
+      // Selecting text in a card is not a click on it.
+      const selection=window.getSelection?.();
+      if(selection&&!selection.isCollapsed&&card.contains(selection.anchorNode))return true;
+      card.querySelector('.interaction-action')?.click();
+      return true;
+    }
+    function onRegionClick(event){
+      if(event.target.closest('button,a,input,select,textarea,label'))return;
+      if(Date.now()-swipedAt<400)return;
+      const card=stackCardFrom(event.target);
+      if(stackExpanded){if(card)openCard(card);else if(event.target===toastRegion())setExpanded(false);return;}
+      if(!card)return;
+      if(['front','full'].includes(card.dataset.stackPlace)&&openCard(card))return;
+      const cards=[...toastRegion().children].filter(isStackCard);
+      if(cards.length>1||cardClamped(card))setExpanded(true);
+    }
+    // A sideways swipe (touch or pen) closes a card; one that cannot be
+    // closed springs back.
+    let swipe=null,swipedAt=0;
+    function onPointerDown(event){
+      if(!['touch','pen'].includes(event.pointerType)||event.target.closest('button,a,input'))return;
+      const card=stackCardFrom(event.target);if(!card)return;
+      swipe={card,id:event.pointerId,x:event.clientX,y:event.clientY,dx:0,active:false,dismissible:cardDismissible(card)};
+    }
+    function onPointerMove(event){
+      if(!swipe||event.pointerId!==swipe.id)return;
+      const dx=event.clientX-swipe.x,dy=event.clientY-swipe.y;
+      if(!swipe.active){
+        if(Math.abs(dy)>12&&Math.abs(dy)>Math.abs(dx)){swipe=null;return;}
+        if(Math.abs(dx)<10)return;
+        // Capture fails only if the pointer has already gone; the swipe still works.
+        swipe.active=true;swipe.card.classList.add('swiping');try{swipe.card.setPointerCapture(event.pointerId);}catch{}
+      }
+      swipe.dx=swipe.dismissible?dx:dx/4;
+      swipe.card.style.transform=`translateX(${swipe.dx}px)`;swipe.card.style.opacity=String(Math.max(.2,1-Math.abs(swipe.dx)/240));
+    }
+    function onPointerEnd(event){
+      if(!swipe||event.pointerId!==swipe.id)return;
+      const {card,dx,active,dismissible}=swipe;swipe=null;
+      if(!active)return;
+      swipedAt=Date.now();card.classList.remove('swiping');
+      if(dismissible&&Math.abs(dx)>=SWIPE_DISTANCE&&event.type!=='pointercancel'){
+        card.style.transform=`translateX(${dx>0?'110%':'-110%'})`;card.style.opacity='0';
+        if(!closeCard(card)){card.style.transform='';card.style.opacity='';}
+        else if(card.dataset.toastCard!==undefined)setTimeout(()=>{card.style.transform='';card.style.opacity='';},TOAST_REMOVE_FALLBACK_MS);
+        return;
+      }
+      card.style.transform='';card.style.opacity='';
+    }
+    // The stack's own wiring, set up once the notification area is first used.
+    function watchRegion(region){
+      if(watchingRegion===region)return;
+      watchingRegion=region;
+      region.addEventListener('click',onRegionClick);
+      region.addEventListener('pointerdown',onPointerDown);
+      region.addEventListener('pointermove',onPointerMove);
+      for(const type of ['pointerup','pointercancel'])region.addEventListener(type,onPointerEnd);
+      document.addEventListener('keydown',event=>{if(event.key==='Escape'&&stackExpanded){event.preventDefault();event.stopPropagation();setExpanded(false);}},true);
+      phoneQuery=window.matchMedia(PHONE_QUERY);phoneQuery.addEventListener('change',()=>layoutStack());
+      // The Connect card shows and hides itself; the stack follows.
+      new window.MutationObserver(()=>layoutStack()).observe(region,{attributes:true,attributeFilter:['hidden'],subtree:true});
+    }
     function renderToasts(state){
       const region=toastRegion();if(!region)return;
+      watchRegion(region);
       const wanted=new Map(state.toasts.map(row=>[row.key,row]));
       for(const [key,entry] of renderedToasts){
         const row=wanted.get(key);
         if(!row||row.deliveryId!==entry.deliveryId){renderedToasts.delete(key);removeToast(entry.toast);}
       }
+      const added=[];
       for(const row of state.toasts){
         let entry=renderedToasts.get(row.key);
         if(!entry){
@@ -368,22 +621,38 @@ registry.define('interactions',1,()=>{
             toast.addEventListener(event,eventValue=>{if(event==='focusout'&&toast.contains(eventValue.relatedTarget))return;notifications.pauseEvent(row.key,row.deliveryId,reason,paused);});
           }
           copy.append(title,message);toast.append(copy);if(row.dismissible!==false)toast.append(close);region.appendChild(toast);
-          entry={toast,copy,title,message,deliveryId:row.deliveryId,action:null,actionSpec:null,secondary:null,secondarySpec:null};renderedToasts.set(row.key,entry);
+          entry={toast,copy,title,message,row,deliveryId:row.deliveryId,action:null,actionSpec:null,secondary:null,secondarySpec:null};renderedToasts.set(row.key,entry);
+          added.push(entry);
           requestAnimationFrame(()=>toast.classList.remove('entering'));
         }
+        entry.row=row;
         const {toast,title,message,copy}=entry;
         for(const kind of ['error','warning','success','info'])toast.classList.toggle(kind,row.severity===kind);
+        if(toast.dataset.tier!==row.tier)toast.dataset.tier=row.tier;
         toast.setAttribute('role',row.severity==='error'?'alert':'status');
         if(title.textContent!==row.title)title.textContent=row.title;
         if(message.textContent!==row.message)message.textContent=row.message;
-        message.hidden=!row.message;
-        const actionButton=spec=>{const control=button(spec.label);control.addEventListener('click',()=>{try{Promise.resolve(spec.run()).catch(error=>capture('notification.action',error));}catch(error){capture('notification.action',error);}});return control;};
+        setHiddenFlag(message,!row.message);
+        // A card's own button closes it, except critical cards and decisions
+        // that close themselves once settled.
+        const actionButton=spec=>{const control=button(spec.label);control.addEventListener('click',()=>{
+          const current=entry.row;
+          if(current.dismissible!==false&&current.tier!=='critical')notifications.dismissEvent(current.key,current.deliveryId,'acted');
+          try{Promise.resolve(spec.run()).catch(error=>capture('notification.action',error));}catch(error){capture('notification.action',error);}
+        });return control;};
         if(entry.actionSpec?.run!==row.action?.run||entry.actionSpec?.label!==row.action?.label||entry.secondarySpec?.run!==row.secondaryAction?.run||entry.secondarySpec?.label!==row.secondaryAction?.label){
           entry.action?.remove();entry.secondary?.remove();entry.action=entry.secondary=null;entry.actionSpec=row.action;entry.secondarySpec=row.secondaryAction||null;
           if(row.action){entry.action=actionButton(row.action);copy.appendChild(entry.action);}
           if(row.action&&row.secondaryAction){entry.secondary=actionButton(row.secondaryAction);copy.appendChild(entry.secondary);}
         }
+        // One button that only opens something: the whole card opens it.
+        const opens=row.action?.opens===true&&!row.secondaryAction?'true':'false';
+        if(toast.dataset.opens!==opens)toast.dataset.opens=opens;
       }
+      toastRows=state.toasts;
+      layoutStack();
+      // A card that arrives out of full view is read out once.
+      for(const entry of added)if(['hidden','behind-1','behind-2'].includes(entry.toast.dataset.stackPlace))announce([entry.row.title,entry.row.message].filter(Boolean).join('. '));
     }
     notifications.subscribe(renderToasts);
     if(typeof document.addEventListener==='function')document.addEventListener('visibilitychange',()=>notifications.setHidden(document.hidden));

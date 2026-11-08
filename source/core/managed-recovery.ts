@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {ManagedRecoveryInput,RecoverySpec,RecoveryKind,SafetyProof} from '../../types/managed-recovery.ts';
+import type {ManagedRecoveryInput,RecoverySpec,RecoveryKind,SafetyProof,VerifiedSafety} from '../../types/managed-recovery.ts';
 import type {AuthorityOptions} from '../../types/mutation-coordinator.ts';
 const sdManagedRecoveryFactory=(()=>{
 'use strict';
@@ -18,17 +18,17 @@ const createModule=()=>{
     functions(input.diagnostics,['capture','mark'],'Managed recovery diagnostics port');
     let active=false;
     function normalizeSpec<R extends object,P extends object>(spec:RecoverySpec<R,P>){
-      exactObject(spec,Object.hasOwn(spec,'keepsActiveSession')?['apply','createSafety','keepsActiveSession','kind','label','publishPresent']:['apply','createSafety','kind','label','publishPresent'],'Managed recovery operation');
+      exactObject(spec,['apply','createSafety','kind','label','publishPresent',...(Object.hasOwn(spec,'keepsActiveSession')?['keepsActiveSession']:[]),...(Object.hasOwn(spec,'verifyEmpty')?['verifyEmpty']:[])],'Managed recovery operation');
       const kind=String(spec.kind||'') as RecoveryKind;
       if(!['bring-in','restore-version','sync'].includes(kind))throw new TypeError('Managed recovery kind is invalid.');
       // A sync only merges without loss, so it needs no external safety
       // version; the local restore journal still protects the apply step.
-      if(typeof spec.apply!=='function'||(kind==='sync'?spec.createSafety!==null:typeof spec.createSafety!=='function')||typeof spec.publishPresent!=='function')throw new TypeError('Managed recovery callbacks are invalid.');
+      if(typeof spec.apply!=='function'||(kind==='sync'?spec.createSafety!==null:typeof spec.createSafety!=='function')||typeof spec.publishPresent!=='function'||spec.verifyEmpty!==undefined&&(kind==='sync'||typeof spec.verifyEmpty!=='function'))throw new TypeError('Managed recovery callbacks are invalid.');
       const label=String(spec.label||'').trim();if(!label)throw new TypeError('Managed recovery source label is required.');
       return freeze({...spec,kind,label,keepsActiveSession:spec.keepsActiveSession===true});
     }
-    function verifiedSafety(input:unknown):input is SafetyProof{
-      const value=input as Partial<SafetyProof>|null|undefined;
+    function verifiedSafety(input:unknown):input is VerifiedSafety{
+      const value=input as Partial<VerifiedSafety>|null|undefined;
       return !!value&&typeof value==='object'&&value.verified===true&&/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))&&Number.isFinite(Date.parse(String(value.sourceRevision||'')));
     }
     async function execute<R extends object,P extends object>(rawSpec:RecoverySpec<R,P>){
@@ -49,14 +49,21 @@ const createModule=()=>{
           });
           input.diagnostics.mark('recovery-preflight-quiesce-complete',{kind:spec.kind});
           let safety:SafetyProof|null=null;
-          if(spec.createSafety){input.diagnostics.mark('external-safety-start',{kind:spec.kind,source:spec.label});assertAuthority();const proof=await spec.createSafety();safety=verifiedSafety(proof)?proof:null;assertAuthority();input.diagnostics.mark('external-safety-complete',{kind:spec.kind,source:spec.label});}
-          if(spec.createSafety&&!verifiedSafety(safety))throw new Error(`Study Director could not verify the Before restore safety version in ${spec.label}. Recovery was stopped before changing local data.`);
+          if(spec.createSafety){input.diagnostics.mark('external-safety-start',{kind:spec.kind,source:spec.label});assertAuthority();const proof=await spec.createSafety();safety=verifiedSafety(proof)?proof:proof&&typeof proof==='object'&&'verified' in proof&&proof.verified===false&&'skipped' in proof&&proof.skipped==='local-empty'?{verified:false,skipped:'local-empty'}:null;assertAuthority();input.diagnostics.mark('external-safety-complete',{kind:spec.kind,source:spec.label});}
+          const skippedEmpty=safety?.verified===false&&safety?.skipped==='local-empty'&&typeof spec.verifyEmpty==='function';
+          if(spec.createSafety&&!verifiedSafety(safety)&&!skippedEmpty)throw new Error(`Study Director could not verify the Before restore safety version in ${spec.label}. Recovery was stopped before changing local data.`);
           let result!:R;
           input.diagnostics.mark('recovery-commit-quiesce-enter',{kind:spec.kind});
           await input.lifecycle.quiesce(async()=>{
             input.diagnostics.mark('recovery-final-settle-start',{kind:spec.kind});await input.lifecycle.settle(spec.kind,freeze({phase:'final',keepsActiveSession:spec.keepsActiveSession}));input.diagnostics.mark('recovery-final-settle-complete',{kind:spec.kind});
             const currentRevision=String(input.lifecycle.revision()||'');
-            if(safety&&settledRevision&&safety.sourceRevision&&currentRevision!==String(safety.sourceRevision)){
+            if(skippedEmpty){
+              // Recheck after the final settlement, including when a brand-new
+              // device has no revision timestamp yet.
+              if(currentRevision!==settledRevision||await spec.verifyEmpty()!==true){
+                throw Object.assign(new Error('Local data changed while preparing recovery. Nothing was restored; retry when ready.'),{code:'STUDY_DIRECTOR_RECOVERY_STALE_SAFETY'});
+              }
+            }else if(verifiedSafety(safety)&&settledRevision&&safety.sourceRevision&&currentRevision!==String(safety.sourceRevision)){
               throw Object.assign(new Error('Local data changed while the Before restore safety version was being created. Recovery stopped before changing current data; retry when ready.'),{code:'STUDY_DIRECTOR_RECOVERY_STALE_SAFETY'});
             }
             input.diagnostics.mark('recovery-apply-start',{kind:spec.kind});assertAuthority();result=await spec.apply();assertAuthority();input.diagnostics.mark('recovery-apply-complete',{kind:spec.kind,cancelled:result&&'cancelled' in result&&result.cancelled===true});

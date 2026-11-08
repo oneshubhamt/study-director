@@ -862,7 +862,7 @@ html[data-presentation="glass"] .sb-stats{
   }
   html[data-presentation="glass"] .nav-item.on{border-bottom-color:var(--sd-glass-edge)!important}
   html[data-presentation="glass"] .nav-icon{display:grid!important;width:22px;height:22px;border-radius:8px;font-size:var(--sd-type-role-copy-size)}
-  html[data-presentation="glass"] .main{margin-left:0!important;padding-right:0;padding-bottom:0}
+  html[data-presentation="glass"] .main{margin-left:0!important;padding-top:var(--sd-safe-top);padding-right:0;padding-bottom:0}
   html[data-presentation="glass"] .pane,
   html[data-presentation="glass"] #pane-plan{padding-top:max(18px,var(--sd-density-pane-padding-top));padding-bottom:var(--sd-glass-mobile-content-clearance)}
   html[data-presentation="glass"] .display-tools,

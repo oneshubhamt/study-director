@@ -18,7 +18,7 @@ registry.define('persistence',1,()=>{
     let lastError:unknown=null;
     function getText(key:string,fallback?:string):string;
     function getText(key:string,fallback:null):string|null;
-    function getText(key:string,fallback:string|null=''){
+    function getText(key:string,fallback:string|null=''):string|null{
         try{
           const value=globalThis.localStorage.getItem(key);
           lastError=null;onOk('read');
@@ -54,7 +54,7 @@ registry.define('persistence',1,()=>{
     };
     return freeze(api);
   }
-  function randomIdPart(bytes=8){
+  function randomIdPart(bytes:number=8){
     try{
       const arr=new Uint8Array(bytes);
       crypto.getRandomValues(arr);
@@ -114,21 +114,26 @@ registry.define('persistence',1,()=>{
   }
   function normalizeTimestamp(value:unknown,fallback?:null):string|null;
   function normalizeTimestamp(value:unknown,fallback:string):string;
-  function normalizeTimestamp(value:unknown,fallback:string|null=null){
+  function normalizeTimestamp(value:unknown,fallback:string|null=null):string|null{
     const n=Date.parse(String(value||''));
     return Number.isFinite(n)?new Date(n).toISOString():fallback;
   }
+  // A time later than this device's clock by more than this is damaged. It
+  // is two days, not minutes: another device's clock can be hours ahead of
+  // this one (a wrong time zone, a dual-boot PC), and its data must still
+  // read here. Times only choose what shows before a review.
+  const IMPORTED_TIME_AHEAD_MS=48*60*60*1000;
   function normalizeImportedTimestamp(value:unknown,fallback?:null,nowMs?:number):string|null;
   function normalizeImportedTimestamp(value:unknown,fallback:string,nowMs?:number):string;
-  function normalizeImportedTimestamp(value:unknown,fallback:string|null=null,nowMs=Date.now()){
+  function normalizeImportedTimestamp(value:unknown,fallback:string|null=null,nowMs:number=Date.now()):string|null{
     const n=Date.parse(String(value||''));
-    return !Number.isFinite(n)||n>Number(nowMs)+10*60*1000?fallback:new Date(n).toISOString();
+    return !Number.isFinite(n)||n>Number(nowMs)+IMPORTED_TIME_AHEAD_MS?fallback:new Date(n).toISOString();
   }
   function normalizeImportedEpochMillis(value:unknown,fallback?:null,nowMs?:number):number|null;
   function normalizeImportedEpochMillis(value:unknown,fallback:number,nowMs?:number):number;
-  function normalizeImportedEpochMillis(value:unknown,fallback:number|null=null,nowMs=Date.now()){
+  function normalizeImportedEpochMillis(value:unknown,fallback:number|null=null,nowMs:number=Date.now()):number|null{
     const n=Number(value);
-    return !Number.isFinite(n)||n<0||n>Number(nowMs)+10*60*1000?fallback:Math.round(n);
+    return !Number.isFinite(n)||n<0||n>Number(nowMs)+IMPORTED_TIME_AHEAD_MS?fallback:Math.round(n);
   }
   function jsonByteLength(value:unknown){
     const text=typeof value==='string'?value:JSON.stringify(value);
@@ -280,7 +285,7 @@ registry.define('persistence',1,()=>{
       return idbGetAll(storeName,abortMessage);
     }
     let strictDurabilitySupport=0;
-    function createIdbTransaction(db:IDBDatabase,stores:string|string[],mode:IDBTransactionMode,strict=false){
+    function createIdbTransaction(db:IDBDatabase,stores:string|string[],mode:IDBTransactionMode,strict:boolean=false){
       if(!strict)return db.transaction(stores,mode) as DbTransaction;
       if(mode!=='readwrite')throw new TypeError('Strict IndexedDB durability is reserved for readwrite transactions.');
       if(strictDurabilitySupport<0)return db.transaction(stores,mode) as DbTransaction;
@@ -311,7 +316,7 @@ registry.define('persistence',1,()=>{
     // replaceable: the record is this build's own bookkeeping (a lease,
     // maintenance progress, a cache), which the data contract lets any build
     // replace; writing it takes it back. Everything else is never changed.
-    function hold(storeName:string,key:DbKey,reason='unsupported',{replaceable=false}={}){
+    function hold(storeName:string,key:DbKey,reason:string='unsupported',{replaceable=false}={}){
       const name=String(storeName||'');if(!STORE_KEY_PATHS.has(name)||key===undefined||key===null)return false;
       if(!unsupported.has(name))unsupported.set(name,new Map());
       const rows=unsupported.get(name)!,id=keyId(key);if(rows.has(id))return false;
@@ -431,7 +436,7 @@ registry.define('persistence',1,()=>{
       return view;
     }
     const touchesHeld=(stores:string|string[])=>(Array.isArray(stores)?stores:[stores]).some(name=>heldIn(String(name)));
-    async function runIdbTransaction<T>(stores:string|string[],mode:IDBTransactionMode,fn:TransactionOperation<T>,abortMessage='transaction aborted',strict=false,retry=0,raw=false):Promise<T>{
+    async function runIdbTransaction<T>(stores:string|string[],mode:IDBTransactionMode,fn:TransactionOperation<T>,abortMessage:string='transaction aborted',strict:boolean=false,retry:number=0,raw:boolean=false):Promise<T>{
       const db=await openAppDB();
       return new Promise<T>((resolve,reject)=>{
         let tx;
@@ -453,9 +458,9 @@ registry.define('persistence',1,()=>{
         try{fn(view,finish);}catch(error){try{tx.abort();}catch{}finish(false,error);}
       });
     }
-    function idbTransaction<T>(stores:string|string[],mode:IDBTransactionMode,fn:TransactionOperation<T>,abortMessage='transaction aborted'){return runIdbTransaction(stores,mode,fn,abortMessage,false);}
-    function idbStrictTransaction<T>(stores:string|string[],mode:IDBTransactionMode,fn:TransactionOperation<T>,abortMessage='transaction aborted'){return runIdbTransaction(stores,mode,fn,abortMessage,true);}
-    function idbStoreTransaction<T>(storeName:string,mode:IDBTransactionMode,fn:StoreOperation<T>,abortMessage='transaction aborted'){return idbTransaction<T>(storeName,mode,(tx,finish)=>fn(tx.objectStore(storeName),tx,finish),abortMessage);}
+    function idbTransaction<T>(stores:string|string[],mode:IDBTransactionMode,fn:TransactionOperation<T>,abortMessage:string='transaction aborted'){return runIdbTransaction(stores,mode,fn,abortMessage,false);}
+    function idbStrictTransaction<T>(stores:string|string[],mode:IDBTransactionMode,fn:TransactionOperation<T>,abortMessage:string='transaction aborted'){return runIdbTransaction(stores,mode,fn,abortMessage,true);}
+    function idbStoreTransaction<T>(storeName:string,mode:IDBTransactionMode,fn:StoreOperation<T>,abortMessage:string='transaction aborted'){return idbTransaction<T>(storeName,mode,(tx,finish)=>fn(tx.objectStore(storeName),tx,finish),abortMessage);}
     function idbStrictStoreTransaction<T>(storeName:string,mode:IDBTransactionMode,fn:StoreOperation<T>,abortMessage='transaction aborted'){return idbStrictTransaction<T>(storeName,mode,(tx,finish)=>fn(tx.objectStore(storeName),tx,finish),abortMessage);}
     // Reads every record of a store as stored (unsupported ones included) and
     // holds each one classify names a reason for (a string, or {reason,replaceable}). A store this build
@@ -477,7 +482,7 @@ registry.define('persistence',1,()=>{
     function idbGet(storeName:string,key:DbQuery,abortMessage='read aborted'){
       return idbStoreTransaction(storeName,'readonly',(store,tx,finish)=>{const req=store.get(key);req.onsuccess=()=>finish(true,req.result||null);req.onerror=()=>finish(false,req.error||new Error(abortMessage));},abortMessage);
     }
-    function idbGetAll(storeName:string,abortMessage='read aborted'){
+    function idbGetAll(storeName:string,abortMessage:string='read aborted'){
       return idbStoreTransaction<unknown[]>(storeName,'readonly',(store,tx,finish)=>{const req=store.getAll();req.onsuccess=()=>finish(true,req.result||[]);req.onerror=()=>finish(false,req.error||new Error(abortMessage));},abortMessage);
     }
     return freeze({

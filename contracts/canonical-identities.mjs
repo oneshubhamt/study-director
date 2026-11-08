@@ -21,7 +21,7 @@ export const CURRENT_SCHEMA_VERSIONS=freeze({
   LocalRecoveryEnvelope:1,
   ActiveSession:10,
   Note:3,
-  PendingReview:1,
+  PendingReview:2,
   AppMeta:1,
   CheckpointMetadata:1,
   CheckpointProtectedManifest:3
@@ -59,8 +59,8 @@ export const CACHE_STORAGE_IDENTITIES=freeze({
 
 export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
   deviceFolderPickerId:'study-director-device-backup',
-  // Earlier versions kept one repository folder in the chosen folder; it is
-  // moved into the profile and device's own ("Study Director - Ana - iPhone Safari").
+  // Each profile and device owns its repository folder
+  // ("Study Director - Ana - iPhone Safari").
   backupFolderPrefix:'Study Director',
   deviceFolderObjects:'objects',
   deviceFolderCheckpoints:'checkpoints',
@@ -82,7 +82,7 @@ export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
 });
 
 export const EXTERNAL_FORMATS=freeze({
-  completeBackup:freeze({format:'study-director-backup',metadataVersion:23,containerMagic:'SDBK10\r\n'}),
+  completeBackup:freeze({format:'study-director-backup',metadataVersion:24,containerMagic:'SDBK10\r\n'}),
   protectedBackup:freeze({magic:'SDENC02\n',version:2}),
   attachmentArchive:freeze({format:'study-director.attachments',magic:'SDAT01\r\n',version:1})
 });

@@ -19,7 +19,7 @@ const createModule=()=>{
   const hashPattern=/^[a-f0-9]{64}$/;
   const abort=()=>Object.assign(new Error('Attachment operation cancelled.'),{name:'AbortError'});
   async function identify(file:Blob){
-    const b=new Uint8Array(await file.slice(0,64).arrayBuffer()),at=(s:string,n=0)=>[...s].every((v,i)=>b[n+i]===v.charCodeAt(0));let type='';
+    const b=new Uint8Array(await file.slice(0,64).arrayBuffer()),at=(s:string,n:number=0)=>[...s].every((v,i)=>b[n+i]===v.charCodeAt(0));let type='';
     if(at('%PDF-'))type='application/pdf';
     else if(b[0]===137&&at('PNG\r\n\x1a\n',1))type='image/png';
     else if(b[0]===255&&b[1]===216&&b[2]===255)type='image/jpeg';
@@ -81,9 +81,11 @@ const createModule=()=>{
       return loaded.value;
     }
 
+    function sources(options:SourceOptions&{referencesOnly:true}):Promise<Set<string>>;
+    function sources(options?:SourceOptions&{referencesOnly?:false}):Promise<AttachmentSource[]>;
     async function sources(options:SourceOptions={}){
-      const includeLive=options.includeLive!==false,priority=options.priority==='background'?'background':'user-visible',sources=new Map<string,AttachmentSource>(),budget=background.budget();
-      const add=(kind:string,key:string,label:string,value:unknown)=>{if(!key)return;const identity=kind+':'+key;sources.set(identity,descriptor(kind,key,label,value));};
+      const includeLive=options.includeLive!==false,priority=options.priority==='background'?'background':'user-visible',referencesOnly=options.referencesOnly===true,sources=new Map<string,AttachmentSource>(),references=referencesOnly?new Set():null,budget=background.budget();
+      const add=(kind:string,key:string,label:string,value:unknown)=>{if(!key)return;if(references){for(const id of scan(value).assetIds||[])references.add(id);return;}const identity=kind+':'+key;sources.set(identity,descriptor(kind,key,label,value));};
       for(const [key,note] of Object.entries(await data.notes.readFreshPayload()||{})){add('note',key,note.label||key,note.text);if(budget())await background.yieldTask({priority});}
       // Verification and reference removal require a complete canonical inventory.
       for(const day of await data.dailyRecords.list({strict:true})||[]){add('day',day.date,'Reflection · '+day.date,day.reflection);if(budget())await background.yieldTask({priority});}
@@ -98,11 +100,12 @@ const createModule=()=>{
           const key=diary?field.dataset['diaryDate']:reflection?String(session?.id||'current'):live.noteKey(field.dataset['areaKey']);
           if(!key)continue;
           const kind=diary?'day':reflection?'session':'note',label=diary?'Diary edit · '+key:reflection?'Reflection · '+reviewDate:key;
+          if(references){add(kind,key,label,field.value);continue;}
           const identity=kind+':'+key,current=descriptor(kind,key,label,field.value),prior=sources.get(identity);
           if(prior){const ids=new Set([...prior.ids,...current.ids]);sources.set(identity,Object.freeze({...current,ids}));}else sources.set(identity,current);
         }
       }
-      return [...sources.values()];
+      return references||[...sources.values()];
     }
     async function restore(snapshot:ReferenceSnapshot|null){
       if(!snapshot)return true;
@@ -157,12 +160,12 @@ const createModule=()=>{
     const integrityIssue=(id:string)=>typeof p.integrityIssue==='function'?p.integrityIssue(String(id||'')):null;
     const integrityLabel=(issue:AssetIssue|null)=>issue?.kind==='missing-file'?'File missing':issue?.kind==='size-mismatch'?'Stored size mismatch':issue?.kind==='metadata-invalid'?'Metadata unreadable':issue?.kind==='missing-metadata'?'Library record missing':'Storage issue';
     const integrityMessage=(issue:AssetIssue)=>issue?.kind==='missing-file'?'The stored attachment file is missing. Restore it from a verified backup.':issue?.kind==='size-mismatch'?'The stored attachment file size no longer matches its metadata. Restore it from a verified backup.':issue?.kind==='metadata-invalid'?'The attachment metadata is unreadable. Preserve browser storage and restore from a verified backup.':issue?.kind==='missing-metadata'?'A note references this attachment identity, but its library metadata is missing. Restore it from a verified backup.':'Attachment storage needs attention.';
-    const status=(message:string,notice=activeNotice,progress:AttachmentProgress|null=null)=>{if(notice)return !!notice.update({message,progress});notifications.feedback({id:'attachment-status',surfaceId:'attachment-status',surface:'inline',cue:'none',severity:'info',lifecycle:message?'succeeded':'resolved',message});return true;};
+    const status=(message:string,notice:AttachmentNotice|AttachmentNotice | null=activeNotice,progress:AttachmentProgress|null=null)=>{if(notice)return !!notice.update({message,progress});notifications.feedback({id:'attachment-status',surfaceId:'attachment-status',surface:'inline',cue:'none',severity:'info',lifecycle:message?'succeeded':'resolved',message});return true;};
     const formatIngestProgress=(name:unknown,progress:WorkerProgress)=>{const phase=String(progress?.phase||'preparing'),loaded=Number(progress?.loaded)||0,total=Number(progress?.total)||0,label=cleanName(name);if(phase==='copying'&&total>0)return `Copying ${label} · ${sizeLabel(loaded)} / ${sizeLabel(total)} · ${Math.min(100,Math.max(0,Math.round(loaded/total*100)))}%`;if(phase==='verifying')return `Verifying ${label}…`;if(phase==='complete')return `Finishing ${label}…`;return `Preparing ${label}…`;};
-    function renderIngestProgress(name:unknown,progress:WorkerProgress,ticket=activeProgress,notice=activeNotice){if(!ticket||ticket!==activeProgress||notice?.read()?.lifecycle!=='running')return;const panel=byId('attachment-progress'),bar=byId('attachment-progress-bar'),label=byId('attachment-progress-label'),value=byId('attachment-progress-value'),message=formatIngestProgress(name,progress),phase=String(progress?.phase||'preparing'),loaded=Math.max(0,Number(progress?.loaded)||0),total=Math.max(0,Number(progress?.total)||0),percent=total>0?Math.min(100,Math.max(0,Math.round(loaded/total*100))):0;if(panel)panel.hidden=false;if(label)label.textContent=message;if(value)value.textContent=phase==='copying'||phase==='verifying'||phase==='complete'?`${phase==='verifying'?'Verify · ':''}${phase==='complete'?100:percent}%`:'';if(bar){bar.max=total>0?total:1;if(total>0&&(phase==='copying'||phase==='verifying'||phase==='complete'))bar.value=phase==='complete'?total:Math.min(total,loaded);else bar.removeAttribute('value');bar.setAttribute('aria-label',message);}status(message,notice,{stage:phase,loadedBytes:loaded,activeBytes:total});}
-    function clearIngestProgress(ticket=activeProgress){if(ticket!==activeProgress)return;activeProgress=0;const panel=byId('attachment-progress'),bar=byId('attachment-progress-bar'),label=byId('attachment-progress-label'),value=byId('attachment-progress-value');if(panel)panel.hidden=true;if(bar){bar.removeAttribute('value');bar.removeAttribute('aria-label');bar.max=1;}if(label)label.textContent='Preparing attachment…';if(value)value.textContent='';}
+    function renderIngestProgress(name:unknown,progress:WorkerProgress,ticket:number=activeProgress,notice:AttachmentNotice|null=activeNotice){if(!ticket||ticket!==activeProgress||notice?.read()?.lifecycle!=='running')return;const panel=byId('attachment-progress'),bar=byId('attachment-progress-bar'),label=byId('attachment-progress-label'),value=byId('attachment-progress-value'),message=formatIngestProgress(name,progress),phase=String(progress?.phase||'preparing'),loaded=Math.max(0,Number(progress?.loaded)||0),total=Math.max(0,Number(progress?.total)||0),percent=total>0?Math.min(100,Math.max(0,Math.round(loaded/total*100))):0;if(panel)panel.hidden=false;if(label)label.textContent=message;if(value)value.textContent=phase==='copying'||phase==='verifying'||phase==='complete'?`${phase==='verifying'?'Verify · ':''}${phase==='complete'?100:percent}%`:'';if(bar){bar.max=total>0?total:1;if(total>0&&(phase==='copying'||phase==='verifying'||phase==='complete'))bar.value=phase==='complete'?total:Math.min(total,loaded);else bar.removeAttribute('value');bar.setAttribute('aria-label',message);}status(message,notice,{stage:phase,loadedBytes:loaded,activeBytes:total});}
+    function clearIngestProgress(ticket:number=activeProgress){if(ticket!==activeProgress)return;activeProgress=0;const panel=byId('attachment-progress'),bar=byId('attachment-progress-bar'),label=byId('attachment-progress-label'),value=byId('attachment-progress-value');if(panel)panel.hidden=true;if(bar){bar.removeAttribute('value');bar.removeAttribute('aria-label');bar.max=1;}if(label)label.textContent='Preparing attachment…';if(value)value.textContent='';}
     const element=<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string,className?:string)=>{const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(className)el.className=className;return el;};
-    const button=(text:string,action:()=>unknown,mutation=false,actionId='')=>{const el=element('button',text,'mini-btn ui-btn');el.type='button';el.dataset['attachmentAction']=actionId||String(text||'action').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');if(mutation)el.dataset['ownerMutation']='attachments';el.disabled=busy||(mutation&&!p.canMutate());el.addEventListener('click',()=>{try{Promise.resolve(action()).catch(error=>reportError(error));}catch(error){reportError(error);}});return el;};
+    const button=(text:string,action:()=>unknown,mutation:boolean=false,actionId:string='')=>{const el=element('button',text,'mini-btn ui-btn');el.type='button';el.dataset['attachmentAction']=actionId||String(text||'action').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');if(mutation)el.dataset['ownerMutation']='attachments';el.disabled=busy||(mutation&&!p.canMutate());el.addEventListener('click',()=>{try{Promise.resolve(action()).catch(error=>reportError(error));}catch(error){reportError(error);}});return el;};
     function releasePreviewResources(panel=byId('attachment-detail')){const audio=panel?.querySelector?.('audio');if(audio){audio.pause();audio.removeAttribute('src');audio.load();}if(url){URL.revokeObjectURL(url);url='';}previewRelease?.();previewRelease=null;}
     function closePreview(){generation++;refreshSequence++;releasePreviewResources();byId('attachment-preview')?.replaceChildren();}
     function reportError(error:unknown,notice:AttachmentNotice|null=null){
@@ -391,7 +394,7 @@ const createModule=()=>{
       document.querySelectorAll<HTMLElement>('#attachment-list [data-attachment-id]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset['attachmentId']===id)));
       const row=rows.find(r=>r.id===id);try{const prepared=await prepareDetail(id,row,epoch);if(prepared.stale||epoch!==generation){discardPreparedDetail(prepared);return false;}notifications.feedback({id:'attachment-access',lifecycle:'resolved'});return commitDetail(prepared);}catch(error){if(epoch===generation)reportError(error);return false;}
     }
-    function renderAttachmentList(sourceRows=rows,activeId=selected){
+    function renderAttachmentList(sourceRows:AssetRow[]=rows,activeId:string=selected){
       const list=byId('attachment-list');if(!list)return false;const scrollTop=list.scrollTop||0,query=byId('attachment-search')!.value.trim().toLowerCase(),matching=sourceRows.filter(r=>(r.name||'Note image').toLowerCase().includes(query)),fragment=document.createDocumentFragment();
       for(const itemRow of matching.slice(0,visibleCount)){const item=button(itemRow.name||'Note image',()=>select(itemRow.id),false,`attachment-row-${itemRow.id}`),issue=integrityIssue(itemRow.id);item.classList.add('attachment-item');if(issue)item.classList.add('integrity-issue');item.dataset['attachmentId']=itemRow.id;item.setAttribute('aria-pressed',String(itemRow.id===activeId));item.append(element('small',`${sizeLabel(itemRow.size)} · ${itemRow.type.replace('application/','')}`));if(issue)item.append(element('small',integrityLabel(issue),'attachment-integrity-note'));fragment.append(item);}
       if(matching.length>visibleCount)fragment.append(button('Show more',()=>{visibleCount+=100;renderAttachmentList();return true;}));if(!fragment.childNodes.length)fragment.append(element('p',sourceRows.length?'No matching attachments.':'Add images, PDFs or audio.','ui-status'));

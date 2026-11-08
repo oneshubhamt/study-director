@@ -8,7 +8,7 @@ export type LocalLease={version?:unknown;tabId?:unknown;pageId?:unknown;claimId?
 export interface MutationInput{
  configuration:Readonly<{heartbeatMs:number;leaseMs:number;lockName:string;storageKey:string}>;
  durable:{acquire(value:LeaseInput):Promise<LeaseResult>;release(id:string):Promise<unknown>};
- environment:{AbortController:typeof AbortController;addStorageListener(listener:(event:{key:string|null})=>void):void;clearInterval(id:number):void;locks:Pick<LockManager,'request'>|null;now():number;randomIdPart(length:number):string;setInterval(callback:()=>void,ms:number):number;setTimeout(callback:()=>void,ms:number):unknown};
- hooks:{refreshUi():void;scheduleUpdate(delay:number):void};identity:{canMutate():boolean;status():{tabId?:unknown;pageId?:unknown;claimId?:unknown}};
+ environment:{AbortController:typeof AbortController;addStorageListener(listener:(event:{key:string|null})=>void):void;clearInterval(id:number):void;locks:Pick<LockManager,'request'>|null;now():number;randomIdPart(length:number):string;setInterval(callback:()=>void,ms:number):number;setTimeout(callback:()=>void,ms:number):number};
+ hooks:{foreignReleased():void;refreshUi():void;scheduleUpdate(delay:number):void};identity:{canMutate():boolean;status():{tabId?:unknown;pageId?:unknown;claimId?:unknown}};
  local:{getJson(key:string,fallback:null):unknown;remove(key:string):unknown;setJson(key:string,value:unknown):boolean};
 }

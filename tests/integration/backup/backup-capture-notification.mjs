@@ -9,7 +9,12 @@ assert.ok(start>=0&&end>start,'The reference-aware canonical commit handler must
 const commits=[],notifications=[],maintenanceDelays=[];
 const RichTextApi={scanAttachmentReferences:value=>({trusted:true,assetIds:[...String(value||'').matchAll(/img-[a-z0-9-]{20,80}/g)].map(match=>match[0])})};
 const handler=new Function('writeStorageHealth','renderStorageHealth','document','NativeCapabilities','notifyBackupChange','scheduleRichTextAssetMaintenance','invalidateAttachmentLibrary','RichTextApi','ACTIVE_SESSION_ID',
-  `let richAssetReferenceRevision=0;const canonicalAttachmentReferenceSignatures=new Map();${html.slice(start,end)};return {handleCanonicalCommit,getRevision:()=>richAssetReferenceRevision};`)(
+  `let richAssetReferenceRevision=0;const canonicalAttachmentReferenceSignatures=new Map();
+   let saveReminderDate='',noticeRechecks=0;
+   function revalidateSaveReminderAfterCanonicalConvergence(){noticeRechecks++;return Promise.resolve(true);}
+   ${html.slice(start,end)};
+   return {handleCanonicalCommit,getRevision:()=>richAssetReferenceRevision,
+     setReminderDate:value=>saveReminderDate=value,reminderRechecks:()=>noticeRechecks};`)(
   state=>commits.push(state),()=>{}, {querySelector:()=>null},null,change=>notifications.push(change),delay=>maintenanceDelays.push(delay),()=>{},RichTextApi,'active-session'
 );
 handler.handleCanonicalCommit({entityType:'activeSession',operation:'upsert',value:{snapshot:{review:{reflection:'',studyQuality:null}}},committedAt:'2026-09-23T17:00:00.000Z',backupCapture:true});
@@ -37,4 +42,19 @@ assert.equal(maintenanceDelays.length,backupCaptureMaintenance+2,'Plain-text edi
 handler.handleCanonicalCommit({entityType:'dailyRecord',operation:'upsert',value:{date:'2026-09-23',reflection:'img-reference-12345678901234567890'},committedAt:'2026-09-23T17:04:00.000Z'});
 assert.equal(maintenanceDelays.length,backupCaptureMaintenance+3,'Adding an attachment reference must schedule attachment maintenance.');
 assert.equal(handler.getRevision(),6,'Canonical reference signatures advance independently of whether backup-capture commits suppress maintenance scheduling.');
-console.log(JSON.stringify({status:'PASS',suite:'backup-capture-notification',referenceAwareMaintenance:true}));
+
+// A canonical Saved Day commit rechecks a pending unsaved-work notice, even
+// when the commit is part of backup capture and must not recurse into backup.
+const backupBeforeReminder=notifications.length;
+handler.setReminderDate('2026-09-23');
+handler.handleCanonicalCommit({entityType:'dailyRecord',operation:'upsert',
+  value:{date:'2026-09-23',reflection:'plain text'},
+  committedAt:'2026-09-23T17:05:00.000Z',backupCapture:true});
+assert.equal(handler.reminderRechecks(),1,'a pending Save Today warning must revalidate after a canonical Day commit');
+assert.equal(notifications.length,backupBeforeReminder,'reminder reconciliation must not schedule a recursive backup');
+handler.setReminderDate('');
+handler.handleCanonicalCommit({entityType:'dailyRecord',operation:'upsert',
+  value:{date:'2026-09-23',reflection:'plain text'},backupCapture:true});
+assert.equal(handler.reminderRechecks(),1,'no redundant coverage read after the reminder is settled');
+
+console.log(JSON.stringify({status:'PASS',suite:'backup-capture-notification',referenceAwareMaintenance:true,reminderRevalidation:true}));

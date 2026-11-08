@@ -2,7 +2,7 @@ import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {MetaValidator,MetaEntry} from '../../types/app-meta.ts';
 import type {DbTransaction} from '../../types/persistence.ts';
 import type {WriteToken} from '../../types/ownership.ts';
-import type {DailyRecord,ActiveSession,SavedPlans,PendingReview} from '../../types/record-models.ts';
+import type {DailyRecord,ActiveSession,SavedPlans,PendingReview,PersonalData} from '../../types/record-models.ts';
 import type {RepositoriesInput,ValidatorInput,RepositoryMetadata,MetadataFields,SessionResult,RecoveryEnvelope,DeletionEntry,DayDeletion,NoteDeletion,AttachmentDeletion,WriteOptions,BatchOptions,RevisionValue,RevisionState,MaintenanceOptions,MaintenanceResult,WindowOptions,ImportOptions,CanonicalReadOptions,DailyView,DailySummary,SummaryView,PortablePreferences} from '../../types/repositories.ts';
 type RawFields=MetadataFields&Partial<Record<'kind'|'id'|'entries'|'shell'|'snapshot'|'revision'|'type'|'scheduleText'|'runningOn'|'suspendedAt'|'savedAt'|'entityType'|'entityId'|'schemaVersion'|'deviceId'|'createdAt'|'deleted'|'syncStatus'|'dayOfWeek'|'dayName',unknown>>;
 // Inspection only: properties stay unknown until the existing validators accept them.
@@ -128,7 +128,7 @@ const createModule=()=>{
     const getInstallationId=InstallationIdentity.getId;
     const {
       buildDailyRecordSummary,sanitizeCurrentDailyRecord,sanitizeCurrentNote,
-      materializeDailyRecordView,sanitizeDailyRecordSummary,materializeDailyRecordSummary
+      materializeDailyRecordView,storedDailyRecordFields,sanitizeDailyRecordSummary,materializeDailyRecordSummary
     }=DailyRecordCodec;
     const FALLBACK_DAILY_RECORD_LIMIT=14;
     let fallbackDailyRecordsActive=false;
@@ -162,12 +162,14 @@ const createModule=()=>{
     let changeClockMs=0;
     function nextChangeAt(){changeClockMs=Math.max(Date.now(),changeClockMs+1);return new Date(changeClockMs).toISOString();}
     function seedChangeClock(value:unknown){const ms=Date.parse(String(value||''));if(Number.isFinite(ms))changeClockMs=Math.max(changeClockMs,ms);return changeClockMs?new Date(changeClockMs).toISOString():'';}
-    function reportCanonicalCommit(entityType:string,operation:'upsert'|'delete'='upsert',value:unknown=null,{backupCapture=false}:{backupCapture?:boolean}={}){
+    // startup: written during canonical hydration, not by the person
+    // or a sync. settingsOnly: personal settings alone, no plans.
+    function reportCanonicalCommit(entityType:string,operation:'upsert'|'delete'='upsert',value:unknown=null,{backupCapture=false,startup=false,settingsOnly=false}={}){
       try{
         onCanonicalCommit(freeze({
           format:'study-director.canonical-commit',contractVersion:1,
           entityType:String(entityType||''),operation:operation==='delete'?'delete':'upsert',
-          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true
+          committedAt:nextChangeAt(),value,backupCapture:backupCapture===true,startup:startup===true,settingsOnly:settingsOnly===true
         }));
       }catch(error){capture('repository.canonical-commit-hook',error,'error');}
     }
@@ -257,9 +259,13 @@ const createModule=()=>{
       AppDiagnostics.capture('daily-record.recovery-cleanup',error,'warn');return false;
     }
     function showSubjectNoteSaveWarning(reason:unknown){
+      if(reason&&typeof reason==='object'&&(reason as {kind?:unknown}).kind==='rescue-capacity'){
+        markStorageHealthError('notes',String((reason as {message?:unknown}).message||'An unsaved Note could not fit the emergency browser copy. Keep this tab open until it finishes saving.'));
+        return;
+      }
       markStorageHealthError('notes',`Notes could not be saved in this browser session${reason?`: ${reason}`:''}. Export a backup before closing this tab.`);
     }
-    function notifyDailyRecordsChanged(date='',type='change'){
+    function notifyDailyRecordsChanged(date:string='',type:string='change'){
       onDailyRecordsChanged(freeze({date:isValidIsoDate(date)?date:'',type:String(type||'change')}));
     }
     function nextSessionRevision(seed=0){
@@ -281,7 +287,7 @@ const createModule=()=>{
       if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
       return value;
     }
-    function entityTimestamp(input:unknown,kind=''){
+    function entityTimestamp(input:unknown,kind:string=''){
       const value=repositoryFields(input);
       if(!value||typeof value!=='object')return 0;
       const raw=value.updatedAt||(kind==='dailyRecord'?value.savedAt:null)||value.deletedAt;
@@ -322,7 +328,7 @@ const createModule=()=>{
       if(!kept.length)return LocalStorageContract.remove(STORAGE_KEYS.deletionRecovery);
       return LocalStorageContract.setJson(STORAGE_KEYS.deletionRecovery,{format:'study-director.deletion-recovery',version:1,updatedAt:new Date().toISOString(),entries:kept});
     }
-    function stageDeletionRecovery(kind:DeletionEntry['kind'],id:string,deletedAt=new Date().toISOString()){
+    function stageDeletionRecovery(kind:DeletionEntry['kind'],id:string,deletedAt:string=new Date().toISOString()){
       const entries=currentDeletionRecoveryEntries(),next=sanitizeDeletionRecoveryEntries([...entries,{kind,id,deletedAt}]);
       return writeDeletionRecoveryEntries(next,rescueRoom(STORAGE_KEYS.deletionRecovery,APP_LIMITS.deletionRecoveryBytes));
     }
@@ -340,7 +346,7 @@ const createModule=()=>{
     }
     function filterPendingDeletedEntities<T>(values:readonly T[],kind:string,idKey: keyof T|((value:T)=>unknown)){
       const entries=pendingDeletionEntryMap();
-      return (values||[]).filter(value=>{const id=typeof idKey==='function'?idKey(value):value&&value[idKey];return id&&!pendingDeletionShadowsEntity(kind,id,value,entries);});
+      return (values||[]).filter((value:T)=>{const id=typeof idKey==='function'?idKey(value):value&&value[idKey];return id&&!pendingDeletionShadowsEntity(kind,id,value,entries);});
     }
     function savedDayDeletionValue(date:unknown,deletedAt:unknown=new Date().toISOString()){
       const when=normalizeTimestamp(deletedAt,new Date().toISOString());return {format:'study-director.saved-day-deletion',version:1,date:String(date||''),deletedAt:when};
@@ -380,7 +386,7 @@ function capFallbackDailyRecords(records:readonly unknown[],room:number=APP_LIMI
 }
 function activeSessionRecoveryEnvelope(session:ActiveSession|null):RecoveryEnvelope|null{
   if(!session||!session.snapshot)return null;
-  const revision=boundedNumber(session.revision,{min:1,max:Number.MAX_SAFE_INTEGER,fallback:1});
+  const revision=boundedNumber(session['revision'],{min:1,max:Number.MAX_SAFE_INTEGER,fallback:1});
   return {
     version:DATA_CONTRACT.schemas.LocalRecoveryEnvelope.version,revision,
     shell:{id:ACTIVE_SESSION_ID,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:session.date,status:session.status==='suspended'?'suspended':'active',runningOn:String(session.runningOn||''),scheduleText:session.scheduleText,suspendedAt:session.suspendedAt||null,updatedAt:session.updatedAt||new Date().toISOString()},
@@ -431,7 +437,7 @@ function writePlanMeta(family:string,value:unknown,{strictDurability=false,owner
   return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{
     assertWriteToken(token,'save plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const request=meta.put(family,value);request.onerror=()=>finish(false,request.error||new Error('plan document write failed'));
     request.onsuccess=()=>{try{assertWriteToken(token,'save plan documents');}catch(error){try{tx.abort();}catch{}finish(false,error);}};
-    tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture});finish(true,undefined);};
+    tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert',null,{backupCapture,startup:allowHydrating===true,settingsOnly:family==='personalPreferences'});finish(true,undefined);};
   },{strict:strictDurability,abortMessage:'plan document write aborted'});
 }
 const planData=freeze({
@@ -439,7 +445,24 @@ const planData=freeze({
     const token=issueWriteToken('restore Plan documents');if(new TextEncoder().encode(JSON.stringify(value)).length>1024*1024)throw new RangeError('Plan data exceeds its storage allowance.');
     return Meta.transaction<void>('readwrite',(meta,tx,finish)=>{assertWriteToken(token,'restore Plan documents');stageCanonicalMutationEpoch(tx,['personalData']);const updatedAt=new Date().toISOString();meta.put('planDraft',value.draft,{updatedAt});meta.put('planLibrary',{savedPlans:value.savedPlans,defaultId:value.defaultId},{updatedAt});tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,undefined);};},{strict:true,abortMessage:'Plan document restore aborted'});
   },
-  read:async()=>{const [draft,library]=await Promise.all([readMetadata('planDraft'),readMetadata('planLibrary')]);return {draft:draft??null,savedPlans:library?.savedPlans||[],defaultId:library?.defaultId||null};},
+  // Save the three existing portable Personal Data records in one strict
+  // transaction. Neither a failed import nor a kept review can split them.
+  replacePortable:(value:PersonalData)=>{
+    const token=issueWriteToken('restore portable Plans and Preferences');
+    const clean=PersonalDataCodec.normalize(value),now=new Date().toISOString(),
+      portable=PersonalDataCodec.portablePreferences({...clean.preferences,version:2,updatedAt:now});
+    if(new TextEncoder().encode(JSON.stringify(clean.plans)).length>1024*1024)
+      throw new RangeError('Plan data exceeds its storage allowance.');
+    return Meta.transaction('readwrite',(meta,tx,finish)=>{
+      assertWriteToken(token,'restore portable Plans and Preferences');
+      stageCanonicalMutationEpoch(tx,['personalData']);
+      meta.put('planDraft',clean.plans.draft,{updatedAt:now});
+      meta.put('planLibrary',{savedPlans:clean.plans.savedPlans,defaultId:clean.plans.defaultId},{updatedAt:now});
+      meta.put('personalPreferences',portable,{updatedAt:now});
+      tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,freeze(portable));};
+    },{strict:true,abortMessage:'Portable Plans and Preferences restore aborted'});
+  },
+  read:async()=>{const [draft,rawLibrary]=await Promise.all([Meta.read('planDraft'),Meta.read('planLibrary')]);const library=rawLibrary as Omit<SavedPlans,'draft'>|null;return {draft:draft??null,savedPlans:library?.savedPlans||[],defaultId:library?.defaultId||null};},
   writeDraft:(value:string|null,options:WriteOptions={})=>{if(value!==null&&(typeof value!=='string'||value.length>APP_LIMITS.maxScheduleChars))throw new RangeError('Plan draft exceeds its text limit.');return writePlanMeta('planDraft',value,options);},
   writeLibrary:(value:Omit<SavedPlans,'draft'>,options:WriteOptions={})=>writePlanMeta('planLibrary',value,{...options,strictDurability:true})
 });
@@ -456,17 +479,17 @@ const InsightsDatasetRevision=(()=>{
   function record(counter:unknown,updatedAt=new Date().toISOString()){return {format:FORMAT,version:VALUE_VERSION,counter:Math.min(Number.MAX_SAFE_INTEGER,Math.max(1,Math.floor(Number(counter)||1))),updatedAt};}
   function revisionKey(value:RevisionValue|null){return value?`${value.version}:${value.counter}:${value.updatedAt}:v${volatileRevision}`:null;}
   function refreshActive(){if(refreshQueued)return;refreshQueued=true;queueMicrotask(()=>{refreshQueued=false;onDatasetRevisionChanged(snapshot());});}
-  function accept(value:unknown,reason=''){const clean=normalize(value);if(!clean)return null;current=clean;lastError='';lastReason=clampText(reason||'',80);return revisionKey(clean);}
+  function accept(value:unknown,reason:string=''){const clean=normalize(value);if(!clean)return null;current=clean;lastError='';lastReason=clampText(reason||'',80);return revisionKey(clean);}
   function capture(scope:string,error:unknown){lastError=clampText(error&&(error as {message?:unknown;code?:unknown;name?:unknown;reason?:unknown}|null|undefined)?.message?(error as {message?:unknown;code?:unknown;name?:unknown;reason?:unknown}|null|undefined)?.message:String(error||'revision failure'),160);AppDiagnostics.capture(scope,error);}
   function readOrCreate(){return Meta.transaction<MetadataFields|null>('readwrite',(meta,tx,finish)=>{let resolved:MetadataFields|null=null;const handle=meta.get('insightsDatasetRevision'),req=handle.request;req.onsuccess=()=>{try{resolved=handle.value() as MetadataFields|null;}catch(error){try{tx.abort();}catch{}finish(false,error);return;}if(!resolved){resolved=record(1);meta.put('insightsDatasetRevision',resolved,{updatedAt:String(resolved.updatedAt)});}};req.onerror=()=>finish(false,req.error||new Error('insights revision read failed'));tx.oncomplete=()=>finish(true,resolved);},{abortMessage:'insights revision read aborted'});}
   async function get(){if(readPromise)return readPromise;readPromise=(async()=>accept((await readMetadata('insightsDatasetRevision'))||await readOrCreate(),'read'))().catch(error=>{capture('insights.revision-read',error);return null;}).finally(()=>{readPromise=null;});return readPromise;}
-  function stage(tx:DbTransaction,reason='daily-record-change'){
+  function stage(tx:DbTransaction,reason:string='daily-record-change'){
     const state:RevisionState={value:null,reason},meta=Meta.view(tx),handle=meta.get('insightsDatasetRevision'),req=handle.request;
     req.onsuccess=()=>{let previous;try{previous=normalize(handle.value());}catch{try{tx.abort();}catch{}return;}state.value=record((previous&&previous.counter||0)+1);meta.put('insightsDatasetRevision',state.value,{updatedAt:state.value.updatedAt});};
     return state;
   }
   function committed(state:RevisionState|null){if(state&&state.value){accept(state.value,state.reason);refreshActive();}}
-  function invalidateVolatile(reason='fallback-record-change'){volatileRevision+=1;lastReason=clampText(reason||'',80);refreshActive();return snapshot();}
+  function invalidateVolatile(reason:string='fallback-record-change'){volatileRevision+=1;lastReason=clampText(reason||'',80);refreshActive();return snapshot();}
   async function bump(reason='daily-record-change'){let state:RevisionState|null=null;try{await Meta.transaction<void>('readwrite',(meta,tx,finish)=>{state=stage(tx,reason);tx.oncomplete=()=>finish(true,undefined);tx.onabort=()=>finish(false,tx.error||new Error('Insights dataset revision is not canonical. Only current canonical metadata is supported.'));},{abortMessage:'insights revision update aborted'});committed(state);}catch(error){capture('insights.revision-bump',error);invalidateVolatile(reason);}return snapshot();}
   function snapshot(){return Object.freeze({format:FORMAT,version:VALUE_VERSION,counter:current&&current.counter||null,updatedAt:current&&current.updatedAt||null,revision:revisionKey(current),volatileRevision,lastReason,lastError});}
   return Object.freeze({get,bump,stage,committed,invalidateVolatile,snapshot,normalize,key:KEY});
@@ -612,7 +635,7 @@ async function replaceAttachmentDeletions(values:unknown){
 }
 // Removes the stored records each ledger's listing already leaves out.
 async function pruneDeletionLedgers(){
-  const ledgers:[string,number,(value:MetadataFields)=>string][]=[['savedDayDeletionPrefix',APP_LIMITS.maxImportRecords,value=>String(value.date)],['noteDeletionPrefix',APP_LIMITS.maxNotes,value=>String(value.key)],['attachmentDeletionPrefix',ATTACHMENT_DELETION_LIMIT,value=>String(value.assetId)]];
+  const ledgers:[string,number,(value:MetadataFields)=>string][]=[['savedDayDeletionPrefix',APP_LIMITS.maxImportRecords,(value:MetadataFields)=>String(value.date)],['noteDeletionPrefix',APP_LIMITS.maxNotes,(value:MetadataFields)=>String(value.key)],['attachmentDeletionPrefix',ATTACHMENT_DELETION_LIMIT,(value:MetadataFields)=>String(value.assetId)]];
   let removed=0;
   for(const [family,limit,idOf] of ledgers){
     removed+=await Meta.transaction<number>('readwrite',(meta,tx,finish)=>{
@@ -702,7 +725,7 @@ async function idbGetRecordsByMonth(month:unknown){
     const request=store.getAll();request.onsuccess=()=>finish(true,(request.result||[]).filter(row=>String(repositoryFields(row)?.date||'').startsWith(key+'-')));request.onerror=()=>finish(false,request.error);
   },'Saved-Day month read aborted');
 }
-function currentDailyRecordDocuments(records:unknown,label='Daily Records'):DailyRecord[]{
+function currentDailyRecordDocuments(records:unknown,label:string='Daily Records'):DailyRecord[]{
   const input=Array.isArray(records)?records:[];
   const docs=input.map(sanitizeCurrentDailyRecord);
   if(docs.some(record=>!record))throw new Error(`${label} contain noncanonical data. Only current canonical data may be persisted.`);
@@ -741,6 +764,17 @@ async function idbPut(rec:unknown,options:BatchOptions={}){
 }
 function idbAllRecords(){return idbGetAll(DB_DAILY_RECORD_STORE,'read aborted');}
 function idbAllSummaries(){return idbGetAll(DB_DAILY_SUMMARY_STORE,'summary read aborted');}
+function idbInsightsDailySnapshot(){
+  return idbTransaction<{records:unknown[];summaries:unknown[]}>([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE],'readonly',(tx,finish)=>{
+    const recordsRequest=tx.objectStore(DB_DAILY_RECORD_STORE).getAll(),summariesRequest=tx.objectStore(DB_DAILY_SUMMARY_STORE).getAll();
+    let records:unknown[]|null=null,summaries:unknown[]|null=null,pending=2,failed=false;
+    const complete=()=>{if(!failed&&--pending===0)finish(true,{records:records||[],summaries:summaries||[]});};
+    recordsRequest.onsuccess=()=>{records=recordsRequest.result||[];complete();};
+    summariesRequest.onsuccess=()=>{summaries=summariesRequest.result||[];complete();};
+    const fail=(request:IDBRequest<unknown[]>)=>{if(failed)return;failed=true;finish(false,request.error||new Error('Insights snapshot read failed'));};
+    recordsRequest.onerror=()=>fail(recordsRequest);summariesRequest.onerror=()=>fail(summariesRequest);
+  },'Insights snapshot read aborted');
+}
 async function idbDailyRecordKeys(){
   return idbStoreTransaction<string[]>(DB_DAILY_RECORD_STORE,'readonly',(store,tx,finish)=>{
     if(typeof store.getAllKeys==='function'){const request=store.getAllKeys();request.onsuccess=()=>finish(true,(request.result||[]).map(String));request.onerror=()=>finish(false,request.error);return;}
@@ -774,13 +808,31 @@ async function idbDelete(date:string,{trackDeletion=true,ownershipToken=null,del
     tx.oncomplete=()=>{InsightsDatasetRevision.committed(revisionState);finish(true,{changed});};
   },'daily record deletion aborted');
 }
-async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:WriteToken|null=null){
+async function idbPutActiveSession(session:ActiveSession|null,ownershipToken:WriteToken|null=null,strictDurability:boolean=false,expectedCanonical:ActiveSession | null=null){
   const current=ActiveSessionCodec.sanitizeCurrent(session);if(!current)throw canonicalRuntimeError('Active Session write requires the current canonical schema.');session=current;
-  return idbTransaction<void>([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
+  return (strictDurability?idbStrictTransaction:idbTransaction)<void>([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
     if(ownershipToken)assertWriteToken(ownershipToken,'the active-session transaction');
-    stageCanonicalMutationEpoch(tx,['activeSession']);const request=store.put(session);request.onerror=()=>finish(false,request.error||new Error('active session write failed'));
+    const put=()=>{
+      stageCanonicalMutationEpoch(tx,['activeSession']);
+      const request=store.put(session);request.onerror=()=>finish(false,request.error||new Error('active session write failed'));
+    };
     tx.oncomplete=()=>finish(true,undefined);
+    if(expectedCanonical){
+      // Compare and replace in one readwrite transaction: a competing local
+      // write between Drive verification and recovery cannot be overwritten.
+      const request=store.get(ACTIVE_SESSION_ID);
+      request.onerror=()=>finish(false,request.error||new Error('Active Session recovery precondition read failed'));
+      request.onsuccess=()=>{
+        const present=ActiveSessionCodec.sanitizeCurrent(request.result);
+        if(!present||!sameDataValue(present,expectedCanonical)){
+          try{tx.abort();}catch{}
+          finish(false,Object.assign(new Error('Active Session changed before this save.'),{code:'ACTIVE_SESSION_CHANGED'}));
+          return;
+        }
+        put();
+      };
+    }else put();
   },'active session write aborted');
 }
 function idbGetActiveSession(){return idbGet(DB_ACTIVE_SESSION_STORE,ACTIVE_SESSION_ID,'active session read failed');}
@@ -793,15 +845,20 @@ async function idbDeleteActiveSession(ownershipToken:WriteToken|null=null){
   },'active session delete aborted');
 }
 
-async function saveActiveSessionRecord(sessionInput:unknown,{emergency=false,backupCapture=false}={}):Promise<SessionResult>{
-  const session=repositoryFields(sessionInput);
+async function saveActiveSessionRecord(value:unknown,{emergency=false,backupCapture=false,strictDurability=false,expectedCanonical=null}:{emergency?:boolean;backupCapture?:boolean;strictDurability?:boolean;expectedCanonical?:ActiveSession|null}={}):Promise<SessionResult>{
   let ownershipToken:WriteToken;
   try{ownershipToken=issueWriteToken('saving the active session');}
   catch(error){return {ok:false,value:null,error,storage:{local:false,idb:false}};}
-  if(!session||session.id!==ACTIVE_SESSION_ID||!session.snapshot)return {ok:false,value:null,error:new Error('invalid active session'),storage:{local:false,idb:false}};
-  const revision=boundedNumber(session.revision,{min:1,max:Number.MAX_SAFE_INTEGER,fallback:nextSessionRevision()});
+  // Live snapshots are normalized only after the current record's write
+  // metadata is stamped. Exact stored-record validation belongs after that.
+  const session=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
+  if(!session||session['id']!==ACTIVE_SESSION_ID||!session['snapshot']||Number(session['version'])!==DATA_CONTRACT.schemas.ActiveSession.version)return {ok:false,value:null,error:new Error('invalid active session'),storage:{local:false,idb:false}};
+  const expected=expectedCanonical===null?null:ActiveSessionCodec.sanitizeCurrent(expectedCanonical);
+  if(expectedCanonical!==null&&(!expected||emergency))
+    return {ok:false,value:null,error:new Error('Conditional ownership recovery requires an exact canonical precondition without an emergency fallback.'),storage:{local:false,idb:false}};
+  const revision=boundedNumber(session['revision'],{min:1,max:Number.MAX_SAFE_INTEGER,fallback:nextSessionRevision()});
   lastSessionRevision=Math.max(lastSessionRevision,revision);
-  const clean=ActiveSessionCodec.canonicalize({...session,version:DATA_CONTRACT.schemas.ActiveSession.version,revision,updatedAt:normalizeTimestamp(session.updatedAt,new Date().toISOString())});
+  const clean=ActiveSessionCodec.canonicalize({...session,version:DATA_CONTRACT.schemas.ActiveSession.version,revision,updatedAt:normalizeTimestamp(session['updatedAt'],new Date().toISOString())});
   if(!clean)return {ok:false,value:null,error:new Error('active session failed canonical validation'),storage:{local:false,idb:false}};
   const writeEpoch=++activeSessionMutationEpoch;
   let localSaved=false;
@@ -816,13 +873,15 @@ async function saveActiveSessionRecord(sessionInput:unknown,{emergency=false,bac
   const writing=activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.previous-write',error,'error');}).then(async()=>{
     let idbSaved=false,idbError:unknown=null;
     try{
-      await idbPutActiveSession(clean,ownershipToken);idbSaved=true;
+      // Only explicit critical saves, page-exit flushes and suspension need
+      // strict disk-commit semantics. Periodic timer snapshots stay default.
+      await idbPutActiveSession(clean,ownershipToken,strictDurability===true||emergency===true||clean.status==='suspended',expected);idbSaved=true;
       clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)]);
       reportCanonicalCommit('activeSession','upsert',clean,{backupCapture});
     }catch(e){
       if(isOwnershipLostError(e))return {ok:false,value:clean,error:e,storage:{local:localSaved,idb:false}};
       idbError=e;
-      if(!localSaved&&writeEpoch===activeSessionMutationEpoch){
+      if(!expected&&!localSaved&&writeEpoch===activeSessionMutationEpoch){
         try{checkpoint();}catch(error){if(isOwnershipLostError(error))return {ok:false,value:clean,error,storage:{local:false,idb:false}};throw error;}
       }
     }
@@ -845,7 +904,7 @@ async function activeSessionEpochFallback(retry:number,options:{strict?:boolean}
   const currentLocal=readLocalRecoverySession();
   return {ok:true,value:currentLocal,error:null,storage:{local:!!currentLocal,idb:false}};
 }
-async function loadActiveSessionRecord(retry=0,options:{strict?:boolean}={}):Promise<SessionResult>{
+async function loadActiveSessionRecord(retry:number=0,options:{strict?:boolean}={}):Promise<SessionResult>{
   await activeSessionWriteChain.catch(error=>{AppDiagnostics.capture('active-session.pre-read-settle',error,'error');});
   const readEpoch=activeSessionMutationEpoch;
   let localSession:ActiveSession|null=null;
@@ -870,7 +929,7 @@ async function loadActiveSessionRecord(retry=0,options:{strict?:boolean}={}):Pro
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session reconciliation');
-          await idbPutActiveSession(value,reconciliationToken);
+          await idbPutActiveSession(value,reconciliationToken,true);
           if(readEpoch===activeSessionMutationEpoch){assertWriteToken(reconciliationToken,'clearing reconciled session recovery');if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Reconciled session recovery could not be cleared.');}
           if(!clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)])&&options.strict)throw LocalStorageContract.lastError||new Error('Session deletion recovery could not be reconciled.');
         }catch(e){reconciliationError=e;if(!isOwnershipLostError(e))AppDiagnostics.capture('active-session.reconcile-idb',e);}
@@ -878,7 +937,7 @@ async function loadActiveSessionRecord(retry=0,options:{strict?:boolean}={}):Pro
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session canonical read-repair');
-          if(rawIdb&&!sameDataValue(rawIdb,idbSession))await idbPutActiveSession(idbSession,reconciliationToken);
+          if(rawIdb&&!sameDataValue(rawIdb,idbSession))await idbPutActiveSession(idbSession,reconciliationToken,true);
           if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Session recovery could not be cleared.');
         }catch(error){reconciliationError=error;if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.reconcile-local',error);}
       }
@@ -1011,6 +1070,15 @@ async function replayFallbackDailyRecords(records:readonly DailyRecord[],{strict
     finishWrite();
   }
 }
+// Canonical Saved Day receipts never consult localStorage rescue. A successful
+// fallback write is recoverable work, not proof that the day reached IndexedDB.
+async function verifyCanonicalDailyRecord(record:unknown){
+  const clean=sanitizeCurrentDailyRecord(record);
+  if(!clean)throw new Error('Saved Day verification requires a canonical record.');
+  const stored=readableDailyRecord(await idbGetRecord(clean.date));
+  if(!stored||!sameDataValue(stored,clean))throw new Error('Canonical Saved Day read-back did not match the committed study evidence.');
+  return true;
+}
 async function storeDailyRecord(rec:DailyRecord|DailyView,options:{backupCapture?:boolean}={}){
   const ownershipToken=issueWriteToken('saving the daily record');
   if(!rec||!isValidIsoDate(rec.date))throw new Error('Invalid daily record date');
@@ -1019,8 +1087,8 @@ async function storeDailyRecord(rec:DailyRecord|DailyView,options:{backupCapture
   try{
   assertWriteToken(ownershipToken,'preparing the daily record');
   const updatedAt=normalizeTimestamp(rec.updatedAt,normalizeTimestamp(rec.savedAt,new Date().toISOString()));
-  const candidate:RawFields={...rec,version:DATA_CONTRACT.schemas.DailyRecord.version,updatedAt};
-  for(const key of ['entityType','entityId','schemaVersion','deviceId','createdAt','deleted','syncStatus'] as const)delete candidate[key];
+  // A record read from here comes back as its view; it is saved as its stored fields.
+  const candidate:RawFields={...storedDailyRecordFields(rec),version:DATA_CONTRACT.schemas.DailyRecord.version,updatedAt};
   const clean=sanitizeCurrentDailyRecord(candidate);
   if(!clean||('degraded' in clean&&clean.degraded))throw new Error('New daily record failed its canonical validation.');
   try{
@@ -1049,7 +1117,7 @@ async function storeDailyRecord(rec:DailyRecord|DailyView,options:{backupCapture
 }
 async function storeDailyRecordBatch(records:readonly unknown[]){
   const ownershipToken=issueWriteToken('saving the daily-record batch');
-  const docs=currentDailyRecordDocuments(records,'Daily Record batch');
+  const docs=currentDailyRecordDocuments((Array.isArray(records)?records:[]).map(storedDailyRecordFields),'Daily Record batch');
   if(!docs.length)return true;
   const finishWrite=beginAuthoritativeWrite();
   try{
@@ -1074,6 +1142,28 @@ async function storeDailyRecordBatch(records:readonly unknown[]){
     notifyDailyRecordsChanged('','batch');
     return true;
   }finally{finishWrite();}
+}
+async function getDailyRecordInsightsSnapshot(options:{yieldProjection?:boolean}={}){
+  const fallback=fallbackDailyRecordsGet(),yieldProjection=options&&options.yieldProjection===true;
+  try{
+    const snapshot=await idbInsightsDailySnapshot(),storedRecords=Array.isArray(snapshot.records)?snapshot.records:[],storedSummaries=Array.isArray(snapshot.summaries)?snapshot.summaries:[],cleanSummaries=storedSummaries.map(sanitizeDailyRecordSummary);
+    const summaryKeys=cleanSummaries.filter((row):row is DailySummary=>row!==null).map(row=>row.date).sort(),recordKeys=storedRecords.map(row=>String((row as {date?:unknown}|null)?.date||'')).filter(isValidIsoDate).sort();
+    const projectionCurrent=!fallback.length&&!cleanSummaries.some(row=>!row)&&summaryKeys.length===recordKeys.length&&summaryKeys.every((date,index)=>date===recordKeys[index]);
+    const canonicalRecords=filterPendingDeletedEntities(mergeDailyRecordSets(storedRecords,fallback),'dailyRecord','date');
+    let summaries;
+    if(projectionCurrent)summaries=filterPendingDeletedEntities(cleanSummaries.filter((row):row is DailySummary=>row!==null),'dailyRecord','date').map(materializeDailyRecordSummary);
+    else{
+      summaries=canonicalRecords.map(record=>materializeDailyRecordSummary(buildDailyRecordSummary(record))).filter(Boolean);
+      if(!fallback.length&&appCanMutate())void repairDailySummaries().catch(error=>AppDiagnostics.capture('daily-summaries.repair',error,'warn'));
+    }
+    if(fallback.length)void replayFallbackDailyRecords(fallback);else confirmDailyRecordStorage();
+    const records=sortDailyRecordsAsc(await materializeDailyRecordViews(canonicalRecords,{yieldProjection})).filter(record=>record.recordKind==='study');
+    return freeze({summaries:freeze(sortDailySummariesAsc(summaries)),records:freeze(records)});
+  }catch(error){
+    if(isCanonicalRuntimeError(error))throw error;
+    const [summaries,records]=await Promise.all([getSortedDailyRecordSummaries(),getDailyRecordsForWindow({yieldProjection})]);
+    return freeze({summaries:freeze(summaries),records:freeze(records)});
+  }
 }
 async function getDailyRecordSummaries(){
   const fallback=fallbackDailyRecordsGet();
@@ -1111,7 +1201,7 @@ async function getDailyRecordSummaries(){
 function sortDailySummariesAsc(summaries:readonly (SummaryView|null)[]){return (summaries||[]).map(summary=>{const {dayOfWeek,dayName,...raw}=summary||{};return materializeDailyRecordSummary(raw);}).filter(value=>value!==null).sort((a,b)=>a.date.localeCompare(b.date));}
 function sortDailyRecordsAsc<T extends {date:string}>(records:readonly (T|null)[]):T[]{return (records||[]).filter((r):r is T=>!!r&&isValidIsoDate(r.date)).sort((a,b)=>a.date.localeCompare(b.date));}
 async function getSortedDailyRecordSummaries(){return sortDailySummariesAsc(await getDailyRecordSummaries());}
-async function getSortedDailyRecords(){return sortDailyRecordsAsc(await getDailyRecords());}
+async function getSortedDailyRecords(options:{yieldProjection?:boolean}={}){return sortDailyRecordsAsc(await getDailyRecords(options));}
 async function getDailyRecordsForWindow(options:WindowOptions={}){
   const opts=options&&typeof options==='object'?options:{};
   if(opts.windowDays||opts.from||opts.to||opts.limit){
@@ -1121,14 +1211,14 @@ async function getDailyRecordsForWindow(options:WindowOptions={}){
       const fallback=fallbackDailyRecordsGet();
       const idbRecords=await idbGetRecordsByDates(recordWindow.dates);
       const records=filterPendingDeletedEntities(mergeDailyRecordSets(idbRecords,fallback.filter(r=>recordWindow.dates.includes(r.date))),'dailyRecord','date');
-      return sortDailyRecordsAsc(records.map(materializeDailyRecordView)).filter(record=>record.recordKind==='study');
+      return sortDailyRecordsAsc(await materializeDailyRecordViews(records,{yieldProjection:opts.yieldProjection===true})).filter(record=>record.recordKind==='study');
     }catch(e){
       if(isCanonicalRuntimeError(e))throw e;
       const records=await Promise.all(recordWindow.dates.map(date=>getDailyRecord(date)));
       return sortDailyRecordsAsc(records).filter(record=>record.recordKind==='study');
     }
   }
-  return (await getSortedDailyRecords()).filter(record=>record.recordKind==='study');
+  return (await getSortedDailyRecords({yieldProjection:opts.yieldProjection===true})).filter(record=>record.recordKind==='study');
 }
 async function getDailyRecord(date:string,options:{strict?:boolean}={}){
   const fallback=fallbackDailyRecordsGet().find(r=>r.date===date)||null;
@@ -1144,14 +1234,27 @@ async function getDailyRecord(date:string,options:{strict?:boolean}={}){
     return materializeDailyRecordView(fallback);
   }
 }
-async function getDailyRecords(options:{strict?:boolean}={}){
+async function getDailyRecords(options:{strict?:boolean;yieldProjection?:boolean}={}){
   const fallback=fallbackDailyRecordsGet();
   try{
     const raw=filterPendingDeletedEntities(mergeDailyRecordSets(await idbAllRecords(),fallback),'dailyRecord','date');
     if(fallback.length)void replayFallbackDailyRecords(fallback);
     else confirmDailyRecordStorage();
-    return raw.map(materializeDailyRecordView).filter(value=>value!==null);
-  }catch(e){if(options?.strict||isCanonicalRuntimeError(e))throw e;showStorageFallbackWarning(e&&(e as {message?:unknown;code?:unknown;name?:unknown;reason?:unknown}|null|undefined)?.message?(e as {message?:unknown;code?:unknown;name?:unknown;reason?:unknown}|null|undefined)?.message:'saved-date database failed');return fallback.map(materializeDailyRecordView).filter(value=>value!==null);}
+    return materializeDailyRecordViews(raw,{yieldProjection:options?.yieldProjection===true});
+  }catch(e){
+    if(options?.strict||isCanonicalRuntimeError(e))throw e;
+    showStorageFallbackWarning(e instanceof Error?e.message:'saved-date database failed');
+    return materializeDailyRecordViews(fallback);
+  }
+}
+async function materializeDailyRecordViews(records:DailyRecord[],{yieldProjection=false}={}){
+  const source=Array.isArray(records)?records:[],out=[],batchSize=128;
+  for(let start=0;start<source.length;start+=batchSize){
+    const end=Math.min(source.length,start+batchSize);
+    for(let index=start;index<end;index+=1){const value=materializeDailyRecordView(source[index]);if(value)out.push(value);}
+    if(yieldProjection&&end<source.length)await new Promise(resolve=>setTimeout(resolve,0));
+  }
+  return out;
 }
 async function removeDailyRecord(date:string,options:{rollback?:boolean}={}){
   const rollback=options&&options.rollback===true;
@@ -1433,6 +1536,7 @@ async function runDataMaintenance(options:MaintenanceOptions={}):Promise<Mainten
     const local=LocalStorageContract;
     const dailyRecords=freeze({
       save:storeDailyRecord,
+      verifyCanonical:verifyCanonicalDailyRecord,
       saveBatch:storeDailyRecordBatch,
       restoreBatch:(records:readonly unknown[])=>storeDailyRecordBatch(records),
       get:getDailyRecord,
@@ -1442,6 +1546,7 @@ async function runDataMaintenance(options:MaintenanceOptions={}):Promise<Mainten
       clearAll:clearAllDailyRecords,
       sortedSummaries:getSortedDailyRecordSummaries,
       sortedList:getSortedDailyRecords,
+      insightsSnapshot:getDailyRecordInsightsSnapshot,
       'window':getDailyRecordsForWindow,
       normalizeWindow:normalizeInsightsRecordWindowOptions,
       documents:getDailyRecordDocumentsByDates,

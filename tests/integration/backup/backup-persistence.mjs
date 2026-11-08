@@ -37,7 +37,7 @@ const limits=freeze({
   backupMaxLineBytes:262144,backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,
   backupMaxUncompressedBytes:8*1024*1024,backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,
   importBytes:4*1024*1024,maxImportRecords:100,maxNotes:100,
-  maxLegacyImportTombstones:100,maxReflectionChars:10000
+  maxLegacyImportTombstones:100,maxReflectionChars:10000,maxNoteLinks:50,maxPendingReviews:2000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const entityDefinitions=freeze({
@@ -75,7 +75,8 @@ const dailyRecordCodec=freeze({
   sanitizeCurrentNote:normalizeNote,
   isSupportedSavedDate:isDate
 });
-const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
+const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item}):null;
+const activeSessionCodec=freeze({sanitizeCurrent:sanitizeActiveSession,contentValue:item=>{const clean=sanitizeActiveSession(item);if(!clean)return null;const snapshot=clean.snapshot&&typeof clean.snapshot==='object'?clean.snapshot:{},{contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_updatedAt,...contentSnapshot}=snapshot;return freeze({date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot:freeze(contentSnapshot)});}});
 
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>entityDefinitions[type]||null;
@@ -115,8 +116,10 @@ let safetyReadDone=false;
 let areaImportFailureOnce=false;
 let corruptAfterImportOnce=false;
 let corruptPostCommitReadOnce=false;
+let corruptDuringVerificationOnce=false;
 let cancelDuringBatchOnce=false;
 let restoreJournal=null;
+let failStartupRollbackOnce=false;
 let activeSessionBlocking=false;
 let selectIncomingSavedDay=false;
 let exportSaveStatus='downloaded',chooseSaveResult=()=>Promise.resolve(null),cancelExport=()=>{},cancelExportCalls=0;const exportProgress=[];const chosenNames=[];
@@ -142,7 +145,7 @@ const fn=()=>false;
 const backupPresentation=createBackupPresentation();
 let runtime;
 runtime=BackupModule.createRuntime(freeze({ports:freeze({
-  configuration:freeze({appVersion:'QA_FIXTURE',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,limits}),
+  configuration:freeze({appVersion:'QA_FIXTURE',backupVersion:RUNTIME_DATA_CONTRACT.schemas.Backup.version,starterSchedule:'',limits}),
 
   persistence:freeze({
     activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{local:false,idb:false}}),activeSessionSave:async value=>({ok:true,value}),activeSessionClear:async()=>true,activeSessionSettled:async()=>true,
@@ -170,19 +173,19 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
     restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);restoreJournal=null;return true;},
-    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.full===true?'full-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],scheduleRead:()=> '08:00 | 60 | Existing | work | Ethics | block | 1',
-    installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),reconciliationBaseReadDays:async()=>freeze({}),...keptReviews.ports,reconciliationBaseWrite:async()=>true
+    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.full===true?'full-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],
+    installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),...keptReviews.ports,reconciliationBaseReadDayAncestry:async()=>freeze({}),reconciliationBaseWrite:async()=>true
   }),
   exports:freeze({...testProcessing,followProtection:async()=>false,cancel:()=>{cancelExportCalls++;cancelExport();},backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');options.onProgress({loaded:file.blob.size,total:file.blob.size});exportProgress.push(backupPresentation.read('file')?.progress);return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
   assets:freeze({get:async id=>{assetGetCalls+=1;return assetRows.some(row=>row.id===id)?(assetBlobOverrides.get(id)||duplicateAssetBlob):null;},put:async()=>true,keys:async()=>assetRows.map(row=>row.id),list:async()=>assetRows,importAll:async()=>0,restoreAll:async()=>true,removeMany:async()=>0,removeMetadata:async()=>0,scheduleMaintenance:()=>true}),
-    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,pendingReview:pendingReviewCodec}),
-    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
+    codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,dailyRecord:freeze({savedDayCoversSessionEvidence:()=>false}),pendingReview:pendingReviewCodec}),
+    reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async({conflicts=[]})=>freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries(conflicts.map(item=>[item.key,freeze({text:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
   session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('cancel-save'),captureSnapshot:()=>null,hasActiveSession:()=>activeSessionBlocking,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:async operation=>{events.push('suppression:start');try{return await operation();}finally{events.push('suppression:end');}},yieldSession:async()=>false}),
   domain:freeze({
     clampText,filenameSafeStudentName:()=> 'student',getStudentName:()=> 'Student',
     materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-05'
   }),
-  view:freeze({presentation:backupPresentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn}),
+  view:freeze({presentation:backupPresentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn,deviceName:()=>"iPad · Safari"}),
   events:freeze({
     libraryChanged:()=>events.push('library-changed'),backupCompleted:context=>backupCompletions.push(context||{}),
     reconcileNotes:async payload=>{
@@ -192,7 +195,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
       currentNotes=freeze({...currentNotes,...normalized});return currentNotes;
     },
     restoreNotesSnapshot:async payload=>{events.push('rollback-notes');currentNotes=freeze(Object.fromEntries(Object.entries(payload||{}).map(([key,item])=>[key,normalizeNote(item,key)]).filter(([,item])=>item)));return currentNotes;},
-    restoreSessionState:async()=>{events.push('restore-session-state');return true;},
+    restoreSessionState:async()=>{events.push('restore-session-state');if(failStartupRollbackOnce){failStartupRollbackOnce=false;throw new Error('injected startup rollback interruption');}return true;},
     verifyActiveSessionRuntime:async()=>true,restoredFromFile:()=>false
   }),
   operations:freeze({canShare:()=>true,assertAuthority:()=>true,clearFault:fn,failClosed:fn,runExclusive:async(kind,operation)=>operation()}),
@@ -216,7 +219,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     AbortController,clearTimeout,yieldTask:async()=>{},
     setTimeout:(callback,delay)=>delay>=300000?setTimeout(callback,delay):(callback(),1)
   }),
-  diagnostics:freeze({capture:(scope,error,level)=>events.push(`diagnostic:${scope}:${level}:${error?.message||error}`),start:()=>'',mark:()=>false,finish:()=>false,fail:()=>false})
+  diagnostics:freeze({capture:(scope,error,level)=>events.push(`diagnostic:${scope}:${level}:${error?.message||error}`),start:()=>'',mark:phase=>{if(phase==='restore-verification-saved-days-start'&&corruptDuringVerificationOnce){corruptDuringVerificationOnce=false;corruptPostCommitReadOnce=true;}return false;},finish:()=>false,fail:()=>false})
 })}));
 
 // Current-format checkpoint export is verified from canonical repositories; unsaved Review state belongs only to Active Session.
@@ -269,14 +272,14 @@ exportSaveStatus='downloaded';
 assert.equal((await withoutFileJobDeadlock(()=>runtime.controller.exportLocal())).status,'downloaded');
 assert.equal(currentFileJob,null,'standalone export must release its exclusive file job');
 assert.equal(backupCompletions.length,1);
-assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:false},'a download is a backup the person made; it cannot be read back, so it is recorded unverified');
+assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:false,attachmentsComplete:true},'a download is a backup the person made; it cannot be read back, so it is recorded unverified');
 // The save dialog opens from the click with the backup's file name; a file saved
 // there and read back is a verified copy of the data as of its capture.
 backupCompletions.length=0;chosenNames.length=0;chooseSaveResult=()=>Promise.resolve({name:'chosen.sdbackup'});
 const savedExport=await withoutFileJobDeadlock(()=>runtime.controller.exportLocal());
 assert.ok(exportProgress.some(progress=>progress?.stage==='export'&&progress.completedBytes===progress.totalBytes&&progress.totalBytes>0),'export progress must update the presentation without calling a missing renderer');
 assert.equal(savedExport.status,'saved');assert.match(chosenNames[0],/-study-director-backup-\d{4}-\d{2}-\d{2}\.sdbackup$/u);
-assert.equal(backupCompletions.length,1);assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:true});
+assert.equal(backupCompletions.length,1);assert.deepEqual({...backupCompletions[0].copy},{source:'file',sourceRevision:'2026-09-15T12:00:00.000Z',verified:true,attachmentsComplete:true});
 // Cancellation reaches the declared export port while a standalone operation is pending.
 let rejectExportChoice;chooseSaveResult=()=>new Promise((_resolve,reject)=>{rejectExportChoice=reject;});
 cancelExport=()=>rejectExportChoice(Object.assign(new Error('cancelled'),{name:'AbortError'}));
@@ -339,16 +342,30 @@ assert.equal(currentNotes.Ethics.version,2);
 const gzipBomb=new Blob([gzipSync('\n'.repeat(limits.backupMaxUncompressedBytes+1024))],{type:'application/gzip'});
 await assert.rejects(()=>codec.inspectCurrent(gzipBomb,{filename:'gzip-bomb.sdbackup.gz'}),/retired|unsupported/u);
 
-// Post-commit verification detects a corrupted write and restores the safety snapshot.
+// The canonical commit receipt detects a corrupted write immediately and restores the safety snapshot.
 // Make the local Saved Day genuinely divergent so the v15 conflict contract performs an explicit replacement rather than treating it as identical.
 importedDailyRecords.push(freeze({version:16,recordKind:'study',date:'2026-08-03',reflection:'local divergent reflection',studyQuality:2,savedAt:'2026-08-03T21:00:00.000Z'}));
 restoring=true;safetyReadDone=false;corruptAfterImportOnce=true;selectIncomingSavedDay=true;
 const verificationCandidate=await runtime.controller.inspect(created.blob,{filename:created.filename});
 const verificationFailure=await runtime.controller.restore(verificationCandidate).then(()=>null,error=>error);
 assert.ok(verificationFailure instanceof Error);
-assert.match(verificationFailure.message,/Post-restore verification failed for saved day/u);
+assert.match(verificationFailure.message,/Saved-Day reconciliation commit did not match the resolved state/u);
 assert.equal(verificationFailure.studyDirectorCommittedDescription,'');
 assert.match(verificationFailure.studyDirectorRollbackDescription,/rolled back from the verified safety copy/u);
+
+// A correct commit receipt is not the final proof: a later canonical read can
+// disagree before verification completes. That mismatch must also roll back.
+const latestImportedRecords=()=>[...new Map(importedDailyRecords.map(record=>[record.date,record])).values()];
+const recordsBeforeFinalVerification=structuredClone(latestImportedRecords());
+safetyReadDone=false;corruptDuringVerificationOnce=true;
+const finalVerificationCandidate=await runtime.controller.inspect(created.blob,{filename:created.filename});
+const finalVerificationFailure=await runtime.controller.restore(finalVerificationCandidate).then(()=>null,error=>error);
+assert.ok(finalVerificationFailure instanceof Error);
+assert.match(finalVerificationFailure.message,/Post-restore verification failed for saved day/u);
+assert.equal(finalVerificationFailure.backupStage,'restore-verification-saved-days');
+assert.match(finalVerificationFailure.studyDirectorRollbackDescription,/rolled back from the verified safety copy/u);
+assert.deepEqual(latestImportedRecords(),recordsBeforeFinalVerification,'final verification failure restores the pre-import canonical state');
+assert.equal(restoreJournal,null,'only verified rollback may retire its journal');
 
 // Cancellation is observed during a committed repository batch, yields to the UI, and rolls back safely.
 cancelDuringBatchOnce=true;
@@ -374,17 +391,38 @@ assert.deepEqual(Object.keys(currentNotes),['Economics'],'rollback must restore 
 currentNotes=notes;
 restoring=false;
 
-// A durable journal left by a terminated tab is automatically replayed on the next startup.
-importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'interrupted imported state',savedAt:'2026-08-04T20:00:00.000Z'}));
-restoreJournal={
-  state:{id:'restore_crash_recovery_12345678',phase:'notes-committed'},
-  payload:{id:'restore_crash_recovery_12345678',blob:created.blob,filename:created.filename,scheduleText:'08:00 | 60 | Existing | work | Ethics | block | 1'}
-};
-const crashRecovery=await runtime.controller.recoverInterruptedRestore();
-assert.equal(crashRecovery.recovered,true);
+// A terminated standalone or managed restore can leave the durable journal at
+// any commit boundary. Startup must replay the same verified pre-restore state
+// for every phase, never infer success from a partially written phase marker.
+const crashPhases=["prepared","applying-assets","assets-committed","applying-saved-day-state","saved-day-state-committed","applying-notes","notes-committed","applying-pending-reviews","applying-active-session","active-session-committed","applying-personal-data","verifying","verified","startup-rolling-back"];
+for(const [index,phase] of crashPhases.entries()){
+  importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'interrupted '+phase,savedAt:'2026-08-04T20:00:00.000Z'}));
+  currentNotes=freeze({Corrupted:normalizeNote({key:'Corrupted',text:'interrupted '+phase},'Corrupted')});
+  restoreJournal={
+    state:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),phase},
+    payload:{id:'restore_crash_recovery_'+String(index).padStart(8,'0'),blob:created.blob,filename:created.filename}
+  };
+  const result=await runtime.controller.recoverInterruptedRestore();
+  assert.equal(result.recovered,true,phase+' must be recovered');
+  assert.deepEqual([...new Set(importedDailyRecords.map(record=>record.date))],['2026-08-03'],phase+' restores the original Saved Day');
+  assert.deepEqual(Object.keys(currentNotes).sort(),['Economics','Ethics'],phase+' restores the original note set');
+  assert.equal(currentNotes.Ethics.text,notes.Ethics.text,phase+' restores the original note bytes');
+  assert.equal(restoreJournal,null,phase+' clears the journal only after verified rollback');
+}
 assert.equal(backupPresentation.read('file','startup-recovery').outcome,'local-recovery-completed');
 assert.equal(backupPresentation.read('file','startup-recovery').lifecycle,'succeeded');
-assert.equal(restoreJournal,null,'startup recovery must clear the durable journal only after verified rollback');
+// A second crash during rollback must retain the journal and make a later
+// startup retry idempotent instead of acknowledging incomplete recovery.
+importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'half-rolled-back',savedAt:'2026-08-04T20:00:00.000Z'}));
+restoreJournal={
+  state:{id:'restore_crash_retry_12345678',phase:'startup-rolling-back'},
+  payload:{id:'restore_crash_retry_12345678',blob:created.blob,filename:created.filename}
+};
+failStartupRollbackOnce=true;
+await assert.rejects(()=>runtime.controller.recoverInterruptedRestore(),/injected startup rollback interruption/u);
+assert.ok(restoreJournal,'a failed startup rollback must keep its durable safety journal');
+assert.equal((await runtime.controller.recoverInterruptedRestore()).recovered,true,'the next startup must retry the interrupted rollback');
+assert.equal(restoreJournal,null,'successful replay must retire the journal');
 assert.deepEqual([...new Set(importedDailyRecords.map(record=>record.date))],['2026-08-03']);
 assert.ok(events.includes('restore-session-state'));
 
@@ -412,7 +450,14 @@ const fixedClock=createFakeClock('2026-09-13T06:00:00.000Z');
 const expectedNow=new fixedClock.Date().toISOString();
 assert.equal(Persistence.normalizeImportedTimestamp('2099-01-01T00:00:00.000Z',null,fixedClock.now()),null);
 assert.equal(Persistence.normalizeImportedTimestamp(expectedNow,null,fixedClock.now()),expectedNow);
-assert.equal(Persistence.normalizeImportedEpochMillis(fixedClock.now()+86400000,null,fixedClock.now()),null);
+assert.equal(Persistence.normalizeImportedEpochMillis(fixedClock.now()+3*86400000,null,fixedClock.now()),null);
+// Another device's clock can be hours ahead of this one: what it wrote, up
+// to two days ahead, still reads here (before, anything over 10 minutes
+// ahead made its notes and sessions unreadable and stopped sync).
+const hoursAhead=fixedClock.now()+5*60*60*1000;
+assert.equal(Persistence.normalizeImportedTimestamp(new Date(hoursAhead).toISOString(),null,fixedClock.now()),new Date(hoursAhead).toISOString(),'a time five hours ahead reads');
+assert.equal(Persistence.normalizeImportedEpochMillis(hoursAhead,null,fixedClock.now()),hoursAhead);
+assert.equal(Persistence.normalizeImportedTimestamp(new Date(fixedClock.now()+47*60*60*1000).toISOString(),null,fixedClock.now())!==null,true,'and up to two days');
 
 console.log(JSON.stringify({
   status:'PASS',scenarios:8,

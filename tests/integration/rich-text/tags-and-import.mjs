@@ -57,6 +57,15 @@ assert.equal(html,[
   '<h1>Setext</h1><p>#tag line<br>*literal*</p>'
 ].join(''));
 // Raw HTML is shown as text, apart from the inline tags Study Director's own export writes.
+// Markdown written for export and copy keeps blocks apart with a blank line:
+// without one, two paragraphs read as one and a paragraph after a list joins it.
+{const p=value=>({type:'Paragraph',content:[{type:'Text',param:value}]});
+assert.equal(text.markdownDocument({type:'Doc',content:[{type:'Heading',param:1,content:[{type:'Text',param:'Title'}]},p('One'),p('Two'),{type:'BulletList',content:[{type:'ListItem',content:[p('a')]},{type:'ListItem',content:[p('b')]}]},p('After'),p('')]}),'# Title\n\nOne\n\nTwo\n\n- a\n- b\n\nAfter\n');}
+// Pasted plain text is read as Markdown only on strong signals.
+for(const markdown of ['# Polity\nArticles','## Notes','- one\n- two','1. first\n2) second','```\ncode\n```','| a | b |\n|---|---|\n| 1 | 2 |','Read **this** first','See [the docs](https://example.com/x)','  * one\n  + two'])
+  assert.equal(text.looksLikeMarkdown(markdown),true,`Markdown: ${JSON.stringify(markdown)}`);
+for(const plain of ['Ordinary text, with a comma.','#tag and #revise','#1 priority','- just one line','Send me :-* later','2 * 3 * 4 = 24','def __init__(self):','a | b and c | d','**','**  **','Price: $5 - $10\nTime: 2-3 pm','[not a link](notes)','```just one fence','> a quote alone',''])
+  assert.equal(text.looksLikeMarkdown(plain),false,`plain: ${JSON.stringify(plain)}`);
 assert.equal(text.markdownToHtml('<script>x</script> <u>under</u>'),'<p>&lt;script&gt;x&lt;/script&gt; <u>under</u></p>');
 // A table wider than a note allows stays as its text.
 const wide=['|'+Array.from({length:16},(_,i)=>` c${i} `).join('|')+'|','|'+Array.from({length:16},()=>'---').join('|')+'|'].join('\n');

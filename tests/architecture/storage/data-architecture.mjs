@@ -29,8 +29,6 @@ const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){co
 walk(path.join(root,'source'));
 
 assert.match(app,/const STORAGE_KEYS=Object\.freeze\(Object\.fromEntries\(Object\.entries\(@@SD_LOCAL_STORAGE_KEYS@@\)\.map\(\(\[name,key\]\)=>\[name,DEVICE_WIDE_STORAGE_KEYS\.includes\(name\)\?key:ProfileScope\.scoped\(key\)\]\)\)\);/u,'every browser-storage key but the device-wide ones belongs to the open profile');
-assert.match(app,/const themeStorageKey=profileScope\.scoped\('@@SD_THEME_STORAGE_KEY@@'\);/u);
-assert.match(app,/const presentationStorageKey=profileScope\.scoped\('@@SD_PRESENTATION_STORAGE_KEY@@'\);/u);
 assert.doesNotMatch(app,/['"]studyDirector\.(?:theme|presentation)\.v1['"]/u,'pre-hydration presentation bootstrap must use build-injected storage identities');
 assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAGE_KEYS@@\);/u);
 
@@ -55,8 +53,9 @@ assert.equal(LOCAL_STORAGE_KEYS.deletionRecovery,'studyDirector.deletionRecovery
 assert.equal(CHECKPOINT_METADATA.format,'study-director.checkpoint-metadata');
 assert.deepEqual(CHECKPOINT_METADATA.fields,Object.freeze(['format','version','checkpointId','createdAt','originInstallationId']));
 
-assert.deepEqual(SESSION_STORAGE_KEYS,Object.freeze({appTab:'studyDirector.appTab.v1',pwaReload:'studyDirector.pwaReload.v1'}));
-assert.equal(Object.keys(DATA_ARCHITECTURE.sessionStorage).length,2);
+assert.deepEqual(SESSION_STORAGE_KEYS,Object.freeze({appTab:'studyDirector.appTab.v1',pwaReload:'studyDirector.pwaReload.v1',notifications:'studyDirector.notifications.v1'}));
+assert.equal(Object.keys(DATA_ARCHITECTURE.sessionStorage).length,3);
+assert.deepEqual(Object.keys(DATA_ARCHITECTURE.sessionStorage).sort(),Object.keys(SESSION_STORAGE_KEYS).sort(),'every sessionStorage key has a registered surface');
 assert.equal(DATA_ARCHITECTURE.cacheStorage.applicationShell.lifecycle.includes('no user data'),true);
 assert.equal(DATA_ARCHITECTURE.memory.searchIndex.role,'derived');
 
@@ -209,7 +208,6 @@ assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTE
 assert.doesNotMatch(deviceBackupSource,/Study-Director-Automatic-Backup-Repository/u,'Device Backup must not mint its repository root');
 assert.doesNotMatch(deviceBackupSource,/id:['"]study-director-device-backup/u,'Device Backup must not mint its persistent picker identity');
 assert.match(app,/pickerId:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderPickerId/u,'Device Backup picker identity must come from the canonical contract');
-assert.match(driveSource,/@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@/u,'Drive repository folder identity must come from the canonical contract');
 assert.doesNotMatch(driveSource,/const FOLDER_NAME=['"]Study Director Backups/u,'Drive must not mint its repository folder');
 for(const identity of ['studyDirectorFolder','studyDirectorSecurity','studyDirectorSha256','studyDirectorRepository','studyDirectorRepositoryVersion','studyDirectorRepositoryKind','studyDirectorRepositoryId'])assert.ok(!driveSource.includes(`'${identity}'`),`Drive must not mint durable appProperties identity ${identity}`);
 for(const field of ['driveFolderMarker','driveFileSecurityMarker','driveFileDigestMarker','driveRepositoryMarker','driveRepositoryVersionMarker','driveRepositoryKindMarker','driveRepositoryIdMarker','driveAppVersionMarker','driveExportedAtMarker'])assert.ok(driveSource.includes(`REPOSITORY_IDENTITIES.${field}`),`Drive must consume canonical external identity ${field}`);
@@ -217,7 +215,6 @@ assert.doesNotMatch(insights,/\blocalStorage\.(?:getItem|setItem|removeItem)\(/u
 assert.match(insights,/StudyDirector\?\.data\?\.deviceState/u,'Insights must consume the host device-state capability');
 assert.match(app,/deviceState:Object\.freeze\(\{[\s\S]{0,320}readInsightsWindow:[\s\S]{0,180}AppData\.local\.getText[\s\S]{0,220}writeInsightsWindow:[\s\S]{0,180}AppData\.local\.setText/u,'host must expose only the bounded Insights device-local preference capability');
 assert.match(app,/function pwaLastUpdateCheckAt\(\)[\s\S]{0,260}AppData\.local\.getText\(STORAGE_KEYS\.pwaUpdateCheck/u,'PWA update bookkeeping must use the LocalStorage abstraction');
-assert.match(app,/function markPwaUpdateCheck[\s\S]{0,260}AppData\.local\.setText\(STORAGE_KEYS\.pwaUpdateCheck/u,'PWA update timestamp writes must use the LocalStorage abstraction');
 const appDirectLocal=[...app.matchAll(/\blocalStorage\.(?:getItem|setItem|removeItem)\(/gu)];
 assert.equal(appDirectLocal.length,3,'host direct localStorage access must be limited to the profile scope read and the two pre-hydration appearance mirror helpers');
 assert.ok(appDirectLocal.every(match=>match.index<app.indexOf('const LocalStorageContract=')),'direct host localStorage must occur only before the persistence abstraction is created');

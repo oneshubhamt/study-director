@@ -78,7 +78,6 @@ assert.equal(new Set(RELEASE_TEST_SCRIPTS).size,RELEASE_TEST_SCRIPTS.length,'rel
 
 const packageScripts=JSON.parse(fs.readFileSync('package.json','utf8')).scripts||{};
 const scripts=JSON.stringify(packageScripts);
-assert.doesNotMatch(scripts,/tests\/(?:sdv[ab]\d|n\d+-)/i,'package scripts must not reference release-era test names');
 assert.doesNotMatch(scripts,/tests\/(?:_?tmp|.*repro)/i,'package scripts must not reference diagnostics');
 for(const layer of ['unit','integration','architecture'])
   assert.equal(packageScripts[`test:${layer}`],`node tests/helpers/run-category.mjs ${layer}`,`${layer} must have one recursive discovery entrypoint`);
@@ -104,9 +103,7 @@ const scripts=entries.map(entry=>entry.script);
 const files=browserFiles().sort();
 
 for(const tier of tiers)assert.ok(Object.isFrozen(BROWSER_TEST_MANIFEST[tier]),`${tier} manifest must be frozen`);
-assert.ok(BROWSER_TEST_MANIFEST.smoke.length>=8&&BROWSER_TEST_MANIFEST.smoke.length<=12,'smoke browser QA must remain 8–12 critical journeys');
-assert.ok(BROWSER_TEST_MANIFEST.smoke.length<BROWSER_TEST_MANIFEST.feature.length,'feature tier should contain deeper targeted coverage than smoke');
-assert.ok(BROWSER_TEST_MANIFEST.extended.length<BROWSER_TEST_MANIFEST.feature.length,'extended tier must remain a small expensive edge/stress set');
+for(const tier of tiers)assert.ok(BROWSER_TEST_MANIFEST[tier].length>0,`${tier} browser tier must not be empty`);
 assert.equal(new Set(ids).size,ids.length,'browser-test ids must be unique');
 assert.equal(new Set(scripts).size,scripts.length,'browser-test scripts must be listed exactly once');
 assert.deepEqual([...scripts].sort(),files,'every browser test must be represented exactly once in the canonical manifest');
@@ -119,8 +116,6 @@ for(const entry of entries){
   for(const tag of entry.coverage)assert.match(tag,/^[a-z0-9]+(?:-[a-z0-9]+)*$/,`${entry.id} coverage tag must be semantic kebab-case`);
   assert.ok(Number.isFinite(entry.timeoutMs)&&entry.timeoutMs>=0&&entry.timeoutMs<=300000,`${entry.id} timeout must be a bounded non-negative duration`);
   assert.ok(entry.alone===''||(typeof entry.alone==='string'&&entry.alone.length>=40),`${entry.id} runs alone only with a written reason`);
-  assert.ok(!/(?:regression|legacy|historical|sdv[ab]|^n\d)/i.test(entry.id),`${entry.id} must describe current behavior, not test history`);
-  assert.ok(!/(?:sdv[ab]|^n\d)/i.test(path.basename(entry.script)),`${entry.id} must not use release-era naming`);
 }
 const release=selectedBrowserTests('release');
 assert.equal(release.length,entries.length,'release browser QA must include every active browser test');

@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import fs from 'node:fs';
 import {artifactPath,writeArtifact} from '../../helpers/artifacts.mjs';
 import http from 'node:http';
@@ -10,11 +11,11 @@ import {CdpPage,withoutPwaChecks,studyTimezone,devToolsPort} from '../../helpers
 const root=process.cwd();
 const chromium=process.env.CHROMIUM_PATH||['/usr/bin/chromium','/tmp/chromium'].find(fs.existsSync)||'/usr/bin/chromium';
 if(!fs.existsSync(chromium))throw new Error(`Chromium not found: ${chromium}`);
-const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.json'),'utf8'));
+const manifest=JSON.parse(readRuntimeSource(path.join(root,'dist/build-manifest.json')));
 const deployment=path.join(root,'dist/deployment');
 const marker='/* PUBLIC PLUGIN API */';
 const exposure=`window.__StorageDebug=Object.freeze({StorageHealthController,IndexedDb,AppData,PlanDraftEditor,writeLiveDraftNow,saveDayRecord,applySchedule,StartupLifecycle,AppOwnership,readStorageHealth,inspectStorageCapability,refreshStorageFallbackWarning,dismissStorageWarning});\n`;
-let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
+let main=readRuntimeSource(path.join(deployment,manifest.main));
 if(!main.includes(marker))throw new Error('Storage-health browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
 main=withoutPwaChecks(main);
@@ -93,6 +94,9 @@ const results={release:manifest.release,localStorage:{},indexedDB:{},planDraft:{
 const pages=[];
 try{
   const page=await createPage();pages.push(page);
+  const storageEstimateLabel=await page.evaluate(`document.getElementById('local-storage-use')?.textContent||''`);
+  assert.doesNotMatch(storageEstimateLabel,/\bUsing\b/u,'browser-wide usage must not be presented as Study Director data size');
+  if(storageEstimateLabel)assert.match(storageEstimateLabel,/Browser storage estimate:/u,'storage estimate must identify its browser/origin scope');
   const planScenario=await page.evaluate(`(async()=>{
     const d=__StorageDebug,wait=ms=>new Promise(r=>setTimeout(r,ms)),warningVisible=()=>!document.getElementById('notice-region').hidden&&!document.getElementById('storage-warning').hidden;
     const input=document.getElementById('plan-input');
@@ -145,7 +149,7 @@ try{
   const activeScenario=await page.evaluate(`(async()=>{
     const d=__StorageDebug,wait=ms=>new Promise(r=>setTimeout(r,ms));
     __storageFaults.write=false;__storageFaults.quota=false;
-    await d.PlanDraftEditor.save();d.applySchedule({skipNotify:true});
+    await d.PlanDraftEditor.save();await d.applySchedule({skipNotify:true});
     await d.writeLiveDraftNow({markChanged:false});await wait(50);
     const beforeHealth=d.readStorageHealth();
     const original=IDBDatabase.prototype.transaction;

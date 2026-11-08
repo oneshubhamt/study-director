@@ -1,10 +1,11 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
 const sourcePath='source/external/insights-model.js';
-const source=fs.readFileSync(sourcePath,'utf8');
+const source=readRuntimeSource(sourcePath);
 const context=vm.createContext({console});
 vm.runInContext(source,context,{filename:sourcePath});
 const {Config,PacerEvidence:Pacer,ModelEngine}=context.StudyDirectorInsightsModel;
@@ -139,6 +140,15 @@ const historyRecords=Array.from({length:historyDays},(_,index)=>{
 });
 const classifyTaskOutcome=task=>task.completion>=100?'full':task.completion>0?'partial':'zero-output';
 const engine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+const canonicalPrepared=engine.prepare(historyRecords,'canonical-worker-reuse');
+const asyncEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+let asyncYields=0;
+const asyncPrepared=await asyncEngine.prepareAsync(historyRecords,'canonical-worker-reuse',async()=>{asyncYields++;await Promise.resolve();});
+assert.deepEqual(asyncPrepared,canonicalPrepared,'cooperative Insights preparation must be semantically identical to synchronous preparation');
+assert.ok(asyncYields>0,'large Insights preparation must yield cooperatively');
+const workerPrepared=engine.reusePrepared(canonicalPrepared.records,canonicalPrepared.revision);
+assert.equal(workerPrepared.records,canonicalPrepared.records,'the worker handoff must reuse host-normalized canonical records instead of normalizing them again');
+assert.equal(workerPrepared.revision,canonicalPrepared.revision);
 const prepared=engine.prepare(historyRecords);
 const allWindow=engine.filterPreparedWindow(prepared,'all',endDate);
 const model=engine.buildPrepared(allWindow.records,prepared,{windowKey:'all',windowLabel:'All records',allRecordCount:historyDays,currentStudyDate:endDate});
@@ -177,6 +187,17 @@ assert.equal(model.dynamics.allocation.dynamic.trendBasis.label,'Latest 2 years'
 assert.equal(model.dynamics.allocation.dynamic.trendBasis.capped,true);
 assert.ok(model.dynamics.allocation.dynamic.trendBasis.selectedPeriods>model.dynamics.allocation.dynamic.trendBasis.periods);
 
+// The 590-day browser performance fixture stays inside the 730-day directional
+// horizon. Its first All-history render may reuse the all-history evidence
+// index and daily series, but the result must be byte-for-byte equivalent to
+// the ordinary path that receives an independent window array.
+const reuseRecords=historyRecords.slice(-590),reuseOptions={windowKey:'all',windowLabel:'All records',allRecordCount:590,currentStudyDate:endDate};
+const reuseEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns}),reusePrepared=reuseEngine.prepare(reuseRecords,'uncapped-reuse');
+const reusedModel=reuseEngine.buildPrepared(reuseEngine.filterPreparedWindow(reusePrepared,'all',endDate).records,reusePrepared,reuseOptions);
+const referenceEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns}),referencePrepared=referenceEngine.prepare(reuseRecords,'uncapped-reference');
+const referenceModel=referenceEngine.buildPrepared([...referencePrepared.records],referencePrepared,reuseOptions);
+assert.deepEqual(JSON.parse(JSON.stringify(reusedModel)),JSON.parse(JSON.stringify(referenceModel)),'uncapped All-history intermediate reuse must not change Insights model output');
+
 
 const evidence={
   status:'PASS',
@@ -184,7 +205,8 @@ const evidence={
   boundedAnnualSample:{eligibleDays:annualPractice.trend.eligibleDays,sampledDays:annualPractice.trend.sampledDays,pairs:annualPractice.trend.pairCount,blocks:annualPractice.trend.blockCount},
   boundedLargeSample:{eligibleDays:denseFirst.trend.eligibleDays,sampledDays:denseFirst.trend.sampledDays,pairs:denseFirst.trend.pairCount,blocks:denseFirst.trend.blockCount},
   horizon:{selectedDays:model.recordCount,trendDays:model.advanced.trendCompletionDayCount,label:model.trendBasis.label,descriptivePracticeDays:model.practice.practiceDays,trendPracticeDays:model.practice.trendBasis.practiceDays},
-  fullModel:{days:historyDays}
+  fullModel:{days:historyDays},
+  uncappedAllHistoryReuse:{days:reuseRecords.length,parity:true}
 };
 writeArtifact('insights-scaling.json',`${JSON.stringify(evidence,null,2)}\n`);
 console.log(JSON.stringify(evidence,null,2));

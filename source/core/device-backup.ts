@@ -29,6 +29,8 @@ const createModule=()=>{
     const {configuration:config,engine,environment,settings,hooks,presentation}=input;
     const supported=typeof environment.showDirectoryPicker==='function';
     let installed=false,handle:ChosenFolder|null=null,permission:PermissionState|'unknown'='unknown',baseline='',mode:DeviceMode=supported?'off':'unsupported',settingsUnverified=supported,connectionListener:(()=>void)|null=null,connecting=false,permissionNoticeShown=false;
+    // A permission observation belongs to a particular folder and request order.
+    let permissionRevision=0,stalePermissionResponses=0,authorizing=0;
     // The repository folder inside the chosen folder this profile and device
     // use; '' until it is settled (found or made).
     let repositoryName='',preparing:Promise<string>|null=null;
@@ -43,7 +45,7 @@ const createModule=()=>{
         installed,supported,mode,connected:connected(),permission,folderName:handle&&typeof handle.name==='string'?handle.name:'',
         busy:engineState?.busy===true||connecting||!!preparing,cancellable:engineState?.cancellable===true,foregroundKind:connecting?'connect':preparing?'prepare':String(engineState?.foregroundKind||''),
         backingUp:engineState?.backingUp===true,maintenanceBusy:engineState?.maintenanceBusy===true,paused:engineState?.paused===true,locked:engineState?.locked===true,pending:engineState?.waiting===true,nextEligibleAt:String(engineState?.nextEligibleAt||''),
-        retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,repositoryName,
+        retryAttempt:Number(engineState?.retryAttempt)||0,retryBackoffCapped:engineState?.retryBackoffCapped===true,repositoryName,stalePermissionResponses,
         lastBackupAt:String(hooks.verifiedAt()||'')||null,
         // The row's inline note shows the location's messages; this says whether it has one.
         hasNote:!!presentation.current(ID)
@@ -55,7 +57,7 @@ const createModule=()=>{
       try{connectionListener?.();}catch(error){capture('device-backup.connection',error);}
       publish();
     }
-    function feedback(text:string,ok=true){presentation.feedback(ID,String(text||''),ok);publish();}
+    function feedback(text:string,ok:boolean=true){presentation.feedback(ID,String(text||''),ok);publish();}
     function permissionMessage(){return permission==='prompt'?'Folder permission needs to be renewed. Choose Allow access.':'Folder access is blocked by the browser. Choose Allow access or update this site’s folder permission.';}
     // Someone who backs up to a folder hears once per launch that it needs
     // their permission again; the status row keeps the Allow access button.
@@ -89,7 +91,8 @@ const createModule=()=>{
       try{const result=await target.requestPermission({mode:'readwrite'});return ['granted','prompt','denied'].includes(result)?result:'denied';}
       catch(error){capture('device-backup.permission-request',error);return 'denied';}
     }
-    function forgetFolder(text=''){
+    function forgetFolder(text:string=''){
+      permissionRevision++;
       handle=null;permission='unknown';baseline='';repositoryName='';mode=supported?'off':'unsupported';
       presentation.resolve(ID,'permission');if(text)presentation.feedback(ID,text,false);
       publish();
@@ -180,16 +183,30 @@ const createModule=()=>{
     async function authorize({operation=''}:{operation?:string}={}){
       if(operation==='disconnect')return;
       if(!handle)throw new Error('Choose the backup folder first.');
-      if(permission!=='granted'){permission=await query();if(permission==='prompt')permission=await request();if(permission!=='granted'){permissionNeeded();publish();throw new Error('Folder permission is required. Choose Allow access.');}mode='connected';connectionChanged();}
+      if(permission!=='granted'){
+        const target=handle,revision=++permissionRevision;
+        authorizing++;
+        try{
+          let observed=await query(target);
+          if(revision!==permissionRevision||handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
+          if(observed==='prompt')observed=await request(target);
+          if(revision!==permissionRevision||handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
+          permission=observed as PermissionState;
+          if(permission!=='granted'){permissionNeeded();publish();throw new Error('Folder permission is required. Choose Allow access.');}
+          mode='connected';connectionChanged();
+        }finally{authorizing--;}
+      }
       await prepareRepository();
     }
     async function disconnectFolder(){
+      permissionRevision++;
       await settings.remove(config.metadataKey);forgetFolder();
     }
     if(supported&&!engine.register(freeze({
       id:ID,label:LABEL,hosted:true,
       connected,backgroundAvailable:connected,
       automaticBaseline:()=>connected()?baseline||EPOCH:'',
+      automaticConfigured:()=>supported&&!!handle,
       subscribeConnection:(listener:()=>void)=>{connectionListener=listener;},
       authorize,disconnect:disconnectFolder,disconnectLabel:'Turn off',
       repository:transport
@@ -200,12 +217,19 @@ const createModule=()=>{
       if(installed)return snapshot();
       installed=true;
       if(!supported)return publish();
+      const revision=++permissionRevision;
       try{
-        const stored=normalizeSettings(await bounded(settings.read(config.metadataKey),'Device Folder settings'));settingsUnverified=false;
+        const stored=normalizeSettings(await bounded(settings.read(config.metadataKey),'Device Folder settings'));
+        if(revision!==permissionRevision)return snapshot();
+        settingsUnverified=false;
         if(!stored){mode='off';return publish();}
-        handle=stored.directoryHandle;baseline=stored.baseline;permission=await query();
+        handle=stored.directoryHandle;baseline=stored.baseline;
+        const observed=await query(stored.directoryHandle);
+        if(revision!==permissionRevision||handle!==stored.directoryHandle)return snapshot();
+        permission=observed as PermissionState;
         if(permission==='granted')mode='connected';else permissionNeeded();
       }catch(error){
+        if(revision!==permissionRevision)return snapshot();
         settingsUnverified=true;mode='error';capture('device-backup.restore-settings',error);
         presentation.feedback(ID,'Automatic Device Folder backup settings could not be read. Normal app saving continues.',false);
       }
@@ -214,10 +238,16 @@ const createModule=()=>{
     // Permission can change while the app is open (another tab, the browser's
     // site settings); it is checked again whenever the app comes back.
     async function refreshPermission(){
-      if(!supported||!installed)return snapshot();
+      if(!supported||!installed||connecting||authorizing)return snapshot();
       if(settingsUnverified){installed=false;return install();}
       if(!handle)return snapshot();
-      const before=permission;permission=await query();
+      const target=handle,revision=++permissionRevision;
+      const observed=await query(target);
+      if(revision!==permissionRevision||handle!==target||connecting){
+        stalePermissionResponses=Math.min(9999,stalePermissionResponses+1);
+        return snapshot();
+      }
+      const before=permission;permission=observed as PermissionState;
       if(permission===before){prepareInBackground();return snapshot();}
       if(permission==='granted')mode='connected';else permissionNeeded();
       connectionChanged();prepareInBackground();return snapshot();
@@ -228,22 +258,27 @@ const createModule=()=>{
       if(!supported)return publish();
       if(!environment.canMutate()){feedback('Take control in this tab before connecting a backup folder.',false);return snapshot();}
       if(connecting||snapshot().busy)return snapshot();
-      const reconnect=!!handle;let pending:Promise<ChosenFolder|PermissionState>;
-      try{pending=Promise.resolve(reconnect?request():environment.showDirectoryPicker!({id:config.pickerId,mode:'readwrite',startIn:'documents'}));}
+      const previousHandle=handle,reconnect=!!previousHandle,revision=++permissionRevision;let pending:Promise<ChosenFolder|PermissionState>;
+      try{pending=Promise.resolve(reconnect?request(previousHandle):environment.showDirectoryPicker!({id:config.pickerId,mode:'readwrite',startIn:'documents'}));}
       catch(error){pending=Promise.reject(error);}
       connecting=true;feedback('Connecting backup folder…');
       let initial=false;
       try{
         if(reconnect){
-          permission=await pending as PermissionState;
+          const observed=await pending;
+          if(revision!==permissionRevision||handle!==previousHandle)return snapshot();
+          permission=observed as PermissionState;
           if(permission!=='granted'){permissionNeeded();feedback(permissionMessage(),false);return snapshot();}
           mode='connected';presentation.feedback(ID,'');prepareInBackground();return snapshot();
         }
-        const chosen=await pending as ChosenFolder;
-        if(!chosen||typeof chosen.getDirectoryHandle!=='function')throw new Error('The selected folder is not writable.');
+        const chosen=await pending;
+        if(revision!==permissionRevision||handle!==previousHandle)return snapshot();
+        if(!chosen||typeof chosen==='string'||typeof chosen.getDirectoryHandle!=='function')throw new Error('The selected folder is not writable.');
         let granted=await query(chosen);if(granted!=='granted')granted=await request(chosen);
+        if(revision!==permissionRevision||handle!==previousHandle)return snapshot();
         if(granted!=='granted')throw new Error('Write permission was not granted for the selected folder.');
         if(preparing)await preparing.catch(()=>{});
+        if(revision!==permissionRevision||handle!==previousHandle)return snapshot();
         const previous=handle,previousName=repositoryName;handle=chosen;permission='granted';repositoryName='';
         try{
           await prepareRepository({choose:true});
@@ -254,7 +289,14 @@ const createModule=()=>{
           baseline=versions?sourceRevision():'';initial=!versions;
           await settings.write(config.metadataKey,settingsValue());settingsUnverified=false;mode='connected';
           presentation.feedback(ID,versions?'Existing Study Director backups found. Open Version History to recover one, or Back up now to keep this device’s current data.':'');
-        }catch(error){handle=previous;repositoryName=previous?previousName:'';permission=previous?await query(previous):'unknown';throw error;}
+        }catch(error){
+          if(revision===permissionRevision&&handle===chosen){
+            handle=previous;repositoryName=previous?previousName:'';
+            const restored=previous?await query(previous):'unknown';
+            if(revision===permissionRevision&&handle===previous)permission=restored;
+          }
+          throw error;
+        }
       }catch(error){
         if(error&&(error as {name?:unknown}).name==='AbortError')presentation.feedback(ID,handle?'':'Folder selection was cancelled.');
         else{capture('device-backup.connect',error);presentation.feedback(ID,(error as {code?:unknown}|null|undefined)?.code==='DEVICE_FOLDER_MISSING'?String((error as {message?:unknown}).message||''):`${String(error&&(error as {message?:unknown}).message||'The backup folder could not be used safely.')} Normal app saving continues.`,false);}

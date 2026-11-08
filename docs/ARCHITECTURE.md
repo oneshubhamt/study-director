@@ -1,6 +1,6 @@
 # Study Director — current architecture
 
-This is the current source/runtime map for `TS-Conversion`. [Product purpose](PRODUCT.md), [data contracts](DATA-CONTRACTS.md) and [conversion status](../TS-CONVERSION-EXECUTION.md) are separate. The documentation review used source checkpoint `4136ba5`; it is not a fresh whole-app correctness or device audit.
+This is the current source/runtime map for `TS-Conversion`. [Product purpose](PRODUCT.md), [data contracts](DATA-CONTRACTS.md) and [conversion status](../TS-CONVERSION-EXECUTION.md) are separate. The current source map incorporates production intake `2638619`; targeted results are recorded in the execution record. It is not whole-app or device certification.
 
 ## Composition and source ownership
 
@@ -68,3 +68,5 @@ Developer diagnostics summarize operational state, outcomes and verification cov
 ## Evidence and historical context
 
 Use [verification](VERIFICATION.md) for executable checks and the [execution record](../TS-CONVERSION-EXECUTION.md) for results actually run. [Product history](history/PRODUCT-DEVELOPMENT.md) preserves earlier detailed explanations, measurements, changes and superseded policies. It must not be read as an active migration plan or current certification. No module rewrite or product redesign is implied by this documentation reorganization.
+
+Detailed current workflows: [study sessions](areas/study-session.md), [status indicator](areas/status-indicator.md), [app updates](areas/app-updates.md), [UI](areas/ui.md), and [storage operations](areas/data-and-storage.md).

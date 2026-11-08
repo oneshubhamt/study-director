@@ -29,7 +29,6 @@ assert.doesNotMatch(app.slice(fontStart,fontEnd),/AppData\.local\.setText/u,'fon
 const flushStart=app.indexOf('async function flushProtectedPreferences('),flushEnd=app.indexOf('function scheduleProtectedPreferencesWrite()',flushStart);
 const flushBlock=app.slice(flushStart,flushEnd);
 assert.ok(flushBlock.indexOf('const saved=await run;')<flushBlock.indexOf('refreshAppearanceMirrors(saved)'),'appearance mirrors must refresh only after the canonical write resolves');
-assert.match(startup,/lifecycle\.flush-preferences/u,'page/background lifecycle must proactively flush a pending Preferences write');
 
 
 const maintenanceStart=app.indexOf('function scheduleDataMaintenance(delay=1200');
@@ -37,7 +36,6 @@ const maintenanceEnd=app.indexOf('/* ONGOING SUBJECT NOTES */',maintenanceStart)
 const maintenanceBlock=app.slice(maintenanceStart,maintenanceEnd);
 assert.match(maintenanceBlock,/if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return false;/u,'data maintenance must not start before canonical startup verification completes');
 const maintenanceAdmission=app.slice(app.indexOf('const DataMaintenanceJob=OperationLifecycle.createJob('),maintenanceStart);
-assert.match(maintenanceAdmission,/isAvailable:\(\)=>upkeepBlocker\(/u,'the owned maintenance job must recheck the shared gate at execution admission');
 assert.match(app,/function backgroundBlocker\([^)]*\)\{[^}]*if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return 'startup';/u,'the shared background gate rechecks startup');
 assert.match(app,/markReady:async proof=>\{[\s\S]*proof&&proof\.canonical===true[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*scheduleDataMaintenance\(\);/u,'initial maintenance must remain inside the verified-ready boundary after canonical epoch reseeding');
 

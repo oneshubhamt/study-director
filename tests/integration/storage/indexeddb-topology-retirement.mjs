@@ -57,10 +57,15 @@ function fakeIndexedDb(initial){
   };
 }
 
+// The modules and this test share one clock running 10 times faster, so the app's
+// 2.5 s open limit and the waits around it keep their order without real waiting.
+const TIME_SCALE=10;
+const fastTimeout=(fn,ms=0)=>setTimeout(fn,Math.ceil((Number(ms)||0)/TIME_SCALE));
+
 function loadModules(indexedDB){
   const context=vm.createContext({
     console,Date,Math,JSON,RegExp,Error,TypeError,Object,Array,String,Number,Map,Set,Promise,Uint8Array,TextEncoder,
-    crypto:globalThis.crypto,indexedDB,setTimeout,clearTimeout,queueMicrotask,globalThis:null
+    crypto:globalThis.crypto,indexedDB,setTimeout:fastTimeout,clearTimeout,queueMicrotask,globalThis:null
   });
   context.globalThis=context;
   for(const file of ['internal','persistence'])vm.runInContext(readCoreScript(file),context,{filename:`${file}.js`});
@@ -103,7 +108,7 @@ function silentIndexedDb({answerFrom,lateAfter=null}){
   return {events,open(){
     const attempt=++events.opens,req={result:null,error:null,onupgradeneeded:null,onsuccess:null,onerror:null,onblocked:null};
     if(attempt>=answerFrom)queueMicrotask(()=>answer(req));
-    else if(lateAfter!==null)setTimeout(()=>answer(req),lateAfter);
+    else if(lateAfter!==null)fastTimeout(()=>answer(req),lateAfter);
     return req;
   }};
 }

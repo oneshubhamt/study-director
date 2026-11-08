@@ -20,7 +20,7 @@ assert.doesNotMatch(codecs,/sanitizeCurrentSyncMetadata|sanitizeHistoricalSyncMe
 assert.match(persistence,/strictTransaction:idbStrictTransaction[\s\S]*strictStoreTransaction:idbStrictStoreTransaction/,'IndexedDB primitives must expose one centralized strict-durability capability');
 assert.match(persistence,/db\.transaction\(stores,mode,\{durability:'strict'\}\)/,'strict durability must use the native IndexedDB transaction option');
 assert.doesNotMatch(repositories,/idbPutReflectionDraft|DB_REFLECTION_DRAFT_STORE/u,'retired Reflection Draft persistence must not remain a current repository boundary');
-assert.match(repositories,/async function idbPutActiveSession[\s\S]*?return idbTransaction\s*\(\[DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE\],'readwrite'/,'high-frequency active-session checkpoints must share their canonical mutation epoch in the same default-durability transaction');
+assert.match(repositories,/async function idbPutActiveSession[\s\S]*?return \(strictDurability\?idbStrictTransaction:idbTransaction\)\s*\(\[DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE\],'readwrite'/,'high-frequency active-session checkpoints must share their canonical mutation epoch in the same default-durability transaction');
 assert.doesNotMatch(notes,/meta\.put\('noteRecoveryPrefix'/u,'Notes save straight to their canonical rows and never journal edits in appMeta');
 assert.match(notes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\s*\(\[DB_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical note commits and deletion markers must share one strict transaction');
 assert.match(repositories,/async function idbPutDailyRecordBatch[\s\S]*?idbStrictTransaction\s*\(stores,'readwrite'/,'authoritative Daily Record commits must opt into strict durability');
@@ -51,10 +51,11 @@ assert.match(repositories,/input\.journals/,'AppData must compose journal capabi
 assert.match(repositories,/const Meta=input\.appMeta/,'AppData must consume owner-scoped appMeta capability rather than reacquiring arbitrary metadata access');
 assert.match(journals,/const APP_LIMITS=input\.limits,Meta=input\.appMeta/,'repository journals must consume their owner-scoped appMeta capability');
 assert.match(appMeta,/function family\(name\s*,owner\s*\)/,'appMeta gateway must enforce family ownership');
-assert.match(persistence,/n>Number\(nowMs\)\+10\*60\*1000/,'import timestamp acceptance must use an explicit caller-supplied decision time');
+assert.match(persistence,/n>Number\(nowMs\)\+IMPORTED_TIME_AHEAD_MS/,'import timestamp acceptance must use an explicit caller-supplied decision time');
 assert.match(journals,/Number\(current\.expiresAt\)>decisionNowMs\(\)/,'durable mutation lease expiry must use the injected decision clock');
 assert.match(repositories,/decisionNowMs\(\)-lastRun<DATA_MAINTENANCE_INTERVAL_MS/,'repository maintenance recency must use the injected decision clock');
 assert.match(repositories,/NotesRepositoryModule\.create/,'AppData facade must compose the extracted notes repository through an injected module contract');
 assert.match(repositories,/Math\.floor\(Number\(seed\)\|\|0\),lastSessionRevision,decisionNowMs\(\)/,'session revision ordering must use the injected decision clock');
 
+assert.match(persistence,/IMPORTED_TIME_AHEAD_MS=48\*60\*60\*1000/u,'the production clock-lead allowance stays 48 hours');
 console.log(JSON.stringify({status:'PASS',boundary:'persistence-repositories',layers:['persistence primitives','record codecs','backup codec','repository journals','AppData facade']},null,2));

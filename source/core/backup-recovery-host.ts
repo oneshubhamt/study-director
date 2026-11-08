@@ -126,7 +126,7 @@ const createModule=()=>{
       // captures half-applied data.
       automaticBackup:freeze({
         suspend:async reason=>{
-          const held=input.providers.suspendBackground(reason);
+          const held=input.providers.suspendBackground(reason,{preserveManagedSync:reason==='sync'});
           try{await held.settled;}catch(error){held.release();throw error;}
           return held;
         },
@@ -164,15 +164,15 @@ const createModule=()=>{
       status:input.document.getElementById('managed-version-history-status'),
       cancel:input.document.getElementById('cancel-backup-import') as HTMLButtonElement|null
     });
-    const safetyLabel=(value:unknown)=>(value==='before-clear-library'||value==='before-clear-archive')?'Before Clear Library':value==='before-combine'?'Before Combine':'Before Restore';
-    const tierLabel=(value:unknown,purpose='')=>value==='before-restore'?safetyLabel(purpose):value==='latest'?'Latest':value==='hourly'?'Hourly':value==='daily'?'Daily':value==='weekly'?'Weekly':value==='monthly'?'Monthly':'Saved';
+    const safetyLabel=(value:unknown)=>value==='before-clear-library'?'Before Clear Library':value==='before-combine'?'Before Combine':'Before Restore';
+    const tierLabel=(value:unknown,purpose:string | undefined='')=>value==='before-restore'?safetyLabel(purpose):value==='latest'?'Latest':value==='hourly'?'Hourly':value==='daily'?'Daily':value==='weekly'?'Weekly':value==='monthly'?'Monthly':'Saved';
     // "12 Saved Days · 1 note".
     const countLabel=(counts:HistoryEntry['counts'])=>{const days=Number(counts?.dailyRecord)||0,notes=Number(counts?.note)||0;return `${days} Saved Day${days===1?'':'s'} · ${notes} note${notes===1?'':'s'}`;};
     const dateLabel=(value:string)=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleString():String(value||'');};
     function sourceDescriptor(sourceId:string){
       const id=String(sourceId||'').trim(),provider=input.providers.list().find(item=>item.id===id);return provider?freeze({id:provider.id,label:provider.label,shared:provider.shared===true}):null;
     }
-    function setHistoryStatus(message='',ok=true,lifecycle:PresentationLifecycle|''=''){
+    function setHistoryStatus(message:string='',ok:boolean=true,lifecycle:PresentationLifecycle|''=''){
       presentationLifecycle=lifecycle||(ok?'succeeded':'failed');
       if(presentationScope?.read()?.lifecycle==='running'){presentation.feedback(activeSourceId,'');presentationScope.update({message:String(message||''),severity:ok?'info':'error'});}
       else if(activeSourceId)presentation.feedback(activeSourceId,String(message||''),ok);
@@ -193,7 +193,7 @@ const createModule=()=>{
     }
     function renderOperationPresentation(){render(lastEntries);renderHistoryPresentation();renderBusy();return true;}
     function renderBusy(){const {cancel,dialog}=elements();if(dialog)dialog.dataset['busy']=busy?'true':'false';if(cancel){cancel.hidden=!busy||!activeController;cancel.disabled=!busy;cancel.textContent='Cancel';}}
-    function setOperationBusy(next:boolean,controller:AbortController|null=null,kind='history'){
+    function setOperationBusy(next:boolean,controller:AbortController|null=null,kind:string='history'){
       if(next&&!busy){presentationLifecycle='succeeded';presentationScope=presentation.begin(activeSourceId,kind,{label:activeSourceLabel});}
       if(!next&&busy){presentationScope?.finish({lifecycle:presentationLifecycle});presentationScope=null;}
       busy=!!next;activeController=busy?controller:null;renderBusy();renderHistoryPresentation();return busy;
@@ -237,7 +237,7 @@ const createModule=()=>{
         head.append(when,exact,use);card.appendChild(head);list.appendChild(card);
       }
     }
-    function render(entries=lastEntries){
+    function render(entries:readonly HistoryEntry[]=lastEntries){
       const {list}=elements();if(!list)return;list.replaceChildren();
       if(noteTarget){renderNoteVersions(entries);return;}
       if(!entries.length){const empty=input.document.createElement('div');empty.className='managed-version-history-empty ui-helper';empty.textContent=busy?'':'No versions yet.';list.appendChild(empty);return;}
@@ -256,8 +256,8 @@ const createModule=()=>{
         const status=input.document.createElement('span');status.className='ui-helper';status.textContent=`${tierLabel(location.tier,location.safetyPurpose)}${location.encrypted?' · Encrypted':''}${location.health==='degraded'?' · Degraded capture':''}${several&&Array.isArray(entry.held)&&entry.held.length===1?` · Only in ${entry.held[0]}`:''}`;copy.appendChild(status);
         if(location.warning){const warning=input.document.createElement('span');warning.className='ui-status warn';warning.textContent=String(location.warning);copy.appendChild(warning);}
         const actions=input.document.createElement('div');actions.className='managed-version-location-actions';
-        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset['action']=noteTarget?'compare-managed-note':'recover-managed-version';use.dataset['versionHistorySource']=location.sourceId;use.dataset['versionHistoryCheckpoint']=location.checkpointId;use.textContent=noteTarget?'Restore note…':'Restore…';actions.appendChild(use);
-        if(location.tier==='before-restore'&&!noteTarget)actions.appendChild(removeButton(location,'Remove safety version'));
+        const use=input.document.createElement('button');use.type='button';use.className='mini-btn ui-btn';use.dataset['action']='recover-managed-version';use.dataset['versionHistorySource']=location.sourceId;use.dataset['versionHistoryCheckpoint']=location.checkpointId;use.textContent='Restore…';actions.appendChild(use);
+        if(location.tier==='before-restore')actions.appendChild(removeButton(location,'Remove safety version'));
         row.append(copy,actions);card.appendChild(row);list.appendChild(card);
       }
     }
@@ -389,12 +389,15 @@ const createModule=()=>{
       // The version is read from the location the list chose for it.
       activeSourceId=source.id;activeSourceLabel=source.label;
       const note=noteTarget,from=fromDevice(entry,lastEntries),reach=typeof presentation.reach==='function'?presentation.reach():'';
+      const missingAttachments=Math.max(0,...[location,...(Array.isArray(entry.copies)?entry.copies as readonly {attachmentsMissing?:number}[]:[])].map(at=>Number(at?.attachmentsMissing)||0));
+      const partialWarning=/Partial attachment recovery:/u.test(String(location.warning||''))?String(location.warning):missingAttachments?`Partial attachment recovery: ${missingAttachments} attachment${missingAttachments===1?'':'s'} missing. Saved Days and Notes are preserved, but missing files cannot be restored from this backup.`:'';
+      const partialAttachments=!!partialWarning;
       const choice=note?'combine':await input.interactions.choose({
         title:'Use this version',
         message:`Saved ${dateLabel(location.exportedAt)}${from?`, ${from}`:''}.`,
-        details:['A safety version is kept first, so you can go back.','Settings that belong to this device stay as they are.',...(reach?[reach]:[])],
+        details:['A safety version is kept first, so you can go back.','Settings that belong to this device stay as they are.',...(partialAttachments?[partialWarning]:[]),...(reach?[reach]:[])],
         cancelLabel:'Keep current',
-        choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,presentation.restoreChoices.replace]
+        choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]
       });
       if(!choice)return false;const controller=new AbortController();setOperationBusy(true,controller,choice==='replace'?'restore-version':'bring-in');setHistoryStatus('');setHistoryProgress({message:choice==='replace'?'Preparing restore…':'Preparing comparison…'});
       try{

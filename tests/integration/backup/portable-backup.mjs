@@ -75,7 +75,7 @@ const complete=await codec.encodeCompletion(3,counts,[checkpointChunk.checksum,p
 const metadata=new Blob([JSON.stringify(manifest)+'\n'+checkpointChunk.line+'\n'+personalChunk.line+'\n'+chunk.line+'\n'+JSON.stringify(complete)+'\n']);
 const portable=codec.createV10Container(metadata,{compression:'none',assetBlobs:[image]});
 const parsed=await codec.inspectCurrent(portable,{filename:'portable.sdbackup'});
-assert.equal(parsed.formatVersion,23);
+assert.equal(parsed.formatVersion,24);
 assert.equal(parsed.captureAuthority,'canonical-complete','Current standalone backups must persist canonical-complete authority inside the protected completion proof.');
 assert.equal(parsed.protectedCheckpointManifest.checkpointId,parsed.manifest.checkpoint.checkpointId);
 assert.equal(parsed.manifest.deviceId,undefined);
@@ -120,6 +120,11 @@ const missingMetadata=new Blob([JSON.stringify(manifest)+'\n'+checkpointChunk.li
 const missingParsed=await codec.inspectCurrent(codec.createV10Container(missingMetadata,{compression:'none',assetBlobs:[]}),{filename:'missing.sdbackup'});
 assert.equal(missingParsed.assetDescriptors[0].missing,true);
 assert.equal(missingParsed.importedAssets.length,0);
+const missingCoverage=codec.attachmentCoverage(missingParsed.assetDescriptors);
+assert.equal(missingCoverage.fullyRecoverable,false,'a canonical-complete file with a missing asset is not fully recoverable');
+assert.deepEqual(missingCoverage.missingIds,[assetId],'the missing attachment identity must remain inspectable');
+assert.match(codec.missingAttachmentWarning(missingParsed.assetDescriptors),/Partial attachment recovery: 1 attachment missing/u);
+assert.equal(codec.attachmentCoverage(parsed.assetDescriptors).fullyRecoverable,true,'all present, verified binary frames certify full attachment coverage');
 
 await assert.rejects(()=>codec.encodeCompletion(3,counts,[checkpointChunk.checksum,personalChunk.checksum,chunk.checksum],algorithm,[descriptor,descriptor]),/duplicate asset identity/u);
 const extraId='img-abcdefghijklmnopqrstuvwx';

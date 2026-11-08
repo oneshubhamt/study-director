@@ -130,3 +130,44 @@ console.log(JSON.stringify({
   canonicalWriteFailurePreservesPriorRow:true
 },null,2));
 }
+
+{ // bf2-portable-personal-atomicity
+const controls={},h=createHarness(new Map(),null,controls);
+const before={version:2,plans:{draft:'Local unsaved working draft',savedPlans:[],defaultId:null},
+  preferences:{studentName:'Before',theme:'glass',presentation:'glass',quote:'Original',
+    practiceCueMode:'quiet',fontScale:1,practiceTargetMs:600000,nudge:null}};
+const after={version:2,plans:{draft:'Another device draft',savedPlans:[],defaultId:null},
+  preferences:{...before.preferences,studentName:'After',theme:'aurora',quote:'Changed'}};
+const keys=['planDraft','planLibrary','personalPreferences'];
+const snapshot=()=>Object.fromEntries(keys.map(key=>[key,structuredClone(h.stores.meta.get(key))]));
+await h.app.planData.replacePortable(before);
+assert.equal(JSON.stringify(await h.app.planData.read()),JSON.stringify(before.plans),'cross-realm Plan values match');
+const previous=snapshot(),strict=h.idbDurability.strict;
+controls.failNextMetaWrite=true;
+await assert.rejects(h.app.planData.replacePortable(after),/injected appMeta write failure/u,
+  'portable Personal Data transaction rejects its failure instead of reporting success');
+assert.deepEqual(snapshot(),previous,'a failed Personal Data transaction preserves draft, saved Plans and preferences together');
+assert.equal(JSON.stringify(await h.app.planData.read()),JSON.stringify(before.plans),'cross-realm Plan values match');
+assert.equal((await h.app.personalPreferences.read()).studentName,'Before');
+await h.app.planData.replacePortable(after);
+assert.equal(h.idbDurability.strict,strict+2,'each attempt uses one strict IndexedDB transaction, not three independent writes');
+assert.equal(JSON.stringify(await h.app.planData.read()),JSON.stringify(after.plans),'both Plan records publish together');
+const preferences=await h.app.personalPreferences.read();
+for(const [key,value] of Object.entries(after.preferences))
+  assert.deepEqual(preferences[key],value,`portable setting ${key} publishes with Plans`);
+assert.ok(h.stores.meta.has('canonicalMutationEpoch'),'the combined commit carries canonical mutation provenance');
+
+// Explicit user Apply/Done must use the same strict IDB durability boundary,
+// while a failed write must leave the previous canonical draft intact.
+const strictBeforeDraft=h.idbDurability.strict;
+controls.failNextMetaWrite=true;
+await assert.rejects(h.app.planData.writeDraft('unsafely rejected',{strictDurability:true}),
+  /injected appMeta write failure/u,'explicit Plan save rejects a failed strict write');
+assert.equal((await h.app.planData.read()).draft,after.plans.draft,
+  'a failed strict Plan write does not replace the canonical draft');
+await h.app.planData.writeDraft('strict Plan saved',{strictDurability:true});
+assert.equal(h.idbDurability.strict,strictBeforeDraft+2,
+  'failed and completed explicit Plan writes each use the existing strict transaction path');
+assert.equal((await h.app.planData.read()).draft,'strict Plan saved');
+console.log(JSON.stringify({status:'PASS',suite:'portable-personal-atomicity',strictCommits:2,rolledBackOnFailure:true,planAndPreferencesTogether:true}));
+}

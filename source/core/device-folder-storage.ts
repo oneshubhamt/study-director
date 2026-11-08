@@ -1,5 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {FolderStorageInput,FolderDirectory,FolderMarker,StorageKind,LockKind,StorageItem,StorageIdentity,StorageUpload,StoredFile,FileSummary,LockLease,SignalOptions,RangeOptions,WholeOptions,DownloadOptions,RangeResult} from '../../types/device-folder-storage.ts';
+const errorFields=(value:unknown):Record<string,unknown>=>value&&typeof value==='object'?value as Record<string,unknown>:{};
 const sdDeviceFolderStorageFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'device-folder-storage','study-director.device-folder-storage-module'>|undefined;
@@ -31,7 +32,7 @@ const createModule=()=>{
     functions(input.environment,['canMutate','clearTimeout','now','setTimeout','yieldTask'],'Device Folder storage environment');
     exactObject(input.identities,['checkpoints','commits','objects','prefix','root'],'Device Folder storage identities');
     if(typeof input.owner!=='function')throw new TypeError('Device Folder storage owner port is invalid.');
-    exactObject(input.limits,['maintenanceAssertionMarginMs','maintenanceMaxAgeMs','publicationAssertionMarginMs','publicationMaxAgeMs','responseTimeoutMs'],'Device Folder storage limits');
+    exactObject(input.limits,['maintenanceAssertionMarginMs','maintenanceMaxAgeMs','publicationAssertionMarginMs','publicationMaxAgeMs','publicationRenewMs','publicationStaleMs','responseTimeoutMs'],'Device Folder storage limits');
     if(typeof input.folder!=='function'||typeof input.checksum!=='function'||typeof input.inspectManifest!=='function')throw new TypeError('Device Folder storage ports are invalid.');
     const environment=input.environment,identities=input.identities,limits=input.limits;
     const summaryCache=new Map<string,FileSummary>(),digestCache=new Map<string,string>();
@@ -42,7 +43,7 @@ const createModule=()=>{
     // Every file-system call, read or write, is bounded, so a stalled folder
     // (a disconnected drive, a cloud sync client) surfaces as an error instead
     // of a hang. Closing a written file commits it, so it gets a longer allowance.
-    function bounded<T>(operation:PromiseLike<T>,label:string,signal:AbortSignal|null=null,timeoutMs=limits.responseTimeoutMs):Promise<T>{
+    function bounded<T>(operation:PromiseLike<T>,label:string,signal:AbortSignal|null=null,timeoutMs:number=limits.responseTimeoutMs):Promise<T>{
       return new Promise<T>((resolve,reject)=>{
         let settled=false;
         const finish=<V>(callback:(value:V)=>void,value:V)=>{if(settled)return;settled=true;environment.clearTimeout(timer);signal?.removeEventListener('abort',onAbort);callback(value);};
@@ -106,8 +107,11 @@ const createModule=()=>{
       await writeFile(root,SCOPE_FILE,markerBlob(id));
       return `device-folder:1:${id}`;
     }
-    async function digestOf(file:Blob,cacheKey:string,signal:AbortSignal|null){
-      const cached=digestCache.get(cacheKey);if(cached)return cached;
+    async function digestOf(file:Blob,cacheKey:string,signal:AbortSignal|null,{fresh=false}={}){
+      // File name, size and lastModified are only a performance hint, not proof.
+      // Retention/deletion discovery must hash the current bytes even if all
+      // filesystem metadata appears unchanged after an external modification.
+      const cached=!fresh&&digestCache.get(cacheKey);if(cached)return cached;
       const digest=String(await input.checksum(file,{signal})||'');if(!/^[a-f0-9]{64}$/u.test(digest))throw new Error('Device Folder file checksum is invalid.');
       digestCache.set(cacheKey,digest);if(digestCache.size>512)digestCache.delete(digestCache.keys().next().value!);return digest;
     }
@@ -118,24 +122,25 @@ const createModule=()=>{
     async function summaryOf(file:Blob,cacheKey:string):Promise<FileSummary>{
       if(summaryCache.has(cacheKey))return summaryCache.get(cacheKey)!;
       let summary:FileSummary;
-      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({history:freeze({format:Number(manifest.version)||0,logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.['dailyRecord'])||0,note:Number(manifest.counts?.['note'])||0}),encrypted:manifest.encrypted===true,retention:manifest.retention,origin:String(manifest.installationId||'')})});}
-      catch(error){if(error&&(error as {code?:unknown}).code==='BACKUP_LOCKED')return freeze({locked:true});if((error as {repositoryUnreadable?:unknown}|null|undefined)?.repositoryUnreadable!==true)return freeze({});summary=freeze({unreadable:true});}
+      try{const manifest=await input.inspectManifest(file,{interactive:false});summary=freeze({history:freeze({format:Number(manifest.version)||0,logicalFingerprint:manifest.logicalFingerprint,exportedAt:manifest.exportedAt,counts:freeze({dailyRecord:Number(manifest.counts?.["dailyRecord"])||0,note:Number(manifest.counts?.["note"])||0}),encrypted:manifest.encrypted===true,retention:manifest.retention,origin:String(manifest.installationId||''),attachmentsMissing:(Array.isArray(manifest.assets)?manifest.assets as readonly {missing?:boolean}[]:[]).filter(asset=>asset?.missing===true).length})});}
+      catch(error){if(error&&errorFields(error)['code']==='BACKUP_LOCKED')return freeze({locked:true});if(errorFields(error)['repositoryUnreadable']!==true)return freeze({});summary=freeze({unreadable:true});}
       summaryCache.set(cacheKey,summary);if(summaryCache.size>256)summaryCache.delete(summaryCache.keys().next().value!);return summary;
     }
-    async function describe(kind:StorageKind,id:string,name:string,file:StoredFile,repositoryScope:string,signal:AbortSignal|null){
-      const modifiedAt=iso(file.lastModified||nowMs()),cacheKey=`${repositoryScope}\u0000${name}\u0000${file.lastModified}\u0000${file.size}`,item:StorageItem={kind,id,name,size:file.size,createdAt:modifiedAt,modifiedAt,remoteId:name,remoteVersion:String(Math.max(1,Math.floor(Number(file.lastModified)||1))),verificationScope:repositoryScope};
-      if(kind!=='object')Object.assign(item,{digest:await digestOf(file,cacheKey,signal)});
-      if(kind==='checkpoint')Object.assign(item,await summaryOf(file,cacheKey));
+    async function describe(kind:StorageKind,id:string,name:string,file:StoredFile,repositoryScope:string,signal:AbortSignal|null,{freshDigests=false}={}){
+      const modifiedAt=iso(file.lastModified||nowMs()),cacheKey=`${repositoryScope}\u0000${name}\u0000${file.lastModified}\u0000${file.size}`,item:{-readonly[K in keyof StorageItem]:StorageItem[K]}={kind,id,name,size:file.size,createdAt:modifiedAt,modifiedAt,remoteId:name,remoteVersion:String(Math.max(1,Math.floor(Number(file.lastModified)||1))),verificationScope:repositoryScope};
+      if(kind!=='object')item.digest=await digestOf(file,cacheKey,signal,{fresh:freshDigests});
+      if(kind==='checkpoint')Object.assign(item,await summaryOf(file,cacheKey+'\u0000'+item.digest));
       return freeze(item);
     }
-    async function list({kind,signal=null}:{kind:StorageKind}&SignalOptions){
+    async function list({kind,signal=null,freshDigests=false}:{kind?:StorageKind;signal?:AbortSignal|null;freshDigests?:boolean}={}){
+      if(!kind)throw new Error('Device Folder storage list kind is invalid.');
       const spec=KINDS[kind];if(!spec)throw new Error('Device Folder storage list kind is invalid.');
       const dirs=await directories(),repositoryScope=await scope(),items=[];let ignored=0;
       for(const [name,handle] of await entries(dirs[spec.directory],`Device Folder ${kind} folder`,signal)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder ${kind} ${name}`,signal);if(!(Number(file.size)>0)){ignored+=1;continue;}items.push(await describe(kind,match[1]!,String(name),file,repositoryScope,signal));}
-        catch(error){if(error&&((error as {name?:unknown}).name==='AbortError'||(error as {code?:unknown}).code==='DEVICE_FILESYSTEM_TIMEOUT'))throw error;ignored+=1;}
+        try{const file=await bounded(handle.getFile(),`Device Folder ${kind} ${name}`,signal);if(!(Number(file.size)>0)){ignored+=1;continue;}items.push(await describe(kind,match[1]!,String(name),file,repositoryScope,signal,{freshDigests}));}
+        catch(error){if(error&&(errorFields(error)['name']==='AbortError'||errorFields(error)['code']==='DEVICE_FILESYSTEM_TIMEOUT'))throw error;ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }
@@ -171,6 +176,17 @@ const createModule=()=>{
     async function upload(file:StorageUpload){
       const spec=KINDS[file&&file.kind];if(!spec||!spec.pattern.test(String(file.id||'')+spec.suffix)||!(file.blob instanceof Blob))throw new Error('A Study Director backup upload has an invalid identity.');
       const dirs=await directories(),name=file.id+spec.suffix,directory=dirs[spec.directory],checks=async()=>{await file.checkProtection?.();await file.checkSource?.();};
+      // Repository identities are immutable. An ambiguous prior publication
+      // may have left the exact bytes here: reuse them, but never overwrite a
+      // different object/manifest/commit (including when a retry is corrupted).
+      const existing=await fileOrNull(directory,name);
+      if(existing){
+        const expected=String(file.digest||'');
+        if(!/^[a-f0-9]{64}$/u.test(expected)||existing.size!==file.blob.size||await input.checksum(file.blob,{})!==expected||await input.checksum(existing,{})!==expected)
+          throw new Error('Device Folder repository identity collision: existing verified backup bytes were preserved.');
+        await checks();
+        return freeze({...await describe(file.kind,file.id,name,existing,await scope(),null),serverDigest:expected});
+      }
       await writeFile(directory,name,file.blob,{checks,onProgress:file.onProgress});
       const written=await fileOrNull(directory,name);
       if(!written||written.size!==file.blob.size){try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);}catch{}throw new Error('The Device Folder did not keep the complete backup file.');}
@@ -182,22 +198,36 @@ const createModule=()=>{
     async function remove(item:StorageIdentity){
       const spec=KINDS[item&&item.kind];if(!spec||!spec.pattern.test(String(item.id||'')+spec.suffix))throw new Error('A Study Director backup deletion request has an invalid identity.');
       const dirs=await directories(),name=item.id+spec.suffix,directory=dirs[spec.directory];
-      if(item.remoteVersion){const current=await fileOrNull(directory,name);if(!current)return false;if(String(Math.max(1,Math.floor(Number(current.lastModified)||1)))!==String(item.remoteVersion))throw new Error('A Study Director backup file changed before deletion. Nothing was removed.');}
-      try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);return true;}catch(error){if(error&&(error as {name?:unknown}).name==='NotFoundError')return false;throw error;}
+      if(item.remoteVersion||item.digest){
+        const current=await fileOrNull(directory,name);if(!current)return false;
+        if(item.remoteVersion&&String(Math.max(1,Math.floor(Number(current.lastModified)||1)))!==String(item.remoteVersion))throw new Error('A Study Director backup file changed before deletion. Nothing was removed.');
+        if(item.digest){
+          const expected=String(item.digest);
+          if(!/^[a-f0-9]{64}$/u.test(expected)||await input.checksum(current,{})!==expected)throw new Error('A Study Director backup file changed checksum before deletion. Nothing was removed.');
+        }
+      }
+      try{await bounded(directory.removeEntry(name),`Device Folder remove ${name}`);return true;}catch(error){if(error&&errorFields(error)['name']==='NotFoundError')return false;throw error;}
     }
     // Locks are marker files; their age comes from the file's modified time.
+    // An upload lock says it renews: its upload rewrites it while it runs, so
+    // one left unrewritten too long was abandoned (see publicationStaleMs).
+    const lockBody=(kind:LockKind,id:string)=>{const spec=LOCKS[kind];return new Blob([JSON.stringify({format:spec.format,version:1,id,startedAt:iso(nowMs()),...(kind==='publication'?{renews:true}:{})})],{type:'application/json'});};
+    async function lockRenews(kind:string,file:StoredFile){
+      if(kind!=='publication')return false;
+      try{const parsed:unknown=JSON.parse(await bounded(file.text(),'Device Folder lock contents')) as unknown;return errorFields(parsed)['renews']===true;}catch{return false;}
+    }
     async function beginLock(kind:LockKind){
       const spec=LOCKS[kind],id=spec.prefix+globalThis.crypto.randomUUID().replace(/-/gu,''),name=id+spec.suffix,{objects}=await directories();
-      await writeFile(objects,name,new Blob([JSON.stringify({format:spec.format,version:1,id,startedAt:iso(nowMs())})],{type:'application/json'}));
+      await writeFile(objects,name,lockBody(kind,id));
       const written=await fileOrNull(objects,name);if(!written)throw new Error('The Device Folder lock could not be written.');
-      return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs())});
+      return freeze({kind,id,name,createdAt:iso(written.lastModified||nowMs()),sameDevice:true,renews:kind==='publication'});
     }
     async function listLocks(kind:LockKind){
       const spec=LOCKS[kind],{objects}=await directories(),items=[];let ignored=0;
       for(const [name,handle] of await entries(objects,'Device Folder lock folder',null)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1]!,name:String(name),createdAt:iso(file.lastModified)}));}catch{ignored+=1;}
+        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1]!,name:String(name),createdAt:iso(file.lastModified),sameDevice:true,renews:await lockRenews(kind,file)}));}catch{ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }
@@ -205,15 +235,16 @@ const createModule=()=>{
       const spec=LOCKS[kind],id=String(lease&&lease.id||''),name=String(lease&&lease.name||'');
       if(!spec.pattern.test(name)||name!==id+spec.suffix)throw new Error('Device Folder lock is invalid.');
       const {objects}=await directories(),file=await fileOrNull(objects,name);if(!file)throw new Error('Device Folder lock disappeared. Retry the backup.');
-      const age=nowMs()-Number(file.lastModified||0),window=kind==='publication'?limits.publicationMaxAgeMs-limits.publicationAssertionMarginMs:limits.maintenanceMaxAgeMs-limits.maintenanceAssertionMarginMs;
-      if(!Number.isFinite(age)||age<0||age>=window)throw new Error('Device Folder lock is too old to continue safely. Retry the backup.');
-      let parsed: {format?:unknown;version?:unknown;id?:unknown}|null=null;try{parsed=JSON.parse(await file.text()) as {format?:unknown;version?:unknown;id?:unknown}|null;}catch{}
+      let parsed:{format?:unknown;version?:unknown;id?:unknown;renews?:unknown}|null=null;try{const value:unknown=JSON.parse(await file.text()) as unknown;parsed=value&&typeof value==='object'?value:null;}catch{}
       if(!parsed||parsed.format!==spec.format||Number(parsed.version)!==1||parsed.id!==id)throw new Error('Device Folder lock could not be verified. Retry the backup.');
+      // A renewing upload lock must be renewed well before cleanup could take it for abandoned.
+      const age=nowMs()-Number(file.lastModified||0),window=kind==='publication'?(parsed.renews===true?limits.publicationStaleMs-limits.publicationRenewMs:limits.publicationMaxAgeMs-limits.publicationAssertionMarginMs):limits.maintenanceMaxAgeMs-limits.maintenanceAssertionMarginMs;
+      if(!Number.isFinite(age)||age<0||age>=window)throw new Error('Device Folder lock is too old to continue safely. Retry the backup.');
       return true;
     }
     async function renewLock(kind:LockKind,lease:LockLease){
-      await assertLock(kind,lease);const spec=LOCKS[kind],{objects}=await directories();
-      await writeFile(objects,lease.name,new Blob([JSON.stringify({format:spec.format,version:1,id:lease.id,startedAt:iso(nowMs())})],{type:'application/json'}));
+      await assertLock(kind,lease);const {objects}=await directories();
+      await writeFile(objects,lease.name,lockBody(kind,lease.id));
       // The renewed lease carries the new start, so the next renewal waits a full interval.
       const written=await fileOrNull(objects,lease.name);if(!written)throw new Error('Device Folder lock disappeared. Retry the backup.');
       return freeze({...lease,createdAt:iso(written.lastModified||nowMs())});
@@ -229,14 +260,14 @@ const createModule=()=>{
       function guardedDownload(item:StorageIdentity,options:RangeOptions):Promise<RangeResult>;
       function guardedDownload(item:StorageIdentity,options?:WholeOptions):Promise<StoredFile>;
       function guardedDownload(item:StorageIdentity,options:DownloadOptions):Promise<StoredFile|RangeResult>;
-      async function guardedDownload(item:StorageIdentity,options:DownloadOptions={}){await guard();return download(item,{...options,signal:options.signal||signal});}
+      async function guardedDownload(item:StorageIdentity,options:DownloadOptions={}):Promise<StoredFile|RangeResult>{await guard();return download(item,{...options,signal:options.signal||signal});}
       return freeze({
         list:async(options:{kind:StorageKind}&SignalOptions)=>{await guard();return list({...options,signal:options?.signal||signal});},
         download:guardedDownload,
         delete:async(item:StorageIdentity)=>{await guard();return remove(item);},
         upload:async(file:StorageUpload)=>{await guard();return upload(file);},
         scope,historyReadConcurrency:8,
-        beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:(lease:LockLease)=>assertLock('publication',lease),endPublication:(lease:LockLease)=>endLock('publication',lease),
+        beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:(lease:LockLease)=>assertLock('publication',lease),renewPublication:(lease:LockLease)=>renewLock('publication',lease),endPublication:(lease:LockLease)=>endLock('publication',lease),
         beginMaintenance:()=>beginLock('maintenance'),listMaintenances:()=>listLocks('maintenance'),assertMaintenance:(lease:LockLease)=>assertLock('maintenance',lease),renewMaintenance:(lease:LockLease)=>renewLock('maintenance',lease),endMaintenance:(lease:LockLease)=>endLock('maintenance',lease)
       });
     }
@@ -302,7 +333,7 @@ const createModule=()=>{
     return freeze({
       layout:freeze({inspect,create,claim}),
       list,upload,download,delete:remove,scope,beginOperation,historyReadConcurrency:8,
-      beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:(lease:LockLease)=>assertLock('publication',lease),endPublication:(lease:LockLease)=>endLock('publication',lease),
+      beginPublication:()=>beginLock('publication'),listPublications:()=>listLocks('publication'),assertPublication:(lease:LockLease)=>assertLock('publication',lease),renewPublication:(lease:LockLease)=>renewLock('publication',lease),endPublication:(lease:LockLease)=>endLock('publication',lease),
       beginMaintenance:()=>beginLock('maintenance'),listMaintenances:()=>listLocks('maintenance'),assertMaintenance:(lease:LockLease)=>assertLock('maintenance',lease),renewMaintenance:(lease:LockLease)=>renewLock('maintenance',lease),endMaintenance:(lease:LockLease)=>endLock('maintenance',lease)
     });
   }

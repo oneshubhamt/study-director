@@ -17,14 +17,15 @@ export type RepositoryObservation={unreadable?:readonly unknown[];invalid?:reado
 export type ObservationRow={id?:string;manifest?:RetentionManifest|null;item?:{id?:string;history?:Pick<StorageHistory,'format'|'exportedAt'|'origin'>&{retention:Omit<RetentionManifest['retention'],'calendar'>&{calendar:RetentionManifest['retention']['calendar']|null}}|null}};
 export type RetentionSelector=(rows:readonly RetentionCandidate[],options:{now:Date})=>{remove:readonly RetentionCandidate[]};
 export type ScheduledJob={job:string;dueAt:number;callback:()=>unknown;timer:number|null};
-export type ActiveJob={controller:AbortController;settlement:Promise<void>;preemptCode:string;preemptMessage:string};
-export type RegisteredJobInput<R extends JobResult>=Omit<JobInput<R>,'environment'|'onBlocked'|'minDelayMs'>&{initialDelayMs?:number|null;discover?:boolean|(()=>boolean)};
-export type BackgroundOptions={externalSignal?:AbortSignal|null;budgetMs?:number;budgetCode?:string;budgetMessage?:string;preemptCode?:string;preemptMessage?:string};
+export type ActiveJob={startedAt:number;controller:AbortController;settlement:Promise<void>;preemptCode:string;preemptMessage:string};
+export type RegisteredJobInput<R extends JobResult>=Omit<JobInput<R>,'environment'|'onBlocked'|'minDelayMs'>&{onUnregister?:()=>void;initialDelayMs?:number|null;discover?:boolean|(()=>boolean)};
+export type BackgroundOptions={pressing?:boolean;externalSignal?:AbortSignal|null;budgetMs?:number;budgetCode?:string;budgetMessage?:string;preemptCode?:string;preemptMessage?:string};
 export type BackgroundScope=Readonly<{job:string;signal:AbortSignal;controller:AbortController;settlement:Promise<void>;workBudget:WorkBudget;release():void}>;
 export type TransitionDetails={reason?:string;nextEligibleAt?:string|undefined;actionable?:boolean};
 export type Transition=Readonly<{target:string;job:string;from:string;to:string;at:string;reason:string;nextEligibleAt:string;actionable:boolean}>;
 export interface CoordinatorCore{
  readonly format:'study-director.repository-background-coordinator';readonly contractVersion:1;
+ status():{held:boolean;foreground:boolean;active:readonly string[]};onRelease(listener:(job:string)=>void):()=>void;
  now():number;clearScheduled(job:string):boolean;registerJob<R extends JobResult>(name:string,ports:RegisteredJobInput<R>):Readonly<Job<R>>;
  beginBackground(job:string,options?:BackgroundOptions):Promise<BackgroundScope|null>;jobStatus(job:string,running?:boolean,lastResult?:OutcomeDetails|null):Snapshot;
  transition(job:string,from:string,to:string,details?:TransitionDetails):Transition;

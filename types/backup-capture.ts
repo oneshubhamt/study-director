@@ -18,7 +18,7 @@ export interface BackupCaptureInput{
  domain:{getStudentName():string;currentDailyRecords(records:unknown,label:string):DailyRecord[]};environment:{yieldTask():Promise<unknown>};
 }
 export type SessionCapture={session:ActiveSession|null;warning:string;canonical:boolean};
-export type Completeness=Readonly<{complete:boolean;dailyRecords:'canonical'|'rescue-partial';notes:'canonical'|'recovered-complete'|'rescue-partial';activeSession:'canonical'|'rescue-partial';deletionState:'canonical'|'uncertain'}>;
+export type Completeness=Readonly<{complete:boolean;fullyRecoverable?:boolean;attachments?:'complete'|'missing';dailyRecords:'canonical'|'rescue-partial';notes:'canonical'|'recovered-complete'|'rescue-partial';activeSession:'canonical'|'rescue-partial';deletionState:'canonical'|'uncertain'}>;
 export interface CaptureBase{format:'study-director.logical-checkpoint-capture';version:1;exportedAt:string;sourceRevision:string;studentName:string;installationId:string;checkpoint:Checkpoint;recordDates:readonly string[];savedDayDeletions:readonly SavedDayDeletion[];noteDeletions:readonly NoteDeletion[];attachmentDeletions:readonly AttachmentDeletion[];counts:Counts;warning:string;completeness:Completeness;protectedCheckpointManifest:ProtectedManifest}
 export type CapturedAsset=Readonly<{descriptor:AssetDescriptor;blob:Blob|null}>;
 export interface FullLogicalCapture extends CaptureBase{dailyDocuments:readonly DailyRecord[];noteItems:readonly NoteRecord[];activeSession:ActiveSession|null;personalData:PersonalData|null;pendingReviewItems:readonly PendingReview[];assetItems:readonly CapturedAsset[]}

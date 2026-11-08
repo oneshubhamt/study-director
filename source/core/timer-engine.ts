@@ -43,7 +43,7 @@ const createModule=()=>{
     const {Pomodoro,notifications}=ports.userPreferences;
     let soundOperation:SoundOperation|null=null,soundOccurrence=0;
     function clearSoundOperation(){if(soundOperation)soundOperation.resolve();soundOperation=null;}
-    function soundEvent(cue:string,metadata:SoundMetadata={},fresh=false){
+    function soundEvent(cue:string,metadata:SoundMetadata={},fresh:boolean=false){
       if(fresh)clearSoundOperation();
       if(!soundOperation)soundOperation=notifications.begin({source:'timer',id:'execution',surface:'quiet',foreground:false});
       soundOperation.update({cue,occurrence:String(++soundOccurrence),system:false,title:'Study Director',message:'',...metadata});
@@ -141,7 +141,7 @@ function initTimerState(idx:number,durationSec:number){
   TimerState.runtime={...TimerState.emptyRuntime(),taskIdx:idx,startMs:now,durationSec:Math.max(1,Math.round(durationSec||0)),lastTickMs:now};
   TimerState.inactiveGap=null;
 }
-function rebaseTimerAfterBackwardClockJump(now=nowMs()){
+function rebaseTimerAfterBackwardClockJump(now:number=nowMs()){
   if(!TimerState.runtime||TimerState.runtime.startMs===null)return 0;
   const last=Number(TimerState.runtime.lastTickMs);
   if(!Number.isFinite(last)||now>=last)return 0;
@@ -160,7 +160,7 @@ function rebaseTimerAfterBackwardClockJump(now=nowMs()){
   TimerState.patchRuntime({lastTickMs:now});
   return -delta;
 }
-function absorbInactiveTimerGap(source='tick'){
+function absorbInactiveTimerGap(source:string='tick'){
   if(!TimerState.runtime||TimerState.runtime.startMs===null)return 0;
   const now=nowMs();
   rebaseTimerAfterBackwardClockJump(now);
@@ -187,7 +187,7 @@ function absorbInactiveTimerGap(source='tick'){
   saveLiveDraft();
   return gapMs;
 }
-function pendingInactiveGapMs(now=nowMs()){
+function pendingInactiveGapMs(now:number=nowMs()){
   if(!TimerState.inactiveGap)return 0;
   return Math.max(0,TimerState.inactiveGap.gapMs||0)+Math.max(0,TimerState.inactiveGap.promptMs||0)+Math.max(0,now-(TimerState.inactiveGap.detectedAtMs||now));
 }
@@ -232,7 +232,7 @@ function handleOverlayFocusTrap(ev:KeyboardEvent){
 // during the away time ends the countable part; time from there on is never
 // added to the running block. The fixed block also stops the timer, as it would
 // have with the app open.
-function inactiveGapWindow(gap:InactiveGapPatch|null,now=nowMs()){
+function inactiveGapWindow(gap:InactiveGapPatch|null,now:number=nowMs()){
   const gapMs=Math.max(0,Number(gap&&gap.gapMs)||0),last=Number(gap&&gap.lastMs);
   const whole=Object.freeze({gapMs,countableMs:gapMs,limit:null,fixed:null});
   if(!Number.isFinite(last)||last<=0||last>now||!TimerState.runtime)return whole;
@@ -358,7 +358,7 @@ function classifyInactiveGap(mode:'focus'|'break'|'split'|'ignore',focusMs:numbe
 function currentTimerActiveSeconds(){
   return currentTimerActiveSecondsAt((TimerState.paused&&TimerState.runtime&&TimerState.runtime.pausedStartedMs)?TimerState.runtime.pausedStartedMs:nowMs());
 }
-function currentTimerActiveMs(endMs=(TimerState.paused&&TimerState.runtime&&TimerState.runtime.pausedStartedMs)?TimerState.runtime.pausedStartedMs:nowMs()){
+function currentTimerActiveMs(endMs:number=(TimerState.paused&&TimerState.runtime&&TimerState.runtime.pausedStartedMs)?TimerState.runtime.pausedStartedMs:nowMs()){
   if(!TimerState.runtime||TimerState.runtime.startMs===null)return Math.max(0,(totS-remS+overflowS)*1000);
   return Math.max(0,endMs-TimerState.runtime.startMs-(TimerState.runtime.totalPausedMs||0)-pendingInactiveGapMs(endMs));
 }
@@ -416,6 +416,9 @@ function stopTimerForFixedBoundary(boundary:TimerBoundary|null,options:{away?:bo
   setTimerMode(TIMER_MODES.READY,'fixed-boundary');
   const label=boundary&&boundary.task?shortTaskLabel(boundary.task):'fixed block';
   const away=options&&options.away===true;
+  // Settle, or a device notification while the app is in the background. Not
+  // when the person was away: they find the choice waiting when they return.
+  if(!away)soundEvent('fixed-start',{system:true,title:'Fixed block started',message:`${label} has started. The timer stopped and counted focus was saved.`},true);
   showEmpty(away
     ?`Fixed block started while you were away: ${label}. Your choice was applied to the study time before it; time from the fixed block on was not counted.`
     :`Fixed block started: ${label}. Counted focus was saved; resume or shift the remaining study blocks when ready.`);
@@ -441,14 +444,14 @@ function jumpTo(i:number){
   return true;
 }
 function nextTrackableIndexAfter(idx:number){return findNextIncompleteTrackableAfter(idx);}
-function updateTimerNextLabels(idx=TimerState.currentIndex){
+function updateTimerNextLabels(idx:number=TimerState.currentIndex){
   const ni=nextTrackableIndexAfter(idx);
   const label=ni<TASKS.length?TASKS[ni]!.name:'';
   const unresolved=ni>=TASKS.length&&TASKS.some((t,i)=>isTrackableBlock(t)&&!isTaskResolved(i));
   setTextSafe('next-name',ni<TASKS.length?label:(unresolved?'No later unfinished block':'All done!'));
   setTextSafe('status-next','NEXT: '+(ni<TASKS.length?label.substring(0,20):'REVIEW'));
 }
-function setTimerIdentity(t:Task|undefined,idx=TimerState.currentIndex){setTextSafe('task-name',t&&t.name||'—');setTextSafe('task-area-badge',t?taskAreaValue(t):'—');updateTimerNextLabels(idx);}
+function setTimerIdentity(t:Task|undefined,idx:number=TimerState.currentIndex){setTextSafe('task-name',t&&t.name||'—');setTextSafe('task-area-badge',t?taskAreaValue(t):'—');updateTimerNextLabels(idx);}
 function preferredScrollBehavior(){
   return window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
 }
@@ -456,6 +459,7 @@ function timerClockEls(){
   return cachedElements(timerClockEls,{cd:'cd',overflow:'cd-overflow',prog:'prog',pct:'prog-pct'});
 }
 function startCur(durationOverrideSec?:number|null,options:{cue?:string}={}){
+  if(!appCanMutate())return false;
   if(!TASKS.length){showEmpty();return;}
   let nextIdx=TimerState.currentIndex;
   while(nextIdx<TASKS.length&&!isTrackableBlock(TASKS[nextIdx]))nextIdx++;
@@ -548,14 +552,14 @@ function timerVisualPercent(){
   const activeMs=(TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.runtime.durationSec)?currentTimerActiveMs():Math.max(0,totS-remS+overflowS)*1000;
   return totS?Math.min(100,Math.max(0,(activeMs/(totS*1000))*100)):0;
 }
-function paintTimerText(visualPct=timerVisualPercent()){
+function paintTimerText(visualPct:number=timerVisualPercent()){
   const els=timerClockEls(),el=els.cd;if(!el)return;
   setElementText(el,fmtS(remS));
   const className=timerCountdownClass();if(el.className!==className)el.className=className;
   if(isOverflow)setElementText(els.overflow,fmtOver(overflowS));
   setElementText(els.pct,isOverflow?'OVERTIME':Math.round(visualPct)+'%');
 }
-function paintTimerProgress(visualPct=timerVisualPercent()){
+function paintTimerProgress(visualPct:number=timerVisualPercent()){
   const prog=timerClockEls().prog,width=visualPct.toFixed(3)+'%';
   if(prog&&prog.style.width!==width)prog.style.width=width;
 }
@@ -643,6 +647,7 @@ function finalizePauseEvent(){
   return pausedSec;
 }
 function resumeTimerFromPause(){
+  if(!appCanMutate())return false;
   if(TimerState.mode!==TIMER_MODES.PAUSED||!TimerState.paused)return false;
   finalizePauseEvent();
   TimerState.paused=false;
