@@ -973,7 +973,10 @@ function sessionDecisionsCover(x,y){
   for(const id of new Set([...Object.keys(x.tasks),...Object.keys(y.tasks)])){
     const a=x.tasks[id]||{},b=y.tasks[id]||{};
     value(a.resolved||'',b.resolved||'');
-    if(b.completionSource){if(a.completionSource!==b.completionSource||a.completion<b.completion)fails=true;else if(a.completion>b.completion)ahead=true;}
+    // A manual completion is an assessment that can go down as well as up, so
+    // two different ones are different decisions; one counted from units only
+    // grows as more units are done.
+    if(b.completionSource){if(a.completionSource!==b.completionSource||(b.completionSource==='manual'?a.completion!==b.completion:a.completion<b.completion))fails=true;else if(a.completion>b.completion)ahead=true;}
     else if(a.completionSource)ahead=true;
     if(b.progress){if(!a.progress||Number(a.progress.total||0)!==Number(b.progress.total||0)||Number(a.progress.done||0)<Number(b.progress.done||0))fails=true;else if(Number(a.progress.done||0)>Number(b.progress.done||0))ahead=true;}
     else if(a.progress)ahead=true;

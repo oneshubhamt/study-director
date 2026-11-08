@@ -1852,7 +1852,9 @@ for(const skew of [-2*3600e3,2*3600e3]){
 // either side with no review: the old owner finished a block the new owner
 // had not seen (it hands the decision over), or the new owner finished one.
 // The owner keeps its timer and time. Both deciding differently is kept.
-for(const variant of ['old-owner-finished','new-owner-finished','both-decided']){
+// A manual completion is an assessment either device may raise or lower, not a
+// counter: 30% on one and 90% on the other are different decisions.
+for(const variant of ['old-owner-finished','new-owner-finished','both-decided','both-manual']){
   syncWorld.drive.clear();syncWorld.claims.clear();
   const day='2026-08-31',
     a={installationId:'inst_decided_a',records:new Map(),deletions:[],noteDeletions:[],notes:syncWorld.note('decided'),activeSession:null,schedule:'',personal:personal('Decided QA'),journal:null},
@@ -1867,12 +1869,12 @@ for(const variant of ['old-owner-finished','new-owner-finished','both-decided'])
     observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,
     handoffToken:'77777777-7777-4777-8777-777777777777',revision:20})).status,'completed');
   b.activeSession=withTasks(freeze({...source.session,runningOn:b.installationId,status:'active',revision:20,suspendedAt:null}),
-    {warmup:freeze(variant==='both-decided'?{resolvedState:'skipped',actual:freeze({seconds:30})}:{actual:freeze({seconds:30})}),focus:freeze({actual:freeze({seconds:240})}),
+    {warmup:freeze(variant==='both-decided'?{resolvedState:'skipped',actual:freeze({seconds:30})}:variant==='both-manual'?{completionSource:'manual',completion:30,actual:freeze({seconds:30})}:{actual:freeze({seconds:30})}),focus:freeze({actual:freeze({seconds:240})}),
       ...(variant==='new-owner-finished'?{review:freeze({resolvedState:'done',actual:freeze({seconds:20})})}:{})},'2026-08-31T09:10:00.000Z');
   b.schedule=b.activeSession.scheduleText;b.running=true;
   // A, not yet stopped by the claim, finishes the warm-up block and a
   // practice run.
-  a.activeSession=withTasks(a.activeSession,{warmup:freeze(variant==='new-owner-finished'?{actual:freeze({seconds:45})}:{resolvedState:'done',actual:freeze({seconds:45})}),focus:freeze({actual:freeze({seconds:30})})},'2026-08-31T09:05:00.000Z');
+  a.activeSession=withTasks(a.activeSession,{warmup:freeze(variant==='new-owner-finished'?{actual:freeze({seconds:45})}:variant==='both-manual'?{completionSource:'manual',completion:90,actual:freeze({seconds:45})}:{resolvedState:'done',actual:freeze({seconds:45})}),focus:freeze({actual:freeze({seconds:30})})},'2026-08-31T09:05:00.000Z');
   if(variant==='old-owner-finished')a.activeSession=freeze({...a.activeSession,snapshot:freeze({...a.activeSession.snapshot,practice:freeze({active:null,runs:freeze([freeze({taskId:'warmup',targetMs:60000,unitMs:freeze([55000,61000])})])})})});
   await B.upload();
   assert.equal((await A.sync()).cancelled,false,variant);
@@ -1882,6 +1884,11 @@ for(const variant of ['old-owner-finished','new-owner-finished','both-decided'])
   if(variant==='both-decided'){
     assert.equal(keptOnA.length,1,'both deciding differently keeps the old owner\'s copy for review');
     assert.equal(keptOnA[0].kept.snapshot.taskState.warmup.resolvedState,'done');
+    continue;
+  }
+  if(variant==='both-manual'){
+    assert.equal(keptOnA.length,1,'a different manual completion on each device is kept for review, not overwritten');
+    assert.equal(keptOnA[0].kept.snapshot.taskState.warmup.completion,90);
     continue;
   }
   assert.equal(keptOnA.length,0,variant+': no session kept for review on the old owner');
