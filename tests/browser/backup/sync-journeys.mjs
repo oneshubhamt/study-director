@@ -6,7 +6,8 @@ import {shot,journeyLog,openDevice,hold,versionUpload,setOffline,freeze,thaw,run
 // Sync journeys, part 1: a laptop (A) and a phone (B) share one simulated
 // Google Drive. A first sync that waits for another device's upload (Sync
 // now on the Connect card), then the day's session moved between them while
-// the other device is mid-upload, offline or frozen in the background.
+// the other device is mid-upload, offline or frozen in the background, and
+// a pause and a resume that reach the other device by themselves.
 // Part 2 is session-handoff-journeys.mjs; the helpers say what each checks.
 
 const {steps,step}=journeyLog('sync-journeys');
@@ -100,6 +101,20 @@ try{
   assert.equal(await running(a),true,'the laptop keeps running');assert.equal(await owner(b),idA);
   await noReviews([['A',a],['B',b]],'frozen');
   step('old owner frozen',{continueHereMs:ms,stopsAfterWakeMs:stopFrozen});
+
+  // Journey 6. A pause or resume reaches the other device by itself within
+  // seconds: the laptop pauses (its app stays open, nothing flushes) and the
+  // phone's Continue Here continues it paused, so the pause is not counted
+  // as study; the phone resumes, and the laptop's Continue Here runs it.
+  const pauseOn=page=>page.evaluate(`(async()=>{const d=__PWA6;d.goTab('execute');await new Promise(r=>setTimeout(r,80));d.togglePause();})()`);
+  await pauseOn(a);assert.equal((await view(a)).mode,'paused','the laptop pauses');
+  await sleep(8000);await elsewhere(b,'B');
+  const pausedMs=await continueHere(b,'B',{mode:'paused'});await stopsWithin(a,'A');
+  await pauseOn(b);assert.equal((await view(b)).mode,'running','the phone resumes');
+  await sleep(8000);await elsewhere(a,'A');
+  const resumedMs=await continueHere(a,'A');await stopsWithin(b,'B');
+  await bothSettled([['A',a],['B',b]],'pause');await noReviews([['A',a],['B',b]],'pause');
+  step('a pause and a resume reach the other device by themselves',{continueHereMs:[pausedMs,resumedMs]});
 
   // A change made while an upload runs goes out with the next flush (the
   // app going to the background), not at the next 20-minute cadence.

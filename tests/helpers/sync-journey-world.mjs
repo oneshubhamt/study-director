@@ -65,11 +65,11 @@ export const upload=async page=>{for(let attempt=0;attempt<4;attempt++){await pa
 export const syncNow=page=>page.evaluate(`__PWA6.BackupProviderRuntime.scheduleSharedSync('google-drive','qa-journey')`);
 export const settled=async(page,label,timeout=90000)=>waitFor(async()=>!markers()&&!await waiting(page)&&!(await sync(page))?.catchingUp,{label:`${label} settles`,timeout});
 // Continue Here as a person presses it: the Execute card's button.
-export async function continueHere(page,who){
+export async function continueHere(page,who,{mode='running'}={}){
   await waitFor(()=>page.evaluate(`(()=>{const button=[...document.querySelectorAll('[data-action="restore-session"]')].find(item=>!item.hidden);return !!button&&!button.disabled;})()`),{label:`${who}: Continue Here offered`,timeout:60000});
   const started=Date.now();
   await page.evaluate(`(async()=>{${acceptDialogs}__PWA6.goTab('execute');await new Promise(r=>setTimeout(r,100));document.getElementById('execute-session-action').click();})()`);
-  await waitFor(async()=>(await view(page)).mode==='running',{label:`${who}: Continue Here starts the timer`,timeout:30000});
+  await waitFor(async()=>(await view(page)).mode===mode,{label:`${who}: Continue Here continues the timer (${mode})`,timeout:30000});
   return Date.now()-started;
 }
 // The old owner stops within one claim check (15 s) of seeing the claim.
@@ -105,6 +105,7 @@ export async function explain(devices){
     console.error(who,'personal review',JSON.stringify(await page.evaluate(`(async()=>{const d=__PWA6,rows=(await d.AppData.pendingReviews.list()).filter(row=>!row.resolvedAt&&row.subject==='personal'),current=await d.PlanData.exportData({flush:false});
       const diff=(x,y,prefix='')=>{const out=[];if(JSON.stringify(x)===JSON.stringify(y))return out;if(!x||!y||typeof x!=='object'||typeof y!=='object')return [prefix+': '+JSON.stringify(x)?.slice(0,200)+' | '+JSON.stringify(y)?.slice(0,200)];for(const key of new Set([...Object.keys(x),...Object.keys(y)]))out.push(...diff(x[key],y[key],prefix+'.'+key));return out;};
       return rows.map(row=>({origin:row.origin,diffKeptVsCurrent:diff(row.kept,current).slice(0,20)}));})()`).catch(cause=>String(cause?.message||cause))));
+    console.error(who,'warnings',JSON.stringify((page.warnings||[]).slice(-12)));
     console.error(who,'claim',JSON.stringify(await page.evaluate(`(async()=>({visibility:document.visibilityState,online:navigator.onLine,claim:await __PWA6.BackupProviderRuntime.readSessionClaim('google-drive').catch(error=>({error:String(error?.code||error?.message)}))}))()`).catch(cause=>String(cause?.message||cause))));
   }
 }

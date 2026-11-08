@@ -2880,7 +2880,14 @@ const {
   markDone:markDoneTimer, setPausedUI, setTimerIdentity, skipTask:skipTaskTimer, startCur, syncTimerAfterWake, toggleDone, togglePause:togglePauseTimer,
   updateBreakMeter, updateCD
 }=TimerEngine;
-function togglePause(){const result=togglePauseTimer();schedulePwaUpdateEvaluation(150);return result;}
+// A pause, resume, finished or skipped block goes to the other devices
+// within seconds (an urgent change), not at the next quiet-period upload:
+// Continue Here elsewhere takes the timer from Drive's newest version, so a
+// pause still waiting here would count the paused time there as study.
+function sendSessionChangeSoon(reason){
+  void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.session-change-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason}));
+}
+function togglePause(){const result=togglePauseTimer();sendSessionChangeSoon(TimerState.paused?'timer-pause':'timer-resume');schedulePwaUpdateEvaluation(150);return result;}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
@@ -3044,10 +3051,10 @@ function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
 function markDone(){
   const finishWasAvailable=isTrackableBlock(TASKS[TimerState.currentIndex]);
   const result=markDoneTimer();
-  if(finishWasAvailable&&result!==false)notifyDeviceBackupIfStudyDayResolved();
+  if(finishWasAvailable&&result!==false){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-finished');}
   schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;
 }
-function skipTask(){const result=skipTaskTimer();if(result!==false)notifyDeviceBackupIfStudyDayResolved();schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;}
+function skipTask(){const result=skipTaskTimer();if(result!==false){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-skipped');}schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;}
 function finishPracticePacer(){
   const result=PracticePacer.finish();
   schedulePwaUpdateEvaluation(150);return result;
