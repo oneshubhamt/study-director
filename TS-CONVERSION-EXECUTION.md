@@ -111,7 +111,7 @@ assert archive.split(b'<!-- BEGIN PRESERVED EXECUTION RECORD -->\n\n', 1)[1] == 
 
 **Handoff:** DOC-01–DOC-08 are closed within the documented scope. F-001–F-003 remain open. Next application action: P5.0 inspection and mechanical extraction, beginning with its baseline and full host-consumer allocation. The completion commit is the documentation commit containing this worklog (resolve with `git log -1 --format=%H -- TS-CONVERSION-EXECUTION.md`); publication is checked against `git ls-remote origin refs/heads/TS-Conversion` before reporting the push. Phase 5 has not begun. No changes were made to the Practice Desk reference or either main branch.
 
-## Active durable worklog — P5.0
+## Recent closed worklog — P5.0
 
 **State: VERIFIED — TARGETED.** Baseline `8d9c525550d652e391c58f6fbd3db87160cf25fa`, clean `TS-Conversion`, 2026-10-31 UTC. Remote identity verified with `ls-remote` and an explicit branch refspec (origin's configured fetch maps only main); fetched `origin/TS-Conversion` now matches. Main remains `9afbda7`. Temporary pad: `/tmp/study-director-P5.0.md`.
 
@@ -141,6 +141,14 @@ assert archive.split(b'<!-- BEGIN PRESERVED EXECUTION RECORD -->\n\n', 1)[1] == 
 No TypeScript admission count changed: this is mechanical preparation, not new strict typing. Full QA, authored-host coverage, repeated pre-merge browser reliability runs, manual/device and whole-app certification were not performed; Phase 7 remains required. Later edits were documentation/test-reader repairs only, so unchanged runtime/build/browser evidence remains applicable.
 
 **Handoff:** P5.0 complete within targeted scope; next is P5.1 foundation modules and their allocated host adapters. Establish a fresh baseline and bounded objectives before editing those implementations. Preserve the current canonical model and immutable Wordgard. Commit containing this worklog identifies the completion revision (`git log -1 --format=%H -- TS-CONVERSION-EXECUTION.md`); verify `git ls-remote origin refs/heads/TS-Conversion` before claiming push. No main/Practice Desk edits or deployment.
+
+## Active durable worklog — MAIN-2026-11-08
+
+**State: ACTIVE.** Owner requests integration of latest production main before P5.1; explicitly excludes all migration/compatibility code and assumes every installation already uses the latest canonical topology. Baseline TS `d36c32e97506324f7305b22f0bb3c4bcdb1778a3`; fetched main `26386198a5c5b283d8adb97cf60aabeb8f6ebb9c`; last inspected main `9afbda7`; actual shared Git ancestor `a3c94d9`. Temporary pad `/tmp/study-director-main-intake/WORKLOG.md`.
+
+**Objectives:** MAIN-A inventory all production deltas and exclusions; MAIN-B integrate untouched runtime/features and port overlapping implementation into strict TS, preserving host extraction; MAIN-C adopt current-only topology (backup24, PendingReview2 and corresponding manifest/claim/metadata), never historical converters; MAIN-D reconcile source and run affected strict/build/behavior checks; MAIN-E update current docs/ownership and commit/push only TS-Conversion.
+
+**Inspection/design:** main has 932 commits since last inspected production checkpoint, touching 238 paths across history. Use fixed endpoints, not commit-by-commit replay. Storage/sync/handoff, notifications, Markdown, Insights and UI changes require coordinated integration. Preserve immutable Wordgard, compiler/lint admission, canonical-only policy and existing conversion history. Include incoming production release/build metadata as part of the requested main integration; retain stronger TS CI gates. Compatibility source/contracts/tests are explicitly excluded. Record every overlap resolution and validation limit before closure. P5.1 remains unstarted.
 
 ## Worklog template — replace the active block when starting the next pass
 
