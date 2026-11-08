@@ -643,11 +643,13 @@ let syncWorld=null;
 // difference made on both waits for the person, and a session running here
 // keeps its own state while everything else merges.
 {
-  const drive=new Map(),key=(kind,id)=>kind+':'+id,keepAll={on:false},counts={downloads:0,kinds:[]};
+  // gate.before(file), when set, runs before a file is stored: a test can
+  // hold one device's upload at its commit while another device acts.
+  const drive=new Map(),key=(kind,id)=>kind+':'+id,keepAll={on:false},counts={downloads:0,kinds:[]},gate={before:null};
   const describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,digest:file.digest,remoteId:'remote-'+key(file.kind,file.id),...(file.historySummary?{history:freeze({...file.historySummary,exportedAt:file.exportedAt})}:{})});
   const store=files=>freeze({
     list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),
-    upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},
+    upload:async file=>{if(files===drive&&gate.before)await gate.before(file);const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},
     download:async ref=>{counts.downloads++;counts.kinds.push(ref.kind);const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('QA_FIXTURE missing backup file');return freeze({blob:stored.blob,release:async()=>{}});},
     // A test can hold on to every version (all of them fall in one hour, so
     // retention would keep only the newest).
@@ -705,7 +707,7 @@ let syncWorld=null;
   const A=device(a),B=device(b);
   // A new device takes in everything.
   const v1=await A.upload();assert.equal(a.reconciliationBase.checkpointId,v1.checkpointId,'a Drive backup is what this device shares');
-  syncWorld=freeze({drive,head,device,note,keepAll,versions,claims,counts});
+  syncWorld=freeze({drive,head,device,note,keepAll,versions,claims,counts,gate});
   assert.equal((await B.sync()).cancelled,false);
   assert.deepEqual([...b.records.keys()].sort(),['2026-08-01','2026-08-02']);assert.equal(b.notes.Shared.text,'first');
   assert.deepEqual(b.followed,[{protectionId:'',encrypted:false,removedElsewhere:false}],'a sync tells the backup password what the newest version uses');assert.equal(b.reconciliationBase.checkpointId,v1.checkpointId,'what a device takes in from Drive is what it shares');
@@ -1633,6 +1635,43 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   claimed=await claimWith(other('c',ago(1),ago(0.5)),Infinity,'88888888-8888-4888-8888-888888888888');
   assert.equal(claimed.status,'completed');assert.equal(checks,10,'past the limit (10 checks, 3 s apart), Continue Here goes ahead');
   assert.equal(markers.size,0,'the claim releases its own marker');
+}
+
+// Two uploads overlap: another device's Sync now during this device's
+// upload, or this device frozen mid-upload past its turn. B's version lands
+// while A's upload is held: before A's last check (A stops before its
+// commit, catches up and uploads again), or in the last instant after it
+// (both commit on the same base). Either way nothing either device wrote is
+// lost: the same note edited on both shows the newer edit and keeps the
+// other for review, on both devices.
+for(const late of [false,true]){
+  syncWorld.drive.clear();syncWorld.claims.clear();syncWorld.keepAll.on=true;
+  const {device,gate}=syncWorld,row=(key,text)=>freeze({version:2,key,text,updatedAt:new Date().toISOString()}),pause=()=>new Promise(resolve=>setTimeout(resolve,3));
+  const start=()=>({Shared:row('Shared','base text'),Other:row('Other','other base'),Both:row('Both','both base')});
+  const a={installationId:'inst_overlap_a_'+late,records:new Map(),deletions:[],noteDeletions:[],notes:start(),activeSession:null,schedule:'',personal:personal('Overlap'),journal:null};
+  const b={installationId:'inst_overlap_b_'+late,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Overlap'),journal:null};
+  const A=device(a),B=device(b);
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  await pause();a.notes={...a.notes,Shared:row('Shared','edited on A'),FromA:row('FromA','new on A'),Both:row('Both','both by A')};
+  await pause();b.notes={...b.notes,Other:row('Other','edited on B'),FromB:row('FromB','new on B'),Both:row('Both','both by B')};
+  let release,holding=false;const held=new Promise(resolve=>{release=resolve;});
+  gate.before=async file=>{if(file.kind===(late?'commit':'checkpoint')&&!holding){holding=true;await held;}};
+  const aUpload=A.upload().then(value=>({value}),error=>({error}));
+  for(let n=0;n<400&&!holding;n++)await new Promise(resolve=>setTimeout(resolve,5));
+  assert.equal(holding,true,'A reached the held step');gate.before=null;
+  const bUpload=await B.upload().then(value=>({value}),error=>({error}));assert.equal(bUpload.error,undefined,'B uploads while A is held');
+  release();const aResult=await aUpload;
+  if(late)assert.equal(aResult.error,undefined,'a version landing after the last check is not seen: both commit');
+  else assert.equal(aResult.error?.code,'REPOSITORY_SYNC_BEHIND','an upload Drive moved past stops before its commit');
+  for(let round=0;round<3;round++)for(const D of [A,B]){assert.equal((await D.sync()).cancelled,false);await D.upload();}
+  const shown=state=>Object.fromEntries(Object.entries(state.notes).map(([key,value])=>[key,value.text]).sort());
+  const kept=state=>state.reviews.open().filter(review=>review.subject==='note').map(review=>review.ref+': '+review.kept?.text).sort();
+  for(const [name,state] of [['A',a],['B',b]]){
+    assert.deepEqual(shown(state),{Both:'both by B',FromA:'new on A',FromB:'new on B',Other:'edited on B',Shared:'edited on A'},`${name} shows both devices' edits`);
+    assert.ok(kept(state).includes('Both: both by A'),`${name} keeps the older edit of the note changed on both for review`);
+    if(!late)assert.deepEqual(kept(state),['Both: both by A'],`${name} keeps nothing else: the versions never forked`);
+  }
+  gate.before=null;syncWorld.keepAll.on=false;
 }
 
 // Continue Here in one lease: decide gets the newest verified session under

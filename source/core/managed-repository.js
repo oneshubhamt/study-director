@@ -588,7 +588,7 @@ async function cleanupRepositoryRetention(input){
   return freeze({warning:parts.join(' '),retained:freeze(actualRetained),formats:repositoryFormats(actualRetained,unreadable),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped&&!waitsOnUnreadable||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,unreadableCount:unreadable,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
 }
 
-async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null,baseUpdate=false}={}){
+async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null,baseUpdate=false,reuse=null}={}){
   throwIfImportAborted(signal);
   const history=repositoryHistory(previousManifests);
   const context=await repositoryProtectionContext({interactive});
@@ -598,7 +598,11 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
   const plan=preparation?await repositoryPreparationPlan(preparation,reconciliationBase,{baseUpdate}):null;
   if(!plan&&repositoryPreparationIndex)repositoryPreparationIndex=null;
   const excluded=new Set(repositoryScrubObjectIds(excludedObjectIds)),available=availableObjectIds instanceof Set?new Set([...availableObjectIds].filter(id=>!excluded.has(id))):availableObjectIds;
-  const reuseIndex=repositoryReuseIndex(history,context.protectionId,available),objects=[],leases=[],structuredObjects=new Map(),packedPayloads=new Map(),currentByUnit=new Map(),candidateEntries=plan?new Map(plan.entries):new Map(),readNoteStates=new Map(),readMonths=new Map();let readPersonal,readSession;
+  // reuse: versions this device uploaded but never committed (Drive moved
+  // on first). Their pieces may be reused, only where the caller saw them on
+  // Drive; they are never history (no ancestry, no "unchanged" match).
+  const reuseOnly=[];if(available instanceof Set)for(const manifest of Array.isArray(reuse)?reuse:[])try{reuseOnly.push(...repositoryHistory(manifest));}catch(error){AppDiagnostics.capture('repository.reuse-invalid',error,'warn');}
+  const reuseIndex=repositoryReuseIndex([...reuseOnly,...history],context.protectionId,available),objects=[],leases=[],structuredObjects=new Map(),packedPayloads=new Map(),currentByUnit=new Map(),candidateEntries=plan?new Map(plan.entries):new Map(),readNoteStates=new Map(),readMonths=new Map();let readPersonal,readSession;
   let capture=null,assetItems=[],candidateIndex=null,reconciliationUpdate=null;
   const serializeStructured=async(kind,key,payload)=>{
     const body=freeze({format:REPOSITORY_OBJECT_FORMAT,version:REPOSITORY_OBJECT_VERSION,kind,key,payload}),serialized=await repositorySerializedJson(body,{signal}),fingerprint=await Exports.run('checksum',{value:serialized.text,algorithm:'sha256'},{signal});

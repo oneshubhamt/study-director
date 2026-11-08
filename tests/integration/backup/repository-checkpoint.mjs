@@ -470,8 +470,8 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
 // off by a closed page) never does.
 {
   const files=new Map(),markers=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,remoteId:'turn-'+key(file.kind,file.id)});
-  let leases=0;const lease=prefix=>freeze({id:prefix+'_'+String(++leases).padStart(32,'0'),createdAt:new Date().toISOString()});
-  const transport=freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing turn file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id)),
+  let leases=0,beforeUpload=null;const lease=prefix=>freeze({id:prefix+'_'+String(++leases).padStart(32,'0'),createdAt:new Date().toISOString()});
+  const transport=freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{if(beforeUpload)await beforeUpload(file);const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing turn file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id)),
     beginPublication:async()=>{const row=lease('pub');markers.set(row.id,row);return row;},listPublications:async()=>freeze({items:freeze([...markers.values()]),overflow:false,ignored:0}),assertPublication:async row=>row,endPublication:async row=>markers.delete(row.id),
     beginMaintenance:async()=>lease('mnt'),listMaintenances:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertMaintenance:async row=>row,endMaintenance:async()=>true});
   const baseBefore=reconciliationBase,baseNotesBefore=reconciliationBaseNotes;
@@ -512,14 +512,40 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
     assert.equal(await turnFor(live()),'waits','one press, one upload: the next one takes its turn again');
     // Drive's newer changes come in without waiting for a turn: a device
     // behind Drive is sent to catch up, not to wait.
-    const head=[...files.values()].filter(file=>file.kind==='checkpoint').map(file=>file.id).sort();
-    const reference=files.get(key('checkpoint',head.at(-1))),commitRef=files.get(key('commit',head.at(-1))),newerId='cp_'+'f'.repeat(32);
-    const newerManifest=JSON.parse(await reference.blob.text());newerManifest.checkpoint={...newerManifest.checkpoint,checkpointId:newerId,createdAt:new Date().toISOString()};newerManifest.exportedAt=new Date().toISOString();newerManifest.protectedCheckpointManifest={...newerManifest.protectedCheckpointManifest,checkpointId:newerId};
-    files.set(key('checkpoint',newerId),freeze({...reference,id:newerId,blob:new Blob([JSON.stringify(newerManifest)]),createdAt:new Date().toISOString()}));
-    files.set(key('commit',newerId),freeze({...commitRef,id:newerId,blob:new Blob([JSON.stringify({...JSON.parse(await commitRef.blob.text()),checkpointId:newerId,exportedAt:newerManifest.exportedAt})]),createdAt:new Date().toISOString()}));
+    // Another device's version, newer than this device's base (a copy of
+    // the newest committed one under a new id). Returns its removal.
+    const committedIds=()=>[...files.values()].filter(file=>file.kind==='commit').map(file=>file.id).sort();
+    const addNewer=async(newerId='cp_'+'f'.repeat(32))=>{
+      const head=committedIds().filter(id=>!id.startsWith('cp_ff')).sort((a,b)=>Date.parse(files.get(key('checkpoint',a)).exportedAt)-Date.parse(files.get(key('checkpoint',b)).exportedAt)).at(-1);
+      const reference=files.get(key('checkpoint',head)),commitRef=files.get(key('commit',head)),at=new Date().toISOString();
+      const newerManifest=JSON.parse(await reference.blob.text());newerManifest.checkpoint={...newerManifest.checkpoint,checkpointId:newerId,createdAt:at};newerManifest.exportedAt=at;newerManifest.protectedCheckpointManifest={...newerManifest.protectedCheckpointManifest,checkpointId:newerId};
+      files.set(key('checkpoint',newerId),freeze({...reference,id:newerId,blob:new Blob([JSON.stringify(newerManifest)]),exportedAt:at,createdAt:at}));
+      files.set(key('commit',newerId),freeze({...commitRef,id:newerId,blob:new Blob([JSON.stringify({...JSON.parse(await commitRef.blob.text()),checkpointId:newerId,exportedAt:at})]),exportedAt:at,createdAt:at}));
+      return ()=>{files.delete(key('checkpoint',newerId));files.delete(key('commit',newerId));};
+    };
+    let removeNewer=await addNewer();
     markers.set(live().id,live());
     await assert.rejects(()=>runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}),{code:'REPOSITORY_SYNC_BEHIND'},'a device behind Drive is sent to catch up, not held by another device\'s turn');
-    markers.delete(live().id);files.delete(key('checkpoint',newerId));files.delete(key('commit',newerId));
+    markers.delete(live().id);removeNewer();
+    // Drive moves on while this upload runs (another device's Sync now, or
+    // this device frozen past its turn): the upload stops before its commit,
+    // so no version is built on one this device never took in. Its retry
+    // sends no attachment bytes again: the pieces it uploaded are reused.
+    const audioBefore=audioBlob,descriptorBefore=assetDescriptor;
+    try{
+      audioBlob=new Blob([new Uint8Array(256*1024).fill(7)],{type:'audio/mpeg'});
+      assetDescriptor=freeze({id:'asset-audio',type:'audio/mpeg',size:audioBlob.size,hash:await engine.run('checksum',{value:audioBlob}),name:'overtaken.mp3',library:true});
+      snapshotRevision='turn-7';sourceRevision='2026-09-19T04:00:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn seven',updatedAt:sourceRevision})};
+      const before=committedIds();removeNewer=null;
+      beforeUpload=async file=>{if(file.kind==='checkpoint'&&!removeNewer)removeNewer=await addNewer();};
+      await assert.rejects(()=>runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}),{code:'REPOSITORY_SYNC_BEHIND'},'an upload overtaken by another device\'s version does not commit over it');
+      beforeUpload=null;
+      assert.deepEqual(committedIds().filter(id=>!before.includes(id)),['cp_'+'f'.repeat(32)],'only the other device\'s version is committed');
+      removeNewer();
+      const retry=await runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false});
+      assert.ok(retry.checkpointId,'the retry commits');
+      assert.equal(retry.attachmentBytesWritten,0,'the retry reuses the attachment it already uploaded');
+    }finally{beforeUpload=null;audioBlob=audioBefore;assetDescriptor=descriptorBefore;}
   }finally{reconciliationBase=baseBefore;reconciliationBaseNotes=baseNotesBefore;}
 }
 const retainedManifests=[];
