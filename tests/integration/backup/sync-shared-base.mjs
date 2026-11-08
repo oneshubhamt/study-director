@@ -300,7 +300,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
       // the independent Plan working draft. Production restore derives it from
       // the canonical Active Session; the backup layer no longer transports a
       // second session→draft schedule argument.
-      restoreSessionState:async value=>(state.activeSession=value,state.schedule=String(value&&value.scheduleText||''),events.push('session'),true),
+      restoreSessionState:async (value,options)=>(state.activeSession=value,state.restoreOptions=options||null,state.schedule=String(value&&value.scheduleText||''),events.push('session'),true),
       verifyActiveSessionRuntime:async expected=>(assert.deepEqual(state.activeSession,expected),true),
       restoredFromFile:()=>{events.push('restored-from-file');return restoredFromFile?restoredFromFile(state):false;}
     }),
@@ -1902,6 +1902,45 @@ for(const variant of ['old-owner-finished','new-owner-finished','both-decided'])
   assert.equal(b.reviews.open().filter(row=>row.subject==='session').length,0,'no session kept for review on the new owner');
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,'and none comes back to the old owner');
+}
+
+// The old owner finished the block the new owner was on and moved to the
+// next before it saw the claim. The new owner takes that in under its own
+// control: the old owner's timer comes with its block but carries the new
+// owner's later tick (it ran all along, so the old device's last tick is no
+// time away), and the restore is told to keep this device's timer running.
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-08-31',
+    a={installationId:'inst_moved_on_a',records:new Map(),deletions:[],noteDeletions:[],notes:syncWorld.note('moved'),activeSession:null,schedule:'',personal:personal('Moved QA'),journal:null},
+    b={installationId:'inst_moved_on_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Moved QA'),journal:null};
+  const A=syncWorld.device(a,{claims:true}),B=syncWorld.device(b,{claims:true});
+  const runtime=(taskId,lastTickMs)=>freeze({version:2,taskId,mode:'running',paused:false,updatedAt:'2026-08-31T09:00:00.000Z',
+    timerState:freeze({startMs:lastTickMs-60000,durationSec:1800,totalPausedMs:0,pausedStartedMs:null,recordedSec:60,overtimeNotified:false,lastTickMs,sleepPausedMs:0})});
+  const at=(item,{taskState,current,timer,updatedAt})=>freeze({...item,revision:item.revision+1,updatedAt,
+    snapshot:freeze({...item.snapshot,contentRevision:item.snapshot.contentRevision+1,taskState:freeze(taskState),currentTaskId:current,timerRuntime:timer,updatedAt})});
+  a.activeSession=at(revisionedSession(day,'MOVED',{runningOn:a.installationId,revision:10,contentRevision:7,updatedAt:'2026-08-31T08:00:00.000Z'}),
+    {taskState:{},current:'warmup',timer:runtime('warmup',1000),updatedAt:'2026-08-31T08:00:00.000Z'});
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const source=await B.handoffSource();
+  assert.equal((await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,
+    observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,
+    handoffToken:'88888888-8888-4888-8888-888888888888',revision:20})).status,'completed');
+  b.activeSession=at(freeze({...source.session,runningOn:b.installationId,status:'active',revision:20,suspendedAt:null}),
+    {taskState:{warmup:freeze({actual:freeze({seconds:300})})},current:'warmup',timer:runtime('warmup',5000),updatedAt:'2026-08-31T09:10:00.000Z'});
+  b.schedule=b.activeSession.scheduleText;b.running=true;
+  a.activeSession=at(a.activeSession,{taskState:{warmup:freeze({resolvedState:'done',actual:freeze({seconds:120})})},current:'focus',timer:runtime('focus',2000),updatedAt:'2026-08-31T09:05:00.000Z'});
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession.runningOn,b.installationId,'the old owner hands its finished block over');
+  assert.equal(a.activeSession.snapshot.currentTaskId,'focus');
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.activeSession.runningOn,b.installationId);
+  assert.equal(b.activeSession.snapshot.taskState.warmup.resolvedState,'done','the new owner takes the finished block in');
+  assert.equal(b.activeSession.snapshot.timerRuntime.taskId,'focus','and moves on to the next block with its timer');
+  assert.equal(b.activeSession.snapshot.timerRuntime.timerState.lastTickMs,5000,'carrying this device\'s own later tick, so no time away is asked about');
+  assert.equal(b.restoreOptions?.keepRunning,true,'the restore keeps this device\'s timer running');
+  assert.equal(b.reviews.open().filter(row=>row.subject==='session').length,0);
 }
 
 // BF-1: a Drive claim that exists but cannot be verified is not an absent

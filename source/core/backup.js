@@ -441,7 +441,7 @@ async function applyResolvedNotes(resolvedPlan){
   const parts=[count?`${count} note${count===1?'':'s'} updated`:'',deleted?`${deleted} note${deleted===1?'':'s'} moved to Recently deleted`:''].filter(Boolean);
   return {message:parts.length?` · ${parts.join(' · ')}`:'',changed:true,expectedItems,expectedDeletions,count,deleted};
 }
-async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
+async function applyResolvedActiveSession(resolvedPlan,{clear=false,keepRunning=false}={}){
   const resolved=resolvedPlan&&resolvedPlan.activeSession;
   // Active Session reconciliation owns only session/runtime state. The Plan
   // working draft is portable Personal Data and is never transported through
@@ -451,7 +451,7 @@ async function applyResolvedActiveSession(resolvedPlan,{clear=false}={}){
   requireBackupMutationControl('reconciling the active session');
   const expected=ActiveSessionCodec.sanitizeCurrent(resolved.value);
   if(!expected)throw new Error('Resolved Active Session is invalid.');
-  await restoreSessionState(expected);
+  await restoreSessionState(expected,{keepRunning});
   return {message:' and active session',changed:true,expected};
 }
 function staleReconciliationError(){
@@ -1001,7 +1001,14 @@ function sessionWithDecisions(owner,other){
   const mine=ActiveSessionCodec.sanitizeCurrent(owner),theirs=ActiveSessionCodec.sanitizeCurrent(other);
   if(!mine||!theirs||mine.date!==theirs.date)return null;
   const own=mine.snapshot,their=theirs.snapshot;
-  if(String(own.currentTaskId||'')!==String(their.currentTaskId||''))return rebaseSessionContentToOwner(mine,theirs);
+  if(String(own.currentTaskId||'')!==String(their.currentTaskId||'')){
+    // The other copy's timer comes with its block. The owner has been running
+    // all along, so its own later tick carries over: the other device's last
+    // tick is no gap this device was away for.
+    const rebased=rebaseSessionContentToOwner(mine,theirs),runtime=rebased?.snapshot?.timerRuntime,ownTick=Number(own.timerRuntime?.timerState?.lastTickMs)||0;
+    if(!runtime||runtime.paused||!own.timerRuntime||own.timerRuntime.paused||!(ownTick>(Number(runtime.timerState?.lastTickMs)||0)))return rebased;
+    return ActiveSessionCodec.sanitizeCurrent({...rebased,snapshot:{...rebased.snapshot,timerRuntime:{...runtime,timerState:{...runtime.timerState,lastTickMs:ownTick}}}})||rebased;
+  }
   const taskState=Object.assign(Object.create(null),own.taskState);
   for(const [id,row] of Object.entries(their.taskState||{})){
     const kept=taskState[id];
@@ -2559,7 +2566,9 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     }
     const sessionResult=await runRestoreMutationStage('active-session',async()=>{
       await AppData.restoreJournal.mark(restoreId,'applying-active-session');
-      const result=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession});
+      // A sync that merges another device's decisions into the session this
+      // device runs never stops its timer.
+      const result=await applyResolvedActiveSession(resolvedPlan,{clear:clearSession,keepRunning:sync&&session==='graft'});
       if(result.changed)committedDescription+=(committedDescription?' and ':'')+'the Active Session was already saved';
       await AppData.restoreJournal.mark(restoreId,'active-session-committed');return result;
     });

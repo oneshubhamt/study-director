@@ -18,8 +18,11 @@ export function journeyLog(suite){
 // Devices --------------------------------------------------------------------
 // clockMs: how far this device's clock is from the true time.
 const clockScript=ms=>`(()=>{const off=${Number(ms)||0};if(!off)return;const Real=Date;class Skewed extends Real{constructor(...args){super(...(args.length?args:[Real.now()+off]));}static now(){return Real.now()+off;}}globalThis.Date=Skewed;})();`;
+// Each device's last session saves (timer state and the code that saved it),
+// for a failing journey's report only.
+const sessionWriteLog=`(()=>{const put=IDBObjectStore.prototype.put;window.__sessionWrites=[];IDBObjectStore.prototype.put=function(value,...rest){try{if(value&&value.type==='activeSession'){const rt=value.snapshot&&value.snapshot.timerRuntime;window.__sessionWrites.push({at:new Date().toISOString().slice(11,23),st:value.status,own:String(value.runningOn||'').slice(-4),cur:value.snapshot&&value.snapshot.currentTaskId,rt:rt?rt.mode+' '+rt.taskId:'none',by:new Error().stack.split('\\n').slice(2,10).map(line=>line.trim().replace(/^at /,'').replace(/ \\(.*\\)$/,'')).join(' < ')});if(window.__sessionWrites.length>40)window.__sessionWrites.shift();}}catch(error){}return put.call(this,value,...rest);};})();`;
 export async function openDevice(browser,server,who,{clockMs=0}={}){
-  const page=await browser.createPage(server.url('deployment','instrumented.html'),{preload:clockScript(clockMs)+preload});
+  const page=await browser.createPage(server.url('deployment','instrumented.html'),{preload:clockScript(clockMs)+preload+sessionWriteLog});
   await attachDrive(page,who);
   await waitForStudyDirector(page,{instrumented:true});
   await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:`${who}: ownership`});
@@ -106,6 +109,7 @@ export async function explain(devices){
       const diff=(x,y,prefix='')=>{const out=[];if(JSON.stringify(x)===JSON.stringify(y))return out;if(!x||!y||typeof x!=='object'||typeof y!=='object')return [prefix+': '+JSON.stringify(x)?.slice(0,200)+' | '+JSON.stringify(y)?.slice(0,200)];for(const key of new Set([...Object.keys(x),...Object.keys(y)]))out.push(...diff(x[key],y[key],prefix+'.'+key));return out;};
       return rows.map(row=>({origin:row.origin,diffKeptVsCurrent:diff(row.kept,current).slice(0,20)}));})()`).catch(cause=>String(cause?.message||cause))));
     console.error(who,'warnings',JSON.stringify((page.warnings||[]).slice(-12)));
+    console.error(who,'session saves',JSON.stringify(await page.evaluate('window.__sessionWrites||[]').catch(cause=>String(cause?.message||cause)),null,1));
     console.error(who,'claim',JSON.stringify(await page.evaluate(`(async()=>({visibility:document.visibilityState,online:navigator.onLine,claim:await __PWA6.BackupProviderRuntime.readSessionClaim('google-drive').catch(error=>({error:String(error?.code||error?.message)}))}))()`).catch(cause=>String(cause?.message||cause))));
   }
 }

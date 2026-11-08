@@ -55,6 +55,7 @@ try{
   await bothSettled([['A',a],['B',b]],'closed');await syncNow(b);await bothSettled([['A',a],['B',b]],'closed');await syncNow(a);await bothSettled([['A',a],['B',b]],'closed');
   const closed=await keeps(b,'the phone',laptopUnsent,'laptop closed before uploading');
   await syncNow(a);await bothSettled([['A',a],['B',b]],'closed');await noReviews([['A',a],['B',b]],'closed');
+  assert.equal(await running(b),true,'the phone keeps its timer running after taking the finished block in');
   step('old owner closed before uploading',{continueHereMs:ms,lastBlock:closed});
 
   // Journey 9. The phone uploads a large change slowly; the laptop's

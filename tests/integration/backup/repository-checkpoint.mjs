@@ -520,6 +520,14 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
       failMaintenanceList=Object.assign(new Error('Repository maintenance yielded to a higher-priority backup operation.'),{name:'AbortError'});
       await runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}).catch(()=>null);
       assert.equal(logged(),before,'a check stopped on purpose is not logged');
+      // Going offline mid-cleanup cuts its requests off: expected, not logged.
+      const online=Object.getOwnPropertyDescriptor(globalThis,'navigator');
+      Object.defineProperty(globalThis,'navigator',{value:{onLine:false},configurable:true});
+      try{
+        failMaintenanceList=new TypeError('Failed to fetch');
+        await runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}).catch(()=>null);
+        assert.equal(logged(),before,'a request cut off by going offline is not logged');
+      }finally{if(online)Object.defineProperty(globalThis,'navigator',online);else delete globalThis.navigator;}
       failMaintenanceList=new Error('Drive could not list markers');
       await runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}).catch(()=>null);
       assert.equal(logged(),before+1,'a real failure is');

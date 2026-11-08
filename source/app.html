@@ -10184,12 +10184,16 @@ async function restoreNotesSnapshotThroughLifecycle(snapshotNotes){
     date:getReviewDate(),
   },()=>AppData.notes.replace(snapshotNotes));
 }
-async function restoreSessionStateThroughLifecycle(importedSession){
+async function restoreSessionStateThroughLifecycle(importedSession,options={}){
   const session=importedSession?ActiveSessionCodec.sanitizeCurrent(importedSession):null;
+  // A sync merge into the session running here keeps the timer running: when
+  // the merged session has no timer (the other device had stopped), the
+  // current block runs on here. A pause the other device made stays paused.
+  const keepRunning=options.keepRunning===true&&TimerState.mode===TIMER_MODES.RUNNING&&!TimerState.paused;let runOn=false;
   const date=session&&isValidIsoDate(session.date)?session.date:todayISO();
   const snapshot=session?activeSessionSnapshot(session):null;
   if(session&&!snapshot)throw new Error('The rollback active-session snapshot is incompatible.');
-  return SessionLifecycle.run('restore-journal-rollback',{
+  const result=await SessionLifecycle.run('restore-journal-rollback',{
     scheduleIdentity:true,date,autoDate:date===todayISO(),sessionRevision:session&&session.revision||0,
     snapshotReview:snapshot&&snapshot.review
   },async()=>{
@@ -10211,6 +10215,7 @@ async function restoreSessionStateThroughLifecycle(importedSession){
         const restored=applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
         if(restored===false)throw new Error('Rollback active-session runtime could not be applied.');
         setSessionPanelMode('active');
+        runOn=keepRunning&&!snapshot.timerRuntime;
       }
       return saved;
     }
@@ -10220,6 +10225,9 @@ async function restoreSessionStateThroughLifecycle(importedSession){
     PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('none');
     return cleared;
   });
+  const idx=TimerState.currentIndex;
+  if(runOn&&!TimerState.runtime?.startMs&&idx<TASKS.length&&isTrackableBlock(TASKS[idx])&&!isTaskResolved(idx))TimerEngine.startCur();
+  return result;
 }
 function verifyRestoredTimerRuntimeSemantics(expectedRuntime){
   if(!expectedRuntime)return true;

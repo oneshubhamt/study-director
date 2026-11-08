@@ -9,6 +9,9 @@ registry.define('backup-provider',1,input=>{
   if(!input||!Object.isFrozen(input)||Object.keys(input).sort().join('|')!=='repositoryPolicy')throw new TypeError('Backup provider module dependencies are invalid.');
   const RepositoryPolicy=input.repositoryPolicy;if(!RepositoryPolicy||RepositoryPolicy.format!=='study-director.repository-policy-module'||RepositoryPolicy.contractVersion!==1||!Object.isFrozen(RepositoryPolicy.protocol))throw new TypeError('Backup provider repository policy dependency is invalid.');
   const freeze=Object.freeze;
+  // A request stopped on purpose, or cut off because the device went offline,
+  // is expected: the work yields or waits and runs again. It is not logged.
+  const expectedRequestFailure=error=>error?.name==='AbortError'||globalThis.navigator?.onLine===false&&error instanceof TypeError;
   const PORT_FIELDS=freeze({
     configuration:freeze(['appVersion']),
     controller:freeze(['beginImport','cancelImport','finishImport']),
@@ -92,7 +95,7 @@ registry.define('backup-provider',1,input=>{
   function providerMaintenanceIntent(selected){
     if(!maintenanceHooks)return null;const id=safeId(selected&&selected.id);if(!id)throw new Error('Backup provider maintenance target is invalid.');selected=registeredProvider(selected);
     let intent=providerMaintenanceIntents.get(id);if(intent)return intent;const coordinator=providerBackground(selected);
-    intent=coordinator.maintenanceIntent(freeze({capture:(phase,error)=>AppDiagnostics.capture('backup-provider.repository-maintenance-'+phase,error,'warn'),clear:expected=>maintenanceHooks.clear(id,expected),mark:(state,expected)=>maintenanceHooks.mark(id,freeze({...state,repositoryScope:repositoryScopeByProvider.get(id)||''}),expected),read:()=>maintenanceHooks.read(id),scope:()=>repositoryScopeByProvider.get(id)||null,selectRetention:RepositoryCheckpointPipeline.selectRetention}));providerMaintenanceIntents.set(id,intent);return intent;
+    intent=coordinator.maintenanceIntent(freeze({capture:(phase,error)=>{if(!expectedRequestFailure(error))AppDiagnostics.capture('backup-provider.repository-maintenance-'+phase,error,'warn');},clear:expected=>maintenanceHooks.clear(id,expected),mark:(state,expected)=>maintenanceHooks.mark(id,freeze({...state,repositoryScope:repositoryScopeByProvider.get(id)||''}),expected),read:()=>maintenanceHooks.read(id),scope:()=>repositoryScopeByProvider.get(id)||null,selectRetention:RepositoryCheckpointPipeline.selectRetention}));providerMaintenanceIntents.set(id,intent);return intent;
   }
   const userProviderMessage=(error,fallback)=>{const code=String(error&&error.code||'');if(code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY'||code==='STUDY_DIRECTOR_RECOVERY_MAINTENANCE_YIELD_TIMEOUT')return 'Another Study Director device is still finishing backup maintenance. Wait a moment, then retry the restore.';if(code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_UNCERTAIN')return 'Backup maintenance state could not be verified safely. Retry after the other device has finished its backup work.';const raw=String(error&&error.message||error||'').trim();if(!raw)return fallback;return /\b(?:repository|checkpoint|manifest|commit marker|reconciliation)\b/iu.test(raw)?fallback:raw;};
   const providerBackgroundAvailability=selected=>{
@@ -624,7 +627,7 @@ registry.define('backup-provider',1,input=>{
   function repositoryClockOffset(selected){const now=typeof selected?.repository?.now==='function'?Number(selected.repository.now()):NaN;return Number.isFinite(now)?now-Date.now():0;}
   async function repositoryPublicationSafety(selected){
     if(!repositoryPublicationCapable(selected))return freeze({blocked:false,reason:'publication-protection-unavailable',active:0,invalid:0});
-    let listed;try{listed=await selected.repository.listPublications();}catch(error){if(error?.name!=='AbortError')AppDiagnostics.capture('backup-provider.repository-publications',error,'warn');return freeze({blocked:true,reason:'publication-state-unavailable',active:0,invalid:1});}
+    let listed;try{listed=await selected.repository.listPublications();}catch(error){if(!expectedRequestFailure(error))AppDiagnostics.capture('backup-provider.repository-publications',error,'warn');return freeze({blocked:true,reason:'publication-state-unavailable',active:0,invalid:1});}
     const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],offset=repositoryClockOffset(selected),now=Date.now()+offset;let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
     // A marker that renews and has gone unrenewed past publicationStaleMs was
     // left by an upload that stopped (a closed or frozen page): it is removed,
@@ -636,7 +639,7 @@ registry.define('backup-provider',1,input=>{
   }
   async function repositoryMaintenanceSafety(selected,{excludeId='',releaseSameDevice=false}={}){
     if(!repositoryMaintenanceCapable(selected))return freeze({blocked:false,reason:'maintenance-protection-unavailable',active:0,invalid:0});
-    let listed;try{listed=await selected.repository.listMaintenances();}catch(error){if(error?.name!=='AbortError')AppDiagnostics.capture('backup-provider.repository-maintenances',error,'warn');return freeze({blocked:true,reason:'maintenance-state-unavailable',active:0,invalid:1});}
+    let listed;try{listed=await selected.repository.listMaintenances();}catch(error){if(!expectedRequestFailure(error))AppDiagnostics.capture('backup-provider.repository-maintenances',error,'warn');return freeze({blocked:true,reason:'maintenance-state-unavailable',active:0,invalid:1});}
     const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],offset=repositoryClockOffset(selected),now=Date.now()+offset,excluded=String(excludeId||'');let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
     for(const row of rows){if(excluded&&String(row&&row.id||'')===excluded)continue;if(releaseSameDevice&&row&&row.sameDevice===true){try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-own-release',error,'warn');invalid+=1;}continue;}const created=Date.parse(String(row&&row.createdAt||'')),expires=row&&row.expiresAt?Date.parse(String(row.expiresAt)):created+MAINTENANCE_MAX_AGE_MS;if(!Number.isFinite(created)||!Number.isFinite(expires)||expires<=created){invalid+=1;continue;}if(now<expires){active+=1;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-expired-cleanup',error,'warn');}}
     return freeze({blocked:active>0||invalid>0,reason:active>0?'active-maintenance':invalid>0?'uncertain-maintenance-state':'',active,invalid,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt-offset).toISOString():''});
@@ -1803,7 +1806,7 @@ registry.define('backup-provider',1,input=>{
     const background=providerBackground(selected),intent=providerMaintenanceIntent(selected);let traceId='';
     scheduler=background.createMaintenanceScheduler(freeze({
       intent,budgetMs:0,budgetCode:'REPOSITORY_MAINTENANCE_BUDGET',budgetMessage:'Repository cleanup completed a protected work unit and will continue shortly.',preemptCode:'REPOSITORY_BACKGROUND_PREEMPTED',preemptMessage:'Repository maintenance yielded to a higher-priority backup operation.',
-      capture:(phase,error)=>AppDiagnostics.capture('backup-provider.repository-maintenance-'+phase,error,'warn'),
+      capture:(phase,error)=>{if(!expectedRequestFailure(error))AppDiagnostics.capture('backup-provider.repository-maintenance-'+phase,error,'warn');},
       isAvailable:()=>providerBackgroundAvailability(selected),
       isBusy:()=>busy,
       execute:({signal,workBudget})=>cleanupRepositoryProviderSafely(selected,{signal,workBudget,traceId}),
