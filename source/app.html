@@ -3181,7 +3181,7 @@ function setTaskSkippedState(idx){
 function emptyStorageHealth(){
   // lastLocalSaveAt: the change clock's fast copy for backup decisions.
   // lastStudyDataSaveAt: when study data (notes, Saved Days, sessions, plans,
-  // settings, kept versions) was last saved in this browser.
+  // kept versions; not settings alone) was last saved in this browser.
   // browserDataClearedAt: a browser-data clear still being resolved.
   return {version:3,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null};
 }
@@ -5311,11 +5311,11 @@ function handleCanonicalCommit(event){
   const referencesChanged=canonicalCommitChangesAttachmentReferences(event);
   if(referencesChanged)richAssetReferenceRevision++;
   const committedAt=event&&event.committedAt||new Date().toISOString();
-  // Study data was saved here: notes, Saved Days, sessions, plans and
-  // settings, kept versions, whether made here or taken in by a sync. The
-  // start-up compatibility step (settings rebuilt from browser storage on a
-  // fresh install) is not.
-  const studyData=!!event&&event.startup!==true&&STUDY_DATA_COMMITS.has(event.entityType);
+  // Study data was saved here: notes, Saved Days, sessions, plans, kept
+  // versions, whether made here or taken in by a sync: what the empty-device
+  // check counts. Settings alone (a name, a theme) and the start-up
+  // compatibility step are not.
+  const studyData=!!event&&event.startup!==true&&event.settingsOnly!==true&&STUDY_DATA_COMMITS.has(event.entityType);
   writeStorageHealth(studyData?{lastLocalSaveAt:committedAt,lastStudyDataSaveAt:committedAt}:{lastLocalSaveAt:committedAt});
   renderStorageHealth();
   if(NativeCapabilities&&event&&event.entityType==='activeSession'){
