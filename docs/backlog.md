@@ -127,7 +127,7 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
     - **Agreed flow (owner approved, 2026-11-08; not started):** Finish Today is terminal: it ends the day's session for good and never behaves like a suspend, so nothing is left to resume or to take over on another device.
       1. Finish Today (with its confirmation, as now) stops the timer, records a running block as partial and ends the live session. The day becomes a *finished day*: kept here and synced like any session, but no longer running anywhere.
       2. Execute, the Practice Pacer and Plan look exactly as after Reset Today: idle, with the plan a draft again (same text, editable, ready for the next plan).
-      3. Review opens on the finished day, with everything Review allows today.
+      3. Finish Today takes the person straight to Review by itself (owner, 2026-11-08), on the finished day, with everything Review allows today. Today's code already switches to Review (`goTab('review')` in `finishTodaySession`); keep that, and make sure the finished day is what Review shows.
       4. A finished day blocks nothing: a kept session review opens at once. Taking another copy's decisions into a finished day never starts a timer.
       5. Save Today to Library stores the day; the finished day then closes. Until then it is never lost: it stays here and on Drive, and the existing "Unsaved previous study day" prompt catches it if a new day starts first.
       6. Other devices see the day as finished: Continue Here does not bring back a timer for it; their Review shows the same finished day.
