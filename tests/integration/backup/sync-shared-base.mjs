@@ -1801,9 +1801,10 @@ for(const skew of [-2*3600e3,2*3600e3]){
   assert.equal(keptSessions(a).length,0,'a legitimate handoff and save leave no Active Session kept version');
 }
 
-// Post-handoff A can accrue focus before detecting B's claim. A verified Day
- // covering those seconds must not create a redundant kept session. A shorter
- // Day, or more time caught during the final yield, still requires review.
+// Post-handoff A can accrue focus before detecting B's claim. Time alone is
+ // never a choice: whether B's Saved Day covers those seconds or is shorter,
+ // and with more time caught during the final yield, A follows B and keeps
+ // no session for review.
  for(const variant of ['covered-active','covered-ended','shorter-day','final-tick-uncovered']){
    syncWorld.drive.clear();syncWorld.claims.clear();
    const day='2026-08-31',
@@ -1841,17 +1842,67 @@ for(const skew of [-2*3600e3,2*3600e3]){
    assert.equal(a.activeSession?.runningOn,variant==='covered-ended'?undefined:b.installationId,
      variant+' checkpoint ownership/end remains authoritative');
    const kept=a.reviews.open().filter(row=>row.subject==='session'&&row.kept?.date===day);
-   const expectedKept=['shorter-day','final-tick-uncovered'].includes(variant)?1:0;
-   assert.equal(kept.length,expectedKept,
-     variant+' must retain only evidence not covered by the verified Saved Day');
-   if(expectedKept)assert.equal(kept[0].kept.snapshot.taskState?.focus?.actual?.seconds,
-     variant==='shorter-day'?60:130,'unsaved post-handoff time is retained');
-   else{
-     assert.equal((await A.sync()).cancelled,false,variant+' repeat sync');
-     assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,
-       variant+' must not manufacture a repeated review');
-   }
+   assert.equal(kept.length,0,variant+': time alone keeps no session for review');
+   assert.equal((await A.sync()).cancelled,false,variant+' repeat sync');
+   assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,
+     variant+' must not manufacture a repeated review');
  }
+
+// After a handoff, a copy further along in what was decided is taken in on
+// either side with no review: the old owner finished a block the new owner
+// had not seen (it hands the decision over), or the new owner finished one.
+// The owner keeps its timer and time. Both deciding differently is kept.
+for(const variant of ['old-owner-finished','new-owner-finished','both-decided']){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-08-31',
+    a={installationId:'inst_decided_a',records:new Map(),deletions:[],noteDeletions:[],notes:syncWorld.note('decided'),activeSession:null,schedule:'',personal:personal('Decided QA'),journal:null},
+    b={installationId:'inst_decided_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Decided QA'),journal:null};
+  const A=syncWorld.device(a,{claims:true}),B=syncWorld.device(b,{claims:true});
+  const withTasks=(item,taskState,updatedAt)=>freeze({...item,revision:item.revision+1,updatedAt,snapshot:freeze({...item.snapshot,contentRevision:item.snapshot.contentRevision+1,taskState:freeze(taskState),updatedAt})});
+  a.activeSession=withTasks(revisionedSession(day,'DECIDED',{runningOn:a.installationId,revision:10,contentRevision:7,updatedAt:'2026-08-31T08:00:00.000Z'}),{warmup:freeze({actual:freeze({seconds:30})}),focus:freeze({actual:freeze({seconds:30})})},'2026-08-31T08:00:00.000Z');
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  const source=await B.handoffSource();
+  assert.equal((await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,
+    observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,
+    handoffToken:'77777777-7777-4777-8777-777777777777',revision:20})).status,'completed');
+  b.activeSession=withTasks(freeze({...source.session,runningOn:b.installationId,status:'active',revision:20,suspendedAt:null}),
+    {warmup:freeze(variant==='both-decided'?{resolvedState:'skipped',actual:freeze({seconds:30})}:{actual:freeze({seconds:30})}),focus:freeze({actual:freeze({seconds:240})}),
+      ...(variant==='new-owner-finished'?{review:freeze({resolvedState:'done',actual:freeze({seconds:20})})}:{})},'2026-08-31T09:10:00.000Z');
+  b.schedule=b.activeSession.scheduleText;b.running=true;
+  // A, not yet stopped by the claim, finishes the warm-up block and a
+  // practice run.
+  a.activeSession=withTasks(a.activeSession,{warmup:freeze(variant==='new-owner-finished'?{actual:freeze({seconds:45})}:{resolvedState:'done',actual:freeze({seconds:45})}),focus:freeze({actual:freeze({seconds:30})})},'2026-08-31T09:05:00.000Z');
+  if(variant==='old-owner-finished')a.activeSession=freeze({...a.activeSession,snapshot:freeze({...a.activeSession.snapshot,practice:freeze({active:null,runs:freeze([freeze({taskId:'warmup',targetMs:60000,unitMs:freeze([55000,61000])})])})})});
+  await B.upload();
+  assert.equal((await A.sync()).cancelled,false,variant);
+  assert.equal(a.running,false,variant+': the old owner stops');
+  assert.equal(a.activeSession.runningOn,b.installationId,variant+': the new owner keeps control');
+  const keptOnA=a.reviews.open().filter(row=>row.subject==='session');
+  if(variant==='both-decided'){
+    assert.equal(keptOnA.length,1,'both deciding differently keeps the old owner\'s copy for review');
+    assert.equal(keptOnA[0].kept.snapshot.taskState.warmup.resolvedState,'done');
+    continue;
+  }
+  assert.equal(keptOnA.length,0,variant+': no session kept for review on the old owner');
+  if(variant==='new-owner-finished'){
+    assert.equal(a.activeSession.snapshot.taskState.review.resolvedState,'done','the old owner takes the new owner\'s copy');
+    assert.equal(a.activeSession.snapshot.taskState.warmup.resolvedState,undefined);
+    continue;
+  }
+  assert.equal(a.activeSession.snapshot.taskState.warmup.resolvedState,'done','the old owner hands its finished block over');
+  assert.equal(a.activeSession.snapshot.taskState.focus.actual.seconds,240,'under the new owner\'s time');
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.running,true,'the new owner keeps running');
+  assert.equal(b.activeSession.runningOn,b.installationId);
+  assert.equal(b.activeSession.snapshot.taskState.warmup.resolvedState,'done','the new owner takes the finished block in');
+  assert.equal(b.activeSession.snapshot.taskState.warmup.actual.seconds,45,'with the time it was finished in');
+  assert.equal(b.activeSession.snapshot.taskState.focus.actual.seconds,240,'and keeps its own time on its block');
+  assert.deepEqual(b.activeSession.snapshot.practice?.runs?.map(run=>run.unitMs.length),[2],'the practice run finished on the old owner comes too');
+  assert.equal(b.reviews.open().filter(row=>row.subject==='session').length,0,'no session kept for review on the new owner');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,'and none comes back to the old owner');
+}
 
 // BF-1: a Drive claim that exists but cannot be verified is not an absent
 // claim. Sync must stop without applying the still-old shared checkpoint;

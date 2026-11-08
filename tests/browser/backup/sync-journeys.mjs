@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
 import {faults,ledger,hooks,sync,connect,uploadsBy,sleep} from '../../helpers/drive-browser.mjs';
-import {shot,journeyLog,openDevice,hold,versionUpload,setOffline,freeze,thaw,runSession,view,noteOf,writeNote,upload,syncNow,settled,continueHere,stopsWithin,markDone,owner,running,elsewhere,bothSettled,openFindings,keeps,explain,holds} from '../../helpers/sync-journey-world.mjs';
+import {shot,journeyLog,openDevice,hold,versionUpload,setOffline,freeze,thaw,runSession,view,noteOf,writeNote,upload,syncNow,settled,continueHere,stopsWithin,markDone,owner,running,elsewhere,bothSettled,noReviews,keeps,explain,holds} from '../../helpers/sync-journey-world.mjs';
 
 // Sync journeys, part 1: a laptop (A) and a phone (B) share one simulated
 // Google Drive. A first sync that waits for another device's upload (Sync
@@ -9,7 +9,7 @@ import {shot,journeyLog,openDevice,hold,versionUpload,setOffline,freeze,thaw,run
 // the other device is mid-upload, offline or frozen in the background.
 // Part 2 is session-handoff-journeys.mjs; the helpers say what each checks.
 
-const {steps,step}=journeyLog('sync-journeys'),findings=openFindings('sync-journeys');
+const {steps,step}=journeyLog('sync-journeys');
 const server=await startReleaseServer();
 const laptop=await launchChromium({profilePrefix:'sd-journey-a-'}),phone=await launchChromium({profilePrefix:'sd-journey-b-'});
 let a=null,b=null;
@@ -60,13 +60,13 @@ try{
   const stopA=await stopsWithin(a,'A');
   await bothSettled([['A',a],['B',b]],'handoff');await syncNow(a);await bothSettled([['A',a],['B',b]],'handoff');
   assert.equal(await running(b),true,'the phone keeps running the session');assert.equal(await owner(a),idB,'the laptop records the phone as the owner');
-  await findings.noReviews([['A',a],['B',b]],'handoff');
+  await noReviews([['A',a],['B',b]],'handoff');
   step('handoff',{continueHereMs:ms,oldOwnerStopsMs:stopA});
 
   // Journey 3. The phone finishes a block and its upload is still in flight
   // (the final minutes) when the laptop presses Continue Here. Continue Here
   // does not wait for it; the phone's upload lands first, and the block
-  // finished on the phone reaches the laptop (merged, or kept for review).
+  // finished on the phone is taken in by the laptop, with no review.
   let held=hold('B',versionUpload);const phoneFinished=(await view(b)).current;await markDone(b);void upload(b);
   await waitFor(()=>held.reached,{label:'the phone is mid-upload with its finished block',timeout:30000});
   await elsewhere(a,'A');
@@ -75,6 +75,7 @@ try{
   await bothSettled([['A',a],['B',b]],'mid-upload');await syncNow(a);await bothSettled([['A',a],['B',b]],'mid-upload');
   const midUpload=await keeps(a,'the laptop',phoneFinished,'continue during the old owner\'s upload');
   assert.equal(await running(a),true,'the laptop keeps running');assert.equal(await owner(b),idA);
+  await noReviews([['A',a],['B',b]],'mid-upload');
   step('continue while the old owner uploads',{continueHereMs:ms,lastBlock:midUpload});
 
   // Journey 4. The laptop goes offline with its timer running; the phone
@@ -86,6 +87,7 @@ try{
   await setOffline(a,'A',false);const stopOffline=await stopsWithin(a,'A',40000);
   await bothSettled([['A',a],['B',b]],'offline');await syncNow(a);await bothSettled([['A',a],['B',b]],'offline');
   assert.equal(await running(b),true,'the phone keeps running');assert.equal(await owner(a),idB);
+  await noReviews([['A',a],['B',b]],'offline');
   step('old owner offline',{continueHereMs:ms,stopsAfterOnlineMs:stopOffline});
 
   // Journey 5. The phone is frozen in the background with its timer running;
@@ -96,6 +98,7 @@ try{
   await sleep(4000);await thaw(b);const stopFrozen=await stopsWithin(b,'B',40000);
   await bothSettled([['A',a],['B',b]],'frozen');await syncNow(b);await bothSettled([['A',a],['B',b]],'frozen');
   assert.equal(await running(a),true,'the laptop keeps running');assert.equal(await owner(b),idA);
+  await noReviews([['A',a],['B',b]],'frozen');
   step('old owner frozen',{continueHereMs:ms,stopsAfterWakeMs:stopFrozen});
 
   // A change made while an upload runs goes out with the next flush (the
@@ -111,6 +114,6 @@ try{
 
   for(const page of [a,b])assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[]);
   assert.deepEqual(faults,[],'every request reached the simulated Drive or failed on purpose');
-  console.log(JSON.stringify({status:'PASS',suite:'sync-journeys',journeys:steps.length,steps,openFindings:findings.found}));
+  console.log(JSON.stringify({status:'PASS',suite:'sync-journeys',journeys:steps.length,steps}));
 }catch(error){console.error(ledger.slice(-40).join('\n'));await explain([['A',a],['B',b]]);throw error;}
 finally{for(const entry of [...holds])entry.release();hooks.before=null;await laptop.close();await phone.close();await server.close();}

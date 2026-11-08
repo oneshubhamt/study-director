@@ -40,7 +40,12 @@ export async function attachDrive(page,who='?'){
       if(request.method==='POST'||request.method==='PUT'){try{const meta=await response.clone().json();if(meta&&meta.name)ledger.push(`${new Date().toISOString().slice(11,23)} ${who} ${request.method} ${meta.id} ${meta.name} ${meta.appProperties?.studyDirectorRepositoryKind||''} ${meta.appProperties?.studyDirectorDevice||meta.appProperties?.studyDirectorRepositoryDevice||''}`);}catch{}}
       const out=Buffer.from(await response.arrayBuffer());
       await page.send('Fetch.fulfillRequest',{requestId,responseCode:response.status,responseHeaders:[...CORS,...[...response.headers].map(([name,value])=>({name,value}))],body:out.toString('base64')});
-    }catch(error){faults.push(`${request.method} ${request.url}: ${error.message}`);await page.send('Fetch.failRequest',{requestId,errorReason:'Failed'}).catch(()=>{});}
+    }catch(error){
+      // The page cancelled the request (an aborted fetch, or the page closed)
+      // before its answer: nothing to answer, and not a fault of the harness.
+      if(/Invalid InterceptionId/u.test(String(error?.message||''))){ledger.push(`${new Date().toISOString().slice(11,23)} ${who} ${request.method} cancelled by the page`);return;}
+      faults.push(`${request.method} ${request.url}: ${error.message}`);await page.send('Fetch.failRequest',{requestId,errorReason:'Failed'}).catch(()=>{});
+    }
   });
   await page.send('Fetch.enable',{patterns:[{urlPattern:'https://accounts.google.com/*'},{urlPattern:'https://www.googleapis.com/*'}]});
 }

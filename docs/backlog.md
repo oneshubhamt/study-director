@@ -161,15 +161,26 @@ A redesign must fit each kind of data, not one rule for all. Likely a fusion: me
 3. The new backup machinery: the options and requirements above, Device Folder included.
 
 
-### Session handoffs leave versions kept for review (found 2026-11-08, waiting on the owner)
+### Why the first sync paused, compared with F18 (checked 2026-11-08)
 
-The sync journeys (`tests/browser/backup/sync-journeys.mjs`) show that a session moved with Continue Here keeps a "session" version for review whenever both devices recorded anything after the claim's snapshot, and these pile up (16 after a few handoffs back and forth). Three cases:
+From the owner's diagnostics (F20 on 4 Nov, F23 on 7 Nov) and the code at F18 (`0aa682c`):
 
-- **Time only.** The old device's timer ticks until its claim check (up to 15 s): its copy differs only in seconds recorded on the running block. Nothing is lost by dropping it (the new owner's timer runs from the same start), yet it is kept for review.
-- **The old device was further along.** It finished a block just before Continue Here and that upload landed after the claim, or it was closed before uploading it. The finished block is kept for review instead of joining the new owner's session.
-- **Both devices made different decisions** (each finished or changed a different thing). A review is right here.
+- **F20, empty device.** The first attempt found nothing local to upload (`local-empty`) and put the catch-up off for 20 minutes. Fixed on 5 Nov (`be622cd`).
+- **F23, device with changes of its own** (first-start settings typed after a wipe). It tried its own upload first, and the upload asked for the turn before asking whether Drive was ahead. Another device's upload marker held the turn, so it never brought Drive's data in: three tries over 90 seconds, then a 5-minute wait. That order already existed at F18. What changed on 2 Nov (`8b0437c`, F19) is that upload markers renew: an upload held the turn for as long as it kept renewing, measured from its last renewal, where at F18 a marker stopped counting 15 minutes after the upload began. A slow upload therefore blocked everyone for its whole duration, for example on a device in the background, where Safari throttles the timers the upload pipeline waits on.
+- **Fixed at the cause in F24.** Drive's changes come in first and never wait for a turn (`1dda276`); a turn counts from the upload's start on Drive's clock and lasts at most 15 minutes, or 5 minutes without a renewal (`9d5d2b5`, `ce02b94`). Only a device's own upload still waits, and Sync now skips that wait. Journey 1 in `sync-journeys.mjs` checks it: a phone with changes of its own connects while the laptop is mid-upload, and brings Drive's latest in at once.
 
-Proposal for the owner: time alone never makes a review (the claim's owner's copy is kept), and a copy that is only further along (the same blocks resolved the same way, plus more) is taken in by itself; only different decisions on both sides are kept for review. The journeys then assert no reviews after plain handoffs.
+## Owner's requests (noted 2026-11-08)
+
+- **Notification lifecycle, as a whole (not now).** Every notification should have a lifecycle: it appears when it matters, and it goes away by itself once it no longer applies, instead of staying around or piling up. Action notifications matter most: they must appear at the right time and, above all, never offer an action that could now do something unintended. Example: a "kept for review" from two or three weeks ago, after much syncing since, whose Review could restore something the person no longer means to restore. Such an action has to re-check that it still applies when pressed, expire, or explain what it would change now. View-only notifications should not bombard the person with things that no longer matter. Start with an inventory of every notification source (sync, kept versions, session hand-off, storage and backup check, Device Folder, app update, sign-in) with what retires each one.
+- **Pane-switch animation missing on Insights.** In the Glass and Director skins, switching panes animates every pane, Guide included (it is lazy-loaded too), but not Insights. Insights should animate the same way.
+- **Expand the sync QA matrix? (to decide).** The sync journeys (`tests/browser/backup/sync-journeys.mjs`, `session-handoff-journeys.mjs`) found many hidden bugs on their first runs: a 30 s takeover check, devices with a wrong clock unable to read each other's data, sync not resuming after going offline, an app killed mid-sync locked until a reload, changes made during an upload left unsent; asserting no reviews after each handoff then found a new device saving the starter plan as its draft. Consider more permutations of real multi-device use: three devices, longer offline spells, a phone killed at each sync step, password changes, app updates mid-sync, large attachments, several days of history.
+
+## Found while testing (2026-11-08), not yet fixed
+
+Both browser tests also fail on `main` (`a558d6c`), so they predate this branch's sync work. Browser tests are not part of the repository checks, which is how they went unnoticed.
+
+- **Save Today fails after a Practice Pacer run** (`tests/browser/app/session-draft-edit.mjs`, the BF-1 step): "New daily record failed its canonical validation" (`repositories.js`, `storeDailyRecord`). The day's record projected without the pacer run passes the same validation, so the practice run Save Today adds is the likely cause. Possibly a real bug in saving a study day with a pacer run: check first.
+- **`tests/browser/plans/saved-plans-ui.mjs`** fails at its first projection check: the evaluated `applySchedule(...)` comes back as `{}` where `true` is expected, which looks like the test not awaiting an `applySchedule` that now returns a promise. Confirm, then fix the test and see what the rest of it finds.
 
 ## Decided, not yet scheduled
 

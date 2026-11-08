@@ -640,6 +640,14 @@ const PlanDraftEditor=(()=>{
     return true;
   }
   function flush(options={}){return draftSaveTimer?save(options):true;}
+  // The Plan box's text when it is the person's draft: null with no box, or
+  // when it shows the default plan over no stored draft. That is not a draft
+  // anyone wrote, and saving it would invent a change on this device that
+  // later clashes with a real plan from another.
+  function authoredText(){
+    const input=document.getElementById('plan-input');if(!input)return null;
+    return persistence.readDraft()===null&&!draftSaveTimer&&input.value===DefaultStore.active().scheduleText?null:input.value;
+  }
   function enter(){
     // Always reconstruct editing rows from the latest authored text, not a
     // cached board projection from before an import or a Composer change.
@@ -1059,7 +1067,7 @@ const PlanDraftEditor=(()=>{
     deactivate();
     setParsedScheduleDraft([]);
   }
-  return Object.freeze({active,deactivate,enter,confirm,cancel,preview,composerInput,renderRows,save,flush,clear,reset,install});
+  return Object.freeze({active,deactivate,enter,confirm,cancel,preview,composerInput,renderRows,save,flush,authoredText,clear,reset,install});
 })();
 
     function isPlanPaneVisible(){return !!document.getElementById('pane-plan')?.classList.contains('on');}

@@ -142,7 +142,8 @@ The owner settled these over several rounds (2026-10-17 to 10-25); do not reopen
 | Note changed on both, in different paragraphs | Smart merge (`mergeThreeWay`, only when it reports `safe`) |
 | Note changed on both in the same paragraph, or renamed on both | The newer shows; the other is kept for review |
 | Note edited on one device, deleted on the other | The note stays; the review offers to delete it |
-| Saved Day, plans and settings, or the session changed on both | The newer shows; the other is kept for review |
+| Saved Day, or plans and settings, changed on both | The newer shows; the other is kept for review |
+| Session changed on both | Time alone: no review. A copy that decided all the other did, and more, is taken in ([study-session.md](study-session.md)). Different decisions on both: the newer shows; the other is kept for review |
 | Attachments | Added on either side are kept (content-addressed); deletions follow deletion records |
 
 **Edge cases.**

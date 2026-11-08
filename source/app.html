@@ -10843,7 +10843,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     activeSessionIssue:loaded=>pwaRecoveryReadBackIssue(loaded),activeSessionLoad:()=>AppData.activeSession.load(0,{strict:true}),activeSessionSettled:()=>AppData.activeSession.settled(),
     attachmentBusy:()=>imagePreparationCount>0||AttachmentIngest.status().busy,canonicalPlanDraft:async()=>(await AppData.planData.read()).draft,deletionRecoveryFlush:()=>AppData.deletionRecovery.flush(),
     flushNotes:()=>AppData.notes.flush({strict:true}),flushPlanDraft:()=>PlanDraftEditor.flush(),hasTasks:()=>TASKS.length>0,noteFailure:()=>AppData.notes.failure(),
-    planDraft:()=>PlanData.readDraft(),planInputValue:()=>document.getElementById('plan-input')?.value??null,quiesce:operation=>quiesceManagedRecoveryRuntime(operation),
+    planDraft:()=>PlanData.readDraft(),planInputValue:()=>PlanDraftEditor.authoredText(),quiesce:operation=>quiesceManagedRecoveryRuntime(operation),
     savePlanDraft:options=>PlanDraftEditor.save(options),settleAttachmentWriters:()=>settleAttachmentWriters(),settlePlan:()=>PlanData.settled(),writeLiveDraft:()=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:true})
   }),
   managedRecovery:Object.freeze({createCoordinator:input=>ManagedRecoveryModule.createCoordinator(input)}),
@@ -11104,15 +11104,16 @@ async function prepareApplicationUpdate(context={}){
     check();
     if(await PlanDraftEditor.flush()===false)return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
     check();
-    const planInput=document.getElementById('plan-input');
-    if(planInput&&(PlanData.readDraft()??'')!==planInput.value&&await PlanDraftEditor.save()===false){
+    // The default plan shown over no stored draft is not saved as a draft.
+    const planText=PlanDraftEditor.authoredText();
+    if(planText!==null&&(PlanData.readDraft()??'')!==planText&&await PlanDraftEditor.save()===false){
       return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
     }
     await PlanData.settled();
     check();
-    const storedPlan=planInput?await AppData.planData.read():null;
+    const storedPlan=planText!==null?await AppData.planData.read():null;
     check();
-    if(planInput&&storedPlan.draft!==planInput.value){
+    if(planText!==null&&storedPlan.draft!==planText){
       return Object.freeze({ok:false,reason:'The Plan draft did not pass the update read-back check.'});
     }
     if(flushPendingReviewSave({strict:true})===false)return Object.freeze({ok:false,reason:'The pending reflection could not be saved. Keep this tab open and retry.'});

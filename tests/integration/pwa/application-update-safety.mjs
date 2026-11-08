@@ -39,7 +39,7 @@ function fixture(){
     quiesceManagedRecoveryRuntime:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}},
     PracticePacer:{status:()=>({running:state.pacer})},isLiveTrackableTimer:()=>state.timer,appCanMutate:()=>state.owner.state==='primary',pwaRecentEditableInput:()=>false,
     LibraryView:{settleDiary:async()=>{await state.diaryWait;calls.push('diary');return state.diary;}},
-    PlanDraftEditor:{flush:async()=>{calls.push('plan-flush');return state.planFlush;},save:async()=>{calls.push('plan-save');return true;}},PlanData:{readDraft:()=>state.draft,settled:()=>record('plan-settled')},
+    PlanDraftEditor:{flush:async()=>{calls.push('plan-flush');return state.planFlush;},save:async()=>{calls.push('plan-save');return true;},authoredText:()=>state.draft},PlanData:{readDraft:()=>state.draft,settled:()=>record('plan-settled')},
     flushPendingReviewSave:()=>{calls.push('reflection');return state.reflection;},ReviewEditor:{settled:()=>record('review-settled')},
     writeLiveDraftNow:async options=>{assert.equal(options.allowDuringRecoveryQuiescence,true);calls.push('live');return state.live;},
     AppData:{maintenance:{settled:()=>Promise.resolve()},planData:{read:async()=>({draft:state.storedDraft})},

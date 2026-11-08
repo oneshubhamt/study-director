@@ -53,7 +53,7 @@ const acceptDialogs=`window.__accepted=window.__accepted||[];clearInterval(windo
 export const view=page=>page.evaluate(`(async()=>{const d=__PWA6;await d.goTab('execute');await new Promise(r=>setTimeout(r,60));const t=d.TimerState.snapshot(),session=(await d.AppData.activeSession.load()).value,reviews=(await d.AppData.pendingReviews.list()).filter(row=>!row.resolvedAt);
   const state=session?.snapshot?.taskState||{};
   return {mode:t.mode,loop:d.TimerEngine.status().loopActive,done:Object.keys(state).filter(id=>state[id]?.resolvedState==='done').sort(),current:String(session?.snapshot?.currentTaskId||''),
-    owner:String(session?.runningOn||''),
+    owner:String(session?.runningOn||''),status:String(session?.status||''),timer:session?.snapshot?.timerRuntime?session.snapshot.timerRuntime.mode+' '+session.snapshot.timerRuntime.taskId:'none',
     panel:document.getElementById('session-panel')?.checkVisibility()?document.getElementById('session-panel-title').textContent:'',countdown:document.getElementById('cd')?.textContent||'',
     reviews:reviews.map(row=>row.subject+':'+row.ref)};})()`);
 export const noteOf=(page,key)=>page.evaluate(`(()=>{const note=__PWA6.AppData.notes.get(${JSON.stringify(key)});return note?String(note.text||''):null;})()`);
@@ -78,22 +78,19 @@ export const markDone=page=>page.evaluate(`(async()=>{const d=__PWA6;d.goTab('ex
 
 // The day's session. Each Continue Here is checked the same way: the timer
 // runs on the device that pressed it within seconds, without Sync now; the
-// other device stops within one claim check; and nothing studied on either
-// device is lost (it is merged, or kept for review).
-// Open (docs/backlog.md, "Session handoffs leave versions kept for review"):
-// a handoff still keeps a version for review when nothing was lost, and a
-// block the old owner finished is kept for review rather than taken in.
-// Those are listed as open findings, not yet asserted.
+// other device stops within one claim check; nothing studied on either
+// device is lost; and a handoff keeps nothing for review: time alone is
+// never a choice, and a block either device finished is taken in.
 export const owner=async page=>(await view(page)).owner;
 export const running=async page=>{const row=await view(page);return row.mode==='running'&&row.loop;};
 export const elsewhere=async(page,who)=>{await syncNow(page);await waitFor(async()=>(await view(page)).panel==='Running on Another Device',{label:`${who} shows the session running elsewhere`,timeout:60000});};
 export const bothSettled=async(devices,label)=>{for(const [who,page] of devices)await settled(page,`${label}: ${who}`);};
-export function openFindings(suite){
-  const found=[];
-  return {found,noReviews:async(devices,label)=>{for(const [who,page] of devices){const reviews=(await view(page)).reviews;if(reviews.length){found.push({label,who,reviews:reviews.length});console.log(`[${suite}] open finding, ${label}: ${reviews.length} kept for review on ${who}`);}}}};
-}
-// A block done on one device is done on the other, or kept for review.
-export const keeps=async(page,who,block,label)=>{const row=await view(page);assert.ok(row.done.includes(block)||row.reviews.some(item=>item.startsWith('session')),`${label}: ${block} done on ${who} is not lost (${JSON.stringify(row)})`);return row.done.includes(block)?'merged':'review';};
+export const noReviews=async(devices,label)=>{for(const [who,page] of devices)assert.deepEqual((await view(page)).reviews,[],`${label}: nothing is kept for review on ${who}`);};
+// A block done on one device reaches the other, with nothing kept for review.
+export const keeps=async(page,who,block,label)=>{
+  await waitFor(async()=>{const row=await view(page);if(row.done.includes(block))return true;await syncNow(page);return false;},{label:`${label}: ${block} done reaches ${who}`,timeout:60000,interval:3000});
+  assert.deepEqual((await view(page)).reviews,[],`${label}: nothing is kept for review on ${who}`);return 'merged';
+};
 // What a failing journey prints: each device's session, its kept session
 // versions against its current one, and its view of the claim.
 export async function explain(devices){
@@ -105,6 +102,9 @@ export async function explain(devices){
     console.error(who,'review diff',JSON.stringify(await page.evaluate(`(async()=>{const d=__PWA6,rows=(await d.AppData.pendingReviews.list()).filter(row=>!row.resolvedAt&&row.subject==='session'),current=(await d.AppData.activeSession.load()).value;
       const diff=(x,y,prefix='')=>{const out=[];if(JSON.stringify(x)===JSON.stringify(y))return out;if(!x||!y||typeof x!=='object'||typeof y!=='object')return [prefix+': '+JSON.stringify(x)?.slice(0,160)+' | '+JSON.stringify(y)?.slice(0,160)];for(const key of new Set([...Object.keys(x),...Object.keys(y)]))out.push(...diff(x[key],y[key],prefix+'.'+key));return out;};
       return rows.map(row=>({keptFrom:row.keptFrom,diffKeptVsCurrent:diff(row.kept?.snapshot,current?.snapshot).slice(0,30)}));})()`).catch(cause=>String(cause?.message||cause))));
+    console.error(who,'personal review',JSON.stringify(await page.evaluate(`(async()=>{const d=__PWA6,rows=(await d.AppData.pendingReviews.list()).filter(row=>!row.resolvedAt&&row.subject==='personal'),current=await d.PlanData.exportData({flush:false});
+      const diff=(x,y,prefix='')=>{const out=[];if(JSON.stringify(x)===JSON.stringify(y))return out;if(!x||!y||typeof x!=='object'||typeof y!=='object')return [prefix+': '+JSON.stringify(x)?.slice(0,200)+' | '+JSON.stringify(y)?.slice(0,200)];for(const key of new Set([...Object.keys(x),...Object.keys(y)]))out.push(...diff(x[key],y[key],prefix+'.'+key));return out;};
+      return rows.map(row=>({origin:row.origin,diffKeptVsCurrent:diff(row.kept,current).slice(0,20)}));})()`).catch(cause=>String(cause?.message||cause))));
     console.error(who,'claim',JSON.stringify(await page.evaluate(`(async()=>({visibility:document.visibilityState,online:navigator.onLine,claim:await __PWA6.BackupProviderRuntime.readSessionClaim('google-drive').catch(error=>({error:String(error?.code||error?.message)}))}))()`).catch(cause=>String(cause?.message||cause))));
   }
 }
