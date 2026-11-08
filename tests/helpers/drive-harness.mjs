@@ -24,6 +24,8 @@ export const QA_PROFILE_ID='prof_qa_mve00000_abcdef01';
 const defaultBind=async info=>info.mine?'continue':'claim';
 export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,remoteState=null,addEventListener=()=>{},profileId=()=>QA_PROFILE_ID,profileName=()=>'',bind=defaultBind,email='qa@example.com',device=()=>'inst_qa_harness_mve00000_abcdef01'}={}){
   const state={email,folderProperties:new Map(),folderNames:new Map(),deletionMarkers:[],deletedSignals:[],libraryControl:null,binds:[],rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
+  // state.driveClockAheadMs: how far Drive's clock is ahead of this device's
+  // (negative: behind) for the files it creates without content (markers).
   // A new browser page has fresh JavaScript upload state, but Drive's remote
   // files and partially acknowledged sessions survive page termination.
   // Share only server-side fixtures; never share the provider's in-memory map.
@@ -87,7 +89,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       if(metadata.mimeType==='application/vnd.google-apps.folder'){
         const id=`folder-${state.nextFolderId++}`;state.folders.push(id);if(metadata.name)state.folderNames.set(id,String(metadata.name));const {studyDirectorFolder:_marker,...properties}=metadata.appProperties||{};state.folderProperties.set(id,properties);return json(folderMetadata(id));
       }
-      const id=`repo-${state.nextId++}`,stamp=new (clock?.Date||Date)().toISOString(),file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content:new Blob([]),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);
+      const id=`repo-${state.nextId++}`,stamp=new (clock?.Date||Date)((clock?.Date||Date).now()+(Number(state.driveClockAheadMs)||0)).toISOString(),file={id,name:metadata.name,mimeType:metadata.mimeType||'application/octet-stream',parents:[...(metadata.parents||[])],appProperties:{...(metadata.appProperties||{})},content:new Blob([]),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:state.nextVersion++,createdTime:stamp,modifiedTime:stamp};state.files.set(id,file);
       if(state.networkFailCoordinationPostOnce&&['publication','maintenance'].includes(String(metadata.appProperties?.studyDirectorRepositoryKind||''))){state.networkFailCoordinationPostOnce=false;throw new TypeError('simulated ambiguous coordination create');}
       return json(fileMetadata(file));
     }

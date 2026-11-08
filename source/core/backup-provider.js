@@ -116,6 +116,7 @@ registry.define('backup-provider',1,input=>{
       scope:typeof value.scope==='function'?value.scope:null,
       discardUploads:typeof value.discardUploads==='function'?value.discardUploads:null,
       beginOperation:typeof value.beginOperation==='function'?value.beginOperation:null,
+      now:typeof value.now==='function'?value.now:null,
       historyReadConcurrency:Math.max(1,Math.min(VERIFIED_HISTORY_READ_CONCURRENCY,Math.floor(Number(value.historyReadConcurrency)||1)))
     });
   };
@@ -617,24 +618,28 @@ registry.define('backup-provider',1,input=>{
   function repositoryPublicationCapable(selected){return !!(selected&&selected.repository&&selected.repository.beginPublication&&selected.repository.listPublications&&selected.repository.assertPublication&&selected.repository.endPublication);}
   function repositoryMaintenanceCapable(selected){return !!(selected&&selected.repository&&selected.repository.beginMaintenance&&selected.repository.listMaintenances&&selected.repository.assertMaintenance&&selected.repository.endMaintenance);}
   function repositoryCoordinationCapable(selected){return repositoryPublicationCapable(selected)&&repositoryMaintenanceCapable(selected);}
+  // Drive's clock less this device's (0 for a location without one). Marker
+  // times are Drive's, so their ages are measured on Drive's clock; times
+  // handed on (when to try again) are this device's.
+  function repositoryClockOffset(selected){const now=typeof selected?.repository?.now==='function'?Number(selected.repository.now()):NaN;return Number.isFinite(now)?now-Date.now():0;}
   async function repositoryPublicationSafety(selected){
     if(!repositoryPublicationCapable(selected))return freeze({blocked:false,reason:'publication-protection-unavailable',active:0,invalid:0});
     let listed;try{listed=await selected.repository.listPublications();}catch(error){AppDiagnostics.capture('backup-provider.repository-publications',error,'warn');return freeze({blocked:true,reason:'publication-state-unavailable',active:0,invalid:1});}
-    const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],now=Date.now();let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
+    const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],offset=repositoryClockOffset(selected),now=Date.now()+offset;let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
     // A marker that renews and has gone unrenewed past publicationStaleMs was
     // left by an upload that stopped (a closed or frozen page): it is removed,
     // so the upload, if it ever resumes, fails its own check before commit. A
     // marker from an older build that does not renew keeps the full day.
     let abandoned=0;
     for(const row of rows){const created=Date.parse(String(row&&row.createdAt||''));if(!Number.isFinite(created)){invalid+=1;continue;}const lifetime=row&&row.renews===true?PUBLICATION_STALE_MS:PUBLICATION_MAX_AGE_MS;if(now-created<lifetime){active+=1;const expires=created+lifetime;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}const renewing=lifetime===PUBLICATION_STALE_MS;try{await selected.repository.endPublication(row);if(renewing)abandoned+=1;}catch(error){AppDiagnostics.capture('backup-provider.repository-publication-expired-cleanup',error,'warn');if(renewing)invalid+=1;}}
-    return freeze({blocked:active>0||invalid>0,reason:active>0?'active-publication':invalid>0?'uncertain-publication-state':'',active,invalid,abandoned,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt).toISOString():''});
+    return freeze({blocked:active>0||invalid>0,reason:active>0?'active-publication':invalid>0?'uncertain-publication-state':'',active,invalid,abandoned,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt-offset).toISOString():''});
   }
   async function repositoryMaintenanceSafety(selected,{excludeId='',releaseSameDevice=false}={}){
     if(!repositoryMaintenanceCapable(selected))return freeze({blocked:false,reason:'maintenance-protection-unavailable',active:0,invalid:0});
     let listed;try{listed=await selected.repository.listMaintenances();}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenances',error,'warn');return freeze({blocked:true,reason:'maintenance-state-unavailable',active:0,invalid:1});}
-    const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],now=Date.now(),excluded=String(excludeId||'');let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
+    const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],offset=repositoryClockOffset(selected),now=Date.now()+offset,excluded=String(excludeId||'');let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
     for(const row of rows){if(excluded&&String(row&&row.id||'')===excluded)continue;if(releaseSameDevice&&row&&row.sameDevice===true){try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-own-release',error,'warn');invalid+=1;}continue;}const created=Date.parse(String(row&&row.createdAt||'')),expires=row&&row.expiresAt?Date.parse(String(row.expiresAt)):created+MAINTENANCE_MAX_AGE_MS;if(!Number.isFinite(created)||!Number.isFinite(expires)||expires<=created){invalid+=1;continue;}if(now<expires){active+=1;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-expired-cleanup',error,'warn');}}
-    return freeze({blocked:active>0||invalid>0,reason:active>0?'active-maintenance':invalid>0?'uncertain-maintenance-state':'',active,invalid,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt).toISOString():''});
+    return freeze({blocked:active>0||invalid>0,reason:active>0?'active-maintenance':invalid>0?'uncertain-maintenance-state':'',active,invalid,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt-offset).toISOString():''});
   }
   // Markers this page started. A marker from this device that this page did
   // not start was left by an earlier page (an upload cut off by a closed
@@ -1271,10 +1276,10 @@ registry.define('backup-provider',1,input=>{
   // that Drive has not moved on.
   async function sharedPublicationTurnHolder(selected,publicationLease){
     if(!publicationLease||!repositoryPublicationCapable(selected))return null;
-    const listed=await selected.repository.listPublications(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],began=row=>Date.parse(String(row&&(row.startedAt||row.createdAt)||'')),mine=began(publicationLease),now=Date.now();
+    const listed=await selected.repository.listPublications(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],began=row=>Date.parse(String(row&&(row.startedAt||row.createdAt)||'')),mine=began(publicationLease),offset=repositoryClockOffset(selected),now=Date.now()+offset;
     const holders=rows.filter(row=>{const id=String(row&&row.id||''),at=began(row),renewedAt=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&now-at<SYNC_TURN_WINDOW_MS&&(row.renews!==true||Number.isFinite(renewedAt)&&now-renewedAt<SYNC_TURN_RENEWED_MS)&&(at<mine||at===mine&&id<publicationLease.id);}).sort((a,b)=>began(a)-began(b));
     const holder=holders[0];
-    return holder?freeze({device:String(holder.device||''),startedAt:new Date(began(holder)).toISOString(),renewedAt:Number.isFinite(Date.parse(String(holder.createdAt||'')))?new Date(holder.createdAt).toISOString():'',renews:holder.renews===true}):null;
+    return holder?freeze({device:String(holder.device||''),startedAt:new Date(began(holder)-offset).toISOString(),renewedAt:Number.isFinite(Date.parse(String(holder.createdAt||'')))?new Date(Date.parse(holder.createdAt)-offset).toISOString():'',renews:holder.renews===true}):null;
   }
   async function assertSharedPublicationTurn(selected,publicationLease){
     const holder=await sharedPublicationTurnHolder(selected,publicationLease);syncState(selected).turnHolder=holder;

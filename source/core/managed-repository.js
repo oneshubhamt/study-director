@@ -592,7 +592,12 @@ async function prepareRepositoryCheckpointWork(previousManifests=null,{interacti
   throwIfImportAborted(signal);
   const history=repositoryHistory(previousManifests);
   const context=await repositoryProtectionContext({interactive});
-  const exportedAt=new Date().toISOString();
+  // A version is always newer than the one it is built on, whatever this
+  // device's clock says. The newest time is the newest version, so a clock
+  // running behind (or another device's running ahead) would otherwise keep
+  // this device's uploads from ever becoming the newest on Drive.
+  const builtOn=retention?.role==='before-restore'?0:history.reduce((latest,manifest)=>Math.max(latest,Date.parse(manifest.exportedAt)||0),0);
+  const exportedAt=new Date(Math.max(Date.now(),builtOn+1)).toISOString();
   const preparation=await beginPreparationCapture(exportedAt);throwIfImportAborted(signal);
   const reconciliationBase=await AppData.reconciliationBase.read().catch(()=>null),reconciliationBaseId=String(reconciliationBase&&reconciliationBase.checkpointId||''),reconciliationAncestorIds=repositoryReconciliationAncestors(history,reconciliationBaseId);
   const plan=preparation?await repositoryPreparationPlan(preparation,reconciliationBase,{baseUpdate}):null;

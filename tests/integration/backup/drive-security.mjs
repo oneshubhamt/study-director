@@ -288,6 +288,24 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   const listed=(await provider.repository.listPublications()).items.find(row=>row.id===late.id);
   assert.equal(listed.renews,false,'an older build\'s marker does not renew');assert.equal(listed.startedAt,listed.createdAt,'an older build\'s marker began when it was made');
 }
+{
+  // This device's clock runs 20 minutes ahead of Drive's. The adapter learns
+  // Drive's clock from the markers it creates and measures their ages on it,
+  // so a marker made a moment ago is not "too long without renewal". An
+  // upload's start is Drive's time too.
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  state.driveClockAheadMs=-20*60*1000;
+  const first=await provider.repository.beginPublication();
+  assert.equal(first.startedAt,first.createdAt,'an upload begins at its marker\'s creation time on Drive');
+  assert.ok(Math.abs(provider.repository.now()-(Date.now()-20*60*1000))<5000,'the adapter reads Drive\'s clock');
+  const second=await provider.repository.renewPublication(first);
+  assert.equal(second.startedAt,first.startedAt,'renewal keeps the start');
+  assert.equal((await provider.repository.assertPublication(second)).id,second.id,'a fresh marker is not too old to commit');
+  await provider.repository.endPublication(second);
+  const maintenance=await provider.repository.beginMaintenance();
+  assert.equal((await provider.repository.assertMaintenance(maintenance)).id,maintenance.id,'nor is a fresh maintenance marker');
+  await provider.repository.endMaintenance(maintenance);
+}
 
 {
   const {state,provider}=createHarness();await provider.prepare();await provider.authorize();

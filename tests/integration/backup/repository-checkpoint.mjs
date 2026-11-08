@@ -470,10 +470,11 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
 // off by a closed page) never does.
 {
   const files=new Map(),markers=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,remoteId:'turn-'+key(file.kind,file.id)});
-  let leases=0,beforeUpload=null;const lease=prefix=>freeze({id:prefix+'_'+String(++leases).padStart(32,'0'),createdAt:new Date().toISOString()});
+  // driveBehind: how far Drive's clock is behind this device's.
+  let leases=0,beforeUpload=null,driveBehind=0;const driveNow=()=>Date.now()-driveBehind,lease=prefix=>freeze({id:prefix+'_'+String(++leases).padStart(32,'0'),createdAt:new Date(driveNow()).toISOString()});
   const transport=freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{if(beforeUpload)await beforeUpload(file);const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing turn file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id)),
     beginPublication:async()=>{const row=lease('pub');markers.set(row.id,row);return row;},listPublications:async()=>freeze({items:freeze([...markers.values()]),overflow:false,ignored:0}),assertPublication:async row=>row,endPublication:async row=>markers.delete(row.id),
-    beginMaintenance:async()=>lease('mnt'),listMaintenances:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertMaintenance:async row=>row,endMaintenance:async()=>true});
+    beginMaintenance:async()=>lease('mnt'),listMaintenances:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertMaintenance:async row=>row,endMaintenance:async()=>true,now:driveNow});
   const baseBefore=reconciliationBase,baseNotesBefore=reconciliationBaseNotes;
   assert.equal(runtime.providers.register(freeze({id:'turn-drive',label:'Google Drive',shared:true,connected:()=>true,repository:transport})),true);
   try{
@@ -512,6 +513,21 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
     assert.equal(await turnFor(live()),'waits','one press, one upload: the next one takes its turn again');
     // Drive's newer changes come in without waiting for a turn: a device
     // behind Drive is sent to catch up, not to wait.
+    // This device's clock runs 20 minutes ahead of Drive's. Marker times are
+    // Drive's, so their ages are measured on Drive's clock: another device's
+    // live upload still holds the turn, and one that began after this
+    // upload is not taken for abandoned and removed by its cleanup.
+    driveBehind=20*60*1000;
+    try{
+      const driveMinutes=value=>new Date(driveNow()-value*60*1000).toISOString();
+      snapshotRevision='turn-skew';sourceRevision='2026-09-19T03:55:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn skew',updatedAt:sourceRevision})};
+      assert.equal(await turnFor(freeze({id:'pub_'+'6'.repeat(32),startedAt:driveMinutes(3),createdAt:driveMinutes(1),renews:true,device:writer})),'waits','a live upload holds the turn whatever this device\'s clock says');
+      const later=freeze({id:'pub_'+'7'.repeat(32),startedAt:driveMinutes(0),createdAt:driveMinutes(0),renews:true,device:writer});
+      beforeUpload=async file=>{if(file.kind==='object'&&!markers.has(later.id))markers.set(later.id,later);};
+      assert.ok((await runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false})).checkpointId);
+      assert.equal(markers.has(later.id),true,'a live upload marker is not removed as abandoned');
+      markers.delete(later.id);
+    }finally{beforeUpload=null;driveBehind=0;}
     // Another device's version, newer than this device's base (a copy of
     // the newest committed one under a new id). Returns its removal.
     const committedIds=()=>[...files.values()].filter(file=>file.kind==='commit').map(file=>file.id).sort();

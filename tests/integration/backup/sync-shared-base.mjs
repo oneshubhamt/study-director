@@ -1674,6 +1674,27 @@ for(const late of [false,true]){
   gate.before=null;syncWorld.keepAll.on=false;
 }
 
+// A device clock that is wrong by hours (behind or ahead): Drive's newest
+// version is the one with the latest time, so each version is stamped after
+// the one it is built on. Every change still reaches the other device, and
+// nothing uploads again and again.
+for(const skew of [-2*3600e3,2*3600e3]){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,head}=syncWorld,RealDate=Date,row=(key,text,at=RealDate.now())=>freeze({version:2,key,text,updatedAt:new RealDate(at).toISOString()});
+  const skewed=async work=>{class Skewed extends RealDate{constructor(...args){super(...(args.length?args:[RealDate.now()+skew]));}static now(){return RealDate.now()+skew;}}globalThis.Date=Skewed;try{return await work();}finally{globalThis.Date=RealDate;}};
+  const a={installationId:'inst_clock_right_'+(skew<0?'b':'a'),records:new Map(),deletions:[],noteDeletions:[],notes:{Shared:row('Shared','base')},activeSession:null,schedule:'',personal:personal('Clock'),journal:null};
+  const b={installationId:'inst_clock_wrong_'+(skew<0?'b':'a'),records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Clock'),journal:null};
+  const A=device(a),B=device(b),label=skew<0?'behind':'ahead';
+  await A.upload();assert.equal((await skewed(()=>B.sync())).cancelled,false);
+  b.notes={...b.notes,FromB:row('FromB','new on B',RealDate.now()+skew)};
+  const fromB=await skewed(()=>B.upload());assert.equal(head(),fromB.checkpointId,`a version from a clock ${label} becomes Drive's newest`);
+  assert.equal((await A.sync()).cancelled,false);assert.equal(a.notes.FromB?.text,'new on B','its change reaches the other device');
+  await new Promise(resolve=>setTimeout(resolve,3));a.notes={...a.notes,FromA:row('FromA','new on A')};
+  const fromA=await A.upload();assert.equal(head(),fromA.checkpointId,`a version built on one from a clock ${label} becomes the newest`);
+  assert.equal((await skewed(()=>B.sync())).cancelled,false);assert.equal(b.notes.FromA?.text,'new on A');
+  const again=await skewed(()=>B.upload());assert.equal(again.checkpointId,fromA.checkpointId,'nothing new to upload: the device in step uploads no new version');
+}
+
 // Continue Here in one lease: decide gets the newest verified session under
 // it and names the claim; a refused decision writes nothing; a session this
 // device already read for that version is not downloaded again, and a newer

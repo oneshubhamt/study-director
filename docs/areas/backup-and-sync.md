@@ -151,7 +151,7 @@ The owner settled these over several rounds (2026-10-17 to 10-25); do not reopen
 |---|---|
 | Browser data cleared | An unresolved clear never uploads; the device downloads again |
 | Offline for months | Merges normally; deletions older than the kept deletion records may reappear |
-| Clocks differ | Clocks only choose what shows before review |
+| Clocks differ | Clocks only choose what shows before review. A version is always stamped after the version it is built on, whatever the device's clock says, so a clock running behind or ahead never keeps a device's uploads from becoming Drive's newest. Upload and cleanup markers are aged on Drive's clock, which the Drive adapter learns from the markers it creates (`repository.now`), so a wrong clock neither removes another device's live marker nor waits for one long gone |
 | A note open in the editor when a change arrives | Updates in place if nothing was typed since the last save; otherwise a both-changed case |
 | Password added or changed elsewhere | Other devices ask for it at their next sync |
 | Drive full or unreachable | Sync pauses; the app carries on locally |
