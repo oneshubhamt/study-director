@@ -161,6 +161,16 @@ A redesign must fit each kind of data, not one rule for all. Likely a fusion: me
 3. The new backup machinery: the options and requirements above, Device Folder included.
 
 
+### Session handoffs leave versions kept for review (found 2026-11-08, waiting on the owner)
+
+The sync journeys (`tests/browser/backup/sync-journeys.mjs`) show that a session moved with Continue Here keeps a "session" version for review whenever both devices recorded anything after the claim's snapshot, and these pile up (16 after a few handoffs back and forth). Three cases:
+
+- **Time only.** The old device's timer ticks until its claim check (up to 15 s): its copy differs only in seconds recorded on the running block. Nothing is lost by dropping it (the new owner's timer runs from the same start), yet it is kept for review.
+- **The old device was further along.** It finished a block just before Continue Here and that upload landed after the claim, or it was closed before uploading it. The finished block is kept for review instead of joining the new owner's session.
+- **Both devices made different decisions** (each finished or changed a different thing). A review is right here.
+
+Proposal for the owner: time alone never makes a review (the claim's owner's copy is kept), and a copy that is only further along (the same blocks resolved the same way, plus more) is taken in by itself; only different decisions on both sides are kept for review. The journeys then assert no reviews after plain handoffs.
+
 ## Decided, not yet scheduled
 
 - **Better Smart merge** (`mergeThreeWay`). The owner will come back to it; until then, do not audit it or suggest changes.

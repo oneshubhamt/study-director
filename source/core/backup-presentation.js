@@ -236,7 +236,9 @@ registry.define('backup-presentation',1,()=>{
       };
       // A step that waits (for a retry or a sign-in) is amber; failed (×) is red.
       const result=(tone,title,status,active,{waiting=false,...extra}={})=>freeze({tone,title,status,detail:'',fraction:null,action:null,done:false,...extra,steps:steps(active,extra.failed||'',waiting)});
-      const act=(action,label)=>freeze({action,label});
+      // step: the action sits on that step's line, as a quiet link (Sync now
+      // and Try now, which only skip a wait); otherwise it is the card's button.
+      const act=(action,label,step='')=>freeze({action,label,...(step?{step}:{})});
       if(phase==='failed')return result('error','Google Drive wasn’t connected',String(value.error||'Sign-in didn’t finish.'),'sign-in',{failed:'sign-in',action:act('sign-in','Try again')});
       if(phase==='signing-in')return result('working','Connecting Google Drive','Signing in to Google…','sign-in');
       if(!drive?.connected)return result('attention','Google Drive signed out','Sign in again to finish syncing.','bring-in',{failed:'bring-in',waiting:true,action:act('sign-in','Sign in')});
@@ -249,7 +251,7 @@ registry.define('backup-presentation',1,()=>{
       if(sync.newer)return result('attention','Update the app to finish syncing','Google Drive holds data from a newer version of Study Director.','bring-in',{action:act('check-update','Check for update')});
       if(!working&&drive.retryBackoffCapped)return result('error','Sync stopped','Syncing stopped after several tries.',active,{failed:active,action:act('retry','Try again')});
       // Still retrying: amber; red only once retries ran out (above).
-      if(!working&&sync.failed){const next=timeText(drive.nextEligibleAt);return result('attention','Syncing with Google Drive',`Couldn’t finish syncing.${next?` Trying again at ${next}.`:' Trying again shortly.'}`,active,{failed:active,waiting:true,action:act('retry','Try now')});}
+      if(!working&&sync.failed){const next=timeText(drive.nextEligibleAt);return result('attention','Syncing with Google Drive',`Couldn’t finish syncing.${next?` Trying again at ${next}.`:' Trying again shortly.'}`,active,{failed:active,waiting:true,action:act('retry','Try now',active)});}
       // A review leaves the sync time as it was, and nothing comes in or
       // goes up until it is settled.
       if(!working&&sync.review)return result('attention','Google Drive has changes to review','Some changes need your review before they come in.','bring-in',{failed:'bring-in',waiting:true,action:act('review-sync','Review')});
@@ -258,7 +260,7 @@ registry.define('backup-presentation',1,()=>{
         if(kept)return result('done','Synced with Google Drive',`Synced at ${when}. ${kept} version${kept===1?'':'s'} kept for you to review.`,'done',{done:true,action:act('review-kept','Review')});
         return result('done','Synced with Google Drive',`Synced at ${when}. This device is up to date.`,'done',{done:true});
       }
-      if(!working&&turn)return result('working','Syncing with Google Drive',`Waiting for ${String(sync.turnDevice||'')||'another device'} to finish saving…`,'upload',{failed:'upload',waiting:true,action:act('sync-now','Sync now')});
+      if(!working&&turn)return result('working','Syncing with Google Drive',`Waiting for ${String(sync.turnDevice||'')||'another device'} to finish saving…`,'upload',{failed:'upload',waiting:true,action:act('sync-now','Sync now','upload')});
       const status=active==='upload'?'Uploading this device’s data…':syncing?'Bringing in changes from Google Drive…':'Checking Google Drive…';
       return result('working','Syncing with Google Drive',status,active,{detail:opDetail,fraction});
     }

@@ -1500,6 +1500,11 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 .drive-connect-steps li[data-state="failed"]::before{content:"×";opacity:1;border:0;font-size:15px;font-weight:700;line-height:11px;text-align:center}
 .drive-connect-steps li[data-state="waiting"]{color:var(--sd-color-warning)}
 .drive-connect-steps li[data-state="waiting"]::before{opacity:1}
+/* Sync now / Try now: a quiet link at the end of the waiting step's line; the padding gives a comfortable target without making the line taller. */
+.drive-connect-step-action{flex:0 0 auto;margin:-6px -6px -6px auto;padding:6px;border:0;border-radius:var(--sd-shape-control-radius);background:none;color:var(--sd-color-accent-primary);font:inherit;font-weight:600;line-height:inherit;white-space:nowrap;cursor:pointer}
+.drive-connect-step-action:hover{text-decoration:underline;text-underline-offset:2px}
+.drive-connect-step-action:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:0}
+.drive-connect-steps li>span{min-width:0}
 .drive-connect-bar{position:relative;height:4px;border-radius:2px;background:rgba(var(--sd-rgb-accent-primary),.18);overflow:hidden}
 .drive-connect-bar[hidden]{display:none}
 .drive-connect-bar>span{position:absolute;top:0;bottom:0;left:0;width:0;border-radius:inherit;background:var(--sd-color-accent-primary);transition:width .3s ease}

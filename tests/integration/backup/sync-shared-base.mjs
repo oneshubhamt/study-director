@@ -659,7 +659,8 @@ let syncWorld=null;
   // Session ownership claims on Drive, shared by the devices that use them.
   const claims=new Map(),claimItem=file=>freeze({kind:'session-claim',id:file.id,name:file.name,size:file.blob.size,digest:file.digest,serverDigest:file.digest,createdAt:file.exportedAt,modifiedAt:file.exportedAt,remoteId:'claim-'+file.id});
   const claimTransport=freeze({...transport,
-    listSessionClaims:async()=>freeze({items:freeze([...claims.values()].map(claimItem)),overflow:false,ignored:0}),
+    // Drive lists claims newest first.
+    listSessionClaims:async()=>freeze({items:freeze([...claims.values()].reverse().map(claimItem)),overflow:false,ignored:0}),
     uploadSessionClaim:async file=>{claims.set(file.id,freeze({...file}));return claimItem(file);},
     downloadSessionClaim:async item=>{const file=claims.get(item.id);if(!file)throw new Error('QA_FIXTURE missing session claim');return freeze({blob:file.blob,release:async()=>{}});},
     deleteSessionClaim:async item=>claims.delete(item.id)
@@ -698,6 +699,7 @@ let syncWorld=null;
       noteVersions:(id,noteId,options={})=>providers.noteVersions(id,noteId,{interactive:false,...options}),
       handoffSource:()=>providers.readSessionHandoffSource('drive'),
       claim:request=>providers.claimSessionOwnership('drive',request),
+      readClaim:()=>providers.readSessionClaim('drive'),
       diagnostics:harness.diagnosticMarks
     });
   };
@@ -1610,10 +1612,9 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   assert.equal(d.reviews.open().find(review=>review.subject==='personal')?.kept?.preferences?.studentName,'Name on C','the other\'s is kept for review');
 }
 
-// Continue Here gives another device's running upload a short while to
-// finish (polls 3 s apart, at most 10), never waits for one that stopped
-// renewing (a laptop shut mid-upload), and goes ahead after the limit: the
-// claim is small, and a late upload cannot take the session back.
+// Continue Here is the person's own action: it goes ahead at once, without
+// waiting for another device's running upload (the claim is small, and a
+// late upload cannot take the session back).
 {
   syncWorld.drive.clear();syncWorld.claims.clear();
   const {device,note}=syncWorld,day='2026-08-31',markers=new Map();
@@ -1623,18 +1624,34 @@ for(const variant of ['metadata-covered','divergent','unacknowledged','deleted']
   a.activeSession=revisionedSession(day,'TURN-CLAIM',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
   await A.upload();assert.equal((await B.sync()).cancelled,false);
   const fields=async source=>({observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),revision:source.session.revision+1});
-  const ago=minutes=>new Date(Date.now()-minutes*60*1000).toISOString(),other=(id,startedAt,createdAt)=>freeze({id:'pub_'+id.repeat(32),startedAt,createdAt,renews:true,device:'inst_windows_chrome_mgx2k3a0_1a2b3c4d'});
-  // The harness's timers fire at once; each check lists the markers, and
-  // the other upload finishes (its marker goes) after finishAfter checks.
-  let checks=0;
-  const claimWith=async(marker,finishAfter,token)=>{checks=0;markers.onList=()=>{checks++;if(checks>finishAfter)markers.delete(marker.id);};markers.set(marker.id,marker);const claimed=await B.claim({date:day,handoffToken:token,decide:fields});markers.onList=null;markers.delete(marker.id);return claimed;};
-  let claimed=await claimWith(other('a',ago(1),ago(0.5)),2,'66666666-6666-4666-8666-666666666666');
-  assert.equal(claimed.status,'completed');assert.equal(checks,3,'a running upload is given the moment it needs to finish (two waits)');
-  claimed=await claimWith(other('b',ago(8),ago(6)),Infinity,'77777777-7777-4777-8777-777777777777');
-  assert.equal(claimed.status,'completed');assert.equal(checks,1,'an upload that stopped renewing is not waited for');
-  claimed=await claimWith(other('c',ago(1),ago(0.5)),Infinity,'88888888-8888-4888-8888-888888888888');
-  assert.equal(claimed.status,'completed');assert.equal(checks,10,'past the limit (10 checks, 3 s apart), Continue Here goes ahead');
-  assert.equal(markers.size,0,'the claim releases its own marker');
+  const ago=minutes=>new Date(Date.now()-minutes*60*1000).toISOString();
+  // Each check for other devices' uploads lists the markers.
+  let checks=0;markers.onList=()=>{checks++;};
+  const live=freeze({id:'pub_'+'a'.repeat(32),startedAt:ago(1),createdAt:ago(0.5),renews:true,device:'inst_windows_chrome_mgx2k3a0_1a2b3c4d'});markers.set(live.id,live);
+  const claimed=await B.claim({date:day,handoffToken:'66666666-6666-4666-8666-666666666666',decide:fields});
+  assert.equal(claimed.status,'completed','Continue Here completes while another device uploads');assert.equal(checks,0,'it does not wait for, or even look at, another device\'s upload');
+  markers.onList=null;assert.deepEqual([...markers.keys()],[live.id],'the claim releases its own marker and leaves the other device\'s');markers.delete(live.id);
+}
+
+// Two devices press Continue Here at the same moment. Drive lists the newest
+// claim first, and every device follows that one: exactly one device owns
+// the session, the other's Continue Here stops (or, if it finished first,
+// its claim check stops its timer).
+{
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const {device,note}=syncWorld,day='2026-08-31';
+  const make=id=>({installationId:id,records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Race User'),journal:null});
+  const a={...make('inst_race_claim_device_a'),notes:note('race')},b=make('inst_race_claim_device_b'),c=make('inst_race_claim_device_c');
+  const A=device(a,{claims:true}),B=device(b,{claims:true}),C=device(c,{claims:true});
+  a.activeSession=revisionedSession(day,'RACE',{runningOn:a.installationId,revision:10,contentRevision:7,savedRevision:0,updatedAt:'2026-08-31T09:00:00.000Z'});a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();for(const D of [B,C])assert.equal((await D.sync()).cancelled,false);
+  const fields=async source=>({observedOwner:source.session.runningOn,observedRevision:source.session.revision,observedContentFingerprint:await sessionContentFingerprint(source.session),revision:source.session.revision+1});
+  const results=await Promise.allSettled([B.claim({date:day,handoffToken:'99999999-9999-4999-8999-999999999991',decide:fields}),C.claim({date:day,handoffToken:'99999999-9999-4999-8999-999999999992',decide:fields})]);
+  const completed=results.filter(row=>row.status==='fulfilled'&&row.value?.status==='completed').length;
+  assert.ok(completed>=1,`at least one Continue Here completes (${JSON.stringify(results.map(row=>row.status==='fulfilled'?row.value?.status:String(row.reason?.code||row.reason)))})`);
+  const views=await Promise.all([A,B,C].map(D=>D.readClaim()));
+  assert.equal(views.filter(view=>view?.ownedHere===true).length,1,'every device reads the same claim: exactly one owns the session');
+  assert.equal(views[0].ownedHere,false,'the old owner does not');
 }
 
 // Two uploads overlap: another device's Sync now during this device's

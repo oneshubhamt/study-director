@@ -446,7 +446,14 @@ const fixedClock=createFakeClock('2026-09-13T06:00:00.000Z');
 const expectedNow=new fixedClock.Date().toISOString();
 assert.equal(Persistence.normalizeImportedTimestamp('2099-01-01T00:00:00.000Z',null,fixedClock.now()),null);
 assert.equal(Persistence.normalizeImportedTimestamp(expectedNow,null,fixedClock.now()),expectedNow);
-assert.equal(Persistence.normalizeImportedEpochMillis(fixedClock.now()+86400000,null,fixedClock.now()),null);
+assert.equal(Persistence.normalizeImportedEpochMillis(fixedClock.now()+3*86400000,null,fixedClock.now()),null);
+// Another device's clock can be hours ahead of this one: what it wrote, up
+// to two days ahead, still reads here (before, anything over 10 minutes
+// ahead made its notes and sessions unreadable and stopped sync).
+const hoursAhead=fixedClock.now()+5*60*60*1000;
+assert.equal(Persistence.normalizeImportedTimestamp(new Date(hoursAhead).toISOString(),null,fixedClock.now()),new Date(hoursAhead).toISOString(),'a time five hours ahead reads');
+assert.equal(Persistence.normalizeImportedEpochMillis(hoursAhead,null,fixedClock.now()),hoursAhead);
+assert.equal(Persistence.normalizeImportedTimestamp(new Date(fixedClock.now()+47*60*60*1000).toISOString(),null,fixedClock.now())!==null,true,'and up to two days');
 
 console.log(JSON.stringify({
   status:'PASS',scenarios:8,

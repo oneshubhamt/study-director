@@ -114,6 +114,8 @@ function checkCard(name,input,expected){
   if('detail' in expected)assert.match(result.detail,expected.detail,`${name}: detail "${result.detail}"`);
   if('fraction' in expected)assert.equal(result.fraction,expected.fraction,`${name}: fraction`);
   if('action' in expected)assert.equal(result.action?.action||'',expected.action,`${name}: action`);
+  // Sync now and Try now sit on the waiting step's line; other actions are the card's button.
+  if('action' in expected)assert.equal(result.action?.step||'',expected.step||'',`${name}: the action's place`);
   if(result.action)assert.ok(actions.has(result.action.action)||['sync-now'].includes(result.action.action),`${name}: the host handles ${result.action.action}`);
   assert.equal(result.steps.length,3,`${name}: three steps`);assert.ok(result.title&&result.status,`${name}: always says something`);
   return result;
@@ -127,7 +129,7 @@ checkCard('Bringing in, with counts',{phase:'signed-in',drive:linked({busy:true,
 checkCard('An opening line is not repeated',{phase:'signed-in',drive:linked({busy:true,foregroundKind:'sync',waiting:true},{syncing:true}),operation:{kind:'sync',message:'Syncing with Google Drive…',progress:null}},{status:/^Bringing in changes/u,detail:/^$/u});
 checkCard('Between catch-up and upload',{phase:'signed-in',seen:{sync:true},drive:linked({waiting:true},{syncedAt:LATER})},{status:/^Uploading this device’s data/u,steps:'done,done,active',labels:['Signed in to Google','Brought in changes from Google Drive','Upload this device’s data']});
 checkCard('Uploading, with counts',{phase:'signed-in',seen:{sync:true},drive:linked({backingUp:true,waiting:true},{syncedAt:LATER}),operation:{kind:'upload',message:'Uploading backup data to Google Drive…',progress:{stage:'upload',current:3,total:4}}},{status:/^Uploading/u,steps:'done,done,active',fraction:0.75,detail:/3 of 4 complete/u});
-checkCard('Waiting for another device\'s turn',{phase:'signed-in',drive:linked({waiting:true},{turnWaits:2,turnDevice:'iPad · Safari'})},{tone:'working',status:/^Waiting for iPad · Safari to finish saving/u,steps:'done,done,waiting',action:'sync-now'});
+checkCard('Waiting for another device\'s turn',{phase:'signed-in',drive:linked({waiting:true},{turnWaits:2,turnDevice:'iPad · Safari'})},{tone:'working',status:/^Waiting for iPad · Safari to finish saving/u,steps:'done,done,waiting',action:'sync-now',step:'upload'});
 checkCard('Synced, new library',{phase:'signed-in',seen:{upload:true},drive:linked({},{syncedAt:LATER})},{tone:'done',done:true,status:/^Synced at 12:04\. This device is up to date\.$/u,steps:'done,done,done',labels:['Signed in to Google','Nothing new on Google Drive','Uploaded this device’s data'],action:''});
 checkCard('Synced, joined library',{phase:'signed-in',seen:{sync:true,upload:true},drive:linked({},{syncedAt:LATER})},{tone:'done',labels:['Signed in to Google','Brought in changes from Google Drive','Uploaded this device’s data']});
 checkCard('Synced with versions kept for review',{phase:'signed-in',seen:{sync:true},keptNew:2,drive:linked({},{syncedAt:LATER})},{tone:'done',done:true,status:/2 versions kept for you to review/u,action:'review-kept'});
@@ -140,7 +142,7 @@ checkCard('Needs password (this device)',{phase:'signed-in',drive:linked({locked
 checkCard('Needs app update',{phase:'signed-in',drive:linked({},{newer:true})},{tone:'attention',action:'check-update'});
 checkCard('Offline',{phase:'signed-in',online:false,drive:linked({waiting:true})},{tone:'attention',status:/^Offline/u,action:''});
 // Red only once retries ran out (phase 4); retrying and signed out wait in amber.
-checkCard('Retrying',{phase:'signed-in',drive:linked({waiting:true,nextEligibleAt:'2026-11-01T12:10:00.000Z'},{failed:true})},{tone:'attention',status:/Trying again at 12:10/u,steps:'done,waiting,pending',action:'retry'});
+checkCard('Retrying',{phase:'signed-in',drive:linked({waiting:true,nextEligibleAt:'2026-11-01T12:10:00.000Z'},{failed:true})},{tone:'attention',status:/Trying again at 12:10/u,steps:'done,waiting,pending',action:'retry',step:'bring-in'});
 checkCard('Stopped after retries',{phase:'signed-in',drive:linked({retryBackoffCapped:true,waiting:true},{failed:true})},{tone:'error',title:'Sync stopped',steps:'done,failed,pending',action:'retry'});
 checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({connected:false})},{tone:'attention',steps:'done,waiting,pending',action:'sign-in'});
 

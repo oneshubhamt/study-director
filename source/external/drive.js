@@ -79,7 +79,10 @@
     URLSearchParams:globalThis.URLSearchParams,
     Blob:globalThis.Blob,
     Uint8Array:globalThis.Uint8Array,
-    crypto:globalThis.crypto
+    crypto:globalThis.crypto,
+    // Offline (the browser says so): background work waits for the network
+    // instead of failing and backing off.
+    online:()=>globalThis.navigator?.onLine!==false
   });
 
   // JSON metadata is consumed once, inside the request's timeout/abort lifetime.
@@ -1211,7 +1214,7 @@
       shared:true,
       prepare,
       authorize,
-      backgroundAvailable:()=>tokenValid(),
+      backgroundAvailable:()=>tokenValid()&&Platform.online(),
       connected:()=>tokenValid(),
       automaticConfigured:()=>tokenValid()||signedInBefore,
       connectionExpiresAt:()=>tokenValid()?tokenExpiresAt:0,

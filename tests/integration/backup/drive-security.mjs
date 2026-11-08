@@ -261,6 +261,14 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
 }
 
 {
+  // Offline, background work waits for the network instead of failing and
+  // backing off; back online it may run again.
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  assert.equal(provider.backgroundAvailable(),true,'signed in and online, background work may run');
+  state.offline=true;assert.equal(provider.backgroundAvailable(),false,'offline, background work waits');
+  state.offline=false;assert.equal(provider.backgroundAvailable(),true,'back online, it may run again');
+}
+{
   // An upload renews its marker while it runs: Drive markers never change, so
   // renewal puts a fresh marker in place and removes the old one. Cleanup
   // treats a renewing marker left unrenewed as abandoned, so renewal must

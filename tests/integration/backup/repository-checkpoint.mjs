@@ -471,10 +471,10 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
 {
   const files=new Map(),markers=new Map(),key=(kind,id)=>kind+':'+id,describe=file=>freeze({kind:file.kind,id:file.id,name:file.name,size:file.blob.size,createdAt:file.createdAt,modifiedAt:file.createdAt,remoteId:'turn-'+key(file.kind,file.id)});
   // driveBehind: how far Drive's clock is behind this device's.
-  let leases=0,beforeUpload=null,driveBehind=0;const driveNow=()=>Date.now()-driveBehind,lease=prefix=>freeze({id:prefix+'_'+String(++leases).padStart(32,'0'),createdAt:new Date(driveNow()).toISOString()});
+  let leases=0,beforeUpload=null,driveBehind=0,failMaintenanceList=null;const driveNow=()=>Date.now()-driveBehind,lease=prefix=>freeze({id:prefix+'_'+String(++leases).padStart(32,'0'),createdAt:new Date(driveNow()).toISOString()});
   const transport=freeze({list:async({kind})=>freeze({items:freeze([...files.values()].filter(file=>file.kind===kind).map(describe)),overflow:false}),upload:async file=>{if(beforeUpload)await beforeUpload(file);const stored=freeze({...file,createdAt:new Date().toISOString()});files.set(key(file.kind,file.id),stored);return describe(stored);},download:async ref=>{const stored=files.get(key(ref.kind,ref.id));if(!stored)throw new Error('missing turn file');return freeze({blob:stored.blob,release:async()=>{}});},delete:async ref=>files.delete(key(ref.kind,ref.id)),
     beginPublication:async()=>{const row=lease('pub');markers.set(row.id,row);return row;},listPublications:async()=>freeze({items:freeze([...markers.values()]),overflow:false,ignored:0}),assertPublication:async row=>row,endPublication:async row=>markers.delete(row.id),
-    beginMaintenance:async()=>lease('mnt'),listMaintenances:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertMaintenance:async row=>row,endMaintenance:async()=>true,now:driveNow});
+    beginMaintenance:async()=>lease('mnt'),listMaintenances:async()=>{if(failMaintenanceList){const error=failMaintenanceList;failMaintenanceList=null;throw error;}return freeze({items:freeze([]),overflow:false,ignored:0});},assertMaintenance:async row=>row,endMaintenance:async()=>true,now:driveNow});
   const baseBefore=reconciliationBase,baseNotesBefore=reconciliationBaseNotes;
   assert.equal(runtime.providers.register(freeze({id:'turn-drive',label:'Google Drive',shared:true,connected:()=>true,repository:transport})),true);
   try{
@@ -513,6 +513,17 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
     assert.equal(await turnFor(live()),'waits','one press, one upload: the next one takes its turn again');
     // Drive's newer changes come in without waiting for a turn: a device
     // behind Drive is sent to catch up, not to wait.
+    // A check that was stopped on purpose (its operation yielded to something
+    // the person did) is not logged as a problem; a real failure still is.
+    {
+      const logged=()=>diagnosticFailures.filter(row=>row.phase==='backup-provider.repository-maintenances').length,before=logged();
+      failMaintenanceList=Object.assign(new Error('Repository maintenance yielded to a higher-priority backup operation.'),{name:'AbortError'});
+      await runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}).catch(()=>null);
+      assert.equal(logged(),before,'a check stopped on purpose is not logged');
+      failMaintenanceList=new Error('Drive could not list markers');
+      await runtime.providers.backupRepositoryProvider('turn-drive',{interactive:false}).catch(()=>null);
+      assert.equal(logged(),before+1,'a real failure is');
+    }
     // This device's clock runs 20 minutes ahead of Drive's. Marker times are
     // Drive's, so their ages are measured on Drive's clock: another device's
     // live upload still holds the turn, and one that began after this

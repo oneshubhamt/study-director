@@ -2809,7 +2809,10 @@ AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze
     try{renderOwnershipBanner();}catch{}
     if(mutationUiOperationActive&&!active&&!AppMutationCoordinator.blocksUi())queueProtectedMutationUiReconcile();
     mutationUiOperationActive=active;
-  },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)})
+  },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay),
+  // Another tab's lease ran out without being released (it was closed in the
+  // middle of a change): background work that waited for it goes now.
+  foreignReleased:()=>wakeBackgroundOperations('mutation-lease-ended')})
 }));
 if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='study-director.mutation-coordinator'||AppMutationCoordinator.contractVersion!==1)throw new Error('Study Director mutation coordinator is unavailable or incompatible.');
 /* TIMER NUDGE AND SOUND CUES */
@@ -3010,9 +3013,12 @@ async function checkSessionOwnershipClaim(){
   }catch(error){AppDiagnostics.capture('session.claim-watch',error,'warn');return false;}
   finally{sessionClaimCheckActive=false;}
 }
-function wakeSessionOwnershipClaim(){
+// slackMs: the interval's own tick arrives a few milliseconds short of the
+// period after the check it started last time, so it allows a second;
+// coming back to the app or online waits out the whole period.
+function wakeSessionOwnershipClaim(slackMs=0){
   const now=Date.now();
-  if(sessionClaimLastAttemptAt&&now>=sessionClaimLastAttemptAt&&now-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS)return false;
+  if(sessionClaimLastAttemptAt&&now>=sessionClaimLastAttemptAt&&now-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS-slackMs)return false;
   return checkSessionOwnershipClaim();
 }
 function installSessionWatch(){
@@ -3023,7 +3029,7 @@ function installSessionWatch(){
     try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
-  sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim();},SESSION_CLAIM_WATCH_MS);
+  sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim(1000);},SESSION_CLAIM_WATCH_MS);
   // Existing interval owns the cadence. Foreground/online return only advances
   // an eligible missed attempt, never introducing a second polling timer.
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void wakeSessionOwnershipClaim();});
@@ -6067,6 +6073,14 @@ function installBackgroundOwners(){
   ])BackgroundOperations.register(id,owner);
   backgroundOwnersInstalled=true;
 }
+// A page closed in the middle of a change (a sync applying it, perhaps as
+// the phone put the app away) leaves its write lease until it runs out, at
+// most 20 s. This tab owns the app, so the lease is that closed page's:
+// start-up recovery waits for it to end rather than asking for a reload.
+async function waitForClosedTabLease(limitMs=25000){
+  for(let waited=0;waited<limitMs&&AppOwnership.canMutate()&&AppMutationCoordinator.foreignActive();waited+=250)await new Promise(resolve=>setTimeout(resolve,250));
+  return !AppMutationCoordinator.foreignActive();
+}
 function wakeBackgroundOperations(trigger='eligibility'){
   if(!StartupLifecycle.status().fullyInitialized)return false;
   installBackgroundOwners();BackgroundOperations.wake(trigger);return true;
@@ -6640,7 +6654,7 @@ function syncStatusInput(){
   try{storage=readStorageHealth().issues;}catch{/* Not installed yet. */}
   return {
     online:navigator.onLine!==false,
-    drive:drive?{...drive,...(drive.sync?{sync:{...drive.sync,turnDevice:drive.sync.turnDevice?deviceName(drive.sync.turnDevice):''}}:{}),setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
+    drive:drive?{...namedTurnDevice(drive),setUp:drive.connected||drive.wasConnected||!!email,connecting:driveConnecting}:driveConnecting?{connecting:true}:null,
     device:device&&device.supported?device:null,
     passwordNeeded:!!protection&&protection.enabled&&!protection.unlocked,
     newerData:UnsupportedData.held(),
@@ -6905,13 +6919,16 @@ function driveRunningOperation(){
   }
   return null;
 }
+// Drive reports the device whose upload this one waits for by its id; what
+// the person reads is its type and browser ("Windows · Chrome").
+function namedTurnDevice(drive){return drive?.sync?{...drive,sync:{...drive.sync,turnDevice:drive.sync.turnDevice?deviceName(drive.sync.turnDevice):''}}:drive;}
 function renderDriveConnectCard(){
   const node=id=>document.getElementById(id),root=node('drive-connect-card');if(!root)return;
   const state=driveConnectCard;
   if(!state){root.hidden=true;return;}
   let model;
   try{
-    const drive=BackupProviderRuntime.locationStatus('google-drive'),operation=driveRunningOperation();
+    const drive=namedTurnDevice(BackupProviderRuntime.locationStatus('google-drive')),operation=driveRunningOperation();
     if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
     if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
     model=BackupPresentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
@@ -6920,16 +6937,24 @@ function renderDriveConnectCard(){
   setTextSafe('drive-connect-title',model.title);
   // Screen readers hear the sentence when it changes, not every count.
   if(state.lastStatus!==model.status){state.lastStatus=model.status;setTextSafe('drive-connect-status',model.status);}
-  const list=node('drive-connect-steps'),key=JSON.stringify(model.steps);
+  // Sync now and Try now sit on the line of the step that waits, as a quiet
+  // link; any other action is the card's button.
+  const inline=model.action?.step?model.action:null,list=node('drive-connect-steps'),key=JSON.stringify([model.steps,inline]);
   if(list&&list.dataset.key!==key){
     list.dataset.key=key;
-    list.replaceChildren(...model.steps.map(step=>{const item=document.createElement('li');item.dataset.state=step.state;item.textContent=step.label;if(step.state==='active')item.setAttribute('aria-current','step');return item;}));
+    list.replaceChildren(...model.steps.map(step=>{
+      const item=document.createElement('li');item.dataset.state=step.state;if(step.state==='active')item.setAttribute('aria-current','step');
+      const label=document.createElement('span');label.textContent=step.label;item.append(label);
+      if(inline&&inline.step===step.id){const link=document.createElement('button');link.type='button';link.className='drive-connect-step-action';link.dataset.action='sync-status-action';link.dataset.syncAction=inline.action;link.textContent=inline.label;item.append(link);}
+      return item;
+    }));
   }
-  const bar=node('drive-connect-bar'),showBar=model.tone==='working'&&state.phase!=='signing-in';
+  // No moving bar while a step only waits (for another device, or a retry).
+  const bar=node('drive-connect-bar'),showBar=model.tone==='working'&&state.phase!=='signing-in'&&!model.steps.some(step=>step.state==='waiting');
   if(bar){bar.hidden=!showBar;bar.dataset.mode=model.fraction===null?'indeterminate':'determinate';bar.firstElementChild.style.width=model.fraction===null?'':`${Math.round(model.fraction*100)}%`;}
   const detail=node('drive-connect-detail');if(detail){detail.hidden=!model.detail;if(detail.textContent!==model.detail)detail.textContent=model.detail;}
   const action=node('drive-connect-action');
-  if(action){action.hidden=!model.action;if(model.action){action.dataset.syncAction=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
+  if(action){action.hidden=!model.action||!!inline;if(model.action&&!inline){action.dataset.syncAction=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
   // Synced closes on its own; anything that needs the person stays.
   if(model.done&&!driveConnectCardHide)driveConnectCardHide=setTimeout(()=>{if(driveConnectCard===state)endDriveConnectCard();},6000);
 }
@@ -12002,6 +12027,9 @@ function installApplicationDomBindings(){
   BackupProviderRuntime.subscribeStatus(storageResetConnectionsChanged);
   // The indicator also follows the network and keeps its times current.
   for(const type of ['online','offline'])window.addEventListener(type,scheduleSyncStatus);
+  // Background sync waits while offline (Drive reports it unavailable); back
+  // online, it goes at once rather than at its next retry.
+  window.addEventListener('online',()=>{try{BackupProviderRuntime.wakeBackground('online');}catch(error){AppDiagnostics.capture('backup-provider.online-wake',error,'warn');}});
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleSyncStatus();});
   setInterval(()=>{if(document.visibilityState==='visible')scheduleSyncStatus();},30*1000);
   // The indicator, the panel's counts and the Connect card follow each step
@@ -12085,7 +12113,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     },
     bindDom:installApplicationDomBindings,
     recoverInterruptedLibraryClear:()=>LibraryClearCoordinator.recoverInterrupted(),
-    recoverInterruptedRestore:async()=>{await PlanData.hydrate();return BackupController.recoverInterruptedRestore();},
+    recoverInterruptedRestore:async()=>{await PlanData.hydrate();if(await AppData.restoreJournal.read().catch(()=>null))await waitForClosedTabLease();return BackupController.recoverInterruptedRestore();},
     loadNotes:()=>AppData.notes.load(),
     hydrateDrafts:hydrateSavedDrafts,
     previewPlan:()=>PlanDraftEditor.preview({silent:true}),
