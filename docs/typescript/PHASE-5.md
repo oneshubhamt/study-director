@@ -6,7 +6,7 @@
 
 Convert first-party application runtime code to strict TypeScript while preserving current canonical behavior, startup timing, UI, persistence and recovery. Each feature pass owns its host wiring as well as its module. The final composition pass must not inherit the entire large host script.
 
-The phase has 17 bounded work units, not 17 promised sessions. P5.0 precedes conversion. Foundation/bootstrap work precedes feature composition; model contracts precede Insights UI/worker conversion. Some transport/model work is structurally independent, but proceed sequentially unless current scope or an explicit instruction calls for a different order. Split an unexpectedly large unit into stable child IDs **before** widening implementation; update ownership, dependency and closure evidence together. Never mark a parent complete while a child is unfinished.
+The phase has **14 top-level steps (P5.0–P5.13)** and 17 tracked units because P5.9 and P5.11 have subdivisions. These are scope/ownership divisions, not mandatory separate sessions or review cycles. Combine related units into one coherent implementation pass when useful, retaining their completion criteria. P5.0 precedes conversion. Foundation/bootstrap work precedes feature composition; model contracts precede Insights UI/worker conversion. Some transport/model work is structurally independent, but proceed sequentially unless current scope or an explicit instruction calls for a different order. Split an unexpectedly large unit into stable child IDs **before** widening implementation; update ownership, dependency and closure evidence together. Never mark a parent complete while a child is unfinished.
 
 ## Objective register
 
@@ -14,7 +14,7 @@ The phase has 17 bounded work units, not 17 promised sessions. P5.0 precedes con
 
 | ID | Status | Primary scope and host responsibility | Required evidence for targeted closure |
 | --- | --- | --- | --- |
-| P5.0 | [VERIFIED — TARGETED](../../TS-CONVERSION-EXECUTION.md#recent-closed-worklog--p50) | Mechanically extract all five inline scripts at their existing positions/scopes; manifest/build integration and shared test readers. Inventory every main-host responsibility and consumer | Executable equivalence of extraction except documented build glue; script order/scope, CSP/hash/precache consistency; build/generated syntax, startup/core-flow and affected source-reader tests; close F-001/F-002 within their stated scope |
+| P5.0 | [VERIFIED — TARGETED](https://github.com/oneshubhamt/study-director/blob/b4e4cfd716626c55fd713f3565837ac7f9e70a95/TS-CONVERSION-EXECUTION.md#recent-closed-worklog--p50) | Mechanically extract all five inline scripts at their existing positions/scopes; manifest/build integration and shared test readers. Inventory every main-host responsibility and consumer | Executable equivalence of extraction except documented build glue; script order/scope, CSP/hash/precache consistency; build/generated syntax, startup/core-flow and affected source-reader tests; close F-001/F-002 within their stated scope |
 | P5.1 | NOT STARTED | `internal`, `interactions`, `workspace-overlay`, `notice-coordinator`, `navigation`, `audio-engine`, `backup-presentation`; shared DOM/scalar/capability helpers | Strict registry/ports and DOM/event handling; dialogs, keyboard/focus, navigation, notices, sound and overlay checks |
 | P5.2 | NOT STARTED | `profiles`, `startup`, `native-capabilities`; early profile-scope script, configuration, installation identity, persistence/repository construction and activation | Startup/restore ordering, profile isolation/switching, storage-failure and ownership startup paths; capabilities/fallbacks remain valid |
 | P5.3 | NOT STARTED | `plan`; plan editor, schedule/defaults, saved-plan composition and host adapters | Editing/applying plans, draft durability, saved-plan save/reload and relevant UI |
@@ -69,184 +69,11 @@ The five authored scripts in `source/host/`, inserted inline into `source/app.ht
 | Install/update/offline handlers and service-worker communication | P5.12 | Background backup, storage and session settlement |
 | Final cross-feature assembly, public exports, top-level bindings and start invocation | P5.13 | All completed feature contracts |
 
-## Extracted host ownership — historical P5.0 baseline
+## Host integration rule
 
-Production intake `2638619` changes host line positions and adds responsibilities. The ranges below preserve the verified P5.0 accounting and must not be used as current line anchors. Feature ownership above still applies; refresh the statement/range inventory against the integration commit before P5.1 implementation. MAIN-E owns this explicit handoff, not a claim that P5.0 audited new production behavior.
+Feature passes own their adapters, callbacks and action handlers inside shared assembly as well as their named modules. P5.13 owns final composition, not unfinished feature wiring. Refresh anchors for the assigned scope against current source before converting it; record newly discovered ownership where needed. Preserve startup order, scope and public capability identities.
 
-Extraction baseline `8d9c525`; paths/lines below refer to the mechanically extracted bodies. These ranges are exhaustive ownership assignments, not a behavior audit or strict-type completion claim. Nested functions/closures inherit their enclosing range's owner; shared callback contracts require the adjacent owners' source reconciliation. Keep this map current when later passes move/split code. P5.13 owns only the explicitly allocated assembly, not unassigned feature code.
-
-| Extracted script | Complete scope | Conversion owner |
-| --- | --- | --- |
-| `source/host/install-capture.js` | Entire early capture IIFE | P5.12 |
-| `source/host/profile-scope.js` | Entire pre-storage profile IIFE | P5.2 |
-| `source/host/presentation-kernel.js` | Entire pre-paint kernel IIFE | P5.11b |
-| `source/host/presentation-metadata.js` | Entire metadata synchronizer | P5.11b |
-| `source/host/main.js` | Entire main IIFE, allocated below | Feature owners / P5.13 assembly |
-
-Main host: **9284 physical lines, 1005 top-level statements, 117 contiguous ranges**. AST inspection with Acorn 8.19.0 confirmed each statement lies wholly in exactly one range; all source lines including comments, whitespace and wrapper are covered. Build tokens were replaced with same-length parse placeholders for this inventory only; executed equivalence uses real rendered output. Earlier inline line anchors map to main-file lines by subtracting 1515.
-
-| Main lines | Owner | Responsibility / anchors |
-| --- | --- | --- |
-| 1–17 | P5.13 | IIFE scope, directive and composition-map preface |
-| 18–18 | P5.2 | Release configuration |
-| 19–22 | P5.1 | Registry identity guard |
-| 23–76 | P5.13 | Validated module loads; feature owners supply construction contracts |
-| 77–91 | P5.11b | Presentation kernel guard and metadata |
-| 92–92 | P5.6 | Note search-worker URL |
-| 93–112 | P5.3 | Factory schedule and defaults configuration |
-| 113–118 | P5.6 | Editor boot/attachment limits guard |
-| 119–125 | P5.2 | Profile-scoped durable names |
-| 126–129 | P5.3 | Factory defaults |
-| 130–145 | P5.2 | Data contract/store names |
-| 146–161 | P5.13 | Public capability version inventory |
-| 162–186 | P5.2 | Canonical entity definitions/identity and keyed record helpers |
-| 187–274 | P5.2 | Storage/capability/backup startup slots, health controller |
-| 275–300 | P5.7 | App and operation diagnostics, decision clock |
-| 301–337 | P5.2 | Installation identity, device/folder names and profile controller |
-| 338–363 | P5.1 | Scalar/domain adapters and registry lock |
-| 364–564 | P5.1 | Shared DOM adapters, route/history, notices and interactions |
-| 565–608 | P5.6 | PDF workspace lifecycle |
-| 609–704 | P5.1 | System notifications and audio |
-| 705–709 | P5.1 | Text clamp |
-| 710–731 | P5.6 | Rich editor capability/validation adapters |
-| 732–768 | P5.1 | Scalar/array/data-value helpers |
-| 769–774 | P5.5 | Study-quality normalization |
-| 775–785 | P5.3 | Schedule model adapters |
-| 786–791 | P5.6 | Task-note identities |
-| 792–995 | P5.4 | Completion adapters, Execute panels, timeline, timer and session state |
-| 996–998 | P5.5 | Review composition slots |
-| 999–1003 | P5.6 | Rich-text lifecycle slots |
-| 1004–1013 | P5.4 | Execute rendering keys and save/nudge state |
-| 1014–1035 | P5.2 | Activation kinds and coordinator |
-| 1036–1126 | P5.2 | Cross-tab ownership and mutation coordinator |
-| 1127–1192 | P5.4 | Pomodoro, Practice Pacer and timer composition |
-| 1193–1209 | P5.7 | Backup-change and flush adapters |
-| 1210–1220 | P5.12 | Backup settlement before PWA update |
-| 1221–1227 | P5.3 | Post-plan automatic backup notification |
-| 1228–1387 | P5.4 | Session watch, current task and completion actions |
-| 1388–1433 | P5.2 | Storage health data/rendering |
-| 1434–1461 | P5.1 | Coordinated notices |
-| 1462–1510 | P5.2 | Installation/native capability projections |
-| 1511–1613 | P5.7 | File/Drive/Device backup rows, settings and actions |
-| 1614–1678 | P5.2 | Storage health writes, estimate, protection and install actions |
-| 1679–1683 | P5.4 | Live-draft save warning |
-| 1684–1851 | P5.2 | Storage fallback, ownership UI and primary hydration |
-| 1852–1887 | P5.2 | Record/session/pending-review codec construction |
-| 1888–1893 | P5.5 | Daily-record presentation adapters |
-| 1894–1946 | P5.4 | Pause/runtime snapshot payload |
-| 1947–1972 | P5.1 | Date/hour formatting |
-| 1973–2312 | P5.3 | Derived schedule and PlanScheduleGateway |
-| 2313–2342 | P5.5 | Review date and saved-content revision |
-| 2343–2351 | P5.1 | Status/notice adapters |
-| 2352–2386 | P5.4 | Session safety and saved-day reminder |
-| 2387–2418 | P5.7 | Backup reminder |
-| 2419–2812 | P5.4 | Session capture/save, live drafts and runtime restore |
-| 2813–2947 | P5.2 | IndexedDB, unsupported-data hold, metadata validation/gateways |
-| 2948–2948 | P5.7 | Capture/reference revision slots |
-| 2949–2951 | P5.12 | PWA work/input revision fences |
-| 2952–3043 | P5.6 | Attachment ingest/storage/maintenance and note rendering/printing |
-| 3044–3059 | P5.2 | AppMeta family/storage adapters |
-| 3060–3142 | P5.7 | Reconciliation baseline and verified-recovery freshness/protection |
-| 3143–3314 | P5.2 | Canonical commit subscribers, journals/repositories, capability activation |
-| 3315–3534 | P5.4 | Session reset/suspend/continue/takeover/finish |
-| 3535–3671 | P5.6 | Note catalogue, inherited areas and consumer/conflict updates |
-| 3672–3767 | P5.7 | Background gates/owners and data maintenance |
-| 3768–3975 | P5.6 | Inherited notes, editor identities/bindings and sync indicators |
-| 3976–4046 | P5.11b | Protected portable preferences and appearance mirrors |
-| 4047–4075 | P5.3 | Saved drafts and user defaults persistence |
-| 4076–4225 | P5.4 | Runtime schedule layers, actual clock and pause evidence |
-| 4226–4422 | P5.2 | Student name/defaults/profile identity UI |
-| 4423–4464 | P5.8 | Drive library choice/join/bind |
-| 4465–4534 | P5.2 | First-start onboarding/profile activation |
-| 4535–4545 | P5.7 | Profile backup unlock adapters |
-| 4546–4555 | P5.3 | Quote draft change |
-| 4556–4595 | P5.4 | Clock and header presentation |
-| 4596–4699 | P5.1 | Tab registry and scroll preference |
-| 4700–4908 | P5.13 | Plugin-ready identity, lazy plugin loader and registration |
-| 4909–4927 | P5.1 | Local-file notice and Trusted Types violation/asset adapters |
-| 4928–5072 | P5.1 | Navigation scroll/focus, tab transitions and readiness |
-| 5073–5269 | P5.11b | Fullscreen, theme/presentation controls and font scaling |
-| 5270–5403 | P5.4 | Real-time schedule windows and Execute awareness |
-| 5404–5454 | P5.13 | Shared render queue and cross-feature protected-UI reconciliation |
-| 5455–5709 | P5.4 | Recovery actions, shifts/carry-forward and unfinished-note draft |
-| 5710–5712 | P5.4 | Task completion adapter |
-| 5713–5740 | P5.6 | Task-note editor commit |
-| 5741–5832 | P5.5 | Daily reflection persistence and Library Diary editor |
-| 5833–6226 | P5.6 | Rich text documents, note links/tags/import and editor runtime |
-| 6227–6241 | P5.7 | Managed recovery runtime quiescence |
-| 6242–6247 | P5.6 | Rich-text composition slot assignments |
-| 6248–6373 | P5.3 | Plan data/runtime/controller composition |
-| 6374–6388 | P5.6 | Note saving, Execute note and Library entry |
-| 6389–6390 | P5.7 | Backup info popovers |
-| 6391–6489 | P5.6 | Execute note display/editing |
-| 6490–6688 | P5.4 | Execute controls/idle state/autostart/end prompt/session controls |
-| 6689–6817 | P5.5 | Review composition, day save/rollover and presentation |
-| 6818–6903 | P5.4 | Session editor lifecycle and focus metrics |
-| 6904–6933 | P5.7 | Backup file/export/protection composition and unlock lifecycle |
-| 6934–7039 | P5.6 | Note export, attachment references/insertion/library and clear-state helpers |
-| 7040–7173 | P5.7 | Attachment/repository integrity projections, state and audits |
-| 7174–7206 | P5.6 | Library clear eligibility/coordinator |
-| 7207–7243 | P5.7 | Kept versions and unsupported-data projection |
-| 7244–7341 | P5.6 | Library view composition |
-| 7342–7359 | P5.1 | Navigation controller composition |
-| 7360–7362 | P5.6 | Library/search composition slot assignments |
-| 7363–7669 | P5.7 | Backup codec/runtime, lifecycle restore and semantic verification |
-| 7670–7914 | P5.7 | Backup subscriptions, maintenance requests and storage-reset recovery |
-| 7915–8083 | P5.7 | Device backup/recovery host composition and integrity scrub |
-| 8084–8426 | P5.12 | PWA update policy, reservation/preparation/checking and event bindings |
-| 8427–8541 | P5.10 | Preview runtime, Insights data source and host adapter |
-| 8542–8591 | P5.7 | Data/backup diagnostic copies |
-| 8592–8727 | P5.13 | Action tables; feature-owned handlers follow the allocation below |
-| 8728–8943 | P5.2 | Mutation ownership requirements, blocked-action hints and UI projection |
-| 8944–9001 | P5.1 | Delegated event dispatch and ownership guards |
-| 9002–9026 | P5.6 | Note sync popover |
-| 9027–9090 | P5.13 | Delegated/application DOM binding assembly |
-| 9091–9093 | P5.12 | PWA launch routing |
-| 9094–9195 | P5.2 | Startup clock slots and lifecycle construction |
-| 9196–9284 | P5.13 | Plugin placeholders, public API, readiness event and final start invocations |
-
-### Shared assembly and action ownership
-
-P5.13 owns registry-load assembly (23–76), plugin loading/registration (4700–4908), render dispatch (5404–5454), action-table composition (8592–8727), DOM wiring (9027–9090) and the public API/start invocations (9196–9284). Feature owners must type/verify their adapters and callbacks **during their own passes**, including entries inside these shared structures. Keep lazy Guide/Insights activation with P5.11a/P5.10, Drive integration with P5.8 and presentation packs with P5.11b/c. Public export shapes are reconciled again in P5.13. This prevents deferred assembly from becoming deferred feature implementation.
-
-All five action tables contain 119 entries (113 unique names). Repeated names inherit the same feature owner; dispatch/ownership guards remain shared P5.1/P5.2 work. A feature must preserve the binding and adjacent backup/PWA effects when converting its handler.
-
-| Handler owner | Exact action names across CLICK/CHANGE/INPUT/BLUR/KEYDOWN |
-| --- | --- |
-| P5.1 | `toggle-system-alerts`, `test-sound`, `test-system-alert`, `sound-mode` |
-| P5.2 | `protect-local-data`, `install-notice-action`, `dismiss-install-notice`, `dismiss-storage-warning`, `open-profile`, `close-profile`, `profile-drive`, `switch-profile`, `add-profile`, `delete-profile`, `first-start-drive`, `first-start-continue`, `first-start-skip`, `first-start-password`, `profile-name`, `first-start`, `keep-screen-awake` |
-| P5.3 | `edit-plan`, `confirm-plan-edit`, `cancel-plan-edit`, `load-default`, `apply-schedule`, `clear-schedule-draft`, `quote`, `schedule-draft` |
-| P5.4 | `toggle-pause`, `practice-mode`, `practice-total-toggle`, `practice-cue-toggle`, `practice-start`, `practice-next`, `practice-undo`, `practice-reset`, `practice-reset-confirm`, `practice-reset-cancel`, `practice-toggle`, `practice-finish`, `practice-setup`, `mark-done`, `skip-task`, `jump-scheduled-now`, `start-scheduled-full`, `start-remaining-window`, `shift-remaining-day`, `generate-carry-forward`, `copy-carry-forward`, `close-unfinished-note`, `toggle-pomodoro`, `restore-session`, `suspend-session`, `finish-session`, `reset-session`, `close-nudge`, `take-pomodoro-break`, `gap-focus`, `gap-break`, `gap-split`, `gap-ignore`, `gap-apply`, `unfinished-note` |
-| P5.5 | `practice-delete-run`, `save-day`, `copy-review`, `toggle-copy-report-menu`, `reset-copy-report`, `change-reflection-date`, `save-reflection` |
-| P5.6 | `render-library`, `open-library-day`, `clear-library`, `open-notes`, `toggle-pnote-info`, `load-more-library`, `pnote-progress` |
-| P5.7 | `recheck-device-integrity`, `recheck-drive-integrity`, `connect-device-backup`, `backup-now`, `cancel-device-backup`, `toggle-backup-settings`, `disconnect-device-backup`, `open-version-history`, `cancel-drive-backup`, `disconnect-drive-backup`, `refresh-version-history`, `close-version-history`, `cancel-version-history-operation`, `recover-managed-version`, `compare-managed-note`, `remove-managed-version`, `export-backup`, `backup-protection`, `copy-backup-diagnostics`, `cancel-standalone-import`, `pick-import-file`, `toggle-backup-info`, `show-drive-sync`, `review-kept-versions`, `import-backup` |
-| P5.8 | `connect-drive-backup` |
-| P5.11b | `font-smaller`, `font-reset`, `font-larger`, `set-theme`, `set-presentation`, `toggle-display-tools`, `toggle-fullscreen` |
-| P5.12 | `apply-pwa-update`, `check-unsupported-update` |
-
-### Host-source consumers reconciled in P5.0
-
-`build/host-source.mjs` is the single assembly/erasure reader, driven by `hostScripts` in the module manifest. `build/build.mjs` consumes it for source validation and runtime rendering; all five bodies participate in canonical inventory and source hashes. Built-output consumers (browser harness/instrumentation, PWA variants, generated syntax, minification, CSP and deployment checks) continue reading generated HTML; its bytes are unchanged by extraction.
-
-All 42 pre-existing executable source readers now call `readHostHtml`; assertions/extracted-function logic is retained. The diagnostics scanner selects the composer for its HTML entry. Literal `source/app.html` fixture names/error labels are not source readers. The new `tests/architecture/build/host-source.mjs` deliberately reads the raw template to check its composition contract. Repository-wide source search found no other direct app-source consumers in build/tests/contracts at this checkpoint.
-
-| Reader directory | Adapted executables |
-| --- | --- |
-| `tests/architecture/app/` | `internal-module-boundary.mjs`, `presentation-contracts.mjs`, `protected-mutation-ui-contract.mjs`, `runtime-boundaries.mjs`, `workspace-contracts.mjs` |
-| `tests/architecture/backup/` | `host-export-port.mjs` |
-| `tests/architecture/build/` | `production-limits.mjs` |
-| `tests/architecture/pwa/` | `pwa-updater-contract.mjs` |
-| `tests/architecture/rich-text/` | `image-policy.mjs`, `reconciliation-ui-contract.mjs`, `wordgard-adapter-boundary.mjs` |
-| `tests/architecture/security/` | `security-policy.mjs` |
-| `tests/architecture/storage/` | `attachment-aware-reconciliation.mjs`, `background-work-contract.mjs`, `backup-recovery-ux-contract.mjs`, `cleer-integration.mjs`, `data-architecture.mjs`, `diagnostics-labels.mjs`, `managed-recovery-contract.mjs`, `managed-version-history-contract.mjs`, `persistence-boundary.mjs`, `runtime-authority-contract.mjs` |
-| `tests/integration/attachments/` | `pdf-reader-lifetime.mjs` |
-| `tests/integration/backup/` | `backup-capture-notification.mjs`, `backup-reminder.mjs`, `capture-safety.mjs`, `no-backup-location.mjs`, `repository-checkpoint.mjs` |
-| `tests/integration/pwa/` | `application-update-safety.mjs` |
-| `tests/integration/storage/` | `attachment-integrity-audit.mjs`, `attachment-reference-recovery.mjs`, `background-gc-reliability.mjs`, `canonical-baseline.mjs`, `data-maintenance.mjs`, `largefile-behavior.mjs`, `managed-provider-backup-pending.mjs`, `repository-integrity-state.mjs` |
-| `tests/integration/ui/` | `application-outcomes.mjs`, `background-diagnostics.mjs`, `notification-lifecycle.mjs` |
-| `tests/unit/app/` | `navigation.mjs`, `presentation-defaults.mjs` |
-
-Coverage caveat: these historical substring/VM tests still execute extracted fragments. Composition does not create a new mapping from whole-HTML offsets to authored host-file offsets. No authored-host coverage percentage is claimed in P5.0; built-runtime browser evidence is separate. Later feature conversions must route their owned fragments through strict checked sources, and Phase 6 owns complete retirement of transitional text readers. No coverage floor is changed here.
+The [P5.0 statement/action/reader inventory](https://github.com/oneshubhamt/study-director/blob/b4e4cfd716626c55fd713f3565837ac7f9e70a95/docs/typescript/PHASE-5.md#extracted-host-ownership--historical-p50-baseline) is historical evidence, not a current line map. `build/host-source.mjs` remains the composition/erasure reader; affected tests must continue to use it. Substring/VM readers do not establish whole-host coverage; Phase 6 owns their retirement.
 
 ## Completion and handoff
 
