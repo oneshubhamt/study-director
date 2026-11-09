@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawn} from 'node:child_process';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {RELEASE_TEST_SET} from './release-tests.mjs';
+import {discoverFastTests} from './test-discovery.mjs';
 
 // Runs the fast suite (or one category, or chosen files). Each test file runs in
 // its own Node process with its own temporary folders and a clean environment;
@@ -34,19 +34,7 @@ const selected=target==='targeted'?[...new Set(positional.slice(1).map(file=>fil
 if(target==='targeted'&&!selected.length)throw new Error('Targeted QA requires explicit test paths.');
 
 const ignoredRoots=new Set(['.git','node_modules']);
-function discover(dir){
-  return fs.readdirSync(dir,{withFileTypes:true}).flatMap(entry=>{
-    const file=path.join(dir,entry.name);
-    if(entry.isDirectory())return discover(file);
-    return entry.isFile()&&entry.name.endsWith('.mjs')?[file]:[];
-  });
-}
-function fastFiles(category){
-  return discover(path.join(root,'tests',category))
-    .map(file=>path.relative(root,file).split(path.sep).join('/'))
-    .filter(file=>!RELEASE_TEST_SET.has(file))
-    .sort();
-}
+const fastFiles=category=>discoverFastTests(root,category);
 function repositorySnapshot(){
   const rows=new Map();
   const walk=(directory,prefix='')=>{
@@ -83,8 +71,9 @@ function isolatedEnvironment(tempRoot){
   return env;
 }
 function runtimePreflight(){
-  const major=Number(process.versions.node.split('.')[0]);
-  if(!Number.isInteger(major)||major<20)throw new Error(`Fast tests require Node.js 20+; found ${process.versions.node}. npm is not required.`);
+  const [major,minor,patch]=process.versions.node.split('.').map(Number);
+  const supported=major===22&&(minor>23||minor===23&&patch>=4)||major===24&&minor>=15||major>=26;
+  if(!supported)throw new Error(`Fast tests require Node.js 22.23.4+; found ${process.versions.node}. npm is not required.`);
   for(const [name,value] of [['Blob',globalThis.Blob],['structuredClone',globalThis.structuredClone],['crypto',globalThis.crypto],['MessageChannel',globalThis.MessageChannel]]){
     if(value===undefined)throw new Error(`Fast-test runtime is missing ${name}; use a current Node.js runtime. npm is not required.`);
   }

@@ -22,6 +22,8 @@ jobs:
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '26.12.1'
+          # Cache lookup invokes npm before the pinned version is installed.
+          package-manager-cache: false
       - name: Use pinned npm
         run: npm install --global npm@12.2.1
       - name: Install type-checking toolchain

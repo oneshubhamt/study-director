@@ -35,6 +35,9 @@ assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAG
 assert.match(app,/const APP_META_KEYS=Object\.freeze\(@@SD_APP_META_KEYS@@\);/u);
 
 assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,19,'current localStorage inventory; attachment cleanup keeps no record of its own');
+assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,'sessionHandoffSafety'),false,'Drive claims settle interrupted Continue Here without a local marker');
+assert.match(app,/sessionStorage\.(?:getItem|setItem|removeItem)\(SESSION_STORAGE_KEYS\.notifications/u);
+assert.doesNotMatch(app,/['"]studyDirector\.notifications\.v1['"]/u);
 assert.equal(LOCAL_STORAGE_KEYS.driveSession,'studyDirector.driveSession.v1');
 for(const key of ['attachmentMaintenancePending','attachmentMaintenanceDay']){assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,key),false,key+' is retired');assert.equal(Object.hasOwn(DATA_ARCHITECTURE.localStorage,key),false,key+' has no live surface');}
 

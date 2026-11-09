@@ -39,7 +39,7 @@ node tests/helpers/run-category.mjs integration
 node tests/helpers/run-category.mjs architecture
 ```
 
-`npm test` and the `test:unit|integration|architecture|fast` scripts are thin aliases only.
+Files run in parallel, each in its own process (`--jobs N`, default the CPU count up to 4); every failure is reported at the end, and `--bail` stops starting new files after the first. `npm test` and the `test:unit|integration|architecture|fast` scripts are thin aliases only.
 
 Browser QA is deliberately separate:
 
@@ -52,11 +52,14 @@ npm run test:browser:release    # every browser journey
 
 Non-browser release certification is `npm run test:release`. Full promotion is `npm run qa:promotion`.
 
+Each browser tier is also `node tests/helpers/browser-suite.mjs <smoke|feature|extended|release>`, for environments where `npm run` refuses the installed npm ([verification commands](../docs/VERIFICATION.md#commands)).
+
 ## Test design
 
 1. One executable should represent one coherent production contract. Closely coupled scenarios may share it; unrelated failure domains should not.
 2. Strengthen the existing authoritative test for a regression before adding another file. Never create tests named after a release/pass/bug era.
 3. Prefer exact invariants—conservation, monotonicity, idempotence, bounds, reference preservation, transaction atomicity—over arbitrary thresholds or example-only assertions.
+   Where a rule must hold for any input, check it over generated cases with `helpers/generated-cases.mjs`: fixed seeds, so every run tests the same cases, and a failure names its seed, which `SD_CASE_SEED=<seed>` reruns alone. Show the cases reach every branch of the rule (tally them once) and that a mutant breaking the rule fails them. Sync merge (`integration/backup/sync-shared-base.mjs`), backup retention (`integration/backup/repository-checkpoint.mjs`) and the timer (`unit/app/timer-engine-logic.mjs`) do this.
 4. Behavior belongs at the lowest faithful behavioral layer. Static source assertions belong in `architecture` only when source shape is itself the contract.
 5. Browser smoke is intentionally small; feature and extended tiers remain separate when their cost or failure mode is materially different.
 6. Capacity/stress certification that distorts fast coverage belongs in release/extended cadence rather than ordinary correctness runs.
@@ -73,39 +76,38 @@ A browser test that sometimes fails is a defect, either in the test or in the ap
    - `pwa-update` drives real service-worker activation across tabs. Its wait used to message the old worker in a loop, which delays activation; it failed about 5 times in 12 with four copies running at once. It now watches the registration and passed 12 of 12 under the same load. It still runs alone, as a safeguard.
    - `site-data-clear` reopens the database right after wiping site storage. The app tries to open IndexedDB twice, 2.5 seconds each, before it stops, and under CPU load that reopen can take longer.
    - `backup-encryption` failed only under concurrent load and passes alone. Its reason starts "Not yet diagnosed": it needs a root cause, and once fixed it may run concurrently again.
-2. Other browser tests run concurrently. `npm run test:browser*` runs up to two at a time, then the `alone` tests by themselves. `BROWSER_TEST_JOBS=N` changes the limit; `BROWSER_TEST_JOBS=1` runs everything one at a time.
+2. Wall-clock performance tests marked `alone` never compete with another browser workload. On controlled hardware they run first on a clean runner. Promotion CI certifies the unchanged absolute budget through three independent clean hosted-runner samples and requires at least one complete pass; every sample is logged. This is runner sampling for diagnosed VM-speed variance, not an in-test retry or a relaxed threshold. Other browser tests then run concurrently, up to two at a time, and the remaining `alone` tests run by themselves afterwards. `BROWSER_TEST_JOBS=N` changes the concurrent limit; `BROWSER_TEST_JOBS=1` keeps ordinary tests serial while preserving the isolated ordering.
 3. A failure seen only while tests run concurrently is not yet evidence of a bug. Rerun that test alone first. If it passes alone but fails under load more than once, diagnose it like any other failure. Fix the cause when the test can avoid it. Otherwise, or until it is diagnosed, mark it `alone` with the reason.
-4. A failure seen in a test running alone is real until diagnosed. Decide whether the test, the app or the browser is at fault, and fix that. Never add a retry loop, raise a timeout or skip an assertion just to get green.
+4. A failure seen in a test running alone is real until diagnosed. Decide whether the test, the app or the browser is at fault, and fix that. Never add an in-test retry loop, raise a timeout or skip an assertion just to get green. Independent hosted-runner sampling is allowed only for a diagnosed absolute wall-clock benchmark under rule 2, with the product thresholds unchanged.
 5. Wait for observable state (a DOM value, a stored record, a service-worker registration state), never for a fixed sleep. A sleep is acceptable only when the elapsed time is itself the contract, such as a debounce or a re-check interval. A wait must not disturb what it watches. For example, messaging a service worker in a polling loop delays its activation. Wait for the outcome, not the first event on the way to it. A blocked database delete completes once the old connection closes. The first save after a storage clear may abort and be retried. A file can exist before it is fully written.
-6. A new or changed browser test must pass 5 consecutive runs before it is merged.
+6. On this branch, a new or changed browser test must pass 5 consecutive runs on its own before it is merged.
 7. Report a run as one summary: the totals plus each failure. Do not report passing tests one by one.
 8. When a test times out, its failure message must say what it was waiting for and the last observed state, so a single failure can be diagnosed without a rerun.
 9. Quarantine is the last resort, follows the governance rules below and never applies to the smoke tier.
 
 ## Coverage and mutation
 
-`node tests/helpers/coverage.mjs` uses V8 coverage over the hermetic unit/integration runtime. Global percentages are diagnostic; enforcement is risk-based through `helpers/coverage-risk.mjs`, which combines conservative floors for safety-critical modules with explicit critical-path anchors and named owners for production code exercised only outside the fast runtime.
+`node tests/helpers/coverage.mjs` runs the whole fast suite once, which is both the correctness gate and the V8 coverage measurement of the unit and integration tests; `--keep-raw <dir>` keeps the raw data so `branch-coverage.mjs --from <dir>` reports branch edges without another run. Global percentages are diagnostic; enforcement is risk-based through `helpers/coverage-risk.mjs`, which combines conservative floors for safety-critical modules with explicit critical-path anchors and named owners for production code exercised only outside the fast runtime.
 
 `node tests/helpers/mutation.mjs` applies a small curated set of safety-critical mutants to temporary repository clones. Existing behavioral tests must kill every mutant; the working tree is never mutated.
 
 Promotion-only branch coverage and browser runtime coverage use the installed release/browser toolchain.
 
+Regression tooling names VM-loaded canonical modules for accurate coverage attribution. The baseline comparison, mutation harness, source/generated syntax checks and deployment contract share file-backed subprocess capture; launch errors, signals and output-limit failures are harness failures, not application/test results. This also supports environments that prohibit subprocess pipes. Coverage floors and critical-path requirements remain enforced.
+
 ## Governance
 
 The architecture governance tests enforce the suite itself:
 
-- canonical semantic paths and one execution route per test;
-- no exact duplicate tests, orphan tests, release-era filenames or active historical QA tokens;
-- semantic-overlap and structural-containment detection, with explicit rationale for intentional overlap;
-- durable feature contracts mapped to authoritative behavioral owners;
-- browser tier/manifest integrity, bounded timeouts and semantic coverage tags;
+- canonical paths and one execution route per test;
+- no exact duplicate tests or orphan tests;
+- browser manifest integrity, bounded timeouts, written reasons for `alone` and coverage tags;
 - release-manifest/package entrypoint consistency;
 - hermetic source and runtime restrictions;
 - browser-only, time-bounded quarantine rules;
 - repository-clean execution and external QA artifacts.
 
 The goal is not the largest suite. It is the smallest suite that preserves all material contracts with clear ownership, deterministic evidence and appropriate depth.
-
 
 ## TypeScript coexistence
 

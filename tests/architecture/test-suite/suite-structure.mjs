@@ -1,3 +1,4 @@
+import {discoverFastTests} from '../../helpers/test-discovery.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,6 +29,7 @@ for(const layer of layers){
   const directory=path.join('tests',layer);
   assert.ok(fs.statSync(directory).isDirectory(),`missing test layer: ${layer}`);
   const files=executableFiles(directory).sort();
+  if(layer!=='browser')assert.deepEqual(discoverFastTests(process.cwd(),layer),files.filter(file=>!RELEASE_TEST_SET.has(file)),`${layer}: runner discovery must include every classified JS and TS test`);
   assert.ok(files.length>0,`${layer} must not be empty`);
   counts[layer]=files.length;
   for(const file of files){

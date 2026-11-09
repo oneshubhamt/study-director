@@ -98,7 +98,6 @@ export const APP_META_KEYS=freeze({
   reconciliationBaseNotePrefix:'reconciliationBaseNote:',
   reconciliationBaseDayPrefix:'reconciliationBaseDays:'
 });
-// Earlier names of these records: while names carried a version, and before
 export const APP_META_FAMILY_COUNT=Object.keys(APP_META_KEYS).length;
 export const APP_META_FAMILY_LABEL=`${APP_META_FAMILY_COUNT} typed appMeta families`;
 

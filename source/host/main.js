@@ -9749,7 +9749,7 @@ function keptReviewCause(review){
   if(review.subject==='session')return kept?'session':'session-absent';
   return 'settings';
 }
-// The start-up check of this device's data (verifyCanonicalInstallation).
+// Read current storage and recovery summaries for on-demand diagnostics.
 async function readDataDiagnosticStates(){
   const samples=[
     // Which storage this page opened. It tells a browser wipe (no profile

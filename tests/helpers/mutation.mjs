@@ -59,17 +59,17 @@ const mutations=Object.freeze([
   // The rule-based tests: a sync keeps the other edit, Hourly keeps only
   // versions whose notes changed, and a backward clock jump moves the timer's start.
   Object.freeze({
-    id:'sync-keeps-the-other-edit',file:'source/core/backup.js',
+    id:'sync-keeps-the-other-edit',file:'source/core/backup.ts',
     find:'held.kept.text=sides.incomingNewer?conflict.localValue:conflict.incomingValue;',replace:'held.kept.text=sides.incomingNewer?conflict.incomingValue:conflict.localValue;',
     tests:Object.freeze(['tests/integration/backup/sync-shared-base.mjs'])
   }),
   Object.freeze({
-    id:'hourly-keeps-only-changed-notes',file:'source/core/managed-repository.js',
+    id:'hourly-keeps-only-changed-notes',file:'source/core/managed-repository.ts',
     find:'if(hour(row)===hour(after)||notes(row)&&notes(row)===notes(after))continue;',replace:'if(hour(row)===hour(after))continue;',
     tests:Object.freeze(['tests/unit/backup/repository-retention.mjs'])
   }),
   Object.freeze({
-    id:'clock-jump-rebases-timer-start',file:'source/core/timer-engine.js',
+    id:'clock-jump-rebases-timer-start',file:'source/core/timer-engine.ts',
     find:'TimerState.patchRuntime({startMs:Number(TimerState.runtime.startMs)+delta});',replace:'void delta;',
     tests:Object.freeze(['tests/unit/app/timer-engine-logic.mjs'])
   })

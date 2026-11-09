@@ -1,3 +1,4 @@
+import {discoverTestFiles} from '../../helpers/test-discovery.mjs';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -10,12 +11,7 @@ import {evaluateBugRegressionPolicy} from '../../helpers/bug-regression-policy.m
 
 const layers=['unit','integration','browser','architecture'];
 const generatedRoots=['qa','coverage','.nyc_output','test-results','.study-director-test-artifacts'];
-function walk(directory){
-  return fs.readdirSync(directory,{withFileTypes:true}).flatMap(entry=>{
-    const target=path.join(directory,entry.name);
-    return entry.isDirectory()?walk(target):entry.isFile()&&entry.name.endsWith('.mjs')?[target.split(path.sep).join('/')]:[];
-  });
-}
+const walk=directory=>discoverTestFiles(directory).map(file=>file.split(path.sep).join('/'));
 function normalizedSource(file){return fs.readFileSync(file,'utf8').replace(/\r\n?/g,'\n').replace(/[ \t]+$/gm,'').replace(/\n{3,}/g,'\n\n').trim();}
 function normalizedFingerprint(file){return crypto.createHash('sha256').update(normalizedSource(file)).digest('hex');}
 const tests=layers.flatMap(layer=>walk(`tests/${layer}`)).sort();
@@ -53,6 +49,14 @@ for(const entry of ['node_modules/','dist/','qa/','coverage/','.nyc_output/','te
 // CI policy.
 const fastWorkflow=fs.readFileSync('.github/workflows/qa-fast.yml','utf8'),promotionWorkflow=fs.readFileSync('.github/workflows/qa-promotion.yml','utf8');
 assert.match(fastWorkflow,/pull_request:/);assert.match(fastWorkflow,/push:/);assert.match(fastWorkflow,/node tests\/helpers\/run-category\.mjs targeted/,'automatic checks must run the explicit targeted contracts');assert.match(fastWorkflow,/npm ci --ignore-scripts/,'strict compiler and typed lint require the locked toolchain');assert.match(fastWorkflow,/npm run check:types/,'automatic checks must enforce strict TypeScript and typed lint');
+for(const workflow of [fastWorkflow,promotionWorkflow]){
+  const setupSteps=[...workflow.matchAll(/- uses: actions\/setup-node@[^\n]+\n([\s\S]*?)(?=      - |$)/g)];
+  assert.ok(setupSteps.length>0,'each workflow must set up Node');
+  for(const [,settings] of setupSteps){
+    assert.match(settings,/package-manager-cache: false/,'setup-node must not invoke an unpinned npm through automatic caching before bootstrap');
+    assert.doesNotMatch(settings,/^\s+cache:/m,'explicit cache also invokes npm before bootstrap');
+  }
+}
 assert.match(fastWorkflow,/bug-regression-policy\.mjs/,'bug-like PRs must be machine-checked for regression protection');
 // Promotion runs only when started by hand; no push or schedule runs it.
 const promotionTriggerBlock=promotionWorkflow.match(/^on:\n([\s\S]*?)^permissions:/m)?.[1]||'';
@@ -71,6 +75,7 @@ assert.ok(fs.existsSync('CONTRIBUTING.md'));
 const prTemplate=fs.readFileSync('.github/pull_request_template.md','utf8');assert.match(prTemplate,/regression test/i);assert.match(prTemplate,/correct layer/i);
 assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.ts']}).passed,false);
 assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.ts','tests/integration/backup/backup-persistence.mjs']}).passed,true);
+assert.equal(evaluateBugRegressionPolicy({title:'fix: canonical values',changedFiles:['source/core/canonical.ts','tests/unit/app/canonical.mts']}).passed,true,'typed regression tests count as regression protection');
 assert.equal(evaluateBugRegressionPolicy({title:'feat: new theme',changedFiles:['source/app.html']}).required,false);
 
 console.log(JSON.stringify({status:'PASS',tests:tests.length,exactDuplicates:0,quarantines:quarantines.length},null,2));

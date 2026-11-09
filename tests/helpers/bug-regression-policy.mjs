@@ -6,7 +6,7 @@ export function evaluateBugRegressionPolicy({title='',labels=[],changedFiles=[]}
   const labelNames=labels.map(label=>typeof label==='string'?label:String(label?.name||''));
   const bugLike=/\b(?:fix|bug|regression|hotfix)\b/iu.test(title)||labelNames.some(label=>/^(?:bug|regression)$/iu.test(label));
   if(!bugLike)return {required:false,passed:true};
-  const regressionTests=changedFiles.filter(file=>/^tests\/(?:unit|integration|browser|architecture)\/.+\.mjs$/u.test(file));
+  const regressionTests=changedFiles.filter(file=>/^tests\/(?:unit|integration|browser|architecture)\/.+\.(?:mjs|mts)$/u.test(file));
   return {required:true,passed:regressionTests.length>0,regressionTests};
 }
 

@@ -203,3 +203,23 @@ assert.match(hostMetadata,/value\.format!=='study-director\.device-folder-settin
 
 assert.doesNotMatch(codec,/schemaVersion:DATA_CONTRACT\s*\.schemas\s*\.Backup/u,'current manifest writer must not emit retired schemaVersion baggage');
 assert.doesNotMatch(backup,/schemaVersion:Number\s*\(manifest\s*\.schemaVersion/u,'current restore preview must not expose a retired sync-era schema API');
+
+{ // Production session/recovery boundaries retained across TS erasure.
+const sessionClaimRelease=backupProvider.slice(backupProvider.indexOf('async function releaseSessionClaim('),backupProvider.indexOf('async function readSessionClaim('));
+const sessionTransfer=app.slice(app.indexOf('async function transferSessionOwnershipHere('),app.indexOf('// Another device continued today'));
+const combineBody=backupProvider.slice(backupProvider.indexOf('async function bringInRepositoryProvider('),backupProvider.indexOf('async function restoreRepositoryProviderVersion('));
+assert.match(app,/ready:async\s*\(\s*\)\s*=>\s*\{const empty\s*=await canonicalLocalRecoveryEmpty\s*\(\s*\);return empty\s*=\s*=\s*=null\?null:!empty;\s*\}/u,'failed canonical emptiness reads remain unknown, not safe to skip');
+assert.match(app,/async function canonicalLocalRecoveryEmpty\s*\(\s*\)[\s\S]*AppData\s*\.pendingReviews\s*\.list\s*\(\s*\)[\s\S]*!reviews\s*\.some\s*\(review\s*=>!review\s*\.resolvedAt\s*\)/u,'a locally retained unresolved Kept Version rules out empty-device restore');
+assert.match(backupProvider,/async function queueOtherLocations\s*\(selected\s*\)[\s\S]*automaticRecoveryDestination\s*\(other\s*\)[\s\S]*markPendingRetry\s*\(other\s*\),scheduled\s*=retryQueued&&schedulePendingProviderBackup\s*\(other,1000,\s*\{trigger:'managed-recovery-peer'\s*\}\s*\)[\s\S]*async function queueResolvedProviderState[\s\S]*markPendingRetry\s*\(selected\s*\),scheduled\s*=retryQueued&&schedulePendingProviderBackup\s*\(selected,1000,\s*\{trigger:'managed-recovery'\s*\}\s*\)[\s\S]*others:await queueOtherLocations\s*\(selected\s*\)/u,'managed recovery must durably record source and configured-peer obligations before scheduling their normal convergence jobs');
+assert.match(backupProvider,/if\s*\(automaticNeeded\s*\(selected\s*\)\s*\)\s*\{[\s\S]{0,500}markPendingRetry\s*\(selected\s*\),scheduled\s*=retryQueued&&schedulePendingProviderBackup\s*\(selected,1000,\s*\{trigger:'managed-recovery-source-current'\s*\}\s*\)/u,'an already-present source checkpoint must durably retain convergence when recovery produced a newer local canonical revision');
+assert.doesNotMatch(combineBody,/options\?\s*\.sync|sync:true/u,'user Combine must not hide ordinary synchronization as an option');
+assert.doesNotMatch(backupProvider,/shared\s*=\[\s*\.\s*\.\s*\.providers\s*\.values\s*\(\s*\)\]\s*\.find\s*\(sharedSyncing\s*\)/u,'Device Folder recovery must not probe Drive to impersonate shared ancestry');
+assert.doesNotMatch(backupProvider,/claim\s*=freeze\s*\(\s*\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,date[,}]/u,'new Active Session claims must not persist the session date.');
+assert.doesNotMatch(backupProvider,/claim\s*=freeze\s*\(\s*\{format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,[^\n]*\bowner[,}]/u,'new Active Session claims must not persist an installation id.');
+assert.match(backupProvider,/state:'released'/u,'session end must use a higher-epoch released ownership state rather than deleting the current claim');
+assert.match(backupProvider,/claim\s*\.state\s*=\s*=\s*='released'&&current\s*\.claim\s*\.revision>\s*=observedRevision/u,'a released ownership epoch blocks only the session revision it closed or an older one; a strictly newer same-day canonical session may establish a fresh handoff epoch.');
+assert.doesNotMatch(backupProvider,/publishSharedStateNow/u,'live ownership transfer must not put a full checkpoint publication on the timer critical path');
+assert.doesNotMatch(sessionClaimRelease,/deleteSessionClaim/u,'failed takeover rollback must never delete the newest immutable claim and expose an older owner');
+assert.ok(sessionTransfer.indexOf("claimSessionOwnership('google-drive'")>=0&&sessionTransfer.indexOf("claimSessionOwnership('google-drive'")<sessionTransfer.indexOf('AppData.activeSession.save(next,{strictDurability:true'),'Drive ownership must become durable before the new local owner is saved or allowed to run');
+assert.match(app,/'apply-schedule': async\s*\(\s*\)\s*=>\s*\{[\s\S]{0,700}transferSessionOwnershipHere\s*\(sessionPanelSession\s*\)/u,'Start a new plan here must use the same durable ownership transfer as Continue Here');
+}

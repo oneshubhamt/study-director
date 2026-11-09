@@ -331,3 +331,14 @@ console.log(JSON.stringify({status:'PASS',boundary:'presentation-surfaces',level
 
 
 assert.doesNotMatch(readScript('source/core/timer-engine.ts'),/startCueDelayMs/,'start cue spacing must not rely on delayed callbacks');
+
+{ // Production session/recovery boundaries retained across TS erasure.
+const app=readHostHtml(),review=readScript('source/core/review.js'),background=readScript('source/core/repository-background.ts');
+const sessionRestoreBlock=app.slice(app.indexOf('async function restoreSessionStateThroughLifecycle('),app.indexOf('async function verifyRestoredSessionRuntime',app.indexOf('async function restoreSessionStateThroughLifecycle(')));
+assert.match(app,/async function restoreSessionStateThroughLifecycle\s*\(importedSession,options\s*=\s*\{\s*\}\s*\)\s*\{\n\s*const session\s*=[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*const keepRunning\s*=options\s*\.keepRunning\s*=\s*=\s*=true&&/u,'Portable Active Session restore must use the lifecycle host without a Plan-draft transport parameter.');
+assert.doesNotMatch(sessionRestoreBlock,/PlanData\s*\.writeDraft|enterDraft:true/u,'Active Session restore must not write or enter the independent Plan draft.');
+assert.match(review,/async function saveDayRecord\s*\(options\s*=\s*\{\s*\}\s*\)[\s\S]{0,1100}captureTodayState\s*\(\s*\)[\s\S]{0,260}await flushLiveDraft\s*\(\s*\)[\s\S]{0,260}commitDailyRecord/u,'Save Today must flush Active Session Review state before committing the canonical DailyRecord.');
+assert.match(background,/const PRIORITY\s*=freeze\s*\(\s*\{integrity:10,maintenance:20,convergence:30\s*\}\s*\)[\s\S]*scheduled\s*=new Map\s*\(\s*\),active\s*=new Map\s*\(\s*\)/u,'Repository integrity, maintenance and convergence must be explicitly tracked by the shared coordinator so foreground work can pre-empt them.');
+assert.doesNotMatch(background,/const PRIORITY\s*=freeze\s*\(\s*\{[^}]*\bautomatic:/u,'The retired automatic background job must not return alongside convergence.');
+assert.match(background,/function arm\s*\(entry\s*\)\s*\{[\s\S]*if\s*\(!entry\|\|foreground\|\|suspensions\s*\.size[\s\S]*function beginForeground[\s\S]*suspendTimers\s*\(\s*\)[\s\S]*release:[\s\S]*if\s*\(foreground\s*=\s*=\s*=row\s*\)foreground\s*=null;resolveRelease\?\s*\.\s*\(\s*\);resumeTimers\s*\(\s*\)/u,'Foreground ownership must keep queued repository maintenance disarmed until the foreground operation has fully released and its settlement barrier is resolved.');
+}
