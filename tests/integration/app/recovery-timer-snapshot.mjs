@@ -52,7 +52,7 @@ now+=60000;recoveryWork=true;assert.equal(controller.maybeSnapshotRunningTimer()
 saveMode='local';await assert.rejects(()=>controller.writeCanonicalNow('finishing today'),/idb unavailable|durably committed/);saveMode='idb';
 // Suspension is canonical before runtime reset, and restore is canonical active before apply.
 const suspended=await controller.suspendLocal();assert.equal(suspended.status,'suspended');assert.ok(resetCount>0);assert.equal(repoValue.status,'suspended');
-const priorApply=applyCount;const restored=await controller.restoreSuspendedLocal(suspended);assert.equal(restored.status,'active');assert.equal(repoValue.status,'active');assert.ok(applyCount>priorApply);assert.equal(planDraft,'different draft');
+const priorApply=applyCount;const restored=await controller.restoreSuspendedLocal(suspended);assert.equal(restored.status,'active');assert.equal(repoValue.status,'active');assert.ok(applyCount>priorApply);assert.equal(planDraft,'draft survives reload');
 // Reset requires a physical canonical clear and verified null readback.
 await controller.resetLocal();assert.equal(repoValue,null);clearMode='local';repoValue=controller.payload(controller.captureSnapshot());await assert.rejects(()=>controller.resetLocal(),/delete failed|not durably cleared/);
 console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','reload-recovery','draft-independence','strict-option-merge','recovery-snapshot-gate','canonical-fail-closed','suspend-restore','reset-clear']}));
