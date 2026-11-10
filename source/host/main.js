@@ -630,7 +630,7 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
     domain:Object.freeze({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
     schedule:Object.freeze({getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),isLiveTrackableTimer,isWorkBlock,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
     persistence:Object.freeze({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}),
-    view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}),
+    view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl}),
     clock:Object.freeze({nowMs:DecisionClock.nowMs}),
     reviewEvidence:Object.freeze({applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}),
     clockEnvironment:Object.freeze({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
@@ -989,18 +989,6 @@ function finishPracticePacer(){
   schedulePwaUpdateEvaluation(150);return result;
 }
 function handlePracticeStartKey(event){if(event&&event.key==='Enter'){PracticePacer.start();return false;}return true;}
-function toggleDoneMarker(idx){
-  const prior=TaskSessionState.resolvedState(idx);
-  TaskSessionState.toggleDone(idx);
-  if(prior==='skipped'){
-    if(normalizeCompletionSource(TaskSessionState.getField(idx,'completionSource'))===COMPLETION_SOURCES.SKIPPED)TaskSessionState.deleteField(idx,'completionSource');
-    if(Number(TaskSessionState.getField(idx,'completion'))===0)TaskSessionState.deleteField(idx,'completion');
-  }
-  if(prior==='done'&&normalizeCompletionSource(TaskSessionState.getField(idx,'completionSource'))===COMPLETION_SOURCES.FINISHED_UNVERIFIED){
-    TaskSessionState.deleteField(idx,'completionSource');
-    if(Number(TaskSessionState.getField(idx,'completion'))===0)TaskSessionState.deleteField(idx,'completion');
-  }
-}
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
 function emptyStorageHealth(){
