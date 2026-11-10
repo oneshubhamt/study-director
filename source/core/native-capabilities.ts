@@ -320,7 +320,7 @@ const createModule=()=>{
         installInspecting=true;publish();
         try{
           const apps=await inspect.call(nav);
-          relatedInstalled=Array.isArray(apps)&&apps.some(app=>app?.platform==='webapp');
+          relatedInstalled=Array.isArray(apps)&&apps.some((app:unknown)=>!!app&&typeof app==='object'&&Reflect.get(app,'platform')==='webapp');
           if(relatedInstalled){installing=false;installPrompt=null;}
         }catch(error){capture('native.install-inspection',error);}
         finally{installInspecting=false;installInspectionPromise=null;publish();}
