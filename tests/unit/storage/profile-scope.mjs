@@ -25,6 +25,11 @@ function run(value,existing=null){
   assert.equal(scope.scope,'');assert.equal(scope.safe,true);assert.equal(scope.scoped('db'),'db');
 }
 {
+  const scope=run({version:1,active:'missing',profiles:[{id:idA,scope:''}]});
+  assert.equal(scope.safe,false,'the current schema never guesses a different active profile when its active pointer is invalid');
+  assert.equal(scope.scope,'__profile-registry-unreadable__');
+}
+{
   const absent=run(undefined);
   assert.equal(absent.id,'');assert.equal(absent.scope,'');assert.equal(absent.safe,true,'an absent registry is a genuine first-start state');
   for(const value of ['{bad json',{version:1,active:'bad',profiles:[{id:'bad',scope:''}]},{version:1,active:'',profiles:[]}]){
@@ -36,4 +41,4 @@ function run(value,existing=null){
   const existing=Object.freeze({sentinel:true}),scope=run({version:1,active:idA,profiles:[{id:idA,scope:''}]},existing);
   assert.equal(scope,existing,'the bootstrap never replaces an already-installed scope identity');
 }
-console.log(JSON.stringify({status:'PASS',suite:'profile-scope',cases:['active scoped profile','newer registry fallback','absent registry','malformed registry fails closed','existing identity preserved']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'profile-scope',cases:['active scoped profile','newer registry fallback','current active pointer fails closed','absent registry','malformed registry fails closed','existing identity preserved']},null,2));

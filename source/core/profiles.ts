@@ -50,20 +50,32 @@ const createModule=()=>{
       const text=storage.read();if(text)lastText=text;
       let raw:unknown=null,parsed=true;
       try{raw=JSON.parse(text||'null') as unknown;}catch{raw=null;parsed=false;}
-      const rawRecord=objectRecord(raw)?raw:null;
-      const unsupported=text!==null&&text!==''&&(!parsed||!rawRecord||rawRecord['version']!==VERSION);
+      const present=text!==null&&text!=='',rawRecord=objectRecord(raw)?raw:null,rawVersion=Number(rawRecord?.['version']);
+      const current=!!rawRecord&&parsed&&rawRecord['version']===VERSION;
+      const readable=!!rawRecord&&parsed&&Number.isInteger(rawVersion)&&rawVersion>=VERSION;
       const profiles:Readonly<ProfileEntry>[]=[],ids=new Set<string>(),scopes=new Set<string>();
       const rawProfiles=rawRecord&&Array.isArray(rawRecord['profiles'])?rawRecord['profiles']:[];
-      if(rawRecord&&(rawRecord['version']===VERSION||unsupported)){
+      let malformedCurrent=current&&(!Array.isArray(rawRecord!['profiles'])||rawProfiles.length===0||rawProfiles.length>MAX_PROFILES);
+      if(readable){
         for(const value of rawProfiles.slice(0,MAX_PROFILES)){
-          const row=entry(value);if(!row||ids.has(row.id)||scopes.has(row.scope))continue;
+          const row=entry(value);
+          if(!row||ids.has(row.id)||scopes.has(row.scope)){if(current)malformedCurrent=true;continue;}
           ids.add(row.id);scopes.add(row.scope);profiles.push(row);
         }
       }
-      const rawRemoving=!unsupported&&rawRecord&&Array.isArray(rawRecord['removing'])?rawRecord['removing']:[];
-      const removing=[...new Set(rawRemoving.filter((scope:unknown):scope is string=>(scope===''||validId(scope))&&!scopes.has(scope)))];
       const candidateActive=rawRecord?.['active'];
-      const active=typeof candidateActive==='string'&&profiles.some(row=>row.id===candidateActive)?candidateActive:(profiles[0]?.id||'');
+      const activeKnown=typeof candidateActive==='string'&&profiles.some(row=>row.id===candidateActive);
+      if(current&&!activeKnown)malformedCurrent=true;
+      const active=activeKnown?String(candidateActive):(profiles[0]?.id||'');
+      const rawRemoving=current&&Array.isArray(rawRecord!['removing'])?rawRecord!['removing']:[];
+      if(current&&rawRecord!['removing']!==undefined&&!Array.isArray(rawRecord!['removing']))malformedCurrent=true;
+      const removing:string[]=[];
+      for(const value of rawRemoving){
+        const scope=String(value||''),valid=(scope===''||validId(scope))&&!scopes.has(scope);
+        if(!valid){malformedCurrent=true;continue;}
+        if(!removing.includes(scope))removing.push(scope);
+      }
+      const unsupported=present&&(!parsed||!rawRecord||rawRecord['version']!==VERSION||malformedCurrent);
       return freeze({version:VERSION,active,profiles:freeze(profiles),removing:freeze(removing),unsupported});
     }
 

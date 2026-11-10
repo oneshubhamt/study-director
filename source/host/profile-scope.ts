@@ -21,7 +21,8 @@
       const version=Number(list?.['version']);
       const profiles=list&&Number.isInteger(version)&&version>=1&&Array.isArray(list['profiles'])?(list['profiles'].filter(valid) as Record<string,unknown>[]):[];
       const activeId=typeof list?.['active']==='string'?list['active']:'';
-      const active=profiles.find(entry=>entry['id']===activeId)||profiles[0];
+      const selected=profiles.find(entry=>entry['id']===activeId);
+      const active=version===1?selected:(selected||profiles[0]);
       if(!active){safe=false;scope=unsafeScope;}
       else{
         id=typeof active['id']==='string'?active['id']:'';
