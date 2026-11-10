@@ -41,6 +41,9 @@ fields.set('0:completion',75);fields.set('0:completionSource','manual');resolved
 const snap=controller.captureSnapshot();assert.equal(snap.taskState.a.completion,75);assert.equal(snap.taskState.b.resolvedState,'skipped');assert.equal(snap.taskState.a.actual.seconds,42);
 // Plan draft is independent of the canonical session schedule.
 const canonical=controller.payload(snap);planDraft='different draft';controller.applyStoredSession(canonical,canonical.snapshot,{lifecycleManaged:true});assert.equal(planDraft,'different draft');assert.equal(appliedText,canonical.scheduleText);
+// Reload-style local recovery must reconstruct task state without replacing the independently edited Plan draft.
+fields.clear();resolved.clear();carry='';repoValue=structuredClone(canonical);planDraft='draft survives reload';
+assert.equal(controller.restoreLocalRecovery(),true);assert.equal(fields.get('0:completion'),75);assert.equal(resolved.get(1),'skipped');assert.equal(carry,'carry');assert.equal(planDraft,'draft survives reload');
 // Queued strict durability is not discarded by a later ordinary save request.
 controller.saveLiveDraft({strictDurability:true,markChanged:false});controller.saveLiveDraft();await runTimers();assert.equal(lastSaveOptions.strictDurability,true);assert.ok(marked>0);
 // Periodic checkpoints wait through managed recovery and run immediately after the interval is eligible.
@@ -52,4 +55,4 @@ const suspended=await controller.suspendLocal();assert.equal(suspended.status,'s
 const priorApply=applyCount;const restored=await controller.restoreSuspendedLocal(suspended);assert.equal(restored.status,'active');assert.equal(repoValue.status,'active');assert.ok(applyCount>priorApply);assert.equal(planDraft,'different draft');
 // Reset requires a physical canonical clear and verified null readback.
 await controller.resetLocal();assert.equal(repoValue,null);clearMode='local';repoValue=controller.payload(controller.captureSnapshot());await assert.rejects(()=>controller.resetLocal(),/delete failed|not durably cleared/);
-console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','draft-independence','strict-option-merge','recovery-snapshot-gate','canonical-fail-closed','suspend-restore','reset-clear']}));
+console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','reload-recovery','draft-independence','strict-option-merge','recovery-snapshot-gate','canonical-fail-closed','suspend-restore','reset-clear']}));
