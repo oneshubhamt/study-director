@@ -9,7 +9,7 @@ const DATE='2026-10-27',LOCAL='inst_local',REMOTE='inst_remote',CHECKPOINT='cp_'
 const sessionBase={id:'active',type:'activeSession',version:1,revision:10,date:DATE,status:'active',runningOn:LOCAL,scheduleText:'07:00 | 30 | Work | work | Ethics | units | 1',snapshot:{version:1,date:DATE,fingerprint:'x',contentRevision:1,savedRevision:0,currentTaskId:null,taskState:{},scheduleAdjustments:{},timerRuntime:{token:'timer'},latestCarryForward:'',updatedAt:'2026-10-27T08:00:00.000Z',review:{reflection:'',studyQuality:null},practice:{token:'practice'}},suspendedAt:null,updatedAt:'2026-10-27T08:00:00.000Z'};
 const result=value=>({ok:true,value,storage:{idb:true,local:false}});
 function makeHarness(options={}){
-  let now=100000,current=structuredClone(options.current||sessionBase),claim=options.claim||{epoch:2,applies:true,state:'owned',ownedHere:false},tasks=options.tasks!==false;
+  let now=100000,current=structuredClone(options.current||sessionBase),claim=Object.prototype.hasOwnProperty.call(options,'claim')?options.claim:{epoch:2,applies:true,state:'owned',ownedHere:false},tasks=options.tasks!==false;
   let captureNo=0,claimWrites=0,releaseWorks=options.releaseWorks!==false,source=structuredClone(options.source||current),remoteClaim=claim;
   const calls={stops:0,resumes:0,syncs:[],writes:[],captures:[],evidence:0,warnings:[],status:[],notices:0,notes:0,releases:0,resets:0,pauses:0,lifecycles:[],claimReads:0,sessionLoads:0};
   const strictQueue=[];
@@ -105,11 +105,14 @@ function makeHarness(options={}){
 
 // Remote claim preempts execution before persistence, freezes timing, and only syncs after strict receipt.
 {
-  const t=makeHarness();assert.equal(await t.controller.checkClaim(),true);
+  let reflection='before preemption';
+  const t=makeHarness({reflection:()=>reflection});assert.equal(await t.controller.checkClaim(),true);
   assert.equal(t.calls.stops,1);assert.equal(t.calls.evidence,1);assert.equal(t.calls.writes.length,1);
   assert.equal(t.calls.syncs[0],'session-claim');assert.equal(t.controller.status().localVerified,true);
-  const frozen=t.controller.snapshotForWrite();t.setNow(130000);
-  assert.equal(t.controller.snapshotForWrite().timerRuntime.token,frozen.timerRuntime.token,'waiting wall time never becomes study time');
+  const frozen=t.controller.snapshotForWrite();t.setNow(130000);reflection='late reflection retained';
+  const projected=t.controller.snapshotForWrite();
+  assert.equal(projected.timerRuntime.token,frozen.timerRuntime.token,'waiting wall time never becomes study time');
+  assert.equal(projected.review.reflection,'late reflection retained','late non-timing edits remain eligible for reconciliation after ownership preemption');
 }
 // A local-only/failed receipt leaves execution frozen; a retry reuses frozen timing evidence.
 {
