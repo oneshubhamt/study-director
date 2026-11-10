@@ -79,7 +79,7 @@ for(const direct of [
   /PracticePacerModule\.createController\(/u,
   /TimerEngineModule\.createEngine\(/u
 ]) assert.doesNotMatch(host,direct,'main host must not reconstruct a typed execution engine directly');
-assert.match(executionHost,/const byTaskId=new Map<string,Entry>\(\)/u,'task-session evidence has one task-identity keyed store');
+assert.match(executionHost,/const byTaskId=new Map\s*\(\)/u,'task-session evidence has one task-identity keyed store after TypeScript erasure');
 assert.match(executionHost,/taskIdentity\.indexForId\(row\.taskId,indexMap\)/u,'runtime evidence is remapped through stable task identity');
 for(const token of ['AppData.activeSession','BackupProviderRuntime','claimSessionOwnership','continueSessionHere','sessionHandoff']){
   assert.equal(executionHost.includes(token),false,`P5.4A execution host must not absorb later Active Session/handoff ownership: ${token}`);
