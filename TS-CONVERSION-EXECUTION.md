@@ -1,6 +1,6 @@
 # TypeScript conversion — current execution record
 
-**Working branch: `ts-exp`. P5.0–P5.1 VERIFIED — TARGETED; P5.2 not started.** Delegated implementation begins at `de4872a88c2015bc8833e0244c0ab8ce6e6b5998`, the shared P5.1 tip of `ts-exp` and `TS-Conversion` at handoff. Follow the sole-implementor and end-of-Phase-5 audit arrangement in [AGENTS](AGENTS.md). Main intake endpoint remains `2638619`.
+**Working branch: `ts-exp`. P5.0–P5.1 VERIFIED — TARGETED; P5.2 ACTIVE with P5.2-capabilities VERIFIED — TARGETED. Next: P5.2-profiles.** P5.2 implementation baseline is `d3f69c4`; capability implementation endpoint is `0271ea4`. Preserve `TS-Conversion` and main. Follow the sole-implementor and end-of-Phase-5 audit arrangement in [AGENTS](AGENTS.md). Main intake endpoint remains `2638619`.
 
 Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHASE-5.md), then inspect current source. Consult [decisions](docs/typescript/DECISIONS.md), [tooling](docs/TYPESCRIPT.md), [verification commands](docs/VERIFICATION.md) and [product docs](docs/README.md) as needed. Do not reload historical logs for routine passes.
 
@@ -9,7 +9,7 @@ Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHAS
 | Stage | State / next action |
 | --- | --- |
 | Preparation, Phases 1–4 | Complete within recorded scope at `4136ba5`: 34 Phase 4 modules, 126 strict files, zero unchecked existing TS at last check. [Evidence](docs/typescript/HISTORY-PREPARATION-PHASE-4.md) |
-| Phase 5 — host/features | P5.0–P5.1 verified; P5.2 next; later steps unstarted. [Scope/status register](docs/typescript/PHASE-5.md) |
+| Phase 5 — host/features | P5.0–P5.1 verified; P5.2 active: capabilities verified, profiles next, then data bootstrap and startup. Later steps unstarted. [Scope/status register](docs/typescript/PHASE-5.md) |
 | Phase 6 — tooling/tests | Not started; convert remaining tooling/tests and retire transitional readers |
 | Phase 7 — certification | Not started; whole-app reconciliation and full correctness, coverage, mutation, browser, release and performance QA |
 
@@ -21,16 +21,18 @@ Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHAS
 | F-002 | Phase 6: retire transitional substring/VM readers and reconcile authored coverage; P5 conversions must keep their readers working meanwhile |
 | F-003 | Phase 7: full certification, with unavailable manual/device evidence stated separately |
 | REVIEW-P5 | Independent planning-assistant audit after all Phase 5 outcomes, including P5.13 reconciliation. Compare against `de4872a`; retain inherited limitations and intentional changes. No external review gate between implementation passes |
-| VERIFY-D | Inspect hosted CI after GitHub API access is permitted. The network-only environment draft is saved, not applied. Local setup-node/npm repair and exact automatic CI commands passed; no hosted success claimed |
 
-## Current handoff — ready for P5.2-capabilities
+## Latest closed worklog — P5.2-capabilities
 
-- **Setup:** `ts-exp` fetched and confirmed identical to P5.1 tip `de4872a`; local branch tracks `origin/ts-exp`. This handoff changes documentation only; local links and assigned test paths checked. No P5.2 implementation or new runtime verification claimed. Preserve main and `TS-Conversion`.
-- **Next outcome:** execute P5.2-capabilities end to end using the [P5.2 execution groups](docs/typescript/PHASE-5.md#execution-boundaries-on-ts-exp). Refresh named anchors and affected callers before editing. Remaining P5.2 groups: profiles, data bootstrap, startup/integration; the parent stays incomplete until all are done.
-- **Start:** confirm branch/remote/local edits, activate pinned tools, inspect the assigned surfaces/tests, and replace this handoff with a compact scope/invariants/QA entry. Keep a temporary scratchpad outside the repo. Plan and implement the bounded pass in the same request; no return to the planning assistant for routine decisions.
-- **Closure/resume:** reconcile every objective, run targeted QA, fix relevant findings, update the record and register, commit/push `ts-exp`, and verify remote/worktree state. Report complete versus blocked accurately. A subsequent “continue” resumes open work or advances to the next group; independent review waits until Phase 5 ends.
-- **Prepared workspace:** `/workspace/study-director`; Node **26.12.1**, npm **12.2.1**, TS **7.0.2** verified. The default shell selects older Node/npm. Use `source /tmp/study-director-ts-exp-env.sh` here, then check versions. If the temporary helper is absent but installations remain, prepend `/workspace/.study-director-node26/node_modules/node-linux-x64/bin:/workspace/.study-director-tools/node_modules/.bin` to PATH and set `npm_config_cache=/tmp/study-director-npm-cache`. For a fresh environment use the pinned setup in README; do not assume these local paths exist.
-- **Evidence limits:** inherited P5.1 evidence is linked below, not rerun for this documentation handoff. Full-app browser tests serve existing `dist`: rebuild/verify first. Hosted CI remains unverified under VERIFY-D; no full QA during routine passes. Phase 5 independent audit and Phase 7 certification are distinct.
+- **Baseline / scope:** `d3f69c4` on `ts-exp`; refreshed current capability/module/host/test anchors before editing. Owned scope: `native-capabilities`, scheduler/browser ports, capability presentation/storage/install/wake/badge host wiring. Parent P5.2 remains open.
+- **Implemented:** renamed the runtime to strict `source/core/native-capabilities.ts`; added typed browser/native ports and closed registry/compiler fixtures. Added checked `capabilities-host.ts` factories for UI projection, storage inspection/protection, installation actions, controller construction and active-session badge wiring; removed the corresponding duplicate/untyped host logic. Manifest, registry and explicit TS admission now use the TS implementations.
+- **Behavior / fixes:** preserved deferred controller access, storage persistence request/retry, wake-lock lifecycle/reacquisition, install guidance, badge best effort and unsupported fallbacks. Malformed install-prompt events without a callable `prompt()` are now ignored instead of being retained as usable prompts. Rejected persistence, related-app, badge, wake-lock and install-prompt APIs remain contained and diagnosed.
+- **Objective reconciliation:** baseline→`0271ea4` changes only the capability module/adapter, owned host composition, typed contracts/fixture, manifest/registry admission and capability regression test. Git recognizes `native-capabilities.js`→`.ts` as a rename; old host rendering/storage-estimate implementations no longer remain in `main.js`.
+- **Pinned toolchain / hosted QA PASS:** Repository checks run **1357** at `0271ea4` used Node 26.12.1/npm 12.2.1. `npm run check:types` PASS — 146 checked files, zero unchecked TS; typed lint 0 warnings/errors. Targeted repository safety contracts PASS; source build, `verify-build` and generated-syntax verification PASS.
+- **Runtime QA PASS:** capability-specific runtime harness covered scheduler postTask/yield/fallback/cancellation/budget, storage success/denial, wake lifecycle, install positive/malformed/rejected paths, badge best effort, rejected APIs and checked UI projection. Supplemental local runtime was Node 22 and is not substituted for the pinned compiler/build evidence.
+- **Browser QA PASS / limit:** Chromium 144 capability harness passed actual DOM projection, supported/unsupported storage/wake presentation, persistence success/rejection, malformed install handling and projection de-duplication with no browser exceptions. The named full-app `browser/app/core-flow` and `browser/ui/interactions` journeys could not be run here because this runtime had no materialized repository/dist and localhost navigation is administrator-blocked; no claim is made for those two journeys or physical-device install/wake APIs. Phase 7 retains full browser/device certification.
+- **Failures repaired:** initial run 1355 exposed one unsafe-any lint narrowing and was fixed without weakening validation. Run 1356 then passed strict types/lint but an unrelated existing backup checkpoint stress assertion missed its timing target; no out-of-scope backup change was made. Current-head run 1357 passed the same repository checks.
+- **Next:** P5.2-profiles. P5.2 does not close until profiles, data bootstrap and startup/integration are verified.
 
 ## Recording subsequent passes
 
