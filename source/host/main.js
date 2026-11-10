@@ -746,7 +746,7 @@ const AppActivation=StartupHostModule.createActivation(Object.freeze({
 }));
 const APP_ACTIVATION_KINDS=AppActivation.kinds;
 let StartupLifecycle;
-/* APPLICATION WRITE AUTHORITY · 4. CROSS-TAB OWNERSHIP *//* APPLICATION WRITE AUTHORITY · 4. CROSS-TAB OWNERSHIP */
+/* APPLICATION WRITE AUTHORITY · 4. CROSS-TAB OWNERSHIP */
 const OWNERSHIP_HEARTBEAT_MS=4000;
 const OWNERSHIP_STALE_MS=15000;
 const OWNERSHIP_PROBE_MS=700;
@@ -813,7 +813,7 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze({
     ]);}
   })
 }));
-const appCanMutate=()=>AppOwnership.canMutate()const appCanMutate=()=>AppOwnership.canMutate()&&!(AppMutationCoordinator&&AppMutationCoordinator.writesBlocked());
+const appCanMutate=()=>AppOwnership.canMutate()&&!(AppMutationCoordinator&&AppMutationCoordinator.writesBlocked());
 const transitionAppOwnership=next=>next===OWNERSHIP_STATES.RELEASING
   ?AppOwnership.transitionReleasing():AppOwnership.state;
 AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze({
