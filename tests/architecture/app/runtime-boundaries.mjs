@@ -82,13 +82,19 @@ console.log(JSON.stringify({status:'PASS',boundary:'practice-pacer',pureModel:tr
 
 { // plan-authoring-runtime-boundary
 const plan=readScript('source/core/plan.ts');
+const planHost=readScript('source/core/plan-host.ts');
+const host=readHostHtml();
 for(const token of ['TimerEngine','TimerState','SessionLifecycle','AppData.activeSession','flushLiveDraft','restoreSessionState','setCurrentTask','Pomodoro','PracticePacer']){
   assert.equal(plan.includes(token),false,`Plan authoring must not absorb live runtime ownership: ${token}`);
 }
 assert.match(plan,/scheduleGateway\.apply\(lastParsed,/u,'validated Plan application must cross the scheduleGateway runtime port');
 assert.match(plan,/if\(opts\.persistDraft===false\)return apply\(\);/u,'canonical session restoration must retain its synchronous no-draft-write seam');
 assert.match(plan,/save\(\{strictDurability:true\}\)/u,'user-authored Apply/Done remains gated by strict durable draft persistence');
-console.log(JSON.stringify({status:'PASS',boundary:'plan-authoring-runtime',runtimePort:'scheduleGateway',directRuntimeOwnership:false,synchronousRestoreSeam:true},null,2));
+assert.match(host,/PlanHostModule\.createData\(/u,'PlanData composition must cross the checked Plan host boundary');
+assert.doesNotMatch(host,/const PlanData=\(\(\)=>\{/u,'the legacy untyped PlanData implementation must not return to the host');
+assert.match(planHost,/repositories\.plans\.replace\(snapshot\)/u,'browser-data-clear recovery restores Plan draft and library through one canonical replacement');
+assert.doesNotMatch(planHost,/TimerEngine|TimerState|SessionLifecycle|activeSession|flushLiveDraft|setCurrentTask|Pomodoro|PracticePacer/u,'Plan host persistence/default composition must not absorb P5.4 live-runtime ownership');
+console.log(JSON.stringify({status:'PASS',boundary:'plan-authoring-runtime',runtimePort:'scheduleGateway',directRuntimeOwnership:false,synchronousRestoreSeam:true,checkedPlanHost:true,atomicResetRecovery:true},null,2));
 }
 
 { // presentation-surface-boundary

@@ -70,6 +70,7 @@ const BackupRecoveryHostModule=INTERNAL_MODULES.load('backup-recovery-host',1,'s
 const PwaLifecycleModule=INTERNAL_MODULES.load('pwa-lifecycle',1,'study-director.pwa-lifecycle-module',1);
 const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'study-director.native-capabilities-module',1);
 const CapabilitiesHostModule=INTERNAL_MODULES.load('capabilities-host',1,'study-director.capabilities-host-module',1);
+const PlanHostModule=INTERNAL_MODULES.load('plan-host',1,'study-director.plan-host-module',1);
 const PlanModule=INTERNAL_MODULES.load('plan',1,'study-director.plan-module',1);
 const StartupLifecycleModule=INTERNAL_MODULES.load('startup-lifecycle',1,'study-director.startup-lifecycle',1);
 const StartupHostModule=INTERNAL_MODULES.load('startup-host',1,'study-director.startup-host-module',1);
@@ -4399,13 +4400,7 @@ function readUserDefaults(){
   if(studentName===FACTORY_DEFAULTS.studentName&&!practiceTargetMs&&practiceCueMode===PRACTICE_CUE_DEFAULT)return null;
   return {studentName,practiceTargetMs:practiceTargetMs||null,practiceCueMode};
 }
-function getActiveDefaults(){
-  const saved=readUserDefaults();
-  return saved ? {
-    studentName:saved.studentName||FACTORY_DEFAULTS.studentName,
-    scheduleText:PlanData.defaultSchedule()??(saved.scheduleText||FACTORY_DEFAULTS.scheduleText)
-  } : {...FACTORY_DEFAULTS,scheduleText:PlanData.defaultSchedule()??FACTORY_DEFAULTS.scheduleText};
-}
+function getActiveDefaults(){return PlanData.activeDefaults();}
 function applyStudentName(name){
   const clean=normalizeStudentName(name);
   document.querySelectorAll('[data-student-name]').forEach(el=>{
@@ -6212,128 +6207,81 @@ richTextCloseField=field=>RichTextRuntime.closeField(field);
 richTextSyncField=field=>RichTextRuntime.syncField(field);
 richTextSyncAll=()=>RichTextRuntime.syncAll(document);
 richTextReconcileExternal=(field,canonical,revision)=>RichTextRuntime.reconcileExternal(field,canonical,revision);
-/* PERSONAL PLAN DOCUMENTS · IndexedDB persistence and portable preference adapter */
-const PlanData=(()=>{
-  let state={draft:null,savedPlans:[],defaultId:null},persistedDraft=null,ready=false,chain=Promise.resolve(),failure=null,libraryBytes=0;
-  const measureLibrary=()=>{libraryBytes=new TextEncoder().encode(JSON.stringify({savedPlans:state.savedPlans,defaultId:state.defaultId})).length;};
-  const copy=value=>structuredClone(value);
-  function enqueue(work,{ownershipToken=null,allowHydrating=false}={}){
-    const token=ownershipToken||AppOwnership.issueWriteToken('save Plan data',{allowHydrating});
-    const next=chain.catch(()=>{}).then(()=>{AppOwnership.assertWriteToken(token,'save Plan data');return work(token);});
-    chain=next;next.catch(error=>{failure=error;markStorageHealthError('planDraft.write','Plan data was not saved. Keep this tab open and copy the draft before closing.');});return next;
-  }
-  async function hydrate(){
-    await chain.catch(()=>{});
-    state=PersonalDataCodec.plans(await AppData.planData.read());persistedDraft=state.draft;measureLibrary();ready=true;
-    return true;
-  }
-  function writeDraft(value,options={}){
-    if(!ready)return Promise.reject(new Error('Plan storage is still loading.'));
-    if(value!==null&&(typeof value!=='string'||value.length>APP_LIMITS.maxScheduleChars))throw new RangeError('Plan draft is too long.');
-    if(libraryBytes+new TextEncoder().encode(JSON.stringify(value)).length+9>PersonalDataCodec.maxBytes)throw new RangeError('Plans and draft exceed the 1 MiB allowance.');
-    state={...state,draft:value};
-    return enqueue(async token=>{
-      if(libraryBytes+new TextEncoder().encode(JSON.stringify(value)).length+9>PersonalDataCodec.maxBytes)throw new RangeError('Plans and draft exceed the 1 MiB allowance.');
-      // The cache only proves what this page wrote; a forced write (or a browser
-      // data clear, which resets the cache) must reach storage again.
-      if(persistedDraft===value&&options.force!==true&&options.strictDurability!==true){failure=null;return true;}
-      await AppData.planData.writeDraft(value,{ownershipToken:token,allowHydrating:!!options.allowHydrating,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true});persistedDraft=value;failure=null;return true;
-    },options);
-  }
-  // Browser data was cleared while this page stayed open. Write back the draft
-  // and saved plans this page still holds instead of trusting the old cache.
-  async function rewriteAfterStorageReset(){
-    persistedDraft=undefined;
-    if(!ready)return false;
-    const library={savedPlans:state.savedPlans,defaultId:state.defaultId};
-    await enqueue(async token=>{await AppData.planData.writeLibrary(library,{ownershipToken:token,allowHydrating:false});failure=null;return true;});
-    if(state.draft!==null)await writeDraft(state.draft,{force:true});
-    return true;
-  }
-  async function writeLibrary(value,options={}){
-    if(!ready)throw new Error('Plan storage is still loading.');
-    const clean=PersonalDataCodec.plans({...state,...value});
-    return enqueue(async token=>{PersonalDataCodec.plans({...clean,draft:state.draft});await AppData.planData.writeLibrary({savedPlans:clean.savedPlans,defaultId:clean.defaultId},{ownershipToken:token,allowHydrating:!!options.allowHydrating});state={...state,savedPlans:clean.savedPlans,defaultId:clean.defaultId};measureLibrary();failure=null;return true;},options);
-  }
-  async function settled(options={}){await chain;await flushProtectedPreferences(options);if(failure)throw failure;return true;}
-  async function preferences(){
-    const canonical=await AppData.personalPreferences.read()||protectedPreferencesState;
-    return PersonalDataCodec.preferences(canonical);
-  }
-  async function exportData({flush=true,backupCapture=false}={}){
-    if(flush&&appCanMutate()){if(await PlanDraftEditor.flush({backupCapture})===false)throw new Error('Save the current Plan draft before exporting.');await settled({backupCapture});}
-    return PersonalDataCodec.normalize({version:2,plans:await AppData.planData.read(),preferences:await preferences()});
-  }
-  async function importData(value){
-    const clean=PersonalDataCodec.normalize(value);
-    // A failed local edit cannot be overwritten by an import. The canonical
-    // Plans and Preferences commit together before the runtime adopts them.
-    await settled();
-    await enqueue(async()=>{
-      const portable=await AppData.planData.replacePortable(clean);
-      state=clean.plans;persistedDraft=clean.plans.draft;measureLibrary();failure=null;
-      acceptProtectedPreferences(portable);
-      refreshAppearanceMirrors(portable);
-      applyPortablePreferencesToRuntime(portable);
-      return true;
-    });
-    const input=document.getElementById('plan-input'),draftText=String(clean.plans.draft??getActiveDefaults().scheduleText);if(input)input.value=draftText;
-    // An imported draft never applies a session or enters edit mode.
-    PlanDraftEditor.preview({silent:true,enterDraft:false});PlanRuntime.savedPlans.render();
-  }
-  async function verify(value){
-    await settled();const actual={version:2,plans:await AppData.planData.read(),preferences:await preferences()};
-    if(JSON.stringify(PersonalDataCodec.normalize(actual))!==JSON.stringify(PersonalDataCodec.normalize(value)))throw new Error('Post-restore verification failed for plans or personal settings.');return true;
-  }
-  return Object.freeze({hydrate,writeDraft,writeLibrary,rewriteAfterStorageReset,settled,exportData,importData,verify,readDraft:()=>state.draft,library:()=>copy({savedPlans:state.savedPlans,defaultId:state.defaultId}),defaultSchedule:()=>state.savedPlans.find(p=>p.id===state.defaultId)?.scheduleText??null,ready:()=>ready});
-})();
+/* PERSONAL PLAN DOCUMENTS · checked host persistence/default adapter */
+const PlanData=PlanHostModule.createData(Object.freeze({
+  codec:PersonalDataCodec,
+  repositories:Object.freeze({
+    plans:Object.freeze({
+      read:()=>AppData.planData.read(),
+      replace:value=>AppData.planData.replace(value),
+      replacePortable:value=>AppData.planData.replacePortable(value),
+      writeDraft:(value,options)=>AppData.planData.writeDraft(value,options),
+      writeLibrary:(value,options)=>AppData.planData.writeLibrary(value,options)
+    }),
+    preferences:Object.freeze({read:()=>AppData.personalPreferences.read()})
+  }),
+  ownership:Object.freeze({
+    issueWriteToken:(reason,options)=>AppOwnership.issueWriteToken(reason,options),
+    assertWriteToken:(token,reason)=>AppOwnership.assertWriteToken(token,reason)
+  }),
+  storage:Object.freeze({markError:(surface,message)=>markStorageHealthError(surface,message)}),
+  preferences:Object.freeze({
+    fallback:()=>protectedPreferencesState,
+    flush:options=>flushProtectedPreferences(options),
+    accept:value=>acceptProtectedPreferences(value),
+    refreshAppearance:value=>refreshAppearanceMirrors(value),
+    applyRuntime:value=>applyPortablePreferencesToRuntime(value),
+    studentName:()=>readUserDefaults()?.studentName||null
+  }),
+  runtime:Object.freeze({
+    canMutate:()=>appCanMutate(),
+    flushDraft:options=>PlanDraftEditor.flush(options),
+    replaceDraftText:value=>{const input=document.getElementById('plan-input');if(input)input.value=value;},
+    previewDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
+    renderSavedPlans:()=>PlanRuntime.savedPlans.render()
+  }),
+  defaults:Object.freeze({factory:Object.freeze({studentName:FACTORY_DEFAULTS.studentName,scheduleText:FACTORY_DEFAULTS.scheduleText})})
+}));
 
 /* PLAN MODULE COMPOSITION */
-const PlanRuntime=PlanModule.createController(Object.freeze({ports:Object.freeze({
-  configuration:Object.freeze({limits:Object.freeze({
-    maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars,
-    maxDurationMinutes:APP_LIMITS.maxDurationMinutes,
-    maxTaskNameChars:APP_LIMITS.maxTaskNameChars,
-    maxAreaNameChars:APP_LIMITS.maxAreaNameChars,
-    maxUnitChars:APP_LIMITS.maxUnitChars
-  })}),
-  persistence:Object.freeze({
-    lastError:()=>AppData.lastStorageError,
-    readDraft:()=>PlanData.readDraft(),
-    readLibrary:()=>PlanData.library(),
-    writeLibrary:value=>PlanData.writeLibrary(value),
-    writeDraft:(value,options)=>PlanData.writeDraft(value,options),
-    reportDraftResult:(ok,error)=>{
-      if(ok)markStorageHealthOk('planDraft.write');
-      else markStorageHealthError('planDraft.write',`Plan draft was not saved: ${error&&error.message?error.message:error||'browser storage is unavailable'}. Keep this tab open and copy the draft before closing.`);
-    }
-  }),
-  defaults:Object.freeze({
-    active:getActiveDefaults,
-    applyStudentName,
-    factory:Object.freeze({studentName:FACTORY_DEFAULTS.studentName,scheduleText:FACTORY_DEFAULTS.scheduleText})
-  }),
-  domain:Object.freeze({
-    clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,
-    makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,
-    scheduleToken,scheduleWarningsMessage,taskAreaKey:noteKeyForTask,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey
-  }),
-  parser:Object.freeze({isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}),
-  clock:Object.freeze({clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}),
-  view:Object.freeze({document,on,textEl,updateRealTimeAwareness,window}),
-  notifications:NoticeCoordinator.presentation('plan'),
-  scheduleGateway:PlanScheduleGateway,
-  ownership:Object.freeze({canMutate:()=>appCanMutate(),requirePrimary:(event,reason)=>!AppMutationCoordinator.blocksUi()&&requirePrimaryTab(event,reason)}),
-  interactions:Object.freeze({confirm:options=>Interactions.confirm(options),input:options=>Interactions.input(options)}),
-  overlays:Object.freeze({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
-  environment:Object.freeze({
-    clearTimeout:id=>clearTimeout(id),
-    setTimeout:(callback,delay)=>setTimeout(callback,delay)
+const PlanRuntime=PlanHostModule.createController(Object.freeze({
+  module:PlanModule,
+  data:PlanData,
+  ports:Object.freeze({
+    configuration:Object.freeze({limits:Object.freeze({
+      maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars,
+      maxDurationMinutes:APP_LIMITS.maxDurationMinutes,
+      maxTaskNameChars:APP_LIMITS.maxTaskNameChars,
+      maxAreaNameChars:APP_LIMITS.maxAreaNameChars,
+      maxUnitChars:APP_LIMITS.maxUnitChars
+    })}),
+    persistence:Object.freeze({
+      lastError:()=>AppData.lastStorageError,
+      reportDraftResult:(ok,error)=>{
+        if(ok)markStorageHealthOk('planDraft.write');
+        else markStorageHealthError('planDraft.write',`Plan draft was not saved: ${error&&error.message?error.message:error||'browser storage is unavailable'}. Keep this tab open and copy the draft before closing.`);
+      }
+    }),
+    defaults:Object.freeze({applyStudentName}),
+    domain:Object.freeze({
+      clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,
+      makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,
+      scheduleToken,scheduleWarningsMessage,taskAreaKey:noteKeyForTask,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey
+    }),
+    parser:Object.freeze({isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}),
+    clock:Object.freeze({clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}),
+    view:Object.freeze({document,on,textEl,updateRealTimeAwareness,window}),
+    notifications:NoticeCoordinator.presentation('plan'),
+    scheduleGateway:PlanScheduleGateway,
+    ownership:Object.freeze({canMutate:()=>appCanMutate(),requirePrimary:(event,reason)=>!AppMutationCoordinator.blocksUi()&&requirePrimaryTab(event,reason)}),
+    interactions:Object.freeze({confirm:options=>Interactions.confirm(options),input:options=>Interactions.input(options)}),
+    overlays:Object.freeze({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
+    environment:Object.freeze({
+      clearTimeout:id=>clearTimeout(id),
+      setTimeout:(callback,delay)=>setTimeout(callback,delay)
+    })
   })
-})}));
-if(!Object.isFrozen(PlanRuntime)||PlanRuntime.format!=='study-director.plan-controller'||PlanRuntime.contractVersion!==1){
-  throw new Error('Study Director Plan controller is unavailable or incompatible.');
-}
+}));
 const {
   draft:PlanDraftEditor, render:renderSched, apply:applySchedule, setStatus:setPlanStatus,
   loadDefault:loadDefaultPlan, getDraft:getPlanDraftText,

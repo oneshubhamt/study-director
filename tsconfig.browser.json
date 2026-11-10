@@ -172,8 +172,11 @@
     "source/core/startup-host.ts",
     "types/startup-host.ts",
     "types/checks/startup.ts",
+    "source/core/plan-host.ts",
     "source/core/plan.ts",
+    "types/plan-host.ts",
     "types/plan.ts",
+    "types/checks/plan-host.ts",
     "types/checks/plan.ts"
   ]
 }

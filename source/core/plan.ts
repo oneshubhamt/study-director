@@ -150,7 +150,10 @@ const SavedPlans=(()=>{
     busy=true;render(planId);
     operationNotice=notifications.begin({id:'saved-plan-operation',kind:action,surfaceId:'saved-plan-status',title:'Saved plans',message:'',announce:false});
     try{
-      const library=persistence.readLibrary(),id=library.savedPlans.some(plan=>plan.id===planId)?planId:(library.savedPlans.some(plan=>plan.id===selectedId)?selectedId:library.savedPlans[0]?.id||''),selected=library.savedPlans.find(plan=>plan.id===id),draft=getPlanDraftText(),now=new Date().toISOString();
+      let library=persistence.readLibrary();
+      const id=library.savedPlans.some(plan=>plan.id===planId)?planId:(library.savedPlans.some(plan=>plan.id===selectedId)?selectedId:library.savedPlans[0]?.id||'');
+      let selected=library.savedPlans.find(plan=>plan.id===id);
+      const draft=getPlanDraftText(),now=new Date().toISOString();
       selectedId=id;
       if(action==='load'){if(selected){const result=await loadScheduleIntoDraft(selected.scheduleText,{label:selected.label,allowIncomplete:true});status(result.ok?'Working copy loaded into Draft.':result.error==='cancelled'?'Current draft kept.':'Could not load the plan.',result.ok);}return true;}
       if(action==='save'){
@@ -158,17 +161,23 @@ const SavedPlans=(()=>{
         if(!name)throw new Error('Enter a name for the plan.');
         if(!draft.trim())throw new Error('Add something to the draft first.');
         if(library.savedPlans.length>=100)throw new Error('You have 100 saved plans. Delete one before saving another.');
-        const next={id:'plan-'+crypto.randomUUID(),label:name,scheduleText:draft,createdAt:now,updatedAt:now};library.savedPlans.push(next);await persistence.writeLibrary(library);selectedId=next.id;status('Plan saved.');return true;
+        const next={id:'plan-'+crypto.randomUUID(),label:name,scheduleText:draft,createdAt:now,updatedAt:now};
+        library.savedPlans.push(next);await persistence.writeLibrary(library);selectedId=next.id;status('Plan saved.');return true;
       }
       if(!selected)throw new Error('Choose a saved plan first.');
       if(action==='rename'){
         const answer=await requestInput({title:'Rename saved plan',inputLabel:'Plan name',defaultValue:selected.label,maxLength:80,required:true,confirmLabel:'Rename',cancelLabel:'Cancel'});
         if(!answer)return false;if(!ownership.requirePrimary(null,'rename a saved plan'))return false;
+        library=persistence.readLibrary();selected=library.savedPlans.find(plan=>plan.id===id);
+        if(!selected)throw new Error('That saved plan changed while the rename dialog was open. Review the list and try again.');
         const name=String(answer.value||'').trim();if(!name)throw new Error('Enter a name for the plan.');selected.label=name;selected.updatedAt=now;
       }else if(action==='delete'||action==='update'){
-        const yes=await confirm({title:action==='delete'?'Delete saved plan?':'Update saved plan?',message:action==='delete'?`Delete “${selected.label}”? Your current draft and live plan will stay available.`:`Replace “${selected.label}” with the current draft?`,confirmLabel:action==='delete'?'Delete plan':'Update plan',cancelLabel:'Cancel'});
+        if(action==='update'&&!draft.trim())throw new Error('Add something to the draft first.');
+        const yes=await confirm({title:action==='delete'?'Delete saved plan?':'Update saved plan?',message:action==='delete'?'Delete “'+selected.label+'”? Your current draft and live plan will stay available.':'Replace “'+selected.label+'” with the current draft?',confirmLabel:action==='delete'?'Delete plan':'Update plan',cancelLabel:'Cancel'});
         if(!yes)return false;if(!ownership.requirePrimary(null,'change saved plans'))return false;
         if(action==='update'&&getPlanDraftText()!==draft)throw new Error('The draft changed while confirming. Review it and try again.');
+        library=persistence.readLibrary();selected=library.savedPlans.find(plan=>plan.id===id);
+        if(!selected)throw new Error('That saved plan changed while the confirmation was open. Review the list and try again.');
         if(action==='update'){selected.scheduleText=draft;selected.updatedAt=now;}
         else{library.savedPlans=library.savedPlans.filter(plan=>plan.id!==id);if(library.defaultId===id)library.defaultId=null;selectedId='';}
       }else if(action==='default')library.defaultId=selected.id;

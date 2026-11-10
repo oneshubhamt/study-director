@@ -57,7 +57,7 @@ document.add('pane-plan');
 document.add('sched-list');
 const liveTasks=[];
 
-let library={savedPlans:[],defaultId:null},renameAnswer={value:'Renamed plan'},timerCallback=null,canMutate=true,draftWriteCalls=[];
+let library={savedPlans:[],defaultId:null},renameAnswer={value:'Renamed plan'},renameMutation=null,timerCallback=null,canMutate=true,draftWriteCalls=[];
 const freeze=Object.freeze,fn=()=>false;
 let notificationTime=0,notificationTimer=null;
 const {coordinator,port:notifications}=createNotifications('plan',{now:()=>notificationTime,setTimeout:callback=>{notificationTimer=callback;return 1;},clearTimeout:()=>{notificationTimer=null;}});
@@ -68,12 +68,12 @@ const ports=freeze({
   persistence:freeze({lastError:()=>null,readDraft:()=>draft.value,readLibrary:()=>structuredClone(library),writeLibrary:async value=>{library=structuredClone(value);return true;},writeDraft:async(value,options={})=>{draftWriteCalls.push({value,options:{...options}});return true;},reportDraftResult:()=>{}}),
   defaults:freeze({active:()=>freeze({studentName:'QA',scheduleText:''}),applyStudentName:()=>{},factory:freeze({studentName:'QA',scheduleText:''})}),
   domain:freeze(Object.fromEntries(['clampText','fmtDur','fmtS','hasOngoingTaskNotes','isFixedBlock','isSupportBlock','isTrackableBlock','isWorkBlock','makeScheduleRow','normalizeScheduleKind','normalizeScheduleTarget','positiveMinutes','scheduleFingerprintForRows','scheduleToken','scheduleWarningsMessage','taskAreaKey','taskAreaValue','taskMeasureValue','taskTargetValue','noteTextForKey'].map(key=>[key,key==='clampText'?(v=>String(v??'')):fn]))),
-  parser:freeze({isCanonicalScheduleText:()=>true,parseScheduleDraftText:()=>({ok:true,rows:[],warnings:[]}),scheduleTextFromRows:()=>''}),
+  parser:freeze({isCanonicalScheduleText:()=>true,parseScheduleDraftText:()=>({ok:true,kind:'valid',parsed:[],errors:[],warnings:[]}),scheduleTextFromRows:()=>''}),
   clock:freeze(Object.fromEntries(['clockHM','clockMinuteToStudyMinute','getMinuteOfDay','isValidHHMM','normalizeHHMM','studyMinuteToHHMM','t2m','timeLabelFromIso'].map(key=>[key,fn]))),
   view:freeze({document,on:()=>{},textEl:()=>{},updateRealTimeAwareness:()=>{},window:{}}),
   scheduleGateway:freeze({act:fn,apply:fn,breakState:fn,captureMigration:fn,clearSafety:fn,flush:fn,hasLiveState:fn,markRender:fn,read:()=>({tasks:liveTasks,currentIndex:0,renderDirty:false}),reconcile:fn,renameAreas:fn,row:()=>({}),timeline:()=>({rows:[],realtime:{scheduledIdx:null,nowEff:0,first:0}})}),
   ownership:freeze({canMutate:()=>canMutate,requirePrimary:()=>canMutate}),
-  interactions:freeze({confirm:async()=>true,input:async()=>renameAnswer}),
+  interactions:freeze({confirm:async()=>true,input:async()=>{renameMutation?.();renameMutation=null;return renameAnswer;}}),
   overlays:freeze({createAnchoredPopover:popup=>{popup.hidden=true;let trigger=null;return {show:target=>{trigger=target;target.popoverTargetElement=popup;popup.hidden=false;},hide:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;},destroy:()=>{popup.hidden=true;if(trigger)trigger.popoverTargetElement=null;trigger=null;}};}}),
   environment:freeze({clearTimeout:()=>{timerCallback=null;},setTimeout:callback=>{timerCallback=callback;return 1;}})
 });
@@ -129,9 +129,25 @@ assert.equal(library.defaultId,id);
 assert.equal(list.children[0].querySelector('.saved-plan-default').textContent,'Default');
 assert.equal(list.children[0].querySelectorAll('[data-saved-plan]').some(button=>button.dataset.savedPlan==='default'),false);
 
+const savedText=library.savedPlans[0].scheduleText;
+draft.value='Temporary working copy';
+assert.equal(await runtime.savedPlans.act('load',id),true);
+assert.equal(draft.value,savedText,'Load restores the saved schedule into the independent working draft');
+
+draft.value='08:00 | 45 | Updated revision | work | Biology | pages | 12';
+assert.equal(await runtime.savedPlans.act('update',id),true);
+assert.equal(library.savedPlans[0].scheduleText,draft.value,'Update replaces the selected saved-plan schedule');
+const updatedText=library.savedPlans[0].scheduleText;
+draft.value='   ';
+assert.equal(await runtime.savedPlans.act('update',id),false,'an empty draft cannot erase a saved plan');
+assert.equal(library.savedPlans[0].scheduleText,updatedText,'rejected empty update leaves canonical saved-plan content unchanged');
+draft.value=updatedText;
+
 name.value='New-plan field must stay untouched';
+renameMutation=()=>{library.savedPlans.push({id:'plan-concurrent',label:'Concurrent plan',scheduleText:'Concurrent',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});};
 assert.equal(await runtime.savedPlans.act('rename',id),true);
-assert.equal(library.savedPlans[0].label,'Renamed plan');
+assert.equal(library.savedPlans.find(plan=>plan.id===id).label,'Renamed plan');
+assert.ok(library.savedPlans.some(plan=>plan.id==='plan-concurrent'),'rename re-reads the library after its dialog and preserves a completed concurrent library change');
 assert.equal(name.value,'New-plan field must stay untouched');
 
 assert.equal(timerCallback,null,'saved-plan feedback must not use a controller-owned timer');
@@ -140,7 +156,8 @@ notificationTime+=2601;notificationTimer();
 assert.equal(status.textContent,'','coordinator expires transient inline feedback');
 
 assert.equal(await runtime.savedPlans.act('delete',id),true);
-assert.equal(library.savedPlans.length,0);
+assert.equal(library.savedPlans.length,1);
+assert.equal(library.savedPlans[0].id,'plan-concurrent');
 assert.equal(library.defaultId,null);
 
 // BF-1R2: startup preview and Cancel do not implicitly open editing or
@@ -160,4 +177,4 @@ assert.equal(draftWriteCalls.length,writesBeforeCancel+1,'Cancel commits the ind
 assert.equal(draftWriteCalls.at(-1).value,preservedText,'Cancel saves the independent working draft rather than copying live Plan rows');
 assert.equal(draftWriteCalls.at(-1).options.strictDurability,true,'Cancel waits for a strict IndexedDB Plan draft write');
 
-console.log(JSON.stringify({status:'PASS',suite:'saved-plans-logic',checks:['empty state','save row rendering','ellipsis menu survives native popover default action and ownership heartbeat sync','default badge and redundant action omission','rename dialog contract keeps new-plan field independent','coordinator-owned success expiry','delete cleans default reference','backup flush is dirty-only and backupCapture-tagged']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'saved-plans-logic',checks:['empty state','save/load/update row behavior','empty update rejection','ellipsis menu survives native popover default action and ownership heartbeat sync','default badge and redundant action omission','rename preserves concurrent library change','rename dialog contract keeps new-plan field independent','coordinator-owned success expiry','delete cleans default reference without deleting unrelated plans','backup flush is dirty-only and backupCapture-tagged']},null,2));
