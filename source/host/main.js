@@ -118,7 +118,7 @@ const {
   richText:RICH_TEXT_BOOT_API,
   attachments:AttachmentsModule
 }));
-const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
+const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
   pluginApi:1,
   tabRegistry:1,
   planDraft:1,
@@ -134,7 +134,7 @@ const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({const STUDY_DIRECTOR_CAPABILITI
   installation:1,
   workspaceHistory:1
 });
-// All externally keyed dictionary data flows through this helper.// All externally keyed dictionary data flows through this helper. It prevents
+// All externally keyed dictionary data flows through this helper. It prevents
 // prototype-key collisions and keeps own-property access consistent.
 const {KeyedRecord,textEl,on,emptyMsg,setProgressSummary,setElementText,setElementValue,setElementClass,setElementHidden,setElementDisabled,setElementAttribute,setElementStyle,setTextSafe,cachedElements,clampText,clampArray,wipeObject,boundedInt,boundedNumber,safeBoolean,finiteNumber,optionalBoundedNumber,optionalText,sameDataValue}=FoundationHostModule.createPrimitives({document,APP_LIMITS,CompletionModel:{fromUnits:(done,total)=>CompletionModel.fromUnits(done,total)}});
 // Data access is instantiated after the codecs through the private repository module.
@@ -2869,7 +2869,7 @@ const {RepositoryAppMeta,JournalAppMeta,HostAppMeta,ExportsAppMeta,DeviceFolderA
     })
   })
 }));
-const ReconciliationBaselineStore=const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze({
+const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze({
   codec:ReconciliationBaselineCodec,meta:HostAppMeta,
   families:Object.freeze({header:'reconciliationBase',notes:'reconciliationBaseNotePrefix',days:'reconciliationBaseDayPrefix'})
 }));
@@ -3242,12 +3242,9 @@ const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryCompo
     })
   })
 }));
-// Saves made before the startup repair still continue the change clock// Saves made before the startup repair still continue the change clock from
+// Saves made before the startup repair still continue the change clock from
 // the last recorded save, even if the system clock went back across a reload.
 try{AppData.mutationEpoch.seedChangeClock(readStorageHealth().lastLocalSaveAt);}catch(error){AppDiagnostics.capture('backup.change-clock-seed',error,'warn');}
-if(!Object.isFrozen(AppData)||AppData.format!=='study-director.app-data'||AppData.contractVersion!==1){
-  throw new Error('Study Director AppData facade is unavailable or incompatible.');
-}
 CapabilityBadge=CapabilitiesHostModule.createBadge(Object.freeze({
   controller:()=>NativeCapabilities,
   activeSession:()=>AppData.activeSession,
