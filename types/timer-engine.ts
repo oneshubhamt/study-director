@@ -9,7 +9,7 @@ export type LivePauseMeta={startedAt:string;endedAt:string;type:string;plannedSe
 export type LiveActualSession={startedAt?:string|null;endedAt?:string|null;durationSec?:number;activeSeconds?:number;pausedSeconds?:number;pauseCount?:number;pauseEvents?:PauseEvent[]};
 export type LiveActualRecord={idx?:number;taskId?:string;firstStartedAt?:string|null;lastStartedAt?:string|null;lastEndedAt?:string|null;activeSeconds?:number;pausedSeconds?:number;pauseCount?:number;status?:string;sessionCount?:number;sessions?:LiveActualSession[];pauseEvents?:PauseEvent[]};
 export type ActualRecordSnapshot={idx:number;taskId:string;firstStartedAt:string|null;lastStartedAt:string|null;lastEndedAt:string|null;activeSeconds:number;pausedSeconds:number;pauseCount:number;status:string;sessionCount?:number;sessions:{startedAt:string|null;durationSec:number;endedAt:string|null;activeSeconds:number;pausedSeconds:number;pauseCount:number}[];pauseEvents:PauseEvent[]};
-export interface TaskSessionFields{actualTime:number;actualClock:ClockRecord;actualRecords:LiveActualRecord;notes:{done?:number;total?:number}}
+export interface TaskSessionFields{completion:number;completionSource:CompletionSource;actualTime:number;actualClock:ClockRecord;actualRecords:LiveActualRecord;notes:{done?:number;total?:number}}
 export interface TaskSessionPort{
  indexSnapshot<K extends keyof TaskSessionFields>(field:K):Record<string,TaskSessionFields[K]>;
  getField<K extends keyof TaskSessionFields>(index:number,field:K):TaskSessionFields[K]|undefined;
