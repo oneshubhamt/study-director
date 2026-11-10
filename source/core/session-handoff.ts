@@ -122,7 +122,9 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
           session.host.cancelPendingLiveDraftSave();
           claimFreeze=freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0,localVerified:false,snapshot,evidence});
         }
-        if(!claimFreeze.localVerified){
+        const activeFreeze=claimFreeze;
+        if(!activeFreeze)return true;
+        if(!activeFreeze.localVerified){
           if(!await verifyFrozenClaim())return true;
           if(claim.newer)presentation.notifyNewerClaim();
           else presentation.setStatus('Today’s session moved to another device. Syncing its latest state…');
