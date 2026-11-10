@@ -430,6 +430,7 @@ function handleInactiveGapSplitKey(e:KeyboardEvent){
   }
 }
 function classifyInactiveGap(mode:'focus'|'break'|'split'|'ignore',focusMs:number|null=null){
+  if(!appCanMutate())return false;
   const gap=TimerState.inactiveGap;
   if(!gap)return;
   // Every choice closes the dialog first, so an accounting problem can never
@@ -553,10 +554,13 @@ function stopTimerForFixedBoundary(boundary:TimerBoundary|null,options:{away?:bo
 
 /* TIMER COUNTDOWN EXECUTION */
 function toggleDone(i:number){
+  if(!appCanMutate())return false;
   toggleDoneMarker(i);
   saveLiveDraft();requestRender('schedule','badges');
+  return true;
 }
 function jumpTo(i:number){
+  if(!appCanMutate())return false;
   if(!isTrackableBlock(TASKS[i])||isTaskResolved(i)){
     recoverySetStatus('Reopen the completed/skipped block before starting it again.',false);
     return false;
@@ -564,8 +568,7 @@ function jumpTo(i:number){
   if(tInt)clearInterval(tInt);
   recoveryCaptureActiveBeforeSwitch();
   setCurrentTask(i);
-  startCur();
-  return true;
+  return startCur()===true;
 }
 function nextTrackableIndexAfter(idx:number){return findNextIncompleteTrackableAfter(idx);}
 function updateTimerNextLabels(idx:number=TimerState.currentIndex){
@@ -584,13 +587,13 @@ function timerClockEls(){
 }
 function startCur(durationOverrideSec?:number|null,options:{cue?:string}={}){
   if(!appCanMutate())return false;
-  if(!TASKS.length){showEmpty();return;}
+  if(!TASKS.length){showEmpty();return false;}
   let nextIdx=TimerState.currentIndex;
   while(nextIdx<TASKS.length&&!isTrackableBlock(TASKS[nextIdx]))nextIdx++;
   setCurrentTask(nextIdx);
   if(TimerState.currentIndex>=TASKS.length){
     const complete=TASKS.every((task,index)=>!isTrackableBlock(task)||isTaskResolved(index));
-    showDone();if(options.cue)soundEvent(options.cue==='skip'?'skip':complete?'day-complete':'block-complete',{},true);return;
+    showDone();if(options.cue)soundEvent(options.cue==='skip'?'skip':complete?'day-complete':'block-complete',{},true);return true;
   }
   const continuing=TimerState.runtime?.startMs!=null||TASKS.some((task,index)=>isTrackableBlock(task)&&(isTaskResolved(index)||Number(TaskSessionState.getField(index,'actualTime'))>0));
   const startingCue=options.cue||(continuing?'next-block':'study-start');
@@ -618,6 +621,7 @@ function startCur(durationOverrideSec?:number|null,options:{cue?:string}={}){
   resetBreakState();
   writeLiveDraftNow();
   soundEvent(startingCue,{},true);
+  return true;
 }
 function tick(){
   const timerVisible=isExecutePaneVisible();
@@ -720,7 +724,7 @@ const TimerPresentation=(()=>{
   return Object.freeze({start,stop,status:()=>Object.freeze({active:frame!==0})});
 })();
 function beginTimerPause(type:'manual'|'pomodoro'='manual',meta:{plannedSeconds?:number;cueIssuedAt?:string|null}={}){
-  if(TimerState.mode!==TIMER_MODES.RUNNING||TimerState.paused)return false;
+  if(!appCanMutate()||TimerState.mode!==TIMER_MODES.RUNNING||TimerState.paused)return false;
   const now=nowMs();
   const breakType=type==='pomodoro'?'pomodoro':'manual';
   Pomodoro.timerEvent('clear-cue');
@@ -847,7 +851,7 @@ function setPausedUI(p:boolean){
   }
 }
 function finishTrackableBlock(skipped:boolean){
-  if(!isTrackableBlock(TASKS[TimerState.currentIndex]))return false;
+  if(!appCanMutate()||!isTrackableBlock(TASKS[TimerState.currentIndex]))return false;
   if(TimerState.paused){finalizePauseEvent();TimerState.paused=false;setPausedUI(false);}
   const finishedIdx=TimerState.currentIndex;
   recordCurrentActiveToTask(finishedIdx,skipped?'skipped':'completed');
