@@ -156,7 +156,12 @@ function createExecutionSchedule(input:Readonly<ExecutionScheduleInput>):Readonl
     return Math.max(60,Math.round((tasks[index]!.dur||1)*60));
   }
   function fixedAnchorRowsFrom(startIndex:number){
-    return plannedRows().filter(row=>row.idx>=Math.max(0,startIndex||0)&&model.isFixed(row.t)).map(row=>({...row,start:originalStartMin(row.idx),end:originalEndMin(row.idx)}));
+    const rows:ExecutionScheduleRow[]=[];
+    for(let index=Math.max(0,startIndex||0);index<tasks.length;index++){
+      const task=tasks[index]!;
+      if(model.isFixed(task))rows.push({idx:index,t:task,start:originalStartMin(index),end:originalEndMin(index),plannedStart:originalStartMin(index),plannedEnd:originalEndMin(index),adjusted:false});
+    }
+    return rows;
   }
   function avoidFixedAnchorOverlap(startMin:number,durationMin:number,anchors:readonly Pick<ExecutionScheduleRow,'start'|'end'>[]){
     let start=startMin,guard=0;
@@ -416,8 +421,10 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
       ...input.timer.reviewEvidence,
       buildRealTimeSnapshot:ExecutionSchedule.buildRealTimeSnapshot,
       exactTaskCompletionPercent:CompletionEvidence.exactTaskCompletionPercent,
+      focusCompletionForTask:CompletionEvidence.focusCompletionForTask,
       liveTaskOutcome:CompletionEvidence.liveTaskOutcome,
       resolveTaskCompletion:CompletionEvidence.resolveTaskCompletion,
+      storeResolvedCompletion:CompletionEvidence.storeResolvedCompletion,
       setTaskDoneState:CompletionEvidence.setTaskDoneState,
       setTaskSkippedState:CompletionEvidence.setTaskSkippedState
     }),
