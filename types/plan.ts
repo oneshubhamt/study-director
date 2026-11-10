@@ -10,7 +10,10 @@ export interface PlanApplyOptions{
   scheduleText?:string;projection?:PlanDraftProjection;currentEditor?:()=>boolean;forceReload?:boolean;reviewOnly?:boolean;
   persistDraft?:boolean;source?:string;studyDate?:unknown;sessionSnapshot?:unknown;lifecycleManaged?:boolean;skipNotify?:boolean;
 }
-export interface PlanApplyPreparation{handled?:boolean;result?:boolean;cancelled?:boolean;scheduleChanged?:boolean;progressMigration?:PlanMigration|null}
+export type PlanApplyPreparation=
+  | Readonly<{handled:true;result:boolean;scheduleChanged:false;progressMigration:null;cancelled?:false}>
+  | Readonly<{handled:false;cancelled:false;scheduleChanged:boolean;progressMigration:PlanMigration|null;result?:never}>
+  | Readonly<{handled?:false;cancelled:true;scheduleChanged?:boolean;progressMigration?:PlanMigration|null;result?:never}>
 export interface PlanMigrationSummary{total?:number;matched?:number;practiceTotal?:number;practiceMatched?:number}
 
 export interface PlanRow{

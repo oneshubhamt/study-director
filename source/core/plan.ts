@@ -492,7 +492,7 @@ function confirmScheduleChangeWillMigrateProgress(newRows:readonly PlanRow[],sti
     return ok?snapshot:false;
   });
 }
-function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>){
+function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>):Readonly<PlanApplyPreparation>|PromiseLike<Readonly<PlanApplyPreparation>>{
   const stillCurrent=()=>typeof opts.currentEditor!=='function'||opts.currentEditor();
   const hasApplied=TASKS.length>0;
   const scheduleChanged=hasApplied&&scheduleFingerprintForRows(parsed)!==scheduleGateway.read().fingerprint;
