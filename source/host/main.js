@@ -4709,12 +4709,12 @@ const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze({
   renderPanel:()=>renderProfilePanel(),
   recent:NotificationRecent
 }));
-const openProfilePanel=ProfilePanelActions.open;
-const closeProfilePanel=ProfilePanelActions.close;
-const installProfileDialogs=ProfilePanelActions.install;
-const startProfileRename=ProfilePanelActions.startRename;
-const finishProfileRename=ProfilePanelActions.finishRename;
-const handleProfileNameKey=ProfilePanelActions.handleNameKey;
+function openProfilePanel(){return ProfilePanelActions.open();}
+function closeProfilePanel(){return ProfilePanelActions.close();}
+function installProfileDialogs(){return ProfilePanelActions.install();}
+function startProfileRename(){return ProfilePanelActions.startRename();}
+function finishProfileRename(){return ProfilePanelActions.finishRename();}
+function handleProfileNameKey(event){return ProfilePanelActions.handleNameKey(event);}
 
 async function profileDriveAction(){
   if(BackupProviderRuntime.locationStatus('google-drive')?.connected)return BackupProviderRuntime.disconnect('google-drive');
