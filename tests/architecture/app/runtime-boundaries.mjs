@@ -49,10 +49,13 @@ assert.doesNotMatch(runtimePayload,/Date\.now\(\)/,'persisted timer runtime arit
 assert.match(runtimePayload,/DecisionClock\.nowMs\(\)/,'timer runtime captures decision time from DecisionClock');
 
 assert.match(host,/SessionHostModule\.createController\(Object\.freeze\(\{/u,'canonical Active Session composition crosses the checked session host');
+const executionComposition=section(host,'const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({','const {\n  TimerState,SessionState');
+const hostReviewPort=section(executionComposition,'reviewEvidence:Object.freeze({','}),\n    clockEnvironment');
+assert.doesNotMatch(hostReviewPort,/buildRealTimeSnapshot|exactTaskCompletionPercent|liveTaskOutcome|resolveTaskCompletion|setTaskDoneState|setTaskSkippedState/u,'execution host must not self-reference runtime exports before ExecutionRuntime is initialized');
+assert.match(sessionHost,/strictDurability:true/u,'critical local session transitions require strict repository durability');
 assert.doesNotMatch(sessionHost,/Date\.now\(\)/,'session-host decisions use injected clocks rather than ambient Date.now');
 assert.match(sessionHost,/clock\.nowMs\(\)/u,'live-draft debounce and timer snapshot cadence use the injected decision clock');
 assert.match(sessionHost,/persistence\.recoveryWorkActive\(\)/u,'timer snapshots remain quiesced while managed recovery owns the mutation lane');
-assert.match(sessionHost,/strictDurability:true/u,'critical local session transitions require strict repository durability');
 for(const token of ['claimSessionOwnership','continueSessionHere','BackupProviderRuntime','sessionHandoff']){
   assert.equal(sessionHost.includes(token),false,`P5.4B session host must not absorb P5.4C distributed ownership: ${token}`);
 }

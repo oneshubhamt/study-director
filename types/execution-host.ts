@@ -117,7 +117,7 @@ export type ExecutionPracticePorts=Omit<PracticeControllerPorts,'state'|'schedul
 };
 export type ExecutionTimerPorts=Omit<TimerPorts,'state'|'practice'|'userPreferences'|'schedule'|'reviewEvidence'>&{
   schedule:Pick<TimerPorts['schedule'],'getLatestCarryForward'|'getScheduleDerivedState'|'handleStudyDayRollover'|'isLiveTrackableTimer'|'isWorkBlock'|'scheduleFingerprint'|'studyDayRolledOver'>;
-  reviewEvidence:Pick<TimerPorts['reviewEvidence'],'applicableNotesForTask'|'buildRealTimeSnapshot'|'getReviewDate'|'updateRealTimeAwareness'|'updateTimerFocusMetrics'>;
+  reviewEvidence:Pick<TimerPorts['reviewEvidence'],'applicableNotesForTask'|'getReviewDate'|'updateRealTimeAwareness'|'updateTimerFocusMetrics'>;
   userPreferences:Pick<TimerPorts['userPreferences'],'notifications'>;
 };
 export interface ExecutionHostInput{

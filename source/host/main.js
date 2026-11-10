@@ -633,7 +633,7 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
     persistence:Object.freeze({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}),
     view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl}),
     clock:Object.freeze({nowMs:DecisionClock.nowMs}),
-    reviewEvidence:Object.freeze({applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}),
+    reviewEvidence:Object.freeze({applicableNotesForTask,getReviewDate,updateRealTimeAwareness,updateTimerFocusMetrics}),
     clockEnvironment:Object.freeze({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
     userPreferences:Object.freeze({notifications:NoticeCoordinator}),
     ownership:Object.freeze({appCanMutate:()=>appCanMutate()})
