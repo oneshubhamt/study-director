@@ -629,7 +629,7 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
     configuration:Object.freeze({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
     domain:Object.freeze({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
     schedule:Object.freeze({getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),isLiveTrackableTimer,isWorkBlock,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
-    persistence:Object.freeze({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoveryCaptureActiveBeforeSwitch,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}),
+    persistence:Object.freeze({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}),
     view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}),
     clock:Object.freeze({nowMs:DecisionClock.nowMs}),
     reviewEvidence:Object.freeze({applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}),
@@ -658,7 +658,8 @@ const {
   applyInactiveGapSplit,captureRuntimeEvidence,classifyInactiveGap,currentTimerActiveSeconds,
   handleInactiveGapSplitKey,handleOverlayFocusTrap,nowIso,pruneActualRecordAudit,restoredRuntimeRecordedSec,
   showInactiveGapSplit,syncTimerFromClock,beginTimerPause,finalizePauseEvent,getCurrentBreakSeconds,jumpTo,
-  markDone:markDoneTimer,recordCurrentActiveToTask,reopenActualSessionForTimer,setPausedUI,setTimerIdentity,skipTask:skipTaskTimer,startCur,syncTimerAfterWake,
+  markDone:markDoneTimer,recordCurrentActiveToTask,recoveryCaptureActiveBeforeSwitch,reopenActualSessionForTimer,resolveActivePauseBeforeTimerSwitch,
+  setPausedUI,setTimerIdentity,skipTask:skipTaskTimer,startCur,syncTimerAfterWake,
   toggleDone,togglePause:togglePauseTimer,updateBreakMeter,updateCD
 }=TimerEngine;
 const POMODORO_RESTORE_OVERRUN_GRACE_SEC=30*60;
@@ -1784,10 +1785,7 @@ function applyRows(rows,options={}){
     const active=!!(TimerState.paused&&TimerState.activeBreak&&TimerState.runtime&&TimerState.runtime.startMs!==null);
     if(action==='status')return active;
     if(action!=='end')throw new TypeError('Unknown Plan schedule break action.');
-    if(!active||!appCanMutate())return false;
-    finalizePauseEvent();
-    TimerState.paused=false;
-    setPausedUI(false);
+    if(!active||resolveActivePauseBeforeTimerSwitch()!==true)return false;
     writeLiveDraftNow();
     return true;
   }
@@ -5018,27 +5016,10 @@ function renderRecoveryTarget(state=null){
   if(s.scheduledTask)el.textContent='TARGET: '+shortTaskLabel(s.scheduledTask);
   else el.textContent=s.nowEff<(s.first??0)?'TARGET: BEFORE FIRST BLOCK':'TARGET: AFTER FINAL BLOCK';
 }
-function resolveActivePauseBeforeTimerSwitch(){
-  if(!TimerState.paused)return false;
-  finalizePauseEvent();
-  TimerState.paused=false;
-  setPausedUI(false);
-  updateBreakMeter();
-  return true;
-}
-function recoveryCaptureActiveBeforeSwitch(){
-  // Capture current active focus and any open pause before a recovery action restarts or switches the timer.
-  // This also runs before restarting the same block so already-studied time is not lost.
-  if(!(TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex])))return;
-  resolveActivePauseBeforeTimerSwitch();
-  const active=recordCurrentActiveToTask(TimerState.currentIndex,'partial');
-  if(active<=0)return;
-  if(TaskSessionState.getField(TimerState.currentIndex,'completion')===undefined&&!isTaskResolved(TimerState.currentIndex)){
-    const pct=focusCompletionForTask(TimerState.currentIndex,actualTimeSnapshot(),{cap:99});
-    if(pct!==null)storeResolvedCompletion(TimerState.currentIndex,{pct,source:COMPLETION_SOURCES.TIME});
-  }
-}
 function recoveryStartTimerAt(idx,seconds,actionLabel){
+  if(!appCanMutate()){
+    recoverySetStatus('Timer could not start because this tab no longer has execution control.',false);return false;
+  }
   if(idx===null||idx===undefined||!isTrackableBlock(TASKS[idx])||isTaskResolved(idx)){
     recoverySetStatus('No unfinished trackable block is available for this action.',false);return false;
   }
@@ -6086,7 +6067,7 @@ function showExecuteWaitingState(title,message){
   refreshExecuteIdleDisplay(new Date(),{title,message,force:true});
 }
 function maybeAutoStartScheduledBlock(d=new Date()){
-  if(!TASKS.some(isTrackableBlock))return false;
+  if(!appCanMutate()||!TASKS.some(isTrackableBlock))return false;
   if(studyDayRolledOver(d))return false;
   if(TimerState.mode===TIMER_MODES.SUSPENDED||TimerState.mode===TIMER_MODES.DONE)return false;
   if(isLiveTrackableTimer()||TimerState.paused)return false;
