@@ -19,8 +19,8 @@ const createModule=()=>{
     domain:freeze(['KeyedRecord','boundedInt','clampText','cleanDayRevision','fmtOver','fmtS','makeTaskId','positiveMinutes','shortTaskLabel','studyMinuteToHHMM','taskAreaValue','taskMeasureValue','taskTargetValue']),
     schedule:freeze(['adjustedEndMin','adjustedStartMin','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver']),
     persistence:freeze(['compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoverySetStatus','saveLiveDraft','saveNote','writeLiveDraftNow']),
-    view:freeze(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl','toggleDoneMarker']),
-    reviewEvidence:freeze(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','focusCompletionForTask','getReviewDate','liveTaskOutcome','resolveTaskCompletion','storeResolvedCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics']),
+    view:freeze(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl']),
+    reviewEvidence:freeze(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','focusCompletionForTask','getReviewDate','liveTaskOutcome','resolveTaskCompletion','storeResolvedCompletion','toggleDoneState','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics']),
     clock:freeze(['nowMs']),
     clockEnvironment:freeze(['cancelAnimationFrame','clearInterval','document','getComputedStyle','requestAnimationFrame','setInterval','setTimeout','window']),
     userPreferences:freeze(['Pomodoro','notifications']),
@@ -36,8 +36,8 @@ const createModule=()=>{
     const {KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}=ports.domain;
     const {adjustedEndMin,adjustedStartMin,effectiveNowMin,findNextIncompleteTrackableAfter,getLatestCarryForward,getScheduleDerivedState,handleStudyDayRollover,hasAdjustedTiming,isFixedBlock,isLiveTrackableTimer,isTaskResolved,isTrackableBlock,isWorkBlock,originalEndMin,originalStartMin,plannedRows,scheduleFingerprint,studyDayRolledOver}=ports.schedule;
     const {compactPauseEvents,compactRealTimeSnapshot,flushLiveDraft,maybeSnapshotRunningTimer,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}=ports.persistence;
-    const {cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay,refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}=ports.view;
-    const {applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,focusCompletionForTask,getReviewDate,liveTaskOutcome,resolveTaskCompletion,storeResolvedCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}=ports.reviewEvidence;
+    const {cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay,refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl}=ports.view;
+    const {applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,focusCompletionForTask,getReviewDate,liveTaskOutcome,resolveTaskCompletion,storeResolvedCompletion,toggleDoneState,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}=ports.reviewEvidence;
     const {nowMs}=ports.clock;
     const {cancelAnimationFrame,clearInterval,document,getComputedStyle,requestAnimationFrame,setInterval,setTimeout,window}=ports.clockEnvironment;
     const {Pomodoro,notifications}=ports.userPreferences;
@@ -555,7 +555,8 @@ function stopTimerForFixedBoundary(boundary:TimerBoundary|null,options:{away?:bo
 /* TIMER COUNTDOWN EXECUTION */
 function toggleDone(i:number){
   if(!appCanMutate())return false;
-  toggleDoneMarker(i);
+  const result=toggleDoneState(i);
+  if(result===false)return false;
   saveLiveDraft();requestRender('schedule','badges');
   return true;
 }
