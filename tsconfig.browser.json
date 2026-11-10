@@ -92,6 +92,7 @@
     "source/core/session-lifecycle.ts",
     "source/core/timer-engine.ts",
     "source/core/execution-host.ts",
+    "source/core/session-host.ts",
     "source/core/timer-state.ts",
     "types/app-meta.ts",
     "types/asset-maintenance.ts",
@@ -178,7 +179,9 @@
     "source/core/plan.ts",
     "types/plan-host.ts",
     "types/plan.ts",
+    "types/session-host.ts",
     "types/checks/execution-host.ts",
+    "types/checks/session-host.ts",
     "types/checks/plan-host.ts",
     "types/checks/plan.ts"
   ]

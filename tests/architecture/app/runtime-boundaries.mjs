@@ -12,6 +12,7 @@ const foundation=readRuntimeSource('source/core/foundation-host.ts');
 { // decision-clock-boundary
 const host=readHostHtml();
 const timer=readScript('source/core/timer-engine.ts');
+const sessionHost=readScript('source/core/session-host.ts');
 const attachments=readScript('source/core/attachments.ts');
 const mutation=readScript('source/core/mutation-coordinator.ts');
 
@@ -47,9 +48,14 @@ const runtimePayload=section(host,'function timerRuntimePayload(){','/* DATE AND
 assert.doesNotMatch(runtimePayload,/Date\.now\(\)/,'persisted timer runtime arithmetic uses DecisionClock');
 assert.match(runtimePayload,/DecisionClock\.nowMs\(\)/,'timer runtime captures decision time from DecisionClock');
 
-const snapshotCadence=section(host,'function writeLiveDraftNow(options={}){','function applySessionSnapshot(snapshot){');
-assert.doesNotMatch(snapshotCadence,/Date\.now\(\)/,'running-timer snapshot cadence uses DecisionClock');
-assert.equal((snapshotCadence.match(/DecisionClock\.nowMs\(\)/g)||[]).length,3,'snapshot write, priority-debounce deadline and cadence comparison share DecisionClock');
+assert.match(host,/SessionHostModule\.createController\(Object\.freeze\(\{/u,'canonical Active Session composition crosses the checked session host');
+assert.doesNotMatch(sessionHost,/Date\.now\(\)/,'session-host decisions use injected clocks rather than ambient Date.now');
+assert.match(sessionHost,/clock\.nowMs\(\)/u,'live-draft debounce and timer snapshot cadence use the injected decision clock');
+assert.match(sessionHost,/persistence\.recoveryWorkActive\(\)/u,'timer snapshots remain quiesced while managed recovery owns the mutation lane');
+assert.match(sessionHost,/strictDurability:true/u,'critical local session transitions require strict repository durability');
+for(const token of ['claimSessionOwnership','continueSessionHere','BackupProviderRuntime','sessionHandoff']){
+  assert.equal(sessionHost.includes(token),false,`P5.4B session host must not absorb P5.4C distributed ownership: ${token}`);
+}
 
 const restoreTimer=section(host,'function deriveRestoredTimerState(candidate){','function isRestorableActiveSession(session){');
 assert.doesNotMatch(restoreTimer,/Date\.now\(\)/,'restored timer/gap/break arithmetic uses DecisionClock');

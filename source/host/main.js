@@ -81,6 +81,7 @@ const PomodoroModule=INTERNAL_MODULES.load('pomodoro',1,'study-director.pomodoro
 const PracticePacerModule=INTERNAL_MODULES.load('practice-pacer',1,'study-director.practice-pacer-module',1);
 const TimerEngineModule=INTERNAL_MODULES.load('timer-engine',2,'study-director.timer-engine-module',2);
 const ExecutionHostModule=INTERNAL_MODULES.load('execution-host',1,'study-director.execution-host-module',1);
+const SessionHostModule=INTERNAL_MODULES.load('session-host',1,'study-director.session-host-module',1);
 const PRESENTATION_KERNEL=window[Symbol.for('studyDirector.presentationKernel.v1')];
 const PRESENTATION_MANIFEST=PRESENTATION_KERNEL&&PRESENTATION_KERNEL.manifest;
 if(!PRESENTATION_KERNEL||PRESENTATION_KERNEL.format!=='study-director.presentation-kernel'||PRESENTATION_KERNEL.version!==1||!PRESENTATION_MANIFEST||PRESENTATION_MANIFEST.format!=='study-director.presentation-manifest'||PRESENTATION_MANIFEST.version!==1){
@@ -664,12 +665,9 @@ const {
 }=TimerEngine;
 const POMODORO_RESTORE_OVERRUN_GRACE_SEC=30*60;
 /* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION */
-let liveDraftSaveTimer=null;
-let liveDraftSaveDueAt=0;
-let liveDraftPendingOptions=null;
 const LIVE_DRAFT_SAVE_DEBOUNCE_MS=1000;
 const TIMER_SNAPSHOT_INTERVAL_MS=60*1000;
-let lastTimerSnapshotMs=0;
+let ActiveSessionRuntime=null;
 let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
@@ -678,18 +676,14 @@ let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusR
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='',saveReminderEvidence=null,saveReminderGeneration=0;
-let restoreSessionPersistenceSuppressionDepth=0;
 let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
 let sessionClaimFreeze=null;
 let refreshSessionSafetyUi=()=>{};
-function restoreSessionPersistenceSuppressed(){return restoreSessionPersistenceSuppressionDepth>0;}
+function restoreSessionPersistenceSuppressed(){return !!ActiveSessionRuntime?.persistenceSuppressed();}
 function managedRecoverySessionQuiesced(){return managedRecoverySessionQuiescenceDepth>0;}
 async function withRestoreSessionPersistenceSuppressed(operation){
-  if(typeof operation!=='function')throw new TypeError('Restore persistence operation is required.');
-  restoreSessionPersistenceSuppressionDepth+=1;
-  cancelPendingLiveDraftSave();
-  try{return await operation();}
-  finally{restoreSessionPersistenceSuppressionDepth=Math.max(0,restoreSessionPersistenceSuppressionDepth-1);}
+  if(!ActiveSessionRuntime)throw new Error('Active Session runtime is unavailable.');
+  return ActiveSessionRuntime.withPersistenceSuppressed(operation);
 }
 function hasBlockingActiveSession(){
   const active=TASKS.some(isTrackableBlock);
@@ -1277,33 +1271,8 @@ function activeSessionScheduleFingerprint(session){
   return draft.ok?scheduleFingerprintForRows(draft.parsed):'';
 }
 function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,lifecycleManaged=false}={}){
-  const ta=document.getElementById('plan-input');
-  if(!session||!snapshot||!ta)return false;
-  const transitionSource=source||'stored-session-apply';
-  const lifecycleContext={scheduleIdentity:true,date:session.date,autoDate:session.date===todayISO(),snapshotReview:snapshot.review};
-  // The Plan draft is independent authoring state. Applying a canonical
-  // Active Session must neither persist its schedule as that draft nor open
-  // the draft editor. Keep the exact local text in place while the live
-  // schedule is restored from the explicit session schedule.
-  const pendingDraft=String(ta.value||'');
-  const applySnapshot=()=>{
-    resetRuntimeSessionState({lifecycleManaged:true,source:transitionSource,date:session.date});
-    const dd=document.getElementById('day-date');
-    if(dd){dd.value=session.date;dd.dataset.autoDate=session.date===todayISO()?'1':'0';}
-    const restored=applySchedule({
-      source:transitionSource,skipNotify:true,studyDate:session.date,reviewOnly,forceReload:true,
-      sessionSnapshot:snapshot,lifecycleManaged:true,scheduleText:String(session.scheduleText||''),persistDraft:false
-    });
-    if(restored!==false){
-      ta.value=pendingDraft;
-      // Rehydrate the draft projection without entering draft mode; the Plan
-      // board continues to show the applied session until the person edits it.
-      PlanDraftEditor.preview({silent:true,enterDraft:false});
-    }
-    return restored;
-  };
-  if(lifecycleManaged)return applySnapshot();
-  return SessionLifecycle.runSync(transitionSource,lifecycleContext,applySnapshot);
+  if(!ActiveSessionRuntime)return false;
+  return ActiveSessionRuntime.applyStoredSession(session,snapshot,{source,reviewOnly,lifecycleManaged});
 }
 async function hydratePrimaryStateFromStorage(options={}){
   const sameTabReload=!!options.sameTabReload;
@@ -1947,12 +1916,11 @@ async function acknowledgeSavedStudyDay(date,revision){
   }
   TimerState.savedRevision=covered;
   try{
-    const saved=await writeLiveDraftNow({markChanged:false,strictDurability:true});
+    const saved=await ActiveSessionRuntime.writeCanonicalNow('acknowledging the Saved Day',{markChanged:false});
     if(!saved?.value||saved.value.date!==date||
         cleanDayRevision(saved.value.snapshot?.savedRevision)<covered){
       throw saved?.error||new Error('The Saved Day acknowledgement was not saved in the Active Session.');
     }
-    await requireCanonicalSessionWrite(saved,saved.value,'acknowledging the Saved Day');
     clearSaveReminder(date,covered);
     return true;
   }catch(error){
@@ -1997,47 +1965,7 @@ async function maybePromptBackupNudge(force=false){
   }
 }
 /* LIVE DRAFT AND ACTIVE SESSION STORE */
-function captureSessionSnapshot(evidence=null){
-  if(!TASKS.length)return null;
-  ensureTaskIds();
-  evidence=evidence||captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true});
-  const {actualTime,actualRecords}=evidence;
-  const taskState={};
-  TASKS.slice(0,APP_LIMITS.maxTasksPerDay).forEach((task,idx)=>{
-    if(!task)return;
-    const taskId=String(task.id||makeTaskId(task,idx));
-    const row={};
-    const resolvedState=TaskSessionState.resolvedState(idx);
-    if(resolvedState)row.resolvedState=resolvedState;
-    const storedCompletion=TaskSessionState.getField(idx,'completion');
-    if(storedCompletion!==undefined)row.completion=CompletionModel.clampPercent(storedCompletion);
-    const source=normalizeCompletionSource(TaskSessionState.getField(idx,'completionSource'));
-    if(source!==COMPLETION_SOURCES.NONE)row.completionSource=source;
-    const progress=TaskSessionState.getField(idx,'notes');
-    if(progress&&typeof progress==='object')row.progress={...progress};
-    const seconds=actualTime[idx];
-    const clock=TaskSessionState.getField(idx,'actualClock');
-    const record=actualRecords[idx];
-    if(seconds!==undefined||clock||record){
-      row.actual={};
-      if(seconds!==undefined)row.actual.seconds=Math.max(0,Math.round(Number(seconds)||0));
-      if(clock&&typeof clock==='object')row.actual.clock={...clock};
-      if(record&&typeof record==='object'){
-        row.actual.record=JSON.parse(JSON.stringify(record));
-        delete row.actual.record.idx;delete row.actual.record.taskId;
-      }
-    }
-    if(Object.keys(row).length)taskState[taskId]=row;
-  });
-  return TimerState.projectSessionSnapshot(Object.freeze({
-    version:DATA_CONTRACT.schemas.SessionSnapshot.version,
-    date:getReviewDate(),fingerprint:scheduleFingerprint(),taskState,
-    timerRuntime:timerRuntimePayload(),
-    latestCarryForward:clampText(latestCarryForward,APP_LIMITS.maxCarryForwardChars),
-    review:currentReviewSnapshot(),
-    practice:PracticePacer.snapshot(),updatedAt:new Date().toISOString()
-  }));
-}
+function captureSessionSnapshot(evidence=null){return ActiveSessionRuntime?.captureSnapshot(evidence)||null;}
 // Keep elapsed time and practice progress at the ownership boundary while
 // retaining any later text, completion or reflection edits for reconciliation.
 function snapshotWhileSessionClaimFrozen(){
@@ -2054,23 +1982,8 @@ async function activeSessionContentFingerprint(session){
   if(!/^[a-f0-9]{64}$/u.test(fingerprint))throw new Error('Active Session content fingerprint could not be derived safely.');
   return fingerprint;
 }
-function activeSessionPayload(snapshot=null,options={}){
-  if(!TASKS.length)return null;
-  const scheduleText=clampText(PlanRuntime.appliedScheduleText(),APP_LIMITS.maxScheduleChars);
-  if(!scheduleText.trim())return null;
-  const revision=nextSessionRevision(options.revision);
-  snapshot=snapshot||captureSessionSnapshot();
-  if(!snapshot)return null;
-  const nowIso=new Date().toISOString();
-  return {
-    id:ACTIVE_SESSION_ID,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,
-    revision,date:snapshot.date,status:options.status==='suspended'?'suspended':'active',runningOn:InstallationIdentity.getId(),
-    scheduleText,snapshot,suspendedAt:options.suspendedAt||null,updatedAt:nowIso
-  };
-}
-
-
-function readLocalRecoverySession(){return AppData.activeSession.readLocal();}
+function activeSessionPayload(snapshot=null,options={}){return ActiveSessionRuntime?.payload(snapshot,options)||null;}
+function readLocalRecoverySession(){return ActiveSessionRuntime?.readLocal()||null;}
 function handleActiveSessionRepositoryResult(result,action='save'){
   if(result&&result.ok){
     if(action==='save'&&result.storage&&result.storage.idb===true)markStorageHealthOk('activeSession');
@@ -2086,159 +1999,22 @@ function handleActiveSessionRepositoryResult(result,action='save'){
   }
   return false;
 }
-// One canonical durability barrier for an ownership transfer in either direction,
-// session suspension and restore. Local rescue alone does not establish control.
-async function clearCanonicalSessionAfterSavedDay(){
-  const cleared=await AppData.activeSession.clear();
-  if(!cleared?.ok||cleared.error||cleared.storage?.idb!==true)
-    throw cleared?.error||new Error('The saved study session was not deleted from canonical IndexedDB.');
-  const loaded=await AppData.activeSession.load(0,{strict:true});
-  if(!loaded?.ok||loaded.error||loaded.value)
-    throw loaded?.error||new Error('The saved study session remained after its canonical deletion.');
-  return cleared;
-}
-async function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){
-  const intended=ActiveSessionCodec.sanitizeCurrent(expected);
-  if(!intended||!saved?.ok||saved.storage?.idb!==true||saved.error||
-      !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(saved.value),intended)){
-    throw saved?.error||new Error('Canonical IndexedDB commit is required before '+operation+'.');
-  }
-  const checked=await AppData.activeSession.load(0,{strict:true});
-  if(!checked?.ok||checked.error||checked.storage?.idb!==true||
-      !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(checked.value),intended)){
-    throw checked?.error||new Error('Canonical Active Session read-back differs after '+operation+'.');
-  }
-  return saved;
-}
-function writeActiveSessionNow(snapshot,options={}){
-  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return Promise.resolve(null);
-  if(!appCanMutate())return Promise.resolve(null);
-  if(ReviewSaveService.status().activeSessionPersistenceBlocked)return Promise.resolve(null);
-  const session=activeSessionPayload(snapshot);if(!session)return Promise.resolve(null);
-  return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
-}
-function writeLiveDraftNow(options={}){
-  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
-  if(!appCanMutate())return null;
-  try{
-    // Preserve the frozen clock even if a managed sync settles the latest
-    // reflection or edits after the remote ownership claim.
-    if(options.markChanged!==false)markDayContentChanged();
-    const snapshot=sessionClaimFreeze?.snapshot?snapshotWhileSessionClaimFrozen():captureSessionSnapshot();if(!snapshot)return null;
-    lastTimerSnapshotMs=DecisionClock.nowMs();
-    return writeActiveSessionNow(snapshot,options);
-  }catch(e){
-    const reason=(e&&e.name==='QuotaExceededError')?'localStorage quota exceeded':(e&&e.message?e.message:'session recovery storage unavailable');
-    showLiveDraftSaveWarning(reason);return null;
-  }
-}
-function mergeLiveDraftOptions(base={},next={}){
-  return {
-    markChanged:(base.markChanged!==false)||(next.markChanged!==false),
-    backupCapture:base.backupCapture===true||next.backupCapture===true,
-    allowDuringRecoveryQuiescence:base.allowDuringRecoveryQuiescence===true||next.allowDuringRecoveryQuiescence===true
-  };
-}
-function saveLiveDraft(options={}){
-  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced())return false;
-  if(!appCanMutate())return false;
-  const delay=Math.max(0,Number.isFinite(Number(options.delayMs))?Number(options.delayMs):LIVE_DRAFT_SAVE_DEBOUNCE_MS);
-  const due=DecisionClock.nowMs()+delay;
-  liveDraftPendingOptions=mergeLiveDraftOptions(liveDraftPendingOptions||{markChanged:false},options);
-  if(liveDraftSaveTimer&&liveDraftSaveDueAt<=due)return true;
-  if(liveDraftSaveTimer)clearTimeout(liveDraftSaveTimer);
-  liveDraftSaveDueAt=due;
-  liveDraftSaveTimer=setTimeout(()=>{
-    const pending=liveDraftPendingOptions||{};
-    liveDraftSaveTimer=null;liveDraftSaveDueAt=0;liveDraftPendingOptions=null;
-    writeLiveDraftNow(pending);
-  },delay);
-  return true;
-}
-function cancelPendingLiveDraftSave(){
-  if(!liveDraftSaveTimer){liveDraftSaveDueAt=0;liveDraftPendingOptions=null;return false;}
-  clearTimeout(liveDraftSaveTimer);
-  liveDraftSaveTimer=null;liveDraftSaveDueAt=0;liveDraftPendingOptions=null;
-  return true;
-}
-function flushLiveDraft(options={}){
-  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()&&options.allowDuringRecoveryQuiescence!==true)return null;
-  if(!appCanMutate())return null;
-  const pending=mergeLiveDraftOptions(liveDraftPendingOptions||{markChanged:false},options);
-  if(liveDraftSaveTimer)clearTimeout(liveDraftSaveTimer);
-  liveDraftSaveTimer=null;liveDraftSaveDueAt=0;liveDraftPendingOptions=null;
-  return writeLiveDraftNow({...pending,emergency:true});
-}
-// The once-a-minute snapshot waits while a restore, combine or sync runs: one
-// landing during its safety upload would read as local data changing and
-// start the whole recovery again (a second safety upload). The next tick
-// after it writes the snapshot; leaving the page still saves at once.
-function maybeSnapshotRunningTimer(){
-  if(restoreSessionPersistenceSuppressed()||managedRecoverySessionQuiesced()||AppMutationCoordinator?.status().active==='managed-recovery')return;
-  if(TimerState.paused||TimerState.inactiveGap||!TimerState.runtime||TimerState.runtime.startMs===null)return;
-  const now=DecisionClock.nowMs();
-  if(now-lastTimerSnapshotMs>=TIMER_SNAPSHOT_INTERVAL_MS)writeLiveDraftNow();
-}
-function applySessionSnapshot(snapshot){
-  if(!snapshot||!TASKS.length)return false;
-  TimerState.contentRevision=cleanDayRevision(snapshot.contentRevision);
-  TimerState.savedRevision=Math.min(TimerState.contentRevision,cleanDayRevision(snapshot.savedRevision));
-  clearProgressRuntime();
-  latestCarryForward='';
-  TimerState.adjustedSchedule={};
-  const indexMap=TaskIdentity.indexMap();
-  Object.entries(snapshot.scheduleAdjustments||{}).forEach(([taskId,entry])=>{
-    const idx=TaskIdentity.indexForId(taskId,indexMap);
-    if(idx!==null)TimerState.setAdjustment(idx,{...entry});
-  });
-  TimerState.adjustedSchedule=sanitizeRuntimeAdjustedSchedule(TimerState.adjustedSchedule);
-  invalidateScheduleDerived({adjustments:true,render:true});
-  Object.entries(snapshot.taskState||{}).forEach(([taskId,state])=>{
-    if(!state||typeof state!=='object')return;
-    const idx=TaskIdentity.indexForId(taskId,indexMap);
-    if(idx===null||idx<0||idx>=TASKS.length)return;
-    if(state.completion!==undefined)TaskSessionState.setField(idx,'completion',state.completion);
-    const source=normalizeCompletionSource(state.completionSource);
-    if(source!==COMPLETION_SOURCES.NONE)TaskSessionState.setField(idx,'completionSource',source);
-    if(state.progress&&typeof state.progress==='object')TaskSessionState.setField(idx,'notes',state.progress);
-    if(state.actual&&typeof state.actual==='object'){
-      if(state.actual.seconds!==undefined)TaskSessionState.setField(idx,'actualTime',state.actual.seconds);
-      if(state.actual.clock&&typeof state.actual.clock==='object')TaskSessionState.setField(idx,'actualClock',state.actual.clock);
-      if(state.actual.record&&typeof state.actual.record==='object')TaskSessionState.setField(idx,'actualRecords',{...state.actual.record,idx,taskId});
-    }
-    if(state.resolvedState==='done'||state.resolvedState==='skipped')TaskSessionState.setResolved(idx,state.resolvedState);
-  });
-  TimerState.pendingRestore=snapshot.timerRuntime||null;
-  latestCarryForward=snapshot.latestCarryForward||'';
-  if(snapshot.currentTaskId){
-    const idx=TaskIdentity.indexForId(snapshot.currentTaskId,indexMap);
-    if(idx!==null)setCurrentTask(idx);
-  }
-  const timerCandidate=validateTimerRestoreCandidate(snapshot.timerRuntime);
-  const forcedPracticePause=!timerCandidate
-    ? PRACTICE_PAUSE_CAUSES.SESSION
-    : snapshot.timerRuntime&&snapshot.timerRuntime.pendingInactiveGap
-    ? PRACTICE_PAUSE_CAUSES.GAP
-    : snapshot.timerRuntime&&snapshot.timerRuntime.paused
-    ? PRACTICE_PAUSE_CAUSES.MAIN
-    : null;
-  const practiceCutoff=forcedPracticePause===PRACTICE_PAUSE_CAUSES.GAP
-    ? Number(snapshot.timerRuntime.pendingInactiveGap.lastMs)||Date.parse(snapshot.updatedAt||'')
-    : Date.parse(snapshot.updatedAt||'');
-  PracticePacer.restore(snapshot.practice,{forcePaused:!!forcedPracticePause,pauseCause:forcedPracticePause||PRACTICE_PAUSE_CAUSES.SESSION,savedAtMs:practiceCutoff});
-  return true;
-}
+function clearCanonicalSessionAfterSavedDay(){return ActiveSessionRuntime.clearCanonical('clearing the saved study session');}
+function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){return ActiveSessionRuntime.requireCanonicalWrite(saved,expected,operation);}
+function writeActiveSessionNow(snapshot,options={}){return ActiveSessionRuntime.writeSnapshot(snapshot,options);}
+function writeLiveDraftNow(options={}){return ActiveSessionRuntime.writeNow(options);}
+function saveLiveDraft(options={}){return ActiveSessionRuntime.saveLiveDraft(options);}
+function cancelPendingLiveDraftSave(){return ActiveSessionRuntime?.cancelPendingLiveDraftSave()||false;}
+function flushLiveDraft(options={}){return ActiveSessionRuntime?.flushLiveDraft(options)||null;}
+function maybeSnapshotRunningTimer(){return ActiveSessionRuntime?.maybeSnapshotRunningTimer()||false;}
+function applySessionSnapshot(snapshot){return ActiveSessionRuntime?.applySnapshot(snapshot)||false;}
 function restoreLiveDraftIfAny(){
   TimerState.pendingRestore=null;
-  try{
-    const session=readLocalRecoverySession();
-    if(!session||session.date!==getReviewDate()||activeSessionScheduleFingerprint(session)!==scheduleFingerprint())return false;
-    return applySessionSnapshot(session.snapshot);
-  }catch(e){return false;}
+  try{return ActiveSessionRuntime?.restoreLocalRecovery()||false;}catch(e){return false;}
 }
 function activeSessionSnapshot(session){
-  if(!session||typeof session!=='object')return null;
-  return ActiveSessionCodec.sanitizeSessionSnapshot(session.snapshot,session.date,activeSessionScheduleFingerprint(session),session.revision);
+  const current=ActiveSessionCodec.sanitizeCurrent(session);
+  return current&&ActiveSessionRuntime?ActiveSessionRuntime.sessionSnapshot(current):null;
 }
 
 function validateTimerRestoreCandidate(runtime){
@@ -3005,31 +2781,8 @@ StorageHealthController.activate();
 
 /* SESSION RESET ORCHESTRATION */
 function resetRuntimeSessionState(options={}){
-  const opts=options&&typeof options==='object'?options:{};
-  if(!opts.lifecycleManaged){
-    const date=isValidIsoDate(opts.date)?opts.date:todayISO();
-    return SessionLifecycle.runSync(opts.source||'session-reset',{
-      scheduleIdentity:true,date,autoDate:date===todayISO(),
-    },()=>resetRuntimeSessionState({...opts,lifecycleManaged:true,date}));
-  }
-  TimerPresentation.stop();
-  executeIdleDisplayKey='';
-  realTimeAwarenessRenderKey='';
-  executePanelsRenderKey='';
-  executeProgressPanelRenderKey='';
-  scheduleEndPromptKey='';
-  resetCountdownRuntime();
-  setCurrentTask(0);
-  resetBreakState(false);
-  setTimerMode(TIMER_MODES.EMPTY,'session-reset');
-  TimerState.clearSession();
-  hydrateReviewState({date:isValidIsoDate(opts.date)?opts.date:todayISO(),snapshotReview:null});
-
-  invalidateScheduleDerived({identity:true,adjustments:true,render:true});
-  PlanRuntime.resetSession();
-  clearProgressRuntime();
-  latestCarryForward='';
-  PracticePacer.reset();
+  if(!ActiveSessionRuntime)return false;
+  return ActiveSessionRuntime.resetRuntime(options);
 }
 function refreshPlanAfterSessionReset(emptyMessage='',emptyTitle=''){
   // A session reset, suspension or remote handoff is not an edit action.
@@ -3049,39 +2802,21 @@ async function suspendTodaySession(){
     details:['The live draft is kept; Restore Session can continue it without re-applying the schedule.','You can also open Review and save the suspended progress to Library. Saved Library Study Days and notes are unchanged.'],
     confirmLabel:'Suspend session',cancelLabel:'Keep session active'
   });
-  if(!ok)return;
-  if(!appCanMutate())return;
+  if(!ok||!appCanMutate())return false;
   try{
-    await SessionLifecycle.run('session-suspend',{
-      scheduleIdentity:true,date:todayISO(),autoDate:true,
-    },async()=>{
-      PracticePacer.pauseForSessionEnd({persist:false});
-      await flushLiveDraft();
-      const loaded=await AppData.activeSession.load();
-      const existing=loaded&&loaded.value||null;
-      const session=activeSessionPayload() || (existing&&typeof existing==='object'?{...existing}:null);
-      if(session){
-        session.status='suspended';
-        session.suspendedAt=new Date().toISOString();
-        session.updatedAt=session.suspendedAt;
-        // A built session takes its stored form when saved, so the check
-        // compares the strict read-back with what was saved.
-        const saved=await AppData.activeSession.save(session,{strictDurability:true});
-        await requireCanonicalSessionWrite(saved,saved?.value,'suspending the Active Session');
-      }
-      resetRuntimeSessionState({lifecycleManaged:true,source:'session-suspend',date:todayISO()});
-      setSessionPanelMode('suspended');
-      refreshPlanAfterSessionReset();
-      setTimerMode(TIMER_MODES.SUSPENDED,'session-suspend');
-      updateExecutePanels();
-      setPlanStatus('Today’s session is suspended. Restore it to continue, save it from Review to preserve the suspended progress in Library, or Reset Today to start fresh.');
-      const synced=BackupProviderRuntime.connected('google-drive');
-      Interactions.notify({source:'session',kind:'success',key:'session-suspend',title:'Session suspended',message:synced?'Saving it to Google Drive now. Continue it here with Restore Session, or on another device once it syncs.':'Restore Session continues it; Review can save the suspended progress to Library.'});
-      return true;
-    });
+    const session=await ActiveSessionRuntime.suspendLocal();
+    setSessionPanelMode('suspended',session);
+    refreshPlanAfterSessionReset();
+    setTimerMode(TIMER_MODES.SUSPENDED,'session-suspend');
+    updateExecutePanels();
+    setPlanStatus('Today’s session is suspended. Restore it to continue, save it from Review to preserve the suspended progress in Library, or Reset Today to start fresh.');
+    const synced=BackupProviderRuntime.connected('google-drive');
+    Interactions.notify({source:'session',kind:'success',key:'session-suspend',title:'Session suspended',message:synced?'Saving it to Google Drive now. Continue it here with Restore Session, or on another device once it syncs.':'Restore Session continues it; Review can save the suspended progress to Library.'});
     notifyBackupChange({urgent:true,reason:'session-suspend'});
+    return true;
   }catch(e){
     setPlanStatus('Could not suspend today’s session: '+(e&&e.message?e.message:e),false);
+    return false;
   }
 }
 function sessionUpdateTime(session){return storageHealthTime(String(session&&session.updatedAt||''));}
@@ -3346,7 +3081,6 @@ async function restoreSuspendedTodaySession(){
   if(!appCanMutate())return false;
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
-    // Date takes precedence over status and ownership.
     if(isPreviousActiveSessionRecord(session)){
       setSessionPanelMode('previous',session);
       setPlanStatus('This session belongs to a previous study day. Review it without restarting its timer.',false);
@@ -3354,11 +3088,8 @@ async function restoreSuspendedTodaySession(){
     }
     if(!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
     if(sessionFromElsewhere(session))return continueSessionHere();
-    const snapshot=activeSessionSnapshot(session);
-    if(!snapshot)throw new Error('The suspended session snapshot is unreadable.');
-    const restored=applyStoredSessionSnapshot(session,snapshot,{source:'session-restore'});
-    if(restored===false)throw new Error('The suspended session could not be restored.');
-    setSessionPanelMode('active');
+    const restored=await ActiveSessionRuntime.restoreSuspendedLocal(session);
+    setSessionPanelMode('active',restored);
     setPlanStatus('✓ Suspended session restored.');
     Interactions.notify({source:'session',kind:'success',key:'session-restore',cue:'resume',title:'Session restored',message:'Today’s suspended session is active again.'});
     await goTab('execute',{source:'session-restore'});
@@ -3396,8 +3127,7 @@ async function finishTodaySession(){
     setTimerMode(TIMER_MODES.DONE,'manual-finish-day');
     resetBreakState();
     refreshCoreUi();
-    const saved=await writeLiveDraftNow({markChanged:true,emergency:true});
-    if(saved&&saved.ok===false)throw saved.error||new Error('live session save failed');
+    await ActiveSessionRuntime.writeCanonicalNow('finishing today’s session',{markChanged:true});
     setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
     await goTab('review',{source:'finish-today'});
     ReviewView.refresh({force:true});
@@ -3405,6 +3135,8 @@ async function finishTodaySession(){
     notifyBackupChange({urgent:true,reason:'finish-today'});
     return true;
   }catch(error){
+    if(TimerState.mode===TIMER_MODES.DONE)setTimerMode(TIMER_MODES.READY,'manual-finish-save-failed');
+    refreshCoreUi();
     completionNotice?.update({lifecycle:'cancelled'});
     setPlanStatus('Could not finish today safely: '+(error&&error.message?error.message:error),false);
     return false;
@@ -3417,24 +3149,17 @@ async function resetTodaySession(){
     details:['Timer audit, skips, completion marks and the live draft will be removed.','Saved Library Study Days and notes are unchanged.'],
     confirmLabel:'Reset today',cancelLabel:'Keep current session'
   });
-  if(!ok)return;
-  if(!appCanMutate())return;
+  if(!ok||!appCanMutate())return false;
   try{
-    await SessionLifecycle.run('session-reset',{
-      scheduleIdentity:true,date:todayISO(),autoDate:true,
-    },async()=>{
-      const cleared=await AppData.activeSession.clear();
-      handleActiveSessionRepositoryResult(cleared,'clear');
-      if(!cleared.ok)throw cleared.error||new Error('active session clear failed');
-      resetRuntimeSessionState({lifecycleManaged:true,source:'session-reset',date:todayISO()});
-      setSessionPanelMode('none');
-      refreshPlanAfterSessionReset();
-      setPlanStatus('Today’s active session was reset. Paste, edit, or apply a schedule when ready.');
-      Interactions.notify({source:'session',kind:'success',key:'session-reset',title:'Today reset',message:'The active session was cleared; saved days and notes were kept.'});
-      return true;
-    });
+    await ActiveSessionRuntime.resetLocal();
+    setSessionPanelMode('none');
+    refreshPlanAfterSessionReset();
+    setPlanStatus('Today’s active session was reset. Paste, edit, or apply a schedule when ready.');
+    Interactions.notify({source:'session',kind:'success',key:'session-reset',title:'Today reset',message:'The active session was cleared; saved days and notes were kept.'});
+    return true;
   }catch(e){
     setPlanStatus('Could not reset today’s session: '+(e&&e.message?e.message:e),false);
+    return false;
   }
 }
 let latestCarryForward='';
@@ -6317,7 +6042,6 @@ function setLifecycleEditorsBlocked(blocked){
 function invalidateLifecycleEditors(context){
   void richTextClose();
   cancelPendingLiveDraftSave();
-  if(liveDraftSaveTimer){clearTimeout(liveDraftSaveTimer);liveDraftSaveTimer=null;}
   if(context.options.scheduleIdentity)advanceTaskNoteScheduleRevision();
   document.documentElement.dataset.studyDirectorLifecycle='transitioning';
   document.documentElement.dataset.studyDirectorLifecycleRevision=String(context.revision);
@@ -6369,6 +6093,65 @@ const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze({h
 })}));
 if(!Object.isFrozen(SessionLifecycle)||SessionLifecycle.format!=='study-director.session-lifecycle-coordinator'||SessionLifecycle.contractVersion!==1){
   throw new Error('Study Director session lifecycle coordinator is unavailable or incompatible.');
+}
+
+ActiveSessionRuntime=SessionHostModule.createController(Object.freeze({
+  configuration:Object.freeze({
+    activeSessionId:ACTIVE_SESSION_ID,activeSessionVersion:DATA_CONTRACT.schemas.ActiveSession.version,
+    sessionSnapshotVersion:DATA_CONTRACT.schemas.SessionSnapshot.version,maxCarryForwardChars:APP_LIMITS.maxCarryForwardChars,
+    maxScheduleChars:APP_LIMITS.maxScheduleChars,maxTasksPerDay:APP_LIMITS.maxTasksPerDay,
+    debounceMs:LIVE_DRAFT_SAVE_DEBOUNCE_MS,timerSnapshotIntervalMs:TIMER_SNAPSHOT_INTERVAL_MS,
+    completionNone:COMPLETION_SOURCES.NONE,
+    practicePauseCauses:Object.freeze({session:PRACTICE_PAUSE_CAUSES.SESSION,gap:PRACTICE_PAUSE_CAUSES.GAP,main:PRACTICE_PAUSE_CAUSES.MAIN})
+  }),
+  codec:Object.freeze({sanitizeCurrent:value=>ActiveSessionCodec.sanitizeCurrent(value),sanitizeSessionSnapshot:(value,date,fingerprint,revision)=>ActiveSessionCodec.sanitizeSessionSnapshot(value,date,fingerprint,revision)}),
+  repository:Object.freeze({
+    save:(value,options)=>AppData.activeSession.save(value,options),load:(retry,options)=>AppData.activeSession.load(retry,options),
+    clear:()=>AppData.activeSession.clear(),readLocal:()=>AppData.activeSession.readLocal(),
+    nextRevision:seed=>AppData.activeSession.nextRevision(seed),settled:()=>AppData.activeSession.settled()
+  }),
+  canonical:Object.freeze({same:(a,b)=>CanonicalModule.same(a,b)}),
+  snapshot:Object.freeze({
+    tasks:()=>TASKS,ensureTaskIds,taskIdentity:TaskIdentity,taskState:TaskSessionState,timerState:TimerState,
+    captureEvidence:()=>captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true}),
+    timerPayload:timerRuntimePayload,reviewSnapshot:()=>currentReviewSnapshot(),practiceSnapshot:()=>PracticePacer.snapshot(),
+    practiceRestore:(value,options)=>PracticePacer.restore(value,options),getReviewDate,scheduleFingerprint,
+    sessionFingerprint:activeSessionScheduleFingerprint,appliedScheduleText:()=>PlanRuntime.appliedScheduleText(),
+    getCarryForward:()=>latestCarryForward,setCarryForward:value=>{latestCarryForward=value;},clearProgress:clearProgressRuntime,
+    sanitizeAdjustedSchedule:sanitizeRuntimeAdjustedSchedule,invalidateScheduleDerived,setCurrentTask,timerRestoreValid:runtime=>!!validateTimerRestoreCandidate(runtime)
+  }),
+  domain:Object.freeze({normalizeCompletionSource,clampCompletion:CompletionModel.clampPercent,cleanDayRevision,clampText,isCanonicalScheduleText,isValidIsoDate,todayISO}),
+  persistence:Object.freeze({
+    canMutate:appCanMutate,recoveryQuiesced:managedRecoverySessionQuiesced,
+    persistenceBlocked:()=>ReviewSaveService.status().activeSessionPersistenceBlocked,
+    recoveryWorkActive:()=>AppMutationCoordinator?.status().active==='managed-recovery',
+    timerSnapshotEligible:()=>!TimerState.paused&&!TimerState.inactiveGap&&!!TimerState.runtime&&TimerState.runtime.startMs!==null,
+    markContentChanged:markDayContentChanged,
+    snapshotForWrite:()=>sessionClaimFreeze?.snapshot?snapshotWhileSessionClaimFrozen():ActiveSessionRuntime.captureSnapshot(),
+    reportResult:handleActiveSessionRepositoryResult,warn:showLiveDraftSaveWarning
+  }),
+  lifecycle:Object.freeze({run:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),runSync:(kind,options,operation)=>SessionLifecycle.runSync(kind,options,operation)}),
+  apply:Object.freeze({
+    readPlanDraft:()=>String(document.getElementById('plan-input')?.value||''),
+    writePlanDraft:value=>{const input=document.getElementById('plan-input');if(input)input.value=value;},
+    previewPlanDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
+    setStudyDate:(date,automatic)=>{const dd=document.getElementById('day-date');if(dd){dd.value=date;dd.dataset.autoDate=automatic?'1':'0';}},
+    applySessionSchedule:input=>applySchedule({source:input.source,skipNotify:true,studyDate:input.studyDate,reviewOnly:input.reviewOnly,forceReload:true,sessionSnapshot:input.snapshot,lifecycleManaged:true,scheduleText:input.scheduleText,persistDraft:false})
+  }),
+  reset:Object.freeze({
+    stopTimerPresentation:()=>TimerPresentation.stop(),
+    invalidatePresentation:()=>{executeIdleDisplayKey='';realTimeAwarenessRenderKey='';executePanelsRenderKey='';executeProgressPanelRenderKey='';scheduleEndPromptKey='';},
+    resetCountdown:resetCountdownRuntime,setCurrentTask,resetBreak:resetBreakState,setEmptyTimerMode:()=>setTimerMode(TIMER_MODES.EMPTY,'session-reset'),
+    clearTimerSession:()=>TimerState.clearSession(),hydrateReview:date=>hydrateReviewState({date,snapshotReview:null}),
+    invalidateSchedule:()=>invalidateScheduleDerived({identity:true,adjustments:true,render:true}),resetPlanSession:()=>PlanRuntime.resetSession(),
+    clearProgress:clearProgressRuntime,clearCarryForward:()=>{latestCarryForward='';},resetPractice:()=>PracticePacer.reset(),
+    pausePracticeForSessionEnd:()=>PracticePacer.pauseForSessionEnd({persist:false})
+  }),
+  installation:Object.freeze({id:()=>InstallationIdentity.getId()}),clock:Object.freeze({nowMs:DecisionClock.nowMs,nowIso:()=>new Date().toISOString()}),
+  environment:Object.freeze({clearTimeout:id=>clearTimeout(id),setTimeout:(callback,delay)=>setTimeout(callback,delay)})
+}));
+if(!Object.isFrozen(ActiveSessionRuntime)||ActiveSessionRuntime.format!=='study-director.session-host'||ActiveSessionRuntime.contractVersion!==1){
+  throw new Error('Study Director Active Session runtime is unavailable or incompatible.');
 }
 
 /* LIVE FOCUS EVIDENCE IN THE EXECUTION HEADER */
@@ -6958,8 +6741,7 @@ async function restoreSessionStateThroughLifecycle(importedSession,options={}){
     snapshotReview:snapshot&&snapshot.review
   },async()=>{
     if(session){
-      const saved=await AppData.activeSession.save(session,{strictDurability:true});
-      await requireCanonicalSessionWrite(saved,session,'restoring an Active Session');
+      const saved=await ActiveSessionRuntime.saveCanonicalSession(session,'restoring an Active Session');
       if(isPreviousActiveSessionRecord(session)){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date:todayISO()});
         PlanDraftEditor.preview({silent:true,enterDraft:false});
@@ -6979,8 +6761,7 @@ async function restoreSessionStateThroughLifecycle(importedSession,options={}){
       }
       return saved;
     }
-    const cleared=await AppData.activeSession.clear();
-    if(!cleared.ok)throw cleared.error||new Error('Rollback active-session clear failed.');
+    const cleared=await ActiveSessionRuntime.clearCanonical('restoring an empty Active Session');
     resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
     PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('none');
     return cleared;
@@ -7186,9 +6967,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,cancel:Exports.cancel,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,followProtection:BackupProtection.follow,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
   session:Object.freeze({
     canMutate:()=>appCanMutate(),
-    cancelLiveDraftSave:()=>{
-      if(liveDraftSaveTimer){clearTimeout(liveDraftSaveTimer);liveDraftSaveTimer=null;}
-    },
+    cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),
     captureSnapshot:captureSessionSnapshot,
     hasActiveSession:hasBlockingActiveSession,
     hasTasks:()=>TASKS.length>0,

@@ -33,6 +33,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'practice-pacer',source:'core/practice-pacer.ts',stem:'sd.practice-pacer'}),
   Object.freeze({id:'timer-engine',source:'core/timer-engine.ts',stem:'sd.timer-engine'}),
   Object.freeze({id:'execution-host',source:'core/execution-host.ts',stem:'sd.execution-host'}),
+  Object.freeze({id:'session-host',source:'core/session-host.ts',stem:'sd.session-host'}),
   Object.freeze({id:'plan-host',source:'core/plan-host.ts',stem:'sd.plan-host'}),
   Object.freeze({id:'plan',source:'core/plan.ts',stem:'sd.plan'}),
   Object.freeze({id:'review',source:'core/review.js',stem:'sd.review'}),
