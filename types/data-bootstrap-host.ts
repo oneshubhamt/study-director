@@ -5,7 +5,7 @@ import type {RepositoriesInput,ValidatorInput} from './repositories.ts';
 import type {ProfilesController} from './profiles.ts';
 import type {RepositoryJournalsModule} from '../source/core/repository-journals.ts';
 import type {RepositoriesModule} from '../source/core/repositories.ts';
-import type {AppMetaModule} from '../source/core/app-meta.ts';
+import type {AppMetaModule} from './app-meta.ts';
 import type {HostMetadataModule} from './host-metadata.ts';
 
 export interface ProfileScopePort{
@@ -39,6 +39,11 @@ export interface RuntimeDataContract extends DataContract{
   readonly app:string;
   readonly storage:{readonly dbName:string;readonly dbVersion:number;readonly stores:Readonly<Record<keyof StoreNames,RuntimeStoreDefinition>>};
   readonly schemas:DataContract['schemas']&{
+    readonly DailyRecord:{readonly version:16;readonly key:string};
+    readonly DailySummary:{readonly version:5;readonly key:string};
+    readonly ActiveSession:{readonly version:10;readonly key:string};
+    readonly Note:{readonly version:3;readonly key:string;readonly trashKeyPrefix:string};
+    readonly PendingReview:{readonly version:2;readonly key:string};
     readonly AppMeta:{readonly version:number;readonly key:string};
     readonly CheckpointMetadata:{readonly version:number;readonly format:string};
     readonly CheckpointProtectedManifest:{readonly version:number;readonly format:string};

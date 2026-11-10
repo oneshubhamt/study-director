@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {DataBootstrapHostModule,ConfigurationInput,BootstrapConfiguration,LocalStorageKeys,SessionStorageKeys,AppMetaKeys,ExternalRepositoryIdentities,RuntimeDataContract,EntityType,InstallationInput,NamingInput,IndexedDbInput,MetadataInput,MetadataOwners,RepositoryCompositionInput,RepositoryComposition,UnsupportedDataInput,UnsupportedDataController,UnsupportedDataState} from '../../types/data-bootstrap-host.ts';
+import type {DataBootstrapHostModule as DataBootstrapHostContract,ConfigurationInput,BootstrapConfiguration,LocalStorageKeys,SessionStorageKeys,AppMetaKeys,ExternalRepositoryIdentities,RuntimeDataContract,EntityDefinition,EntityType,InstallationInput,NamingInput,IndexedDbInput,MetadataInput,MetadataOwners,RepositoryCompositionInput,RepositoryComposition,UnsupportedDataInput,UnsupportedDataController,UnsupportedDataState} from '../../types/data-bootstrap-host.ts';
 import type {Limits} from '../../types/record-models.ts';
 import type {MetaDefinition} from '../../types/app-meta.ts';
 import type {StoreNames} from '../../types/persistence.ts';
@@ -94,7 +94,7 @@ function createConfiguration(input:Readonly<ConfigurationInput>):Readonly<Bootst
   });
   const FACTORY_DEFAULTS=freeze({studentName:APP_CONFIG.defaultName,scheduleText:APP_CONFIG.factorySchedule});
   const DB_DAILY_RECORD_STORE=DB_STORES.dailyRecords,DB_DAILY_SUMMARY_STORE=DB_STORES.dailySummaries,DB_NOTES_STORE=DB_STORES.notes,DB_ACTIVE_SESSION_STORE=DB_STORES.activeSessions,DB_APP_META_STORE=DB_STORES.appMeta,DB_ASSET_STORE=DB_STORES.assets;
-  const ENTITY_DEFINITIONS=freeze({
+  const ENTITY_DEFINITIONS:Readonly<Record<EntityType,Readonly<EntityDefinition>>>=freeze({
     dailyRecord:freeze({schema:DATA_CONTRACT.schemas.DailyRecord.version,idField:'date',store:DB_DAILY_RECORD_STORE,backupLimit:APP_LIMITS.maxImportRecords}),
     note:freeze({schema:DATA_CONTRACT.schemas.Note.version,idField:'key',store:DB_NOTES_STORE,backupLimit:APP_LIMITS.maxNotes}),
     activeSession:freeze({schema:DATA_CONTRACT.schemas.ActiveSession.version,idField:'id',fixedId:activeSession.key,store:DB_ACTIVE_SESSION_STORE,backupLimit:1})
@@ -136,7 +136,7 @@ function createIndexedDb(input:Readonly<IndexedDbInput>){
   if(!Object.isFrozen(indexedDb)||indexedDb.format!=='study-director.indexeddb-primitives'||indexedDb.contractVersion!==2)throw new TypeError('IndexedDB primitives are unavailable or incompatible.');
   return indexedDb;
 }
-function createAppMetaGateway(input:Parameters<DataBootstrapHostModule['createAppMetaGateway']>[0]){
+function createAppMetaGateway(input:Parameters<DataBootstrapHostContract['createAppMetaGateway']>[0]){
   const gateway=input.module.create({indexedDb:freeze({transaction:input.indexedDb.transaction,strictTransaction:input.indexedDb.strictTransaction,get:input.indexedDb.get,getAll:input.indexedDb.getAll}),store:input.store,registry:input.registry});
   if(!Object.isFrozen(gateway)||gateway.format!=='study-director.app-meta-gateway'||gateway.contractVersion!==1)throw new TypeError('AppMeta gateway is unavailable or incompatible.');
   return gateway;
@@ -219,7 +219,7 @@ function createUnsupportedData(input:Readonly<UnsupportedDataInput>):Readonly<Un
   }
   return freeze({census,summary,held,describe,announce,reportBlocked,blocked:()=>blocked});
 }
-const createModule=():DataBootstrapHostModule=>freeze({format:'study-director.data-bootstrap-host-module',contractVersion:1,createConfiguration,createInstallationIdentity,createNaming,createIndexedDb,createAppMetaGateway,createMetadataOwners,createRepositoryComposition,createUnsupportedData});
+const createModule=():DataBootstrapHostContract=>freeze({format:'study-director.data-bootstrap-host-module',contractVersion:1,createConfiguration,createInstallationIdentity,createNaming,createIndexedDb,createAppMetaGateway,createMetadataOwners,createRepositoryComposition,createUnsupportedData});
 registry.define('data-bootstrap-host',1,createModule);return createModule;
 })();
 export type DataBootstrapHostModule=ReturnType<typeof sdDataBootstrapHostFactory>;
