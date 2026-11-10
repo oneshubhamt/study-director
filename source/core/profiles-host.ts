@@ -5,7 +5,7 @@ interface ProfilesControllerHostInput{readonly module:ProfilesModulePort;readonl
 interface PanelActionsInput{
   readonly document:Document;
   getStudentName():string;normalizeStudentName(value:unknown):string;applyStudentName(value:string):string;persistUserDefaultName(value:string):unknown;
-  renderPanel():unknown;
+  renderPanel():unknown;reportError(error:unknown):unknown;
   readonly recent:Readonly<{opened():unknown;closed():unknown}>;
 }
 interface FirstStartInput{
@@ -13,7 +13,7 @@ interface FirstStartInput{
   readonly backupProtection:Readonly<{enable(password:string):PromiseLike<unknown>}>;
   readonly provider:Readonly<{locationStatus(id:'google-drive'):Readonly<{connected?:boolean;engineBusy?:boolean}>|null}>;
   connectDriveForProfile():boolean|PromiseLike<boolean>;
-  getStudentName():string;isDefaultStudentName(value:string):boolean;applyStudentName(value:string):string;persistUserDefaultName(value:string):unknown;renderProfile():unknown;
+  getStudentName():string;isDefaultStudentName(value:string):boolean;applyStudentName(value:string):string;persistUserDefaultName(value:string):unknown;renderProfile():unknown;reportError(error:unknown):unknown;
 }
 interface FirstStartController{
   open():boolean;close():void;render():void;connect():Promise<boolean>;finish():Promise<boolean>;skip():boolean;confirmField():void;key(event:KeyboardEvent):boolean;joined():void;isOpen():boolean;
@@ -21,14 +21,14 @@ interface FirstStartController{
 interface LifecycleInput{
   readonly profiles:ProfilesController;readonly firstStart:FirstStartController;
   settleCurrentProfile():PromiseLike<boolean>;getStudentName():string;isDefaultStudentName(value:string):boolean;canonicalLocalRecoveryEmpty():PromiseLike<boolean|null>;
-  renderProfile():unknown;appCanMutate():boolean;
+  renderProfile():unknown;appCanMutate():boolean;reportError(error:unknown):unknown;
   readonly backupProtection:Readonly<{ask():PromiseLike<unknown>}>;setBackupProtectionSurfaceError(error:unknown):unknown;
 }
 interface DriveLibraryInfo{readonly email?:unknown;readonly folder?:unknown;readonly found?:unknown;readonly mine?:unknown;readonly library?:Readonly<{notes?:number;savedAt?:string}>|null}
 interface DriveBindingInput{
   readonly profiles:ProfilesController;
   readonly interactions:Readonly<{confirm(input:Readonly<Record<string,unknown>>):Promise<boolean>;notify(input:Readonly<Record<string,unknown>>):unknown}>;
-  clearBaseline():PromiseLike<unknown>;renderProfile():unknown;endConnectCard():unknown;firstStartJoined():unknown;
+  clearBaseline():PromiseLike<unknown>;renderProfile():unknown;endConnectCard():unknown;firstStartJoined():unknown;capture(scope:string,error:unknown):unknown;
   storageHealthTime(value:string):string;now():number;
 }
 interface DriveBindingController{
@@ -59,10 +59,14 @@ function createPanelActions(ports:PanelActionsInput){
   const {document}=ports;
   const input=()=>document.getElementById('profile-name-input') as HTMLInputElement|null;
   function saveName(){
-    const field=input();if(!field)return;
-    const raw=String(field.value||'').trim();if(!raw){field.value=ports.getStudentName();return;}
-    if(ports.normalizeStudentName(raw)===ports.getStudentName())return;
-    const clean=ports.applyStudentName(raw);field.value=clean;ports.persistUserDefaultName(clean);
+    const field=input();if(!field)return false;
+    const before=ports.getStudentName(),raw=String(field.value||'').trim();if(!raw){field.value=before;return false;}
+    if(ports.normalizeStudentName(raw)===before)return true;
+    try{
+      const clean=ports.applyStudentName(raw);field.value=clean;ports.persistUserDefaultName(clean);return true;
+    }catch(error){
+      field.value=before;ports.reportError(error);ports.renderPanel();return false;
+    }
   }
   function startRename(){
     const button=document.getElementById('profile-name-button') as HTMLButtonElement|null,field=input();
@@ -138,34 +142,48 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
     render();dialog.showModal();setTimeout(()=>field('first-start-name')?.focus(),0);return true;
   }
   function close(){const dialog=node('first-start-dialog') as HTMLDialogElement|null;if(dialog?.open)dialog.close();}
+  function fail(error:unknown){
+    ports.reportError(error);showError('This profile could not be updated safely. Retry after storage recovers.');return false;
+  }
   async function connect(){
-    showError('');if(!await applyPassword())return false;
-    const raw=String(field('first-start-name')?.value||'').trim();if(raw)profiles.rename(raw);
-    const ok=await ports.connectDriveForProfile();render();return ok;
+    try{
+      showError('');if(!await applyPassword())return false;
+      const raw=String(field('first-start-name')?.value||'').trim();if(raw)profiles.rename(raw);
+      const ok=await ports.connectDriveForProfile();render();return ok;
+    }catch(error){return fail(error);}
   }
   async function finish(){
-    showError('');if(!await applyPassword())return false;
-    applyName();profiles.finishFirstStart();close();ports.renderProfile();return true;
+    try{
+      showError('');if(!await applyPassword())return false;
+      applyName();profiles.finishFirstStart();close();ports.renderProfile();return true;
+    }catch(error){return fail(error);}
   }
   function skip(){
-    const mine=profiles.current();if(mine&&mine.from!==null)return profiles.remove();
-    profiles.finishFirstStart();close();ports.renderProfile();return true;
+    try{
+      const mine=profiles.current();if(mine&&mine.from!==null)return profiles.remove();
+      profiles.finishFirstStart();close();ports.renderProfile();return true;
+    }catch(error){return fail(error);}
   }
   function confirmField(){const confirmation=node('first-start-confirm-field');if(confirmation)confirmation.hidden=!String(field('first-start-password')?.value||'');}
   function key(event:KeyboardEvent){if(event.key==='Enter'&&event.target instanceof HTMLInputElement){event.preventDefault();void finish();return false;}return true;}
   return Object.freeze({open,close,render,connect,finish,skip,confirmField,key,joined:()=>{joined=true;render();},isOpen:()=>!!(node('first-start-dialog') as HTMLDialogElement|null)?.open});
 }
 function createLifecycle(ports:LifecycleInput){
+  const fail=(error:unknown)=>{ports.reportError(error);return false;};
   async function switchProfile(event:unknown){
-    const target=event&&typeof event==='object'&&'target' in event?(event as {target?:unknown}).target:null;
-    const element=target instanceof Element?target.closest<HTMLElement>('[data-profile]'):null;
-    const id=String(element?.dataset['profile']||'');if(!id)return false;
-    if(await ports.settleCurrentProfile()!==true)return false;
-    return ports.profiles.switchTo(id);
+    try{
+      const target=event&&typeof event==='object'&&'target' in event?(event as {target?:unknown}).target:null;
+      const element=target instanceof Element?target.closest<HTMLElement>('[data-profile]'):null;
+      const id=String(element?.dataset['profile']||'');if(!id)return false;
+      if(await ports.settleCurrentProfile()!==true)return false;
+      return ports.profiles.switchTo(id);
+    }catch(error){return fail(error);}
   }
   async function addProfile(){
-    if(await ports.settleCurrentProfile()!==true)return false;
-    return ports.profiles.add();
+    try{
+      if(await ports.settleCurrentProfile()!==true)return false;
+      return ports.profiles.add();
+    }catch(error){return fail(error);}
   }
   async function startProfile(){
     const name=ports.getStudentName(),named=!ports.isDefaultStudentName(name);let mine=ports.profiles.current();
@@ -199,18 +217,23 @@ function createDriveBinding(ports:DriveBindingInput):Readonly<DriveBindingContro
     });
   }
   async function bind(info:DriveLibraryInfo|null|undefined):Promise<'refuse'|'continue'|'claim'|'adopt'>{
-    const mine=ports.profiles.current();if(!mine)return 'refuse';
-    const email=String(info?.email||''),folder=String(info?.folder||''),found=String(info?.found||''),others=ports.profiles.list().filter(row=>row.scope!==mine.scope);
     const refuse=(message:string)=>{ports.endConnectCard();ports.interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});ports.renderProfile();return 'refuse' as const;};
-    const owner=others.find(row=>(!!email&&row.email===email)||(!!found&&row.id===found));
-    if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
-    if(info?.mine){await record(email,folder);return 'continue';}
-    if(!found&&(!info?.library||!others.length)){await record(email,folder);return 'claim';}
-    if(ports.now()-connectRequestedAt>CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
-    libraryQuestion??=askToJoin(email,info?.library).finally(()=>{libraryQuestion=null;});
-    if(!await libraryQuestion){ports.endConnectCard();ports.renderProfile();return 'refuse';}
-    if(found&&!ports.profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
-    ports.firstStartJoined();await record(email,folder);return found?'adopt':'claim';
+    try{
+      const mine=ports.profiles.current();if(!mine)return 'refuse';
+      const email=String(info?.email||''),folder=String(info?.folder||''),found=String(info?.found||''),others=ports.profiles.list().filter(row=>row.scope!==mine.scope);
+      const owner=others.find(row=>(!!email&&row.email===email)||(!!found&&row.id===found));
+      if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
+      if(info?.mine){await record(email,folder);return 'continue';}
+      if(!found&&(!info?.library||!others.length)){await record(email,folder);return 'claim';}
+      if(ports.now()-connectRequestedAt>CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
+      libraryQuestion??=askToJoin(email,info?.library).finally(()=>{libraryQuestion=null;});
+      if(!await libraryQuestion){ports.endConnectCard();ports.renderProfile();return 'refuse';}
+      if(found&&!ports.profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
+      ports.firstStartJoined();await record(email,folder);return found?'adopt':'claim';
+    }catch(error){
+      ports.capture('profile.drive-binding',error);
+      return refuse('The local profile list could not be updated safely. Retry after browser storage recovers.');
+    }
   }
   return Object.freeze({markRequested,bind});
 }
@@ -230,28 +253,34 @@ function createDeletion(ports:DeletionInput){
     }finally{hold?.release();}
   }
   async function deleteThisProfile(){
-    const mine=ports.profiles.current();if(!mine)return false;
-    const name=ports.getStudentName(),last=ports.profiles.list().length<2,drive=ports.provider.locationStatus('google-drive'),synced=!!(drive?.connected&&drive.sync?.syncedAt&&!drive.waiting&&!drive.sync?.syncing),folder=ports.device.status();
-    const afterwards=last?' A new, empty profile starts afterwards.':'';
-    const choice=await ports.interactions.choose({
-      title:`Delete ${name}?`,message:last?'This is the only profile on this device.':'Other profiles on this device are not changed.',
-      choices:[
-        {value:'device',label:'Remove from this device',description:(synced?`Its data stays in ${mine.email||'Google Drive'} and in any Device Folder backups.`:'Its data is deleted from this device. Google Drive and Device Folder backups, if any, stay.')+afterwards,kind:'caution'},
-        {value:'everywhere',label:'Delete everywhere',description:`Here, in Google Drive (to its Trash) and in this device’s Device Folder backups. Other devices remove it when they next sign in.${afterwards}`,kind:'danger'}
-      ]
-    });
-    if(choice==='device'){
-      if(!synced&&!await ports.interactions.confirm({title:`Remove ${name} from this device?`,message:'This profile is not fully synced to Google Drive. Removing it deletes its notes, Saved Days, plans and attachments from this device for good.',details:['Its Device Folder backups and backup files, if any, stay where they are.'],confirmLabel:'Remove from this device',danger:true}))return false;
-      return ports.profiles.remove();
+    try{
+      const mine=ports.profiles.current();if(!mine)return false;
+      const name=ports.getStudentName(),last=ports.profiles.list().length<2,drive=ports.provider.locationStatus('google-drive'),synced=!!(drive?.connected&&drive.sync?.syncedAt&&!drive.waiting&&!drive.sync?.syncing),folder=ports.device.status();
+      const afterwards=last?' A new, empty profile starts afterwards.':'';
+      const choice=await ports.interactions.choose({
+        title:`Delete ${name}?`,message:last?'This is the only profile on this device.':'Other profiles on this device are not changed.',
+        choices:[
+          {value:'device',label:'Remove from this device',description:(synced?`Its data stays in ${mine.email||'Google Drive'} and in any Device Folder backups.`:'Its data is deleted from this device. Google Drive and Device Folder backups, if any, stay where they are.')+afterwards,kind:'caution'},
+          {value:'everywhere',label:'Delete everywhere',description:`Here, in Google Drive (to its Trash) and in this device’s Device Folder backups. Other devices remove it when they next sign in.${afterwards}`,kind:'danger'}
+        ]
+      });
+      if(choice==='device'){
+        if(!synced&&!await ports.interactions.confirm({title:`Remove ${name} from this device?`,message:'This profile is not fully synced to Google Drive. Removing it deletes its notes, Saved Days, plans and attachments from this device for good.',details:['Its Device Folder backups and backup files, if any, stay where they are.'],confirmLabel:'Remove from this device',danger:true}))return false;
+        return ports.profiles.remove();
+      }
+      if(choice!=='everywhere')return false;
+      if(mine.email&&!drive?.connected){ports.interactions.notify({key:'profile-delete',title:'Sign in to Google Drive first',message:`${name}’s library is in ${mine.email}. Sign in from the Profile panel, then delete the profile everywhere.`});return false;}
+      const places=[drive?.connected?`its library in ${mine.email||'Google Drive'} moves to the Drive Trash, where it can be brought back for 30 days`:'',folder.connected?'its Device Folder backups on this device are deleted':''].filter(Boolean);
+      const ok=await ports.interactions.confirm({
+        title:`Delete ${name} everywhere?`,message:`Its notes, Saved Days, plans, reflections and attachments are deleted from this device${places.length?`; ${places.join('; ')}`:''}.`,
+        details:['Other devices remove this profile the next time they sign in to Google Drive.',...(last?['A new, empty profile starts afterwards.']:[])],confirmLabel:'Delete everywhere',danger:true
+      });
+      return ok?deleteHere({drive:!!drive?.connected}):false;
+    }catch(error){
+      ports.capture('profile.delete',error);
+      ports.interactions.notify({key:'profile-delete',title:'The profile was not deleted',message:'The local profile list could not be updated safely. Nothing was removed; retry after browser storage recovers.'});
+      return false;
     }
-    if(choice!=='everywhere')return false;
-    if(mine.email&&!drive?.connected){ports.interactions.notify({key:'profile-delete',title:'Sign in to Google Drive first',message:`${name}’s library is in ${mine.email}. Sign in from the Profile panel, then delete the profile everywhere.`});return false;}
-    const places=[drive?.connected?`its library in ${mine.email||'Google Drive'} moves to the Drive Trash, where it can be brought back for 30 days`:'',folder.connected?'its Device Folder backups on this device are deleted':''].filter(Boolean);
-    const ok=await ports.interactions.confirm({
-      title:`Delete ${name} everywhere?`,message:`Its notes, Saved Days, plans, reflections and attachments are deleted from this device${places.length?`; ${places.join('; ')}`:''}.`,
-      details:['Other devices remove this profile the next time they sign in to Google Drive.',...(last?['A new, empty profile starts afterwards.']:[])],confirmLabel:'Delete everywhere',danger:true
-    });
-    return ok?deleteHere({drive:!!drive?.connected}):false;
   }
   async function driveProfileDeleted(info:ProfileDeletionInfo|null|undefined){
     const mine=ports.profiles.current();if(!mine||String(info?.profile||'')!==mine.id||deletionQuestion)return false;

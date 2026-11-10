@@ -4563,6 +4563,10 @@ function renderProfilePanel(){
   renderProfileBadge();
 }
 function renderProfile(){renderProfileBadge();renderProfilePanel();}
+function reportProfileActionError(error){
+  AppDiagnostics.capture('profile.action',error,'warn');
+  Interactions.notify({key:'profile-action',title:'Profile change stopped',message:'Study Director could not safely update the local profile list. Your current profile remains authoritative; retry after browser storage recovers.'});
+}
 const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze({
   document,
   getStudentName:()=>getStudentNameFromDisplay(),
@@ -4570,6 +4574,7 @@ const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze({
   applyStudentName,
   persistUserDefaultName,
   renderPanel:()=>renderProfilePanel(),
+  reportError:error=>reportProfileActionError(error),
   recent:NotificationRecent
 }));
 function openProfilePanel(){return ProfilePanelActions.open();}
@@ -4681,6 +4686,7 @@ const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze({
   renderProfile:()=>renderProfile(),
   endConnectCard:()=>endDriveConnectCard(),
   firstStartJoined:()=>FirstStart.joined(),
+  capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
   storageHealthTime,
   now:()=>Date.now()
 }));
@@ -4699,7 +4705,8 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze({
   isDefaultStudentName,
   applyStudentName,
   persistUserDefaultName,
-  renderProfile:()=>renderProfile()
+  renderProfile:()=>renderProfile(),
+  reportError:error=>reportProfileActionError(error)
 }));
 
 // A deliberate profile reload must not outrun writes owned by the current
@@ -4738,6 +4745,7 @@ const ProfileLifecycle=ProfilesHostModule.createLifecycle(Object.freeze({
   canonicalLocalRecoveryEmpty:()=>canonicalLocalRecoveryEmpty(),
   renderProfile:()=>renderProfile(),
   appCanMutate:()=>appCanMutate(),
+  reportError:error=>reportProfileActionError(error),
   backupProtection:Object.freeze({ask:()=>BackupProtection.ask()}),
   setBackupProtectionSurfaceError:error=>setBackupProtectionSurfaceError(error)
 }));
