@@ -102,6 +102,7 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   }
   async function rewriteAfterStorageReset(){
     if(!ready)return false;
+    await chain.catch(()=>undefined);
     const snapshot=clonePlans(codec.plans(state));
     return enqueue(async()=>{
       await repositories.plans.replace(snapshot);
@@ -148,7 +149,9 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   async function verify(value:unknown){
     await settled();
     const actual=codec.normalize({version:2,plans:await repositories.plans.read(),preferences:await currentPreferences()});
-    return JSON.stringify(actual)===JSON.stringify(codec.normalize(value))||(()=>{throw new Error('Restored Plans or Preferences did not match the selected backup.');})();
+    const expected=codec.normalize(value);
+    if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Restored Plans or Preferences did not match the selected backup.');
+    return true;
   }
   const controller=freeze({
     format:'study-director.plan-data' as const,contractVersion:1 as const,factory,

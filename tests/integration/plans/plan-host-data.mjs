@@ -24,7 +24,7 @@ const b={id:'plan-beta0001',label:'Beta',scheduleText:'08:00 | 45 | Beta | work 
 let canonical=cleanPlans({draft:null,savedPlans:[a,b],defaultId:a.id});
 let canonicalPreferences={...emptyPreferences(),studentName:'Stored Student'};
 let writeDraftCalls=0,writeLibraryCalls=0,replaceCalls=0,replacePortableCalls=0,flushPreferenceCalls=0;
-let failLibrary=false,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
+let failLibrary=false,libraryWriteGate=null,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
 const token=freeze({format:'study-director.ownership-write-token',contractVersion:1,tabId:'t',pageId:'p',claimId:'c',revision:1,state:'primary',allowHydrating:false,reason:'qa'});
 const data=PlanHostModule.createData(freeze({
   codec,
@@ -34,7 +34,7 @@ const data=PlanHostModule.createData(freeze({
       replace:async value=>{replaceCalls++;canonical=cleanPlans(value);return true;},
       replacePortable:async value=>{replacePortableCalls++;canonical=cleanPlans(value.plans);canonicalPreferences=clone(value.preferences);return clone({...value.preferences,version:2,updatedAt:'2026-11-10T00:00:00.000Z'});},
       writeDraft:async value=>{writeDraftCalls++;canonical={...canonical,draft:value};return true;},
-      writeLibrary:async value=>{writeLibraryCalls++;if(failLibrary)throw new Error('library unavailable');canonical=cleanPlans({...canonical,...value});return true;}
+      writeLibrary:async value=>{writeLibraryCalls++;if(failLibrary)throw new Error('library unavailable');if(libraryWriteGate)await libraryWriteGate;canonical=cleanPlans({...canonical,...value});return true;}
     }),
     preferences:freeze({read:async()=>clone(canonicalPreferences)})
   }),
@@ -81,6 +81,19 @@ assert.equal(canonical.draft,'Working draft');
 assert.equal(canonical.defaultId,b.id);
 assert.equal(canonical.savedPlans.length,2);
 
+let releaseLibraryWrite;
+libraryWriteGate=new Promise(resolve=>{releaseLibraryWrite=resolve;});
+const queuedLibrary=data.writeLibrary({savedPlans:[a,b],defaultId:a.id});
+await Promise.resolve();
+const queuedReset=data.rewriteAfterStorageReset();
+await Promise.resolve();
+assert.equal(replaceCalls,beforeReset.replaceCalls+1,'storage-reset snapshot waits for an already-queued library write');
+releaseLibraryWrite();
+await queuedLibrary;
+await queuedReset;
+libraryWriteGate=null;
+assert.equal(canonical.defaultId,a.id,'storage-reset rewrite includes the library state committed immediately before its snapshot');
+
 const stableLibrary=data.library();
 failLibrary=true;
 await assert.rejects(data.writeLibrary({savedPlans:[a],defaultId:a.id}),/library unavailable/);
@@ -97,4 +110,4 @@ assert.equal(acceptedPreferences.studentName,'Imported Student');
 assert.equal(await data.verify(imported),true);
 assert.ok(flushPreferenceCalls>=2,'settlement keeps Plan and protected Preferences in one portable-data barrier');
 
-console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','atomic storage-reset replacement','failed-library rollback','portable import projection','portable verification']},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification']},null,2));
