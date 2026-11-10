@@ -19,6 +19,7 @@ export interface TaskIdentityPort{
   indexForId(taskId:unknown,indexMap?:ReadonlyMap<string,number>|null):number|null;
 }
 export type ExecutionScheduleRow={idx:number;t:Task;start:number;end:number;plannedStart:number;plannedEnd:number;adjusted:boolean};
+export type ExecutionAnchorRow=Pick<ExecutionScheduleRow,'idx'|'t'|'start'|'end'>;
 export type ExecutionTimelineRow={kind:'task';idx:number;t:Task;plannedStart:number;plannedEnd:number;startMin:number;endMin:number;completed:boolean;active:boolean;adjusted:boolean};
 export type RealTimeScheduleState={
   nowEff:number;first:number|null;last:number|null;scheduledIdx:number|null;scheduledTask:Task|null;scheduledStart:number|null;scheduledEnd:number|null;
@@ -51,7 +52,7 @@ export interface ExecutionScheduleController{
   plannedRows():ExecutionScheduleRow[];
   isInsideAdjustedWindow(index:number|null|undefined,date?:Date):boolean;
   remainingWindowSeconds(index:number|null|undefined,date?:Date):number;
-  fixedAnchorRowsFrom(startIndex:number):ExecutionScheduleRow[];
+  fixedAnchorRowsFrom(startIndex:number):ExecutionAnchorRow[];
   avoidFixedAnchorOverlap(startMin:number,durationMin:number,anchors:readonly Pick<ExecutionScheduleRow,'start'|'end'>[]):number;
   nextIncompleteTrackableFrom(fromIndex:number):number|null;
   findNextIncompleteTrackableAfter(index:number):number;
