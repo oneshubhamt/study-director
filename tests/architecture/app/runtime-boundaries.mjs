@@ -81,7 +81,8 @@ assert.match(executionHost,/taskIdentity\.indexForId\(row\.taskId,indexMap\)/u,'
 for(const token of ['AppData.activeSession','BackupProviderRuntime','claimSessionOwnership','continueSessionHere','sessionHandoff']){
   assert.equal(executionHost.includes(token),false,`P5.4A execution host must not absorb later Active Session/handoff ownership: ${token}`);
 }
-assert.match(host,/function togglePause\(\)\{const result=togglePauseTimer\(\);if\(result===true\)sendSessionChangeSoon/u,'urgent pause/resume publication occurs only after a real timer transition');
+assert.match(host,/function togglePause\(\)\{const result=togglePauseTimer\(\);if\(result===true\)\{sendSessionChangeSoon[\s\S]*?schedulePwaUpdateEvaluation\(150\);\}return result;\}/u,'pause/resume publication and update work occur only after a real timer transition');
+assert.match(host,/function skipTask\(\)\{[\s\S]*?if\(result===true\)\{notifyDeviceBackupIfStudyDayResolved\(\);sendSessionChangeSoon\('block-skipped'\);schedulePwaUpdateEvaluation\(150\);/u,'skip side effects occur only after a real block transition');
 console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checkedComposition:true,taskIdentityEvidence:true,noOpSideEffectsGated:true},null,2));
 }
 
