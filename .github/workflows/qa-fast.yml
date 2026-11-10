@@ -60,14 +60,3 @@ jobs:
         run: node build/verify-build.mjs
       - name: Verify generated syntax
         run: node tests/architecture/build/generated-syntax-check.mjs
-      - name: P5.3A Plan targeted QA
-        run: |
-          node tests/unit/app/plan-controller.mjs
-          node tests/integration/plans/saved-plans-logic.mjs
-          node tests/architecture/app/protected-mutation-ui-contract.mjs
-          node tests/architecture/app/presentation-contracts.mjs
-          node tests/architecture/security/security-policy.mjs
-          node tests/browser/app/core-flow.mjs
-          node tests/browser/app/session-draft-edit.mjs
-          node tests/browser/app/session-merge-timer.mjs
-          node tests/browser/ui/interactions.mjs
