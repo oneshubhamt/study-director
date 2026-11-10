@@ -69,6 +69,7 @@ const host=readHostHtml();
 const executionHost=readScript('source/core/execution-host.ts');
 const timer=readScript('source/core/timer-engine.ts');
 const plan=readScript('source/core/plan.ts');
+const review=readScript('source/core/review.js');
 assert.match(host,/ExecutionHostModule\.createRuntime\(Object\.freeze\(\{/u,'live execution composition crosses the checked execution host');
 assert.doesNotMatch(host,/const TaskSessionState=\(\(\)=>\{/u,'per-task runtime evidence no longer has an untyped host implementation');
 for(const direct of [
@@ -93,6 +94,8 @@ assert.match(timer,/function tick\(\)\{[\s\S]*?if\(!appCanMutate\(\)\)\{stopExec
 assert.match(timer,/function recoveryCaptureActiveBeforeSwitch\(\)\{[\s\S]*?if\(!appCanMutate\(\)[\s\S]*?recordCurrentActiveToTask[\s\S]*?storeResolvedCompletion/u,'timer switching captures focus/completion inside the checked engine under current authority');
 assert.match(host,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|resolveActivePauseBeforeTimerSwitch\(\)!==true\)return false;[\s\S]*?writeLiveDraftNow\(\)/u,'Plan break termination delegates to the ownership-fenced checked timer transition after confirmation');
 assert.match(plan,/return scheduleGateway\.breakState\('end'\)===true;/u,'Plan application propagates a failed break termination instead of claiming success');
+assert.doesNotMatch(review,/function setCompletionState\(/u,'Review must consume the checked completion-state owner instead of maintaining a duplicate mutator');
+assert.match(review,/resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState/u,'Review completion editing consumes the checked execution evidence port');
 for(const stale of ['function latestTrackableEndMin(','const TaskSessionState=(()=>','function getRealTimeState(','function rebuildOriginalSchedule(','function resolveTaskCompletion(','function recoveryCaptureActiveBeforeSwitch(','function resolveActivePauseBeforeTimerSwitch(']){
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.4A runtime logic: ${stale}`);
 }
