@@ -60,3 +60,15 @@ jobs:
         run: node build/verify-build.mjs
       - name: Verify generated syntax
         run: node tests/architecture/build/generated-syntax-check.mjs
+      - name: P5.2 startup targeted QA
+        run: |
+          node tests/integration/app/startup-lifecycle-module.mjs
+          node tests/integration/app/ownership-hydration-fail-closed.mjs
+          node tests/integration/app/session-lifecycle-module.mjs
+          node tests/architecture/storage/runtime-authority-contract.mjs
+          node tests/architecture/storage/cleer-integration.mjs
+          node tests/browser/app/core-flow.mjs
+          node tests/browser/storage/multi-tab.mjs
+          node tests/browser/storage/site-data-clear.mjs
+          node tests/browser/storage/storage-failure-recovery.mjs
+          node tests/browser/storage/canonical-storage.mjs
