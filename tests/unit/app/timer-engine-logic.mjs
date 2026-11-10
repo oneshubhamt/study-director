@@ -14,7 +14,7 @@ const module=registry.require('timer-engine',2);
 const freeze=Object.freeze,noop=()=>false;
 const clock=createFakeClock('2026-09-13T06:00:00.000Z');
 // The generated cases below move the wall clock back: the engine reads this.
-let clockSkew=0,canMutate=true,recoverySwitchCalls=0,toggleMarkerCalls=0;
+let clockSkew=0,canMutate=true,toggleMarkerCalls=0;
 const practiceEvents=[],modeTransitions=[];let scheduleRows=[];
 const fields=(names,overrides={})=>freeze(Object.fromEntries(names.map(name=>[name,Object.prototype.hasOwnProperty.call(overrides,name)?overrides[name]:noop])));
 
@@ -82,11 +82,11 @@ const ports=freeze({
     setTimerMode:(mode,reason)=>{modeTransitions.push([timerState.mode,mode,reason]);timerState.mode=mode;return mode;}
   }),
   domain:freeze({KeyedRecord:domainPort.KeyedRecord,boundedInt:domainPort.boundedInt,clampText:domainPort.clampText,cleanDayRevision:domainPort.cleanDayRevision,fmtOver:domainPort.fmtOver,fmtS:domainPort.fmtS,makeTaskId:domainPort.makeTaskId,positiveMinutes:domainPort.positiveMinutes,shortTaskLabel:domainPort.shortTaskLabel,studyMinuteToHHMM:domainPort.studyMinuteToHHMM,taskAreaValue:domainPort.taskAreaValue,taskMeasureValue:domainPort.taskMeasureValue,taskTargetValue:domainPort.taskTargetValue}),
-  schedule:fields(['adjustedEndMin','adjustedStartMin','beginActualTask','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver'],{getScheduleDerivedState:()=>({adjustmentsRevision:0}),plannedRows:()=>scheduleRows,scheduleFingerprint:()=>'',isFixedBlock:task=>task?.kind==='fixed',isTrackableBlock:task=>!!task&&task.kind!=='fixed',isWorkBlock:task=>!task?.kind||task.kind==='work',isLiveTrackableTimer:()=>true,studyDayRolledOver:()=>false,effectiveNowMin:(date=new Date(clock.now()))=>date.getUTCHours()*60+date.getUTCMinutes()}),
-  persistence:fields(['compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoveryCaptureActiveBeforeSwitch','recoverySetStatus','saveLiveDraft','saveNote','writeLiveDraftNow'],{compactPauseEvents:(value,extra)=>{const out=Array.isArray(value)?value.map(row=>({...row})):[];if(extra)out.push({...extra});return out.slice(-100);},compactRealTimeSnapshot:()=>null,recoveryCaptureActiveBeforeSwitch:()=>{recoverySwitchCalls++;}}),
+  schedule:fields(['adjustedEndMin','adjustedStartMin','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver'],{getScheduleDerivedState:()=>({adjustmentsRevision:0}),plannedRows:()=>scheduleRows,scheduleFingerprint:()=>'',isFixedBlock:task=>task?.kind==='fixed',isTrackableBlock:task=>!!task&&task.kind!=='fixed',isWorkBlock:task=>!task?.kind||task.kind==='work',isLiveTrackableTimer:()=>true,studyDayRolledOver:()=>false,effectiveNowMin:(date=new Date(clock.now()))=>date.getUTCHours()*60+date.getUTCMinutes()}),
+  persistence:fields(['compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoverySetStatus','saveLiveDraft','saveNote','writeLiveDraftNow'],{compactPauseEvents:(value,extra)=>{const out=Array.isArray(value)?value.map(row=>({...row})):[];if(extra)out.push({...extra});return out.slice(-100);},compactRealTimeSnapshot:()=>null}),
   view:fields(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl','toggleDoneMarker'],{cachedElements:()=>({}),textEl:()=>({}),toggleDoneMarker:()=>{toggleMarkerCalls++;return true;}}),
   clock:fields(['nowMs'],{nowMs:()=>clock.now()+clockSkew}),
-  reviewEvidence:fields(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','getReviewDate','liveTaskOutcome','resolveTaskCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics'],{buildRealTimeSnapshot:()=>({}),getReviewDate:()=> '2026-09-13',resolveTaskCompletion:()=>({pct:0,source:'unresolved'})}),
+  reviewEvidence:fields(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','focusCompletionForTask','getReviewDate','liveTaskOutcome','resolveTaskCompletion','storeResolvedCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics'],{buildRealTimeSnapshot:()=>({}),focusCompletionForTask:()=>50,getReviewDate:()=> '2026-09-13',resolveTaskCompletion:()=>({pct:0,source:'none'}),storeResolvedCompletion:(_index,options)=>({pct:options?.pct??0,source:options?.source||'none'})}),
   clockEnvironment:fields(['cancelAnimationFrame','clearInterval','document','getComputedStyle','requestAnimationFrame','setInterval','setTimeout','window'],{
     document:documentStub,getComputedStyle:()=>({}),window:{matchMedia:()=>({matches:false})},requestAnimationFrame:()=>1,setInterval:()=>1,setTimeout:()=>1
   }),
@@ -116,12 +116,11 @@ timerState.currentIndex=0;
 // Execution mutations are fenced at the engine boundary, not merely by disabled UI.
 timerState.mode='running';timerState.paused=false;timerState.inactiveGap={id:'readonly-gap',taskIdx:0,gapMs:45000,lastMs:clock.now()-45000,detectedAtMs:clock.now(),source:'sleep'};
 timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:clock.now()-60000,durationSec:600,totalPausedMs:0,lastTickMs:clock.now()};
-const beforeRuntime={...timerState.runtime},beforeRecoveryCalls=recoverySwitchCalls,beforeToggleCalls=toggleMarkerCalls;
+const beforeRuntime={...timerState.runtime},beforeToggleCalls=toggleMarkerCalls;
 canMutate=false;
 assert.equal(engine.beginTimerPause('manual'),false,'a non-owner cannot pause the main timer');
 assert.equal(engine.togglePause(),false,'a non-owner cannot toggle pause');
 assert.equal(engine.jumpTo(0),false,'a non-owner cannot jump the main timer');
-assert.equal(recoverySwitchCalls,beforeRecoveryCalls,'a rejected jump cannot capture or switch execution state');
 assert.equal(engine.toggleDone(0),false,'a non-owner cannot reopen/resolve a block');
 assert.equal(toggleMarkerCalls,beforeToggleCalls,'a rejected completion toggle cannot reach host mutation callbacks');
 assert.equal(engine.markDone(),false,'a non-owner cannot finish a block');
@@ -129,6 +128,9 @@ assert.equal(engine.skipTask(),false,'a non-owner cannot skip a block');
 assert.deepEqual({...timerState.runtime},beforeRuntime,'rejected execution actions leave timer state unchanged');
 assert.equal(engine.classifyInactiveGap('break'),false,'a non-owner cannot classify a pending inactive gap');
 assert.equal(timerState.inactiveGap.id,'readonly-gap','rejected gap classification leaves the pending decision intact');
+assert.equal(engine.tick(),false,'a stale interval tick stops immediately after ownership loss');
+assert.equal(engine.status().loopActive,false,'ownership loss leaves no timer loop running');
+assert.deepEqual({...timerState.runtime},beforeRuntime,'a rejected stale tick does not advance timer state');
 canMutate=true;timerState.inactiveGap=null;
 
 // A long inactive gap is detected once, then classified as break time without counting focus.
