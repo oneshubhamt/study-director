@@ -5045,7 +5045,10 @@ function recoveryStartTimerAt(idx,seconds,actionLabel){
   recoveryCaptureActiveBeforeSwitch();
   TimerEngine.stopExecution();
   setCurrentTask(idx);
-  startCur(seconds||TASKS[idx].dur*60);
+  if(startCur(seconds||TASKS[idx].dur*60)!==true){
+    recoverySetStatus('Timer could not start because this tab no longer has execution control.',false);
+    return false;
+  }
   const t=TASKS[idx];
   const label=seconds?`${actionLabel}: ${t.name} · ${fmtS(TimerEngine.status().totalSec)}`:`${actionLabel}: ${t.name}`;
   recoverySetStatus(label,true);
@@ -6092,7 +6095,7 @@ function maybeAutoStartScheduledBlock(d=new Date()){
   if(idx===null||!isTrackableBlock(TASKS[idx]))return false;
   if(isTaskResolved(idx))return false;
   setCurrentTask(idx);
-  startCur(remainingWindowSeconds(idx,d));
+  if(startCur(remainingWindowSeconds(idx,d))!==true)return false;
   recoverySetStatus('Auto-started the scheduled trackable block at its wall-clock window.');
   return true;
 }
