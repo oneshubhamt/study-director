@@ -451,6 +451,9 @@ function renderSched(projection:PlanDraftProjection|null=null){
   updateRealTimeAwareness(rt,{force:true});
 }
 /* PLAN APPLY AND PREVIEW PIPELINE */
+function isPromiseLike<T>(value:T|PromiseLike<T>|null|undefined):value is PromiseLike<T>{
+  return !!value&&typeof (value as Partial<PromiseLike<T>>).then==='function';
+}
 function renderInvalidScheduleApply(projection:PlanDraftProjection){
   lastParsed=[];
   renderSched(projection);
@@ -571,7 +574,7 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
     }
     const draft=projection.draft,parsed=draft.parsed;
     const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
-    return preparation&&typeof preparation.then==='function'
+    return isPromiseLike(preparation)
       ?preparation.then((result:Readonly<PlanApplyPreparation>)=>finish(result,draft,parsed))
       :finish(preparation,draft,parsed);
   };
