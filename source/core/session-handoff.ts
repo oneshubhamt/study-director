@@ -68,7 +68,8 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
     if(!current?.snapshot)return session.host.captureSnapshot();
     const recent=session.host.captureSnapshot(current.evidence);
     if(!recent)return current.snapshot;
-    return freeze({...recent,timerRuntime:current.snapshot.timerRuntime,practice:current.snapshot.practice});
+    const practice=current.snapshot.practice;
+    return freeze({...recent,timerRuntime:current.snapshot.timerRuntime,...(practice===undefined?{}:{practice})});
   }
   async function verifyFrozenClaim(){
     const current=claimFreeze;
@@ -128,6 +129,7 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
         }
         if(claim.newer)return true;
         const frozen=claimFreeze;
+        if(!frozen)return true;
         if(frozen&&(!frozen.lastSyncAt||now-frozen.lastSyncAt>=configuration.claimSyncRetryMs)){
           claimFreeze=freeze({...frozen,lastSyncAt:now});
           provider.scheduleSync(configuration.providerId,'session-claim');
@@ -205,8 +207,10 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
       if(claimed?.status==='unavailable')throw handoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
       if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
       ownershipClaim=claimed.claim;
-      if(!planned||!previous)throw new Error('Google Drive confirmed ownership without a verified Active Session source.');
-      next=session.sanitize({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:clock.nowIso()});
+      const plannedSession=session.sanitize(planned),previousSession=session.sanitize(previous);
+      if(!plannedSession||!previousSession)throw new Error('Google Drive confirmed ownership without a verified Active Session source.');
+      previous=previousSession;
+      next=session.sanitize({...plannedSession,revision:Math.max(plannedSession.revision,Number(ownershipClaim.revision)||0),updatedAt:clock.nowIso()});
       if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
       const saved=await session.host.saveCanonicalSession(next,'claiming Active Session ownership',{expectedCanonical:localBefore});
       localVerified=true;
