@@ -15,7 +15,7 @@
       return typeof entry.id==='string'&&pattern.test(entry.id)&&(entry.scope===''||(typeof entry.scope==='string'&&pattern.test(entry.scope)));
     };
     // A newer version's list still names the active profile the same way where it can.
-    const profiles=list&&Number(list.version)>=1&&Array.isArray(list.profiles)?list.profiles.filter(valid) as Record<string,unknown>[]):[];
+    const profiles=list&&Number(list.version)>=1&&Array.isArray(list.profiles)?(list.profiles.filter(valid) as Record<string,unknown>[]):[];
     const activeId=typeof list?.active==='string'?list.active:'';
     const active=profiles.find(entry=>entry.id===activeId)||profiles[0];
     if(active){
