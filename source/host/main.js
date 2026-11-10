@@ -5836,7 +5836,6 @@ const {
 /* TIMER COUNTDOWN EXECUTION · PRIVATE ENGINE */
 /* EXECUTE ONGOING PROGRESS NOTE PANEL */
 function saveNote(){
-  if(!TaskSessionState.getField(TimerState.currentIndex,'notes'))TaskSessionState.setField(TimerState.currentIndex,'notes',{});
   const doneEl=document.getElementById('pn-done');
   const totalEl=document.getElementById('pn-total');
   if(doneEl&&totalEl){
@@ -5878,7 +5877,6 @@ function refreshPnote(options={}){
   }
   const measure=taskMeasureValue(t,'units'),hasNotes=hasOngoingTaskNotes(t),support=isSupportBlock(t),areaKey=hasNotes?noteKeyForTask(t):'';
   const n=TaskSessionState.getField(TimerState.currentIndex,'notes')||{};
-  TaskSessionState.setField(TimerState.currentIndex,'notes',n);
   const done=n.done!==undefined?n.done:'',total=n.total!==undefined?n.total:(taskTargetValue(t)||'');
   // A linked note opened from the bar stays on screen until this block ends.
   const taskId=TaskIdentity.idAt(TimerState.currentIndex),viewed=hasNotes&&executeNoteView&&executeNoteView.taskId===taskId?AppData.notes.get(executeNoteView.id):null;
