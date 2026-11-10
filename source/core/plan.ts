@@ -478,7 +478,7 @@ function closeActiveBreakForScheduleChange(stillCurrent:()=>boolean=()=>true){
     confirmLabel:'End break and continue',cancelLabel:'Keep break'
   }).then(ok=>{
     if(!ok||!stillCurrent())return false;
-    scheduleGateway.breakState('end');return true;
+    return scheduleGateway.breakState('end')===true;
   });
 }
 function confirmScheduleChangeWillMigrateProgress(newRows:readonly PlanRow[],stillCurrent:()=>boolean=()=>true){
