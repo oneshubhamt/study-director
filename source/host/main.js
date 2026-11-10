@@ -266,7 +266,7 @@ const {
 const InstallationIdentity=DataBootstrapHostModule.createInstallationIdentity(Object.freeze({
   module:PersistenceModule,local:LocalStorageContract,installationKey:STORAGE_KEYS.installationId,navigator
 }));
-// The people who use Study Director on this device (core/profiles.ts).// The people who use Study Director on this device (core/profiles.ts).
+// The people who use Study Director on this device (core/profiles.ts).
 const Profiles=ProfilesHostModule.createController(Object.freeze({module:ProfilesModule,ports:Object.freeze({
   scope:Object.freeze({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
   storage:Object.freeze({
