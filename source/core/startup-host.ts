@@ -39,7 +39,7 @@ function createActivation(input:Readonly<{capture(scope:string,error:unknown,sev
 
 function createOwnershipController(input:Readonly<OwnershipHostInput>){
   exactObject(input,['module','config','environment','local','diagnostics','activation','reloadHint','lifecycle','hydration','hooks'],'Startup ownership host input');
-  functions(input,['reloadHint'],'Startup ownership reload hint');
+  if(typeof input.reloadHint!=='function')throw new TypeError('Startup ownership reload hint must be a function.');
   exactObject(input.lifecycle,['isReady','resumeStorageReset'],'Startup ownership lifecycle');
   functions(input.lifecycle,['isReady','resumeStorageReset'],'Startup ownership lifecycle');
   exactObject(input.hydration,['hydratePlanData','hydratePlanRuntime','renderSavedPlans','hydratePrimary','censusUnsupported','hydrateSavedDrafts'],'Startup ownership hydration');
