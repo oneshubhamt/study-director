@@ -644,7 +644,7 @@ const {
   Pomodoro,PracticePacerModel,PracticePacer,TimerEngine,TimerPresentation,SessionEvidenceGateway,
   setCompletionSource,explicitCompletionSource,plannedSecondsForCompletion,unitCompletionForTask,progressInputState,
   syncProgressInputsToState,clearManualCompletionOverride,focusCompletionForTask,liveTaskOutcome,resolveTaskCompletion,
-  exactTaskCompletionPercent,storeResolvedCompletion,setTaskDoneState,setTaskSkippedState,
+  exactTaskCompletionPercent,storeResolvedCompletion,setCompletionState,setTaskDoneState,setTaskSkippedState,
   rebuildOriginalSchedule,resetScheduleLayers,originalStartMin,originalEndMin,adjustedStartMin,adjustedEndMin,
   hasAdjustedTiming,scheduleWindowLabel,sanitizeRuntimeAdjustedSchedule,effectiveNowMin,plannedRows,isInsideAdjustedWindow,
   remainingWindowSeconds,fixedAnchorRowsFrom,avoidFixedAnchorOverlap,nextIncompleteTrackableFrom,findNextIncompleteTrackableAfter,
@@ -6215,7 +6215,7 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
     evidence:Object.freeze({
       actualRecordsSnapshot,applicableNotesForTask,clearManualCompletionOverride,
       liveTaskOutcome,progressInputState,recordCurrentActiveToTask,
-      resolveTaskCompletion,storeResolvedCompletion,syncProgressInputsToState,updateTimerFocusMetrics
+      resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState,updateTimerFocusMetrics
     }),
     session:Object.freeze({
       acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
@@ -6256,7 +6256,7 @@ currentReviewSnapshot=ReviewEditor.activeSessionReview;
 bindReviewSession=ReviewEditor.bindSession;
 const {
   selectDate:selectReviewDate, captureInputs:captureReviewInputs,
-  clearFutureUntouched:clearFutureUntouchedProgress, setCompletionState, deletePracticeRun
+  clearFutureUntouched:clearFutureUntouchedProgress, deletePracticeRun
 }=ReviewEditor;
 const {saveToday:saveDayRecordCore,isRolledOver:studyDayRolledOver}=ReviewSaveService;
 async function saveDayRecord(){
