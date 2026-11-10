@@ -500,13 +500,14 @@ function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts
     return {handled:true,result:keepAppliedScheduleOnReapply(parsed,rawOriginal,opts),scheduleChanged:false,progressMigration:null};
   }
   if(!scheduleChanged)return {handled:false,cancelled:false,scheduleChanged:false,progressMigration:null};
-  const finish=()=>{
+  const finish=():Readonly<PlanApplyPreparation>|PromiseLike<Readonly<PlanApplyPreparation>>=>{
     const progressMigration=confirmScheduleChangeWillMigrateProgress(parsed,stillCurrent);
-    if(progressMigration)return progressMigration.then((value:false|PlanMigration)=>value===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration:value});
+    if(progressMigration)return Promise.resolve(progressMigration).then((value:false|PlanMigration)=>
+      value===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration:value});
     return {handled:false,cancelled:false,scheduleChanged:true,progressMigration:null};
   };
   const breakDecision=closeActiveBreakForScheduleChange(stillCurrent);
-  if(typeof breakDecision!=='boolean')return breakDecision.then((ok:boolean)=>ok?finish():{cancelled:true});
+  if(typeof breakDecision!=='boolean')return Promise.resolve(breakDecision).then((ok:boolean)=>ok?finish():{cancelled:true});
   return breakDecision?finish():{cancelled:true};
 }
 function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraft,opts:Readonly<PlanApplyOptions>,migrationSummary:PlanMigrationSummary|undefined):{text:string;state:PlanTone}{
