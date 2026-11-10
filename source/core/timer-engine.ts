@@ -17,10 +17,10 @@ const createModule=()=>{
     configuration:freeze(['APP_LIMITS','SLEEP_GAP_THRESHOLD_MS']),
     state:freeze(['TASKS','TIMER_MODES','TaskIdentity','TaskSessionState','TimerState','resetBreakState','setCurrentTask','setTimerMode']),
     domain:freeze(['KeyedRecord','boundedInt','clampText','cleanDayRevision','fmtOver','fmtS','makeTaskId','positiveMinutes','shortTaskLabel','studyMinuteToHHMM','taskAreaValue','taskMeasureValue','taskTargetValue']),
-    schedule:freeze(['adjustedEndMin','adjustedStartMin','beginActualTask','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver']),
-    persistence:freeze(['activePauseEventSnapshot','addPauseToActual','compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoveryCaptureActiveBeforeSwitch','recoverySetStatus','reopenActualSessionForTimer','saveLiveDraft','saveNote','writeLiveDraftNow']),
+    schedule:freeze(['adjustedEndMin','adjustedStartMin','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver']),
+    persistence:freeze(['compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoveryCaptureActiveBeforeSwitch','recoverySetStatus','saveLiveDraft','saveNote','writeLiveDraftNow']),
     view:freeze(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl','toggleDoneMarker']),
-    reviewEvidence:freeze(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','getReviewDate','liveTaskOutcome','recordCurrentActiveToTask','resolveTaskCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics']),
+    reviewEvidence:freeze(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','getReviewDate','liveTaskOutcome','resolveTaskCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics']),
     clock:freeze(['nowMs']),
     clockEnvironment:freeze(['cancelAnimationFrame','clearInterval','document','getComputedStyle','requestAnimationFrame','setInterval','setTimeout','window']),
     userPreferences:freeze(['Pomodoro','notifications']),
@@ -34,10 +34,10 @@ const createModule=()=>{
     const {APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}=ports.configuration;
     const {TASKS,TIMER_MODES,TaskIdentity,TaskSessionState,TimerState,resetBreakState,setCurrentTask,setTimerMode}=ports.state;
     const {KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}=ports.domain;
-    const {adjustedEndMin,adjustedStartMin,beginActualTask,effectiveNowMin,findNextIncompleteTrackableAfter,getLatestCarryForward,getScheduleDerivedState,handleStudyDayRollover,hasAdjustedTiming,isFixedBlock,isLiveTrackableTimer,isTaskResolved,isTrackableBlock,isWorkBlock,originalEndMin,originalStartMin,plannedRows,scheduleFingerprint,studyDayRolledOver}=ports.schedule;
-    const {activePauseEventSnapshot,addPauseToActual,compactPauseEvents,compactRealTimeSnapshot,flushLiveDraft,maybeSnapshotRunningTimer,recoveryCaptureActiveBeforeSwitch,recoverySetStatus,reopenActualSessionForTimer,saveLiveDraft,saveNote,writeLiveDraftNow}=ports.persistence;
+    const {adjustedEndMin,adjustedStartMin,effectiveNowMin,findNextIncompleteTrackableAfter,getLatestCarryForward,getScheduleDerivedState,handleStudyDayRollover,hasAdjustedTiming,isFixedBlock,isLiveTrackableTimer,isTaskResolved,isTrackableBlock,isWorkBlock,originalEndMin,originalStartMin,plannedRows,scheduleFingerprint,studyDayRolledOver}=ports.schedule;
+    const {compactPauseEvents,compactRealTimeSnapshot,flushLiveDraft,maybeSnapshotRunningTimer,recoveryCaptureActiveBeforeSwitch,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}=ports.persistence;
     const {cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay,refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}=ports.view;
-    const {applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,recordCurrentActiveToTask,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}=ports.reviewEvidence;
+    const {applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}=ports.reviewEvidence;
     const {nowMs}=ports.clock;
     const {cancelAnimationFrame,clearInterval,document,getComputedStyle,requestAnimationFrame,setInterval,setTimeout,window}=ports.clockEnvironment;
     const {Pomodoro,notifications}=ports.userPreferences;
@@ -136,6 +136,130 @@ function captureRuntimeEvidence({includeActivePause=true,withCompletion=true,inc
   return {actualTime,actualRecords,taskEvidence};
 }
 function nowIso(){return new Date().toISOString();}
+function ensureActualRecord(idx:number){
+  let record=TaskSessionState.getField(idx,'actualRecords');
+  if(!record){
+    record={idx,taskId:TASKS[idx]?.id||makeTaskId(TASKS[idx]||{},idx),firstStartedAt:null,lastStartedAt:null,lastEndedAt:null,activeSeconds:0,pausedSeconds:0,pauseCount:0,pauseEvents:[],status:'not_started',sessionCount:0,sessions:[]};
+    TaskSessionState.setField(idx,'actualRecords',record);
+  }
+  return record;
+}
+function ensureActualClock(idx:number){
+  let clock=TaskSessionState.getField(idx,'actualClock');
+  if(!clock){clock={};TaskSessionState.setField(idx,'actualClock',clock);}
+  return clock;
+}
+function captureActualClockStart(idx:number,date=new Date()){
+  const clock=ensureActualClock(idx);
+  if(clock.startedAt)return false;
+  const d=date instanceof Date&&!Number.isNaN(date.getTime())?date:new Date();
+  clock.startedAt=d.toISOString();
+  clock.startedAtLocalMinute=d.getHours()*60+d.getMinutes();
+  clock.startedAtUtcOffsetMinutes=-d.getTimezoneOffset();
+  try{
+    const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if(zone)clock.startedAtTimeZone=clampText(zone,80);
+  }catch{}
+  return true;
+}
+function beginActualTask(idx:number,durationSec:number){
+  const started=new Date(),iso=started.toISOString();
+  captureActualClockStart(idx,started);
+  const clock=ensureActualClock(idx);
+  if(clock.endedAt)delete clock.endedAt;
+  const record=ensureActualRecord(idx);
+  if(!record.firstStartedAt)record.firstStartedAt=iso;
+  record.lastStartedAt=iso;
+  record.lastEndedAt=null;
+  record.status='in_progress';
+  record.sessions=record.sessions||[];
+  record.sessionCount=Math.max(Number(record.sessionCount)||0,record.sessions.length)+1;
+  record.sessions.push({startedAt:iso,durationSec:Math.max(1,Math.round(durationSec||0)),endedAt:null,activeSeconds:0,pausedSeconds:0,pauseCount:0,pauseEvents:[]});
+  pruneActualRecordAudit(record);
+}
+function reopenActualSessionForTimer(idx:number|null|undefined,durationSec:number,status='in_progress'){
+  if(idx===null||idx===undefined||!isTrackableBlock(TASKS[idx]))return null;
+  const reopened=new Date(),iso=reopened.toISOString();
+  captureActualClockStart(idx,reopened);
+  const clock=ensureActualClock(idx);
+  if(clock.endedAt)delete clock.endedAt;
+  const record=ensureActualRecord(idx);
+  if(!record.firstStartedAt)record.firstStartedAt=clock.startedAt||iso;
+  if(!record.lastStartedAt)record.lastStartedAt=record.firstStartedAt;
+  record.lastEndedAt=null;
+  record.status=status;
+  record.sessions=Array.isArray(record.sessions)?record.sessions:[];
+  let session=record.sessions.length?record.sessions[record.sessions.length-1]!:null;
+  if(!session){
+    session={startedAt:record.lastStartedAt||record.firstStartedAt||iso,durationSec:Math.max(1,Math.round(durationSec||0)),endedAt:null,activeSeconds:Math.max(0,Math.round(Number(record.activeSeconds)||0)),pausedSeconds:Math.max(0,Math.round(Number(record.pausedSeconds)||0)),pauseCount:Math.max(0,Math.round(Number(record.pauseCount)||0)),pauseEvents:compactPauseEvents(record.pauseEvents)};
+    record.sessionCount=Math.max(Number(record.sessionCount)||0,record.sessions.length)+1;
+    record.sessions.push(session);
+  }else{
+    if(!session.startedAt)session.startedAt=record.lastStartedAt||record.firstStartedAt||iso;
+    session.durationSec=Math.max(1,Math.round(Number(session.durationSec)||durationSec||0));
+    session.endedAt=null;
+    session.pauseEvents=Array.isArray(session.pauseEvents)?session.pauseEvents:[];
+  }
+  pruneActualRecordAudit(record);
+  return session;
+}
+function recordCurrentActiveToTask(idx:number|null|undefined,status='partial'){
+  if(idx===null||idx===undefined||!isTrackableBlock(TASKS[idx]))return 0;
+  syncTimerFromClock();
+  const active=currentTimerActiveSeconds();
+  const delta=Math.max(0,active-(TimerState.runtime&&TimerState.runtime.taskIdx===idx?(TimerState.runtime.recordedSec||0):0));
+  if(delta>0)TaskSessionState.setField(idx,'actualTime',(Number(TaskSessionState.getField(idx,'actualTime'))||0)+delta);
+  if(TimerState.runtime&&TimerState.runtime.taskIdx===idx)TimerState.patchRuntime({recordedSec:(TimerState.runtime.recordedSec||0)+delta});
+  captureActualClockStart(idx,new Date());
+  const clock=ensureActualClock(idx);
+  clock.endedAt=nowIso();
+  const record=ensureActualRecord(idx);
+  record.activeSeconds=Number(TaskSessionState.getField(idx,'actualTime'))||0;
+  record.lastEndedAt=clock.endedAt;
+  record.status=status;
+  const session=record.sessions&&record.sessions.length?record.sessions[record.sessions.length-1]:null;
+  if(session&&!session.endedAt){session.endedAt=record.lastEndedAt;session.activeSeconds=Math.max(0,active);session.pausedSeconds=Math.round((TimerState.runtime?.totalPausedMs||0)/1000);}
+  return active;
+}
+function addPauseToActual(idx:number|null|undefined,sec:number,meta:LivePauseMeta){
+  if(idx===null||idx===undefined||sec<=0)return false;
+  const seconds=Math.max(1,Math.round(sec)),endedAt=meta.endedAt||nowIso(),endedMs=Date.parse(endedAt);
+  const startedAt=meta.startedAt||new Date(Number.isFinite(endedMs)?endedMs-seconds*1000:Date.now()-seconds*1000).toISOString();
+  const rawType=clampText(meta.type||'manual',32),type=['pomodoro','manual','inactive-gap'].includes(rawType)?rawType:'manual';
+  const event:LivePauseMeta&{seconds:number}={startedAt,endedAt,seconds,type};
+  const planned=Number(meta.plannedSeconds);
+  if(type==='pomodoro'&&Number.isFinite(planned)&&planned>0)event.plannedSeconds=Math.round(planned);
+  if(type==='pomodoro'&&meta.cueIssuedAt)event.cueIssuedAt=clampText(meta.cueIssuedAt,40);
+  const record=ensureActualRecord(idx);
+  record.pausedSeconds=(Number(record.pausedSeconds)||0)+seconds;
+  record.pauseCount=(Number(record.pauseCount)||0)+1;
+  record.pauseEvents=Array.isArray(record.pauseEvents)?record.pauseEvents:[];
+  record.pauseEvents.push(event);
+  const session=record.sessions&&record.sessions.length?record.sessions[record.sessions.length-1]:null;
+  if(session){
+    session.pausedSeconds=(Number(session.pausedSeconds)||0)+seconds;
+    session.pauseCount=(Number(session.pauseCount)||0)+1;
+    session.pauseEvents=Array.isArray(session.pauseEvents)?session.pauseEvents:[];
+    session.pauseEvents.push({...event});
+  }
+  pruneActualRecordAudit(record);
+  return true;
+}
+function activePauseEventSnapshot(idx:number){
+  if(!TimerState.paused||!TimerState.activeBreak||TimerState.activeBreak.taskIdx!==idx)return null;
+  const seconds=getCurrentBreakSeconds();
+  if(seconds<=0)return null;
+  const startedAtMs=Number(TimerState.activeBreak.startedAtMs)||nowMs()-seconds*1000;
+  const event:LivePauseMeta&{seconds:number}={
+    startedAt:new Date(startedAtMs).toISOString(),endedAt:new Date().toISOString(),seconds,
+    type:TimerState.activeBreak.type==='pomodoro'?'pomodoro':'manual'
+  };
+  if(event.type==='pomodoro'){
+    event.plannedSeconds=Math.max(1,Math.round(Number(TimerState.activeBreak.plannedSeconds)||Pomodoro.configuration.breakSeconds()));
+    if(TimerState.activeBreak.cueIssuedAt)event.cueIssuedAt=TimerState.activeBreak.cueIssuedAt;
+  }
+  return event;
+}
 function initTimerState(idx:number,durationSec:number){
   const now=nowMs();
   TimerState.runtime={...TimerState.emptyRuntime(),taskIdx:idx,startMs:now,durationSec:Math.max(1,Math.round(durationSec||0)),lastTickMs:now};
@@ -888,7 +1012,7 @@ const SessionEvidenceProjector=(()=>{
       absorbInactiveTimerGap,actualRecordsSnapshot,actualTimeSnapshot,applyInactiveGapSplit,
       captureRuntimeEvidence,classifyInactiveGap,currentTimerActiveMs,currentTimerActiveSeconds,
       fixedBoundaryForRunningTimer,handleInactiveGapSplitKey,handleOverlayFocusTrap,initTimerState,
-      nowIso,pruneActualRecordAudit,rebaseTimerAfterBackwardClockJump,renderInactiveGapPrompt,
+      nowIso,pruneActualRecordAudit,recordCurrentActiveToTask,reopenActualSessionForTimer,rebaseTimerAfterBackwardClockJump,renderInactiveGapPrompt,
       restoredRuntimeRecordedSec,showInactiveGapSplit,stopTimerForFixedBoundary,syncTimerFromClock,
       beginTimerPause,finalizePauseEvent,getCurrentBreakSeconds,isExecutePaneVisible,jumpTo,markDone,
       setPausedUI,setTimerIdentity,skipTask,startCur,syncTimerAfterWake,tick,toggleDone,togglePause,
