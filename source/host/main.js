@@ -2247,13 +2247,7 @@ async function handlePreviousActiveSession(session){
         if(!latest?.ok||latest.error||
             !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(latest.value),current))
           throw new Error('The previous-day session changed while discard was starting.');
-        const result=await AppData.activeSession.clear();
-        handleActiveSessionRepositoryResult(result,'clear');
-        if(!result?.ok||result.error||result.storage?.idb!==true)
-          throw result?.error||new Error('Canonical previous-day session deletion failed.');
-        const checked=await AppData.activeSession.load(0,{strict:true});
-        if(!checked?.ok||checked.error||checked.value)
-          throw checked?.error||new Error('Previous-day recovery still exists after deletion.');
+        await ActiveSessionRuntime.clearCanonical('discarding the previous-day recovery session');
       });
     }catch(error){
       setSessionPanelMode('previous',current);
