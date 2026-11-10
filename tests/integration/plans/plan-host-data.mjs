@@ -24,7 +24,7 @@ const b={id:'plan-beta0001',label:'Beta',scheduleText:'08:00 | 45 | Beta | work 
 let canonical=cleanPlans({draft:null,savedPlans:[a,b],defaultId:a.id});
 let canonicalPreferences={...emptyPreferences(),studentName:'Stored Student'};
 let writeDraftCalls=0,writeLibraryCalls=0,replaceCalls=0,replacePortableCalls=0,flushPreferenceCalls=0;
-let failLibrary=false,libraryWriteGate=null,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
+let failLibrary=false,denyToken=false,libraryWriteGate=null,replacedDraftText='',previewCalls=0,renderCalls=0,acceptedPreferences=null;
 const token=freeze({format:'study-director.ownership-write-token',contractVersion:1,tabId:'t',pageId:'p',claimId:'c',revision:1,state:'primary',allowHydrating:false,reason:'qa'});
 const data=PlanHostModule.createData(freeze({
   codec,
@@ -38,7 +38,7 @@ const data=PlanHostModule.createData(freeze({
     }),
     preferences:freeze({read:async()=>clone(canonicalPreferences)})
   }),
-  ownership:freeze({issueWriteToken:()=>token,assertWriteToken:()=>true}),
+  ownership:freeze({issueWriteToken:()=>{if(denyToken)throw new Error('ownership unavailable');return token;},assertWriteToken:()=>true}),
   storage:freeze({markError:()=>true}),
   preferences:freeze({
     fallback:()=>emptyPreferences(),
@@ -70,6 +70,12 @@ assert.equal(canonical.defaultId,b.id);
 assert.equal(await data.writeDraft('Working draft',{strictDurability:true}),true);
 assert.equal(canonical.draft,'Working draft');
 assert.equal(writeDraftCalls,1);
+
+denyToken=true;
+assert.throws(()=>data.writeDraft('Unauthorized draft'),/ownership unavailable/);
+assert.equal(data.readDraft(),'Working draft','failed token acquisition cannot publish an unauthorized in-memory draft');
+assert.equal(canonical.draft,'Working draft');
+denyToken=false;
 
 const beforeReset={writeDraftCalls,writeLibraryCalls,replaceCalls};
 canonical=cleanPlans({draft:null,savedPlans:[],defaultId:null});
@@ -110,4 +116,4 @@ assert.equal(acceptedPreferences.studentName,'Imported Student');
 assert.equal(await data.verify(imported),true);
 assert.ok(flushPreferenceCalls>=2,'settlement keeps Plan and protected Preferences in one portable-data barrier');
 
-console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification']},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'plan-host-data',checks:['default composition','detached library reads','saved default persistence','strict draft adapter','token-before-memory-publication','atomic storage-reset replacement','queued-write recovery ordering','failed-library rollback','portable import projection','portable verification']},null,2));

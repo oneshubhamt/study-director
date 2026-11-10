@@ -41,8 +41,8 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
   const factory=freeze({studentName:input.defaults.factory.studentName,scheduleText:input.defaults.factory.scheduleText});
   let state:SavedPlans={draft:null,savedPlans:[],defaultId:null},persistedDraft:string|null|undefined=null,ready=false,chain:Promise<unknown>=Promise.resolve(),failure:unknown=null;
 
-  function enqueue<T>(work:(token:WriteToken)=>Promise<T>,options:Readonly<PlanDataWriteOptions|PlanLibraryWriteOptions>={}):Promise<T>{
-    const token=options.ownershipToken||ownership.issueWriteToken('save Plan data',{allowHydrating:options.allowHydrating===true});
+  function enqueue<T>(work:(token:WriteToken)=>Promise<T>,options:Readonly<PlanDataWriteOptions|PlanLibraryWriteOptions>={},preparedToken:WriteToken|null=null):Promise<T>{
+    const token=preparedToken||options.ownershipToken||ownership.issueWriteToken('save Plan data',{allowHydrating:options.allowHydrating===true});
     const next=chain.catch(()=>undefined).then(()=>{
       ownership.assertWriteToken(token,'save Plan data');
       return work(token);
@@ -67,17 +67,21 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
     await chain.catch(()=>undefined);
     state=clonePlans(codec.plans(await repositories.plans.read()));
     persistedDraft=state.draft;
+    failure=null;
     ready=true;
     return true;
   }
   function writeDraft(value:string|null,options:Readonly<PlanDataWriteOptions>={}){
     if(!ready)return Promise.reject(new Error('Plan storage is still loading.'));
-    state=clonePlans(codec.plans({...state,draft:value}));
-    return enqueue(async token=>{
-      codec.plans({...state,draft:value});
+    const clean=clonePlans(codec.plans({...state,draft:value}));
+    // Authorization precedes publication to the in-memory Plan view. If the
+    // page lost ownership, readDraft() must not claim an unauthorized value.
+    const token=options.ownershipToken||ownership.issueWriteToken('save Plan data',{allowHydrating:options.allowHydrating===true});
+    state=clean;
+    return enqueue(async activeToken=>{
       if(persistedDraft===value&&options.force!==true&&options.strictDurability!==true){failure=null;return true;}
       await repositories.plans.writeDraft(value,{
-        ownershipToken:token,
+        ownershipToken:activeToken,
         allowHydrating:options.allowHydrating===true,
         backupCapture:options.backupCapture===true,
         strictDurability:options.strictDurability===true
@@ -85,7 +89,7 @@ function createData(input:Readonly<PlanDataHostInput>):Readonly<PlanDataControll
       persistedDraft=value;
       failure=null;
       return true;
-    },options);
+    },options,token);
   }
   function writeLibrary(value:PlanLibrary,options:Readonly<PlanLibraryWriteOptions>={}){
     if(!ready)return Promise.reject(new Error('Plan storage is still loading.'));
