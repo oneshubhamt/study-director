@@ -94,7 +94,7 @@ function createCoordinator(input:Readonly<StartupHostCoordinatorInput>){
   const coordinator=input.module.createCoordinator(freeze({
     environment:input.environment,
     diagnostics:input.diagnostics,
-    activation:freeze({publish:(kind,source,options)=>input.activation.publish(kind,source,options)}),
+    activation:freeze({publish:(kind:ActivationKind,source?:string,options?:Readonly<{destructive?:boolean}>)=>input.activation.publish(kind,source,options)}),
     ownership:freeze({
       install:input.ownership.install,evaluate:input.ownership.evaluate,canMutate:input.ownership.canMutate,hasControl:input.ownership.hasControl,
       writeLease:input.ownership.writeLease,flushAndRelease:input.ownership.flushAndRelease,transitionReleasing:input.ownership.transitionReleasing,
