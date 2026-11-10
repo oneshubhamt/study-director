@@ -9,12 +9,12 @@ const strictCount=()=>idbDurability.strict;
 const normalCount=()=>idbDurability.normal;
 
 // High-frequency Review/Active Session checkpoints stay on normal/default durability.
-await app.activeSession.save({id:'active',revision:1,date:'2026-09-15',status:'active',scheduleText:'',snapshot:{elapsedMs:1,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-15T12:00:00.000Z'});
+await app.activeSession.save({id:'active',version:6,revision:1,date:'2026-09-15',status:'active',scheduleText:'',snapshot:{elapsedMs:1,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-15T12:00:00.000Z'});
 assert.equal(strictCount(),0,'Review autosaves through Active Session must not force a storage flush');
 assert.ok(normalCount()>0,'Review autosaves through Active Session must keep the normal transaction path');
 
 const beforeSessionStrict=strictCount();
-await app.activeSession.save({id:'active',revision:2,date:'2026-09-15',status:'active',scheduleText:'',snapshot:{elapsedMs:2,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-15T12:00:01.000Z'});
+await app.activeSession.save({id:'active',version:6,revision:2,date:'2026-09-15',status:'active',scheduleText:'',snapshot:{elapsedMs:2,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-15T12:00:01.000Z'});
 assert.equal(strictCount(),beforeSessionStrict,'active-session checkpoints must not use strict durability');
 
 await app.notes.load();
