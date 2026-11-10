@@ -116,7 +116,7 @@ const SavedPlans=(()=>{
   const actionButton=(label:string,action:string,id:string,className='saved-plan-menu-action ui-btn ghost')=>{
     const button=document.createElement('button');button.type='button';button.className=className;button.textContent=label;button.dataset.savedPlan=action;if(id)button.dataset.savedPlanId=id;if(className.includes('saved-plan-menu-action'))button.setAttribute('role','menuitem');return button;
   };
-  function render(selected='':string){
+  function render(selected:string=''){
     const panel=node('saved-plans-panel'),list=node('saved-plans-list');if(!panel||!list)return;
     const data=persistence.readLibrary();
     if(selected&&data.savedPlans.some(plan=>plan.id===selected))selectedId=selected;
@@ -633,7 +633,7 @@ const PlanDraftEditor=(()=>{
     }
     return ok;
   }
-  function save(options={}){
+  function save(options:Readonly<Record<string,unknown>>={}){
     if(!ownership.canMutate())return false;
     clearTimer('save');
     return persistNow(options);
