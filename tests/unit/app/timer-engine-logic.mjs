@@ -14,8 +14,8 @@ const module=registry.require('timer-engine',2);
 const freeze=Object.freeze,noop=()=>false;
 const clock=createFakeClock('2026-09-13T06:00:00.000Z');
 // The generated cases below move the wall clock back: the engine reads this.
-let clockSkew=0;
-const pauseRecords=[],practiceEvents=[],modeTransitions=[],recordedFocusSec=[];let scheduleRows=[],engineRef=null;
+let clockSkew=0,canMutate=true,recoverySwitchCalls=0,toggleMarkerCalls=0;
+const practiceEvents=[],modeTransitions=[];let scheduleRows=[];
 const fields=(names,overrides={})=>freeze(Object.fromEntries(names.map(name=>[name,Object.prototype.hasOwnProperty.call(overrides,name)?overrides[name]:noop])));
 
 const limits=freeze({
@@ -62,30 +62,40 @@ const practiceStub=freeze({
   resolveInactiveGap:(focus,options)=>{practiceEvents.push(['gap-resolve',focus,options.resume,options.now]);return true;},
   paint:noop,pulse:noop,paintProgress:noop,onMainTaskChanging:noop,onBlockResolved:noop,status:()=>freeze({})
 });
+const taskFields=new Map();
+const taskFieldKey=(index,field)=>`${index}:${field}`;
+const taskSessionStub=freeze({
+  getField:(index,field)=>taskFields.get(taskFieldKey(index,field)),
+  setField:(index,field,value)=>{const key=taskFieldKey(index,field);if(value===undefined)taskFields.delete(key);else taskFields.set(key,value);return true;},
+  indexSnapshot:field=>{const out={};for(const [key,value] of taskFields){const split=key.indexOf(':');if(key.slice(split+1)===field)out[key.slice(0,split)]=value;}return out;},
+  resolvedState:()=>null
+});
+const pauseCount=()=>Number(taskSessionStub.getField(0,'actualRecords')?.pauseCount)||0;
+const latestPause=()=>taskSessionStub.getField(0,'actualRecords')?.pauseEvents?.at(-1)||null;
 const ports=freeze({
   configuration:fields(['APP_LIMITS','SLEEP_GAP_THRESHOLD_MS'],{APP_LIMITS:limits,SLEEP_GAP_THRESHOLD_MS:30000}),
   state:fields(['TASKS','TIMER_MODES','TaskIdentity','TaskSessionState','TimerState','resetBreakState','setCurrentTask','setTimerMode'],{
     TASKS:tasks,TIMER_MODES:freeze({EMPTY:'empty',READY:'ready',RUNNING:'running',PAUSED:'paused',DONE:'done'}),
-    TaskIdentity:freeze({idAt:index=>tasks[index]?.id||null,indexForId:id=>tasks.findIndex(task=>task.id===id)}),TaskSessionState:freeze({getField:()=>null,resolvedState:()=>'',indexSnapshot:()=>({})}),TimerState:timerState,
+    TaskIdentity:freeze({idAt:index=>tasks[index]?.id||null,indexForId:id=>tasks.findIndex(task=>task.id===id)}),TaskSessionState:taskSessionStub,TimerState:timerState,
     resetBreakState:()=>{timerState.breakStartMs=null;timerState.currentBreakSec=0;timerState.activeBreak=null;},
     setCurrentTask:index=>{timerState.currentIndex=index;return index;},
     setTimerMode:(mode,reason)=>{modeTransitions.push([timerState.mode,mode,reason]);timerState.mode=mode;return mode;}
   }),
   domain:freeze({KeyedRecord:domainPort.KeyedRecord,boundedInt:domainPort.boundedInt,clampText:domainPort.clampText,cleanDayRevision:domainPort.cleanDayRevision,fmtOver:domainPort.fmtOver,fmtS:domainPort.fmtS,makeTaskId:domainPort.makeTaskId,positiveMinutes:domainPort.positiveMinutes,shortTaskLabel:domainPort.shortTaskLabel,studyMinuteToHHMM:domainPort.studyMinuteToHHMM,taskAreaValue:domainPort.taskAreaValue,taskMeasureValue:domainPort.taskMeasureValue,taskTargetValue:domainPort.taskTargetValue}),
   schedule:fields(['adjustedEndMin','adjustedStartMin','beginActualTask','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver'],{getScheduleDerivedState:()=>({adjustmentsRevision:0}),plannedRows:()=>scheduleRows,scheduleFingerprint:()=>'',isFixedBlock:task=>task?.kind==='fixed',isTrackableBlock:task=>!!task&&task.kind!=='fixed',isWorkBlock:task=>!task?.kind||task.kind==='work',isLiveTrackableTimer:()=>true,studyDayRolledOver:()=>false,effectiveNowMin:(date=new Date(clock.now()))=>date.getUTCHours()*60+date.getUTCMinutes()}),
-  persistence:fields(['activePauseEventSnapshot','addPauseToActual','compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoveryCaptureActiveBeforeSwitch','recoverySetStatus','reopenActualSessionForTimer','saveLiveDraft','saveNote','writeLiveDraftNow'],{addPauseToActual:(idx,sec,meta)=>{pauseRecords.push({idx,sec,meta});return true;}}),
-  view:fields(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl','toggleDoneMarker'],{cachedElements:()=>({}),textEl:()=>({})}),
+  persistence:fields(['compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoveryCaptureActiveBeforeSwitch','recoverySetStatus','saveLiveDraft','saveNote','writeLiveDraftNow'],{compactPauseEvents:(value,extra)=>{const out=Array.isArray(value)?value.map(row=>({...row})):[];if(extra)out.push({...extra});return out.slice(-100);},compactRealTimeSnapshot:()=>null,recoveryCaptureActiveBeforeSwitch:()=>{recoverySwitchCalls++;}}),
+  view:fields(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl','toggleDoneMarker'],{cachedElements:()=>({}),textEl:()=>({}),toggleDoneMarker:()=>{toggleMarkerCalls++;return true;}}),
   clock:fields(['nowMs'],{nowMs:()=>clock.now()+clockSkew}),
-  reviewEvidence:fields(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','getReviewDate','liveTaskOutcome','recordCurrentActiveToTask','resolveTaskCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics'],{recordCurrentActiveToTask:()=>{recordedFocusSec.push(engineRef?engineRef.currentTimerActiveSeconds():null);return 0;},buildRealTimeSnapshot:()=>({}),getReviewDate:()=> '2026-09-13',resolveTaskCompletion:()=>({pct:0,source:'unresolved'})}),
+  reviewEvidence:fields(['applicableNotesForTask','buildRealTimeSnapshot','exactTaskCompletionPercent','getReviewDate','liveTaskOutcome','resolveTaskCompletion','setTaskDoneState','setTaskSkippedState','updateRealTimeAwareness','updateTimerFocusMetrics'],{buildRealTimeSnapshot:()=>({}),getReviewDate:()=> '2026-09-13',resolveTaskCompletion:()=>({pct:0,source:'unresolved'})}),
   clockEnvironment:fields(['cancelAnimationFrame','clearInterval','document','getComputedStyle','requestAnimationFrame','setInterval','setTimeout','window'],{
     document:documentStub,getComputedStyle:()=>({}),window:{matchMedia:()=>({matches:false})},requestAnimationFrame:()=>1,setInterval:()=>1,setTimeout:()=>1
   }),
   userPreferences:fields(['Pomodoro','notifications'],{notifications,Pomodoro:freeze({timerEvent:noop,configuration:freeze({breakSeconds:()=>300}),acceptedBreak:()=>null,stop:noop})}),
-  ownership:fields(['appCanMutate'],{appCanMutate:()=>true}),
+  ownership:fields(['appCanMutate'],{appCanMutate:()=>canMutate}),
   practice:freeze({controller:practiceStub,model:practiceModel})
 });
 
-const engine=module.createEngine(freeze({ports}));engineRef=engine;
+const engine=module.createEngine(freeze({ports}));
 assert.equal(engine.format,'study-director.timer-engine');
 const restored=engine.restoredRuntimeRecordedSec({mode:'paused',paused:true,updatedAt:'2026-09-13T00:00:20.000Z',activeBreak:{startedAtMs:10000}},{startMs:1000,totalPausedMs:2000,pausedStartedMs:10000,recordedSec:3});
 assert.equal(restored,7,'restored evidence uses active elapsed time at the pause boundary and never regresses below saved evidence');
@@ -94,7 +104,7 @@ assert.equal(restored,7,'restored evidence uses active elapsed time at the pause
 timerState.mode='running';timerState.paused=false;timerState.inactiveGap=null;timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:clock.now()-30000,durationSec:600,totalPausedMs:0,lastTickMs:clock.now()};
 assert.equal(engine.beginTimerPause('manual'),true);assert.equal(timerState.mode,'paused');assert.equal(timerState.paused,true);assert.equal(timerState.runtime.pausedStartedMs,clock.now());
 await clock.advance(15000);assert.equal(engine.togglePause(),true,'resume reports a real transition');
-assert.equal(timerState.mode,'running');assert.equal(timerState.paused,false);assert.equal(timerState.runtime.totalPausedMs,15000);assert.equal(pauseRecords.at(-1).sec,15);assert.equal(pauseRecords.at(-1).meta.type,'manual');
+assert.equal(timerState.mode,'running');assert.equal(timerState.paused,false);assert.equal(timerState.runtime.totalPausedMs,15000);assert.equal(latestPause().seconds,15);assert.equal(latestPause().type,'manual');
 assert.equal(practiceEvents.some(event=>event[0]==='pause'),true);assert.equal(practiceEvents.some(event=>event[0]==='resume'),true);
 timerState.mode='ready';timerState.paused=false;
 assert.equal(engine.togglePause(),false,'pause toggle reports a no-op outside running/paused modes');
@@ -103,11 +113,29 @@ assert.equal(engine.markDone(),false,'finish reports a no-op without a trackable
 assert.equal(engine.skipTask(),false,'skip reports a no-op without a trackable current block');
 timerState.currentIndex=0;
 
+// Execution mutations are fenced at the engine boundary, not merely by disabled UI.
+timerState.mode='running';timerState.paused=false;timerState.inactiveGap={id:'readonly-gap',taskIdx:0,gapMs:45000,lastMs:clock.now()-45000,detectedAtMs:clock.now(),source:'sleep'};
+timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:clock.now()-60000,durationSec:600,totalPausedMs:0,lastTickMs:clock.now()};
+const beforeRuntime={...timerState.runtime},beforeRecoveryCalls=recoverySwitchCalls,beforeToggleCalls=toggleMarkerCalls;
+canMutate=false;
+assert.equal(engine.beginTimerPause('manual'),false,'a non-owner cannot pause the main timer');
+assert.equal(engine.togglePause(),false,'a non-owner cannot toggle pause');
+assert.equal(engine.jumpTo(0),false,'a non-owner cannot jump the main timer');
+assert.equal(recoverySwitchCalls,beforeRecoveryCalls,'a rejected jump cannot capture or switch execution state');
+assert.equal(engine.toggleDone(0),false,'a non-owner cannot reopen/resolve a block');
+assert.equal(toggleMarkerCalls,beforeToggleCalls,'a rejected completion toggle cannot reach host mutation callbacks');
+assert.equal(engine.markDone(),false,'a non-owner cannot finish a block');
+assert.equal(engine.skipTask(),false,'a non-owner cannot skip a block');
+assert.deepEqual({...timerState.runtime},beforeRuntime,'rejected execution actions leave timer state unchanged');
+assert.equal(engine.classifyInactiveGap('break'),false,'a non-owner cannot classify a pending inactive gap');
+assert.equal(timerState.inactiveGap.id,'readonly-gap','rejected gap classification leaves the pending decision intact');
+canMutate=true;timerState.inactiveGap=null;
+
 // A long inactive gap is detected once, then classified as break time without counting focus.
 timerState.mode='running';timerState.paused=false;timerState.inactiveGap=null;timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:clock.now()-60000,durationSec:600,totalPausedMs:0,lastTickMs:clock.now()-40000};
 assert.equal(engine.absorbInactiveTimerGap('unit-wake'),40000);assert.equal(timerState.inactiveGap.gapMs,40000);
 engine.classifyInactiveGap('break');
-assert.equal(timerState.inactiveGap,null);assert.equal(timerState.runtime.totalPausedMs,40000);assert.equal(timerState.runtime.sleepPausedMs,40000);assert.equal(pauseRecords.at(-1).sec,40);assert.equal(pauseRecords.at(-1).meta.type,'inactive-gap');
+assert.equal(timerState.inactiveGap,null);assert.equal(timerState.runtime.totalPausedMs,40000);assert.equal(timerState.runtime.sleepPausedMs,40000);assert.equal(latestPause().seconds,40);assert.equal(latestPause().type,'inactive-gap');
 // A pending gap whose timer already stopped (for example at a fixed block) must
 // still close on any choice instead of leaving an unresponsive dialog.
 timerState.inactiveGap={id:'gap_stale',taskIdx:0,gapMs:90000,lastMs:clock.now()-90000,detectedAtMs:clock.now(),source:'sleep'};
@@ -128,14 +156,13 @@ function awayFor(kind,{ranMin=10,awayMin=20,startsAgoMin=5}={}){
   assert.equal(engine.absorbInactiveTimerGap('unit-wake'),awayMin*60000);
 }
 for(const [choice,focusMs,expectedMin] of [['focus',null,25],['break',null,10],['split',5*60000,15],['split',60*60000,25],['ignore',null,10]]){
-  awayFor('fixed');const before=recordedFocusSec.length,breaks=pauseRecords.length;
+  awayFor('fixed');const beforeFocus=Number(taskSessionStub.getField(0,'actualTime'))||0,beforePauses=pauseCount();
   engine.classifyInactiveGap(choice,focusMs);
   assert.equal(timerState.inactiveGap,null,`${choice} closes the dialog`);
-  assert.equal(recordedFocusSec.length,before+1,'the fixed block stops the timer and records its focus');
-  assert.equal(recordedFocusSec.at(-1),expectedMin*60,`${choice}: only the 15 minutes before the fixed block can count`);
+  assert.equal((Number(taskSessionStub.getField(0,'actualTime'))||0)-beforeFocus,expectedMin*60,`${choice}: only the time before the fixed block can be recorded as focus`);
   assert.equal(timerState.mode,'ready');assert.equal(timerState.runtime.startMs,null);
-  if(choice==='break')assert.equal(pauseRecords.at(-1).sec,15*60,'break covers only the countable part');
-  else assert.equal(pauseRecords.length,breaks+(choice==='split'&&focusMs<15*60000?1:0));
+  if(choice==='break')assert.equal(latestPause().seconds,15*60,'break covers only the countable part');
+  else assert.equal(pauseCount(),beforePauses+(choice==='split'&&focusMs<15*60000?1:0));
 }
 awayFor('fixed',{startsAgoMin:-5});
 engine.classifyInactiveGap('focus');
@@ -218,8 +245,8 @@ const timerCases=await checkCases('timer rules',{seed:20261103,count:200},async(
     }else if(op==='jump'){clockSkew-=int(1,2*3600000);engine.syncTimerAfterWake();}
     else if(op==='pause'){assert.equal(engine.beginTimerPause('manual'),true);pauseRun=0;}
     else if(op==='resume'){
-      const records=pauseRecords.length;engine.togglePause();assert.equal(timerState.paused,false);
-      assert.equal(pauseRecords.length,records+1);assert.equal(pauseRecords.at(-1).sec,Math.floor(pauseRun/1000),'a pause records how long it lasted');
+      const records=pauseCount();engine.togglePause();assert.equal(timerState.paused,false);
+      assert.equal(pauseCount(),records+1);assert.equal(latestPause().seconds,Math.floor(pauseRun/1000),'a pause records how long it lasted');
       paused+=pauseRun;pauseRun=0;
     }else{
       const choice=pick(['focus','break','split','ignore']),split=int(0,gap.away+60000),toFocus=choice==='focus'?gap.away:choice==='split'?Math.min(gap.away,split):0;
