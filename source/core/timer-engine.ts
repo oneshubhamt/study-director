@@ -2,7 +2,7 @@ import type {InactiveGapPatch} from '../../types/timer-state.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {TimerEngineInput,SoundMetadata,SoundOperation,LiveActualRecord,ActualRecordSnapshot,TaskEvidence,RuntimeEvidence,PlannedRow,TimerBoundary,LivePauseMeta,RestoredBreak} from '../../types/timer-engine.ts';
 import type {Task,TaskInput} from '../../types/domain.ts';
-import type {TimerPayload} from '../../types/record-models.ts';
+import type {PauseEvent,TimerPayload} from '../../types/record-models.ts';
 import type {RuntimeInput,InactiveGap,DeepReadonly} from '../../types/timer-state.ts';
 const sdTimerEngineFactory=(()=>{
 'use strict';
@@ -226,7 +226,7 @@ function addPauseToActual(idx:number|null|undefined,sec:number,meta:LivePauseMet
   const seconds=Math.max(1,Math.round(sec)),endedAt=meta.endedAt||nowIso(),endedMs=Date.parse(endedAt);
   const startedAt=meta.startedAt||new Date(Number.isFinite(endedMs)?endedMs-seconds*1000:Date.now()-seconds*1000).toISOString();
   const rawType=clampText(meta.type||'manual',32),type=['pomodoro','manual','inactive-gap'].includes(rawType)?rawType:'manual';
-  const event:LivePauseMeta&{seconds:number}={startedAt,endedAt,seconds,type};
+  const event:PauseEvent={startedAt,endedAt,seconds,type};
   const planned=Number(meta.plannedSeconds);
   if(type==='pomodoro'&&Number.isFinite(planned)&&planned>0)event.plannedSeconds=Math.round(planned);
   if(type==='pomodoro'&&meta.cueIssuedAt)event.cueIssuedAt=clampText(meta.cueIssuedAt,40);
@@ -250,7 +250,7 @@ function activePauseEventSnapshot(idx:number){
   const seconds=getCurrentBreakSeconds();
   if(seconds<=0)return null;
   const startedAtMs=Number(TimerState.activeBreak.startedAtMs)||nowMs()-seconds*1000;
-  const event:LivePauseMeta&{seconds:number}={
+  const event:PauseEvent={
     startedAt:new Date(startedAtMs).toISOString(),endedAt:new Date().toISOString(),seconds,
     type:TimerState.activeBreak.type==='pomodoro'?'pomodoro':'manual'
   };

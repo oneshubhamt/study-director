@@ -1,6 +1,7 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {CompletionEvidenceController,CompletionEvidenceInput,ExecutionHostInput,RuntimeTaskSessionFields,TaskIdentityPort,TaskResolvedState,TaskSessionField,TaskSessionStore} from '../../types/execution-host.ts';
 import type {TimerEngineInput} from '../../types/timer-engine.ts';
+import type {CompletionSource} from '../../types/domain.ts';
 
 const sdExecutionHostFactory=(()=>{
 'use strict';
@@ -120,9 +121,10 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
   }
   function resolveTaskCompletion(index:number,{actualSnapshot=null,preferStoredAuto=false}:{actualSnapshot?:Record<string,number>|null;preferStoredAuto?:boolean}={}){
     if(!validIndex(index))return completionModel.resolve();
+    const savedPct=taskSessionState.getField(index,'completion');
     const state={
       skipped:taskSessionState.isSkipped(index),source:explicitCompletionSource(index),
-      storedPct:taskSessionState.getField(index,'completion')!==undefined?taskSessionState.getField(index,'completion'):null,
+      storedPct:savedPct===undefined?null:savedPct,
       unitPct:unitCompletionForTask(index),doneFlag:taskSessionState.isDone(index),preferStoredAuto
     };
     const focusPct=completionModel.needsFocus(state)?focusCompletionForTask(index,actualSnapshot):null;
@@ -140,7 +142,7 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
       completionSource:evidence.source,actualSeconds:Number(snapshot[index])||0
     });
   }
-  function storeResolvedCompletion(index:number,{source=null,pct=null,actualSnapshot=null,preserveDone=false}:{source?:import('../../types/domain.ts').CompletionSource|null;pct?:number|null;actualSnapshot?:Record<string,number>|null;preserveDone?:boolean}={}){
+  function storeResolvedCompletion(index:number,{source=null,pct=null,actualSnapshot=null,preserveDone=false}:{source?:CompletionSource|null;pct?:number|null;actualSnapshot?:Record<string,number>|null;preserveDone?:boolean}={}){
     const resolved=pct===null||pct===undefined
       ?resolveTaskCompletion(index,{actualSnapshot})
       :{pct:completionModel.clampPercent(pct),source:source||sources.MANUAL};
@@ -151,7 +153,7 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
     if(resolved.pct>0&&taskSessionState.isSkipped(index))taskSessionState.setResolved(index,null);
     return resolved;
   }
-  function setCompletionState(index:number,pct:number,source=sources.MANUAL){
+  function setCompletionState(index:number,pct:number,source:CompletionSource=sources.MANUAL){
     storeResolvedCompletion(index,{pct,source,preserveDone:taskSessionState.isDone(index)&&!taskSessionState.isSkipped(index)});
     if(Number(pct)>=100)taskSessionState.setResolved(index,'done');
     else if(taskSessionState.isSkipped(index)&&Number(pct)>0)taskSessionState.setResolved(index,null);
@@ -160,7 +162,9 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
     if(!validIndex(index))return {...resolveTaskCompletion(index),changed:false};
     const previous=taskSessionState.getField(index,'notes')||{},prevDone=previous.done,prevTotal=previous.total;
     const prevPct=taskSessionState.getField(index,'completion'),prevSource=explicitCompletionSource(index);
-    const next={done:state&&state.hasDone?state.done??undefined:undefined,total:state&&state.hasTotal?state.total??undefined:undefined};
+    const next:{done?:number;total?:number}={};
+    if(state?.hasDone&&state.done!==null)next.done=state.done;
+    if(state?.hasTotal&&state.total!==null)next.total=state.total;
     taskSessionState.setField(index,'notes',next);
     const inputChanged=next.done!==prevDone||next.total!==prevTotal;
     if(state&&state.pct!==null){
@@ -281,7 +285,13 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
     TimerState,SessionState,TASKS,TIMER_MODES,TaskIdentity,setTimerMode,TaskSessionState,
     Pomodoro,PracticePacerModel,PracticePacer,TimerEngine:engine,
     TimerPresentation:engine.presentation,SessionEvidenceGateway:engine.evidenceGateway,
-    ...CompletionEvidence,
+    setCompletionSource:CompletionEvidence.setCompletionSource,explicitCompletionSource:CompletionEvidence.explicitCompletionSource,
+    plannedSecondsForCompletion:CompletionEvidence.plannedSecondsForCompletion,unitCompletionForTask:CompletionEvidence.unitCompletionForTask,
+    progressInputState:CompletionEvidence.progressInputState,syncProgressInputsToState:CompletionEvidence.syncProgressInputsToState,
+    clearManualCompletionOverride:CompletionEvidence.clearManualCompletionOverride,focusCompletionForTask:CompletionEvidence.focusCompletionForTask,
+    liveTaskOutcome:CompletionEvidence.liveTaskOutcome,resolveTaskCompletion:CompletionEvidence.resolveTaskCompletion,
+    exactTaskCompletionPercent:CompletionEvidence.exactTaskCompletionPercent,storeResolvedCompletion:CompletionEvidence.storeResolvedCompletion,
+    setTaskDoneState:CompletionEvidence.setTaskDoneState,setTaskSkippedState:CompletionEvidence.setTaskSkippedState,
     setCurrentTask,resetBreakState,
     resetCountdownRuntime:()=>engine.resetCountdownRuntime(),
     clearProgressRuntime:()=>TaskSessionState.clear(),
