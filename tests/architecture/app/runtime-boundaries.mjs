@@ -13,6 +13,7 @@ const foundation=readRuntimeSource('source/core/foundation-host.ts');
 const host=readHostHtml();
 const timer=readScript('source/core/timer-engine.ts');
 const sessionHost=readScript('source/core/session-host.ts');
+const sessionHandoff=readScript('source/core/session-handoff.ts');
 const attachments=readScript('source/core/attachments.ts');
 const mutation=readScript('source/core/mutation-coordinator.ts');
 
@@ -59,6 +60,18 @@ assert.match(sessionHost,/persistence\.recoveryWorkActive\(\)/u,'timer snapshots
 for(const token of ['claimSessionOwnership','continueSessionHere','BackupProviderRuntime','sessionHandoff']){
   assert.equal(sessionHost.includes(token),false,`P5.4B session host must not absorb P5.4C distributed ownership: ${token}`);
 }
+assert.match(host,/SessionHandoffModule\.createController\(Object\.freeze\(\{/u,'distributed session ownership crosses the checked P5.4C handoff boundary');
+assert.doesNotMatch(sessionHandoff,/Date\.now\(\)|new Date\(/u,'handoff decisions and stamps use injected clocks');
+for(const token of ['BackupProviderRuntime','AppData.activeSession','google-drive','document.','window.']){
+  assert.equal(sessionHandoff.includes(token),false,`P5.4C handoff core consumes ports instead of host/provider implementation details: ${token}`);
+}
+assert.match(sessionHandoff,/runtime\.stopExecution\(\)[\s\S]*session\.host\.cancelPendingLiveDraftSave\(\)/u,'remote claims stop execution before persistence/sync work');
+assert.match(sessionHandoff,/timerRuntime:current\.snapshot\.timerRuntime/u,'frozen claim projection preserves preemption-time timer evidence');
+assert.match(sessionHandoff,/claimOwnership\([\s\S]*saveCanonicalSession\(next,'claiming Active Session ownership'/u,'Continue Here linearizes the provider claim before strict local ownership commit');
+assert.match(sessionHandoff,/saveCanonicalSession\(previous,'compensating a failed ownership transfer'[\s\S]*releaseClaim/u,'failed local handoff compensates only after canonical rollback');
+assert.match(sessionHandoff,/SESSION_CONTINUE_SYNC_REQUIRED[\s\S]*session-handoff-source-advanced/u,'unproven advanced remote content is delegated to ordinary sync rather than guessed');
+const handoffAdapter=section(host,'async function transferSessionOwnershipHere(session,','// Continue Here in progress:');
+assert.doesNotMatch(handoffAdapter,/AppData\.activeSession|claimSessionOwnership|releaseSessionClaim|readSessionClaim/u,'host Continue Here adapter contains no distributed state-machine implementation');
 const finishTransition=section(host,'async function finishTodaySession(){','async function resetTodaySession(){');
 assert.match(finishTransition,/rollbackSnapshot=ActiveSessionRuntime\.captureSnapshot\(\)[\s\S]*writeCanonicalNow\('finishing today’s session'/u,'finish captures a recoverable runtime before its strict canonical commit');
 assert.match(finishTransition,/withPersistenceSuppressed\([\s\S]*applyStoredSession\(rollbackSession,rollbackSnapshot/u,'failed finish restores the pre-finish runtime without recursively persisting the rollback');
