@@ -137,7 +137,7 @@ function createIndexedDb(input:Readonly<IndexedDbInput>){
   return indexedDb;
 }
 function createAppMetaGateway(input:Parameters<DataBootstrapHostContract['createAppMetaGateway']>[0]){
-  const gateway=input.module.create({indexedDb:freeze({transaction:input.indexedDb.transaction,strictTransaction:input.indexedDb.strictTransaction,get:input.indexedDb.get,getAll:input.indexedDb.getAll}),store:input.store,registry:input.registry});
+  const gateway=input.module.create(freeze({indexedDb:freeze({transaction:input.indexedDb.transaction,strictTransaction:input.indexedDb.strictTransaction,get:input.indexedDb.get,getAll:input.indexedDb.getAll}),store:input.store,registry:input.registry}));
   if(!Object.isFrozen(gateway)||gateway.format!=='study-director.app-meta-gateway'||gateway.contractVersion!==1)throw new TypeError('AppMeta gateway is unavailable or incompatible.');
   return gateway;
 }
