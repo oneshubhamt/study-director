@@ -268,7 +268,20 @@ export async function launchChromium(options={}){
   const args=['--headless=new','--no-sandbox','--disable-dev-shm-usage','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank',...(options.args||[])];
   const processHandle=spawn(chromium,args,{stdio:['ignore','ignore','pipe'],env:{...process.env,TERM:process.env.TERM||'xterm'}});
   let stderr='';processHandle.stderr.on('data',chunk=>{stderr+=chunk;});
-  const port=await devToolsPort(profile);
+  let port;
+  try{
+    port=await Promise.race([
+      devToolsPort(profile),
+      new Promise((_,reject)=>processHandle.once('exit',(code,signal)=>reject(new Error(`Chromium exited before DevTools became ready (code=${code}, signal=${signal||'none'}).`))))
+    ]);
+  }catch(error){
+    if(processHandle.exitCode===null)processHandle.kill('SIGTERM');
+    await Promise.race([new Promise(resolve=>processHandle.once('exit',resolve)),sleep(1000)]);
+    if(processHandle.exitCode===null)processHandle.kill('SIGKILL');
+    try{fs.rmSync(profile,{recursive:true,force:true});}catch{}
+    const detail=stderr.trim().slice(-4000);
+    throw new Error(`${error.message}; executable=${chromium}; stderr=${detail||'(empty)'}`,{cause:error});
+  }
   await waitFor(async()=>{try{return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok;}catch{return false;}},{label:'Chromium CDP endpoint'});
   const pages=new Set();
   async function createPage(url,settings={}){
