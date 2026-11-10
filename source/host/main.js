@@ -657,7 +657,7 @@ const {
   summarizePracticeRunsForInsights,validPracticeMs,actualRecordsSnapshot,actualTimeSnapshot,
   applyInactiveGapSplit,captureRuntimeEvidence,classifyInactiveGap,currentTimerActiveSeconds,
   handleInactiveGapSplitKey,handleOverlayFocusTrap,nowIso,pruneActualRecordAudit,restoredRuntimeRecordedSec,
-  showInactiveGapSplit,syncTimerFromClock,beginTimerPause,finalizePauseEvent,getCurrentBreakSeconds,jumpTo,
+  showInactiveGapSplit,syncTimerFromClock,beginTimerPause,getCurrentBreakSeconds,jumpTo,
   markDone:markDoneTimer,recordCurrentActiveToTask,recoveryCaptureActiveBeforeSwitch,reopenActualSessionForTimer,resolveActivePauseBeforeTimerSwitch,
   setPausedUI,setTimerIdentity,skipTask:skipTaskTimer,startCur,syncTimerAfterWake,
   toggleDone,togglePause:togglePauseTimer,updateBreakMeter,updateCD
