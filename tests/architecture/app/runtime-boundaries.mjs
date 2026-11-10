@@ -80,6 +80,18 @@ assert.doesNotMatch(timer,/Date\.now\(\)/,'Timer state-machine timing must use i
 console.log(JSON.stringify({status:'PASS',boundary:'practice-pacer',pureModel:true,timerOrchestrationOnly:true},null,2));
 }
 
+{ // profile-name-authority-boundary
+const host=readHostHtml();
+const from=host.indexOf('function applyStudentName(name){'),to=host.indexOf('function getStudentNameFromDisplay()',from);
+assert.ok(from>=0&&to>from,'profile-name host boundary is present');
+const applyName=host.slice(from,to);
+assert.match(applyName,/mine=Profiles\.current\(\)/u,'profile-name mirror resolves the current profile');
+assert.match(applyName,/mine&&mine\.name!==clean&&appCanMutate\(\)\)Profiles\.rename\(clean\)/u,'profile-name registry writes require current mutation authority');
+assert.ok(applyName.indexOf('Profiles.rename(clean)')<applyName.indexOf("document.querySelectorAll('[data-student-name]')"),'profile registry mirror commits before the UI claims the new name');
+assert.doesNotMatch(applyName,/isDefaultStudentName\(clean\).*Profiles\.rename/u,'the factory label is not a forbidden profile name');
+console.log(JSON.stringify({status:'PASS',boundary:'profile-name-authority',stableIdentity:true,authorityGuard:true,commitBeforePresentation:true},null,2));
+}
+
 { // plan-authoring-runtime-boundary
 const plan=readScript('source/core/plan.ts');
 const planHost=readScript('source/core/plan-host.ts');

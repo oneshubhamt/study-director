@@ -4397,14 +4397,17 @@ function readUserDefaults(){
 }
 function getActiveDefaults(){return PlanData.activeDefaults();}
 function applyStudentName(name){
-  const clean=normalizeStudentName(name);
+  const clean=normalizeStudentName(name),mine=Profiles.current();
+  // The device-wide profile registry mirrors the synced personal name, but
+  // read-only/secondary tabs must never rewrite that device authority.
+  // Commit the registry mirror before presenting the new name in this tab.
+  if(mine&&mine.name!==clean&&appCanMutate())Profiles.rename(clean);
   document.querySelectorAll('[data-student-name]').forEach(el=>{
     if('value' in el)el.value=clean;
     else el.textContent=clean;
   });
   const meta=document.querySelector('meta[name="apple-mobile-web-app-title"]');
   if(meta)meta.setAttribute('content',`${clean} Study Director`);
-  if(!isDefaultStudentName(clean))Profiles.rename(clean);
   renderProfileBadge();
   return clean;
 }
