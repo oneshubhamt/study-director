@@ -1,4 +1,5 @@
 import type {CompletionModel,CompletionResult,CompletionSource,OutcomeModel,ScheduleModel,Task,TaskOutcome,TimeModel} from './domain.ts';
+import type {RealTimeSnapshot} from './record-models.ts';
 import type {OriginalScheduleRow,ScheduleAdjustment,TimerStateInput} from './timer-state.ts';
 import type {TaskSessionFields,TimerEngineInput} from './timer-engine.ts';
 import type {PomodoroInput} from './pomodoro.ts';
@@ -59,7 +60,7 @@ export interface ExecutionScheduleController{
   findNextIncompleteTrackableAfter(index:number):number;
   buildLiveTimeline():ExecutionTimelineRow[];
   getRealTimeState(date?:Date):RealTimeScheduleState;
-  buildRealTimeSnapshot():Readonly<Record<string,unknown>>;
+  buildRealTimeSnapshot():Readonly<RealTimeSnapshot>;
   latestTrackableEndMin():number|null;
 }
 export interface CompletionEvidenceInput{
