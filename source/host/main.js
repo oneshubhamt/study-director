@@ -2119,27 +2119,10 @@ function restoreTimerRuntimeIfAny(){
 function sessionRunsElsewhere(session){return !!session&&typeof session==='object'&&session.status!=='suspended'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
 function sessionFromElsewhere(session){return !!session&&typeof session==='object'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
 function isRestorableActiveSession(session){
-  if(!session||typeof session!=='object'||sessionRunsElsewhere(session))return false;
-  if(session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
-  if(session.status&&session.status!=='active')return false;
-  if(!isValidIsoDate(session.date)||session.date!==todayISO())return false;
-  if(!isCanonicalScheduleText(session.scheduleText))return false;
-  return !!activeSessionSnapshot(session);
+  return !sessionRunsElsewhere(session)&&ActiveSessionRuntime?.classify(session)==='today-active';
 }
-function isSuspendedActiveSession(session){
-  if(!session||typeof session!=='object')return false;
-  if(session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision)||session.status!=='suspended')return false;
-  if(!isValidIsoDate(session.date)||session.date!==todayISO())return false;
-  if(!isCanonicalScheduleText(session.scheduleText))return false;
-  return !!activeSessionSnapshot(session);
-}
-function isPreviousActiveSessionRecord(session){
-  if(!session||typeof session!=='object'||session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
-  if(session.status&&!['active','suspended'].includes(session.status))return false;
-  if(!isValidIsoDate(session.date)||session.date>=todayISO())return false;
-  if(!isCanonicalScheduleText(session.scheduleText))return false;
-  return !!activeSessionSnapshot(session);
-}
+function isSuspendedActiveSession(session){return ActiveSessionRuntime?.classify(session)==='today-suspended';}
+function isPreviousActiveSessionRecord(session){return ActiveSessionRuntime?.classify(session)==='previous';}
 // Verify the actual canonical Saved Day, not just a date match or two
 // unrelated devices' numeric revision counters. The session must first carry
 // its own durable save acknowledgement; its study evidence must still be
