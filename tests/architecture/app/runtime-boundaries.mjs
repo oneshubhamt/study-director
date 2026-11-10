@@ -94,6 +94,9 @@ assert.match(executionHost,/function toggleDoneState\([^)]*\)\{[\s\S]*?taskSessi
 assert.doesNotMatch(timer,/toggleDoneMarker/u,'timer engine no longer reaches an untyped host completion mutator');
 assert.match(timer,/function classifyInactiveGap\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;[\s\S]*?const gap=TimerState\.inactiveGap/u,'inactive-gap classification cannot consume a pending decision from a read-only tab');
 assert.match(timer,/function tick\(\)\{[\s\S]*?if\(!appCanMutate\(\)\)\{stopExecution\(\);return false;\}/u,'stale interval ticks stop before mutating execution after ownership loss');
+assert.match(timer,/function syncTimerAfterWake\(\)\{[\s\S]*?if\(!appCanMutate\(\)\)\{stopExecution\(\);return false;\}/u,'wake reconciliation cannot mutate execution after ownership loss');
+assert.match(timer,/function resumeRestoredPaused\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;/u,'paused timer restoration is authority fenced inside the engine');
+assert.match(timer,/function resumeRestoredRunning\(\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;/u,'running timer restoration is authority fenced inside the engine');
 assert.match(timer,/function recoveryCaptureActiveBeforeSwitch\(\)\{[\s\S]*?if\(!appCanMutate\(\)[\s\S]*?recordCurrentActiveToTask[\s\S]*?storeResolvedCompletion/u,'timer switching captures focus/completion inside the checked engine under current authority');
 assert.match(host,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|resolveActivePauseBeforeTimerSwitch\(\)!==true\)return false;[\s\S]*?writeLiveDraftNow\(\)/u,'Plan break termination delegates to the ownership-fenced checked timer transition after confirmation');
 assert.match(plan,/return scheduleGateway\.breakState\('end'\)===true;/u,'Plan application propagates a failed break termination instead of claiming success');
