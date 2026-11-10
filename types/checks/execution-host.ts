@@ -1,10 +1,11 @@
 import type {BrowserRegistry} from '../browser-registry.ts';
 import type {TaskSessionStore} from '../execution-host.ts';
+import type {TaskInput} from '../domain.ts';
 declare const registry:BrowserRegistry;
 const timer=registry.require('timer-state',1);
 const execution=registry.require('execution-host',1);
 const controller=timer.createStateController(Object.freeze({
-  helpers:Object.freeze({makeTaskId:(_task,index)=>`task-${index}`}),
+  helpers:Object.freeze({makeTaskId:(_task:TaskInput,index:number)=>`task-${index}`}),
   diagnostics:Object.freeze({capture:()=>{}}),
   effects:Object.freeze({modeChanged:()=>{}})
 }));
