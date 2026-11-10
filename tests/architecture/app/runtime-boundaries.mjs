@@ -89,9 +89,11 @@ assert.match(timer,/function beginTimerPause\([^)]*[\s\S]*?if\(!appCanMutate\(\)
 assert.match(timer,/function jumpTo\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;[\s\S]*?return startCur\(\)===true;/u,'jump refuses before capture/task mutation when ownership is lost and reports the real start result');
 assert.match(timer,/function finishTrackableBlock\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\|\|!isTrackableBlock/u,'finish and skip share an ownership-fenced transition');
 assert.match(timer,/function classifyInactiveGap\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;[\s\S]*?const gap=TimerState\.inactiveGap/u,'inactive-gap classification cannot consume a pending decision from a read-only tab');
-assert.match(host,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|!appCanMutate\(\)\)return false;[\s\S]*?finalizePauseEvent\(\)/u,'Plan break termination is fenced at the runtime gateway after confirmation');
+assert.match(timer,/function tick\(\)\{[\s\S]*?if\(!appCanMutate\(\)\)\{stopExecution\(\);return false;\}/u,'stale interval ticks stop before mutating execution after ownership loss');
+assert.match(timer,/function recoveryCaptureActiveBeforeSwitch\(\)\{[\s\S]*?if\(!appCanMutate\(\)[\s\S]*?recordCurrentActiveToTask[\s\S]*?storeResolvedCompletion/u,'timer switching captures focus/completion inside the checked engine under current authority');
+assert.match(host,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|resolveActivePauseBeforeTimerSwitch\(\)!==true\)return false;[\s\S]*?writeLiveDraftNow\(\)/u,'Plan break termination delegates to the ownership-fenced checked timer transition after confirmation');
 assert.match(plan,/return scheduleGateway\.breakState\('end'\)===true;/u,'Plan application propagates a failed break termination instead of claiming success');
-for(const stale of ['function latestTrackableEndMin(','const TaskSessionState=(()=>','function getRealTimeState(','function rebuildOriginalSchedule(','function resolveTaskCompletion(']){
+for(const stale of ['function latestTrackableEndMin(','const TaskSessionState=(()=>','function getRealTimeState(','function rebuildOriginalSchedule(','function resolveTaskCompletion(','function recoveryCaptureActiveBeforeSwitch(','function resolveActivePauseBeforeTimerSwitch(']){
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.4A runtime logic: ${stale}`);
 }
 console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checkedComposition:true,taskIdentityEvidence:true,noOpSideEffectsGated:true,authorityFenced:true,staleHostRuntimeRemoved:true},null,2));
