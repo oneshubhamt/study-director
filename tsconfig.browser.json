@@ -91,6 +91,7 @@
     "source/core/save-lane.ts",
     "source/core/session-lifecycle.ts",
     "source/core/timer-engine.ts",
+    "source/core/execution-host.ts",
     "source/core/timer-state.ts",
     "types/app-meta.ts",
     "types/asset-maintenance.ts",
@@ -135,6 +136,7 @@
     "types/repository-journals.ts",
     "types/session-lifecycle.ts",
     "types/timer-engine.ts",
+    "types/execution-host.ts",
     "types/timer-state.ts",
     "source/core/backup.ts",
     "types/backup.ts",
@@ -176,6 +178,7 @@
     "source/core/plan.ts",
     "types/plan-host.ts",
     "types/plan.ts",
+    "types/checks/execution-host.ts",
     "types/checks/plan-host.ts",
     "types/checks/plan.ts"
   ]

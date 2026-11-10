@@ -62,6 +62,29 @@ assert.match(host,/nowIso:\(\)=>new Date\(\)\.toISOString\(\)\n\}\)\);/,'Library
 console.log(JSON.stringify({status:'PASS',boundary:'decision-clock',decisionClock:['nowMs'],ambientInformationalTimestamps:true},null,2));
 }
 
+
+
+{ // live-execution-host-boundary
+const host=readHostHtml();
+const executionHost=readScript('source/core/execution-host.ts');
+assert.match(host,/ExecutionHostModule\.createRuntime\(Object\.freeze\(\{/u,'live execution composition crosses the checked execution host');
+assert.doesNotMatch(host,/const TaskSessionState=\(\(\)=>\{/u,'per-task runtime evidence no longer has an untyped host implementation');
+for(const direct of [
+  /TimerStateModule\.createStateController\(/u,
+  /PomodoroModule\.createController\(/u,
+  /PracticePacerModule\.createModel\(/u,
+  /PracticePacerModule\.createController\(/u,
+  /TimerEngineModule\.createEngine\(/u
+]) assert.doesNotMatch(host,direct,'main host must not reconstruct a typed execution engine directly');
+assert.match(executionHost,/const byTaskId=new Map<string,Entry>\(\)/u,'task-session evidence has one task-identity keyed store');
+assert.match(executionHost,/taskIdentity\.indexForId\(row\.taskId,indexMap\)/u,'runtime evidence is remapped through stable task identity');
+for(const token of ['AppData.activeSession','BackupProviderRuntime','claimSessionOwnership','continueSessionHere','sessionHandoff']){
+  assert.equal(executionHost.includes(token),false,`P5.4A execution host must not absorb later Active Session/handoff ownership: ${token}`);
+}
+assert.match(host,/function togglePause\(\)\{const result=togglePauseTimer\(\);if\(result===true\)sendSessionChangeSoon/u,'urgent pause/resume publication occurs only after a real timer transition');
+console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checkedComposition:true,taskIdentityEvidence:true,noOpSideEffectsGated:true},null,2));
+}
+
 { // practice-pacer-boundary
 const pacer=readScript('source/core/practice-pacer.ts');
 const timer=readScript('source/core/timer-engine.ts');

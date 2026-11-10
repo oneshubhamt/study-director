@@ -7,8 +7,10 @@ import vm from 'node:vm';
 const execute=file=>vm.runInThisContext(readScript(fileURLToPath(new URL(file,import.meta.url))),{filename:file});
 execute('../../../source/core/internal.ts');
 execute('../../../source/core/timer-state.ts');
+execute('../../../source/core/execution-host.ts');
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const timer=registry.require('timer-state',1);
+const executionHost=registry.require('execution-host',1);
 
 const captures=[];
 const transitions=[];
@@ -97,10 +99,38 @@ assert.equal(renameDemo.currentIndex,1);assert.equal(renameDemo.currentTaskId,'b
 assert.deepEqual({...renameDemo.captureAdjustmentsByTaskId()},{b:{start:60,end:90}},'adjustments stay with their blocks');
 assert.equal(renameDemo.renameTaskAreas(()=>undefined),0,'nothing to rename changes nothing');
 
+
+// Per-task runtime evidence is keyed by stable task identity rather than array position.
+const evidenceController=timer.createStateController(Object.freeze({
+  helpers:Object.freeze({makeTaskId:(task,index)=>String(task?.id||`task-${index}`)}),
+  diagnostics:Object.freeze({capture:()=>{}}),effects:Object.freeze({modeChanged:()=>{}})
+}));
+evidenceController.loadSchedule([
+  {id:'a',start:'08:00',dur:60,name:'A',kind:'work',area:'Core',measure:'block',target:1},
+  {id:'b',start:'09:00',dur:60,name:'B',kind:'work',area:'Core',measure:'block',target:1}
+]);
+const taskState=executionHost.createTaskSessionState(evidenceController.taskIdentity);
+assert.equal(taskState.setField(0,'completion',40),true);
+assert.equal(taskState.setField(0,'notes',{done:2,total:5}),true);
+assert.equal(taskState.setResolved(1,'skipped'),true);
+evidenceController.loadSchedule([
+  {id:'b',start:'08:00',dur:60,name:'B',kind:'work',area:'Core',measure:'block',target:1},
+  {id:'a',start:'09:00',dur:60,name:'A',kind:'work',area:'Core',measure:'block',target:1}
+]);
+assert.equal(taskState.resolvedState(0),'skipped','resolved state follows task b after reorder');
+assert.equal(taskState.getField(1,'completion'),40,'completion follows task a after reorder');
+assert.deepEqual(taskState.getField(1,'notes'),{done:2,total:5});
+assert.deepEqual(taskState.indexSnapshot('completion'),{'1':40},'snapshots use current indices without relocating identity-owned evidence');
+assert.equal(taskState.deleteField(1,'completion'),true);
+assert.equal(taskState.deleteField(1,'notes'),true);
+assert.equal(taskState.indices().includes(1),false,'empty unresolved task evidence is pruned');
+taskState.clear();
+assert.deepEqual(taskState.indices(),[],'clear removes all runtime evidence');
+
 controller.clearSession();
 assert.equal(controller.mode,'empty');
 assert.equal(controller.tasks.length,0);
 assert.equal(controller.studyDate,null);
 assert.equal(controller.runtime.startMs,null);
 
-console.log(JSON.stringify({status:'PASS',contract:'timer-state',taskIdentity:true,runtimeNormalization:true,transitions:true,snapshots:true,areaRenameInPlace:true},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'timer-state',taskIdentity:true,runtimeNormalization:true,transitions:true,snapshots:true,taskIdentityEvidence:true,areaRenameInPlace:true},null,2));

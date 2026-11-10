@@ -666,11 +666,10 @@ function resumeTimerFromPause(){
 function togglePause(){
   if(TimerState.mode===TIMER_MODES.RUNNING){
     const request=Pomodoro.acceptedBreak({activeSec:currentTimerActiveSeconds()});
-    if(request){beginTimerPause('pomodoro',request);return;}
-    beginTimerPause('manual');
-    return;
+    return request?beginTimerPause('pomodoro',request):beginTimerPause('manual');
   }
-  if(TimerState.mode===TIMER_MODES.PAUSED){resumeTimerFromPause();}
+  if(TimerState.mode===TIMER_MODES.PAUSED)return resumeTimerFromPause();
+  return false;
 }
 function getCurrentBreakSeconds(){
   if(TimerState.paused&&TimerState.breakStartMs){
@@ -724,7 +723,7 @@ function setPausedUI(p:boolean){
   }
 }
 function finishTrackableBlock(skipped:boolean){
-  if(!isTrackableBlock(TASKS[TimerState.currentIndex])){return;}
+  if(!isTrackableBlock(TASKS[TimerState.currentIndex]))return false;
   if(TimerState.paused){finalizePauseEvent();TimerState.paused=false;setPausedUI(false);}
   const finishedIdx=TimerState.currentIndex;
   recordCurrentActiveToTask(finishedIdx,skipped?'skipped':'completed');
@@ -738,9 +737,10 @@ function finishTrackableBlock(skipped:boolean){
   const nextIdx=findNextIncompleteTrackableAfter(finishedIdx);
   setCurrentTask(nextIdx);
   startCur(undefined,{cue:skipped?'skip':'block-complete'});
+  return true;
 }
-function markDone(){finishTrackableBlock(false);}
-function skipTask(){finishTrackableBlock(true);}
+function markDone(){return finishTrackableBlock(false);}
+function skipTask(){return finishTrackableBlock(true);}
 
 const SessionEvidenceProjector=(()=>{
   function cloneFrozen<T>(value:T):DeepReadonly<T>{

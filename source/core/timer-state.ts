@@ -1,6 +1,6 @@
 import type {InactiveGapPatch} from '../../types/timer-state.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {TaskInput} from '../../types/domain.ts';
+import type {Task,TaskInput} from '../../types/domain.ts';
 import type {TimerPayload} from '../../types/record-models.ts';
 import type {FrozenController,TimerMode,DeepReadonly,TimerTask,RuntimeInput,TimerSession,InactiveGap,ActiveBreak,ScheduleAdjustment,TimerStateInput,SnapshotInput,EvidenceBase} from '../../types/timer-state.ts';
 const sdTimerStateFactory=(()=>{
@@ -122,10 +122,10 @@ const createModule=()=>{
         return typeof idx==='number'&&Number.isInteger(idx)?idx:null;
       }
     });
-    function normalizeTasks(values:readonly TaskInput[]){
+    function normalizeTasks(values:readonly Task[]){
       const seen=new Set<string>();
-      return freeze((Array.isArray(values)?values as readonly TaskInput[]:[]).map((value,index)=>{
-        const task:TaskInput=value&&typeof value==='object'?{...value}:{};
+      return freeze((Array.isArray(values)?values as readonly Task[]:[]).map((value,index)=>{
+        const task:Task={...value};
         let id=String(task.id||'').trim();
         if(!id||seen.has(id))id=String(makeTaskId(task,index));
         while(seen.has(id))id+=`_${index+1}`;
@@ -143,7 +143,7 @@ const createModule=()=>{
       replaceSession({currentTaskId:taskIdAt(next)});
       return currentIndex;
     }
-    function loadSchedule(values:readonly TaskInput[],options:{studyDate?:string}={}){
+    function loadSchedule(values:readonly Task[],options:{studyDate?:string}={}){
       tasks=normalizeTasks(values);
       const studyDate=options&&typeof options.studyDate==='string'?options.studyDate:session.studyDate;
       replaceSession({studyDate:studyDate||null,currentTaskId:null});

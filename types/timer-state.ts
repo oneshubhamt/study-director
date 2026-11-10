@@ -1,8 +1,8 @@
-import type {TaskInput} from './domain.ts';
+import type {Task,TaskInput} from './domain.ts';
 import type {TimerPayload,PracticeState,SessionTaskState} from './record-models.ts';
 export type TimerMode='empty'|'ready'|'running'|'paused'|'done'|'suspended';
 export type DeepReadonly<T>=T extends object?{readonly [K in keyof T]:DeepReadonly<T[K]>}:T;
-export type TimerTask=TaskInput&{id:string};
+export type TimerTask=Task;
 export type Runtime={taskIdx:number|null;startMs:number|null;durationSec:number;totalPausedMs:number;pausedStartedMs:number|null;recordedSec:number;overtimeNotified:boolean;lastTickMs:number|null;sleepPausedMs:number};
 export type RuntimeInput=Partial<Record<keyof Runtime,unknown>>;
 export type TimerSession={studyDate:string|null;currentTaskId:string|null;contentRevision:number;savedRevision:number};

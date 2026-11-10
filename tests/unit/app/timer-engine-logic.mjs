@@ -72,7 +72,7 @@ const ports=freeze({
     setTimerMode:(mode,reason)=>{modeTransitions.push([timerState.mode,mode,reason]);timerState.mode=mode;return mode;}
   }),
   domain:freeze({KeyedRecord:domainPort.KeyedRecord,boundedInt:domainPort.boundedInt,clampText:domainPort.clampText,cleanDayRevision:domainPort.cleanDayRevision,fmtOver:domainPort.fmtOver,fmtS:domainPort.fmtS,makeTaskId:domainPort.makeTaskId,positiveMinutes:domainPort.positiveMinutes,shortTaskLabel:domainPort.shortTaskLabel,studyMinuteToHHMM:domainPort.studyMinuteToHHMM,taskAreaValue:domainPort.taskAreaValue,taskMeasureValue:domainPort.taskMeasureValue,taskTargetValue:domainPort.taskTargetValue}),
-  schedule:fields(['adjustedEndMin','adjustedStartMin','beginActualTask','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver'],{getScheduleDerivedState:()=>({adjustmentsRevision:0}),plannedRows:()=>scheduleRows,scheduleFingerprint:()=>'',isFixedBlock:task=>task?.kind==='fixed',isTrackableBlock:task=>task?.kind!=='fixed',isWorkBlock:task=>!task?.kind||task.kind==='work',isLiveTrackableTimer:()=>true,studyDayRolledOver:()=>false,effectiveNowMin:(date=new Date(clock.now()))=>date.getUTCHours()*60+date.getUTCMinutes()}),
+  schedule:fields(['adjustedEndMin','adjustedStartMin','beginActualTask','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver'],{getScheduleDerivedState:()=>({adjustmentsRevision:0}),plannedRows:()=>scheduleRows,scheduleFingerprint:()=>'',isFixedBlock:task=>task?.kind==='fixed',isTrackableBlock:task=>!!task&&task.kind!=='fixed',isWorkBlock:task=>!task?.kind||task.kind==='work',isLiveTrackableTimer:()=>true,studyDayRolledOver:()=>false,effectiveNowMin:(date=new Date(clock.now()))=>date.getUTCHours()*60+date.getUTCMinutes()}),
   persistence:fields(['activePauseEventSnapshot','addPauseToActual','compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoveryCaptureActiveBeforeSwitch','recoverySetStatus','reopenActualSessionForTimer','saveLiveDraft','saveNote','writeLiveDraftNow'],{addPauseToActual:(idx,sec,meta)=>{pauseRecords.push({idx,sec,meta});return true;}}),
   view:fields(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl','toggleDoneMarker'],{cachedElements:()=>({}),textEl:()=>({})}),
   clock:fields(['nowMs'],{nowMs:()=>clock.now()+clockSkew}),
@@ -93,9 +93,15 @@ assert.equal(restored,7,'restored evidence uses active elapsed time at the pause
 // Pause/resume accounting is entirely clock-driven and records only the paused interval.
 timerState.mode='running';timerState.paused=false;timerState.inactiveGap=null;timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:clock.now()-30000,durationSec:600,totalPausedMs:0,lastTickMs:clock.now()};
 assert.equal(engine.beginTimerPause('manual'),true);assert.equal(timerState.mode,'paused');assert.equal(timerState.paused,true);assert.equal(timerState.runtime.pausedStartedMs,clock.now());
-await clock.advance(15000);engine.togglePause();
+await clock.advance(15000);assert.equal(engine.togglePause(),true,'resume reports a real transition');
 assert.equal(timerState.mode,'running');assert.equal(timerState.paused,false);assert.equal(timerState.runtime.totalPausedMs,15000);assert.equal(pauseRecords.at(-1).sec,15);assert.equal(pauseRecords.at(-1).meta.type,'manual');
 assert.equal(practiceEvents.some(event=>event[0]==='pause'),true);assert.equal(practiceEvents.some(event=>event[0]==='resume'),true);
+timerState.mode='ready';timerState.paused=false;
+assert.equal(engine.togglePause(),false,'pause toggle reports a no-op outside running/paused modes');
+timerState.currentIndex=99;
+assert.equal(engine.markDone(),false,'finish reports a no-op without a trackable current block');
+assert.equal(engine.skipTask(),false,'skip reports a no-op without a trackable current block');
+timerState.currentIndex=0;
 
 // A long inactive gap is detected once, then classified as break time without counting focus.
 timerState.mode='running';timerState.paused=false;timerState.inactiveGap=null;timerState.runtime={...timerState.emptyRuntime(),taskIdx:0,startMs:clock.now()-60000,durationSec:600,totalPausedMs:0,lastTickMs:clock.now()-40000};

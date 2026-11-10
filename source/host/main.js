@@ -80,6 +80,7 @@ const SessionLifecycleModule=INTERNAL_MODULES.load('session-lifecycle',1,'study-
 const PomodoroModule=INTERNAL_MODULES.load('pomodoro',1,'study-director.pomodoro-module',1);
 const PracticePacerModule=INTERNAL_MODULES.load('practice-pacer',1,'study-director.practice-pacer-module',1);
 const TimerEngineModule=INTERNAL_MODULES.load('timer-engine',2,'study-director.timer-engine-module',2);
+const ExecutionHostModule=INTERNAL_MODULES.load('execution-host',1,'study-director.execution-host-module',1);
 const PRESENTATION_KERNEL=window[Symbol.for('studyDirector.presentationKernel.v1')];
 const PRESENTATION_MANIFEST=PRESENTATION_KERNEL&&PRESENTATION_KERNEL.manifest;
 if(!PRESENTATION_KERNEL||PRESENTATION_KERNEL.format!=='study-director.presentation-kernel'||PRESENTATION_KERNEL.version!==1||!PRESENTATION_MANIFEST||PRESENTATION_MANIFEST.format!=='study-director.presentation-manifest'||PRESENTATION_MANIFEST.version!==1){
@@ -591,108 +592,78 @@ function buildLiveTimeline(){
   });
   return chronologicalRows(rows);
 }
-/* RUNTIME STATE · PRIVATE TIMER CONTROLLER */
+/* RUNTIME STATE · CHECKED LIVE EXECUTION HOST */
+const SLEEP_GAP_THRESHOLD_MS=120000;
 // While the timer runs on a work block here, pop-ups that block nothing
 // wait; support and fixed blocks, a pause or the end let them show
 // (docs/areas/status-indicator.md, noise rules).
 function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING&&isWorkBlock(TASKS[TimerState.currentIndex]));}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
-const TimerState=TimerStateModule.createStateController(Object.freeze({
-  helpers:Object.freeze({makeTaskId}),
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
+const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
+  modules:Object.freeze({timerState:TimerStateModule,pomodoro:PomodoroModule,practicePacer:PracticePacerModule,timerEngine:TimerEngineModule}),
+  timerState:Object.freeze({
+    helpers:Object.freeze({makeTaskId}),
+    diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+    effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
+  }),
+  pomodoro:Object.freeze({
+    schedule:Object.freeze({isPomodoroEligibleBlock}),
+    persistence:Object.freeze({
+      canMutate:()=>appCanMutate(),
+      readConfiguration:()=>protectedPreferencesState.nudge,
+      writeConfiguration:value=>persistProtectedPreferences({nudge:value,soundMode:NoticeCoordinator.soundStatus().mode}),
+      writeSession:(...args)=>writeLiveDraftNow(...args)
+    }),
+    view:Object.freeze({document,notifications:NoticeCoordinator,updateExecutePanels}),
+    environment:Object.freeze({nowIso:()=>new Date().toISOString()})
+  }),
+  practiceModel:Object.freeze({
+    configuration:Object.freeze({APP_LIMITS}),
+    domain:Object.freeze({boundedInt,boundedNumber,clampArray,clampText,fmtS})
+  }),
+  practice:Object.freeze({
+    configuration:Object.freeze({APP_LIMITS}),
+    schedule:Object.freeze({isWorkBlock}),
+    persistence:Object.freeze({persistPracticeCueMode,persistPracticeTarget,saveLiveDraft,writeLiveDraftNow}),
+    view:Object.freeze({
+      document,
+      isExecutePaneVisible:()=>!document.hidden&&!!document.getElementById('pane-execute')?.classList.contains('on'),
+      setElementAttribute,setElementClass,setElementDisabled,setElementHidden,setElementStyle,setElementText,setTextSafe
+    }),
+    userPreferences:Object.freeze({notifications:NoticeCoordinator,readUserDefaults}),
+    ownership:Object.freeze({appCanMutate:()=>appCanMutate()}),
+    clock:Object.freeze({nowMs:DecisionClock.nowMs})
+  }),
+  timer:Object.freeze({
+    configuration:Object.freeze({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
+    domain:Object.freeze({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
+    schedule:Object.freeze({adjustedEndMin,adjustedStartMin,beginActualTask,effectiveNowMin,findNextIncompleteTrackableAfter,getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),hasAdjustedTiming,isFixedBlock,isLiveTrackableTimer,isTrackableBlock,isWorkBlock,originalEndMin,originalStartMin,plannedRows,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
+    persistence:Object.freeze({activePauseEventSnapshot,addPauseToActual,compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoveryCaptureActiveBeforeSwitch,recoverySetStatus,reopenActualSessionForTimer,saveLiveDraft,saveNote,writeLiveDraftNow}),
+    view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}),
+    clock:Object.freeze({nowMs:DecisionClock.nowMs}),
+    reviewEvidence:Object.freeze({applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,recordCurrentActiveToTask,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}),
+    clockEnvironment:Object.freeze({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
+    userPreferences:Object.freeze({notifications:NoticeCoordinator}),
+    ownership:Object.freeze({appCanMutate:()=>appCanMutate()})
+  }),
+  hooks:Object.freeze({syncStudyQuiet})
 }));
 const {
-  session:SessionState, tasks:TASKS, modes:TIMER_MODES, taskIdentity:TaskIdentity, setMode:setTimerMode
-}=TimerState;
+  TimerState,SessionState,TASKS,TIMER_MODES,TaskIdentity,setTimerMode,TaskSessionState,
+  Pomodoro,PracticePacerModel,PracticePacer,TimerEngine,TimerPresentation,SessionEvidenceGateway,
+  setCurrentTask,resetBreakState,resetCountdownRuntime,clearProgressRuntime,isTaskResolved
+}=ExecutionRuntime;
+const {
+  PRACTICE_CUE_DEFAULT,PRACTICE_PAUSE_CAUSES,formatPracticeMs,practicePaceBandLabel,sanitizePracticeCueMode,
+  sanitizePracticeRun,sanitizePracticeRuns,sanitizePracticeState,summarizeCleanPracticeRuns,
+  summarizePracticeRunsForInsights,validPracticeMs,actualRecordsSnapshot,actualTimeSnapshot,
+  applyInactiveGapSplit,captureRuntimeEvidence,classifyInactiveGap,currentTimerActiveSeconds,
+  handleInactiveGapSplitKey,handleOverlayFocusTrap,nowIso,pruneActualRecordAudit,restoredRuntimeRecordedSec,
+  showInactiveGapSplit,syncTimerFromClock,beginTimerPause,finalizePauseEvent,getCurrentBreakSeconds,jumpTo,
+  markDone:markDoneTimer,setPausedUI,setTimerIdentity,skipTask:skipTaskTimer,startCur,syncTimerAfterWake,
+  toggleDone,togglePause:togglePauseTimer,updateBreakMeter,updateCD
+}=TimerEngine;
 const POMODORO_RESTORE_OVERRUN_GRACE_SEC=30*60;
-function resetBreakState(refreshMeter=true){
-  TimerState.breakStartMs=null;
-  TimerState.currentBreakSec=0;
-  Pomodoro.timerEvent('clear-cue');
-  TimerState.activeBreak=null;
-  if(refreshMeter)updateBreakMeter();
-}
-/* TASK SESSION STATE · 2. PER-TASK RUNTIME EVIDENCE */
-const TaskSessionState=(()=>{
-  const byTaskId=new Map();
-  const fieldPaths=Object.freeze({
-    completion:['completion'],completionSource:['completionSource'],notes:['progress'],
-    actualTime:['actual','seconds'],actualClock:['actual','clock'],actualRecords:['actual','record']
-  });
-  function createEntry(taskId){return {taskId,resolvedState:null,completion:undefined,completionSource:undefined,progress:undefined,actual:undefined};}
-  function entry(index,create=false){
-    const taskId=TaskIdentity.idAt(index);
-    if(!taskId)return null;
-    let row=byTaskId.get(taskId)||null;
-    if(!row&&create){row=createEntry(taskId);byTaskId.set(taskId,row);}
-    return row;
-  }
-  function fieldPath(field){return fieldPaths[field]||null;}
-  function getField(index,field){
-    const row=entry(index,false),path=fieldPath(field);
-    if(!row||!path)return undefined;
-    return path.length===1?row[path[0]]:row[path[0]]?.[path[1]];
-  }
-  function setField(index,field,value){
-    const path=fieldPath(field);
-    if(!path)return false;
-    if(value===undefined)return deleteField(index,field);
-    const row=entry(index,true);
-    if(!row)return false;
-    if(path.length===1)row[path[0]]=value;
-    else{
-      if(!row[path[0]]||typeof row[path[0]]!=='object')row[path[0]]={};
-      row[path[0]][path[1]]=value;
-    }
-    return true;
-  }
-  function fieldPresent(row,field){
-    const path=fieldPath(field);
-    return !!(row&&path&&(path.length===1?row[path[0]]!==undefined:row[path[0]]?.[path[1]]!==undefined));
-  }
-  function isEmpty(row){
-    return !!row&&row.resolvedState===null&&row.completion===undefined&&row.completionSource===undefined&&
-      row.progress===undefined&&(!row.actual||Object.keys(row.actual).length===0);
-  }
-  function prune(row){if(row&&isEmpty(row))byTaskId.delete(row.taskId);}
-  function deleteField(index,field){
-    const row=entry(index,false),path=fieldPath(field);
-    if(!row||!path||!fieldPresent(row,field))return false;
-    if(path.length===1)row[path[0]]=undefined;
-    else{
-      delete row[path[0]][path[1]];
-      if(!Object.keys(row[path[0]]).length)row[path[0]]=undefined;
-    }
-    prune(row);
-    return true;
-  }
-  function resolvedState(index){return entry(index,false)?.resolvedState||null;}
-  function setResolved(index,state){
-    const next=state==='done'||state==='skipped'?state:null,row=entry(index,next!==null);
-    if(!row||row.resolvedState===next)return false;
-    row.resolvedState=next;prune(row);return true;
-  }
-  function isDone(index){return resolvedState(index)==='done';}
-  function isSkipped(index){return resolvedState(index)==='skipped';}
-  function isResolved(index){return resolvedState(index)!==null;}
-  function toggleDone(index){
-    if(isSkipped(index)){setResolved(index,null);return 'reopened-skip';}
-    setResolved(index,isDone(index)?null:'done');return resolvedState(index);
-  }
-  function indices(){
-    const out=[],indexMap=TaskIdentity.indexMap();
-    byTaskId.forEach(row=>{const idx=TaskIdentity.indexForId(row.taskId,indexMap);if(idx!==null)out.push(idx);});
-    return [...new Set(out)].sort((a,b)=>a-b);
-  }
-  function indicesWithField(field){return indices().filter(idx=>fieldPresent(entry(idx,false),field));}
-  function resolvedIndices(state){return indices().filter(idx=>resolvedState(idx)===state);}
-  function clear(){byTaskId.clear();}
-  function indexSnapshot(field){
-    const out={};indicesWithField(field).forEach(idx=>{out[idx]=getField(idx,field);});return out;
-  }
-  return Object.freeze({getField,setField,deleteField,indexSnapshot,resolvedState,setResolved,isDone,isSkipped,isResolved,toggleDone,resolvedIndices,indices,clear});
-})();
-/* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION */
+/* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION *//* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION */
 let liveDraftSaveTimer=null;
 let liveDraftSaveDueAt=0;
 let liveDraftPendingOptions=null;
@@ -753,7 +724,6 @@ const OWNERSHIP_STALE_MS=15000;
 const OWNERSHIP_PROBE_MS=700;
 const OWNERSHIP_WEB_LOCK_NAME=ProfileScope.scoped('study-director-app-owner-v1');
 const OWNERSHIP_STATES=OwnershipModule.OWNERSHIP_STATES;
-const SLEEP_GAP_THRESHOLD_MS=120000;
 let ownershipBanner=null;
 let AppMutationCoordinator=null;
 let mutationUiOperationActive=false;
@@ -834,79 +804,14 @@ AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze
   foreignReleased:()=>wakeBackgroundOperations('mutation-lease-ended')})
 }));
 if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='study-director.mutation-coordinator'||AppMutationCoordinator.contractVersion!==1)throw new Error('Study Director mutation coordinator is unavailable or incompatible.');
-/* TIMER NUDGE AND SOUND CUES */
-const Pomodoro=PomodoroModule.createController(Object.freeze({ports:Object.freeze({
-  state:Object.freeze({TASKS,TIMER_MODES,TimerState}),
-  schedule:Object.freeze({isPomodoroEligibleBlock}),
-  persistence:Object.freeze({
-    canMutate:()=>appCanMutate(),
-    readConfiguration:()=>protectedPreferencesState.nudge,
-    writeConfiguration:value=>persistProtectedPreferences({nudge:value,soundMode:NoticeCoordinator.soundStatus().mode}),
-    writeSession:(...args)=>writeLiveDraftNow(...args)
-  }),
-  view:Object.freeze({document,notifications:NoticeCoordinator,updateExecutePanels}),
-  environment:Object.freeze({nowIso:()=>new Date().toISOString()})
-})}));
-if(!Object.isFrozen(Pomodoro)||!Object.isFrozen(Pomodoro.configuration)){
-  throw new Error('Study Director Pomodoro controller is unavailable or incompatible.');
-}
-const PracticePacerModel=PracticePacerModule.createModel(Object.freeze({ports:Object.freeze({
-  configuration:Object.freeze({APP_LIMITS}),
-  domain:Object.freeze({boundedInt,boundedNumber,clampArray,clampText,fmtS})
-})}));
-const PracticePacerController=PracticePacerModule.createController(Object.freeze({model:PracticePacerModel,ports:Object.freeze({
-  configuration:Object.freeze({APP_LIMITS}),
-  state:Object.freeze({TASKS,TIMER_MODES,TaskIdentity,TimerState}),
-  schedule:Object.freeze({isTaskResolved,isWorkBlock}),
-  persistence:Object.freeze({persistPracticeCueMode,persistPracticeTarget,saveLiveDraft,writeLiveDraftNow}),
-  view:Object.freeze({
-    document,
-    isExecutePaneVisible:()=>!document.hidden&&!!document.getElementById('pane-execute')?.classList.contains('on'),
-    setElementAttribute,setElementClass,setElementDisabled,setElementHidden,setElementStyle,setElementText,setTextSafe
-  }),
-  userPreferences:Object.freeze({notifications:NoticeCoordinator,readUserDefaults}),
-  ownership:Object.freeze({appCanMutate}),
-  clock:Object.freeze({nowMs:DecisionClock.nowMs})
-})}));
-if(!Object.isFrozen(PracticePacerModel)||PracticePacerModel.format!=='study-director.practice-pacer-model'||PracticePacerModel.contractVersion!==1||!Object.isFrozen(PracticePacerController)){
-  throw new Error('Study Director Practice Pacer is unavailable or incompatible.');
-}
-const TimerEngine=TimerEngineModule.createEngine(Object.freeze({ports:Object.freeze({
-  configuration:Object.freeze({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
-  state:Object.freeze({TASKS,TIMER_MODES,TaskIdentity,TaskSessionState,TimerState,resetBreakState,setCurrentTask,setTimerMode}),
-  domain:Object.freeze({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
-  schedule:Object.freeze({adjustedEndMin,adjustedStartMin,beginActualTask,effectiveNowMin,findNextIncompleteTrackableAfter,getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),hasAdjustedTiming,isFixedBlock,isLiveTrackableTimer,isTaskResolved,isTrackableBlock,isWorkBlock,originalEndMin,originalStartMin,plannedRows,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
-  persistence:Object.freeze({activePauseEventSnapshot,addPauseToActual,compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoveryCaptureActiveBeforeSwitch,recoverySetStatus,reopenActualSessionForTimer,saveLiveDraft,saveNote,writeLiveDraftNow}),
-  view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}),
-  clock:Object.freeze({nowMs:DecisionClock.nowMs}),
-  reviewEvidence:Object.freeze({applicableNotesForTask,buildRealTimeSnapshot,exactTaskCompletionPercent,getReviewDate,liveTaskOutcome,recordCurrentActiveToTask,resolveTaskCompletion,setTaskDoneState,setTaskSkippedState,updateRealTimeAwareness,updateTimerFocusMetrics}),
-  clockEnvironment:Object.freeze({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
-  userPreferences:Object.freeze({Pomodoro,notifications:NoticeCoordinator}),
-  ownership:Object.freeze({appCanMutate}),
-  practice:Object.freeze({controller:PracticePacerController,model:PracticePacerModel})
-})}));
-if(!Object.isFrozen(TimerEngine)||TimerEngine.format!=='study-director.timer-engine'||TimerEngine.contractVersion!==2){
-  throw new Error('Study Director Timer engine is unavailable or incompatible.');
-}
-const {
-  practice:PracticePacer, presentation:TimerPresentation, evidenceGateway:SessionEvidenceGateway,
-  PRACTICE_CUE_DEFAULT, PRACTICE_PAUSE_CAUSES, formatPracticeMs, practicePaceBandLabel, sanitizePracticeCueMode,
-  sanitizePracticeRun, sanitizePracticeRuns, sanitizePracticeState, summarizeCleanPracticeRuns,
-  summarizePracticeRunsForInsights, validPracticeMs, actualRecordsSnapshot, actualTimeSnapshot,
-  applyInactiveGapSplit, captureRuntimeEvidence, classifyInactiveGap, currentTimerActiveSeconds,
-  handleInactiveGapSplitKey, handleOverlayFocusTrap, nowIso, pruneActualRecordAudit, restoredRuntimeRecordedSec,
-  showInactiveGapSplit, syncTimerFromClock, beginTimerPause, finalizePauseEvent, getCurrentBreakSeconds, jumpTo,
-  markDone:markDoneTimer, setPausedUI, setTimerIdentity, skipTask:skipTaskTimer, startCur, syncTimerAfterWake, toggleDone, togglePause:togglePauseTimer,
-  updateBreakMeter, updateCD
-}=TimerEngine;
-// A pause, resume, finished or skipped block goes to the other devices
+// A pause, resume, finished or skipped block goes to the other devices// A pause, resume, finished or skipped block goes to the other devices
 // within seconds (an urgent change), not at the next quiet-period upload:
 // Continue Here elsewhere takes the timer from Drive's newest version, so a
 // pause still waiting here would count the paused time there as study.
 function sendSessionChangeSoon(reason){
   void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.session-change-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason}));
 }
-function togglePause(){const result=togglePauseTimer();sendSessionChangeSoon(TimerState.paused?'timer-pause':'timer-resume');schedulePwaUpdateEvaluation(150);return result;}
+function togglePause(){const result=togglePauseTimer();if(result===true)sendSessionChangeSoon(TimerState.paused?'timer-pause':'timer-resume');schedulePwaUpdateEvaluation(150);return result;}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
@@ -1079,17 +984,6 @@ function finishPracticePacer(){
   schedulePwaUpdateEvaluation(150);return result;
 }
 function handlePracticeStartKey(event){if(event&&event.key==='Enter'){PracticePacer.start();return false;}return true;}
-function setCurrentTask(idx,options={}){
-  const next=boundedInt(idx,{min:0,max:Math.max(0,TASKS.length),fallback:0});
-  if(options.notifyPractice!==false)PracticePacer.onMainTaskChanging(next<TASKS.length?TaskIdentity.idAt(next):null);
-  TimerState.currentIndex=next;
-  syncStudyQuiet();
-  return TimerState.currentIndex;
-}
-function resetCountdownRuntime(){return TimerEngine.resetCountdownRuntime();}
-
-function clearProgressRuntime(){TaskSessionState.clear();}
-function isTaskResolved(idx){return TaskSessionState.isResolved(idx);}
 function toggleDoneMarker(idx){
   const prior=TaskSessionState.resolvedState(idx);
   TaskSessionState.toggleDone(idx);
