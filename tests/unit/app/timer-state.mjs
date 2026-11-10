@@ -129,6 +129,33 @@ assert.equal(taskState.indices().includes(1),false,'empty unresolved task eviden
 taskState.clear();
 assert.deepEqual(taskState.indices(),[],'clear removes all runtime evidence');
 
+const sources=Object.freeze({UNITS:'units',MANUAL:'manual',TIME:'time',FINISHED_TIME:'finished-time',FINISHED_UNVERIFIED:'finished-unverified',SKIPPED:'skipped',NONE:'none'});
+const completionModel=Object.freeze({
+  normalizeSource:value=>Object.values(sources).includes(value)?value:sources.NONE,
+  fromUnits:()=>null,
+  progressInput:()=>({done:null,total:null,pct:null,hasDone:false,hasTotal:false}),
+  fromFocus:()=>null,
+  needsFocus:()=>false,
+  resolve:input=>({pct:Number(input?.storedPct)||0,source:input?.source||sources.NONE}),
+  clampPercent:value=>Math.max(0,Math.min(100,Number(value)||0))
+});
+const completion=executionHost.createCompletionEvidence(Object.freeze({
+  tasks:evidenceController.tasks,taskSessionState:taskState,completionModel,sources,
+  classifyTaskOutcome:()=> 'untouched',taskTargetValue:()=>null,actualTimeSnapshot:()=>({}),
+  renderCompletionChange:()=>false,saveLiveDraft:()=>false
+}));
+taskState.setResolved(0,'skipped');taskState.setField(0,'completion',0);taskState.setField(0,'completionSource','skipped');
+assert.equal(completion.toggleDoneState(0),'reopened-skip','reopening a skipped block uses the checked completion owner');
+assert.equal(taskState.resolvedState(0),null);assert.equal(taskState.getField(0,'completion'),undefined);assert.equal(taskState.getField(0,'completionSource'),undefined);
+taskState.setResolved(0,'done');taskState.setField(0,'completion',0);taskState.setField(0,'completionSource','finished-unverified');
+assert.equal(completion.toggleDoneState(0),null,'reopening an unverified finished block clears the synthetic done state');
+assert.equal(taskState.getField(0,'completion'),undefined);assert.equal(taskState.getField(0,'completionSource'),undefined);
+taskState.setResolved(0,'done');taskState.setField(0,'completion',55);taskState.setField(0,'completionSource','manual');
+assert.equal(completion.toggleDoneState(0),null);
+assert.equal(taskState.getField(0,'completion'),55,'reopening preserves genuine manual completion evidence');
+assert.equal(taskState.getField(0,'completionSource'),'manual');
+assert.equal(completion.toggleDoneState(99),false,'invalid task indices fail closed');
+
 controller.clearSession();
 assert.equal(controller.mode,'empty');
 assert.equal(controller.tasks.length,0);
