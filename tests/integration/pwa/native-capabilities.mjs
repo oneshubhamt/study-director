@@ -122,13 +122,17 @@ await controller.updateBadge(false);assert.equal(badge,0);
 assert.equal(captures.length,0);
 assert.ok(renders.some(state=>state.wakeAcquired));
 
-function storageOnlyController(navigatorValue,capture=()=>{}){
+function storageOnlyHarness(navigatorValue,capture=()=>{},isTimerRunning=()=>false){
   const documentValue=emitter({hidden:false}),windowValue=emitter({matchMedia:()=>({matches:false})});
-  return NativeModule.createController(Object.freeze({
+  const controller=NativeModule.createController(Object.freeze({
     configuration:Object.freeze({installNoticeKey:'install-notice',wakePreferenceKey:'wake'}),
     environment:Object.freeze({document:documentValue,navigator:navigatorValue,window:windowValue}),
-    hooks:Object.freeze({capture,isTimerRunning:()=>false,readPreference:()=>false,writePreference:()=>true,render:()=>{}})
+    hooks:Object.freeze({capture,isTimerRunning,readPreference:()=>false,writePreference:()=>true,render:()=>{}})
   }));
+  return {controller,document:documentValue,window:windowValue};
+}
+function storageOnlyController(navigatorValue,capture=()=>{},isTimerRunning=()=>false){
+  return storageOnlyHarness(navigatorValue,capture,isTimerRunning).controller;
 }
 let deniedPersistCalls=0;
 const denied=storageOnlyController({
@@ -164,6 +168,17 @@ assert.match(unsupportedState.storageMessage,/browser-managed/i);
   assert.ok(rejected.some(row=>row.scope==='native.storage-protect-auto'));
   assert.ok(rejected.some(row=>row.scope==='native.badge'));
   assert.ok(rejected.some(row=>row.scope==='native.install-inspection'));
+  const wakeRejected=storageOnlyController({
+    userAgent:'Mozilla/5.0',wakeLock:{request:async()=>{throw new Error('wake denied');}}
+  },(scope,error)=>rejected.push({scope,message:String(error)}),()=>true);
+  wakeRejected.install();await wakeRejected.setKeepAwake(true);
+  assert.equal(wakeRejected.status().wakeAcquired,false);
+  assert.ok(rejected.some(row=>row.scope==='native.wake-request'));
+  const promptHarness=storageOnlyHarness({userAgent:'Mozilla/5.0'},(scope,error)=>rejected.push({scope,message:String(error)}));
+  promptHarness.controller.install();
+  promptHarness.window.emit('beforeinstallprompt',{preventDefault(){},prompt:async()=>{throw new Error('prompt denied');}});
+  assert.equal(await promptHarness.controller.promptInstall(),false);
+  assert.ok(rejected.some(row=>row.scope==='native.install-prompt'));
 }
 
 { // checked UI projection preserves unsupported fallbacks and deduplicates change events
@@ -182,6 +197,6 @@ assert.match(unsupportedState.storageMessage,/browser-managed/i);
 
 console.log(JSON.stringify({
   status:'PASS',schedulerPorts:true,persistenceAutoRequested:true,persistenceRetryAvailable:true,wakeLifecycle:true,
-  persistenceDenialSafe:true,persistenceUnsupportedSafe:true,rejectedApisContained:true,
+  persistenceDenialSafe:true,persistenceUnsupportedSafe:true,rejectedApisContained:true,rejectedWakeAndInstallSafe:true,
   installGuidance:true,malformedInstallPromptIgnored:true,installedTabRemainsBrowser:true,badgeBestEffort:true,checkedHostAdapter:true,wakeRequests,persistCalls
 },null,2));
