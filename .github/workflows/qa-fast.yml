@@ -49,6 +49,10 @@ jobs:
           tests/integration/storage/attachment-integrity-audit.mjs
           tests/integration/storage/integrity-continuation.mjs
           tests/integration/exports/scratch-gc.mjs
+          tests/integration/app/recovery-timer-snapshot.mjs
+          tests/integration/app/session-lifecycle-module.mjs
+          tests/integration/storage/strict-durability-boundaries.mjs
+          tests/architecture/app/runtime-boundaries.mjs
           tests/architecture/storage/background-work-contract.mjs
           tests/architecture/storage/managed-recovery-contract.mjs
           tests/architecture/test-suite/suite-governance.mjs
