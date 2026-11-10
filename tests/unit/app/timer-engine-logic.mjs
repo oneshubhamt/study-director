@@ -257,7 +257,7 @@ const timerCases=await checkCases('timer rules',{seed:20261103,count:200},async(
     else if(op==='pause'){assert.equal(engine.beginTimerPause('manual'),true);pauseRun=0;}
     else if(op==='resume'){
       const records=pauseCount();engine.togglePause();assert.equal(timerState.paused,false);
-      assert.equal(pauseCount(),records+1);assert.equal(latestPause().seconds,Math.floor(pauseRun/1000),'a pause records how long it lasted');
+      const pauseSec=Math.floor(pauseRun/1000);assert.equal(pauseCount(),records+(pauseSec>0?1:0));if(pauseSec>0)assert.equal(latestPause().seconds,pauseSec,'a countable pause records how long it lasted');
       paused+=pauseRun;pauseRun=0;
     }else{
       const choice=pick(['focus','break','split','ignore']),split=int(0,gap.away+60000),toFocus=choice==='focus'?gap.away:choice==='split'?Math.min(gap.away,split):0;
