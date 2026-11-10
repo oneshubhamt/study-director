@@ -15,7 +15,7 @@ assert.equal(ownershipModule.isOwnershipLostError(lost),true);
 assert.equal(ownershipModule.isOwnershipLostError({code:'STUDY_DIRECTOR_OWNERSHIP_LOST'}),true);
 assert.equal(ownershipModule.isOwnershipLostError(new Error('other')),false);
 
-let ownershipNow=1000,lastError=null;
+let ownershipNow=1000,lastError=null,ownershipSettleFailure=false;
 const ownerStore=new Map(),sessionStore=new Map(),ownershipHookCalls={render:0,refreshStorage:0,practiceRender:0};
 const ownershipInput=Object.freeze({
   config:Object.freeze({storageKey:'owner',sessionTabKey:'tab',channelName:'test',heartbeatMs:1000,staleMs:100,probeMs:25,webLockName:'test-lock'}),

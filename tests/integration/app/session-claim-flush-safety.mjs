@@ -15,58 +15,50 @@ function productionFunction(name){
 // exercised in session-handoff-runtime.mjs plus browser handoff journeys.
 // This file retains only the still-distinct canonical persistence regressions.
 
-// BF-1R1: the Saved Day acknowledgement must survive strict canonical
-// readback before the app can declare this study revision saved.
+// Saved-Day acknowledgement integrates with the P5.4B canonical session owner:
+ // the host may advance savedRevision only after the checked strict write succeeds.
 {
   const src=[
-    productionFunction("async function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){"),
     productionFunction('async function acknowledgeSavedStudyDay(date,revision){'),
-    productionFunction('async function clearCanonicalSessionAfterSavedDay(){')
+    productionFunction('function clearCanonicalSessionAfterSavedDay(){')
   ].join('\n');
   const date='2026-08-27';
   const prepare=(failure='')=>{
-    let recorded=null,acknowledged=0,clears=0;
+    let acknowledged=0,clears=0,writes=0;
     const sessionState={savedRevision:0,contentRevision:7,studyDate:date};
     const context=vm.createContext({
       TASKS:[{}],TimerState:sessionState,
       getReviewDate:()=>date,
       cleanDayRevision:value=>Math.max(0,Math.floor(Number(value)||0)),
-      writeLiveDraftNow:async options=>{
-        assert.equal(options.strictDurability,true);
-        assert.equal(options.markChanged,false);
-        recorded={date,snapshot:{savedRevision:sessionState.savedRevision,contentRevision:sessionState.contentRevision},revision:10};
-        if(failure==='no-receipt')return null;
-        if(failure==='local-only')return {ok:true,value:recorded,error:new Error('IndexedDB unavailable'),storage:{idb:false,local:true}};
-        return {ok:true,value:recorded,storage:{idb:true}};
-      },
       clearSaveReminder:()=>{acknowledged++;},
-      requireUnused:()=>{},
-      AppData:{activeSession:{
-        load:async()=>failure==='mismatched-read'?{ok:true,value:{...recorded,revision:9},storage:{idb:true}}:
-          failure==='clear-shadow'?{ok:true,value:{date},storage:{idb:true}}:
-          {ok:true,value:recorded,storage:{idb:true}},
-        clear:async()=>{clears++;return failure==='clear-local-only'?{ok:true,storage:{idb:false},error:new Error('IndexedDB unavailable')}:{ok:true,storage:{idb:true}};}
-      }},
-      ActiveSessionCodec:{sanitizeCurrent:v=>v||null},
-      CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
+      ActiveSessionRuntime:{
+        writeCanonicalNow:async(operation,options)=>{
+          writes++;assert.equal(operation,'acknowledging the Saved Day');assert.equal(options.markChanged,false);
+          if(failure==='write-failure')throw new Error('IndexedDB unavailable');
+          const savedRevision=failure==='mismatched-write'?Math.max(0,sessionState.savedRevision-1):sessionState.savedRevision;
+          return {ok:true,value:{date,snapshot:{savedRevision}},storage:{idb:true}};
+        },
+        clearCanonical:async operation=>{
+          clears++;assert.equal(operation,'clearing the saved study session');
+          if(failure==='clear-failure')throw new Error('IndexedDB unavailable');
+          return {ok:true,value:null,storage:{idb:true}};
+        }
+      },
       Object
     });
     vm.runInContext(src+'\nglobalThis.ack=acknowledgeSavedStudyDay;globalThis.clearDay=clearCanonicalSessionAfterSavedDay;',context);
-    return {ack:()=>context.ack(date,7),clear:()=>context.clearDay(),state:()=>({saved:sessionState.savedRevision,acknowledged,clears})};
+    return {ack:()=>context.ack(date,7),clear:()=>context.clearDay(),state:()=>({saved:sessionState.savedRevision,acknowledged,clears,writes})};
   };
   const good=prepare();assert.equal(await good.ack(),true);
-  assert.equal(good.state().saved,7);assert.equal(good.state().acknowledged,1);
-  for(const fault of ['local-only','no-receipt','mismatched-read']){
+  assert.deepEqual(good.state(),{saved:7,acknowledged:1,clears:0,writes:1});
+  for(const fault of ['write-failure','mismatched-write']){
     const trial=prepare(fault);
-    await assert.rejects(trial.ack(),/IndexedDB unavailable|acknowledgement was not saved|read-back differs/u,fault);
+    await assert.rejects(trial.ack(),/IndexedDB unavailable|acknowledgement was not saved/u,fault);
     assert.equal(trial.state().saved,0,fault+' must not mark session revision saved');
     assert.equal(trial.state().acknowledged,0);
   }
-  const localOnlyClear=prepare('clear-local-only');
-  await assert.rejects(localOnlyClear.clear(),/IndexedDB unavailable/u);
-  assert.equal(localOnlyClear.state().clears,1);
-  const mismatchedClear=prepare('clear-shadow');
-  await assert.rejects(mismatchedClear.clear(),/remained after its canonical deletion/u);
+  const cleared=prepare();await cleared.clear();assert.equal(cleared.state().clears,1);
+  const failedClear=prepare('clear-failure');await assert.rejects(failedClear.clear(),/IndexedDB unavailable/u);assert.equal(failedClear.state().clears,1);
 }
 {
   // A successful reminder check must never survive a later canonical Day

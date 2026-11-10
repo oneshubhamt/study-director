@@ -73,7 +73,8 @@ assert.match(sessionHandoff,/session-handoff-source-advanced[\s\S]*SESSION_CONTI
 const handoffAdapter=section(host,'async function transferSessionOwnershipHere(session,','// Continue Here in progress:');
 assert.doesNotMatch(handoffAdapter,/AppData\.activeSession|claimSessionOwnership|releaseSessionClaim|readSessionClaim/u,'host Continue Here adapter contains no distributed state-machine implementation');
 assert.equal((host.match(/readSessionHandoffSource\(/gu)||[]).length,1,'host reaches the provider handoff-source reader only through P5.4C composition');
-assert.match(handoffAdapter,/SessionHandoffRuntime\?\.prefetchSource\(\)/u,'Continue Here latency prefetch remains inside the checked P5.4C provider boundary');
+const continueFlow=section(host,'async function continueSessionHere(){','// From a pop-up or the profile panel:');
+assert.match(continueFlow,/SessionHandoffRuntime\?\.prefetchSource\(\)/u,'Continue Here latency prefetch remains inside the checked P5.4C provider boundary');
 const finishTransition=section(host,'async function finishTodaySession(){','async function resetTodaySession(){');
 assert.match(finishTransition,/rollbackSnapshot=ActiveSessionRuntime\.captureSnapshot\(\)[\s\S]*writeCanonicalNow\('finishing today’s session'/u,'finish captures a recoverable runtime before its strict canonical commit');
 assert.match(finishTransition,/withPersistenceSuppressed\([\s\S]*applyStoredSession\(rollbackSession,rollbackSnapshot/u,'failed finish restores the pre-finish runtime without recursively persisting the rollback');
