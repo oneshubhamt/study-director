@@ -1,6 +1,6 @@
 # TypeScript conversion — current execution record
 
-**Working branch: `ts-exp`. P5.0–P5.4A VERIFIED — TARGETED. Next: P5.4B canonical Active Session & local lifecycle.** P5.2/P5.3 were independently reopened at `134ad02` and re-closed after de novo source reconciliation at source endpoint `88e4095`. Preserve `TS-Conversion` and main. Follow the sole-implementor and end-of-Phase-5 audit arrangement in [AGENTS](AGENTS.md). Main intake endpoint remains `2638619`.
+**Working branch: `ts-exp`. P5.0–P5.4A VERIFIED — TARGETED; P5.4B canonical Active Session & local lifecycle is ACTIVE.** P5.2/P5.3 were independently reopened at `134ad02` and re-closed after de novo source reconciliation at source endpoint `88e4095`. Preserve `TS-Conversion` and main. Follow the sole-implementor and end-of-Phase-5 audit arrangement in [AGENTS](AGENTS.md). Main intake endpoint remains `2638619`.
 
 Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHASE-5.md), then inspect current source. Consult [decisions](docs/typescript/DECISIONS.md), [tooling](docs/TYPESCRIPT.md), [verification commands](docs/VERIFICATION.md) and [product docs](docs/README.md) as needed. Do not reload historical logs for routine passes.
 
@@ -9,7 +9,7 @@ Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHAS
 | Stage | State / next action |
 | --- | --- |
 | Preparation, Phases 1–4 | Complete within recorded scope at `4136ba5`: 34 Phase 4 modules, 126 strict files, zero unchecked existing TS at last check. [Evidence](docs/typescript/HISTORY-PREPARATION-PHASE-4.md) |
-| Phase 5 — host/features | P5.0–P5.4A VERIFIED — TARGETED; P5.4 parent remains active and P5.4B canonical Active Session & local lifecycle is next. [Scope/status register](docs/typescript/PHASE-5.md) |
+| Phase 5 — host/features | P5.0–P5.4A VERIFIED — TARGETED; P5.4 parent remains active and P5.4B canonical Active Session & local lifecycle is in progress. [Scope/status register](docs/typescript/PHASE-5.md) |
 | Phase 6 — tooling/tests | Not started; convert remaining tooling/tests and retire transitional readers |
 | Phase 7 — certification | Not started; whole-app reconciliation and full correctness, coverage, mutation, browser, release and performance QA |
 
@@ -21,6 +21,16 @@ Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHAS
 | F-002 | Phase 6: retire transitional substring/VM readers and reconcile authored coverage; P5 conversions must keep their readers working meanwhile |
 | F-003 | Phase 7: full certification, with unavailable manual/device evidence stated separately |
 | REVIEW-P5 | Independent planning-assistant audit after all Phase 5 outcomes, including P5.13 reconciliation. Compare against `de4872a`; retain inherited limitations and intentional changes. No external review gate between implementation passes |
+
+## Active worklog — P5.4B canonical Active Session & local lifecycle
+
+- **Baseline / branch:** `96e9b69` on `ts-exp`; P5.4A remains closed. This pass owns local Active Session durability/recovery only. Distributed ownership claims, preemption, `Continue Here`, yield and handoff compensation remain P5.4C.
+- **Outcome:** establish one checked local-session boundary: **runtime state → canonical Active Session → recovery back into runtime**, including live-draft snapshot/save/flush, reload recovery, suspension/restoration, finish/reset and day/session lifecycle transitions while preserving the independently authored Plan draft.
+- **Refreshed source anchors:** `source/host/main.js` session snapshot/payload/save/flush and hydration paths, `applyStoredSessionSnapshot`, previous-day recovery, runtime reset/suspend/restore/finish/reset callers, Review/startup adapters; `source/core/repositories.ts` Active Session repository; `source/core/session-lifecycle.ts`; P5.4A execution host/state contracts.
+- **Invariants:** stable task-ID evidence survives snapshot round trips; canonical restoration never writes the applied schedule into the Plan draft; ordinary high-frequency checkpoints remain default-durability while critical transition barriers require verified canonical IndexedDB state; failed/blocked critical persistence cannot be presented as a completed finish/suspend transition; reset/deletion recovery remains fail-safe; P5.4C distributed state stays outside this module.
+- **Audit finding to repair:** current `finishTodaySession()` treats a `null` or recovery-only live-draft result as a safe finish. P5.4B will make the critical finish boundary require canonical commit/read-back before reporting success.
+- **Starting targeted evidence:** `tests/integration/app/session-lifecycle-module.mjs`, `tests/integration/app/recovery-timer-snapshot.mjs`, `tests/integration/storage/strict-durability-boundaries.mjs`, `tests/architecture/app/runtime-boundaries.mjs`; strengthen existing session/draft tests where they are the authoritative surface and add only a focused local-session host regression if the extracted boundary needs direct failure-path coverage. Relevant browser evidence is `tests/browser/app/session-draft-edit.mjs` and `tests/browser/backup/restore-session-safety.mjs`.
+- **Toolchain:** pinned Node `26.12.1` / npm `12.2.1`; `npm ci --ignore-scripts`; strict `npm run check:types`; affected targeted checks; source build / verify / generated syntax after build-input changes. Browser evidence unavailable to the connector will be recorded, not inferred.
 
 ## Latest closed worklog — P5.4A live execution runtime & timer presentation
 
