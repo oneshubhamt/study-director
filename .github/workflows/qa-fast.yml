@@ -54,9 +54,24 @@ jobs:
           tests/architecture/test-suite/suite-governance.mjs
           tests/architecture/test-suite/suite-structure.mjs
           tests/architecture/test-suite/suite-policy.mjs
+          tests/integration/storage/canonical-baseline.mjs
+          tests/integration/storage/installation-identity.mjs
+          tests/integration/storage/appmeta-contract.mjs
+          tests/integration/storage/indexeddb-topology-retirement.mjs
+          tests/unit/storage/indexeddb-durability.mjs
+          tests/architecture/storage/data-architecture.mjs
+          tests/architecture/storage/persistence-boundary.mjs
+          tests/architecture/storage/runtime-authority-contract.mjs
       - name: Source build
         run: node build/build.mjs
       - name: Verify generated build
         run: node build/verify-build.mjs
       - name: Verify generated syntax
         run: node tests/architecture/build/generated-syntax-check.mjs
+      - name: P5.2 data-bootstrap browser journeys
+        run: |
+          node tests/browser/app/core-flow.mjs
+          node tests/browser/storage/canonical-storage.mjs
+          node tests/browser/storage/storage-failure-recovery.mjs
+          node tests/browser/storage/site-data-clear.mjs
+          node tests/browser/storage/unsupported-data.mjs
