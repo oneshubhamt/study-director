@@ -3,15 +3,13 @@ import type {IndexedDb,LocalStoragePort,PersistenceModule,StoreNames} from './pe
 import type {DataContract,Limits} from './record-models.ts';
 import type {RepositoriesInput,ValidatorInput} from './repositories.ts';
 import type {ProfilesController} from './profiles.ts';
+import type {ProfileScopeValue} from './profile-scope.ts';
 import type {RepositoryJournalsModule} from '../source/core/repository-journals.ts';
 import type {RepositoriesModule} from '../source/core/repositories.ts';
 import type {AppMetaModule} from './app-meta.ts';
 import type {HostMetadataModule} from './host-metadata.ts';
 
-export interface ProfileScopePort{
-  readonly registryKey:string;readonly separator:string;readonly pattern:RegExp;readonly id:string;readonly scope:string;
-  scoped(name:unknown):string;
-}
+export type ProfileScopePort=ProfileScopeValue;
 export interface LocalStorageKeys{
   readonly recovery:string;readonly appOwner:string;readonly mutationLock:string;readonly storageHealth:string;readonly installationId:string;
   readonly deletionRecovery:string;readonly fallbackDailyRecords:string;readonly noteRescue:string;readonly fontScale:string;readonly keepScreenAwake:string;

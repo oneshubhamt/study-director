@@ -29,7 +29,7 @@ function run(value,existing=null){
   assert.equal(absent.id,'');assert.equal(absent.scope,'');assert.equal(absent.safe,true,'an absent registry is a genuine first-start state');
   for(const value of ['{bad json',{version:1,active:'bad',profiles:[{id:'bad',scope:''}]},{version:1,active:'',profiles:[]}]){
     const scope=run(value);
-    assert.equal(scope.id,'');assert.equal(scope.scope,'');assert.equal(scope.safe,false,'a present registry that cannot resolve a profile must fail closed');assert.equal(scope.scoped('db'),'db');
+    assert.equal(scope.id,'');assert.equal(scope.safe,false,'a present registry that cannot resolve a profile must fail closed');assert.equal(scope.scope,'__profile-registry-unreadable__');assert.equal(scope.scoped('db'),'db~__profile-registry-unreadable__','unsafe startup is quarantined away from the unscoped first-profile namespace');
   }
 }
 {
