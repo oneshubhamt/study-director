@@ -82,6 +82,7 @@ const PracticePacerModule=INTERNAL_MODULES.load('practice-pacer',1,'study-direct
 const TimerEngineModule=INTERNAL_MODULES.load('timer-engine',2,'study-director.timer-engine-module',2);
 const ExecutionHostModule=INTERNAL_MODULES.load('execution-host',1,'study-director.execution-host-module',1);
 const SessionHostModule=INTERNAL_MODULES.load('session-host',1,'study-director.session-host-module',1);
+const SessionHandoffModule=INTERNAL_MODULES.load('session-handoff',1,'study-director.session-handoff-module',1);
 const PRESENTATION_KERNEL=window[Symbol.for('studyDirector.presentationKernel.v1')];
 const PRESENTATION_MANIFEST=PRESENTATION_KERNEL&&PRESENTATION_KERNEL.manifest;
 if(!PRESENTATION_KERNEL||PRESENTATION_KERNEL.format!=='study-director.presentation-kernel'||PRESENTATION_KERNEL.version!==1||!PRESENTATION_MANIFEST||PRESENTATION_MANIFEST.format!=='study-director.presentation-manifest'||PRESENTATION_MANIFEST.version!==1){
@@ -667,7 +668,7 @@ const POMODORO_RESTORE_OVERRUN_GRACE_SEC=30*60;
 /* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION */
 const LIVE_DRAFT_SAVE_DEBOUNCE_MS=1000;
 const TIMER_SNAPSHOT_INTERVAL_MS=60*1000;
-let ActiveSessionRuntime=null;
+let ActiveSessionRuntime=null,SessionHandoffRuntime=null;
 let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
@@ -677,7 +678,6 @@ let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
 let saveReminderDate='',saveReminderEvidence=null,saveReminderGeneration=0;
 let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
-let sessionClaimFreeze=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return !!ActiveSessionRuntime?.persistenceSuppressed();}
 function managedRecoverySessionQuiesced(){return managedRecoverySessionQuiescenceDepth>0;}
@@ -841,111 +841,13 @@ function uploadSoonAfterPlanApply(result){
   const done=applied=>{if(applied)void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason:'plan-apply'}));return applied;};
   return result&&typeof result.then==='function'?result.then(done):done(result);
 }
-// During a live session, a tiny ownership claim is checked frequently while
-// full checkpoint reconciliation keeps its ordinary cadence. A remote claim
-// stops only this runtime clock; canonical progress stays untouched until the
-// verified full checkpoint arrives and ordinary reconciliation preserves it.
+// During a live session, the checked P5.4C controller owns remote-claim
+// observation, timer preemption, frozen evidence and retry cadence. The host
+// keeps only scheduling and browser lifecycle adapters.
 const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
-let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
-const SESSION_CLAIM_SAVE_WARNING='The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.';
-async function verifyFrozenSessionClaim(){
-  const frozen=sessionClaimFreeze;
-  try{
-    if(!frozen?.snapshot)throw new Error('The frozen Active Session snapshot is unavailable.');
-    const saved=await writeActiveSessionNow(snapshotWhileSessionClaimFrozen(),{emergency:true,strictDurability:true});
-    await requireCanonicalSessionWrite(saved,saved?.value,'yielding a transferred session');
-    if(sessionClaimFreeze!==frozen)return false;
-    sessionClaimFreeze=Object.freeze({...frozen,localVerified:true});
-    if(sessionSafetyMessage===SESSION_CLAIM_SAVE_WARNING)clearSessionSafetyMessage(SESSION_CLAIM_SAVE_WARNING);
-    return true;
-  }catch(error){
-    AppDiagnostics.capture('session.claim-flush',error,'warn');
-    markStorageHealthError('activeSession',SESSION_CLAIM_SAVE_WARNING);
-    sessionSafetyMessage=SESSION_CLAIM_SAVE_WARNING;refreshStorageFallbackWarning();
-    setPlanStatus('CRITICAL: Session handoff is waiting for a verified local save. Keep this tab open.',false);
-    return false;
-  }
-}
-function resumeAfterReleasedSessionClaim(session){
-  if(!sessionClaimFreeze?.localVerified||!session||session.runningOn!==InstallationIdentity.getId()||!TASKS.length)return false;
-  const frozenSinceMs=sessionClaimFreeze.frozenSinceMs;
-  try{
-    if(!TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs}))return false;
-    sessionClaimFreeze=null;setPlanStatus('✓ Session ownership remains on this device.');return true;
-  }catch(error){AppDiagnostics.capture('session.claim-resume',error,'warn');return false;}
-}
-// Another device wrote today's ownership claim in a newer version's form:
-// it may be running the session. The timer here stopped and the progress is
-// saved; only an updated app can continue here.
-const SESSION_NEWER_CLAIM_MESSAGE='Another device runs a newer version of Study Director and may be running today’s session. The timer here stopped and your progress is saved. Update the app to continue here.';
-function notifyNewerSessionClaim(){
-  setPlanStatus(SESSION_NEWER_CLAIM_MESSAGE,false);
-  Interactions.notify({source:'session',kind:'warning',key:'session-newer-claim',title:'Update the app to continue',message:SESSION_NEWER_CLAIM_MESSAGE,action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
-}
-async function checkSessionOwnershipClaim(){
-  if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
-  if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
-  if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
-  sessionClaimLastAttemptAt=Date.now();sessionClaimCheckActive=true;
-  try{
-    const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
-    if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
-    const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.applies&&claim.state==='owned'&&!claim.ownedHere),mine=!!(session&&session.runningOn===me);
-    if(remote&&mine&&TASKS.length){
-      const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
-      if(!same){
-        // Stop duplicate execution before awaiting a potentially slow/failed disk write.
-        const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
-        let snapshot=null,evidence=null;
-        try{
-          markDayContentChanged();
-          evidence=captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true});
-          snapshot=captureSessionSnapshot(evidence);
-        }catch(error){AppDiagnostics.capture('session.claim-snapshot',error,'warn');}
-        cancelPendingLiveDraftSave();
-        sessionClaimFreeze=Object.freeze({epoch:claim.epoch,frozenSinceMs,lastSyncAt:0,localVerified:false,snapshot,evidence});
-      }
-      // A local emergency envelope is useful for recovery, but the managed
-      // reconciliation preflight requires a strict canonical commit and read-back.
-      // Retry the same frozen evidence; never add time spent waiting to study time.
-      if(!sessionClaimFreeze.localVerified){
-        if(!await verifyFrozenSessionClaim())return true;
-        if(claim.newer)notifyNewerSessionClaim();
-        else setPlanStatus('Today’s session moved to another device. Syncing its latest state…');
-      }
-      // A newer build's claim: nothing here can follow it until the app is
-      // updated, so the timer stays stopped and no sync is asked for.
-      if(claim.newer)return true;
-      const current=sessionClaimFreeze;
-      if(current&&(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS)){
-        sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
-        BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim');
-      }
-      return true;
-    }
-    if(sessionClaimFreeze){
-      if(!mine||!TASKS.length){sessionClaimFreeze=null;return false;}
-      if(!sessionClaimFreeze.localVerified&&!await verifyFrozenSessionClaim())return true;
-      if(claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeAfterReleasedSessionClaim(session);
-      const now=DecisionClock.nowMs(),current=sessionClaimFreeze;
-      if(!current.lastSyncAt||now-current.lastSyncAt>=SESSION_CLAIM_SYNC_RETRY_MS){
-        sessionClaimFreeze=Object.freeze({...current,lastSyncAt:now});
-        BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim-release');
-      }
-      return true;
-    }
-    return false;
-  }catch(error){AppDiagnostics.capture('session.claim-watch',error,'warn');return false;}
-  finally{sessionClaimCheckActive=false;}
-}
-// slackMs: the interval's own tick arrives a few milliseconds short of the
-// period after the check it started last time, so it allows a second;
-// coming back to the app or online waits out the whole period.
-function wakeSessionOwnershipClaim(slackMs=0){
-  const now=Date.now();
-  if(sessionClaimLastAttemptAt&&now>=sessionClaimLastAttemptAt&&now-sessionClaimLastAttemptAt<SESSION_CLAIM_WATCH_MS-slackMs)return false;
-  return checkSessionOwnershipClaim();
-}
+let sessionWatchTimer=null,sessionClaimWatchTimer=null;
+async function checkSessionOwnershipClaim(){return SessionHandoffRuntime?SessionHandoffRuntime.checkClaim():false;}
+function wakeSessionOwnershipClaim(slackMs=0){return SessionHandoffRuntime?SessionHandoffRuntime.wakeClaim(slackMs):false;}
 function installSessionWatch(){
   if(sessionWatchTimer||sessionClaimWatchTimer)return false;
   sessionWatchTimer=setInterval(()=>{
@@ -955,8 +857,6 @@ function installSessionWatch(){
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
   sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim(1000);},SESSION_CLAIM_WATCH_MS);
-  // Existing interval owns the cadence. Foreground/online return only advances
-  // an eligible missed attempt, never introducing a second polling timer.
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void wakeSessionOwnershipClaim();});
   window.addEventListener('online',()=>{void wakeSessionOwnershipClaim();});
   return true;
@@ -1204,7 +1104,7 @@ function dismissStorageWarning(){
 }
 function resumeTimerLoopAfterPrimaryRestore(){
   try{
-    if(sessionClaimFreeze)return false;
+    if(SessionHandoffRuntime?.frozen())return false;
     const resumed=TimerEngine.resumeAfterPrimaryRestore();
     if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{
       date:getReviewDate(),
@@ -1968,12 +1868,7 @@ async function maybePromptBackupNudge(force=false){
 function captureSessionSnapshot(evidence=null){return ActiveSessionRuntime?.captureSnapshot(evidence)||null;}
 // Keep elapsed time and practice progress at the ownership boundary while
 // retaining any later text, completion or reflection edits for reconciliation.
-function snapshotWhileSessionClaimFrozen(){
-  const frozen=sessionClaimFreeze;
-  if(!frozen?.snapshot)return captureSessionSnapshot();
-  const recent=captureSessionSnapshot(frozen.evidence);
-  return Object.freeze({...recent,timerRuntime:frozen.snapshot.timerRuntime,practice:frozen.snapshot.practice});
-}
+function snapshotWhileSessionClaimFrozen(){return SessionHandoffRuntime?.snapshotForWrite()||captureSessionSnapshot();}
 function nextSessionRevision(seed=0){return AppData.activeSession.nextRevision(seed);}
 async function activeSessionContentFingerprint(session){
   const content=ActiveSessionCodec.contentValue(session);
@@ -2116,8 +2011,8 @@ function restoreTimerRuntimeIfAny(){
   return true;
 }
 // A session another device runs: this device shows it and never runs its timer.
-function sessionRunsElsewhere(session){return !!session&&typeof session==='object'&&session.status!=='suspended'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
-function sessionFromElsewhere(session){return !!session&&typeof session==='object'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
+function sessionRunsElsewhere(session){return SessionHandoffRuntime?SessionHandoffRuntime.runsElsewhere(session):!!session&&typeof session==='object'&&session.status!=='suspended'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
+function sessionFromElsewhere(session){return SessionHandoffRuntime?SessionHandoffRuntime.fromElsewhere(session):!!session&&typeof session==='object'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
 function isRestorableActiveSession(session){
   return !sessionRunsElsewhere(session)&&ActiveSessionRuntime?.classify(session)==='today-active';
 }
@@ -2811,135 +2706,13 @@ async function confirmSessionTakeover(session,{replace=false}={}){
     confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
   });
 }
-const sessionHandoffError=(code,message)=>Object.assign(new Error(message),{code});
-// Ownership moves by Drive's claim first, then this device's strict local
-// save. If Continue Here stops between the two, neither device runs the
-// timer: the old owner stops on seeing the claim, and this device still has
-// the session as running elsewhere. Pressing Continue Here again finishes it.
-const HANDOFF_RETRY_MESSAGE='Couldn’t finish moving the session. Press Continue Here again to finish.';
-// onStep(text): each step, for Continue Here's progress line.
-// preread: a readSessionHandoffSource started while the person confirmed.
+const HANDOFF_RETRY_MESSAGE=SessionHandoffModule.retryMessage;
+// P5.4C owns the distributed claim/compensation state machine. This host
+// adapter supplies UI progress only; provider and persistence semantics live
+// behind the checked controller.
 async function transferSessionOwnershipHere(session,{onStep=null,preread=null}={}){
-  const step=text=>{try{onStep?.(text);}catch{}};
-  if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
-  if(!BackupProviderRuntime.connected('google-drive'))throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive must be connected to transfer a session that belongs to another device.');
-  const requested=ActiveSessionCodec.sanitizeCurrent(session);
-  if(!requested)throw new Error('the transferred session state is invalid');
-  // localBefore: the session stored here that the next save may replace.
-  let previous=null,next=null,ownershipClaim=null,backgroundHold=null,claimAttempted=false,localVerified=false,localBefore=requested;
-  try{
-    // flush() starts a pending debounce write; settled() also waits for an
-    // already-running write whose timer callback has finished.
-    const displayedDraft=String(document.getElementById('plan-input')?.value||'');
-    const draftFlushed=await Promise.resolve(PlanDraftEditor.flush());
-    if(draftFlushed===false)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The Plan draft could not be saved before continuing the session.');
-    await PlanData.settled();
-    const savedDraft=PlanData.readDraft(),canonicalDraft=(await AppData.planData.read()).draft;
-    // A displayed default is not a saved Plan draft. Null is a valid
-    // canonical value until the person deliberately edits or loads a draft.
-    const expectedDisplay=savedDraft===null?getActiveDefaults().scheduleText:savedDraft;
-    if(canonicalDraft!==savedDraft||displayedDraft!==expectedDisplay)throw sessionHandoffError('SESSION_CONTINUE_DRAFT_UNSAVED','The independent Plan draft changed or did not reach canonical storage before Continue Here.');
-    // A read started while the person confirmed finishes first: it fills the
-    // verified session the claim reuses when Drive has not moved on.
-    if(preread)await preread;
-    step('Moving the session here…');
-    backgroundHold=BackupProviderRuntime.suspendBackground('session-continue');await backgroundHold.settled;
-    let planned=null;
-    // One Drive lease covers both steps. Under it the provider reads only the
-    // newest verified Drive Active Session (Continue Here never reconciles
-    // other data, such as the Plan draft, to move ownership), decide checks
-    // it and names the claim, and the claim is written. decide throwing
-    // writes nothing.
-    const decide=async source=>{
-      const expectedCheckpointId=String(source?.checkpointId||'');
-      if(!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Google Drive did not provide a verified current checkpoint for the handoff.');
-      previous=source.session?ActiveSessionCodec.sanitizeCurrent(source.session):null;
-      if(!previous||previous.date!==requested.date)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s shared session ended or changed while Continue Here was starting.');
-      if(previous.runningOn!==requested.runningOn)throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_STALE','Today’s session changed ownership while Continue Here was starting.');
-      if(Number(previous.revision)<Number(requested.revision))throw sessionHandoffError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','This device has a newer session copy than the verified Google Drive head. Sync must settle that difference before ownership can move.');
-      const [requestedContentFingerprint,observedContentFingerprint]=await Promise.all([activeSessionContentFingerprint(requested),activeSessionContentFingerprint(previous)]);
-      if(requestedContentFingerprint!==observedContentFingerprint){
-        // Drive's newer session only adds to this device's copy when this copy
-        // is exactly content Drive held before: what this device last shared
-        // through Drive (sync takes the newer session then too), or what the
-        // newest claim observed when it was made, whether that claim is the
-        // current owner's or this device's own from a Continue Here that
-        // stopped part-way. Advance only Active Session, then transfer
-        // ownership. A real divergence, or content with attachments, uses
-        // normal sync.
-        const priorClaim=source.priorClaim||null;
-        const causalContinuation=!!(
-          priorClaim&&priorClaim.state==='owned'&&priorClaim.applies&&
-          priorClaim.observedContentFingerprint===requestedContentFingerprint&&
-          Number(priorClaim.revision)<=Number(previous.revision)
-        );
-        const sharedContinuation=!!source.sharedContentFingerprint&&source.sharedContentFingerprint===requestedContentFingerprint;
-        const referencedAssets=BackupCodec.assetIds(previous);
-        if(!causalContinuation&&!sharedContinuation||referencedAssets.length){
-          BackupProviderRuntime.scheduleSharedSync('google-drive','session-handoff-source-advanced');
-          throw sessionHandoffError('SESSION_CONTINUE_SYNC_REQUIRED','Today’s shared session has newer study content that must be reconciled before ownership can move. This device is syncing it first; retry Continue Here after sync.');
-        }
-        // Only over the copy this press started from: a save made here in the
-        // meantime is never overwritten.
-        const advanced=await AppData.activeSession.save(previous,{strictDurability:true,expectedCanonical:requested});
-        if(advanced?.error?.code==='ACTIVE_SESSION_CHANGED')throw sessionHandoffError('SESSION_CONTINUE_CHANGED','Today’s session changed on this device while Continue Here was starting.');
-        await requireCanonicalSessionWrite(advanced,previous,'advancing the handoff source');
-        handleActiveSessionRepositoryResult(advanced,'save');
-        localBefore=previous;
-      }
-      planned=ActiveSessionCodec.sanitizeCurrent({...previous,runningOn:InstallationIdentity.getId(),revision:nextSessionRevision(previous.revision),updatedAt:new Date().toISOString()});
-      if(!planned)throw new Error('the transferred session state is invalid');
-      next=planned;
-      setPlanStatus('Transferring today’s session to this device…');step('Confirming with Google Drive…');
-      return {observedOwner:previous.runningOn,observedRevision:previous.revision,observedContentFingerprint,revision:planned.revision};
-    };
-    const claimed=await BackupProviderRuntime.claimSessionOwnership('google-drive',{date:requested.date,handoffToken:crypto.randomUUID(),decide,onWrite:()=>{claimAttempted=true;}});
-    // Busy and not connected are answered before any claim is written.
-    if(claimed?.status==='busy')throw sessionHandoffError('SESSION_CONTINUE_BUSY','Google Drive is busy with another backup or restore.');
-    if(claimed?.status==='unavailable')throw sessionHandoffError('SESSION_CONTINUE_NOT_CONNECTED','Google Drive is not connected.');
-    if(!claimed||claimed.status!=='completed'||!claimed.claim)throw new Error('Google Drive did not confirm the Active Session ownership claim.');
-    ownershipClaim=claimed.claim;
-    next=ActiveSessionCodec.sanitizeCurrent({...planned,revision:Math.max(planned.revision,Number(ownershipClaim.revision)||0),updatedAt:new Date().toISOString()});
-    if(!next)throw new Error('the accepted Active Session ownership revision is invalid');
-    const saved=await AppData.activeSession.save(next,{strictDurability:true,expectedCanonical:localBefore});
-    await requireCanonicalSessionWrite(saved,next,'claiming Active Session ownership');
-    localVerified=true;
-    handleActiveSessionRepositoryResult(saved,'save');
-    // The claim was confirmed on Drive as the newest one, under the lease,
-    // before this save. A later claim by another device is caught by the
-    // ownership watcher, so the handoff does not wait to read it again.
-    backgroundHold.release();backgroundHold=null;
-    notifyBackupChange({urgent:true,reason:'session-continue'});
-    // Only the session moved; notes, Saved Days and everything else come in
-    // by a full sync at once, in the background, while the timer runs here.
-    BackupProviderRuntime.scheduleSharedSync('google-drive','session-continue');
-    return Object.freeze({previous,session:saved.value||next,claim:ownershipClaim});
-  }catch(error){
-    // Reversal is safe only if the strict canonical record is still exactly
-    // the attempted state, or is already the observed previous state. An
-    // unrelated concurrent write is never overwritten during compensation.
-    let compensated=false;
-    if(ownershipClaim&&!localVerified&&previous&&next){
-      try{
-        const loaded=await AppData.activeSession.load(0,{strict:true});
-        const current=loaded?.ok&&loaded.storage?.idb===true?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
-        let localReverted=!!current&&CanonicalModule.same(current,previous);
-        if(!localReverted&&current&&CanonicalModule.same(current,next)){
-          const restored=await AppData.activeSession.save(previous,{strictDurability:true,expectedCanonical:current});
-          await requireCanonicalSessionWrite(restored,previous,'compensating a failed ownership transfer');
-          localReverted=true;
-        }
-        if(localReverted)compensated=await BackupProviderRuntime.releaseSessionClaim('google-drive',ownershipClaim);
-      }catch(rollbackError){AppDiagnostics.capture('session.takeover-compensation',rollbackError,'warn');}
-    }
-    try{BackupProviderRuntime.wakeBackground('session-watch');}catch{}
-    // Drive may hold this device's claim while the session here is not yet
-    // saved as running here. No device runs the timer meanwhile; Continue
-    // Here again finishes the move. An unexpected local record is never
-    // overwritten to pretend that the previous owner kept the session.
-    if(claimAttempted&&!compensated)throw Object.assign(sessionHandoffError('SESSION_CONTINUE_INCOMPLETE',HANDOFF_RETRY_MESSAGE),{cause:error});
-    throw error;
-  }finally{backgroundHold?.release();}
+  if(!SessionHandoffRuntime)throw new Error('Session handoff runtime is unavailable.');
+  return SessionHandoffRuntime.transferHere(session,{onStep,preread});
 }
 // Continue Here in progress: every Continue Here button says so and the
 // Execute card shows the step; a failure stays in the card until the next
@@ -3032,23 +2805,14 @@ async function continueSessionOnExecute(source){
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
 async function yieldSessionToOtherDevice(options={}){
-  if(!TASKS.length)return false;
-  const deferReview=options&&options.deferReview===true;
-  await SessionLifecycle.run('session-yield',{scheduleIdentity:true,date:todayISO(),autoDate:true},async()=>{
-    PracticePacer.pauseForSessionEnd({persist:false});
-    const now=new Date().toISOString(),session=activeSessionPayload(null,{status:'suspended',suspendedAt:now});
-    if(session){
-      const saved=await AppData.activeSession.save(session,{strictDurability:true});
-      await requireCanonicalSessionWrite(saved,saved?.value,'yielding the Active Session during reconciliation');
-    }
-    resetRuntimeSessionState({lifecycleManaged:true,source:'session-yield',date:todayISO()});
-    setSessionPanelMode('suspended',session);
-    refreshPlanAfterSessionReset();
-    setTimerMode(TIMER_MODES.SUSPENDED,'session-yield');
-    updateExecutePanels();
-    return true;
-  });
-  sessionYieldedAt=Date.now();
+  if(!SessionHandoffRuntime)return false;
+  const deferReview=options&&options.deferReview===true,session=await SessionHandoffRuntime.yieldLocal();
+  if(!session)return false;
+  setSessionPanelMode('suspended',session);
+  refreshPlanAfterSessionReset();
+  setTimerMode(TIMER_MODES.SUSPENDED,'session-yield');
+  updateExecutePanels();
+  sessionYieldedAt=DecisionClock.nowMs();
   if(deferReview)Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. Any late progress on this device will be compared when the new owner’s session arrives.'});
   else Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.',
     action:{label:'Review',opens:true,run:()=>void KeptVersions.review()}});
@@ -5457,7 +5221,7 @@ async function quiesceManagedRecoveryRuntime(operation){
     if(outer&&managedRecoverySessionQuiescenceDepth===0)void AppMutationCoordinator.settled().then(()=>{
       if(managedRecoverySessionQuiesced()||AppMutationCoordinator.status().active)return;
       const frozenSinceMs=managedRecoveryTimerFrozenSinceMs;managedRecoveryTimerFrozenSinceMs=null;
-      if(sessionClaimFreeze)return;
+      if(SessionHandoffRuntime?.frozen())return;
        try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
     });
   }
@@ -6116,7 +5880,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze({
     recoveryWorkActive:()=>AppMutationCoordinator?.status().active==='managed-recovery',
     timerSnapshotEligible:()=>!TimerState.paused&&!TimerState.inactiveGap&&!!TimerState.runtime&&TimerState.runtime.startMs!==null,
     markContentChanged:markDayContentChanged,
-    snapshotForWrite:()=>sessionClaimFreeze?.snapshot?snapshotWhileSessionClaimFrozen():ActiveSessionRuntime.captureSnapshot(),
+    snapshotForWrite:()=>SessionHandoffRuntime?.snapshotForWrite()||ActiveSessionRuntime.captureSnapshot(),
     reportResult:handleActiveSessionRepositoryResult,warn:showLiveDraftSaveWarning
   }),
   lifecycle:Object.freeze({run:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),runSync:(kind,options,operation)=>SessionLifecycle.runSync(kind,options,operation)}),
@@ -7020,6 +6784,63 @@ if(!Object.isFrozen(BackupRuntime)||BackupRuntime.format!=='study-director.backu
 const {
   controller:BackupController, checkpoint:CheckpointPipeline, repository:RepositoryCheckpointPipeline, providers:BackupProviderRuntime
 }=BackupRuntime;
+SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze({
+  configuration:Object.freeze({
+    providerId:'google-drive',claimWatchMs:SESSION_CLAIM_WATCH_MS,claimSyncRetryMs:SESSION_CLAIM_SYNC_RETRY_MS,
+    claimSaveWarning:'The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.'
+  }),
+  authority:Object.freeze({
+    canMutate:()=>appCanMutate(),startupReady:()=>StartupLifecycle.status().fullyInitialized,
+    visible:()=>document.visibilityState==='visible',online:()=>navigator.onLine!==false,
+    hasTasks:()=>TASKS.length>0,panelElsewhere:()=>sessionPanelMode==='elsewhere'
+  }),
+  provider:Object.freeze({
+    connected:id=>BackupProviderRuntime.connected(id),
+    readHandoffSource:id=>BackupProviderRuntime.readSessionHandoffSource(id),
+    claimOwnership:(id,request)=>BackupProviderRuntime.claimSessionOwnership(id,request),
+    releaseClaim:(id,claim)=>BackupProviderRuntime.releaseSessionClaim(id,claim),
+    readClaim:id=>BackupProviderRuntime.readSessionClaim(id),
+    scheduleSync:(id,reason)=>BackupProviderRuntime.scheduleSharedSync(id,reason),
+    suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason),
+    wakeBackground:reason=>BackupProviderRuntime.wakeBackground(reason)
+  }),
+  session:Object.freeze({
+    host:ActiveSessionRuntime,sanitize:value=>ActiveSessionCodec.sanitizeCurrent(value),
+    same:(left,right)=>CanonicalModule.same(left,right),nextRevision:seed=>nextSessionRevision(seed),
+    contentFingerprint:value=>activeSessionContentFingerprint(value),assetIds:value=>BackupCodec.assetIds(value)
+  }),
+  plan:Object.freeze({
+    flushDraft:()=>PlanDraftEditor.flush(),settled:()=>PlanData.settled(),readDraft:()=>PlanData.readDraft(),
+    readCanonicalDraft:async()=>{const value=await AppData.planData.read();return value.draft;},
+    displayedDraft:()=>String(document.getElementById('plan-input')?.value||''),
+    defaultScheduleText:()=>getActiveDefaults().scheduleText
+  }),
+  runtime:Object.freeze({
+    markContentChanged:()=>markDayContentChanged(),
+    captureEvidence:()=>captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true}),
+    stopExecution:()=>TimerEngine.stopExecution(),resumeExecution:options=>TimerEngine.resumeAfterPrimaryRestore(options),
+    runLifecycle:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),
+    pausePractice:()=>PracticePacer.pauseForSessionEnd({persist:false}),todayISO
+  }),
+  presentation:Object.freeze({
+    capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+    setStatus:(message,ok)=>setPlanStatus(message,ok),
+    warnStorage:message=>{markStorageHealthError('activeSession',message);sessionSafetyMessage=message;refreshStorageFallbackWarning();},
+    clearStorageWarning:message=>{if(sessionSafetyMessage===message)clearSessionSafetyMessage(message);},
+    notifyNewerClaim:()=>{
+      const message='Another device runs a newer version of Study Director and may be running today’s session. The timer here stopped and your progress is saved. Update the app to continue here.';
+      setPlanStatus(message,false);
+      Interactions.notify({source:'session',kind:'warning',key:'session-newer-claim',title:'Update the app to continue',message,action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
+    },
+    noteBackupChange:reason=>notifyBackupChange({urgent:true,reason})
+  }),
+  installation:Object.freeze({id:()=>InstallationIdentity.getId()}),
+  clock:Object.freeze({nowMs:DecisionClock.nowMs,nowIso:()=>new Date().toISOString()}),
+  identity:Object.freeze({uuid:()=>crypto.randomUUID()})
+}));
+if(!Object.isFrozen(SessionHandoffRuntime)||SessionHandoffRuntime.format!=='study-director.session-handoff'||SessionHandoffRuntime.contractVersion!==1){
+  throw new Error('Study Director session handoff runtime is unavailable or incompatible.');
+}
 // Each location row has one inline note, drawn from the presentation's current event.
 // The controller owns execution; the coordinator owns the immutable presentation event.
 fileBackupRowReady=true;BackupController.subscribeStatus(renderFileBackup);renderFileBackup();
