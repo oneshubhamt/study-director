@@ -7,6 +7,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('core-flow','tests/browser/app/core-flow.mjs',['plan','execute','review','library','indexeddb','backup']),
     test('session-draft-edit','tests/browser/app/session-draft-edit.mjs',['plan','execute','practice-pacer','backup']),
     test('session-merge-timer','tests/browser/app/session-merge-timer.mjs',['execute','sync','active-session']),
+    test('storage-census','tests/browser/app/storage-census.mjs',['diagnostics','indexeddb','opfs','cache-storage']),
     test('notes-management','tests/browser/library/notes-management.mjs',['library','notes']),
     test('attachment-editor','tests/browser/attachments/attachment-editor.mjs',['attachments','pdf','audio','rich-editor','overlay']),
     test('restore-session-safety','tests/browser/backup/restore-session-safety.mjs',['backup','restore','execute','library','recovery','multi-tab','ownership','reflection']),
