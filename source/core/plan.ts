@@ -1,7 +1,8 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {
   PlanModule as PlanModuleContract,PlanModuleInput,PlanRow,PlanParseResult,ImmutablePlanDraft,PlanDraftProjection,
-  PlanTone,PlanElement,PlanEvent,PlanRealtimeState,PlanMigration
+  PlanTone,PlanElement,PlanEvent,PlanRealtimeState,PlanMigration,PlanTimelineRow,PlanHydrateOptions,PlanLoadDraftOptions,
+  PlanDraftSaveOptions,PlanDraftPreviewOptions,PlanApplyOptions,PlanApplyPreparation,PlanMigrationSummary
 } from '../../types/plan.ts';
 const sdPlanFactory=(()=>{
 'use strict';
@@ -60,7 +61,7 @@ const createModule=():PlanModuleContract=>{
     let lastAppliedScheduleText='';
     let lastScheduleNowMinuteKey:string|null=null;
 
-    function hydratePlanDraft(options:Readonly<Record<string,unknown>>={}){
+    function hydratePlanDraft(options:Readonly<PlanHydrateOptions>={}){
       const input=document.getElementById('plan-input');
       const fallback=!!(options&&options.fallback);
       const active=fallback?DefaultStore.factory:DefaultStore.active();
@@ -73,7 +74,7 @@ function loadDefaultPlan(){return loadScheduleIntoDraft(DefaultStore.active().sc
 function getPlanDraftText(){
   return String(document.getElementById('plan-input')?.value||'');
 }
-async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<Record<string,unknown>>={}){
+async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<PlanLoadDraftOptions>={}){
   if(!ownership.requirePrimary(null,'load a plan template'))return {ok:false,error:'ownership_unavailable'};
   const text=String(scheduleText??'');
   const opts=options&&typeof options==='object'?options:{};
@@ -173,7 +174,7 @@ const SavedPlans=(()=>{
       }else if(action==='default')library.defaultId=selected.id;
       else return false;
       await persistence.writeLibrary(library);status(action==='default'?'Default plan selected.':'Saved plans updated.');return true;
-    }catch(error){status(error?.message||'Saved plans could not be updated.',false);return false;}
+    }catch(error){status(error instanceof Error?error.message:'Saved plans could not be updated.',false);return false;}
     finally{if(operationNotice?.read()?.lifecycle==='running')operationNotice.finish('cancelled','',{announce:false});operationNotice=null;busy=false;render(selectedId);}
   }
   return freeze({render,syncAccess,act});
@@ -193,7 +194,7 @@ function scheduleKindClass(t:PlanRow){
   if(isFixedBlock(t))return ' rest';
   return '';
 }
-function scheduleRowClass(row:Readonly<{i:number;t:PlanRow}>,rt:PlanRealtimeState){
+function scheduleRowClass(row:PlanTimelineRow,rt:PlanRealtimeState){
   const t=row.t,i=row.idx;
   let cls='si'+scheduleKindClass(t);
   if(i===scheduleGateway.read().currentIndex)cls+=' active';
@@ -207,7 +208,7 @@ function scheduleRowClass(row:Readonly<{i:number;t:PlanRow}>,rt:PlanRealtimeStat
 // Only a row seen incomplete and then complete gets the moment; a rebuild
 // during it resumes through a negative delay instead of restarting.
 const COMPLETION_MOMENT_MS=900;
-const completionMoments=new Map();
+const completionMoments=new Map<string,{done:boolean;at:number}>();
 function completionMomentElapsed(key:string,done:boolean){
   const now=Date.now(),prior=completionMoments.get(key);
   if(completionMoments.size>400)completionMoments.clear();
@@ -217,7 +218,7 @@ function completionMomentElapsed(key:string,done:boolean){
   completionMoments.set(key,{done:true,at:0});
   return -1;
 }
-function createScheduleRow(row:Readonly<{i:number;t:PlanRow}>,rt:PlanRealtimeState){
+function createScheduleRow(row:PlanTimelineRow,rt:PlanRealtimeState){
   const t=row.t,i=row.idx;
   const wrap=document.createElement('div');
   wrap.className=scheduleRowClass(row,rt);
@@ -256,9 +257,9 @@ function createScheduleRow(row:Readonly<{i:number;t:PlanRow}>,rt:PlanRealtimeSta
     const layer=document.createElement('div');
     layer.className='schedule-layer-note ui-label';
     layer.append(
-      textEl('span','adj',`ADJUSTED ${studyMinuteToHHMM(scheduleGateway.row(i).adjustedStartMin)}-${studyMinuteToHHMM(scheduleGateway.row(i).adjustedEndMin)}`),
+      textEl('span','adj',`ADJUSTED ${studyMinuteToHHMM(scheduleGateway.row(i).adjustedStartMin!)}-${studyMinuteToHHMM(scheduleGateway.row(i).adjustedEndMin!)}`),
       document.createTextNode(' · '),
-      textEl('span','orig',`ORIGINAL ${studyMinuteToHHMM(scheduleGateway.row(i).originalStartMin)}-${studyMinuteToHHMM(scheduleGateway.row(i).originalEndMin)}`)
+      textEl('span','orig',`ORIGINAL ${studyMinuteToHHMM(scheduleGateway.row(i).originalStartMin!)}-${studyMinuteToHHMM(scheduleGateway.row(i).originalEndMin!)}`)
     );
     info.appendChild(layer);
   }
@@ -276,7 +277,7 @@ function createScheduleRow(row:Readonly<{i:number;t:PlanRow}>,rt:PlanRealtimeSta
   if(actualSeconds!==undefined){
     const at=document.createElement('div');
     at.className='actual-time-note ui-mono';
-    const planned=t.dur*60;const diff=actualSeconds-planned;
+    const planned=Number(t.dur)*60;const diff=actualSeconds-planned;
     const sign=diff>0?'+':'-';
     const clk=scheduleGateway.row(i).actualClock||{};
     const wall=(clk.startedAt||clk.endedAt)?` · ${timeLabelFromIso(clk.startedAt)||'—'}-${timeLabelFromIso(clk.endedAt)||'—'}`:'';
@@ -308,7 +309,7 @@ function draftTextFromRows(rows:readonly PlanRow[]){
   ].join(' | ')).join('\n');
 }
 function immutableDraftResult(result:PlanParseResult|ImmutablePlanDraft|null|undefined):ImmutablePlanDraft{
-  const source=result&&typeof result==='object'?result:{};
+  const source=(result&&typeof result==='object'?result:{}) as Partial<PlanParseResult>;
   const parsed=freeze((Array.isArray(source.parsed)?source.parsed:[]).map(row=>freeze({...row})));
   const errors=freeze((Array.isArray(source.errors)?source.errors:[]).map(String));
   const warnings=freeze((Array.isArray(source.warnings)?source.warnings:[]).map(String));
@@ -336,7 +337,7 @@ function createPlanDraftProjection(result:PlanParseResult|ImmutablePlanDraft|nul
   // The board describes what it actually draws. An independently authored
   // (even invalid) working draft must not relabel an applied live schedule.
   const draftSurfaceOpen=editMode||!hasApplied;
-  let boardMode='empty',boardLabel='EMPTY',boardCaption='Paste or load a schedule to build the board.';
+  let boardMode:PlanDraftProjection['board']['mode']='empty',boardLabel='EMPTY',boardCaption='Paste or load a schedule to build the board.';
   if(!draftSurfaceOpen){
     boardMode='live';boardLabel='LIVE';boardCaption='Applied plan. Timing and completion update here.';
   }else if(status==='invalid'){
@@ -367,7 +368,7 @@ function createPlanDraftProjection(result:PlanParseResult|ImmutablePlanDraft|nul
 function setParsedScheduleDraft(rows:readonly PlanRow[]){
   lastParsed=Array.isArray(rows)?rows.map(row=>({...row})):[];
 }
-function keepAppliedScheduleOnReapply(parsed:readonly PlanRow[],rawOriginal:unknown,options:Readonly<Record<string,unknown>>={}){
+function keepAppliedScheduleOnReapply(parsed:readonly PlanRow[],rawOriginal:unknown,options:Readonly<PlanApplyOptions>={}){
   setParsedScheduleDraft(parsed);
   PlanDraftEditor.deactivate();
   lastAppliedScheduleText=String(rawOriginal||scheduleTextFromRows(lastParsed)||'');
@@ -426,7 +427,7 @@ function updatePlanBoardState(projection:PlanDraftProjection=createPlanDraftProj
 }
 /* PLAN BOARD RENDER ORCHESTRATION */
 function renderSched(projection:PlanDraftProjection|null=null){
-  const el=document.getElementById('sched-list');el.replaceChildren();
+  const el=document.getElementById('sched-list')!;el.replaceChildren();
   if(PlanDraftEditor.active()||!TASKS.length){
     PlanDraftEditor.renderRows(el);
     scheduleGateway.markRender('clean');
@@ -488,7 +489,7 @@ function confirmScheduleChangeWillMigrateProgress(newRows:readonly PlanRow[],sti
     return ok?snapshot:false;
   });
 }
-function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<Record<string,unknown>>){
+function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>){
   const stillCurrent=()=>typeof opts.currentEditor!=='function'||opts.currentEditor();
   const hasApplied=TASKS.length>0;
   const scheduleChanged=hasApplied&&scheduleFingerprintForRows(parsed)!==scheduleGateway.read().fingerprint;
@@ -505,7 +506,7 @@ function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts
   if(breakDecision&&typeof breakDecision.then==='function')return breakDecision.then(ok=>ok?finish():{cancelled:true});
   return breakDecision?finish():{cancelled:true};
 }
-function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraft,opts:Readonly<Record<string,unknown>>,migrationSummary:unknown){
+function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraft,opts:Readonly<PlanApplyOptions>,migrationSummary:PlanMigrationSummary|undefined):{text:string;state:PlanTone}{
   const migrationParts=[];
   if(migrationSummary&&migrationSummary.total)migrationParts.push(`${migrationSummary.matched}/${migrationSummary.total} progress entries`);
   if(migrationSummary&&migrationSummary.practiceTotal)migrationParts.push(`${migrationSummary.practiceMatched}/${migrationSummary.practiceTotal} Pacer links`);
@@ -522,7 +523,7 @@ function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraf
     : '✓ Schedule loaded — ' + parsed.filter(isWorkBlock).length + ' work blocks' + migrationText + ' · switch to Execute tab';
   return {text:warningText?baseStatus+' · '+warningText:baseStatus,state:warningText?'warn':true};
 }
-function completeScheduleApply(preparation:Readonly<Record<string,unknown>>,parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<Record<string,unknown>>,draft:ImmutablePlanDraft){
+function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>,draft:ImmutablePlanDraft){
   if(preparation.handled)return preparation.result;
   if(preparation.cancelled)return false;
   setParsedScheduleDraft(parsed);
@@ -535,12 +536,13 @@ function completeScheduleApply(preparation:Readonly<Record<string,unknown>>,pars
   });
   renderSched();
   setPlanComposerOpen(false);
-  const status=appliedScheduleStatus(parsed,draft,opts,applyResult&&applyResult.migrationSummary);
+  const migrationSummary=applyResult&&typeof applyResult==='object'?applyResult.migrationSummary:undefined;
+  const status=appliedScheduleStatus(parsed,draft,opts,migrationSummary);
   setPlanStatus(status.text,status.state);
   scheduleGateway.clearSafety('New study day');
   return true;
 }
-function applySchedule(options:Readonly<Record<string,unknown>>={}){
+function applySchedule(options:Readonly<PlanApplyOptions>={}){
   const opts=options&&typeof options==='object'?options:{};
   // A canonical Active Session is already durable: restore it synchronously
   // without writing or replacing the independent working Plan draft.
@@ -552,7 +554,7 @@ function applySchedule(options:Readonly<Record<string,unknown>>={}){
   const canApply=()=>
     (explicitSchedule!==null||ownership.canMutate())&&
     (typeof opts.currentEditor!=='function'||opts.currentEditor());
-  const finish=(preparation,draft,parsed)=>{
+  const finish=(preparation:Readonly<PlanApplyPreparation>,draft:ImmutablePlanDraft,parsed:readonly PlanRow[])=>{
     if(!canApply())return false;
     if(!currentDraft()){
       setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
@@ -577,7 +579,7 @@ function applySchedule(options:Readonly<Record<string,unknown>>={}){
   // A user-authored Plan may apply only after its exact working text was
   // committed. Preserve invalid text in storage too, even when Apply rejects
   // its syntax. Never silently continue after a failed asynchronous save.
-  return Promise.resolve(PlanDraftEditor.save({strictDurability:true})).then(saved=>{
+  return Promise.resolve(PlanDraftEditor.save({strictDurability:true})).then((saved:boolean)=>{
     if(saved!==true||!ownership.canMutate())return false;
     return apply();
   });
@@ -613,7 +615,7 @@ const PlanDraftEditor=(()=>{
     if(timer)clearTimeout(timer);
     if(name==='preview')draftPreviewTimer=null;else draftSaveTimer=null;
   }
-  async function persistNow(options:Readonly<Record<string,unknown>>={}){
+  async function persistNow(options:Readonly<PlanDraftSaveOptions>={}){
     if(!ownership.canMutate())return false;
     let ok=false,error=null;
     try{
@@ -625,7 +627,8 @@ const PlanDraftEditor=(()=>{
     persistence.reportDraftResult(ok,error);
     if(!ok){
       draftSaveWarningActive=true;
-      setPlanStatus(`Draft not saved — browser storage is unavailable${error&&error.message?`: ${error.message}`:''}. Keep this tab open and copy the draft before closing.`,false);
+      const message=error instanceof Error?error.message:'';
+      setPlanStatus(`Draft not saved — browser storage is unavailable${message?`: ${message}`:''}. Keep this tab open and copy the draft before closing.`,false);
     }else if(draftSaveWarningActive){
       draftSaveWarningActive=false;
       const projection=createPlanDraftProjection();
@@ -633,7 +636,7 @@ const PlanDraftEditor=(()=>{
     }
     return ok;
   }
-  function save(options:Readonly<Record<string,unknown>>={}){
+  function save(options:Readonly<PlanDraftSaveOptions>={}){
     if(!ownership.canMutate())return false;
     clearTimer('save');
     return persistNow(options);
@@ -644,7 +647,7 @@ const PlanDraftEditor=(()=>{
     draftSaveTimer=setTimeout(()=>{draftSaveTimer=null;persistNow();},Math.max(0,Number(delay)||SAVE_DELAY_MS));
     return true;
   }
-  function flush(options:Readonly<Record<string,unknown>>={}){return draftSaveTimer?save(options):true;}
+  function flush(options:Readonly<PlanDraftSaveOptions>={}){return draftSaveTimer?save(options):true;}
   // The Plan box's text when it is the person's draft: null with no box, or
   // when it shows the default plan over no stored draft. That is not a draft
   // anyone wrote, and saving it would invent a change on this device that
@@ -717,7 +720,7 @@ const PlanDraftEditor=(()=>{
       saved===true?'cancelled':false);
     return saved===true;
   }
-  function preview(options:Readonly<Record<string,unknown>>={}){
+  function preview(options:Readonly<PlanDraftPreviewOptions>={}){
     const opts=options&&typeof options==='object'?options:{};
     clearTimer('preview');
     if(opts.enterDraft===true){editEpoch++;openedEpoch=editEpoch;draftMode=true;}
@@ -761,11 +764,13 @@ const PlanDraftEditor=(()=>{
   function reflowTimesFrom(startIdx:number=0){
     if(!lastParsed.length)return;
     const idx=Math.max(0,Math.min(Number(startIdx)||0,lastParsed.length-1));
-    if(!isValidHHMM(lastParsed[idx].start))return;
-    let m=clockMinuteToStudyMinute(t2m(lastParsed[idx].start));
+    const first=lastParsed[idx]!;
+    if(!isValidHHMM(first.start))return;
+    let m=clockMinuteToStudyMinute(t2m(first.start));
     for(let i=idx;i<lastParsed.length;i++){
-      lastParsed[i].start=studyMinuteToHHMM(m);
-      const duration=positiveMinutes(lastParsed[i].dur);
+      const row=lastParsed[i]!;
+      row.start=studyMinuteToHHMM(m);
+      const duration=positiveMinutes(row.dur);
       if(!duration)break;
       m+=duration;
     }
@@ -820,7 +825,7 @@ const PlanDraftEditor=(()=>{
     updatePlanBoardState();
   }
   function fieldAccessibleLabel(key:string,idx:number|null){
-    const blockNumber=Number.isInteger(idx)?idx+1:1;
+    const blockNumber=idx!==null&&Number.isInteger(idx)?idx+1:1;
     const labels:Record<string,string>={name:'task name',start:'start time',dur:'duration in minutes',kind:'kind',area:'area',measure:'measure',target:'target'};
     return `Block ${blockNumber} ${labels[key]||key}`;
   }
@@ -829,7 +834,7 @@ const PlanDraftEditor=(()=>{
     control.className='plan-draft-field ui-field ui-mono '+key;
     control.dataset.draftField=key;
     control.type=type==='name'?'text':type;
-    control.value=value??'';
+    control.value=String(value??'');
     control.placeholder=label;
     control.setAttribute('aria-label',fieldAccessibleLabel(key,idx));
     if(type==='number'){control.min=key==='dur'?'1':'0';control.step='1';control.inputMode='numeric';}
@@ -899,7 +904,7 @@ const PlanDraftEditor=(()=>{
     if(Number.isInteger(from)&&from!==targetIdx)moveRow(from,targetIdx);
   }
   function recalcTimes(){
-    let m=lastParsed.length&&isValidHHMM(lastParsed[0].start)?clockMinuteToStudyMinute(t2m(lastParsed[0].start)):scheduleGateway.read().anchor;
+    let m=lastParsed.length&&isValidHHMM(lastParsed[0]!.start)?clockMinuteToStudyMinute(t2m(lastParsed[0]!.start)):scheduleGateway.read().anchor;
     lastParsed.forEach(row=>{row.start=studyMinuteToHHMM(m);const duration=positiveMinutes(row.dur);if(duration)m+=duration;});
   }
   function commitRows(message:string,ok:PlanTone=true){
@@ -909,7 +914,7 @@ const PlanDraftEditor=(()=>{
   }
   function moveRow(from:number,to:number){
     if(from<0||to<0||from>=lastParsed.length||to>=lastParsed.length||from===to)return false;
-    const [row]=lastParsed.splice(from,1);
+    const row=lastParsed.splice(from,1)[0]!;
     lastParsed.splice(to,0,row);
     recalcTimes();
     commitRows('Draft reordered in scheduler. Press Done to apply.');
@@ -931,11 +936,11 @@ const PlanDraftEditor=(()=>{
   }
   function removeRow(idx:number){
     if(idx<0||idx>=lastParsed.length)return false;
-    const removed=lastParsed[idx];
-    const removedStart=clockMinuteToStudyMinute(t2m(removed&&removed.start));
+    const removed=lastParsed[idx]!;
+    const removedStart=clockMinuteToStudyMinute(t2m(removed.start));
     lastParsed.splice(idx,1);
     if(lastParsed.length){
-      if(idx===0)lastParsed[0].start=studyMinuteToHHMM(removedStart);
+      if(idx===0)lastParsed[0]!.start=studyMinuteToHHMM(removedStart);
       recalcTimes();
     }
     commitRows(lastParsed.length?'Draft row removed. Press Done to apply changes.':'All draft rows removed. Add a row or paste a schedule in Composer.');
@@ -979,7 +984,7 @@ const PlanDraftEditor=(()=>{
     info.appendChild(fields);
     const actions=document.createElement('div');
     actions.className='plan-draft-row-actions';
-    const action=(name,label,title,className='plan-draft-action ui-btn')=>{
+    const action=(name:string,label:string,title:string,className='plan-draft-action ui-btn')=>{
       const button=document.createElement('button');
       button.type='button';button.className=className;button.title=title;button.dataset.draftAction=name;button.textContent=label;
       return button;
@@ -1046,8 +1051,8 @@ const PlanDraftEditor=(()=>{
       const idx=row?rowIndex(row):-1;
       if(target.dataset.draftAction==='add')insertRowAfter(idx===null?-1:idx);
       else if(target.dataset.draftAction==='remove'&&idx!==null)removeRow(idx);
-      else if(target.dataset.draftAction==='up'&&Number.isInteger(idx)&&idx>0)moveRow(idx,idx-1);
-      else if(target.dataset.draftAction==='down'&&Number.isInteger(idx)&&idx>=0&&idx<lastParsed.length-1)moveRow(idx,idx+1);
+      else if(target.dataset.draftAction==='up'&&idx!==null&&Number.isInteger(idx)&&idx>0)moveRow(idx,idx-1);
+      else if(target.dataset.draftAction==='down'&&idx!==null&&Number.isInteger(idx)&&idx>=0&&idx<lastParsed.length-1)moveRow(idx,idx+1);
     });
     container.addEventListener('dragstart',ev=>{
       if(ev.target.closest&&ev.target.closest('[data-draft-field]')){ev.preventDefault();return;}
