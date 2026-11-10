@@ -5,7 +5,7 @@ import fs from 'node:fs';
 
 const html=readHostHtml();
 const review=fs.readFileSync('source/core/review.js','utf8');
-const plan=fs.readFileSync('source/core/plan.js','utf8');
+const plan=fs.readFileSync('source/core/plan.ts','utf8');
 const repositories=readScript('source/core/repositories.ts');
 
 assert.match(html,/let mutationUiOperationActive=false;/u,'protected-operation UI reconciliation must track the local mutation lifecycle.');

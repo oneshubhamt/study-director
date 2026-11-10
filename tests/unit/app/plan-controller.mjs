@@ -6,7 +6,7 @@ import vm from 'node:vm';
 // Exercise the shipped Plan controller, not a copied projection or static
 // source assertion. Each scenario changes the live board and the independent
 // working draft through the same narrow ports used by the host.
-for(const path of ['source/core/internal.ts','source/core/plan.js']){
+for(const path of ['source/core/internal.ts','source/core/plan.ts']){
   vm.runInThisContext(readRuntimeSource(path),{filename:path});
 }
 const PlanModule=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('plan',1);

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const html=readHostHtml();
-const planJs=fs.readFileSync('source/core/plan.js','utf8');
+const planJs=fs.readFileSync('source/core/plan.ts','utf8');
 const coreCss=fs.readFileSync('source/styles/core.css','utf8');
 const glassCss=fs.readFileSync('source/external/glass.js','utf8');
 const auroraCss=fs.readFileSync('source/external/aurora.js','utf8');

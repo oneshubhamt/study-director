@@ -1,11 +1,16 @@
-(()=>{
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+import type {
+  PlanModule as PlanModuleContract,PlanModuleInput,PlanRow,PlanParseResult,ImmutablePlanDraft,PlanDraftProjection,
+  PlanTone,PlanElement,PlanEvent,PlanRealtimeState,PlanMigration
+} from '../../types/plan.ts';
+const sdPlanFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'plan','study-director.plan-module'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject,declaredFunctions:requireFunctions}=registry.contracts;
-registry.define('plan',1,()=>{
+const createModule=():PlanModuleContract=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     configuration:freeze(['limits']),
@@ -22,10 +27,10 @@ registry.define('plan',1,()=>{
     overlays:freeze(['createAnchoredPopover']),
     environment:freeze(['clearTimeout','setTimeout'])
   });
-  function createController(input){
+  function createController(input:Readonly<PlanModuleInput>){
     exactObject(input,['ports'],'Plan input');
     const ports=exactObject(input.ports,Object.keys(PORT_FIELDS),'Plan ports');
-    for(const [name,fields] of Object.entries(PORT_FIELDS))exactObject(ports[name],fields,'Plan '+name+' port');
+    for(const [name,fields] of Object.entries(PORT_FIELDS) as [keyof typeof PORT_FIELDS,readonly string[]][])exactObject(ports[name],fields,'Plan '+name+' port');
     requireFunctions(ports.persistence,PORT_FIELDS.persistence,'Plan persistence port');
     requireFunctions(ports.defaults,['active','applyStudentName'],'Plan defaults port');
     requireFunctions(ports.domain,PORT_FIELDS.domain,'Plan domain port');
@@ -51,11 +56,11 @@ registry.define('plan',1,()=>{
     const {confirm,input:requestInput}=ports.interactions;
     const {clearTimeout,setTimeout}=ports.environment;
     const TASKS=scheduleGateway.read().tasks;
-    let lastParsed=[];
+    let lastParsed:PlanRow[]=[];
     let lastAppliedScheduleText='';
-    let lastScheduleNowMinuteKey=null;
+    let lastScheduleNowMinuteKey:string|null=null;
 
-    function hydratePlanDraft(options={}){
+    function hydratePlanDraft(options:Readonly<Record<string,unknown>>={}){
       const input=document.getElementById('plan-input');
       const fallback=!!(options&&options.fallback);
       const active=fallback?DefaultStore.factory:DefaultStore.active();
@@ -68,7 +73,7 @@ function loadDefaultPlan(){return loadScheduleIntoDraft(DefaultStore.active().sc
 function getPlanDraftText(){
   return String(document.getElementById('plan-input')?.value||'');
 }
-async function loadScheduleIntoDraft(scheduleText,options={}){
+async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<Record<string,unknown>>={}){
   if(!ownership.requirePrimary(null,'load a plan template'))return {ok:false,error:'ownership_unavailable'};
   const text=String(scheduleText??'');
   const opts=options&&typeof options==='object'?options:{};
@@ -93,8 +98,8 @@ async function loadScheduleIntoDraft(scheduleText,options={}){
   return {ok:true};
 }
 const SavedPlans=(()=>{
-  let installed=false,busy=false,selectedId='',operationNotice=null,menuControllers=[];
-  const node=id=>document.getElementById(id);
+  let installed=false,busy=false,selectedId='',operationNotice:ReturnType<typeof notifications.begin>|null=null,menuControllers:{popup:PlanElement;controller:ReturnType<typeof ports.overlays.createAnchoredPopover>}[]=[];
+  const node=(id:string)=>document.getElementById(id);
   const clearMenus=()=>{for(const item of menuControllers)item.controller.destroy();menuControllers=[];};
   const syncAccess=()=>{
     const panel=node('saved-plans-panel');if(!panel)return false;
@@ -104,14 +109,14 @@ const SavedPlans=(()=>{
     if(locked)for(const item of menuControllers)item.controller.hide();
     return !locked;
   };
-  const status=(message,ok=true)=>{
+  const status=(message:string,ok=true)=>{
     if(operationNotice)return operationNotice.finish(ok?'succeeded':'failed',message,{cue:ok&&operationNotice.read()?.kind==='load'?'none':'',retainInline:false,duration:2600});
     return notifications.feedback({id:'saved-plan-status',surfaceId:'saved-plan-status',surface:'inline',message,severity:ok?'info':'error',lifecycle:ok?'succeeded':'failed',retainInline:false,duration:2600});
   };
-  const actionButton=(label,action,id,className='saved-plan-menu-action ui-btn ghost')=>{
+  const actionButton=(label:string,action:string,id:string,className='saved-plan-menu-action ui-btn ghost')=>{
     const button=document.createElement('button');button.type='button';button.className=className;button.textContent=label;button.dataset.savedPlan=action;if(id)button.dataset.savedPlanId=id;if(className.includes('saved-plan-menu-action'))button.setAttribute('role','menuitem');return button;
   };
-  function render(selected=''){
+  function render(selected='':string){
     const panel=node('saved-plans-panel'),list=node('saved-plans-list');if(!panel||!list)return;
     const data=persistence.readLibrary();
     if(selected&&data.savedPlans.some(plan=>plan.id===selected))selectedId=selected;
@@ -139,7 +144,7 @@ const SavedPlans=(()=>{
     syncAccess();
     if(!installed){installed=true;panel.addEventListener('click',event=>{const button=event.target.closest('[data-saved-plan]');if(!button)return;const popup=button.closest('.saved-plan-menu-popover');if(popup){const entry=menuControllers.find(item=>item.popup===popup);entry?.controller.hide();}void act(button.dataset.savedPlan,button.dataset.savedPlanId||'');});panel.addEventListener('toggle',()=>{if(!panel.open)for(const item of menuControllers)item.controller.hide();});}
   }
-  async function act(action,planId=''){
+  async function act(action:string,planId=''){
     if(busy||!ownership.requirePrimary(null,'manage saved plans'))return false;
     busy=true;render(planId);
     operationNotice=notifications.begin({id:'saved-plan-operation',kind:action,surfaceId:'saved-plan-status',title:'Saved plans',message:'',announce:false});
@@ -174,21 +179,21 @@ const SavedPlans=(()=>{
   return freeze({render,syncAccess,act});
 })();
 /* PLAN BOARD LIVE RENDERING */
-function appendNowMarker(container,label){
+function appendNowMarker(container:PlanElement,label?:string){
   const m=document.createElement('div');
   m.className='now-marker ui-label';
   m.textContent=label||('NOW · '+clockHM());
   container.appendChild(m);
   return true;
 }
-function scheduleKindClass(t){
+function scheduleKindClass(t:PlanRow){
   const area=scheduleToken(taskAreaValue(t));
   if(isFixedBlock(t)&&area==='meal')return ' meal';
   if(isSupportBlock(t))return ' hobby';
   if(isFixedBlock(t))return ' rest';
   return '';
 }
-function scheduleRowClass(row,rt){
+function scheduleRowClass(row:Readonly<{i:number;t:PlanRow}>,rt:PlanRealtimeState){
   const t=row.t,i=row.idx;
   let cls='si'+scheduleKindClass(t);
   if(i===scheduleGateway.read().currentIndex)cls+=' active';
@@ -203,7 +208,7 @@ function scheduleRowClass(row,rt){
 // during it resumes through a negative delay instead of restarting.
 const COMPLETION_MOMENT_MS=900;
 const completionMoments=new Map();
-function completionMomentElapsed(key,done){
+function completionMomentElapsed(key:string,done:boolean){
   const now=Date.now(),prior=completionMoments.get(key);
   if(completionMoments.size>400)completionMoments.clear();
   if(!done){completionMoments.set(key,{done:false,at:0});return -1;}
@@ -212,7 +217,7 @@ function completionMomentElapsed(key,done){
   completionMoments.set(key,{done:true,at:0});
   return -1;
 }
-function createScheduleRow(row,rt){
+function createScheduleRow(row:Readonly<{i:number;t:PlanRow}>,rt:PlanRealtimeState){
   const t=row.t,i=row.idx;
   const wrap=document.createElement('div');
   wrap.className=scheduleRowClass(row,rt);
@@ -291,7 +296,7 @@ function createScheduleRow(row,rt){
   return wrap;
 }
 /* PLAN DRAFT STATE AND BOARD CONTROLS */
-function draftTextFromRows(rows){
+function draftTextFromRows(rows:readonly PlanRow[]){
   return (Array.isArray(rows)?rows:[]).map(row=>[
     String(row&&row.start||''),
     row&&row.dur!==undefined?String(row.dur):'',
@@ -302,7 +307,7 @@ function draftTextFromRows(rows){
     row&&row.target!==null&&row.target!==undefined?String(row.target):''
   ].join(' | ')).join('\n');
 }
-function immutableDraftResult(result){
+function immutableDraftResult(result:PlanParseResult|ImmutablePlanDraft|null|undefined):ImmutablePlanDraft{
   const source=result&&typeof result==='object'?result:{};
   const parsed=freeze((Array.isArray(source.parsed)?source.parsed:[]).map(row=>freeze({...row})));
   const errors=freeze((Array.isArray(source.errors)?source.errors:[]).map(String));
@@ -312,16 +317,16 @@ function immutableDraftResult(result){
     parsed,errors,warnings
   });
 }
-function isIncompleteDraftResult(draft,hasRows){
+function isIncompleteDraftResult(draft:ImmutablePlanDraft,hasRows:boolean){
   if(!hasRows||draft.ok||draft.kind!=='errors'||!draft.errors.length)return false;
   return draft.errors.every(message=>/missing task name|missing area|bad duration ""|bad kind ""/i.test(message));
 }
-function firstActionableDraftError(draft){
+function firstActionableDraftError(draft:ImmutablePlanDraft){
   if(draft.ok)return '';
   if(!draft.errors.length)return draft.message;
   return `${draft.kind==='timeline'?'⚠ Timeline error:':'⚠ Error:'} ${draft.errors[0]}`;
 }
-function createPlanDraftProjection(result=null){
+function createPlanDraftProjection(result:PlanParseResult|ImmutablePlanDraft|null=null):PlanDraftProjection{
   const draft=immutableDraftResult(result||parseScheduleDraftText(getPlanDraftText()));
   const hasApplied=TASKS.length>0,editMode=PlanDraftEditor.active(),hasRows=draft.ok?draft.parsed.length>0:lastParsed.length>0;
   const status=draft.ok?'valid':draft.kind==='empty'||draft.kind==='no-tasks'?'empty':isIncompleteDraftResult(draft,hasRows)?'incomplete':'invalid';
@@ -359,10 +364,10 @@ function createPlanDraftProjection(result=null){
     warningText:scheduleWarningsMessage(draft.warnings),ownershipAvailable:canMutate,controls,draft
   });
 }
-function setParsedScheduleDraft(rows){
+function setParsedScheduleDraft(rows:readonly PlanRow[]){
   lastParsed=Array.isArray(rows)?rows.map(row=>({...row})):[];
 }
-function keepAppliedScheduleOnReapply(parsed,rawOriginal,options={}){
+function keepAppliedScheduleOnReapply(parsed:readonly PlanRow[],rawOriginal:unknown,options:Readonly<Record<string,unknown>>={}){
   setParsedScheduleDraft(parsed);
   PlanDraftEditor.deactivate();
   lastAppliedScheduleText=String(rawOriginal||scheduleTextFromRows(lastParsed)||'');
@@ -378,15 +383,15 @@ function keepAppliedScheduleOnReapply(parsed,rawOriginal,options={}){
   scheduleGateway.clearSafety('New study day');
   return true;
 }
-function setPlanComposerOpen(open){
+function setPlanComposerOpen(open:boolean){
   const composer=document.querySelector('.plan-composer');
   if(composer)composer.open=!!open;
 }
-function setPlanStatus(message,tone=true){
+function setPlanStatus(message:unknown,tone:PlanTone=true){
   return notifications.feedback({id:'plan-status',surfaceId:'plan-status',surface:'inline',foreground:false,cue:'none',severity:tone==='warn'?'warning':tone?'info':'error',lifecycle:message?(tone==='cancelled'?'cancelled':tone?'succeeded':'failed'):'resolved',message:clampText(message,APP_LIMITS.maxStatusMessageChars)});
 }
 
-function updatePlanBoardControls(projection=createPlanDraftProjection()){
+function updatePlanBoardControls(projection:PlanDraftProjection=createPlanDraftProjection()){
   const edit=document.getElementById('plan-edit-btn');
   const done=document.getElementById('plan-done-edit-btn');
   const cancel=document.getElementById('plan-cancel-edit-btn');
@@ -409,7 +414,7 @@ function updatePlanBoardControls(projection=createPlanDraftProjection()){
   const apply=document.querySelector('button[data-action="apply-schedule"]');
   if(apply)apply.disabled=!controls.applyEnabled;
 }
-function updatePlanBoardState(projection=createPlanDraftProjection()){
+function updatePlanBoardState(projection:PlanDraftProjection=createPlanDraftProjection()){
   const board=document.getElementById('plan-board');
   const state=document.getElementById('plan-board-state');
   const cap=document.getElementById('plan-board-caption');
@@ -420,7 +425,7 @@ function updatePlanBoardState(projection=createPlanDraftProjection()){
   return projection;
 }
 /* PLAN BOARD RENDER ORCHESTRATION */
-function renderSched(projection=null){
+function renderSched(projection:PlanDraftProjection|null=null){
   const el=document.getElementById('sched-list');el.replaceChildren();
   if(PlanDraftEditor.active()||!TASKS.length){
     PlanDraftEditor.renderRows(el);
@@ -445,13 +450,13 @@ function renderSched(projection=null){
   updateRealTimeAwareness(rt,{force:true});
 }
 /* PLAN APPLY AND PREVIEW PIPELINE */
-function renderInvalidScheduleApply(projection){
+function renderInvalidScheduleApply(projection:PlanDraftProjection){
   lastParsed=[];
   renderSched(projection);
   setPlanComposerOpen(true);
   setPlanStatus(projection.firstActionableError||'Fix the schedule before applying.',false);
 }
-function closeActiveBreakForScheduleChange(stillCurrent=()=>true){
+function closeActiveBreakForScheduleChange(stillCurrent:()=>boolean=()=>true){
   if(!scheduleGateway.breakState())return true;
   return confirm({
     title:'End the current break?',
@@ -463,7 +468,7 @@ function closeActiveBreakForScheduleChange(stillCurrent=()=>true){
     scheduleGateway.breakState('end');return true;
   });
 }
-function confirmScheduleChangeWillMigrateProgress(newRows,stillCurrent=()=>true){
+function confirmScheduleChangeWillMigrateProgress(newRows:readonly PlanRow[],stillCurrent:()=>boolean=()=>true){
   if(!scheduleGateway.hasLiveState())return null;
   const snapshot=scheduleGateway.captureMigration(newRows||[]);
   const matched=snapshot.preview?snapshot.preview.matched:0;
@@ -483,7 +488,7 @@ function confirmScheduleChangeWillMigrateProgress(newRows,stillCurrent=()=>true)
     return ok?snapshot:false;
   });
 }
-function prepareScheduleApply(parsed,rawOriginal,opts){
+function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<Record<string,unknown>>){
   const stillCurrent=()=>typeof opts.currentEditor!=='function'||opts.currentEditor();
   const hasApplied=TASKS.length>0;
   const scheduleChanged=hasApplied&&scheduleFingerprintForRows(parsed)!==scheduleGateway.read().fingerprint;
@@ -500,7 +505,7 @@ function prepareScheduleApply(parsed,rawOriginal,opts){
   if(breakDecision&&typeof breakDecision.then==='function')return breakDecision.then(ok=>ok?finish():{cancelled:true});
   return breakDecision?finish():{cancelled:true};
 }
-function appliedScheduleStatus(parsed,draft,opts,migrationSummary){
+function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraft,opts:Readonly<Record<string,unknown>>,migrationSummary:unknown){
   const migrationParts=[];
   if(migrationSummary&&migrationSummary.total)migrationParts.push(`${migrationSummary.matched}/${migrationSummary.total} progress entries`);
   if(migrationSummary&&migrationSummary.practiceTotal)migrationParts.push(`${migrationSummary.practiceMatched}/${migrationSummary.practiceTotal} Pacer links`);
@@ -517,7 +522,7 @@ function appliedScheduleStatus(parsed,draft,opts,migrationSummary){
     : '✓ Schedule loaded — ' + parsed.filter(isWorkBlock).length + ' work blocks' + migrationText + ' · switch to Execute tab';
   return {text:warningText?baseStatus+' · '+warningText:baseStatus,state:warningText?'warn':true};
 }
-function completeScheduleApply(preparation,parsed,rawOriginal,opts,draft){
+function completeScheduleApply(preparation:Readonly<Record<string,unknown>>,parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<Record<string,unknown>>,draft:ImmutablePlanDraft){
   if(preparation.handled)return preparation.result;
   if(preparation.cancelled)return false;
   setParsedScheduleDraft(parsed);
@@ -535,7 +540,7 @@ function completeScheduleApply(preparation,parsed,rawOriginal,opts,draft){
   scheduleGateway.clearSafety('New study day');
   return true;
 }
-function applySchedule(options={}){
+function applySchedule(options:Readonly<Record<string,unknown>>={}){
   const opts=options&&typeof options==='object'?options:{};
   // A canonical Active Session is already durable: restore it synchronously
   // without writing or replacing the independent working Plan draft.
@@ -582,9 +587,9 @@ const PlanDraftEditor=(()=>{
   const SAVE_DELAY_MS=300;
   const PREVIEW_DELAY_MS=220;
   let draftMode=false;
-  let draftDragIndex=null;
-  let draftSaveTimer=null;
-  let draftPreviewTimer=null;
+  let draftDragIndex:number|null=null;
+  let draftSaveTimer:number|null=null;
+  let draftPreviewTimer:number|null=null;
   let editEpoch=0,openedEpoch=0;
   let draftSaveWarningActive=false;
 
@@ -603,12 +608,12 @@ const PlanDraftEditor=(()=>{
     if(input.value!==bounded)input.value=bounded;
     return input;
   }
-  function clearTimer(name){
+  function clearTimer(name:'preview'|'save'){
     const timer=name==='preview'?draftPreviewTimer:draftSaveTimer;
     if(timer)clearTimeout(timer);
     if(name==='preview')draftPreviewTimer=null;else draftSaveTimer=null;
   }
-  async function persistNow(options={}){
+  async function persistNow(options:Readonly<Record<string,unknown>>={}){
     if(!ownership.canMutate())return false;
     let ok=false,error=null;
     try{
@@ -633,13 +638,13 @@ const PlanDraftEditor=(()=>{
     clearTimer('save');
     return persistNow(options);
   }
-  function queueSave(delay=SAVE_DELAY_MS){
+  function queueSave(delay:number=SAVE_DELAY_MS){
     if(!ownership.canMutate())return false;
     clearTimer('save');
     draftSaveTimer=setTimeout(()=>{draftSaveTimer=null;persistNow();},Math.max(0,Number(delay)||SAVE_DELAY_MS));
     return true;
   }
-  function flush(options={}){return draftSaveTimer?save(options):true;}
+  function flush(options:Readonly<Record<string,unknown>>={}){return draftSaveTimer?save(options):true;}
   // The Plan box's text when it is the person's draft: null with no box, or
   // when it shows the default plan over no stored draft. That is not a draft
   // anyone wrote, and saving it would invent a change on this device that
@@ -712,7 +717,7 @@ const PlanDraftEditor=(()=>{
       saved===true?'cancelled':false);
     return saved===true;
   }
-  function preview(options={}){
+  function preview(options:Readonly<Record<string,unknown>>={}){
     const opts=options&&typeof options==='object'?options:{};
     clearTimer('preview');
     if(opts.enterDraft===true){editEpoch++;openedEpoch=editEpoch;draftMode=true;}
@@ -753,7 +758,7 @@ const PlanDraftEditor=(()=>{
     if(input)input.value=draftTextFromRows(lastParsed);
     queueSave();
   }
-  function reflowTimesFrom(startIdx=0){
+  function reflowTimesFrom(startIdx:number=0){
     if(!lastParsed.length)return;
     const idx=Math.max(0,Math.min(Number(startIdx)||0,lastParsed.length-1));
     if(!isValidHHMM(lastParsed[idx].start))return;
@@ -765,8 +770,8 @@ const PlanDraftEditor=(()=>{
       m+=duration;
     }
   }
-  function rowClass(t){return 'si draft'+scheduleKindClass(t);}
-  function refreshRowVisual(idx){
+  function rowClass(t:PlanRow){return 'si draft'+scheduleKindClass(t);}
+  function refreshRowVisual(idx:number){
     const row=lastParsed[idx];
     const wrap=[...document.querySelectorAll('.si.draft[data-draft-idx]')].find(candidate=>candidate.dataset.draftIdx===String(idx))||null;
     if(!row||!wrap)return;
@@ -788,10 +793,10 @@ const PlanDraftEditor=(()=>{
     if(wasDragging)wrap.classList.add('dragging');
     if(wasOver)wrap.classList.add('drag-over');
   }
-  function refreshVisualsFrom(startIdx=0){
+  function refreshVisualsFrom(startIdx:number=0){
     for(let i=Math.max(0,Number(startIdx)||0);i<lastParsed.length;i++)refreshRowVisual(i);
   }
-  function normalizeFieldValue(key,value,current){
+  function normalizeFieldValue(key:string,value:unknown,current:unknown){
     const raw=String(value??'').trim();
     if(key==='start')return isValidHHMM(raw)?normalizeHHMM(raw):raw;
     if(key==='dur'){
@@ -805,7 +810,7 @@ const PlanDraftEditor=(()=>{
     if(key==='measure')return clampText(raw,APP_LIMITS.maxUnitChars);
     return raw;
   }
-  function setField(idx,key,value){
+  function setField(idx:number,key:string,value:unknown){
     const row=lastParsed[idx];
     if(!row)return;
     row[key]=normalizeFieldValue(key,value,row);
@@ -814,12 +819,12 @@ const PlanDraftEditor=(()=>{
     refreshVisualsFrom(idx);
     updatePlanBoardState();
   }
-  function fieldAccessibleLabel(key,idx){
+  function fieldAccessibleLabel(key:string,idx:number|null){
     const blockNumber=Number.isInteger(idx)?idx+1:1;
-    const labels={name:'task name',start:'start time',dur:'duration in minutes',kind:'kind',area:'area',measure:'measure',target:'target'};
+    const labels:Record<string,string>={name:'task name',start:'start time',dur:'duration in minutes',kind:'kind',area:'area',measure:'measure',target:'target'};
     return `Block ${blockNumber} ${labels[key]||key}`;
   }
-  function input(key,value,label,type='text',idx=null){
+  function input(key:string,value:unknown,label:string,type='text',idx:number|null=null){
     const control=document.createElement('input');
     control.className='plan-draft-field ui-field ui-mono '+key;
     control.dataset.draftField=key;
@@ -830,7 +835,7 @@ const PlanDraftEditor=(()=>{
     if(type==='number'){control.min=key==='dur'?'1':'0';control.step='1';control.inputMode='numeric';}
     return control;
   }
-  function select(key,value,idx=null){
+  function select(key:string,value:string,idx:number|null=null){
     const control=document.createElement('select');
     control.className='plan-draft-field ui-field ui-mono '+key;
     control.dataset.draftField=key;
@@ -848,7 +853,7 @@ const PlanDraftEditor=(()=>{
     });
     return control;
   }
-  function coarseTarget(control,className){
+  function coarseTarget(control:PlanElement,className:string){
     const coarse=window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches;
     if(!coarse)return control;
     const target=document.createElement('label');
@@ -856,20 +861,20 @@ const PlanDraftEditor=(()=>{
     target.appendChild(control);
     return target;
   }
-  function rowFromTarget(target,container){
+  function rowFromTarget(target:PlanElement|null,container:PlanElement){
     const row=target&&target.closest&&target.closest('.si.draft[data-draft-idx]');
     return row&&container.contains(row)?row:null;
   }
-  function rowIndex(row){
+  function rowIndex(row:PlanElement|null){
     const idx=Number(row&&row.dataset.draftIdx);
     return Number.isInteger(idx)?idx:null;
   }
-  function clearDragState(row=null){
+  function clearDragState(row:PlanElement|null=null){
     if(row)row.classList.remove('dragging','drag-over');
     document.querySelectorAll('.si.draft.dragging,.si.draft.drag-over').forEach(el=>el.classList.remove('dragging','drag-over'));
     draftDragIndex=null;
   }
-  function dragStart(ev,row,idx){
+  function dragStart(ev:PlanEvent,row:PlanElement,idx:number){
     draftDragIndex=idx;
     row.classList.add('dragging');
     if(ev.dataTransfer){
@@ -877,16 +882,16 @@ const PlanDraftEditor=(()=>{
       ev.dataTransfer.setData('text/plain',String(idx));
     }
   }
-  function dragOver(ev,row){
+  function dragOver(ev:PlanEvent,row:PlanElement){
     ev.preventDefault();
     row.classList.add('drag-over');
     if(ev.dataTransfer)ev.dataTransfer.dropEffect='move';
   }
-  function dragLeave(ev,row){
+  function dragLeave(ev:PlanEvent,row:PlanElement){
     if(ev.relatedTarget&&row.contains(ev.relatedTarget))return;
     row.classList.remove('drag-over');
   }
-  function drop(ev,row,targetIdx){
+  function drop(ev:PlanEvent,row:PlanElement,targetIdx:number){
     ev.preventDefault();
     row.classList.remove('drag-over');
     const transferred=Number(ev.dataTransfer&&ev.dataTransfer.getData('text/plain'));
@@ -897,12 +902,12 @@ const PlanDraftEditor=(()=>{
     let m=lastParsed.length&&isValidHHMM(lastParsed[0].start)?clockMinuteToStudyMinute(t2m(lastParsed[0].start)):scheduleGateway.read().anchor;
     lastParsed.forEach(row=>{row.start=studyMinuteToHHMM(m);const duration=positiveMinutes(row.dur);if(duration)m+=duration;});
   }
-  function commitRows(message,ok=true){
+  function commitRows(message:string,ok:PlanTone=true){
     syncTextFromRows();
     renderSched();
     if(message)setPlanStatus(message,ok);
   }
-  function moveRow(from,to){
+  function moveRow(from:number,to:number){
     if(from<0||to<0||from>=lastParsed.length||to>=lastParsed.length||from===to)return false;
     const [row]=lastParsed.splice(from,1);
     lastParsed.splice(to,0,row);
@@ -910,12 +915,12 @@ const PlanDraftEditor=(()=>{
     commitRows('Draft reordered in scheduler. Press Done to apply.');
     return true;
   }
-  function defaultRowAfter(row){
+  function defaultRowAfter(row:PlanRow|null){
     const baseStart=row&&isValidHHMM(row.start)?clockMinuteToStudyMinute(t2m(row.start)):clockMinuteToStudyMinute(getMinuteOfDay());
     const start=studyMinuteToHHMM(baseStart+(row?positiveMinutes(row.dur):0));
     return {start,dur:'',name:'',kind:'',area:'',measure:'',target:null};
   }
-  function insertRowAfter(idx){
+  function insertRowAfter(idx:number){
     const safeIdx=Number.isInteger(idx)?idx:lastParsed.length-1;
     const base=lastParsed[safeIdx]||lastParsed[lastParsed.length-1]||null;
     const insertAt=lastParsed.length?Math.max(0,Math.min(safeIdx+1,lastParsed.length)):0;
@@ -924,7 +929,7 @@ const PlanDraftEditor=(()=>{
     commitRows('Blank row added. Complete Task, Minutes, Kind and Area before applying.','warn');
     return true;
   }
-  function removeRow(idx){
+  function removeRow(idx:number){
     if(idx<0||idx>=lastParsed.length)return false;
     const removed=lastParsed[idx];
     const removedStart=clockMinuteToStudyMinute(t2m(removed&&removed.start));
@@ -936,7 +941,7 @@ const PlanDraftEditor=(()=>{
     commitRows(lastParsed.length?'Draft row removed. Press Done to apply changes.':'All draft rows removed. Add a row or paste a schedule in Composer.');
     return true;
   }
-  function createRow(t,idx){
+  function createRow(t:PlanRow,idx:number){
     const start=clockMinuteToStudyMinute(t2m(t.start));
     const duration=positiveMinutes(t.dur);
     const wrap=document.createElement('div');
@@ -993,7 +998,7 @@ const PlanDraftEditor=(()=>{
     wrap.append(time,card);
     return wrap;
   }
-  function renderRows(container){
+  function renderRows(container:PlanElement){
     if(!lastParsed.length){
       const message=TASKS.length?'Open Composer or use Edit Plan to revise the schedule.':'No draft rows yet. Use Composer to load or paste a schedule.';
       container.appendChild(textEl('div','plan-empty-message ui-mono',message));
@@ -1080,7 +1085,7 @@ const PlanDraftEditor=(()=>{
       if(`${s.scheduledIdx}:${s.nowEff}`!==lastScheduleNowMinuteKey){renderSched();return true;}
       return false;
     }
-    function needsRealtimeRefresh(state){
+    function needsRealtimeRefresh(state:PlanRealtimeState){
       if(!isPlanPaneVisible()||!TASKS.length||PlanDraftEditor.active())return false;
       const nowKey=`${state.scheduledIdx}:${state.nowEff}`;
       if(nowKey===lastScheduleNowMinuteKey)return false;
@@ -1092,21 +1097,21 @@ const PlanDraftEditor=(()=>{
     // plans" takes its Area along. Blocks under that Area, or nested inside it,
     // change their Area: today's plan in place (times, progress and the timer
     // stay), and the draft and saved plans as text. Finished days keep theirs.
-    const areaMatches=(row,from)=>{const key=taskAreaKey(row);return key===from||key.startsWith(`${from} > `);};
-    function renamedArea(row,from,toLabel){
+    const areaMatches=(row:PlanRow,from:string)=>{const key=taskAreaKey(row);return key===from||key.startsWith(`${from} > `);};
+    function renamedArea(row:PlanRow,from:string,toLabel:string){
       if(!areaMatches(row,from))return undefined;
       const rest=String(taskAreaValue(row)||'').split('>').map(part=>part.trim()).filter(Boolean).slice(from.split(' > ').length);
       return [toLabel,...rest].join(' > ');
     }
-    function renameAreaInText(text,from,toLabel){
+    function renameAreaInText(text:unknown,from:string,toLabel:string){
       const parsed=parseScheduleDraftText(String(text||''));if(!parsed.ok||!parsed.parsed.some(row=>areaMatches(row,from)))return null;
       return scheduleTextFromRows(parsed.parsed.map(row=>{const area=renamedArea(row,from,toLabel);return area===undefined?row:{...row,area};}));
     }
-    function areaUse(fromTitle){
+    function areaUse(fromTitle:unknown){
       const from=taskAreaKey({area:fromTitle});
       return freeze({today:scheduleGateway.read().tasks.some(task=>areaMatches(task,from)),savedPlans:persistence.readLibrary().savedPlans.filter(plan=>renameAreaInText(plan.scheduleText,from,'x')!==null).length});
     }
-    async function renameArea(fromTitle,toLabel){
+    async function renameArea(fromTitle:unknown,toLabel:unknown){
       const from=taskAreaKey({area:fromTitle}),label=String(toLabel||'').trim();if(!from||!label)return freeze({blocks:0,savedPlans:0});
       const blocks=scheduleGateway.renameAreas(row=>renamedArea(row,from,label));
       if(lastParsed.some(row=>areaMatches(row,from))){lastParsed=lastParsed.map(row=>{const area=renamedArea(row,from,label);return area===undefined?row:{...row,area};});}
@@ -1144,5 +1149,7 @@ const PlanDraftEditor=(()=>{
     return api;
   }
   return freeze({format:'study-director.plan-module',contractVersion:1,createController});
-});
+};
+registry.define('plan',1,createModule);return createModule;
 })();
+export type PlanModule=ReturnType<typeof sdPlanFactory>;

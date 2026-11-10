@@ -32,7 +32,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'pomodoro',source:'core/pomodoro.ts',stem:'sd.pomodoro'}),
   Object.freeze({id:'practice-pacer',source:'core/practice-pacer.ts',stem:'sd.practice-pacer'}),
   Object.freeze({id:'timer-engine',source:'core/timer-engine.ts',stem:'sd.timer-engine'}),
-  Object.freeze({id:'plan',source:'core/plan.js',stem:'sd.plan'}),
+  Object.freeze({id:'plan',source:'core/plan.ts',stem:'sd.plan'}),
   Object.freeze({id:'review',source:'core/review.js',stem:'sd.review'}),
   Object.freeze({id:'asset-maintenance',source:'core/asset-maintenance.ts',stem:'sd.asset-maintenance'}),
   Object.freeze({id:'exports',source:'core/exports.ts',stem:'sd.exports'}),
