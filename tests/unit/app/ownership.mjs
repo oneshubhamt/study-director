@@ -49,6 +49,7 @@ assert.equal(ownership.writeLease({force:true}),true);
 assert.equal(ownership.assertWriteToken(writeToken,'renewed commit'),true);
 ownerStore.set('owner',{...ownerStore.get('owner'),claimId:'other-claim'});
 assert.throws(()=>ownership.assertWriteToken(writeToken,'tampered commit'),error=>ownershipModule.isOwnershipLostError(error));
+assert.equal(ownership.writeLease({force:true}),true,'the next fixture starts from a verified primary lease after the deliberate tamper');
 assert.equal(ownership.format,'study-director.app-ownership-controller');
 assert.equal(ownership.status().format,'study-director.app-ownership-status');
 
