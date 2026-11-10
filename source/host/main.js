@@ -1102,31 +1102,11 @@ function dismissStorageWarning(){
     NoticeCoordinator.acknowledge(active.id);
   }
 }
-function reconcileReviewRichTextAfterPrimaryRestore(){
-  const field=document.getElementById('daily-reflection');
-  if(!(field instanceof HTMLTextAreaElement))return false;
-  const canonical=String(currentReviewSnapshot()?.reflection||'');
-  const revision=[field.dataset.reviewDate||'',field.dataset.reviewOwnershipRevision||'',field.dataset.reviewLifecycleRevision||''].join(':');
-  const reconciled=richTextReconcileExternal(field,canonical,revision);
-  if(reconciled.status==='conflict'){
-    AppDiagnostics.capture('ownership.review-rich-text',new Error('The Review rich-text editor still has unsaved local changes after ownership hydration.'),'warn');
-    return false;
-  }
-  if(reconciled.status==='unmounted')richTextSyncAll();
-  else richTextSyncField(field);
-  return true;
-}
 function resumeTimerLoopAfterPrimaryRestore(){
   try{
     if(SessionHandoffRuntime?.frozen())return false;
     const resumed=TimerEngine.resumeAfterPrimaryRestore();
-    if(StartupLifecycle.status().fullyInitialized){
-      SessionLifecycle.reconcile('ownership-primary',{date:getReviewDate()});
-      // Lifecycle reconciliation refreshes canonical Review state and binding
-      // revisions. Reconcile the already-mounted rich editor afterwards so a
-      // tab that regains ownership cannot keep showing the prior owner's view.
-      queueMicrotask(reconcileReviewRichTextAfterPrimaryRestore);
-    }
+    if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{date:getReviewDate()});
     return resumed;
   }catch(e){AppDiagnostics.capture('ownership.resume-timer',e,'error');return false;}
 }
@@ -5792,6 +5772,7 @@ const {
 }=SharedReviewPresentation;
 
 /* CANONICAL SESSION / EDITOR LIFECYCLE */
+let lifecycleRichTextClose=Promise.resolve(true);
 function lifecycleEditorElements(){
   return [...document.querySelectorAll('.task-note-field,#daily-reflection,.quality-btn,#review-list input,#review-list textarea')];
 }
@@ -5811,7 +5792,10 @@ function setLifecycleEditorsBlocked(blocked){
   });
 }
 function invalidateLifecycleEditors(context){
-  void richTextClose();
+  lifecycleRichTextClose=Promise.resolve(richTextClose()).catch(error=>{
+    AppDiagnostics.capture('session-lifecycle.rich-text-close',error,'warn');
+    return false;
+  });
   cancelPendingLiveDraftSave();
   if(context.options.scheduleIdentity)advanceTaskNoteScheduleRevision();
   document.documentElement.dataset.studyDirectorLifecycle='transitioning';
@@ -5847,9 +5831,20 @@ function completeLifecycleTransition(context){
   const writable=!!context.reconciled&&appCanMutate();
   setLifecycleEditorsBlocked(!writable);
   ReviewView.syncMode();
-  if(writable&&document.getElementById('pane-review')?.classList.contains('on'))ReviewView.activate({restoreScroll:false});
+  const reviewActive=!!document.getElementById('pane-review')?.classList.contains('on');
+  if(writable&&reviewActive)ReviewView.activate({restoreScroll:false});
   document.documentElement.dataset.studyDirectorLifecycle=writable?'ready':(context.reconciled?'read-only':'blocked');
   document.documentElement.dataset.studyDirectorLifecycleRevision=String(context.revision);
+  // prepare() closes mounted editors asynchronously. Remount only after that
+  // close settles and only if this exact lifecycle transition is still the
+  // current writable one; otherwise a later transition/navigation owns it.
+  if(writable&&reviewActive){
+    const revision=context.revision,closed=lifecycleRichTextClose;
+    void closed.then(()=>{
+      if(SessionLifecycle.revision!==revision||!SessionLifecycle.canWrite()||!document.getElementById('pane-review')?.classList.contains('on'))return false;
+      return richTextSyncAll();
+    }).catch(error=>AppDiagnostics.capture('session-lifecycle.rich-text-remount',error,'warn'));
+  }
   // A waiting update blocked by the transition retries now, not at the safety retry.
   // Deferred: start-up transitions finish before the update state is declared.
   setTimeout(()=>schedulePwaUpdateEvaluation(250),0);
