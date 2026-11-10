@@ -1,6 +1,6 @@
 # TypeScript conversion — current execution record
 
-**Working branch: `ts-exp`. P5.0–P5.3 VERIFIED — TARGETED. Next: P5.4 live execution/session runtime.** P5.3 baseline is `8753895`; P5.3A targeted-QA endpoint is `1f6dd8f`; P5.3B implementation baseline is `0e8714f` and verified source endpoint is `e6ab717`. Preserve `TS-Conversion` and main. Follow the sole-implementor and end-of-Phase-5 audit arrangement in [AGENTS](AGENTS.md). Main intake endpoint remains `2638619`.
+**Working branch: `ts-exp`. P5.0–P5.1 VERIFIED — TARGETED; P5.2/P5.3 REOPENED — SOURCE RECONCILIATION.** Reconciliation baseline is `134ad02`; do not begin P5.4 until both parents are re-closed from source. Preserve `TS-Conversion` and main. Follow the sole-implementor and end-of-Phase-5 audit arrangement in [AGENTS](AGENTS.md). Main intake endpoint remains `2638619`.
 
 Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHASE-5.md), then inspect current source. Consult [decisions](docs/typescript/DECISIONS.md), [tooling](docs/TYPESCRIPT.md), [verification commands](docs/VERIFICATION.md) and [product docs](docs/README.md) as needed. Do not reload historical logs for routine passes.
 
@@ -9,7 +9,7 @@ Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHAS
 | Stage | State / next action |
 | --- | --- |
 | Preparation, Phases 1–4 | Complete within recorded scope at `4136ba5`: 34 Phase 4 modules, 126 strict files, zero unchecked existing TS at last check. [Evidence](docs/typescript/HISTORY-PREPARATION-PHASE-4.md) |
-| Phase 5 — host/features | P5.0–P5.3 verified; P5.4 live execution/session runtime is next. Later steps remain unstarted. [Scope/status register](docs/typescript/PHASE-5.md) |
+| Phase 5 — host/features | P5.2/P5.3 source reconciliation active after de novo parent audit found in-scope defects despite prior targeted verification. P5.4 remains blocked on re-closure. [Scope/status register](docs/typescript/PHASE-5.md) |
 | Phase 6 — tooling/tests | Not started; convert remaining tooling/tests and retire transitional readers |
 | Phase 7 — certification | Not started; whole-app reconciliation and full correctness, coverage, mutation, browser, release and performance QA |
 
@@ -21,6 +21,14 @@ Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHAS
 | F-002 | Phase 6: retire transitional substring/VM readers and reconcile authored coverage; P5 conversions must keep their readers working meanwhile |
 | F-003 | Phase 7: full certification, with unavailable manual/device evidence stated separately |
 | REVIEW-P5 | Independent planning-assistant audit after all Phase 5 outcomes, including P5.13 reconciliation. Compare against `de4872a`; retain inherited limitations and intentional changes. No external review gate between implementation passes |
+
+## Active worklog — de novo P5.2/P5.3 parent reconciliation
+
+- **Baseline / method:** reopened at `134ad02` by owner request. Re-read AGENTS, Phase 5, decisions, architecture, product/data/storage/session contracts, then audited owned P5.2/P5.3 source and host consumers directly before relying on fixtures.
+- **P5.2 source contradictions found:** ordinary fresh-profile rename changes the profile ID although the current product/data contract says identity is created once and survives rename; profile mutations ignore failed registry writes and can report success/reload without a committed device-wide registry; successful profile deletion can retain its background-publication hold; switch/add starts a preference flush but reload can race it; lifecycle flush starts promise-returning writers without observing asynchronous rejection.
+- **P5.3 source findings:** Plan/editor/runtime ownership remains correctly separated through `scheduleGateway`; checked `PlanData` composition/default/recovery remains structurally sound. Explicit Load/Clear draft actions still use ordinary durability while Apply/Done/Cancel use strict durability, so user-triggered draft replacement/clear will be made consistent.
+- **Objectives:** restore stable profile identity; make every registry mutation fail closed on an uncommitted registry; release deletion holds on all exits; settle current-profile writes before deliberate profile reload; make lifecycle best-effort flushing observe async failures; make explicit Plan load/clear strict; preserve adoption/remote-deletion identity changes, startup ordering, unsupported-data fail-closed behavior, Plan draft/live separation and P5.4 boundary.
+- **QA / reconciliation:** strengthen profile and Plan regressions for each defect; rerun pinned strict type/lint + build/generated checks; run focused profile/Plan/startup tests where executable; inspect final source/host consumers again and re-close each parent only if no owned source contradiction remains. Browser/manual evidence limits remain explicit.
 
 ## Latest closed worklog — P5.3B Saved Plans/default composition and parent P5.3 reconciliation
 
