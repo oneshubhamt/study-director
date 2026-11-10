@@ -10,10 +10,7 @@ export interface PlanApplyOptions{
   scheduleText?:string;projection?:PlanDraftProjection;currentEditor?:()=>boolean;forceReload?:boolean;reviewOnly?:boolean;
   persistDraft?:boolean;source?:string;studyDate?:unknown;sessionSnapshot?:unknown;lifecycleManaged?:boolean;skipNotify?:boolean;
 }
-export type PlanApplyPreparation=
-  | Readonly<{handled:true;result:boolean;scheduleChanged:false;progressMigration:null;cancelled?:false}>
-  | Readonly<{handled:false;cancelled:false;scheduleChanged:boolean;progressMigration:PlanMigration|null;result?:never}>
-  | Readonly<{handled?:false;cancelled:true;scheduleChanged?:boolean;progressMigration?:PlanMigration|null;result?:never}>
+export interface PlanApplyPreparation{handled?:boolean;result?:boolean;cancelled?:boolean;scheduleChanged?:boolean;progressMigration?:PlanMigration|null}
 export interface PlanMigrationSummary{total?:number;matched?:number;practiceTotal?:number;practiceMatched?:number}
 
 export interface PlanRow{
@@ -148,7 +145,7 @@ export interface PlanController{
   readonly format:'study-director.plan-controller';readonly contractVersion:1;readonly savedPlans:Readonly<SavedPlansController>;readonly draft:Readonly<PlanDraftController>;
   hydrate(options?:Readonly<PlanHydrateOptions>):boolean;loadDefault():Promise<Readonly<Record<string,unknown>>>;getDraft():string;
   loadDraft(scheduleText:unknown,options?:Readonly<PlanLoadDraftOptions>):Promise<Readonly<Record<string,unknown>>>;
-  render(projection?:PlanDraftProjection|null):void;apply(options?:Readonly<PlanApplyOptions>):boolean|Promise<boolean>;
+  render(projection?:PlanDraftProjection|null):void;apply(options?:Readonly<PlanApplyOptions>):boolean|PromiseLike<boolean>;
   setStatus(message:unknown,tone?:PlanTone):unknown;markRenderDirty():void;renderIfVisible():boolean;renderOnOpen():boolean;
   needsRealtimeRefresh(state:PlanRealtimeState):boolean;resetSession():boolean;appliedScheduleText():string;
   areaUse(fromTitle:unknown):Readonly<{today:boolean;savedPlans:number}>;

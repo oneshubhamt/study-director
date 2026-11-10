@@ -527,7 +527,7 @@ function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraf
   return {text:warningText?baseStatus+' · '+warningText:baseStatus,state:warningText?'warn':true};
 }
 function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>,draft:ImmutablePlanDraft){
-  if(preparation.handled)return preparation.result;
+  if(preparation.handled)return preparation.result===true;
   if(preparation.cancelled)return false;
   setParsedScheduleDraft(parsed);
   PlanDraftEditor.deactivate();
