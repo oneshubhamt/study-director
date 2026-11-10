@@ -4704,12 +4704,31 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze({
   renderProfile:()=>renderProfile()
 }));
 
+// A deliberate profile reload must not outrun writes owned by the current
+// profile. Page-exit flushing remains a last safety net, not the commit gate.
+async function settleCurrentProfileBeforeReload(){
+  if(!appCanMutate())return false;
+  try{
+    await AppMutationCoordinator.settled();
+    if(await Promise.resolve(PlanDraftEditor.flush({strictDurability:true}))===false)throw new Error('The current Plan draft could not be saved.');
+    StartupLifecycle.flush();
+    await PlanData.settled();
+    if(await AppData.notes.flush({strict:true})!==true)throw new Error('Current Notes could not be saved.');
+    if(await AppData.deletionRecovery.flush()!==true)throw new Error('Pending deletions could not be saved.');
+    await AppData.activeSession.settled();
+    return true;
+  }catch(error){
+    AppDiagnostics.capture('profiles.pre-reload-settlement',error,'error');
+    setPlanStatus('Profile change stopped because current work could not be safely saved. Keep this tab open and retry after storage recovers.',false);
+    return false;
+  }
+}
 // Startup: make sure this page's profile is on the device's list, and offer
 // the first-start form to someone new.
 const ProfileLifecycle=ProfilesHostModule.createLifecycle(Object.freeze({
   profiles:Profiles,
   firstStart:FirstStart,
-  flushProtectedPreferences:()=>flushProtectedPreferences(),
+  settleCurrentProfile:()=>settleCurrentProfileBeforeReload(),
   getStudentName:()=>getStudentNameFromDisplay(),
   isDefaultStudentName,
   canonicalLocalRecoveryEmpty:()=>canonicalLocalRecoveryEmpty(),

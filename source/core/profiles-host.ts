@@ -20,7 +20,7 @@ interface FirstStartController{
 }
 interface LifecycleInput{
   readonly profiles:ProfilesController;readonly firstStart:FirstStartController;
-  flushProtectedPreferences():unknown;getStudentName():string;isDefaultStudentName(value:string):boolean;canonicalLocalRecoveryEmpty():PromiseLike<boolean|null>;
+  settleCurrentProfile():PromiseLike<boolean>;getStudentName():string;isDefaultStudentName(value:string):boolean;canonicalLocalRecoveryEmpty():PromiseLike<boolean|null>;
   renderProfile():unknown;appCanMutate():boolean;
   readonly backupProtection:Readonly<{ask():PromiseLike<unknown>}>;setBackupProtectionSurfaceError(error:unknown):unknown;
 }
@@ -39,7 +39,7 @@ interface DeletionInput{
   readonly profiles:ProfilesController;
   readonly provider:Readonly<{
     locationStatus(id:'google-drive'):Readonly<{connected?:boolean;waiting?:boolean;sync?:Readonly<{syncedAt?:unknown;syncing?:unknown}>}>|null;
-    suspendBackground(reason:string):Readonly<{release():unknown}>|null;
+    suspendBackground(reason:string):Readonly<{release():unknown;settled?:PromiseLike<unknown>}>|null;
   }>;
   readonly device:Readonly<{status():Readonly<{connected?:boolean}>;deleteBackups():PromiseLike<unknown>}>;
   readonly interactions:Readonly<{choose(input:Readonly<Record<string,unknown>>):Promise<unknown>;confirm(input:Readonly<Record<string,unknown>>):Promise<boolean>;notify(input:Readonly<Record<string,unknown>>):unknown}>;
@@ -156,14 +156,17 @@ function createFirstStart(ports:FirstStartInput):Readonly<FirstStartController>{
   return Object.freeze({open,close,render,connect,finish,skip,confirmField,key,joined:()=>{joined=true;render();},isOpen:()=>!!(node('first-start-dialog') as HTMLDialogElement|null)?.open});
 }
 function createLifecycle(ports:LifecycleInput){
-  function switchProfile(event:unknown){
+  async function switchProfile(event:unknown){
     const target=event&&typeof event==='object'&&'target' in event?(event as {target?:unknown}).target:null;
     const element=target instanceof Element?target.closest<HTMLElement>('[data-profile]'):null;
     const id=String(element?.dataset['profile']||'');if(!id)return false;
-    void Promise.resolve(ports.flushProtectedPreferences()).catch(()=>{});
+    if(await ports.settleCurrentProfile()!==true)return false;
     return ports.profiles.switchTo(id);
   }
-  function addProfile(){void Promise.resolve(ports.flushProtectedPreferences()).catch(()=>{});return ports.profiles.add();}
+  async function addProfile(){
+    if(await ports.settleCurrentProfile()!==true)return false;
+    return ports.profiles.add();
+  }
   async function startProfile(){
     const name=ports.getStudentName(),named=!ports.isDefaultStudentName(name);let mine=ports.profiles.current();
     if(!mine)mine=ports.profiles.ensure(named?name:'',{fresh:!named&&await ports.canonicalLocalRecoveryEmpty()===true});
@@ -214,15 +217,17 @@ function createDriveBinding(ports:DriveBindingInput):Readonly<DriveBindingContro
 function createDeletion(ports:DeletionInput){
   let libraryControl:DeleteLibraryControl|null=null,deletionQuestion:Promise<boolean>|null=null;
   async function deleteHere({drive=false}:Readonly<{drive?:boolean}>={}){
-    let hold:Readonly<{release():unknown}>|null=null;try{hold=ports.provider.suspendBackground('profile-delete');}catch{hold=null;}
+    let hold:Readonly<{release():unknown;settled?:PromiseLike<unknown>}>|null=null;
     try{
+      hold=ports.provider.suspendBackground('profile-delete');
+      if(hold?.settled)await hold.settled;
       if(drive){if(!libraryControl)throw new Error('Google Drive is not ready yet. Try again in a moment.');await libraryControl.deleteLibrary();}
       await ports.device.deleteBackups();return ports.profiles.remove();
     }catch(error){
-      hold?.release();ports.capture('profile.delete',error);
+      ports.capture('profile.delete',error);
       ports.interactions.notify({key:'profile-delete',title:'The profile was not deleted',message:`${String(error instanceof Error?error.message:error)} Nothing was removed from this device; try again.`});
       return false;
-    }
+    }finally{hold?.release();}
   }
   async function deleteThisProfile(){
     const mine=ports.profiles.current();if(!mine)return false;

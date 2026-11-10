@@ -102,7 +102,7 @@ const createModule=()=>{
       const next=write({...list,profiles:[...list.profiles,row],active:list.profiles.some(other=>other.id===list.active&&other.scope!==pageScope)?list.active:row.id,removing:list.removing.filter(scope=>scope!==pageScope)});
       return current(next);
     }
-    const rename=(name:string)=>update(mine=>{const clean=cleanName(name);if(clean===mine.name)return null;return mine.fresh&&!mine.folder&&clean?{name:clean,id:newId(clean)}:{name:clean};});
+    const rename=(name:string)=>update(mine=>{const clean=cleanName(name);return clean===mine.name?null:{name:clean};});
     const setAccount=(account:Readonly<{email?:unknown;folder?:unknown}>={})=>update(mine=>{const next={email:cleanEmail(account.email),folder:cleanFolder(account.folder)};return next.email!==mine.email||next.folder!==mine.folder?next:null;});
     function adopt(id:string){
       const list=read();if(!validId(id))return false;

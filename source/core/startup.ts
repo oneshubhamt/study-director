@@ -88,13 +88,22 @@ const createModule=():StartupLifecycleContract=>{
       domBindingsInstalled=true;
       return true;
     }
+    function flushOne(scope:string,operation:()=>unknown){
+      return diagnostics.guard(scope,()=>{
+        const result=operation();
+        if(result&&typeof (result as PromiseLike<unknown>).then==='function'){
+          void Promise.resolve(result).catch((error:unknown)=>diagnostics.guard(scope,()=>{throw error;}));
+        }
+        return true;
+      });
+    }
     function flush(){
       if(!ownership.canMutate())return false;
-      diagnostics.guard('lifecycle.flush-schedule',flushers.planDraft);
-      diagnostics.guard('lifecycle.flush-preferences',flushers.preferences);
-      diagnostics.guard('lifecycle.flush-session',flushers.activeSession);
-      diagnostics.guard('lifecycle.flush-notes',flushers.notes);
-      diagnostics.guard('lifecycle.flush-deletion-recovery',flushers.deletionRecovery);
+      flushOne('lifecycle.flush-schedule',flushers.planDraft);
+      flushOne('lifecycle.flush-preferences',flushers.preferences);
+      flushOne('lifecycle.flush-session',flushers.activeSession);
+      flushOne('lifecycle.flush-notes',flushers.notes);
+      flushOne('lifecycle.flush-deletion-recovery',flushers.deletionRecovery);
       return true;
     }
     function queueWakeReconciliation(source:string){

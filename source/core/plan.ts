@@ -92,8 +92,8 @@ async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<PlanL
   }
   if(!ownership.requirePrimary(null,'load a plan'))return {ok:false,error:'ownership_unavailable'};
   ta.value=text;
-  const saved=await PlanDraftEditor.save();
-  if(!saved)return {ok:false,error:'storage_failed'};
+  const saved=await PlanDraftEditor.save({strictDurability:true});
+  if(!saved){if(ta.value===text)ta.value=previous;PlanDraftEditor.preview({silent:true});return {ok:false,error:'storage_failed'};}
   PlanDraftEditor.preview({source:'guide-template',enterDraft:true});
   setPlanStatus(opts.label?`${opts.label} loaded into Draft. Review, reorder, then Apply.`:'Template loaded into Draft. Review, reorder, then Apply.');
   return {ok:true};
@@ -155,7 +155,7 @@ const SavedPlans=(()=>{
       let selected=library.savedPlans.find(plan=>plan.id===id);
       const draft=getPlanDraftText(),now=new Date().toISOString();
       selectedId=id;
-      if(action==='load'){if(selected){const result=await loadScheduleIntoDraft(selected.scheduleText,{label:selected.label,allowIncomplete:true});status(result.ok?'Working copy loaded into Draft.':result.error==='cancelled'?'Current draft kept.':'Could not load the plan.',result.ok);}return true;}
+      if(action==='load'){if(!selected)return false;const result=await loadScheduleIntoDraft(selected.scheduleText,{label:selected.label,allowIncomplete:true});status(result.ok?'Working copy loaded into Draft.':result.error==='cancelled'?'Current draft kept.':'Could not load the plan.',result.ok);return result.ok;}
       if(action==='save'){
         const name=node('saved-plan-name')!.value.trim();
         if(!name)throw new Error('Enter a name for the plan.');
@@ -1084,7 +1084,11 @@ const PlanDraftEditor=(()=>{
     if(!ownership.requirePrimary(null,'clear the plan draft'))return false;
     clearTimer('save');clearTimer('preview');clearDragState();
     editEpoch++;const input=document.getElementById('plan-input');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
-    const ok=await save();if(ok&&input?.value==='')setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return ok;
+    const previous=getPlanDraftText();
+    const ok=await save({strictDurability:true});
+    if(ok&&input?.value===''){setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return true;}
+    if(!ok&&input&&input.value===''){input.value=previous;preview({silent:true});}
+    return ok;
   }
   function reset(){
     deactivate();
