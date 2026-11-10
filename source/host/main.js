@@ -4711,11 +4711,11 @@ async function settleCurrentProfileBeforeReload(){
   try{
     await AppMutationCoordinator.settled();
     if(await Promise.resolve(PlanDraftEditor.flush({strictDurability:true}))===false)throw new Error('The current Plan draft could not be saved.');
-    StartupLifecycle.flush();
     await PlanData.settled();
-    if(await AppData.notes.flush({strict:true})!==true)throw new Error('Current Notes could not be saved.');
+    // This existing writer barrier closes/settles rich-text and Diary edits,
+    // Notes, the current reflection and Active Session before the profile reload.
+    await settleAttachmentWriters();
     if(await AppData.deletionRecovery.flush()!==true)throw new Error('Pending deletions could not be saved.');
-    await AppData.activeSession.settled();
     return true;
   }catch(error){
     AppDiagnostics.capture('profiles.pre-reload-settlement',error,'error');
