@@ -159,7 +159,7 @@ function createLifecycle(ports:LifecycleInput){
   function switchProfile(event:unknown){
     const target=event&&typeof event==='object'&&'target' in event?(event as {target?:unknown}).target:null;
     const element=target instanceof Element?target.closest<HTMLElement>('[data-profile]'):null;
-    const id=String(element?.dataset.profile||'');if(!id)return false;
+    const id=String(element?.dataset['profile']||'');if(!id)return false;
     void Promise.resolve(ports.flushProtectedPreferences()).catch(()=>{});
     return ports.profiles.switchTo(id);
   }
@@ -172,7 +172,7 @@ function createLifecycle(ports:LifecycleInput){
   }
   function askProfilePassword(){
     if(ports.profiles.list().length<2||ports.firstStart.isOpen()||!ports.appCanMutate())return;
-    void ports.backupProtection.ask().catch(ports.setBackupProtectionSurfaceError);
+    void Promise.resolve(ports.backupProtection.ask()).catch(ports.setBackupProtectionSurfaceError);
   }
   return Object.freeze({switchProfile,addProfile,startProfile,askProfilePassword});
 }

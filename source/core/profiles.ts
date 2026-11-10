@@ -37,11 +37,11 @@ const createModule=()=>{
     const time=(value:unknown)=>typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():'';
 
     function entry(value:unknown):Readonly<ProfileEntry>|null{
-      if(!objectRecord(value)||!validId(value.id)||!(value.scope===''||validId(value.scope)))return null;
-      const from=value.from===''||validId(value.from)?value.from:null;
+      if(!objectRecord(value)||!validId(value['id'])||!(value['scope']===''||validId(value['scope'])))return null;
+      const from=value['from']===''||validId(value['from'])?value['from']:null;
       return freeze({
-        id:value.id,scope:value.scope,name:cleanName(value.name),email:cleanEmail(value.email),folder:cleanFolder(value.folder),
-        createdAt:time(value.createdAt),fresh:value.fresh===true,from:value.fresh===true?from:null
+        id:value['id'],scope:value['scope'],name:cleanName(value['name']),email:cleanEmail(value['email']),folder:cleanFolder(value['folder']),
+        createdAt:time(value['createdAt']),fresh:value['fresh']===true,from:value['fresh']===true?from:null
       });
     }
 
@@ -51,18 +51,18 @@ const createModule=()=>{
       let raw:unknown=null,parsed=true;
       try{raw=JSON.parse(text||'null') as unknown;}catch{raw=null;parsed=false;}
       const rawRecord=objectRecord(raw)?raw:null;
-      const unsupported=text!==null&&text!==''&&(!parsed||!rawRecord||rawRecord.version!==VERSION);
+      const unsupported=text!==null&&text!==''&&(!parsed||!rawRecord||rawRecord['version']!==VERSION);
       const profiles:Readonly<ProfileEntry>[]=[],ids=new Set<string>(),scopes=new Set<string>();
-      const rawProfiles=rawRecord&&Array.isArray(rawRecord.profiles)?rawRecord.profiles:[];
-      if(rawRecord&&(rawRecord.version===VERSION||unsupported)){
+      const rawProfiles=rawRecord&&Array.isArray(rawRecord['profiles'])?rawRecord['profiles']:[];
+      if(rawRecord&&(rawRecord['version']===VERSION||unsupported)){
         for(const value of rawProfiles.slice(0,MAX_PROFILES)){
           const row=entry(value);if(!row||ids.has(row.id)||scopes.has(row.scope))continue;
           ids.add(row.id);scopes.add(row.scope);profiles.push(row);
         }
       }
-      const rawRemoving=!unsupported&&rawRecord&&Array.isArray(rawRecord.removing)?rawRecord.removing:[];
+      const rawRemoving=!unsupported&&rawRecord&&Array.isArray(rawRecord['removing'])?rawRecord['removing']:[];
       const removing=[...new Set(rawRemoving.filter((scope:unknown):scope is string=>(scope===''||validId(scope))&&!scopes.has(scope)))];
-      const candidateActive=rawRecord?.active;
+      const candidateActive=rawRecord?.['active'];
       const active=typeof candidateActive==='string'&&profiles.some(row=>row.id===candidateActive)?candidateActive:(profiles[0]?.id||'');
       return freeze({version:VERSION,active,profiles:freeze(profiles),removing:freeze(removing),unsupported});
     }
