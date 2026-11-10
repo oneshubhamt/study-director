@@ -8,9 +8,10 @@ import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readRuntimeSource(path.join(ROOT,relative));
-for(const file of ['source/core/internal.ts','source/core/startup.ts'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/startup.ts','source/core/startup-host.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Startup=registry.require('startup-lifecycle',1);
+const StartupHost=registry.require('startup-host',1);
 
 const docListeners=new Map(),winListeners=new Map();
 const document={
@@ -24,10 +25,13 @@ const guard=(scope,operation)=>{try{return operation();}catch(error){sequence.pu
 const fn=name=>()=>{sequence.push(name);return true;};
 const asyncFn=name=>async()=>{sequence.push(`${name}:begin`);await Promise.resolve();sequence.push(`${name}:end`);return true;};
 let primary=true;
-const coordinator=Startup.createCoordinator(Object.freeze({
+const activation=StartupHost.createActivation(Object.freeze({capture:(scope,error)=>sequence.push(`capture:${scope}:${error?.message||error}`)}));
+activation.subscribe(event=>sequence.push(`activation:${event.kind}:${event.source}:${event.destructive?'destructive':'non-destructive'}`));
+const coordinator=StartupHost.createCoordinator(Object.freeze({
+  module:Startup,
   environment:Object.freeze({document,window}),
   diagnostics:Object.freeze({guard}),
-  activation:Object.freeze({publish:(kind,source,options)=>{sequence.push(`activation:${kind}:${source}:${options?.destructive===true?'destructive':'non-destructive'}`);return true;}}),
+  activation,
   ownership:Object.freeze({
     install:fn('ownership-install'),evaluate:asyncFn('ownership-evaluate',2),
     canMutate:()=>primary,hasControl:()=>primary,writeLease:fn('write-lease'),
@@ -93,6 +97,8 @@ await drain();
 assert.ok(sequence.includes('activation:visibility-return:visibilitychange:non-destructive'));
 const exit=winListeners.get('pagehide');assert.equal(typeof exit,'function');exit();
 assert.ok(sequence.includes('activation:exit:page-exit:destructive'));
+assert.equal(activation.kinds.OWNERSHIP_TAKEOVER,'ownership-takeover');
+assert.ok(activation.status().sequence>=4,'activation contract must publish a monotone sequence');
 const lastEvaluateEnd=sequence.lastIndexOf('ownership-evaluate:end');
 assert.ok(lastEvaluateEnd<sequence.lastIndexOf('wake-reconcile'));
 
@@ -102,10 +108,12 @@ const failureSequence=[],failureDocListeners=new Map(),failureWinListeners=new M
 let failVerification=true,primary2=true,failureEvaluations=0;
 const failureDocument={readyState:'complete',hidden:false,addEventListener:(name,handler)=>failureDocListeners.set(name,handler)};
 const failureWindow={addEventListener:(name,handler)=>failureWinListeners.set(name,handler)};
-const failureCoordinator=Startup.createCoordinator(Object.freeze({
+const failureActivation=StartupHost.createActivation(Object.freeze({capture:(scope,error)=>failureSequence.push(`capture:${scope}:${error?.message||error}`)}));
+const failureCoordinator=StartupHost.createCoordinator(Object.freeze({
+  module:Startup,
   environment:Object.freeze({document:failureDocument,window:failureWindow}),
   diagnostics:Object.freeze({guard:(scope,operation)=>{try{return operation();}catch(error){failureSequence.push(`guard:${scope}:${error.message}`);return false;}}}),
-  activation:Object.freeze({publish:()=>true}),
+  activation:failureActivation,
   ownership:Object.freeze({
     install:()=>true,evaluate:async()=>{failureEvaluations++;primary2=true;return true;},canMutate:()=>primary2,hasControl:()=>primary2,writeLease:()=>true,
     flushAndRelease:async()=>true,transitionReleasing:()=>true,release:()=>{failureSequence.push('release');primary2=false;return true;},

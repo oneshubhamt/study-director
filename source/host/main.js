@@ -72,6 +72,7 @@ const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'st
 const CapabilitiesHostModule=INTERNAL_MODULES.load('capabilities-host',1,'study-director.capabilities-host-module',1);
 const PlanModule=INTERNAL_MODULES.load('plan',1,'study-director.plan-module',1);
 const StartupLifecycleModule=INTERNAL_MODULES.load('startup-lifecycle',1,'study-director.startup-lifecycle',1);
+const StartupHostModule=INTERNAL_MODULES.load('startup-host',1,'study-director.startup-host-module',1);
 const OwnershipModule=INTERNAL_MODULES.load('ownership',1,'study-director.ownership',1);
 const TimerStateModule=INTERNAL_MODULES.load('timer-state',1,'study-director.timer-state',1);
 const SessionLifecycleModule=INTERNAL_MODULES.load('session-lifecycle',1,'study-director.session-lifecycle',1);
@@ -740,28 +741,12 @@ let scheduleEndPromptKey='';
 const BACKUP_NUDGE_MS=7*24*60*60*1000;
 const BACKUP_NUDGE_CHECK_MS=60*60*1000;
 /* APPLICATION ACTIVATION CONTRACT */
-const APP_ACTIVATION_KINDS=Object.freeze({
-  ORDINARY_FOCUS:'ordinary-focus',VISIBILITY_RETURN:'visibility-return',BACKGROUND:'background',
-  OWNERSHIP_TAKEOVER:'ownership-takeover',DATE_ROLLOVER:'date-rollover',EXIT:'exit'
-});
-const AppActivation=(()=>{
-  const listeners=new Set(),valid=new Set(Object.values(APP_ACTIVATION_KINDS));
-  let sequence=0,last=null;
-  function publish(kind,source='',options={}){
-    if(!valid.has(kind))throw new TypeError(`Unknown Study Director activation kind: ${kind}`);
-    const event=Object.freeze({
-      format:'study-director.activation-event',contractVersion:1,sequence:++sequence,kind,
-      source:String(source||kind),destructive:options&&options.destructive===true,at:new Date().toISOString()
-    });
-    last=event;
-    listeners.forEach(listener=>{try{listener(event);}catch(error){AppDiagnostics.capture('activation.listener',error,'error');}});
-    return event;
-  }
-  function subscribe(listener){if(typeof listener!=='function')throw new TypeError('Activation listener must be a function.');listeners.add(listener);return ()=>listeners.delete(listener);}
-  function status(){return Object.freeze({format:'study-director.activation-status',contractVersion:1,sequence,last,kinds:APP_ACTIVATION_KINDS});}
-  return Object.freeze({format:'study-director.activation-contract',contractVersion:1,kinds:APP_ACTIVATION_KINDS,publish,subscribe,status});
-})();
-/* APPLICATION WRITE AUTHORITY · 4. CROSS-TAB OWNERSHIP */
+const AppActivation=StartupHostModule.createActivation(Object.freeze({
+  capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
+}));
+const APP_ACTIVATION_KINDS=AppActivation.kinds;
+let StartupLifecycle;
+/* APPLICATION WRITE AUTHORITY · 4. CROSS-TAB OWNERSHIP *//* APPLICATION WRITE AUTHORITY · 4. CROSS-TAB OWNERSHIP */
 const OWNERSHIP_HEARTBEAT_MS=4000;
 const OWNERSHIP_STALE_MS=15000;
 const OWNERSHIP_PROBE_MS=700;
@@ -772,7 +757,8 @@ let ownershipBanner=null;
 let AppMutationCoordinator=null;
 let mutationUiOperationActive=false;
 let pwaUpdateReservation=null;
-const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
+const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze({
+  module:OwnershipModule,
   config:Object.freeze({
     storageKey:STORAGE_KEYS.appOwner,sessionTabKey:SESSION_STORAGE_KEYS.appTab,
     channelName:ProfileScope.scoped('study-director-app-owner'),heartbeatMs:OWNERSHIP_HEARTBEAT_MS,
@@ -793,27 +779,24 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     guard:(scope,operation)=>AppDiagnostics.guard(scope,operation)
   }),
+  activation:AppActivation,
+  reloadHint:()=>performance.getEntriesByType('navigation')[0]?.type==='reload'||performance.navigation?.type===1,
+  lifecycle:Object.freeze({
+    isReady:()=>StartupLifecycle.status().fullyInitialized,
+    resumeStorageReset:()=>resumeUnresolvedStorageReset()
+  }),
+  hydration:Object.freeze({
+    hydratePlanData:()=>PlanData.hydrate(),
+    hydratePlanRuntime:()=>PlanRuntime.hydrate(),
+    renderSavedPlans:()=>PlanRuntime.savedPlans.render(),
+    hydratePrimary:options=>hydratePrimaryStateFromStorage(options),
+    censusUnsupported:()=>UnsupportedData.census(),
+    hydrateSavedDrafts:options=>hydrateSavedDrafts(options)
+  }),
   hooks:Object.freeze({
     render:()=>renderOwnershipUi(),
     refreshStorage:()=>refreshStorageFallbackWarning(),
-    stopExecution:()=>{
-      TimerEngine.stopExecution();
-    },
-    isInitialized:()=>StartupLifecycle.status().fullyInitialized,
-    hydrate:async options=>{
-      await PlanData.hydrate();PlanRuntime.hydrate();PlanRuntime.savedPlans.render();
-      const result=await hydratePrimaryStateFromStorage(Object.freeze({
-        ...options,
-        sameTabReload:!!(options&&options.sameTabReload)||performance.getEntriesByType('navigation')[0]?.type==='reload'
-      }));
-      AppActivation.publish(APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,'app-ownership',{destructive:true});
-      if(StartupLifecycle.status().fullyInitialized)resumeUnresolvedStorageReset();
-      return result;
-    },
-    finalizeHydration:async()=>{
-      await UnsupportedData.census();
-      await hydrateSavedDrafts({forcePreferences:true,failClosed:true});
-    },
+    stopExecution:()=>TimerEngine.stopExecution(),
     resume:()=>resumeTimerLoopAfterPrimaryRestore(),
     refreshCore:()=>refreshCoreUi(),
     scheduleMaintenance:()=>scheduleDataMaintenance(),
@@ -830,7 +813,7 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
     ]);}
   })
 }));
-const appCanMutate=()=>AppOwnership.canMutate()&&!(AppMutationCoordinator&&AppMutationCoordinator.writesBlocked());
+const appCanMutate=()=>AppOwnership.canMutate()const appCanMutate=()=>AppOwnership.canMutate()&&!(AppMutationCoordinator&&AppMutationCoordinator.writesBlocked());
 const transitionAppOwnership=next=>next===OWNERSHIP_STATES.RELEASING
   ?AppOwnership.transitionReleasing():AppOwnership.state;
 AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze({
@@ -1546,7 +1529,7 @@ function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,li
   return SessionLifecycle.runSync(transitionSource,lifecycleContext,applySnapshot);
 }
 async function hydratePrimaryStateFromStorage(options={}){
-  const sameTabReload=!!options.sameTabReload||performance.getEntriesByType('navigation')[0]?.type==='reload'||performance.navigation?.type===1;
+  const sameTabReload=!!options.sameTabReload;
   const notesReloaded=await AppData.notes.reloadFresh();
   if(!notesReloaded)throw new Error('The latest notes could not be reloaded before ownership transfer.');
   const session=await loadActiveSessionForRestore();
@@ -9314,21 +9297,12 @@ function applyPwaLaunchRoute(){
   return NavigationController.hydrate({source:'launch-route',explicitOnly:true}).then(result=>result.ok===true);
 }
 let startupClockInterval=null,startupHeaderClockInterval=null;
-const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
+StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
+  module:StartupLifecycleModule,
   environment:Object.freeze({document,window}),
   diagnostics:Object.freeze({guard:AppDiagnostics.guard}),
-  activation:Object.freeze({publish:(kind,source,options)=>AppActivation.publish(kind,source,options)}),
-  ownership:Object.freeze({
-    install:installAppOwnership,
-    evaluate:evaluateAppOwnership,
-    canMutate:appCanMutate,
-    hasControl:()=>AppOwnership.hasControl(),
-    writeLease:writeAppOwner,
-    flushAndRelease:flushAndReleaseAppOwner,
-    transitionReleasing:()=>transitionAppOwnership(OWNERSHIP_STATES.RELEASING,'page exit'),
-    release:releaseAppOwner,
-    setPrimary:setPrimaryTabState
-  }),
+  activation:AppActivation,
+  ownership:AppOwnership,
   timer:Object.freeze({
     stopPresentation:TimerPresentation.stop,
     syncAfterWake:()=>{

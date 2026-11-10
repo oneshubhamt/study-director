@@ -5,6 +5,7 @@ import fs from 'node:fs';
 
 const app=readHostHtml();
 const startup=readScript('source/core/startup.ts');
+const startupHost=readScript('source/core/startup-host.ts');
 const persistence=readScript('source/core/persistence.ts');
 
 
@@ -15,7 +16,9 @@ const hydrateStart=app.indexOf('async function hydrateProtectedPreferences({forc
 const hydrateEnd=app.indexOf('async function flushProtectedPreferences()',hydrateStart);
 const hydrateBlock=app.slice(hydrateStart,hydrateEnd);
 assert.match(hydrateBlock,/protectedPreferencesHydrated&&!force/u,'ordinary hydration may reuse current in-memory Preferences');
-assert.match(app,/hydrateSavedDrafts\(\{forcePreferences:true,failClosed:true\}\)/u,'ownership takeover must force a fresh canonical Preferences read before becoming writable');
+assert.match(startupHost,/hydrateSavedDrafts\(freeze\(\{forcePreferences:true,failClosed:true\}\)\)/u,'ownership takeover must force a fresh canonical Preferences read before becoming writable');
+assert.match(app,/StartupHostModule\.createOwnershipController/u,'host ownership startup composition must cross the checked startup-host boundary');
+assert.doesNotMatch(app,/OwnershipModule\.createOwnershipController\(Object\.freeze/u,'host must not retain duplicate direct ownership startup composition');
 assert.match(app,/let planError=null,preferencesError=null;[\s\S]{0,260}try\{await PlanData\.hydrate\(\);\}[\s\S]{0,260}try\{await hydrateProtectedPreferences\(\{force:forcePreferences\}\);\}/u,'Plan and Preferences hydration failures must be isolated rather than sharing one Promise.all failure domain');
 assert.match(app,/if\(planError\)PlanRuntime\.hydrate\(\{fallback:true\}\);\s*else\{PlanRuntime\.hydrate\(\);PlanRuntime\.savedPlans\.render\(\);\}/u,'Preferences failure must not force Plan fallback when Plan hydration succeeded');
 assert.match(app,/if\(!appCanMutate\(\)\|\|!protectedPreferencesHydrated\)return false;/u,'portable Preferences writes must be blocked when canonical Preferences are not hydrated');
