@@ -22,6 +22,7 @@ const attachments=read('source/core/attachments.ts');
 const repositories=read('source/core/repositories.ts');
 const notes=read('source/core/repositories-notes.ts');
 const startup=read('source/core/startup.ts');
+const dataBootstrap=read('source/core/data-bootstrap-host.ts');
 const persistence=read('source/core/persistence.ts');
 const hostMetadata=read('source/core/host-metadata.ts');
 const backupRecoveryHost=read('source/core/backup-recovery-host.ts');
@@ -35,10 +36,10 @@ for(const retired of ['AppData.sync','createVerified','syncEntityKey','normalize
   assert.equal(currentSource.includes(retired),false,`retired current-runtime symbol must stay absent: ${retired}`);
 }
 
-const entityStart=app.indexOf('const ENTITY_DEFINITIONS=Object.freeze({');
-const entityEnd=app.indexOf('const BACKUP_ENTITY_TYPES=',entityStart);
-assert.ok(entityStart>=0&&entityEnd>entityStart,'current entity definition block must remain discoverable');
-const currentEntities=app.slice(entityStart,entityEnd);
+const entityStart=dataBootstrap.indexOf('const ENTITY_DEFINITIONS:');
+const entityEnd=dataBootstrap.indexOf('const BACKUP_ENTITY_TYPES=',entityStart);
+assert.ok(entityStart>=0&&entityEnd>entityStart,'current entity definition block must remain discoverable in the typed data-bootstrap authority');
+const currentEntities=dataBootstrap.slice(entityStart,entityEnd);
 assert.equal(currentEntities.includes('tombstone'),false,'generalized tombstones must not be a current entity definition');
 assert.equal(currentEntities.includes('syncable'),false,'current domain entities must not carry distributed-sync capability flags');
 
