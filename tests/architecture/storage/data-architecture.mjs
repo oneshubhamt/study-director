@@ -23,16 +23,18 @@ const repositories=read('source/core/repositories.ts');
 const journals=read('source/core/repository-journals.ts');
 const appMeta=read('source/core/app-meta.ts');
 const persistence=read('source/core/persistence.ts');
+const dataBootstrap=read('source/core/data-bootstrap-host.ts');
 const insights=read('source/external/insights.js');
 const sourceFiles=[];
 const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())walk(full);else if(/\.(?:js|ts|html)$/u.test(entry.name))sourceFiles.push(full);}};
 walk(path.join(root,'source'));
 
-assert.match(app,/const STORAGE_KEYS=Object\.freeze\(Object\.fromEntries\(Object\.entries\(@@SD_LOCAL_STORAGE_KEYS@@\)\.map\(\(\[name,key\]\)=>\[name,DEVICE_WIDE_STORAGE_KEYS\.includes\(name\)\?key:ProfileScope\.scoped\(key\)\]\)\)\);/u,'every browser-storage key but the device-wide ones belongs to the open profile');
+assert.match(app,/localStorageKeys:@@SD_LOCAL_STORAGE_KEYS@@/u,'host must inject the canonical localStorage identity map into the typed bootstrap boundary');
+assert.match(dataBootstrap,/deviceWide\.includes\(name\)\?rawLocal\[name\]:profileScope\.scoped\(rawLocal\[name\]\)/u,'every browser-storage key but the device-wide ones belongs to the open profile');
 assert.doesNotMatch(app,/['"]studyDirector\.(?:theme|presentation)\.v1['"]/u,'pre-hydration presentation bootstrap must use build-injected storage identities');
-assert.match(app,/const SESSION_STORAGE_KEYS=Object\.freeze\(@@SD_SESSION_STORAGE_KEYS@@\);/u);
+assert.match(app,/sessionStorageKeys:@@SD_SESSION_STORAGE_KEYS@@/u);
 
-assert.match(app,/const APP_META_KEYS=Object\.freeze\(@@SD_APP_META_KEYS@@\);/u);
+assert.match(app,/appMetaKeys:@@SD_APP_META_KEYS@@/u);
 
 assert.equal(Object.keys(LOCAL_STORAGE_KEYS).length,19,'current localStorage inventory; attachment cleanup keeps no record of its own');
 assert.equal(Object.hasOwn(LOCAL_STORAGE_KEYS,'sessionHandoffSafety'),false,'Drive claims settle interrupted Continue Here without a local marker');
@@ -116,8 +118,9 @@ assert.deepEqual(idbStores,Object.keys(INDEXED_DB.stores).sort(),'IndexedDB topo
 assert.deepEqual(Object.keys(INDEXED_DB_STORE_NAMES).sort(),idbStores,'runtime store-name map must cover every canonical store');
 assert.equal(RUNTIME_DATA_CONTRACT.storage.dbName,INDEXED_DB.name);
 assert.equal(RUNTIME_DATA_CONTRACT.storage.dbVersion,INDEXED_DB.version);
-assert.match(app,/const DATA_CONTRACT=\(\(\)=>\{[\s\S]{0,600}@@SD_RUNTIME_DATA_CONTRACT@@/u,'host data contract must be build-injected from the canonical identity manifest');
-assert.match(app,/const DB_STORES=Object\.freeze\(@@SD_INDEXED_DB_STORE_NAMES@@\);/u,'host physical store names must be build-injected from the canonical identity manifest');
+assert.match(app,/runtimeDataContract:@@SD_RUNTIME_DATA_CONTRACT@@/u,'host data contract must be build-injected into the typed bootstrap boundary');
+assert.match(dataBootstrap,/const DATA_CONTRACT=freeze\(\{\.\.\.rawContract,storage:freeze/u,'typed bootstrap must deep-freeze the injected runtime data contract');
+assert.match(app,/indexedDbStoreNames:@@SD_INDEXED_DB_STORE_NAMES@@/u,'host physical store names must be build-injected into the typed bootstrap boundary');
 
 assert.doesNotMatch(app,/dbName:\s*['"]sdmLocalAppDB\.v1['"]/u,'host must not redeclare the IndexedDB identity');
 for(const name of idbStores){
@@ -151,7 +154,8 @@ const attachmentsSource=read('source/core/attachments.ts');
 assert.ok(attachmentsSource.includes(`encode('${literal(EXTERNAL_FORMATS.attachmentArchive.magic)}')`),'attachment archive magic must mechanically match the canonical manifest');
 assert.ok(attachmentsSource.includes(`m.format!=='${literal(EXTERNAL_FORMATS.attachmentArchive.format)}'||m.version!==${EXTERNAL_FORMATS.attachmentArchive.version}`),'attachment archive manifest identity must mechanically match the canonical manifest');
 assert.doesNotMatch(read('source/external/drive.js'),/SDENC02|\.sdbackup/u,'Drive repository transport must remain opaque to portable/protected backup container formats');
-assert.match(app,/const APP_META_REGISTRY=Object\.freeze\(Object\.fromEntries\(Object\.entries\(@@SD_APP_META_REGISTRY@@\)\.map/u,'host must deep-freeze each build-injected typed appMeta registry definition before strict validation');
+assert.match(app,/appMetaRegistry:@@SD_APP_META_REGISTRY@@/u,'host must inject the typed appMeta registry into the bootstrap boundary');
+assert.match(dataBootstrap,/const APP_META_REGISTRY=freeze\(Object\.fromEntries\(Object\.entries\(input\.raw\.appMetaRegistry\)/u,'typed bootstrap must deep-freeze each appMeta registry definition before strict validation');
 assert.match(app,/function exactAppMetaFamily\(capability,key,label=/u,'typed exact-key adapters must enforce logical appMeta ownership');
 assert.match(app,/JournalAppMeta\.read\('restoreJournalPayload'\)/u,'temporary backup-file retention must read the typed restore-journal family only');
 assert.match(appMeta,/function registerValidators\(validationOwner\s*,ownerValidators\s*\)/u,'appMeta gateway must register validators independently by validation owner');
@@ -207,7 +211,7 @@ const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/devi
 assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u,'service worker cache identities must come from the canonical contract');
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');
-assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');
+assert.match(app,/externalRepositoryIdentities:@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@/u,'Device Backup repository directories must enter through the canonical typed bootstrap boundary');
 assert.doesNotMatch(deviceBackupSource,/Study-Director-Automatic-Backup-Repository/u,'Device Backup must not mint its repository root');
 assert.doesNotMatch(deviceBackupSource,/id:['"]study-director-device-backup/u,'Device Backup must not mint its persistent picker identity');
 assert.match(app,/pickerId:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderPickerId/u,'Device Backup picker identity must come from the canonical contract');

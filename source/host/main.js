@@ -15,7 +15,6 @@
 // private registry -> host contracts/state -> repositories -> feature controllers ->
 // shell/public plugins -> DOM/startup. Private modules never resolve one another.
 /* CONFIG AND DATA CONTRACT */
-const APP_VERSION='@@SD_RELEASE@@';
 const INTERNAL_MODULES=window[Symbol.for('studyDirector.internalModules.v1')];
 if(!INTERNAL_MODULES||INTERNAL_MODULES.format!=='study-director.internal-module-registry'||INTERNAL_MODULES.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
@@ -41,6 +40,7 @@ const AudioEngineModule=INTERNAL_MODULES.load('audio-engine',1,'study-director.a
 const NoticeCoordinatorModule=INTERNAL_MODULES.load('notice-coordinator',1,'study-director.notice-coordinator-module',1);
 const NavigationModule=INTERNAL_MODULES.load('navigation',1,'study-director.navigation-module',1);
 const FoundationHostModule=INTERNAL_MODULES.load('foundation-host',1,'study-director.foundation-host-module',1);
+const DataBootstrapHostModule=INTERNAL_MODULES.load('data-bootstrap-host',1,'study-director.data-bootstrap-host-module',1);
 
 const RepositoryJournalModule=INTERNAL_MODULES.load('repository-journals',1,'study-director.repository-journals',1);
 const SaveLaneModule=INTERNAL_MODULES.load('save-lane',1,'study-director.save-lane-module',1);
@@ -94,60 +94,31 @@ const {
   invariants:PRESENTATION_INVARIANTS, breakpoints:PRESENTATION_BREAKPOINTS, tokens:PRESENTATION_TOKEN_CONTRACT
 }=PRESENTATION_MANIFEST;
 const NOTES_SEARCH_WORKER_URL='@@SD_SEARCH_WORKER_FILENAME@@';
-const APP_CONFIG = {
-  appName: 'Study Director',
-  attribution: 'Shubham Tiwari with ChatGPT',
-  defaultName: 'Student',
-  storagePrefix: 'studyDirector',
-  factorySchedule: `05:30 | 90 | Morning Routine: Wake-up + Exercise + Freshen-up | support | Routine | block | 1
-07:00 | 120 | Deep Study Block 1 | work | Core Subject | block | 1
-09:00 | 30 | Breakfast + Short Break | fixed | Meal | |
-09:30 | 120 | Class / Lecture / Primary Study | work | Main Course | block | 1
-11:30 | 60 | Practice Questions / Application Work | work | Practice | questions | 25
-12:30 | 60 | Lunch + Rest | fixed | Meal | |
-13:30 | 120 | Deep Study Block 2 | work | Secondary Subject | block | 1
-15:30 | 60 | Review + Error Notebook | work | Revision | block | 1
-16:30 | 45 | Break / Walk / Snack | fixed | Break | |
-17:15 | 90 | Test Practice / Writing Practice | work | Assessment | block | 1
-18:45 | 45 | Light Revision / Flashcards | work | Revision | block | 1
-19:30 | 60 | Dinner + Recovery | fixed | Meal | |
-20:30 | 60 | Daily Review + Tomorrow Planning | support | Planning | block | 1
-21:30 | 480 | Sleep | fixed | Rest | |`
-};
 const RICH_TEXT_BOOT_API=window.StudyDirectorRichText;
 if(!RICH_TEXT_BOOT_API||!RICH_TEXT_BOOT_API.assetPolicy||typeof RICH_TEXT_BOOT_API.isAssetId!=='function'||typeof RICH_TEXT_BOOT_API.isSupportedImageType!=='function'){throw new Error('Study Director rich text runtime is unavailable or incompatible.');}
-const APP_LIMITS=Object.freeze(@@SD_PRODUCTION_LIMITS@@);
-if(APP_LIMITS.richAssetMaxBytes!==RICH_TEXT_BOOT_API.assetPolicy.maxBytes||APP_LIMITS.richAssetMaxPerDocument!==RICH_TEXT_BOOT_API.assetPolicy.maxPerDocument||APP_LIMITS.richAssetMaxBytesPerDocument!==RICH_TEXT_BOOT_API.assetPolicy.maxBytesPerDocument||APP_LIMITS.richAssetMaxDimensionPx!==RICH_TEXT_BOOT_API.assetPolicy.maxDimensionPx||APP_LIMITS.richAssetMaxPixels!==RICH_TEXT_BOOT_API.assetPolicy.maxPixels){throw new Error('Rich-text asset limits differ from the production-limit manifest.');}
-if(AttachmentsModule.limits?.maxImage!==APP_LIMITS.richAssetMaxBytes||AttachmentsModule.limits?.maxPdfAudio!==APP_LIMITS.attachmentPdfAudioMaxBytes){throw new Error('Attachment limits differ from the production-limit manifest.');}
-// Durable names of the active profile (see the profile scope at the top).
-const ProfileScope=window[Symbol.for('studyDirector.profileScope.v1')];
-const DEVICE_WIDE_STORAGE_KEYS=Object.freeze(@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS@@);
-const STORAGE_KEYS=Object.freeze(Object.fromEntries(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).map(([name,key])=>[name,DEVICE_WIDE_STORAGE_KEYS.includes(name)?key:ProfileScope.scoped(key)])));
-const SESSION_STORAGE_KEYS=Object.freeze(@@SD_SESSION_STORAGE_KEYS@@);
-const APP_META_KEYS=Object.freeze(@@SD_APP_META_KEYS@@);
-const EXTERNAL_REPOSITORY_IDENTITIES=Object.freeze(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@);
-const APP_META_REGISTRY=Object.freeze(Object.fromEntries(Object.entries(@@SD_APP_META_REGISTRY@@).map(([name,definition])=>[name,Object.freeze(definition)])));
-const FACTORY_DEFAULTS = {
-  studentName: APP_CONFIG.defaultName,
-  scheduleText: APP_CONFIG.factorySchedule
-};
-const DATA_CONTRACT=(()=>{
-  const raw=@@SD_RUNTIME_DATA_CONTRACT@@;
-  const stores=Object.freeze(Object.fromEntries(Object.entries(raw.storage.stores).map(([id,value])=>[id,Object.freeze({...value})])));
-  const schemas=Object.freeze(Object.fromEntries(Object.entries(raw.schemas).map(([id,value])=>[id,Object.freeze(id==='LocalRecoveryEnvelope'?{...value,key:STORAGE_KEYS.recovery}:{...value})])));
-  return Object.freeze({...raw,storage:Object.freeze({...raw.storage,stores}),schemas});
-})();
-const DB_STORES=Object.freeze(@@SD_INDEXED_DB_STORE_NAMES@@);
-const DB_NAME=ProfileScope.scoped(DATA_CONTRACT.storage.dbName);
-const DB_DAILY_RECORD_STORE=DB_STORES.dailyRecords;
-const DB_DAILY_SUMMARY_STORE=DB_STORES.dailySummaries;
-const DB_NOTES_STORE=DB_STORES.notes;
-const DB_ACTIVE_SESSION_STORE=DB_STORES.activeSessions;
-const DB_APP_META_STORE=DB_STORES.appMeta;
-const DB_ASSET_STORE=DB_STORES.assets;
-const DB_VER=DATA_CONTRACT.storage.dbVersion;
-const ACTIVE_SESSION_ID=DATA_CONTRACT.schemas.ActiveSession.key;
-const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
+const ProfileScopeBootstrap=window[Symbol.for('studyDirector.profileScope.v1')];
+const {
+  APP_VERSION,APP_CONFIG,APP_LIMITS,ProfileScope,DEVICE_WIDE_STORAGE_KEYS,STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,EXTERNAL_REPOSITORY_IDENTITIES,APP_META_REGISTRY,
+  DATA_CONTRACT,DB_STORES,DB_NAME,DB_VER,DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_NOTES_STORE,DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE,DB_ASSET_STORE,
+  ACTIVE_SESSION_ID,ENTITY_DEFINITIONS,BACKUP_ENTITY_TYPES,FACTORY_DEFAULTS,entityDefinition,entityIdentity
+}=DataBootstrapHostModule.createConfiguration(Object.freeze({
+  release:'@@SD_RELEASE@@',
+  profileScope:ProfileScopeBootstrap,
+  raw:Object.freeze({
+    productionLimits:@@SD_PRODUCTION_LIMITS@@,
+    deviceWideStorageKeys:@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS@@,
+    localStorageKeys:@@SD_LOCAL_STORAGE_KEYS@@,
+    sessionStorageKeys:@@SD_SESSION_STORAGE_KEYS@@,
+    appMetaKeys:@@SD_APP_META_KEYS@@,
+    externalRepositoryIdentities:@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@,
+    appMetaRegistry:@@SD_APP_META_REGISTRY@@,
+    runtimeDataContract:@@SD_RUNTIME_DATA_CONTRACT@@,
+    indexedDbStoreNames:@@SD_INDEXED_DB_STORE_NAMES@@
+  }),
+  richText:RICH_TEXT_BOOT_API,
+  attachments:AttachmentsModule
+}));
+const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
   pluginApi:1,
   tabRegistry:1,
   planDraft:1,
@@ -163,19 +134,7 @@ const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
   installation:1,
   workspaceHistory:1
 });
-const ENTITY_DEFINITIONS=Object.freeze({
-  dailyRecord:Object.freeze({schema:DATA_CONTRACT.schemas.DailyRecord.version,idField:'date',store:DB_DAILY_RECORD_STORE,backupLimit:APP_LIMITS.maxImportRecords}),
-  note:Object.freeze({schema:DATA_CONTRACT.schemas.Note.version,idField:'key',store:DB_NOTES_STORE,backupLimit:APP_LIMITS.maxNotes}),
-  activeSession:Object.freeze({schema:DATA_CONTRACT.schemas.ActiveSession.version,idField:'id',fixedId:ACTIVE_SESSION_ID,store:DB_ACTIVE_SESSION_STORE,backupLimit:1}),
-});
-const BACKUP_ENTITY_TYPES=Object.freeze(Object.keys(ENTITY_DEFINITIONS));
-function entityDefinition(entityType){return ENTITY_DEFINITIONS[entityType]||null;}
-function entityIdentity(entityType,value){
-  const def=entityDefinition(entityType);
-  if(!def)return '';
-  return String(def.fixedId||(value&&value[def.idField])||'').trim();
-}
-// All externally keyed dictionary data flows through this helper. It prevents
+// All externally keyed dictionary data flows through this helper.// All externally keyed dictionary data flows through this helper. It prevents
 // prototype-key collisions and keeps own-property access consistent.
 const {KeyedRecord,textEl,on,emptyMsg,setProgressSummary,setElementText,setElementValue,setElementClass,setElementHidden,setElementDisabled,setElementAttribute,setElementStyle,setTextSafe,cachedElements,clampText,clampArray,wipeObject,boundedInt,boundedNumber,safeBoolean,finiteNumber,optionalBoundedNumber,optionalText,sameDataValue}=FoundationHostModule.createPrimitives({document,APP_LIMITS,CompletionModel:{fromUnits:(done,total)=>CompletionModel.fromUnits(done,total)}});
 // Data access is instantiated after the codecs through the private repository module.
@@ -301,25 +260,13 @@ if(!Object.isFrozen(BackupOperationDiagnostics)||BackupOperationDiagnostics.form
 }
 const DecisionClock=Object.freeze({nowMs:()=>Date.now()});
 /* INSTALLATION IDENTITY + PERSISTENCE HELPERS · IMPORTED */
-const InstallationIdentity=PersistenceModule.createInstallationIdentity(Object.freeze({
-  local:LocalStorageContract,
-  keys:Object.freeze({installationId:STORAGE_KEYS.installationId}),
-  describe:()=>PersistenceModule.describeDevice(navigator)
+const {
+  randomIdPart,normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis,jsonByteLength
+}=PersistenceModule;
+const InstallationIdentity=DataBootstrapHostModule.createInstallationIdentity(Object.freeze({
+  module:PersistenceModule,local:LocalStorageContract,installationKey:STORAGE_KEYS.installationId,navigator
 }));
-// "iPhone · Safari", "This device", or '' when an ID does not say.
-const deviceName=(id,others=[])=>String(id||'')===InstallationIdentity.getId()?'This device':PersistenceModule.deviceName(id,[...others,InstallationIdentity.getId()]);
-// The folders a profile's backups live in: "Study Director – Ana" on Google
-// Drive, "Study Director - Ana - iPhone Safari" in the Device Folder. The
-// names are for people; a marker inside each says whose it is. Device Folder
-// names use plain letters only (accents dropped, other scripts left out),
-// because some file systems map other characters onto another folder.
-function backupFolderName({device=false}={}){
-  const plain=value=>device?String(value||'').normalize('NFKD').replace(/[\u0300-\u036f]/gu,'').replace(/[^\x20-\x7e]+/gu,' '):String(value||'');
-  const clean=value=>plain(value).replace(/[\u0000-\u001f\\/:*?"<>|]+/gu,' ').replace(/\s+/gu,' ').trim().replace(/[. ]+$/u,'').slice(0,48).trim();
-  const parts=[clean(Profiles.current()?.name),device?clean(PersistenceModule.deviceName(InstallationIdentity.getId()).replace(' · ',' '))||'Device':''].filter(Boolean),separator=device?' - ':' – ';
-  return parts.length?`${EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix}${separator}${parts.join(separator)}`:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder;
-}
-// The people who use Study Director on this device (core/profiles.ts).
+// The people who use Study Director on this device (core/profiles.ts).// The people who use Study Director on this device (core/profiles.ts).
 const Profiles=ProfilesHostModule.createController(Object.freeze({module:ProfilesModule,ports:Object.freeze({
   scope:Object.freeze({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
   storage:Object.freeze({
@@ -338,9 +285,9 @@ const Profiles=ProfilesHostModule.createController(Object.freeze({module:Profile
   limits:Object.freeze({maxName:APP_LIMITS.maxStudentNameChars})
 })}));
 Profiles.watch();
-const {
-  randomIdPart,normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis,jsonByteLength
-}=PersistenceModule;
+const {deviceName,backupFolderName}=DataBootstrapHostModule.createNaming(Object.freeze({
+  module:PersistenceModule,identity:InstallationIdentity,currentProfile:()=>Profiles.current(),repositories:EXTERNAL_REPOSITORY_IDENTITIES
+}));
 /* SHARED PURE HELPERS */
 /* Internal domain-module boundary. */
 const DOMAIN_LIMITS=Object.freeze({
@@ -2851,7 +2798,8 @@ async function attemptAutoRestoreActiveSession(){
   return false;
 }
 /* INDEXEDDB STORE ADAPTERS · IMPORTED */
-const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
+const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze({
+  module:PersistenceModule,
   config:Object.freeze({
     dbName:DB_NAME,
     dbVersion:DB_VER,
@@ -2870,12 +2818,11 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     onReset:event=>{void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
   })
+
 }));
 const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.noteKeys.isKey}));
-const AppMetaGateway=AppMetaModule.create(Object.freeze({
-  indexedDb:Object.freeze({transaction:IndexedDb.transaction,strictTransaction:IndexedDb.strictTransaction,get:IndexedDb.get,getAll:IndexedDb.getAll}),
-  store:DB_APP_META_STORE,
-  registry:APP_META_REGISTRY
+const AppMetaGateway=DataBootstrapHostModule.createAppMetaGateway(Object.freeze({
+  module:AppMetaModule,indexedDb:IndexedDb,store:DB_APP_META_STORE,registry:APP_META_REGISTRY
 }));
 // Data this build cannot read stays exactly as it is. Every start, before
 // anything reads stored data, the census finds it: a record whose version is
@@ -2888,101 +2835,41 @@ const AppMetaGateway=AppMetaModule.create(Object.freeze({
 // usual. A database a newer build changed so much that a store this build
 // needs is gone, or keyed differently, is not opened: the profile waits for
 // an update and the person can use another profile meanwhile.
-const UnsupportedData=(()=>{
-  const schemaVersion=schema=>{const match=/\.v(\d+)$/u.exec(String(schema||''));return match?Number(match[1]):0;};
-  const recordStores=Object.freeze(Object.entries(DATA_CONTRACT.storage.stores).filter(([id])=>id!=='appMeta').map(([id,value])=>Object.freeze([DB_STORES[id],schemaVersion(value.schema),id==='dailySummaries'?'summaryVersion':'version'])));
-  const envelopeVersion=Number(DATA_CONTRACT.schemas.AppMeta?.version)||1;
-  const recordVerdict=(max,field)=>value=>value&&typeof value==='object'&&Number(value[field])===max?'':Number(value?.[field])>max?'newer':'unreadable';
-  function metaVerdict(row){
-    const key=String(row&&row.key||'');if(!key)return '';
-    if(row&&typeof row==='object'&&Number(row.version)>envelopeVersion)return 'newer';
-    const family=AppMetaGateway.resolve(key);
-    if(!family)return 'unknown';
-    if(AppMetaGateway.readable(row))return '';
-    const value=row&&row.value,newer=!!value&&typeof value==='object'&&Number(value.version)>schemaVersion(family.schema);
-    return Object.freeze({reason:newer?'newer':'unreadable',replaceable:family.protection==='operational'});
-  }
-  let blocked=null;
-  async function census(){
-    const topology=await IndexedDb.topology();
-    if(topology.newer&&!topology.usable){
-      blocked=Object.freeze({version:topology.version,missing:topology.missing,changed:topology.changed});
-      throw Object.assign(new Error(`This profile was saved by a newer version of Study Director (database ${topology.version}), which this version cannot open.`),{code:'STUDY_DIRECTOR_PROFILE_NEEDS_UPDATE'});
-    }
-    for(const [store,max,field] of recordStores)await IndexedDb.unsupported.scan(store,recordVerdict(max,field));
-    // A Saved Day and its summary are one item: either one held holds the other.
-    for(const [from,to] of [[DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE],[DB_DAILY_SUMMARY_STORE,DB_DAILY_RECORD_STORE]])for(const key of IndexedDb.unsupported.keys(from))IndexedDb.unsupported.hold(to,key,'same-day');
-    await IndexedDb.unsupported.scan(DB_APP_META_STORE,metaVerdict);
-    return summary();
-  }
-  // What the person is told about: Saved Days, notes, attachments, a session
-  // and settings, never the bookkeeping this build replaces.
-  function summary(){
-    const keys=store=>IndexedDb.unsupported.keys(store),days=new Set([...keys(DB_DAILY_RECORD_STORE),...keys(DB_DAILY_SUMMARY_STORE)].map(String));
-    const meta=keys(DB_APP_META_STORE).filter(key=>{const family=AppMetaGateway.resolve(key);return !family||family.protection!=='operational';}).length;
-    const items=Object.freeze({days:days.size,notes:keys(DB_NOTES_STORE).length,attachments:keys(DB_ASSET_STORE).length,sessions:keys(DB_ACTIVE_SESSION_STORE).length,settings:meta});
-    const total=Object.values(items).reduce((sum,count)=>sum+count,0);
-    const stored=IndexedDb.unsupported.summary();
-    return Object.freeze({total,held:stored.total,protected:stored.protected,stores:stored.stores,reasons:stored.reasons,items,blocked});
-  }
-  // Protected data is held (bookkeeping this build replaces does not count).
-  const held=()=>IndexedDb.unsupported.summary().protected>0;
-  function describe(state=summary()){
-    const parts=[['days','Saved Day'],['notes','note'],['attachments','attachment'],['sessions','study session'],['settings','setting']].filter(([id])=>state.items[id]>0).map(([id,label])=>`${state.items[id]} ${label}${state.items[id]===1?'':'s'}`);
-    return parts.length>1?`${parts.slice(0,-1).join(', ')} and ${parts.at(-1)}`:parts[0]||'';
-  }
-  let noticeShown=false;
-  function announce(){
-    const state=summary();if(!state.total||noticeShown)return false;noticeShown=true;
-    NoticeCoordinator.emit({source:'unsupported-data',id:'held',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:true,
-      title:'Some data is from a newer version',
-      message:`This device has ${describe(state)} saved by a newer version of Study Director. This version leaves them exactly as they are and works with everything else; Drive sync waits until the app is updated.`,
-      action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
-    return true;
-  }
-  // The profile cannot be opened: shown instead of the start-up failure.
-  function reportBlocked(){
-    if(!blocked)return false;
-    const others=Profiles.list().filter(row=>row.scope!==ProfileScope.scope);
-    NoticeCoordinator.emit({source:'unsupported-data',id:'blocked',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'blocking',surface:'toast',dismissible:false,
-      title:'This profile needs a newer version',
-      message:'This profile was saved by a newer version of Study Director, which changed how its data is stored. This version leaves it exactly as it is. Update the app to open it, or use another profile meanwhile.',
-      action:{label:'Check for update',opens:true,run:()=>void PwaLifecycle.checkForUpdate().catch(error=>AppDiagnostics.capture('unsupported-data.update-check',error,'warn'))},
-      secondaryAction:others.length?{label:`Open ${others[0].name||'another profile'}`,run:()=>{try{Profiles.switchTo(others[0].id);}catch(error){AppDiagnostics.capture('unsupported-data.switch-profile',error,'warn');}}}:{label:'Start a new profile',run:()=>{try{Profiles.add();}catch(error){AppDiagnostics.capture('unsupported-data.add-profile',error,'warn');}}}});
-    return true;
-  }
-  return Object.freeze({census,summary,held,describe,announce,reportBlocked,blocked:()=>blocked});
-})();
-const RepositoryAppMetaValidators=RepositoryModule.createAppMetaValidators(Object.freeze({
-  limits:APP_LIMITS,
-  dataContract:DATA_CONTRACT,
-  personalDataCodec:PersonalDataCodec,
-  pendingReviewCodec:PendingReviewCodec,
-  helpers:Object.freeze({isValidIsoDate,isNoteId:DailyRecordCodec.noteKeys.isId,isNoteKey:DailyRecordCodec.noteKeys.isKey,normalizeTimestamp,sameDataValue})
+const UnsupportedData=DataBootstrapHostModule.createUnsupportedData(Object.freeze({
+  dataContract:DATA_CONTRACT,stores:DB_STORES,indexedDb:IndexedDb,appMeta:AppMetaGateway,profiles:Profiles,profileScope:ProfileScope,notices:NoticeCoordinator,
+  checkUnsupportedUpdate:()=>checkUnsupportedUpdate(),
+  checkForUpdate:()=>PwaLifecycle.checkForUpdate(),
+  capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
 }));
-AppMetaGateway.registerValidators('repositories',RepositoryAppMetaValidators);
-AppMetaGateway.registerValidators('journals',RepositoryJournalModule.createAppMetaValidators(Object.freeze({limits:APP_LIMITS})));
-AppMetaGateway.registerValidators('host',HostMetadataModule.createAppMetaValidators(Object.freeze({
-  keys:Object.freeze({
-    verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
-    attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,
-    repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
-    reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix
+const {RepositoryAppMeta,JournalAppMeta,HostAppMeta,ExportsAppMeta,DeviceFolderAppMeta,BackupAppMeta}=DataBootstrapHostModule.createMetadataOwners(Object.freeze({
+  gateway:AppMetaGateway,
+  repositoriesModule:RepositoryModule,
+  repositoryValidatorInput:Object.freeze({
+    limits:APP_LIMITS,
+    dataContract:DATA_CONTRACT,
+    personalDataCodec:PersonalDataCodec,
+    pendingReviewCodec:PendingReviewCodec,
+    helpers:Object.freeze({isValidIsoDate,isNoteId:DailyRecordCodec.noteKeys.isId,isNoteKey:DailyRecordCodec.noteKeys.isKey,normalizeTimestamp,sameDataValue})
   }),
-  same:sameDataValue,
-  normalizers:Object.freeze({
-    verifiedRecovery:normalizeVerifiedRecoveryState,attachmentIntegrity:normalizeAttachmentIntegrityState,
-    repositoryIntegrity:normalizeRepositoryIntegrityState,
-    reconciliationBase:ReconciliationBaselineCodec.normalizeHeader,reconciliationBaseNote:ReconciliationBaselineCodec.normalizeNote,reconciliationBaseDays:ReconciliationBaselineCodec.normalizeDays
+  journalsModule:RepositoryJournalModule,
+  journalLimits:APP_LIMITS,
+  hostMetadataModule:HostMetadataModule,
+  hostValidatorInput:Object.freeze({
+    keys:Object.freeze({
+      verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
+      attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,
+      repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
+      reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix
+    }),
+    same:sameDataValue,
+    normalizers:Object.freeze({
+      verifiedRecovery:normalizeVerifiedRecoveryState,attachmentIntegrity:normalizeAttachmentIntegrityState,
+      repositoryIntegrity:normalizeRepositoryIntegrityState,
+      reconciliationBase:ReconciliationBaselineCodec.normalizeHeader,reconciliationBaseNote:ReconciliationBaselineCodec.normalizeNote,reconciliationBaseDays:ReconciliationBaselineCodec.normalizeDays
+    })
   })
-})));
-const RepositoryAppMeta=AppMetaGateway.bind('repositories');
-const JournalAppMeta=AppMetaGateway.bind('repository-journals');
-const HostAppMeta=AppMetaGateway.bind('host');
-const ExportsAppMeta=AppMetaGateway.bind('exports');
-const DeviceFolderAppMeta=AppMetaGateway.bind('device-backup');
-const BackupAppMeta=AppMetaGateway.bind('backup');
-const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze({
+}));
+const ReconciliationBaselineStore=const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze({
   codec:ReconciliationBaselineCodec,meta:HostAppMeta,
   families:Object.freeze({header:'reconciliationBase',notes:'reconciliationBaseNotePrefix',days:'reconciliationBaseDayPrefix'})
 }));
@@ -3282,77 +3169,80 @@ function handleCanonicalCommit(event){
 }
 
 async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
-const RepositoryJournals=RepositoryJournalModule.create(Object.freeze({
-  appMeta:JournalAppMeta,
-  limits:APP_LIMITS,
-  helpers:Object.freeze({clampText}),
-  clock:Object.freeze({nowMs:DecisionClock.nowMs})
-}));
-const AppData=RepositoryModule.createAppData(Object.freeze({
-  local:LocalStorageContract,
-  indexedDb:IndexedDb,
-  appMeta:RepositoryAppMeta,
-  installationIdentity:InstallationIdentity,
-  dailyRecordCodec:DailyRecordCodec,
-  activeSessionCodec:ActiveSessionCodec,
-  personalDataCodec:PersonalDataCodec,
-  pendingReviewCodec:PendingReviewCodec,
-  keyedRecord:KeyedRecord,
-  journals:RepositoryJournals,
-  notesRepositoryModule:NotesRepositoryModule,
-  saveLaneModule:SaveLaneModule,
-  limits:APP_LIMITS,
-  dataContract:DATA_CONTRACT,
-  stores:Object.freeze({
-    dailyRecords:DB_DAILY_RECORD_STORE,
-    dailySummaries:DB_DAILY_SUMMARY_STORE,
-    notes:DB_NOTES_STORE,
-    activeSessions:DB_ACTIVE_SESSION_STORE,
-    appMeta:DB_APP_META_STORE
+const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryComposition(Object.freeze({
+  repositoriesModule:RepositoryModule,
+  journalsModule:RepositoryJournalModule,
+  journal:Object.freeze({
+    appMeta:JournalAppMeta,
+    limits:APP_LIMITS,
+    helpers:Object.freeze({clampText}),
+    clock:Object.freeze({nowMs:DecisionClock.nowMs})
   }),
-  keys:Object.freeze({
-    recovery:STORAGE_KEYS.recovery,
-    fallbackDailyRecords:STORAGE_KEYS.fallbackDailyRecords,
-    noteRescue:STORAGE_KEYS.noteRescue,
-    deletionRecovery:STORAGE_KEYS.deletionRecovery
-  }),
-  metaKeys:Object.freeze({
-    planDraft:APP_META_KEYS.planDraft,
-    planLibrary:APP_META_KEYS.planLibrary,
-    personalPreferences:APP_META_KEYS.personalPreferences,
-    canonicalMutationEpoch:APP_META_KEYS.canonicalMutationEpoch,
-    backupPreparationUnitPrefix:APP_META_KEYS.backupPreparationUnitPrefix,
-    insightsDatasetRevision:APP_META_KEYS.insightsDatasetRevision,
-    dataMaintenance:APP_META_KEYS.dataMaintenance,
-    savedDayDeletionPrefix:APP_META_KEYS.savedDayDeletionPrefix,
-    noteDeletionPrefix:APP_META_KEYS.noteDeletionPrefix,
-    attachmentDeletionPrefix:APP_META_KEYS.attachmentDeletionPrefix,
-    pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix,
-  }),
-  activeSessionId:ACTIVE_SESSION_ID,
-  clock:Object.freeze({nowMs:DecisionClock.nowMs}),
-  helpers:Object.freeze({
-    boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
-    activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay,normalizeTimestamp,jsonByteLength
-  }),
-  hooks:Object.freeze({
-    canMutate:appCanMutate,
-    getOwnershipRevision:()=>AppOwnership.revision,
-    issueWriteToken:(reason,options)=>AppOwnership.issueWriteToken(reason,options),
-    assertWriteToken:(token,reason)=>AppOwnership.assertWriteToken(token,reason),
-    isOwnershipLostError:error=>AppOwnership.isOwnershipLostError(error),
-    capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
-    onStorageOk:markStorageHealthOk,
-    onStorageError:markStorageHealthError,
-    onNotesChanged:refreshNoteConsumers,
-    onNoteSyncState:setNoteSyncStateForKey,
-    onNoteConflict:reportNoteConflict,
-    onDailyRecordsChanged:handleRepositoryDailyRecordsChanged,
-    onDatasetRevisionChanged:handleRepositoryDatasetRevisionChanged,
-    onCanonicalCommit:handleCanonicalCommit
+  appData:Object.freeze({
+    local:LocalStorageContract,
+    indexedDb:IndexedDb,
+    appMeta:RepositoryAppMeta,
+    installationIdentity:InstallationIdentity,
+    dailyRecordCodec:DailyRecordCodec,
+    activeSessionCodec:ActiveSessionCodec,
+    personalDataCodec:PersonalDataCodec,
+    pendingReviewCodec:PendingReviewCodec,
+    keyedRecord:KeyedRecord,
+    notesRepositoryModule:NotesRepositoryModule,
+    saveLaneModule:SaveLaneModule,
+    limits:APP_LIMITS,
+    dataContract:DATA_CONTRACT,
+    stores:Object.freeze({
+      dailyRecords:DB_DAILY_RECORD_STORE,
+      dailySummaries:DB_DAILY_SUMMARY_STORE,
+      notes:DB_NOTES_STORE,
+      activeSessions:DB_ACTIVE_SESSION_STORE,
+      appMeta:DB_APP_META_STORE
+    }),
+    keys:Object.freeze({
+      recovery:STORAGE_KEYS.recovery,
+      fallbackDailyRecords:STORAGE_KEYS.fallbackDailyRecords,
+      noteRescue:STORAGE_KEYS.noteRescue,
+      deletionRecovery:STORAGE_KEYS.deletionRecovery
+    }),
+    metaKeys:Object.freeze({
+      planDraft:APP_META_KEYS.planDraft,
+      planLibrary:APP_META_KEYS.planLibrary,
+      personalPreferences:APP_META_KEYS.personalPreferences,
+      canonicalMutationEpoch:APP_META_KEYS.canonicalMutationEpoch,
+      backupPreparationUnitPrefix:APP_META_KEYS.backupPreparationUnitPrefix,
+      insightsDatasetRevision:APP_META_KEYS.insightsDatasetRevision,
+      dataMaintenance:APP_META_KEYS.dataMaintenance,
+      savedDayDeletionPrefix:APP_META_KEYS.savedDayDeletionPrefix,
+      noteDeletionPrefix:APP_META_KEYS.noteDeletionPrefix,
+      attachmentDeletionPrefix:APP_META_KEYS.attachmentDeletionPrefix,
+      pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix
+    }),
+    activeSessionId:ACTIVE_SESSION_ID,
+    clock:Object.freeze({nowMs:DecisionClock.nowMs}),
+    helpers:Object.freeze({
+      boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
+      activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay,normalizeTimestamp,jsonByteLength
+    }),
+    hooks:Object.freeze({
+      canMutate:appCanMutate,
+      getOwnershipRevision:()=>AppOwnership.revision,
+      issueWriteToken:(reason,options)=>AppOwnership.issueWriteToken(reason,options),
+      assertWriteToken:(token,reason)=>AppOwnership.assertWriteToken(token,reason),
+      isOwnershipLostError:error=>AppOwnership.isOwnershipLostError(error),
+      capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+      onStorageOk:markStorageHealthOk,
+      onStorageError:markStorageHealthError,
+      onNotesChanged:refreshNoteConsumers,
+      onNoteSyncState:setNoteSyncStateForKey,
+      onNoteConflict:reportNoteConflict,
+      onDailyRecordsChanged:handleRepositoryDailyRecordsChanged,
+      onDatasetRevisionChanged:handleRepositoryDatasetRevisionChanged,
+      onCanonicalCommit:handleCanonicalCommit
+    })
   })
 }));
-// Saves made before the startup repair still continue the change clock from
+// Saves made before the startup repair still continue the change clock// Saves made before the startup repair still continue the change clock from
 // the last recorded save, even if the system clock went back across a reload.
 try{AppData.mutationEpoch.seedChangeClock(readStorageHealth().lastLocalSaveAt);}catch(error){AppDiagnostics.capture('backup.change-clock-seed',error,'warn');}
 if(!Object.isFrozen(AppData)||AppData.format!=='study-director.app-data'||AppData.contractVersion!==1){

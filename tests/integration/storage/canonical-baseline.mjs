@@ -1,4 +1,4 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import {dailyRecordCodec,dataContract} from '../../helpers/current-codec-fixture.mjs';
 const stamp='2026-09-10T10:00:00.000Z',current=dailyRecordCodec.createDiaryRecord('2026-09-09','Canonical reflection',{savedAt:stamp,updatedAt:stamp});
@@ -12,7 +12,7 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-baseline',currentVali
 
 // The startup census must use each store's canonical version field. Summaries
 // use summaryVersion; treating them as unsupported also hides their Saved Day.
-const {default:fs}=await import('node:fs'),{default:vm}=await import('node:vm');
+const {default:vm}=await import('node:vm');
 const stores=Object.fromEntries(Object.keys(dataContract.storage.stores).map(name=>[name,new Map()])),held=new Map();
 const hold=(store,key,reason)=>{if(!held.has(store))held.set(store,new Map());held.get(store).set(key,reason);};
 const indexedDb={
@@ -22,13 +22,18 @@ const indexedDb={
     hold,keys:store=>[...(held.get(store)?.keys()||[])],summary:()=>({total:[...held.values()].reduce((sum,rows)=>sum+rows.size,0),protected:[...held.values()].reduce((sum,rows)=>sum+rows.size,0),stores:{},reasons:{}})
   }
 };
-const host=readHostHtml(),begin=host.indexOf('const UnsupportedData=(()=>{'),end=host.indexOf('const RepositoryAppMetaValidators=',begin);
-assert.ok(begin>=0&&end>begin);
-const census=vm.runInNewContext(host.slice(begin,end)+'\nUnsupportedData;',{
-  DATA_CONTRACT:dataContract,DB_STORES:Object.fromEntries(Object.keys(stores).map(name=>[name,name])),
-  DB_DAILY_RECORD_STORE:'dailyRecords',DB_DAILY_SUMMARY_STORE:'dailySummaries',DB_NOTES_STORE:'notes',DB_ACTIVE_SESSION_STORE:'activeSessions',DB_APP_META_STORE:'appMeta',DB_ASSET_STORE:'assets',
-  IndexedDb:indexedDb,AppMetaGateway:{resolve:()=>({schema:'Setting.v1',protection:'protect'}),readable:row=>row.value?.version===1}
-});
+const context=vm.createContext({console,Error,TypeError,Object,Array,String,Number,Map,Set,JSON,Date,Math,Symbol,Promise,RegExp});
+context.globalThis=context;
+for(const file of ['internal','data-bootstrap-host'])vm.runInContext(readCoreScript(file),context,{filename:file});
+const DataBootstrap=context[Symbol.for('studyDirector.internalModules.v1')].require('data-bootstrap-host',1);
+const census=DataBootstrap.createUnsupportedData(Object.freeze({
+  dataContract,stores:Object.freeze(Object.fromEntries(Object.keys(stores).map(name=>[name,name]))),indexedDb,
+  appMeta:Object.freeze({resolve:()=>({schema:'Setting.v1',protection:'protect'}),readable:row=>row?.value?.version===1}),
+  profiles:Object.freeze({list:()=>[],switchTo:()=>false,add:()=>false}),
+  profileScope:Object.freeze({scope:''}),
+  notices:Object.freeze({emit:()=>null}),
+  checkUnsupportedUpdate:()=>null,checkForUpdate:()=>Promise.resolve(),capture:()=>null
+}));
 stores.dailyRecords.set(current.date,current);stores.dailySummaries.set(current.date,{date:current.date,summaryVersion:dataContract.schemas.DailySummary.version});
 stores.notes.set('current',{version:dataContract.schemas.Note.version});stores.activeSessions.set('current',{version:dataContract.schemas.ActiveSession.version});stores.assets.set('current',{version:2});stores.appMeta.set('current',{key:'current',version:1,value:{version:1}});
 assert.equal((await census.census()).held,0,'all current canonical store versions, including summaries, remain readable');
