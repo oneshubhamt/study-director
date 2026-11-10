@@ -61,6 +61,8 @@ for(const token of ['claimSessionOwnership','continueSessionHere','BackupProvide
   assert.equal(sessionHost.includes(token),false,`P5.4B session host must not absorb P5.4C distributed ownership: ${token}`);
 }
 assert.match(host,/SessionHandoffModule\.createController\(Object\.freeze\(\{/u,'distributed session ownership crosses the checked P5.4C handoff boundary');
+assert.match(host,/function reconcileReviewRichTextAfterPrimaryRestore\(\)[\s\S]*richTextReconcileExternal\(field,canonical,revision\)[\s\S]*reconciled\.status==='conflict'[\s\S]*(?:richTextSyncAll\(\)|richTextSyncField\(field\))/u,'ownership return reconciles the mounted Review rich-text surface from canonical state without overwriting a dirty editor');
+assert.match(host,/SessionLifecycle\.reconcile\('ownership-primary',[\s\S]*queueMicrotask\(reconcileReviewRichTextAfterPrimaryRestore\)/u,'Review rich-text reconciliation runs only after ownership-primary lifecycle hydration has rebound canonical Review state');
 assert.doesNotMatch(sessionHandoff,/Date\.now\(\)|new Date\(/u,'handoff decisions and stamps use injected clocks');
 for(const token of ['BackupProviderRuntime','AppData.activeSession','google-drive','document.','window.']){
   assert.equal(sessionHandoff.includes(token),false,`P5.4C handoff core consumes ports instead of host/provider implementation details: ${token}`);

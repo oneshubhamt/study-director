@@ -1102,13 +1102,31 @@ function dismissStorageWarning(){
     NoticeCoordinator.acknowledge(active.id);
   }
 }
+function reconcileReviewRichTextAfterPrimaryRestore(){
+  const field=document.getElementById('daily-reflection');
+  if(!(field instanceof HTMLTextAreaElement))return false;
+  const canonical=String(currentReviewSnapshot()?.reflection||'');
+  const revision=[field.dataset.reviewDate||'',field.dataset.reviewOwnershipRevision||'',field.dataset.reviewLifecycleRevision||''].join(':');
+  const reconciled=richTextReconcileExternal(field,canonical,revision);
+  if(reconciled.status==='conflict'){
+    AppDiagnostics.capture('ownership.review-rich-text',new Error('The Review rich-text editor still has unsaved local changes after ownership hydration.'),'warn');
+    return false;
+  }
+  if(reconciled.status==='unmounted')richTextSyncAll();
+  else richTextSyncField(field);
+  return true;
+}
 function resumeTimerLoopAfterPrimaryRestore(){
   try{
     if(SessionHandoffRuntime?.frozen())return false;
     const resumed=TimerEngine.resumeAfterPrimaryRestore();
-    if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{
-      date:getReviewDate(),
-    });
+    if(StartupLifecycle.status().fullyInitialized){
+      SessionLifecycle.reconcile('ownership-primary',{date:getReviewDate()});
+      // Lifecycle reconciliation refreshes canonical Review state and binding
+      // revisions. Reconcile the already-mounted rich editor afterwards so a
+      // tab that regains ownership cannot keep showing the prior owner's view.
+      queueMicrotask(reconcileReviewRichTextAfterPrimaryRestore);
+    }
     return resumed;
   }catch(e){AppDiagnostics.capture('ownership.resume-timer',e,'error');return false;}
 }
