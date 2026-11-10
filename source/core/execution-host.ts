@@ -142,7 +142,7 @@ function createExecutionSchedule(input:Readonly<ExecutionScheduleInput>):Readonl
   function effectiveNowMin(date=new Date()){return time.clockMinuteToStudyMinute(time.minuteOfDay(date));}
   function plannedRows(){
     const rows=tasks.map((task,index)=>({idx:index,t:task,start:adjustedStartMin(index),end:adjustedEndMin(index),plannedStart:originalStartMin(index),plannedEnd:originalEndMin(index),adjusted:hasAdjustedTiming(index)}));
-    return model.chronologicalRows(rows) as ExecutionScheduleRow[];
+    return model.chronologicalRows(rows);
   }
   function isInsideAdjustedWindow(index:number|null|undefined,date=new Date()){
     if(index===null||index===undefined||!tasks[index])return false;
