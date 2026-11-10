@@ -43,6 +43,7 @@ jobs:
           node tests/architecture/app/protected-mutation-ui-contract.mjs
           node tests/architecture/app/presentation-contracts.mjs
           node tests/architecture/security/security-policy.mjs
+          node tests/architecture/app/runtime-boundaries.mjs
       - name: Plan authoring browser journeys
         run: |
           node tests/browser/app/core-flow.mjs

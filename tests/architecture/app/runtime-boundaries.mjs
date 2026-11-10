@@ -80,6 +80,17 @@ assert.doesNotMatch(timer,/Date\.now\(\)/,'Timer state-machine timing must use i
 console.log(JSON.stringify({status:'PASS',boundary:'practice-pacer',pureModel:true,timerOrchestrationOnly:true},null,2));
 }
 
+{ // plan-authoring-runtime-boundary
+const plan=readScript('source/core/plan.ts');
+for(const token of ['TimerEngine','TimerState','SessionLifecycle','AppData.activeSession','flushLiveDraft','restoreSessionState','setCurrentTask','Pomodoro','PracticePacer']){
+  assert.equal(plan.includes(token),false,`Plan authoring must not absorb live runtime ownership: ${token}`);
+}
+assert.match(plan,/scheduleGateway\.apply\(lastParsed,/u,'validated Plan application must cross the scheduleGateway runtime port');
+assert.match(plan,/if\(opts\.persistDraft===false\)return apply\(\);/u,'canonical session restoration must retain its synchronous no-draft-write seam');
+assert.match(plan,/save\(\{strictDurability:true\}\)/u,'user-authored Apply/Done remains gated by strict durable draft persistence');
+console.log(JSON.stringify({status:'PASS',boundary:'plan-authoring-runtime',runtimePort:'scheduleGateway',directRuntimeOwnership:false,synchronousRestoreSeam:true},null,2));
+}
+
 { // presentation-surface-boundary
 const app=readHostHtml();
 assert.match(app,/<html[^>]*data-presentation="glass"[^>]*data-typography="glass"[^>]*data-shape="glass"[^>]*data-material="glass"[^>]*data-depth="glass"/u,'Glass must be the pre-hydration presentation before bootstrap JavaScript runs.');
