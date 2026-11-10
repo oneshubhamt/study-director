@@ -298,7 +298,7 @@ function createScheduleRow(row:PlanTimelineRow,rt:PlanRealtimeState){
 }
 /* PLAN DRAFT STATE AND BOARD CONTROLS */
 function draftTextFromRows(rows:readonly PlanRow[]){
-  return (Array.isArray(rows)?rows:[]).map(row=>[
+  return rows.map(row=>[
     String(row&&row.start||''),
     row&&row.dur!==undefined?String(row.dur):'',
     String(row&&row.name||''),
@@ -310,9 +310,9 @@ function draftTextFromRows(rows:readonly PlanRow[]){
 }
 function immutableDraftResult(result:PlanParseResult|ImmutablePlanDraft|null|undefined):ImmutablePlanDraft{
   const source=(result&&typeof result==='object'?result:{}) as Partial<PlanParseResult>;
-  const parsed=freeze((Array.isArray(source.parsed)?source.parsed:[]).map(row=>freeze({...row})));
-  const errors=freeze((Array.isArray(source.errors)?source.errors:[]).map(String));
-  const warnings=freeze((Array.isArray(source.warnings)?source.warnings:[]).map(String));
+  const parsed=freeze((source.parsed??[]).map(row=>freeze({...row})));
+  const errors=freeze((source.errors??[]).map(String));
+  const warnings=freeze((source.warnings??[]).map(String));
   return freeze({
     ok:source.ok===true,kind:String(source.kind||'errors'),message:String(source.message||''),
     parsed,errors,warnings
@@ -366,7 +366,7 @@ function createPlanDraftProjection(result:PlanParseResult|ImmutablePlanDraft|nul
   });
 }
 function setParsedScheduleDraft(rows:readonly PlanRow[]){
-  lastParsed=Array.isArray(rows)?rows.map(row=>({...row})):[];
+  lastParsed=rows.map(row=>({...row}));
 }
 function keepAppliedScheduleOnReapply(parsed:readonly PlanRow[],rawOriginal:unknown,options:Readonly<PlanApplyOptions>={}){
   setParsedScheduleDraft(parsed);
@@ -648,7 +648,7 @@ const PlanDraftEditor=(()=>{
   function queueSave(delay:number=SAVE_DELAY_MS){
     if(!ownership.canMutate())return false;
     clearTimer('save');
-    draftSaveTimer=setTimeout(()=>{draftSaveTimer=null;persistNow();},Math.max(0,Number(delay)||SAVE_DELAY_MS));
+    draftSaveTimer=setTimeout(()=>{draftSaveTimer=null;void persistNow();},Math.max(0,Number(delay)||SAVE_DELAY_MS));
     return true;
   }
   function flush(options:Readonly<PlanDraftSaveOptions>={}){return draftSaveTimer?save(options):true;}
