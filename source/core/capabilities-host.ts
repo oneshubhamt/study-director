@@ -138,7 +138,12 @@ function createBadge(ports:CapabilityBadgeInput){
       const loaded=await repository.load();
       const confirmed=!!(loaded?.storage?.idb&&persistedActiveSessionUnfinished(loaded.value));
       return native.updateBadge(confirmed);
-    }catch(error){capture('native.badge-refresh',error);return native.updateBadge(false);}
+    }catch(error){
+      capture('native.badge-refresh',error);
+      // An unavailable canonical read is unknown, not proof that no session
+      // remains. Preserve the last badge state until a canonical read succeeds.
+      return false;
+    }
   }
   return Object.freeze({syncFromCanonicalCommit,refreshPersistedSessionBadge});
 }

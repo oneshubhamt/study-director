@@ -118,6 +118,18 @@ controller.offerInstallNotice();
 assert.equal(controller.status().installNoticeVisible,false,'an already installed app must not show the first-run notice');
 
 await controller.updateBadge(true);assert.equal(badge,1);
+{
+  const badgeErrors=[];
+  const adapter=CapabilitiesHost.createBadge(Object.freeze({
+    controller:()=>controller,
+    activeSession:()=>Object.freeze({settled:async()=>{throw new Error('canonical session unavailable');},load:async()=>null}),
+    persistedActiveSessionUnfinished:()=>false,
+    capture:(scope,error)=>badgeErrors.push({scope,message:String(error)})
+  }));
+  assert.equal(await adapter.refreshPersistedSessionBadge(),false);
+  assert.equal(badge,1,'an unavailable canonical session read preserves the prior badge instead of asserting emptiness');
+  assert.ok(badgeErrors.some(row=>row.scope==='native.badge-refresh'));
+}
 await controller.updateBadge(false);assert.equal(badge,0);
 assert.equal(captures.length,0);
 assert.ok(renders.some(state=>state.wakeAcquired));
@@ -198,5 +210,5 @@ assert.match(unsupportedState.storageMessage,/browser-managed/i);
 console.log(JSON.stringify({
   status:'PASS',schedulerPorts:true,persistenceAutoRequested:true,persistenceRetryAvailable:true,wakeLifecycle:true,
   persistenceDenialSafe:true,persistenceUnsupportedSafe:true,rejectedApisContained:true,rejectedWakeAndInstallSafe:true,
-  installGuidance:true,malformedInstallPromptIgnored:true,installedTabRemainsBrowser:true,badgeBestEffort:true,checkedHostAdapter:true,wakeRequests,persistCalls
+  installGuidance:true,malformedInstallPromptIgnored:true,installedTabRemainsBrowser:true,badgeBestEffort:true,badgeUnknownPreserved:true,checkedHostAdapter:true,wakeRequests,persistCalls
 },null,2));
