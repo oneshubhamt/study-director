@@ -155,6 +155,10 @@ assert.equal(completion.toggleDoneState(0),null);
 assert.equal(taskState.getField(0,'completion'),55,'reopening preserves genuine manual completion evidence');
 assert.equal(taskState.getField(0,'completionSource'),'manual');
 assert.equal(completion.toggleDoneState(99),false,'invalid task indices fail closed');
+taskState.setField(0,'notes',{done:1,total:2});
+const clearedProgress=completion.syncProgressInputsToState(0,{done:null,total:null,pct:null,hasDone:false,hasTotal:false});
+assert.equal(clearedProgress.changed,true);
+assert.equal(taskState.getField(0,'notes'),undefined,'blank progress inputs prune empty runtime evidence');
 
 controller.clearSession();
 assert.equal(controller.mode,'empty');
