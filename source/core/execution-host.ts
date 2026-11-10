@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {CompletionEvidenceController,CompletionEvidenceInput,ExecutionHostInput,ExecutionScheduleController,ExecutionScheduleInput,ExecutionScheduleRow,RealTimeScheduleState,RuntimeTaskSessionFields,TaskIdentityPort,TaskResolvedState,TaskSessionField,TaskSessionStore} from '../../types/execution-host.ts';
+import type {CompletionEvidenceController,CompletionEvidenceInput,ExecutionAnchorRow,ExecutionHostInput,ExecutionScheduleController,ExecutionScheduleInput,ExecutionScheduleRow,RealTimeScheduleState,RuntimeTaskSessionFields,TaskIdentityPort,TaskResolvedState,TaskSessionField,TaskSessionStore} from '../../types/execution-host.ts';
 import type {TimerEngineInput} from '../../types/timer-engine.ts';
 import type {CompletionSource} from '../../types/domain.ts';
 
@@ -156,10 +156,10 @@ function createExecutionSchedule(input:Readonly<ExecutionScheduleInput>):Readonl
     return Math.max(60,Math.round((tasks[index]!.dur||1)*60));
   }
   function fixedAnchorRowsFrom(startIndex:number){
-    const rows:ExecutionScheduleRow[]=[];
+    const rows:ExecutionAnchorRow[]=[];
     for(let index=Math.max(0,startIndex||0);index<tasks.length;index++){
       const task=tasks[index]!;
-      if(model.isFixed(task))rows.push({idx:index,t:task,start:originalStartMin(index),end:originalEndMin(index),plannedStart:originalStartMin(index),plannedEnd:originalEndMin(index),adjusted:false});
+      if(model.isFixed(task))rows.push({idx:index,t:task,start:originalStartMin(index),end:originalEndMin(index)});
     }
     return rows;
   }
