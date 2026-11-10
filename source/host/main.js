@@ -319,7 +319,7 @@ function backupFolderName({device=false}={}){
   const parts=[clean(Profiles.current()?.name),device?clean(PersistenceModule.deviceName(InstallationIdentity.getId()).replace(' · ',' '))||'Device':''].filter(Boolean),separator=device?' - ':' – ';
   return parts.length?`${EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix}${separator}${parts.join(separator)}`:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder;
 }
-// The people who use Study Director on this device (core/profiles.js).
+// The people who use Study Director on this device (core/profiles.ts).
 const Profiles=ProfilesHostModule.createController(Object.freeze({module:ProfilesModule,ports:Object.freeze({
   scope:Object.freeze({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
   storage:Object.freeze({
