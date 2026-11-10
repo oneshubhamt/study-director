@@ -99,7 +99,7 @@ function createExecutionSchedule(input:Readonly<ExecutionScheduleInput>):Readonl
   functions(time,['clockToMinute','clockMinuteToStudyMinute','studyMinuteToHHMM','currentStudySecond','formatDuration','minuteOfDay'],'Execution time model');
   functions(input,['compactAdjustedSchedule','invalidateDerived'],'Execution schedule input');
   function rebuildOriginalSchedule(){
-    const absoluteStarts=model.startMinutes(tasks);
+    const absoluteStarts=model.startMinutes(tasks.map(task=>({...task})));
     const rows=tasks.map((task,index)=>({
       idx:index,id:task.id,name:task.name,kind:task.kind,area:model.areaValue(task),start:task.start,dur:task.dur,
       plannedStartMin:absoluteStarts[index]??0,plannedEndMin:(absoluteStarts[index]??0)+task.dur,
