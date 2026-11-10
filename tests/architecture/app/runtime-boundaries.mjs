@@ -83,7 +83,16 @@ for(const token of ['AppData.activeSession','BackupProviderRuntime','claimSessio
 }
 assert.match(host,/function togglePause\(\)\{const result=togglePauseTimer\(\);if\(result===true\)\{sendSessionChangeSoon[\s\S]*?schedulePwaUpdateEvaluation\(150\);\}return result;\}/u,'pause/resume publication and update work occur only after a real timer transition');
 assert.match(host,/function skipTask\(\)\{[\s\S]*?if\(result===true\)\{notifyDeviceBackupIfStudyDayResolved\(\);sendSessionChangeSoon\('block-skipped'\);schedulePwaUpdateEvaluation\(150\);/u,'skip side effects occur only after a real block transition');
-console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checkedComposition:true,taskIdentityEvidence:true,noOpSideEffectsGated:true},null,2));
+assert.match(timer,/function beginTimerPause\([^)]*[\s\S]*?if\(!appCanMutate\(\)\|\|TimerState\.mode!==TIMER_MODES\.RUNNING/u,'pause begins only while this tab retains mutation authority');
+assert.match(timer,/function jumpTo\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;[\s\S]*?return startCur\(\)===true;/u,'jump refuses before capture/task mutation when ownership is lost and reports the real start result');
+assert.match(timer,/function finishTrackableBlock\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\|\|!isTrackableBlock/u,'finish and skip share an ownership-fenced transition');
+assert.match(timer,/function classifyInactiveGap\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;[\s\S]*?const gap=TimerState\.inactiveGap/u,'inactive-gap classification cannot consume a pending decision from a read-only tab');
+assert.match(host,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|!appCanMutate\(\)\)return false;[\s\S]*?finalizePauseEvent\(\)/u,'Plan break termination is fenced at the runtime gateway after confirmation');
+assert.match(plan,/return scheduleGateway\.breakState\('end'\)===true;/u,'Plan application propagates a failed break termination instead of claiming success');
+for(const stale of ['function latestTrackableEndMin(','const TaskSessionState=(()=>','function getRealTimeState(','function rebuildOriginalSchedule(','function resolveTaskCompletion(']){
+  assert.equal(host.includes(stale),false,`main host must not retain extracted P5.4A runtime logic: ${stale}`);
+}
+console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checkedComposition:true,taskIdentityEvidence:true,noOpSideEffectsGated:true,authorityFenced:true,staleHostRuntimeRemoved:true},null,2));
 }
 
 { // practice-pacer-boundary
