@@ -9288,7 +9288,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
     deletionRecovery:AppData.deletionRecovery.flush
   }),
   startup:Object.freeze({
-    prepareCanonicalData:()=>UnsupportedData.census(),
+    prepareCanonicalData:()=>{if(ProfileScope.safe!==true)throw Object.assign(new Error('The device profile list could not be read safely. Profile-owned storage was not opened for use.'),{code:'STUDY_DIRECTOR_PROFILE_REGISTRY_UNREADABLE'});return UnsupportedData.census();},
     restoreAppearance:()=>{
       if(protectedPreferencesHydrated){applyPortablePreferencesToRuntime(protectedPreferencesState);return;}
       applyTheme(PRESENTATION_KERNEL.readStoredTheme((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false});

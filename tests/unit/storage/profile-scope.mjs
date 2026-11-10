@@ -17,20 +17,23 @@ function run(value,existing=null){
 }
 {
   const scope=run({version:1,active:idB,profiles:[{id:idA,scope:''},{id:idB,scope:idB}]});
-  assert.equal(scope.id,idB);assert.equal(scope.scope,idB);assert.equal(scope.scoped('db'),'db~'+idB);
+  assert.equal(scope.id,idB);assert.equal(scope.scope,idB);assert.equal(scope.safe,true);assert.equal(scope.scoped('db'),'db~'+idB);
 }
 {
   const scope=run({version:9,active:'missing',profiles:[{id:idA,scope:''},{id:'bad',scope:idB}]});
   assert.equal(scope.id,idA,'a readable newer registry still resolves the first valid profile');
-  assert.equal(scope.scope,'');assert.equal(scope.scoped('db'),'db');
+  assert.equal(scope.scope,'');assert.equal(scope.safe,true);assert.equal(scope.scoped('db'),'db');
 }
 {
-  for(const value of [undefined,'{bad json',{version:1,active:'bad',profiles:[{id:'bad',scope:''}]}]){
-    const scope=run(value);assert.equal(scope.id,'');assert.equal(scope.scope,'');assert.equal(scope.scoped('db'),'db');
+  const absent=run(undefined);
+  assert.equal(absent.id,'');assert.equal(absent.scope,'');assert.equal(absent.safe,true,'an absent registry is a genuine first-start state');
+  for(const value of ['{bad json',{version:1,active:'bad',profiles:[{id:'bad',scope:''}]},{version:1,active:'',profiles:[]}]){
+    const scope=run(value);
+    assert.equal(scope.id,'');assert.equal(scope.scope,'');assert.equal(scope.safe,false,'a present registry that cannot resolve a profile must fail closed');assert.equal(scope.scoped('db'),'db');
   }
 }
 {
   const existing=Object.freeze({sentinel:true}),scope=run({version:1,active:idA,profiles:[{id:idA,scope:''}]},existing);
   assert.equal(scope,existing,'the bootstrap never replaces an already-installed scope identity');
 }
-console.log(JSON.stringify({status:'PASS',suite:'profile-scope',cases:['active scoped profile','newer registry fallback','malformed/absent registry','existing identity preserved']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'profile-scope',cases:['active scoped profile','newer registry fallback','absent registry','malformed registry fails closed','existing identity preserved']},null,2));

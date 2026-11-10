@@ -26,7 +26,7 @@ const STORE_KEYS=freeze(['dailyRecords','dailySummaries','notes','activeSessions
 function createConfiguration(input:Readonly<ConfigurationInput>):Readonly<BootstrapConfiguration>{
   if(!input||!Object.isFrozen(input)||!Object.isFrozen(input.raw))throw new TypeError('Data bootstrap configuration input must be frozen.');
   const profileScope=input.profileScope;
-  if(!profileScope||typeof profileScope.scoped!=='function'||typeof profileScope.registryKey!=='string'||typeof profileScope.separator!=='string'||!(profileScope.pattern instanceof RegExp))throw new TypeError('Profile scope is unavailable or incompatible.');
+  if(!profileScope||typeof profileScope.scoped!=='function'||typeof profileScope.registryKey!=='string'||typeof profileScope.separator!=='string'||!(profileScope.pattern instanceof RegExp)||typeof profileScope.safe!=='boolean')throw new TypeError('Profile scope is unavailable or incompatible.');
   const limitsRaw=input.raw.productionLimits;
   if(!objectRecord(limitsRaw))throw new TypeError('Production limits are unavailable.');
   const APP_LIMITS=freeze({...limitsRaw}) as unknown as Limits;
