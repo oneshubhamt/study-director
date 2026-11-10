@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {ExecutionHostInput,RuntimeTaskSessionFields,TaskIdentityPort,TaskResolvedState,TaskSessionField,TaskSessionStore} from '../../types/execution-host.ts';
+import type {CompletionEvidenceController,CompletionEvidenceInput,ExecutionHostInput,RuntimeTaskSessionFields,TaskIdentityPort,TaskResolvedState,TaskSessionField,TaskSessionStore} from '../../types/execution-host.ts';
 import type {TimerEngineInput} from '../../types/timer-engine.ts';
 
 const sdExecutionHostFactory=(()=>{
@@ -92,8 +92,124 @@ function createTaskSessionState(taskIdentity:TaskIdentityPort):Readonly<TaskSess
     getField,setField,deleteField,indexSnapshot,resolvedState,setResolved,isDone,isSkipped,isResolved,toggleDone,resolvedIndices,indices,clear
   });
 }
+function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Readonly<CompletionEvidenceController>{
+  const {tasks,taskSessionState,completionModel,sources,classifyTaskOutcome,taskTargetValue,actualTimeSnapshot,renderCompletionChange,saveLiveDraft}=input;
+  functions(input,['taskTargetValue','actualTimeSnapshot','renderCompletionChange','saveLiveDraft'],'Completion evidence input');
+  functions(completionModel,['normalizeSource','fromUnits','progressInput','fromFocus','needsFocus','resolve','clampPercent'],'Completion model');
+  const validIndex=(index:number)=>Number.isInteger(index)&&index>=0&&index<tasks.length;
+  function setCompletionSource(index:number,source:unknown){
+    if(validIndex(index))taskSessionState.setField(index,'completionSource',completionModel.normalizeSource(source));
+  }
+  function explicitCompletionSource(index:number){
+    const source=validIndex(index)?taskSessionState.getField(index,'completionSource'):undefined;
+    return source!==undefined?completionModel.normalizeSource(source):sources.NONE;
+  }
+  function plannedSecondsForCompletion(index:number){return validIndex(index)?Math.max(0,Number(tasks[index]?.dur||0)*60):0;}
+  function unitCompletionForTask(index:number){
+    if(!validIndex(index))return null;
+    const progress=taskSessionState.getField(index,'notes')||{};
+    const total=progress.total!==undefined&&progress.total!==null?progress.total:taskTargetValue(tasks[index]!);
+    return completionModel.fromUnits(progress.done,total);
+  }
+  function progressInputState(index:number,doneValue:unknown,totalValue:unknown,defaultTotal:unknown=validIndex(index)?taskTargetValue(tasks[index]!):null){
+    return completionModel.progressInput(doneValue,totalValue,defaultTotal);
+  }
+  function focusCompletionForTask(index:number,snapshot:Record<string,number>|null=actualTimeSnapshot(),{cap=100}:{cap?:number}={}){
+    const actual=snapshot||actualTimeSnapshot();
+    return completionModel.fromFocus(actual[index],plannedSecondsForCompletion(index),{cap});
+  }
+  function resolveTaskCompletion(index:number,{actualSnapshot=null,preferStoredAuto=false}:{actualSnapshot?:Record<string,number>|null;preferStoredAuto?:boolean}={}){
+    if(!validIndex(index))return completionModel.resolve();
+    const state={
+      skipped:taskSessionState.isSkipped(index),source:explicitCompletionSource(index),
+      storedPct:taskSessionState.getField(index,'completion')!==undefined?taskSessionState.getField(index,'completion'):null,
+      unitPct:unitCompletionForTask(index),doneFlag:taskSessionState.isDone(index),preferStoredAuto
+    };
+    const focusPct=completionModel.needsFocus(state)?focusCompletionForTask(index,actualSnapshot):null;
+    return completionModel.resolve({...state,focusPct});
+  }
+  function exactTaskCompletionPercent(index:number,{actualSnapshot=null,resolved=null}:{actualSnapshot?:Record<string,number>|null;resolved?:ReturnType<CompletionEvidenceController['resolveTaskCompletion']>|null}={}){
+    const evidence=resolved||resolveTaskCompletion(index,{actualSnapshot});
+    return completionModel.clampPercent(evidence.pct);
+  }
+  function liveTaskOutcome(index:number,{actualSnapshot=null,resolved=null,exactPct=null}:{actualSnapshot?:Record<string,number>|null;resolved?:ReturnType<CompletionEvidenceController['resolveTaskCompletion']>|null;exactPct?:number|null}={}){
+    const evidence=resolved||resolveTaskCompletion(index,{actualSnapshot}),snapshot=actualSnapshot||actualTimeSnapshot();
+    return classifyTaskOutcome({
+      skipped:taskSessionState.isSkipped(index),doneFlag:taskSessionState.isDone(index),
+      completion:exactPct===null||exactPct===undefined?evidence.pct:exactPct,
+      completionSource:evidence.source,actualSeconds:Number(snapshot[index])||0
+    });
+  }
+  function storeResolvedCompletion(index:number,{source=null,pct=null,actualSnapshot=null,preserveDone=false}:{source?:import('../../types/domain.ts').CompletionSource|null;pct?:number|null;actualSnapshot?:Record<string,number>|null;preserveDone?:boolean}={}){
+    const resolved=pct===null||pct===undefined
+      ?resolveTaskCompletion(index,{actualSnapshot})
+      :{pct:completionModel.clampPercent(pct),source:source||sources.MANUAL};
+    if(!validIndex(index))return resolved;
+    taskSessionState.setField(index,'completion',resolved.pct);
+    setCompletionSource(index,source||resolved.source);
+    if(preserveDone)taskSessionState.setResolved(index,'done');
+    if(resolved.pct>0&&taskSessionState.isSkipped(index))taskSessionState.setResolved(index,null);
+    return resolved;
+  }
+  function setCompletionState(index:number,pct:number,source=sources.MANUAL){
+    storeResolvedCompletion(index,{pct,source,preserveDone:taskSessionState.isDone(index)&&!taskSessionState.isSkipped(index)});
+    if(Number(pct)>=100)taskSessionState.setResolved(index,'done');
+    else if(taskSessionState.isSkipped(index)&&Number(pct)>0)taskSessionState.setResolved(index,null);
+  }
+  function syncProgressInputsToState(index:number,state:ReturnType<typeof completionModel.progressInput>|null|undefined,{updateUI=false,save=false}={}){
+    if(!validIndex(index))return {...resolveTaskCompletion(index),changed:false};
+    const previous=taskSessionState.getField(index,'notes')||{},prevDone=previous.done,prevTotal=previous.total;
+    const prevPct=taskSessionState.getField(index,'completion'),prevSource=explicitCompletionSource(index);
+    const next={done:state&&state.hasDone?state.done??undefined:undefined,total:state&&state.hasTotal?state.total??undefined:undefined};
+    taskSessionState.setField(index,'notes',next);
+    const inputChanged=next.done!==prevDone||next.total!==prevTotal;
+    if(state&&state.pct!==null){
+      setCompletionState(index,state.pct,sources.UNITS);
+      const changed=inputChanged||taskSessionState.getField(index,'completion')!==prevPct||explicitCompletionSource(index)!==prevSource;
+      if(updateUI)renderCompletionChange(index,state.pct,true);
+      if(save&&changed)saveLiveDraft();
+      return {pct:state.pct,source:sources.UNITS,changed};
+    }
+    let changed=inputChanged;
+    if(explicitCompletionSource(index)===sources.UNITS){
+      taskSessionState.deleteField(index,'completion');taskSessionState.deleteField(index,'completionSource');changed=true;
+    }
+    const resolved=resolveTaskCompletion(index);
+    if(updateUI)renderCompletionChange(index,resolved.pct,true);
+    if(save&&changed)saveLiveDraft();
+    return {...resolved,changed};
+  }
+  function clearManualCompletionOverride(index:number,{updateUI=false,save=false}={}){
+    if(explicitCompletionSource(index)!==sources.MANUAL){
+      const resolved=resolveTaskCompletion(index);
+      if(updateUI)renderCompletionChange(index,resolved.pct,true);
+      return resolved;
+    }
+    taskSessionState.deleteField(index,'completion');taskSessionState.deleteField(index,'completionSource');
+    const resolved=resolveTaskCompletion(index);
+    if(updateUI)renderCompletionChange(index,resolved.pct,true);
+    if(save)saveLiveDraft();
+    return resolved;
+  }
+  function setTaskDoneState(index:number){
+    if(!validIndex(index))return;
+    taskSessionState.setResolved(index,'done');
+    const resolved=resolveTaskCompletion(index,{actualSnapshot:actualTimeSnapshot()});
+    storeResolvedCompletion(index,{pct:resolved.pct,source:resolved.source===sources.TIME?sources.FINISHED_TIME:resolved.source,preserveDone:true});
+  }
+  function setTaskSkippedState(index:number){
+    if(!validIndex(index))return;
+    taskSessionState.setResolved(index,'skipped');taskSessionState.setField(index,'completion',0);setCompletionSource(index,sources.SKIPPED);
+  }
+  return freeze({
+    format:'study-director.completion-evidence' as const,contractVersion:1 as const,
+    setCompletionSource,explicitCompletionSource,plannedSecondsForCompletion,unitCompletionForTask,progressInputState,
+    syncProgressInputsToState,clearManualCompletionOverride,focusCompletionForTask,liveTaskOutcome,resolveTaskCompletion,
+    exactTaskCompletionPercent,storeResolvedCompletion,setTaskDoneState,setTaskSkippedState
+  });
+}
 function createRuntime(input:Readonly<ExecutionHostInput>){
-  exactObject(input,['modules','timerState','pomodoro','practiceModel','practice','timer','hooks'],'Execution host input');
+  exactObject(input,['modules','timerState','pomodoro','practiceModel','practice','timer','evidence','hooks'],'Execution host input');
   exactObject(input.modules,['timerState','pomodoro','practicePacer','timerEngine'],'Execution host modules');
   functions(input.hooks,['syncStudyQuiet'],'Execution host hooks');
   const {timerState:timerStateModule,pomodoro:pomodoroModule,practicePacer:practicePacerModule,timerEngine:timerEngineModule}=input.modules;
@@ -109,6 +225,13 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
   const setTimerMode=TimerState.setMode;
   const TaskSessionState=createTaskSessionState(TaskIdentity);
   let TimerEngine:ReturnType<typeof timerEngineModule.createEngine>|null=null;
+  const CompletionEvidence=createCompletionEvidence(freeze({
+    tasks:TASKS,taskSessionState:TaskSessionState,
+    completionModel:input.evidence.completionModel,sources:input.evidence.sources,
+    classifyTaskOutcome:input.evidence.classifyTaskOutcome,taskTargetValue:input.evidence.taskTargetValue,
+    actualTimeSnapshot:()=>TimerEngine?TimerEngine.actualTimeSnapshot():{},
+    renderCompletionChange:input.evidence.renderCompletionChange,saveLiveDraft:input.evidence.saveLiveDraft
+  }));
 
   const Pomodoro=pomodoroModule.createController(freeze({ports:freeze({
     ...input.pomodoro,
@@ -140,6 +263,14 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
     ...input.timer,
     state:freeze({TASKS,TIMER_MODES,TaskIdentity,TaskSessionState,TimerState,resetBreakState,setCurrentTask,setTimerMode}),
     schedule:freeze({...input.timer.schedule,isTaskResolved:TaskSessionState.isResolved}),
+    reviewEvidence:freeze({
+      ...input.timer.reviewEvidence,
+      exactTaskCompletionPercent:CompletionEvidence.exactTaskCompletionPercent,
+      liveTaskOutcome:CompletionEvidence.liveTaskOutcome,
+      resolveTaskCompletion:CompletionEvidence.resolveTaskCompletion,
+      setTaskDoneState:CompletionEvidence.setTaskDoneState,
+      setTaskSkippedState:CompletionEvidence.setTaskSkippedState
+    }),
     userPreferences:freeze({...input.timer.userPreferences,Pomodoro}),
     practice:freeze({controller:PracticePacer,model:PracticePacerModel})
   });
@@ -150,6 +281,7 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
     TimerState,SessionState,TASKS,TIMER_MODES,TaskIdentity,setTimerMode,TaskSessionState,
     Pomodoro,PracticePacerModel,PracticePacer,TimerEngine:engine,
     TimerPresentation:engine.presentation,SessionEvidenceGateway:engine.evidenceGateway,
+    ...CompletionEvidence,
     setCurrentTask,resetBreakState,
     resetCountdownRuntime:()=>engine.resetCountdownRuntime(),
     clearProgressRuntime:()=>TaskSessionState.clear(),
@@ -158,7 +290,7 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
 }
 const createModule=()=>freeze({
   format:'study-director.execution-host-module' as const,contractVersion:1 as const,
-  createTaskSessionState,createRuntime
+  createTaskSessionState,createCompletionEvidence,createRuntime
 });
 registry.define('execution-host',1,createModule);
 return createModule;

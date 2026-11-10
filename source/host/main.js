@@ -633,6 +633,12 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
     ownership:Object.freeze({appCanMutate:()=>appCanMutate()}),
     clock:Object.freeze({nowMs:DecisionClock.nowMs})
   }),
+  evidence:Object.freeze({
+    completionModel:CompletionModel,sources:COMPLETION_SOURCES,classifyTaskOutcome,
+    taskTargetValue,
+    renderCompletionChange:(...args)=>renderCompletionChange(...args),
+    saveLiveDraft:()=>saveLiveDraft()
+  }),
   timer:Object.freeze({
     configuration:Object.freeze({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
     domain:Object.freeze({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
@@ -650,6 +656,9 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
 const {
   TimerState,SessionState,TASKS,TIMER_MODES,TaskIdentity,setTimerMode,TaskSessionState,
   Pomodoro,PracticePacerModel,PracticePacer,TimerEngine,TimerPresentation,SessionEvidenceGateway,
+  setCompletionSource,explicitCompletionSource,plannedSecondsForCompletion,unitCompletionForTask,progressInputState,
+  syncProgressInputsToState,clearManualCompletionOverride,focusCompletionForTask,liveTaskOutcome,resolveTaskCompletion,
+  exactTaskCompletionPercent,storeResolvedCompletion,setTaskDoneState,setTaskSkippedState,
   setCurrentTask,resetBreakState,resetCountdownRuntime,clearProgressRuntime,isTaskResolved
 }=ExecutionRuntime;
 const {
@@ -1000,112 +1009,6 @@ function toggleDoneMarker(idx){
     TaskSessionState.deleteField(idx,'completionSource');
     if(Number(TaskSessionState.getField(idx,'completion'))===0)TaskSessionState.deleteField(idx,'completion');
   }
-}
-function setCompletionSource(idx,source){
-  if(idx===undefined||idx===null)return;
-  TaskSessionState.setField(idx,'completionSource',normalizeCompletionSource(source));
-}
-function explicitCompletionSource(idx){
-  const source=TaskSessionState.getField(idx,'completionSource');
-  return source!==undefined?normalizeCompletionSource(source):COMPLETION_SOURCES.NONE;
-}
-function plannedSecondsForCompletion(idx){return Math.max(0,Number(TASKS[idx]?.dur||0)*60);}
-function unitCompletionForTask(idx){
-  const progress=TaskSessionState.getField(idx,'notes')||{};
-  const total=progress.total!==undefined&&progress.total!==null?progress.total:taskTargetValue(TASKS[idx]);
-  return CompletionModel.fromUnits(progress.done,total);
-}
-function progressInputState(idx,doneValue,totalValue,defaultTotal=taskTargetValue(TASKS[idx])){
-  return CompletionModel.progressInput(doneValue,totalValue,defaultTotal);
-}
-function syncProgressInputsToState(idx,state,{updateUI=false,save=false}={}){
-  if(idx===undefined||idx===null||!TASKS[idx])return {...resolveTaskCompletion(idx),changed:false};
-  let progress=TaskSessionState.getField(idx,'notes');
-  if(!progress){progress={};TaskSessionState.setField(idx,'notes',progress);}
-  const {
-    done:prevDone, total:prevTotal
-  }=progress;
-  const prevPct=TaskSessionState.getField(idx,'completion');
-  const prevSource=explicitCompletionSource(idx);
-  progress.done=state&&state.hasDone?state.done:undefined;
-  progress.total=state&&state.hasTotal?state.total:undefined;
-  const inputChanged=progress.done!==prevDone||progress.total!==prevTotal;
-  if(state&&state.pct!==null){
-    setCompletionState(idx,state.pct,COMPLETION_SOURCES.UNITS);
-    const changed=inputChanged||TaskSessionState.getField(idx,'completion')!==prevPct||explicitCompletionSource(idx)!==prevSource;
-    if(updateUI)renderCompletionChange(idx,state.pct,true);
-    if(save&&changed)saveLiveDraft();
-    return {pct:state.pct,source:COMPLETION_SOURCES.UNITS,changed};
-  }
-  let changed=inputChanged;
-  if(explicitCompletionSource(idx)===COMPLETION_SOURCES.UNITS){
-    TaskSessionState.deleteField(idx,'completion');
-    TaskSessionState.deleteField(idx,'completionSource');
-    changed=true;
-  }
-  const resolved=resolveTaskCompletion(idx);
-  if(updateUI)renderCompletionChange(idx,resolved.pct,true);
-  if(save&&changed)saveLiveDraft();
-  return {...resolved,changed};
-}
-function clearManualCompletionOverride(idx,{updateUI=false,save=false}={}){
-  if(explicitCompletionSource(idx)!==COMPLETION_SOURCES.MANUAL){
-    const resolved=resolveTaskCompletion(idx);
-    if(updateUI)renderCompletionChange(idx,resolved.pct,true);
-    return resolved;
-  }
-  TaskSessionState.deleteField(idx,'completion');
-  TaskSessionState.deleteField(idx,'completionSource');
-  const resolved=resolveTaskCompletion(idx);
-  if(updateUI)renderCompletionChange(idx,resolved.pct,true);
-  if(save)saveLiveDraft();
-  return resolved;
-}
-function focusCompletionForTask(idx,actualSnapshot=null,{cap=100}={}){
-  const snapshot=actualSnapshot||actualTimeSnapshot();
-  return CompletionModel.fromFocus(snapshot&&snapshot[idx],plannedSecondsForCompletion(idx),{cap});
-}
-function liveTaskOutcome(idx,{actualSnapshot=null,resolved=null,exactPct=null}={}){
-  const evidence=resolved||resolveTaskCompletion(idx,{actualSnapshot});
-  const snapshot=actualSnapshot||actualTimeSnapshot();
-  return classifyTaskOutcome({
-    skipped:TaskSessionState.isSkipped(idx),doneFlag:TaskSessionState.isDone(idx),
-    completion:exactPct===null||exactPct===undefined?evidence.pct:exactPct,
-    completionSource:evidence.source,actualSeconds:Number(snapshot&&snapshot[idx])||0
-  });
-}
-function resolveTaskCompletion(idx,{actualSnapshot=null,preferStoredAuto=false}={}){
-  const state={
-    skipped:TaskSessionState.isSkipped(idx),source:explicitCompletionSource(idx),
-    storedPct:TaskSessionState.getField(idx,'completion')!==undefined?TaskSessionState.getField(idx,'completion'):null,
-    unitPct:unitCompletionForTask(idx),doneFlag:TaskSessionState.isDone(idx),preferStoredAuto
-  };
-  const focusPct=CompletionModel.needsFocus(state)?focusCompletionForTask(idx,actualSnapshot):null;
-  return CompletionModel.resolve({...state,focusPct});
-}
-function exactTaskCompletionPercent(idx,{actualSnapshot=null,resolved=null}={}){
-  const evidence=resolved||resolveTaskCompletion(idx,{actualSnapshot});
-  return CompletionModel.clampPercent(evidence.pct);
-}
-function storeResolvedCompletion(idx,{source=null,pct=null,actualSnapshot=null,preserveDone=false}={}){
-  const resolved=pct===null||pct===undefined
-    ? resolveTaskCompletion(idx,{actualSnapshot})
-    : {pct:Math.max(0,Math.min(100,Number(pct)||0)),source:source||COMPLETION_SOURCES.MANUAL};
-  TaskSessionState.setField(idx,'completion',resolved.pct);
-  setCompletionSource(idx,source||resolved.source);
-  if(preserveDone)TaskSessionState.setResolved(idx,'done');
-  if(resolved.pct>0&&TaskSessionState.isSkipped(idx))TaskSessionState.setResolved(idx,null);
-  return resolved;
-}
-function setTaskDoneState(idx){
-  TaskSessionState.setResolved(idx,'done');
-  const resolved=resolveTaskCompletion(idx,{actualSnapshot:actualTimeSnapshot()});
-  storeResolvedCompletion(idx,{pct:resolved.pct,source:resolved.source===COMPLETION_SOURCES.TIME?COMPLETION_SOURCES.FINISHED_TIME:resolved.source,preserveDone:true});
-}
-function setTaskSkippedState(idx){
-  TaskSessionState.setResolved(idx,'skipped');
-  TaskSessionState.setField(idx,'completion',0);
-  setCompletionSource(idx,COMPLETION_SOURCES.SKIPPED);
 }
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
