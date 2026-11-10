@@ -28,7 +28,7 @@ registry.define('review',1,()=>{
     evidence:freeze([
       'actualRecordsSnapshot','applicableNotesForTask','clearManualCompletionOverride',
       'liveTaskOutcome','progressInputState','recordCurrentActiveToTask',
-      'resolveTaskCompletion','storeResolvedCompletion','syncProgressInputsToState','updateTimerFocusMetrics'
+      'resolveTaskCompletion','storeResolvedCompletion','setCompletionState','syncProgressInputsToState','updateTimerFocusMetrics'
     ]),
     session:freeze([
       'acknowledgeSavedStudyDay','clearCanonicalSessionAfterSavedDay',
@@ -101,7 +101,7 @@ registry.define('review',1,()=>{
     const {
       actualRecordsSnapshot,applicableNotesForTask,clearManualCompletionOverride,
       liveTaskOutcome,progressInputState,recordCurrentActiveToTask,
-      resolveTaskCompletion,storeResolvedCompletion,syncProgressInputsToState,updateTimerFocusMetrics
+      resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState,updateTimerFocusMetrics
     }=ports.evidence;
     const {
       acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
@@ -620,11 +620,6 @@ function applyReviewOutcomeVisual(card,outcome){
   if(!card)return;
   card.classList.remove(...Object.values(TASK_OUTCOMES));
   card.classList.add(outcome);
-}
-function setCompletionState(idx,pct,source=COMPLETION_SOURCES.MANUAL){
-  storeResolvedCompletion(idx,{pct,source,preserveDone:TaskSessionState.isDone(idx)&&!TaskSessionState.isSkipped(idx)});
-  if(Number(pct)>=100)TaskSessionState.setResolved(idx,'done');
-  else if(TaskSessionState.isSkipped(idx)&&Number(pct)>0)TaskSessionState.setResolved(idx,null);
 }
 function renderCompletionChange(idx,pct,refreshStats=true,options={}){
   const card=document.getElementById(`rcard-${idx}`);
