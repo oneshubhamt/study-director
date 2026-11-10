@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -23,8 +24,8 @@ class FakeDocument {
 
 globalThis.HTMLElement=FakeElement;
 const key=Symbol.for('studyDirector.internalModules.v1');
-vm.runInThisContext(fs.readFileSync('source/core/internal.js','utf8'),{filename:'source/core/internal.js'});
-vm.runInThisContext(fs.readFileSync('source/core/workspace-overlay.js','utf8'),{filename:'workspace-overlay.js'});
+vm.runInThisContext(readRuntimeSource('source/core/internal.ts'),{filename:'source/core/internal.ts'});
+vm.runInThisContext(readRuntimeSource('source/core/workspace-overlay.ts'),{filename:'workspace-overlay.js'});
 const module=globalThis[key].require('workspace-overlay',1);
 
 const document=new FakeDocument();

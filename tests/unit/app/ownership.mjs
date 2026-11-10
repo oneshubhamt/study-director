@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const execute=file=>vm.runInThisContext(readScript(fileURLToPath(new URL(file,import.meta.url))),{filename:file});
-execute('../../../source/core/internal.js');
+execute('../../../source/core/internal.ts');
 execute('../../../source/core/ownership.ts');
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const ownershipModule=registry.require('ownership',1);

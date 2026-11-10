@@ -6,7 +6,7 @@ import {APP_META_VALIDATION_OWNERS} from '../../../contracts/data-architecture.m
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {noteKeys,noteId} from '../../helpers/note-ids.mjs';
 
-for(const file of ['source/core/internal.js','source/core/reconciliation-baseline.ts'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/reconciliation-baseline.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],BaselineModule=registry.require('reconciliation-baseline',1),freeze=Object.freeze;
 const sharedStores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
 const harness=createHarness(new Map(),sharedStores),gateway=harness.appMetaGateway;

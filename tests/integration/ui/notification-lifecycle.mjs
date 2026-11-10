@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const name of ['internal','notice-coordinator','backup-presentation','interactions'])vm.runInThisContext(readCoreScript(name),{filename:coreScriptPath(name)});
+for(const name of ['internal','notice-coordinator','backup-presentation','interactions','foundation-host'])vm.runInThisContext(readCoreScript(name),{filename:coreScriptPath(name)});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('notice-coordinator',1),freeze=Object.freeze;
 function clock(){
   let time=0,sequence=0;const pending=new Map();
@@ -99,8 +99,7 @@ class Element {
 {
   const {notices:n}=coordinator();for(let i=0;i<200;i++)n.notify({key:`routine-${i}`,title:'Saved'});
   assert.ok(n.eventStatus().events.length<=100,'routine notification queues and dedup history remain bounded');n.clear();
-  const html=readHostHtml(),a=html.indexOf('function renderCoordinatedNotice(state){'),b=html.indexOf('function noticeCanCompact',a);
-  const announcer=new Element(),render=new Function('document',html.slice(a,b)+';return renderCoordinatedNotice;')({getElementById:id=>id==='install-notice-announcer'?announcer:null});
+  const announcer=new Element(),{renderCoordinatedNotice:render}=registry.require('foundation-host',1).createNoticeViews({document:{getElementById:id=>id==='install-notice-announcer'?announcer:null}});
   render({active:{kind:'safety'},announcement:'Local save failed'});assert.equal(announcer.textContent,'Local save failed');render({active:null,announcement:''});assert.equal(announcer.textContent,'','the DOM live region must clear between identical recurrences');render({active:{kind:'safety'},announcement:'Local save failed'});assert.equal(announcer.textContent,'Local save failed');
 }
 {
@@ -200,8 +199,8 @@ class Element {
   assert.equal(first.read(),null);assert.equal(first.finish('failed','Late failure'),false);
   second.finish('succeeded','Saved');assert.equal(second.read().message,'Saved');n.clear();
   const node=new Element();node.id='status';const nodes=[node];
-  const html=readHostHtml(),start=html.indexOf('function renderNotificationSurfaces(state){'),end=html.indexOf('const BackupPresentation=',start);
-  new Function('NoticeCoordinator','document',html.slice(start,end))(n,{getElementById:id=>id==='status'?node:null,querySelectorAll:()=>nodes.filter(node=>node.dataset.notificationKey)});
+  const {renderNotificationSurfaces}=registry.require('foundation-host',1).createNoticeViews({document:{getElementById:id=>id==='status'?node:null,querySelectorAll:()=>nodes.filter(node=>node.dataset.notificationKey)}});
+  n.subscribe(renderNotificationSurfaces);
   port.feedback({id:'hint',surfaceId:'status',surface:'inline',message:'First hint'});
   const operation=port.begin({id:'work',surfaceId:'status',announce:false});operation.finish('succeeded','Completed');
   port.feedback({id:'hint',surfaceId:'status',surface:'inline',message:'Latest hint',retainInline:false,duration:2000});

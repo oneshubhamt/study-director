@@ -57,7 +57,7 @@ const cases=[];
 // Conservative reachability, source fencing and lease contention.
 {
 const context={console,Object,Set,Map,Math,Number,String,Promise,Date,TypeError,Symbol,setTimeout:()=>1,clearTimeout:()=>{}};context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.ts','source/core/asset-storage.ts','source/core/asset-maintenance.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/asset-storage.ts','source/core/asset-maintenance.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const registry=context[Symbol.for('studyDirector.internalModules.v1')],storage=registry.require('asset-storage',1),mod=registry.require('asset-maintenance',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)}));
 const lease=()=>storage.createLease(5000,()=>1000);
 const assetId='img-prune-safety-12345678901234567890';let uncertain=true,removeCalls=0,referenceRevision=0,datasetRevision='stable';

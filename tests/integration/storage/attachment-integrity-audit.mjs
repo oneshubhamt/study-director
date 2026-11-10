@@ -9,7 +9,7 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
 const context={crypto:webcrypto,TextEncoder,Uint8Array,console,Blob,Object,Set,Map,Math,Number,String,Promise,Date,TypeError,Symbol};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/asset-storage.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/asset-storage.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const storageModule=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-storage',1);
 
 const hash='a'.repeat(64);

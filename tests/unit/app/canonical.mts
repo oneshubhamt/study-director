@@ -11,7 +11,7 @@ for(const file of ['source/core/canonical.ts','source/core/save-lane.ts']){
   }
 }
 const context=vm.createContext({});
-for(const file of ['source/core/internal.js','source/core/canonical.ts']){
+for(const file of ['source/core/internal.ts','source/core/canonical.ts']){
   vm.runInContext(readScript(file),context,{filename:file});
 }
 // The VM executes the real JS registry and checked canonical implementation.

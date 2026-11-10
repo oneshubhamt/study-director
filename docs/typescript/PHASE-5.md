@@ -1,6 +1,6 @@
 # Phase 5 — host and features: scope and status register
 
-**Planning baseline:** `4136ba513479f0e0e0c01e0cef2495bcf61e0a2e`, 2026-10-30. **P5.0 is VERIFIED — TARGETED; later objectives are NOT STARTED.** This is the sole Phase 5 scope/status schedule; the [execution control record](../../TS-CONVERSION-EXECUTION.md) owns active findings and the durable working scratchpad. P5.0 mechanically extracted the host; strict feature conversion remains unstarted. See its evidence in the execution record.
+**Planning baseline:** `4136ba513479f0e0e0c01e0cef2495bcf61e0a2e`, 2026-10-30. **P5.0–P5.1 are VERIFIED — TARGETED; P5.2 is next; later objectives are NOT STARTED.** This is the sole Phase 5 scope/status schedule; the [execution control record](../../TS-CONVERSION-EXECUTION.md) owns active findings and the durable working scratchpad. P5.0 mechanically extracted the host; P5.1 converts the foundations and their owned host adapters. See its evidence in the execution record.
 
 ## Purpose and sequencing
 
@@ -15,7 +15,7 @@ The phase has **14 top-level steps (P5.0–P5.13)** and 17 tracked units because
 | ID | Status | Primary scope and host responsibility | Required evidence for targeted closure |
 | --- | --- | --- | --- |
 | P5.0 | [VERIFIED — TARGETED](https://github.com/oneshubhamt/study-director/blob/b4e4cfd716626c55fd713f3565837ac7f9e70a95/TS-CONVERSION-EXECUTION.md#recent-closed-worklog--p50) | Mechanically extract all five inline scripts at their existing positions/scopes; manifest/build integration and shared test readers. Inventory every main-host responsibility and consumer | Executable equivalence of extraction except documented build glue; script order/scope, CSP/hash/precache consistency; build/generated syntax, startup/core-flow and affected source-reader tests; close F-001/F-002 within their stated scope |
-| P5.1 | NOT STARTED | `internal`, `interactions`, `workspace-overlay`, `notice-coordinator`, `navigation`, `audio-engine`, `backup-presentation`; shared DOM/scalar/capability helpers | Strict registry/ports and DOM/event handling; dialogs, keyboard/focus, navigation, notices, sound and overlay checks |
+| P5.1 | [VERIFIED — TARGETED](../../TS-CONVERSION-EXECUTION.md#latest-closed-worklog--p51) | `internal`, `interactions`, `workspace-overlay`, `notice-coordinator`, `navigation`, `audio-engine`, `backup-presentation`; shared DOM/scalar/capability helpers | Strict registry/ports and DOM/event handling; dialogs, keyboard/focus, navigation, notices, sound and overlay checks |
 | P5.2 | NOT STARTED | `profiles`, `startup`, `native-capabilities`; early profile-scope script, configuration, installation identity, persistence/repository construction and activation | Startup/restore ordering, profile isolation/switching, storage-failure and ownership startup paths; capabilities/fallbacks remain valid |
 | P5.3 | NOT STARTED | `plan`; plan editor, schedule/defaults, saved-plan composition and host adapters | Editing/applying plans, draft durability, saved-plan save/reload and relevant UI |
 | P5.4 | NOT STARTED | Host live execution, timer presentation, task/session runtime state, drafts, reset and cross-tab/session handoff; consume existing typed timer/session modules | Start/pause/resume, reload/recovery, live-draft preservation, handoff/preemption and timer cues |
@@ -36,7 +36,7 @@ P5.9a may require a mechanical model split before one portion can be admitted to
 
 ## Complete remaining file inventory at the planning baseline
 
-All 17 private core JS implementations have an owner:
+All 17 private core JS implementations at the planning baseline have an owner. P5.1 now uses `.ts` for its seven entries and adds the checked `foundation-host.ts`; the table below retains the original inventory for reconciliation:
 
 | Owner | `source/core/` files |
 | --- | --- |

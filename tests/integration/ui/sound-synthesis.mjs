@@ -15,7 +15,7 @@ const REFERENCE={begin:[24916,.2253,767.2],pause:[13891,.2546,403.91],resume:[15
   // from the code when they were made, so any change to them is deliberate.
   settle:[32413,.2628,1011.36],handoff:[27342,.2574,818.61],knock:[16096,.2382,451.95],chime:[23152,.2694,663.98]};
 
-for(const file of ['source/core/internal.js','source/core/audio-engine.js'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/audio-engine.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('audio-engine',1);
 assert.equal(module.sampleRate,22050);
 assert.deepEqual([...module.cues],Object.keys(REFERENCE));

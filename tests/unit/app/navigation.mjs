@@ -1,10 +1,11 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const internal=fs.readFileSync('source/core/internal.js','utf8');
-const navigationSource=fs.readFileSync('source/core/navigation.js','utf8');
+const internal=readRuntimeSource('source/core/internal.ts');
+const navigationSource=readRuntimeSource('source/core/navigation.ts');
 
 function deferred(){
   let resolve;
@@ -403,7 +404,7 @@ for(const native of [false,true]){
 
 // The host's presentation wait must settle even if a hidden tab receives no frames.
 {
-  const host=readHostHtml();
+  const host=readRuntimeSource('source/core/foundation-host.ts');
   const start=host.indexOf('const nextNavigationFrame='),end=host.indexOf('\n});',start)+4;
   for(const hidden of [false,true])for(const winner of ['frame','timer']){
     let id=0,resolved=0;const frames=new Map(),timers=new Map();

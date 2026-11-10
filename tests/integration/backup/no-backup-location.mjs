@@ -1,3 +1,5 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
+import vm from 'node:vm';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -15,11 +17,10 @@ const AppDiagnostics={capture:(scope,error)=>captured.push(`${scope}: ${error?.m
 const source=[
   slice('function notifyBackupChange(change){','document.addEventListener(\'visibilitychange\',()=>{if(document.hidden'),
   slice('const PWA_UPDATE_BACKUP_WAIT_MS=','function notifyDeviceBackupIfStudyDayResolved('),
-  slice('async function openBackupRestore(){','function backupRestoreChoices(){'),
   slice('async function restoreMissingAfterStorageReset(hold,id=\'\'){','// A reload or a takeover in another tab brings back an unresolved clear.')
 ].join('\n');
 const run=new Function('BackupProviderRuntime','DeviceBackup','AppDiagnostics','appCanMutate','showBackupPresentation','renderPwaUpdateStatus','PwaLifecycle','settleStorageReset','NoticeCoordinator','setTimeout','clearTimeout',
-  `let pwaAutomaticBlockMessage='';${source};return {notifyBackupChange,flushAutomaticBackups,automaticBackupsWaiting,backUpBeforeUpdate,openBackupRestore,restoreMissingAfterStorageReset,blockMessage:()=>pwaAutomaticBlockMessage};`);
+  `let pwaAutomaticBlockMessage='';${source};return {notifyBackupChange,flushAutomaticBackups,automaticBackupsWaiting,backUpBeforeUpdate,restoreMissingAfterStorageReset,blockMessage:()=>pwaAutomaticBlockMessage};`);
 const app=run(runtime,w.controller,AppDiagnostics,()=>true,async(source,kind)=>{shown.push(`${source}:${kind}`);return true;},()=>statuses.push('render'),{status:()=>({})},()=>{throw new Error('nothing to settle');},{emit:()=>{throw new Error('no notice expected');}},w.clock.setTimeout,w.clock.clearTimeout);
 const cases=[];
 
@@ -29,7 +30,11 @@ assert.equal(w.published.length,0);cases.push('changes and key moments are noted
 await app.flushAutomaticBackups('app-hidden');assert.equal(app.automaticBackupsWaiting(),false);cases.push('going to the background does nothing');
 const started=w.clock.now();await app.backUpBeforeUpdate();assert.equal(w.clock.now(),started,'an update never waits');assert.equal(app.blockMessage(),'');assert.deepEqual(statuses,[]);cases.push('an update applies without waiting');
 assert.equal(await app.restoreMissingAfterStorageReset({clearedAt:'2026-10-06T07:00:00.000Z'}),false,'after a browser data clear the person chooses');cases.push('a browser data clear falls back to the decision notice');
-await app.openBackupRestore();assert.deepEqual(shown,['restore:status'],'restore opens Data & Backup with every way back in');cases.push('restore opens Data & Backup');
+const context=vm.createContext({requestAnimationFrame:callback=>callback()});
+for(const name of ['internal','foundation-host'])vm.runInContext(readCoreScript(name),context);
+const foundation=context[Symbol.for('studyDirector.internalModules.v1')].require('foundation-host',1);
+const restore=foundation.createBackupActions({device:()=>w.controller,providers:()=>runtime,goTab:async tab=>{assert.equal(tab,'library');return true;},showData:()=>shown.push('restore:status'),document:{getElementById:()=>({parentElement:null,scrollIntoView(){}}),querySelector:()=>({open:false})},preferredScrollBehavior:()=> 'auto'});
+await restore.openBackupRestore();assert.deepEqual(shown,['restore:status'],'restore opens Data & Backup with every way back in');cases.push('restore opens Data & Backup');
 assert.equal(runtime.automaticActive(),false,'so the 7-day reminder stays available');
 assert.deepEqual({...await runtime.createProtectedSafety('device-folder','before-clear-library')},{verified:false,skipped:true,reason:'unavailable'},'Clear Library proceeds on its own safeguards');cases.push('Clear Library needs no backup location');
 assert.equal((await runtime.history('google-drive',{interactive:false})).available,false);assert.equal(runtime.backgroundStatus().length,0);cases.push('Version History and diagnostics report no location');

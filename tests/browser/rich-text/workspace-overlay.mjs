@@ -1,10 +1,11 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
-const internal=fs.readFileSync('source/core/internal.js','utf8');
-const overlayModule=fs.readFileSync('source/core/workspace-overlay.js','utf8');
+const internal=readRuntimeSource('source/core/internal.ts');
+const overlayModule=readRuntimeSource('source/core/workspace-overlay.ts');
 const bundle=richTextRuntimeSource();
 const css=fs.readFileSync('source/styles/core.css','utf8');
 const browser=await launchChromium({profilePrefix:'qa-overlay-'});let page;

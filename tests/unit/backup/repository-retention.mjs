@@ -6,7 +6,7 @@ import {checkCases} from '../../helpers/generated-cases.mjs';
 
 // Backup retention: which versions each location keeps, and the cleanup that
 // deletes the rest. These are the production repository rules with no I/O.
-for(const file of ['source/core/internal.js','source/core/managed-repository.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/managed-repository.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const freeze=Object.freeze;
 const unused=()=>{throw new Error('Retention needs no repository I/O.');};

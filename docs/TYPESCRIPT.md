@@ -29,7 +29,7 @@ Running coverage without selection flags retains the complete final-certificatio
 
 | Project | Implementation boundary through Phase 4 | Environment |
 | --- | --- | --- |
-| browser | prior domain/editor modules plus Phase 4 persistence, records/backup codecs, repositories, ownership, session/timer, attachment, export, backup/provider/recovery orchestration and contracts | ES2022 + DOM |
+| browser | prior domain/editor modules plus Phase 4 persistence, records/backup codecs, repositories, ownership, session/timer, attachment, export, backup/provider/recovery orchestration and contracts; P5.1 registry, interaction/navigation/notice/audio/overlay foundations and extracted host adapters | ES2022 + DOM |
 | portable | shared contracts, domain/time, WG1, Markdown, tags and reconciliation | ES2022 only |
 | worker | search/image/attachment/export workers, validated processing requests and portable file/codec modules | ES2022 + WebWorker |
 | service-worker | boundary assertions; implementation deferred | ES2022 + WebWorker, service-worker scope |
@@ -37,7 +37,9 @@ Running coverage without selection flags retains the complete final-certificatio
 
 All projects use strict checking, checked indexing, exact optional properties, override/fallthrough checks, type-only imports and erasable syntax. No first-party `allowJs`, `noCheck` or `skipLibCheck` exemption is used. Type-error expectations are restricted to compile-time boundary fixtures. Production suppressions are rejected. Typed lint rejects explicit/unsafe `any`, floating/misused promises and non-exhaustive switches. Compiler and lint negative probes verify the gates fail for the intended diagnostic.
 
-`types/pilot.ts` is a narrow declaration of the still-JavaScript registry and the checked pilot exports. The module map is closed and return types follow module IDs; callers cannot choose arbitrary result types. Existing JS callers and the registry implementation remain unchecked until later phases. Runtime version/shape/freeze validation stays in place. Assertions at the registry lookup and unknown-property inspection bridge existing JS behavior. Save-lane's retained-value assertion follows its pending invariant; its retry-index assertion follows the bounded nonempty tuple. Preserve these checks and invariants when converting callers.
+`types/pilot.ts` and `types/browser-registry.ts` provide closed consumer maps: module IDs determine inputs, export identities and results. P5.1 checks the registry implementation itself; unknown classic-script producers still cross its runtime version/shape/freeze validation. Foundation APIs infer their exports from checked implementations. `foundation-host.ts` owns shared helpers, workspace/history routing, notification/Recent/system/sound adapters, tab presentation and delegated dispatch; explicit ports defer access to feature controllers until initialized. Remaining JS composition is owned by its scheduled feature pass or P5.13. Boundary fixtures reject invalid dialog results, notification progress/lifecycle, navigation modes, overlay content and DOM helper values.
+
+Assertions at registry lookup and validated unknown-property inspection bridge dynamic runtime behavior. Save-lane's retained-value assertion follows its pending invariant; audio indices follow fixed-array/sample bounds; the heterogeneous interaction queue uses one result assertion tied to its request kind. Preserve these checks and invariants when converting callers.
 
 ## Build, tests and coverage
 
@@ -78,4 +80,4 @@ Record/backup codecs are now checked together with their persistence/session dep
 
 Persistence, canonical record/backup codecs, repositories, ownership/mutation, sessions/timers, attachments, export, provider orchestration and recovery implementations are now admitted to strict checking. The final `backup.ts` and `backup-provider.ts` expose actual checked construction/output contracts; reduced retention proofs are distinct from restore manifests and pending review subjects determine their payloads. Phase 4's exact validation evidence is in the [history archive](typescript/HISTORY-PREPARATION-PHASE-4.md).
 
-Host scripts, UI/feature modules, authored external integrations, registry implementation and service worker remain Phase 5 work. Generated runtime JS is expected; it must map to checked authored entry points. Phase 6 owns remaining first-party build/contracts/tests and transitional-bridge retirement. Do not infer whole-app strictness from the zero unchecked-*existing-TS* count while authored JavaScript still remains.
+The remaining host scripts, UI/feature modules, authored external integrations and service worker remain Phase 5 work. Generated runtime JS is expected; it must map to checked authored entry points. Phase 6 owns remaining first-party build/contracts/tests and transitional-bridge retirement. Do not infer whole-app strictness from the zero unchecked-*existing-TS* count while authored JavaScript still remains.

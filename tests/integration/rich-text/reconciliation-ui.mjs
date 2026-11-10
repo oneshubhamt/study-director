@@ -23,7 +23,7 @@ function descendants(root,predicate,out=[]){for(const child of root.children){if
 function byText(root,text){return descendants(root,node=>node.textContent===text)[0]||null;}
 function tick(){return new Promise(resolve=>setImmediate(resolve));}
 
-for(const file of ['source/core/internal.js','source/core/reconciliation-ui.js'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/reconciliation-ui.js'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('reconciliation-ui',1);
 const freeze=Object.freeze;
 function createController({mount,assetGet,failMount=()=>false,failDestroy=()=>false}={}){

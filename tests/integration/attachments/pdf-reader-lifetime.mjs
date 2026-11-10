@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 const source=readHostHtml();
-const start=source.indexOf('function openPdfWorkspace('),end=source.indexOf('const SystemNotifications=',start);
+const start=source.indexOf('function openPdfWorkspace('),end=source.indexOf('const {SystemNotifications}=',start);
 const adapter=source.split('\n').find(line=>line.trim().startsWith('openPdf:')).trim().slice('openPdf:'.length,-1);
 const {coordinator}=createNotifications();
 let options,mode='open',releases=0,revokes=0;

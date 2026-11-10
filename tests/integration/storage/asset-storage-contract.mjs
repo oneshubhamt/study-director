@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,7 +11,7 @@ const render=source=>source
   .replaceAll('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'.attachmentsV1);
 const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Map,Set,Object,Promise,Number,String,Math,Date,JSON,crypto:webcrypto,Symbol,TypeError,Error};
 context.globalThis=context;vm.createContext(context);
-vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'source/core/internal.js'});
+vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'source/core/internal.ts'});
 vm.runInContext(render(readScript('source/core/asset-storage.ts')),context,{filename:'source/core/asset-storage.ts'});
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-storage',1);
 

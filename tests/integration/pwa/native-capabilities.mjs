@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import {drainMicrotasks} from '../../helpers/async-tools.mjs';
 import fs from 'node:fs';
@@ -5,8 +6,8 @@ import path from 'node:path';
 import vm from 'node:vm';
 
 const root=path.resolve(new URL('../../..',import.meta.url).pathname);
-const read=relative=>fs.readFileSync(path.join(root,relative),'utf8');
-for(const file of ['source/core/internal.js','source/core/native-capabilities.js'])vm.runInThisContext(read(file),{filename:file});
+const read=relative=>readRuntimeSource(path.join(root,relative));
+for(const file of ['source/core/internal.ts','source/core/native-capabilities.js'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const NativeModule=registry.require('native-capabilities',1);
 

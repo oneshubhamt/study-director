@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 
 const context={console,Map,Set,Object,Promise,Number,String,Math,Date,JSON,structuredClone};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.ts']){
+for(const file of ['source/core/internal.ts','source/core/library-clear.ts']){
   vm.runInContext(readScript(file),context,{filename:file});
 }
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('library-clear',1);

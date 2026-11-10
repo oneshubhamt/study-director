@@ -1,9 +1,10 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {launchChromium,CdpPage,waitFor} from '../../helpers/browser-harness.mjs';
 
-const internal=fs.readFileSync(new URL('../../../source/core/internal.js',import.meta.url),'utf8');
-const noticeSource=fs.readFileSync(new URL('../../../source/core/notice-coordinator.js',import.meta.url),'utf8');
+const internal=readRuntimeSource(new URL('../../../source/core/internal.ts',import.meta.url));
+const noticeSource=readRuntimeSource(new URL('../../../source/core/notice-coordinator.ts',import.meta.url));
 const librarySource=fs.readFileSync(new URL('../../../source/core/library.js',import.meta.url),'utf8');
 const coreCss=fs.readFileSync(new URL('../../../source/styles/core.css',import.meta.url),'utf8');
 const browser=await launchChromium({profilePrefix:'study-director-library-selection-'});

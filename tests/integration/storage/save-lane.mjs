@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,7 +11,7 @@ import {createFakeClock} from '../../helpers/fake-clock.mjs';
 // keeps the value and retries on its own.
 const clock=createFakeClock('2026-10-05T10:00:00.000Z');
 const context=vm.createContext({console,Promise,Object,Symbol,Error,TypeError,String,Number,Math,Array,Set,Map,WeakMap,JSON,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,queueMicrotask});
-vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'internal.js'});
+vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'internal.js'});
 vm.runInContext(readScript('source/core/save-lane.ts'),context,{filename:'source/core/save-lane.ts'});
 const SaveLane=context[Symbol.for('studyDirector.internalModules.v1')].require('save-lane',1);
 const settle=()=>clock.drainMicrotasks(32);

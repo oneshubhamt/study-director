@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const file of ['source/core/internal.js','source/core/attachments.ts'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/attachments.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('attachments',1);
 const payload=new Blob([new Uint8Array([1,2,3,4])],{type:'image/png'});
 const hash='a'.repeat(64),id='img-abcdefghijklmnopqrst';

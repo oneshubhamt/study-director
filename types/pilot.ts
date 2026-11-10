@@ -1,9 +1,9 @@
 import type {SessionLifecycleModule} from './session-lifecycle.ts';
 import type {LifecycleModule,RepositoryPolicyModule} from './lifecycle.ts';
 import type {DomainModule,DomainLimits} from './domain.ts';
-// Transitional declaration of the existing JS registry, limited to checked modules.
-// The registry implementation remains unchecked until its implementation phase; its runtime contract
-// is covered by internal-modules and the pilot boundary tests.
+// Closed consumer map for the pilot modules. The registry implementation is
+// checked in source/core/internal.ts; unknown classic-script producers still
+// cross its runtime validation boundary.
 export interface CanonicalModule {
   readonly format: 'study-director.canonical';
   readonly contractVersion: 1;

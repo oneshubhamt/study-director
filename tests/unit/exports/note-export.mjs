@@ -1,11 +1,12 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createStoreZip} from '../../../portable/zip.ts';
 import {createProcessingEngine} from '../../../portable/processing.ts';
 
-const run=file=>vm.runInThisContext(fs.readFileSync(new URL(file,import.meta.url),'utf8'),{filename:file});
-run('../../../source/core/internal.js');run('../../../source/core/note-export.js');
+const run=file=>vm.runInThisContext(readRuntimeSource(new URL(file,import.meta.url)),{filename:file});
+run('../../../source/core/internal.ts');run('../../../source/core/note-export.js');
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const module=registry.require('note-export',2);
 assert.equal(module.format,'study-director.note-export-module');

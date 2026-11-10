@@ -137,6 +137,21 @@
     "types/timer-engine.ts",
     "types/timer-state.ts",
     "source/core/backup.ts",
-    "types/backup.ts"
+    "types/backup.ts",
+    "source/core/internal.ts",
+    "source/core/interactions.ts",
+    "source/core/workspace-overlay.ts",
+    "source/core/notice-coordinator.ts",
+    "source/core/navigation.ts",
+    "source/core/audio-engine.ts",
+    "source/core/backup-presentation.ts",
+    "types/workspace.ts",
+    "types/navigation.ts",
+    "types/notifications.ts",
+    "types/backup-presentation.ts",
+    "types/interactions.ts",
+    "source/core/foundation-host.ts",
+    "types/foundation-host.ts",
+    "types/checks/foundation.ts"
   ]
 }

@@ -1,3 +1,4 @@
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,7 +14,8 @@ const noop=()=>{};
   const {coordinator}=createNotifications(),registrations=[],shown=[];let preference=true,permission='granted',permissionRequests=0;
   class Notification {static get permission(){return permission;}static requestPermission(){permissionRequests++;return Promise.resolve(permission);}constructor(title,options){shown.push({title,options});}}
   const context={NoticeCoordinator:coordinator,Notification,window:{Notification},AppData:{local:{getJson:()=>preference,setJson:(_k,value)=>{preference=value;}}},STORAGE_KEYS:{systemAlerts:'alerts'},document:{getElementById:()=>null,addEventListener:noop},AppDiagnostics:{capture:noop},Interactions:{notify:noop},appCanMutate:()=>true,location:{href:'https://example.test/'},URL,navigator:{serviceWorker:{getRegistration:()=>{const gate=deferred();registrations.push(gate);return gate.promise;}}}};
-  vm.createContext(context);vm.runInContext(html.slice(html.indexOf('const SystemNotifications='),html.indexOf('/* SHARED SCALAR HELPERS */'))+';globalThis.api=SystemNotifications;',context);
+  vm.createContext(context);for(const name of ['internal','foundation-host'])vm.runInContext(readCoreScript(name),context);
+  context.api=context[Symbol.for('studyDirector.internalModules.v1')].require('foundation-host',1).createSystem({...context,readPreference:()=>preference,writePreference:value=>{preference=value;}}).SystemNotifications;
   const registration={showNotification:async(title,options)=>shown.push({title,options})};
   const first=context.api.notify('Cue','Break','pomodoro','one');
   assert.equal(await context.api.notify('Cue','Break','pomodoro','one'),false,'in-flight duplicate must not start another delivery');

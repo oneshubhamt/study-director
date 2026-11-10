@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
@@ -55,11 +56,11 @@ console.log(JSON.stringify({noteReadOnly:true,standaloneStatusLocal:true,library
 
 
 { // workspace-history-boundary
-const navigation=fs.readFileSync('source/core/navigation.js','utf8');
+const navigation=readRuntimeSource('source/core/navigation.ts');
 const guide=fs.readFileSync('source/external/guide.js','utf8');
 const app=readHostHtml();
-const overlay=fs.readFileSync('source/core/workspace-overlay.js','utf8');
-const interactions=fs.readFileSync('source/core/interactions.js','utf8');
+const overlay=readRuntimeSource('source/core/workspace-overlay.ts');
+const interactions=readRuntimeSource('source/core/interactions.ts');
 
 assert.match(navigation,/history\.pushState\(/);
 assert.match(navigation,/history\.replaceState\(/);
@@ -73,7 +74,7 @@ assert.match(interactions,/kind:'prompt'/);
 assert.doesNotMatch(overlay,/history\.pushState|history\.replaceState|popstate/);
 assert.doesNotMatch(interactions,/history\.pushState|history\.replaceState|popstate/);
 
-console.log(JSON.stringify({status:'PASS',suite:'workspace-history-ownership',owner:'source/core/navigation.js',consumers:['Legal Center','workspace overlay','interaction dialogs']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'workspace-history-ownership',owner:'source/core/navigation.ts',consumers:['Legal Center','workspace overlay','interaction dialogs']},null,2));
 }
 
 { // library-sections-contract

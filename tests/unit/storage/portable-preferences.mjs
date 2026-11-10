@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
-for(const file of ['source/core/internal.js','source/core/record-codecs.ts']){
+for(const file of ['source/core/internal.ts','source/core/record-codecs.ts']){
   vm.runInThisContext(readScript(path.join(ROOT,file)),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];

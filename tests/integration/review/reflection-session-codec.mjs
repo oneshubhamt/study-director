@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readScript(path.join(ROOT,relative));
-for(const file of ['source/core/internal.js','source/core/domain.ts','source/core/timer-state.ts','source/core/record-codecs.ts'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/domain.ts','source/core/timer-state.ts','source/core/record-codecs.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Domain=registry.require('domain',1,Object.freeze({maxAreaNameChars:200,maxDurationMinutes:1440,maxScheduleChars:50000,maxScheduleRows:200,maxTaskNameChars:300,maxTasksPerDay:100,maxUnitChars:80}));
 const TimerStateModule=registry.require('timer-state',1);

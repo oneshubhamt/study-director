@@ -20,7 +20,7 @@ function loadModule(files,name){
 
 // Coordinator: a 260 MiB attachment is admitted by quota rather than an arbitrary byte ceiling.
 {
-  const {module}=loadModule(['source/core/internal.js','source/core/attachment-ingest.ts'],'attachment-ingest');
+  const {module}=loadModule(['source/core/internal.ts','source/core/attachment-ingest.ts'],'attachment-ingest');
   let estimateCalls=0;const posted=[];
   const worker={terminate(){},postMessage(message){posted.push(message);if(message.type==='ingest')queueMicrotask(()=>{this.onmessage?.({data:{id:message.id,progress:{phase:'copying',loaded:130*MiB,total:260*MiB,mode:'sync'}}});this.onmessage?.({data:{id:message.id,value:{storageName:message.data.storageName,hash:'a'.repeat(64),size:260*MiB,mode:'sync'}}});});}};
   const coordinator=module.create({...releasingTimers,createWorker:()=>worker,directory:'study-director-assets-v2',storage:{estimate:async()=>{estimateCalls++;return {quota:1024*MiB,usage:100*MiB};}},randomUUID:()=> '12345678-1234-1234-1234-123456789012'});
@@ -33,7 +33,7 @@ function loadModule(files,name){
 
 // Quota failure and pre-aborted requests stop before worker ingestion.
 {
-  const {module}=loadModule(['source/core/internal.js','source/core/attachment-ingest.ts'],'attachment-ingest');
+  const {module}=loadModule(['source/core/internal.ts','source/core/attachment-ingest.ts'],'attachment-ingest');
   let estimateCalls=0,workerPosts=0;
   const worker={terminate(){},postMessage(){workerPosts++;}};
   const virtual=Object.create(Blob.prototype);Object.defineProperty(virtual,'size',{value:260*MiB});
@@ -58,14 +58,14 @@ function element(id=''){
 
 // Library-originated ingestion bypasses the global file-job coordinator; Cancel aborts only its own signal.
 {
-  const {module}=loadModule(['source/core/internal.js','source/core/attachments.ts'],'attachments');
+  const {module}=loadModule(['source/core/internal.ts','source/core/attachments.ts'],'attachments');
   const ids=new Map();
   for(const id of ['library-attachments','attachment-status','attachment-preview','attachment-detail','attachment-list','attachment-search','attachment-count','attachment-cancel','attachment-add','attachment-files','attachment-import','attachment-archive','attachment-export','attachment-progress','attachment-progress-bar','attachment-progress-label','attachment-progress-value'])ids.set(id,element(id));
   let jobCalls=0,cancelCalls=0,putStarted=false,putAborted=false;const lateProgress=[];
   const {coordinator,port}=createNotifications('attachments');
   const document={activeElement:null,getElementById:id=>ids.get(id)||element(id),querySelectorAll(){return []},querySelector(){return null},createElement:tag=>element(tag),createDocumentFragment:()=>element('fragment'),addEventListener(){}};
-  const html=readHostHtml();
-  vm.runInNewContext(html.slice(html.indexOf('function renderNotificationSurfaces(state){'),html.indexOf('const BackupPresentation=')),{NoticeCoordinator:coordinator,document});
+  const {module:foundation}=loadModule(['source/core/internal.ts','source/core/foundation-host.ts'],'foundation-host');
+  coordinator.subscribe(foundation.createNoticeViews({document}).renderNotificationSurfaces);
   const store={
     requireAvailable(){},during:fn=>fn(),list:async()=>[],discard:async()=>0,publish:async()=>1,
     put:async(_id,blob,options)=>{putStarted=true;lateProgress.push(options.onProgress);options.onProgress?.({phase:'copying',loaded:1,total:blob.size,mode:'async'});return await new Promise((resolve,reject)=>{const onAbort=()=>{putAborted=true;const error=new Error('cancelled');error.name='AbortError';reject(error)};options.signal?.addEventListener('abort',onAbort,{once:true});});},

@@ -41,7 +41,7 @@ class FakeDocument{
   add(id,node=new FakeElement()){this.nodes.set(id,node);return node;}
 }
 
-vm.runInThisContext(readRuntimeSource('source/core/internal.js'),{filename:'source/core/internal.js'});
+vm.runInThisContext(readRuntimeSource('source/core/internal.ts'),{filename:'source/core/internal.ts'});
 vm.runInThisContext(readRuntimeSource('source/core/plan.js'),{filename:'source/core/plan.js'});
 const PlanModule=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('plan',1);
 assert.ok(PlanModule);

@@ -1,56 +1,58 @@
-(()=>{
+import type {WorkspaceDescriptor,WorkspaceCloseMeta,OverlayHistory,OverlayOptions,OverlayHandle,OverlayInput} from '../../types/workspace.ts';
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+const sdWorkspaceOverlayFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'workspace-overlay','study-director.workspace-overlay-module'>|undefined;
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject}=registry.contracts;
-registry.define('workspace-overlay',1,()=>{
+const createModule=()=>{
   const freeze=Object.freeze;
   const HISTORY_KINDS=new Set(['focus','pdf','audio']);
   const REPLAY_LIMIT=32;
   const CLOSE_FALLBACK_MS=220;
-  function createController(controllerInput){
+  function createController(controllerInput:OverlayInput){
     exactObject(controllerInput,['ports'],'Workspace overlay input');
     const rawPorts=controllerInput.ports,portKeys=rawPorts&&typeof rawPorts==='object'?Object.keys(rawPorts).sort():[];
     if(!rawPorts||!Object.isFrozen(rawPorts)||!['environment','environment|history'].includes(portKeys.join('|')))throw new TypeError('Workspace overlay ports are incomplete, mutable, or contain unexpected fields.');
     const environment=exactObject(rawPorts.environment,['document'],'Workspace overlay environment');
     const historyPort=rawPorts.history||null;
     if(historyPort)exactObject(historyPort,['closed','opened','requestClose'],'Workspace overlay history port');
-    if(historyPort&&['closed','opened','requestClose'].some(key=>typeof historyPort[key]!=='function'))throw new TypeError('Workspace overlay history port must contain functions only.');
+    if(historyPort&&(['closed','opened','requestClose'] as const).some(key=>typeof historyPort[key]!=='function'))throw new TypeError('Workspace overlay history port must contain functions only.');
     const {document}=environment;
-    const stack=[];
-    const replay=new Map();
+    const stack:{handle:OverlayHandle;descriptor:WorkspaceDescriptor|null}[]=[];
+    const replay=new Map<string,{descriptor:WorkspaceDescriptor;parentToken:string;reopen:(descriptor:WorkspaceDescriptor)=>unknown;valid:(()=>boolean)|null}>();
     const nonce=String(globalThis.crypto?.randomUUID?.()||Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g,'').slice(0,24)||'session';
     let sequence=0,historySequence=0,baseOverflow='',physicalDialogs=0;
-    const closingByToken=new Map();
+    const closingByToken=new Map<string,Promise<boolean>>();
 
-    function supportsDialog(dialog){return !!(dialog&&typeof dialog.showModal==='function'&&typeof dialog.close==='function');}
-    function cleanLabel(value){const text=String(value??'').trim();return text.slice(0,180)||'Study Director';}
-    function cleanKey(value){const key=String(value??'').trim();return /^[A-Za-z0-9._-]{1,120}$/.test(key)?key:'';}
-    function cleanToken(value){const token=String(value??'').trim();return /^[A-Za-z0-9:_-]{1,96}$/.test(token)?token:'';}
-    function descriptor(raw,parentToken=''){
+    function supportsDialog(dialog:HTMLDialogElement){return !!(dialog&&typeof dialog.showModal==='function'&&typeof dialog.close==='function');}
+    function cleanLabel(value:unknown){const text=String(value??'').trim();return text.slice(0,180)||'Study Director';}
+    function cleanKey(value:unknown){const key=String(value??'').trim();return /^[A-Za-z0-9._-]{1,120}$/.test(key)?key:'';}
+    function cleanToken(value:unknown){const token=String(value??'').trim();return /^[A-Za-z0-9:_-]{1,96}$/.test(token)?token:'';}
+    function descriptor(raw:OverlayHistory|null,parentToken=''):WorkspaceDescriptor|null{
       if(!raw||typeof raw!=='object')return null;
       const kind=String(raw.kind||'').trim().toLowerCase();if(!HISTORY_KINDS.has(kind))return null;
       const token=cleanToken(raw.token)||`ws:${nonce}:${++historySequence}`;
-      const key=cleanKey(raw.key),out={kind,token};if(key)out.key=key;
+      const key=cleanKey(raw.key),out:{kind:string;token:string;key?:string}={kind,token};if(key)out.key=key;
       const value=freeze(out);
       if(typeof raw.reopen==='function'){
         replay.set(token,freeze({descriptor:value,parentToken:cleanToken(parentToken),reopen:raw.reopen,valid:typeof raw.valid==='function'?raw.valid:null}));
-        while(replay.size>REPLAY_LIMIT)replay.delete(replay.keys().next().value);
+        while(replay.size>REPLAY_LIMIT)replay.delete(replay.keys().next().value!);
       }
       return value;
     }
-    function addClass(node,name){if(node.classList?.add)node.classList.add(name);else if(!String(node.className||'').split(/\s+/).includes(name))node.className=`${node.className||''} ${name}`.trim();}
-    function removeClass(node,name){if(node.classList?.remove)node.classList.remove(name);else node.className=String(node.className||'').split(/\s+/).filter(value=>value&&value!==name).join(' ');}
+    function addClass(node:HTMLElement,name:string){if(node.classList?.add)node.classList.add(name);else if(!String(node.className||'').split(/\s+/).includes(name))node.className=`${node.className||''} ${name}`.trim();}
+    function removeClass(node:HTMLElement,name:string){if(node.classList?.remove)node.classList.remove(name);else node.className=String(node.className||'').split(/\s+/).filter(value=>value&&value!==name).join(' ');}
     function reducedMotion(){try{return !!document.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)').matches}catch{return false}}
-    function frame(callback){const raf=document.defaultView?.requestAnimationFrame||globalThis.requestAnimationFrame;return typeof raf==='function'?raf(callback):globalThis.setTimeout(callback,0);}
-    function after(delay,callback){return globalThis.setTimeout(callback,delay);}
+    function frame(callback:()=>void){const raf=document.defaultView?.requestAnimationFrame||globalThis.requestAnimationFrame;return typeof raf==='function'?raf(callback):globalThis.setTimeout(callback,0);}
+    function after(delay:number,callback:()=>void){return globalThis.setTimeout(callback,delay);}
     function currentEntry(){return stack[stack.length-1]||null;}
     function historyDescriptor(){return currentEntry()?.descriptor||null;}
-    function forget(token){const key=cleanToken(token);return key?replay.delete(key):false;}
-    function open(rawOptions){
-      const options=rawOptions&&typeof rawOptions==='object'?rawOptions:{};
+    function forget(token:unknown){const key=cleanToken(token);return key?replay.delete(key):false;}
+    function open(rawOptions:OverlayOptions){
+      const options:Partial<OverlayOptions>=rawOptions&&typeof rawOptions==='object'?rawOptions:{};
       if(!(options.content instanceof HTMLElement))throw new TypeError('Workspace overlay content must be an HTMLElement.');
       if(options.headerContent!==undefined&&!(options.headerContent instanceof HTMLElement))throw new TypeError('Workspace overlay header content must be an HTMLElement.');
       const dialog=document.createElement('dialog');
@@ -59,7 +61,7 @@ registry.define('workspace-overlay',1,()=>{
       const fromHistory=!!cleanToken(historyConfig?.token);
       const id=`sd-workspace-overlay-title-${++sequence}`,restoreFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
       dialog.className=`workspace-overlay${options.className?` ${String(options.className).replace(/[^a-z0-9_-]+/gi,' ').trim()}`:''}`;
-      dialog.dataset.sdWorkspaceOverlay='1';dialog.setAttribute('aria-labelledby',id);
+      dialog.dataset['sdWorkspaceOverlay']='1';dialog.setAttribute('aria-labelledby',id);
       const shell=document.createElement('section');shell.className='workspace-overlay-shell';
       const header=document.createElement('header');header.className='workspace-overlay-head';
       const title=document.createElement('div');title.className='workspace-overlay-title';title.id=id;title.textContent=cleanLabel(options.label);
@@ -67,10 +69,10 @@ registry.define('workspace-overlay',1,()=>{
       const closeButton=document.createElement('button');closeButton.type='button';closeButton.className='workspace-overlay-close';closeButton.setAttribute('aria-label',String(options.closeLabel||'Close'));closeButton.textContent='×';
       const body=document.createElement('div');body.className='workspace-overlay-body';body.append(options.content);
       header.append(title,slot,closeButton);shell.append(header,body);dialog.append(shell);document.body.append(dialog);
-      let closing=false,closed=false,closeTimer=0,closeEndHandler=null,resolveClosed=()=>{};
-      const whenClosed=new Promise(resolve=>{resolveClosed=resolve;});
-      const onCancel=event=>{event.preventDefault();};
-      let handle=null;
+      let closing=false,closed=false,closeTimer=0,closeEndHandler:((event:TransitionEvent)=>void)|null=null,resolveClosed: (closed:boolean)=>void=()=>{};
+      const whenClosed=new Promise<boolean>(resolve=>{resolveClosed=resolve;});
+      const onCancel=(event:Event)=>{event.preventDefault();};
+      let handle:OverlayHandle|null=null;
       const clearCloseWait=()=>{
         if(closeTimer)globalThis.clearTimeout(closeTimer);closeTimer=0;
         if(closeEndHandler){dialog.removeEventListener('transitionend',closeEndHandler);closeEndHandler=null;}
@@ -87,7 +89,7 @@ registry.define('workspace-overlay',1,()=>{
         if(restoreFocus?.isConnected)restoreFocus.focus({preventScroll:true});
         resolveClosed(true);return true;
       };
-      const beginClose=(meta={})=>{
+      const beginClose=(meta:WorkspaceCloseMeta={})=>{
         if(closing||closed)return false;closing=true;
         const index=stack.findIndex(item=>item.handle===handle);if(index>=0)stack.splice(index,1);
         if(historyDescriptorValue?.token)closingByToken.set(historyDescriptorValue.token,whenClosed);
@@ -121,10 +123,10 @@ registry.define('workspace-overlay',1,()=>{
       return handle;
     }
     function close(){const top=currentEntry();return top?top.handle.close():false;}
-    async function closeToIndex(index){
+    async function closeToIndex(index:number){
       while(stack.length-1>index){const top=currentEntry();if(!top)break;top.handle.closeFromHistory();await top.handle.whenClosed;}
     }
-    async function ensureToken(token,seen=new Set()){
+    async function ensureToken(token:string,seen=new Set<string>()):Promise<boolean>{
       const key=cleanToken(token);if(!key||seen.has(key))return false;seen.add(key);
       const closing=closingByToken.get(key);if(closing)await closing;
       const existing=stack.findIndex(item=>item.descriptor?.token===key);
@@ -135,7 +137,7 @@ registry.define('workspace-overlay',1,()=>{
       let opened=false;try{opened=await record.reopen(record.descriptor)===true}catch{opened=false;}
       return opened&&historyDescriptor()?.token===key;
     }
-    async function reconcile(rawDesired){
+    async function reconcile(rawDesired:WorkspaceDescriptor|null){
       const desired=rawDesired&&typeof rawDesired==='object'&&HISTORY_KINDS.has(String(rawDesired.kind||'').toLowerCase())?rawDesired:null;
       if(!desired){await closeToIndex(-1);return historyDescriptor();}
       const targetToken=cleanToken(desired.token);if(!targetToken){await closeToIndex(-1);return historyDescriptor();}
@@ -146,5 +148,7 @@ registry.define('workspace-overlay',1,()=>{
     return freeze({format:'study-director.workspace-overlay',contractVersion:1,open,close,reconcile,historyDescriptor});
   }
   return freeze({format:'study-director.workspace-overlay-module',contractVersion:1,createController});
-});
+};
+registry.define('workspace-overlay',1,createModule);return createModule;
 })();
+export type WorkspaceOverlayModule=ReturnType<typeof sdWorkspaceOverlayFactory>;

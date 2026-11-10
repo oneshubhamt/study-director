@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const execute=file=>vm.runInThisContext(readScript(fileURLToPath(new URL(file,import.meta.url))),{filename:file});
-execute('../../../source/core/internal.js');
+execute('../../../source/core/internal.ts');
 execute('../../../source/core/timer-state.ts');
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const timer=registry.require('timer-state',1);

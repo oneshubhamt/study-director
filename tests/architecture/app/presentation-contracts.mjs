@@ -1,3 +1,5 @@
+import {readScript} from '../../../build/source-script.mts';
+const foundation=readScript('source/core/foundation-host.ts');
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -46,7 +48,7 @@ assert.match(glassCss,/html\[data-material="glass"\] body::before\{[\s\S]*?posit
 assert.match(coreCss,/\.pane\.on\[data-sd-enter\]>\*\{animation:var\(--sd-motion-pane-enter-name\) var\(--sd-motion-pane-enter-duration\) var\(--sd-motion-pane-enter-ease\) backwards\}/u,'pane entrances must use backwards fill so no transform or opacity persists after the entrance.');
 assert.match(coreCss,/@media \(prefers-reduced-motion: reduce\)\{[\s\S]*?\.pane\.on\[data-sd-enter\]>\*\{animation:none!important\}/u,'reduced motion must remove pane entrances entirely, including staggered delays.');
 assert.match(glassCss,/--sd-motion-pane-enter-name:sd-pane-enter-float;/u,'Glass must present its own pane entrance.');
-assert.match(html,/pane\.classList\.add\('on'\);[^\n]*\n\s*if\(previousTab!==tabName\)markPaneEntrance\(pane\);/u,'only a real tab change may mark a pane entrance.');
+assert.match(foundation,/pane\.classList\.add\('on'\);[^\n]*\n\s*if\(previousTab!==tabName\)markPaneEntrance\(pane\);/u,'only a real tab change may mark a pane entrance.');
 assert.match(html,/function runAppearanceChange\(origin,change\)\{[\s\S]*?prefers-reduced-motion: reduce[\s\S]*?\{change\(\);return;\}[\s\S]*?typeof document\.startViewTransition!=='function'\)\{beginAppearanceShift\(\);change\(\);return;\}/u,'appearance changes must be immediate under reduced motion and fall back to the colour crossfade without View Transitions.');
 assert.match(coreCss,/html\[data-sd-appearance-reveal\]::view-transition-old\(root\)\{animation:none;[\s\S]*?html\[data-sd-appearance-reveal\] \*,html\[data-sd-appearance-reveal\] \*::before,html\[data-sd-appearance-reveal\] \*::after\{transition:none!important\}/u,'the reveal holds the old view still and settles the live new view without replaying control transitions.');
 assert.match(glassCss,/html\[data-presentation="glass"\]\[data-sd-appearance-reveal\]::view-transition-new\(root\)\{[\s\S]*?mask-image:radial-gradient/u,'Glass reveals appearance changes as a feathered bloom.');
@@ -65,8 +67,8 @@ assert.match(glassCss,/\[data-theme="dark"\]\[data-sd-area="execute"\] body::bef
 // the document made every tab change restyle the whole page each frame.
 assert.doesNotMatch(glassCss,/@property --sd-aurora-[abcd]\{[^}]*inherits:true/u,'aurora colours must not inherit.');
 assert.match(glassCss,/html\[data-material="glass"\] body::before\{\s*transition:--sd-aurora-a/u,'the aurora glide runs on the background layer.');
-assert.match(html,/function markPaneEntrance\(pane\)\{[\s\S]*?if\(pane\.id==='pane-insights'&&\(!pane\.firstElementChild\|\|pane\.querySelector\('\.plugin-loading-panel'\)\)\)return;/u,'Insights arrives still only while it renders behind its loading panel; a kept view animates like any pane.');
-assert.match(html,/markPaneEntrance\(pane\);\n\s*document\.documentElement\.dataset\.sdArea=tabName;/u,'navigation publishes the active area for presentation atmospheres.');
+assert.match(foundation,/function markPaneEntrance\(pane\s*\)\{[\s\S]*?if\(pane\.id==='pane-insights'&&\(!pane\.firstElementChild\|\|pane\.querySelector\('\.plugin-loading-panel'\)\)\)return;/u,'Insights arrives still only while it renders behind its loading panel; a kept view animates like any pane.');
+assert.match(foundation,/markPaneEntrance\(pane\);\n\s*document\.documentElement\.dataset\['sdArea'\]=tabName;/u,'navigation publishes the active area for presentation atmospheres.');
 assert.doesNotMatch(coreCss,/--row-name-color:rgba\(/u,'plan row names must not be dimmed with alpha below readable contrast.');
 
 assert.match(auroraCss,/const PROFILE=Object\.freeze\(\{\s*contractVersion:2,\s*id:'aurora',\s*label:'Aurora',\s*typography:'aurora',\s*shape:'aurora',\s*material:'aurora',\s*depth:'aurora',/u,'Aurora is its own presentation profile.');

@@ -105,7 +105,8 @@ await test('Drive executor quarantines confirmed corruption while retaining avai
 await test('the validator accepts only the current record and rejects older versions',async()=>{
   const h=fixture(),context=h.context;
   for(const file of ['source/core/host-metadata.ts'])vm.runInContext(readScript(file),context);
-  vm.runInContext(app.slice(app.indexOf('function sameDataValue('),app.indexOf('function normalizeStudyQuality(')),context);
+  vm.runInContext(readCoreScript('foundation-host'),context);
+  context.sameDataValue=context[Symbol.for('studyDirector.internalModules.v1')].require('foundation-host',1).createPrimitives({document:{},APP_LIMITS:{maxNoteChars:1},CompletionModel:{fromUnits:()=>0}}).sameDataValue;
   const module=context[Symbol.for('studyDirector.internalModules.v1')].require('host-metadata',1),names=['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'];
   const validators=module.createAppMetaValidators(Object.freeze({keys:Object.freeze(Object.fromEntries(names.map(name=>[name,name]))),same:context.sameDataValue,normalizers:Object.freeze({verifiedRecovery:value=>value,attachmentIntegrity:value=>value,repositoryIntegrity:context.normalizeRepositoryIntegrityState,reconciliationBase:value=>value,reconciliationBaseNote:value=>value,reconciliationBaseDays:value=>value})}));
   const validate=value=>validators.repositoryIntegrityScrub(value,{key:'repositoryIntegrityScrub'});

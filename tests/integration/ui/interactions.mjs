@@ -9,7 +9,7 @@ import {fileURLToPath} from 'node:url';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const read=relative=>readRuntimeSource(path.join(root,relative));
-for(const file of ['source/core/internal.js','source/core/interactions.js'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/interactions.ts'])vm.runInThisContext(read(file),{filename:file});
 const notificationPort=Object.freeze({notify:()=>'',subscribe:()=>()=>{},dismissEvent:()=>false,dismissAll:()=>0,pauseEvent:()=>false,setPaused:()=>false,setHidden:()=>{}});
 const interactions=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('interactions',1);
 
@@ -90,6 +90,8 @@ const checkboxResult=await controller.configure({
 });
 assert.deepEqual(checkboxResult,{safetyCopy:true},'Fallback configure must preserve compact checkbox decisions.');
 assert.match(confirmMessages.at(-1),/Download an extra standalone safety copy before applying/u);
+assert.deepEqual(await controller.configure({checkboxes:[{id:'plain',label:'Plain choice'}]}),{plain:true});
+assert.equal(confirmMessages.at(-1),'Plain choice\nOK = checked · Cancel = unchecked','Absent optional descriptions must not add an empty prompt line.');
 assert.equal(controller.notify({title:'No DOM'}),'');
 assert.equal(controller.dismiss(),false);
 

@@ -1,8 +1,11 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
+
+const foundation=readRuntimeSource('source/core/foundation-host.ts');
 
 // Current runtime boundary invariants: decision time, pacing, presentation, and bounded background/display work.
 
@@ -153,9 +156,9 @@ assert.doesNotMatch(glass,/html\[data-material="glass"\] \.library-notes-grid\{/
 
 // Shared notices use the coordinator's existing compact semantic in every presentation,
 // while skin-specific surface geometry remains confined to Glass.
-assert.match(app,/region\.dataset\.noticeCompact=active&&active\.compact\?'true':'false'/,
+assert.match(foundation,/region\.dataset\['noticeCompact'\]=active&&active\.compact\?'true':'false'/,
   'notice renderer exposes the coordinator compact semantic to presentation CSS');
-assert.match(app,/function noticeCanCompact\(message\)\{[^}]*text\.length<=160/s,
+assert.match(foundation,/function noticeCanCompact\(message\s*\)\{[^}]*text\.length<=160/s,
   'short single-line safety/storage notices are classified compact without a second notice system');
 assert.doesNotMatch(app,/kind:'(?:safety|storage)'[^}]*compact:false/,
   'safety/storage notices no longer force the wide notice geometry');
@@ -211,7 +214,7 @@ for(const token of ['--sd-motion-workspace-open-duration','--sd-motion-workspace
   assert.ok(app.includes(token),`presentation manifest exposes ${token}`);
   assert.ok(core.includes(token),`core presentation profile defines ${token}`);
 }
-for(const source of [insights,fs.readFileSync('source/core/navigation.js','utf8'),fs.readFileSync('source/core/library.js','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
+for(const source of [foundation,insights,readRuntimeSource('source/core/navigation.ts'),fs.readFileSync('source/core/library.js','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
   assert.doesNotMatch(source,/startViewTransition|viewTransitionName|view-transition-name/,
     'navigation and lazy feature surfaces must not start snapshot transitions');
 }
@@ -219,12 +222,12 @@ assert.equal((app.match(/startViewTransition\(/g)||[]).length,1,'the app starts 
 const appearanceChange=app.slice(app.indexOf('function runAppearanceChange'),app.indexOf('function renderThemeControls'));
 assert.match(appearanceChange,/prefers-reduced-motion: reduce[\s\S]*?typeof document\.startViewTransition!=='function'[\s\S]*?document\.startViewTransition\(\(\)=>\{change\(\);\}\)/,
   'appearance transitions fall back to an immediate change under reduced motion or without the API, and only run a synchronous update');
-const tabCommit=app.slice(app.indexOf('async function presentTabCommit'),app.indexOf('async function prepareTabDeparture'));
+const tabCommit=foundation.slice(foundation.indexOf('async function presentTabCommit'),foundation.indexOf('async function prepareTabDeparture'));
 assert.doesNotMatch(tabCommit,/startViewTransition/,'primary tab presentation never waits behind a snapshot');
 assert.doesNotMatch(app,/motion:\s*PRESENTATION_KERNEL\.motion|PRESENTATION_KERNEL\.motion/,
   'Presentation does not expose a snapshot-transition runtime API to plugins');
 assert.ok(app.includes('present:presentTabCommit'),'navigation retains one presentation boundary for state/focus arbitration');
-const tabPresentation=app.slice(app.indexOf('async function presentTabCommit'),app.indexOf('async function prepareTabDeparture'));
+const tabPresentation=tabCommit;
 assert.match(tabPresentation,/const result=await update\(\);/,
   'primary tab presentation commits directly on the live DOM');
 assert.ok(insights.includes('ready:view.ready'),'lazy Insights exposes an explicit stable-shell navigation readiness hook');
@@ -236,9 +239,9 @@ assert.doesNotMatch(core,/\.interaction-toast\{[^}]*(?:\.15s|150ms)[^}]*\}/s,
   'toast feedback does not retain component-local timing literals');
 assert.match(core,/:is\([^)]*\.pnote-info-popover[^)]*\.display-tools-menu[^)]*\.copy-report-menu[^)]*\.plan-field-popover[^)]*\.saved-plan-menu-popover[^)]*\.sd-rte-menu[^)]*\)\{transition:var\(--sd-motion-anchored-transition\);animation:none\}/s,
   'geometry-sensitive anchored menus/popovers remain explicitly immediate');
-assert.doesNotMatch(fs.readFileSync('source/core/workspace-overlay.js','utf8'),/presentation\.interrupt|interrupt.*snapshot/,
+assert.doesNotMatch(readRuntimeSource('source/core/workspace-overlay.ts'),/presentation\.interrupt|interrupt.*snapshot/,
   'workspace overlays have no dead snapshot-interruption dependency');
-assert.doesNotMatch(fs.readFileSync('source/core/interactions.js','utf8'),/presentation.*interrupt|interrupt.*snapshot/,
+assert.doesNotMatch(readRuntimeSource('source/core/interactions.ts'),/presentation.*interrupt|interrupt.*snapshot/,
   'interaction prompts have no dead snapshot-interruption dependency');
 assert.doesNotMatch(fs.readFileSync('source/external/guide.js','utf8'),/replaceGuidePanel|motion\.replace|appearance\.presentation\.motion/,
   'Guide structural replacements update the live DOM directly');

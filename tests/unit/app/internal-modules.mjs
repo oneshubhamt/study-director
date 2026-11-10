@@ -1,8 +1,9 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-vm.runInThisContext(fs.readFileSync('source/core/internal.js','utf8'),{filename:'source/core/internal.js'});
+vm.runInThisContext(readRuntimeSource('source/core/internal.ts'),{filename:'source/core/internal.ts'});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 assert.ok(Object.isFrozen(registry));
 assert.equal(registry.format,'study-director.internal-module-registry');

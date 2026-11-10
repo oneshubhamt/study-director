@@ -21,13 +21,13 @@ flowchart TD
 
 | Layer | Source owners | Boundary |
 | --- | --- | --- |
-| Bootstrap/composition | `source/app.html`, `source/host/`, `source/core/internal.js`, `startup.js`, `profiles.js` | Early scope/presentation before storage or hydration; explicit feature/service wiring |
+| Bootstrap/composition | `source/app.html`, `source/host/`, `source/core/internal.ts`, `foundation-host.ts`, `startup.js`, `profiles.js` | Early scope/presentation before storage or hydration; explicit feature/service wiring |
 | Core data | `domain.ts`, `record-codecs.ts`, `persistence.ts`, `app-meta.ts`, `repositories.ts`, `repositories-notes.ts` in `source/core/` | Unknown stored input → validated canonical records; strict transactions and stable identities |
 | Session/execution | `ownership.ts`, `mutation-coordinator.ts`, `session-lifecycle.ts`, `timer-state.ts`, `timer-engine.ts`, `pomodoro.ts`, `practice-pacer.ts`, plus host adapters | One writable owner; portable session evidence and local execution state |
 | Features | `plan.js`, `review.js`, `library.js`, `note-links.js`, `note-export.js`, host UI | User actions and presentation; durable writes through domain services |
 | Editor/files | Authored `rich-text/`, `attachments.ts`, `asset-storage.ts`, `attachment-ingest.ts`, `asset-maintenance.ts`, `portable/` | Rich-text serialization, references, verified bytes, scoped worker/file lifetimes |
 | Backup/recovery | `backup-capture.ts`, `backup-codec.ts`, `managed-repository.ts`, `backup-provider.ts`, `backup.ts`, recovery/journal/reconciliation modules | Verified captures, publication, current-format restore and rollback |
-| Background/presentation | `operation-lifecycle.ts`, `repository-background.ts`, diagnostics, `notice-coordinator.js`, `interactions.js`, `backup-presentation.js`, `audio-engine.js` | Explicit job outcomes, priority/settlement and one notification policy |
+| Background/presentation | `operation-lifecycle.ts`, `repository-background.ts`, diagnostics, `notice-coordinator.ts`, `interactions.ts`, `backup-presentation.ts`, `audio-engine.ts` | Explicit job outcomes, priority/settlement and one notification policy |
 | External authored features | `source/external/{drive,insights-model,insights,guide,glass,aurora}.js` | Transport, analytics, help and presentation contracts |
 | Platform/build | `source/platform/sw.js`, `pwa-lifecycle.js`, `native-capabilities.js`, `build/` | Offline/update protocols, capability checks, deterministic output/CSP |
 

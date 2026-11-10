@@ -794,8 +794,7 @@ for(const [label,shared,snapshot] of [
   // A successful repository write receipt is not sufficient if the strict
   // IDB read disagrees or the value exists only in local rescue storage.
   const repo=readRuntimeSource(new URL('../../../source/core/repositories.ts',import.meta.url));
-  const signature='async function verifyCanonicalDailyRecord(record){';
-  const start=repo.indexOf(signature),end=start<0?-1:repo.indexOf('\n}',start);
+  const start=repo.search(/async function verifyCanonicalDailyRecord\(record\s*\)\{/u),end=start<0?-1:repo.indexOf('\n}',start);
   assert.ok(start>=0&&end>start,'canonical Saved Day verifier must exist in production');
   const fn=repo.slice(start,end+2),record={date:'2026-08-27',recordKind:'study',sourceRevision:7,reflection:'Saved'};
   for(const actual of [record,{...record,reflection:'Unrelated'},null]){
@@ -816,8 +815,7 @@ for(const [label,shared,snapshot] of [
 // content ancestry, and no local rescue copy is a canonical Saved Day.
 {
   const sourceCodec=readRuntimeSource(new URL('../../../source/core/record-codecs.ts',import.meta.url));
-  const signature='function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){';
-  const start=sourceCodec.indexOf(signature),end=start<0?-1:sourceCodec.indexOf('\n}',start);
+  const start=sourceCodec.search(/function savedDayCoversSessionEvidence\(record\s*,session\s*,\{allowAdvances=false\}\s*=\{\}\)\s*\{/u),end=start<0?-1:sourceCodec.indexOf('\n}',start);
   assert.ok(start>=0&&end>start,'production Saved-Day coverage predicate must exist');
   const src=[sourceCodec.slice(start,end+2),productionFunction('async function savedDayCoversActiveSession(session){')].join('\n');
   const date='2026-08-27';

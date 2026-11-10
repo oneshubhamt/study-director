@@ -2,7 +2,7 @@ import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-for(const file of ['source/core/internal.js','source/core/pwa-lifecycle.js'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/pwa-lifecycle.js'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('pwa-lifecycle',1),freeze=Object.freeze;
 const flush=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};

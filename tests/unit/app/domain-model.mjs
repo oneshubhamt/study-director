@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const execute=file=>vm.runInThisContext(readScript(new URL(file,import.meta.url).pathname),{filename:file});
-execute('../../../source/core/internal.js');
+execute('../../../source/core/internal.ts');
 execute('../../../source/core/domain.ts');
 
 const limits=Object.freeze({

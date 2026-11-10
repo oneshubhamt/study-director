@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-for(const file of ['source/core/internal.js','source/core/practice-pacer.ts'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/practice-pacer.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const {coordinator:notifications}=createNotifications();
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('practice-pacer',1);
 const freeze=Object.freeze,noop=()=>false;

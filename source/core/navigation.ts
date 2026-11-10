@@ -1,109 +1,113 @@
-(()=>{
+import type {WorkspaceDescriptor,WorkspaceOpenMeta} from '../../types/workspace.ts';
+import type {TabId,HistoryMode,NavigationContext,NavigationOptions,NavigationResult,NavigationInput,NavigationEventPort,NavigationWindow} from '../../types/navigation.ts';
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+const sdNavigationFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'navigation','study-director.navigation-module'>|undefined;
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
-registry.define('navigation',1,()=>{
+const createModule=()=>{
   const freeze=Object.freeze;
-  const TABS=freeze(['plan','execute','review','library','insights','guide']);
-  const TAB_SET=new Set(TABS);
+  const TABS=freeze(['plan','execute','review','library','insights','guide'] as const);
+  const TAB_SET:ReadonlySet<string>=new Set(TABS);
   const WORKSPACE_KINDS=new Set(['legal','focus','pdf','audio','prompt']);
   const ROUTE_STATE_KEY='studyDirectorRoute';
   const WORKSPACE_STATE_KEY='studyDirectorWorkspace';
   const ROUTE_STATE_VERSION=1;
   const WORKSPACE_STATE_VERSION=1;
-  function validTab(value){
+  function validTab(value:unknown):TabId|null{
     const tab=String(value||'').trim().toLowerCase();
-    return TAB_SET.has(tab)?tab:null;
+    return TAB_SET.has(tab)?tab as TabId:null;
   }
-  function cleanTab(value){return validTab(value)||'plan';}
-  function parseUrl(value,base){
+  function cleanTab(value:unknown){return validTab(value)||'plan';}
+  function parseUrl(value:string,base:string){
     const url=new URL(value,base);
     const raw=url.searchParams.get('tab');
     const explicit=raw!==null;
     const valid=!explicit||TAB_SET.has(String(raw||'').trim().toLowerCase());
     return freeze({tab:valid?cleanTab(raw):'plan',explicit,valid,url});
   }
-  function routeUrl(value,tab){
+  function routeUrl(value:string,tab:unknown){
     const url=new URL(value);
     url.searchParams.set('tab',cleanTab(tab));
     return url.href;
   }
-  function sameDocument(value,location){
+  function sameDocument(value:string,location:NavigationWindow["location"]){
     const url=new URL(value,location.href);
     return url.origin===location.origin&&url.pathname===location.pathname;
   }
-  function statePosition(state){
-    const route=state&&state[ROUTE_STATE_KEY];
+  function statePosition(state:unknown){
+    const route=state&&typeof state==='object'?(state as Record<string,unknown>)[ROUTE_STATE_KEY] as {version?:unknown;position?:unknown}|null:null;
     const position=route&&route.version===ROUTE_STATE_VERSION?Number(route.position):NaN;
     return Number.isSafeInteger(position)&&position>=0?position:null;
   }
-  function cleanWorkspace(value){
-    if(!value||typeof value!=='object')return null;
+  function cleanWorkspace(input:unknown):WorkspaceDescriptor|null{
+    if(!input||typeof input!=='object')return null;
+    const value=input as {kind?:unknown;token?:unknown;key?:unknown};
     const kind=String(value.kind||'').trim().toLowerCase();
     const token=String(value.token||'').trim();
     const key=String(value.key||'').trim();
     if(!WORKSPACE_KINDS.has(kind)||!/^[A-Za-z0-9:_-]{1,96}$/.test(token))return null;
     if(key&&!/^[A-Za-z0-9._-]{1,120}$/.test(key))return null;
-    const out={version:WORKSPACE_STATE_VERSION,kind,token};
+    const out:{version:number;kind:string;token:string;key?:string}={version:WORKSPACE_STATE_VERSION,kind,token};
     if(key)out.key=key;
     return freeze(out);
   }
-  function legalWorkspaceFromUrl(value,base){
+  function legalWorkspaceFromUrl(value:string,base:string){
     const url=new URL(value,base),match=/^#legal\/([A-Za-z0-9._-]{1,120})$/.exec(url.hash||'');
     if(!match)return null;
     const key=match[1];
     return cleanWorkspace({kind:'legal',token:`legal:${key}`,key});
   }
-  function workspaceFromState(state,url,base){
-    return legalWorkspaceFromUrl(url,base)||cleanWorkspace(state&&state[WORKSPACE_STATE_KEY]);
+  function workspaceFromState(state:unknown,url:string,base:string){
+    return legalWorkspaceFromUrl(url,base)||cleanWorkspace(state&&typeof state==='object'&&(state as Record<string,unknown>)[WORKSPACE_STATE_KEY]);
   }
-  function sameWorkspace(a,b){
+  function sameWorkspace(a:WorkspaceDescriptor|null,b:WorkspaceDescriptor|null){
     if(!a&&!b)return true;
     return !!a&&!!b&&a.kind===b.kind&&a.token===b.token&&(a.key||'')===(b.key||'');
   }
-  function workspaceUrl(value,tab,workspace){
+  function workspaceUrl(value:string,tab:unknown,workspace:unknown){
     const url=new URL(routeUrl(value,tab));
     const descriptor=cleanWorkspace(workspace);
     if(descriptor?.kind==='legal'&&descriptor.key)url.hash=`legal/${descriptor.key}`;
     else if(/^#legal\//.test(url.hash||''))url.hash='';
     return url.href;
   }
-  function routeState(tab,position,workspace=null){
+  function routeState(tab:unknown,position:number,workspace:WorkspaceDescriptor|null=null){
     const safePosition=Number.isSafeInteger(position)&&position>=0?position:0;
-    const state={[ROUTE_STATE_KEY]:freeze({version:ROUTE_STATE_VERSION,tab:cleanTab(tab),position:safePosition})};
+    const state:Record<string,unknown>={[ROUTE_STATE_KEY]:freeze({version:ROUTE_STATE_VERSION,tab:cleanTab(tab),position:safePosition})};
     const descriptor=cleanWorkspace(workspace);
     if(descriptor)state[WORKSPACE_STATE_KEY]=descriptor;
     return state;
   }
-  function createController(input){
+  function createController(input:NavigationInput){
     if(!input||!Object.isFrozen(input))throw new TypeError('Navigation input must be frozen.');
     const win=input.window;
     const host=input.host;
     if(!win||!host||!Object.isFrozen(host))throw new TypeError('Navigation environment or host adapter is incomplete.');
-    for(const key of ['currentTab','prepare','present','commit','ready','report'])if(typeof host[key]!=='function')throw new TypeError('Navigation host adapter is incomplete.');
+    for(const key of ['currentTab','prepare','present','commit','ready','report'] as const)if(typeof host[key]!=='function')throw new TypeError('Navigation host adapter is incomplete.');
     const workspaceHost=host.workspace&&Object.isFrozen(host.workspace)?host.workspace:null;
-    if(workspaceHost&&['current','reconcile'].some(key=>typeof workspaceHost[key]!=='function'))throw new TypeError('Navigation workspace host adapter is incomplete.');
+    if(workspaceHost&&(['current','reconcile'] as const).some(key=>typeof workspaceHost[key]!=='function'))throw new TypeError('Navigation workspace host adapter is incomplete.');
     let generation=0;
     let installed=false;
     let driver='none';
     let position=statePosition(win.history?.state)??0;
-    let reconciliation=null;
-    let lastResult=freeze({ok:true,tab:cleanTab(host.currentTab()),changed:false,reason:'initial',generation:0,source:'initial'});
-    const native=win.navigation&&typeof win.navigation.addEventListener==='function';
+    let reconciliation:{tab:TabId;position:number;workspace:WorkspaceDescriptor|null}|null=null;
+    let lastResult:NavigationResult=freeze({ok:true,tab:cleanTab(host.currentTab()),changed:false,reason:'initial',generation:0,source:'initial'});
+    const native=win.navigation&&typeof win.navigation!.addEventListener==='function';
     const location=()=>win.location;
     const activeTab=()=>cleanTab(host.currentTab());
     const activeWorkspace=()=>cleanWorkspace(workspaceHost?.current?.());
-    const result=(ok,tab,changed,reason,revision,source)=>freeze({ok:!!ok,tab:cleanTab(tab),changed:!!changed,reason:String(reason||''),generation:revision,source:String(source||'programmatic')});
-    function publish(next){if(next.generation>=lastResult.generation)lastResult=next;return next;}
-    function write(mode,tab,urlOverride=null,positionOverride=null,workspace=null){
+    const result=(ok:boolean,tab:unknown,changed:boolean,reason:string,revision:number,source:string)=>freeze({ok:!!ok,tab:cleanTab(tab),changed:!!changed,reason:String(reason||''),generation:revision,source:String(source||'programmatic')});
+    function publish(next:NavigationResult){if(next.generation>=lastResult.generation)lastResult=next;return next;}
+    function write(mode:HistoryMode,tab:unknown,urlOverride:string|null=null,positionOverride:number|null=null,workspace:WorkspaceDescriptor|null=null){
       if(mode==='none')return true;
       const history=win.history;
       if(!history)return false;
       const descriptor=cleanWorkspace(workspace);
       const href=urlOverride||workspaceUrl(location().href,tab,descriptor);
-      const nextPosition=Number.isSafeInteger(positionOverride)&&positionOverride>=0
+      const nextPosition=positionOverride!==null&&Number.isSafeInteger(positionOverride)&&positionOverride>=0
         ?positionOverride
         :(mode==='push'?position+1:position);
       const state=routeState(tab,nextPosition,descriptor);
@@ -112,7 +116,7 @@ registry.define('navigation',1,()=>{
       position=nextPosition;
       return true;
     }
-    function takeReconciliation(url,state){
+    function takeReconciliation(url:string,state:unknown){
       if(!reconciliation)return null;
       const parsed=parseUrl(url,location().href);
       const targetPosition=statePosition(state);
@@ -120,15 +124,15 @@ registry.define('navigation',1,()=>{
       if(parsed.tab!==reconciliation.tab||targetPosition!==reconciliation.position||!sameWorkspace(targetWorkspace,reconciliation.workspace))return null;
       const match=reconciliation;reconciliation=null;position=match.position;return match;
     }
-    async function replayReconciliation(match,source){
+    async function replayReconciliation(match:{tab:TabId;position:number;workspace:WorkspaceDescriptor|null},source:string){
       if(!workspaceHost)return true;
       try{await workspaceHost.reconcile(match.workspace,freeze({from:activeTab(),to:match.tab,source,generation,traversal:true,reconciliation:true,current:()=>true}));}
       catch(error){host.report('navigation.workspace-reconcile',error);}
       return true;
     }
-    function restoreAfterFailedTraversal(tab,originPosition,targetPosition,originWorkspace=null){
+    function restoreAfterFailedTraversal(tab:unknown,originPosition:number,targetPosition:number|null,originWorkspace:WorkspaceDescriptor|null=null){
       const history=win.history,descriptor=cleanWorkspace(originWorkspace);
-      if(Number.isSafeInteger(originPosition)&&Number.isSafeInteger(targetPosition)&&originPosition!==targetPosition&&typeof history?.go==='function'){
+      if(targetPosition!==null&&Number.isSafeInteger(originPosition)&&Number.isSafeInteger(targetPosition)&&originPosition!==targetPosition&&typeof history?.go==='function'){
         reconciliation=freeze({tab:cleanTab(tab),position:originPosition,workspace:descriptor});
         position=originPosition;
         history.go(originPosition-targetPosition);
@@ -137,7 +141,7 @@ registry.define('navigation',1,()=>{
       reconciliation=null;
       return write('replace',tab,workspaceUrl(location().href,tab,descriptor),originPosition,descriptor);
     }
-    async function reconcileWorkspace(desired,context,{normalize=false}={}){
+    async function reconcileWorkspace(desired:WorkspaceDescriptor|null,context:NavigationContext,{normalize=false}={}){
       const target=cleanWorkspace(desired);
       if(!workspaceHost)return freeze({matched:!target,actual:null});
       let actual=activeWorkspace();
@@ -150,14 +154,14 @@ registry.define('navigation',1,()=>{
       }
       return freeze({matched,actual});
     }
-    async function settleAndCommit(tab,options={}){
+    async function settleAndCommit(tab:unknown,options:NavigationOptions={}){
       const source=String(options.source||'programmatic');
       const revision=++generation;
       const from=activeTab();
       const target=validTab(tab);
       const originPosition=position;
       const originWorkspace=activeWorkspace();
-      const traversalPosition=Number.isSafeInteger(options.traversalPosition)?options.traversalPosition:null;
+      const traversalPosition=Number.isSafeInteger(options.traversalPosition)?options.traversalPosition??null:null;
       const workspaceSpecified=options.workspaceSpecified===true;
       const desiredWorkspace=workspaceSpecified?cleanWorkspace(options.workspace):null;
       if(!target){
@@ -200,7 +204,7 @@ registry.define('navigation',1,()=>{
           return publish(result(false,from,false,'workspace-departure-blocked',revision,source));
         }
       }
-      let committed=false,commitAttempted=false,commitPromise=null,historyWritten=false;
+      let committed=false,commitAttempted=false,commitPromise:Promise<boolean>|null=null,historyWritten=false;
       const commit=()=>{
         if(revision!==generation)return Promise.resolve(false);
         if(commitPromise)return commitPromise;
@@ -244,7 +248,7 @@ registry.define('navigation',1,()=>{
       if(revision!==generation)return publish(result(false,target,true,'superseded-after-workspace',revision,source));
       return publish(result(true,target,true,workspaceMatched?'committed':'workspace-normalized',revision,source));
     }
-    async function restoreDestination(url,state,source='history'){
+    async function restoreDestination(url:string,state:unknown,source='history'){
       const parsed=parseUrl(url,location().href);
       const desiredWorkspace=workspaceFromState(state,url,location().href);
       const targetPosition=statePosition(state);
@@ -257,7 +261,7 @@ registry.define('navigation',1,()=>{
       installed=true;
       if(native){
         driver='navigation';
-        const handler=event=>{
+        const handler=(event:NavigationEventPort)=>{
           if(event.navigationType!=='traverse'||!event.destination?.url||!sameDocument(event.destination.url,location()))return;
           const state=typeof event.destination.getState==='function'?event.destination.getState():null;
           const match=takeReconciliation(event.destination.url,state);
@@ -268,17 +272,17 @@ registry.define('navigation',1,()=>{
             return;
           }
           if(event.canIntercept===false){
-            Promise.resolve().then(()=>restoreDestination(event.destination.url,state,'navigation-unintercepted'));
+            void Promise.resolve().then(()=>restoreDestination(event.destination.url,state,'navigation-unintercepted'));
             return;
           }
           try{
             event.intercept({focusReset:'manual',scroll:'manual',handler:()=>restoreDestination(event.destination.url,state,'navigation-traverse')});
           }catch(error){
             host.report('navigation.intercept',error);
-            Promise.resolve().then(()=>restoreDestination(event.destination.url,state,'navigation-reconcile'));
+            void Promise.resolve().then(()=>restoreDestination(event.destination.url,state,'navigation-reconcile'));
           }
         };
-        win.navigation.addEventListener('navigate',handler);
+        win.navigation!.addEventListener('navigate',handler);
       }else{
         driver='history';
         win.addEventListener('popstate',event=>{
@@ -290,7 +294,7 @@ registry.define('navigation',1,()=>{
       }
       return driver;
     }
-    async function hydrate(options={}){
+    async function hydrate(options:{explicitOnly?:boolean;source?:string}={}){
       const parsed=parseUrl(location().href,location().href);
       const desiredWorkspace=workspaceFromState(win.history?.state,location().href,location().href);
       const legalDirect=desiredWorkspace?.kind==='legal';
@@ -303,18 +307,18 @@ registry.define('navigation',1,()=>{
       const url=parsed.valid?workspaceUrl(parsed.url.href,targetTab,desiredWorkspace):workspaceUrl(parsed.url.href,'plan',null);
       return settleAndCommit(targetTab,{source:options.source||'startup-route',history:'replace',normalize:true,ensureEntry:true,url,restoreScroll:false,workspaceSpecified:true,workspace:parsed.valid?desiredWorkspace:null});
     }
-    function workspaceOpen(raw,options={}){
+    function workspaceOpen(raw:WorkspaceDescriptor,options:WorkspaceOpenMeta={}){
       const descriptor=cleanWorkspace(raw);
       if(!descriptor)return false;
       const tab=activeTab(),mode=options.replace===true?'replace':'push';
       return write(mode,tab,options.url||workspaceUrl(location().href,tab,descriptor),null,descriptor);
     }
-    function workspaceClose(raw){
+    function workspaceClose(raw:WorkspaceDescriptor){
       const descriptor=cleanWorkspace(raw),current=workspaceFromState(win.history?.state,location().href,location().href),history=win.history;
       if(!descriptor||!sameWorkspace(descriptor,current)||position<=0||typeof history?.back!=='function')return false;
       history.back();return true;
     }
-    function workspaceDrop(raw){
+    function workspaceDrop(raw:WorkspaceDescriptor){
       const descriptor=cleanWorkspace(raw),current=workspaceFromState(win.history?.state,location().href,location().href);
       if(!descriptor||!sameWorkspace(descriptor,current))return false;
       return write('replace',activeTab(),workspaceUrl(location().href,activeTab(),null),position,null);
@@ -325,10 +329,12 @@ registry.define('navigation',1,()=>{
     return freeze({
       format:'study-director.navigation-controller',contractVersion:1,
       install,hydrate,status,
-      request:(tab,options={})=>settleAndCommit(tab,options),
-      workspace:freeze({open:workspaceOpen,replace:(descriptor,options={})=>workspaceOpen(descriptor,{...options,replace:true}),close:workspaceClose,drop:workspaceDrop})
+      request:(tab:unknown,options:NavigationOptions={})=>settleAndCommit(tab,options),
+      workspace:freeze({open:workspaceOpen,replace:(descriptor:WorkspaceDescriptor,options:WorkspaceOpenMeta={})=>workspaceOpen(descriptor,{...options,replace:true}),close:workspaceClose,drop:workspaceDrop})
     });
   }
   return freeze({format:'study-director.navigation-module',contractVersion:1,createController});
-});
+};
+registry.define('navigation',1,createModule);return createModule;
 })();
+export type NavigationModule=ReturnType<typeof sdNavigationFactory>;

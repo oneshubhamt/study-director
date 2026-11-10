@@ -10,7 +10,7 @@ import {drainMicrotasks} from '../../helpers/async-tools.mjs';
 { // attachment-library-reactivity
 const context={console,Blob,TextEncoder,TextDecoder,URL,AbortController,crypto:globalThis.crypto,Map,Set,Object,Promise,Number,String,Math,Uint8Array,DataView,queueMicrotask};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const attachments=context[Symbol.for('studyDirector.internalModules.v1')].require('attachments',1);
 
 function element(id=''){
@@ -62,7 +62,7 @@ console.log(JSON.stringify({status:'PASS',contracts:['batched reconciliation','s
 { // attachment-lifecycle
 const context={console,Blob,TextEncoder,TextDecoder,URL:{createObjectURL:()=>'',revokeObjectURL:()=>{}},crypto:globalThis.crypto,Map,Set,Object,Promise,Number,String,Math,Uint8Array,DataView,queueMicrotask,structuredClone};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const module=context[Symbol.for('studyDirector.internalModules.v1')].require('attachments',1);
 
 const retainedId='att-'+ 'a'.repeat(20);
@@ -192,7 +192,7 @@ console.log('attachment lifecycle behavior: PASS');
 { // attachment-integrity-projection
 const context={console,Blob,TextEncoder,TextDecoder,URL:{createObjectURL:()=> 'blob:test',revokeObjectURL(){}},AbortController,crypto:globalThis.crypto,Map,Set,Object,Promise,Number,String,Math,Uint8Array,DataView,queueMicrotask,structuredClone};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const attachments=context[Symbol.for('studyDirector.internalModules.v1')].require('attachments',1);
 
 function makeClassList(node){

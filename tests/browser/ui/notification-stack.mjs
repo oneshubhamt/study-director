@@ -34,6 +34,12 @@ try{
     const page=await browser.createPage(server.url('deployment','instrumented.html'),{preload,viewport:{width:1280,height:800,mobile:false,scale:1}});
     await standInForGoogle(page);
     await waitForStudyDirector(page,{instrumented:true});
+    // Synthetic DOM events may originate at a text node or Document. Delegated
+    // navigation and toast gestures must ignore them without throwing.
+    await page.evaluate(`(()=>{const region=document.getElementById('sd-toast-region'),text=document.createTextNode('');region.append(text);
+      text.dispatchEvent(new MouseEvent('click',{bubbles:true}));text.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'touch'}));
+      for(const type of ['click','change','input','blur','keydown'])document.dispatchEvent(new Event(type,{bubbles:true}));text.remove();})()`);
+    checks.nonElementEvents=true;
     // The page's own clocks would close results mid-test; hold them as an expanded stack does.
     await page.evaluate(`__PWA6.NoticeCoordinator.setPaused('qa',true)`);
     await page.evaluate(seed);await page.settle(4);await settleMotion(page);

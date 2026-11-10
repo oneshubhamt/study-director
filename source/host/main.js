@@ -40,6 +40,8 @@ const BackupPresentationModule=INTERNAL_MODULES.load('backup-presentation',1,'st
 const AudioEngineModule=INTERNAL_MODULES.load('audio-engine',1,'study-director.audio-engine-module',1);
 const NoticeCoordinatorModule=INTERNAL_MODULES.load('notice-coordinator',1,'study-director.notice-coordinator-module',1);
 const NavigationModule=INTERNAL_MODULES.load('navigation',1,'study-director.navigation-module',1);
+const FoundationHostModule=INTERNAL_MODULES.load('foundation-host',1,'study-director.foundation-host-module',1);
+
 const RepositoryJournalModule=INTERNAL_MODULES.load('repository-journals',1,'study-director.repository-journals',1);
 const SaveLaneModule=INTERNAL_MODULES.load('save-lane',1,'study-director.save-lane-module',1);
 const NotesRepositoryModule=INTERNAL_MODULES.load('repositories-notes',1,'study-director.notes-repository-module',1);
@@ -173,16 +175,7 @@ function entityIdentity(entityType,value){
 }
 // All externally keyed dictionary data flows through this helper. It prevents
 // prototype-key collisions and keeps own-property access consistent.
-const KeyedRecord=Object.freeze({
-  create(entries=null){
-    const out=Object.create(null);
-    if(entries)Object.entries(entries).forEach(([key,value])=>{out[String(key)]=value;});
-    return out;
-  },
-  has(record,key){return !!record&&Object.prototype.hasOwnProperty.call(record,String(key));},
-  get(record,key,fallback=null){return !!record&&Object.prototype.hasOwnProperty.call(record,String(key))?record[String(key)]:fallback;},
-  clone(record){return this.create(record&&typeof record==='object'?record:null);}
-});
+const {KeyedRecord,textEl,on,emptyMsg,setProgressSummary,setElementText,setElementValue,setElementClass,setElementHidden,setElementDisabled,setElementAttribute,setElementStyle,setTextSafe,cachedElements,clampText,clampArray,wipeObject,boundedInt,boundedNumber,safeBoolean,finiteNumber,optionalBoundedNumber,optionalText,sameDataValue}=FoundationHostModule.createPrimitives({document,APP_LIMITS,CompletionModel:{fromUnits:(done,total)=>CompletionModel.fromUnits(done,total)}});
 // Data access is instantiated after the codecs through the private repository module.
 let StorageHealthController=null;
 let storageResetHold=null,storageResetHandling=null,storageResetSince=0,storageResetAcknowledged=0;
@@ -369,132 +362,13 @@ const {
   positiveMinutes
 }=TimeModel;
 /* DOM PRIMITIVES */
-function textEl(tag,className,text){
-  const el=document.createElement(tag);
-  if(className)el.className=className;
-  if(text!==undefined&&text!==null)el.textContent=String(text);
-  return el;
-}
-function on(el,type,handler,options){el.addEventListener(type,handler,options);return el;}
-function emptyMsg(text){
-  return textEl('div','library-empty ui-status',text);
-}
-function setProgressSummary(el,done,total,measure,suffix='',showZero=false){
-  if(!el)return;
-  const safeDone=Number(done);
-  const safeTotal=Number(total);
-  el.replaceChildren();
-  if(Number.isFinite(safeDone)&&safeTotal>0){
-    const pct=Math.round(CompletionModel.fromUnits(safeDone,safeTotal));
-    el.append(textEl('span','hi',`${safeDone}/${safeTotal} ${measure||'units'}`),document.createTextNode(suffix||` · ${pct}%`));
-  }else if(Number.isFinite(safeDone)&&(safeDone>0||showZero)){
-    el.append(textEl('span','hi',`${safeDone} ${measure||'units'}`),document.createTextNode(suffix||' done'));
-  }else{
-    el.textContent='—';
-  }
-}
-function setElementText(el,value){
-  if(!el)return false;
-  const next=String(value??'');
-  if(el.textContent===next)return false;
-  el.textContent=next;
-  return true;
-}
-function setElementValue(el,value){
-  if(!el)return false;
-  const next=String(value??'');
-  if(el.value===next)return false;
-  el.value=next;
-  return true;
-}
-function setElementClass(el,value){
-  if(!el||el.className===value)return false;
-  el.className=value;return true;
-}
-function setElementHidden(el,value){
-  const next=!!value;if(!el||el.hidden===next)return false;
-  el.hidden=next;return true;
-}
-function setElementDisabled(el,value){
-  const next=!!value;if(!el||el.disabled===next)return false;
-  el.disabled=next;return true;
-}
-function setElementAttribute(el,name,value){
-  if(!el)return false;
-  const next=String(value??'');
-  if(el.getAttribute(name)===next)return false;
-  el.setAttribute(name,next);return true;
-}
-function setElementStyle(el,name,value){
-  if(!el||el.style[name]===value)return false;
-  el.style[name]=value;return true;
-}
-function setTextSafe(id,value){return setElementText(document.getElementById(id),value);}
-function cachedElements(owner,spec){
-  if(owner.cache)return owner.cache;
-  const out={};
-  Object.entries(spec).forEach(([key,id])=>{out[key]=document.getElementById(id);});
-  owner.cache=out;
-  return out;
-}
+
 /* SHARED INTERACTION AND SYSTEM-ALERT SERVICES */
 let NavigationController=null;
-const WorkspaceRouteCoordinator=(()=>{
-  const handlers=new Map(),overlayKinds=new Set(['focus','pdf','audio']);
-  const same=(a,b)=>{if(!a&&!b)return true;return !!a&&!!b&&a.kind===b.kind&&a.token===b.token&&(a.key||'')===(b.key||'');};
-  const cleanKind=value=>String(value||'').trim().toLowerCase();
-  function register(kind,handler){
-    const id=cleanKind(kind);
-    if(!/^[a-z][a-z0-9-]{1,31}$/.test(id)||!handler||!Object.isFrozen(handler)||typeof handler.current!=='function'||typeof handler.reconcile!=='function')return false;
-    handlers.set(id,handler);return true;
-  }
-  function opened(descriptor,options={}){
-    if(!NavigationController?.workspace)return false;
-    return options.replace===true?NavigationController.workspace.replace(descriptor,{url:options.url||null}):NavigationController.workspace.open(descriptor,{url:options.url||null});
-  }
-  function requestClose(descriptor){return !!NavigationController?.workspace?.close(descriptor);}
-  function closed(descriptor,meta={}){
-    if(meta.fromHistory===true||meta.historyPending===true)return true;
-    return !!NavigationController?.workspace?.drop(descriptor);
-  }
-  function externalCurrent(){
-    for(const handler of handlers.values()){const value=handler.current();if(value)return value;}
-    return null;
-  }
-  function current(){
-    const prompt=typeof Interactions?.historyDescriptor==='function'?Interactions.historyDescriptor():null;if(prompt)return prompt;
-    const external=externalCurrent();if(external)return external;
-    return typeof WorkspaceOverlay?.historyDescriptor==='function'?WorkspaceOverlay.historyDescriptor():null;
-  }
-  async function reconcile(desired,context){
-    const target=desired&&typeof desired==='object'?desired:null;
-    const prompt=typeof Interactions?.historyDescriptor==='function'?Interactions.historyDescriptor():null;
-    if(prompt){if(same(prompt,target))return prompt;Interactions.reconcileHistory(null);}
-    if(target?.kind==='prompt')return current();
-    for(const [kind,handler] of handlers){
-      const active=handler.current();if(active&&!(target&&target.kind===kind&&same(active,target)))await handler.reconcile(null,context);
-    }
-    const overlayTarget=target&&overlayKinds.has(target.kind)?target:null;
-    if(typeof WorkspaceOverlay?.reconcile==='function')await WorkspaceOverlay.reconcile(overlayTarget,context);
-    if(target&&!overlayKinds.has(target.kind)){
-      const handler=handlers.get(target.kind);if(handler)await handler.reconcile(target,context);
-    }
-    return current();
-  }
-  return Object.freeze({register,opened,requestClose,closed,current,reconcile});
-})();
-const WorkspaceHistoryBridge=Object.freeze({
-  opened:(descriptor,options)=>WorkspaceRouteCoordinator.opened(descriptor,options),
-  requestClose:descriptor=>WorkspaceRouteCoordinator.requestClose(descriptor),
-  closed:(descriptor,meta)=>WorkspaceRouteCoordinator.closed(descriptor,meta)
-});
-const WorkspaceHistoryPublic=Object.freeze({
-  register:(kind,handler)=>WorkspaceRouteCoordinator.register(kind,handler),
-  open:(descriptor,options={})=>WorkspaceRouteCoordinator.opened(descriptor,options),
-  replace:(descriptor,options={})=>WorkspaceRouteCoordinator.opened(descriptor,{...options,replace:true}),
-  close:descriptor=>WorkspaceRouteCoordinator.requestClose(descriptor),
-  closed:(descriptor,meta={})=>WorkspaceRouteCoordinator.closed(descriptor,meta)
-});
+const {WorkspaceRouteCoordinator,WorkspaceHistoryBridge,WorkspaceHistoryPublic}=FoundationHostModule.createWorkspace({navigation:()=>NavigationController,interactions:()=>Interactions,overlay:()=>WorkspaceOverlay});
+
+
+const {renderNotificationSurfaces,renderCoordinatedNotice,noticeCanCompact,setStatus}=FoundationHostModule.createNoticeViews({document,notifications:()=>NoticeCoordinator,clampText,maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars});
 const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze({
   render:renderCoordinatedNotice,now:()=>Date.now(),
   setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),
@@ -506,105 +380,8 @@ if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-direct
 // Recent (docs/areas/notifications.md): today's pop-ups and banners in the profile
 // panel. Kept for this window across a reload (sessionStorage), tied to the
 // profile; never uploaded or backed up. Opening the panel marks news seen.
-const NotificationRecent=(()=>{
-  // The three newest show; Show all lists the rest while the panel is open.
-  const SHOWN=3;
-  let highlight=new Set(),all=false;
-  function restore(){
-    try{
-      const value=JSON.parse(sessionStorage.getItem(SESSION_STORAGE_KEYS.notifications)||'null');
-      if(value&&value.version===1&&value.scope===ProfileScope.scope&&Array.isArray(value.entries))NoticeCoordinator.restoreRecent(value.entries);
-    }catch(error){AppDiagnostics.capture('notifications.recent-restore',error,'warn');}
-  }
-  function save(state){
-    try{
-      if(!state.entries.length){sessionStorage.removeItem(SESSION_STORAGE_KEYS.notifications);return;}
-      const entries=state.entries.map(({id,source,tier,severity,title,message,at,outcome,seen})=>({id,source,tier,severity,title,message,at,outcome,seen}));
-      sessionStorage.setItem(SESSION_STORAGE_KEYS.notifications,JSON.stringify({version:1,scope:ProfileScope.scope,entries}));
-    }catch(error){AppDiagnostics.capture('notifications.recent-save',error,'warn');}
-  }
-  function changed(state){save(state);scheduleSyncStatus();render(state);}
-  function time(at){try{return new Date(at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}catch{return '';}}
-  // Rebuilt only when the entries change, so a focused button keeps focus.
-  function render(state=NoticeCoordinator.recent()){
-    const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
-    const list=document.getElementById('profile-recent-list'),empty=document.getElementById('profile-recent-empty'),clear=document.getElementById('profile-recent-clear');
-    const group=document.getElementById('profile-recent-group'),more=document.getElementById('profile-recent-more'),total=state.entries.length;
-    if(empty)empty.hidden=!!total;if(clear)clear.hidden=!total;if(group)group.hidden=!total;
-    if(more){
-      more.hidden=total<=SHOWN;more.setAttribute('aria-expanded',all?'true':'false');
-      const label=all?'Show fewer':`Show all (${total})`;if(more.textContent!==label)more.textContent=label;
-    }
-    const shown=all?state.entries:state.entries.slice(0,SHOWN);
-    const key=JSON.stringify([shown,[...highlight]]);if(!list||list.dataset.key===key)return;list.dataset.key=key;
-    list.replaceChildren(...shown.map(entry=>{
-      const row=document.createElement('li');row.className='profile-recent-item';row.dataset.tone=entry.severity;row.dataset.tier=entry.tier;
-      if(highlight.has(entry.id))row.dataset.unseen='true';
-      // A live pop-up whose button opens something opens from anywhere on its row.
-      if(entry.actionOpens){row.dataset.action='recent-action';row.dataset.recentId=entry.id;row.dataset.opens='true';}
-      const mark=document.createElement('span');mark.className='profile-recent-mark';mark.setAttribute('aria-hidden','true');
-      const text=document.createElement('span');text.className='profile-recent-text';
-      const title=document.createElement('strong');title.className='profile-recent-title';title.textContent=entry.title;text.append(title);
-      if(entry.message){const message=document.createElement('span');message.className='profile-recent-message';message.textContent=entry.message;text.append(message);}
-      const when=document.createElement('time');when.className='profile-recent-time';when.dateTime=new Date(entry.at).toISOString();when.textContent=time(entry.at);
-      row.append(mark,text,when);
-      if(entry.actionLabel){const button=document.createElement('button');button.type='button';button.className='profile-act ui-btn';button.dataset.action='recent-action';button.dataset.recentId=entry.id;button.textContent=entry.actionLabel;row.append(button);}
-      return row;
-    }));
-  }
-  // News that faded unseen stays marked while the panel is open.
-  function opened(){const state=NoticeCoordinator.recent();highlight=new Set(state.entries.filter(entry=>entry.tier==='news'&&entry.outcome==='expired'&&!entry.seen).map(entry=>entry.id));render(state);NoticeCoordinator.markRecentSeen();}
-  function closed(){highlight=new Set();all=false;}
-  function toggle(){all=!all;render();return true;}
-  function run(ev){
-    const id=String(ev?.target?.closest?.('[data-recent-id]')?.dataset.recentId||'');if(!id)return false;
-    closeProfilePanel();return NoticeCoordinator.runRecentAction(id);
-  }
-  restore();
-  return Object.freeze({changed,render,opened,closed,run,toggle,clear:()=>{NoticeCoordinator.clearRecent();return true;}});
-})();
-async function showBackupPresentation(source,kind){
-  if(source==='device-folder'&&kind==='permission')return DeviceBackup?connectDeviceBackupWithRecovery():undefined;
-  // Reconnecting straight from the toast keeps it to one click.
-  if(kind==='permission'&&source!=='file'&&await (source==='google-drive'?connectDriveForProfile():BackupProviderRuntime.connect(source)))return true;
-  if(['history','restore-version','bring-in','remove-version'].includes(kind))return BackupRecoveryHost?.history.open();
-  // A review opens Combine, which waits while today's session runs.
-  if(kind==='sync-review')return BackupProviderRuntime.reviewSync(source);
-  if(kind==='sync-password')return BackupProviderRuntime.unlockSync(source);
-  if(kind==='sync-newer')return PwaLifecycle.checkForUpdate().catch(error=>{AppDiagnostics.capture('backup.sync-newer-update-check',error,'warn');return false;});
-  if(!await goTab('library',{source:'backup-notification'}))return false;
-  LibraryView.showSection('data');
-  // 'restore' shows every way back in: Device Folder where supported, Google
-  // Drive, and the backup file import under Advanced.
-  const target=document.getElementById({file:'backup-file-heading','device-folder':'device-backup-status','google-drive':'backup-provider-row-status-google-drive',restore:'managed-backup-heading'}[source]||'');
-  if(!target)return false;
-  if(source==='restore')document.querySelector('.backup-advanced-disclosure').open=true;
-  for(let node=target.parentElement;node;node=node.parentElement)if(node.tagName==='DETAILS')node.open=true;
-  requestAnimationFrame(()=>target.scrollIntoView({block:source==='restore'?'start':'center',behavior:preferredScrollBehavior()}));return true;
-}
-// A restore opens Version History when a backup location is connected;
-// otherwise Library → Data with every way to restore.
-async function openBackupRestore(){
-  return showBackupPresentation('restore',DeviceBackup.status().connected||BackupProviderRuntime.connected('google-drive')?'history':'status');
-}
-function backupRestoreChoices(){return DeviceBackup.status().supported?'your Device Folder, Google Drive or a backup file':'Google Drive or a backup file';}
-function renderNotificationSurfaces(state){
-  const latest=new Map();
-  for(const event of state.events)if(event.surfaceId&&(!latest.has(event.surfaceId)||event.surfaceRevision>latest.get(event.surfaceId).surfaceRevision))latest.set(event.surfaceId,event);
-  for(const node of document.querySelectorAll('[data-notification-key]'))if(!latest.has(node.id)){
-    const previous=JSON.parse(node.dataset.notificationRevision||'[]');
-    if(node.textContent===previous[2]){node.textContent='';node.classList.remove('err','ok','warn');delete node.dataset.state;}
-    delete node.dataset.notificationRevision;delete node.dataset.notificationKey;
-  }
-  for(const [id,event] of latest){
-    const node=document.getElementById(id);if(!node)continue;
-    const message=event.dismissed&&!event.retainInline?'':event.message;
-    const revision=JSON.stringify([event.deliveryId,event.lifecycle,message,event.severity]);if(node.dataset.notificationRevision===revision)continue;
-    node.dataset.notificationRevision=revision;node.dataset.notificationKey=event.key;node.textContent=message;
-    node.classList.toggle('err',event.severity==='error');node.classList.toggle('warn',event.severity==='warning');node.classList.toggle('ok',event.lifecycle==='succeeded'&&event.severity!=='warning');
-    node.dataset.state=event.severity==='error'?'error':event.severity==='warning'?'warning':'success';
-  }
-}
+const {NotificationRecent}=FoundationHostModule.createRecent({document,sessionStorage,SESSION_STORAGE_KEYS,ProfileScope,NoticeCoordinator,AppDiagnostics,scheduleSyncStatus,closeProfilePanel});
+const {showBackupPresentation,openBackupRestore,backupRestoreChoices}=FoundationHostModule.createBackupActions({document,AppDiagnostics,device:()=>DeviceBackup,providers:()=>BackupProviderRuntime,history:()=>BackupRecoveryHost?.history,checkForUpdate:()=>PwaLifecycle.checkForUpdate(),connectDeviceBackupWithRecovery,connectDriveForProfile,goTab:(...args)=>goTab(...args),showData:()=>LibraryView.showSection('data'),preferredScrollBehavior:()=>preferredScrollBehavior()});
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
 const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>verifiedRecoveryState.providers[source]||null,action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',opens:true,run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
@@ -725,107 +502,17 @@ function openPdfWorkspace(row,file,reservedWindow=null,releaseReader=()=>{},repl
   NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');
   return true;
 }
-const SystemNotifications=(()=>{
-  let installed=false;
-  function supported(){return 'Notification' in window&&!!window.Notification;}
-  function permission(){return supported()?String(Notification.permission||'default'):'unsupported';}
-  function preference(){return AppData.local.getJson(STORAGE_KEYS.systemAlerts,false)===true;}
-  function enabled(){return preference()&&permission()==='granted';}
-  function write(value){return AppData.local.setJson(STORAGE_KEYS.systemAlerts,value===true);}
-  function status(){return Object.freeze({supported:supported(),permission:permission(),preference:preference(),enabled:enabled()});}
-  function render(){
-    const state=status(),button=document.getElementById('system-alert-toggle'),note=document.getElementById('system-alert-note');
-    if(button){
-      button.disabled=!state.supported||state.permission==='denied';
-      button.textContent=!state.supported?'Unavailable':state.permission==='denied'?'Blocked in browser':state.enabled?'On':'Enable';
-      button.setAttribute('aria-pressed',state.enabled?'true':'false');
-    }
-    if(note){
-      note.textContent=!state.supported
-        ? 'This browser does not support system notifications. In-app cues and sounds still work.'
-        : state.permission==='denied'
-        ? 'Blocked in browser settings. Allow notifications for this site, then return to Study Director.'
-        : state.enabled
-        ? 'On · sound is controlled by your device.'
-        : 'Off · browser permission required.';
-    }
-    const test=document.getElementById('system-alert-test');if(test)test.disabled=!state.enabled;
-    return state;
-  }
-  async function toggle(){
-    if(!appCanMutate())return false;
-    const before=status();
-    if(!before.supported||before.permission==='denied'){render();return false;}
-    if(before.enabled){
-      write(false);render();
-      Interactions.notify({source:'system-settings',key:'system-alerts',title:'System alerts off',message:'In-app Pomodoro cues and sounds remain available.'});
-      return false;
-    }
-    let result=before.permission;
-    if(result==='default'){
-      try{result=await Notification.requestPermission();}
-      catch(error){AppDiagnostics.capture('system-notifications.permission',error,'warn');result='default';}
-    }
-    if(!appCanMutate()){render();return false;}
-    const accepted=result==='granted';write(accepted);render();
-    Interactions.notify(accepted
-      ? {source:'system-settings',key:'system-alerts',title:'System alerts enabled',message:'Timer and study reminders may now appear outside Study Director.'}
-      : {source:'system-settings',key:'system-alerts',kind:'warning',title:'System alerts remain off',message:'You can continue using in-app cues and sounds.'});
-    return accepted;
-  }
-  async function deliver(event,isCurrent=()=>true,isSilent=()=>NoticeCoordinator.soundStatus().mode==='off'){
-    if(!enabled()||!appCanMutate())return false;
-    const options={
-      body:String(event.message||''),tag:String(event.id||event.title||'study-director'),
-      icon:new URL('./assets/icons/icon-192.png',location.href).href,
-      badge:new URL('./assets/icons/favicon-32.png',location.href).href,
-      data:{url:new URL('./',location.href).href}
-    };
-    try{
-      if(navigator.serviceWorker&&typeof navigator.serviceWorker.getRegistration==='function'){
-        const registration=await navigator.serviceWorker.getRegistration();
-        if(!enabled()||!appCanMutate()||!isCurrent())return false;
-        options.silent=isSilent();
-        if(registration&&typeof registration.showNotification==='function'){
-          await registration.showNotification(String(event.title||'Study Director'),options);return true;
-        }
-      }
-      if(!enabled()||!appCanMutate()||!isCurrent())return false;
-      options.silent=isSilent();new Notification(String(event.title||'Study Director'),options);return true;
-    }catch(error){AppDiagnostics.capture('system-notifications.display',error,'warn');return false;}
-  }
-  async function notify(title,body,tag,occurrence,test=false){
-    if(!enabled())return false;
-    const event={source:'system',id:String(tag||title||'study-director'),occurrence,title,message:body,test};
-    return NoticeCoordinator.deliverSystem(event,isCurrent=>deliver(event,isCurrent));
-  }
-  function test(){return notify('Study Director','Device notifications are working.','notification-test',String(Date.now()),true);}
-  function install(){
-    if(installed)return render();
-    installed=true;document.addEventListener('visibilitychange',()=>{if(!document.hidden)render();});return render();
-  }
-  return Object.freeze({format:'study-director.system-notifications',contractVersion:1,install,status,render,toggle,notify,deliver,test});
-})();
-/* SHARED SCALAR HELPERS */
+const {SystemNotifications}=FoundationHostModule.createSystem({window,document,navigator,location,NoticeCoordinator,Interactions,AppDiagnostics,appCanMutate:()=>appCanMutate(),readPreference:()=>AppData.local.getJson(STORAGE_KEYS.systemAlerts,false),writePreference:value=>AppData.local.setJson(STORAGE_KEYS.systemAlerts,value)});
+const notifyUser=SystemNotifications.notify;
+/* SOUND DELIVERY */
+const {renderSoundSettings,setAppSoundMode,handleSoundModeChange}=FoundationHostModule.createSound({document,NoticeCoordinator,appCanMutate:()=>appCanMutate(),persistProtectedPreferences});
 const AppAudio=AudioEngineModule.createEngine({window,document,onStatus:()=>renderSoundSettings()});
 NoticeCoordinator.configureDelivery({audio:AppAudio,system:(...args)=>SystemNotifications.deliver(...args),context:()=>({owner:appCanMutate(),foreground:!document.hidden})});
-function renderSoundSettings(){
-  const state=NoticeCoordinator.soundStatus();
-  document.querySelectorAll('input[name="app-sound-mode"]').forEach(input=>{input.checked=input.value===state.mode;});
-  const note=document.getElementById('app-sound-status');
-  if(note)note.textContent=state.readiness==='unavailable'?'Audio unavailable in this browser.':state.mode==='off'?'App sounds off.':state.readiness==='ready'?'Applies throughout the app.':'Sound becomes ready after an interaction.';
-}
-function setAppSoundMode(mode){
-  if(!appCanMutate())return;
-  NoticeCoordinator.setSoundMode(mode);persistProtectedPreferences({soundMode:mode});renderSoundSettings();
-}
+
+
 window.addEventListener('pagehide',()=>{NoticeCoordinator.stopSound();});
 window.addEventListener('beforeunload',()=>AppAudio.dispose());
-function clampText(value,max=APP_LIMITS.maxNoteChars){
-  const text=String(value??'');
-  const limit=Math.max(0,Number(max)||0);
-  return text.length>limit?text.slice(0,limit):text;
-}
+
 const RichTextApi=RICH_TEXT_BOOT_API;
 const RICH_VALIDATED_INPUT_META=Symbol.for('studyDirector.richValidatedInput.v1');
 function validatedRichInputMeta(event,field){
@@ -848,43 +535,7 @@ function editorContentWithinLimits(value){
   const size=RichTextApi.measure(text);return size.words<=APP_LIMITS.maxRichTextWords&&size.bytes<=APP_LIMITS.maxRichTextBytes;
 }
 function plainTextContent(value){return RichTextApi.toPlainText(String(value??''));}
-function clampArray(arr,max){return Array.isArray(arr)?arr.slice(0,Math.max(0,Number(max)||0)):[];}
-function wipeObject(obj){Object.keys(obj||{}).forEach(k=>delete obj[k]);}
-function boundedInt(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={}){
-  const n=Number(value);
-  if(!Number.isFinite(n))return fallback;
-  const i=Math.trunc(n);
-  return Math.min(max,Math.max(min,i));
-}
-function boundedNumber(value,{min=-Number.MAX_SAFE_INTEGER,max=Number.MAX_SAFE_INTEGER,fallback=0}={}){
-  const n=Number(value);
-  if(!Number.isFinite(n))return fallback;
-  return Math.min(max,Math.max(min,n));
-}
-function safeBoolean(value){
-  if(value===true||value===1)return true;
-  if(value===false||value===0||value===null||value===undefined)return false;
-  const text=String(value).trim().toLowerCase();
-  return text==='true'||text==='1'||text==='yes'||text==='y';
-}
-function finiteNumber(value,fallback=0){
-  const n=Number(value);
-  return Number.isFinite(n)?n:fallback;
-}
-function optionalBoundedNumber(value,{min=-Number.MAX_SAFE_INTEGER,max=Number.MAX_SAFE_INTEGER,integer=false}={}){
-  if(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max||(integer&&!Number.isInteger(value)))return null;
-  return value;
-}
-function optionalText(value,max){
-  return typeof value==='string'&&value.length<=max?value:null;
-}
-function sameDataValue(left,right){
-  if(Object.is(left,right))return true;
-  if(!left||!right||typeof left!=='object'||typeof right!=='object'||Array.isArray(left)!==Array.isArray(right))return false;
-  if(Array.isArray(left))return left.length===right.length&&left.every((value,index)=>sameDataValue(value,right[index]));
-  const leftKeys=Object.keys(left).sort(),rightKeys=Object.keys(right).sort();
-  return leftKeys.length===rightKeys.length&&leftKeys.every((key,index)=>key===rightKeys[index]&&sameDataValue(left[key],right[key]));
-}
+
 function normalizeStudyQuality(value){
   if(value===null||value===undefined||value==='')return null;
   const n=Number(value);
@@ -1677,30 +1328,8 @@ function renderStorageHealth(health=readStorageHealth()){
   }
   if(NativeCapabilities)renderNativeCapabilities(NativeCapabilities.status());
 }
-function renderCoordinatedNotice(state){
-  const region=document.getElementById('notice-region');
-  const storage=document.getElementById('storage-warning');
-  const installation=document.getElementById('install-notice');
-  const update=document.getElementById('pwa-update-control');
-  const announcer=document.getElementById('install-notice-announcer');
-  const active=state&&state.active||null;
-  if(region){
-    region.hidden=!active;
-    region.dataset.noticeKind=active&&active.kind||'';
-    region.dataset.noticeId=active&&active.id||'';
-    region.dataset.noticeCompact=active&&active.compact?'true':'false';
-  }
-  if(storage){storage.hidden=!active||!['critical','safety','storage'].includes(active.kind);}
-  if(installation)installation.hidden=!active||active.kind!=='installation';
-  if(update)update.hidden=!active||active.kind!=='update';
-  const storageText=document.getElementById('storage-warning-text');
-  if(storageText&&active&&['critical','safety','storage'].includes(active.kind))storageText.textContent=active.message;
-  if(announcer){if(state?.announcement)announcer.textContent=state.announcement;else if(!active)announcer.textContent='';}
-}
-function noticeCanCompact(message){
-  const text=String(message||'').trim();
-  return !!text&&!text.includes('\n')&&text.length<=160;
-}
+
+
 function publishSafetyNotice(message,title='Unsaved work needs attention',id='safety'){
   const text=String(message||'').trim();
   return NoticeCoordinator.publish(String(id||'safety'),{visible:!!text,kind:'safety',title,message:text||'Resolved.',compact:noticeCanCompact(text)});
@@ -2587,15 +2216,6 @@ function reviewDateTitle(iso){
 function setReviewDateTitle(iso){
   const rptDate=document.getElementById('review-date');
   if(rptDate)rptDate.textContent=reviewDateTitle(iso);
-}
-function setStatus(id,msg,ok=true,lifecycle=''){
-  const source=id==='library-status'?'library':id==='notes-status'?'notes':'review';
-  if(!msg)return NoticeCoordinator.resolveEvent(source,'status-'+id);
-  return NoticeCoordinator.emit({source,id:'status-'+id,surfaceId:id,surface:'inline',foreground:false,cue:'none',severity:ok?'info':'error',lifecycle:lifecycle||(ok?'succeeded':'failed'),message:clampText(msg,APP_LIMITS.maxStatusMessageChars)});
-}
-
-function notifyUser(title,body,tag,occurrence){
-  return SystemNotifications.notify(title,body,tag,occurrence);
 }
 function clearSessionSafetyMessage(match=''){
   if(!match||sessionSafetyMessage.includes(match)){
@@ -5521,110 +5141,13 @@ function updateHeaderInfo(){
   const schedMeta=document.getElementById('sched-meta');if(schedMeta)schedMeta.textContent=workBlocks.length?`${hrsLabel} · ${blockLabel}`:'BUILD TODAY’S PLAN';
 }
 /* SHELL, PLUGINS, AND TABS */
-const NAV_HORIZONTAL_MEDIA_QUERY='(max-width: 900px), (hover: none) and (pointer: coarse) and (max-height: 600px)';
-function preferredScrollBehavior(){
-  return window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth';
-}
-const UiTabRegistry=(()=>{
-  const renderHooks=new Map();
-  const readyHooks=new Map();
-  const TAB_ORDER=Object.freeze(['plan','execute','review','library','insights','guide']);
-  const safeId=id=>String(id||'').trim().toLowerCase().match(/^[a-z][a-z0-9-]{0,40}$/)?.[0]||'';
-  const findNav=()=>document.querySelector('.sb-nav');
-  const findMain=()=>document.querySelector('.main');
-  const items=()=>[...(findNav()?.querySelectorAll('.nav-item[data-tab]')||[])];
-  function enforceNavOrder(){
-    const nav=findNav();
-    if(!nav)return;
-    items().sort((a,b)=>{
-      const ai=TAB_ORDER.indexOf(a.dataset.tab),bi=TAB_ORDER.indexOf(b.dataset.tab);
-      return (ai<0?999:ai)-(bi<0?999:bi);
-    }).forEach(item=>nav.appendChild(item));
-  }
-  function sync(activeId){
-    items().forEach(item=>{
-      const active=item.dataset.tab===activeId;
-      item.classList.toggle('on',active);
-      item.setAttribute('aria-selected',active?'true':'false');
-      item.tabIndex=active?0:-1;
-    });
-  }
-  function updateOrientation(){
-    const nav=findNav();
-    if(nav)nav.setAttribute('aria-orientation',window.matchMedia&&window.matchMedia(NAV_HORIZONTAL_MEDIA_QUERY).matches?'horizontal':'vertical');
-  }
-  function registerTab(config={}){
-    const id=safeId(config.id);
-    if(!id)return false;
-    const label=clampText(config.label||id,40);
-    const icon=clampText(config.icon||'◌',4);
-    const nav=findNav();
-    const main=findMain();
-    if(!nav||!main)return false;
-    let item=items().find(candidate=>candidate.dataset.tab===id)||null;
-    if(!item){
-      item=document.createElement('button');
-      item.className='nav-item ui-label';
-      item.type='button';
-      item.id='tab-'+id;
-      item.setAttribute('role','tab');
-      item.setAttribute('aria-controls','pane-'+id);
-      item.setAttribute('aria-selected','false');
-      item.tabIndex=-1;
-      item.dataset.tab=id;
-      const iconEl=document.createElement('span');
-      iconEl.className='nav-icon';
-      iconEl.setAttribute('aria-hidden','true');
-      iconEl.textContent=icon;
-      item.append(iconEl,document.createTextNode(label));
-      nav.appendChild(item);
-    }
-    enforceNavOrder();
-    let pane=document.getElementById('pane-'+id);
-    if(!pane){
-      pane=(config.pane&&config.pane.nodeType===1)?config.pane:document.createElement('div');
-      pane.id='pane-'+id;
-      pane.classList.add('pane');
-      main.appendChild(pane);
-    }
-    pane.setAttribute('role','tabpanel');
-    pane.setAttribute('aria-labelledby','tab-'+id);
-    const active=document.querySelector('.nav-item.on')?.dataset.tab===id;
-    pane.hidden=!active;
-    pane.style.display=active?'block':'none';
-    if(typeof config.render==='function')renderHooks.set(id,config.render);
-    if(typeof config.ready==='function')readyHooks.set(id,config.ready);
-    updateOrientation();
-    return true;
-  }
-  function handleKeydown(ev){
-    const target=ev.target;
-    const current=target&&typeof target.closest==='function'?target.closest('.nav-item[data-tab]'):null;
-    if(!current||!findNav()?.contains(current))return false;
-    const all=items();
-    const index=all.indexOf(current);
-    let next=-1;
-    if(['ArrowRight','ArrowDown'].includes(ev.key))next=(index+1)%all.length;
-    else if(['ArrowLeft','ArrowUp'].includes(ev.key))next=(index-1+all.length)%all.length;
-    else if(ev.key==='Home')next=0;
-    else if(ev.key==='End')next=all.length-1;
-    else if(ev.key==='Enter'||ev.key===' '){void goTab(current.dataset.tab,{source:'keyboard'});ev.preventDefault();return true;}
-    else return false;
-    const nextItem=all[next];
-    if(nextItem){all.forEach(item=>{item.tabIndex=item===nextItem?0:-1;});nextItem.focus();}
-    ev.preventDefault();
-    return true;
-  }
-  function renderTab(id,context={}){
-    const hook=renderHooks.get(id);
-    return hook?hook({...context,id,pane:document.getElementById('pane-'+id)}):null;
-  }
-  function readyTab(id,context){
-    const hook=readyHooks.get(id);
-    return hook?hook(context):true;
-  }
-  return Object.freeze({registerTab,renderTab,readyTab,sync,updateOrientation,handleKeydown});
-})();
+const {NAV_HORIZONTAL_MEDIA_QUERY,preferredScrollBehavior,UiTabRegistry,presentTabCommit,prepareTabDeparture,commitTabView,waitForTabReady,goTab}=FoundationHostModule.createNavigation({document,window,clampText,controller:()=>NavigationController,
+  library:()=>LibraryView,review:()=>ReviewView,attachments:()=>AttachmentLibrary,reviewEditor:()=>ReviewEditor,
+  flushPendingReviewSave:(...args)=>flushPendingReviewSave(...args),setStatus:(...args)=>setStatus(...args),clearPreview:tab=>PreviewRuntime.clearExcept(tab),refreshPnote:(...args)=>refreshPnote(...args),updateCD:(...args)=>updateCD(...args),isLiveTrackableTimer:(...args)=>isLiveTrackableTimer(...args),refreshExecuteIdleDisplay:(...args)=>refreshExecuteIdleDisplay(...args),
+  paused:()=>TimerState.paused,updateBreakMeter:(...args)=>updateBreakMeter(...args),renderPacer:()=>PracticePacer.render(),startTimerPresentation:()=>TimerPresentation.start(),stopTimerPresentation:()=>TimerPresentation.stop(),
+  renderScheduleOnPlanOpen:(...args)=>renderScheduleOnPlanOpen(...args),updateRealTimeAwareness:(...args)=>updateRealTimeAwareness(...args),requestPluginTab:tab=>PluginRuntime.requestTab(tab),applyOwnership:()=>OwnershipUiProjection.apply(),richTextSyncAll:(...args)=>richTextSyncAll(...args)});
+
+
 const STUDY_DIRECTOR_READY_EVENT='studydirector:ready';
 const OPTIONAL_PLUGIN_DESCRIPTORS=Object.freeze([
   Object.freeze({tabId:'guide',label:'Guide',icon:'?',src:'@@SD_EXTERNAL_GUIDE_FILENAME@@',pluginName:'SD-guide'}),
@@ -5867,151 +5390,6 @@ const trustedAssetURL=(()=>{
   const policy=globalThis.trustedTypes?.createPolicy('sd-assets',{createScriptURL:validate});
   return value=>policy?policy.createScriptURL(value):validate(value);
 })();
-const FEATURE_SCROLL_OWNERS=new Set(['review','library','insights']);
-const shellTabScrollState=new Map();
-const navigationFocusState=new Map();
-const nextNavigationFrame=()=>new Promise(resolve=>{
-  let frame=null,timer=null;
-  const finish=()=>{if(frame!==null)cancelAnimationFrame(frame);if(timer!==null)clearTimeout(timer);resolve();};
-  // Hidden windows may receive no animation frames; startup must still settle.
-  frame=requestAnimationFrame(finish);timer=setTimeout(finish,document.hidden?0:100);
-});
-function captureShellScroll(tab){
-  if(FEATURE_SCROLL_OWNERS.has(tab))return;
-  const root=document.scrollingElement||document.documentElement,main=document.querySelector('.main');
-  shellTabScrollState.set(tab,Object.freeze({windowTop:Math.max(0,Number(root?.scrollTop)||Number(window.scrollY)||0),mainTop:Math.max(0,Number(main?.scrollTop)||0)}));
-}
-function applySharedScroll(state){
-  const root=document.scrollingElement||document.documentElement,main=document.querySelector('.main');
-  if(root)root.scrollTop=Math.max(0,Number(state?.windowTop)||0);
-  if(main)main.scrollTop=Math.max(0,Number(state?.mainTop)||0);
-}
-function restoreShellScrollNow(tab,restore=true){
-  if(FEATURE_SCROLL_OWNERS.has(tab))return;
-  applySharedScroll(restore?shellTabScrollState.get(tab):null);
-}
-function captureNavigationState(context){
-  captureShellScroll(context.from);
-  const pane=document.getElementById('pane-'+context.from);
-  const active=document.activeElement;
-  navigationFocusState.set(context.generation,Object.freeze({departingHadFocus:!!(pane&&active&&pane.contains(active))}));
-}
-const paneEntranceTimers=new Map();
-function markPaneEntrance(pane){
-  // Presentation-owned entrance: CSS animates the arriving pane's sections for
-  // one beat. The marker is cleared afterwards so later re-renders stay still.
-  // Insights renders progressively behind its own loading panel the first
-  // time; animating that render made it about 300 ms slower, so a first open
-  // arrives still. Reopened, it shows the view it kept and animates like any pane.
-  if(pane.id==='pane-insights'&&(!pane.firstElementChild||pane.querySelector('.plugin-loading-panel')))return;
-  clearTimeout(paneEntranceTimers.get(pane.id));
-  pane.setAttribute('data-sd-enter','');
-  paneEntranceTimers.set(pane.id,setTimeout(()=>{pane.removeAttribute('data-sd-enter');paneEntranceTimers.delete(pane.id);},900));
-}
-async function presentTabCommit(context,update){
-  // Primary tab changes are intentionally immediate. Navigation owns state,
-  // history, focus, and readiness; visual snapshot transitions are not part of
-  // the tab-commit contract.
-  captureNavigationState(context);
-  try{
-    const result=await update();
-    if(result===false)navigationFocusState.delete(context.generation);
-    return result;
-  }catch(error){
-    navigationFocusState.delete(context.generation);
-    throw error;
-  }finally{
-    if(!context.current())navigationFocusState.delete(context.generation);
-  }
-}
-async function prepareTabDeparture(context){
-  if(context.from===context.to)return true;
-  if(context.from==='library'&&!await LibraryView.settleDiary())return false;
-  if(context.from==='review'){
-    if(flushPendingReviewSave({strict:true})===false)return false;
-    try{await ReviewEditor.settled();}catch(error){setStatus('save-status',error&&error.message||'Reflection could not be saved safely.',false);return false;}
-  }
-  return true;
-}
-const navigationReadyByGeneration=new Map();
-function commitTabView(context){
-  const tabName=String(context.to||'').trim();
-  const pane=document.getElementById('pane-'+tabName);
-  if(!pane)return false;
-  const previousTab=String(context.from||document.querySelector('.pane.on')?.id||'').replace(/^pane-/,'');
-  if(previousTab==='library'&&tabName!=='library'){LibraryView.deactivate({diarySettled:true});AttachmentLibrary.close();}
-  if(previousTab==='review'&&tabName!=='review')ReviewView.deactivate();
-  PreviewRuntime.clearExcept(tabName);
-  const activeNav=[...document.querySelectorAll('.nav-item[data-tab]')].find(item=>item.dataset.tab===tabName)||null;
-  UiTabRegistry.sync(tabName);
-  document.querySelectorAll('.pane').forEach(p=>{p.classList.remove('on');p.style.display='none';p.hidden=true;});
-  pane.classList.add('on');pane.style.display='block';pane.hidden=false;
-  if(previousTab!==tabName)markPaneEntrance(pane);
-  document.documentElement.dataset.sdArea=tabName;
-  if(tabName==='execute'){
-    refreshPnote({force:true});
-    updateCD();
-    if(!isLiveTrackableTimer())refreshExecuteIdleDisplay(new Date(),{force:true});
-    if(TimerState.paused)updateBreakMeter();
-    PracticePacer.render();
-    TimerPresentation.start();
-  }else TimerPresentation.stop();
-  if(tabName==='review')ReviewView.activate({restoreScroll:context.restoreScroll&&previousTab!=='review',immediateScroll:true});
-  if(tabName==='plan'){renderScheduleOnPlanOpen();updateRealTimeAwareness(null,{force:true});}
-  if(tabName==='insights')applySharedScroll(null);
-  else restoreShellScrollNow(tabName,context.restoreScroll!==false);
-  const waits=[];
-  if(tabName==='library'){
-    waits.push(Promise.resolve(LibraryView.activate({restoreScroll:context.restoreScroll&&previousTab!=='library',immediateScroll:true})));
-    void AttachmentLibrary.refresh();
-  }
-  const pluginReady=PluginRuntime.requestTab(tabName);
-  if(pluginReady)waits.push(Promise.resolve(pluginReady));
-  UiTabRegistry.renderTab(tabName,context);
-  OwnershipUiProjection.apply();
-  richTextSyncAll();
-  if(activeNav&&window.matchMedia&&window.matchMedia(NAV_HORIZONTAL_MEDIA_QUERY).matches){
-    requestAnimationFrame(()=>activeNav.scrollIntoView({block:'nearest',inline:'nearest',behavior:preferredScrollBehavior()}));
-  }
-  navigationReadyByGeneration.set(context.generation,Promise.all(waits).then(()=>true));
-  return true;
-}
-async function waitForTabReady(context){
-  const ready=navigationReadyByGeneration.get(context.generation);
-  try{
-    if(ready)await ready;
-    await UiTabRegistry.readyTab(context.to,context);
-    if(!context.current())return false;
-    if(context.restoreScroll!==false&&!FEATURE_SCROLL_OWNERS.has(context.to)){
-      await nextNavigationFrame();
-      if(!context.current())return false;
-      restoreShellScrollNow(context.to,true);
-    }else{
-      await nextNavigationFrame();
-      await nextNavigationFrame();
-      if(!context.current())return false;
-    }
-    const focus=navigationFocusState.get(context.generation);
-    const pane=document.getElementById('pane-'+context.to);
-    const active=document.activeElement;
-    const destinationOwnsFocus=!!(pane&&active&&pane.contains(active));
-    if(!destinationOwnsFocus&&(context.traversal||focus?.departingHadFocus)){
-      const nav=[...document.querySelectorAll('.nav-item[data-tab]')].find(item=>item.dataset.tab===context.to)||null;
-      nav?.focus({preventScroll:true});
-    }
-    return true;
-  }finally{
-    navigationReadyByGeneration.delete(context.generation);
-    navigationFocusState.delete(context.generation);
-  }
-}
-function goTab(name,options={}){
-  if(!NavigationController)return Promise.resolve(false);
-  return NavigationController.request(name,options).then(result=>{
-    if(result.ok===true&&result.reason==='same-tab')UiTabRegistry.sync(result.tab);
-    return result.ok===true;
-  });
-}
 
 function fullscreenAvailable(){
   const standalone=(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
@@ -9923,7 +9301,7 @@ const CHANGE_ACTIONS=Object.freeze({
   'render-library': ()=>LibraryView.render(),
   'import-backup': ev=>BackupController.importLocal(ev),
   'change-reflection-date': ev=>{richTextCloseField(document.getElementById('daily-reflection'));return selectReviewDate(ev);},
-  'sound-mode': ev=>setAppSoundMode(ev.target.value),
+  'sound-mode': handleSoundModeChange,
   'keep-screen-awake': ev=>NativeCapabilities.setKeepAwake(ev.target.checked)
 });
 const INPUT_ACTIONS=Object.freeze({
@@ -10162,64 +9540,10 @@ const OwnershipUiProjection=(()=>{
   return Object.freeze({format:'study-director.ownership-ui-projection',contractVersion:1,apply,install,snapshot});
 })();
 refreshSessionSafetyUi=()=>OwnershipUiProjection.apply();
-function actionNeedsAppControl(action,set){return !!(action&&set&&set.has(action));}
-function handleDelegatedClick(ev){
-  const tabEl=ev.target.closest('[data-tab]');
-  if(tabEl){
-    ev.preventDefault();
-    void goTab(tabEl.dataset.tab,{source:'primary-tab'});
-    return;
-  }
-  const qualityEl=ev.target.closest('[data-quality]');
-  if(qualityEl){
-    if(!requirePrimaryTab(ev,'rate or edit this review'))return;
-    ev.preventDefault();
-    const raw=qualityEl.dataset.quality;
-    setStudyQuality(raw===''?null:Number(raw));
-    return;
-  }
-  const actionEl=ev.target.closest('[data-action]');
-  if(!actionEl)return;
-  const action=actionEl.dataset.action;
-  if(actionNeedsAppControl(action,OWNER_REQUIRED_CLICK_ACTIONS)&&!requirePrimaryTab(ev,'run timers or save changes'))return;
-  const handler=CLICK_ACTIONS[action];
-  if(handler){ev.preventDefault();handler(ev);}
-}
-function handleDelegatedChange(ev){
-  const action=ev.target.dataset.change;
-  if(actionNeedsAppControl(action,OWNER_REQUIRED_CHANGE_ACTIONS)&&!requirePrimaryTab(ev,'save or import changes'))return;
-  const handler=action&&CHANGE_ACTIONS[action];
-  if(handler)handler(ev);
-}
-function handleDelegatedInput(ev){
-  if(ev.target instanceof HTMLTextAreaElement){richAssetReferenceRevision++;captureMutationGeneration++;}
-  const action=ev.target.dataset.input;
-  if(actionNeedsAppControl(action,OWNER_REQUIRED_INPUT_ACTIONS)&&!requirePrimaryTab(ev,'edit saved drafts'))return;
-  const handler=action&&INPUT_ACTIONS[action];
-  if(handler)handler(ev);
-}
-function handleDelegatedBlur(ev){
-  const action=ev.target.dataset.blur;
-  if(actionNeedsAppControl(action,OWNER_REQUIRED_BLUR_ACTIONS)&&!requirePrimaryTab(ev,'edit saved drafts'))return;
-  const handler=action&&BLUR_ACTIONS[action];
-  if(handler)handler(ev);
-}
-function handleDelegatedKeydown(ev){
-  if(UiTabRegistry.handleKeydown(ev))return;
-  if(ev.key==='Escape'&&document.getElementById('nudge-overlay')?.classList.contains('on')){
-    Pomodoro.stop({dismiss:true,audio:false});
-    ev.preventDefault();
-    ev.stopPropagation();
-    return;
-  }
-  const action=ev.target.dataset.keydown;
-  if(actionNeedsAppControl(action,OWNER_REQUIRED_KEYDOWN_ACTIONS)&&!requirePrimaryTab(ev,'edit saved drafts'))return;
-  const handler=action&&KEYDOWN_ACTIONS[action];
-  if(handler&&handler(ev)===false){
-    ev.preventDefault();
-    ev.stopPropagation();
-  }
-}
+const {actionNeedsAppControl,handleDelegatedClick,handleDelegatedChange,handleDelegatedInput,handleDelegatedBlur,handleDelegatedKeydown}=FoundationHostModule.createDelegated({document,goTab,setStudyQuality,requirePrimaryTab,CLICK_ACTIONS,CHANGE_ACTIONS,INPUT_ACTIONS,BLUR_ACTIONS,KEYDOWN_ACTIONS,
+  OWNER_REQUIRED_CLICK_ACTIONS,OWNER_REQUIRED_CHANGE_ACTIONS,OWNER_REQUIRED_INPUT_ACTIONS,OWNER_REQUIRED_BLUR_ACTIONS,OWNER_REQUIRED_KEYDOWN_ACTIONS,
+  editedTextarea:()=>{richAssetReferenceRevision++;captureMutationGeneration++;},UiTabRegistry,Pomodoro});
+
 const NoteSyncPopover=(()=>{
   let popover=null,target=null,controller=null,installed=false;
   const clearTarget=()=>{if(target?.getAttribute('aria-describedby')==='note-sync-popover')target.removeAttribute('aria-describedby');target=null;};

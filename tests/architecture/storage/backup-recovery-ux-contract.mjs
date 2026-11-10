@@ -1,3 +1,4 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
@@ -6,7 +7,7 @@ import fs from 'node:fs';
 const app=readHostHtml();
 const backup=readScript('source/core/backup.ts');
 const provider=readScript('source/core/backup-provider.ts');
-const presentation=fs.readFileSync('source/core/backup-presentation.js','utf8');
+const presentation=readRuntimeSource('source/core/backup-presentation.ts');
 const device=readScript('source/core/device-backup.ts');
 const host=readScript('source/core/backup-recovery-host.ts');
 const guide=fs.readFileSync('source/external/guide.js','utf8');

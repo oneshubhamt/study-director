@@ -186,9 +186,9 @@ console.log(JSON.stringify(result,null,2));
 }
 
 { // interaction-history
-const internal=readRuntimeSource('source/core/internal.js');
-const interactions=readRuntimeSource('source/core/interactions.js');
-const notices=readRuntimeSource('source/core/notice-coordinator.js');
+const internal=readRuntimeSource('source/core/internal.ts');
+const interactions=readRuntimeSource('source/core/interactions.ts');
+const notices=readRuntimeSource('source/core/notice-coordinator.ts');
 const browser=await launchChromium({profilePrefix:'qa-interaction-history-'});let page;
 try{
   page=await browser.createPage('about:blank',{viewport:{width:800,height:600,mobile:false,scale:1}});

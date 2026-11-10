@@ -154,5 +154,5 @@ one compact button (32 px, 36 px on touch screens).
 
 ## Ownership
 
-- `source/core/backup-presentation.js` owns the pure status decision (no DOM, no clocks except the `now` it is given).
+- `source/core/backup-presentation.ts` owns the pure status decision (no DOM, no clocks except the `now` it is given).
 - The host (`source/app.html`) gathers the inputs, draws the hosts and panel, and maps panel actions to existing feature actions. Features keep their own operations; the indicator never starts work on its own.

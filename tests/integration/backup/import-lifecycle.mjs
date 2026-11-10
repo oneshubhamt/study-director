@@ -9,7 +9,7 @@ const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readScript(path.join(ROOT,relative));
 // Deterministic import-while-Review-open lifecycle fixture.
-for(const file of ['source/core/internal.js','source/core/session-lifecycle.ts'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/session-lifecycle.ts'])vm.runInThisContext(read(file),{filename:file});
 const Lifecycle=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('session-lifecycle',1);
 let primary=true;
 let repository={Area:{key:'Area',text:'before'}};

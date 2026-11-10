@@ -9,7 +9,7 @@ import {webcrypto} from 'node:crypto';
 { // attachment-postverify-dedup
 const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Map,Set,Object,Promise,Number,String,Math,Date,JSON,crypto:webcrypto,Symbol};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/asset-storage.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/asset-storage.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-storage',1);
 
 const metadata=new Map(),files=new Map();
@@ -71,7 +71,7 @@ console.log(JSON.stringify({status:'PASS',suite:'attachment-postverify-dedup',su
 { // shared-hash-safety
 const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Map,Set,Object,Promise,Number,String,Math,Date,JSON,crypto:globalThis.crypto};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/asset-storage.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/asset-storage.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('asset-storage',1);
 
 const metadata=new Map(),files=new Map();

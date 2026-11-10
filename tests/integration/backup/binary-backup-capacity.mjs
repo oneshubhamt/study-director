@@ -11,7 +11,7 @@ import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const read=file=>readScript(fileURLToPath(new URL('../../../'+file,import.meta.url)));
-for(const file of ['source/core/internal.js','source/core/persistence.ts','source/core/record-codecs.ts','source/core/backup-codec.ts'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/persistence.ts','source/core/record-codecs.ts','source/core/backup-codec.ts'])vm.runInThisContext(read(file),{filename:file});
 const richSandbox={console,URL,TextEncoder,TextDecoder,setTimeout,clearTimeout,queueMicrotask};vm.createContext(richSandbox);vm.runInContext(richTextRuntimeSource(),richSandbox,{filename:'rich-text.js'});
 const richApi=vm.runInContext('globalThis.StudyDirectorRichText',richSandbox);
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],Persistence=registry.require('persistence',1),freeze=Object.freeze;

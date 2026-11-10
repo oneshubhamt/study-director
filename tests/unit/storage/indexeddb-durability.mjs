@@ -1,9 +1,10 @@
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const internal=fs.readFileSync('source/core/internal.js','utf8');
+const internal=readRuntimeSource('source/core/internal.ts');
 const persistence=readScript('source/core/persistence.ts');
 
 function createPrimitiveHarness({strictUnsupported=false}={}){

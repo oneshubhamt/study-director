@@ -6,7 +6,7 @@ import vm from 'node:vm';
 // The profile indicator (ring and badge on the phone circle, the sidebar name
 // and the profile panel) replaces the sidebar's sync text and the phone dot.
 // Every case those covered, and each new one, is checked here row by row.
-for(const file of ['source/core/internal.js','source/core/notice-coordinator.js','source/core/backup-presentation.js'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/notice-coordinator.ts','source/core/backup-presentation.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const notifications=registry.require('notice-coordinator',1).createCoordinator(Object.freeze({setTimeout:(fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref();return timer;},clearTimeout}));
 const presentation=registry.require('backup-presentation',1).createPresentation(Object.freeze({notifications,timeLabel:at=>String(at).slice(11,16)}));

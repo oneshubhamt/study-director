@@ -41,7 +41,7 @@ foreground=false;cue('pomodoro',{system:true,title:'Break'});assert.equal(os.len
 owner=false;c.setSoundMode('full');cue('overtime',{system:true});assert.equal(attempts.length,quiet);owner=true;cue('pause');const hiddenCue=attempts.at(-1);c.setHidden(true);assert.equal(hiddenCue.options.isCurrent(),false);c.setHidden(false);assert.equal(attempts.at(-1),hiddenCue);await drain();c.clear();n.clear();
 
 // Playback uses actual engine behavior with a controllable browser audio boundary.
-vm.runInThisContext(readRuntimeSource('source/core/audio-engine.js'),{filename:'source/core/audio-engine.js'});
+vm.runInThisContext(readRuntimeSource('source/core/audio-engine.ts'),{filename:'source/core/audio-engine.ts'});
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('audio-engine',1);
 let context,starts=0,disconnections=0,made=0,failMake=false;const sources=[],listeners=new Map(),idle=[];
 class Context {

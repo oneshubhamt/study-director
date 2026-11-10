@@ -14,7 +14,7 @@ import {testPendingReviewCodec} from '../../helpers/pending-review-codec.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readScript(path.join(ROOT,relative));
-for(const file of ['source/core/internal.js','source/core/persistence.ts','source/core/record-codecs.ts','source/core/backup-codec.ts'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/persistence.ts','source/core/record-codecs.ts','source/core/backup-codec.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const RecordCodecs=registry.require('record-codecs',1);
 const BackupCodecs=registry.require('backup-codec',1);

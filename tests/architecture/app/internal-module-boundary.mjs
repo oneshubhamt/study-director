@@ -1,3 +1,4 @@
+import {readScript} from '../../../build/source-script.mts';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -5,13 +6,13 @@ import path from 'node:path';
 import {privateModules} from '../../../build/module-manifest.mjs';
 
 const coreRoot='source/core';
-const internal=fs.readFileSync(path.join(coreRoot,'internal.js'),'utf8');
+const internal=readScript(path.join(coreRoot,'internal.ts'));
 const app=readHostHtml();
 const coreFiles=fs.readdirSync(coreRoot).filter(name=>/\.(?:js|ts)$/u.test(name)).sort();
-const sources=new Map(coreFiles.map(name=>[name,fs.readFileSync(path.join(coreRoot,name),'utf8')]));
+const sources=new Map(coreFiles.map(name=>[name,readScript(path.join(coreRoot,name))]));
 
 assert.match(internal,/const contracts=freeze\(\{exactFrozenObject,functionPort,declaredFunctions\}\)/u,'the registry owns the canonical shared contract validators');
-assert.match(internal,/function load\(name,registryVersion,format,contractVersion,input\)/u,'the registry owns validated module loading');
+assert.match(internal,/function load\(name\s*,registryVersion\s*,format\s*,contractVersion\s*,input\s*\)/u,'the registry owns validated module loading');
 assert.equal((app.match(/INTERNAL_MODULES\.load\(/gu)||[]).length,privateModules.length-1,'the host resolves all private modules through the validated loader');
 const loaded=[...app.matchAll(/INTERNAL_MODULES\.load\('([^']+)'/gu)].map(row=>row[1]);assert.deepEqual([...loaded].sort(),privateModules.filter(row=>row.id!=='internal').map(row=>row.registryId||row.id).sort(),'every declared private module must cross the validated host boundary exactly once');
 assert.equal((app.match(/INTERNAL_MODULES\.require\(/gu)||[]).length,0,'the host must not bypass validated module loading');
@@ -26,8 +27,8 @@ assert.match(sources.get(path.basename(attachmentsSource)),/format:'study-direct
 const localExact=coreFiles.filter(name=>/function\s+exactObject\s*\(/u.test(sources.get(name)));
 const localFunctions=coreFiles.filter(name=>/function\s+functions\s*\(/u.test(sources.get(name)));
 const localDeclared=coreFiles.filter(name=>/function\s+requireFunctions\s*\(/u.test(sources.get(name)));
-assert.deepEqual(localExact,['interactions.js','reconciliation-ui.js'],'only the intentional diagnostic/non-frozen exact-object validators remain local');
-assert.deepEqual(localFunctions,['interactions.js'],'only the diagnostic interaction function validator remains local');
+assert.deepEqual(localExact,['interactions.ts','reconciliation-ui.js'],'only the intentional diagnostic/non-frozen exact-object validators remain local');
+assert.deepEqual(localFunctions,['interactions.ts'],'only the diagnostic interaction function validator remains local');
 assert.deepEqual(localDeclared,[],'declared-function validation is fully centralized');
 assert.equal(coreFiles.filter(name=>sources.get(name).includes('registry.contracts')).length,39,'all modules using the ordinary shared validators consume the registry primitives');
 

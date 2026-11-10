@@ -1,32 +1,34 @@
-(()=>{
+import type {Severity,Lifecycle,Tier,Surface,BannerKind,RecentOutcome,Cue,NotificationAction,NotificationProgress,NotificationInput,NotificationRequest,BannerInput,BannerRow,BannerState,CoordinatorInput,RecentFields,RecentEntry,Delivery} from '../../types/notifications.ts';
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+const sdNoticeCoordinatorFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'notice-coordinator','study-director.notice-coordinator-module'>|undefined;
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
-registry.define('notice-coordinator',1,()=>{
+const createModule=()=>{
   const freeze=Object.freeze;
   const PRIORITIES=freeze({critical:500,safety:400,storage:300,update:200,installation:100});
   const KINDS=freeze(new Set(Object.keys(PRIORITIES)));
   // Banners kept in Recent, with their kind, and the ones that sound.
-  const BANNER_TIERS=freeze({critical:'critical',safety:'critical',storage:'blocking'});
-  const BANNER_CUES=freeze({safety:'attention',storage:'needs-you'});
-  function createCoordinator(input){
+  const BANNER_TIERS:Readonly<Partial<Record<BannerKind,Tier>>>=freeze({critical:'critical',safety:'critical',storage:'blocking'});
+  const BANNER_CUES:Readonly<Partial<Record<BannerKind,Cue>>>=freeze({safety:'attention',storage:'needs-you'});
+  function createCoordinator(input:CoordinatorInput){
     if(!input||!Object.isFrozen(input))throw new TypeError('Notice coordinator input must be frozen.');
     const render=typeof input.render==='function'?input.render:()=>{};
     const now=typeof input.now==='function'?input.now:()=>Date.now();
     const setTimer=typeof input.setTimeout==='function'?input.setTimeout:setTimeout;
     const clearTimer=typeof input.clearTimeout==='function'?input.clearTimeout:clearTimeout;
     const cooldownMs=Math.max(0,Number(input.installationCooldownMs)||1200);
-    const rows=new Map(),dismissedNotices=new Map(),bannerLines=new Map(),bannerEntries=new Map();
-    let active=null,revision=0,timer=null,bannerSerial=0;
-    function cleanId(value){
+    const rows=new Map<string,BannerRow>(),dismissedNotices=new Map<string,string>(),bannerLines=new Map<string,Set<string>>(),bannerEntries=new Map<string,string>();
+    let active:BannerRow|null=null,revision=0,timer:number|null=null,bannerSerial=0;
+    function cleanId(value:unknown){
       const id=String(value||'').trim();
       if(!/^[a-z][a-z0-9-]*$/.test(id))throw new TypeError('Notice id is invalid.');
       return id;
     }
-    function cleanNotice(id,value,previous){
-      const kind=String(value&&value.kind||'');
+    function cleanNotice(id:string,value:BannerInput,previous:BannerRow|undefined):BannerRow{
+      const kind=String(value&&value.kind||'') as BannerKind;
       if(!KINDS.has(kind))throw new TypeError('Notice kind is invalid.');
       const title=String(value&&value.title||'').trim();
       const message=String(value&&value.message||'').trim();
@@ -40,11 +42,11 @@ registry.define('notice-coordinator',1,()=>{
       });
     }
     function ordered(){return [...rows.values()].filter(row=>dismissedNotices.get(row.id)!==row.signature).sort((a,b)=>b.priority-a.priority||a.id.localeCompare(b.id));}
-    function schedule(at){
+    function schedule(at:number){
       if(timer!==null)clearTimer(timer);
       timer=setTimer(()=>{timer=null;recompute();},Math.max(0,at-now()));
     }
-    function publicRow(row){return row?freeze({...row}):null;}
+    function publicRow(row:BannerRow|null){return row?freeze({...row}):null;}
     function snapshot(announcement=''){
       return freeze({format:'study-director.notice-state',version:1,revision,active:publicRow(active),queued:freeze(ordered().filter(row=>!active||row.id!==active.id).map(publicRow)),announcement});
     }
@@ -74,41 +76,43 @@ registry.define('notice-coordinator',1,()=>{
     // A banner on screen enters Recent, and a new line on an unsaved-work or
     // storage banner sounds once (Attention, or the softer needs-you); the
     // same lines sound again only after the banner clears and returns.
-    function noteBanner(key){
+    function noteBanner(key:string){
       const row=rows.get(key);
       if(!row||!active||active.id!==key||!BANNER_TIERS[row.kind])return;
       // Entered once per appearance; later only updated, so Clear keeps it out.
       let entry=bannerEntries.get(key);const created=!entry;if(created){entry=`banner:${key}#${++bannerSerial}`;bannerEntries.set(key,entry);}
-      upsertRecent(entry,{key:'',source:'banner',deliveryId:'',tier:BANNER_TIERS[row.kind],severity:row.kind==='storage'?'warning':'error',title:row.title,message:row.message},created);
+      upsertRecent(entry!,{key:'',source:'banner',deliveryId:'',tier:BANNER_TIERS[row.kind]!,severity:row.kind==='storage'?'warning':'error',title:row.title,message:row.message},created);
       const lines=row.message.split('\n').map(line=>line.trim()).filter(Boolean),known=bannerLines.get(key)||new Set();
       const fresh=lines.some(line=>!known.has(line));
       for(const line of lines)known.add(line);bannerLines.set(key,known);
-      if(fresh&&BANNER_CUES[row.kind])playCue(BANNER_CUES[row.kind],{key:`banner:${key}`,isCurrent:()=>active?.id===key});
+      if(fresh&&BANNER_CUES[row.kind])playCue(BANNER_CUES[row.kind]!,{key:`banner:${key}`,isCurrent:()=>active?.id===key});
       flushRecent();
     }
-    function endBanner(key,outcome){
+    function endBanner(key:string,outcome:RecentOutcome){
       bannerLines.delete(key);const entry=bannerEntries.get(key);bannerEntries.delete(key);
       if(entry){settleRecent(entry,outcome);flushRecent();}
     }
     // Whichever banner ends up on screen is noted, also one that a higher
     // banner had kept back.
-    function shown(state){if(state.active)noteBanner(state.active.id);return state;}
-    function publish(id,value){
+    function shown(state:BannerState){if(state.active)noteBanner(state.active.id);return state;}
+    function publish(id:string,value:BannerInput|null){
       const key=cleanId(id);
       if(!value||value.visible===false){rows.delete(key);dismissedNotices.delete(key);endBanner(key,'resolved');return shown(recompute());}
       const previous=rows.get(key);
       rows.set(key,cleanNotice(key,value,previous));
       return shown(recompute());
     }
-    function dismiss(id){const key=cleanId(id);rows.delete(key);dismissedNotices.delete(key);endBanner(key,'dismissed');return shown(recompute());}
-    function acknowledge(id){
+    function dismiss(id:string){const key=cleanId(id);rows.delete(key);dismissedNotices.delete(key);endBanner(key,'dismissed');return shown(recompute());}
+    function acknowledge(id:string){
       const row=rows.get(cleanId(id));if(row)dismissedNotices.set(row.id,row.signature);
       const entry=row&&bannerEntries.get(row.id);if(entry){settleRecent(entry,'dismissed');flushRecent();}
       return shown(recompute());
     }
     function clear(){clearEvents();rows.clear();dismissedNotices.clear();bannerLines.clear();bannerEntries.clear();active=null;if(timer!==null)clearTimer(timer);timer=null;revision+=1;render(snapshot(''));return snapshot();}
     // Shared presentation state. Feature controllers retain execution and cancellation.
-    const events=new Map(),listeners=new Set(),recentListeners=new Set();
+    type NormalizedEvent=ReturnType<typeof normalize>;
+    type EventRow={key:string;event:NormalizedEvent;signature:string;revision:number;surfaceRevision:number;sequence:number;dismissed:boolean;remaining:number;started:number|null;pauses:Set<string>;chimed:boolean;recorded:boolean};
+    const events=new Map<string,EventRow>(),listeners=new Set<(state:ReturnType<typeof eventSnapshot>)=>void>(),recentListeners=new Set<(state:ReturnType<typeof recentSnapshot>)=>void>();
     const SEVERITY=freeze({error:400,warning:300,info:200,success:100});
     const LIFECYCLES=new Set(['running','succeeded','failed','cancelled','resolved']);
     const SURFACES=new Set(['toast','inline','quiet']);
@@ -121,14 +125,14 @@ registry.define('notice-coordinator',1,()=>{
     const TIERS=freeze(new Set(['result','news','blocking','critical']));
     const STACK_LIMIT=32,HISTORY_LIMIT=64,RECENT_LIMIT=20,NEWS_MS=12000,CHIME_GAP_MS=4000;
     const RECENT_OUTCOMES=freeze(new Set(['open','expired','dismissed','acted','resolved','replaced','ended']));
-    let sequence=0,eventRevision=0,eventTimer=null,hidden=false,studying=false,lastChimeAt=-Infinity,recentDirty=false;
-    const stackPauses=new Set(),recentEntries=[];
-    function identity(value,label){
+    let sequence=0,eventRevision=0,eventTimer:number|null=null,hidden=false,studying=false,lastChimeAt=-Infinity,recentDirty=false;
+    const stackPauses=new Set<string>(),recentEntries:RecentEntry[]=[];
+    function identity(value:unknown,label:string){
       if(typeof value!=='string'||!value.trim()||value.length>120||/[\u0000-\u001f]/u.test(value))throw new TypeError(`Notification ${label} is invalid.`);
       return value;
     }
-    function eventKey(source,id){return JSON.stringify([identity(source,'source'),identity(id,'id')]);}
-    function normalize(raw){
+    function eventKey(source:unknown,id:unknown){return JSON.stringify([identity(source,'source'),identity(id,'id')]);}
+    function normalize(raw:NotificationInput){
       const source=identity(raw.source,'source'),id=identity(raw.id,'id');
       const severity=raw.severity||'info',lifecycle=raw.lifecycle||'succeeded',surface=raw.surface||(raw.foreground===false&&['succeeded','cancelled'].includes(lifecycle)?'quiet':'toast');
       if(!Object.hasOwn(SEVERITY,severity)||!LIFECYCLES.has(lifecycle)||!SURFACES.has(surface))throw new TypeError('Notification severity, lifecycle or surface is invalid.');
@@ -136,13 +140,13 @@ registry.define('notice-coordinator',1,()=>{
       const foreground=raw.foreground!==false;
       // Without a stated kind: the person's own action is a result; background
       // success or information is news; a background warning or error blocks.
-      const tier=raw.tier==null||raw.tier===''?(foreground?'result':severity==='warning'||severity==='error'?'blocking':'news'):String(raw.tier);
+      const tier=raw.tier==null||raw.tier===''?(foreground?'result':severity==='warning'||severity==='error'?'blocking':'news'):String(raw.tier) as Tier;
       if(!TIERS.has(tier))throw new TypeError('Notification tier is invalid.');
       const operationId=raw.operationId==null?'':identity(raw.operationId,'operation id');
       const title=String(raw.title||'Study Director').trim().slice(0,120),message=String(raw.message||'').trim().slice(0,surface==='toast'?500:2000);
-      let progress=null,action=null,secondaryAction=null;
+      let progress:Required<NotificationProgress>|null=null,action:Readonly<Required<NotificationAction>>|null=null,secondaryAction:NotificationAction|null=null;
       if(raw.progress){
-        const number=key=>{const value=Number(raw.progress[key]||0);if(!Number.isFinite(value)||value<0)throw new TypeError('Notification progress is invalid.');return value;};
+        const number=(key:Exclude<keyof NotificationProgress,'stage'>)=>{const value=Number(raw.progress![key]||0);if(!Number.isFinite(value)||value<0)throw new TypeError('Notification progress is invalid.');return value;};
         progress=freeze({stage:String(raw.progress.stage||''),current:number('current'),total:number('total'),completedBytes:number('completedBytes'),totalBytes:number('totalBytes'),loadedBytes:number('loadedBytes'),activeBytes:number('activeBytes')});
       }
       if(raw.action){
@@ -163,12 +167,12 @@ registry.define('notice-coordinator',1,()=>{
       // (dismissible:false), keep their pop-up until resolved.
       const dismissible=tier!=='critical'&&!(persistent&&raw.dismissible===false&&raw.action);
       const duration=persistent?0:Math.max(1800,Math.min(12000,Number(raw.duration)||(tier==='news'?NEWS_MS:severity==='warning'?7000:4200)));
-      return freeze({source,id,operationId,surfaceId:String(raw.surfaceId||''),retainInline:raw.retainInline!==false,occurrence:String(raw.occurrence||''),cue:String(raw.cue||''),system:raw.system===true,kind:String(raw.kind||''),outcome:String(raw.outcome||''),completedAt:String(raw.completedAt||''),announce:raw.announce===true,severity,lifecycle,foreground,tier,title,message,progress,action,secondaryAction,surface,persistent,dismissible,duration});
+      return freeze({source,id,operationId,surfaceId:String(raw.surfaceId||''),retainInline:raw.retainInline!==false,occurrence:String(raw.occurrence||''),cue:String(raw.cue||'') as Cue|'none'|'',system:raw.system===true,kind:String(raw.kind||''),outcome:String(raw.outcome||''),completedAt:String(raw.completedAt||''),announce:raw.announce===true,severity,lifecycle,foreground,tier,title,message,progress,action,secondaryAction,surface,persistent,dismissible,duration});
     }
-    function signature(event){return JSON.stringify({...event,action:event.action?[event.action.label,event.action.opens]:null,secondaryAction:event.secondaryAction?event.secondaryAction.label:null});}
-    function pinned(event){return event.tier==='critical'||event.tier==='blocking'||event.severity==='error';}
-    function publicEvent(row){return freeze({...row.event,key:row.key,deliveryId:String(row.sequence),revision:row.revision,surfaceRevision:row.surfaceRevision,dismissed:row.dismissed,pinned:pinned(row.event)});}
-    function rank(row){return row.event.tier==='critical'?0:pinned(row.event)?1:2;}
+    function signature(event:NormalizedEvent){return JSON.stringify({...event,action:event.action?[event.action.label,event.action.opens]:null,secondaryAction:event.secondaryAction?event.secondaryAction.label:null});}
+    function pinned(event:NormalizedEvent){return event.tier==='critical'||event.tier==='blocking'||event.severity==='error';}
+    function publicEvent(row:EventRow){return freeze({...row.event,key:row.key,deliveryId:String(row.sequence),revision:row.revision,surfaceRevision:row.surfaceRevision,dismissed:row.dismissed,pinned:pinned(row.event)});}
+    function rank(row:EventRow){return row.event.tier==='critical'?0:pinned(row.event)?1:2;}
     // Every pop-up is in the stack at once, urgent ones pinned first, then
     // newest first; an update keeps its place. While this device's timer runs
     // on a work block, news waits, unseen and untimed.
@@ -193,7 +197,7 @@ registry.define('notice-coordinator',1,()=>{
       }
       // Keep a small deduplication history; never discard an unresolved error or active operation.
       const retired=[...events.values()].filter(row=>(row.dismissed||row.event.surface==='quiet')&&row.event.lifecycle!=='running'&&row.event.lifecycle!=='failed');
-      while(retired.length>HISTORY_LIMIT){const row=retired.shift();events.delete(row.key);}
+      while(retired.length>HISTORY_LIMIT){const row=retired.shift();events.delete(row!.key);}
       const visibleKeys=new Set(visible.map(row=>row.key));let next=Infinity;
       const timed=new Set([...visible,...[...events.values()].filter(row=>row.event.surfaceId&&!row.event.retainInline&&!row.dismissed)]);
       for(const row of events.values())if(!visibleKeys.has(row.key))row.pauses.clear();
@@ -208,38 +212,38 @@ registry.define('notice-coordinator',1,()=>{
     }
     // A pop-up on screen enters Recent once it has a result, and news chimes
     // once when it first shows (after a work block, if it waited).
-    function noteShown(row){
+    function noteShown(row:EventRow){
       const event=row.event;if(event.lifecycle==='running')return;
       // Entered once; later only updated, so a cleared or trimmed entry stays gone.
       recordRecent(row,!row.recorded);row.recorded=true;
       if(event.tier==='news'&&!row.chimed){
         row.chimed=true;
-        if(!event.cue&&now()-lastChimeAt>=CHIME_GAP_MS&&playCue('news',{key:row.key,isCurrent:()=>events.get(row.key)?.sequence===row.sequence&&!events.get(row.key).dismissed}))lastChimeAt=now();
+        if(!event.cue&&now()-lastChimeAt>=CHIME_GAP_MS&&playCue('news',{key:row.key,isCurrent:()=>events.get(row.key)?.sequence===row.sequence&&!events.get(row.key)!.dismissed}))lastChimeAt=now();
       }
     }
-    function storeEvent(event,{fresh=false,dismissed=false}={}){
+    function storeEvent(event:NormalizedEvent,{fresh=false,dismissed=false}={}){
       const key=eventKey(event.source,event.id),previous=events.get(key),sig=signature(event);
       if(!fresh&&previous&&previous.signature===sig&&previous.event.action?.run===event.action?.run&&previous.event.secondaryAction?.run===event.secondaryAction?.run)return publicEvent(previous);
       accountTime();
       const renewed=fresh||!previous;
-      const row={key,event,signature:sig,revision:++eventRevision,surfaceRevision:event.operationId&&!fresh&&previous?previous.surfaceRevision:eventRevision,sequence:renewed?++sequence:previous.sequence,dismissed,remaining:event.duration,started:null,pauses:previous&&!fresh?previous.pauses:new Set(),chimed:!renewed&&previous.chimed===true,recorded:!renewed&&previous.recorded===true};
+      const row:EventRow={key,event,signature:sig,revision:++eventRevision,surfaceRevision:event.operationId&&!fresh&&previous?previous.surfaceRevision:eventRevision,sequence:renewed?++sequence:previous!.sequence,dismissed,remaining:event.duration,started:null,pauses:previous&&!fresh?previous.pauses:new Set(),chimed:!renewed&&previous!.chimed===true,recorded:!renewed&&previous!.recorded===true};
       // A pop-up raised again after it was closed is a new occurrence.
       if(fresh&&previous){tierSounds.delete(key);settleRecent(previous,'replaced');}
       if(activeSound?.key===key&&(fresh||event.lifecycle!==previous?.event.lifecycle||event.occurrence!==previous?.event.occurrence))stopSound();
       events.set(key,row);publishEvents();deliverOccurrence(row,previous);return publicEvent(row);
     }
-    function publishEvent(raw,renewDismissed=false){
+    function publishEvent(raw:NotificationInput,renewDismissed=false){
       const event=normalize(raw),key=eventKey(event.source,event.id),previous=events.get(key);
       if(event.operationId)throw new TypeError('Operation notifications require begin() and its scoped update handle.');
       if(event.lifecycle==='resolved'){resolveEvent(event.source,event.id);return null;}
       if(previous?.event.operationId)throw new TypeError('An operation notification cannot be overwritten by an unscoped event.');
       return storeEvent(event,{fresh:renewDismissed&&previous?.dismissed===true});
     }
-    function emit(raw){return publishEvent(raw);}
-    function begin(raw){
+    function emit(raw:NotificationInput){return publishEvent(raw);}
+    function begin(raw:NotificationInput){
       const event=normalize({...raw,operationId:raw.operationId||`operation-${sequence+1}`,lifecycle:'running'}),key=eventKey(event.source,event.id);
-      storeEvent(event,{fresh:true});const generation=events.get(key).sequence;
-      function update(patch){
+      storeEvent(event,{fresh:true});const generation=events.get(key)!.sequence;
+      function update(patch:NotificationInput){
         const row=events.get(key);
         if(!row||row.sequence!==generation||row.event.lifecycle!=='running')return false;
         const next=normalize({...row.event,persistent:patch.lifecycle&&patch.lifecycle!=='running'?false:row.event.persistent,...patch,source:event.source,id:event.id,operationId:event.operationId});
@@ -249,13 +253,13 @@ registry.define('notice-coordinator',1,()=>{
       }
       return freeze({operationId:event.operationId,update,read:()=>{const row=events.get(key);return row?.sequence===generation?publicEvent(row):null;},resolve:()=>resolveEvent(event.source,event.id,generation)});
     }
-    function resolveEvent(source,id,generation=null){
+    function resolveEvent(source:string,id:string,generation:number|null=null){
       const key=eventKey(source,id),row=events.get(key);if(!row||generation!==null&&row.sequence!==generation)return false;
       accountTime();settleRecent(row,'resolved');events.delete(key);failureSounds.delete(key);tierSounds.delete(key);if(activeSound?.key===key)stopSound();publishEvents();return true;
     }
     // Closing a pop-up (×, swipe, Clear all, or its own button: reason
     // 'acted') only hides it; the work and the condition are unaffected.
-    function dismissEvent(key,deliveryId,reason='dismissed'){
+    function dismissEvent(key:string,deliveryId:string|number,reason='dismissed'){
       const row=events.get(key);if(!row||String(row.sequence)!==String(deliveryId)||row.event.dismissible===false)return false;
       accountTime();row.dismissed=true;settleRecent(row,reason==='acted'?'acted':'dismissed');publishEvents();return true;
     }
@@ -265,65 +269,65 @@ registry.define('notice-coordinator',1,()=>{
       if(count)publishEvents();
       return count;
     }
-    function pauseEvent(key,deliveryId,reason,paused){
+    function pauseEvent(key:string,deliveryId:string|number,reason:string,paused:boolean){
       const row=events.get(key);if(!row||String(row.sequence)!==String(deliveryId))return false;
       accountTime();if(paused){row.pauses.add(reason);markSeen(entryId(row));}else row.pauses.delete(reason);publishEvents();return true;
     }
     // Stops every visible pop-up's clock, for example while the stack is expanded.
-    function setPaused(reason,value){
+    function setPaused(reason:string,value:boolean){
       const id=String(reason||'');if(!id||!!value===stackPauses.has(id))return false;
       accountTime();if(value)stackPauses.add(id);else stackPauses.delete(id);publishEvents();return true;
     }
-    function setHidden(value){if(hidden===!!value)return;accountTime();hidden=!!value;if(hidden)stopSound();publishEvents();}
-    function setStudying(value){if(studying===!!value)return;accountTime();studying=!!value;publishEvents();}
-    function subscribe(listener){if(typeof listener!=='function')throw new TypeError('Notification listener is required.');listeners.add(listener);listener(eventSnapshot());return ()=>listeners.delete(listener);}
+    function setHidden(value:boolean){if(hidden===!!value)return;accountTime();hidden=!!value;if(hidden)stopSound();publishEvents();}
+    function setStudying(value:boolean){if(studying===!!value)return;accountTime();studying=!!value;publishEvents();}
+    function subscribe(listener:(state:ReturnType<typeof eventSnapshot>)=>void){if(typeof listener!=='function')throw new TypeError('Notification listener is required.');listeners.add(listener);listener(eventSnapshot());return ()=>listeners.delete(listener);}
     function clearEvents(){accountTime();events.clear();failureSounds.clear();tierSounds.clear();heard.clear();stackPauses.clear();stopSound();publishEvents();}
-    function notify(raw={}){
+    function notify(raw:NotificationRequest={}){
       const severity=raw.severity||raw.kind||'info',id=String(raw.key||`message-${++sequence}`);
       return publishEvent({...raw,kind:raw.operationKind||'',source:raw.source||'interaction',id,severity,lifecycle:raw.lifecycle||(severity==='error'?'failed':'succeeded')},true)?.deliveryId||'';
     }
     // Feature adapters carry handles, never a second message store. Inline surfaces
     // and toast summaries are projections of the same scoped event.
-    function presentation(source,action=null){
+    function presentation(source:string,action:NotificationAction|null=null){
       identity(source,'source');
-      function start(raw={}){
+      function start(raw:NotificationInput={}){
         const id=raw.id||'operation',handle=begin({action,...raw,source,id,surface:'inline',announce:raw.foreground!==false&&raw.announce!==false});
         const read=handle.read;
         return freeze({operationId:handle.operationId,read,resolve:handle.resolve,update:handle.update,
-          finish:(lifecycle,message,patch={})=>handle.update({lifecycle,message,progress:null,severity:lifecycle==='failed'?'error':lifecycle==='succeeded'?'success':'info',announce:raw.foreground!==false&&lifecycle!=='cancelled',...patch})});
+          finish:(lifecycle:Lifecycle,message:string,patch:NotificationInput={})=>handle.update({lifecycle,message,progress:null,severity:lifecycle==='failed'?'error':lifecycle==='succeeded'?'success':'info',announce:raw.foreground!==false&&lifecycle!=='cancelled',...patch})});
       }
-      return freeze({begin:start,feedback:raw=>emit({action,...raw,source})});
+      return freeze({begin:start,feedback:(raw:NotificationInput)=>emit({action,...raw,source})});
     }
     // Recent: today's pop-ups and banners, newest first, at most RECENT_LIMIT.
     // Entries hold text only; a pop-up still live offers its button.
-    function localDay(ms){const date=new Date(ms);return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
-    function entryId(row){return `${row.key}#${row.sequence}`;}
+    function localDay(ms:number){const date=new Date(ms);return `${date.getFullYear()}-${date.getMonth()+1}-${date.getDate()}`;}
+    function entryId(row:EventRow){return `${row.key}#${row.sequence}`;}
     function trimRecent(){
       const today=localDay(now()),before=recentEntries.length;
-      for(let index=recentEntries.length-1;index>=0;index--)if(localDay(recentEntries[index].at)!==today)recentEntries.splice(index,1);
+      for(let index=recentEntries.length-1;index>=0;index--)if(localDay(recentEntries[index]!.at)!==today)recentEntries.splice(index,1);
       if(recentEntries.length>RECENT_LIMIT)recentEntries.length=RECENT_LIMIT;
       if(recentEntries.length!==before)recentDirty=true;
     }
-    function upsertRecent(id,fields,create=true){
+    function upsertRecent(id:string,fields:RecentFields,create=true){
       const entry=recentEntries.find(item=>item.id===id);
       if(!entry){if(create){recentEntries.unshift({id,...fields,at:now(),outcome:'open',seen:false});trimRecent();recentDirty=true;}return;}
-      for(const [name,value] of Object.entries(fields))if(entry[name]!==value){entry[name]=value;recentDirty=true;}
+      for(const name of Object.keys(fields) as (keyof RecentFields)[])if(entry[name]!==fields[name]){Object.assign(entry,{[name]:fields[name]});recentDirty=true;}
       if(entry.outcome!=='open'){entry.outcome='open';recentDirty=true;}
     }
-    function recordRecent(row,create){
+    function recordRecent(row:EventRow,create:boolean){
       const event=row.event;
       upsertRecent(entryId(row),{key:row.key,source:event.source,deliveryId:String(row.sequence),tier:event.tier,severity:event.severity,title:event.title,message:event.message},create);
     }
-    function settleRecent(rowOrId,outcome){
+    function settleRecent(rowOrId:EventRow|string,outcome:RecentOutcome){
       const id=typeof rowOrId==='string'?rowOrId:entryId(rowOrId),entry=recentEntries.find(item=>item.id===id);
       if(entry&&entry.outcome==='open'){entry.outcome=outcome;recentDirty=true;}
     }
-    function markSeen(id){const entry=recentEntries.find(item=>item.id===id);if(entry&&!entry.seen){entry.seen=true;recentDirty=true;}}
+    function markSeen(id:string){const entry=recentEntries.find(item=>item.id===id);if(entry&&!entry.seen){entry.seen=true;recentDirty=true;}}
     function recentSnapshot(){
       trimRecent();
       const entries=recentEntries.map(entry=>{
         const row=events.get(entry.key),live=!!row&&String(row.sequence)===entry.deliveryId&&!!row.event.action&&row.event.lifecycle!=='resolved';
-        return freeze({id:entry.id,source:entry.source,tier:entry.tier,severity:entry.severity,title:entry.title,message:entry.message,at:entry.at,outcome:entry.outcome,seen:entry.seen,actionLabel:live?row.event.action.label:'',actionOpens:live&&row.event.action.opens===true});
+        return freeze({id:entry.id,source:entry.source,tier:entry.tier,severity:entry.severity,title:entry.title,message:entry.message,at:entry.at,outcome:entry.outcome,seen:entry.seen,actionLabel:live?row.event.action!.label:'',actionOpens:live&&row.event.action!.opens===true});
       });
       // Unseen: news that faded on its own, untouched, since Recent was last opened.
       return freeze({entries:freeze(entries),unseen:entries.filter(entry=>entry.tier==='news'&&entry.outcome==='expired'&&!entry.seen).length});
@@ -333,18 +337,19 @@ registry.define('notice-coordinator',1,()=>{
       const state=recentSnapshot();recentDirty=false;
       for(const listener of recentListeners)try{listener(state);}catch(error){if(typeof input.capture==='function')input.capture('notifications.recent',error);}
     }
-    function subscribeRecent(listener){if(typeof listener!=='function')throw new TypeError('Recent listener is required.');recentListeners.add(listener);listener(recentSnapshot());return ()=>recentListeners.delete(listener);}
+    function subscribeRecent(listener:(state:ReturnType<typeof recentSnapshot>)=>void){if(typeof listener!=='function')throw new TypeError('Recent listener is required.');recentListeners.add(listener);listener(recentSnapshot());return ()=>recentListeners.delete(listener);}
     function markRecentSeen(){for(const entry of recentEntries)if(!entry.seen){entry.seen=true;recentDirty=true;}flushRecent();return recentSnapshot();}
     function clearRecent(){if(recentEntries.length){recentEntries.length=0;recentDirty=true;}flushRecent();return recentSnapshot();}
     // Entries kept from earlier in this window (a reload) come back as text:
     // their pop-ups are gone, so they never offer a button or count as unseen
     // unless they had already faded unseen.
-    function restoreRecent(list){
+    function restoreRecent(list:unknown){
       if(!Array.isArray(list))return recentSnapshot();
       const today=localDay(now()),known=new Set(recentEntries.map(entry=>entry.id));
-      for(const item of list.slice(0,RECENT_LIMIT)){
+      for(const raw of (list as unknown[]).slice(0,RECENT_LIMIT)){
+        const item=raw as Partial<Record<'at'|'tier'|'severity'|'outcome'|'title'|'message'|'id'|'source'|'seen',unknown>>|null;
         if(!item||typeof item!=='object')continue;
-        const at=Number(item.at),tier=String(item.tier||''),severity=String(item.severity||''),outcome=String(item.outcome||'');
+        const at=Number(item.at),tier=String(item.tier||'') as Tier,severity=String(item.severity||'') as Severity,outcome=String(item.outcome||'') as RecentOutcome;
         const title=String(item.title||'').trim().slice(0,120),message=String(item.message||'').trim().slice(0,500),id=`restored:${String(item.id||'').slice(0,200)}`;
         if(!Number.isFinite(at)||localDay(at)!==today||!TIERS.has(tier)||!Object.hasOwn(SEVERITY,severity)||!RECENT_OUTCOMES.has(outcome)||!title||known.has(id))continue;
         known.add(id);
@@ -354,7 +359,7 @@ registry.define('notice-coordinator',1,()=>{
       return recentSnapshot();
     }
     // Recent's button runs the pop-up's own action, as its button would.
-    function runRecentAction(id){
+    function runRecentAction(id:string){
       const entry=recentEntries.find(item=>item.id===id),row=entry&&events.get(entry.key);
       if(!row||String(row.sequence)!==entry.deliveryId||!row.event.action||row.event.lifecycle==='resolved')return false;
       const run=row.event.action.run;
@@ -365,7 +370,7 @@ registry.define('notice-coordinator',1,()=>{
     }
     // Delivery policy runs only on accepted event edges, never on rendering.
     // [sound, plays in Minimal, priority]
-    const CUES=freeze({
+    const CUES:Readonly<Record<Cue,readonly [string,boolean,number]>>=freeze({
       'study-start':['begin',true,30], 'day-complete':['day',true,40],
       'block-complete':['complete',true,35], 'next-block':['resume',false,20],
       pause:['pause',false,20], resume:['resume',false,20], skip:['skip',false,20],
@@ -375,18 +380,18 @@ registry.define('notice-coordinator',1,()=>{
       'fixed-start':['settle',true,40], 'session-moved':['handoff',true,45],
       'needs-you':['knock',true,60], news:['chime',false,12]
     });
-    let delivery=null,soundMode='full',activeSound=null,soundEpoch=0;
-    const heard=new Set(),failureSounds=new Map(),tierSounds=new Map();
+    let delivery:Delivery<NormalizedEvent>|null=null,soundMode:'full'|'minimal'|'off'='full',activeSound:{key:string|undefined;priority:number;until:number}|null=null,soundEpoch=0;
+    const heard=new Set<string>(),failureSounds=new Map<string,number>(),tierSounds=new Map<string,number>();
     function deliveryContext(){return delivery?.context?.()||{owner:true,foreground:true};}
     function stopSound(){soundEpoch++;activeSound=null;delivery?.audio?.stop();}
-    function configureDelivery(value){stopSound();delivery=value;}
-    function setSoundMode(value){
+    function configureDelivery(value:Delivery<NormalizedEvent>){stopSound();delivery=value;}
+    function setSoundMode(value:"full"|"minimal"|"off"){
       if(!['full','minimal','off'].includes(value))throw new TypeError('Invalid sound mode.');
       if(soundMode!==value){soundMode=value;stopSound();}
       return soundMode;
     }
     function soundStatus(){return freeze({mode:soundMode,readiness:delivery?.audio?.status?.()||'unavailable'});}
-    function occurrenceCue(event,previous,key){
+    function occurrenceCue(event:NormalizedEvent,previous:EventRow|undefined,key:string):Cue|''{
       if(event.lifecycle==='cancelled'||event.lifecycle==='resolved')return '';
       if(event.lifecycle==='succeeded')failureSounds.delete(key);
       if(event.cue)return event.cue==='none'?'':event.cue;
@@ -407,13 +412,13 @@ registry.define('notice-coordinator',1,()=>{
       if(event.lifecycle==='succeeded'&&previous?.event.lifecycle==='running'&&event.foreground&&event.announce&&confirmations.includes(event.source))return 'confirmation';
       return '';
     }
-    function deliverOccurrence(row,previous){
-      const event=row.event,key=row.key,cue=occurrenceCue(event,previous,key),policy=CUES[cue];
-      if(!policy)return;
+    function deliverOccurrence(row:EventRow,previous:EventRow|undefined){
+      const event=row.event,key=row.key,cue=occurrenceCue(event,previous,key),policy=cue?CUES[cue]:undefined;
+      if(!policy||!cue)return;
       const token=JSON.stringify([key,event.operationId,event.occurrence||event.lifecycle,cue, event.lifecycle==='failed'?event.severity:'']);
       if(event.cue){
         if(heard.has(token))return;
-        heard.add(token);if(heard.size>256)heard.delete(heard.values().next().value);
+        heard.add(token);if(heard.size>256)heard.delete(heard.values().next().value!);
       }
       if(!delivery||!deliveryContext().owner)return;
       const acceptedAt=now();
@@ -430,8 +435,8 @@ registry.define('notice-coordinator',1,()=>{
     }
     // One in-app sound, foreground only, by mode and priority: a sound never
     // cuts off a more important one that is still playing.
-    function playCue(cue,{key,isCurrent=()=>true,source='',acceptedAt=now()}={}){
-      const policy=CUES[cue];
+    function playCue(cue:Cue,{key,isCurrent=()=>true,source='',acceptedAt=now()}:{key?:string;isCurrent?:()=>boolean;source?:string;acceptedAt?:number}={}){
+      const policy=cue?CUES[cue]:undefined;
       if(!policy||!delivery||!deliveryContext().owner)return false;
       if(hidden||!deliveryContext().foreground||soundMode==='off'||soundMode==='minimal'&&!policy[1])return false;
       const priority=source==='local-saving'?100:policy[2];
@@ -445,17 +450,17 @@ registry.define('notice-coordinator',1,()=>{
     function testSound(){
       if(!delivery?.audio)return Promise.resolve(false);
       // Explicit audition bypasses mode only. Never interrupt a storage warning.
-      if(activeSound?.priority>=80&&activeSound.until>now())return Promise.resolve(false);
+      if(activeSound&&activeSound.priority>=80&&activeSound.until>now())return Promise.resolve(false);
       stopSound();const epoch=soundEpoch,started=now();
       return delivery.audio.play('begin',{explicit:true,isCurrent:()=>epoch===soundEpoch&&now()-started<2000&&!hidden&&deliveryContext().foreground});
     }
-    async function deliverSystem(raw,deliver){
+    async function deliverSystem(raw:NotificationInput & {test?:boolean},deliver:(isCurrent:()=>boolean)=>unknown){
       if(delivery&&(!deliveryContext().owner||deliveryContext().foreground&&!raw.test))return false;
       const source=raw.source||'system',id=raw.id,occurrence=String(raw.occurrence||id),key=eventKey(source,id),previous=events.get(key);
       if(previous?.event.kind==='os'&&previous.event.occurrence===occurrence&&['running','succeeded'].includes(previous.event.lifecycle))return false;
       const createdAt=now();
       const handle=begin({...raw,source,id,occurrence,kind:'os',surface:'quiet',foreground:false,announce:false});
-      const isCurrent=()=>events.get(key)?.event.operationId===handle.operationId&&events.get(key)?.event.lifecycle==='running'&&now()-createdAt<30000&&(!delivery||deliveryContext().owner&&(raw.test||!deliveryContext().foreground));
+      const isCurrent=()=>!!(events.get(key)?.event.operationId===handle.operationId&&events.get(key)?.event.lifecycle==='running'&&now()-createdAt<30000&&(!delivery||deliveryContext().owner&&(raw.test||!deliveryContext().foreground)));
       try{
         const delivered=await deliver(isCurrent);
         if(!isCurrent()){handle.update({lifecycle:'cancelled',outcome:'expired-or-inactive'});return false;}
@@ -469,9 +474,15 @@ registry.define('notice-coordinator',1,()=>{
     }
     function status(){return snapshot();}
     return freeze({format:'study-director.notice-coordinator',contractVersion:1,priorities:PRIORITIES,publish,dismiss,acknowledge,clear,status,
-      readEvent:(source,id)=>{const row=events.get(eventKey(source,id));return row?publicEvent(row):null;},emit,begin,presentation,configureDelivery,setSoundMode,soundStatus,testSound,stopSound,deliverSystem,resolveEvent,dismissEvent,dismissAll,pauseEvent,setPaused,setHidden,setStudying,subscribe,notify,eventStatus:eventSnapshot,
+      readEvent:(source:string,id:string)=>{const row=events.get(eventKey(source,id));return row?publicEvent(row):null;},emit,begin,presentation,configureDelivery,setSoundMode,soundStatus,testSound,stopSound,deliverSystem,resolveEvent,dismissEvent,dismissAll,pauseEvent,setPaused,setHidden,setStudying,subscribe,notify,eventStatus:eventSnapshot,
       recent:recentSnapshot,subscribeRecent,markRecentSeen,clearRecent,restoreRecent,runRecentAction});
   }
   return freeze({format:'study-director.notice-coordinator-module',contractVersion:1,priorities:PRIORITIES,createCoordinator});
-});
+};
+registry.define('notice-coordinator',1,createModule);return createModule;
 })();
+export type NoticeCoordinatorModule=ReturnType<typeof sdNoticeCoordinatorFactory>;
+export type NoticeCoordinator=ReturnType<NoticeCoordinatorModule["createCoordinator"]>;
+export type NotificationEvent=NonNullable<ReturnType<NoticeCoordinator["readEvent"]>>;
+export type NotificationState=ReturnType<NoticeCoordinator["eventStatus"]>;
+export type RecentState=ReturnType<NoticeCoordinator["recent"]>;

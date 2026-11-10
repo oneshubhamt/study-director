@@ -14,7 +14,7 @@ import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 const context={console,Map,Set,Object,Promise,Number,String,Math,Date,JSON,structuredClone};
 context.globalThis=context;
 vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const libraryClear=context[Symbol.for('studyDirector.internalModules.v1')].require('library-clear',1);
 
 let membershipProbes=0;
@@ -38,7 +38,7 @@ console.log(JSON.stringify({status:'PASS',attachments:attachments.length,sources
 { // library-clear-rollback-state
 const context={console,Object,Promise,Map,Set,Date,String,Number,Array,Error,TypeError,structuredClone,Symbol,JSON,Math};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const registry=context[Symbol.for('studyDirector.internalModules.v1')];
 const libraryClear=registry.require('library-clear',1);
 
@@ -157,7 +157,7 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-rollback-state',c
 { // library-clear-scaling
 const context={console,Map,Set,Object,Promise,Number,String,Math,Date,JSON,structuredClone};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.ts']){
+for(const file of ['source/core/internal.ts','source/core/library-clear.ts']){
   vm.runInContext(readScript(file),context,{filename:file});
 }
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('library-clear',1);
@@ -214,7 +214,7 @@ console.log(JSON.stringify({status:'PASS',suite:'library-clear-scaling',checks:1
 { // library-clear-transaction
 const context={console,Map,Set,Object,Promise,Number,String,Math,Date,JSON,structuredClone,crypto:globalThis.crypto};
 context.globalThis=context;vm.createContext(context);
-for(const file of ['source/core/internal.js','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
+for(const file of ['source/core/internal.ts','source/core/library-clear.ts'])vm.runInContext(readScript(file),context,{filename:file});
 const mod=context[Symbol.for('studyDirector.internalModules.v1')].require('library-clear',1);
 const A='att-aaaaaaaaaaaaaaaaaaaa',B='att-bbbbbbbbbbbbbbbbbbbb';
 const baseSnapshot=()=>({attachments:[{id:A},{id:B}],sources:[{kind:'note',key:'n1',label:'N1',ids:new Set([B])},{kind:'session',key:'current',label:'Session reflection · 2026-09-11',ids:new Set([B])}]});
