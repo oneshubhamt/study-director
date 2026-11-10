@@ -6096,10 +6096,6 @@ function maybeAutoStartScheduledBlock(d=new Date()){
   recoverySetStatus('Auto-started the scheduled trackable block at its wall-clock window.');
   return true;
 }
-function latestTrackableEndMin(){
-  const ends=TASKS.map((t,i)=>isTrackableBlock(t)?adjustedEndMin(i):null).filter(Number.isFinite);
-  return ends.length?Math.max(...ends):null;
-}
 function maybePromptScheduleEndSave(d=new Date()){
   if(!appCanMutate()||!TASKS.some(isTrackableBlock)||!TimerState.studyDate)return;
   if(TimerState.studyDate!==todayISO(d))return;
