@@ -89,6 +89,9 @@ assert.match(host,/function skipTask\(\)\{[\s\S]*?if\(result===true\)\{notifyDev
 assert.match(timer,/function beginTimerPause\([^)]*[\s\S]*?if\(!appCanMutate\(\)\|\|TimerState\.mode!==TIMER_MODES\.RUNNING/u,'pause begins only while this tab retains mutation authority');
 assert.match(timer,/function jumpTo\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;[\s\S]*?return startCur\(\)===true;/u,'jump refuses before capture/task mutation when ownership is lost and reports the real start result');
 assert.match(timer,/function finishTrackableBlock\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\|\|!isTrackableBlock/u,'finish and skip share an ownership-fenced transition');
+assert.match(timer,/function toggleDone\([^)]*\)\{[\s\S]*?const result=toggleDoneState\(i\);[\s\S]*?if\(result===false\)return false;/u,'done-marker toggles route through the checked completion-state owner');
+assert.match(executionHost,/function toggleDoneState\([^)]*\)\{[\s\S]*?taskSessionState\.toggleDone\(index\)[\s\S]*?sources\.SKIPPED[\s\S]*?sources\.FINISHED_UNVERIFIED/u,'completion reopen cleanup is owned by the checked execution boundary');
+assert.doesNotMatch(timer,/toggleDoneMarker/u,'timer engine no longer reaches an untyped host completion mutator');
 assert.match(timer,/function classifyInactiveGap\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;[\s\S]*?const gap=TimerState\.inactiveGap/u,'inactive-gap classification cannot consume a pending decision from a read-only tab');
 assert.match(timer,/function tick\(\)\{[\s\S]*?if\(!appCanMutate\(\)\)\{stopExecution\(\);return false;\}/u,'stale interval ticks stop before mutating execution after ownership loss');
 assert.match(timer,/function recoveryCaptureActiveBeforeSwitch\(\)\{[\s\S]*?if\(!appCanMutate\(\)[\s\S]*?recordCurrentActiveToTask[\s\S]*?storeResolvedCompletion/u,'timer switching captures focus/completion inside the checked engine under current authority');
@@ -96,7 +99,7 @@ assert.match(host,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|
 assert.match(plan,/return scheduleGateway\.breakState\('end'\)===true;/u,'Plan application propagates a failed break termination instead of claiming success');
 assert.doesNotMatch(review,/function setCompletionState\(/u,'Review must consume the checked completion-state owner instead of maintaining a duplicate mutator');
 assert.match(review,/resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState/u,'Review completion editing consumes the checked execution evidence port');
-for(const stale of ['function latestTrackableEndMin(','const TaskSessionState=(()=>','function getRealTimeState(','function rebuildOriginalSchedule(','function resolveTaskCompletion(','function recoveryCaptureActiveBeforeSwitch(','function resolveActivePauseBeforeTimerSwitch(']){
+for(const stale of ['function latestTrackableEndMin(','const TaskSessionState=(()=>','function getRealTimeState(','function rebuildOriginalSchedule(','function resolveTaskCompletion(','function toggleDoneMarker(','function recoveryCaptureActiveBeforeSwitch(','function resolveActivePauseBeforeTimerSwitch(']){
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.4A runtime logic: ${stale}`);
 }
 console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checkedComposition:true,taskIdentityEvidence:true,noOpSideEffectsGated:true,authorityFenced:true,staleHostRuntimeRemoved:true},null,2));
