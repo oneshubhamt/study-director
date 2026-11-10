@@ -67,6 +67,8 @@ console.log(JSON.stringify({status:'PASS',boundary:'decision-clock',decisionCloc
 { // live-execution-host-boundary
 const host=readHostHtml();
 const executionHost=readScript('source/core/execution-host.ts');
+const timer=readScript('source/core/timer-engine.ts');
+const plan=readScript('source/core/plan.ts');
 assert.match(host,/ExecutionHostModule\.createRuntime\(Object\.freeze\(\{/u,'live execution composition crosses the checked execution host');
 assert.doesNotMatch(host,/const TaskSessionState=\(\(\)=>\{/u,'per-task runtime evidence no longer has an untyped host implementation');
 for(const direct of [
