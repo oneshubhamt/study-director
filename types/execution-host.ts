@@ -88,6 +88,7 @@ export interface CompletionEvidenceController{
   exactTaskCompletionPercent(index:number,options?:{actualSnapshot?:Record<string,number>|null;resolved?:CompletionResult|null}):number;
   storeResolvedCompletion(index:number,options?:{source?:CompletionSource|null;pct?:number|null;actualSnapshot?:Record<string,number>|null;preserveDone?:boolean}):CompletionResult;
   setCompletionState(index:number,pct:number,source?:CompletionSource):void;
+  toggleDoneState(index:number):TaskResolvedState|'reopened-skip'|false;
   setTaskDoneState(index:number):void;
   setTaskSkippedState(index:number):void;
 }
