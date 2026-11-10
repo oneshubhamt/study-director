@@ -1608,6 +1608,7 @@ const RepositoryPolicyModule=INTERNAL_MODULES.load('repository-policy',1,'study-
 const RepositoryBackgroundModule=INTERNAL_MODULES.load('repository-background',1,'study-director.repository-background-module',1,Object.freeze({lifecycle:OperationLifecycle}));
 const MutationCoordinatorModule=INTERNAL_MODULES.load('mutation-coordinator',1,'study-director.mutation-coordinator-module',1);
 const BackupOperationDiagnosticsModule=INTERNAL_MODULES.load('backup-operation-diagnostics',1,'study-director.backup-operation-diagnostics-module',1,Object.freeze({lifecycle:OperationLifecycle}));
+const StorageCensus=INTERNAL_MODULES.load('storage-census',1,'study-director.storage-census',1);
 const BackupProviderModule=INTERNAL_MODULES.load('backup-provider',1,'study-director.backup-provider-module',1,Object.freeze({repositoryPolicy:RepositoryPolicyModule}));
 const BackupCaptureModule=INTERNAL_MODULES.load('backup-capture',1,'study-director.backup-capture-module',1);
 const BackupModule=INTERNAL_MODULES.load('backup',1,'study-director.backup-module',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule}));
@@ -4907,10 +4908,10 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
     apply:context=>CompatibilityModule.applyIndexedDbUpgrade(Object.freeze({...context,dailyRecordMigrationKey:APP_META_KEYS.dailyRecordMigration}))
   }),
   hooks:Object.freeze({
-    onError:message=>markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`),
+    onError:message=>{markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`);try{DatabaseLifecycle.fault();}catch{}},
     onOk:key=>markStorageHealthOk('indexedDB',key),
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
-    onReset:event=>{void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
+    onReset:event=>{try{DatabaseLifecycle.noteLoss();}catch{}void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
   })
 }));
 const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.noteKeys.isKey}));
@@ -11501,6 +11502,36 @@ function currentBackupDiagnosticStates(){
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;
 }
+// The database's life, kept in browser storage, which survived both database
+// losses on the phone: this start (new or existing database, the version
+// found, the store counts), the last committed write, storage faults by name
+// and closes the app did not ask for, and the start before the last loss, so
+// the next start after a loss shows what was there and what failed first.
+// Only the tab in control records it. Counts, times and error names only.
+const DatabaseLifecycle=(()=>{
+  const Lifecycle=StorageCensus.lifecycle;let started=false,lastFlushAt=0,timer=null;
+  const read=()=>Lifecycle.read(AppData.local.getJson(STORAGE_KEYS.databaseLifecycle,null));
+  const write=record=>{try{AppData.local.setJson(STORAGE_KEYS.databaseLifecycle,record);}catch(error){AppDiagnostics.capture('storage.lifecycle-write',error,'warn');}};
+  const live=()=>{const value=IndexedDb.lifecycle();return {openedVersion:value.version??0,lastWriteAt:value.lastWriteAt,storageErrors:value.errors,lastError:value.lastError,lastErrorAt:value.lastErrorAt,unexpectedCloses:value.closes,versionChanges:value.versionChanges};};
+  const countStore=name=>IndexedDb.storeTransaction(name,'readonly',(store,tx,finish)=>{const request=store.count();request.onsuccess=()=>finish(true,request.result);request.onerror=()=>finish(false,request.error);});
+  function flush(){if(!started)return;clearTimeout(timer);timer=null;lastFlushAt=Date.now();write(Lifecycle.update(read(),live()));}
+  async function start(){
+    if(started||!appCanMutate())return false;
+    started=true;const value=IndexedDb.lifecycle();
+    write(Lifecycle.start(read(),{startedAt:new Date().toISOString(),fresh:value.startedFresh===true,foundVersion:value.foundVersion??0,openedVersion:value.version??0}));
+    const counts={};
+    for(const [id,name] of Object.entries(DB_STORES)){try{counts[id]=await countStore(name);}catch(error){AppDiagnostics.capture('storage.lifecycle-count',error,'warn');flush();return false;}}
+    write(Lifecycle.update(read(),{...live(),counts,countedAt:new Date().toISOString()}));lastFlushAt=Date.now();
+    return true;
+  }
+  // A fault is written within 5 seconds, at most once per 5 seconds.
+  function fault(){if(!started||timer)return;timer=setTimeout(flush,Math.max(0,5000-(Date.now()-lastFlushAt)));}
+  function noteLoss(){if(started)write(Lifecycle.noteLoss(Lifecycle.update(read(),live()),new Date().toISOString()));}
+  const snapshot=()=>started?Lifecycle.update(read(),live()):read();
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flush();});
+  window.addEventListener('pagehide',flush);
+  return Object.freeze({start,flush,fault,noteLoss,snapshot});
+})();
 // Why a version was kept, for diagnostics: the kind of difference, not its content.
 function keptReviewCause(review){
   const kept=review.kept;
@@ -11522,6 +11553,24 @@ async function readDataDiagnosticStates(){
       return {names,listed:!!Profiles.current(),listPresent:LocalStorageContract.getText(ProfileScope.registryKey,null)!==null,fresh:IndexedDb.lifecycle().startedFresh===true,clearedAt:String(readStorageHealth().browserDataClearedAt||'')};
     },project:value=>({job:'Profile storage',state:value.names?'observed':'partial',scoped:!!ProfileScope.scope,profileListPresent:value.listPresent,pageProfileListed:value.listed,startedFresh:value.fresh,...(value.clearedAt?{dataClearedAt:value.clearedAt}:{}),
       ...(value.names?{databases:value.names.length,otherDatabases:value.names.filter(name=>name!==DB_NAME).length}:{})})},
+    // What this site's storage holds, measured here: database records and
+    // sizes by store, file storage by folder at its root, cached app files, and
+    // the gap to the browser's own figure. Read-only; counts and sizes only.
+    {job:'Storage census',read:()=>StorageCensus.measure({now:()=>Date.now(),budgetMs:2400,
+      estimate:typeof navigator.storage?.estimate==='function'?()=>navigator.storage.estimate():null,
+      stores:Object.entries(DB_STORES).map(([id,name])=>Object.freeze({id,name})),
+      readStore:(name,visit)=>IndexedDb.storeTransaction(name,'readonly',(store,tx,finish)=>{
+        const request=store.openCursor();request.onerror=()=>finish(false,request.error);
+        request.onsuccess=()=>{const cursor=request.result;if(!cursor){finish(true,true);return;}if(visit(cursor.primaryKey,cursor.value)===false){finish(true,false);return;}cursor.continue();};
+      }),
+      fileRoot:typeof navigator.storage?.getDirectory==='function'?()=>navigator.storage.getDirectory():null,
+      classifyFolder:name=>{const is=base=>name===base||name.startsWith(base+ProfileScope.separator);return is('@@SD_ATTACHMENT_OPFS_DIRECTORY@@')?'attachment':is('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')?'scratch':is('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@')?'oldFolder':'other';},
+      caches:typeof caches==='undefined'?null:caches
+    }),project:value=>[{...value.summary,job:'Storage census'},{...value.database,job:'Storage census database'},{...value.meta,job:'Storage census settings data'},{...value.files,job:'Storage census files'},{...value.caches,job:'Storage census caches'}]},
+    {job:'Database this start',read:()=>DatabaseLifecycle.snapshot(),project:value=>[
+      value.current?{...value.current,job:'Database this start',state:value.current.fresh?'fresh':'existing'}:{job:'Database this start',state:'absent'},
+      ...(value.beforeLoss?[{...value.beforeLoss,job:'Database before last loss',state:'recorded'}]:[])
+    ]},
     // Each version kept for review, newest first: what it is, why it was kept
     // and which device's copy it came from (type and browser), never its
     // content or which note or day it is.
@@ -12160,6 +12209,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       // startup gate opens any automatic provider work.
       await reconcileStartupChangeClock();
       resumeUnresolvedStorageReset();
+      void DatabaseLifecycle.start().catch(error=>AppDiagnostics.capture('storage.lifecycle-start',error,'warn'));
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));

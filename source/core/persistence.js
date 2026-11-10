@@ -164,6 +164,16 @@ registry.define('persistence',1,()=>{
     // page stayed open (for example, Clear browsing data). Callers must not
     // treat their in-memory "already saved" knowledge as durable after that.
     let establishedConnection=false,startedFresh=false,resetCount=0,lastResetAt='';
+    // The database's life on this page, for diagnostics: the version found at
+    // the first open (0 for a new database), the last committed write, storage
+    // faults by name, and closes the app did not ask for.
+    let foundVersion=null,lastWriteAt='',faultCount=0,lastFault='',lastFaultAt='',closeCount=0,versionChangeCount=0;
+    const STORAGE_FAULTS=new Set(['AbortError','ConstraintError','DataCloneError','DataError','InvalidAccessError','InvalidStateError','NotFoundError','NotReadableError','QuotaExceededError','ReadOnlyError','SecurityError','TimeoutError','TransactionInactiveError','UnknownError','VersionError','IDB_OPEN_TIMEOUT','IDB_OPEN_BLOCKED']);
+    function noteFault(error){
+      const name=String(error?.code||error?.name||'');
+      if(!STORAGE_FAULTS.has(name))return;
+      faultCount++;lastFault=name;lastFaultAt=new Date().toISOString();
+    }
     function noteRecreatedDatabase(){
       resetCount++;lastResetAt=new Date().toISOString();
       const event=freeze({detectedAt:lastResetAt,count:resetCount});
@@ -193,10 +203,11 @@ registry.define('persistence',1,()=>{
     function attachConnection(db){
       appDbConnection=db;establishedConnection=true;
       db.onversionchange=()=>{
+        versionChangeCount++;
         if(appDbConnection===db)clearAppDBConnection(db);
         try{db.close();}catch(error){AppDiagnostics.capture('storage.db-versionchange-close',error);}
       };
-      if('onclose' in db)db.onclose=()=>clearAppDBConnection(db);
+      if('onclose' in db)db.onclose=()=>{closeCount++;clearAppDBConnection(db);};
       markStorageHealthOk();
       return db;
     }
@@ -216,10 +227,10 @@ registry.define('persistence',1,()=>{
         const finish=(fn,val)=>{if(settled)return;settled=true;clearTimeout(timer);fn(val);};
         const timer=setTimeout(()=>{
           const error=new Error(blocked?'IndexedDB open blocked':'IndexedDB open timed out');error.code=blocked?'IDB_OPEN_BLOCKED':'IDB_OPEN_TIMEOUT';
-          if(blocked||last)markStorageHealthError(error.message);finish(reject,error);
+          if(blocked||last){noteFault(error);markStorageHealthError(error.message);}finish(reject,error);
         },2500);
         let req;
-        try{req=version===null?globalThis.indexedDB.open(DB_NAME):globalThis.indexedDB.open(DB_NAME,version);}catch(error){markStorageHealthError(error&&error.message?error.message:'IndexedDB open failed');finish(reject,error);return;}
+        try{req=version===null?globalThis.indexedDB.open(DB_NAME):globalThis.indexedDB.open(DB_NAME,version);}catch(error){noteFault(error);markStorageHealthError(error&&error.message?error.message:'IndexedDB open failed');finish(reject,error);return;}
         req.onupgradeneeded=e=>{
           // An open that was given up on never upgrades in the background.
           if(settled){try{e.target.transaction&&e.target.transaction.abort();}catch(abortError){}return;}
@@ -233,12 +244,12 @@ registry.define('persistence',1,()=>{
             if(!fresh)applyUpgrade(Object.freeze({oldVersion:Number(e.oldVersion||0),db,transaction:tx,appMetaStore:DB_APP_META_STORE}));
           }catch(error){
             try{e.target.transaction&&e.target.transaction.abort();}catch(abortError){}
-            markStorageHealthError((error&&error.message)||'IndexedDB upgrade failed');
+            noteFault(error);markStorageHealthError((error&&error.message)||'IndexedDB upgrade failed');
             finish(reject,error||new Error('IndexedDB upgrade failed'));
           }
         };
         req.onsuccess=()=>{if(settled){try{req.result.close();}catch(closeError){}return;}finish(resolve,req.result);};
-        req.onerror=()=>{if(settled)return;markStorageHealthError((req.error&&req.error.message)||'IndexedDB open failed');finish(reject,req.error||new Error('IndexedDB open failed'));};
+        req.onerror=()=>{if(settled)return;noteFault(req.error);markStorageHealthError((req.error&&req.error.message)||'IndexedDB open failed');finish(reject,req.error||new Error('IndexedDB open failed'));};
         // Another tab still holds the database while it closes its connection
         // (each tab closes on a version change); the open waits for it within
         // the same time limit.
@@ -247,6 +258,7 @@ registry.define('persistence',1,()=>{
     }
     async function openBootstrapDatabase(){
       let db=await openRequest(null,{fresh:true});
+      if(foundVersion===null)foundVersion=freshlyCreatedDatabases.has(db)?0:Number(db.version)||0;
       // A brand-new versionless database is created at v1. Promote it directly
       // to the current lean topology; there is no historical state to bridge.
       if(Number(db.version)===1&&freshlyCreatedDatabases.has(db)){
@@ -465,13 +477,13 @@ registry.define('persistence',1,()=>{
         catch(error){
           if(appDbConnection===db){clearAppDBConnection(db);try{db.close();}catch(closeError){}}
           if(retry<1){runIdbTransaction(stores,mode,fn,abortMessage,strict,retry+1,raw).then(resolve,reject);return;}
-          markStorageHealthError((error&&error.message)||abortMessage);reject(error);return;
+          noteFault(error);markStorageHealthError((error&&error.message)||abortMessage);reject(error);return;
         }
         let settled=false;
         const finish=(ok,val)=>{
           if(settled)return;settled=true;
-          if(ok){markStorageHealthOk();resolve(val);}
-          else{markStorageHealthError((val&&val.message)||abortMessage);reject(val);}
+          if(ok){if(mode==='readwrite')lastWriteAt=new Date().toISOString();markStorageHealthOk();resolve(val);}
+          else{noteFault(val);markStorageHealthError((val&&val.message)||abortMessage);reject(val);}
         };
         const state={error:null},view=!raw&&touchesHeld(stores)?guardTransaction(tx,state):tx;
         tx.onerror=()=>finish(false,state.error||tx.error||new Error(abortMessage));
@@ -512,7 +524,7 @@ registry.define('persistence',1,()=>{
       transaction:idbTransaction,strictTransaction:idbStrictTransaction,storeTransaction:idbStoreTransaction,strictStoreTransaction:idbStrictStoreTransaction,
       get:idbGet,getAll:idbGetAll,getAllIfPresent,hasStore,topology,retireLegacyStores,
       unsupported:freeze({scan:scanUnsupported,hold,has:(storeName,key)=>isHeld(String(storeName||''),key),keys:unsupportedKeys,summary:unsupportedSummary}),
-      lifecycle:()=>freeze({startedFresh,resets:resetCount,lastResetAt})
+      lifecycle:()=>freeze({startedFresh,resets:resetCount,lastResetAt,foundVersion,version:appDbConnection?Number(appDbConnection.version)||0:null,lastWriteAt,errors:faultCount,lastError:lastFault,lastErrorAt:lastFaultAt,closes:closeCount,versionChanges:versionChangeCount})
     });
   }
 

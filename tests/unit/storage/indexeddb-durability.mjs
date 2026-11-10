@@ -72,4 +72,21 @@ function createPrimitiveHarness({strictUnsupported=false}={}){
   }),'recovered','a later healthy strict commit is still possible');
 }
 
+{
+  // The database's life on this page, for diagnostics: the last committed
+  // write, and storage faults by name only (an app's own refusal is not one).
+  const {api}=createPrimitiveHarness();
+  assert.equal(api.lifecycle().lastWriteAt,'');
+  await api.transaction('meta','readonly',(_tx,finish)=>finish(true,null));
+  assert.equal(api.lifecycle().lastWriteAt,'','a read is not a write');
+  await api.transaction('meta','readwrite',(_tx,finish)=>finish(true,null));
+  assert.ok(Number.isFinite(Date.parse(api.lifecycle().lastWriteAt)),'a committed write is recorded');
+  await assert.rejects(api.transaction('meta','readwrite',(_tx,finish)=>finish(false,Object.assign(new Error('disk full'),{name:'QuotaExceededError'}))));
+  await assert.rejects(api.transaction('meta','readwrite',(_tx,finish)=>finish(false,Object.assign(new Error('refused'),{code:'STUDY_DIRECTOR_UNSUPPORTED_DATA'}))));
+  const life=api.lifecycle();
+  assert.equal(life.errors,1,'an app refusal is not a storage fault');
+  assert.equal(life.lastError,'QuotaExceededError');
+  assert.ok(Number.isFinite(Date.parse(life.lastErrorAt)));
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'indexeddb-durability',contracts:['default path unchanged','strict opt-in uses transaction options','unsupported option falls back safely']},null,2));
