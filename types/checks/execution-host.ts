@@ -12,8 +12,6 @@ const controller=timer.createStateController(Object.freeze({
 const state:Readonly<TaskSessionStore>=execution.createTaskSessionState(controller.taskIdentity);
 void state.setResolved(0,'done');
 void state.indexSnapshot('actualTime');
-const completion=execution.createCompletionEvidence as unknown;
-void completion;
 // @ts-expect-error -- resolved state is closed.
 state.setResolved(0,'finished');
 // @ts-expect-error -- field names are closed.
