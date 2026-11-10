@@ -651,6 +651,7 @@ function tick(){
   maybeSnapshotRunningTimer();
 }
 function syncTimerAfterWake(){
+  if(!appCanMutate()){stopExecution();return false;}
   try{
     rebaseTimerAfterBackwardClockJump(nowMs());
     if(studyDayRolledOver()){handleStudyDayRollover();return true;}
@@ -993,6 +994,7 @@ const SessionEvidenceProjector=(()=>{
       return false;
     }
     function resumeRestoredPaused(restoredBreak:RestoredBreak){
+      if(!appCanMutate())return false;
       TimerState.paused=true;
       TimerState.breakStartMs=restoredBreak.startedAtMs;
       TimerState.currentBreakSec=0;
@@ -1008,6 +1010,7 @@ const SessionEvidenceProjector=(()=>{
       return true;
     }
     function resumeRestoredRunning(){
+      if(!appCanMutate())return false;
       TimerState.paused=false;resetBreakState(false);
       if(TimerState.runtime)TimerState.patchRuntime({pausedStartedMs:null});
       setTimerMode(TIMER_MODES.RUNNING,'restore-running');
