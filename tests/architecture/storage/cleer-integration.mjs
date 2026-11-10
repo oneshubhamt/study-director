@@ -36,7 +36,7 @@ for(const retired of ['AppData.sync','createVerified','syncEntityKey','normalize
   assert.equal(currentSource.includes(retired),false,`retired current-runtime symbol must stay absent: ${retired}`);
 }
 
-const entityStart=dataBootstrap.indexOf('const ENTITY_DEFINITIONS:');
+const entityStart=dataBootstrap.indexOf('const ENTITY_DEFINITIONS');
 const entityEnd=dataBootstrap.indexOf('const BACKUP_ENTITY_TYPES=',entityStart);
 assert.ok(entityStart>=0&&entityEnd>entityStart,'current entity definition block must remain discoverable in the typed data-bootstrap authority');
 const currentEntities=dataBootstrap.slice(entityStart,entityEnd);
