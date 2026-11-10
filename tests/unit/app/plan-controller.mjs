@@ -457,10 +457,36 @@ fireTimers(300);await Promise.resolve();
 assert.equal(canonicalDraft,'Default');
 assert.equal(plan.draft.authoredText(),'Default','a stored draft is always authored');
 
+// Loading a template is an explicit draft replacement: it uses strict
+// durability and restores the previous working text if canonical storage fails.
+ids['plan-input'].value='Before load';canonicalDraft='Before load';writeFailure=true;
+const failedLoad=await plan.loadDraft('Loaded template',{label:'Saved plan'});
+assert.equal(failedLoad.ok,false);assert.equal(failedLoad.error,'storage_failed');
+assert.equal(ids['plan-input'].value,'Before load','failed load restores the previous working text');
+assert.equal(canonicalDraft,'Before load');
+assert.equal(saveOptions.at(-1).strictDurability,true,'Load requests a strict draft write');
+writeFailure=false;
+const goodLoad=await plan.loadDraft('Loaded template',{label:'Saved plan'});
+assert.equal(goodLoad.ok,true);assert.equal(canonicalDraft,'Loaded template');
+assert.equal(saveOptions.at(-1).strictDurability,true);
+
+// Clear is also explicit authorship. A failed clear cannot leave the UI
+// pretending the old canonical draft disappeared.
+ids['plan-input'].value='Before clear';canonicalDraft='Before clear';plan.draft.preview({silent:true,enterDraft:true});
+writeFailure=true;
+assert.equal(await plan.draft.clear(),false);
+assert.equal(ids['plan-input'].value,'Before clear','failed clear restores the previous working text');
+assert.equal(canonicalDraft,'Before clear');
+assert.equal(saveOptions.at(-1).strictDurability,true,'Clear requests a strict draft write');
+writeFailure=false;
+assert.equal(await plan.draft.clear(),true);
+assert.equal(ids['plan-input'].value,'');assert.equal(canonicalDraft,'');
+assert.equal(saveOptions.at(-1).strictDurability,true);
+
 console.log(JSON.stringify({status:'PASS',contract:'plan-board-and-durability',
   checks:['live-vs-draft-projection','invalid-draft-silent-restore','edit-cancel',
     'failed-save-barrier','single-write-apply','single-write-reapply','single-write-done',
     'concurrent-edit-rejection','synchronous-canonical-restore','empty-board-draft-label','latest-composer-done','fresh-deferred-preview',
     'row-edit-cancels-preview','cancel-strict-commit','cancel-write-failure',
     'cancel-during-modal','cancel-during-break-confirmation',
-    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default']}));
+    'untouched-null-draft-fallback','authored-default-cancel','authored-text-excludes-displayed-default','load-strict-rollback','clear-strict-rollback']}));

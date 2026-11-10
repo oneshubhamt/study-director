@@ -25,14 +25,14 @@ function device(fault={}){
 }
 
 {
-  // Someone new: their first start is still to come; the id follows the name until it is done.
+  // Someone new: profile identity is allocated once; naming only changes the label.
   const d=device(),first=d.page('');
   assert.equal(first.current(),null,'no profile before the first start');
   const made=first.ensure('',{fresh:true});
   assert.match(made.id,/^prof_profile_[a-z0-9]{6,12}_[a-f0-9]{8}$/u);assert.equal(made.scope,'','the first profile keeps the plain storage names');assert.equal(made.fresh,true);
   assert.equal(d.list().active,made.id);
-  const named=first.rename('  Ana   María ');assert.equal(named.name,'Ana María');assert.match(named.id,/^prof_anamaria_/u,'the id says whose profile it is');assert.equal(named.scope,'');
-  assert.equal(d.list().active,named.id,'the active profile follows its new id');
+  const named=first.rename('  Ana   María ');assert.equal(named.name,'Ana María');assert.equal(named.id,made.id,'renaming never changes profile identity');assert.equal(named.scope,'');
+  assert.equal(d.list().active,made.id,'the active profile keeps the same identity after rename');
   first.setAccount({email:' Ana@Example.COM ',folder:'folder-1'});assert.equal(first.current().email,'ana@example.com');assert.equal(first.current().folder,'folder-1');
   assert.equal(first.rename('Ana M').id,named.id,'once a Drive library knows the profile, its id stays');
   assert.equal(first.finishFirstStart().fresh,false);
@@ -53,7 +53,7 @@ function device(fault={}){
   d.tick(1000);assert.equal(first.add(),true);assert.equal(d.events.reloads,1,'Add profile opens the new profile');
   const [,added]=d.list().profiles;assert.equal(added.scope,added.id,'a later profile is scoped by its first id');assert.equal(added.fresh,true);assert.equal(added.from,'','Cancel goes back to the profile that added it');assert.equal(d.list().active,added.id);
   const second=d.page(added.scope);assert.equal(second.current().id,added.id);
-  const renamed=second.rename('Ben');assert.match(renamed.id,/^prof_ben_/u);assert.equal(renamed.scope,added.scope,'its storage stays where it is when the id follows the name');
+  const renamed=second.rename('Ben');assert.equal(renamed.id,added.id,'a fresh added profile keeps its allocated identity when named');assert.equal(renamed.scope,added.scope,'its storage scope stays fixed across rename');
   d.store.set('studyDirector.theme.v1~'+added.scope,'light');d.store.set('studyDirector.theme.v1','dark');
   assert.equal(second.remove(),true);assert.equal(d.events.reloads,2);
   assert.deepEqual(d.list().profiles.map(row=>row.id),[ana.id]);assert.equal(d.list().active,ana.id);assert.deepEqual(d.list().removing,[added.scope]);
@@ -150,4 +150,4 @@ function device(fault={}){
   assert.equal(d.store.get('studyDirector.theme.v1'),'primary-preserved','another profile remains untouched');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['first start id follows the name','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere','kept through a site-data clear']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['stable identity through first-start naming','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere','kept through a site-data clear']},null,2));

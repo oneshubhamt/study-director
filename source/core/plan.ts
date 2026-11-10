@@ -1082,9 +1082,9 @@ const PlanDraftEditor=(()=>{
   }
   async function clear(){
     if(!ownership.requirePrimary(null,'clear the plan draft'))return false;
+    const previous=getPlanDraftText();
     clearTimer('save');clearTimer('preview');clearDragState();
     editEpoch++;const input=document.getElementById('plan-input');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
-    const previous=getPlanDraftText();
     const ok=await save({strictDurability:true});
     if(ok&&input?.value===''){setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return true;}
     if(!ok&&input&&input.value===''){input.value=previous;preview({silent:true});}

@@ -24,7 +24,7 @@ const drain=async(turns=32)=>{for(let i=0;i<turns;i++)await Promise.resolve();};
 const guard=(scope,operation)=>{try{return operation();}catch(error){sequence.push(`guard:${scope}:${error.message}`);return false;}};
 const fn=name=>()=>{sequence.push(name);return true;};
 const asyncFn=name=>async()=>{sequence.push(`${name}:begin`);await Promise.resolve();sequence.push(`${name}:end`);return true;};
-let primary=true;
+let primary=true,rejectPlanFlush=false;
 const activation=StartupHost.createActivation(Object.freeze({capture:(scope,error)=>sequence.push(`capture:${scope}:${error?.message||error}`)}));
 activation.subscribe(event=>sequence.push(`activation:${event.kind}:${event.source}:${event.destructive?'destructive':'non-destructive'}`));
 const coordinator=StartupHost.createCoordinator(Object.freeze({
@@ -40,7 +40,7 @@ const coordinator=StartupHost.createCoordinator(Object.freeze({
   }),
   timer:Object.freeze({stopPresentation:fn('timer-stop'),syncAfterWake:()=>{sequence.push('wake-reconcile');return false;}}),
   flushers:Object.freeze({
-    planDraft:fn('flush-plan'),preferences:fn('flush-preferences'),activeSession:fn('flush-session'),
+    planDraft:()=>{sequence.push('flush-plan');return rejectPlanFlush?Promise.reject(new Error('plan flush rejected')):true;},preferences:fn('flush-preferences'),activeSession:fn('flush-session'),
     notes:fn('flush-notes'),deletionRecovery:fn('flush-deletion-recovery')
   }),
   startup:Object.freeze({
@@ -82,6 +82,8 @@ assert.ok(index('flush-plan')<index('flush-preferences'));
 assert.ok(index('flush-preferences')<index('flush-session'));
 assert.ok(index('flush-session')<index('flush-deletion-recovery'));
 assert.equal(sequence.includes('capture-notes'),false);
+rejectPlanFlush=true;coordinator.flush();await drain();rejectPlanFlush=false;
+assert.ok(sequence.includes('guard:lifecycle.flush-schedule:plan flush rejected'),'promise-returning lifecycle flush failures are observed instead of becoming unhandled rejections');
 
 const focus=winListeners.get('focus');
 assert.equal(typeof focus,'function');
