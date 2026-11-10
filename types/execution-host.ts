@@ -9,10 +9,7 @@ import type {PomodoroModule} from '../source/core/pomodoro.ts';
 import type {PracticePacerModule} from '../source/core/practice-pacer.ts';
 import type {TimerEngineModule} from '../source/core/timer-engine.ts';
 
-export type RuntimeTaskSessionFields=TaskSessionFields&{
-  completion:number;
-  completionSource:CompletionSource;
-};
+export type RuntimeTaskSessionFields=TaskSessionFields;
 export type TaskSessionField=keyof RuntimeTaskSessionFields;
 export type TaskResolvedState='done'|'skipped'|null;
 
