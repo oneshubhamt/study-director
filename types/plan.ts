@@ -19,7 +19,7 @@ export interface PlanRow{
   id?:string;
 }
 export interface PlanParseResult{
-  ok:boolean;kind:string;message?:string;parsed?:readonly PlanRow[];errors?:readonly string[];warnings?:readonly string[];
+  ok:boolean;kind:string;message?:string;parsed:readonly PlanRow[];errors:readonly string[];warnings:readonly string[];
   rawOriginal?:string;raw?:string;
 }
 export interface ImmutablePlanDraft{
@@ -95,7 +95,7 @@ export interface PlanNotice{
   read():Readonly<{lifecycle?:string;kind?:string}>|null;
   finish(lifecycle:string,message:string,options?:Readonly<Record<string,unknown>>):unknown;
 }
-export interface AnchoredPopover{destroy():void;hide():void;show?(anchor:PlanElement):void}
+export interface AnchoredPopover{destroy():void;hide():void;show(anchor:PlanElement):void}
 export interface PlanModuleInput{
   readonly ports:Readonly<{
     configuration:Readonly<{limits:Readonly<PlanLimits>}>;

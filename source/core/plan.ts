@@ -141,9 +141,9 @@ const SavedPlans=(()=>{
       trigger.addEventListener('click',event=>{event.preventDefault();if(popup.hidden)controller.show(trigger);else controller.hide();});
       actions.append(trigger,popup);item.append(identity,actions);list.append(item);
     }
-    node('saved-plans-count').textContent=String(data.savedPlans.length);
+    node('saved-plans-count')!.textContent=String(data.savedPlans.length);
     syncAccess();
-    if(!installed){installed=true;panel.addEventListener('click',event=>{const button=event.target.closest('[data-saved-plan]');if(!button)return;const popup=button.closest('.saved-plan-menu-popover');if(popup){const entry=menuControllers.find(item=>item.popup===popup);entry?.controller.hide();}void act(button.dataset.savedPlan,button.dataset.savedPlanId||'');});panel.addEventListener('toggle',()=>{if(!panel.open)for(const item of menuControllers)item.controller.hide();});}
+    if(!installed){installed=true;panel.addEventListener('click',event=>{const button=event.target.closest('[data-saved-plan]');if(!button)return;const popup=button.closest('.saved-plan-menu-popover');if(popup){const entry=menuControllers.find(item=>item.popup===popup);entry?.controller.hide();}void act(button.dataset.savedPlan||'',button.dataset.savedPlanId||'');});panel.addEventListener('toggle',()=>{if(!panel.open)for(const item of menuControllers)item.controller.hide();});}
   }
   async function act(action:string,planId=''){
     if(busy||!ownership.requirePrimary(null,'manage saved plans'))return false;
@@ -154,7 +154,7 @@ const SavedPlans=(()=>{
       selectedId=id;
       if(action==='load'){if(selected){const result=await loadScheduleIntoDraft(selected.scheduleText,{label:selected.label,allowIncomplete:true});status(result.ok?'Working copy loaded into Draft.':result.error==='cancelled'?'Current draft kept.':'Could not load the plan.',result.ok);}return true;}
       if(action==='save'){
-        const name=node('saved-plan-name').value.trim();
+        const name=node('saved-plan-name')!.value.trim();
         if(!name)throw new Error('Enter a name for the plan.');
         if(!draft.trim())throw new Error('Add something to the draft first.');
         if(library.savedPlans.length>=100)throw new Error('You have 100 saved plans. Delete one before saving another.');
@@ -499,11 +499,11 @@ function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts
   if(!scheduleChanged)return {handled:false,cancelled:false,scheduleChanged:false,progressMigration:null};
   const finish=()=>{
     const progressMigration=confirmScheduleChangeWillMigrateProgress(parsed,stillCurrent);
-    if(progressMigration&&typeof progressMigration.then==='function')return progressMigration.then(value=>value===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration:value});
-    return progressMigration===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration};
+    if(progressMigration)return progressMigration.then((value:false|PlanMigration)=>value===false?{cancelled:true}:{handled:false,cancelled:false,scheduleChanged:true,progressMigration:value});
+    return {handled:false,cancelled:false,scheduleChanged:true,progressMigration:null};
   };
   const breakDecision=closeActiveBreakForScheduleChange(stillCurrent);
-  if(breakDecision&&typeof breakDecision.then==='function')return breakDecision.then(ok=>ok?finish():{cancelled:true});
+  if(typeof breakDecision!=='boolean')return breakDecision.then((ok:boolean)=>ok?finish():{cancelled:true});
   return breakDecision?finish():{cancelled:true};
 }
 function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraft,opts:Readonly<PlanApplyOptions>,migrationSummary:PlanMigrationSummary|undefined):{text:string;state:PlanTone}{
@@ -572,7 +572,7 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
     const draft=projection.draft,parsed=draft.parsed;
     const preparation=prepareScheduleApply(parsed,rawOriginal,opts);
     return preparation&&typeof preparation.then==='function'
-      ?preparation.then(result=>finish(result,draft,parsed))
+      ?preparation.then((result:Readonly<PlanApplyPreparation>)=>finish(result,draft,parsed))
       :finish(preparation,draft,parsed);
   };
   if(opts.persistDraft===false)return apply();
@@ -1025,7 +1025,7 @@ const PlanDraftEditor=(()=>{
       const row=rowFromTarget(field,container),idx=rowIndex(row);
       if(idx===null)return;
       if(!ownership.requirePrimary(ev,'edit the plan draft')){renderSched();return;}
-      setField(idx,field.dataset.draftField,field.value);
+      setField(idx,field.dataset.draftField||'',field.value);
     });
     container.addEventListener('change',ev=>{
       const field=ev.target.closest&&ev.target.closest('select[data-draft-field]');
@@ -1033,7 +1033,7 @@ const PlanDraftEditor=(()=>{
       const row=rowFromTarget(field,container),idx=rowIndex(row);
       if(idx===null)return;
       if(!ownership.requirePrimary(ev,'edit the plan draft')){renderSched();return;}
-      setField(idx,field.dataset.draftField,field.value);
+      setField(idx,field.dataset.draftField||'',field.value);
       renderSched();
     });
     container.addEventListener('focusout',ev=>{
@@ -1122,7 +1122,7 @@ const PlanDraftEditor=(()=>{
       if(lastParsed.some(row=>areaMatches(row,from))){lastParsed=lastParsed.map(row=>{const area=renamedArea(row,from,label);return area===undefined?row:{...row,area};});}
       if(lastAppliedScheduleText)lastAppliedScheduleText=renameAreaInText(lastAppliedScheduleText,from,label)??lastAppliedScheduleText;
       const input=document.getElementById('plan-input'),draft=input?renameAreaInText(input.value,from,label):null;
-      if(draft!==null){input.value=draft;await persistence.writeDraft(draft);}
+      if(input&&draft!==null){input.value=draft;await persistence.writeDraft(draft);}
       const library=persistence.readLibrary(),now=new Date().toISOString();let savedPlans=0;
       library.savedPlans=library.savedPlans.map(plan=>{const text=renameAreaInText(plan.scheduleText,from,label);if(text===null)return plan;savedPlans++;return {...plan,scheduleText:text,updatedAt:now};});
       if(savedPlans){await persistence.writeLibrary(library);SavedPlans.render();}
