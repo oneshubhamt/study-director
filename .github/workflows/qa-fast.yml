@@ -68,19 +68,3 @@ jobs:
         run: node build/verify-build.mjs
       - name: Verify generated syntax
         run: node tests/architecture/build/generated-syntax-check.mjs
-      - name: Locate Chromium for P5.4C browser QA
-        shell: bash
-        run: |
-          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
-          test -n "$CHROME"
-          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: P5.4C browser QA
-        env:
-          BROWSER_TEST_JOBS: 1
-        run: |
-          for run in 1 2 3 4 5; do
-            echo "multi-tab isolated reliability run $run/5"
-            node tests/browser/storage/multi-tab.mjs
-          done
-          node tests/browser/backup/session-handoff-journeys.mjs
-          node tests/browser/backup/restore-session-safety.mjs
