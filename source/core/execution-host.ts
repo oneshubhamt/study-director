@@ -334,6 +334,19 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
     if(save)saveLiveDraft();
     return resolved;
   }
+  function toggleDoneState(index:number){
+    if(!validIndex(index))return false;
+    const prior=taskSessionState.resolvedState(index),next=taskSessionState.toggleDone(index);
+    if(prior==='skipped'){
+      if(explicitCompletionSource(index)===sources.SKIPPED)taskSessionState.deleteField(index,'completionSource');
+      if(Number(taskSessionState.getField(index,'completion'))===0)taskSessionState.deleteField(index,'completion');
+    }
+    if(prior==='done'&&explicitCompletionSource(index)===sources.FINISHED_UNVERIFIED){
+      taskSessionState.deleteField(index,'completionSource');
+      if(Number(taskSessionState.getField(index,'completion'))===0)taskSessionState.deleteField(index,'completion');
+    }
+    return next;
+  }
   function setTaskDoneState(index:number){
     if(!validIndex(index))return;
     taskSessionState.setResolved(index,'done');
@@ -348,7 +361,7 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
     format:'study-director.completion-evidence' as const,contractVersion:1 as const,
     setCompletionSource,explicitCompletionSource,plannedSecondsForCompletion,unitCompletionForTask,progressInputState,
     syncProgressInputsToState,clearManualCompletionOverride,focusCompletionForTask,liveTaskOutcome,resolveTaskCompletion,
-    exactTaskCompletionPercent,storeResolvedCompletion,setCompletionState,setTaskDoneState,setTaskSkippedState
+    exactTaskCompletionPercent,storeResolvedCompletion,setCompletionState,toggleDoneState,setTaskDoneState,setTaskSkippedState
   });
 }
 function createRuntime(input:Readonly<ExecutionHostInput>){
