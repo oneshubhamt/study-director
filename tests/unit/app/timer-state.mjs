@@ -113,6 +113,8 @@ const taskState=executionHost.createTaskSessionState(evidenceController.taskIden
 assert.equal(taskState.setField(0,'completion',40),true);
 assert.equal(taskState.setField(0,'notes',{done:2,total:5}),true);
 assert.equal(taskState.setResolved(1,'skipped'),true);
+assert.equal(taskState.setField(0,'unknown-field',1),false,'unknown runtime evidence fields fail closed for JavaScript callers');
+assert.equal(taskState.getField(0,'unknown-field'),undefined);
 evidenceController.loadSchedule([
   {id:'b',start:'08:00',dur:60,name:'B',kind:'work',area:'Core',measure:'block',target:1},
   {id:'a',start:'09:00',dur:60,name:'A',kind:'work',area:'Core',measure:'block',target:1}

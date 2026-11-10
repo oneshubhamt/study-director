@@ -811,7 +811,7 @@ if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='st
 function sendSessionChangeSoon(reason){
   void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.session-change-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason}));
 }
-function togglePause(){const result=togglePauseTimer();if(result===true)sendSessionChangeSoon(TimerState.paused?'timer-pause':'timer-resume');schedulePwaUpdateEvaluation(150);return result;}
+function togglePause(){const result=togglePauseTimer();if(result===true){sendSessionChangeSoon(TimerState.paused?'timer-pause':'timer-resume');schedulePwaUpdateEvaluation(150);}return result;}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
@@ -975,10 +975,15 @@ function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
 function markDone(){
   const finishWasAvailable=isTrackableBlock(TASKS[TimerState.currentIndex]);
   const result=markDoneTimer();
-  if(finishWasAvailable&&result!==false){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-finished');}
-  schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;
+  if(finishWasAvailable&&result===true){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-finished');}
+  if(result===true){schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});}
+  return result;
 }
-function skipTask(){const result=skipTaskTimer();if(result!==false){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-skipped');}schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});return result;}
+function skipTask(){
+  const result=skipTaskTimer();
+  if(result===true){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-skipped');schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});}
+  return result;
+}
 function finishPracticePacer(){
   const result=PracticePacer.finish();
   schedulePwaUpdateEvaluation(150);return result;

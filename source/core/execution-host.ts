@@ -19,6 +19,8 @@ function functions(value:unknown,keys:readonly string[],label:string){
 function createTaskSessionState(taskIdentity:TaskIdentityPort):Readonly<TaskSessionStore>{
   functions(taskIdentity,['idAt','indexMap','indexForId'],'Task session identity');
   type Entry={taskId:string;resolvedState:TaskResolvedState;fields:Partial<RuntimeTaskSessionFields>};
+  const fieldNames:readonly TaskSessionField[]=freeze(['completion','completionSource','notes','actualTime','actualClock','actualRecords']);
+  const validField=(field:unknown):field is TaskSessionField=>typeof field==='string'&&fieldNames.some(name=>name===field);
   const byTaskId=new Map<string,Entry>();
   function entry(index:number,create=false){
     const taskId=taskIdentity.idAt(index);
@@ -28,12 +30,14 @@ function createTaskSessionState(taskIdentity:TaskIdentityPort):Readonly<TaskSess
     return row;
   }
   function getField<K extends TaskSessionField>(index:number,field:K):RuntimeTaskSessionFields[K]|undefined{
+    if(!validField(field))return undefined;
     return entry(index,false)?.fields[field];
   }
   function prune(row:Entry|null){
     if(row&&row.resolvedState===null&&Object.keys(row.fields).length===0)byTaskId.delete(row.taskId);
   }
   function deleteField<K extends TaskSessionField>(index:number,field:K){
+    if(!validField(field))return false;
     const row=entry(index,false);
     if(!row||row.fields[field]===undefined)return false;
     delete row.fields[field];
@@ -41,6 +45,7 @@ function createTaskSessionState(taskIdentity:TaskIdentityPort):Readonly<TaskSess
     return true;
   }
   function setField<K extends TaskSessionField>(index:number,field:K,value:RuntimeTaskSessionFields[K]|undefined){
+    if(!validField(field))return false;
     if(value===undefined)return deleteField(index,field);
     const row=entry(index,true);
     if(!row)return false;
@@ -73,6 +78,7 @@ function createTaskSessionState(taskIdentity:TaskIdentityPort):Readonly<TaskSess
   }
   function indexSnapshot<K extends TaskSessionField>(field:K){
     const out:Record<string,RuntimeTaskSessionFields[K]>={};
+    if(!validField(field))return out;
     indices().forEach(index=>{
       const value=getField(index,field);
       if(value!==undefined)out[String(index)]=value;
