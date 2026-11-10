@@ -7,6 +7,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'audio-engine',source:'core/audio-engine.ts',stem:'sd.audio-engine'}),
   Object.freeze({id:'notice-coordinator',source:'core/notice-coordinator.ts',stem:'sd.notice-coordinator'}),
   Object.freeze({id:'foundation-host',source:'core/foundation-host.ts',stem:'sd.foundation-host'}),
+  Object.freeze({id:'capabilities-host',source:'core/capabilities-host.ts',stem:'sd.capabilities-host'}),
   Object.freeze({id:'navigation',source:'core/navigation.ts',stem:'sd.navigation'}),
   Object.freeze({id:'domain',source:'core/domain.ts',stem:'sd.domain'}),
   Object.freeze({id:'attachments',source:'core/attachments.ts',stem:'sd.attachments'}),
@@ -54,7 +55,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'device-backup',source:'core/device-backup.ts',stem:'sd.device-backup'}),
   Object.freeze({id:'backup-recovery-host',source:'core/backup-recovery-host.ts',stem:'sd.backup-recovery-host'}),
   Object.freeze({id:'pwa-lifecycle',source:'core/pwa-lifecycle.js',stem:'sd.pwa-lifecycle'}),
-  Object.freeze({id:'native-capabilities',source:'core/native-capabilities.js',stem:'sd.native-capabilities'}),
+  Object.freeze({id:'native-capabilities',source:'core/native-capabilities.ts',stem:'sd.native-capabilities'}),
   Object.freeze({id:'startup',registryId:'startup-lifecycle',source:'core/startup.js',stem:'sd.startup'})
 ]);
 
@@ -68,6 +69,7 @@ export const runtimeDependencies=Object.freeze({
   'audio-engine':Object.freeze([]),
   'notice-coordinator':Object.freeze([]),
   'foundation-host':Object.freeze([]),
+  'capabilities-host':Object.freeze([]),
   'backup-presentation':Object.freeze([]),
   navigation:Object.freeze([]),
   domain:Object.freeze([]),

@@ -68,6 +68,7 @@ const DeviceBackupModule=INTERNAL_MODULES.load('device-backup',1,'study-director
 const BackupRecoveryHostModule=INTERNAL_MODULES.load('backup-recovery-host',1,'study-director.backup-recovery-host-module',1);
 const PwaLifecycleModule=INTERNAL_MODULES.load('pwa-lifecycle',1,'study-director.pwa-lifecycle-module',1);
 const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'study-director.native-capabilities-module',1);
+const CapabilitiesHostModule=INTERNAL_MODULES.load('capabilities-host',1,'study-director.capabilities-host-module',1);
 const PlanModule=INTERNAL_MODULES.load('plan',1,'study-director.plan-module',1);
 const StartupLifecycleModule=INTERNAL_MODULES.load('startup-lifecycle',1,'study-director.startup-lifecycle',1);
 const OwnershipModule=INTERNAL_MODULES.load('ownership',1,'study-director.ownership',1);
@@ -179,7 +180,7 @@ const {KeyedRecord,textEl,on,emptyMsg,setProgressSummary,setElementText,setEleme
 // Data access is instantiated after the codecs through the private repository module.
 let StorageHealthController=null;
 let storageResetHold=null,storageResetHandling=null,storageResetSince=0,storageResetAcknowledged=0;
-let NativeCapabilities=null;
+let NativeCapabilities=null,CapabilityBadge=null;
 let DeviceBackup=null,BackupRecoveryHost=null;
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
 const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
@@ -377,6 +378,7 @@ const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze(
 if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-director.notice-coordinator'||NoticeCoordinator.contractVersion!==1){
   throw new Error('Study Director notice coordinator is unavailable or incompatible.');
 }
+const {renderNativeCapabilities}=CapabilitiesHostModule.createViews(Object.freeze({document,window,notices:NoticeCoordinator}));
 // Recent (docs/areas/notifications.md): today's pop-ups and banners in the profile
 // panel. Kept for this window across a reload (sessionStorage), tied to the
 // profile; never uploaded or backed up. Opening the panel marks news seen.
@@ -1334,54 +1336,7 @@ function publishSafetyNotice(message,title='Unsaved work needs attention',id='sa
   const text=String(message||'').trim();
   return NoticeCoordinator.publish(String(id||'safety'),{visible:!!text,kind:'safety',title,message:text||'Resolved.',compact:noticeCanCompact(text)});
 }
-let lastInstallationProjectionKey='';
-function renderInstallationProjection(state){
-  const noticeAction=document.getElementById('install-notice-action');
-  if(noticeAction){
-    noticeAction.textContent=state.installationAction==='install'?'Install app':'How to install';
-    noticeAction.disabled=state.installInspecting||state.installationState==='installing';
-  }
-  NoticeCoordinator.publish('installation',{
-    visible:!!state.installNoticeVisible,kind:'installation',title:'Install Study Director',
-    message:'Install for easier access and a dedicated app window.',
-    actionLabel:state.installationAction==='install'?'Install app':'How to install'
-  });
-  const signature=[state.installationState,state.installationAction,state.installInspecting,state.installFeedback,state.installHelpRequested,state.installNoticeVisible].join('|');
-  if(signature!==lastInstallationProjectionKey){
-    lastInstallationProjectionKey=signature;
-    window.dispatchEvent(new CustomEvent('studydirector:installationchange',{detail:state}));
-  }
-}
-function renderNativeCapabilities(state){
-  if(!state)return;
-  const local=document.getElementById('local-data-status');
-  const protect=document.getElementById('protect-local-data');
-  const protectedMode=state.storageMode==='protected';
-  const retryMode=state.storageMode==='standard'&&state.storageRequestSupported;
-  if(local){
-    local.hidden=retryMode;
-    local.textContent=protectedMode?'Protected':state.storageMode==='unsupported'?'Browser-managed':state.storageBusy?'Checking…':'Browser-managed';
-    local.classList.toggle('protected',protectedMode);local.classList.toggle('standard',!protectedMode);
-    local.title=state.storageMessage||'';
-  }
-  if(protect){
-    protect.hidden=!retryMode;
-    protect.disabled=state.storageBusy;
-    protect.textContent=state.storageBusy?'Trying…':'Try protection';
-    protect.title=state.storageMessage||'Ask the browser to keep Study Director local data in persistent storage.';
-  }
-  const wakeSetting=document.getElementById('wake-setting');
-  const wakeToggle=document.getElementById('keep-screen-awake');
-  const wakeIndicator=document.getElementById('wake-lock-indicator');
-  if(wakeSetting)wakeSetting.hidden=false;
-  if(wakeToggle){wakeToggle.disabled=!state.wakeSupported;wakeToggle.checked=!!state.keepAwake;wakeToggle.setAttribute('aria-checked',state.keepAwake?'true':'false');}
-  if(wakeIndicator){
-    wakeIndicator.textContent=!state.wakeSupported?'Unavailable':state.wakeAcquired?'Active':state.keepAwake?'Enabled':'Off';
-    wakeIndicator.classList.toggle('enabled',!!state.keepAwake&&!state.wakeAcquired);
-    wakeIndicator.classList.toggle('active',!!state.wakeAcquired);
-  }
-  renderInstallationProjection(state);
-}
+// Native capability presentation is owned by the checked capabilities-host adapter.
 // The portable-file row, drawn like the location rows: Export and Cancel from
 // the backup controller and file processor, the note from the 'file'
 // presentation. It draws once both exist; their status changes redraw it.
@@ -1506,51 +1461,20 @@ function storageSizeLabel(bytes){
 // is returned to at most once an hour, so a tab left open for days still warns
 // before storage fills. It is kept in memory for diagnostics.
 const STORAGE_ESTIMATE_REFRESH_MS=60*60*1000;
-let storageEstimate=Object.freeze({persisted:null,usageBytes:null,quotaBytes:null}),storageEstimateAt=0;
-async function inspectStorageCapability(){
-  if(!navigator.storage)return null;
-  storageEstimateAt=Date.now();
-  let persisted=null,estimate=null;
-  try{
-    const nativeState=await NativeCapabilities.inspectStorage();
-    persisted=nativeState.storageMode==='protected'?true:nativeState.storageMode==='standard'?false:null;
-  }catch(e){}
-  try{if(typeof navigator.storage.estimate==='function')estimate=await navigator.storage.estimate();}catch(e){}
-  const usage=Number(estimate&&estimate.usage),quota=Number(estimate&&estimate.quota);
-  const ratio=Number.isFinite(usage)&&Number.isFinite(quota)&&quota>0?usage/quota:null;
-  const use=document.getElementById('local-storage-use');
-  if(use)use.textContent=Number.isFinite(usage)?`Browser storage estimate: ${storageSizeLabel(usage)}${ratio!==null?` of ${storageSizeLabel(quota)}`:''}`:'';
-  const payload={version:1,persisted:persisted===true,usageBytes:Number.isFinite(usage)?usage:null,quotaBytes:Number.isFinite(quota)?quota:null,usageRatio:ratio,checkedAt:new Date().toISOString()};
-  storageEstimate=Object.freeze({persisted,usageBytes:payload.usageBytes,quotaBytes:payload.quotaBytes});
-  if(ratio!==null&&ratio>=APP_LIMITS.storageCriticalRatio){
-    markStorageHealthError('capacity',`Storage is ${Math.round(ratio*100)}% full (${storageSizeLabel(usage)} of ${storageSizeLabel(quota)}). Export a backup and free browser storage before continuing.`);
-  }else if(ratio!==null&&ratio>=APP_LIMITS.storageWarningRatio){
-    markStorageHealthError('capacity',`Storage usage is ${Math.round(ratio*100)}%. Export a recent backup and monitor available browser storage.`,{level:'warn'});
-  }else markStorageHealthOk('capacity');
-  return payload;
-}
-async function protectLocalData(){
-  const state=await NativeCapabilities.protectLocalData();
-  const persisted=state.storageMode==='protected'?true:state.storageMode==='standard'?false:null;
-  storageEstimate=Object.freeze({...storageEstimate,persisted});
-  renderStorageHealth();
-  return persisted===true;
-}
-async function openInstallationGuide(){
-  NativeCapabilities.revealInstallHelp();
-  if(!await goTab('guide',{source:'install-guide'}))return false;
-  requestAnimationFrame(()=>document.getElementById('guide-install-card')?.scrollIntoView({block:'center',behavior:preferredScrollBehavior()}));
-  return true;
-}
-async function runInstallationAction(options={}){
-  const state=NativeCapabilities.status();
-  if(state.installationAction==='install')return NativeCapabilities.promptInstall();
-  if(state.installationAction==='help'||state.installationAction==='find'){
-    if(options.dismissNotice===true)NativeCapabilities.dismissInstallNotice();
-    return openInstallationGuide();
-  }
-  return false;
-}
+const CapabilityStorage=CapabilitiesHostModule.createStorage(Object.freeze({
+  document,navigator,
+  limits:Object.freeze({storageCriticalRatio:APP_LIMITS.storageCriticalRatio,storageWarningRatio:APP_LIMITS.storageWarningRatio}),
+  controller:()=>NativeCapabilities,
+  storageSizeLabel,markStorageHealthError,markStorageHealthOk,renderStorageHealth
+}));
+const inspectStorageCapability=CapabilityStorage.inspectStorageCapability;
+const protectLocalData=CapabilityStorage.protectLocalData;
+const CapabilityInstallation=CapabilitiesHostModule.createInstallation(Object.freeze({
+  document,window,controller:()=>NativeCapabilities,
+  goTab:(name,options)=>goTab(name,options),
+  preferredScrollBehavior:()=>preferredScrollBehavior()
+}));
+const runInstallationAction=CapabilityInstallation.runInstallationAction;
 function showLiveDraftSaveWarning(reason){
   const message=`Live draft could not be saved${reason?`: ${reason}`:''}. Save today in Review or export a backup before closing this tab.`;
   markStorageHealthError('activeSession',message);
@@ -3342,10 +3266,7 @@ function handleCanonicalCommit(event){
   const studyData=!!event&&event.startup!==true&&event.settingsOnly!==true&&STUDY_DATA_COMMITS.has(event.entityType);
   writeStorageHealth(studyData?{lastLocalSaveAt:committedAt,lastStudyDataSaveAt:committedAt}:{lastLocalSaveAt:committedAt});
   renderStorageHealth();
-  if(NativeCapabilities&&event&&event.entityType==='activeSession'){
-    const badgeActive=event.operation==='delete'?false:persistedActiveSessionUnfinished(event.value);
-    if(NativeCapabilities.status().badgeActive!==badgeActive)void NativeCapabilities.updateBadge(badgeActive);
-  }
+  CapabilityBadge?.syncFromCanonicalCommit(event);
   if(event?.backupCapture!==true)notifyBackupChange({
     urgent:event&&event.entityType==='dailyRecord',
     reason:String(event&&event.entityType||'canonical-commit')
@@ -3359,15 +3280,7 @@ function handleCanonicalCommit(event){
     void revalidateSaveReminderAfterCanonicalConvergence();
 }
 
-async function refreshPersistedSessionBadge(){
-  if(!NativeCapabilities)return false;
-  try{
-    await AppData.activeSession.settled();
-    const loaded=await AppData.activeSession.load();
-    const confirmed=!!(loaded&&loaded.storage&&loaded.storage.idb&&persistedActiveSessionUnfinished(loaded.value));
-    return NativeCapabilities.updateBadge(confirmed);
-  }catch(error){AppDiagnostics.capture('native.badge-refresh',error,'warn');return NativeCapabilities.updateBadge(false);}
-}
+async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
 const RepositoryJournals=RepositoryJournalModule.create(Object.freeze({
   appMeta:JournalAppMeta,
   limits:APP_LIMITS,
@@ -3444,7 +3357,14 @@ try{AppData.mutationEpoch.seedChangeClock(readStorageHealth().lastLocalSaveAt);}
 if(!Object.isFrozen(AppData)||AppData.format!=='study-director.app-data'||AppData.contractVersion!==1){
   throw new Error('Study Director AppData facade is unavailable or incompatible.');
 }
-NativeCapabilities=NativeCapabilitiesModule.createController(Object.freeze({
+CapabilityBadge=CapabilitiesHostModule.createBadge(Object.freeze({
+  controller:()=>NativeCapabilities,
+  activeSession:()=>AppData.activeSession,
+  persistedActiveSessionUnfinished,
+  capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
+}));
+NativeCapabilities=CapabilitiesHostModule.createController(Object.freeze({
+  module:NativeCapabilitiesModule,
   configuration:Object.freeze({installNoticeKey:STORAGE_KEYS.installNoticeShown,wakePreferenceKey:STORAGE_KEYS.keepScreenAwake}),
   environment:Object.freeze({document,navigator,window}),
   hooks:Object.freeze({
@@ -3455,9 +3375,6 @@ NativeCapabilities=NativeCapabilitiesModule.createController(Object.freeze({
     render:renderNativeCapabilities
   })
 }));
-if(!Object.isFrozen(NativeCapabilities)||NativeCapabilities.format!=='study-director.native-capabilities'||NativeCapabilities.contractVersion!==1){
-  throw new Error('Study Director native-capabilities controller is unavailable or incompatible.');
-}
 StorageHealthController.activate();
 
 /* SESSION RESET ORCHESTRATION */
@@ -8594,7 +8511,7 @@ async function refreshDeviceBackgroundPermission(event){
   // The controller reconnects its whole job owner after permission changes.
   await DeviceBackup.refreshPermission();
 }
-AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind)&&wakeBackgroundOperations('activation')&&Date.now()-storageEstimateAt>=STORAGE_ESTIMATE_REFRESH_MS)void inspectStorageCapability().catch(error=>AppDiagnostics.capture('storage.estimate-refresh',error,'warn'));void refreshDeviceBackgroundPermission(event).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));});
+AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind)&&wakeBackgroundOperations('activation')&&Date.now()-CapabilityStorage.lastCheckedAt()>=STORAGE_ESTIMATE_REFRESH_MS)void inspectStorageCapability().catch(error=>AppDiagnostics.capture('storage.estimate-refresh',error,'warn'));void refreshDeviceBackgroundPermission(event).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));});
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
@@ -9096,7 +9013,7 @@ const AppInsights = Object.freeze({
 function currentBackupDiagnosticStates(){
   const states=[],sample=(job,read,project)=>{try{states.push(...project(read()));}catch{states.push({job,state:'unavailable',reason:'state-unavailable'});}};
   sample('Local storage health',()=>StorageHealthController.snapshot(),health=>{
-    const rows=[{job:'Local storage health',state:health.hasIssues?'attention':'observed',issues:health.issues?.length||0,completedAt:health.lastLocalSaveAt||'',studyDataSavedAt:health.lastStudyDataSaveAt||'',storagePersisted:storageEstimate.persisted,usageBytes:storageEstimate.usageBytes,quotaBytes:storageEstimate.quotaBytes}];
+    const rows=[{job:'Local storage health',state:health.hasIssues?'attention':'observed',issues:health.issues?.length||0,completedAt:health.lastLocalSaveAt||'',studyDataSavedAt:health.lastStudyDataSaveAt||'',storagePersisted:CapabilityStorage.snapshot().persisted,usageBytes:CapabilityStorage.snapshot().usageBytes,quotaBytes:CapabilityStorage.snapshot().quotaBytes}];
     const sources=['indexedDB','localStorage.read','localStorage.write','planDraft.write','activeSession','notes','dailyRecords','deletionRecovery','maintenance','capacity','backup','attachmentIntegrity','repositoryIntegrity'];
     for(const source of sources){const issue=health.issues?.find(row=>row.source===source);if(issue)rows.push({job:'Storage '+source,state:'attention',severity:issue.level,failedAt:issue.at});}return rows;
   });
@@ -9175,7 +9092,7 @@ const CLICK_ACTIONS=Object.freeze({
   'protect-local-data': protectLocalData,
   'install-notice-action': ()=>runInstallationAction({dismissNotice:true}),
   'check-unsupported-update': ()=>void checkUnsupportedUpdate(),
-  'dismiss-install-notice': ()=>NativeCapabilities.dismissInstallNotice(),
+  'dismiss-install-notice': ()=>CapabilityInstallation.dismissInstallNotice(),
   'toggle-system-alerts': ()=>SystemNotifications.toggle(),
   'connect-device-backup': ()=>connectDeviceBackupWithRecovery(),
   'backup-now': ()=>backUpEverywhere(),
@@ -9302,7 +9219,7 @@ const CHANGE_ACTIONS=Object.freeze({
   'import-backup': ev=>BackupController.importLocal(ev),
   'change-reflection-date': ev=>{richTextCloseField(document.getElementById('daily-reflection'));return selectReviewDate(ev);},
   'sound-mode': handleSoundModeChange,
-  'keep-screen-awake': ev=>NativeCapabilities.setKeepAwake(ev.target.checked)
+  'keep-screen-awake': ev=>CapabilityInstallation.setKeepAwake(ev.target.checked)
 });
 const INPUT_ACTIONS=Object.freeze({
   'first-start-password': ()=>FirstStart.confirmField(),
@@ -9711,7 +9628,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
     },
     applyLaunchRoute:applyPwaLaunchRoute,
     showNameSetup:startProfile,
-    inspectStorage:async()=>{const state=await inspectStorageCapability();await NativeCapabilities.offerInstallNotice();return state;},
+    inspectStorage:async()=>{const state=await inspectStorageCapability();await CapabilityInstallation.offerInstallNotice();return state;},
     verifyReady:async()=>{const topology=await IndexedDb.topology();if(!topology.usable)throw new Error('Canonical database topology is unavailable.');return Object.freeze({canonical:true});},
     markReady:async proof=>{
       backupFastFenceReady=false;

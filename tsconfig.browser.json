@@ -152,6 +152,11 @@
     "types/interactions.ts",
     "source/core/foundation-host.ts",
     "types/foundation-host.ts",
-    "types/checks/foundation.ts"
+    "types/checks/foundation.ts",
+    "source/core/native-capabilities.ts",
+    "source/core/capabilities-host.ts",
+    "types/native-capabilities.ts",
+    "types/capabilities-host.ts",
+    "types/checks/capabilities.ts"
   ]
 }

@@ -7,9 +7,10 @@ import vm from 'node:vm';
 
 const root=path.resolve(new URL('../../..',import.meta.url).pathname);
 const read=relative=>readRuntimeSource(path.join(root,relative));
-for(const file of ['source/core/internal.ts','source/core/native-capabilities.js'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/native-capabilities.ts','source/core/capabilities-host.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const NativeModule=registry.require('native-capabilities',1);
+const CapabilitiesHost=registry.require('capabilities-host',1);
 
 function emitter(seed={}){
   const listeners=new Map();
@@ -24,6 +25,21 @@ function wakeSentinel(){
   return target;
 }
 
+{ // scheduler ports, fallback and cancellation
+  const posted=[],yielded=[];let now=0,timers=0;
+  const scheduler=NativeModule.createTaskScheduler({
+    scheduler:{postTask:async(_task,options)=>{posted.push(options.priority);},yield:async()=>{yielded.push(true);}},
+    performance:{now:()=>now},setTimeout:callback=>{timers+=1;callback();return timers;}
+  });
+  await scheduler.yieldTask({priority:'background'});assert.deepEqual(posted,['background']);assert.equal(yielded.length,0);
+  await scheduler.yieldTask();assert.equal(yielded.length,1);
+  const budget=scheduler.budget(8);assert.equal(budget(),false);now=8;assert.equal(budget(),true);assert.equal(budget(),false);
+  const aborter=new AbortController();aborter.abort(new DOMException('cancelled','AbortError'));
+  await assert.rejects(()=>scheduler.yieldTask({signal:aborter.signal}),error=>error?.name==='AbortError');
+  const fallback=NativeModule.createTaskScheduler({performance:{now:()=>0},setTimeout:callback=>{timers+=1;callback();return timers;}});
+  await fallback.yieldTask();assert.ok(timers>=1);
+}
+
 let persisted=false,persistCalls=0,wakeRequests=0,timerRunning=false,badge=0;
 const sentinels=[];
 const document=emitter({hidden:false});
@@ -35,7 +51,7 @@ const navigator={
   setAppBadge:async value=>{badge=value;},clearAppBadge:async()=>{badge=0;}
 };
 const preferences=new Map(),renders=[],captures=[];
-const controller=NativeModule.createController(Object.freeze({
+const controller=CapabilitiesHost.createController(Object.freeze({module:NativeModule,
   configuration:Object.freeze({installNoticeKey:'install-notice',wakePreferenceKey:'wake'}),
   environment:Object.freeze({document,navigator,window}),
   hooks:Object.freeze({
@@ -80,6 +96,9 @@ assert.equal(sentinels[2].released,true);
 assert.equal(controller.status().wakeAcquired,false);
 
 let prevented=false,promptCalls=0;
+window.emit('beforeinstallprompt',{preventDefault(){prevented=true;}});
+assert.equal(prevented,false,'malformed install events are ignored rather than retained as callable prompts');
+assert.equal(controller.status().installAvailable,false);
 const promptEvent={
   preventDefault(){prevented=true;},
   prompt:async()=>{promptCalls+=1;},
@@ -103,12 +122,12 @@ await controller.updateBadge(false);assert.equal(badge,0);
 assert.equal(captures.length,0);
 assert.ok(renders.some(state=>state.wakeAcquired));
 
-function storageOnlyController(navigatorValue){
+function storageOnlyController(navigatorValue,capture=()=>{}){
   const documentValue=emitter({hidden:false}),windowValue=emitter({matchMedia:()=>({matches:false})});
   return NativeModule.createController(Object.freeze({
     configuration:Object.freeze({installNoticeKey:'install-notice',wakePreferenceKey:'wake'}),
     environment:Object.freeze({document:documentValue,navigator:navigatorValue,window:windowValue}),
-    hooks:Object.freeze({capture:()=>{},isTimerRunning:()=>false,readPreference:()=>false,writePreference:()=>true,render:()=>{}})
+    hooks:Object.freeze({capture,isTimerRunning:()=>false,readPreference:()=>false,writePreference:()=>true,render:()=>{}})
   }));
 }
 let deniedPersistCalls=0;
@@ -130,8 +149,39 @@ const unsupportedState=await unsupported.inspectStorage();
 assert.equal(unsupportedState.storageMode,'unsupported');
 assert.match(unsupportedState.storageMessage,/browser-managed/i);
 
+{ // rejected native APIs remain contained and observable
+  const rejected=[];
+  const rejecting=storageOnlyController({
+    userAgent:'Mozilla/5.0',
+    storage:{persisted:async()=>false,persist:async()=>{throw new Error('persist denied');}},
+    getInstalledRelatedApps:async()=>{throw new Error('related apps denied');},
+    setAppBadge:async()=>{throw new Error('badge denied');},clearAppBadge:async()=>{}
+  },(scope,error)=>rejected.push({scope,message:String(error)}));
+  rejecting.install();
+  assert.equal((await rejecting.inspectStorage()).storageMode,'standard');
+  assert.equal(await rejecting.updateBadge(true),false);
+  await rejecting.inspectInstallation();
+  assert.ok(rejected.some(row=>row.scope==='native.storage-protect-auto'));
+  assert.ok(rejected.some(row=>row.scope==='native.badge'));
+  assert.ok(rejected.some(row=>row.scope==='native.install-inspection'));
+}
+
+{ // checked UI projection preserves unsupported fallbacks and deduplicates change events
+  const nodes=new Map();
+  const node=id=>{const value={id,hidden:false,textContent:'',title:'',disabled:false,checked:false,attrs:new Map(),classes:new Map(),classList:{toggle(name,on){value.classes.set(name,!!on);}},setAttribute(name,val){value.attrs.set(name,val);}};nodes.set(id,value);return value;};
+  for(const id of ['install-notice-action','local-data-status','protect-local-data','wake-setting','keep-screen-awake','wake-lock-indicator'])node(id);
+  const doc={getElementById:id=>nodes.get(id)||null},events=[],notices=[];
+  const views=CapabilitiesHost.createViews(Object.freeze({document:doc,window:{dispatchEvent:event=>{events.push(event.type);return true;}},notices:{publish:(id,value)=>notices.push({id,value})}}));
+  views.renderNativeCapabilities(unsupportedState);views.renderNativeCapabilities(unsupportedState);
+  assert.equal(nodes.get('local-data-status').textContent,'Browser-managed');
+  assert.equal(nodes.get('wake-lock-indicator').textContent,'Unavailable');
+  assert.equal(nodes.get('keep-screen-awake').disabled,true);
+  assert.equal(events.filter(type=>type==='studydirector:installationchange').length,1);
+  assert.equal(notices.at(-1).id,'installation');
+}
+
 console.log(JSON.stringify({
-  status:'PASS',persistenceAutoRequested:true,persistenceRetryAvailable:true,wakeLifecycle:true,
-  persistenceDenialSafe:true,persistenceUnsupportedSafe:true,
-  installGuidance:true,installedTabRemainsBrowser:true,badgeBestEffort:true,wakeRequests,persistCalls
+  status:'PASS',schedulerPorts:true,persistenceAutoRequested:true,persistenceRetryAvailable:true,wakeLifecycle:true,
+  persistenceDenialSafe:true,persistenceUnsupportedSafe:true,rejectedApisContained:true,
+  installGuidance:true,malformedInstallPromptIgnored:true,installedTabRemainsBrowser:true,badgeBestEffort:true,checkedHostAdapter:true,wakeRequests,persistCalls
 },null,2));
