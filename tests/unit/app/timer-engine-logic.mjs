@@ -131,6 +131,13 @@ assert.equal(timerState.inactiveGap.id,'readonly-gap','rejected gap classificati
 assert.equal(engine.tick(),false,'a stale interval tick stops immediately after ownership loss');
 assert.equal(engine.status().loopActive,false,'ownership loss leaves no timer loop running');
 assert.deepEqual({...timerState.runtime},beforeRuntime,'a rejected stale tick does not advance timer state');
+assert.equal(engine.syncTimerAfterWake(),false,'a non-owner wake cannot rebase or advance execution');
+assert.deepEqual({...timerState.runtime},beforeRuntime,'a rejected wake leaves timer state unchanged');
+const rejectedRestoreBreak={startedAtMs:clock.now()-5000,now:clock.now(),overrunCapped:false,activeBreak:{type:'manual',taskIdx:0,startedAtMs:clock.now()-5000,plannedSeconds:0,cueIssuedAt:null,doneNotified:false}};
+assert.equal(engine.resumeRestoredPaused(rejectedRestoreBreak),false,'a non-owner cannot restart a paused restored timer');
+assert.equal(engine.resumeRestoredRunning(),false,'a non-owner cannot restart a running restored timer');
+assert.equal(timerState.paused,false,'rejected restore entry points do not change pause state');
+assert.deepEqual({...timerState.runtime},beforeRuntime,'rejected restore entry points leave runtime untouched');
 canMutate=true;timerState.inactiveGap=null;
 assert.equal(engine.toggleDone(0),true,'an owner routes completion toggle through the checked evidence mutator');
 assert.equal(toggleDoneCalls,beforeToggleCalls+1);
