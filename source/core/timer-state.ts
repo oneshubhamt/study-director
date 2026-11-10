@@ -297,7 +297,7 @@ const createModule=()=>{
       get pendingRestore(){return pendingRestore;},
       set pendingRestore(value:TimerPayload|null){pendingRestore=value?cloneFrozen(value):null;},
       get originalSchedule(){return originalSchedule;},
-      set originalSchedule(value:readonly TaskInput[]){originalSchedule=cloneFrozen(Array.isArray(value)?value as readonly TaskInput[]:[]);},
+      set originalSchedule(value:readonly OriginalScheduleRow[]){originalSchedule=cloneFrozen(Array.isArray(value)?value as readonly OriginalScheduleRow[]:[]);},
       get adjustedSchedule(){return adjustedSchedule;},
       set adjustedSchedule(value:Readonly<Record<string,Readonly<ScheduleAdjustment>>>){replaceAdjustedSchedule(value);},
       get scheduleAnchorMin(){return scheduleAnchorMin;},
