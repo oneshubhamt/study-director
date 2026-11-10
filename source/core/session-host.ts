@@ -88,7 +88,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     const timerState=snapshot.timerState;
     timerState.contentRevision=domain.cleanDayRevision(value.contentRevision);timerState.savedRevision=Math.min(timerState.contentRevision,domain.cleanDayRevision(value.savedRevision));
     snapshot.clearProgress();snapshot.setCarryForward('');timerState.adjustedSchedule={};
-    const indexMap=snapshot.taskIdentity.indexMap(),adjustments:Record<string,unknown>=Object.create(null);
+    const indexMap=snapshot.taskIdentity.indexMap(),adjustments:Record<string,unknown>={};
     for(const [taskId,entry] of Object.entries(value.scheduleAdjustments||{})){
       const idx=snapshot.taskIdentity.indexForId(taskId,indexMap);if(idx!==null)adjustments[String(idx)]=entry;
     }
