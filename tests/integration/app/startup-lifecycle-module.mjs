@@ -128,7 +128,7 @@ const failureCoordinator=StartupHost.createCoordinator(Object.freeze({
     loadNotes:async()=>true,hydrateDrafts:()=>true,previewPlan:()=>true,startClock:()=>true,startHeaderClock:()=>true,refreshCoreUi:()=>true,renderRecovery:()=>true,
     checkBackup:()=>true,showEmptyIfNeeded:()=>true,openInitialTab:()=>true,restoreActiveSession:async()=>true,showNameSetup:()=>true,inspectStorage:async()=>true,
     reconcileLifecycle:()=>true,applyLaunchRoute:()=>true,
-    verifyReady:async()=>{if(failVerification)throw new Error('canonical proof failed');return Object.freeze({canonical:true});},
+    verifyReady:async()=>{if(failVerification)throw Object.assign(new Error('canonical proof failed'),{code:'QA_CANONICAL_FAIL'});return Object.freeze({canonical:true});},
     markReady:()=>{failureSequence.push('ready');return true;},reportFailure:failure=>{failureSequence.push(`failure:${failure.stage}`);return true;},
     clearFailure:()=>{failureSequence.push('clear');return true;}
   })
@@ -140,6 +140,7 @@ assert.equal(failureStatus.state,'failed');
 assert.equal(failureStatus.failed,true);
 assert.equal(failureStatus.failedStage,'canonical-verification');
 assert.equal(failureStatus.lastFailure.code,'STARTUP_INITIALIZATION_FAILED');
+assert.equal(failureStatus.lastFailure.causeCode,'QA_CANONICAL_FAIL','startup failure keeps a bounded internal cause code for safe presentation routing');
 assert.equal(primary2,false,'fatal startup failure must relinquish mutation ownership');
 const evaluationsAtFailure=failureEvaluations;failureWinListeners.get('focus')?.();await drain();
 assert.equal(failureEvaluations,evaluationsAtFailure,'focus/visibility wake reconciliation must not reacquire ownership while startup is failed');

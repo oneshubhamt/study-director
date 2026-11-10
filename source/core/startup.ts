@@ -205,7 +205,9 @@ const createModule=():StartupLifecycleContract=>{
           await runStage('startup-ready',()=>startup.markReady(proof));
         }catch(error:unknown){
           fullyInitialized=false;lifecycleState='failed';failedStage=currentStage||'startup';currentStage='';
-          const failure:Readonly<StartupFailure>=freeze({code:'STARTUP_INITIALIZATION_FAILED',message:'Study Director could not safely finish loading stored data.',at:new Date().toISOString()});
+          const rawCauseCode=error&&typeof error==='object'&&'code' in error?(error as {code?:unknown}).code:'';
+          const causeCode=typeof rawCauseCode==='string'&&/^[A-Z0-9_]{1,80}$/u.test(rawCauseCode)?rawCauseCode:'';
+          const failure:Readonly<StartupFailure>=freeze({code:'STARTUP_INITIALIZATION_FAILED',message:'Study Director could not safely finish loading stored data.',at:new Date().toISOString(),...(causeCode?{causeCode}:{})});
           lastFailure=failure;
           diagnostics.guard('startup.failure-release',()=>ownership.release());
           diagnostics.guard('startup.failure-secondary',()=>ownership.setPrimary(false));

@@ -18,7 +18,7 @@ export interface ActivationContract{
   status():Readonly<ActivationStatus>;
 }
 export interface StartupFailure{
-  readonly code:'STARTUP_INITIALIZATION_FAILED';readonly message:string;readonly at:string;
+  readonly code:'STARTUP_INITIALIZATION_FAILED';readonly message:string;readonly at:string;readonly causeCode?:string;
 }
 export interface StartupStatus{
   readonly format:'study-director.startup-lifecycle-status';readonly contractVersion:1;

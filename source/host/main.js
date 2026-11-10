@@ -9346,6 +9346,12 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
       document.documentElement.dataset.studyDirectorStartupState='failed';
       document.documentElement.dataset.studyDirectorReady='false';
       if(UnsupportedData.reportBlocked()){setPlanStatus('This profile needs a newer version of Study Director. Its data is left as it is.',false);return;}
+      if(failure?.causeCode==='STUDY_DIRECTOR_PROFILE_REGISTRY_UNREADABLE'){
+        const message='Study Director could not safely identify the active local profile. Profile-owned data was left unopened. Reload once; if this continues, update or recover the browser data before creating or replacing profiles.';
+        NoticeCoordinator.publish('startup-failure',{visible:true,kind:'safety',title:'Profile list could not be read safely',message,compact:noticeCanCompact(message)});
+        setPlanStatus('Startup stopped before profile data opened. Do not create or replace profiles until the device profile list is recovered.',false);
+        return;
+      }
       const message='Study Director could not safely finish loading your stored data. Your existing data has not been replaced. Reload or restore from backup if the problem continues.';
       NoticeCoordinator.publish('startup-failure',{visible:true,kind:'safety',title:'Study Director could not finish starting',message,compact:noticeCanCompact(message)});
       setPlanStatus(`Startup stopped safely at ${String(failure&&failure.stage||'startup')}. Reload the app before making changes.`,false);
