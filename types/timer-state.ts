@@ -10,6 +10,7 @@ export type InactiveGap=NonNullable<TimerPayload['pendingInactiveGap']>&{id?:str
 export type InactiveGapPatch={[K in keyof InactiveGap]?:InactiveGap[K]|undefined};
 export type ActiveBreak=NonNullable<TimerPayload['activeBreak']>&{taskIdx?:number};
 export type ScheduleAdjustment={start?:number;end?:number;startMin?:number;endMin?:number;reason?:string;changedAt?:string|null};
+export type OriginalScheduleRow={idx:number;id:string;name:string;kind:string;area:string;start:string;dur:number;plannedStartMin:number;plannedEndMin:number;measure:string;target:number|null};
 export interface TimerStateInput{helpers:{makeTaskId(task:TaskInput,index:number):string};diagnostics:{capture(scope:string,error:unknown,severity:'warn'|'error'):void};effects:{modeChanged(previous:TimerMode,next:TimerMode,reason:string):void}}
 export interface SnapshotInput{version?:number;date?:string;fingerprint?:string;taskState?:Record<string,SessionTaskState>;timerRuntime?:TimerPayload|null;latestCarryForward?:string;updatedAt?:string;review?:{reflection:string;studyQuality:number|null};practice?:PracticeState}
 export interface EvidenceBase{date?:string;taskEvidence?:Readonly<Record<string,unknown>>;practiceRuns?:readonly unknown[]}
@@ -26,7 +27,7 @@ export interface TimerAccessors{
  get breakStartMs():number|null;set breakStartMs(value:number|null);
  get currentBreakSec():number;set currentBreakSec(value:number);
  get pendingRestore():DeepReadonly<TimerPayload>|null;set pendingRestore(value:TimerPayload|null);
- get originalSchedule():readonly DeepReadonly<TaskInput>[];set originalSchedule(value:readonly TaskInput[]);
+ get originalSchedule():readonly DeepReadonly<OriginalScheduleRow>[];set originalSchedule(value:readonly OriginalScheduleRow[]);
  get adjustedSchedule():Readonly<Record<string,Readonly<ScheduleAdjustment>>>;set adjustedSchedule(value:Readonly<Record<string,Readonly<ScheduleAdjustment>>>);
  get scheduleAnchorMin():number;set scheduleAnchorMin(value:number);
  get studyDate():string|null;set studyDate(value:string|null);

@@ -2,7 +2,7 @@ import type {InactiveGapPatch} from '../../types/timer-state.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {Task,TaskInput} from '../../types/domain.ts';
 import type {TimerPayload} from '../../types/record-models.ts';
-import type {FrozenController,TimerMode,DeepReadonly,TimerTask,RuntimeInput,TimerSession,InactiveGap,ActiveBreak,ScheduleAdjustment,TimerStateInput,SnapshotInput,EvidenceBase} from '../../types/timer-state.ts';
+import type {FrozenController,TimerMode,DeepReadonly,TimerTask,RuntimeInput,TimerSession,InactiveGap,ActiveBreak,ScheduleAdjustment,OriginalScheduleRow,TimerStateInput,SnapshotInput,EvidenceBase} from '../../types/timer-state.ts';
 const sdTimerStateFactory=(()=>{
 'use strict';
 const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'timer-state','study-director.timer-state'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
@@ -94,7 +94,7 @@ const createModule=()=>{
     let breakStartMs:number|null=null;
     let currentBreakSec=0;
     let pendingRestore:DeepReadonly<TimerPayload>|null=null;
-    let originalSchedule:readonly DeepReadonly<TaskInput>[]=freeze([]);
+    let originalSchedule:readonly DeepReadonly<OriginalScheduleRow>[]=freeze([]);
     let adjustedSchedule:Readonly<Record<string,Readonly<ScheduleAdjustment>>>=freeze({});
     let scheduleAnchorMin=0;
 

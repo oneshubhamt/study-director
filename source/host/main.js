@@ -573,25 +573,6 @@ function updateExecuteSessionStatus(){
   if(openPlan)openPlan.hidden=model.state!=='empty';
   return model;
 }
-function findNextIncompleteTrackableAfter(idx){
-  const rows=chronologicalRows(TASKS.map((t,i)=>({idx:i,start:adjustedStartMin(i),end:adjustedEndMin(i),t})).filter(row=>isTrackableBlock(row.t)));
-  const currentPos=rows.findIndex(row=>row.idx===idx);
-  const next=rows.slice(Math.max(0,currentPos+1)).find(row=>!isTaskResolved(row.idx));
-  return next?next.idx:TASKS.length;
-}
-function buildLiveTimeline(){
-  const rows=[];
-  TASKS.forEach((t,i)=>{
-    const plannedStart=originalStartMin(i);
-    const plannedEnd=originalEndMin(i);
-    const startMin=adjustedStartMin(i);
-    const endMin=adjustedEndMin(i);
-    const completed=TaskSessionState.getField(i,'actualTime')!==undefined;
-    const active=i===TimerState.currentIndex&&isTrackableBlock(t);
-    rows.push({kind:'task',idx:i,t,plannedStart,plannedEnd,startMin,endMin,completed,active,adjusted:hasAdjustedTiming(i)});
-  });
-  return chronologicalRows(rows);
-}
 /* RUNTIME STATE · CHECKED LIVE EXECUTION HOST */
 const SLEEP_GAP_THRESHOLD_MS=120000;
 // While the timer runs on a work block here, pop-ups that block nothing
@@ -633,6 +614,11 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
     ownership:Object.freeze({appCanMutate:()=>appCanMutate()}),
     clock:Object.freeze({nowMs:DecisionClock.nowMs})
   }),
+  schedule:Object.freeze({
+    model:ScheduleModel,time:TimeModel,
+    compactAdjustedSchedule:value=>compactAdjustedSchedule(value),
+    invalidateDerived:options=>invalidateScheduleDerived(options)
+  }),
   evidence:Object.freeze({
     completionModel:CompletionModel,sources:COMPLETION_SOURCES,classifyTaskOutcome,
     taskTargetValue,
@@ -642,7 +628,7 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
   timer:Object.freeze({
     configuration:Object.freeze({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
     domain:Object.freeze({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
-    schedule:Object.freeze({adjustedEndMin,adjustedStartMin,effectiveNowMin,findNextIncompleteTrackableAfter,getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),hasAdjustedTiming,isFixedBlock,isLiveTrackableTimer,isTrackableBlock,isWorkBlock,originalEndMin,originalStartMin,plannedRows,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
+    schedule:Object.freeze({getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),isLiveTrackableTimer,isWorkBlock,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
     persistence:Object.freeze({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoveryCaptureActiveBeforeSwitch,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}),
     view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl,toggleDoneMarker}),
     clock:Object.freeze({nowMs:DecisionClock.nowMs}),
@@ -659,6 +645,10 @@ const {
   setCompletionSource,explicitCompletionSource,plannedSecondsForCompletion,unitCompletionForTask,progressInputState,
   syncProgressInputsToState,clearManualCompletionOverride,focusCompletionForTask,liveTaskOutcome,resolveTaskCompletion,
   exactTaskCompletionPercent,storeResolvedCompletion,setTaskDoneState,setTaskSkippedState,
+  rebuildOriginalSchedule,resetScheduleLayers,originalStartMin,originalEndMin,adjustedStartMin,adjustedEndMin,
+  hasAdjustedTiming,scheduleWindowLabel,sanitizeRuntimeAdjustedSchedule,effectiveNowMin,plannedRows,isInsideAdjustedWindow,
+  remainingWindowSeconds,fixedAnchorRowsFrom,avoidFixedAnchorOverlap,nextIncompleteTrackableFrom,findNextIncompleteTrackableAfter,
+  buildLiveTimeline,getRealTimeState,buildRealTimeSnapshot,latestTrackableEndMin,
   setCurrentTask,resetBreakState,resetCountdownRuntime,clearProgressRuntime,isTaskResolved
 }=ExecutionRuntime;
 const {
@@ -4012,43 +4002,7 @@ function persistUserDefaults(overrides={}){return persistProtectedPreferences(us
 function persistUserDefaultName(studentName){if(!appCanMutate())return false;return persistUserDefaults({studentName:normalizeStudentName(studentName)});}
 function persistPracticeTarget(targetMs){if(!appCanMutate())return false;const cleanTarget=validPracticeMs(targetMs,{min:APP_LIMITS.minPracticeTargetMs});if(!cleanTarget)return false;return persistUserDefaults({practiceTargetMs:cleanTarget});}
 function persistPracticeCueMode(mode){if(!appCanMutate())return false;return persistUserDefaults({practiceCueMode:sanitizePracticeCueMode(mode)});}
-/* REVIEW EVIDENCE ADAPTER · READ-ONLY */
 function ensureTaskIds(){return TimerState.ensureTaskIds();}
-/* SCHEDULE LAYERS AND REAL-TIME CLOCK MODEL */
-function rebuildOriginalSchedule(){
-  ensureTaskIds();
-  const absoluteStarts=scheduleStartMinutes(TASKS);
-  TimerState.originalSchedule=TASKS.map((t,i)=>({
-    idx:i,id:t.id,name:t.name,kind:t.kind||'work',area:taskAreaValue(t),start:t.start,dur:t.dur,
-    plannedStartMin:absoluteStarts[i],plannedEndMin:absoluteStarts[i]+t.dur,
-    measure:taskMeasureValue(t,''),target:taskTargetValue(t)
-  }));
-}
-function resetScheduleLayers(){
-  rebuildOriginalSchedule();
-  TimerState.adjustedSchedule={};
-  invalidateScheduleDerived({adjustments:true,render:true});
-}
-function originalRow(idx){return TimerState.originalSchedule[idx]||null;}
-function originalStartMin(idx){const r=originalRow(idx);return r?r.plannedStartMin:(TASKS[idx]?clockMinuteToStudyMinute(t2m(TASKS[idx].start)):0);}
-function originalEndMin(idx){const r=originalRow(idx);return r?r.plannedEndMin:(TASKS[idx]?clockMinuteToStudyMinute(t2m(TASKS[idx].start))+TASKS[idx].dur:0);}
-function adjustedEntry(idx){return TimerState.adjustedSchedule&&TimerState.adjustedSchedule[idx]?TimerState.adjustedSchedule[idx]:null;}
-function adjustedStartMin(idx){const a=adjustedEntry(idx);return a&&Number.isFinite(Number(a.startMin))?Number(a.startMin):originalStartMin(idx);}
-function adjustedEndMin(idx){const a=adjustedEntry(idx);return a&&Number.isFinite(Number(a.endMin))?Number(a.endMin):originalEndMin(idx);}
-function hasAdjustedTiming(idx){return adjustedStartMin(idx)!==originalStartMin(idx)||adjustedEndMin(idx)!==originalEndMin(idx);}
-function scheduleWindowLabel(idx,startMin=adjustedStartMin(idx),endMin=adjustedEndMin(idx)){
-  const live=`${studyMinuteToHHMM(startMin)}-${studyMinuteToHHMM(endMin)}`;
-  const orig=`${studyMinuteToHHMM(originalStartMin(idx))}-${studyMinuteToHHMM(originalEndMin(idx))}`;
-  return hasAdjustedTiming(idx)?`${live} · orig ${orig}`:live;
-}
-function sanitizeRuntimeAdjustedSchedule(adjustments){
-  const clean=compactAdjustedSchedule(adjustments);
-  Object.keys(clean).forEach(key=>{
-    const idx=Number(key),entry=clean[key];
-    if(!TASKS[idx]||entry.endMin<=entry.startMin||(isTrackableBlock(TASKS[idx])&&entry.endMin>STUDY_DAY_MINUTES))delete clean[key];
-  });
-  return clean;
-}
 /* SHELL DEFAULTS AND CLOCK HEADER */
 function normalizeStudentName(name){
   const clean=clampText(String(name||'').replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu,' ').trim().replace(/\s+/g,' '),APP_LIMITS.maxStudentNameChars);
@@ -4939,87 +4893,6 @@ function clockHMS(d=new Date()){
 function timeLabelFromIso(iso){
   if(!iso)return null;
   try{return clockHM(new Date(iso));}catch(e){return null;}
-}
-function effectiveNowMin(d=new Date()){return clockMinuteToStudyMinute(getMinuteOfDay(d));}
-function plannedRows(){
-  return chronologicalRows(TASKS.map((t,i)=>({idx:i,t,start:adjustedStartMin(i),end:adjustedEndMin(i),plannedStart:originalStartMin(i),plannedEnd:originalEndMin(i),adjusted:hasAdjustedTiming(i)})));
-}
-function isInsideAdjustedWindow(idx,d=new Date()){
-  if(idx===null||idx===undefined||!TASKS[idx])return false;
-  const nowEff=effectiveNowMin(d);
-  return nowEff>=adjustedStartMin(idx)&&nowEff<adjustedEndMin(idx);
-}
-function remainingWindowSeconds(idx,d=new Date()){
-  if(idx===null||idx===undefined||!TASKS[idx])return 0;
-  const nowEff=effectiveNowMin(d);
-  const start=adjustedStartMin(idx),end=adjustedEndMin(idx);
-  if(nowEff>=start&&nowEff<end){
-    const secondsLeft=end*60-currentStudySecond(d);
-    return Math.max(1,Math.ceil(secondsLeft));
-  }
-  return Math.max(60,Math.round((TASKS[idx].dur||1)*60));
-}
-function fixedAnchorRowsFrom(startIdx){
-  const rows=[];
-  for(let i=Math.max(0,startIdx||0);i<TASKS.length;i++){
-    const t=TASKS[i];
-    if(isFixedBlock(t))rows.push({idx:i,t,start:originalStartMin(i),end:originalEndMin(i)});
-  }
-  return rows;
-}
-function avoidFixedAnchorOverlap(startMin,durMin,anchors){
-  let s=startMin;
-  let guard=0;
-  while(guard++<200){
-    const hit=(anchors||[]).find(a=>s<a.end && (s+durMin)>a.start);
-    if(!hit)break;
-    s=hit.end;
-  }
-  return s;
-}
-function nextIncompleteTrackableFrom(fromIdx){
-  for(let i=Math.max(0,fromIdx||0);i<TASKS.length;i++){
-    if(isTrackableBlock(TASKS[i])&&!isTaskResolved(i))return i;
-  }
-  return null;
-}
-function getRealTimeState(d=new Date()){
-  const rows=plannedRows();
-  const nowEff=effectiveNowMin(d);
-  const first=rows.length?Math.min(...rows.map(r=>r.start)):null;
-  const last=rows.length?Math.max(...rows.map(r=>r.end)):null;
-  const scheduled=rows.find(r=>nowEff>=r.start&&nowEff<r.end)||null;
-  const curRow=(TimerState.currentIndex<TASKS.length&&TASKS[TimerState.currentIndex])?rows.find(r=>r.idx===TimerState.currentIndex):null;
-  let driftMin=null,driftKind='none',driftLabel='—',match=false,subline='Load a schedule to compare planned time with real time.';
-  if(rows.length&&curRow){
-    match=!!scheduled&&scheduled.idx===TimerState.currentIndex;
-    if(nowEff<curRow.start){driftMin=curRow.start-nowEff;driftKind='ahead';driftLabel='AHEAD '+fmtDur(Math.round(driftMin));}
-    else if(nowEff>curRow.end){driftMin=nowEff-curRow.end;driftKind='behind';driftLabel='BEHIND '+fmtDur(Math.round(driftMin));}
-    else{driftMin=0;driftKind=match?'ontrack':'mismatch';driftLabel=match?'ON WINDOW':'MISMATCH';}
-    const schedName=scheduled?scheduled.t.name:(nowEff<(first??0)?'before first block':'after final block');
-    if(match){subline=`Timer and wall-clock schedule agree: ${curRow.t.name} is the active planned block.`;}
-    else{subline=`Schedule says: ${schedName}. Timer is on: ${curRow.t.name}. No automatic change has been made.`;}
-  }else if(rows.length){
-    const schedName=scheduled?scheduled.t.name:(nowEff<(first??0)?'before first block':'after final block');
-    driftLabel=scheduled?'SCHEDULE LIVE':'OUTSIDE DAY';driftKind=scheduled?'ontrack':'none';
-    subline=`Wall-clock schedule position: ${schedName}. Timer is not on a trackable block.`;
-  }
-  return {nowEff,first,last,scheduledIdx:scheduled?scheduled.idx:null,scheduledTask:scheduled?scheduled.t:null,scheduledStart:scheduled?scheduled.start:null,scheduledEnd:scheduled?scheduled.end:null,scheduledPlannedStart:scheduled?scheduled.plannedStart:null,scheduledPlannedEnd:scheduled?scheduled.plannedEnd:null,currentIdx:curRow?curRow.idx:null,currentTask:curRow?curRow.t:null,currentStart:curRow?curRow.start:null,currentEnd:curRow?curRow.end:null,currentPlannedStart:curRow?curRow.plannedStart:null,currentPlannedEnd:curRow?curRow.plannedEnd:null,match,driftMin,driftKind,driftLabel,subline};
-}
-function buildRealTimeSnapshot(){
-  const s=getRealTimeState();
-  return {
-    capturedAt:new Date().toISOString(),
-    scheduledIdx:s.scheduledIdx,
-    scheduledName:s.scheduledTask?s.scheduledTask.name:null,
-    scheduledKind:s.scheduledTask?s.scheduledTask.kind:null,
-    currentIdx:s.currentIdx,
-    currentName:s.currentTask?s.currentTask.name:null,
-    match:!!s.match,
-    driftKind:s.driftKind,
-    driftMinutes:s.driftMin===null?null:Math.round(s.driftMin),
-    driftLabel:s.driftLabel
-  };
 }
 function shortTaskLabel(t){
   if(!t)return '—';

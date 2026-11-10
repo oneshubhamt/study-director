@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {CompletionEvidenceController,CompletionEvidenceInput,ExecutionHostInput,RuntimeTaskSessionFields,TaskIdentityPort,TaskResolvedState,TaskSessionField,TaskSessionStore} from '../../types/execution-host.ts';
+import type {CompletionEvidenceController,CompletionEvidenceInput,ExecutionHostInput,ExecutionScheduleController,ExecutionScheduleInput,ExecutionScheduleRow,RealTimeScheduleState,RuntimeTaskSessionFields,TaskIdentityPort,TaskResolvedState,TaskSessionField,TaskSessionStore} from '../../types/execution-host.ts';
 import type {TimerEngineInput} from '../../types/timer-engine.ts';
 import type {CompletionSource} from '../../types/domain.ts';
 
@@ -91,6 +91,140 @@ function createTaskSessionState(taskIdentity:TaskIdentityPort):Readonly<TaskSess
   return freeze({
     format:'study-director.task-session-state' as const,contractVersion:1 as const,
     getField,setField,deleteField,indexSnapshot,resolvedState,setResolved,isDone,isSkipped,isResolved,toggleDone,resolvedIndices,indices,clear
+  });
+}
+function createExecutionSchedule(input:Readonly<ExecutionScheduleInput>):Readonly<ExecutionScheduleController>{
+  const {tasks,timerState,taskSessionState,model,time,compactAdjustedSchedule,invalidateDerived}=input;
+  functions(model,['chronologicalRows','startMinutes','isFixed','isTrackable','areaValue','measureValue','targetValue'],'Execution schedule model');
+  functions(time,['clockToMinute','clockMinuteToStudyMinute','studyMinuteToHHMM','currentStudySecond','formatDuration','minuteOfDay'],'Execution time model');
+  functions(input,['compactAdjustedSchedule','invalidateDerived'],'Execution schedule input');
+  function rebuildOriginalSchedule(){
+    const absoluteStarts=model.startMinutes(tasks);
+    const rows=tasks.map((task,index)=>({
+      idx:index,id:task.id,name:task.name,kind:task.kind,area:model.areaValue(task),start:task.start,dur:task.dur,
+      plannedStartMin:absoluteStarts[index]??0,plannedEndMin:(absoluteStarts[index]??0)+task.dur,
+      measure:model.measureValue(task,''),target:model.targetValue(task)
+    }));
+    timerState.originalSchedule=rows;
+    return rows;
+  }
+  function resetScheduleLayers(){
+    rebuildOriginalSchedule();
+    timerState.adjustedSchedule={};
+    invalidateDerived({adjustments:true,render:true});
+  }
+  const originalRow=(index:number)=>timerState.originalSchedule[index]||null;
+  function originalStartMin(index:number){
+    const row=originalRow(index);
+    return row?row.plannedStartMin:(tasks[index]?time.clockMinuteToStudyMinute(time.clockToMinute(tasks[index]!.start)):0);
+  }
+  function originalEndMin(index:number){
+    const row=originalRow(index);
+    return row?row.plannedEndMin:(tasks[index]?time.clockMinuteToStudyMinute(time.clockToMinute(tasks[index]!.start))+tasks[index]!.dur:0);
+  }
+  const adjustedEntry=(index:number)=>timerState.adjustedSchedule[String(index)]||null;
+  function adjustedStartMin(index:number){const row=adjustedEntry(index);return row&&Number.isFinite(Number(row.startMin))?Number(row.startMin):originalStartMin(index);}
+  function adjustedEndMin(index:number){const row=adjustedEntry(index);return row&&Number.isFinite(Number(row.endMin))?Number(row.endMin):originalEndMin(index);}
+  function hasAdjustedTiming(index:number){return adjustedStartMin(index)!==originalStartMin(index)||adjustedEndMin(index)!==originalEndMin(index);}
+  function scheduleWindowLabel(index:number,startMin=adjustedStartMin(index),endMin=adjustedEndMin(index)){
+    const live=`${time.studyMinuteToHHMM(startMin)}-${time.studyMinuteToHHMM(endMin)}`;
+    const original=`${time.studyMinuteToHHMM(originalStartMin(index))}-${time.studyMinuteToHHMM(originalEndMin(index))}`;
+    return hasAdjustedTiming(index)?`${live} · orig ${original}`:live;
+  }
+  function sanitizeRuntimeAdjustedSchedule(value:unknown){
+    const clean={...compactAdjustedSchedule(value)};
+    Object.keys(clean).forEach(key=>{
+      const index=Number(key),entry=clean[key];
+      if(!entry||!tasks[index]||Number(entry.endMin)<=Number(entry.startMin)||(model.isTrackable(tasks[index])&&Number(entry.endMin)>time.dayMinutes))delete clean[key];
+    });
+    return clean;
+  }
+  function effectiveNowMin(date=new Date()){return time.clockMinuteToStudyMinute(time.minuteOfDay(date));}
+  function plannedRows(){
+    const rows=tasks.map((task,index)=>({idx:index,t:task,start:adjustedStartMin(index),end:adjustedEndMin(index),plannedStart:originalStartMin(index),plannedEnd:originalEndMin(index),adjusted:hasAdjustedTiming(index)}));
+    return model.chronologicalRows(rows) as ExecutionScheduleRow[];
+  }
+  function isInsideAdjustedWindow(index:number|null|undefined,date=new Date()){
+    if(index===null||index===undefined||!tasks[index])return false;
+    const now=effectiveNowMin(date);
+    return now>=adjustedStartMin(index)&&now<adjustedEndMin(index);
+  }
+  function remainingWindowSeconds(index:number|null|undefined,date=new Date()){
+    if(index===null||index===undefined||!tasks[index])return 0;
+    const now=effectiveNowMin(date),start=adjustedStartMin(index),end=adjustedEndMin(index);
+    if(now>=start&&now<end)return Math.max(1,Math.ceil(end*60-time.currentStudySecond(date)));
+    return Math.max(60,Math.round((tasks[index]!.dur||1)*60));
+  }
+  function fixedAnchorRowsFrom(startIndex:number){
+    return plannedRows().filter(row=>row.idx>=Math.max(0,startIndex||0)&&model.isFixed(row.t)).map(row=>({...row,start:originalStartMin(row.idx),end:originalEndMin(row.idx)}));
+  }
+  function avoidFixedAnchorOverlap(startMin:number,durationMin:number,anchors:readonly Pick<ExecutionScheduleRow,'start'|'end'>[]){
+    let start=startMin,guard=0;
+    while(guard++<200){
+      const hit=(anchors||[]).find(anchor=>start<anchor.end&&(start+durationMin)>anchor.start);
+      if(!hit)break;
+      start=hit.end;
+    }
+    return start;
+  }
+  function nextIncompleteTrackableFrom(fromIndex:number){
+    for(let index=Math.max(0,fromIndex||0);index<tasks.length;index++)if(model.isTrackable(tasks[index])&&!taskSessionState.isResolved(index))return index;
+    return null;
+  }
+  function findNextIncompleteTrackableAfter(index:number){
+    const rows=model.chronologicalRows(tasks.map((task,idx)=>({idx,start:adjustedStartMin(idx),end:adjustedEndMin(idx),t:task})).filter(row=>model.isTrackable(row.t)));
+    const current=rows.findIndex(row=>row.idx===index),next=rows.slice(Math.max(0,current+1)).find(row=>!taskSessionState.isResolved(row.idx));
+    return next?next.idx:tasks.length;
+  }
+  function buildLiveTimeline(){
+    return model.chronologicalRows(tasks.map((task,index)=>({
+      kind:'task' as const,idx:index,t:task,plannedStart:originalStartMin(index),plannedEnd:originalEndMin(index),
+      startMin:adjustedStartMin(index),endMin:adjustedEndMin(index),completed:taskSessionState.getField(index,'actualTime')!==undefined,
+      active:index===timerState.currentIndex&&model.isTrackable(task),adjusted:hasAdjustedTiming(index),
+      start:adjustedStartMin(index),end:adjustedEndMin(index)
+    }))).map(({start:_start,end:_end,...row})=>row);
+  }
+  function getRealTimeState(date=new Date()):RealTimeScheduleState{
+    const rows=plannedRows(),nowEff=effectiveNowMin(date),first=rows.length?Math.min(...rows.map(row=>row.start)):null,last=rows.length?Math.max(...rows.map(row=>row.end)):null;
+    const scheduled=rows.find(row=>nowEff>=row.start&&nowEff<row.end)||null;
+    const currentRow=timerState.currentIndex<tasks.length?rows.find(row=>row.idx===timerState.currentIndex)||null:null;
+    let driftMin:number|null=null,driftKind:RealTimeScheduleState['driftKind']='none',driftLabel='—',match=false,subline='Load a schedule to compare planned time with real time.';
+    if(rows.length&&currentRow){
+      match=!!scheduled&&scheduled.idx===timerState.currentIndex;
+      if(nowEff<currentRow.start){driftMin=currentRow.start-nowEff;driftKind='ahead';driftLabel='AHEAD '+time.formatDuration(Math.round(driftMin));}
+      else if(nowEff>currentRow.end){driftMin=nowEff-currentRow.end;driftKind='behind';driftLabel='BEHIND '+time.formatDuration(Math.round(driftMin));}
+      else{driftMin=0;driftKind=match?'ontrack':'mismatch';driftLabel=match?'ON WINDOW':'MISMATCH';}
+      const scheduledName=scheduled?scheduled.t.name:(nowEff<(first??0)?'before first block':'after final block');
+      subline=match?`Timer and wall-clock schedule agree: ${currentRow.t.name} is the active planned block.`:`Schedule says: ${scheduledName}. Timer is on: ${currentRow.t.name}. No automatic change has been made.`;
+    }else if(rows.length){
+      const scheduledName=scheduled?scheduled.t.name:(nowEff<(first??0)?'before first block':'after final block');
+      driftLabel=scheduled?'SCHEDULE LIVE':'OUTSIDE DAY';driftKind=scheduled?'ontrack':'none';
+      subline=`Wall-clock schedule position: ${scheduledName}. Timer is not on a trackable block.`;
+    }
+    return {
+      nowEff,first,last,scheduledIdx:scheduled?.idx??null,scheduledTask:scheduled?.t??null,scheduledStart:scheduled?.start??null,scheduledEnd:scheduled?.end??null,
+      scheduledPlannedStart:scheduled?.plannedStart??null,scheduledPlannedEnd:scheduled?.plannedEnd??null,currentIdx:currentRow?.idx??null,currentTask:currentRow?.t??null,
+      currentStart:currentRow?.start??null,currentEnd:currentRow?.end??null,currentPlannedStart:currentRow?.plannedStart??null,currentPlannedEnd:currentRow?.plannedEnd??null,
+      match,driftMin,driftKind,driftLabel,subline
+    };
+  }
+  function buildRealTimeSnapshot(){
+    const state=getRealTimeState();
+    return freeze({
+      capturedAt:new Date().toISOString(),scheduledIdx:state.scheduledIdx,scheduledName:state.scheduledTask?.name??null,scheduledKind:state.scheduledTask?.kind??null,
+      currentIdx:state.currentIdx,currentName:state.currentTask?.name??null,match:state.match,driftKind:state.driftKind,
+      driftMinutes:state.driftMin===null?null:Math.round(state.driftMin),driftLabel:state.driftLabel
+    });
+  }
+  function latestTrackableEndMin(){
+    const ends=tasks.map((task,index)=>model.isTrackable(task)?adjustedEndMin(index):null).filter((value):value is number=>Number.isFinite(value));
+    return ends.length?Math.max(...ends):null;
+  }
+  return freeze({
+    format:'study-director.execution-schedule' as const,contractVersion:1 as const,rebuildOriginalSchedule,resetScheduleLayers,
+    originalStartMin,originalEndMin,adjustedStartMin,adjustedEndMin,hasAdjustedTiming,scheduleWindowLabel,sanitizeRuntimeAdjustedSchedule,
+    effectiveNowMin,plannedRows,isInsideAdjustedWindow,remainingWindowSeconds,fixedAnchorRowsFrom,avoidFixedAnchorOverlap,nextIncompleteTrackableFrom,
+    findNextIncompleteTrackableAfter,buildLiveTimeline,getRealTimeState,buildRealTimeSnapshot,latestTrackableEndMin
   });
 }
 function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Readonly<CompletionEvidenceController>{
@@ -213,7 +347,7 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
   });
 }
 function createRuntime(input:Readonly<ExecutionHostInput>){
-  exactObject(input,['modules','timerState','pomodoro','practiceModel','practice','timer','evidence','hooks'],'Execution host input');
+  exactObject(input,['modules','timerState','pomodoro','practiceModel','practice','timer','schedule','evidence','hooks'],'Execution host input');
   exactObject(input.modules,['timerState','pomodoro','practicePacer','timerEngine'],'Execution host modules');
   functions(input.hooks,['syncStudyQuiet'],'Execution host hooks');
   const {timerState:timerStateModule,pomodoro:pomodoroModule,practicePacer:practicePacerModule,timerEngine:timerEngineModule}=input.modules;
@@ -228,6 +362,10 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
   const SessionState=TimerState.session,TASKS=TimerState.tasks,TIMER_MODES=TimerState.modes,TaskIdentity=TimerState.taskIdentity;
   const setTimerMode=TimerState.setMode;
   const TaskSessionState=createTaskSessionState(TaskIdentity);
+  const ExecutionSchedule=createExecutionSchedule(freeze({
+    tasks:TASKS,timerState:TimerState,taskSessionState:TaskSessionState,model:input.schedule.model,time:input.schedule.time,
+    compactAdjustedSchedule:input.schedule.compactAdjustedSchedule,invalidateDerived:input.schedule.invalidateDerived
+  }));
   let TimerEngine:ReturnType<typeof timerEngineModule.createEngine>|null=null;
   const CompletionEvidence=createCompletionEvidence(freeze({
     tasks:TASKS,taskSessionState:TaskSessionState,
@@ -266,9 +404,17 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
   const timerPorts:TimerEngineInput['ports']=freeze({
     ...input.timer,
     state:freeze({TASKS,TIMER_MODES,TaskIdentity,TaskSessionState,TimerState,resetBreakState,setCurrentTask,setTimerMode}),
-    schedule:freeze({...input.timer.schedule,isTaskResolved:TaskSessionState.isResolved}),
+    schedule:freeze({
+      ...input.timer.schedule,
+      adjustedEndMin:ExecutionSchedule.adjustedEndMin,adjustedStartMin:ExecutionSchedule.adjustedStartMin,
+      effectiveNowMin:ExecutionSchedule.effectiveNowMin,findNextIncompleteTrackableAfter:ExecutionSchedule.findNextIncompleteTrackableAfter,
+      hasAdjustedTiming:ExecutionSchedule.hasAdjustedTiming,isFixedBlock:input.schedule.model.isFixed,
+      isTaskResolved:TaskSessionState.isResolved,isTrackableBlock:input.schedule.model.isTrackable,
+      originalEndMin:ExecutionSchedule.originalEndMin,originalStartMin:ExecutionSchedule.originalStartMin,plannedRows:ExecutionSchedule.plannedRows
+    }),
     reviewEvidence:freeze({
       ...input.timer.reviewEvidence,
+      buildRealTimeSnapshot:ExecutionSchedule.buildRealTimeSnapshot,
       exactTaskCompletionPercent:CompletionEvidence.exactTaskCompletionPercent,
       liveTaskOutcome:CompletionEvidence.liveTaskOutcome,
       resolveTaskCompletion:CompletionEvidence.resolveTaskCompletion,
@@ -292,6 +438,17 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
     liveTaskOutcome:CompletionEvidence.liveTaskOutcome,resolveTaskCompletion:CompletionEvidence.resolveTaskCompletion,
     exactTaskCompletionPercent:CompletionEvidence.exactTaskCompletionPercent,storeResolvedCompletion:CompletionEvidence.storeResolvedCompletion,
     setTaskDoneState:CompletionEvidence.setTaskDoneState,setTaskSkippedState:CompletionEvidence.setTaskSkippedState,
+    rebuildOriginalSchedule:ExecutionSchedule.rebuildOriginalSchedule,resetScheduleLayers:ExecutionSchedule.resetScheduleLayers,
+    originalStartMin:ExecutionSchedule.originalStartMin,originalEndMin:ExecutionSchedule.originalEndMin,
+    adjustedStartMin:ExecutionSchedule.adjustedStartMin,adjustedEndMin:ExecutionSchedule.adjustedEndMin,
+    hasAdjustedTiming:ExecutionSchedule.hasAdjustedTiming,scheduleWindowLabel:ExecutionSchedule.scheduleWindowLabel,
+    sanitizeRuntimeAdjustedSchedule:ExecutionSchedule.sanitizeRuntimeAdjustedSchedule,effectiveNowMin:ExecutionSchedule.effectiveNowMin,
+    plannedRows:ExecutionSchedule.plannedRows,isInsideAdjustedWindow:ExecutionSchedule.isInsideAdjustedWindow,
+    remainingWindowSeconds:ExecutionSchedule.remainingWindowSeconds,fixedAnchorRowsFrom:ExecutionSchedule.fixedAnchorRowsFrom,
+    avoidFixedAnchorOverlap:ExecutionSchedule.avoidFixedAnchorOverlap,nextIncompleteTrackableFrom:ExecutionSchedule.nextIncompleteTrackableFrom,
+    findNextIncompleteTrackableAfter:ExecutionSchedule.findNextIncompleteTrackableAfter,buildLiveTimeline:ExecutionSchedule.buildLiveTimeline,
+    getRealTimeState:ExecutionSchedule.getRealTimeState,buildRealTimeSnapshot:ExecutionSchedule.buildRealTimeSnapshot,
+    latestTrackableEndMin:ExecutionSchedule.latestTrackableEndMin,
     setCurrentTask,resetBreakState,
     resetCountdownRuntime:()=>engine.resetCountdownRuntime(),
     clearProgressRuntime:()=>TaskSessionState.clear(),
@@ -300,7 +457,7 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
 }
 const createModule=()=>freeze({
   format:'study-director.execution-host-module' as const,contractVersion:1 as const,
-  createTaskSessionState,createCompletionEvidence,createRuntime
+  createTaskSessionState,createExecutionSchedule,createCompletionEvidence,createRuntime
 });
 registry.define('execution-host',1,createModule);
 return createModule;
