@@ -1,6 +1,6 @@
 # TypeScript conversion — current execution record
 
-**Working branch: `ts-exp`. P5.0–P5.3 VERIFIED — TARGETED. Next: P5.4 live execution/session runtime.** P5.2/P5.3 were independently reopened at `134ad02` and re-closed after de novo source reconciliation at source endpoint `88e4095`. Preserve `TS-Conversion` and main. Follow the sole-implementor and end-of-Phase-5 audit arrangement in [AGENTS](AGENTS.md). Main intake endpoint remains `2638619`.
+**Working branch: `ts-exp`. P5.0–P5.3 VERIFIED — TARGETED. P5.4A live execution runtime & timer presentation is ACTIVE.** P5.2/P5.3 were independently reopened at `134ad02` and re-closed after de novo source reconciliation at source endpoint `88e4095`. Preserve `TS-Conversion` and main. Follow the sole-implementor and end-of-Phase-5 audit arrangement in [AGENTS](AGENTS.md). Main intake endpoint remains `2638619`.
 
 Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHASE-5.md), then inspect current source. Consult [decisions](docs/typescript/DECISIONS.md), [tooling](docs/TYPESCRIPT.md), [verification commands](docs/VERIFICATION.md) and [product docs](docs/README.md) as needed. Do not reload historical logs for routine passes.
 
@@ -9,7 +9,7 @@ Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHAS
 | Stage | State / next action |
 | --- | --- |
 | Preparation, Phases 1–4 | Complete within recorded scope at `4136ba5`: 34 Phase 4 modules, 126 strict files, zero unchecked existing TS at last check. [Evidence](docs/typescript/HISTORY-PREPARATION-PHASE-4.md) |
-| Phase 5 — host/features | P5.0–P5.3 verified after de novo P5.2/P5.3 source reconciliation; P5.4 live execution/session runtime is next. [Scope/status register](docs/typescript/PHASE-5.md) |
+| Phase 5 — host/features | P5.0–P5.3 verified after de novo P5.2/P5.3 source reconciliation; P5.4A live execution runtime & timer presentation is active. [Scope/status register](docs/typescript/PHASE-5.md) |
 | Phase 6 — tooling/tests | Not started; convert remaining tooling/tests and retire transitional readers |
 | Phase 7 — certification | Not started; whole-app reconciliation and full correctness, coverage, mutation, browser, release and performance QA |
 
@@ -21,6 +21,18 @@ Read [AGENTS](AGENTS.md) and the assigned rows of [Phase 5](docs/typescript/PHAS
 | F-002 | Phase 6: retire transitional substring/VM readers and reconcile authored coverage; P5 conversions must keep their readers working meanwhile |
 | F-003 | Phase 7: full certification, with unavailable manual/device evidence stated separately |
 | REVIEW-P5 | Independent planning-assistant audit after all Phase 5 outcomes, including P5.13 reconciliation. Compare against `de4872a`; retain inherited limitations and intentional changes. No external review gate between implementation passes |
+
+## Active worklog — P5.4A live execution runtime & timer presentation
+
+- **Baseline / branch:** `1fdc960` on `ts-exp`; preserve `TS-Conversion` and main.
+- **Complete outcome:** remove the unchecked host boundary around the in-memory execution state machine while preserving the existing typed TimerState/TimerEngine/Pomodoro/Practice Pacer implementations and their product behavior.
+- **Runtime state objective:** move the host-owned per-task session evidence store behind a strict checked contract; preserve task-ID keyed completion/progress/actual-time evidence across task reordering.
+- **Composition objective:** add a checked execution-host boundary that composes TimerState, Pomodoro, Practice Pacer and TimerEngine with exact typed ports instead of assembling those contracts in authored JavaScript.
+- **Behavior objective:** preserve start/pause/resume, jump, finish/skip, timer clock/presentation, inactive-gap handling, sleep/wake reconciliation, Pomodoro cues and Practice Pacer behavior; fix supported defects found in this surface rather than mechanically transplanting them.
+- **Integration objective:** update owned action/presentation/startup/ownership callers required by execution. P5.4B retains canonical Active Session persistence/reload/suspend/reset; P5.4C retains cross-device claim/handoff/compensation. Their callbacks may be consumed as ports but are not reimplemented here.
+- **Quality objective:** no permissive façade, casual `any`, suppression or duplicate state machine. Reconcile manifest/registry/type admission and remove the superseded host implementation rather than leaving parallel logic.
+- **Targeted evidence:** strict type/typed-lint gates; task-session state and timer-engine unit regressions; runtime-resilience/session-lifecycle affected integration checks; execution/runtime architecture contracts; fresh-build browser evidence for start/pause/resume/task transitions/Practice Pacer/Execute UI where the existing runner supports it.
+- **Status:** ACTIVE — source audit complete enough to implement; QA and objective reconciliation pending.
 
 ## Latest closed worklog — de novo P5.2/P5.3 source reconciliation
 
