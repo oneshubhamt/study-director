@@ -111,5 +111,5 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const repositoryMeta=gateway.bind('repositories'),journalMeta=gateway.bind('repository-journals');
   const journals=journalModule.create(freeze({appMeta:journalMeta,limits,helpers:freeze({clampText:helpers.clampText}),clock:decisionClock}));
   const app=module.createAppData(freeze({local,indexedDb,appMeta:repositoryMeta,installationIdentity,dailyRecordCodec,activeSessionCodec,personalDataCodec,pendingReviewCodec,keyedRecord:KeyedRecord,journals,notesRepositoryModule:notesModule,saveLaneModule,clock:decisionClock,limits,dataContract,stores:freeze({dailyRecords:'daily',dailySummaries:'summary',notes:'area',activeSessions:'session',appMeta:'meta'}),keys:freeze({recovery:'recovery',fallbackDailyRecords:'fallback',noteRescue:'noteRescue',deletionRecovery:'deletionRecovery'}),metaKeys,activeSessionId:'active',helpers,hooks}));
-  return {app,appMetaGateway:gateway,repositoryMeta,journalMeta,indexedDb,localWrites,idbWrites,idbReads,idbDurability,validationCalls,sharedLocal,stores};
+  return {app,appMetaGateway:gateway,repositoryMeta,journalMeta,indexedDb,localWrites,idbWrites,idbReads,idbDurability,validationCalls,sharedLocal,stores,dataContract};
 }
