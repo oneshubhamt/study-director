@@ -438,6 +438,7 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
       liveTaskOutcome:CompletionEvidence.liveTaskOutcome,
       resolveTaskCompletion:CompletionEvidence.resolveTaskCompletion,
       storeResolvedCompletion:CompletionEvidence.storeResolvedCompletion,
+      toggleDoneState:CompletionEvidence.toggleDoneState,
       setTaskDoneState:CompletionEvidence.setTaskDoneState,
       setTaskSkippedState:CompletionEvidence.setTaskSkippedState
     }),
