@@ -662,7 +662,7 @@ const {
   toggleDone,togglePause:togglePauseTimer,updateBreakMeter,updateCD
 }=TimerEngine;
 const POMODORO_RESTORE_OVERRUN_GRACE_SEC=30*60;
-/* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION *//* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION */
+/* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION */
 let liveDraftSaveTimer=null;
 let liveDraftSaveDueAt=0;
 let liveDraftPendingOptions=null;
@@ -1784,7 +1784,7 @@ function applyRows(rows,options={}){
     const active=!!(TimerState.paused&&TimerState.activeBreak&&TimerState.runtime&&TimerState.runtime.startMs!==null);
     if(action==='status')return active;
     if(action!=='end')throw new TypeError('Unknown Plan schedule break action.');
-    if(!active)return false;
+    if(!active||!appCanMutate())return false;
     finalizePauseEvent();
     TimerState.paused=false;
     setPausedUI(false);
