@@ -69,7 +69,7 @@ assert.match(sessionHandoff,/runtime\.stopExecution\(\)[\s\S]*session\.host\.can
 assert.match(sessionHandoff,/timerRuntime:current\.snapshot\.timerRuntime/u,'frozen claim projection preserves preemption-time timer evidence');
 assert.match(sessionHandoff,/claimOwnership\([\s\S]*saveCanonicalSession\(next,'claiming Active Session ownership'/u,'Continue Here linearizes the provider claim before strict local ownership commit');
 assert.match(sessionHandoff,/saveCanonicalSession\(previous,'compensating a failed ownership transfer'[\s\S]*releaseClaim/u,'failed local handoff compensates only after canonical rollback');
-assert.match(sessionHandoff,/SESSION_CONTINUE_SYNC_REQUIRED[\s\S]*session-handoff-source-advanced/u,'unproven advanced remote content is delegated to ordinary sync rather than guessed');
+assert.match(sessionHandoff,/session-handoff-source-advanced[\s\S]*SESSION_CONTINUE_SYNC_REQUIRED/u,'unproven advanced remote content is delegated to ordinary sync rather than guessed');
 const handoffAdapter=section(host,'async function transferSessionOwnershipHere(session,','// Continue Here in progress:');
 assert.doesNotMatch(handoffAdapter,/AppData\.activeSession|claimSessionOwnership|releaseSessionClaim|readSessionClaim/u,'host Continue Here adapter contains no distributed state-machine implementation');
 const finishTransition=section(host,'async function finishTodaySession(){','async function resetTodaySession(){');

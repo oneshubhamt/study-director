@@ -11,7 +11,7 @@ const result=value=>({ok:true,value,storage:{idb:true,local:false}});
 function makeHarness(options={}){
   let now=100000,current=structuredClone(options.current||sessionBase),claim=options.claim||{epoch:2,applies:true,state:'owned',ownedHere:false},tasks=options.tasks!==false;
   let captureNo=0,claimWrites=0,releaseWorks=options.releaseWorks!==false,source=structuredClone(options.source||current),remoteClaim=claim;
-  const calls={stops:0,resumes:0,syncs:[],writes:[],captures:[],evidence:0,warnings:[],status:[],notices:0,notes:0,releases:0,resets:0,pauses:0,lifecycles:[]};
+  const calls={stops:0,resumes:0,syncs:[],writes:[],captures:[],evidence:0,warnings:[],status:[],notices:0,notes:0,releases:0,resets:0,pauses:0,lifecycles:[],claimReads:0,sessionLoads:0};
   const strictQueue=[];
   const host={
     captureSnapshot:evidence=>{
@@ -35,7 +35,7 @@ function makeHarness(options={}){
       if(strictQueue.length){const next=strictQueue.shift();if(next instanceof Error)throw next;if(next===null)throw new Error('canonical write failed');if(next.storage?.idb===false)throw next.error||new Error('canonical write failed');}
       current=structuredClone(value);return result(structuredClone(current));
     },
-    load:async()=>result(structuredClone(current)),
+    load:async()=>{calls.sessionLoads++;return result(structuredClone(current));},
     payload:(snapshot,payloadOptions={})=>({...structuredClone(current),status:payloadOptions.status||'active',runningOn:LOCAL,revision:current.revision+1,suspendedAt:payloadOptions.suspendedAt||null,snapshot:structuredClone(snapshot),updatedAt:'2026-10-27T08:00:02.000Z'}),
     cancelPendingLiveDraftSave:()=>true,
     resetRuntime:()=>{calls.resets++;return true;}
@@ -55,7 +55,7 @@ function makeHarness(options={}){
         return {status:'completed',claim:{revision:decision.revision,epoch:remoteClaim.epoch,state:'owned'}};
       },
       releaseClaim:async()=>{calls.releases++;return releaseWorks;},
-      readClaim:async()=>claim,
+      readClaim:async()=>{calls.claimReads++;return claim;},
       scheduleSync:(_id,reason)=>{calls.syncs.push(reason);return true;},
       suspendBackground:()=>({settled:Promise.resolve(),release:()=>true}),
       wakeBackground:()=>true
@@ -89,6 +89,18 @@ function makeHarness(options={}){
     identity:Object.freeze({uuid:()=> '00000000-0000-4000-8000-000000000001'})
   }));
   return {controller,calls,strictQueue,setNow:value=>{now=value;},setClaim:value=>{claim=value;},setCurrent:value=>{current=structuredClone(value);},setSource:value=>{source=structuredClone(value);},setTasks:value=>{tasks=value;},current:()=>structuredClone(current),claims:()=>claimWrites,setReleaseWorks:value=>{releaseWorks=value;}};
+}
+
+// Claim polling cadence is owned by the controller, not by host/provider timers.
+{
+  const t=makeHarness({claim:null});
+  assert.equal(await t.controller.wakeClaim(),false,'a no-op claim read returns false');
+  assert.equal(t.calls.claimReads,1);assert.equal(t.calls.sessionLoads,1);
+  assert.equal(t.controller.wakeClaim(),false,'same-tick duplicate wake is coalesced');
+  assert.equal(t.calls.claimReads,1);
+  t.setNow(114990);await t.controller.wakeClaim(1000);
+  assert.equal(t.calls.claimReads,2,'the 15 s host tick may arrive a few milliseconds early without becoming a 30 s cadence');
+  assert.equal(t.calls.sessionLoads,2,'each remote claim read is paired with a strict local session read');
 }
 
 // Remote claim preempts execution before persistence, freezes timing, and only syncs after strict receipt.
