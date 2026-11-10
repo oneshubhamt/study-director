@@ -3103,6 +3103,8 @@ async function finishTodaySession(){
     confirmLabel:'Finish today',cancelLabel:'Keep studying'
   });
   if(!accepted||!appCanMutate())return false;
+  const rollbackSnapshot=ActiveSessionRuntime.captureSnapshot();
+  const rollbackSession=rollbackSnapshot?ActiveSessionRuntime.payload(rollbackSnapshot):null;
   let completionNotice=null;
   try{
     const hadActiveTimer=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
@@ -3129,10 +3131,20 @@ async function finishTodaySession(){
     notifyBackupChange({urgent:true,reason:'finish-today'});
     return true;
   }catch(error){
-    if(TimerState.mode===TIMER_MODES.DONE)setTimerMode(TIMER_MODES.READY,'manual-finish-save-failed');
+    let rollbackError=null;
+    if(rollbackSession&&rollbackSnapshot){
+      try{
+        const restored=await ActiveSessionRuntime.withPersistenceSuppressed(
+          ()=>ActiveSessionRuntime.applyStoredSession(rollbackSession,rollbackSnapshot,{source:'finish-today-rollback'})
+        );
+        if(restored===false)throw new Error('The pre-finish runtime snapshot could not be restored.');
+      }catch(recoveryError){rollbackError=recoveryError;}
+    }
+    if(rollbackError&&TimerState.mode===TIMER_MODES.DONE)setTimerMode(TIMER_MODES.READY,'manual-finish-save-failed');
     refreshCoreUi();
     completionNotice?.update({lifecycle:'cancelled'});
-    setPlanStatus('Could not finish today safely: '+(error&&error.message?error.message:error),false);
+    const base='Could not finish today safely: '+(error&&error.message?error.message:error);
+    setPlanStatus(rollbackError?base+' Runtime restoration also failed: '+(rollbackError&&rollbackError.message?rollbackError.message:rollbackError):base+' The active runtime was restored.',false);
     return false;
   }
 }

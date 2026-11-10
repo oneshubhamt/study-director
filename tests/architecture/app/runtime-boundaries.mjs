@@ -56,6 +56,9 @@ assert.match(sessionHost,/strictDurability:true/u,'critical local session transi
 for(const token of ['claimSessionOwnership','continueSessionHere','BackupProviderRuntime','sessionHandoff']){
   assert.equal(sessionHost.includes(token),false,`P5.4B session host must not absorb P5.4C distributed ownership: ${token}`);
 }
+const finishTransition=section(host,'async function finishTodaySession(){','async function resetTodaySession(){');
+assert.match(finishTransition,/rollbackSnapshot=ActiveSessionRuntime\.captureSnapshot\(\)[\s\S]*writeCanonicalNow\('finishing today’s session'/u,'finish captures a recoverable runtime before its strict canonical commit');
+assert.match(finishTransition,/withPersistenceSuppressed\([\s\S]*applyStoredSession\(rollbackSession,rollbackSnapshot/u,'failed finish restores the pre-finish runtime without recursively persisting the rollback');
 
 const restoreTimer=section(host,'function deriveRestoredTimerState(candidate){','function isRestorableActiveSession(session){');
 assert.doesNotMatch(restoreTimer,/Date\.now\(\)/,'restored timer/gap/break arithmetic uses DecisionClock');
