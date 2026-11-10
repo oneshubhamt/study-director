@@ -45,7 +45,7 @@ function device(fault={}){
   assert.equal(made.fresh,false);assert.equal(made.from,null);assert.match(made.id,/^prof_ben_/u);
   d.store.set(REGISTRY,'{not json');assert.equal(d.page('').current(),null);assert.equal(d.page('').unsupported(),true,'an unreadable profile registry is unsupported, never equivalent to an empty registry');
   d.store.set(REGISTRY,JSON.stringify({version:1,active:'x',profiles:[{id:'bad',scope:''},{id:made.id,scope:'',name:'Ben'},{id:made.id,scope:'prof_dup_mve00000_00000001',name:'Dup'}],removing:[]}));
-  assert.deepEqual([...d.page('').list()].map(row=>row.id),[made.id],'known entries remain readable for diagnosis');assert.equal(d.page('').current().name,'Ben');assert.equal(d.page('').unsupported(),true,'a malformed current registry is read-only instead of being normalized on the next write');assert.throws(()=>d.page('').rename('Changed'),/newer version|Update the app/);
+  assert.deepEqual([...d.page('').list()].map(row=>row.id),[made.id],'known entries remain readable for diagnosis');assert.equal(d.page('').current().name,'Ben');assert.equal(d.page('').unsupported(),true,'a malformed current registry is read-only instead of being normalized on the next write');assert.throws(()=>d.page('').rename('Changed'),/cannot be changed safely|recover the browser profile data/);
 }
 {
   // Add profile, Cancel (remove) back to where it was added from, and the removed data is deleted.

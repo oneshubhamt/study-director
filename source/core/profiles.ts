@@ -80,7 +80,7 @@ const createModule=()=>{
     }
 
     function unsupportedError(){
-      return Object.assign(new Error('The profile list on this device was saved by a newer version of Study Director. Update the app to add, switch or remove profiles.'),{code:'STUDY_DIRECTOR_PROFILES_UNSUPPORTED'});
+      return Object.assign(new Error('The profile list on this device cannot be changed safely. Update Study Director or recover the browser profile data before adding, switching, renaming or removing profiles.'),{code:'STUDY_DIRECTOR_PROFILES_UNSUPPORTED'});
     }
     function write(next:Readonly<{active:string;profiles:readonly Readonly<ProfileEntry>[];removing:readonly string[]}>):Readonly<ProfileListState>{
       if(read().unsupported)throw unsupportedError();
