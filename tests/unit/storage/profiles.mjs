@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import vm from 'node:vm';
 
 // Profiles (5.3): the device list of people, each with storage of their own.
 // Every page is one profile; the list is shared by every page on the device.
 const context=vm.createContext({console,Error,TypeError,Object,Array,String,Number,Map,Set,JSON,Date,Math,Symbol,Promise,RegExp});
 context.globalThis=context;
-for(const file of ['internal','profiles'])vm.runInContext(fs.readFileSync(`source/core/${file}.js`,'utf8'),context,{filename:`${file}.js`});
+for(const file of ['internal','profiles'])vm.runInContext(readCoreScript(file),context,{filename:file});
 const ProfilesModule=context[Symbol.for('studyDirector.internalModules.v1')].require('profiles',1);
 const freeze=Object.freeze,REGISTRY='studyDirector.profiles.v1',pattern=/^prof_[a-z0-9]{1,24}_[a-z0-9]{6,12}_[a-f0-9]{8}$/u;
 

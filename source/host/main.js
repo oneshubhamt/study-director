@@ -53,6 +53,7 @@ const NoteExportModule=INTERNAL_MODULES.load('note-export',2,'study-director.not
 const LibraryClearModule=INTERNAL_MODULES.load('library-clear',1,'study-director.library-clear-module',2);
 const NoteLinksModule=INTERNAL_MODULES.load('note-links',1,'study-director.note-links-module',1);
 const ProfilesModule=INTERNAL_MODULES.load('profiles',1,'study-director.profiles-module',1);
+const ProfilesHostModule=INTERNAL_MODULES.load('profiles-host',1,'study-director.profiles-host-module',1);
 const LibraryModule=INTERNAL_MODULES.load('library',1,'study-director.library-module',1);
 const ManagedRepositoryModule=INTERNAL_MODULES.load('managed-repository',1,'study-director.managed-repository-module',1);
 const RepositoryPolicyModule=INTERNAL_MODULES.load('repository-policy',1,'study-director.repository-policy-module',1);
@@ -319,7 +320,7 @@ function backupFolderName({device=false}={}){
   return parts.length?`${EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix}${separator}${parts.join(separator)}`:EXTERNAL_REPOSITORY_IDENTITIES.driveFolder;
 }
 // The people who use Study Director on this device (core/profiles.js).
-const Profiles=ProfilesModule.createController(Object.freeze({ports:Object.freeze({
+const Profiles=ProfilesHostModule.createController(Object.freeze({module:ProfilesModule,ports:Object.freeze({
   scope:Object.freeze({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
   storage:Object.freeze({
     read:()=>LocalStorageContract.getText(ProfileScope.registryKey,null),
@@ -4699,130 +4700,54 @@ function renderProfilePanel(){
   renderProfileBadge();
 }
 function renderProfile(){renderProfileBadge();renderProfilePanel();}
-function openProfilePanel(){
-  const dialog=document.getElementById('profile-dialog');if(!dialog||dialog.open)return false;
-  const input=document.getElementById('profile-name-input');if(input)input.value=getStudentNameFromDisplay();
-  dialog.showModal();renderProfilePanel();NotificationRecent.opened();return true;
-}
-function closeProfilePanel(){const dialog=document.getElementById('profile-dialog');if(dialog?.open)dialog.close();}
-function installProfileDialogs(){
-  const form=document.getElementById('first-start-form');form?.addEventListener('submit',event=>event.preventDefault());
-  // First start stays until Skip, Cancel or Continue; Escape does not drop it.
-  document.getElementById('first-start-dialog')?.addEventListener('cancel',event=>event.preventDefault());
-  document.getElementById('profile-dialog')?.addEventListener('close',()=>{finishProfileRename();NotificationRecent.closed();});
-}
-function saveProfileName(){
-  const input=document.getElementById('profile-name-input');if(!input)return;
-  const raw=String(input.value||'').trim();if(!raw){input.value=getStudentNameFromDisplay();return;}
-  if(normalizeStudentName(raw)===getStudentNameFromDisplay())return;
-  const clean=applyStudentName(raw);input.value=clean;persistUserDefaultName(clean);
-}
-// The name in the panel's header renames in place, as a note title does:
-// Enter or leaving the field saves, Escape keeps the old name.
-function startProfileRename(){
-  const button=document.getElementById('profile-name-button'),input=document.getElementById('profile-name-input');
-  if(!button||!input)return false;
-  input.value=getStudentNameFromDisplay();button.hidden=true;input.hidden=false;input.focus();input.select();
-  return true;
-}
-function finishProfileRename(){
-  saveProfileName();
-  const button=document.getElementById('profile-name-button'),input=document.getElementById('profile-name-input');
-  if(input)input.hidden=true;if(button)button.hidden=false;
-}
-function handleProfileNameKey(e){
-  // Key handlers are delegated from the document, so the field is the target.
-  const input=e.target,button=document.getElementById('profile-name-button');
-  if(e.key==='Enter'){e.preventDefault();input.blur();button?.focus();return false;}
-  // Escape leaves the name as it was and keeps the panel open.
-  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();input.value=getStudentNameFromDisplay();input.blur();button?.focus();return false;}
-  return true;
-}
+const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze({
+  document,
+  getStudentName:()=>getStudentNameFromDisplay(),
+  normalizeStudentName,
+  applyStudentName,
+  persistUserDefaultName,
+  renderPanel:()=>renderProfilePanel(),
+  recent:NotificationRecent
+}));
+const openProfilePanel=ProfilePanelActions.open;
+const closeProfilePanel=ProfilePanelActions.close;
+const installProfileDialogs=ProfilePanelActions.install;
+const startProfileRename=ProfilePanelActions.startRename;
+const finishProfileRename=ProfilePanelActions.finishRename;
+const handleProfileNameKey=ProfilePanelActions.handleNameKey;
+
 async function profileDriveAction(){
   if(BackupProviderRuntime.locationStatus('google-drive')?.connected)return BackupProviderRuntime.disconnect('google-drive');
   return connectDriveForProfile();
 }
-function switchProfile(ev){
-  const id=String(ev?.target?.closest?.('[data-profile]')?.dataset.profile||'');
-  if(!id)return false;
-  void flushProtectedPreferences().catch(()=>{});
-  return Profiles.switchTo(id);
-}
-function addProfile(){void flushProtectedPreferences().catch(()=>{});return Profiles.add();}
-// Deleting this profile, from Library → Data: from this device only (its
-// data stays wherever it was synced), or everywhere: its Google Drive library
-// goes to the Drive Trash with a marker that makes every other device remove
-// it at its next sign-in, and its Device Folder backups here are deleted. The
-// last profile on a device is replaced by a new, empty one.
-async function deleteThisProfile(){
-  const mine=Profiles.current();if(!mine)return false;
-  const name=getStudentNameFromDisplay(),last=Profiles.list().length<2,drive=BackupProviderRuntime.locationStatus('google-drive'),synced=!!(drive?.connected&&drive.sync?.syncedAt&&!drive.waiting&&!drive.sync.syncing),folder=DeviceBackup.status();
-  const afterwards=last?' A new, empty profile starts afterwards.':'';
-  const choice=await Interactions.choose({
-    title:`Delete ${name}?`,
-    message:last?'This is the only profile on this device.':'Other profiles on this device are not changed.',
-    choices:[
-      {value:'device',label:'Remove from this device',description:(synced?`Its data stays in ${mine.email||'Google Drive'} and in any Device Folder backups.`:'Its data is deleted from this device. Google Drive and Device Folder backups, if any, stay.')+afterwards,kind:'caution'},
-      {value:'everywhere',label:'Delete everywhere',description:`Here, in Google Drive (to its Trash) and in this device’s Device Folder backups. Other devices remove it when they next sign in.${afterwards}`,kind:'danger'}
-    ]
-  });
-  if(choice==='device'){
-    if(!synced&&!await Interactions.confirm({title:`Remove ${name} from this device?`,message:'This profile is not fully synced to Google Drive. Removing it deletes its notes, Saved Days, plans and attachments from this device for good.',details:['Its Device Folder backups and backup files, if any, stay where they are.'],confirmLabel:'Remove from this device',danger:true}))return false;
-    return Profiles.remove();
-  }
-  if(choice!=='everywhere')return false;
-  if(mine.email&&!drive?.connected){Interactions.notify({key:'profile-delete',title:'Sign in to Google Drive first',message:`${name}’s library is in ${mine.email}. Sign in from the Profile panel, then delete the profile everywhere.`});return false;}
-  const places=[drive?.connected?`its library in ${mine.email||'Google Drive'} moves to the Drive Trash, where it can be brought back for 30 days`:'',folder.connected?'its Device Folder backups on this device are deleted':''].filter(Boolean);
-  const ok=await Interactions.confirm({
-    title:`Delete ${name} everywhere?`,
-    message:`Its notes, Saved Days, plans, reflections and attachments are deleted from this device${places.length?`; ${places.join('; ')}`:''}.`,
-    details:['Other devices remove this profile the next time they sign in to Google Drive.',...(last?['A new, empty profile starts afterwards.']:[])],
-    confirmLabel:'Delete everywhere',danger:true
-  });
-  return ok?deleteProfileHere({drive:!!drive?.connected}):false;
-}
-// What Google Drive lets the app do with this profile's library.
-let driveLibrary=null;
-async function deleteProfileHere({drive=false}={}){
-  let hold=null;try{hold=BackupProviderRuntime.suspendBackground('profile-delete');}catch{hold=null;}
-  try{
-    if(drive){if(!driveLibrary)throw new Error('Google Drive is not ready yet. Try again in a moment.');await driveLibrary.deleteLibrary();}
-    await DeviceBackup.deleteBackups();
-    return Profiles.remove();
-  }catch(error){
-    hold?.release();AppDiagnostics.capture('profile.delete',error,'warn');
-    Interactions.notify({key:'profile-delete',title:'The profile was not deleted',message:`${String(error?.message||error)} Nothing was removed from this device; try again.`});
-    return false;
-  }
-}
-// Another device deleted this profile everywhere; Google Drive says so at the
-// first sign-in after. With nothing here that Drive did not have, it goes
-// without a question; otherwise the person decides.
-let profileDeletionQuestion=null;
-async function driveProfileDeleted(info){
-  const mine=Profiles.current();if(!mine||String(info?.profile||'')!==mine.id||profileDeletionQuestion)return false;
-  const name=getStudentNameFromDisplay(),synced=verifiedRecoveryState.providers['google-drive']?.sourceRevision||'';
-  if(synced&&synced===currentBackupSourceRevision())return deleteProfileHere();
-  profileDeletionQuestion=Interactions.confirm({
-    title:`${name} was deleted on another device`,
-    message:'This device has changes that never reached Google Drive.',
-    details:['Delete here too: they are deleted with the profile, and so are its Device Folder backups on this device.','Keep on this device: the profile stays here and stops syncing. Connecting Google Drive again starts a new library.'],
-    confirmLabel:'Delete here too',cancelLabel:'Keep on this device',danger:true
-  }).finally(()=>{profileDeletionQuestion=null;});
-  if(await profileDeletionQuestion)return deleteProfileHere();
-  Profiles.renew();renderProfile();
-  Interactions.notify({key:'profile-kept',title:`${name} is kept on this device`,message:'It no longer syncs with Google Drive. Connect Google Drive again to start a new library.'});
-  return false;
-}
+// Profile deletion composes backup/provider effects behind a checked profile-owned adapter.
+const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze({
+  profiles:Profiles,
+  provider:Object.freeze({
+    locationStatus:id=>BackupProviderRuntime.locationStatus(id),
+    suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
+  }),
+  device:Object.freeze({
+    status:()=>DeviceBackup.status(),
+    deleteBackups:()=>DeviceBackup.deleteBackups()
+  }),
+  interactions:Interactions,
+  capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
+  getStudentName:()=>getStudentNameFromDisplay(),
+  renderProfile:()=>renderProfile(),
+  verifiedSourceRevision:()=>verifiedRecoveryState.providers['google-drive']?.sourceRevision||'',
+  currentBackupSourceRevision:()=>currentBackupSourceRevision()
+}));
+const deleteThisProfile=ProfileDeletion.deleteThisProfile;
+const driveProfileDeleted=ProfileDeletion.driveProfileDeleted;
+
 // The Drive connection a person asked for in the last few minutes may ask
 // them about the library it finds; one that just happens (a restored sign-in,
 // a background sync) never does.
-let driveConnectRequestedAt=0,driveLibraryQuestion=null;
-const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
 // The indicator shows Connecting… from the click until the sign-in settles,
 // and the Connect card follows the first sync to its end.
 function connectDriveForProfile(){
-  driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard();scheduleSyncStatus();
+  ProfileDriveBinding.markRequested();driveConnecting=true;startDriveConnectCard();scheduleSyncStatus();
   const settled=ok=>{
     driveConnecting=false;
     if(driveConnectCard&&driveConnectCard.phase==='signing-in'){
@@ -4886,119 +4811,53 @@ function renderDriveConnectCard(){
   // Synced closes on its own; anything that needs the person stays.
   if(model.done&&!driveConnectCardHide)driveConnectCardHide=setTimeout(()=>{if(driveConnectCard===state)endDriveConnectCard();},6000);
 }
-async function recordDriveLibrary(email,folder){
-  const mine=Profiles.current();if(!mine)return;
-  // Another Drive library than the one last synced with: what was shared
-  // with the old one says nothing about the new one, so the next sync is a
-  // first sync (nothing is deleted on either side).
-  if(mine.folder!==folder)await ReconciliationBaselineStore.clear();
-  Profiles.setAccount({email,folder});renderProfile();
-}
-function askToJoinLibrary(email,library){
-  const notes=Number.isFinite(library?.notes)?`${library.notes} note${library.notes===1?'':'s'}`:'',when=library?.savedAt?storageHealthTime(library.savedAt):'';
-  const summary=[notes,when&&`synced ${when}`].filter(Boolean).join(', ');
-  return Interactions.confirm({
-    title:'Continue with your library?',
-    message:`${email||'This Google account'} already holds a Study Director library${summary?` (${summary})`:''}.`,
-    details:['It comes to this device and is combined with anything already here. Nothing is lost; where both differ, one is shown and the other kept for review.','Choose Not now if this library is not yours.'],
-    confirmLabel:'Continue with your library',cancelLabel:'Not now'
-  });
-}
-// Drive tells the app, once per sign-in, which account it reached and what
-// its library holds; the app settles whether this profile may use it.
-async function bindDriveLibrary(info){
-  const mine=Profiles.current();if(!mine)return 'refuse';
-  const email=String(info?.email||''),folder=String(info?.folder||''),found=String(info?.found||''),others=Profiles.list().filter(row=>row.scope!==mine.scope);
-  const refuse=message=>{endDriveConnectCard();Interactions.notify({key:'drive-profile-refused',title:'Google Drive was not used',message});renderProfile();return 'refuse';};
-  const owner=others.find(row=>email&&row.email===email||found&&row.id===found);
-  if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
-  if(info?.mine){await recordDriveLibrary(email,folder);return 'continue';}
-  if(!found&&(!info?.library||!others.length)){await recordDriveLibrary(email,folder);return 'claim';}
-  if(Date.now()-driveConnectRequestedAt>DRIVE_CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
-  driveLibraryQuestion??=askToJoinLibrary(email,info.library).finally(()=>{driveLibraryQuestion=null;});
-  if(!await driveLibraryQuestion){endDriveConnectCard();renderProfile();return 'refuse';}
-  if(found&&!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
-  FirstStart.joined();
-  await recordDriveLibrary(email,folder);
-  return found?'adopt':'claim';
-}
+const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze({
+  profiles:Profiles,
+  interactions:Interactions,
+  clearBaseline:()=>ReconciliationBaselineStore.clear(),
+  renderProfile:()=>renderProfile(),
+  endConnectCard:()=>endDriveConnectCard(),
+  firstStartJoined:()=>FirstStart.joined(),
+  storageHealthTime,
+  now:()=>Date.now()
+}));
+const bindDriveLibrary=ProfileDriveBinding.bind;
+
 // First start (and Add profile): name, an optional password and Google
 // Drive. Someone joining their own Drive library takes its name and settings
 // from it, so nothing typed here competes with them.
-const FirstStart=(()=>{
-  let joined=false;
-  const node=id=>document.getElementById(id);
-  function error(message){const box=node('first-start-error');if(!box)return;box.textContent=message;box.hidden=!message;}
-  function password(){
-    const value=String(node('first-start-password')?.value||''),confirm=String(node('first-start-confirm')?.value||'');
-    if(!value)return {value:''};
-    if(value.length<12)return {error:'Use at least 12 characters for the backup password, or leave it empty.'};
-    if(value.length>1024)return {error:'Use at most 1024 characters for the backup password.'};
-    if(value!==confirm)return {error:'The two passwords do not match.'};
-    return {value};
-  }
-  // The password is set before anything is uploaded, so no unencrypted copy reaches Drive.
-  async function applyPassword(){
-    const chosen=password();if(chosen.error){error(chosen.error);node(chosen.error.includes('match')?'first-start-confirm':'first-start-password')?.focus();return false;}
-    if(chosen.value)await BackupProtection.enable(chosen.value);
-    return true;
-  }
-  function applyName(){
-    const raw=String(node('first-start-name')?.value||'').trim();if(!raw||joined)return;
-    const clean=applyStudentName(raw);persistUserDefaultName(clean);
-  }
-  function render(){
-    const mine=Profiles.current(),adding=!!(mine&&mine.from!==null);
-    node('first-start-eyebrow').textContent=adding?'New profile':'Welcome';
-    node('first-start-title').textContent=adding?'Add a profile':'Personalise Study Director';
-    node('first-start-note').textContent=adding?'A profile has its own notes, days, plans and backups on this device. Add a password to encrypt its backups, and Google Drive to sync it across devices.':'Everything stays on this device. Add a password to encrypt backups, and Google Drive to sync your devices.';
-    node('first-start-skip').textContent=adding?'Cancel':'Skip';
-    const drive=BackupProviderRuntime.locationStatus('google-drive'),button=node('first-start-drive'),note=node('first-start-drive-note');
-    if(button){button.textContent=drive?.connected?'Google Drive connected':'Connect Google Drive';button.disabled=!!drive?.connected||!!drive?.engineBusy;button.classList.toggle('connected',!!drive?.connected);}
-    if(note)note.textContent=drive?.connected?(joined?'Your library is coming to this device.':Profiles.current()?.email||'Synced through your Google account.'):'Keeps your devices in sync. You can connect later.';
-  }
-  function open(){
-    const dialog=node('first-start-dialog');if(!dialog||dialog.open)return false;
-    joined=false;error('');for(const id of ['first-start-password','first-start-confirm'])if(node(id))node(id).value='';
-    const name=getStudentNameFromDisplay();node('first-start-name').value=isDefaultStudentName(name)?'':name;node('first-start-confirm-field').hidden=true;
-    render();dialog.showModal();setTimeout(()=>node('first-start-name')?.focus(),0);return true;
-  }
-  function close(){const dialog=node('first-start-dialog');if(dialog?.open)dialog.close();}
-  async function connect(){
-    error('');if(!await applyPassword())return false;
-    // The id follows the name until a Drive library knows it.
-    const raw=String(node('first-start-name')?.value||'').trim();if(raw)Profiles.rename(raw);
-    const ok=await connectDriveForProfile();render();return ok;
-  }
-  async function finish(){
-    error('');if(!await applyPassword())return false;
-    applyName();Profiles.finishFirstStart();close();renderProfile();return true;
-  }
-  function skip(){
-    const mine=Profiles.current();
-    if(mine&&mine.from!==null)return Profiles.remove();
-    Profiles.finishFirstStart();close();renderProfile();return true;
-  }
-  function confirmField(){const field=node('first-start-confirm-field');if(field)field.hidden=!String(node('first-start-password')?.value||'');}
-  function key(e){if(e.key==='Enter'&&e.target?.tagName==='INPUT'){e.preventDefault();void finish();return false;}return true;}
-  return Object.freeze({open,close,render,connect,finish,skip,confirmField,key,joined:()=>{joined=true;render();},isOpen:()=>!!node('first-start-dialog')?.open});
-})();
+const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze({
+  document,
+  profiles:Profiles,
+  backupProtection:Object.freeze({enable:password=>BackupProtection.enable(password)}),
+  provider:Object.freeze({locationStatus:id=>BackupProviderRuntime.locationStatus(id)}),
+  connectDriveForProfile:()=>connectDriveForProfile(),
+  getStudentName:()=>getStudentNameFromDisplay(),
+  isDefaultStudentName,
+  applyStudentName,
+  persistUserDefaultName,
+  renderProfile:()=>renderProfile()
+}));
+
 // Startup: make sure this page's profile is on the device's list, and offer
 // the first-start form to someone new.
-async function startProfile(){
-  const name=getStudentNameFromDisplay(),named=!isDefaultStudentName(name);
-  let mine=Profiles.current();
-  if(!mine)mine=Profiles.ensure(named?name:'',{fresh:!named&&await canonicalLocalRecoveryEmpty()===true});
-  else if(named)Profiles.rename(name);
-  renderProfile();
-  if(mine?.fresh&&appCanMutate())FirstStart.open();
-}
-// With several profiles on the device, each person enters their own backup
-// password when switching in; Not now keeps sync and encrypted backups paused.
-function askProfilePassword(){
-  if(Profiles.list().length<2||FirstStart.isOpen()||!appCanMutate())return;
-  void BackupProtection.ask().catch(setBackupProtectionSurfaceError);
-}
+const ProfileLifecycle=ProfilesHostModule.createLifecycle(Object.freeze({
+  profiles:Profiles,
+  firstStart:FirstStart,
+  flushProtectedPreferences:()=>flushProtectedPreferences(),
+  getStudentName:()=>getStudentNameFromDisplay(),
+  isDefaultStudentName,
+  canonicalLocalRecoveryEmpty:()=>canonicalLocalRecoveryEmpty(),
+  renderProfile:()=>renderProfile(),
+  appCanMutate:()=>appCanMutate(),
+  backupProtection:Object.freeze({ask:()=>BackupProtection.ask()}),
+  setBackupProtectionSurfaceError:error=>setBackupProtectionSurfaceError(error)
+}));
+const switchProfile=ProfileLifecycle.switchProfile;
+const addProfile=ProfileLifecycle.addProfile;
+const startProfile=ProfileLifecycle.startProfile;
+const askProfilePassword=ProfileLifecycle.askProfilePassword;
+
 // Version History reads each encrypted version for its date and counts, so a
 // password put off at start is asked for first. Not now still opens the list,
 // with those versions shown as locked.
@@ -9713,7 +9572,7 @@ const StudyDirectorPublicAPI=Object.freeze({
     // This device, named on Drive's upload markers.
     device:()=>AppData.provenance.installationId(),
     // The active profile, and who decides which Drive library it may use.
-    profile:Object.freeze({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
+    profile:Object.freeze({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>ProfileDeletion.setLibraryControl(control)}),
     providers:Object.freeze({
       register:BackupProviderRuntime.register,
       list:BackupProviderRuntime.list

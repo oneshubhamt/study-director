@@ -157,6 +157,12 @@
     "source/core/capabilities-host.ts",
     "types/native-capabilities.ts",
     "types/capabilities-host.ts",
-    "types/checks/capabilities.ts"
+    "types/checks/capabilities.ts",
+    "source/core/profiles.ts",
+    "source/core/profiles-host.ts",
+    "source/host/profile-scope.ts",
+    "types/profiles.ts",
+    "types/profile-scope.ts",
+    "types/checks/profiles.ts"
   ]
 }

@@ -40,7 +40,8 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'note-export',source:'core/note-export.js',stem:'sd.note-export'}),
   Object.freeze({id:'library-clear',source:'core/library-clear.ts',stem:'sd.library-clear'}),
   Object.freeze({id:'note-links',source:'core/note-links.js',stem:'sd.note-links'}),
-  Object.freeze({id:'profiles',source:'core/profiles.js',stem:'sd.profiles'}),
+  Object.freeze({id:'profiles',source:'core/profiles.ts',stem:'sd.profiles'}),
+  Object.freeze({id:'profiles-host',source:'core/profiles-host.ts',stem:'sd.profiles-host'}),
   Object.freeze({id:'library',source:'core/library.js',stem:'sd.library'}),
   Object.freeze({id:'managed-repository',source:'core/managed-repository.ts',stem:'sd.managed-repository'}),
   Object.freeze({id:'repository-policy',source:'core/repository-policy.ts',stem:'sd.repository-policy'}),
@@ -104,6 +105,7 @@ export const runtimeDependencies=Object.freeze({
   'library-clear':Object.freeze(['repositories','review']),
   'note-links':Object.freeze([]),
   profiles:Object.freeze([]),
+  'profiles-host':Object.freeze([]),
   library:Object.freeze(['domain','note-export','repositories','review','timer-state']),
   'managed-repository':Object.freeze([]),
   'repository-policy':Object.freeze([]),
@@ -145,7 +147,7 @@ export const styleModules=Object.freeze([
 // Authored scripts are inlined at these exact HTML positions before token rendering.
 export const hostScripts=Object.freeze([
   Object.freeze({id:'install-capture',source:'host/install-capture.js',marker:'<!-- @SD_HOST_INSTALL_CAPTURE@ -->'}),
-  Object.freeze({id:'profile-scope',source:'host/profile-scope.js',marker:'<!-- @SD_HOST_PROFILE_SCOPE@ -->'}),
+  Object.freeze({id:'profile-scope',source:'host/profile-scope.ts',marker:'<!-- @SD_HOST_PROFILE_SCOPE@ -->'}),
   Object.freeze({id:'presentation-kernel',source:'host/presentation-kernel.js',marker:'<!-- @SD_HOST_PRESENTATION_KERNEL@ -->'}),
   Object.freeze({id:'presentation-metadata',source:'host/presentation-metadata.js',marker:'<!-- @SD_HOST_PRESENTATION_METADATA@ -->'}),
   Object.freeze({id:'main',source:'host/main.js',marker:'<!-- @SD_HOST_MAIN@ -->'}),

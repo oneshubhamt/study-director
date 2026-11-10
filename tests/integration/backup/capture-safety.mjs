@@ -287,7 +287,7 @@ for(const rescued of [false,true]){
 // Removed profiles keep emergency browser rescue copies if IndexedDB/OPFS
 // deletion fails; the registry intent survives and retries are idempotent.
 {
-  vm.runInThisContext(fs.readFileSync('source/core/profiles.js','utf8'));
+  vm.runInThisContext(readCoreScript('profiles'));
   const profiles=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('profiles',1);
   const removed='prof_removed_abcdef_12345678',live='prof_live_abcdef_12345679',registryKey='profiles-test-registry';
   const registryRow={version:1,active:live,profiles:[{id:live,scope:live,name:'Current',createdAt:'2026-10-31T00:00:00.000Z'}],removing:[removed]};
