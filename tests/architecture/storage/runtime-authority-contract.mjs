@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const app=readHostHtml();
-const startup=fs.readFileSync('source/core/startup.js','utf8');
+const startup=readScript('source/core/startup.ts');
 const persistence=readScript('source/core/persistence.ts');
 
 

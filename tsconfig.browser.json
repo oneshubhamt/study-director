@@ -166,6 +166,11 @@
     "types/checks/profiles.ts",
     "source/core/data-bootstrap-host.ts",
     "types/data-bootstrap-host.ts",
-    "types/checks/data-bootstrap-host.ts"
+    "types/checks/data-bootstrap-host.ts",
+    "source/core/startup.ts",
+    "types/startup.ts",
+    "source/core/startup-host.ts",
+    "types/startup-host.ts",
+    "types/checks/startup.ts"
   ]
 }

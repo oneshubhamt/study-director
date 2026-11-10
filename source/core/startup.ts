@@ -1,13 +1,15 @@
-(()=>{
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+import type {StartupLifecycleInput,StartupLifecycleModule as StartupLifecycleContract,StartupStatus,StartupFailure} from '../../types/startup.ts';
+const sdStartupLifecycleFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'startup-lifecycle','study-director.startup-lifecycle'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
-registry.define('startup-lifecycle',1,()=>{
+const createModule=():StartupLifecycleContract=>{
   const freeze=Object.freeze;
-  function createCoordinator(input){
+  function createCoordinator(input:Readonly<StartupLifecycleInput>){
     if(!input||!Object.isFrozen(input))throw new TypeError('Startup/lifecycle input must be frozen.');
     exactObject(input,['environment','diagnostics','ownership','timer','flushers','startup','activation'],'Startup/lifecycle input');
     exactObject(input.environment,['document','window'],'Startup/lifecycle environment');
@@ -39,19 +41,19 @@ registry.define('startup-lifecycle',1,()=>{
     let domReadyListenerInstalled=false;
     let initializing=false;
     let fullyInitialized=false;
-    let lifecycleState='idle';
+    let lifecycleState:StartupStatus['state']='idle';
     let currentStage='';
     let failedStage='';
-    let lastFailure=null;
+    let lastFailure:Readonly<StartupFailure>|null=null;
     let domBindingsInstalled=false;
     let lifecycleInstalled=false;
     let exitHandled=false;
     let wakeRevision=0;
-    let wakeSequence=Promise.resolve();
-    let startSequence=Promise.resolve();
-    const completedStages=[];
+    let wakeSequence:Promise<unknown>=Promise.resolve();
+    let startSequence:Promise<unknown>=Promise.resolve();
+    const completedStages:string[]=[];
 
-    function status(){
+    function status():Readonly<StartupStatus>{
       return freeze({
         format:'study-director.startup-lifecycle-status',
         contractVersion:1,
@@ -60,7 +62,7 @@ registry.define('startup-lifecycle',1,()=>{
         completedStages:freeze(completedStages.slice())
       });
     }
-    async function runStage(name,operation){
+    async function runStage(name:string,operation:()=>unknown|PromiseLike<unknown>){
       currentStage=name;
       const result=await operation();
       completedStages.push(name);
@@ -95,7 +97,7 @@ registry.define('startup-lifecycle',1,()=>{
       diagnostics.guard('lifecycle.flush-deletion-recovery',flushers.deletionRecovery);
       return true;
     }
-    function queueWakeReconciliation(source){
+    function queueWakeReconciliation(source:string){
       if(lifecycleState==='failed')return Promise.resolve(false);
       const revision=++wakeRevision;
       wakeSequence=wakeSequence.catch(()=>false).then(async()=>{
@@ -103,7 +105,7 @@ registry.define('startup-lifecycle',1,()=>{
         if(revision!==wakeRevision||doc.hidden||!acquired||!ownership.canMutate())return false;
         timer.syncAfterWake();
         return true;
-      }).catch(error=>{
+      }).catch((error:unknown)=>{
         diagnostics.guard(`lifecycle.${source}-ownership`,()=>{throw error;});
         return false;
       });
@@ -134,7 +136,7 @@ registry.define('startup-lifecycle',1,()=>{
       activation.publish('exit','page-exit',{destructive:true});
       wakeRevision++;
       if(ownership.canMutate()){
-        void Promise.resolve(ownership.flushAndRelease()).catch(error=>{
+        void Promise.resolve(ownership.flushAndRelease()).catch((error:unknown)=>{
           diagnostics.guard('lifecycle.exit-release',()=>{throw error;});
         });
       }else{
@@ -192,7 +194,7 @@ registry.define('startup-lifecycle',1,()=>{
           const proof=await runStage('canonical-verification',startup.verifyReady);
           fullyInitialized=true;lifecycleState='ready';
           await runStage('startup-ready',()=>startup.markReady(proof));
-        }catch(error){
+        }catch(error:unknown){
           fullyInitialized=false;lifecycleState='failed';failedStage=currentStage||'startup';currentStage='';
           lastFailure=freeze({code:'STARTUP_INITIALIZATION_FAILED',message:'Study Director could not safely finish loading stored data.',at:new Date().toISOString()});
           diagnostics.guard('startup.failure-release',()=>ownership.release());
@@ -213,5 +215,7 @@ registry.define('startup-lifecycle',1,()=>{
     contractVersion:1,
     createCoordinator
   });
-});
+};
+registry.define('startup-lifecycle',1,createModule);return createModule;
 })();
+export type StartupLifecycleModule=ReturnType<typeof sdStartupLifecycleFactory>;

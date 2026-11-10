@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readRuntimeSource(path.join(ROOT,relative));
-for(const file of ['source/core/internal.ts','source/core/startup.js'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/startup.ts'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Startup=registry.require('startup-lifecycle',1);
 
@@ -148,7 +148,7 @@ assert.ok(failureSequence.includes('ready'),'a later start() must retry and publ
 
 console.log(JSON.stringify({
   status:'PASS',
-  module:'source/core/startup.js',
+  module:'source/core/startup.ts',
   completedStages:status.completedStages.length,
   startupOrdering:true,
   wakeOrdering:true,

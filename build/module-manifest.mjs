@@ -58,7 +58,8 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'backup-recovery-host',source:'core/backup-recovery-host.ts',stem:'sd.backup-recovery-host'}),
   Object.freeze({id:'pwa-lifecycle',source:'core/pwa-lifecycle.js',stem:'sd.pwa-lifecycle'}),
   Object.freeze({id:'native-capabilities',source:'core/native-capabilities.ts',stem:'sd.native-capabilities'}),
-  Object.freeze({id:'startup',registryId:'startup-lifecycle',source:'core/startup.js',stem:'sd.startup'})
+  Object.freeze({id:'startup',registryId:'startup-lifecycle',source:'core/startup.ts',stem:'sd.startup'}),
+  Object.freeze({id:'startup-host',source:'core/startup-host.ts',stem:'sd.startup-host'})
 ]);
 
 // Direct runtime dependencies after host composition. The manifest order is a
@@ -123,7 +124,8 @@ export const runtimeDependencies=Object.freeze({
   'backup-recovery-host':Object.freeze(['backup','managed-recovery','device-backup']),
   'pwa-lifecycle':Object.freeze([]),
   'native-capabilities':Object.freeze([]),
-  startup:Object.freeze(['library','backup','pomodoro','plan','repositories','review','session-lifecycle','timer-engine','timer-state'])
+  startup:Object.freeze(['library','backup','pomodoro','plan','repositories','review','session-lifecycle','timer-engine','timer-state']),
+  'startup-host':Object.freeze([])
 });
 
 export const trustedExternalModuleIds=Object.freeze(['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
