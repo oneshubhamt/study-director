@@ -102,6 +102,7 @@ export const runtimeDependencies=Object.freeze({
   'practice-pacer':Object.freeze(['domain','notice-coordinator','repositories','timer-state']),
   'timer-engine':Object.freeze(['domain','notice-coordinator','pomodoro','practice-pacer','repositories','timer-state']),
   'execution-host':Object.freeze(['pomodoro','practice-pacer','timer-engine','timer-state']),
+  'session-host':Object.freeze([]),
   'plan-host':Object.freeze([]),
   plan:Object.freeze(['domain','notice-coordinator','repositories','session-lifecycle','timer-engine','timer-state']),
   review:Object.freeze(['domain','persistence','record-codecs','plan','repositories','session-lifecycle','timer-engine','timer-state']),
