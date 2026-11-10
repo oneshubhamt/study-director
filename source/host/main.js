@@ -4705,8 +4705,11 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze({
 // A deliberate profile reload must not outrun writes owned by the current
 // profile. Page-exit flushing remains a last safety net, not the commit gate.
 async function settleCurrentProfileWriters(){
-  if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
+  if(!AppOwnership.canMutate())throw new Error('Study Director does not currently have write control.');
+  // A mutation already owned by this tab is allowed to finish; only after it
+  // settles do we require the ordinary unblocked write state.
   await AppMutationCoordinator.settled();
+  if(!appCanMutate())throw new Error('Study Director could not reach a safe write state.');
   if(await Promise.resolve(PlanDraftEditor.flush({strictDurability:true}))===false)throw new Error('The current Plan draft could not be saved.');
   await PlanData.settled();
   // This existing writer barrier closes/settles rich-text and Diary edits,
