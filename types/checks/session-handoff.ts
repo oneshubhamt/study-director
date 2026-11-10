@@ -7,6 +7,7 @@ const controller=handoff.createController(input);
 controller.runsElsewhere(null);
 controller.fromElsewhere(null);
 controller.snapshotForWrite();
+void controller.prefetchSource();
 void controller.checkClaim();
 void controller.wakeClaim();
 void controller.transferHere(null,{onStep:()=>{}});

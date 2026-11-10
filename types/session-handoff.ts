@@ -126,6 +126,7 @@ export interface SessionHandoffController{
   frozen():boolean;
   status():SessionHandoffStatus;
   snapshotForWrite():SessionSnapshot|null;
+  prefetchSource():Promise<SessionHandoffSource|null>;
   checkClaim():Promise<boolean>;
   wakeClaim(slackMs?:number):Promise<boolean>|false;
   transferHere(session:unknown,options?:SessionHandoffTransferOptions):Promise<Readonly<SessionHandoffTransferResult>>;

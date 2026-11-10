@@ -51,7 +51,10 @@ jobs:
           tests/integration/exports/scratch-gc.mjs
           tests/integration/app/recovery-timer-snapshot.mjs
           tests/integration/app/session-lifecycle-module.mjs
+          tests/unit/app/ownership.mjs
+          tests/integration/app/ownership-hydration-fail-closed.mjs
           tests/integration/app/session-handoff-runtime.mjs
+          tests/integration/app/session-claim-flush-safety.mjs
           tests/integration/storage/strict-durability-boundaries.mjs
           tests/architecture/app/runtime-boundaries.mjs
           tests/architecture/storage/background-work-contract.mjs
@@ -65,3 +68,16 @@ jobs:
         run: node build/verify-build.mjs
       - name: Verify generated syntax
         run: node tests/architecture/build/generated-syntax-check.mjs
+      - name: Locate Chromium for P5.4C browser QA
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: P5.4C browser QA
+        env:
+          BROWSER_TEST_JOBS: 1
+        run: |
+          node tests/browser/storage/multi-tab.mjs
+          node tests/browser/backup/session-handoff-journeys.mjs
+          node tests/browser/backup/restore-session-safety.mjs

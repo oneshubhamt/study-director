@@ -91,6 +91,13 @@ function makeHarness(options={}){
   return {controller,calls,strictQueue,setNow:value=>{now=value;},setClaim:value=>{claim=value;},setCurrent:value=>{current=structuredClone(value);},setSource:value=>{source=structuredClone(value);},setTasks:value=>{tasks=value;},current:()=>structuredClone(current),claims:()=>claimWrites,setReleaseWorks:value=>{releaseWorks=value;}};
 }
 
+// Continue Here prefetch uses the same provider boundary and stays read-only.
+{
+  const t=makeHarness({claim:null});
+  const source=await t.controller.prefetchSource();
+  assert.equal(source.status,'completed');assert.equal(t.claims(),0);
+}
+
 // Claim polling cadence is owned by the controller, not by host/provider timers.
 {
   const t=makeHarness({claim:null});

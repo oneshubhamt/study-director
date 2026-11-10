@@ -71,6 +71,11 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
     const practice=current.snapshot.practice;
     return freeze({...recent,timerRuntime:current.snapshot.timerRuntime,...(practice===undefined?{}:{practice})});
   }
+  async function prefetchSource():Promise<SessionHandoffSource|null>{
+    if(!provider.connected(configuration.providerId)||!authority.online())return null;
+    try{return await provider.readHandoffSource(configuration.providerId);}
+    catch(error){presentation.capture('session.handoff-prefetch',error,'warn');return null;}
+  }
   async function verifyFrozenClaim(){
     const current=claimFreeze;
     try{
@@ -255,7 +260,7 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
   }
 
   return freeze({
-    format:'study-director.session-handoff',contractVersion:1,runsElsewhere,fromElsewhere,frozen,status,snapshotForWrite,
+    format:'study-director.session-handoff',contractVersion:1,runsElsewhere,fromElsewhere,frozen,status,snapshotForWrite,prefetchSource,
     checkClaim,wakeClaim,transferHere,yieldLocal
   });
   function frozen(){return !!claimFreeze;}

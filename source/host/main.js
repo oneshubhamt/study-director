@@ -2750,7 +2750,7 @@ async function continueSessionHere(){
   NoticeCoordinator.resolveEvent('session','session-handoff');
   setSessionHandoff('Checking today’s session…');
   try{
-    const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
+    const loaded=await ActiveSessionRuntime.load(),session=loaded&&loaded.value||null;
     if(!session){setSessionPanelMode('none');return false;}
     // Classify the date before any today-only continuation, restoration or
     // ownership operation.
@@ -2762,7 +2762,7 @@ async function continueSessionHere(){
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     // Drive is read while the person confirms, so pressing Continue here
     // waits only on the claim when Drive has not moved on. Nothing is written.
-    const preread=BackupProviderRuntime.readSessionHandoffSource('google-drive').catch(()=>null);
+    const preread=SessionHandoffRuntime?.prefetchSource()||Promise.resolve(null);
     if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
     if(!appCanMutate())return false;
     // From here Execute shows the session moving here; its timer starts only
@@ -2782,7 +2782,7 @@ async function continueSessionHere(){
     // later claim fence rejected the takeover. Re-project from canonical
     // storage; never redraw the stale object captured before Continue Here.
     try{
-      const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value||null;
+      const loaded=await ActiveSessionRuntime.load(),current=loaded&&loaded.value||null;
       if(!current)setSessionPanelMode('none');
       else if(isPreviousActiveSessionRecord(current))setSessionPanelMode('previous',current);
       else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
