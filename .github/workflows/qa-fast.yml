@@ -78,6 +78,9 @@ jobs:
         env:
           BROWSER_TEST_JOBS: 1
         run: |
-          node tests/browser/storage/multi-tab.mjs
+          for run in 1 2 3 4 5; do
+            echo "multi-tab isolated reliability run $run/5"
+            node tests/browser/storage/multi-tab.mjs
+          done
           node tests/browser/backup/session-handoff-journeys.mjs
           node tests/browser/backup/restore-session-safety.mjs
