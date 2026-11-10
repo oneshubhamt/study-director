@@ -1,6 +1,6 @@
 # Background jobs
 
-Current feature behavior on `TS-Conversion`, reconciled with production intake `2638619`. [Data policy](DATA-CONTRACTS.md) requires current canonical formats only; [the execution record](../TS-CONVERSION-EXECUTION.md) owns implementation and verification status.
+Current feature behavior on `ts-exp` (P5.1 baseline `de4872a`), reconciled with production intake `2638619`. [Data policy](DATA-CONTRACTS.md) requires current canonical formats only; [the execution record](../TS-CONVERSION-EXECUTION.md) owns implementation and verification status.
 
 Everything that runs without the person asking: automatic backups and sync, upkeep, cleanup, integrity checks, workers and diagnostics. What each backup operation does is in [backup-and-sync.md](BACKUP-ENGINE.md).
 

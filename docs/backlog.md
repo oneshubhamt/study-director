@@ -1,6 +1,6 @@
 # Backlog — incidental context, not the conversion schedule
 
-**TypeScript conversion remains the assigned work. Do not hunt these bugs.** If a conversion pass exposes an evident cause and a supported fix, address it with relevant regression checks and record the result under its existing ID. Otherwise leave it parked. Reports and theories below have not been re-investigated on `TS-Conversion`; imported “fixed” claims are historical evidence, not new certification.
+**TypeScript conversion remains the assigned work. Do not hunt these bugs.** If a conversion pass exposes an evident cause and a supported fix, address it with relevant regression checks and record the result under its existing ID. Otherwise leave it parked. Reports and theories below have not been re-investigated on this conversion branch; imported “fixed” claims are historical evidence, not new certification.
 
 Sources: [previous production backlog preserved at `b4e4cfd`](https://github.com/oneshubhamt/study-director/blob/b4e4cfd716626c55fd713f3565837ac7f9e70a95/docs/backlog.md) and [Background Refactor backlog at `a0ff20c`](https://github.com/oneshubhamt/study-director/blob/a0ff20c0649ba5c6e20a4aab53782304a9d72210/docs/backlog.md), branch `refactor/background-coordination`. These retain detailed reports, diagnostics, hypotheses and earlier decisions. Only the backlog document was imported; no branch implementation or bug-hunt schedule was adopted. Item numbers below retain those sources' IDs. [The execution record](../TS-CONVERSION-EXECUTION.md) owns current work.
 

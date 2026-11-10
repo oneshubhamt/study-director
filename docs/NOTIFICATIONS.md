@@ -1,6 +1,6 @@
 # Notifications and sounds
 
-Current feature behavior on `TS-Conversion`, reconciled with production intake `2638619`. [Data policy](DATA-CONTRACTS.md) requires current canonical formats only; [the execution record](../TS-CONVERSION-EXECUTION.md) owns implementation and verification status.
+Current feature behavior on `ts-exp` (P5.1 baseline `de4872a`), reconciled with production intake `2638619`. [Data policy](DATA-CONTRACTS.md) requires current canonical formats only; [the execution record](../TS-CONVERSION-EXECUTION.md) owns implementation and verification status.
 
 Pop-ups, banners, the Recent list, app sounds and device notifications: who owns them, how each kind behaves, and every producer.
 

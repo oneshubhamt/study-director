@@ -1,6 +1,6 @@
 # Study Director — current architecture
 
-This is the current source/runtime map for `TS-Conversion`. [Product purpose](PRODUCT.md), [data contracts](DATA-CONTRACTS.md) and [conversion status](../TS-CONVERSION-EXECUTION.md) are separate. The current source map incorporates production intake `2638619`; targeted results are recorded in the execution record. It is not whole-app or device certification.
+This is the current source/runtime map for `ts-exp` (P5.1 baseline `de4872a`). [Product purpose](PRODUCT.md), [data contracts](DATA-CONTRACTS.md) and [conversion status](../TS-CONVERSION-EXECUTION.md) are separate. The current source map incorporates production intake `2638619`; targeted results are recorded in the execution record. It is not whole-app or device certification.
 
 ## Composition and source ownership
 

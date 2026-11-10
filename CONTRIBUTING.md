@@ -6,7 +6,7 @@ This is a private, source-available project. Contributions require the copyright
 
 Use the pinned Node.js 26.12.1 and npm 12.2.1 toolchain, plus Python 3. Run `npm ci --ignore-scripts` and `npm run check:types` for typed changes; see [TypeScript tooling](docs/TYPESCRIPT.md). See the [README](README.md) for building and running the app. Source belongs at the repository root; generated `dist`, installed dependencies, personal backups and QA output do not belong in commits.
 
-For the TypeScript program, work only on `TS-Conversion` and follow the [execution control record](TS-CONVERSION-EXECUTION.md) and [documentation map](docs/README.md). Keep the persistent scratchpad current during each subpass; record source reconciliation and actual QA before closure. Do not create another branch or a PR unless the owner asks. Outside that program, use a separate branch for coherent changes and obtain the owner’s instructions before opening a PR. Describe the resulting behaviour and the checks actually run. Keep runtime changes separate from unrelated formatting or repository maintenance.
+For the TypeScript program, work only on `ts-exp` and follow [AGENTS](AGENTS.md), the [execution control record](TS-CONVERSION-EXECUTION.md) and [documentation map](docs/README.md). Keep the persistent scratchpad current during each pass; record source reconciliation and actual QA before closure. Do not create another branch or a PR unless the owner asks. Outside that program, use a separate branch for coherent changes and obtain the owner’s instructions before opening a PR. Describe the resulting behaviour and the checks actually run. Keep runtime changes separate from unrelated formatting or repository maintenance.
 
 ## Changes and verification
 

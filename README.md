@@ -6,14 +6,14 @@ Start with the [product guide](docs/PRODUCT.md) for the app's purpose and workfl
 
 ## Working on this branch
 
-All TypeScript conversion work stays on **`TS-Conversion`**. Read [AGENTS.md](AGENTS.md), the [execution control record](TS-CONVERSION-EXECUTION.md) and the assigned [Phase 5 objectives](docs/typescript/PHASE-5.md) before implementation. The control record owns current status, evidence and the durable scratchpad; history is preserved separately. Current canonical formats are supported; historical data/topology migration code is retired on this branch.
+Continue TypeScript conversion on **`ts-exp`**, branched from completed P5.1 at `de4872a`. Read [AGENTS.md](AGENTS.md), the [execution control record](TS-CONVERSION-EXECUTION.md) and the assigned [Phase 5 objectives](docs/typescript/PHASE-5.md) before implementation. The control record owns current status, evidence and the durable scratchpad; history is preserved separately. Current canonical formats are supported; historical data/topology migration code is retired on this branch.
 
 ## Build and run locally
 
 Use the pinned Node.js **26.12.1**, npm **12.2.1** and lockfile. Python 3 is used by the local hosting launcher. [TypeScript tooling](docs/TYPESCRIPT.md) describes the compiler/linter and environment boundaries.
 
 ```bash
-git clone --branch TS-Conversion https://github.com/oneshubhamt/study-director.git
+git clone --branch ts-exp https://github.com/oneshubhamt/study-director.git
 cd study-director
 npm ci --ignore-scripts
 npm run check:types

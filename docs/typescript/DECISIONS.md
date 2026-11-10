@@ -1,10 +1,10 @@
 # TypeScript program — decisions and process provenance
 
-These policies apply to `TS-Conversion`. Explicit owner instructions control intentional changes; source and QA determine whether implementation satisfies them. Earlier chat proposals and archived completion labels do not override current instructions. Do not change a policy merely to close a finding.
+These policies apply to `ts-exp`, continuing from the P5.1 baseline on `TS-Conversion`. Explicit owner instructions control intentional changes; source and QA determine whether implementation satisfies them. Earlier chat proposals and archived completion labels do not override current instructions. Do not change a policy merely to close a finding.
 
 | ID | Authority | Decision / consequence |
 | --- | --- | --- |
-| D-01 | Owner, branch instructions | Work and push only on `TS-Conversion`. Read/port worthwhile main changes with provenance; do not modify main, rewrite shared history or infer permission to merge/deploy |
+| D-01 | Owner, branch instructions | Work and push only on `ts-exp`; preserve `TS-Conversion` as the P5.1 baseline. Read/port worthwhile main changes with provenance; do not modify main, rewrite shared history or infer permission to merge/deploy |
 | D-02 | Owner, vendor boundary | `vendor/wordgard/**` stays byte-for-byte unchanged. Our editor/adapters may change; generated bundles use the build pipeline. Vendor declarations are not permission to change upstream source |
 | D-03 | Owner, canonical-only preparation | The prior upgrade path existed; assume users completed it. Support the current canonical topology only. Keep runtime validation, unsupported-input rejection, journals, rollback, integrity and current recovery. Do not reintroduce historical migrations |
 | D-04 | Owner, preservation goal | Preserve application behavior, data, timing, ownership, UI workflows and recovery. Useful improvements are allowed, but must have explicit rationale and regression evidence. Added capabilities do not compensate for lost behavior |
@@ -17,6 +17,7 @@ These policies apply to `TS-Conversion`. Explicit owner instructions control int
 | D-11 | Owner, expanded 2026-10-30 scope | Clean and consolidate overall application documentation, including durable product purpose/design, current contracts, implementation guidance and history. Preserve prior evidence; correct factual descriptions against source without claiming a fresh certification |
 | D-12 | Owner, 2026-11-09 main intake | Preserve the TS programme documentation separately, including an exact pre-intake snapshot; incorporate worthwhile production product docs, tests, journeys and scripts. Current application behavior must retain production parity while converted implementations retain strict checks |
 | D-13 | Owner, 2026-11-09 discipline refinement | Primary: complete strict TS conversion. Secondary: fix evident bugs and improve affected code where justified. Tertiary: additional test improvements; required validation remains part of completion. Keep docs lean, use Git history instead of duplicating old logs, and do not investigate backlog bugs unless encountered incidentally during a conversion pass |
+| D-14 | Owner, 2026-11-10 delegation | GPT 5.6 Sol High is the sole implementor on `ts-exp`; the planning assistant supports design/process and independently audits after Phase 5 overall. No per-pass external review gate. [AGENTS](../../AGENTS.md) owns the operating procedure |
 
 Current canonical formats/invariants remain defined by source contracts and the [current architecture](../ARCHITECTURE.md); this register does not duplicate their version inventory. [TypeScript tooling](../TYPESCRIPT.md) owns compiler/build details. [Verification](../VERIFICATION.md) owns QA commands.
 

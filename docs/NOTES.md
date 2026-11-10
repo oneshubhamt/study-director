@@ -1,6 +1,6 @@
 # Notes
 
-Current feature behavior on `TS-Conversion`, reconciled with production intake `2638619`. [Data policy](DATA-CONTRACTS.md) requires current canonical formats only; [the execution record](../TS-CONVERSION-EXECUTION.md) owns implementation and verification status.
+Current feature behavior on `ts-exp` (P5.1 baseline `de4872a`), reconciled with production intake `2638619`. [Data policy](DATA-CONTRACTS.md) requires current canonical formats only; [the execution record](../TS-CONVERSION-EXECUTION.md) owns implementation and verification status.
 
 Notes are a first-class part of Study Director alongside the timer. This covers what notes do, the decisions behind them, and how they are stored, saved and edited. The Library layout around them is in [ui.md](areas/ui.md).
 

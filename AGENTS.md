@@ -1,6 +1,14 @@
 # Instructions for AI agents
 
-Study Director is a local-first study planning PWA. The owner's current instructions override repository guidance. Work only on `TS-Conversion` for this programme.
+Study Director is a local-first study planning PWA. The owner's current instructions override repository guidance. Continue this programme only on `ts-exp`; preserve `TS-Conversion` and main.
+
+## Delegated implementation
+
+The owner selected **GPT 5.6 Sol High as the sole implementor**. Do not delegate implementation to other models or coding subagents. The planning assistant supports design/process and performs an independent audit **after Phase 5 overall**, not after individual passes. The implementor owns local planning, objective reconciliation, targeted QA and corrections; no planner sign-off is needed between passes.
+
+Use one coherent, end-to-end outcome per bounded pass, including owned callers and host wiring. The phase register is a roadmap, not a fixed session count. Set the next pass's scope in the existing worklog before editing; adjust boundaries when dependencies justify it. Avoid both whole-host rewrites and tiny file-only passes. On “continue”, finish the open pass; if it is closed, take the next bounded outcome. Complete ordinary fixes and checks without asking for permission again. Ask only when missing information or a genuinely consequential scope/design choice cannot be resolved from the instructions and source.
+
+After P5.13, reconcile all Phase 5 objectives and leave a concise audit handoff in the execution record: baseline and final commit, intentional behavior changes, verification and unresolved limits. Pause before Phase 6 for the owner's independent-audit request. `VERIFIED — TARGETED` means implementor verification, not independent audit or full certification.
 
 ## Priorities and boundaries
 

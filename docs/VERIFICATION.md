@@ -6,7 +6,7 @@ This document owns check selection and evidence policy. The [test guide](../test
 
 Inspect source/consumers → record scope/invariants → implement → reconcile every objective against source → run targeted QA → record evidence and handoff. Maintain the durable worklog throughout, with a separate temporary pad outside the repo. Distinguish implementation, verification and full certification.
 
-On `TS-Conversion`, use targeted affected-surface QA during passes; full correctness/coverage/mutation/browser/release/performance certification remains Phase 7 unless the owner changes scope. Add meaningful positive, malformed-input, failure and adjacent-flow regressions where existing tests miss a changed contract. Mechanical/Markdown changes do not require tests that merely mirror the edit.
+On `ts-exp`, the implementor performs targeted affected-surface QA during passes. Independent review happens after Phase 5 overall; full correctness/coverage/mutation/browser/release/performance certification remains Phase 7 unless the owner changes scope. Add meaningful positive, malformed-input, failure and adjacent-flow regressions where existing tests miss a changed contract. Mechanical/Markdown changes do not require tests that merely mirror the edit.
 
 | Changed boundary | Select checks for |
 | --- | --- |
@@ -48,6 +48,8 @@ npm run test:release:deployment
 ```
 
 Use `npm run build` when authored bundle inputs changed and must be regenerated. Never hand-edit `dist` or checked-in generated bundles. Staging prepares a local Firebase project; it does not deploy it.
+
+Before full-app browser QA, rebuild the current source and verify the generated output. `startReleaseServer()` serves existing `dist`; it does not rebuild. A pass against stale output is not evidence for the current implementation. Verify Node/npm/compiler versions against the repository pins, since a prepared cloud workspace's default shell may select a different installation.
 
 ## Final certification
 

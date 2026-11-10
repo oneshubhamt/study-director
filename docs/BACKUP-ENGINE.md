@@ -1,6 +1,6 @@
 # Backup and sync
 
-Current feature behavior on `TS-Conversion`, reconciled with production intake `2638619`. [Data policy](DATA-CONTRACTS.md) requires current canonical formats only; [the execution record](../TS-CONVERSION-EXECUTION.md) owns implementation and verification status.
+Current feature behavior on `ts-exp` (P5.1 baseline `de4872a`), reconciled with production intake `2638619`. [Data policy](DATA-CONTRACTS.md) requires current canonical formats only; [the execution record](../TS-CONVERSION-EXECUTION.md) owns implementation and verification status.
 
 Automatic backups to the Device Folder and Google Drive, Version History and restore, standalone backup files, and sync between devices through Drive. Device Folder and Google Drive are independent destinations served by one engine. They share the repository format (immutable versions, content-addressed objects, commit markers and coordination files) and the same safety rules, but each destination owns its own history and transport state.
 
