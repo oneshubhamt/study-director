@@ -54,9 +54,18 @@ jobs:
           tests/architecture/test-suite/suite-governance.mjs
           tests/architecture/test-suite/suite-structure.mjs
           tests/architecture/test-suite/suite-policy.mjs
+          tests/unit/storage/profiles.mjs
+          tests/unit/storage/profile-scope.mjs
+          tests/integration/storage/capacity-profiles.mjs
+          tests/integration/backup/drive-profile-binding.mjs
       - name: Source build
         run: node build/build.mjs
       - name: Verify generated build
         run: node build/verify-build.mjs
       - name: Verify generated syntax
         run: node tests/architecture/build/generated-syntax-check.mjs
+      - name: P5.2 profile browser journeys
+        run: |
+          node tests/browser/app/core-flow.mjs
+          node tests/browser/ui/profile-panel.mjs
+          node tests/browser/backup/sync-and-profiles.mjs
