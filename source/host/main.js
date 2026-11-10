@@ -806,12 +806,7 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze({
     peerStorageReset:detectedAt=>{void handleBrowserStorageReset({detectedAt,peer:true}).catch(error=>AppDiagnostics.capture('storage-reset.peer',error,'error'));},
     invalidate:context=>SessionLifecycle.invalidate('primary-tab-loss',{...context,reconcile:false}),
     flush:()=>StartupLifecycle.flush(),
-    settled:async()=>{await PlanData.settled();return Promise.allSettled([
-      AppData.activeSession.settled(),
-      AppData.notes.flush(),
-      AppData.deletionRecovery.flush(),
-      AppMutationCoordinator?AppMutationCoordinator.settled():Promise.resolve()
-    ]);}
+    settled:()=>settleCurrentProfileWriters()
   })
 }));
 const appCanMutate=()=>AppOwnership.canMutate()&&!(AppMutationCoordinator&&AppMutationCoordinator.writesBlocked());
@@ -4706,18 +4701,21 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze({
 
 // A deliberate profile reload must not outrun writes owned by the current
 // profile. Page-exit flushing remains a last safety net, not the commit gate.
+async function settleCurrentProfileWriters(){
+  if(!appCanMutate())throw new Error('Study Director does not currently have write control.');
+  await AppMutationCoordinator.settled();
+  if(await Promise.resolve(PlanDraftEditor.flush({strictDurability:true}))===false)throw new Error('The current Plan draft could not be saved.');
+  await PlanData.settled();
+  // This existing writer barrier closes/settles rich-text and Diary edits,
+  // Notes, the current reflection and Active Session.
+  await settleAttachmentWriters();
+  if(await AppData.deletionRecovery.flush()!==true)throw new Error('Pending deletions could not be saved.');
+  await AppMutationCoordinator.settled();
+  return true;
+}
 async function settleCurrentProfileBeforeReload(){
-  if(!appCanMutate())return false;
-  try{
-    await AppMutationCoordinator.settled();
-    if(await Promise.resolve(PlanDraftEditor.flush({strictDurability:true}))===false)throw new Error('The current Plan draft could not be saved.');
-    await PlanData.settled();
-    // This existing writer barrier closes/settles rich-text and Diary edits,
-    // Notes, the current reflection and Active Session before the profile reload.
-    await settleAttachmentWriters();
-    if(await AppData.deletionRecovery.flush()!==true)throw new Error('Pending deletions could not be saved.');
-    return true;
-  }catch(error){
+  try{return await settleCurrentProfileWriters();}
+  catch(error){
     AppDiagnostics.capture('profiles.pre-reload-settlement',error,'error');
     setPlanStatus('Profile change stopped because current work could not be safely saved. Keep this tab open and retry after storage recovers.',false);
     return false;

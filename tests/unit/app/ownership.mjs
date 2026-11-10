@@ -32,7 +32,7 @@ const ownershipInput=Object.freeze({
   diagnostics:Object.freeze({capture:()=>{},guard:(_scope,fn)=>fn()}),
   hooks:Object.freeze({
     render:()=>{ownershipHookCalls.render+=1;},refreshStorage:()=>{ownershipHookCalls.refreshStorage+=1;},stopExecution:()=>{},isInitialized:()=>false,hydrate:async()=>{},finalizeHydration:async()=>{},resume:()=>{},refreshCore:()=>{},
-    scheduleMaintenance:()=>{},practiceRender:()=>{ownershipHookCalls.practiceRender+=1;},blocked:()=>{},invalidate:()=>{},flush:async()=>{},settled:async()=>{}
+    scheduleMaintenance:()=>{},practiceRender:()=>{ownershipHookCalls.practiceRender+=1;},blocked:()=>{},invalidate:()=>{},flush:async()=>{},settled:async()=>{if(ownershipSettleFailure)throw new Error('durability barrier failed');}
   })
 });
 const ownership=ownershipModule.createOwnershipController(ownershipInput);
@@ -51,6 +51,14 @@ ownerStore.set('owner',{...ownerStore.get('owner'),claimId:'other-claim'});
 assert.throws(()=>ownership.assertWriteToken(writeToken,'tampered commit'),error=>ownershipModule.isOwnershipLostError(error));
 assert.equal(ownership.format,'study-director.app-ownership-controller');
 assert.equal(ownership.status().format,'study-director.app-ownership-status');
+
+// A requested cross-tab handoff must fail closed if current-profile writers
+// cannot settle. A page exit may still release because the page is departing.
+ownershipSettleFailure=true;
+assert.equal(await ownership.flushAndRelease('takeover-regression'),false);
+assert.equal(ownership.canMutate(),true,'failed deliberate handoff keeps the old primary authoritative');
+assert.ok(ownerStore.get('owner'),'failed deliberate handoff keeps its durable ownership lease');
+ownershipSettleFailure=false;
 
 // Unsuccessful secondary probes must preserve the authority epoch. Actual
 // acquisition and release must still invalidate reservations and write tokens.

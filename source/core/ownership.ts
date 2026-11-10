@@ -228,8 +228,15 @@ const createModule=()=>{
     async function flushAndRelease(requestId:unknown=''){
       if(!canMutate())return false;
       diagnostics.guard('ownership.release-flush',hooks.flush);
-      try{await hooks.settled();}catch(error){diagnostics.capture('ownership.release-write-wait',error,'error');}
-      transition(OWNERSHIP_STATES.RELEASING,'handoff');
+      try{await hooks.settled();}
+      catch(error){
+        diagnostics.capture('ownership.release-write-wait',error,'error');
+        // A deliberate takeover is optional: if current work is not durable,
+        // retain authority here and let the requesting tab remain secondary.
+        // Page exit cannot safely retain a lease owned by a departing page.
+        if(requestId)return false;
+      }
+      transition(OWNERSHIP_STATES.RELEASING,requestId?'handoff':'page exit');
       release();setPrimary(false);
       if(requestId)post({type:'owner-takeover-ready',requestId});
       return true;
