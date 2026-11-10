@@ -163,6 +163,9 @@
     "source/host/profile-scope.ts",
     "types/profiles.ts",
     "types/profile-scope.ts",
-    "types/checks/profiles.ts"
+    "types/checks/profiles.ts",
+    "source/core/data-bootstrap-host.ts",
+    "types/data-bootstrap-host.ts",
+    "types/checks/data-bootstrap-host.ts"
   ]
 }
