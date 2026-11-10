@@ -348,7 +348,7 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
     format:'study-director.completion-evidence' as const,contractVersion:1 as const,
     setCompletionSource,explicitCompletionSource,plannedSecondsForCompletion,unitCompletionForTask,progressInputState,
     syncProgressInputsToState,clearManualCompletionOverride,focusCompletionForTask,liveTaskOutcome,resolveTaskCompletion,
-    exactTaskCompletionPercent,storeResolvedCompletion,setTaskDoneState,setTaskSkippedState
+    exactTaskCompletionPercent,storeResolvedCompletion,setCompletionState,setTaskDoneState,setTaskSkippedState
   });
 }
 function createRuntime(input:Readonly<ExecutionHostInput>){
@@ -444,7 +444,7 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
     clearManualCompletionOverride:CompletionEvidence.clearManualCompletionOverride,focusCompletionForTask:CompletionEvidence.focusCompletionForTask,
     liveTaskOutcome:CompletionEvidence.liveTaskOutcome,resolveTaskCompletion:CompletionEvidence.resolveTaskCompletion,
     exactTaskCompletionPercent:CompletionEvidence.exactTaskCompletionPercent,storeResolvedCompletion:CompletionEvidence.storeResolvedCompletion,
-    setTaskDoneState:CompletionEvidence.setTaskDoneState,setTaskSkippedState:CompletionEvidence.setTaskSkippedState,
+    setCompletionState:CompletionEvidence.setCompletionState,setTaskDoneState:CompletionEvidence.setTaskDoneState,setTaskSkippedState:CompletionEvidence.setTaskSkippedState,
     rebuildOriginalSchedule:ExecutionSchedule.rebuildOriginalSchedule,resetScheduleLayers:ExecutionSchedule.resetScheduleLayers,
     originalStartMin:ExecutionSchedule.originalStartMin,originalEndMin:ExecutionSchedule.originalEndMin,
     adjustedStartMin:ExecutionSchedule.adjustedStartMin,adjustedEndMin:ExecutionSchedule.adjustedEndMin,
