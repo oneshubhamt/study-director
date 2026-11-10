@@ -224,7 +224,7 @@ function recordCurrentActiveToTask(idx:number|null|undefined,status='partial'){
 function addPauseToActual(idx:number|null|undefined,sec:number,meta:LivePauseMeta){
   if(idx===null||idx===undefined||sec<=0)return false;
   const seconds=Math.max(1,Math.round(sec)),endedAt=meta.endedAt||nowIso(),endedMs=Date.parse(endedAt);
-  const startedAt=meta.startedAt||new Date(Number.isFinite(endedMs)?endedMs-seconds*1000:Date.now()-seconds*1000).toISOString();
+  const startedAt=meta.startedAt||new Date(Number.isFinite(endedMs)?endedMs-seconds*1000:nowMs()-seconds*1000).toISOString();
   const rawType=clampText(meta.type||'manual',32),type=['pomodoro','manual','inactive-gap'].includes(rawType)?rawType:'manual';
   const event:PauseEvent={startedAt,endedAt,seconds,type};
   const planned=Number(meta.plannedSeconds);
