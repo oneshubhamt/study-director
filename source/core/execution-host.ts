@@ -304,7 +304,8 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
     const next:{done?:number;total?:number}={};
     if(state?.hasDone&&state.done!==null)next.done=state.done;
     if(state?.hasTotal&&state.total!==null)next.total=state.total;
-    taskSessionState.setField(index,'notes',next);
+    if(Object.keys(next).length)taskSessionState.setField(index,'notes',next);
+    else taskSessionState.deleteField(index,'notes');
     const inputChanged=next.done!==prevDone||next.total!==prevTotal;
     if(state&&state.pct!==null){
       setCompletionState(index,state.pct,sources.UNITS);
