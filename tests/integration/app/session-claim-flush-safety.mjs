@@ -972,7 +972,7 @@ for(const [label,shared,snapshot] of [
 // deletion to ReviewSaveService, rather than separately writing a temporary
 // new owner session or resurrecting a stale suspended snapshot on failure.
 {
-  const src=productionFunction('async function saveDayRecord(){');
+  const src=productionFunction('async function saveDayRecordNow(){');
   for(const [hasTasks,success] of [[false,true],[false,false],[true,true],[true,false]]){
     const session={date:'2026-08-27',status:'suspended',snapshot:{token:'saved'}};
     const events=[],state={tasks:hasTasks?[{}]:[]};
@@ -991,7 +991,7 @@ for(const [label,shared,snapshot] of [
       updateSessionControls:()=>events.push('controls'),setStatus:()=>{},
       AppDiagnostics:{capture:()=>{}},TIMER_MODES:{DONE:'done'},Object
     });
-    vm.runInContext(src+'\nglobalThis.reviewSave=saveDayRecord;',context);
+    vm.runInContext(src+'\nglobalThis.reviewSave=saveDayRecordNow;',context);
     assert.equal(await context.reviewSave(),success,'suspended save outcome must match canonical finalization');
     assert.equal(events.includes('review-only'),!hasTasks,'only an unloaded suspended session requires review-only hydration');
     assert.deepEqual(events.filter(x=>x==='core'),['core']);

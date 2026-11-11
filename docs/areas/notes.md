@@ -135,6 +135,12 @@ Note saves run one batch at a time. A batch reads its expected revision only whe
 
 The IndexedDB owner counts a database recreated under an open page the moment it opens it, before any transaction on it runs. From then until every note this tab holds has been written back, a row that vanished without a deletion record is lost storage rather than a newer decision, and is rewritten from memory. Without that count, a vanished row is treated the same way only while the canonical mutation epoch is also missing: an exact Version Restore removes notes without deletion records, and the epoch is what stops a stale tab from bringing them back. A reload keeps notes that survive only in memory. If it cannot read that metadata, it stops and leaves memory unchanged instead of guessing.
 
+## Which editors are live
+
+One rich-text editor is live per visible note field: on a pane switch, and whenever a field is bound to another note (Execute's notes moving to the next block, a linked note opened), the visible field gets its editor at once (`RichTextRuntime.syncAll`). Other note fields show a read-only preview with an Edit button.
+
+A session lifecycle step (a sync bringing in the session or notes, a restore, a new day) keeps editors mounted. During the step they only refuse keystrokes, so the cursor stays. Afterwards each editor whose note and content are unchanged carries on; one whose note or content changed is rebuilt from what is stored (`holdForLifecycle`, `releaseAfterLifecycle`). Before 2026-11-11 every step closed every editor: the editor vanished mid-typing and the raw stored text showed until it came back (backlog item 19). When an editor is rebuilt, the field keeps the stored content: the old editor's text must not stay behind in the field, or the next save would store it over newer text.
+
 ## The editor (Wordgard)
 
 Vendored Wordgard (`vendor/wordgard`) is the exact upstream source. Study Director's runtime behaviour on top of it (the shared Trusted Types parser and cut handling) is reached only through `rich-text/wordgard-adapter.ts`. The few build-time rewrites Wordgard offers no extension point for (`build/wordgard-source-patches.mjs`) each name the upstream text they replace, so a new Wordgard version builds as is unless that text moved; `rich-text/wordgard-patches/README.md` lists them. Wordgard ships as its own readable module (`source/external/wordgard.js`, on `globalThis.StudyDirectorWordgard`) that Study Director's editor (`source/external/rich-text.js`) reads; the minified deployment ships one lean build of both instead.

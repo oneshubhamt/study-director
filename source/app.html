@@ -6295,9 +6295,9 @@ function taskNoteEditorIdentity(idx){
     noteRevision:String(AppData.notes.get(areaKey)?.updatedAt||'')
   });
 }
-function clearTaskNoteEditorBinding(field){
+function clearTaskNoteEditorBinding(field,{keepEditor=false}={}){
   if(!field)return false;
-  richTextCloseField(field);
+  if(!keepEditor)richTextCloseField(field);
   ['noteIdx','areaKey','areaLabel','taskId','scheduleRevision','lifecycleRevision','noteRevision','noteBinding','noteBindingState','noteScope','richSyncState','richSyncStatus'].forEach(key=>delete field.dataset[key]);
   field.removeAttribute('aria-label');
   return true;
@@ -6322,7 +6322,9 @@ function bindTaskNoteEditor(field,idx,source='field'){
   field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
   field.setAttribute('aria-label',`Note for ${identity.areaLabel}`);
   field.maxLength=APP_LIMITS.maxNoteChars;
-  queueMicrotask(()=>richTextSyncField(field));
+  // The visible note gets its editor at once, as on a pane switch: after a
+  // block change only a read-only preview was left (backlog item 19).
+  queueMicrotask(()=>richTextSyncAll());
   return identity;
 }
 function bindNoteEditor(field,areaKey,areaLabel,source='library'){
@@ -6331,7 +6333,10 @@ function bindNoteEditor(field,areaKey,areaLabel,source='library'){
   if(!safeKey){clearTaskNoteEditorBinding(field);return null;}
   const entry=AppData.notes.get(safeKey,areaLabel||displayAreaName(safeKey));
   const label=entry&&entry.label?entry.label:displayAreaName(areaLabel||safeKey);
-  clearTaskNoteEditorBinding(field);
+  // Another note: its editor goes. The same note, or a field a lifecycle step
+  // unbound, keeps it; the sync below judges it against what is stored.
+  const previous=normalizeAreaName(field.dataset.areaKey);
+  clearTaskNoteEditorBinding(field,{keepEditor:!previous||previous===safeKey});
   field.dataset.areaKey=safeKey;
   field.dataset.areaLabel=label;
   field.dataset.lifecycleRevision=String(SessionLifecycle.revision);
@@ -6343,7 +6348,7 @@ function bindNoteEditor(field,areaKey,areaLabel,source='library'){
   field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
   field.setAttribute('aria-label',`Note for ${label}`);
   field.maxLength=APP_LIMITS.maxNoteChars;
-  queueMicrotask(()=>richTextSyncField(field));
+  queueMicrotask(()=>richTextSyncAll());
   return Object.freeze({idx:null,areaKey:safeKey,areaLabel:label,taskId:'',scheduleRevision:null,noteRevision:String(entry&&entry.updatedAt||'')});
 }
 function taskNoteEditorIsVisible(field){
@@ -8571,7 +8576,7 @@ async function importNoteFiles(files,parent=''){
 }
 const RichTextRuntime=(()=>{
   const BACKGROUND_IDLE_DISPOSE_MS=90000;
-  let installed=false,sequence=0,observer=null,closingAll=false,mutationHold=0,mutationFocusState=null,lastActiveField=null,backgroundDisposeTimer=null;
+  let installed=false,sequence=0,observer=null,closingAll=false,mutationHold=0,mutationFocusState=null,lastActiveField=null,backgroundDisposeTimer=null,lifecycleHold=false;
   const mutationFields=new Map(),mutationSurfaces=new Map();
   const mounted=new Map(),pending=new Map();
   const previews=new WeakMap(),lastCanonical=new WeakMap(),mountErrors=new WeakMap();
@@ -8623,7 +8628,7 @@ const RichTextRuntime=(()=>{
     if(!(target instanceof HTMLElement)||target.disabled||target.inert)return false;
     target.focus({preventScroll:true});return document.activeElement===target;
   }
-  function mutationActive(){return mutationHold>0;}
+  function mutationActive(){return mutationHold>0||lifecycleHold;}
   function hidePreview(field){const preview=previews.get(field);if(preview){preview.shell.hidden=true;preview.body.replaceChildren();}}
   function clearPreview(field){hidePreview(field);if(field instanceof HTMLTextAreaElement)field.hidden=false;}
   function clearMountError(field){const known=mountErrors.get(field);if(known)known.remove();mountErrors.delete(field);if(field instanceof HTMLTextAreaElement)delete field.dataset.richMountFailed;}
@@ -8693,6 +8698,36 @@ const RichTextRuntime=(()=>{
     clearExternalConflict(field);
     return Object.freeze({status:'reload'});
   }
+  // A session lifecycle step (a sync bringing in the session or notes, a
+  // restore, a new day) may replace what an editor shows. Editors stay mounted
+  // through it and only refuse input, so the cursor stays; afterwards each one
+  // whose note and content are unchanged keeps going, and the others are
+  // rebuilt from what is stored. Closing every editor at each step made them
+  // vanish and show raw stored text while the person typed (backlog item 19).
+  // A flag, not a count: a superseded step never reaches its end.
+  function holdForLifecycle(){
+    flushEditors();cancelBackgroundDisposal();
+    sequence+=1;pending.clear();lifecycleHold=true;
+  }
+  function releaseAfterLifecycle(){
+    if(!lifecycleHold)return false;
+    lifecycleHold=false;
+    // A mount tried during the step marked fields read-only; undo it, as the
+    // end of quiesce does, unless a quiesce is still running.
+    if(mutationHold===0){restoreMutationFields();restoreMutationSurfaces();}
+    for(const [field,record] of [...mounted]){
+      // Identity and stored content only: the step's fields are still
+      // disabled here, and syncAll disposes an editor that cannot write.
+      const descriptor=field.isConnected?richTextDocumentFor(field,{requireVisible:false,editable:false}):null;
+      if(descriptor&&descriptor.documentId===record.documentId&&String(descriptor.initialValue||'')===record.localCanonical){
+        record.revision=fieldRichRevision(field);record.baselineCanonical=record.localCanonical;clearExternalConflict(field);clearPreview(field);
+      // The step already put the new content in the field; the old editor
+      // must not write its own back on its way out.
+      }else void dispose(field,{resync:false,keepValue:String(field.value||'')});
+    }
+    if(!mutationActive())queueMicrotask(()=>syncAll(document));
+    return true;
+  }
   function cancelBackgroundDisposal(){if(backgroundDisposeTimer){clearTimeout(backgroundDisposeTimer);backgroundDisposeTimer=null;}}
   function pickerLeaseActive(){return [...mounted.keys()].some(field=>field.dataset.richAssetPicker==='active');}
   async function disposeBackgroundIdleEditors(){
@@ -8716,7 +8751,9 @@ const RichTextRuntime=(()=>{
     if(event.kind===APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER||event.kind===APP_ACTIVATION_KINDS.DATE_ROLLOVER||event.kind===APP_ACTIVATION_KINDS.EXIT)cancelBackgroundDisposal();
   }
   function syncField(field){
-    if(!eligible(field))return false;
+    // During a lifecycle step nothing is rearranged: its release judges each
+    // editor against the new state, then syncs all.
+    if(lifecycleHold||!eligible(field))return false;
     const record=mounted.get(field);
     if(record){
       const descriptor=richTextDocumentFor(field,{requireVisible:false});
@@ -8725,7 +8762,10 @@ const RichTextRuntime=(()=>{
       if(currentRevision!==record.revision||canonical!==record.baselineCanonical){
         if(canonical===record.localCanonical){record.revision=currentRevision;record.baselineCanonical=canonical;clearExternalConflict(field);}
         else if(recordDirty(record)){markExternalConflict(field,record);clearPreview(field);return false;}
-        else{clearExternalConflict(field);void dispose(field,{resync:false}).then(()=>{if(field.isConnected&&!document.hidden)void activate(field);else syncField(field);});return true;}
+        // Changed elsewhere: rebuilt from what is stored. The old editor's
+        // text must not stay in the field on its way out, or the next save
+        // would store it over the newer text.
+        else{clearExternalConflict(field);void dispose(field,{resync:false,keepValue:canonical}).then(()=>{if(field.isConnected&&!document.hidden)void activate(field);else syncField(field);});return true;}
       }
       clearPreview(field);return false;
     }
@@ -8742,6 +8782,7 @@ const RichTextRuntime=(()=>{
     field.hidden=true;preview.shell.hidden=false;return true;
   }
   function syncAll(root=document){
+    if(lifecycleHold)return false;
     for(const [field,record] of mounted){const descriptor=richTextDocumentFor(field,{requireVisible:false}),visible=field.id==='daily-reflection'?!!field.closest('.pane.on'):taskNoteEditorIsVisible(field),pickerOpen=field.dataset.richAssetPicker==='active';if(!field.isConnected||!descriptor||descriptor.documentId!==record.documentId||(!document.hidden&&!visible&&!pickerOpen))void dispose(field,{resync:false});}
     const fields=[];
     if(root instanceof HTMLTextAreaElement&&eligible(root))fields.push(root);
@@ -8770,6 +8811,7 @@ const RichTextRuntime=(()=>{
           }catch(error){assetFlushFailed=true;capture('rich-text.reflection-flush',error);}
         }
         await record.mounted.destroy();
+        if(typeof options.keepValue==='string')record.field.value=options.keepValue;
       }catch(error){assetFlushFailed=true;capture('rich-text.destroy',error);}
       try{await AppData.notes.flush();await AppData.activeSession.settled();}catch(error){assetFlushFailed=true;capture('rich-text.asset-flush',error);}
     }finally{
@@ -8872,7 +8914,7 @@ const RichTextRuntime=(()=>{
     queueMicrotask(()=>syncAll(document));return true;
   }
   function status(){return Object.freeze({installed,loaded:true,activeDocumentId:mounted.get(lastActiveField)?.documentId||'',activeDocumentIds:Object.freeze([...new Set([...mounted.values()].map(record=>record.documentId))]),mounted:mounted.size,pending:pending.size>0,quiesced:mutationActive(),backgroundDisposalPending:backgroundDisposeTimer!==null,backgroundIdleDisposeMs:BACKGROUND_IDLE_DISPOSE_MS,externalConflicts:[...mounted.values()].filter(record=>record.field.dataset.richExternalConflict==='1').length});}
-  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,find,findStep,clearFind,status});
+  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,find,findStep,clearFind,status,holdForLifecycle,releaseAfterLifecycle});
 })();
 SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
 async function quiesceManagedRecoveryRuntime(operation){
@@ -9447,7 +9489,20 @@ const {
   clearFutureUntouched:clearFutureUntouchedProgress, setCompletionState, deletePracticeRun
 }=ReviewEditor;
 const {saveToday:saveDayRecordCore,isRolledOver:studyDayRolledOver}=ReviewSaveService;
+// Save Today stores what the person wrote. A background Drive sync must not
+// start part-way through it: the sync holds session writes, so the save's
+// last step was refused ("saved locally; follow-up did not complete"), and it
+// could then settle the just-saved day against Drive's older copy (backlog
+// item 20). Background work stops for the save and resumes after it, as for
+// Continue Here.
 async function saveDayRecord(){
+  let hold=null;
+  try{hold=BackupProviderRuntime.suspendBackground('save-day');await hold.settled;}
+  catch(error){AppDiagnostics.capture('review.save-day-hold',error,'warn');}
+  try{return await saveDayRecordNow();}
+  finally{hold?.release();}
+}
+async function saveDayRecordNow(){
   let suspendedSession=null;
   if(!TASKS.length||sessionPanelMode==='suspended'){
     const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
@@ -9518,16 +9573,18 @@ function setLifecycleEditorsBlocked(blocked){
   });
 }
 function invalidateLifecycleEditors(context){
-  void richTextClose();
+  RichTextRuntime.holdForLifecycle();
   cancelPendingLiveDraftSave();
   if(liveDraftSaveTimer){clearTimeout(liveDraftSaveTimer);liveDraftSaveTimer=null;}
   if(context.options.scheduleIdentity)advanceTaskNoteScheduleRevision();
   document.documentElement.dataset.studyDirectorLifecycle='transitioning';
   document.documentElement.dataset.studyDirectorLifecycleRevision=String(context.revision);
   setLifecycleEditorsBlocked(true);
-  document.querySelectorAll('.task-note-field').forEach(clearTaskNoteEditorBinding);
+  // Bindings go, so nothing an editor publishes now reaches the new state;
+  // the editors themselves stay for releaseAfterLifecycle to judge.
+  document.querySelectorAll('.task-note-field').forEach(field=>clearTaskNoteEditorBinding(field,{keepEditor:true}));
   const executeNote=document.getElementById('pn-extra');
-  if(executeNote){clearTaskNoteEditorBinding(executeNote);executeNote.value='';}
+  if(executeNote)clearTaskNoteEditorBinding(executeNote,{keepEditor:true});
   executeProgressPanelRenderKey='';
   ReviewEditor.invalidateBindings();
   ReviewView.invalidate();
@@ -9552,6 +9609,7 @@ function reconcileLifecycleEditors(context){
   return true;
 }
 function completeLifecycleTransition(context){
+  RichTextRuntime.releaseAfterLifecycle();
   const writable=!!context.reconciled&&appCanMutate();
   setLifecycleEditorsBlocked(!writable);
   ReviewView.syncMode();

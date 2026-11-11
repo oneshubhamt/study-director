@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
 import {connect,sync,reopen} from '../../helpers/drive-browser.mjs';
-import {journeyLog,openDevice,runSession,view,upload,settled,syncNow,noReviews,explain,elsewhere} from '../../helpers/sync-journey-world.mjs';
+import {journeyLog,openDevice,runSession,view,upload,settled,syncNow,noReviews,explain,elsewhere,hold} from '../../helpers/sync-journey-world.mjs';
 
 // Finish Today ends the day for good (backlog item 21): it saves nothing by
 // itself, opens Review, leaves Execute, the Pacer and Plan as after Reset
@@ -26,7 +26,14 @@ try{
   assert.equal(await phone.evaluate(runSession('Day')),'running','the phone runs the day');
   await phone.click('[data-action="practice-start"]');
   await waitFor(()=>phone.evaluate(`document.getElementById('practice-pacer-state').textContent==='Running'`),{label:'the Pacer runs',timeout:5000});
-  assert.equal(await phone.evaluate(`__PWA6.saveDayRecord()`),true,'a mid-day Save Today');
+  // Save Today while a Drive sync is under way (backlog item 20): background
+  // work stops for the save, the save completes, and the sync runs after it.
+  const reading=hold('A',request=>request.method==='GET');
+  await syncNow(phone);await waitFor(()=>reading.reached,{label:'a sync is reading Drive',timeout:20000});
+  const midDay=await phone.evaluate(`(async()=>{const saved=await __PWA6.saveDayRecord();return {saved,notice:document.getElementById('save-status')?.textContent||''};})()`);
+  reading.release();
+  assert.equal(midDay.saved,true,'a mid-day Save Today completes while a sync is under way');
+  assert.doesNotMatch(midDay.notice,/follow-up|could not/iu,'and reports no failed step');
   await upload(phone);await settled(phone,'A');await elsewhere(laptop,'B');
 
   await phone.evaluate(`(async()=>{${accept}await __PWA6.goTab('execute');await new Promise(r=>setTimeout(r,150));${shown('finish-session')}[0].click();})()`);

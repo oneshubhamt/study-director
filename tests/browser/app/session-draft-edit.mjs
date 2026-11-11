@@ -6,6 +6,7 @@ import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor} from '..
 // applied plan, so it stays valid: the Practice Pacer run is saved, and a
 // backup captures the session in full instead of stopping as incomplete.
 const preload=`(()=>{localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'QA',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]}));})();`;
+const runPlan=`(async()=>{const d=__PWA6,now=new Date(),m=now.getHours()*60+now.getMinutes(),fmt=v=>String(Math.floor((v+1440)%1440/60)).padStart(2,'0')+':'+String((v+1440)%1440%60).padStart(2,'0');document.getElementById('plan-input').value=fmt(m-5)+' | 60 | Editor QA Block | work | Surgery | pages | 5';const result=d.applySchedule({skipNotify:true});if(result&&result.then)await result;d.goTab('execute');await new Promise(r=>setTimeout(r,50));d.setCurrentTask(0);d.TimerEngine.startCur();await new Promise(r=>setTimeout(r,300));return d.TimerState.snapshot().mode;})()`;
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'sd-session-draft-'});
 try{
   const page=await browser.createPage(server.url('deployment','instrumented.html'),{preload});
@@ -47,6 +48,12 @@ try{
     return {running,paused,working,support};})()`);
   assert.deepEqual(hold,{running:{mode:'running',kept:false,blocking:true},paused:{mode:'paused',kept:true},working:{mode:'running',waiting:false},support:{mode:'running',kind:'support',waiting:true}},'pop-ups that block nothing wait only while a work block runs');
 
+  // Editors stay usable (backlog item 19): Finish Block above moved Execute
+  // to the support block, and its note has a live editor, not a read-only
+  // preview.
+  const live=selector=>page.evaluate(`!!document.querySelector('${selector} ~ .sd-rte [contenteditable="true"]')`);
+  await waitFor(()=>live('#pn-extra'),{label:'the next block\'s note has its editor',timeout:3000});
+
   // BF-1: a previous-day Active Session is only an unsaved recovery candidate
   // when its content is newer than the Saved Day. Seed yesterday with an exact
   // saved acknowledgement, reload, and require startup to retire the redundant
@@ -68,6 +75,21 @@ try{
     try{await d.DailyReflectionPersistence.commit(yesterday,later,{expectedCanonical:String(before?.reflection||'')});}catch(error){return {kind:before?.recordKind,error:String(error?.message||error)};}
     const after=await d.AppData.dailyRecords.get(yesterday);return {kind:after?.recordKind,edited:after?.reflection===later,results:Object.keys(after?.results||{}).length};})()`);
   assert.deepEqual(diaryEdit,{kind:'study',edited:true,results:2},'the Diary edit of a saved study day saves, and keeps the day');
+
+  // On Review, a session lifecycle step (as a sync bringing in the session
+  // runs) keeps the reflection's editor, cursor and text; a reflection that
+  // changed elsewhere is taken in, and saved as such (backlog item 19).
+  assert.equal(await page.evaluate(runPlan),'running','a new plan runs');
+  await page.evaluate(`__PWA6.goTab('review')`);await waitFor(()=>live('#daily-reflection'),{label:'reflection editor',timeout:3000});
+  await page.click('#daily-reflection ~ .sd-rte [contenteditable="true"]');await page.send('Input.insertText',{text:'Kept through a sync'});
+  const step=await page.evaluate(`(async()=>{const d=__PWA6,editor=()=>document.querySelector('#daily-reflection ~ .sd-rte [contenteditable="true"]'),before=editor();
+    d.SessionLifecycle.reconcile('qa-sync',{date:d.todayISO()});await new Promise(r=>setTimeout(r,500));
+    const kept={same:editor()===before,text:editor()?.textContent,focused:!!document.activeElement?.closest?.('.sd-rte')};
+    await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();const stored=(await d.AppData.activeSession.load()).value;
+    await d.restoreSessionStateThroughLifecycle({...stored,revision:stored.revision+1,snapshot:{...stored.snapshot,review:{...stored.snapshot.review,reflection:'WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Paragraph',content:[{type:'Text',param:'Changed elsewhere'}]}]}})}}},{keepRunning:true});await new Promise(r=>setTimeout(r,500));
+    await d.ReviewEditor.flushPending();await d.ReviewEditor.settled();const saved=(await d.AppData.activeSession.load()).value.snapshot.review.reflection;
+    return {kept,arrived:editor()?.textContent,saved:saved.includes('Changed elsewhere')&&!saved.includes('Kept through')};})()`);
+  assert.deepEqual(step,{kept:{same:true,text:'Kept through a sync',focused:true},arrived:'Changed elsewhere',saved:true},'a lifecycle step keeps the editor; a change from elsewhere is taken in and saved as such');
 
   assert.deepEqual(page.warnings.filter(text=>/\[Study Director\]/u.test(text)),[],'no session save failed');
   assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/iu.test(event.text||'')),[]);
