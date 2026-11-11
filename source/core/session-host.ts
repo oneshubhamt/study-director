@@ -315,7 +315,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   const controller:SessionHostController=freeze({
     format:'study-director.session-host',contractVersion:1,captureSnapshot,applySnapshot,sessionSnapshot,classify,payload,load,readLocal:()=>repository.readLocal(),restoreLocalRecovery,
     writeSnapshot,writeNow,writeCanonicalNow,saveLiveDraft,flushLiveDraft,cancelPendingLiveDraftSave,maybeSnapshotRunningTimer,requireCanonicalWrite,saveCanonicalSession,clearCanonical,settled:()=>repository.settled(),
-    persistenceSuppressed,withPersistenceSuppressed,applyStoredSession,resetRuntime,resetLocal,suspendLocal,restoreSuspendedLocal
+    persistenceSuppressed,withPersistenceSuppressed,rollbackLocalTransition,applyStoredSession,resetRuntime,resetLocal,suspendLocal,restoreSuspendedLocal
   });
   return controller;
 }
