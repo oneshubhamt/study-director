@@ -189,7 +189,7 @@ A backup file stays one self-contained file covering everything, not a repositor
 
 Foreground backup/restore publication has priority over background repository maintenance.
 
-Maintenance is bounded by the shared repository work budget. Provider-visible maintenance markers behave as bounded leases: a marker remains authoritative only through the allowed work budget plus bounded release/network grace. An abandoned marker can therefore be reaped by a later foreground operation instead of blocking Backup/Restore for an extended period.
+Maintenance is bounded by the shared repository work budget. Provider-visible maintenance markers behave as bounded leases: a marker remains authoritative only through the allowed work budget plus bounded release/network grace. An abandoned marker can therefore be reaped by a later foreground operation instead of blocking Backup/Restore for an extended period. A marker from this device that this page does not hold (a cleanup cut off while writing or removing it, or a closed page) is removed by this device's next upload, background ones included, never waited for; a marker another device holds is always waited for. A cleanup paused for foreground work removes its marker without being waited for, so foreground work never waits on it. An upload refused because cleanup holds Drive retries in 15 s and never climbs the failure backoff.
 
 Background maintenance intent is durable only when useful, and it is scoped to the repository generation that created it.
 

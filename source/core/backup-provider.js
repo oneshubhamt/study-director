@@ -637,11 +637,15 @@ registry.define('backup-provider',1,input=>{
     for(const row of rows){const created=Date.parse(String(row&&row.createdAt||''));if(!Number.isFinite(created)){invalid+=1;continue;}const lifetime=row&&row.renews===true?PUBLICATION_STALE_MS:PUBLICATION_MAX_AGE_MS;if(now-created<lifetime){active+=1;const expires=created+lifetime;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}const renewing=lifetime===PUBLICATION_STALE_MS;try{await selected.repository.endPublication(row);if(renewing)abandoned+=1;}catch(error){AppDiagnostics.capture('backup-provider.repository-publication-expired-cleanup',error,'warn');if(renewing)invalid+=1;}}
     return freeze({blocked:active>0||invalid>0,reason:active>0?'active-publication':invalid>0?'uncertain-publication-state':'',active,invalid,abandoned,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt-offset).toISOString():''});
   }
-  async function repositoryMaintenanceSafety(selected,{excludeId='',releaseSameDevice=false}={}){
+  // Cleanup leases this page holds now. A mark from this device that this
+  // page does not hold was left behind (a cleanup cut off while writing or
+  // removing its mark, or a closed page): it is removed, never waited for.
+  const heldMaintenances=new Set();
+  async function repositoryMaintenanceSafety(selected,{excludeId='',releaseSameDevice=false,releaseOwnLeftovers=false}={}){
     if(!repositoryMaintenanceCapable(selected))return freeze({blocked:false,reason:'maintenance-protection-unavailable',active:0,invalid:0});
     let listed;try{listed=await selected.repository.listMaintenances();}catch(error){if(!expectedRequestFailure(error))AppDiagnostics.capture('backup-provider.repository-maintenances',error,'warn');return freeze({blocked:true,reason:'maintenance-state-unavailable',active:0,invalid:1});}
     const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],offset=repositoryClockOffset(selected),now=Date.now()+offset,excluded=String(excludeId||'');let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
-    for(const row of rows){if(excluded&&String(row&&row.id||'')===excluded)continue;if(releaseSameDevice&&row&&row.sameDevice===true){try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-own-release',error,'warn');invalid+=1;}continue;}const created=Date.parse(String(row&&row.createdAt||'')),expires=row&&row.expiresAt?Date.parse(String(row.expiresAt)):created+MAINTENANCE_MAX_AGE_MS;if(!Number.isFinite(created)||!Number.isFinite(expires)||expires<=created){invalid+=1;continue;}if(now<expires){active+=1;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-expired-cleanup',error,'warn');}}
+    for(const row of rows){if(excluded&&String(row&&row.id||'')===excluded)continue;if(row&&row.sameDevice===true&&(releaseSameDevice||releaseOwnLeftovers&&!heldMaintenances.has(String(row.id||'')))){try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-own-release',error,'warn');invalid+=1;}continue;}const created=Date.parse(String(row&&row.createdAt||'')),expires=row&&row.expiresAt?Date.parse(String(row.expiresAt)):created+MAINTENANCE_MAX_AGE_MS;if(!Number.isFinite(created)||!Number.isFinite(expires)||expires<=created){invalid+=1;continue;}if(now<expires){active+=1;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endMaintenance(row);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-expired-cleanup',error,'warn');}}
     return freeze({blocked:active>0||invalid>0,reason:active>0?'active-maintenance':invalid>0?'uncertain-maintenance-state':'',active,invalid,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt-offset).toISOString():''});
   }
   // Markers this page started. A marker from this device that this page did
@@ -699,7 +703,7 @@ registry.define('backup-provider',1,input=>{
   async function validateRepositoryPublicationStart(selected,lease,{foregroundPriority=false,signal=null,progress=null}={}){
     if(!lease||!repositoryMaintenanceCapable(selected))return true;
     if(foregroundPriority)return waitForRepositoryMaintenanceYield(selected,{signal,progress});
-    const safety=await repositoryMaintenanceSafety(selected);if(safety.blocked)throw repositoryMaintenanceError(safety);return true;
+    const safety=await repositoryMaintenanceSafety(selected,{releaseOwnLeftovers:true});if(safety.blocked)throw repositoryMaintenanceError(safety);return true;
   }
   async function validateRepositoryPublicationStartMeasured(selected,lease,options={}){
     OperationDiagnostics.mark('provider-publication-safety-start',{provider:selected.id,foregroundPriority:options&&options.foregroundPriority===true});
@@ -708,18 +712,28 @@ registry.define('backup-provider',1,input=>{
   }
   async function assertRepositoryPublication(selected,lease){if(!lease)return true;const [,safety]=await Promise.all([selected.repository.assertPublication(lease),repositoryMaintenanceSafety(selected)]);if(safety.blocked)throw Object.assign(new Error('Repository maintenance began while this backup was preparing. Retry the backup.'),{code:'REPOSITORY_MAINTENANCE_STARTED'});return true;}
   async function endRepositoryPublication(selected,lease){if(!lease)return false;try{return await selected.repository.endPublication(lease);}catch(error){AppDiagnostics.capture('backup-provider.repository-publication-release',error,'warn');return false;}}
-  async function beginRepositoryMaintenance(selected,{onBlocked=null}={}){
+  // `release` removes the mark: the unscoped transport, so a cleanup paused
+  // for foreground work (its signal aborted) still removes its own mark.
+  async function beginRepositoryMaintenance(selected,{onBlocked=null,release=selected}={}){
     if(!repositoryCoordinationCapable(selected))return null;
-    const lease=await selected.repository.beginMaintenance();
+    const lease=await selected.repository.beginMaintenance();heldMaintenances.add(String(lease&&lease.id||''));
     try{
       const [publications,maintenances]=await Promise.all([repositoryPublicationSafety(selected),repositoryMaintenanceSafety(selected,{excludeId:lease.id})]);
       if(!publications.blocked&&!maintenances.blocked)return lease;
       if(typeof onBlocked==='function')onBlocked(freeze({publications,maintenances}));
-      await selected.repository.endMaintenance(lease).catch(()=>{});return null;
-    }catch(error){try{await selected.repository.endMaintenance(lease);}catch(releaseError){AppDiagnostics.capture('backup-provider.repository-maintenance-release',releaseError,'warn');}throw error;}
+      await endRepositoryMaintenance(release,lease);return null;
+    }catch(error){releasePausedMaintenance(release,lease);throw error;}
+  }
+  // A cleanup that stops early (paused for foreground work, or failed) removes
+  // its mark without being waited for: foreground work never waits on it, and
+  // the mark no longer counts as held, so this device's next upload may remove
+  // it too if this request is slow.
+  function releasePausedMaintenance(release,lease){
+    if(!lease)return;heldMaintenances.delete(String(lease.id||''));
+    void endRepositoryMaintenance(release,lease);
   }
   async function assertRepositoryMaintenance(selected,lease){if(!lease)return true;const [,publications]=await Promise.all([selected.repository.assertMaintenance(lease),repositoryPublicationSafety(selected)]);if(publications.blocked){const error=new Error('Repository maintenance yielded to a higher-priority foreground publication.');error.name='AbortError';error.code='REPOSITORY_BACKGROUND_PREEMPTED';throw error;}return true;}
-  async function endRepositoryMaintenance(selected,lease){if(!lease)return false;try{return await selected.repository.endMaintenance(lease);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-release',error,'warn');return false;}}
+  async function endRepositoryMaintenance(selected,lease){if(!lease)return false;try{return await selected.repository.endMaintenance(lease);}catch(error){AppDiagnostics.capture('backup-provider.repository-maintenance-release',error,'warn');return false;}finally{heldMaintenances.delete(String(lease.id||''));}}
   async function cleanupRepositoryProviderState(selected,state,{reuseObjectInventory=false,preparedObjectListing=null,maintenanceLease=null,checkMaintenance=null,inventoryBeforeDelete=false,beginDeletion=null,workBudget=null}={}){
     const publicationCapable=repositoryPublicationCapable(selected),publicationSafety=await repositoryPublicationSafety(selected),objectGraceBefore=publicationCapable?new Date(Date.now()-OBJECT_GC_GRACE_MS).toISOString():'',assertLease=checkMaintenance||(async()=>{if(maintenanceLease)await assertRepositoryMaintenance(selected,maintenanceLease);});
     const cleanupRows=Object.freeze(state.rows.map(row=>Object.freeze({id:row.item.id,ref:Object.freeze({checkpoint:row.item,commit:row.commitItem}),manifest:row.manifest}))),retentionBacklog=RepositoryCheckpointPipeline.selectRetention(cleanupRows,{now:new Date()}).remove.length,checkpointDeleteBudget=Math.min(MAINTENANCE_MAX_CHECKPOINT_DELETES,Math.max(MAINTENANCE_MIN_CHECKPOINT_DELETES,retentionBacklog));
@@ -773,7 +787,7 @@ registry.define('backup-provider',1,input=>{
     const preparedObjectListing=repositoryCleanupObjectListing(await repositoryObjectInventory(planning,{signal}));
     OperationDiagnostics.mark('maintenance-inventory-complete',{provider:selected.id,total:state.rows.length,objects:preparedObjectListing.items.length,destructive:true},traceId);
 
-    let contentionRetryMs=0,maintenanceLease=await beginRepositoryMaintenance(planning,{onBlocked:safety=>{const uncertain=Number(safety.publications&&safety.publications.invalid)||Number(safety.maintenances&&safety.maintenances.invalid)||0;if(uncertain)return;const deadlines=[safety.publications&&safety.publications.nextEligibleAt,safety.maintenances&&safety.maintenances.nextEligibleAt].map(value=>Date.parse(String(value||''))).filter(Number.isFinite);if(deadlines.length)contentionRetryMs=Math.max(1000,Math.min(...deadlines)-Date.now()+1000);}});
+    let contentionRetryMs=0,maintenanceLease=await beginRepositoryMaintenance(planning,{release:owner,onBlocked:safety=>{const uncertain=Number(safety.publications&&safety.publications.invalid)||Number(safety.maintenances&&safety.maintenances.invalid)||0;if(uncertain)return;const deadlines=[safety.publications&&safety.publications.nextEligibleAt,safety.maintenances&&safety.maintenances.nextEligibleAt].map(value=>Date.parse(String(value||''))).filter(Number.isFinite);if(deadlines.length)contentionRetryMs=Math.max(1000,Math.min(...deadlines)-Date.now()+1000);}});
     if(!maintenanceLease)return deferredRepositoryMaintenance('Repository maintenance was deferred because another backup or maintenance operation is active.',contentionRetryMs);
 
     const renewable=typeof planning.repository.renewMaintenance==='function'&&typeof owner.repository.beginOperation==='function';let renewing=null;
@@ -783,7 +797,7 @@ registry.define('backup-provider',1,input=>{
       const created=Date.parse(maintenanceLease.createdAt),duration=Date.parse(maintenanceLease.expiresAt)-created;
       const renewAfter=Number.isFinite(duration)&&duration>0?duration/4:PROVIDER_MAINTENANCE_BUDGET_MS/2;
       if(renewable&&Date.now()-created>=renewAfter){
-        renewing=(async()=>{maintenanceLease=await planning.repository.renewMaintenance(maintenanceLease);await assertRepositoryMaintenance(planning,maintenanceLease);})().finally(()=>{renewing=null;});await renewing;return;
+        renewing=(async()=>{const next=await planning.repository.renewMaintenance(maintenanceLease);heldMaintenances.add(String(next&&next.id||''));heldMaintenances.delete(String(maintenanceLease.id||''));maintenanceLease=next;await assertRepositoryMaintenance(planning,maintenanceLease);})().finally(()=>{renewing=null;});await renewing;return;
       }
       if(force)await assertRepositoryMaintenance(planning,maintenanceLease);
     };
@@ -801,7 +815,8 @@ registry.define('backup-provider',1,input=>{
       return await cleanupRepositoryProviderState(protectedSelection,state,{workBudget,preparedObjectListing,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true,beginDeletion:()=>{workBudget.start(PROVIDER_MAINTENANCE_BUDGET_MS);OperationDiagnostics.mark('maintenance-deletion-start',{provider:selected.id,total:state.rows.length},traceId);}});
     }finally{
       if(renewing)await renewing.catch(()=>{});
-      await endRepositoryMaintenance(planning,maintenanceLease);
+      if(signal?.aborted)releasePausedMaintenance(owner,maintenanceLease);
+      else await endRepositoryMaintenance(owner,maintenanceLease);
     }
   }
 
@@ -1444,7 +1459,7 @@ registry.define('backup-provider',1,input=>{
       // meanwhile: not a failure, it retries.
       const yielding=code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY'||code==='REPOSITORY_MAINTENANCE_STARTED';
       if(!signal?.aborted&&!behind&&!sessionAhead&&!turn&&!newer&&!yielding)AppDiagnostics.capture('backup-provider.pending-retry',error,'warn');
-      return freeze({status:'pending',reason:newer?'needs-update':behind?'behind':sessionAhead?'session-owner':turn?'turn':String(error&&error.message||error)});
+      return freeze({status:'pending',reason:newer?'needs-update':behind?'behind':sessionAhead?'session-owner':turn?'turn':yielding?'maintenance':String(error&&error.message||error)});
     }finally{notifyStatus();}
   }
   // Opaque canonical timestamps are compared for *change*, not ordering:
@@ -1506,6 +1521,9 @@ registry.define('backup-provider',1,input=>{
         else if(result.reason==='needs-update'){resetConvergenceRetry(selected);schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{backoff:true,attemptRevision,trigger:'needs-update'});}
         // Drive moved on, or another device is backing up there: catch up or take turns.
         else if(['behind','turn'].includes(result.reason)){if(sync&&result.reason==='behind')sync.behind=true;const turns=syncState(selected).turnWaits;schedulePendingProviderBackup(selected,result.reason==='behind'?1000:SYNC_TURN_RETRY_DELAYS[Math.min(Math.max(0,turns-1),SYNC_TURN_RETRY_DELAYS.length-1)],{backoff:result.reason==='turn',attemptRevision,preserveAutomatic,trigger:result.reason==='turn'?'sync-turn':'shared-behind'});}
+        // Cleanup holds Drive (here or on another device): a short wait, never
+        // the failure ladder, so sync does not pause for half an hour.
+        else if(result.reason==='maintenance')schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,preserveAutomatic,trigger:'maintenance-busy'});
         else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{trigger:'source-changed'});}
         else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!scope.signal.aborted,attemptRevision,preserveAutomatic,trigger:scope.signal.aborted?'background-preempted':'retry-failure'});
         return result;

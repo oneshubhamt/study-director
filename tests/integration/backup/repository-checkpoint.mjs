@@ -787,7 +787,7 @@ watched='presentation-cancel';assert.equal(await runtime.providers.backup('prese
 // Production Drive transport + production provider/classifier/retention +
 // owned scheduler. Only HTTP, storage and the clock are simulated.
 const assembledDriveCases=[],assembledDriveWallMs=[];
-for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease','abandoned-publication','live-publication','legacy-publication']){
+for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease','own-leftover-lease','abandoned-publication','live-publication','legacy-publication']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const scenarioStarted=performance.now(),maintenance=new Map(),progress=[],id='drive-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
  // Four slow deletions may require four protected passes plus a final inventory.
@@ -799,8 +799,17 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   await runtime.providers.backupRepositoryProvider(id);
   const kind=file=>file.appProperties.studyDirectorRepositoryKind,committed=[...h.state.files.values()].filter(file=>['checkpoint','commit'].includes(kind(file))),originalPairs=committed.map(file=>file.id).sort();
   assert.equal(originalPairs.length,2);
+  if(scenario==='own-leftover-lease'){
+   // This device's cleanup was cut off while writing its mark (paused for
+   // foreground work): nothing on this page holds it. The next upload removes
+   // it instead of waiting up to 5 minutes, which blocked every device.
+   const operation=h.provider.repository.beginOperation(),marker=await operation.beginMaintenance();
+   snapshotRevision='drive-own-leftover-next';await runtime.providers.backupRepositoryProvider(id);
+   assert.equal(h.state.files.has(marker.remoteId),false,'this device removes its own leftover cleanup mark instead of waiting for it');
+  }
   if(scenario==='remote-lease'){
-   const operation=h.provider.repository.beginOperation(),marker=await operation.beginMaintenance();await clock.advance(61000);
+   // Another device's live cleanup lease.
+   const operation=h.provider.repository.beginOperation(),marker=await operation.beginMaintenance();h.state.files.get(marker.remoteId).appProperties.sdMaintenanceDevice='inst_other_device_mve00000_abcdef02';await clock.advance(61000);
    await assert.rejects(runtime.providers.backupRepositoryProvider(id),error=>error.code==='STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY','a live network lease still blocks a competing writer past the old 60-second expiry');
    assert.ok(h.state.files.has(marker.remoteId),'a competing writer cannot retire the active lease using the legacy expiry');await operation.endMaintenance(marker);
   }
