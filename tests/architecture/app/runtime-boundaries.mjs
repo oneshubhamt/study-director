@@ -77,8 +77,8 @@ const continueFlow=section(host,'async function continueSessionHere(){','// From
 assert.match(continueFlow,/SessionHandoffRuntime\?\.prefetchSource\(\)/u,'Continue Here latency prefetch remains inside the checked P5.4C provider boundary');
 const finishTransition=section(host,'async function finishTodaySession(){','async function resetTodaySession(){');
 assert.match(finishTransition,/rollbackSnapshot=ActiveSessionRuntime\.captureSnapshot\(\)[\s\S]*writeCanonicalNow\('finishing today’s session'/u,'finish captures a recoverable runtime before its strict canonical commit');
-assert.match(finishTransition,/withPersistenceSuppressed\([\s\S]*applyStoredSession\(rollbackSession,rollbackSnapshot/u,'failed finish restores the pre-finish runtime without recursively persisting the rollback');
-assert.match(finishTransition,/applyStoredSession\(rollbackSession,rollbackSnapshot[\s\S]*ActiveSessionRuntime\.writeSnapshot\(rollbackSnapshot,\{emergency:true,strictDurability:true,markChanged:false\}\)/u,'failed finish also preserves the pre-finish recovery snapshot before reporting rollback success');
+assert.match(finishTransition,/ActiveSessionRuntime\.rollbackLocalTransition\(rollbackSnapshot,'finish-today-rollback'\)/u,'failed finish delegates runtime and recovery compensation to the checked local-session owner');
+assert.doesNotMatch(finishTransition,/withPersistenceSuppressed|applyStoredSession\(rollbackSession|writeSnapshot\(rollbackSnapshot/u,'finish host wiring must not duplicate the local-session rollback state machine');
 
 const restoreTimer=section(host,'function deriveRestoredTimerState(candidate){','function isRestorableActiveSession(session){');
 assert.doesNotMatch(restoreTimer,/Date\.now\(\)/,'restored timer/gap/break arithmetic uses DecisionClock');
