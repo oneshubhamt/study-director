@@ -2996,7 +2996,7 @@ async function checkSessionOwnershipClaim(){
       const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
       if(!same){
         // Stop duplicate execution before awaiting a potentially slow/failed disk write.
-        const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
+        const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();TimerEngine.holdClockAt(frozenSinceMs);
         let snapshot=null,evidence=null;
         try{
           markDayContentChanged();
@@ -3025,7 +3025,7 @@ async function checkSessionOwnershipClaim(){
       return true;
     }
     if(sessionClaimFreeze){
-      if(!mine||!TASKS.length){sessionClaimFreeze=null;return false;}
+      if(!mine||!TASKS.length){sessionClaimFreeze=null;TimerEngine.releaseHeldClock();return false;}
       if(!sessionClaimFreeze.localVerified&&!await verifyFrozenSessionClaim())return true;
       if(claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeAfterReleasedSessionClaim(session);
       const now=DecisionClock.nowMs(),current=sessionClaimFreeze;

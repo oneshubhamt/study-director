@@ -787,7 +787,7 @@ watched='presentation-cancel';assert.equal(await runtime.providers.backup('prese
 // Production Drive transport + production provider/classifier/retention +
 // owned scheduler. Only HTTP, storage and the clock are simulated.
 const assembledDriveCases=[],assembledDriveWallMs=[];
-for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease','own-leftover-lease','abandoned-publication','live-publication','legacy-publication']){
+for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease','own-leftover-lease','duplicate-copy','abandoned-publication','live-publication','legacy-publication']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const scenarioStarted=performance.now(),maintenance=new Map(),progress=[],id='drive-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
  // Four slow deletions may require four protected passes plus a final inventory.
@@ -799,6 +799,18 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   await runtime.providers.backupRepositoryProvider(id);
   const kind=file=>file.appProperties.studyDirectorRepositoryKind,committed=[...h.state.files.values()].filter(file=>['checkpoint','commit'].includes(kind(file))),originalPairs=committed.map(file=>file.id).sort();
   assert.equal(originalPairs.length,2);
+  if(scenario==='duplicate-copy'){
+   // An upload whose request timed out here landed after its retry: two
+   // files, one version. They are read as one, and the next backup goes on.
+   const original=[...h.state.files.values()].find(file=>kind(file)==='checkpoint'),copy={...original,id:'dup-'+original.id,appProperties:{...original.appProperties}};
+   h.state.files.set(copy.id,copy);
+   snapshotRevision='drive-duplicate-next';await runtime.providers.backupRepositoryProvider(id);
+   assert.ok((await runtime.providers.history(id,{interactive:false})).available!==false,'an identical second copy of a version does not stop history or backups');
+   // Two files that differ under one identity cannot both be trusted.
+   copy.appProperties={...copy.appProperties,studyDirectorSha256:'0'.repeat(64)};
+   await assert.rejects(runtime.providers.backupRepositoryProvider(id),/Duplicate repository checkpoint identity/u,'differing copies of one version still stop safely');
+   h.state.files.delete(copy.id);
+  }
   if(scenario==='own-leftover-lease'){
    // This device's cleanup was cut off while writing its mark (paused for
    // foreground work): nothing on this page holds it. The next upload removes

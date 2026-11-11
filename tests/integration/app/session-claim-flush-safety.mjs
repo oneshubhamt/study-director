@@ -22,7 +22,7 @@ const failed={ok:false,value:{...session,revision:5},storage:{local:false,idb:fa
 const loaded=value=>({ok:true,value,storage:{local:false,idb:true}});
 function harness(){
   let claim={...owned},now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false,resumeWorks=true,reviewText='Retain the last edits';
-  const calls={notices:[],updates:0,stops:0,resumes:0,snapshots:[],captureEvidenceArgs:[],evidences:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
+  const calls={notices:[],updates:0,stops:0,resumes:0,holds:[],releases:0,snapshots:[],captureEvidenceArgs:[],evidences:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
   const app={
     document:{visibilityState:'visible'},navigator:{onLine:true},
     StartupLifecycle:{status:()=>({fullyInitialized:true})},
@@ -34,7 +34,7 @@ function harness(){
     DecisionClock:{nowMs:()=>now},lastTimerSnapshotMs:0,
     restoreSessionPersistenceSuppressed:()=>false,managedRecoverySessionQuiesced:()=>false,appCanMutate:()=>true,
     showLiveDraftSaveWarning:reason=>calls.warnings.push({key:'capture',message:reason}),
-    TimerEngine:{stopExecution:()=>{calls.stops++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return resumeWorks;}},
+    TimerEngine:{stopExecution:()=>{calls.stops++;return true;},holdClockAt:ms=>{calls.holds.push(ms);return true;},releaseHeldClock:()=>{calls.releases++;return true;},resumeAfterPrimaryRestore:()=>{calls.resumes++;return resumeWorks;}},
     markDayContentChanged:()=>{calls.changed++;},
     captureRuntimeEvidence:()=>{const evidence={actualTime:[42],actualRecords:[{seconds:42}],capturedAt:now};calls.evidences.push(evidence);return evidence;},
     captureSessionSnapshot:evidence=>{if(captureFailure)throw new Error('snapshot failed');const snap={token:calls.snapshots.length+1,review:{reflection:reviewText},timerRuntime:{frozenAt:now},practice:{frozenAt:now},actualTime:evidence?.actualTime||[]};calls.snapshots.push(snap);calls.captureEvidenceArgs.push(evidence);return snap;},
@@ -65,6 +65,7 @@ const good=()=>loaded({...session,revision:5});
   const t=harness();t.loads.push(loaded(session),good());t.saves.push(saved);
   assert.equal(await t.check(),true);
   assert.equal(t.calls.stops,1);
+  assert.equal(t.calls.holds.length,1,'the stopped timer holds its time at the moment it stopped, so the screen does not count on');
   assert.equal(t.calls.snapshots.length,2,'initial capture and current non-timing projection');
   assert.equal(t.calls.writes.length,1);
   assert.equal(t.calls.writes[0].snapshot.timerRuntime,t.calls.snapshots[0].timerRuntime);

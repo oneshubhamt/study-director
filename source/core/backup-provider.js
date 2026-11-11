@@ -335,9 +335,16 @@ registry.define('backup-provider',1,input=>{
     const run=async()=>{try{while(!failure){if(signal?.aborted)throw signal.reason||repositoryImportCancelled();const index=next++;if(index>=rows.length)return;results[index]=await worker(rows[index],index);}}catch(error){if(!failure)failure=error;}};
     await Promise.all(Array.from({length:Math.min(concurrency,rows.length)},run));if(failure)throw failure;return results;
   }
+  // Two files with one identity and the same content are one version: an
+  // upload whose request timed out here can still land on the location after
+  // its retry did. One is used and cleanup removes the other later. Files
+  // that differ under one identity cannot both be trusted: that stops safely.
+  function sameRepositoryContent(a,b){return !!(a&&b&&a.digest&&a.digest===b.digest&&Number(a.size)===Number(b.size));}
+  // The same copy every time, so cleanup's planning and revalidation agree.
+  const preferredCopy=(a,b)=>String(b&&b.remoteId||'')<String(a&&a.remoteId||'')?b:a;
   function prepareRepositoryHistoryItems(values,kind){
-    const seen=new Set(),items=[],invalid=[];
-    for(const raw of Array.isArray(values)?values:[]){let item;try{item=repositoryProviderItem(raw,kind);if(seen.has(item.id))throw new Error(`Duplicate repository ${kind==='commit'?'commit':'checkpoint'} identity was returned by the backup provider.`);seen.add(item.id);items.push(item);}catch(error){if(/Duplicate repository (?:commit|checkpoint) identity/u.test(String(error&&error.message||'')))throw error;invalid.push(Object.freeze({item:item||null,error,kind}));}}
+    const seen=new Map(),items=[],invalid=[];
+    for(const raw of Array.isArray(values)?values:[]){let item;try{item=repositoryProviderItem(raw,kind);if(seen.has(item.id)&&sameRepositoryContent(seen.get(item.id),item)){const kept=preferredCopy(seen.get(item.id),item);if(kept===item){items[items.indexOf(seen.get(item.id))]=item;seen.set(item.id,item);}continue;}if(seen.has(item.id))throw new Error(`Duplicate repository ${kind==='commit'?'commit':'checkpoint'} identity was returned by the backup provider.`);seen.set(item.id,item);items.push(item);}catch(error){if(/Duplicate repository (?:commit|checkpoint) identity/u.test(String(error&&error.message||'')))throw error;invalid.push(Object.freeze({item:item||null,error,kind}));}}
     return Object.freeze({items:Object.freeze(items),invalid:Object.freeze(invalid)});
   }
   // All provider history consumers share one listing/identity-validation path.
@@ -551,7 +558,7 @@ registry.define('backup-provider',1,input=>{
     const listed=await selected.repository.list(Object.freeze({kind:'object',signal}));
     if(listed&&listed.overflow===true){rememberRepositoryObjectInventory(selected,[],{overflow:true});return freeze({items:freeze([]),invalidCount:Math.max(0,Number(listed&&listed.ignored)||0),overflow:true});}
     const raw=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],byId=new Map(),duplicates=new Set();let invalidCount=Math.max(0,Number(listed&&listed.ignored)||0);
-    for(const value of raw){let item;try{item=repositoryProviderItem(value,'object');}catch{invalidCount+=1;continue;}if(byId.has(item.id)){duplicates.add(item.id);continue;}byId.set(item.id,item);}
+    for(const value of raw){let item;try{item=repositoryProviderItem(value,'object');}catch{invalidCount+=1;continue;}if(byId.has(item.id)){if(!sameRepositoryContent(byId.get(item.id),item))duplicates.add(item.id);else byId.set(item.id,preferredCopy(byId.get(item.id),item));continue;}byId.set(item.id,item);}
     if(duplicates.size)throw new Error('Duplicate repository objects were returned by the backup provider. The repository operation was stopped safely.');
     const items=freeze([...byId.values()]);rememberRepositoryObjectInventory(selected,items.map(item=>freeze({id:item.id,ref:item})),{invalidCount});return freeze({items,invalidCount,overflow:false});
   }
@@ -752,7 +759,8 @@ registry.define('backup-provider',1,input=>{
         return Object.freeze({items:Object.freeze(items),overflow:listing&&listing.overflow===true,invalidCount});
       },
       deleteObject:async item=>{await assertLease();return selected.repository.delete(item.ref);},
-      onError:(kind,error)=>AppDiagnostics.capture(kind==='checkpoint-delete'?'backup-provider.repository-checkpoint-delete':kind==='incomplete-delete'?'backup-provider.repository-incomplete-delete':'backup-provider.repository-object-gc',error,'warn')
+      // Going offline or yielding mid-cleanup is not a problem: the next pass retries.
+      onError:(kind,error)=>{if(!expectedRequestFailure(error))AppDiagnostics.capture(kind==='checkpoint-delete'?'backup-provider.repository-checkpoint-delete':kind==='incomplete-delete'?'backup-provider.repository-incomplete-delete':'backup-provider.repository-object-gc',error,'warn');}
     }));
     if(cleaned.formats)formatsByProvider.set(selected.id,freeze({...cleaned.formats,checkedAt:new Date().toISOString()}));
     if(!cleaned.gcPending){const cache=verifiedHistoryByProvider.get(selected.id);if(cache)pruneRepositoryHistoryProofs(selected,cleaned.retained.flatMap(row=>[row.ref.checkpoint,row.ref.commit].filter(Boolean)),cache.scope);}
@@ -1514,7 +1522,7 @@ registry.define('backup-provider',1,input=>{
           if(nothingToUpload&&!sync.ancestryPending){resetConvergenceRetry(selected);return finish('completed','in-sync');}
         }
         OperationDiagnostics.mark('convergence-publication-start',{provider:selected.id},traceId);const result=await retryPendingProviderBackup(selected,{signal:scope.signal});{const state=syncState(selected);state.turnWaits=result.reason==='turn'?state.turnWaits+1:0;if(result.reason!=='turn')state.turnHolder=null;}OperationDiagnostics.mark('convergence-publication-complete',{provider:selected.id,status:String(result.status||''),maintenancePending:result.maintenancePending===true},traceId);OperationDiagnostics.mark('background-transition',background.transition('convergence','running',result.status==='completed'?'completed':'deferred',{reason:String(result.reason||''),actionable:false}),traceId);OperationDiagnostics.finish({status:String(result.status||'pending'),reason:String(result.reason||''),maintenancePending:result.maintenancePending===true},traceId);
-        if(result.status==='completed'){resetConvergenceRetry(selected);background.wake('publication');scheduleAutomaticBackup(selected);}
+        if(result.status==='completed'){handoffDeliverySince.delete(safeId(selected.id));resetConvergenceRetry(selected);background.wake('publication');scheduleAutomaticBackup(selected);}
         else if(['none','local-empty'].includes(result.reason))resetConvergenceRetry(selected);
         // Waiting for an app update is not a failure: no retry ladder, and the
         // regular check looks again (removing that version wakes it sooner).
@@ -1525,6 +1533,7 @@ registry.define('backup-provider',1,input=>{
         // the failure ladder, so sync does not pause for half an hour.
         else if(result.reason==='maintenance')schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,preserveAutomatic,trigger:'maintenance-busy'});
         else if(result.reason==='source'){resetConvergenceRetry(selected);if(!scheduleAutomaticBackup(selected))schedulePendingProviderBackup(selected,AUTOMATIC_QUIET_MS,{trigger:'source-changed'});}
+        else if(!scope.signal.aborted&&handoffDeliveryPending(selected))schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,preserveAutomatic,trigger:'handoff-delivery'});
         else schedulePendingProviderBackup(selected,scope.signal.aborted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!scope.signal.aborted,attemptRevision,preserveAutomatic,trigger:scope.signal.aborted?'background-preempted':'retry-failure'});
         return result;
       }catch(error){
@@ -1535,7 +1544,8 @@ registry.define('backup-provider',1,input=>{
         else{OperationDiagnostics.fail(error,{background:true,status:'unavailable'},traceId);AppDiagnostics.capture('backup-provider.pending-retry-background',error,'warn');}
         // A failed read is unknown, not absence. The next bounded opportunity
         // checks the durable marker again; do not read it again in this handler.
-        schedulePendingProviderBackup(selected,preempted?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!preempted,attemptRevision,preserveAutomatic,trigger:preempted?'background-preempted':'state-read-failed'});
+        const quick=preempted||handoffDeliveryPending(selected);
+        schedulePendingProviderBackup(selected,quick?PROVIDER_CONVERGENCE_BUSY_RETRY_MS:nextConvergenceRetryDelay(selected),{backoff:!quick,attemptRevision,preserveAutomatic,trigger:preempted?'background-preempted':quick?'handoff-delivery':'state-read-failed'});
         return freeze({status:'unavailable',reason:preempted?'preempted':'state-read-failed'});
       }finally{scope?.release();}
     }});providerConvergenceJobs.set(id,job);return job;
@@ -2030,6 +2040,15 @@ registry.define('backup-provider',1,input=>{
     if(!sessionOwnershipHooks||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!SESSION_OWNER_PATTERN.test(observedOwner)||!SESSION_OWNER_PATTERN.test(owner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!SESSION_CLAIM_TOKEN_PATTERN.test(observedContentFingerprint)||!SESSION_HANDOFF_TOKEN_PATTERN.test(handoffToken)||!/^cp_[a-f0-9]{32}$/u.test(expectedCheckpointId)||!Number.isSafeInteger(revision)||revision<=observedRevision)throw new TypeError('Active-session takeover request is invalid.');
     return freeze({date,observedOwner,observedRevision,observedContentFingerprint,expectedCheckpointId,handoffToken,revision,owner});
   }
+  // After Continue Here the old device stops and waits for this device's
+  // copy of the session. Until a version from here lands (at most 10
+  // minutes), a failed upload retries in 15 s, never on the failure backoff.
+  const handoffDeliverySince=new Map(),HANDOFF_DELIVERY_WINDOW_MS=10*60*1000;
+  function handoffDeliveryPending(selected){
+    const id=safeId(selected&&selected.id),since=handoffDeliverySince.get(id);if(!since)return false;
+    if(Date.now()-since>HANDOFF_DELIVERY_WINDOW_MS){handoffDeliverySince.delete(id);return false;}
+    return true;
+  }
   async function claimSessionOwnership(id='google-drive',request={}){
     if(busy)return freeze({status:'busy',reason:'busy'});
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return freeze({status:'unavailable',reason:'not-connected'});
@@ -2069,6 +2088,7 @@ registry.define('backup-provider',1,input=>{
       const epoch=Math.max(0,Number(current&&current.claim&&current.claim.epoch)||0)+1,claim=freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state:'owned',ownerToken,revision,observedOwnerToken,observedRevision,observedContentFingerprint,handoffToken,claimedAt:new Date().toISOString()});
       request?.onWrite?.();
       const verified=await writeRepositorySessionClaim(scoped,claim,{signal:foreground.signal,interactive:true});
+      handoffDeliverySince.set(safeId(selected.id),Date.now());
       return freeze({status:'completed',claim:verified.claim,...(source?{source}:{})});
     }finally{
       // The claim is written and verified; ending the lease need not hold up

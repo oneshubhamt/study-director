@@ -1256,8 +1256,12 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
   let decision=await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,sessionClaim});
   let state=decision.state,value=decision.value,priorReviews=null;
   const decisionReviews=[];
-  const keepSession=async candidate=>{
+  // why: which settlement kept it. The sync trace records it with whether the
+  // kept and the incoming copies were this device's, so a review that keeps
+  // coming back says where it comes from.
+  const keepSession=async(candidate,why)=>{
     const kept=candidate&&ActiveSessionCodec.sanitizeCurrent(candidate);if(!kept)return false;
+    OperationDiagnostics.mark('session-kept-for-review',{reason:why,keptHere:kept.runningOn===installationId(),incomingHere:parsed.importedActiveSession?.runningOn===installationId()});
     if(priorReviews===null)priorReviews=await AppData.pendingReviews.list();
     if([...priorReviews,...decisionReviews].some(item=>item.subject==='session'&&!item.resolvedAt&&Canonical.same(item.kept,kept)))return true;
     // A session names the device running it.
@@ -1265,7 +1269,7 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     if(!keep(()=>item))return false;
     decisionReviews.push(item);return true;
   };
-  if(sync&&decision.kept&&!(await keepSession(decision.kept)))return freeze({needsDecision:true});
+  if(sync&&decision.kept&&!(await keepSession(decision.kept,'settlement')))return freeze({needsDecision:true});
   if(state==='yield-hold'){
     await yieldSession({deferReview:true});state='hold';value=null;
   }else if(state==='hand-over'&&sync){
@@ -1277,14 +1281,14 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     if(merged){state='graft';value=merged;}
     else{
       state='incoming';
-      if(mine&&relation!=='same'&&relation!=='incoming'&&!(await keepSession(mine)))return freeze({needsDecision:true});
+      if(mine&&relation!=='same'&&relation!=='incoming'&&!(await keepSession(mine,'hand-over')))return freeze({needsDecision:true});
     }
   }else if(state==='yield'||state==='hand-over'){
     await yieldSession();
     if(sync){
       const mine=(await readCanonicalActiveSession()).value;
       state='incoming';
-      if(mine&&!(await keepSession(mine)))return freeze({needsDecision:true});
+      if(mine&&!(await keepSession(mine,'yield')))return freeze({needsDecision:true});
     }else{
       decision=await sessionSettlement(base,parsed);state=decision.state;value=decision.value;
     }
@@ -1301,11 +1305,11 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     if(frozen&&!Canonical.same(ActiveSessionCodec.contentValue(before),ActiveSessionCodec.contentValue(frozen))&&
         !checkpointSavedDayCoversSession(parsed,frozen)&&
         !['same','incoming'].includes(parsed.importedActiveSession?sessionProgressRelation(frozen,parsed.importedActiveSession):'diverged')&&
-        !(await keepSession(frozen)))return freeze({needsDecision:true});
+        !(await keepSession(frozen,'yield-capture')))return freeze({needsDecision:true});
   }
   if(sync&&state==='claimed-conflict'){
     const other=parsed.importedActiveSession||null;
-    if(other&&!(await keepSession(other)))return freeze({needsDecision:true});
+    if(other&&!(await keepSession(other,'claimed-conflict')))return freeze({needsDecision:true});
     state='local';
   }
   if(sync&&(state==='conflict'||state===''||state==='ended')){
@@ -1314,7 +1318,7 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     const incomingShows=state==='ended'||!mine||!!theirs&&time(theirs)>time(mine);
     const hidden=incomingShows?mine:theirs;
     state=incomingShows?'incoming':'local';
-    if(hidden&&!(await keepSession(hidden)))return freeze({needsDecision:true});
+    if(hidden&&!(await keepSession(hidden,state==='local'?'unsettled-local':'unsettled-incoming')))return freeze({needsDecision:true});
   }
   return freeze({needsDecision:false,state,value});
 }
