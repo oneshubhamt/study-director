@@ -78,6 +78,7 @@ assert.match(continueFlow,/SessionHandoffRuntime\?\.prefetchSource\(\)/u,'Contin
 const finishTransition=section(host,'async function finishTodaySession(){','async function resetTodaySession(){');
 assert.match(finishTransition,/rollbackSnapshot=ActiveSessionRuntime\.captureSnapshot\(\)[\s\S]*writeCanonicalNow\('finishing today’s session'/u,'finish captures a recoverable runtime before its strict canonical commit');
 assert.match(finishTransition,/withPersistenceSuppressed\([\s\S]*applyStoredSession\(rollbackSession,rollbackSnapshot/u,'failed finish restores the pre-finish runtime without recursively persisting the rollback');
+assert.match(finishTransition,/applyStoredSession\(rollbackSession,rollbackSnapshot[\s\S]*ActiveSessionRuntime\.writeSnapshot\(rollbackSnapshot,\{emergency:true,strictDurability:true,markChanged:false\}\)/u,'failed finish also preserves the pre-finish recovery snapshot before reporting rollback success');
 
 const restoreTimer=section(host,'function deriveRestoredTimerState(candidate){','function isRestorableActiveSession(session){');
 assert.doesNotMatch(restoreTimer,/Date\.now\(\)/,'restored timer/gap/break arithmetic uses DecisionClock');
