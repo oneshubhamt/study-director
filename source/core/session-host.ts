@@ -145,6 +145,30 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     try{return report(await repository.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}),'save');}
     catch(error){const failed:SessionResult={ok:false,value:session,error,storage:{local:false,idb:false}};report(failed,'save');return failed;}
   }
+  async function preserveRecoverySnapshot(value:SessionSnapshot,operation:string):Promise<SessionResult>{
+    const saved=await writeSnapshot(value,{emergency:true,strictDurability:true,markChanged:false});
+    const recovered=saved?.value?sessionSnapshot(saved.value):null;
+    if(!saved||saved.ok!==true||(!saved.storage.idb&&!saved.storage.local)||!recovered||!canonical.same(recovered,value)){
+      throw saved?.error||new Error(`The pre-transition Active Session could not be preserved while ${operation}.`);
+    }
+    return saved;
+  }
+  async function rollbackLocalTransition(value:SessionSnapshot,source:string,{restoreRuntime=true}:Readonly<{restoreRuntime?:boolean}>={}){
+    let runtimeError:unknown=null,recoveryError:unknown=null;
+    if(restoreRuntime){
+      try{
+        const session=payload(value);if(!session)throw new Error('The pre-transition Active Session snapshot is invalid.');
+        const restored=await withPersistenceSuppressed(()=>applyStoredSession(session,value,{source,lifecycleManaged:true}));
+        if(restored===false)throw new Error('The pre-transition Active Session runtime could not be restored.');
+      }catch(error){runtimeError=error;}
+    }
+    try{await preserveRecoverySnapshot(value,source);}catch(error){recoveryError=error;}
+    if(runtimeError||recoveryError){
+      const detail=[runtimeError&&`runtime: ${String((runtimeError as {message?:unknown})?.message||runtimeError)}`,recoveryError&&`recovery: ${String((recoveryError as {message?:unknown})?.message||recoveryError)}`].filter(Boolean).join('; ');
+      throw new Error(`Active Session rollback failed (${detail}).`);
+    }
+    return true;
+  }
   async function writeNow(options:Readonly<LiveDraftWriteOptions>={}):Promise<SessionResult|null>{
     if(blocked(options))return null;
     if(options.markChanged!==false)persistence.markContentChanged();
@@ -225,9 +249,18 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   async function resetLocal():Promise<SessionResult>{
     const date=domain.todayISO();
     return lifecycle.run('session-reset',{scheduleIdentity:true,date,autoDate:true},async()=>{
-      const cleared=await clearCanonical('resetting today’s session');
-      resetRuntime({lifecycleManaged:true,source:'session-reset',date});
-      return cleared;
+      const rollback=persistence.snapshotForWrite();let cleared:SessionResult|null=null;
+      try{
+        cleared=await clearCanonical('resetting today’s session');
+        resetRuntime({lifecycleManaged:true,source:'session-reset',date});
+        return cleared;
+      }catch(error){
+        if(rollback){
+          try{await rollbackLocalTransition(rollback,'rolling back a failed session reset',{restoreRuntime:!!cleared});}
+          catch(rollbackError){throw new Error(`${String((error as {message?:unknown})?.message||error)} Rollback also failed: ${String((rollbackError as {message?:unknown})?.message||rollbackError)}`);}
+        }
+        throw error;
+      }
     });
   }
   function applyStoredSession(session:ActiveSession,value:SessionSnapshot,options:Readonly<{source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean}>={}){
@@ -244,11 +277,18 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   }
   async function suspendLocal():Promise<ActiveSession>{
     return lifecycle.run('session-suspend',{scheduleIdentity:true,date:snapshot.getReviewDate(),autoDate:true},async()=>{
-      reset.pausePracticeForSessionEnd();cancelPendingLiveDraftSave();
-      const value=persistence.snapshotForWrite(),session=payload(value,{status:'suspended'});if(!session)throw new Error('No active study session is available to suspend.');
-      const saved=await saveCanonicalSession(session,'suspending today’s session');
-      resetRuntime({lifecycleManaged:true,source:'session-suspend',date:session.date});
-      return saved.value as ActiveSession;
+      const rollback=persistence.snapshotForWrite();if(!rollback)throw new Error('No active study session is available to suspend.');
+      try{
+        reset.pausePracticeForSessionEnd();cancelPendingLiveDraftSave();
+        const value=persistence.snapshotForWrite(),session=payload(value,{status:'suspended'});if(!session)throw new Error('No active study session is available to suspend.');
+        const saved=await saveCanonicalSession(session,'suspending today’s session');
+        resetRuntime({lifecycleManaged:true,source:'session-suspend',date:session.date});
+        return saved.value as ActiveSession;
+      }catch(error){
+        try{await rollbackLocalTransition(rollback,'rolling back a failed session suspension');}
+        catch(rollbackError){throw new Error(`${String((error as {message?:unknown})?.message||error)} Rollback also failed: ${String((rollbackError as {message?:unknown})?.message||rollbackError)}`);}
+        throw error;
+      }
     });
   }
   async function restoreSuspendedLocal(session:ActiveSession):Promise<ActiveSession>{
