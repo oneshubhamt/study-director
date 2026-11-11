@@ -1633,12 +1633,18 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
    sidebar name (a squircle), the phone circle and the profile panel avatar.
    The ring is sync health; the corner badge is what needs the person. Shape
    and motion differ per state, so colour is never the only signal. */
-.status-host{position:relative;--status-ok:var(--sd-color-success);--status-warn:color-mix(in oklab,var(--sd-color-warning) 50%,#ff7a00);--status-error:var(--sd-color-danger);--status-idle:var(--sd-color-text-secondary);--status-review:#facc15;--status-info:var(--sd-color-info);--status-gap:3px}
+/* Status colours come from the skin's own palette (owner, 2026-11-11): sync
+   health in its info tone, anything that needs the person in its warm tone
+   (Director Dark's yellow accent; otherwise the skin's warning amber, as
+   Director Light's burnt-orange accent sits too close to its red), errors
+   in its red. */
+.status-host{position:relative;--status-ok:var(--sd-color-info);--status-warn:var(--sd-color-warning);--status-error:var(--sd-color-danger);--status-idle:var(--sd-color-text-secondary);--status-review:var(--status-warn);--status-info:var(--sd-color-info);--status-on-warn:var(--sd-color-text-inverse);--status-gap:3px}
+html[data-theme="dark"][data-presentation="director-current"] :is(.status-host,.profile-status){--status-warn:var(--sd-color-accent-primary)}
 .status-ring{position:absolute;left:calc(-1 * var(--status-gap));top:calc(-1 * var(--status-gap));width:calc(100% + 2 * var(--status-gap));height:calc(100% + 2 * var(--status-gap));overflow:visible;pointer-events:none}
 .status-ring rect{fill:none;stroke:transparent;stroke-width:2px;stroke-linecap:round;transition:stroke .3s ease}
 .status-host[data-ring="off"] .status-ring{display:none}
 .status-host[data-ring="synced"] .status-ring-arc{stroke:var(--status-ok)}
-.status-host[data-ring="syncing"] .status-ring-track{stroke:rgba(var(--sd-rgb-success),.2)}
+.status-host[data-ring="syncing"] .status-ring-track{stroke:color-mix(in oklab,var(--status-ok) 22%,transparent)}
 .status-host[data-ring="syncing"] .status-ring-arc{stroke:var(--status-ok);stroke-dasharray:26 74;animation:status-travel 1.3s linear infinite}
 .status-host[data-ring="syncing"][data-slow] .status-ring-arc{animation-duration:3.6s}
 .status-host[data-ring="pending"] .status-ring-arc{stroke:var(--status-ok);stroke-dasharray:84 16;stroke-dashoffset:-8}
@@ -1651,8 +1657,8 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 @keyframes status-settle{from{stroke-dasharray:26 74}45%{filter:drop-shadow(0 0 3px var(--status-ok))}to{stroke-dasharray:100 0;filter:none}}
 .status-badge{position:absolute;top:calc(-1 * var(--status-gap) - 5px);right:calc(-1 * var(--status-gap) - 5px);display:none;box-sizing:border-box;min-width:15px;height:15px;padding:0 3px;border-radius:8px;font:800 10px/15px var(--sd-font-body);text-align:center;letter-spacing:0;text-transform:none;box-shadow:0 0 0 2px var(--sd-color-surface-1);pointer-events:none}
 .status-host[data-badge="error"] .status-badge{display:block;background:var(--status-error);color:#fff}
-.status-host:is([data-badge="warning"],[data-badge="update"],[data-badge="lock"]) .status-badge{display:block;background:var(--status-warn);color:#1b1100}
-.status-host[data-badge="review"] .status-badge{display:block;background:var(--status-review);color:#1b1500;border:1px solid rgba(0,0,0,.28)}
+.status-host:is([data-badge="warning"],[data-badge="update"],[data-badge="lock"]) .status-badge{display:block;background:var(--status-warn);color:var(--status-on-warn)}
+.status-host[data-badge="review"] .status-badge{display:block;background:var(--status-review);color:var(--status-on-warn);border:1px solid rgba(0,0,0,.28)}
 .status-host[data-badge="review"] .status-badge:empty{min-width:12px;width:12px;height:12px;top:calc(-1 * var(--status-gap) - 3px);right:calc(-1 * var(--status-gap) - 3px);padding:0}
 .status-host[data-badge="info"] .status-badge{display:block;min-width:9px;width:9px;height:9px;padding:0;top:calc(-1 * var(--status-gap) - 1px);right:calc(-1 * var(--status-gap) - 1px);background:var(--status-info)}
 .status-host[data-badge="info"] .status-badge:not(:empty){min-width:15px;width:auto;height:15px;padding:0 3px;top:calc(-1 * var(--status-gap) - 5px);right:calc(-1 * var(--status-gap) - 5px);color:#fff}
@@ -1662,6 +1668,12 @@ html[data-sd-appearance-shift] *,html[data-sd-appearance-shift] *::before,html[d
 /* The sidebar squircle is long, so a finer line; at rest (synced) it steps
    back a little, so any change of state draws the eye. */
 .profile-tag .status-ring rect{stroke-width:1.5px}
+/* Director's name button on the sidebar is squarer, like its other
+   controls; the ring sits status-gap outside it, so its corner is that much
+   rounder to stay even (owner, 2026-11-11). Aurora and Glass keep the
+   rounded shape, and the phone's circle is unchanged. */
+html[data-shape="angular"] .profile-tag{border-radius:3px}
+html[data-shape="angular"] .profile-tag .status-ring rect{rx:calc(3px + var(--status-gap))}
 .profile-tag[data-ring="synced"]:not(.status-settle):not(:hover):not(:focus-visible) .status-ring{opacity:.72}
 .profile-tag .status-ring{transition:opacity .3s ease}
 @media (prefers-reduced-motion: reduce){
@@ -1715,7 +1727,7 @@ button.profile-row:disabled{cursor:default;opacity:.55;background:none}
 .profile-act[hidden]{display:none!important}
 .profile-act-quiet{min-height:26px;padding:0 10px;--btn-border:transparent;--btn-bg:transparent;--btn-color:var(--sd-color-accent-primary);box-shadow:none}
 /* Sync & backups: the status first, then the settings rows. */
-.profile-status{--status-ok:var(--sd-color-success);--status-warn:color-mix(in oklab,var(--sd-color-warning) 50%,#ff7a00);--status-error:var(--sd-color-danger);--status-review:#facc15;--status-info:var(--sd-color-info)}
+.profile-status{--status-ok:var(--sd-color-info);--status-warn:var(--sd-color-warning);--status-error:var(--sd-color-danger);--status-review:var(--status-warn);--status-info:var(--sd-color-info)}
 .profile-status-block{display:grid;gap:8px;padding:12px var(--profile-pad)}
 .profile-status-headline{margin:0;color:var(--sd-color-text-primary);font:600 var(--sd-type-role-body-size)/1.35 var(--sd-font-body)}
 .profile-status-next{display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;color:var(--sd-color-text-secondary);font:400 var(--sd-type-role-caption-size)/1.4 var(--sd-font-body)}

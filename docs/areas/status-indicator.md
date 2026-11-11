@@ -24,24 +24,26 @@ that needs the person**. Both can show at once (for example Synced with a
 review waiting). Colour is never the only signal: each state also differs in
 shape or motion and always has text (hover tooltip and screen-reader label).
 
+Colours come from the skin's own palette (owner, 2026-11-11), so they suit each skin in light and dark: the **sync colour** is the skin's info tone (cyan in Director Dark, blue in Director Light, sky blue in Aurora and Glass); the **attention colour** is Director Dark's yellow accent, otherwise the skin's warning amber (Director Light's burnt-orange accent sat too close to its red); errors use the skin's red. A review waiting uses the attention colour too, told apart by its badge. In Director the sidebar name button and its ring have squarer corners, like Director's other controls; Aurora and Glass keep them rounded, and the phone's circle is the same in every skin.
+
 | Ring state | Look | Meaning |
 |---|---|---|
 | `off` | None | Google Drive not set up on this profile |
-| `syncing` | Green arc travelling round | Connecting, bringing in changes, uploading, restoring, combining, reading versions, a Device Folder backup |
-| `syncing` (slow) | Green arc travelling slowly | Waiting for another device to finish saving (named, as "Windows · Chrome", when known) |
-| `synced` | Solid green; settles from the arc with a brief glow | In step with Drive |
-| `pending` | Green with an open segment | Changes here not uploaded yet; last sync failed and is retrying; first sync not finished; sync review waiting |
+| `syncing` | Arc travelling round, in the sync colour | Connecting, bringing in changes, uploading, restoring, combining, reading versions, a Device Folder backup |
+| `syncing` (slow) | Arc travelling slowly, in the sync colour | Waiting for another device to finish saving (named, as "Windows · Chrome", when known) |
+| `synced` | Solid, in the sync colour; settles from the arc with a brief glow | In step with Drive |
+| `pending` | Sync colour with an open segment | Changes here not uploaded yet; last sync failed and is retrying; first sync not finished; sync review waiting |
 | `offline` | Grey dashed | No network; syncs when back online |
-| `signed-out` | Amber, broken into segments | Drive set up but signed out or disconnected |
-| `blocked` | Solid amber | Sync cannot continue until the person acts: backup password, app update |
+| `signed-out` | Attention colour, broken into segments | Drive set up but signed out or disconnected |
+| `blocked` | Solid, in the attention colour | Sync cannot continue until the person acts: backup password, app update |
 | `error` | Solid red | Sync stopped after its retries ran out |
 
 | Badge | Look | Meaning |
 |---|---|---|
 | `error` | Red **!** | A failure: sync stopped, storage error, Device Folder failing |
-| `lock` | Amber lock | Backup password needed on this device |
-| `update` | Amber **↑** | App update needed to keep syncing |
-| `warning` | Amber **!** | Needs attention but not failing: Device Folder permission, storage or backup-check warning, no backup in over a week |
+| `lock` | Lock, attention colour | Backup password needed on this device |
+| `update` | **↑**, attention colour | App update needed to keep syncing |
+| `warning` | **!**, attention colour | Needs attention but not failing: Device Folder permission, storage or backup-check warning, no backup in over a week |
 | `review` | Yellow dot (count when 2 or more) | Something to review: kept versions, a sync review |
 | `info` | Small blue dot (count when 2 or more) | A new app version is ready (not blocking); news that faded unseen since the panel was last opened ([notifications.md](notifications.md#recent)) |
 
