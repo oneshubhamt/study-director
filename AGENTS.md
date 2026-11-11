@@ -52,5 +52,6 @@ Stop and ask before you:
 
 - Clean, lean and reliable: simple things done very well, no unnecessary features or over-engineering.
 - The owner's data is never put at risk.
-- Fix the app, not just the tests. When work finds a bug, dead code or a clear improvement in the app, fix the app code in the same change, with a test that would have caught it, and say so in the summary. Never weaken a test to make it pass. Ask first only when the right behaviour is unclear or the change is large.
+- Fix the app, not just the tests. When work finds a bug, dead code or a clear improvement in the app, fix the app code in the same change and say so in the summary. Never weaken a test to make it pass. Ask first only when the right behaviour is unclear or the change is large.
+- Tests follow how much is at stake, not how many bugs were fixed ([docs/workflow.md](docs/workflow.md#choosing-tests)). Sensitive areas (sync and Drive, storage, backup and restore, data formats, the session lifecycle, timer, handoff and ownership) need a test covering every change and fix, however small: a fix there can break a journey downstream. Elsewhere a small fix needs no test of its own. Running the existing tests for what changed always applies.
 - Short, plain replies, with tables where they help.

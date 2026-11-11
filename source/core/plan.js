@@ -51,6 +51,10 @@ registry.define('plan',1,()=>{
     const {confirm,input:requestInput}=ports.interactions;
     const {clearTimeout,setTimeout}=ports.environment;
     const TASKS=scheduleGateway.read().tasks;
+    // A plan runs today. After Finish Today its blocks stay loaded for
+    // Review, but the board shows the draft, as after Reset Today.
+    const livePlan=()=>TASKS.length>0&&!scheduleGateway.read().finished;
+    const FINISHED_DAY_MESSAGE='Today is finished. Reset Today before applying a new plan; save the day in Review first to keep it.';
     let lastParsed=[];
     let lastAppliedScheduleText='';
     let lastScheduleNowMinuteKey=null;
@@ -323,7 +327,7 @@ function firstActionableDraftError(draft){
 }
 function createPlanDraftProjection(result=null){
   const draft=immutableDraftResult(result||parseScheduleDraftText(getPlanDraftText()));
-  const hasApplied=TASKS.length>0,editMode=PlanDraftEditor.active(),hasRows=draft.ok?draft.parsed.length>0:lastParsed.length>0;
+  const hasApplied=livePlan(),editMode=PlanDraftEditor.active(),hasRows=draft.ok?draft.parsed.length>0:lastParsed.length>0;
   const status=draft.ok?'valid':draft.kind==='empty'||draft.kind==='no-tasks'?'empty':isIncompleteDraftResult(draft,hasRows)?'incomplete':'invalid';
   const draftMatchesApplied=hasApplied&&draft.ok&&draft.parsed.length>0&&
     scheduleFingerprintForRows(draft.parsed)===scheduleGateway.read().fingerprint;
@@ -422,7 +426,7 @@ function updatePlanBoardState(projection=createPlanDraftProjection()){
 /* PLAN BOARD RENDER ORCHESTRATION */
 function renderSched(projection=null){
   const el=document.getElementById('sched-list');el.replaceChildren();
-  if(PlanDraftEditor.active()||!TASKS.length){
+  if(PlanDraftEditor.active()||!livePlan()){
     PlanDraftEditor.renderRows(el);
     scheduleGateway.markRender('clean');
     updatePlanBoardState(projection||createPlanDraftProjection());
@@ -557,6 +561,7 @@ function applySchedule(options={}){
   };
   const apply=()=>{
     if(!canApply())return false;
+    if(explicitSchedule===null&&scheduleGateway.read().finished){setPlanStatus(FINISHED_DAY_MESSAGE,false);return false;}
     if(projection.status!=='valid'){renderInvalidScheduleApply(projection);return false;}
     if(!currentDraft()){
       setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
@@ -660,7 +665,7 @@ const PlanDraftEditor=(()=>{
     // Apply Draft is a deliberate action even when the initial board has
     // no editing session. Replacing a live Plan still requires Edit Draft.
     const editing=draftMode;
-    if(!editing&&TASKS.length)return false;
+    if(!editing&&livePlan())return false;
     const draftText=getPlanDraftText();
     clearTimer('preview');
     const projection=createPlanDraftProjection(parseScheduleDraftText(draftText));
@@ -673,7 +678,7 @@ const PlanDraftEditor=(()=>{
     setParsedScheduleDraft(projection.draft.parsed);
     renderSched(projection);
     const epoch=editEpoch;
-    const stillCurrent=()=>editEpoch===epoch&&draftMode===editing&&(editing||TASKS.length===0);
+    const stillCurrent=()=>editEpoch===epoch&&draftMode===editing&&(editing||!livePlan());
     if(!await save({strictDurability:true}))return false;
     if(!stillCurrent())return false;
     if(!ownership.canMutate()||getPlanDraftText()!==draftText){
@@ -995,7 +1000,7 @@ const PlanDraftEditor=(()=>{
   }
   function renderRows(container){
     if(!lastParsed.length){
-      const message=TASKS.length?'Open Composer or use Edit Plan to revise the schedule.':'No draft rows yet. Use Composer to load or paste a schedule.';
+      const message=livePlan()?'Open Composer or use Edit Plan to revise the schedule.':'No draft rows yet. Use Composer to load or paste a schedule.';
       container.appendChild(textEl('div','plan-empty-message ui-mono',message));
       const actions=document.createElement('div');
       actions.className='plan-draft-empty-actions';
@@ -1075,13 +1080,13 @@ const PlanDraftEditor=(()=>{
     function renderScheduleIfVisible(){if(!isPlanPaneVisible()){markScheduleRenderDirty();return false;}renderSched();return true;}
     function renderScheduleOnPlanOpen(){
       const state=scheduleGateway.read();
-      if(PlanDraftEditor.active()||!TASKS.length||state.renderDirty){renderSched();return true;}
+      if(PlanDraftEditor.active()||!livePlan()||state.renderDirty){renderSched();return true;}
       const s=scheduleGateway.timeline().realtime;
       if(`${s.scheduledIdx}:${s.nowEff}`!==lastScheduleNowMinuteKey){renderSched();return true;}
       return false;
     }
     function needsRealtimeRefresh(state){
-      if(!isPlanPaneVisible()||!TASKS.length||PlanDraftEditor.active())return false;
+      if(!isPlanPaneVisible()||!livePlan()||PlanDraftEditor.active())return false;
       const nowKey=`${state.scheduledIdx}:${state.nowEff}`;
       if(nowKey===lastScheduleNowMinuteKey)return false;
       markScheduleRenderDirty();

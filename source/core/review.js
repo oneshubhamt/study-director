@@ -510,6 +510,9 @@ async function saveDayRecord(options={}){
     if(closesSession){
       await clearCanonicalSessionAfterSavedDay();
       clearSaveReminder(rec.date,doc.sourceRevision);
+      // The reflection is in the Saved Day. A reflection write refused while
+      // the save held the session's writes has no session left to go to.
+      reflectionLane.cancel();setReflectionRichSync('saved','Saved');
     }
     if(closesPriorDay){
       Runtime.setSafetyMessage(`Recovered ${prettyDate(rec.date)} was saved to Library. Apply the current study-day schedule when ready.`);
@@ -519,6 +522,14 @@ async function saveDayRecord(options={}){
       refreshPlanAfterSessionReset('Recovered previous study day was saved. Apply the current study-day schedule when ready.','New Study Day');
       setPlanStatus('Recovered previous study day saved. Apply the current study-day schedule when ready.');
       refreshStorageFallbackWarning();
+    }else if(closesSession){
+      // Today's finished or suspended session closes with its save. It ends
+      // here, while its writes are still held: a later write of the day
+      // still loaded would bring the deleted session back.
+      resetRuntimeSessionState({source:'saved-day-close',date:todayISO()});
+      setSessionPanelMode('none');
+      refreshPlanAfterSessionReset('Today is saved in Library. Apply a new plan when ready.','Today Saved');
+      setPlanStatus('✓ Today is saved in Library. Apply a new plan when ready.');
     }
     notice.finish('succeeded',`✓ Saved ${prettyDate(rec.date)} · completed equivalent ${durationLabel(rec.completedEquivalentMinutes)} · actual focus ${durationLabel(rec.actualFocusMinutes)} · ${displayPercent(rec.completionPercent)}`);
   }catch(e){

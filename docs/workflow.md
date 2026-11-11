@@ -17,6 +17,12 @@ Report exactly what was run, what failed and what was not run. When the app and 
 
 Run targeted tests for each affected surface; run the full suites only after substantial change or before a release.
 
+**Which tests to add (owner, 2026-11-11).** Tests follow how much is at stake.
+
+- *Sensitive areas:* sync and Drive, storage, backup and restore, data formats and codecs, the session lifecycle, timer, handoff and ownership, and anything else that keeps the owner's data. Every change or fix there, however small, comes with a test that covers it at the right layer, usually a journey or integration test of the flow it touches. A fix in these areas can break something downstream; on 2026-11-11 the Finish Today journey found two such bugs (a saved day written back, and devices rewriting a finished day on each sync).
+- *Everywhere else* (layout, wording, a control's state, a small UI bug): a fix needs no test of its own once it is fixed. Add one only when the change sets how an important feature behaves.
+- Prefer extending an existing test of that flow to adding a new file, and keep the addition short.
+
 | Change | Tests |
 |---|---|
 | Persistence or codecs | Repository, migration, recovery and import tests |

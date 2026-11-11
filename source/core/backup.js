@@ -959,7 +959,7 @@ function sessionDecisions(session){
   const review=snapshot.review&&(snapshot.review.reflection||snapshot.review.studyQuality)?JSON.stringify([String(snapshot.review.reflection||''),snapshot.review.studyQuality||null]):'';
   const shifts=Object.create(null);for(const [id,row] of Object.entries(snapshot.scheduleAdjustments||{}))shifts[id]=JSON.stringify([row.startMin,row.endMin,row.reason]);
   const runs=(snapshot.practice?.runs||[]).map(run=>Canonical.signature(run));
-  return freeze({date:clean.date,schedule:String(clean.scheduleText||'')+'\u0000'+String(snapshot.fingerprint||''),current:String(snapshot.currentTaskId||''),tasks,shifts,runs,carryForward:String(snapshot.latestCarryForward||''),review});
+  return freeze({date:clean.date,schedule:String(clean.scheduleText||'')+'\u0000'+String(snapshot.fingerprint||''),current:String(snapshot.currentTaskId||''),tasks,shifts,runs,carryForward:String(snapshot.latestCarryForward||''),review,finished:clean.status==='finished'});
 }
 // Whether copy x holds every decision copy y holds: 'equal', 'ahead' (x
 // also decided more, such as a block y had not finished yet) or 'no'.
@@ -967,6 +967,8 @@ function sessionDecisionsCover(x,y){
   if(!x||!y||x.date!==y.date||x.schedule!==y.schedule)return 'no';
   let ahead=false,fails=false;
   const value=(a,b)=>{if(a===b)return;if(!b){ahead=true;return;}fails=true;};
+  // Finish Today is a decision too, and a final one.
+  if(y.finished&&!x.finished)fails=true;else if(x.finished&&!y.finished)ahead=true;
   value(x.carryForward,y.carryForward);value(x.review,y.review);
   for(const id of new Set([...Object.keys(x.shifts),...Object.keys(y.shifts)]))value(x.shifts[id]||'',y.shifts[id]||'');
   if(y.runs.some(run=>!x.runs.includes(run)))fails=true;else if(x.runs.some(run=>!y.runs.includes(run)))ahead=true;
@@ -1029,8 +1031,10 @@ function sessionWithDecisions(owner,other){
     latestCarryForward:their.latestCarryForward||own.latestCarryForward,
     review:decided(their.review)?their.review:own.review,
     contentRevision:nextMergedSessionRevision(own.contentRevision,their.contentRevision),savedRevision:0,updatedAt:now};
-  return ActiveSessionCodec.sanitizeCurrent({...mine,revision:nextMergedSessionRevision(mine.revision,theirs.revision),snapshot,updatedAt:now});
+  return ActiveSessionCodec.sanitizeCurrent({...mine,...finishedFrom(mine,theirs),revision:nextMergedSessionRevision(mine.revision,theirs.revision),snapshot,updatedAt:now});
 }
+// A day finished on either copy stays finished in what is made of both.
+function finishedFrom(...sessions){return sessions.some(session=>session?.status==='finished')?{status:'finished',suspendedAt:null}:{};}
 // Incoming content can advance after a device has claimed ownership. Preserve
 // the current owner's control state while adopting that later pre-claim work,
 // and start a fresh local content revision so no foreign save acknowledgement
@@ -1051,6 +1055,7 @@ function rebaseSessionContentToOwner(local,incoming){
     runningOn:mine.runningOn,
     snapshot,
     suspendedAt:mine.status==='suspended'?mine.suspendedAt:null,
+    ...finishedFrom(mine,theirs),
     updatedAt:now
   });
 }
@@ -1810,7 +1815,8 @@ async function reviewKeptVersions({ref=''}={}){
           if(!committed||!Canonical.same(committed,personalSelection))
             throw new Error('The selected Personal Data did not reach canonical storage. The review remains open.');
         }
-        if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
+        // A kept copy comes back stopped: suspended, or finished if that day was.
+        if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,...(keptSession.status==='finished'?{status:'finished',suspendedAt:null}:{status:'suspended',suspendedAt:keptSession.suspendedAt||now}),revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
         if(clearSession){
           await applyResolvedActiveSession(freeze({activeSession:freeze({value:session})}),{clear:true});
           const cleared=await readCanonicalActiveSession();

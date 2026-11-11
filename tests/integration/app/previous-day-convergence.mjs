@@ -49,7 +49,7 @@ for(const [label,state,covered,expected] of [
     sessionRunsElsewhere:x=>x.status!=='suspended'&&x.runningOn!=='inst_here',
     handlePreviousActiveSession:async()=>{events.push('previous');return false;},
     setSessionPanelMode:mode=>events.push(mode),
-    isSuspendedActiveSession:()=>false,isRestorableActiveSession:()=>false,
+    isSuspendedActiveSession:()=>false,isFinishedActiveSession:()=>false,isRestorableActiveSession:()=>false,
     AppDiagnostics:{capture:()=>{}}
   });
   vm.runInContext(previous+'\n'+restore+'\nglobalThis.restore=attemptAutoRestoreActiveSession;',context);
@@ -99,7 +99,7 @@ for(const [label,stored,expected] of [
     AppData:{activeSession:{load:async()=>({ok:true,value:stored,storage:{idb:true}})}},
     isValidIsoDate:()=>true,todayISO:()=>today,isCanonicalScheduleText:()=>true,
     DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
-    isSuspendedActiveSession:s=>s?.status==='suspended'&&s.date===today,
+    isSuspendedActiveSession:s=>s?.status==='suspended'&&s.date===today,isFinishedActiveSession:()=>false,
     sessionFromElsewhere:s=>s?.runningOn!=='inst_here',
     setSessionPanelMode:mode=>events.push(mode),setPlanStatus:()=>{},
     attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},

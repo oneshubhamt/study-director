@@ -290,7 +290,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     exports:freeze({...processing,followProtection:async value=>{(state.followed??=[]).push({...value});return false;},backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():freeze({...file,encrypted:false,protectionId:'',checkProtection:async()=>{}}),unprotect:async blob=>({blob,encrypted:false}),check:fn,job:fn=>fn(),download:fn,chooseSave:async()=>null,save:async()=>({status:'downloaded'})}),
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,dailyRecord:dailyRecordCodec,pendingReview:pendingReviewCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
-    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');state.activeSession=freeze({...state.activeSession,status:'suspended',...(state.yieldAddsProgress?{snapshot:freeze({...state.activeSession.snapshot,label:'A-FINAL-TICK',taskState:freeze({...state.activeSession.snapshot.taskState,focus:freeze({actual:freeze({seconds:(Number(state.activeSession.snapshot.taskState?.focus?.actual?.seconds)||0)+70})})})})}:{})});state.running=false;return true;}}),
+    session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');if(state.activeSession?.status==='finished')return false;state.activeSession=freeze({...state.activeSession,status:'suspended',...(state.yieldAddsProgress?{snapshot:freeze({...state.activeSession.snapshot,label:'A-FINAL-TICK',taskState:freeze({...state.activeSession.snapshot.taskState,focus:freeze({actual:freeze({seconds:(Number(state.activeSession.snapshot.taskState?.focus?.actual?.seconds)||0)+70})})})})}:{})});state.running=false;return true;}}),
     domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn,deviceName:()=>"iPad · Safari"}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
@@ -1909,6 +1909,68 @@ for(const variant of ['old-owner-finished','new-owner-finished','both-decided','
   assert.equal(b.reviews.open().filter(row=>row.subject==='session').length,0,'no session kept for review on the new owner');
   await B.upload();assert.equal((await A.sync()).cancelled,false);
   assert.equal(a.reviews.open().filter(row=>row.subject==='session').length,0,'and none comes back to the old owner');
+}
+
+// Finish Today is a decision, and a final one. The finished day reaches the
+// other device as finished. When the other device continued the day before
+// the finish reached it, a copy that differs only in time takes the finish in
+// (on both devices, under the new owner) and never reopens the day; a copy
+// that decided something else keeps the finished copy for review, still
+// finished.
+for(const variant of ['arrives','continued-time-only','continued-decided-otherwise']){
+  syncWorld.drive.clear();syncWorld.claims.clear();
+  const day='2026-08-31',
+    a={installationId:'inst_finished_a',records:new Map(),deletions:[],noteDeletions:[],notes:syncWorld.note('finished'),activeSession:null,schedule:'',personal:personal('Finished QA'),journal:null},
+    b={installationId:'inst_finished_b',records:new Map(),deletions:[],noteDeletions:[],notes:{},activeSession:null,schedule:'',personal:personal('Finished QA'),journal:null};
+  const A=syncWorld.device(a,{claims:true}),B=syncWorld.device(b,{claims:true});
+  const withTasks=(item,taskState,updatedAt,extra={})=>freeze({...item,...extra,revision:item.revision+1,updatedAt,snapshot:freeze({...item.snapshot,contentRevision:item.snapshot.contentRevision+1,taskState:freeze(taskState),updatedAt})});
+  const finish=(item,updatedAt)=>withTasks(item,{warmup:freeze({resolvedState:'partial',actual:freeze({seconds:45})}),focus:freeze({actual:freeze({seconds:30})})},updatedAt,{status:'finished',suspendedAt:null});
+  const sessionReviews=device=>device.reviews.open().filter(row=>row.subject==='session');
+  a.activeSession=withTasks(revisionedSession(day,'FINISHED',{runningOn:a.installationId,revision:10,contentRevision:7,updatedAt:'2026-08-31T08:00:00.000Z'}),{warmup:freeze({actual:freeze({seconds:30})}),focus:freeze({actual:freeze({seconds:30})})},'2026-08-31T08:00:00.000Z');
+  a.schedule=a.activeSession.scheduleText;a.running=true;
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  if(variant==='arrives'){
+    a.activeSession=finish(a.activeSession,'2026-08-31T09:00:00.000Z');a.running=false;
+    await A.upload();
+    assert.equal((await B.sync()).cancelled,false,variant);
+    assert.equal(b.activeSession.status,'finished','the other device takes the day in as finished');
+    assert.equal(b.activeSession.snapshot.taskState.warmup.resolvedState,'partial','with what Finish Today recorded');
+    assert.equal(sessionReviews(b).length,0,variant+': nothing kept for review');
+    assert.equal((await A.sync()).cancelled,false);
+    assert.equal(a.activeSession.status,'finished','and the finishing device stays finished');
+    assert.equal(sessionReviews(a).length,0);
+    continue;
+  }
+  // B continues the day (Continue Here) before A's finish reaches Drive.
+  const source=await B.handoffSource();
+  assert.equal((await B.claim({date:day,observedOwner:source.session.runningOn,observedRevision:source.session.revision,
+    observedContentFingerprint:await sessionContentFingerprint(source.session),expectedCheckpointId:source.checkpointId,
+    handoffToken:'66666666-6666-4666-8666-666666666666',revision:20})).status,'completed');
+  b.activeSession=withTasks(freeze({...source.session,runningOn:b.installationId,status:'active',revision:20,suspendedAt:null}),
+    {warmup:freeze({actual:freeze({seconds:30})}),focus:freeze({actual:freeze({seconds:240})}),
+      ...(variant==='continued-decided-otherwise'?{review:freeze({resolvedState:'done',actual:freeze({seconds:20})})}:{})},'2026-08-31T09:10:00.000Z');
+  b.schedule=b.activeSession.scheduleText;b.running=true;
+  a.activeSession=finish(a.activeSession,'2026-08-31T09:05:00.000Z');a.running=false;
+  await B.upload();
+  assert.equal((await A.sync()).cancelled,false,variant);
+  if(variant==='continued-decided-otherwise'){
+    const kept=sessionReviews(a);
+    assert.equal(kept.length,1,'each device decided something the other did not: the finished copy is kept for review');
+    assert.equal(kept[0].kept.status,'finished','and it is kept as finished, not as a suspended session');
+    assert.equal(kept[0].kept.snapshot.taskState.warmup.resolvedState,'partial');
+    continue;
+  }
+  assert.equal(sessionReviews(a).length,0,variant+': time alone keeps nothing for review');
+  assert.equal(a.activeSession.status,'finished','the finishing device stays finished');
+  assert.equal(a.activeSession.runningOn,b.installationId,'under the new owner');
+  await A.upload();assert.equal((await B.sync()).cancelled,false);
+  assert.equal(b.activeSession.status,'finished','the device that continued takes the finish in');
+  assert.equal(b.activeSession.snapshot.taskState.warmup.resolvedState,'partial');
+  assert.equal(b.activeSession.snapshot.taskState.focus.actual.seconds,240,'keeping the time it recorded');
+  assert.equal(sessionReviews(b).length,0,variant+': nothing kept for review on the device that continued');
+  await B.upload();assert.equal((await A.sync()).cancelled,false);
+  assert.equal(a.activeSession.status,'finished');
+  assert.equal(sessionReviews(a).length,0,'and nothing comes back');
 }
 
 // The old owner finished the block the new owner was on and moved to the

@@ -840,10 +840,13 @@ function materializeDailyRecordSummary(summary){
   // Study content is distinct from ownership/control metadata. Revisions and
   // timestamps establish persistence/order; runningOn/status establish control.
   // Neither may make two otherwise identical study sessions conflict.
+  // What the day holds, without where it runs. Finishing the day is part of
+  // it: the person decided the day is over. (Added only when finished, so an
+  // open day's content reads as it always did.)
   function contentValue(session){
     const clean=sanitizeCurrentActiveSession(session);if(!clean)return null;
     const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,...snapshot}=clean.snapshot;
-    return Object.freeze({date:clean.date,scheduleText:clean.scheduleText,snapshot:Object.freeze(snapshot)});
+    return Object.freeze({date:clean.date,scheduleText:clean.scheduleText,snapshot:Object.freeze(snapshot),...(clean.status==='finished'?{finished:true}:{})});
   }
   return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession,contentValue});
   }
@@ -991,9 +994,10 @@ function materializeDailyRecordSummary(summary){
       }
       if(subject==='session'){
         // Study-content equality may deduplicate redundant retained versions,
-        // but only a suspended, same-owner canonical session proves that a
-        // kept Active Session has actually been applied.
-        return current.status==='suspended'&&current.runningOn===kept.runningOn&&
+        // but only a suspended (or, for a finished day, finished) same-owner
+        // canonical session proves that a kept Active Session has actually
+        // been applied.
+        return current.status===(kept.status==='finished'?'finished':'suspended')&&current.runningOn===kept.runningOn&&
           sameMeaning(subject,current,kept);
       }
       return sameMeaning(subject,current,kept);

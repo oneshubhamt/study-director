@@ -2524,6 +2524,7 @@ function sessionParkedHere(){return sessionPanelMode==='suspended'&&!TASKS.some(
 function executeSessionStatusModel(){
   const elsewhere=sessionShownElsewhere();
   if(sessionPanelMode==='previous')return {state:'suspended',label:'PREVIOUS DAY'};
+  if(sessionPanelMode==='finished')return {state:'complete',label:'FINISHED'};
   if(elsewhere)return {state:'elsewhere',label:`RUNNING ${sessionDevice(elsewhere).toUpperCase()}`};
   if(sessionParkedHere())return {state:'suspended',label:'SUSPENDED'};
   if(!TASKS.length)return {state:'empty',label:'NO SESSION'};
@@ -2573,10 +2574,14 @@ function buildLiveTimeline(){
 // wait; support and fixed blocks, a pause or the end let them show
 // (docs/areas/status-indicator.md, noise rules).
 function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING&&isWorkBlock(TASKS[TimerState.currentIndex]));}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
+// The Practice Pacer can start only while a block's timer runs, so its
+// controls follow every change of the main timer (start, pause, resume,
+// stop). Set once the Pacer exists, below.
+let refreshPracticeControls=()=>{};
 const TimerState=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
+  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();refreshPracticeControls();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
 }));
 const {
   session:SessionState, tasks:TASKS, modes:TIMER_MODES, taskIdentity:TaskIdentity, setMode:setTimerMode
@@ -2698,6 +2703,9 @@ async function withRestoreSessionPersistenceSuppressed(operation){
   finally{restoreSessionPersistenceSuppressionDepth=Math.max(0,restoreSessionPersistenceSuppressionDepth-1);}
 }
 function hasBlockingActiveSession(){
+  // A finished day runs no timer: like a suspended one, it never has to be
+  // suspended first.
+  if(sessionPanelMode==='finished')return false;
   const active=TASKS.some(isTrackableBlock);
   if(sessionPanelMode==='suspended'&&!active)return false;
   if(TimerState.mode===TIMER_MODES.SUSPENDED&&!active)return false;
@@ -2899,6 +2907,7 @@ const {
   markDone:markDoneTimer, setPausedUI, setTimerIdentity, skipTask:skipTaskTimer, startCur, syncTimerAfterWake, toggleDone, togglePause:togglePauseTimer,
   updateBreakMeter, updateCD
 }=TimerEngine;
+refreshPracticeControls=()=>PracticePacer.render();
 // A pause, resume, finished or skipped block goes to the other devices
 // within seconds (an urgent change), not at the next quiet-period upload:
 // Continue Here elsewhere takes the timer from Drive's newest version, so a
@@ -2988,6 +2997,8 @@ function notifyNewerSessionClaim(){
 async function checkSessionOwnershipClaim(){
   if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
   if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
+  // A finished day is never continued elsewhere: no claim to watch for.
+  if(sessionPanelMode==='finished'&&!sessionClaimFreeze)return false;
   if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
   sessionClaimLastAttemptAt=Date.now();sessionClaimCheckActive=true;
   try{
@@ -3053,7 +3064,7 @@ function installSessionWatch(){
   if(sessionWatchTimer||sessionClaimWatchTimer)return false;
   sessionWatchTimer=setInterval(()=>{
     if(document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return;
-    if(!TASKS.length&&sessionPanelMode!=='elsewhere')return;
+    if(!TASKS.length&&sessionPanelMode!=='elsewhere'||sessionPanelMode==='finished')return;
     try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
     catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
   },SESSION_WATCH_MS);
@@ -3634,6 +3645,7 @@ async function hydratePrimaryStateFromStorage(options={}){
   // Historical sessions must never be offered today's Continue Here path,
   // including suspended copies and those last owned on another device.
   if(isPreviousActiveSessionRecord(session)&&!TASKS.length)return attemptAutoRestoreActiveSession();
+  if(isFinishedActiveSession(session))return openFinishedSession(session,{source:'ownership-takeover'});
   if(sessionRunsElsewhere(session)&&!TASKS.length){setSessionPanelMode('elsewhere',session);return false;}
   if(isRestorableActiveSession(session)){
     const snapshot=activeSessionSnapshot(session);
@@ -4101,7 +4113,10 @@ function applyRows(rows,options={}){
       currentIndex:TimerState.currentIndex,
       anchor:TimerState.scheduleAnchorMin,
       fingerprint:scheduleFingerprint(),
-      renderDirty:!!ScheduleDerivedState.renderDirty
+      renderDirty:!!ScheduleDerivedState.renderDirty,
+      // Finish Today: the plan stays loaded for Review, and the Plan board
+      // shows the draft, as after Reset Today.
+      finished:sessionPanelMode==='finished'
     });
   }
   function timeline(){return Object.freeze({rows:buildLiveTimeline(),realtime:getRealTimeState()});}
@@ -4433,11 +4448,21 @@ function activeSessionPayload(snapshot=null,options={}){
   snapshot=snapshot||captureSessionSnapshot();
   if(!snapshot)return null;
   const nowIso=new Date().toISOString();
-  return {
+  const built={
     id:ACTIVE_SESSION_ID,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,
-    revision,date:snapshot.date,status:options.status==='suspended'?'suspended':'active',runningOn:InstallationIdentity.getId(),
+    revision,date:snapshot.date,status:options.status==='suspended'?'suspended':sessionPanelMode==='finished'?'finished':'active',runningOn:InstallationIdentity.getId(),
     scheduleText,snapshot,suspendedAt:options.suspendedAt||null,updatedAt:nowIso
   };
+  // A finished day keeps one form until Review changes it. Every save of it
+  // (a redraw, a sync, a backup) on any device that has it open would
+  // otherwise make it that device's again, with a new revision, and send it
+  // back and forth. sessionPanelSession holds that form while finished.
+  if(sessionPanelMode==='finished'&&options.status!=='suspended'){
+    const held=sessionPanelSession?ActiveSessionCodec.sanitizeCurrent(sessionPanelSession):null;
+    if(held&&CanonicalModule.same(ActiveSessionCodec.contentValue(held),ActiveSessionCodec.contentValue(built)))return held;
+    sessionPanelSession=built;
+  }
+  return built;
 }
 
 
@@ -4487,6 +4512,17 @@ function writeActiveSessionNow(snapshot,options={}){
   if(!appCanMutate())return Promise.resolve(null);
   if(ReviewSaveService.status().activeSessionPersistenceBlocked)return Promise.resolve(null);
   const session=activeSessionPayload(snapshot);if(!session)return Promise.resolve(null);
+  // A finished day changes only when Review is edited. Redraws, tab changes
+  // and flushes that change nothing write nothing: each write would make the
+  // day this device's and send it to every device again.
+  if(sessionPanelMode==='finished')return AppData.activeSession.load().then(stored=>{
+    const current=stored?.value?ActiveSessionCodec.sanitizeCurrent(stored.value):null;
+    if(current&&CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session))){const result={ok:true,value:current,storage:stored.storage,unchanged:true};handleActiveSessionRepositoryResult(result,'save');return result;}
+    return saveActiveSession(session,options);
+  });
+  return saveActiveSession(session,options);
+}
+function saveActiveSession(session,options){
   return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
 }
 function writeLiveDraftNow(options={}){
@@ -4712,7 +4748,8 @@ function restoreTimerRuntimeIfAny(){
   return true;
 }
 // A session another device runs: this device shows it and never runs its timer.
-function sessionRunsElsewhere(session){return !!session&&typeof session==='object'&&session.status!=='suspended'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
+// A finished day runs nowhere.
+function sessionRunsElsewhere(session){return !!session&&typeof session==='object'&&!['suspended','finished'].includes(session.status)&&String(session.runningOn||'')!==InstallationIdentity.getId();}
 function sessionFromElsewhere(session){return !!session&&typeof session==='object'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
 function isRestorableActiveSession(session){
   if(!session||typeof session!=='object'||sessionRunsElsewhere(session))return false;
@@ -4725,6 +4762,13 @@ function isRestorableActiveSession(session){
 function isSuspendedActiveSession(session){
   if(!session||typeof session!=='object')return false;
   if(session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision)||session.status!=='suspended')return false;
+  if(!isValidIsoDate(session.date)||session.date!==todayISO())return false;
+  if(!isCanonicalScheduleText(session.scheduleText))return false;
+  return !!activeSessionSnapshot(session);
+}
+function isFinishedActiveSession(session){
+  if(!session||typeof session!=='object')return false;
+  if(session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision)||session.status!=='finished')return false;
   if(!isValidIsoDate(session.date)||session.date!==todayISO())return false;
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
@@ -4779,12 +4823,31 @@ async function retireCoveredPreviousActiveSession(session){
 }
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
-  sessionPanelSession=['suspended','elsewhere','previous'].includes(sessionPanelMode)?session:null;
+  sessionPanelSession=['suspended','elsewhere','previous','finished'].includes(sessionPanelMode)?session:null;
   if(!sessionPanelSession&&sessionHandoff.error)sessionHandoff={...sessionHandoff,error:''};
   // The Execute header names the device running the session, or stops doing
   // so. Before the panel's own controls, which the idle display disables.
   try{updateExecuteSessionStatus();refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-elsewhere-header',error,'warn');}
   updateSessionControls();scheduleSyncStatus();
+}
+// Today, finished (Finish Today here or on another device): its blocks load
+// for Review only and its timer never restarts. Execute, the Pacer and the
+// Plan board show no session, as after Reset Today; Review stays editable.
+function openFinishedSession(session,{source='finished-session-review',lifecycleManaged=false}={}){
+  const snapshot=activeSessionSnapshot(session);if(!snapshot)return false;
+  const restored=applyStoredSessionSnapshot(session,{...snapshot,timerRuntime:null},{source,reviewOnly:true,lifecycleManaged});
+  if(restored===false)return false;
+  showFinishedDay(session);
+  return true;
+}
+function showFinishedDay(session=null){
+  TimerEngine.stopExecution();
+  TimerState.runtime=TimerState.emptyRuntime();
+  setTimerMode(TIMER_MODES.DONE,'finished-day');
+  setSessionPanelMode('finished',session);
+  renderSched();updateBadges();updateHeaderInfo();updateRealTimeAwareness();
+  refreshExecuteIdleDisplay(new Date(),{force:true});
+  refreshCoreUi({header:true});
 }
 async function recoverPreviousSessionForReview(session){
   const snapshot=activeSessionSnapshot(session);
@@ -4893,6 +4956,7 @@ async function attemptAutoRestoreActiveSession(){
     // retire the redundant recovery copy before considering ownership/UI.
     if(isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session))return false;
     if(isPreviousActiveSessionRecord(session))return handlePreviousActiveSession(session);
+    if(isFinishedActiveSession(session))return openFinishedSession(session);
     if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
     if(isSuspendedActiveSession(session)){setSessionPanelMode('suspended',session);return false;}
     if(!isRestorableActiveSession(session)){setSessionPanelMode('none');return false;}
@@ -5748,6 +5812,7 @@ async function continueSessionHere(){
       setPlanStatus('This session belongs to a previous study day. Review it without transferring or restarting its timer.',false);
       return false;
     }
+    if(isFinishedActiveSession(session)){openFinishedSession(session);return false;}
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     // Drive is read while the person confirms, so pressing Continue here
     // waits only on the claim when Drive has not moved on. Nothing is written.
@@ -5774,6 +5839,7 @@ async function continueSessionHere(){
       const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value||null;
       if(!current)setSessionPanelMode('none');
       else if(isPreviousActiveSessionRecord(current))setSessionPanelMode('previous',current);
+      else if(isFinishedActiveSession(current))openFinishedSession(current);
       else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
       else if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
       else setSessionPanelMode('active',current);
@@ -5794,7 +5860,9 @@ async function continueSessionOnExecute(source){
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
 async function yieldSessionToOtherDevice(options={}){
-  if(!TASKS.length)return false;
+  // A finished day runs no timer and is already stored as it is: nothing to
+  // stop, and it stays finished (not suspended) if it is kept for review.
+  if(!TASKS.length||sessionPanelMode==='finished')return false;
   const deferReview=options&&options.deferReview===true;
   await SessionLifecycle.run('session-yield',{scheduleIdentity:true,date:todayISO(),autoDate:true},async()=>{
     PracticePacer.pauseForSessionEnd({persist:false});
@@ -5826,6 +5894,7 @@ async function restoreSuspendedTodaySession(){
       setPlanStatus('This session belongs to a previous study day. Review it without restarting its timer.',false);
       return false;
     }
+    if(isFinishedActiveSession(session)){openFinishedSession(session);setPlanStatus('Today is finished. Review it and save it to Library when ready.');return false;}
     if(!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
     if(sessionFromElsewhere(session))return continueSessionHere();
     const snapshot=activeSessionSnapshot(session);
@@ -5847,8 +5916,8 @@ async function finishTodaySession(){
   if(!TASKS.some(isTrackableBlock)){setPlanStatus('No active study plan is available to finish.',false);return false;}
   const accepted=await Interactions.confirm({
     title:'Finish today and open Review?',
-    message:'The live timer will stop and your current progress will be kept for Review.',
-    details:['The current block is recorded as partial if it is still running.','Untouched future blocks remain unattempted; they are not marked skipped.','Nothing is added to Library until you choose Save Today to Library in Review.'],
+    message:'The timer stops and today’s session ends, here and on your other devices. Review opens next.',
+    details:['The current block is recorded as partial if it is still running, and so is an open Practice Pacer run.','Untouched future blocks remain unattempted; they are not marked skipped.','Nothing is added to Library until you choose Save Today to Library in Review.'],
     confirmLabel:'Finish today',cancelLabel:'Keep studying'
   });
   if(!accepted||!appCanMutate())return false;
@@ -5863,16 +5932,16 @@ async function finishTodaySession(){
         if(pct!==null)storeResolvedCompletion(TimerState.currentIndex,{pct,source:COMPLETION_SOURCES.TIME});
       }
     }
-    PracticePacer.pauseForSessionEnd({persist:false});
+    // The day is over, so an open Pacer run ends with it, as at day close.
+    PracticePacer.finalizeForDayClose();
     TimerEngine.stopExecution();
     completionNotice=NoticeCoordinator.begin({source:'timer',id:'execution',surface:'quiet',foreground:false});
-    TimerState.runtime=TimerState.emptyRuntime();
-    setTimerMode(TIMER_MODES.DONE,'manual-finish-day');
     resetBreakState();
-    refreshCoreUi();
+    // Finished before the write, so the stored session says so.
+    showFinishedDay();
     const saved=await writeLiveDraftNow({markChanged:true,emergency:true});
-    if(saved&&saved.ok===false)throw saved.error||new Error('live session save failed');
-    setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
+    if(!saved||saved.ok===false)throw saved?.error||new Error('the finished day could not be stored');
+    setPlanStatus('Today is finished. Review the day and save it to Library when ready.');
     await goTab('review',{source:'finish-today'});
     ReviewView.refresh({force:true});
     completionNotice.update({lifecycle:'succeeded',cue:'day-complete',occurrence:completionNotice.operationId});
@@ -5880,6 +5949,8 @@ async function finishTodaySession(){
     return true;
   }catch(error){
     completionNotice?.update({lifecycle:'cancelled'});
+    // Not stored as finished: the day stays open, with its timer stopped.
+    if(sessionPanelMode==='finished'){setSessionPanelMode('active');renderSched();}
     setPlanStatus('Could not finish today safely: '+(error&&error.message?error.message:error),false);
     return false;
   }
@@ -9111,6 +9182,8 @@ function executeIdlePresentation(d=new Date(),options={}){
     return view;
   };
   const elsewhere=sessionShownElsewhere();
+  if(sessionPanelMode==='finished')return applyOverrides(executeIdleView('Today Finished','FINISHED','Today Finished',
+    'Today’s session is finished. Open Review to rate the day, reflect and Save Today to Library. Reset Today clears it to start over.','NEXT: REVIEW'));
   if(sessionPanelMode==='previous')return applyOverrides(executeIdleView('Previous Day Needs Review','PREVIOUS DAY','Previous Day Needs Review',
     'This study day is stored for review. Its timer will not restart. Choose Review Previous Day to recover it safely.','NEXT: REVIEW'));
   if(sessionParkedHere()){
@@ -9165,7 +9238,7 @@ function refreshExecuteIdleDisplay(d=new Date(),options={}){
   setTextSafe('cd','00:00:00');
   const prog=document.getElementById('prog');if(prog)prog.style.width='0%';
   setTextSafe('prog-pct','0%');
-  setTextSafe('next-name',stripScheduleLead(nextTrackableWindowLabel(d))||'—');
+  setTextSafe('next-name',sessionPanelMode==='finished'?'—':stripScheduleLead(nextTrackableWindowLabel(d))||'—');
   setTextSafe('status-next',view.nextText||'NEXT: —');
   setPausedUI(false);
   setExecuteStateOverlay(view.overlayTitle,view.overlayMessage,view.kicker);
@@ -9246,25 +9319,29 @@ function updateSessionControls(){
   const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions'),cardAction=document.getElementById('execute-session-action');
   const active=TASKS.some(isTrackableBlock);
   const running=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
-  const finished=active&&TimerState.mode===TIMER_MODES.DONE;
+  // finished: Finish Today closed the day. complete: every block is resolved,
+  // and the day stays open until Finish Today.
+  const finished=sessionPanelMode==='finished',complete=active&&!finished&&TimerState.mode===TIMER_MODES.DONE;
   const previous=sessionPanelMode==='previous',suspended=sessionPanelMode==='suspended'&&!active,elsewhere=sessionPanelMode==='elsewhere'&&!active,handedOff=suspended&&sessionFromElsewhere(sessionPanelSession);
   const visible=active||suspended||elsewhere||previous;
   if(panel){
     panel.hidden=!visible;
-    panel.classList.toggle('suspended',suspended||elsewhere||previous);
+    panel.classList.toggle('suspended',suspended||elsewhere||previous||finished);
     const title=document.getElementById('session-panel-title');
     const note=document.getElementById('session-panel-note');
-    if(title)title.textContent=previous?'Previous Day Needs Review':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
+    if(title)title.textContent=previous?'Previous Day Needs Review':finished?'Today Finished':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':complete?'Plan Complete':running?'Live Timer Active':'Applied Plan Available';
     if(note)note.textContent=previous
       ? 'This historical session is preserved for Review. Its timer will not restart or transfer ownership. Open Review and Save Today to Library when ready.'
+      : finished
+      ? 'Today’s session is finished on every device. Open Review to rate the day, reflect and Save Today to Library. Reset Today clears it to start over; days already saved stay in Library.'
       : elsewhere
       ? `Today’s session is running ${sessionDevice(sessionPanelSession)} (last update ${sessionUpdateTime(sessionPanelSession)}). Everything else works here as usual. Continue Here moves the session to this device.`
       : handedOff
       ? `Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`
       : suspended
       ? 'Restore Session continues the parked session. Review → Save Today can save the suspended progress to Library without restarting its timer. Reset Today discards the parked session.'
-      : finished
-      ? 'Today is closed for this plan. Open Review and Save Today to Library when ready.'
+      : complete
+      ? 'Every block is resolved. Finish Today ends the session and opens Review.'
       : running
       ? 'The timer is actively tracking a block. Suspend or reset only if you intentionally want to stop this live session.'
       : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and notes are kept.';
@@ -9273,7 +9350,7 @@ function updateSessionControls(){
   if(progress){progress.hidden=!progressText;progress.classList.toggle('error',!continuing&&!!progressText);if(progress.textContent!==progressText)progress.textContent=progressText;}
   if(planControls){
     planControls.hidden=!visible;
-    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:previous?'Previous day needs review':elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
+    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:previous?'Previous day needs review':elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':complete?'Plan complete':running?'Live session':'Today’s session';
     if(state&&state.textContent!==label)state.textContent=label;
   }
   // The same controls in Execute's status card, its session panel and Plan's
@@ -9281,9 +9358,9 @@ function updateSessionControls(){
   // running elsewhere offers only Continue Here.
   [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
     const action=btn.dataset.action;
-    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere&&!previous;btn.disabled=continuing||!suspended&&!elsewhere&&!previous;const label=continuing?'Continuing…':previous?(active?'Open Review':'Review Previous Day'):elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
-    else if(action==='suspend-session'){btn.hidden=previous||suspended||elsewhere;btn.disabled=!active||previous;}
-    else if(action==='finish-session'){btn.hidden=previous||elsewhere||suspended;btn.disabled=!active||finished||previous;}
+    if(action==='restore-session'){const shown=suspended||elsewhere||previous||finished;btn.hidden=!shown;btn.disabled=continuing||!shown;const label=continuing?'Continuing…':finished?'Open Review':previous?(active?'Open Review':'Review Previous Day'):elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
+    else if(action==='suspend-session'){btn.hidden=previous||suspended||elsewhere||finished;btn.disabled=!active||previous||finished;}
+    else if(action==='finish-session'){btn.hidden=previous||elsewhere||suspended||finished;btn.disabled=!active||finished||previous;}
     else if(action==='reset-session'){btn.hidden=previous||elsewhere;btn.disabled=!visible||elsewhere||previous;}
   }));
   updateExecutePanels();
@@ -9385,6 +9462,10 @@ async function saveDayRecord(){
       suspendedSession=session;
     }
   }
+  // A finished day closes once it is saved, as a suspended one does: Review
+  // empties and the next plan can be applied. A save before Finish Today
+  // leaves the session running.
+  if(!suspendedSession&&sessionPanelMode==='finished')return saveDayRecordCore({closeSession:true});
   // The Review save owner commits the Day and closes this suspended session
   // without creating an interim, incorrectly owned Active Session.
   const saved=await saveDayRecordCore({closeSession:!!suspendedSession});
@@ -9397,9 +9478,6 @@ async function saveDayRecord(){
     }catch(error){AppDiagnostics.capture('review.suspended-session-status',error,'warn');}
     return false;
   }
-  setTimerMode(TIMER_MODES.DONE,'suspended-session-saved');
-  setSessionPanelMode('none');
-  updateSessionControls();
   return true;
 }
 
@@ -10225,6 +10303,8 @@ async function restoreSessionStateThroughLifecycle(importedSession,options={}){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date:todayISO()});
         PlanDraftEditor.preview({silent:true,enterDraft:false});
         setSessionPanelMode('previous',session);
+      }else if(session.status==='finished'){
+        if(!openFinishedSession(session,{source:'restore-journal-rollback',lifecycleManaged:true}))throw new Error('The finished day could not be loaded into Review.');
       }else if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('suspended',session);
@@ -10279,7 +10359,9 @@ async function verifyRestoredSessionRuntime(expected,scheduleText=''){
     if(!TASKS.length||scheduleFingerprint()!==expectedFingerprint)throw new Error('Post-restore verification failed to apply the Active Session plan.');
     const expectedSnapshot=activeSessionSnapshot(session);
     if(!expectedSnapshot)throw new Error('Post-restore verification could not read the Active Session snapshot.');
-    verifyRestoredTimerRuntimeSemantics(expectedSnapshot.timerRuntime);
+    // A finished day's timer never restarts.
+    if(session.status==='finished'){if(TimerState.runtime&&TimerState.runtime.startMs!==null)throw new Error('Post-restore verification found a running timer on a finished day.');}
+    else verifyRestoredTimerRuntimeSemantics(expectedSnapshot.timerRuntime);
   }else{
     // The working draft is independently verified through portable Plan data.
     if(TASKS.length||TimerState.mode!==TIMER_MODES.EMPTY)throw new Error('Post-restore verification found an unexpected live timer.');
@@ -11655,7 +11737,8 @@ const CLICK_ACTIONS=Object.freeze({
   'test-sound': ()=>NoticeCoordinator.testSound(),
   'test-system-alert': ()=>SystemNotifications.test(),
   'toggle-pomodoro': Pomodoro.configuration.toggleNudges,
-  'restore-session': ()=>sessionPanelMode==='previous'
+  'restore-session': ()=>sessionPanelMode==='finished'?goTab('review',{source:'finished-day-review'})
+    : sessionPanelMode==='previous'
     ? (TASKS.some(isTrackableBlock)?goTab('review',{source:'previous-day-review'}):revisitPreviousStoredSession())
     : sessionPanelMode==='elsewhere'?continueSessionHere():restoreSuspendedTodaySession(),
   'suspend-session': suspendTodaySession,

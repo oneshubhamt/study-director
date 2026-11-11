@@ -40,7 +40,7 @@ These hold for every step.
 2. **Proof before deleting.** Break the code a check pins, using the mutation harness on a temporary copy (never the working tree), and confirm a behaviour test fails. The most important of these breakages become permanent mutants.
 3. **Merging changes files, not what is checked.** A merged file keeps every scenario and every assertion. A merged browser test passes 3 runs on its own, then one full release-tier run. The `alone` rules stay.
 4. **Coverage never drops** for safety modules. Every mutant in `tests/helpers/mutation.mjs` stays killed.
-5. **Fix the app, not only the tests** (owner, 2026-11-03; this replaced the original "the app defines correct behaviour; report, don't change" rule). A bug, dead code or a clear improvement found along the way is fixed in the app in the same step, with a test that would have caught it, and named in the step's summary. Ask first only when the right behaviour is unclear or the change is large. Never weaken a test to make it pass.
+5. **Fix the app, not only the tests** (owner, 2026-11-03; this replaced the original "the app defines correct behaviour; report, don't change" rule). A bug, dead code or a clear improvement found along the way is fixed in the app in the same step and named in the step's summary. It gets a test when it is in a sensitive area or sets important behaviour ([workflow.md](workflow.md#choosing-tests), owner, 2026-11-11). Ask first only when the right behaviour is unclear or the change is large. Never weaken a test to make it pass.
 6. **Release bump once.** The branch raised `release` once, to `SDVB75F20`, when step 4 first changed the app. Later steps keep it.
 7. **Workflow changes need the owner's OK.** A6 and D7 were approved and are done.
 
@@ -196,6 +196,6 @@ Backup and storage. Done so far: covered checks deleted with mutant proof; 31 re
 
 ## Risks
 
-- New D tests may find app bugs, especially in Insights. Under rule 5 they are fixed in the same step with a test, or raised with the owner first when the right behaviour is unclear or the fix is large.
+- New D tests may find app bugs, especially in Insights. Under rule 5 they are fixed in the same step, or raised with the owner first when the right behaviour is unclear or the fix is large.
 - Removing text checks could weaken protection. Every deletion needs a behaviour test proven to catch the same breakage.
 - Merged browser tests can become flaky under load. Each must pass 3 runs alone; an `alone` test is never run beside another.

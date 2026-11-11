@@ -616,7 +616,7 @@ for(const [label,shared,snapshot] of [
     let resets=0,stops=0,panelChanges=0,notices=0;
     const app={
       Object,Date,Promise,
-      TASKS:[{}],todayISO:()=> '2026-10-27',TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
+      TASKS:[{}],sessionPanelMode:'active',todayISO:()=> '2026-10-27',TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
       PracticePacer:{pauseForSessionEnd:()=>{stops++;}},
       activeSessionPayload:()=>oldSession,
       AppData:{activeSession:{
@@ -667,7 +667,7 @@ for(const [label,shared,snapshot] of [
     const built={date:'2026-10-27',runningOn:'inst_local',revision:4,status:'active',suspendedAt:null,snapshot:{review:'built'}};
     const app={
       Object,Date,Promise,Error,
-      TASKS:[{}],todayISO:()=> '2026-10-27',TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
+      TASKS:[{}],sessionPanelMode:'active',todayISO:()=> '2026-10-27',TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
       PracticePacer:{pauseForSessionEnd:()=>{}},flushLiveDraft:async()=>true,appCanMutate:()=>true,
       activeSessionPayload:(_snapshot,options={})=>({...structuredClone(built),status:options.status||built.status,suspendedAt:options.suspendedAt||null}),
       AppData:{activeSession:{
@@ -995,8 +995,9 @@ for(const [label,shared,snapshot] of [
     assert.equal(await context.reviewSave(),success,'suspended save outcome must match canonical finalization');
     assert.equal(events.includes('review-only'),!hasTasks,'only an unloaded suspended session requires review-only hydration');
     assert.deepEqual(events.filter(x=>x==='core'),['core']);
-    assert.equal(events.includes('finished'),success);
-    assert.equal(events.includes(success?'panel:none':'panel:suspended'),true);
+    // A successful save closes the day inside the Review service, while the
+    // session's writes are still held; only a failed one restores the panel.
+    assert.equal(events.includes('panel:suspended'),!success);
   }
 }
 
