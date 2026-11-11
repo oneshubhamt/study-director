@@ -24,7 +24,13 @@ export const SYNCED_FORMAT_LEDGER=freeze([
     records:{DailyRecord:16,Note:3,ActiveSession:10,SessionSnapshot:6,PendingReview:1,CheckpointMetadata:1,CheckpointProtectedManifest:3}}),
   // Kept versions name their device (PendingReview 2); the claim names the
   // handoff and the content it observed (claim 4).
-  row({release:'current',backup:24,manifest:9,claim:4,personalData:2,
-    records:{DailyRecord:16,Note:3,ActiveSession:10,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}})
+  row({release:'SDVB75F24',backup:24,manifest:9,claim:4,personalData:2,
+    records:{DailyRecord:16,Note:3,ActiveSession:10,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}}),
+  // A day can be finished: ActiveSession 11 adds status 'finished', so Finish
+  // Today is final on every device. Every device must update at about the
+  // same time: an older build keeps a version-10 Drive version as it is,
+  // uploads nothing over it and asks for an update.
+  row({release:'current',backup:25,manifest:10,claim:4,personalData:2,
+    records:{DailyRecord:16,Note:3,ActiveSession:11,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}})
 ]);
 export const CURRENT_SYNCED_FORMATS=freeze({backup:EXTERNAL_FORMATS.completeBackup.metadataVersion,records:freeze(Object.fromEntries(SYNCED_RECORDS.map(name=>[name,CURRENT_SCHEMA_VERSIONS[name]])))});

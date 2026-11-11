@@ -818,7 +818,7 @@ function materializeDailyRecordSummary(summary){
       version:DATA_CONTRACT.schemas.ActiveSession.version,
       revision,
       date:String(session.date||''),
-      status:session.status==='suspended'?'suspended':'active',
+      status:['suspended','finished'].includes(session.status)?session.status:'active',
       runningOn:String(session.runningOn||''),
       scheduleText,
       snapshot:null,

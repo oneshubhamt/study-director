@@ -4731,7 +4731,7 @@ function isSuspendedActiveSession(session){
 }
 function isPreviousActiveSessionRecord(session){
   if(!session||typeof session!=='object'||session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
-  if(session.status&&!['active','suspended'].includes(session.status))return false;
+  if(session.status&&!['active','suspended','finished'].includes(session.status))return false;
   if(!isValidIsoDate(session.date)||session.date>=todayISO())return false;
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
@@ -5302,7 +5302,7 @@ function handleRepositoryDatasetRevisionChanged(){
   setTimeout(()=>{if(document.getElementById('pane-insights')?.classList.contains('on'))UiTabRegistry.renderTab('insights');},0);
 }
 function persistedActiveSessionUnfinished(session){
-  if(!session||session.deleted===true||!['active','suspended'].includes(session.status||'active'))return false;
+  if(!session||session.deleted===true||!['active','suspended','finished'].includes(session.status||'active'))return false;
   const snapshot=activeSessionSnapshot(session);
   const draft=parseScheduleDraftText(String(session.scheduleText||''));
   if(!snapshot||!draft.ok||!draft.parsed.length)return false;

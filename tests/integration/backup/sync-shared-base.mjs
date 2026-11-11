@@ -380,7 +380,7 @@ for(const {domain,decisions} of verificationCases){
 
 // Format/protection boundary: public provenance is separate from integrity-covered authority/deletion metadata.
 const parsed=await codec.inspectCurrent(blob,{filename:'checkpoint.sdbackup'});
-assert.equal(parsed.formatVersion,24);
+assert.equal(parsed.formatVersion,25);
 assert.equal(parsed.manifest.protectedManifest.entityType,'checkpointManifest');
 assert.equal(Object.hasOwn(parsed.manifest,'authority'),false,'Checkpoint authority must not leak into the public provenance manifest.');
 assert.equal(Object.hasOwn(parsed.manifest,'savedDayDeletions'),false,'Saved-Day deletion history must stay behind the protected-manifest boundary.');
