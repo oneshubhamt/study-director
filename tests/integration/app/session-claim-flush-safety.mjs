@@ -8,6 +8,9 @@ function productionFunction(name){
   assert.ok(start>=0&&end>start, `Production function missing: ${name}`);
   return source.slice(start,end+2);
 }
+// The claim cadence comes from the app itself, so the test follows it.
+const claimTimings=source.match(/^const SESSION_WATCH_MS=.*;$/mu)?.[0];
+assert.ok(claimTimings,'Production session-claim timings must exist.');
 const saveWarning=source.match(/^const SESSION_CLAIM_SAVE_WARNING=.*;$/mu)?.[0];
 assert.ok(saveWarning,'Production session-claim warning must exist.');
 const newerMessage=source.match(/^const SESSION_NEWER_CLAIM_MESSAGE=.*;$/mu)?.[0];
@@ -51,11 +54,10 @@ function harness(){
     setPlanStatus:(message,ok)=>calls.status.push({message,ok}),
     Interactions:{notify:notice=>calls.notices.push(notice)},checkUnsupportedUpdate:async()=>{calls.updates++;},
     clearSessionSafetyMessage:()=>{vm.runInContext("sessionSafetyMessage='';",context);},
-    Object,
-    SESSION_CLAIM_SYNC_RETRY_MS:30000
+    Object
   };
   const context=vm.createContext(app);
-  vm.runInContext(`let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionSafetyMessage='';\n${runtime}\nglobalThis.check=checkSessionOwnershipClaim;globalThis.liveWrite=writeLiveDraftNow;globalThis.state=()=>({freeze:sessionClaimFreeze,warning:sessionSafetyMessage,active:sessionClaimCheckActive});`,context,{filename:'production-session-claim.js'});
+  vm.runInContext(`${claimTimings}\nlet sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionSafetyMessage='';\n${runtime}\nglobalThis.check=checkSessionOwnershipClaim;globalThis.liveWrite=writeLiveDraftNow;globalThis.state=()=>({freeze:sessionClaimFreeze,warning:sessionSafetyMessage,active:sessionClaimCheckActive});`,context,{filename:'production-session-claim.js'});
   return {calls,check:()=>context.check(),liveWrite:options=>context.liveWrite(options),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},setResumeWorks:v=>{resumeWorks=v;},setReviewText:v=>{reviewText=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
 }
 const good=()=>loaded({...session,revision:5});
@@ -79,8 +81,8 @@ const good=()=>loaded({...session,revision:5});
   assert.equal(t.calls.stops,1,'same epoch does not re-freeze');
   assert.equal(t.calls.writes.length,1,'verified snapshot is not rewritten on each poll');
   assert.equal(t.calls.syncs.length,1,'unchanged claim obeys sync cooldown');
-  t.setNow(131000);t.loads.push(loaded(session));await t.check();
-  assert.equal(t.calls.syncs.length,2,'an existing frozen claim retains its 30 s sync cadence');
+  t.setNow(115000);t.loads.push(loaded(session));await t.check();
+  assert.equal(t.calls.syncs.length,2,'a stopped device asks again for the letting-go sync at its next 15 s claim check');
 }
 
 // A newer build's claim: the timer stops and the progress is saved, as for any

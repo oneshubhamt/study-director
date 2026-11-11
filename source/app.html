@@ -2946,7 +2946,9 @@ function uploadSoonAfterPlanApply(result){
 // full checkpoint reconciliation keeps its ordinary cadence. A remote claim
 // stops only this runtime clock; canonical progress stays untouched until the
 // verified full checkpoint arrives and ordinary reconciliation preserves it.
-const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
+// While stopped for a handover, every claim check (15 s) asks again for the
+// sync that lets go; a second short of the period allows the timer's slack.
+const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=SESSION_CLAIM_WATCH_MS-1000;
 let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
 const SESSION_CLAIM_SAVE_WARNING='The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.';
 async function verifyFrozenSessionClaim(){
