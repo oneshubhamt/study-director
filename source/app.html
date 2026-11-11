@@ -10934,9 +10934,13 @@ async function restoreMissingAfterStorageReset(hold,id=''){
 // is handled as a clear seen while open: automatic uploads pause so the empty
 // copy cannot replace a backup, and the notice offers the restore. A fresh
 // install or a new profile has no such record, so it is never mistaken.
+// Each loss records when it was found, also when an earlier notice is still
+// unanswered: that time dates this loss in diagnostics, and a restore takes
+// the newest version saved before it (2026-11-11, the phone showed a
+// two-day-old time for a new loss).
 function noteDatabaseRemovedWhileClosed(){
   if(IndexedDb.lifecycle().startedFresh!==true||!appCanMutate())return false;
-  const health=readStorageHealth();if(!health.lastStudyDataSaveAt||health.browserDataClearedAt)return false;
+  const health=readStorageHealth();if(!health.lastStudyDataSaveAt)return false;
   AppDiagnostics.capture('storage.idb-missing-at-start',new Error('The browser database was missing at start although study data had been saved here.'),'warn');
   writeStorageHealth({browserDataClearedAt:new Date().toISOString()});
   return true;

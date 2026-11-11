@@ -277,9 +277,16 @@ for(const rescued of [false,true]){
     assert.equal(result.resumed,false,label+' is not a clear');
     assert.equal(result.calls.writes,0,label+' records nothing');assert.equal(result.calls.holds.length,0,label+' pauses nothing');assert.equal(result.calls.decisions,0);
   }
+  // A second loss while the first notice is unanswered is dated by its own
+  // start: the notice says when data was last cleared, and the restore takes
+  // the newest version saved before it. While a clear is unanswered this
+  // device uploads nothing, so a later time never takes in its empty state.
   const earlier='2026-11-05T02:51:00.000Z',again=run({fresh:true,saved:true,cleared:earlier});
-  assert.equal(again.calls.writes,0,'an unresolved clear keeps the time it was first found');
-  assert.equal(again.calls.holds[0].clearedAt,earlier);assert.equal(again.calls.decisions,1);
+  assert.equal(again.calls.writes,1,'a second loss records its own time');
+  assert.ok(Date.parse(again.health.browserDataClearedAt)>Date.parse(earlier));
+  assert.equal(again.calls.holds[0].clearedAt,again.health.browserDataClearedAt);assert.equal(again.calls.decisions,1);
+  const reloaded=run({fresh:false,saved:true,cleared:earlier});
+  assert.equal(reloaded.calls.writes,0,'a reload of an unanswered clear keeps its time');assert.equal(reloaded.calls.holds[0].clearedAt,earlier);
 }
 
 // Removed profiles keep emergency browser rescue copies if IndexedDB/OPFS
