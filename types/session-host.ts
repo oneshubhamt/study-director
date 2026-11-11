@@ -157,6 +157,7 @@ export interface SessionHostController{
   settled():PromiseLike<unknown>;
   persistenceSuppressed():boolean;
   withPersistenceSuppressed<T>(operation:()=>T|PromiseLike<T>):Promise<T>;
+  rollbackLocalTransition(snapshot:SessionSnapshot,source:string,options?:Readonly<{restoreRuntime?:boolean}>):Promise<boolean>;
   applyStoredSession(session:ActiveSession,snapshot:SessionSnapshot,options?:Readonly<{source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean}>):unknown;
   resetRuntime(options?:Readonly<{source?:string;date?:string;lifecycleManaged?:boolean}>):unknown;
   resetLocal():Promise<SessionResult>;
