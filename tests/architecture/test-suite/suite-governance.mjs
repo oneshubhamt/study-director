@@ -72,5 +72,6 @@ const prTemplate=fs.readFileSync('.github/pull_request_template.md','utf8');asse
 assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.js']}).passed,false);
 assert.equal(evaluateBugRegressionPolicy({title:'fix: restore rollback',changedFiles:['source/core/backup.js','tests/integration/backup/backup-persistence.mjs']}).passed,true);
 assert.equal(evaluateBugRegressionPolicy({title:'feat: new theme',changedFiles:['source/app.html']}).required,false);
+assert.equal(evaluateBugRegressionPolicy({title:'fix: button label',changedFiles:['source/core/practice-pacer.js','source/app.html']}).required,false,'a small fix outside the sensitive areas needs no test of its own');
 
 console.log(JSON.stringify({status:'PASS',tests:tests.length,exactDuplicates:0,quarantines:quarantines.length},null,2));

@@ -32,7 +32,7 @@ Run targeted tests for each affected surface; run the full suites only after sub
 | UI | Presentation architecture tests and the relevant browser tests, at laptop and phone widths |
 | Build or modules | Syntax, architecture, generated syntax, build verification and the deployment contract |
 
-A pull request titled as a bug fix (`fix: …`) must add or strengthen a regression test at the right layer; CI checks this. Test rules and layers: [tests/README.md](../tests/README.md).
+A pull request titled as a bug fix (`fix: …`) that changes a sensitive area must add or strengthen a test at the right layer; CI checks this for the sensitive modules listed in `tests/helpers/bug-regression-policy.mjs` (`app.html` mixes every area, so fixes there rely on review). Test rules and layers: [tests/README.md](../tests/README.md).
 
 **Testing rhythm (owner, 2026-10-10).** Make all the changes for a piece of work, build once and run the suites once. Fix what fails, then rerun only the failing tests.
 
