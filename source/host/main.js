@@ -2883,13 +2883,18 @@ async function finishTodaySession(){
           ()=>ActiveSessionRuntime.applyStoredSession(rollbackSession,rollbackSnapshot,{source:'finish-today-rollback'})
         );
         if(restored===false)throw new Error('The pre-finish runtime snapshot could not be restored.');
+        const compensated=await ActiveSessionRuntime.writeSnapshot(rollbackSnapshot,{emergency:true,strictDurability:true,markChanged:false});
+        const compensatedSnapshot=compensated?.value?ActiveSessionRuntime.sessionSnapshot(compensated.value):null;
+        if(!compensated||compensated.ok!==true||(!compensated.storage.idb&&!compensated.storage.local)||!compensatedSnapshot||!CanonicalModule.same(compensatedSnapshot,rollbackSnapshot)){
+          throw compensated?.error||new Error('The pre-finish recovery snapshot could not be preserved.');
+        }
       }catch(recoveryError){rollbackError=recoveryError;}
     }
     if(rollbackError&&TimerState.mode===TIMER_MODES.DONE)setTimerMode(TIMER_MODES.READY,'manual-finish-save-failed');
     refreshCoreUi();
     completionNotice?.update({lifecycle:'cancelled'});
     const base='Could not finish today safely: '+(error&&error.message?error.message:error);
-    setPlanStatus(rollbackError?base+' Runtime restoration also failed: '+(rollbackError&&rollbackError.message?rollbackError.message:rollbackError):base+' The active runtime was restored.',false);
+    setPlanStatus(rollbackError?base+' Rollback also failed: '+(rollbackError&&rollbackError.message?rollbackError.message:rollbackError):base+' The active runtime and recovery snapshot were restored.',false);
     return false;
   }
 }
