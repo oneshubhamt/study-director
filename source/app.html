@@ -1615,30 +1615,18 @@ const StorageCensus=INTERNAL_MODULES.load('storage-census',1,'study-director.sto
 // and closes the app did not ask for, and the start before the last loss, so
 // the next start after a loss shows what was there and what failed first.
 // Only the tab in control records it. Counts, times and error names only.
-const DatabaseLifecycle=(()=>{
-  const Lifecycle=StorageCensus.lifecycle;let started=false,lastFlushAt=0,timer=null;
-  const read=()=>Lifecycle.read(AppData.local.getJson(STORAGE_KEYS.databaseLifecycle,null));
-  const write=record=>{try{AppData.local.setJson(STORAGE_KEYS.databaseLifecycle,record);}catch(error){AppDiagnostics.capture('storage.lifecycle-write',error,'warn');}};
-  const live=()=>{const value=IndexedDb.lifecycle();return {openedVersion:value.version??0,lastWriteAt:value.lastWriteAt,storageErrors:value.errors,lastError:value.lastError,lastErrorAt:value.lastErrorAt,unexpectedCloses:value.closes,versionChanges:value.versionChanges};};
-  const countStore=name=>IndexedDb.storeTransaction(name,'readonly',(store,tx,finish)=>{const request=store.count();request.onsuccess=()=>finish(true,request.result);request.onerror=()=>finish(false,request.error);});
-  function flush(){if(!started)return;clearTimeout(timer);timer=null;lastFlushAt=Date.now();write(Lifecycle.update(read(),live()));}
-  async function start(){
-    if(started||!appCanMutate())return false;
-    started=true;const value=IndexedDb.lifecycle();
-    write(Lifecycle.start(read(),{startedAt:new Date().toISOString(),fresh:value.startedFresh===true,foundVersion:value.foundVersion??0,openedVersion:value.version??0}));
-    const counts={};
-    for(const [id,name] of Object.entries(DB_STORES)){try{counts[id]=await countStore(name);}catch(error){AppDiagnostics.capture('storage.lifecycle-count',error,'warn');flush();return false;}}
-    write(Lifecycle.update(read(),{...live(),counts,countedAt:new Date().toISOString()}));lastFlushAt=Date.now();
-    return true;
-  }
-  // A fault is written within 5 seconds, at most once per 5 seconds.
-  function fault(){if(!started||timer)return;timer=setTimeout(flush,Math.max(0,5000-(Date.now()-lastFlushAt)));}
-  function noteLoss(){if(started)write(Lifecycle.noteLoss(Lifecycle.update(read(),live()),new Date().toISOString()));}
-  const snapshot=()=>started?Lifecycle.update(read(),live()):read();
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flush();});
-  window.addEventListener('pagehide',flush);
-  return Object.freeze({start,flush,fault,noteLoss,snapshot});
-})();
+const DatabaseLifecycle=StorageCensus.lifecycle.createRecorder(Object.freeze({
+  load:()=>AppData.local.getJson(STORAGE_KEYS.databaseLifecycle,null),
+  save:record=>AppData.local.setJson(STORAGE_KEYS.databaseLifecycle,record),
+  live:()=>{const value=IndexedDb.lifecycle();return {openedVersion:value.version??0,lastWriteAt:value.lastWriteAt,storageErrors:value.errors,lastError:value.lastError,lastErrorAt:value.lastErrorAt,unexpectedCloses:value.closes,versionChanges:value.versionChanges};},
+  countStore:name=>IndexedDb.storeTransaction(name,'readonly',(store,tx,finish)=>{const request=store.count();request.onsuccess=()=>finish(true,request.result);request.onerror=()=>finish(false,request.error);}),
+  stores:()=>Object.entries(DB_STORES).map(([id,name])=>Object.freeze({id,name})),
+  canWrite:()=>appCanMutate(),
+  now:()=>Date.now(),setTimer:(run,ms)=>setTimeout(run,ms),clearTimer:id=>clearTimeout(id),
+  capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
+}));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')DatabaseLifecycle.flush();});
+window.addEventListener('pagehide',()=>DatabaseLifecycle.flush());
 const BackupProviderModule=INTERNAL_MODULES.load('backup-provider',1,'study-director.backup-provider-module',1,Object.freeze({repositoryPolicy:RepositoryPolicyModule}));
 const BackupCaptureModule=INTERNAL_MODULES.load('backup-capture',1,'study-director.backup-capture-module',1);
 const BackupModule=INTERNAL_MODULES.load('backup',1,'study-director.backup-module',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule}));
@@ -12209,7 +12197,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       // startup gate opens any automatic provider work.
       await reconcileStartupChangeClock();
       resumeUnresolvedStorageReset();
-      void DatabaseLifecycle.start().catch(error=>AppDiagnostics.capture('storage.lifecycle-start',error,'warn'));
+      {const life=IndexedDb.lifecycle();void DatabaseLifecycle.start({fresh:life.startedFresh===true,foundVersion:life.foundVersion??0,openedVersion:life.version??0}).catch(error=>AppDiagnostics.capture('storage.lifecycle-start',error,'warn'));}
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
       void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));

@@ -93,6 +93,35 @@ assert.equal(L.start(null,{startedAt:'2026-11-09T06:00:00.000Z',fresh:true,found
 // A database recreated while the app is open keeps this start as the evidence.
 assert.equal(L.noteLoss(record,'2026-11-07T10:00:00.000Z').beforeLoss.records,83);
 
+// The recorder writes only while this tab is in control, checked at every
+// write: a tab that hands control to another mid-way writes nothing more.
+{
+  let saved=null,owner=true,writes=0,clockMs=Date.parse('2026-11-10T08:00:00.000Z'),release;
+  const counted=new Promise(resolve=>{release=resolve;});
+  const timers=[];
+  const recorder=L.createRecorder(freeze({
+    load:()=>saved,save:value=>{writes++;saved=JSON.parse(JSON.stringify(value));},
+    live:()=>({openedVersion:9,lastWriteAt:new Date(clockMs).toISOString(),storageErrors:0,lastError:'',lastErrorAt:'',unexpectedCloses:0,versionChanges:0}),
+    countStore:async name=>{await counted;return name==='dailyRecords'?5:1;},stores:()=>stores,canWrite:()=>owner,
+    now:()=>clockMs,setTimer:(run,ms)=>{timers.push({run,ms});return timers.length;},clearTimer:()=>{},capture:()=>{}
+  }));
+  const starting=recorder.start({fresh:false,foundVersion:9,openedVersion:9});
+  assert.equal(writes,1,'the start is written at once');
+  release();assert.equal(await starting,true);
+  assert.equal(saved.current.records,10);assert.equal(saved.current.savedDayRecords,5);
+  recorder.fault();assert.equal(timers.length,1);assert.ok(timers[0].ms<=5000);recorder.fault();assert.equal(timers.length,1,'one pending fault write at a time');
+  clockMs+=60000;timers[0].run();assert.equal(writes,3);
+  owner=false;const before=JSON.stringify(saved);clockMs+=60000;
+  assert.equal(recorder.flush(),false);assert.equal(recorder.noteLoss(),false);
+  assert.equal(JSON.stringify(saved),before,'a tab no longer in control never writes its stale counters');
+  assert.equal(recorder.snapshot().current.lastWriteAt,saved.current.lastWriteAt,'a tab out of control shows the stored record, not its own counters');
+  // Control lost while the start-up counts were still being read.
+  let late=null,lateOwner=true,lateRelease;const lateCount=new Promise(resolve=>{lateRelease=resolve;});
+  const lateRecorder=L.createRecorder(freeze({load:()=>late,save:value=>{late=JSON.parse(JSON.stringify(value));},live:()=>({openedVersion:9}),countStore:async()=>{await lateCount;return 3;},stores:()=>stores,canWrite:()=>lateOwner,now:()=>clockMs,setTimer:()=>0,clearTimer:()=>{},capture:()=>{}}));
+  const lateStart=lateRecorder.start({fresh:false,foundVersion:9,openedVersion:9});lateOwner=false;lateRelease();
+  assert.equal(await lateStart,false);assert.equal(late.current.records,undefined,'counts finished after control moved are not written');
+}
+
 // Copy diagnostics prints the new lines with their fields, and nothing else.
 const Diagnostics=registry.require('backup-operation-diagnostics',1,freeze({lifecycle:registry.require('operation-lifecycle',1)}));
 const recorder=Diagnostics.createRecorder(freeze({configuration:freeze({release:'test',limit:3}),environment:freeze({now:()=>Date.parse('2026-11-10T00:00:00.000Z')}),storage:freeze({read:()=>'',write:()=>true})}));

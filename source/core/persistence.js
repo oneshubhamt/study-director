@@ -170,7 +170,10 @@ registry.define('persistence',1,()=>{
     let foundVersion=null,lastWriteAt='',faultCount=0,lastFault='',lastFaultAt='',closeCount=0,versionChangeCount=0;
     const STORAGE_FAULTS=new Set(['AbortError','ConstraintError','DataCloneError','DataError','InvalidAccessError','InvalidStateError','NotFoundError','NotReadableError','QuotaExceededError','ReadOnlyError','SecurityError','TimeoutError','TransactionInactiveError','UnknownError','VersionError','IDB_OPEN_TIMEOUT','IDB_OPEN_BLOCKED']);
     function noteFault(error){
-      const name=String(error?.code||error?.name||'');
+      // A browser DOMException also carries a legacy numeric code (22 for a
+      // full disk); its name is what identifies it. Only the open timeouts are
+      // reported by code.
+      const name=STORAGE_FAULTS.has(error?.name)?error.name:String(error?.code||'');
       if(!STORAGE_FAULTS.has(name))return;
       faultCount++;lastFault=name;lastFaultAt=new Date().toISOString();
     }

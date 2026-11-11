@@ -180,14 +180,14 @@ registry.define('storage-census',1,()=>{
   // A start that found no database, after one that saw records or a write,
   // keeps that earlier start as the evidence of what was lost.
   const heldData=start=>!!start&&(count(start.records)>0||!!start.lastWriteAt);
-  function noteLoss(record,detectedAt){
+  function keepLoss(record,detectedAt){
     const stored=readLifecycle(record);
     if(!heldData(stored.current))return stored;
     return freeze({...stored,beforeLoss:cleanStart({...stored.current,detectedAt})});
   }
   function startLifecycle(record,start){
     const stored=readLifecycle(record),current=cleanStart({...start,records:undefined});
-    const kept=start.fresh===true?noteLoss(stored,start.startedAt):stored;
+    const kept=start.fresh===true?keepLoss(stored,start.startedAt):stored;
     return freeze({...kept,current});
   }
   // Fold the database's in-memory counters and the store counts into this start.
@@ -202,7 +202,31 @@ registry.define('storage-census',1,()=>{
     }
     return freeze({...stored,current:cleanStart(next)});
   }
+  // Keeps the record for this page. Only the tab in control writes, checked
+  // at every write: a tab that has handed control to another stops at once,
+  // so its stale counters never replace the new owner's. A fault is written
+  // within 5 seconds, at most once per 5 seconds.
+  function createRecorder(ports){
+    const {load,save,live,countStore,stores,canWrite,now,setTimer,clearTimer,capture}=ports;
+    let started=false,lastFlushAt=0,timer=null;
+    const iso=()=>new Date(now()).toISOString(),stored=()=>readLifecycle(load());
+    const write=record=>{if(!canWrite())return false;try{save(record);return true;}catch(error){capture('storage.lifecycle-write',error);return false;}};
+    function flush(){clearTimer(timer);timer=null;if(!started)return false;lastFlushAt=now();return write(updateLifecycle(stored(),live()));}
+    async function start(info){
+      if(started||!canWrite())return false;
+      started=true;
+      write(startLifecycle(stored(),{...info,startedAt:iso()}));
+      const counts={};
+      for(const {id,name} of stores()){try{counts[id]=await countStore(name);}catch(error){capture('storage.lifecycle-count',error);flush();return false;}}
+      lastFlushAt=now();
+      return write(updateLifecycle(stored(),{...live(),counts,countedAt:iso()}));
+    }
+    function fault(){if(!started||timer)return;timer=setTimer(flush,Math.max(0,5000-(now()-lastFlushAt)));}
+    function recordLoss(){return started&&write(keepLoss(updateLifecycle(stored(),live()),iso()));}
+    const snapshot=()=>started&&canWrite()?updateLifecycle(stored(),live()):stored();
+    return freeze({start,flush,fault,noteLoss:recordLoss,snapshot});
+  }
 
-  return freeze({format:'study-director.storage-census',contractVersion:1,measure,sizeOf,lifecycle:freeze({read:readLifecycle,start:startLifecycle,update:updateLifecycle,noteLoss})});
+  return freeze({format:'study-director.storage-census',contractVersion:1,measure,sizeOf,lifecycle:freeze({read:readLifecycle,start:startLifecycle,update:updateLifecycle,noteLoss:keepLoss,createRecorder})});
 });
 })();
