@@ -2849,7 +2849,6 @@ async function finishTodaySession(){
   });
   if(!accepted||!appCanMutate())return false;
   const rollbackSnapshot=ActiveSessionRuntime.captureSnapshot();
-  const rollbackSession=rollbackSnapshot?ActiveSessionRuntime.payload(rollbackSnapshot):null;
   let completionNotice=null;
   try{
     const hadActiveTimer=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
@@ -2877,18 +2876,9 @@ async function finishTodaySession(){
     return true;
   }catch(error){
     let rollbackError=null;
-    if(rollbackSession&&rollbackSnapshot){
-      try{
-        const restored=await ActiveSessionRuntime.withPersistenceSuppressed(
-          ()=>ActiveSessionRuntime.applyStoredSession(rollbackSession,rollbackSnapshot,{source:'finish-today-rollback'})
-        );
-        if(restored===false)throw new Error('The pre-finish runtime snapshot could not be restored.');
-        const compensated=await ActiveSessionRuntime.writeSnapshot(rollbackSnapshot,{emergency:true,strictDurability:true,markChanged:false});
-        const compensatedSnapshot=compensated?.value?ActiveSessionRuntime.sessionSnapshot(compensated.value):null;
-        if(!compensated||compensated.ok!==true||(!compensated.storage.idb&&!compensated.storage.local)||!compensatedSnapshot||!CanonicalModule.same(compensatedSnapshot,rollbackSnapshot)){
-          throw compensated?.error||new Error('The pre-finish recovery snapshot could not be preserved.');
-        }
-      }catch(recoveryError){rollbackError=recoveryError;}
+    if(rollbackSnapshot){
+      try{await ActiveSessionRuntime.rollbackLocalTransition(rollbackSnapshot,'finish-today-rollback');}
+      catch(recoveryError){rollbackError=recoveryError;}
     }
     if(rollbackError&&TimerState.mode===TIMER_MODES.DONE)setTimerMode(TIMER_MODES.READY,'manual-finish-save-failed');
     refreshCoreUi();
