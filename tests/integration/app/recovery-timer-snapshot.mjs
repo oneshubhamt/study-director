@@ -33,7 +33,7 @@ const input={
  persistence:{canMutate:()=>true,recoveryQuiesced:()=>recovery,persistenceBlocked:()=>blocked,recoveryWorkActive:()=>recoveryWork,timerSnapshotEligible:()=>timerEligible,markContentChanged:()=>{marked++},snapshotForWrite:()=>controller.captureSnapshot(),reportResult(){},warn:m=>warnings.push(m)},
  lifecycle:{async run(_k,_o,op){return op()},runSync(_k,_o,op){return op()}},
  apply:{readPlanDraft:()=>planDraft,writePlanDraft:v=>{planDraft=v},previewPlanDraft(){},setStudyDate:d=>{studyDate=d},applySessionSchedule({snapshot,scheduleText}){applyCount++;appliedText=scheduleText;controller.applySnapshot(snapshot);return true}},
- reset:{stopTimerPresentation(){},invalidatePresentation(){},resetCountdown(){},setCurrentTask:i=>{timerState.currentIndex=i},resetBreak(){},setEmptyTimerMode(){},clearTimerSession(){timerState.contentRevision=0;timerState.savedRevision=0},hydrateReview(){review={reflection:'',studyQuality:null}},invalidateSchedule(){},resetPlanSession(){resetCount++},clearProgress:()=>taskState.clear(),clearCarryForward:()=>{carry=''},resetPractice:()=>{practice={active:null,runs:[]}},pausePracticeForSessionEnd(){}},
+ reset:{stopTimerPresentation(){},invalidatePresentation(){},resetCountdown(){},setCurrentTask:i=>{timerState.currentIndex=i},resetBreak(){},setEmptyTimerMode(){},clearTimerSession(){timerState.contentRevision=0;timerState.savedRevision=0},hydrateReview(){review={reflection:'',studyQuality:null}},invalidateSchedule(){},resetPlanSession(){resetCount++},clearProgress:()=>taskState.clear(),clearCarryForward:()=>{carry=''},resetPractice:()=>{practice={active:null,runs:[]}},pausePracticeForSessionEnd(){if(practice?.active)practice={...practice,active:{...practice.active,pauseCause:'session'}}}},
  installation:{id:()=> 'device-1'},clock:{nowMs:()=>now,nowIso:()=>new Date(now).toISOString()},environment:{clearTimeout:id=>timers.delete(id),setTimeout(fn){const id=++timerId;timers.set(id,fn);return id}}
 };
 const controller=module.createController(input);
@@ -50,9 +50,19 @@ controller.saveLiveDraft({strictDurability:true,markChanged:false});controller.s
 now+=60000;recoveryWork=true;assert.equal(controller.maybeSnapshotRunningTimer(),false);recoveryWork=false;assert.equal(controller.maybeSnapshotRunningTimer(),true);await Promise.resolve();
 // A local recovery envelope is not a canonical completion barrier.
 saveMode='local';await assert.rejects(()=>controller.writeCanonicalNow('finishing today'),/idb unavailable|durably committed/);saveMode='idb';
+// Failed suspension must restore both runtime Practice state and a recoverable active snapshot.
+practice={active:{taskId:'a',pauseCause:null,currentMs:12000},runs:[]};
+const preSuspend=structuredClone(practice),preSuspendSnapshot=controller.captureSnapshot();
+saveMode='local';
+await assert.rejects(()=>controller.suspendLocal(),/idb unavailable|durably committed/);
+assert.deepEqual(practice,preSuspend);assert.equal(repoValue.status,'active');assert.deepEqual(repoValue.snapshot,preSuspendSnapshot);assert.equal(planDraft,'draft survives reload');
+saveMode='idb';
 // Suspension is canonical before runtime reset, and restore is canonical active before apply.
 const suspended=await controller.suspendLocal();assert.equal(suspended.status,'suspended');assert.ok(resetCount>0);assert.equal(repoValue.status,'suspended');
 const priorApply=applyCount;const restored=await controller.restoreSuspendedLocal(suspended);assert.equal(restored.status,'active');assert.equal(repoValue.status,'active');assert.ok(applyCount>priorApply);assert.equal(planDraft,'draft survives reload');
-// Reset requires a physical canonical clear and verified null readback.
-await controller.resetLocal();assert.equal(repoValue,null);clearMode='local';repoValue=controller.payload(controller.captureSnapshot());await assert.rejects(()=>controller.resetLocal(),/delete failed|not durably cleared/);
-console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','reload-recovery','draft-independence','strict-option-merge','recovery-snapshot-gate','canonical-fail-closed','suspend-restore','reset-clear']}));
+// Reset requires a physical canonical clear and verified null readback; a rejected clear must re-establish the pre-reset recovery session.
+await controller.resetLocal();assert.equal(repoValue,null);
+const preReset=controller.captureSnapshot();repoValue=controller.payload(preReset);clearMode='local';
+await assert.rejects(()=>controller.resetLocal(),/delete failed|not durably cleared/);
+assert.equal(repoValue.status,'active');assert.deepEqual(repoValue.snapshot,preReset);
+console.log(JSON.stringify({status:'PASS',suite:'recovery-timer-snapshot',checks:['snapshot-roundtrip','reload-recovery','draft-independence','strict-option-merge','recovery-snapshot-gate','canonical-fail-closed','suspend-failure-rollback','suspend-restore','reset-clear','reset-failure-rollback']}));
