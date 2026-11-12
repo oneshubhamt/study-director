@@ -75,8 +75,8 @@ export async function continueHere(page,who,{mode='running'}={}){
   await waitFor(async()=>(await view(page)).mode===mode,{label:`${who}: Continue Here continues the timer (${mode})`,timeout:30000});
   return Date.now()-started;
 }
-// The old owner stops within one claim check (15 s) of seeing the claim.
-export const stopsWithin=async(page,who,timeout=25000)=>{const started=Date.now();await waitFor(async()=>!(await view(page)).loop,{label:`${who} stops its timer`,timeout});return Date.now()-started;};
+// The old owner stops within one session check (10 s) of the claim.
+export const stopsWithin=async(page,who,timeout=20000)=>{const started=Date.now();await waitFor(async()=>!(await view(page)).loop,{label:`${who} stops its timer`,timeout});return Date.now()-started;};
 export const markDone=page=>page.evaluate(`(async()=>{const d=__PWA6;d.goTab('execute');await new Promise(r=>setTimeout(r,80));d.markDone();await new Promise(r=>setTimeout(r,400));await d.flushLiveDraft();return d.TimerState.snapshot().currentIndex;})()`);
 
 // The day's session. Each Continue Here is checked the same way: the timer

@@ -9,7 +9,7 @@ function productionFunction(name){
   return source.slice(start,end+2);
 }
 // The claim cadence comes from the app itself, so the test follows it.
-const claimTimings=source.match(/^const SESSION_WATCH_MS=.*;$/mu)?.[0];
+const claimTimings=source.match(/^const SESSION_CLAIM_WATCH_MS=.*;$/mu)?.[0];
 assert.ok(claimTimings,'Production session-claim timings must exist.');
 const saveWarning=source.match(/^const SESSION_CLAIM_SAVE_WARNING=.*;$/mu)?.[0];
 assert.ok(saveWarning,'Production session-claim warning must exist.');
@@ -24,13 +24,13 @@ const localOnly={ok:true,value:{...session,revision:5},storage:{local:true,idb:f
 const failed={ok:false,value:{...session,revision:5},storage:{local:false,idb:false},error:new Error('Both local stores unavailable')};
 const loaded=value=>({ok:true,value,storage:{local:false,idb:true}});
 function harness(){
-  let claim={...owned},now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false,resumeWorks=true,reviewText='Retain the last edits';
+  let claim={...owned},newVersions=false,now=100000,sessionValue={...session},saves=[],loads=[],captureFailure=false,resumeWorks=true,reviewText='Retain the last edits';
   const calls={notices:[],updates:0,stops:0,resumes:0,holds:[],releases:0,snapshots:[],captureEvidenceArgs:[],evidences:[],writes:[],syncs:[],warnings:[],status:[],captures:[],changed:0,cancelled:0};
   const app={
     document:{visibilityState:'visible'},navigator:{onLine:true},
     StartupLifecycle:{status:()=>({fullyInitialized:true})},
     TASKS:[{}],sessionPanelMode:'active',
-    BackupProviderRuntime:{connected:()=>true,readSessionClaim:async()=>claim,scheduleSharedSync:(id,reason)=>{calls.syncs.push(reason);return true;}},
+    BackupProviderRuntime:{connected:()=>true,watchSession:async()=>({claim,newVersions}),bringInSessionVersions:()=>{calls.syncs.push('session-watch');return true;},scheduleSharedSync:(id,reason)=>{calls.syncs.push(reason);return true;}},
     AppData:{activeSession:{load:async()=>{const next=loads.length?loads.shift():loaded(sessionValue);return typeof next==='function'?await next():await next;}}},
     ActiveSessionCodec:{sanitizeCurrent:value=>value},CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
     InstallationIdentity:{getId:()=> 'inst_local'},
@@ -58,7 +58,7 @@ function harness(){
   };
   const context=vm.createContext(app);
   vm.runInContext(`${claimTimings}\nlet sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionSafetyMessage='';\n${runtime}\nglobalThis.check=checkSessionOwnershipClaim;globalThis.liveWrite=writeLiveDraftNow;globalThis.state=()=>({freeze:sessionClaimFreeze,warning:sessionSafetyMessage,active:sessionClaimCheckActive});`,context,{filename:'production-session-claim.js'});
-  return {calls,check:()=>context.check(),liveWrite:options=>context.liveWrite(options),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},setResumeWorks:v=>{resumeWorks=v;},setReviewText:v=>{reviewText=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
+  return {calls,check:()=>context.check(),liveWrite:options=>context.liveWrite(options),state:()=>context.state(),saves,loads,setClaim:v=>{claim=v;},setNewVersions:v=>{newVersions=v;},setLocal:v=>{sessionValue=v;},setNow:v=>{now=v;},setResumeWorks:v=>{resumeWorks=v;},setReviewText:v=>{reviewText=v;},failCapture:()=>{captureFailure=true;},setTasks:v=>{context.TASKS=v;}};
 }
 const good=()=>loaded({...session,revision:5});
 
@@ -208,6 +208,21 @@ for(const bad of [
   assert.equal(await t.check(),false);assert.equal(t.calls.stops,0);
   t.setClaim({...owned});t.setLocal({runningOn:'inst_other',revision:6});t.loads.push(loaded({runningOn:'inst_other',revision:6}));
   assert.equal(await t.check(),false);assert.equal(t.calls.stops,0);
+}
+
+// The session check (backlog item 23): a version another device finished is
+// brought in at once, also on a device that shows the session running on
+// another device (that device's claim applies there). A takeover of the
+// session running here saves it first and asks for its own sync once.
+{
+  const elsewhere=harness();elsewhere.setNewVersions(true);elsewhere.setLocal({runningOn:'inst_other',revision:6});elsewhere.loads.push(loaded({runningOn:'inst_other',revision:6}));
+  assert.equal(await elsewhere.check(),false);assert.deepEqual(elsewhere.calls.syncs,['session-watch'],'shown running elsewhere, the new version comes in now');assert.equal(elsewhere.calls.stops,0);
+  const here=harness();here.setNewVersions(true);here.setClaim({...owned,ownedHere:true});here.loads.push(loaded(session));
+  await here.check();assert.deepEqual(here.calls.syncs,['session-watch'],'running here, the new version comes in now');assert.equal(here.calls.stops,0);
+  const taken=harness();taken.setNewVersions(true);taken.loads.push(loaded(session),good());taken.saves.push(saved);
+  assert.equal(await taken.check(),true);assert.equal(taken.calls.stops,1);assert.deepEqual(taken.calls.syncs,['session-claim'],'taken over: one sync, after the stopped session is saved here');
+  const quiet=harness();quiet.setLocal({runningOn:'inst_other',revision:6});quiet.loads.push(loaded({runningOn:'inst_other',revision:6}));
+  await quiet.check();assert.deepEqual(quiet.calls.syncs,[],'nothing new, no sync');
 }
 
 // If snapshot capture fails, the verified remote owner still stops execution and warns.

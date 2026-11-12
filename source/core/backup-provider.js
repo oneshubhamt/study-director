@@ -53,6 +53,7 @@ registry.define('backup-provider',1,input=>{
   const formatsByProvider=new Map();
   // The versions each location's last complete scan could not read (by id).
   const unreadableByProvider=new Map();
+  const sessionWatchByProvider=new Map(),ownCommitIds=new Set();
   const verifiedHistoryByProvider=new Map(),verifiedSessionClaimByProvider=new Map(),recentHistoryByProvider=new Map(),repositoryScopeByProvider=new Map(),connectedOnceByProvider=new Set();
   const repositoryOperationStateBySelection=new WeakMap();
   const providerPublications=new Map();
@@ -115,7 +116,7 @@ registry.define('backup-provider',1,input=>{
       list:value.list,upload:value.upload,download:value.download,delete:value.delete,
       beginPublication:publicationCapable?value.beginPublication:null,listPublications:publicationCapable?value.listPublications:null,assertPublication:publicationCapable?value.assertPublication:null,renewPublication:publicationCapable&&typeof value.renewPublication==='function'?value.renewPublication:null,endPublication:publicationCapable?value.endPublication:null,
       beginMaintenance:maintenanceCapable?value.beginMaintenance:null,listMaintenances:maintenanceCapable?value.listMaintenances:null,assertMaintenance:maintenanceCapable?value.assertMaintenance:null,renewMaintenance:maintenanceCapable&&typeof value.renewMaintenance==='function'?value.renewMaintenance:null,endMaintenance:maintenanceCapable?value.endMaintenance:null,
-      listSessionClaims:sessionClaimCapable?value.listSessionClaims:null,uploadSessionClaim:sessionClaimCapable?value.uploadSessionClaim:null,downloadSessionClaim:sessionClaimCapable?value.downloadSessionClaim:null,deleteSessionClaim:sessionClaimCapable?value.deleteSessionClaim:null,
+      listSessionClaims:sessionClaimCapable?value.listSessionClaims:null,listSessionWatch:sessionClaimCapable&&typeof value.listSessionWatch==='function'?value.listSessionWatch:null,uploadSessionClaim:sessionClaimCapable?value.uploadSessionClaim:null,downloadSessionClaim:sessionClaimCapable?value.downloadSessionClaim:null,deleteSessionClaim:sessionClaimCapable?value.deleteSessionClaim:null,
       scope:typeof value.scope==='function'?value.scope:null,
       discardUploads:typeof value.discardUploads==='function'?value.discardUploads:null,
       beginOperation:typeof value.beginOperation==='function'?value.beginOperation:null,
@@ -923,6 +924,8 @@ registry.define('backup-provider',1,input=>{
           OperationDiagnostics.mark('provider-commit-start',{provider:selected.id});progress(retention?.role==='before-restore'?'safety-commit':'commit',retention?.role==='before-restore'?`Committing safety version in ${selected.label}…`:`Committing and verifying the backup in ${selected.label}…`);
           // A commit might already be visible if its verification fails. Never
           // retract a potentially reused or already-published identity here.
+          // The session check sees this version arrive; it is this device's own.
+          rememberOwnCommit(marker.checkpointId);
           const item=repositoryProviderItem(await selected.repository.upload(Object.freeze({kind:'commit',id:marker.checkpointId,name:marker.checkpointId+'.sdcommit',blob:marker.blob,size:marker.size,digest:marker.digest,exportedAt:marker.exportedAt,appVersion:APP_VERSION,checkProtection:marker.checkProtection,checkSource:marker.checkSource})),'commit');const verifiedCommit=await verifyUploadedRepositoryCommit(selected,item,marker,signal);await marker.checkSource?.();rememberVerifiedHistory(selected,item,Object.freeze({kind:'commit',value:verifiedCommit}),item.verificationScope||null);OperationDiagnostics.mark('provider-commit-complete',{provider:selected.id});return item;
         },
         onCommitted:async context=>{if(shared)overtakenByProvider.delete(selected.id);OperationDiagnostics.mark('provider-checkpoint-committed',{provider:selected.id});RepositoryCheckpointPipeline.markCompleted({copy:{source:selected.id,sourceRevision:context.sourceRevision||context.exportedAt||'',attachmentsComplete:!(context.manifest?.assets||[]).some(item=>item.missing===true)}});restartAutomaticCountdown(publicationOwner,context.sourceRevision||context.exportedAt);progress(retention?.role==='before-restore'?'safety-complete':'complete',retention?.role==='before-restore'?`Safety version saved in ${selected.label}.`:`Finishing ${selected.label} backup…`);return null;},
@@ -1256,6 +1259,11 @@ registry.define('backup-provider',1,input=>{
     if(!repositorySessionClaimCapable(selected))return null;
     const listed=await selected.repository.listSessionClaims(freeze({signal})),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0);
     if(invalid)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state in the shared repository could not be verified safely.');
+    return sessionClaimFromRows(selected,rows,{signal});
+  }
+  // The newest claim among these rows, verified: reused while Drive shows the
+  // same file, downloaded once otherwise.
+  async function sessionClaimFromRows(selected,rows,{signal=null}={}){
     let latest=null,latestEpoch=0;
     for(const raw of rows){const item=repositoryProviderItem(raw,'session-claim'),epoch=sessionClaimEpoch(item.id);if(!epoch)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state has an invalid identity.');if(epoch>latestEpoch){latest=item;latestEpoch=epoch;}}
     if(!latest)return null;
@@ -1419,6 +1427,8 @@ registry.define('backup-provider',1,input=>{
       schedulePendingProviderBackup(selected,nextConvergenceRetryDelay(selected,{sync:true}),{backoff:true,attemptRevision,preserveAutomatic,trigger:'ancestry-incomplete'});
     }else{
       state.review='';state.password='';state.rolledBack=null;sharedAncestryOutcome(selected,true);
+      // Brought in: the session check need not ask for it again.
+      sessionWatchSeen(selected.id,headId);
       resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');
       summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});
       if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:'catch-up-complete'});
@@ -2122,6 +2132,55 @@ registry.define('backup-provider',1,input=>{
     catch(error){if(error?.newerClaim)return freeze({state:'owned',applies:true,ownedHere:false,newer:true,epoch:error.newerClaim.epoch});throw error;}
     return projectSessionClaim(current,{signal});
   }
+  // The session check, every 10 s while a session is open on screen (one
+  // Drive request): the newest takeover notes and version-complete records.
+  // A new takeover note is always among them, so the claim is worked out from
+  // that answer with no further listing; when none is there, no note was
+  // added since the last check and the last verified one stands (the first
+  // check of a connection reads every note once). newVersions: a version
+  // completed by another device since the last check, to bring in.
+  // SESSION_WATCH_FRESH_MS: the last verified claim stands only while checks
+  // keep coming (no device writes 20 versions within it); after a gap (offline,
+  // in the background) the check reads every note once more.
+  const SESSION_WATCH_WINDOW=20,SESSION_WATCH_SEEN_LIMIT=200,SESSION_WATCH_FRESH_MS=60*1000;
+  function rememberOwnCommit(id){ownCommitIds.add(String(id||''));if(ownCommitIds.size>SESSION_WATCH_SEEN_LIMIT)ownCommitIds.delete(ownCommitIds.values().next().value);}
+  function sessionWatchState(providerId){let state=sessionWatchByProvider.get(providerId);if(!state){state={claim:undefined,checkedAt:0,seen:new Set(),pending:'',scoped:null,scopedFor:null,scopedAt:0};sessionWatchByProvider.set(providerId,state);}return state;}
+  function sessionWatchSeen(providerId,id){const state=sessionWatchState(providerId),value=String(id||'');if(!value)return;state.seen.add(value);while(state.seen.size>SESSION_WATCH_SEEN_LIMIT)state.seen.delete(state.seen.values().next().value);}
+  async function watchSession(id='google-drive',options={}){
+    const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected)||!repositorySessionClaimCapable(selected))return null;
+    const signal=options&&options.signal||null,state=sessionWatchState(selected.id),now=Date.now();
+    // One operation serves the checks of a minute, so Drive's folder is
+    // verified once a minute and each check is one request; the listing still
+    // takes only this account's own, unshared files in that folder.
+    if(!state.scoped||state.scopedFor!==selected||!(now-state.scopedAt>=0&&now-state.scopedAt<=SESSION_WATCH_FRESH_MS))Object.assign(state,{scoped:repositoryOperationSelected(selected),scopedFor:selected,scopedAt:now});
+    const scoped=state.scoped;
+    if(typeof scoped.repository.listSessionWatch!=='function')return freeze({claim:await readSessionClaim(id,options),newVersions:false});
+    let listed;
+    try{listed=await scoped.repository.listSessionWatch(freeze({signal,limit:SESSION_WATCH_WINDOW}));}
+    catch(error){state.scoped=null;throw error;}
+    if(Math.max(0,Number(listed&&listed.ignored)||0)||listed&&listed.incomplete===true)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state in the shared repository could not be verified safely.');
+    const claims=Array.isArray(listed&&listed.claims)?listed.claims:[],commits=Array.isArray(listed&&listed.commits)?listed.commits:[];
+    let current;
+    const fresh=state.claim!==undefined&&Date.now()-state.checkedAt<=SESSION_WATCH_FRESH_MS;
+    try{current=claims.length?await sessionClaimFromRows(scoped,claims,{signal}):fresh?state.claim:await readRepositorySessionClaim(scoped,{signal});}
+    catch(error){if(error?.newerClaim)return freeze({claim:freeze({state:'owned',applies:true,ownedHere:false,newer:true,epoch:error.newerClaim.epoch}),newVersions:false});state.scoped=null;throw error;}
+    // A sync brings the device to the newest version, so only the newest
+    // counts: new until this device brings it in (bringInSessionVersions or a
+    // sync), unless it uploaded it itself. (Its own newest upload was built on
+    // every older one: an upload over a newer head is refused at its commit.)
+    // A check that cannot bring it in yet (a takeover being saved) reports it
+    // again at the next one.
+    const ids=commits.map(item=>String(repositoryProviderItem(item,'commit').id||'')).filter(Boolean),newest=ids[0]||'';
+    const newVersions=!!newest&&!state.seen.has(newest)&&!ownCommitIds.has(newest);
+    state.pending=newVersions?newest:'';state.claim=current;state.checkedAt=Date.now();
+    return freeze({claim:await projectSessionClaim(current,{signal}),newVersions});
+  }
+  // The session check found a version to bring in: a sync now, asked once
+  // for that version (one that then fails retries on its own schedule).
+  function bringInSessionVersions(id='google-drive'){
+    const selected=providers.get(safeId(id)),state=selected&&sessionWatchByProvider.get(selected.id);if(!state||!state.pending)return false;
+    sessionWatchSeen(selected.id,state.pending);state.pending='';return scheduleSharedSync(selected.id,'session-watch');
+  }
   function scheduleSharedSync(id='google-drive',reason='shared-sync',{skipTurn=false}={}){
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected))return false;
     const job=providerConvergenceJob(selected);if(!job)return false;
@@ -2272,6 +2331,7 @@ registry.define('backup-provider',1,input=>{
   // Forgetting a location drops everything this device holds about it; its
   // backups stay where they are.
   async function forgetProvider(selected){
+    sessionWatchByProvider.delete(selected.id);
     Object.assign(automaticState(selected),{noticeShown:true,waitingSince:NaN,urgentSince:NaN});await discardProviderPublication(selected);overtakenByProvider.delete(selected.id);connectedOnceByProvider.delete(selected.id);clearRecentHistory(selected);verifiedHistoryByProvider.delete(selected.id);repositoryScopeByProvider.delete(selected.id);handoffSessions.delete(selected.id);await clearPendingRetry(selected);providerBackground(selected).clearAllScheduled();presentation.reset(selected.id);
   }
   async function disconnectProvider(selected){
@@ -2313,7 +2373,7 @@ registry.define('backup-provider',1,input=>{
   function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0),waitingFor:String(state.turnHolder?.device||''),waitingSince:String(state.turnHolder?.startedAt||''),waitingRenewedAt:String(state.turnHolder?.renewedAt||''),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
   function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
-  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,syncRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,readSessionHandoffSource,claimSessionOwnership,releaseSessionClaim,readSessionClaim,scheduleSharedSync,suspendBackground,repositoryScope});
+  return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,syncRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,readSessionHandoffSource,claimSessionOwnership,releaseSessionClaim,readSessionClaim,watchSession,bringInSessionVersions,scheduleSharedSync,suspendBackground,repositoryScope});
 
   }
   return freeze({format:'study-director.backup-provider-module',contractVersion:1,createRuntime});

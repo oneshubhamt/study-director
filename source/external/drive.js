@@ -873,6 +873,33 @@
     }while(pageToken);
     return Object.freeze({items:Object.freeze(items),overflow,ignored});
   }
+  // The session check, every 10 s while a session is open on screen: one
+  // request for the newest takeover notes and version-complete records,
+  // newest first. A new takeover note is always the newest file, so the
+  // answer always holds it; piece-files are never listed, so the answer stays
+  // a few short lines however large a backup is. A takeover note that cannot
+  // be read makes ownership uncertain (ignored); an unreadable
+  // version-complete record does not hide a takeover (ignoredCommits), and
+  // sync deals with it on its own.
+  async function listSessionWatch(options={},baseContext=EMPTY_DRIVE_OPERATION){
+    const context=childDriveOperationContext(baseContext,{signal:options&&options.signal});
+    const limit=Math.max(1,Math.min(100,Math.floor(Number(options&&options.limit)||20)));
+    const parent=await ensureFolder(context),kind=value=>`appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='${value}' }`,q=driveQuery([
+      `'${String(parent).replaceAll("'","\\'")}' in parents`,
+      `appProperties has { key='${REPOSITORY_MARKER.key}' and value='${REPOSITORY_MARKER.value}' }`,
+      `(${kind('session-claim')} or ${kind('commit')})`,
+      'trashed=false'
+    ]);
+    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:String(limit),orderBy:'createdTime desc',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});
+    const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not check Google Drive for changes.');
+    const payload=await jsonResponse(response),files=Array.isArray(payload&&payload.files)?payload.files:[],claims=[],commits=[];let ignored=0,ignoredCommits=0;
+    for(const file of files){
+      const found=String(file&&file.appProperties&&file.appProperties[REPOSITORY_KIND_MARKER]||''),commit=found==='commit';
+      if((commit||found==='session-claim')&&validRepositoryMetadata(file,parent,found))(commit?commits:claims).push(repositoryDescriptor(file,parent));
+      else if(commit)ignoredCommits+=1;else ignored+=1;
+    }
+    return Object.freeze({claims:Object.freeze(claims),commits:Object.freeze(commits),incomplete:payload&&payload.incompleteSearch===true,ignored,ignoredCommits});
+  }
   async function findRepositoryFile(parent,kind,id,context=EMPTY_DRIVE_OPERATION){
     if(!REPOSITORY_KINDS.has(kind)||!repositoryIdValid(kind,id))throw noRetry(new Error('A Study Director backup file has an invalid identity.'));
     const q=driveQuery([
@@ -1042,6 +1069,7 @@
       now:driveNow,
       endMaintenance:ref=>endRepositoryMaintenance(ref,driveOperationContext({folderState:base.folderState})),
       listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'}),base),
+      listSessionWatch:opts=>listSessionWatch(opts,base),
       uploadSessionClaim:file=>repositoryUpload(file,base),
       downloadSessionClaim:(ref,opts)=>repositoryDownload(ref,opts,base),
       deleteSessionClaim:(ref,opts)=>repositoryDelete(ref,opts,base),
@@ -1221,7 +1249,7 @@
       subscribeConnection,
       disconnect,
       release,
-      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:()=>beginRepositoryPublication(),listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,renewPublication:renewRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,now:driveNow,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
+      repository:Object.freeze({discardUploads:()=>repositoryUploads.clear(),list:repositoryList,upload:repositoryUpload,download:repositoryDownload,delete:repositoryDelete,beginPublication:()=>beginRepositoryPublication(),listPublications:listRepositoryPublications,assertPublication:assertRepositoryPublication,renewPublication:renewRepositoryPublication,endPublication:endRepositoryPublication,beginMaintenance:beginRepositoryMaintenance,listMaintenances:listRepositoryMaintenances,assertMaintenance:assertRepositoryMaintenance,renewMaintenance:renewRepositoryMaintenance,endMaintenance:endRepositoryMaintenance,now:driveNow,listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'})),listSessionWatch:opts=>listSessionWatch(opts),uploadSessionClaim:repositoryUpload,downloadSessionClaim:repositoryDownload,deleteSessionClaim:repositoryDelete,scope:()=>repositoryScope(),beginOperation:beginRepositoryOperation,historyReadConcurrency:8})
     }));
   }
 

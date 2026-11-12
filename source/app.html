@@ -2957,8 +2957,10 @@ function uploadSoonAfterPlanApply(result){
 // verified full checkpoint arrives and ordinary reconciliation preserves it.
 // While stopped for a handover, every claim check (15 s) asks again for the
 // sync that lets go; a second short of the period allows the timer's slack.
-const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=SESSION_CLAIM_WATCH_MS-1000;
-let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
+// One Drive check every 10 s while a session is open on screen: a takeover
+// and a version finished on another device (backlog item 23).
+const SESSION_CLAIM_WATCH_MS=10*1000,SESSION_CLAIM_SYNC_RETRY_MS=SESSION_CLAIM_WATCH_MS-1000;
+let sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
 const SESSION_CLAIM_SAVE_WARNING='The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.';
 async function verifyFrozenSessionClaim(){
   const frozen=sessionClaimFreeze;
@@ -3002,10 +3004,17 @@ async function checkSessionOwnershipClaim(){
   if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
   sessionClaimLastAttemptAt=Date.now();sessionClaimCheckActive=true;
   try{
-    const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
+    const [watched,loaded]=await Promise.all([BackupProviderRuntime.watchSession('google-drive'),AppData.activeSession.load(0,{strict:true})]),claim=watched?.claim||null;
     if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
     const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.applies&&claim.state==='owned'&&!claim.ownedHere),mine=!!(session&&session.runningOn===me);
-    if(remote&&mine&&TASKS.length){
+    const takeover=remote&&mine&&TASKS.length>0;
+    // A version another device finished comes in now, also while the session
+    // is shown running on another device. A takeover of the session running
+    // here (and the stop that follows it) asks for its own sync below, once
+    // the stopped session is saved here; a version left for it is reported
+    // again by the next check.
+    if(watched?.newVersions&&!takeover&&!sessionClaimFreeze)BackupProviderRuntime.bringInSessionVersions('google-drive');
+    if(takeover){
       const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
       if(!same){
         // Stop duplicate execution before awaiting a potentially slow/failed disk write.
@@ -3061,13 +3070,8 @@ function wakeSessionOwnershipClaim(slackMs=0){
   return checkSessionOwnershipClaim();
 }
 function installSessionWatch(){
-  if(sessionWatchTimer||sessionClaimWatchTimer)return false;
-  sessionWatchTimer=setInterval(()=>{
-    if(document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return;
-    if(!TASKS.length&&sessionPanelMode!=='elsewhere'||sessionPanelMode==='finished')return;
-    try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
-    catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
-  },SESSION_WATCH_MS);
+  if(sessionClaimWatchTimer)return false;
+  // The one session check: a takeover and new versions (watchSession).
   sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim(1000);},SESSION_CLAIM_WATCH_MS);
   // Existing interval owns the cadence. Foreground/online return only advances
   // an eligible missed attempt, never introducing a second polling timer.

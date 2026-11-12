@@ -6,7 +6,8 @@ import {journeyLog,openDevice,runSession,view,upload,settled,syncNow,noReviews,e
 // Finish Today ends the day for good (backlog item 21): it saves nothing by
 // itself, opens Review, leaves Execute, the Pacer and Plan as after Reset
 // Today, survives a reload, and reaches the laptop as finished (no Continue
-// Here). Save Today then replaces the day's one Saved Day and closes the day.
+// Here), by itself. Save Today then replaces the day's one Saved Day and
+// closes the day.
 const {steps,step}=journeyLog('finish-today-journey');
 const server=await startReleaseServer();
 const phoneBrowser=await launchChromium({profilePrefix:'sd-finish-a-'}),laptopBrowser=await launchChromium({profilePrefix:'sd-finish-b-'});
@@ -54,11 +55,14 @@ try{
   await waitFor(async()=>(await view(phone)).panel==='Today Finished',{label:'a reload keeps the day finished',timeout:20000});
   await waitFor(()=>phone.evaluate(`__PWA6.BackupProviderRuntime.connected('google-drive')`),{label:'the phone is connected again',timeout:20000});
   await upload(phone);await settled(phone,'A');
-  await syncNow(laptop);
-  await waitFor(async()=>(await view(laptop)).panel==='Today Finished',{label:'the laptop shows the day finished',timeout:60000});
+  // No Sync now: the laptop's session check (every 10 s) sees the new version
+  // and brings it in (backlog item 23).
+  const reached=Date.now();
+  await waitFor(async()=>(await view(laptop)).panel==='Today Finished',{label:'the laptop shows the day finished by itself',timeout:30000});
+  const laptopMs=Date.now()-reached;
   assert.deepEqual(await nextStep(laptop),['Open Review'],'the laptop offers Review, not Continue Here');
   assert.equal((await view(laptop)).loop,false,'and runs no timer');
-  step('laptop sees the day finished');
+  step('laptop sees the day finished',{laptopMs});
 
   assert.equal(await phone.evaluate(`__PWA6.saveDayRecord()`),true,'Save Today');
   const saved=await day(phone);

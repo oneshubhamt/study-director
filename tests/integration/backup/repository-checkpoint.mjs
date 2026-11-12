@@ -1379,6 +1379,7 @@ assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','
       resetConvergenceRetry:()=>events.push('retry-reset'),
       presentation:{resolve:(_id,key)=>events.push('resolved:'+key),notice:()=>events.push('review-notice')},
       automaticWaiting:()=>false,notifyStatus:()=>events.push('status'),
+      sessionWatchSeen:(_id,head)=>events.push('seen:'+head),
       summary:{finish:option=>{events.push(option.lifecycle||option.outcome||'unknown');events.push(option.message);}}
     });
     vm.runInContext(production+'\nglobalThis.finishCatchUp=settleCatchUp;',ctx);
@@ -1389,6 +1390,7 @@ assert.deepEqual(ancestryPublicationCases,['unchanged-false','unchanged-throw','
     assert.equal(events.some(event=>event==='Synced with Google Drive.'),!warning,name+' honest user-facing status');
     assert.equal(events.includes('retry:ancestry-incomplete'),warning,name+' retry must follow actual ancestry result');
     assert.equal(events.includes('retry-reset'),!warning,name+' only proven ancestry resets retry');
+    assert.equal(events.includes('seen:cp_'+'a'.repeat(32)),!warning,name+' only a version brought in is marked seen by the session check');
   }
 }
 
