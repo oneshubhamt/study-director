@@ -38,7 +38,8 @@ function makeHarness(options={}){
     load:async()=>{calls.sessionLoads++;return result(structuredClone(current));},
     payload:(snapshot,payloadOptions={})=>({...structuredClone(current),status:payloadOptions.status||'active',runningOn:LOCAL,revision:current.revision+1,suspendedAt:payloadOptions.suspendedAt||null,snapshot:structuredClone(snapshot),updatedAt:'2026-10-27T08:00:02.000Z'}),
     cancelPendingLiveDraftSave:()=>true,
-    resetRuntime:()=>{calls.resets++;return true;}
+    resetRuntime:()=>{calls.resets++;return true;},
+    suspendLocal:async options=>{calls.lifecycles.push(options.source);if(options.source!=='session-yield')throw new Error('Wrong lifecycle source');if(strictQueue.length)throw strictQueue.shift();return {...current,status:'suspended'};}
   };
   const controller=module.createController(Object.freeze({
     configuration:Object.freeze({providerId:'google-drive',claimWatchMs:15000,claimSyncRetryMs:30000,claimSaveWarning:'SAVE WARNING'}),
@@ -168,6 +169,6 @@ function makeHarness(options={}){
 // Yield is a strict suspended-session transition through the P5.4B session host, not an ad-hoc provider write.
 {
   const t=makeHarness();const yielded=await t.controller.yieldLocal();
-  assert.equal(yielded.status,'suspended');assert.equal(t.calls.pauses,1);assert.equal(t.calls.resets,1);assert.deepEqual(t.calls.lifecycles,['session-yield']);
+  assert.equal(yielded.status,'suspended');assert.equal(t.calls.pauses,0);assert.equal(t.calls.resets,0);assert.equal(t.calls.writes.length,0);assert.deepEqual(t.calls.lifecycles,['session-yield']);
 }
 console.log(JSON.stringify({status:'PASS',suite:'session-handoff-runtime',remotePreemption:true,strictFreeze:true,staleSource:true,compensation:true,yield:true}));

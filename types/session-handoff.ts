@@ -64,7 +64,7 @@ export interface SessionHandoffInput{
     wakeBackground(reason:string):unknown;
   };
   session:{
-    host:Pick<SessionHostController,'captureSnapshot'|'writeSnapshot'|'requireCanonicalWrite'|'saveCanonicalSession'|'load'|'payload'|'cancelPendingLiveDraftSave'|'resetRuntime'>;
+    host:Pick<SessionHostController,'captureSnapshot'|'writeSnapshot'|'requireCanonicalWrite'|'saveCanonicalSession'|'load'|'payload'|'cancelPendingLiveDraftSave'|'resetRuntime'|'suspendLocal'>;
     sanitize(value:unknown):ActiveSession|null;
     same(left:unknown,right:unknown):boolean;
     nextRevision(seed:number):number;
@@ -84,9 +84,6 @@ export interface SessionHandoffInput{
     captureEvidence():RuntimeEvidence;
     stopExecution():unknown;
     resumeExecution(options:Readonly<{frozenSinceMs:number}>):boolean;
-    runLifecycle<T>(kind:string,options:Readonly<Record<string,unknown>>,operation:()=>Promise<T>):Promise<T>;
-    pausePractice():unknown;
-    todayISO():string;
   };
   presentation:{
     capture(scope:string,error:unknown,level:'warn'|'error'):unknown;

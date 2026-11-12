@@ -11,6 +11,7 @@
 - Earlier diagnostic evidence: `core-flow` reload failure also reproduced on untouched `6f81937`. It writes a hidden textarea behind a mounted rich editor, whose flush overwrites the fixture. Editing through the actual browser editor passed. Profile-panel viewports must use separate persistent profiles to avoid a legitimate extra recovery notice from the preceding name edit.
 - Extended `session-handoff-journeys` previously failed at “closed: A settles”; diagnosis and a passing rerun remain required. Do not raise timeouts or weaken assertions to close it.
 - Required targeted evidence: compiler/lint and negative gates; affected profile/startup/Plan/timer/session/persistence/architecture tests; fresh build, syntax/release verification; core-flow, profile panel, Saved Plans, independent session draft, multi-tab, restore safety and handoff journeys. Changed browser tests require five consecutive isolated passes. Full certification remains Phase 7.
+- **Restored checkpoint 1:** unsupported-registry changes reject explicitly; suspended restore compensates failed verification while preserving successors; Yield delegates to the compensated suspension owner. Strict compiler/lint (175 files) and profile/session/handoff targeted regressions pass on the restored workspace.
 - Persist coherent checkpoints to `ts-exp` at bounded outcomes. Temporary scratchpad: `/tmp/study-director-P5.2-P5.4-audit.md`. Record current results here before closure; never carry a green status over missing implementation or a reset environment.
 
 ## Programme and obligations

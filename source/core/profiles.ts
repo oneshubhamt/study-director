@@ -95,8 +95,8 @@ const createModule=()=>{
     const current=(list:Readonly<ProfileListState>=read())=>list.profiles.find(row=>row.scope===pageScope)||null;
     function update(change:(mine:Readonly<ProfileEntry>,list:Readonly<ProfileListState>)=>Readonly<Partial<ProfileEntry>>|null):Readonly<ProfileEntry>|null{
       const list=read(),mine=current(list);if(!mine)return null;
-      if(list.unsupported)return mine;
       const next=change(mine,list);if(!next)return mine;
+      if(list.unsupported)throw unsupportedError();
       const profiles=list.profiles.map(row=>{
         if(row.scope!==pageScope)return row;
         const updated=entry({...row,...next});

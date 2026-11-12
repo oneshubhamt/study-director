@@ -14,11 +14,11 @@ const taskState={
   getField(i,k){return fields.get(`${i}:${k}`)},setField(i,k,v){fields.set(`${i}:${k}`,v);return true},deleteField(){return true},indexSnapshot(){return{}},resolvedState(i){return resolved.get(i)||null},setResolved(i,v){if(v)resolved.set(i,v);else resolved.delete(i);return true},isDone(i){return resolved.get(i)==='done'},isSkipped(i){return resolved.get(i)==='skipped'},isResolved(i){return resolved.has(i)},toggleDone(){return'done'},resolvedIndices(){return[]},indices(){return[]},clear(){fields.clear();resolved.clear()}
 };
 const timerState={contentRevision:3,savedRevision:1,adjustedSchedule:{},pendingRestore:null,currentIndex:0,projectSessionSnapshot(input){return structuredClone({...input,currentTaskId:tasks[this.currentIndex]?.id||null,contentRevision:this.contentRevision,savedRevision:this.savedRevision,scheduleAdjustments:{}})}};
-let repoValue=null,revision=10,saveMode='idb',lastSaveOptions=null,clearMode='idb';
+let repoValue=null,revision=10,saveMode='idb',lastSaveOptions=null,clearMode='idb',readFailure=false;
 const result=value=>({ok:true,value,error:null,storage:{local:false,idb:true}});
 const repo={
- async save(value,options={}){lastSaveOptions=options;repoValue=structuredClone(value);if(saveMode==='local')return {ok:true,value:structuredClone(value),error:new Error('idb unavailable'),storage:{local:true,idb:false}};return result(structuredClone(value));},
- async load(){return repoValue?result(structuredClone(repoValue)):{ok:true,value:null,error:null,storage:{local:false,idb:false}}},
+ async save(value,options={}){lastSaveOptions=options;repoValue=structuredClone(value);if(saveMode==='readback'||saveMode==='superseded'){readFailure=true;if(saveMode==='superseded')repoValue.revision+=100;saveMode='idb';}if(saveMode==='local')return {ok:true,value:structuredClone(value),error:new Error('idb unavailable'),storage:{local:true,idb:false}};return result(structuredClone(value));},
+ async load(){if(readFailure){readFailure=false;throw new Error('injected verification read failure');}return repoValue?result(structuredClone(repoValue)):{ok:true,value:null,error:null,storage:{local:false,idb:false}}},
  async clear(){repoValue=null;return clearMode==='idb'?{ok:true,value:null,error:null,storage:{local:false,idb:true}}:{ok:true,value:null,error:new Error('delete failed'),storage:{local:true,idb:false}}},
  readLocal(){return repoValue?structuredClone(repoValue):null},nextRevision(seed=0){return ++revision+Number(seed)*0},settled(){return Promise.resolve()}
 };
@@ -59,6 +59,14 @@ assert.deepEqual(practice,preSuspend);assert.equal(repoValue.status,'active');as
 saveMode='idb';
 // Suspension is canonical before runtime reset, and restore is canonical active before apply.
 const suspended=await controller.suspendLocal();assert.equal(suspended.status,'suspended');assert.ok(resetCount>0);assert.equal(repoValue.status,'suspended');
+// A committed activation whose read-back fails must be compensated without applying runtime.
+const beforeFailedRestore=applyCount;saveMode='readback';
+await assert.rejects(()=>controller.restoreSuspendedLocal(suspended),/verification read failure/);
+assert.equal(repoValue.status,'suspended');assert.equal(applyCount,beforeFailedRestore);
+const preserved=structuredClone(repoValue);saveMode='superseded';
+await assert.rejects(()=>controller.restoreSuspendedLocal(preserved),/successor was preserved/);
+assert.equal(repoValue.status,'active');assert.equal(applyCount,beforeFailedRestore);
+repoValue=structuredClone(suspended);
 const priorApply=applyCount;const restored=await controller.restoreSuspendedLocal(suspended);assert.equal(restored.status,'active');assert.equal(repoValue.status,'active');assert.ok(applyCount>priorApply);assert.equal(planDraft,'draft survives reload');
 // Reset requires a physical canonical clear and verified null readback; a rejected clear must re-establish the pre-reset recovery session.
 await controller.resetLocal();assert.equal(repoValue,null);

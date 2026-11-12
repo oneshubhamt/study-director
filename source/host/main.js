@@ -6812,8 +6812,6 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze({
     markContentChanged:()=>markDayContentChanged(),
     captureEvidence:()=>captureRuntimeEvidence({includeActivePause:false,withCompletion:false,includeRecords:true}),
     stopExecution:()=>TimerEngine.stopExecution(),resumeExecution:options=>TimerEngine.resumeAfterPrimaryRestore(options),
-    runLifecycle:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),
-    pausePractice:()=>PracticePacer.pauseForSessionEnd({persist:false}),todayISO
   }),
   presentation:Object.freeze({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),

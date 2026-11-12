@@ -38,9 +38,9 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
   functions(provider,['connected','readHandoffSource','claimOwnership','releaseClaim','readClaim','scheduleSync','suspendBackground','wakeBackground'],'Session provider port');
   functions(session,['sanitize','same','nextRevision','contentFingerprint','assetIds'],'Session handoff data port');
   if(!session.host)throw new TypeError('Session host port is unavailable.');
-  functions(session.host,['captureSnapshot','writeSnapshot','requireCanonicalWrite','saveCanonicalSession','load','payload','cancelPendingLiveDraftSave','resetRuntime'],'Session host port');
+  functions(session.host,['captureSnapshot','writeSnapshot','requireCanonicalWrite','saveCanonicalSession','load','payload','cancelPendingLiveDraftSave','resetRuntime','suspendLocal'],'Session host port');
   functions(plan,['flushDraft','settled','readDraft','readCanonicalDraft','displayedDraft','defaultScheduleText'],'Session Plan port');
-  functions(runtime,['markContentChanged','captureEvidence','stopExecution','resumeExecution','runLifecycle','pausePractice','todayISO'],'Session runtime port');
+  functions(runtime,['markContentChanged','captureEvidence','stopExecution','resumeExecution'],'Session runtime port');
   functions(presentation,['capture','setStatus','warnStorage','clearStorageWarning','notifyNewerClaim','noteBackupChange'],'Session presentation port');
   functions(installation,['id'],'Session installation port');
   functions(clock,['nowMs','nowIso'],'Session clock port');
@@ -247,16 +247,7 @@ function createController(input:Readonly<SessionHandoffInput>):Readonly<SessionH
 
   async function yieldLocal():Promise<ActiveSession|false>{
     if(!authority.hasTasks())return false;
-    const date=runtime.todayISO();
-    return runtime.runLifecycle('session-yield',{scheduleIdentity:true,date,autoDate:true},async()=>{
-      runtime.pausePractice();session.host.cancelPendingLiveDraftSave();
-      const value=snapshotForWrite(),built=session.host.payload(value,{status:'suspended',suspendedAt:clock.nowIso()});
-      if(!built)throw new Error('No active study session is available to yield.');
-      const saved=await session.host.saveCanonicalSession(built,'yielding the Active Session during reconciliation');
-      const suspended=session.sanitize(saved.value)||built;
-      session.host.resetRuntime({lifecycleManaged:true,source:'session-yield',date});
-      return suspended;
-    });
+    return session.host.suspendLocal({source:'session-yield'});
   }
 
   return freeze({

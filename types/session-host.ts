@@ -161,7 +161,7 @@ export interface SessionHostController{
   applyStoredSession(session:ActiveSession,snapshot:SessionSnapshot,options?:Readonly<{source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean}>):unknown;
   resetRuntime(options?:Readonly<{source?:string;date?:string;lifecycleManaged?:boolean}>):unknown;
   resetLocal():Promise<SessionResult>;
-  suspendLocal():Promise<ActiveSession>;
+  suspendLocal(options?:Readonly<{source?:string}>):Promise<ActiveSession>;
   restoreSuspendedLocal(session:ActiveSession):Promise<ActiveSession>;
 }
 export interface SessionHostModule{

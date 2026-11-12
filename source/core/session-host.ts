@@ -275,14 +275,15 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     if(options.lifecycleManaged===true)return perform();
     return lifecycle.runSync(source,{scheduleIdentity:true,date:session.date,autoDate:session.date===domain.todayISO(),snapshotReview:value.review},perform);
   }
-  async function suspendLocal():Promise<ActiveSession>{
-    return lifecycle.run('session-suspend',{scheduleIdentity:true,date:snapshot.getReviewDate(),autoDate:true},async()=>{
+  async function suspendLocal(options:Readonly<{source?:string}>={}):Promise<ActiveSession>{
+    const source=options.source||'session-suspend';
+    return lifecycle.run(source,{scheduleIdentity:true,date:snapshot.getReviewDate(),autoDate:true},async()=>{
       const rollback=persistence.snapshotForWrite();if(!rollback)throw new Error('No active study session is available to suspend.');
       try{
         reset.pausePracticeForSessionEnd();cancelPendingLiveDraftSave();
         const value=persistence.snapshotForWrite(),session=payload(value,{status:'suspended'});if(!session)throw new Error('No active study session is available to suspend.');
         const saved=await saveCanonicalSession(session,'suspending today’s session');
-        resetRuntime({lifecycleManaged:true,source:'session-suspend',date:session.date});
+        resetRuntime({lifecycleManaged:true,source,date:session.date});
         return saved.value as ActiveSession;
       }catch(error){
         try{await rollbackLocalTransition(rollback,'rolling back a failed session suspension');}
@@ -295,18 +296,25 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     const current=codec.sanitizeCurrent(session);if(!current||classify(current)!=='today-suspended')throw new Error('No suspended session is available for today.');
     return lifecycle.run('session-restore',{scheduleIdentity:true,date:current.date,autoDate:true,snapshotReview:current.snapshot.review},async()=>{
       const loaded=await repository.load(0,{strict:true});
-      if(!loaded?.value||!canonical.same(loaded.value,current))throw new Error('The suspended Active Session changed before it could be restored.');
+      if(!loaded?.ok||loaded.error||!loaded.storage.idb||!loaded.value||!canonical.same(loaded.value,current))throw new Error('The suspended Active Session changed before it could be restored.');
       const active=codec.sanitizeCurrent({...current,status:'active',runningOn:installation.id(),revision:repository.nextRevision(current.revision),suspendedAt:null,updatedAt:clock.nowIso()});
       if(!active)throw new Error('The suspended Active Session could not be activated.');
-      await saveCanonicalSession(active,'restoring today’s suspended session',{expectedCanonical:current});
-      const value=sessionSnapshot(active);if(!value)throw new Error('The restored Active Session snapshot is incompatible.');
+      let applying=false;
       try{
+        await saveCanonicalSession(active,'restoring today’s suspended session',{expectedCanonical:current});
+        const value=sessionSnapshot(active);if(!value)throw new Error('The restored Active Session snapshot is incompatible.');
+        applying=true;
         const restored=applyStoredSession(active,value,{source:'session-restore',lifecycleManaged:true});
         if(restored===false)throw new Error('The suspended Active Session could not be applied to the runtime.');
         return active;
       }catch(error){
-        resetRuntime({lifecycleManaged:true,source:'session-restore-rollback',date:current.date});
-        try{await saveCanonicalSession({...current,revision:repository.nextRevision(active.revision),updatedAt:clock.nowIso()},'rolling back a failed suspended-session restore',{expectedCanonical:active});}
+        if(applying)resetRuntime({lifecycleManaged:true,source:'session-restore-rollback',date:current.date});
+        try{
+          const latest=await repository.load(0,{strict:true});
+          if(!latest.ok||latest.error||!latest.storage.idb)throw latest.error||new Error('The canonical session could not be verified for rollback.');
+          if(canonical.same(latest.value,active))await saveCanonicalSession({...current,revision:repository.nextRevision(active.revision),updatedAt:clock.nowIso()},'rolling back a failed suspended-session restore',{expectedCanonical:active});
+          else if(!canonical.same(latest.value,current))throw new Error('The canonical session advanced during restore; its successor was preserved.');
+        }
         catch(rollbackError){throw new Error(`${String((error as {message?:unknown})?.message||error)} Automatic session rollback also failed: ${String((rollbackError as {message?:unknown})?.message||rollbackError)}`);}
         throw error;
       }
