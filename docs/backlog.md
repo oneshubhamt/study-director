@@ -286,6 +286,7 @@ From the owner's diagnostics (F20 on 4 Nov, F23 on 7 Nov) and the code at F18 (`
 
 ## Noted for later
 
+- **A saved day keeps itself up to date** (owner, 2026-11-12; to consider later, close to autosave). Today Save Today pauses a running timer so the Saved Day cannot fall behind (item 24). The alternative: Save Today never touches the timer, and work done after a save updates the Saved Day by itself (when the app is closed, at midnight, or at the next start), with a quiet note such as "Updated in Library: +34 min on Ethics after your save". It asks only when the Saved Day holds something the session lacks (edited in Library, say). A finished day never saved would be saved the same way the next morning. Trade-off: a timer left running until a fixed block or closing counts, as on a day never saved; Finish Today still ends the day exactly. The pause stays until this is decided.
 - **Encryption at rest.** Browser data (IndexedDB, browser storage, attachments) is not encrypted; backups are, when a password is set. End-to-end encryption with a sign-in-first experience is the intended direction, and it also decides password recovery and changes.
 - **Fully silent background sync** would need a small server to hold Google refresh tokens. Not planned: sync during sign-in windows is the accepted design.
 - **Drive sign-in in localStorage.** An accepted trade-off (short-lived `drive.file` token, no refresh token). Revisit only as an explicit product and security decision ([backup-and-sync.md](areas/backup-and-sync.md#rules-the-engine-applies-once)).
