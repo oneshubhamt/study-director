@@ -4,7 +4,7 @@ Study Director is a local-first study planning PWA. The owner's current instruct
 
 ## Delegated implementation
 
-The owner selected **GPT 5.6 Sol High as the sole implementor**. Do not delegate implementation to other models or coding subagents. The planning assistant supports design/process and performs an independent audit **after Phase 5 overall**, not after individual passes. The implementor owns local planning, objective reconciliation, targeted QA and corrections; no planner sign-off is needed between passes.
+The owner selected **GPT 5.6 Sol High as the sole implementor**. Do not delegate implementation to other models or coding subagents. The planning assistant supports design/process and performs an independent audit **after Phase 5 overall**, not automatically after individual passes. The owner may request an interim audit and authorize corrections, as for P5.2–P5.4 here. The implementor owns local planning, objective reconciliation, targeted QA and corrections; no planner sign-off is needed between passes.
 
 Use one coherent, end-to-end outcome per bounded pass, including owned callers and host wiring. The phase register is a roadmap, not a fixed session count. Set the next pass's scope in the existing worklog before editing; adjust boundaries when dependencies justify it. Avoid both whole-host rewrites and tiny file-only passes. On “continue”, finish the open pass; if it is closed, take the next bounded outcome. Complete ordinary fixes and checks without asking for permission again. Ask only when missing information or a genuinely consequential scope/design choice cannot be resolved from the instructions and source.
 
@@ -15,6 +15,8 @@ After P5.13, reconcile all Phase 5 objectives and leave a concise audit handoff 
 1. **Complete strict TypeScript conversion**, including callers and host wiring. Code must be clear, lean, efficient and reliable. Prefer simple explicit designs; no renamed-only implementations, permissive facades, casual `any`, blanket casts/suppressions or weakened gates.
 2. **Fix evident bugs and make justified local improvements** encountered in converted surfaces. Explain intentional behavior changes and preserve other behavior. Do not turn conversion into an unrelated redesign or bug hunt. Defects preventing the objective working correctly belong in the pass.
 3. **Strengthen relevant tests** where useful, especially for fixes. Necessary verification is part of completion; optional test expansion must not displace conversion.
+
+Use native DOM/event types and actual provider assignability checks. A typed port calling unchecked feature behavior does not complete conversion; only thin composition belongs to P5.13. Test critical transitions with failed writes and committed writes whose verification fails, preserving newer successors.
 
 Keep one current canonical topology with validation, integrity and recovery intact; no historical migration/compatibility code. `vendor/wordgard/**` is immutable; our editor/adapters may change.
 
@@ -28,7 +30,7 @@ Keep one current canonical topology with validation, integrity and recovery inta
 
 ## Lean working memory
 
-Use two pads: one compact active entry in the execution record and one temporary checklist/log index outside the repo. Persist the baseline, objectives, material findings/decisions, actual checks and next action at meaningful changes and before interruption. Aim for under about 40 lines, without omitting necessary evidence.
+Use two pads: one compact active entry in the execution record and one temporary checklist/log index outside the repo. Persist the baseline, objectives, material findings/decisions, actual checks and next action at meaningful changes and before interruption. Commit and push coherent checkpoints on the authorized branch rather than relying on an ephemeral workspace; distinguish checkpoints from verified closure. Aim for under about 40 lines, without omitting necessary evidence.
 
 One owner per fact: this file owns procedure; execution record owns current state; phase register owns scope; [decisions](docs/typescript/DECISIONS.md) owns policy rationale; product docs own contracts. Link instead of repeating. Replace stale notes and use pinned Git history for detail. No routine extra plans/reports/transcripts or loading entire archives, snapshots, backlog and unrelated source. Update product docs when contracts change.
 
