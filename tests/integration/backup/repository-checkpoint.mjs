@@ -1075,13 +1075,17 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
   const keptAtStart=new Set(runtime.repository.selectRetention(await Promise.all([...h.state.files.values()].filter(file=>kind(file)==='checkpoint').map(async file=>freeze({id:file.appProperties.studyDirectorRepositoryId,manifest:JSON.parse(await file.content.text())}))),{now:new Date(clock.now())}).retained.map(row=>row.id));
   h.state.historyReadDelayMs=3000;backgroundReady=true;runtime.providers.wakeBackground('busy-backlog');
   // Ten minutes of study: a new version every two minutes.
-  let uploads=0,landed=0,deletedWhileBusy=0;
+  // A landing counts only while cleanup is still under way. Each upload also
+  // needs real time (checksums, workers), so on a slow machine the last ones
+  // finish after the ten minutes: they are waited for, not dropped.
+  let uploads=0,landed=0,deletedWhileBusy=0,inFlight=0;const outcomes=[];
   for(let elapsed=500;elapsed<=600000;elapsed+=500){
-   if(elapsed%120000===0){uploads++;snapshotRevision=id+'-'+elapsed;sourceRevision=new Date(clock.now()).toISOString();notes={Subject:freeze({version:2,key:'Subject',text:'busy '+elapsed,updatedAt:sourceRevision})};void runtime.providers.backupRepositoryProvider(id).then(result=>{if(result&&result.cancelled!==true)landed++;},()=>{});}
+   if(elapsed%120000===0){uploads++;snapshotRevision=id+'-'+elapsed;sourceRevision=new Date(clock.now()).toISOString();notes={Subject:freeze({version:2,key:'Subject',text:'busy '+elapsed,updatedAt:sourceRevision})};inFlight++;void runtime.providers.backupRepositoryProvider(id).then(result=>{const ok=!!result&&result.cancelled!==true;if(ok&&maintenance.has(id))landed++;outcomes.push(ok?(maintenance.has(id)?'landed':'after-cleanup'):'cancelled:'+String(result&&result.reason||result));},error=>outcomes.push('failed:'+String(error&&error.message||error).slice(0,80))).finally(()=>inFlight--);}
    await step();
   }
   deletedWhileBusy=[...original.keys()].filter(remoteId=>!h.state.files.has(remoteId)).length;
-  assert.ok(landed>=3,`new versions keep landing (${landed} of ${uploads})`);
+  for(let elapsed=0;elapsed<120000&&inFlight>0;elapsed+=500)await step();
+  assert.ok(landed>=3,`new versions keep landing while cleanup works (${landed} of ${uploads}: ${outcomes.join(', ')})`);
   assert.ok(deletedWhileBusy>0,'cleanup deletes while new versions keep landing');
   for(let elapsed=0;elapsed<360000&&maintenance.has(id);elapsed+=500)await step();
   assert.equal(maintenance.has(id),false,'cleanup finishes once uploads stop: '+JSON.stringify({intent:maintenance.get(id),errors:diagnosticFailures.slice(-3)}));
