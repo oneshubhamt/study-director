@@ -1050,10 +1050,13 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
 // changes the listing, so a planned pass defers and plans again. Cleanup
 // must still delete while uploads keep coming, read each obsolete version
 // once, and end with exactly the retained versions once uploads stop.
+// Each step gives real work a real millisecond: cleanup stops within about
+// 2 ms of an upload asking, but on a loaded machine (CI) a step without it
+// let the upload's 10 s wait (20 steps of this clock) run out first.
 {
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=false;dailyRecords=[];assetDescriptor=null;
  const size=200,id='drive-busy-backlog',warmId=id+'-seed',maintenance=new Map(),h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id:warmId,label:'Drive Busy Seed'}))});
- const kind=file=>file.appProperties.studyDirectorRepositoryKind,step=async()=>{await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));await clock.advance(500);};
+ const kind=file=>file.appProperties.studyDirectorRepositoryKind,step=async()=>{await clock.drainMicrotasks(220);await new Promise(resolve=>setTimeout(resolve,1));await clock.advance(500);};
  try{
   await h.provider.prepare();await h.provider.authorize();snapshotRevision=id;sourceRevision='2026-10-03T11:00:00.000Z';notes={Subject:freeze({version:2,key:'Subject',text:'busy seed',updatedAt:sourceRevision})};
   await runtime.providers.backupRepositoryProvider(warmId);
