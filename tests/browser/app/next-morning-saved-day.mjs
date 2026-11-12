@@ -21,6 +21,11 @@ const cases=[
   ['Save Today while the timer runs, then close',async page=>{assert.equal(await page.evaluate(`__PWA6.saveDayRecord()`),true);
     assert.equal(await page.evaluate(`__PWA6.TimerState.snapshot().mode`),'paused','Save Today pauses the running timer');},false],
   ['pause, Save Today, close',async page=>{await page.evaluate(`(async()=>{__PWA6.togglePause();await new Promise(r=>setTimeout(r,500));})()`);assert.equal(await page.evaluate(`__PWA6.saveDayRecord()`),true);},false],
+  // A note (here the block's note in Execute) is kept in Notes, not in the
+  // day: writing one after the save leaves the day saved.
+  ['Save Today, then write the block note, close',async page=>{assert.equal(await page.evaluate(`__PWA6.saveDayRecord()`),true);
+    assert.equal(await page.evaluate(`(async()=>{const d=__PWA6;await d.goTab('execute');await new Promise(r=>setTimeout(r,200));const field=document.getElementById('pn-extra');field.value='Written after the save';return d.commitTaskNoteEditor(field,field.value);})()`),true,'the block note is saved');
+    await page.evaluate(`__PWA6.AppData.notes.flush({strict:true})`);},false],
   ['Save Today, then finish the block, close',async page=>{assert.equal(await page.evaluate(`__PWA6.saveDayRecord()`),true);await markDone(page);},true],
 ];
 const results={};

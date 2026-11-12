@@ -8417,7 +8417,10 @@ function commitTaskNoteEditor(field,value,event=null){
     setStatus('notes-status',message,false);setStatus('save-status',message,false);setPlanStatus(message,false);return false;
   }
   if(result.status==='rejected')return false;
-  if(result.status==='changed')saveLiveDraft();
+  // A note is kept in Notes and syncs on its own; the day holds none of its
+  // text, so a day saved before stays saved (before 2026-11-12 a block note
+  // written after Save Today asked about the day the next morning).
+  if(result.status==='changed')saveLiveDraft({markChanged:false});
   return true;
 }
 /* DAILY REFLECTION PERSISTENCE · shared by Review and Library */
