@@ -4825,6 +4825,23 @@ async function retireCoveredPreviousActiveSession(session){
   notifyBackupChange({urgent:true,reason:'saved-session-retired'});
   return true;
 }
+// After a sync or restore brings data in, a previous day's session kept here
+// is cleared once a Saved Day covers it: another device may have saved the
+// day this copy came from. Before 2026-11-12 it waited for the next start.
+let previousSessionRecheck=null;
+function recheckStoredPreviousSession(){
+  if(previousSessionRecheck||sessionPanelMode!=='previous')return previousSessionRecheck;
+  previousSessionRecheck=(async()=>{
+    try{
+      await AppMutationCoordinator.settled();
+      if(!appCanMutate()||sessionPanelMode!=='previous')return false;
+      const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.ok&&!loaded.error?loaded.value:null;
+      return isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session);
+    }catch(error){AppDiagnostics.capture('session.previous-day-recheck',error,'warn');return false;}
+    finally{previousSessionRecheck=null;}
+  })();
+  return previousSessionRecheck;
+}
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
   sessionPanelSession=['suspended','elsewhere','previous','finished'].includes(sessionPanelMode)?session:null;
@@ -4959,6 +4976,12 @@ async function attemptAutoRestoreActiveSession(){
     // itself. If the canonical Saved Day covers its latest content revision,
     // retire the redundant recovery copy before considering ownership/UI.
     if(isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session))return false;
+    // A previous day that ran on another device (owner's choice, 2026-11-12):
+    // that device asks if the day is not saved. This copy is kept, cleared
+    // once a sync shows the day saved, and Review Previous Day opens it. It
+    // asked every morning: its Drive sign-in had expired overnight, so it
+    // could not see the other device's save.
+    if(isPreviousActiveSessionRecord(session)&&sessionFromElsewhere(session)){setSessionPanelMode('previous',session);return false;}
     if(isPreviousActiveSessionRecord(session))return handlePreviousActiveSession(session);
     if(isFinishedActiveSession(session))return openFinishedSession(session);
     if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
@@ -9230,6 +9253,8 @@ function executeIdlePresentation(d=new Date(),options={}){
   const elsewhere=sessionShownElsewhere();
   if(sessionPanelMode==='finished')return applyOverrides(executeIdleView('Today Finished','FINISHED','Today Finished',
     'Today’s session is finished. Open Review to rate the day, reflect and Save Today to Library. Reset Today clears it to start over.','NEXT: REVIEW'));
+  if(sessionPanelMode==='previous'&&sessionFromElsewhere(sessionPanelSession))return applyOverrides(executeIdleView('Previous Day from Another Device','PREVIOUS DAY','Previous Day from Another Device',
+    `${prettyDate(sessionPanelSession.date)} ran ${sessionDevice(sessionPanelSession)}, which saves it. This copy clears once a sync shows it saved; Review Previous Day opens it here.`,'NEXT: SYNC'));
   if(sessionPanelMode==='previous')return applyOverrides(executeIdleView('Previous Day Needs Review','PREVIOUS DAY','Previous Day Needs Review',
     'This study day is stored for review. Its timer will not restart. Choose Review Previous Day to recover it safely.','NEXT: REVIEW'));
   if(sessionParkedHere()){
@@ -9375,8 +9400,11 @@ function updateSessionControls(){
     panel.classList.toggle('suspended',suspended||elsewhere||previous||finished);
     const title=document.getElementById('session-panel-title');
     const note=document.getElementById('session-panel-note');
-    if(title)title.textContent=previous?'Previous Day Needs Review':finished?'Today Finished':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':complete?'Plan Complete':running?'Live Timer Active':'Applied Plan Available';
-    if(note)note.textContent=previous
+    const previousElsewhere=previous&&sessionFromElsewhere(sessionPanelSession);
+    if(title)title.textContent=previousElsewhere?'Previous Day from Another Device':previous?'Previous Day Needs Review':finished?'Today Finished':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':complete?'Plan Complete':running?'Live Timer Active':'Applied Plan Available';
+    if(note)note.textContent=previousElsewhere
+      ? `${prettyDate(sessionPanelSession.date)} ran ${sessionDevice(sessionPanelSession)}, which saves it. This copy clears here once a sync shows it saved. Review Previous Day opens it here.`
+      : previous
       ? 'This historical session is preserved for Review. Its timer will not restart or transfer ownership. Open Review and Save Today to Library when ready.'
       : finished
       ? 'Today’s session is finished on every device. Open Review to rate the day, reflect and Save Today to Library. Reset Today clears it to start over; days already saved stay in Library.'
@@ -9525,9 +9553,13 @@ async function saveDayRecordNow(){
   // empties and the next plan can be applied. A save before Finish Today
   // leaves the session running.
   if(!suspendedSession&&sessionPanelMode==='finished')return saveDayRecordCore({closeSession:true});
+  // Save Today pauses a running timer (owner's choice, 2026-11-12): time it
+  // added after the save (until a fixed Sleep block, say) left the Saved Day
+  // behind, and the next morning asked about the day. Resume carries on.
+  const timerPaused=!suspendedSession&&appCanMutate()&&beginTimerPause('manual')===true;
   // The Review save owner commits the Day and closes this suspended session
   // without creating an interim, incorrectly owned Active Session.
-  const saved=await saveDayRecordCore({closeSession:!!suspendedSession});
+  const saved=await saveDayRecordCore({closeSession:!!suspendedSession,timerPaused});
   if(!suspendedSession)return saved;
   if(!saved){
     try{
@@ -10613,7 +10645,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     deviceName:(id,others)=>deviceName(id,others)
   }),
   events:Object.freeze({
-    libraryChanged:()=>{LibraryView.render();if(saveReminderDate)void revalidateSaveReminderAfterCanonicalConvergence();},
+    libraryChanged:()=>{LibraryView.render();if(saveReminderDate)void revalidateSaveReminderAfterCanonicalConvergence();void recheckStoredPreviousSession();},
     reconcileNotes:reconcileNotesThroughLifecycle,
     restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,
     restoreSessionState:restoreSessionStateThroughLifecycle,

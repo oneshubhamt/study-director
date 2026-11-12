@@ -72,6 +72,8 @@ try{
   assert.equal(await laptop.evaluate(runSession('Day')),'running','the laptop runs the day');
   assert.equal(await setDraft(laptop,TOMORROW),TOMORROW);
   assert.equal(await laptop.evaluate(`__PWA6.saveDayRecord()`),true,'Save Today part-way through the day');
+  // Save Today pauses the timer; the laptop studies on.
+  assert.equal(await laptop.evaluate(`(async()=>{__PWA6.togglePause();await new Promise(r=>setTimeout(r,300));return __PWA6.TimerState.snapshot().mode;})()`),'running','Resume after Save Today');
   const today=await laptop.evaluate(`__PWA6.todayISO()`);
   await upload(laptop);await settled(laptop,'A');await elsewhere(phone,'B');await settle('day');
   await same('day',{draft:TOMORROW,days:[today]});

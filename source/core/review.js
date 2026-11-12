@@ -531,7 +531,7 @@ async function saveDayRecord(options={}){
       refreshPlanAfterSessionReset('Today is saved in Library. Apply a new plan when ready.','Today Saved');
       setPlanStatus('✓ Today is saved in Library. Apply a new plan when ready.');
     }
-    notice.finish('succeeded',`✓ Saved ${prettyDate(rec.date)} · completed equivalent ${durationLabel(rec.completedEquivalentMinutes)} · actual focus ${durationLabel(rec.actualFocusMinutes)} · ${displayPercent(rec.completionPercent)}`);
+    notice.finish('succeeded',`✓ Saved ${prettyDate(rec.date)} · completed equivalent ${durationLabel(rec.completedEquivalentMinutes)} · actual focus ${durationLabel(rec.actualFocusMinutes)} · ${displayPercent(rec.completionPercent)}${options.timerPaused===true?' · timer paused: Resume to keep studying':''}`);
   }catch(e){
     notice.finish('failed',(committed?'Study Day saved locally in Library; follow-up did not complete. Keep this tab open and review the saved record. ':'Could not save this Study Day. Keep this tab open and retry after storage recovers. ')+(e&&e.message?e.message:e),{title:committed?'Study Day saved; follow-up needs attention':'Study Day not saved',outcome:committed?'local-save-completed':'local-save-failed'});
     return false;
