@@ -457,11 +457,20 @@ function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
     const noTime=!(Number(state.actual?.seconds)>0)&&!(Number(actual.activeSeconds)>0)&&
       result.actualEnd===undefined&&!(Number(result.actualSeconds)>0);
     if(end&&result.actualEnd!==end&&!noTime){
-      // An end moving forward can be legitimate continued focus, but only
-      // with a stable start and strictly increased recorded focus duration.
-      // A missing/replaced start or a merely edited timestamp proves nothing.
       const previousSeconds=Number(state.actual?.seconds);
-      if(!allowAdvances||!start||!Number.isFinite(previousSeconds)||
+      if(!clock.endedAt){
+        // The block had not ended (it was running or paused at Save Today):
+        // the Saved Day keeps no end for it, and the session's copy marks it
+        // ended only as of each time that copy was written, so a pause or a
+        // later write moves the mark with no more focus. Its focus is
+        // compared above. Before 2026-11-12 every day saved with a block in
+        // progress asked about an "unsaved previous study day" next morning.
+        if(!allowAdvances||!start||!Number.isFinite(previousSeconds))return false;
+      }else if(!allowAdvances||!start||!Number.isFinite(previousSeconds)||
+          // A block that ended: a later end is legitimate continued focus,
+          // but only with a stable start and strictly increased recorded
+          // focus. A missing/replaced start or a merely edited timestamp
+          // proves nothing.
           !(Number(result.actualSeconds)>previousSeconds)||
           !Number.isFinite(Date.parse(end))||
           !(Date.parse(result.actualEnd)>Date.parse(end)))return false;

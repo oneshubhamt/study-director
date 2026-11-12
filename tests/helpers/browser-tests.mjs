@@ -5,6 +5,7 @@ const test=(id,script,coverage,timeoutMs=0,{alone=''}={})=>Object.freeze({id,scr
 export const BROWSER_TEST_MANIFEST=Object.freeze({
   smoke:Object.freeze([
     test('core-flow','tests/browser/app/core-flow.mjs',['plan','execute','review','library','indexeddb','backup']),
+    test('next-morning-saved-day','tests/browser/app/next-morning-saved-day.mjs',['execute','review','library','active-session','recovery','indexeddb']),
     test('session-draft-edit','tests/browser/app/session-draft-edit.mjs',['plan','execute','practice-pacer','backup']),
     test('session-merge-timer','tests/browser/app/session-merge-timer.mjs',['execute','sync','active-session']),
     test('storage-census','tests/browser/app/storage-census.mjs',['diagnostics','indexeddb','opfs','cache-storage']),

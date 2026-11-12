@@ -12304,7 +12304,11 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
   flushers:Object.freeze({
     planDraft:PlanDraftEditor.flush,
     preferences:()=>flushProtectedPreferences(),
-    activeSession:flushLiveDraft,
+    // Leaving or hiding the app writes what is pending as it is; it changes
+    // nothing studied, so a day saved before stays saved. Before 2026-11-12
+    // each flush counted as a change, and every day saved and then closed
+    // asked about an "unsaved previous study day" the next morning.
+    activeSession:()=>flushLiveDraft({markChanged:false}),
     notes:()=>AppData.notes.flush(),
     deletionRecovery:AppData.deletionRecovery.flush
   }),
