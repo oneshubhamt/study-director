@@ -2144,15 +2144,18 @@ registry.define('backup-provider',1,input=>{
   // in the background) the check reads every note once more.
   const SESSION_WATCH_WINDOW=20,SESSION_WATCH_SEEN_LIMIT=200,SESSION_WATCH_FRESH_MS=60*1000;
   function rememberOwnCommit(id){ownCommitIds.add(String(id||''));if(ownCommitIds.size>SESSION_WATCH_SEEN_LIMIT)ownCommitIds.delete(ownCommitIds.values().next().value);}
-  function sessionWatchState(providerId){let state=sessionWatchByProvider.get(providerId);if(!state){state={claim:undefined,checkedAt:0,seen:new Set(),pending:'',scoped:null,scopedFor:null,scopedAt:0};sessionWatchByProvider.set(providerId,state);}return state;}
+  function sessionWatchState(providerId){let state=sessionWatchByProvider.get(providerId);if(!state){state={claim:undefined,checkedAt:0,seen:new Set(),pending:'',scoped:null,scopedFor:null};sessionWatchByProvider.set(providerId,state);}return state;}
   function sessionWatchSeen(providerId,id){const state=sessionWatchState(providerId),value=String(id||'');if(!value)return;state.seen.add(value);while(state.seen.size>SESSION_WATCH_SEEN_LIMIT)state.seen.delete(state.seen.values().next().value);}
   async function watchSession(id='google-drive',options={}){
     const selected=providers.get(safeId(id));if(!selected||!selected.shared||!providerConnected(selected)||!repositorySessionClaimCapable(selected))return null;
-    const signal=options&&options.signal||null,state=sessionWatchState(selected.id),now=Date.now();
-    // One operation serves the checks of a minute, so Drive's folder is
-    // verified once a minute and each check is one request; the listing still
-    // takes only this account's own, unshared files in that folder.
-    if(!state.scoped||state.scopedFor!==selected||!(now-state.scopedAt>=0&&now-state.scopedAt<=SESSION_WATCH_FRESH_MS))Object.assign(state,{scoped:repositoryOperationSelected(selected),scopedFor:selected,scopedAt:now});
+    const signal=options&&options.signal||null,state=sessionWatchState(selected.id);
+    // One operation serves every check, so each check is one request: Drive's
+    // folder is verified when checks start, after an error and after a new
+    // sign-in. The listing itself takes only this account's own, unshared
+    // files in that folder: a folder shared since makes the check uncertain,
+    // and a deleted one shows nothing, which stops no timer (sync, which
+    // verifies the folder each time, reports it).
+    if(!state.scoped||state.scopedFor!==selected)Object.assign(state,{scoped:repositoryOperationSelected(selected),scopedFor:selected});
     const scoped=state.scoped;
     if(typeof scoped.repository.listSessionWatch!=='function')return freeze({claim:await readSessionClaim(id,options),newVersions:false});
     let listed;

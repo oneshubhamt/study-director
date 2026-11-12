@@ -16,7 +16,7 @@ const pipeline=freeze({
 const presentation=freeze({
   begin:()=>freeze({update:noop,finish:noop}),read:()=>null,feedback:noop,condition:noop,notice:noop,detail:noop,outcome:noop,locationLabel:()=>'',resolve:noop,reset:noop,subscribe:()=>noop
 });
-const files=new Map(),claimOrder=new Map(),watchCommits=[];let publicationId=0,claimDownloads=0,claimLists=0,tick=0,operations=0,oddWatch={ignored:0,ignoredCommits:0};
+const files=new Map(),claimOrder=new Map(),watchCommits=[];let publicationId=0,claimDownloads=0,claimLists=0,tick=0,operations=0,watchFails=false,oddWatch={ignored:0,ignoredCommits:0};
 const HEAD_A='cp_'+'a'.repeat(32),HEAD_B='cp_'+'b'.repeat(32),CONTENT_FINGERPRINT='c'.repeat(64),HANDOFF_TOKEN='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',OTHER_TOKEN='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';let headId=HEAD_A;
 const descriptor=file=>freeze({kind:'session-claim',id:file.id,name:file.name,size:file.blob.size,digest:file.digest,serverDigest:file.digest,createdAt:file.exportedAt,modifiedAt:file.exportedAt,remoteId:'claim-'+file.id,remoteVersion:'1',verificationScope:'claim-scope'});
 const headDescriptor=kind=>freeze({kind,id:headId,name:headId+(kind==='checkpoint'?'.sdcheckpoint':'.sdcommit'),size:1,digest:'d'.repeat(64),serverDigest:'d'.repeat(64),createdAt:'2026-10-27T08:00:00.000Z',modifiedAt:'2026-10-27T08:00:00.000Z',remoteId:kind+'-'+headId,...(kind==='checkpoint'?{history:freeze({format:15,logicalFingerprint:'e'.repeat(64),exportedAt:'2026-10-27T08:00:00.000Z',counts:freeze({dailyRecord:0,note:0}),encrypted:false,retention:freeze({role:'normal'}),origin:B})}:{})});
@@ -28,6 +28,7 @@ const repository=freeze({
   listSessionClaims:async()=>{claimLists++;return freeze({items:freeze([...files.values()].map(descriptor)),overflow:false,ignored:0});},
   // Newest first, takeover notes and version-complete records together.
   listSessionWatch:async({limit})=>{
+    if(watchFails){watchFails=false;throw new Error('QA_FIXTURE network failure');}
     const rows=[...[...files.values()].map(file=>({at:claimOrder.get(file.id)||0,item:descriptor(file)})),...watchCommits].sort((x,y)=>y.at-x.at).slice(0,limit).map(row=>row.item);
     return freeze({claims:freeze(rows.filter(row=>row.kind==='session-claim')),commits:freeze(rows.filter(row=>row.kind==='commit')),incomplete:false,...oddWatch});
   },
@@ -156,9 +157,13 @@ assert.equal(b.diagnosticSync().find(row=>row.id==='google-drive')?.needsUpdate,
   const realNow=Date.now,operationsBefore=operations;Date.now=()=>realNow()+61000;
   try{
     const afterGap=await b.watchSession('google-drive');assert.equal(afterGap.claim.epoch,known.epoch);assert.equal(claimLists,listsBefore+1,'after a gap the claims are read in full');
-    assert.equal(operations,operationsBefore+1,'and Drive\'s folder is verified again');
+    // One operation serves every check: one request each, Drive's folder
+    // verified when checks start and again only after an error.
     await b.watchSession('google-drive');await b.watchSession('google-drive');
-    assert.equal(operations,operationsBefore+1,'within the minute the checks share it: one request each');
+    assert.equal(operations,operationsBefore,'the checks share one operation, even after a gap');
+    watchFails=true;await assert.rejects(()=>b.watchSession('google-drive'));
+    await b.watchSession('google-drive');
+    assert.equal(operations,operationsBefore+1,'after an error the folder is verified again');
     // An unreadable version record does not hide a takeover; an unreadable
     // takeover note leaves ownership uncertain, and the check says so.
     oddWatch={ignored:0,ignoredCommits:1};assert.equal((await b.watchSession('google-drive')).claim.epoch,known.epoch);
