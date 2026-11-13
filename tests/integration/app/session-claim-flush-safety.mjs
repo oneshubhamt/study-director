@@ -77,7 +77,7 @@ function fixture(options={}){
   assert.match(host,/writeCanonicalNow:\(operation,options\)=>ActiveSessionRuntime\.writeCanonicalNow\(operation,options\),writeLiveDraftNow/u);
   const review=readRuntimeSource('source/core/review.ts');
   assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the Study Day Active Session checkpoint'\);\s*if\(closesSession\)activeSessionPersistenceBlocked=true/u);
-  assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the rollover Active Session checkpoint'\);\s*activeSessionPersistenceBlocked=true/u);
+  assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the rollover Active Session checkpoint'\);[\s\S]{0,420}await runLifecycle\('study-day-rollover'[\s\S]{0,700}activeSessionPersistenceBlocked=true/u);
   assert.doesNotMatch(review,/activeSessionPersistenceBlocked=true;\s*stopTimerExecution\(\);\s*cancelPendingLiveDraftSave\(\)/u);
 }
 
