@@ -1,6 +1,7 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {ReviewHostInput,ReviewLifecycleHooksInput,ReviewHostModule as ReviewHostContract} from '../../types/review-host.ts';
 import type {ActiveSession,DailyRecord,SessionEvidence} from '../../types/record-models.ts';
+import type {SessionHooks} from '../../types/session-lifecycle.ts';
 
 const sdReviewHostFactory=(()=>{
 'use strict';
@@ -27,7 +28,7 @@ function createSubsystem(input:Readonly<ReviewHostInput>){
   return subsystem;
 }
 
-function createLifecycleHooks(input:Readonly<ReviewLifecycleHooksInput>){
+function createLifecycleHooks(input:Readonly<ReviewLifecycleHooksInput>):Readonly<SessionHooks>{
   exactObject(input,['canMutate','reviewEditor','lifecycleViews','diagnostics'],'Review lifecycle provider input');
   if(!Object.isFrozen(input.reviewEditor)||!Object.isFrozen(input.lifecycleViews)||!Object.isFrozen(input.diagnostics))throw new TypeError('Review lifecycle providers must be frozen.');
   const {canMutate,reviewEditor,lifecycleViews,diagnostics}=input;
