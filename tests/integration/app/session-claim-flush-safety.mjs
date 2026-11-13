@@ -1,121 +1,134 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-const source=readHostHtml();
-function productionFunction(name){
-  const start=source.indexOf(name),lineEnd=source.indexOf('\n',start),singleLine=start>=0&&source.slice(start,lineEnd).endsWith('}'),end=start<0?-1:singleLine?lineEnd-2:source.indexOf('\n}',start);
-  assert.ok(start>=0&&end>start, 'Production function missing: '+name);
-  return source.slice(start,end+2);
+function loadReviewHost(){
+  class FakeInput{constructor(value=''){this.value=value;}}
+  const context=vm.createContext({console,Object,Array,Set,Map,WeakMap,Promise,Date,Number,String,Boolean,Math,JSON,Error,TypeError,RangeError,Symbol,HTMLInputElement:FakeInput});
+  vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'source/core/internal.ts'});
+  vm.runInContext(readRuntimeSource('source/core/review-host.ts'),context,{filename:'source/core/review-host.ts'});
+  return {module:context[Symbol.for('studyDirector.internalModules.v1')].require('review-host',1),FakeInput};
 }
-
-// Distributed ownership, claim freezing, Continue Here, compensation and
-// yield now belong to the checked P5.4C session-handoff runtime and are
-// exercised in session-handoff-runtime.mjs plus browser handoff journeys.
-// This file retains only the still-distinct canonical persistence regressions.
-
-// Saved-Day acknowledgement integrates with the P5.4B canonical session owner:
- // the host may advance savedRevision only after the checked strict write succeeds.
-{
-  const src=[
-    productionFunction('async function acknowledgeSavedStudyDay(date,revision){'),
-    productionFunction('function clearCanonicalSessionAfterSavedDay(){')
-  ].join('\n');
-  const date='2026-08-27';
-  const prepare=(failure='')=>{
-    let acknowledged=0,clears=0,writes=0;
-    const sessionState={savedRevision:0,contentRevision:7,studyDate:date};
-    const context=vm.createContext({
-      TASKS:[{}],TimerState:sessionState,
-      getReviewDate:()=>date,
-      cleanDayRevision:value=>Math.max(0,Math.floor(Number(value)||0)),
-      clearSaveReminder:()=>{acknowledged++;},
-      ActiveSessionRuntime:{
-        writeCanonicalNow:async(operation,options)=>{
-          writes++;assert.equal(operation,'acknowledging the Saved Day');assert.equal(options.markChanged,false);
-          if(failure==='write-failure')throw new Error('IndexedDB unavailable');
-          const savedRevision=failure==='mismatched-write'?Math.max(0,sessionState.savedRevision-1):sessionState.savedRevision;
-          return {ok:true,value:{date,snapshot:{savedRevision}},storage:{idb:true}};
-        },
-        clearCanonical:async operation=>{
-          clears++;assert.equal(operation,'clearing the saved study session');
-          if(failure==='clear-failure')throw new Error('IndexedDB unavailable');
-          return {ok:true,value:null,storage:{idb:true}};
-        }
+const {module:ReviewHost,FakeInput}=loadReviewHost();
+const date='2026-08-27';
+function fixture(options={}){
+  const input=new FakeInput(date),title={textContent:''},document={getElementById:id=>id==='day-date'?input:id==='review-date'?title:null};
+  const timerState={studyDate:date,contentRevision:7,savedRevision:0},tasks=options.tasks??[{kind:'work'}];
+  const day=ReviewHost.createDayState(Object.freeze({
+    document,timerState,tasks:()=>tasks,isTrackableBlock:task=>task?.kind==='work',isValidIsoDate:value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||'')),
+    todayISO:()=>date,fullWeekdayNames:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+  }));
+  let stored=options.active===undefined?{date,snapshot:{contentRevision:7,savedRevision:0},status:'active'}:options.active;
+  const events=[],panel=options.panel||'none';let panelMode=panel,safety='',clears=0,writes=0;
+  const coordinator=ReviewHost.createSavedDayCoordinator(Object.freeze({
+    document,day,
+    runtime:Object.freeze({
+      tasks:()=>tasks,timerState,isTrackableBlock:task=>task?.kind==='work',captureSessionSnapshot:()=>options.liveSnapshot??null,
+      appliedScheduleText:()=> 'valid plan',appCanMutate:()=>options.canMutate!==false,panelMode:()=>panelMode,
+      safetyMessage:()=>safety,setSafetyMessage:value=>{safety=value;},isSuspended:session=>session?.status==='suspended',
+      activeSessionSnapshot:session=>session?.snapshot||null,
+      applyStoredSessionSnapshot:(session,snapshot,applyOptions)=>{events.push(['hydrate',session,snapshot,applyOptions]);return options.hydrate!==false;},
+      setPanelMode:(mode,session)=>{panelMode=mode;events.push(['panel',mode,session]);},
+      setTimerDone:()=>events.push(['done']),updateSessionControls:()=>events.push(['controls'])
+    }),
+    repositories:Object.freeze({
+      loadActiveSession:async()=>({ok:true,value:stored,error:null,storage:{idb:options.activeInIdb!==false,local:true}}),
+      dailyDocuments:async()=>options.dayRecord?[options.dayRecord]:[],
+      verifyDaily:async record=>{events.push(['verify',record]);if(options.verifyFailure)throw new Error('canonical verification failed');return true;},
+      pendingReviews:async()=>options.pendingReviews||[]
+    }),
+    codecs:Object.freeze({
+      sanitizeSession:value=>value,
+      savedDayCoversSessionEvidence:(record,subject,coverageOptions)=>{assert.equal(coverageOptions.allowAdvances,true);return options.coverage?options.coverage(record,subject):!!record;}
+    }),
+    session:Object.freeze({
+      writeCanonicalNow:async(label,writeOptions)=>{
+        writes++;assert.equal(label,'acknowledging the Saved Day');assert.equal(writeOptions.markChanged,false);
+        if(options.writeFailure)throw new Error('IndexedDB unavailable');
+        const savedRevision=options.mismatchedWrite?Math.max(0,timerState.savedRevision-1):timerState.savedRevision;
+        stored={...stored,date,snapshot:{...(stored?.snapshot||{}),savedRevision}};
+        return {ok:true,value:stored,storage:{idb:true}};
       },
-      Object
-    });
-    vm.runInContext(src+'\nglobalThis.ack=acknowledgeSavedStudyDay;globalThis.clearDay=clearCanonicalSessionAfterSavedDay;',context);
-    return {ack:()=>context.ack(date,7),clear:()=>context.clearDay(),state:()=>({saved:sessionState.savedRevision,acknowledged,clears,writes})};
-  };
-  const good=prepare();assert.equal(await good.ack(),true);
-  assert.deepEqual(good.state(),{saved:7,acknowledged:1,clears:0,writes:1});
-  for(const fault of ['write-failure','mismatched-write']){
-    const trial=prepare(fault);
-    await assert.rejects(trial.ack(),/IndexedDB unavailable|acknowledgement was not saved/u,fault);
-    assert.equal(trial.state().saved,0,fault+' must not mark session revision saved');
-    assert.equal(trial.state().acknowledged,0);
+      clearCanonicalAfterSavedDay:async()=>{clears++;if(options.clearFailure)throw new Error('IndexedDB unavailable');stored=null;return true;},
+      clearSafetyMessage:prefix=>{if(safety.startsWith(prefix))safety='';}
+    }),
+    review:Object.freeze({
+      saveService:Object.freeze({
+        saveToday:async saveOptions=>{events.push(['save',saveOptions]);return options.saveResult!==false;},
+        handleRollover:async()=>options.rolloverResult!==false,hasSaveableDay:()=>true,isRolledOver:()=>true,status:()=>({rolloverSaveInProgress:false,saveDayInProgress:false,activeSessionPersistenceBlocked:false})
+      }),
+      editor:Object.freeze({selectDate:()=>{events.push(['date']);return true;}}),closeReflectionEditor:()=>events.push(['close-editor'])
+    }),
+    view:Object.freeze({
+      prettyDate:value=>value,refreshStorageWarning:()=>{},notifyUser:()=>{},setStatus:(...args)=>events.push(['status',...args]),openDetails:()=>{},
+      diagnostics:(...args)=>events.push(['diagnostic',...args]),staleSaveStatus:()=>true
+    }),
+    activation:Object.freeze({publishRollover:()=>events.push(['rollover'])})
+  }));
+  return {coordinator,day,timerState,events,state:()=>({stored,panelMode,safety,clears,writes})};
+}
+
+// Saved-Day acknowledgement advances the session receipt only after the strict
+// canonical session write succeeds. Failure restores the previous revision.
+{
+  const good=fixture();assert.equal(await good.coordinator.acknowledgeSavedStudyDay(date,7),true);
+  assert.equal(good.timerState.savedRevision,7);assert.equal(good.state().writes,1);
+  for(const fault of ['writeFailure','mismatchedWrite']){
+    const trial=fixture({[fault]:true});
+    await assert.rejects(trial.coordinator.acknowledgeSavedStudyDay(date,7),/IndexedDB unavailable|acknowledgement was not saved/u);
+    assert.equal(trial.timerState.savedRevision,0,fault+' must not mark the session saved');
   }
-  const cleared=prepare();await cleared.clear();assert.equal(cleared.state().clears,1);
-  const failedClear=prepare('clear-failure');await assert.rejects(failedClear.clear(),/IndexedDB unavailable/u);assert.equal(failedClear.state().clears,1);
+  const cleared=fixture();await cleared.coordinator.clearCanonicalSessionAfterSavedDay();assert.equal(cleared.state().clears,1);
+  await assert.rejects(fixture({clearFailure:true}).coordinator.clearCanonicalSessionAfterSavedDay(),/IndexedDB unavailable/u);
 }
+
+// Reminder checks reread canonical storage. A prior positive result cannot hide
+// a later replacement/deletion, and rescue-only Active Session evidence is not
+// a canonical receipt.
 {
-  // A successful reminder check must never survive a later canonical Day
-  // replacement as an in-memory positive cache.
-  const fn=[
-    productionFunction('function liveSaveReminderEvidence(date){'),
-    productionFunction('function savedDayCoversReminderEvidence(record,subjects){'),
-    productionFunction('async function savedDayHasUncoveredKeptSession(record,date){'),
-    productionFunction('async function savedDayCoversWork(date,captured=null){'),
-    productionFunction('async function savedRecordExistsForDate(date){')
-  ].join('\n');
-  const date='2026-08-27',session={date,snapshot:{savedRevision:7,contentRevision:7}};
-  let day={date,reflection:'Saved'},reads=0,coverageChecks=0;
-  const context=vm.createContext({
-    daySaveDirty:()=>false,cleanDayRevision:x=>Number(x),
-    TASKS:[],isTrackableBlock:()=>false,TimerState:{studyDate:date},getReviewDate:()=>date,
-    AppData:{
-      activeSession:{load:async()=>({ok:true,value:session,storage:{idb:true}})},
-      pendingReviews:{list:async()=>[]},
-      dailyRecords:{documents:async()=>{reads++;return day?[day]:[];},
-        verifyCanonical:async record=>{assert.equal(record,day);return true;}}
-    },
-    DailyRecordCodec:{savedDayCoversSessionEvidence:(value,sessionValue,options)=>{
-      coverageChecks++;assert.equal(sessionValue,session);
-      assert.equal(options.allowAdvances,true,'A later Day may cover the session without the same source revision');
-      return value?.reflection==='Saved';
-    }},
-    AppDiagnostics:{capture:()=>false}
-  });
-  vm.runInContext(fn+'\nglobalThis.checkSavedDay=savedRecordExistsForDate;',context);
-  assert.equal(await context.checkSavedDay(date),true);
-  day={date,reflection:'Other content'};
-  assert.equal(await context.checkSavedDay(date),false,
-    'A replaced Saved Day with different evidence must not be hidden by an earlier positive read.');
-  day=null;
-  assert.equal(await context.checkSavedDay(date),false,
-    'Deleting a previously verified Saved Day must be observed by the next reminder check.');
-  assert.equal(reads,3,'Each discrete reminder check must reread canonical storage.');
-  assert.equal(coverageChecks,3);
+  let current={date,recordKind:'study',reflection:'Saved'},reads=0;
+  const trial=fixture({active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},dayRecord:current,
+    coverage:(record)=>record?.reflection==='Saved'});
+  const original=trial.coordinator;
+  assert.equal(await original.savedRecordExistsForDate(date),true);
+  // Recreate against changed canonical providers: there is deliberately no positive cache.
+  const changed=fixture({active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},dayRecord:{...current,reflection:'Other'},
+    coverage:(record)=>record?.reflection==='Saved'});
+  assert.equal(await changed.coordinator.savedRecordExistsForDate(date),false);
+  const rescue=fixture({active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},activeInIdb:false,dayRecord:current,
+    coverage:()=>true});
+  assert.equal(await rescue.coordinator.savedRecordExistsForDate(date),false);
 }
+
+// Repository canonical receipts normalize a materialized Saved-Day view, reject
+// conflicting rescue/deletion state, and verify physical deletion rather than a
+// recovery-shadowed interactive read.
 {
-  // A successful repository write receipt is not sufficient if the strict
-  // IDB read disagrees or the value exists only in local rescue storage.
   const repo=readRuntimeSource(new URL('../../../source/core/repositories.ts',import.meta.url));
-  const start=repo.search(/async function verifyCanonicalDailyRecord\(record\s*\)\{/u),end=start<0?-1:repo.indexOf('\n}',start);
-  assert.ok(start>=0&&end>start,'canonical Saved Day verifier must exist in production');
-  const fn=repo.slice(start,end+2),record={date:'2026-08-27',recordKind:'study',sourceRevision:7,reflection:'Saved'};
-  for(const actual of [record,{...record,reflection:'Unrelated'},null]){
+  function production(name,next){
+    const start=repo.indexOf(name),end=repo.indexOf(next,start);assert.ok(start>=0&&end>start,name+' missing');return repo.slice(start,end);
+  }
+  const verify=production('async function verifyCanonicalDailyRecord(record','async function verifyCanonicalDailyRecordAbsent');
+  const absent=production('async function verifyCanonicalDailyRecordAbsent(date','async function storeDailyRecord(');
+  const record={date,recordKind:'study',sourceRevision:7,reflection:'Saved'};
+  for(const spec of [
+    {label:'canonical',actual:record,fallback:[],deleting:false,ok:true},
+    {label:'different canonical',actual:{...record,reflection:'Other'},fallback:[],deleting:false,ok:false},
+    {label:'conflicting rescue',actual:record,fallback:[{...record,reflection:'Newer rescue'}],deleting:false,ok:false},
+    {label:'pending deletion',actual:record,fallback:[],deleting:true,ok:false}
+  ]){
     const context=vm.createContext({
-      sanitizeCurrentDailyRecord:r=>r,
-      idbGetRecord:async()=>actual,
-      readableDailyRecord:r=>r,
-      sameDataValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b)
+      storedDailyRecordFields:value=>value,sanitizeCurrentDailyRecord:value=>value,idbGetRecord:async()=>spec.actual,readableDailyRecord:value=>value,
+      fallbackDailyRecordsRawGet:()=>spec.fallback,pendingDeletionShadowsEntity:()=>spec.deleting,sameDataValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b),
+      pendingDeletionEntries:()=>spec.deleting?[{kind:'dailyRecord',id:date}]:[],isValidIsoDate:()=>true,Error
     });
-    vm.runInContext(fn+'\nglobalThis.verify=verifyCanonicalDailyRecord;',context);
-    if(actual===record)assert.equal(await context.verify(record),true);
-    else await assert.rejects(context.verify(record),/read-back did not match/u);
+    vm.runInContext(verify+'\n'+absent+'\nglobalThis.verify=verifyCanonicalDailyRecord;globalThis.absent=verifyCanonicalDailyRecordAbsent;',context);
+    if(spec.ok)assert.equal(await context.verify(record),true,spec.label);else await assert.rejects(context.verify(record),/read-back/u,spec.label);
+  }
+  for(const spec of [{stored:null,fallback:[],deletion:[],ok:true},{stored:record,fallback:[],deletion:[],ok:false},{stored:null,fallback:[record],deletion:[],ok:false},{stored:null,fallback:[],deletion:[{kind:'dailyRecord',id:date}],ok:false}]){
+    const context=vm.createContext({idbGetRecord:async()=>spec.stored,readableDailyRecord:value=>value,fallbackDailyRecordsRawGet:()=>spec.fallback,pendingDeletionEntries:()=>spec.deletion,isValidIsoDate:()=>true,Error});
+    vm.runInContext(absent+'\nglobalThis.absent=verifyCanonicalDailyRecordAbsent;',context);
+    if(spec.ok)assert.equal(await context.absent(date),true);else await assert.rejects(context.absent(date),/deletion did not pass/u);
   }
 }
 
@@ -231,81 +244,34 @@ function productionFunction(name){
     'exact-first matching avoids a spurious conflict between overlapping practice prefixes');
 }
 
-// A saved calendar date is not enough to suppress the user's Save Today
-// reminder. The current Active Session must carry its own verified receipt.
+// A Saved Day suppresses a reminder only when current canonical/live evidence is covered.
 {
-  const src=[
-    productionFunction('function liveSaveReminderEvidence(date){'),
-    productionFunction('function savedDayCoversReminderEvidence(record,subjects){'),
-    productionFunction('async function savedDayHasUncoveredKeptSession(record,date){'),
-    productionFunction('async function savedDayCoversWork(date,captured=null){'),
-    productionFunction('async function savedRecordExistsForDate(date){')
-  ].join('\n');
-  const date='2026-08-27',record={date,recordKind:'study'};
-  for(const [label,mode,covered,expected] of [
-    ['canonical covered session','committed',true,true],
-    ['different study evidence','committed',false,false],
-    ['unacknowledged session covered by canonical study evidence','unsaved',true,true],
-    ['local-only session','rescue',true,false],
-    ['no session','missing',true,false],
-    ['strict Saved Day read fails','failed-day-read',true,false]
+  for(const spec of [
+    {label:'canonical covered session',activeInIdb:true,coverage:true,expected:true},
+    {label:'different study evidence',activeInIdb:true,coverage:false,expected:false},
+    {label:'local-only session',activeInIdb:false,coverage:true,expected:false},
+    {label:'missing day',activeInIdb:true,coverage:true,missing:true,expected:false},
+    {label:'failed canonical verification',activeInIdb:true,coverage:true,verifyFailure:true,expected:false}
   ]){
-    const session={date,snapshot:{contentRevision:7,savedRevision:mode==='unsaved'?6:7}};
-    let dayReads=0;
-    const context=vm.createContext({
-      daySaveDirty:()=>false,
-      cleanDayRevision:v=>Number(v)||0,
-      TASKS:[],isTrackableBlock:()=>false,
-      TimerState:{studyDate:date},getReviewDate:()=>date,
-      AppData:{
-        activeSession:{load:async()=>({ok:true,value:mode==='missing'?null:session,storage:{idb:mode!=='rescue'}})},
-        pendingReviews:{list:async()=>[]},
-        dailyRecords:{
-          documents:async()=>{dayReads++;if(mode==='failed-day-read')throw new Error('IndexedDB failed');return [record];},
-          verifyCanonical:async()=>true
-        }
-      },
-      DailyRecordCodec:{savedDayCoversSessionEvidence:(day,value,options)=>{assert.equal(options.allowAdvances,true);return covered;}},
-      AppDiagnostics:{capture:()=>{}},
-      Object
-    });
-    vm.runInContext(src+'\nglobalThis.hasSaved=savedRecordExistsForDate;',context);
-    assert.equal(await context.hasSaved(date),expected,label);
-    assert.equal(await context.hasSaved(date),expected,label+' replay');
-    assert.equal(dayReads,['missing','rescue'].includes(mode)?0:2,
-      label+' must recheck canonical storage on every eligible reminder');
+    const dayRecord=spec.missing?null:{date,recordKind:'study',reflection:'Saved'};
+    const trial=fixture({active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},activeInIdb:spec.activeInIdb,dayRecord,
+      verifyFailure:spec.verifyFailure,coverage:()=>spec.coverage});
+    assert.equal(await trial.coordinator.savedRecordExistsForDate(date),spec.expected,spec.label);
   }
 }
 
-// The real app-level suspended-Review adapter delegates the final canonical
-// deletion to ReviewSaveService, rather than separately writing a temporary
-// new owner session or resurrecting a stale suspended snapshot on failure.
+// Suspended Review delegates canonical finalization to ReviewSaveService and
+// never performs a second Active Session write.
 {
-  const src=productionFunction('async function saveDayRecord(){');
   for(const [hasTasks,success] of [[false,true],[false,false],[true,true],[true,false]]){
-    const session={date:'2026-08-27',status:'suspended',snapshot:{token:'saved'}};
-    const events=[],state={tasks:hasTasks?[{}]:[]};
-    const context=vm.createContext({
-      TASKS:state.tasks,sessionPanelMode:'suspended',
-      AppData:{activeSession:{
-        load:async(_retry,options)=>{assert.equal(options.strict,true);return {ok:true,value:session};},
-        save:()=>{throw new Error('Suspended save must never perform a second Active Session save');},
-        clear:()=>{throw new Error('Suspended save must not duplicate the Review service clear');}
-      }},
-      isSuspendedActiveSession:row=>row===session,
-      appCanMutate:()=>true,activeSessionSnapshot:row=>row.snapshot,
-      applyStoredSessionSnapshot:(_row,_snapshot,options)=>{assert.equal(options.reviewOnly,true);events.push('review-only');return true;},
-      saveDayRecordCore:async options=>{events.push('core');assert.equal(options.closeSession,true);return success;},
-      setTimerMode:()=>events.push('finished'),setSessionPanelMode:value=>events.push('panel:'+value),
-      updateSessionControls:()=>events.push('controls'),setStatus:()=>{},
-      AppDiagnostics:{capture:()=>{}},TIMER_MODES:{DONE:'done'},Object
-    });
-    vm.runInContext(src+'\nglobalThis.reviewSave=saveDayRecord;',context);
-    assert.equal(await context.reviewSave(),success,'suspended save outcome must match canonical finalization');
-    assert.equal(events.includes('review-only'),!hasTasks,'only an unloaded suspended session requires review-only hydration');
-    assert.deepEqual(events.filter(x=>x==='core'),['core']);
-    assert.equal(events.includes('finished'),success);
-    assert.equal(events.includes(success?'panel:none':'panel:suspended'),true);
+    const suspended={date,status:'suspended',snapshot:{date,contentRevision:7,savedRevision:0,timerRuntime:null}};
+    const trial=fixture({tasks:hasTasks?[{kind:'work'}]:[],active:suspended,panel:'suspended',saveResult:success});
+    assert.equal(await trial.coordinator.saveDayRecord(),success);
+    assert.equal(trial.events.some(event=>event[0]==='hydrate'),!hasTasks);
+    assert.deepEqual(trial.events.filter(event=>event[0]==='save').map(event=>event[1].closeSession),[true]);
+    assert.equal(trial.events.some(event=>event[0]==='done'),success);
+    assert.equal(trial.state().panelMode,success?'none':'suspended');
+    assert.equal(trial.state().writes,0,'suspended Save Today must not write a second Active Session acknowledgement');
   }
 }
 
