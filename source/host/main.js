@@ -46,6 +46,7 @@ const RepositoryJournalModule=INTERNAL_MODULES.load('repository-journals',1,'stu
 const SaveLaneModule=INTERNAL_MODULES.load('save-lane',1,'study-director.save-lane-module',1);
 const NotesRepositoryModule=INTERNAL_MODULES.load('repositories-notes',1,'study-director.notes-repository-module',1);
 const RepositoryModule=INTERNAL_MODULES.load('repositories',1,'study-director.repositories',1);
+const ReviewHostModule=INTERNAL_MODULES.load('review-host',1,'study-director.review-host-module',1);
 const ReviewModule=INTERNAL_MODULES.load('review',1,'study-director.review',1);
 const ExportsModule=INTERNAL_MODULES.load('exports',1,'study-director.exports-module',1,Object.freeze({lifecycle:OperationLifecycle}));
 const IntegrityContinuationModule=INTERNAL_MODULES.load('integrity-continuation',1,'study-director.integrity-continuation-module',1);
@@ -4177,7 +4178,9 @@ function badgeElements(...args){return ExecutionViews.badgeElements(...args);}
 function updateBadges(...args){return ExecutionViews.updateBadges(...args);}
 function updateSessionControls(...args){return ExecutionViews.updateSessionControls(...args);}
 /* REVIEW SUBSYSTEM · PRIVATE MODULE */
-const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
+const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze({
+  module:ReviewModule,
+  subsystem:Object.freeze({
   constants:Object.freeze({
     limits:APP_LIMITS,dataContract:DATA_CONTRACT,
     completionSources:COMPLETION_SOURCES,taskOutcomes:TASK_OUTCOMES,timerModes:TIMER_MODES
@@ -4234,6 +4237,7 @@ const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
     view:Object.freeze({markStorageHealthTimestamp,notifyUser,on,refreshLibraryAfterSave:async()=>{LibraryView.invalidate();return LibraryView.render();},refreshStorageFallbackWarning,setStatus,updateBadges}),
     interactions:Object.freeze({confirm:options=>Interactions.confirm(options),notify:options=>Interactions.notify({...options,source:'review'})}),
     environment:Object.freeze({cancelAnimationFrame,clearTimeout,requestAnimationFrame,setTimeout,todayISO})
+  })
   })
 }));
 if(!Object.isFrozen(ReviewSubsystem)||ReviewSubsystem.format!=='study-director.review-subsystem'||ReviewSubsystem.contractVersion!==1){

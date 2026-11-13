@@ -183,6 +183,8 @@
     "types/plan-host.ts",
     "types/review.ts",
     "source/core/review.ts",
+    "types/review-host.ts",
+    "source/core/review-host.ts",
     "types/plan.ts",
     "types/session-host.ts",
     "types/session-actions.ts",
@@ -192,6 +194,7 @@
     "types/checks/session-host.ts",
     "types/checks/session-handoff.ts",
     "types/checks/plan-host.ts",
+    "types/checks/review-host.ts",
     "types/checks/plan.ts"
   ]
 }
