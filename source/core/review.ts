@@ -4,10 +4,10 @@ import type {
   ReviewHydrateOptions,ReviewSaveOptions,ReviewReflectionBinding,ReviewReflectionPending,ReviewEvidence,ReviewMetrics,ReviewTaskRow,ReviewTaskHeaderInput,
   ReviewTimingRowInput,ReviewProgressLineInput,ReviewCardModel,ReviewCardView,ReviewPracticeRunSummary,PracticeUnitSummary,PracticeSegmentSummary,
   ReviewPracticeAggregate,ReviewPrepared,ReviewRenderOptions,ReviewUiState,ReviewFocusLocator,ReviewReportContext,ReviewReportChild,ReviewReportSection,
-  ReviewRecordViewTask,ReviewReportSelectorContext,ReviewPomodoroSummary,TaskWithPauses
+  ReviewRecordViewTask,ReviewReportSelectorContext,ReviewPomodoroSummary,TaskWithPauses,ReviewProjectedStudyRecord
 } from '../../types/review.ts';
 import type {CompletionSource,Task,TaskOutcome} from '../../types/domain.ts';
-import type {DailyRecord,PracticeRun} from '../../types/record-models.ts';
+import type {DailyRecord,DailyResult,PauseEvent,PracticeRun} from '../../types/record-models.ts';
 const sdReviewFactory=(()=>{
 'use strict';
 const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'review','study-director.review'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
@@ -178,7 +178,7 @@ const createModule=():ReviewModuleContract=>{
     }
     function reviewBindingElements(){
       const box=textAreaById('daily-reflection');
-      return [box,...document.querySelectorAll<HTMLButtonElement>('.quality-btn')].filter(Boolean);
+      return [box,...document.querySelectorAll<HTMLButtonElement>('.quality-btn')].filter((field):field is HTMLElement=>field instanceof HTMLElement);
     }
     function setReflectionRichSync(state:unknown,message:unknown){
       const box=textAreaById('daily-reflection');if(!box)return false;
@@ -254,9 +254,9 @@ function getStudyQuality(){
   const q=parseInt(active.dataset['q'],10);
   return isNaN(q)?null:q;
 }
-function updateStudyQualitySummary(value=getStudyQuality()){
+function updateStudyQualitySummary(value:ReviewQuality=getStudyQuality()){
   const target=document.getElementById('review-study-quality-summary');
-  if(target)target.textContent=Number.isInteger(value)&&value>=1&&value<=5?`${value}/5`:'Not rated';
+  if(target)target.textContent=typeof value==='number'&&Number.isInteger(value)&&value>=1&&value<=5?`${value}/5`:'Not rated';
 }
 function setStudyQuality(q:unknown,options:Readonly<{save?:boolean}>={}){
   const val=reviewHasStudyDay()&&(q!==null&&q!==undefined&&q!=='')?Number(q):null;
@@ -375,7 +375,7 @@ function syncReviewSurfaceMode(){
     document.getElementById('review-summary'),
     document.getElementById('practice-review'),
     document.querySelector<HTMLDetailsElement>('#pane-review .review-blocks-collapse')
-  ].filter(Boolean).forEach(element=>{element.hidden=!hasStudyDay;});
+  ].forEach(element=>{if(element)element.hidden=!hasStudyDay;});
   const quality=document.querySelector<HTMLElement>('#pane-review .quality-wrap');
   if(quality)quality.hidden=!hasStudyDay;
   document.querySelectorAll<HTMLButtonElement>('.quality-btn').forEach(button=>{button.disabled=!hasStudyDay||!lifecycleCanWrite();});
@@ -426,7 +426,7 @@ function captureTodayState(){
   saveReviewState({markChanged:false,strict:true});
   saveLiveDraft();
 }
-function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState){
+function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState):ReviewProjectedStudyRecord{
   if(!evidence||!Object.isFrozen(evidence)||!Array.isArray(evidence.reviewTasks)){
     throw new TypeError('ReviewModel requires a frozen SessionEvidenceGateway snapshot.');
   }
@@ -435,32 +435,37 @@ function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState){
     id:row.id,start:row.originalStart,duration:row.duration,
     name:row.name,kind:row.kind,area:row.area,measure:row.measure,target:row.target
   }));
-  const results=KeyedRecord.create();
+  const results=KeyedRecord.create<DailyResult>();
   evidence.reviewTasks.forEach(row=>{
-    if(!row.trackable||!schedule[row.idx])return;
-    const raw={
+    const scheduleRow=schedule[row.idx];
+    if(!row.trackable||!scheduleRow)return;
+    const raw:DailyResult={
       completion:row.completion,completionSource:row.completionSource,
-      done:row.progress.done??null,total:row.progress.total??null,actualSeconds:row.actualSeconds,
-      actualStart:row.clock.startedAt||row.actualRecord.firstStartedAt||null,
-      actualEnd:row.clock.endedAt||row.actualRecord.lastEndedAt||null,
-      actualStartLocalMinute:Number.isInteger(Number(row.clock.startedAtLocalMinute))?Number(row.clock.startedAtLocalMinute):null,
-      actualStartUtcOffsetMinutes:Number.isInteger(Number(row.clock.startedAtUtcOffsetMinutes))?Number(row.clock.startedAtUtcOffsetMinutes):null,
-      actualStartTimeZone:clampText(row.clock.startedAtTimeZone||'',80)||null,
-      pauseEvents:Array.isArray(row.actualRecord.pauseEvents)?row.actualRecord.pauseEvents.slice(0,1000).map(ev=>({...ev})):[],
+      ...(row.progress.done!==undefined&&row.progress.done!==null?{done:row.progress.done}:{}),
+      ...(row.progress.total!==undefined&&row.progress.total!==null?{total:row.progress.total}:{}),
+      ...(row.actualSeconds!==null?{actualSeconds:row.actualSeconds}:{}),
+      ...((row.clock.startedAt||row.actualRecord.firstStartedAt)?{actualStart:String(row.clock.startedAt||row.actualRecord.firstStartedAt)}:{}),
+      ...((row.clock.endedAt||row.actualRecord.lastEndedAt)?{actualEnd:String(row.clock.endedAt||row.actualRecord.lastEndedAt)}:{}),
+      ...(Number.isInteger(Number(row.clock.startedAtLocalMinute))?{actualStartLocalMinute:Number(row.clock.startedAtLocalMinute)}:{}),
+      ...(Number.isInteger(Number(row.clock.startedAtUtcOffsetMinutes))?{actualStartUtcOffsetMinutes:Number(row.clock.startedAtUtcOffsetMinutes)}:{}),
+      ...(clampText(row.clock.startedAtTimeZone||'',80)?{actualStartTimeZone:clampText(row.clock.startedAtTimeZone||'',80)}:{}),
+      pauseEvents:Array.isArray(row.actualRecord.pauseEvents)?row.actualRecord.pauseEvents.slice(0,1000).map((event:PauseEvent)=>({...event})):[],
       sessionCount:Math.max(Number(row.actualRecord.sessionCount)||0,Array.isArray(row.actualRecord.sessions)?row.actualRecord.sessions.length:0),
-      skipped:row.resolvedState==='skipped',doneFlag:row.resolvedState==='done'
+      ...(row.resolvedState==='skipped'?{skipped:true as const}:{}),
+      ...(row.resolvedState==='done'?{doneFlag:true as const}:{})
     };
     if(row.shifted)raw.adjustedStart=row.adjustedStart;
-    const clean=normalizeDailyResultEntry(raw,schedule[row.idx]);
+    const clean=normalizeDailyResultEntry(raw,scheduleRow);
     if(clean)results[row.id]=clean;
   });
   const savedAt=new Date().toISOString();
-  return {
+  const record:ReviewProjectedStudyRecord={
     version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind:'study',date:evidence.date,
     savedAt,updatedAt:savedAt,quote:evidence.quote,reflection:review.reflection,studyQuality:review.studyQuality,
     realTimeSnapshot:evidence.realTimeSnapshot,sourceRevision:evidence.contentRevision,
-    schedule,results,practiceRuns:evidence.practiceRuns,carryForwardDraft:review.unfinished
+    schedule,results,practiceRuns:[...evidence.practiceRuns],carryForwardDraft:review.unfinished
   };
+  return record;
 }
 function buildDailyRecord(evidence:ReviewEvidence=SessionEvidenceGateway.snapshot({includeRecords:true}),review:ReviewCurrentState=currentReviewState()){
   return projectDailyRecord(evidence,review);
@@ -495,7 +500,7 @@ async function saveReflectionOnlyRecord(){
   let committed=false;
   try{
     const saved=await flushReflectionOnlySave();
-    const hasContent=!!String(saved?.canonical||'').trim();committed=true;
+    const hasContent=!!String(saved&&typeof saved==='object'&&'canonical' in saved?saved.canonical:'').trim();committed=true;
     ReviewView.sync();
     notice.finish('succeeded',hasContent?'✓ Reflection saved in Diary.':'No reflection saved. Empty reflections are not kept in Diary.',{announce:hasContent,title:'Reflection saved'});return true;
   }catch(error){
@@ -576,7 +581,8 @@ async function handleStudyDayRollover(){
   cancelPendingLiveDraftSave();
   rolloverSaveInProgress=true;
   const endedDate=SessionState.studyDate;
-  let savedDay=null;
+  if(!endedDate){activeSessionPersistenceBlocked=false;rolloverSaveInProgress=false;return false;}
+  let savedDay:null|{date:string;revision:number}=null;
   try{
     if(hasSaveableStudyDay()){
       if(isLiveTrackableTimer())recordCurrentActiveToTask(Runtime.currentIndex(),'partial');
@@ -659,7 +665,7 @@ function renderCompletionChange(idx:number,pct:number,refreshStats=true,options:
   const rd=document.getElementById(`rpct-${idx}`);
   if(rd)rd.textContent=displayPercent(pct);
   const pctInput=inputById(`rd-pct-${idx}`);
-  if(pctInput)pctInput.value=source!==COMPLETION_SOURCES.NONE?Math.round(pct):'';
+  if(pctInput)pctInput.value=source!==COMPLETION_SOURCES.NONE?String(Math.round(pct)):'';
   const sourceLine=document.getElementById(`rsource-${idx}`);
   if(sourceLine)sourceLine.textContent=completionSourceDescription(source,pct);
   if(idx===Runtime.currentIndex()&&options.syncTimer!==false){
@@ -679,9 +685,9 @@ function setCompletion(idx:number,pct:number,updateUI:boolean,source:CompletionS
 function syncRptFromTimer(idx:number,pct:number,done:number|null,total:number|null){
   renderCompletionChange(idx,pct,false,{syncTimer:false});
   const rdi=inputById(`rd-done-${idx}`);const rti=inputById(`rd-total-${idx}`);
-  if(rdi)rdi.value=done!==null&&done!==undefined?done:'';
-  if(rti)rti.value=total!==null&&total!==undefined?total:'';
-  refreshRsum(idx,taskMeasureValue(TASKS[idx],'units'),done,total);
+  if(rdi)rdi.value=done!==null&&done!==undefined?String(done):'';
+  if(rti)rti.value=total!==null&&total!==undefined?String(total):'';
+  const task=TASKS[idx];refreshRsum(idx,task?taskMeasureValue(task,'units'):'units',done,total);
 }
 function durationLabel(min:number){
   const n=Math.round(Math.abs(min||0));
@@ -710,7 +716,7 @@ function calculateReviewMetrics(evidence:ReviewEvidence):ReviewMetrics{
   if(!evidence||!Object.isFrozen(evidence)||!Array.isArray(evidence.reviewTasks)){
     throw new TypeError('ReviewModel requires a frozen SessionEvidenceGateway snapshot.');
   }
-  const workBlocks=evidence.reviewTasks.filter(row=>row.work);
+  const workBlocks:ReviewTaskRow[]=evidence.reviewTasks.filter(row=>row.work);
   const completions=workBlocks.map(row=>row.completion);
   const originalPlannedStudyMinutes=workBlocks.reduce((sum,row)=>sum+row.duration,0);
   const completedEquivalentMinutes=workBlocks.reduce((sum,row)=>sum+(row.duration*row.completion/100),0);
@@ -724,7 +730,7 @@ function calculateReviewMetrics(evidence:ReviewEvidence):ReviewMetrics{
   const totalScheduleShiftMinutes=shiftedStudyBlocks?Math.max(...scheduleShifts.map(Math.abs)):0;
   const netScheduleShiftMinutes=shiftedStudyBlocks?Math.round(scheduleShifts.reduce((a,b)=>a+b,0)/shiftedStudyBlocks):0;
   const outcomeCounts=emptyTaskOutcomeCounts();
-  workBlocks.forEach(row=>{outcomeCounts[row.outcome]+=1;});
+  workBlocks.forEach(row=>{const outcome:TaskOutcome=row.outcome;outcomeCounts[outcome]+=1;});
   return {
     evidence,workBlocks,completions,outcomeCounts,originalPlannedStudyMinutes,completedEquivalentMinutes,
     actualFocusMinutes,completionPercent,averageBlockCompletion,actualVsPlannedMinutes,actualVsCompletedMinutes,
@@ -734,7 +740,7 @@ function calculateReviewMetrics(evidence:ReviewEvidence):ReviewMetrics{
 function calculateCurrentReviewMetrics(evidence:ReviewEvidence=SessionEvidenceGateway.snapshot({includeRecords:false})){
   return calculateReviewMetrics(evidence);
 }
-function setMetricText(id:string,value:unknown){const el=document.getElementById(id);if(el)el.textContent=value;}
+function setMetricText(id:string,value:unknown){const el=document.getElementById(id);if(el)el.textContent=value===null||value===undefined?'':String(value);}
 function setMetricCardState(id:string,state:string){
   const el=document.getElementById(id);if(!el)return;
   el.classList.remove('warn','ok','info','primary');
@@ -761,11 +767,11 @@ function updateReviewMetrics(metrics:ReviewMetrics|null=null){
   updateTimerFocusMetrics(m);
   return m;
 }
-const COMPLETION_SOURCE_INFO=Object.freeze({
+const COMPLETION_SOURCE_INFO:Readonly<Partial<Record<CompletionSource,Readonly<{label:string;description:string|((pct:number)=>string)}>>>>=Object.freeze({
   [COMPLETION_SOURCES.UNITS]:Object.freeze({label:'Units',description:'Completion source: Done/Total progress.'}),
   [COMPLETION_SOURCES.MANUAL]:Object.freeze({label:'Manual %',description:'Completion source: manually edited percentage.'}),
-  [COMPLETION_SOURCES.TIME]:Object.freeze({label:'Auto from focus',description:pct=>`Completion source: actual focus time fallback (${displayPercent(pct)}). Edit if this overstates or understates progress.`}),
-  [COMPLETION_SOURCES.FINISHED_TIME]:Object.freeze({label:'Finished · focus-based',description:pct=>`Completion source: finished block using actual focus time (${displayPercent(pct)}). Edit if academic progress differed.`}),
+  [COMPLETION_SOURCES.TIME]:Object.freeze({label:'Auto from focus',description:(pct:number)=>`Completion source: actual focus time fallback (${displayPercent(pct)}). Edit if this overstates or understates progress.`}),
+  [COMPLETION_SOURCES.FINISHED_TIME]:Object.freeze({label:'Finished · focus-based',description:(pct:number)=>`Completion source: finished block using actual focus time (${displayPercent(pct)}). Edit if academic progress differed.`}),
   [COMPLETION_SOURCES.FINISHED_UNVERIFIED]:Object.freeze({label:'Finished · unverified',description:'Completion source: finished status only. No focus/progress evidence yet, so it is not counted as completed work.'}),
   [COMPLETION_SOURCES.SKIPPED]:Object.freeze({label:'Skipped',description:'Completion source: skipped block, counted as 0%.'})
 });
@@ -808,9 +814,9 @@ function createTaskReviewHeader({name,area,pct,statusInfo,shifted=false,tracked=
 }
 function createActualFocusChip(actualSec:number|null,deltaSec:number|null=null){
   const chip=textEl('div','time-chip ui-card actual');
-  const actualValue=textEl('span','tv ui-mono',fmtS(finiteNumber(actualSec))+' ');
+  const actualValue=textEl('span','tv ui-mono',fmtS(finiteNumber(actualSec)??0)+' ');
   if(deltaSec!==null&&deltaSec!==undefined){
-    const delta=finiteNumber(deltaSec);
+    const delta=finiteNumber(deltaSec)??0;
     const deltaCls=delta>0?'delta-plus':delta<0?'delta-minus':'delta-neutral';
     const sign=delta>0?'+':delta<0?'-':'±';
     actualValue.appendChild(textEl('span',deltaCls,`(${sign}${fmtS(Math.abs(delta))})`));
@@ -844,7 +850,7 @@ function pomodoroSummaryFromTasks(tasks:readonly (ReviewRecordViewTask|TaskWithP
   const summary={breaks:0,recoverySeconds:0,overrunSeconds:0,actualSeconds:0,excludedUnknown:0};
   (Array.isArray(tasks)?tasks:[]).forEach(task=>{
     if(!isWorkBlock(task))return;
-    (Array.isArray(task&&task.pauseEvents)?task.pauseEvents:[]).forEach(ev=>{
+    (task.pauseEvents||[]).forEach((ev:PauseEvent)=>{
       if(!ev||ev.type!=='pomodoro')return;
       const seconds=Math.max(0,Math.round(Number(ev.seconds)||0));
       if(!seconds)return;
@@ -940,21 +946,21 @@ function clearFutureUntouchedProgress(){
   return changed;
 }
 function buildReviewCardModel(task:ReviewTaskRow,evidence:ReviewEvidence|null=null):ReviewCardModel{
-  const idx=task.i,row=evidence?.taskEvidence[TaskIdentity.idAt(idx)];
-  const resolved=row?.resolved||resolveTaskCompletion(idx,{actualSnapshot:evidence?.actualTime});
+  const idx=task.i,taskId=TaskIdentity.idAt(idx),row=taskId?evidence?.taskEvidence[taskId]:undefined;
+  const resolved=row?.resolved||resolveTaskCompletion(idx,evidence?{actualSnapshot:evidence.actualTime}:{});
   const pct=row?.pct??resolved.pct;
   const progress=TaskSessionState.getField(idx,'notes')||{};
   const measure=taskMeasureValue(task,'units');
   const target=taskTargetValue(task);
   const hasPct=resolved.source!==COMPLETION_SOURCES.NONE;
   const shifted=hasAdjustedTiming(idx);
-  const actualSeconds=evidence?evidence.actualTime[idx]:TaskSessionState.getField(idx,'actualTime');
-  const tracked=actualSeconds!==undefined;
+  const actualSeconds=evidence?(evidence.actualTime[idx]??null):(TaskSessionState.getField(idx,'actualTime')??null);
+  const tracked=actualSeconds!==null;
   const clock=row?.clock||TaskSessionState.getField(idx,'actualClock')||{};
   const noteInfo=applicableNotesForTask(task);
   return {
     task,idx,resolved,pct,progress,measure,target,hasPct,shifted,tracked,actualSeconds,clock,
-    statusInfo:taskOutcomeInfo(row?.outcome||liveTaskOutcome(idx,{actualSnapshot:evidence?.actualTime,resolved,exactPct:pct})),
+    statusInfo:taskOutcomeInfo(row?.outcome||liveTaskOutcome(idx,evidence?{actualSnapshot:evidence.actualTime,resolved,exactPct:pct}:{resolved,exactPct:pct})),
     sourceText:completionSourceDescription(resolved.source,pct),
     noteAreaKey:String(noteInfo.exactKey||''),
     noteAreaLabel:String(noteInfo.exactLabel||taskAreaValue(task)||''),
@@ -997,12 +1003,12 @@ function renderReviewCard(model:ReviewCardModel){
   const measureRow=document.createElement('div');measureRow.className='rmeasure-row';
   const doneField=document.createElement('div');doneField.className='rfield';
   const doneLabel=document.createElement('label');doneLabel.className='ui-label';doneLabel.textContent='Done';
-  const doneInput=document.createElement('input');doneInput.type='number';doneInput.className='ui-field ui-mono';doneInput.id=`rd-done-${model.idx}`;doneInput.min=0;doneInput.placeholder='0';doneInput.value=model.progress.done!==undefined?model.progress.done:'';
+  const doneInput=document.createElement('input');doneInput.type='number';doneInput.className='ui-field ui-mono';doneInput.id=`rd-done-${model.idx}`;doneInput.min=0;doneInput.placeholder='0';doneInput.value=model.progress.done!==undefined?String(model.progress.done):'';
   doneField.append(doneLabel,doneInput);
   const divider=document.createElement('div');divider.className='rdiv';divider.textContent='/';
   const totalField=document.createElement('div');totalField.className='rfield';
   const totalLabel=document.createElement('label');totalLabel.className='ui-label';totalLabel.textContent='Total';
-  const totalInput=document.createElement('input');totalInput.type='number';totalInput.className='ui-field ui-mono';totalInput.id=`rd-total-${model.idx}`;totalInput.min=0;totalInput.placeholder='—';totalInput.value=model.progress.total!==undefined?model.progress.total:(model.target||'');
+  const totalInput=document.createElement('input');totalInput.type='number';totalInput.className='ui-field ui-mono';totalInput.id=`rd-total-${model.idx}`;totalInput.min=0;totalInput.placeholder='—';totalInput.value=model.progress.total!==undefined?String(model.progress.total):(model.target!==null?String(model.target):'');
   totalField.append(totalLabel,totalInput);
   const unitTag=document.createElement('div');unitTag.className='rutag ui-label ui-chip';unitTag.textContent=model.measure||'—';
   measureRow.append(doneField,divider,totalField,unitTag);
@@ -1011,7 +1017,7 @@ function renderReviewCard(model:ReviewCardModel){
   else if(model.progress.done!==undefined)setProgressSummary(summary,model.progress.done,0,model.measure||'units',' done · enter target for %',true);
   const pctField=document.createElement('div');pctField.className='rfield';
   const pctLabel=document.createElement('label');pctLabel.className='ui-label';pctLabel.textContent='Completion %';
-  const pctInput=document.createElement('input');pctInput.type='number';pctInput.className='ui-field ui-mono';pctInput.id=`rd-pct-${model.idx}`;pctInput.min=0;pctInput.max=100;pctInput.value=model.hasPct?Math.round(model.pct):'';
+  const pctInput=document.createElement('input');pctInput.type='number';pctInput.className='ui-field ui-mono';pctInput.id=`rd-pct-${model.idx}`;pctInput.min=0;pctInput.max=100;pctInput.value=model.hasPct?String(Math.round(model.pct)):'';
   pctField.append(pctLabel,pctInput);
   const noteEdit=document.createElement('textarea');
   noteEdit.className='review-edit-note ui-field task-note-field';
@@ -1025,7 +1031,7 @@ function renderReviewCard(model:ReviewCardModel){
     createTaskTimingRow({
       original:model.originalTiming,adjusted:model.adjustedTiming,shifted:model.shifted,
       actualSec:model.tracked?model.actualSeconds:null,
-      deltaSec:model.tracked?model.actualSeconds-(model.task.dur*60):null,
+      deltaSec:model.tracked&&model.actualSeconds!==null?model.actualSeconds-(model.task.dur*60):null,
       wallStart:model.clock.startedAt,wallEnd:model.clock.endedAt
     }),
     progressLine,noteShare,noteBox,actions,editPanel,inheritedNotes
@@ -1139,7 +1145,7 @@ function createPracticeRunDetail(run:ReviewPracticeRunSummary,{allowDelete=false
   const head=textEl('div','practice-unit-row head');
   ['Unit','Budget','Actual','Pace / difference'].forEach(label=>head.appendChild(textEl('span','',label)));
   list.appendChild(head);
-  const segmentRows=new Map(run.segmentRows.map(segment=>[segment.index,segment]));let currentSegment=null;
+  const segmentRows=new Map(run.segmentRows.map(segment=>[segment.index,segment]));let currentSegment:number|null=null;
   run.unitRows.forEach(unit=>{
     if(unit.segmentIndex!==null&&unit.segmentIndex!==currentSegment){
       currentSegment=unit.segmentIndex;const segment=segmentRows.get(currentSegment);if(segment)list.appendChild(createPracticeSegmentRow(segment));
@@ -1171,7 +1177,7 @@ function createPracticeRunEntry(run:ReviewPracticeRunSummary,tasks:readonly Task
     name:`Run ${run.index+1}${taskName?` · ${taskName}`:''}`,
     units:practiceRunUnitsLabel(run),time:practiceRunTimeLabel(run),bands:practicePaceBandCountsLabel(run),variance:run.varianceMs,partial:run.partial
   });
-  let detail=null;
+  let detail:HTMLElement|null=null;
   const ensureDetail=()=>{
     if(detail)return detail;
     detail=createPracticeRunDetail(run,options);entry.appendChild(detail);return detail;
@@ -1181,14 +1187,14 @@ function createPracticeRunEntry(run:ReviewPracticeRunSummary,tasks:readonly Task
   entry.addEventListener('toggle',()=>{
     if(!entry.open)return;
     ensureDetail();
-    entry.parentElement&&entry.parentElement.querySelectorAll('.practice-run-entry[open]').forEach(other=>{if(other!==entry)other.open=false;});
+    entry.parentElement?.querySelectorAll<HTMLDetailsElement>('.practice-run-entry[open]').forEach(other=>{if(other!==entry)other.open=false;});
   });
   return entry;
 }
 function populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],{tasks=TASKS,includeActiveNote=false,normalized=false,allowDelete=false}:Readonly<{tasks?:readonly Task[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>={}):ReviewPracticeAggregate|null{
   if(!root)return null;
   const cleanRuns=normalized?runs:sanitizePracticeRuns(runs);
-  const summary=summarizeCleanPracticeRuns(cleanRuns),table=root.querySelector('.practice-run-table')||root;
+  const summary=summarizeCleanPracticeRuns(cleanRuns),table=root.querySelector<HTMLElement>('.practice-run-table')||root;
   table.replaceChildren();
   const head=textEl('div','practice-run-head ui-label');
   ['Run / linked block','Units','Actual / target','Pace bands','Difference'].forEach(label=>head.appendChild(textEl('span','',label)));
@@ -1203,7 +1209,7 @@ function populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRu
     });
     table.appendChild(total);
   }
-  const note=root.querySelector('.practice-review-note');
+  const note=root.querySelector<HTMLElement>('.practice-review-note');
   if(note){
     const parts=['Select a run to inspect its units.','Fast <80% · Controlled 80–100% · Over target >100%.'];
     if(includeActiveNote&&PracticePacer.status().active)parts.push('Practice Pacer run currently active in Execute.');
@@ -1224,7 +1230,7 @@ function renderPracticeReview(){
   }
 }
 async function deletePracticeRun(event:Event){
-  const button=event&&event.target&&event.target.closest('[data-run-index]');
+  const button=eventElement(event)?.closest<HTMLElement>('[data-run-index]')||null;
   const index=Number(button&&button.dataset['runIndex']);
   if(!Number.isInteger(index))return false;
   const accepted=await confirm({
@@ -1250,13 +1256,13 @@ function reviewViewLocalState(){
 function reviewViewEvidenceKey(evidence:ReviewEvidence){
   const rows=TASKS.map((task,idx)=>{
     if(!isTrackableBlock(task))return null;
-    const taskId=TaskIdentity.idAt(idx),row=evidence.taskEvidence[taskId]||{};
+    const taskId=TaskIdentity.idAt(idx),row=taskId?evidence.taskEvidence[taskId]||{}:{};
     const progress=TaskSessionState.getField(idx,'notes')||{};
     const clock=row.clock||TaskSessionState.getField(idx,'actualClock')||{};
     const record=TaskSessionState.getField(idx,'actualRecords')||{};
     const noteInfo=applicableNotesForTask(task);
     const pauseEvents=Array.isArray(record.pauseEvents)?record.pauseEvents.map(event=>[
-      String(event&&event.type||event&&event.reason||'').trim().toLowerCase(),
+      String(event?.type||'').trim().toLowerCase(),
       Math.max(0,Math.round(Number(event&&event.seconds)||0)),
       Number.isFinite(Number(event&&event.plannedSeconds))?Math.max(0,Math.round(Number(event.plannedSeconds))):null
     ]):[];
@@ -1289,7 +1295,7 @@ function buildReview(options:ReviewRenderOptions={}):ReviewMetrics{
   const {cleared,evidence}=prepared;
   const metrics=calculateReviewMetrics(evidence),st=evidence.reviewTasks.filter(row=>row.work);
   recalcStats(metrics);
-  const c=document.getElementById('review-list');c.replaceChildren();
+  const c=document.getElementById('review-list');if(!c)throw new Error('Review list surface is unavailable.');c.replaceChildren();
   st.forEach(t=>c.appendChild(createReviewCard(t,evidence)));
   renderReviewUnfinishedNote();renderPracticeReview();setReviewDetailDisclosures(reviewDetailsShouldOpen());syncReviewDateMode();
   if(cleared)saveLiveDraft();
@@ -1299,13 +1305,13 @@ const ReviewView=(()=>{
   let renderedKey='',hasRendered=false,restoreFrame=0;
   let scrollState={documentTop:0,mainTop:0};
   function captureScroll(){
-    const root=document.scrollingElement||document.documentElement,main=document.querySelector('.main');
+    const root=document.scrollingElement||document.documentElement,main=document.querySelector<HTMLElement>('.main');
     scrollState={documentTop:Math.max(0,Number(root&&root.scrollTop)||Number(window.scrollY)||0),mainTop:Math.max(0,Number(main&&main.scrollTop)||0)};
     return {...scrollState};
   }
   function restoreScroll(state:Readonly<{documentTop:number;mainTop:number}>=scrollState,{immediate=false}:Readonly<{immediate?:boolean}>={}){
     const apply=()=>{
-      const root=document.scrollingElement||document.documentElement,main=document.querySelector('.main');
+      const root=document.scrollingElement||document.documentElement,main=document.querySelector<HTMLElement>('.main');
       if(root)root.scrollTop=Math.max(0,Number(state&&state.documentTop)||0);
       if(main)main.scrollTop=Math.max(0,Number(state&&state.mainTop)||0);
     };
@@ -1315,13 +1321,14 @@ const ReviewView=(()=>{
   }
   function focusState(){
     const pane=document.getElementById('pane-review'),active=document.activeElement;
-    if(!pane||!active||!pane.contains(active))return null;
-    let locator=null;
+    if(!pane||!(active instanceof HTMLElement)||!pane.contains(active))return null;
+    let locator:ReviewFocusLocator|null=null;
     if(active.id)locator={kind:'id',value:active.id};
-    else if(active.dataset&&active.dataset['taskId'])locator={kind:'task',value:String(active.dataset['taskId'])};
-    else if(active.dataset&&active.dataset['runIndex']!==undefined)locator={kind:'practice-run',value:String(active.dataset['runIndex'])};
+    else if(active.dataset['taskId'])locator={kind:'task',value:String(active.dataset['taskId'])};
+    else if(active.dataset['runIndex']!==undefined)locator={kind:'practice-run',value:String(active.dataset['runIndex'])};
     if(!locator)return null;
-    return {locator,start:Number.isInteger(active.selectionStart)?active.selectionStart:null,end:Number.isInteger(active.selectionEnd)?active.selectionEnd:null};
+    const selectable=active instanceof HTMLInputElement||active instanceof HTMLTextAreaElement?active:null;
+    return {locator,start:selectable&&Number.isInteger(selectable.selectionStart)?selectable.selectionStart:null,end:selectable&&Number.isInteger(selectable.selectionEnd)?selectable.selectionEnd:null};
   }
   function resolveFocusTarget(pane:HTMLElement|null,locator:ReviewFocusLocator|null):HTMLElement|null{
     if(!pane||!locator)return null;
@@ -1332,40 +1339,41 @@ const ReviewView=(()=>{
     const selector=locator.kind==='task'?'[data-task-id][data-note-source="review"]':locator.kind==='practice-run'?'[data-run-index]':'';
     if(!selector)return null;
     const datasetKey=locator.kind==='task'?'taskId':'runIndex';
-    return [...pane.querySelectorAll(selector)].find(element=>String(element.dataset[datasetKey]??'')===locator.value)||null;
+    return [...pane.querySelectorAll<HTMLElement>(selector)].find(element=>String(element.dataset[datasetKey]??'')===locator.value)||null;
   }
   function captureUi(){
     const pane=document.getElementById('pane-review');
     if(!pane)return null;
     return {
       scroll:captureScroll(),
-      blocksOpen:!!pane.querySelector('.review-blocks-collapse')?.open,
-      unfinishedOpen:!!pane.querySelector('.review-unfinished')?.open,
-      executionOpen:!!pane.querySelector('.review-execution-details')?.open,
-      editing:[...pane.querySelectorAll('#review-list .rcard.editing')].map(card=>card.id),
-      practiceOpen:[...pane.querySelectorAll('.practice-run-entry')].findIndex(entry=>entry.open),
+      blocksOpen:!!pane.querySelector<HTMLDetailsElement>('.review-blocks-collapse')?.open,
+      unfinishedOpen:!!pane.querySelector<HTMLDetailsElement>('.review-unfinished')?.open,
+      executionOpen:!!pane.querySelector<HTMLDetailsElement>('.review-execution-details')?.open,
+      editing:[...pane.querySelectorAll<HTMLElement>('#review-list .rcard.editing')].map(card=>card.id),
+      practiceOpen:[...pane.querySelectorAll<HTMLDetailsElement>('.practice-run-entry')].findIndex(entry=>entry.open),
       focus:focusState()
     };
   }
   function restoreUi(state:ReviewUiState|null,{focus=true,immediateScroll=false}:Readonly<{focus?:boolean;immediateScroll?:boolean}>={}){
     if(!state)return;
     const pane=document.getElementById('pane-review');
-    const blocks=pane&&pane.querySelector('.review-blocks-collapse');if(blocks)blocks.open=!!state.blocksOpen;
-    const unfinished=pane&&pane.querySelector('.review-unfinished');if(unfinished)unfinished.open=!!state.unfinishedOpen;
-    const execution=pane&&pane.querySelector('.review-execution-details');if(execution)execution.open=!!state.executionOpen;
+    const blocks=pane?.querySelector<HTMLDetailsElement>('.review-blocks-collapse');if(blocks)blocks.open=!!state.blocksOpen;
+    const unfinished=pane?.querySelector<HTMLDetailsElement>('.review-unfinished');if(unfinished)unfinished.open=!!state.unfinishedOpen;
+    const execution=pane?.querySelector<HTMLDetailsElement>('.review-execution-details');if(execution)execution.open=!!state.executionOpen;
     (state.editing||[]).forEach(id=>{
       const card=document.getElementById(id);if(!card)return;
-      card.classList.add('editing');const button=card.querySelector('.review-block-actions button');if(button)button.textContent='Done';
+      card.classList.add('editing');const button=card.querySelector<HTMLButtonElement>('.review-block-actions button');if(button)button.textContent='Done';
     });
     if(Number.isInteger(state.practiceOpen)&&state.practiceOpen>=0){
-      const entry=pane&&pane.querySelectorAll('.practice-run-entry')[state.practiceOpen];if(entry)entry.open=true;
+      const entry=pane?.querySelectorAll<HTMLDetailsElement>('.practice-run-entry')[state.practiceOpen];if(entry)entry.open=true;
     }
     restoreScroll(state.scroll,{immediate:immediateScroll});
     if(focus&&state.focus){
+      const focusState=state.focus;
       requestAnimationFrame(()=>{
-        const target=resolveFocusTarget(pane,state.focus.locator);if(!target)return;
+        const target=resolveFocusTarget(pane,focusState.locator);if(!target)return;
         target.focus({preventScroll:true});
-        if(state.focus.start!==null&&typeof target.setSelectionRange==='function')target.setSelectionRange(state.focus.start,state.focus.end??state.focus.start);
+        if(focusState.start!==null&&(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement))target.setSelectionRange(focusState.start,focusState.end??focusState.start);
       });
     }
   }
@@ -1412,8 +1420,8 @@ function onReviewMeasure(idx:number,measure:string,defTotal?:number|null){
   refreshRsum(idx,measure,state.done,state.total);
   if(idx===Runtime.currentIndex()){
     const pd=inputById('pn-done');const pt=inputById('pn-total');
-    if(pd)pd.value=state.hasDone?state.done:'';
-    if(pt)pt.value=state.hasTotal?state.total:'';
+    if(pd)pd.value=state.hasDone?String(state.done??''):'';
+    if(pt)pt.value=state.hasTotal?String(state.total??''):'';
     const pbar=document.getElementById('pbar');
     if(pbar)pbar.style.width=(state.pct!==null?state.pct:0)+'%';
     const sum=document.getElementById('pn-sum');
@@ -1440,12 +1448,12 @@ function setReviewDetailDisclosures(open:boolean){
 }
 function recalcStats(metrics:ReviewMetrics|null=null){
   const m=metrics||calculateCurrentReviewMetrics();
-  document.getElementById('review-avg').textContent=displayPercent(m.completionPercent);
+  setMetricText('review-avg',displayPercent(m.completionPercent));
   const outcomes=sanitizeTaskOutcomeCounts(m.outcomeCounts);
-  document.getElementById('review-full').textContent=outcomes[TASK_OUTCOMES.FULL];
-  document.getElementById('review-part').textContent=outcomes[TASK_OUTCOMES.PARTIAL];
+  setMetricText('review-full',outcomes[TASK_OUTCOMES.FULL]);
+  setMetricText('review-part',outcomes[TASK_OUTCOMES.PARTIAL]);
   const attention=document.getElementById('review-other-outcomes');
-  if(attention)attention.textContent=taskOutcomeTotal(outcomes)-outcomes[TASK_OUTCOMES.FULL]-outcomes[TASK_OUTCOMES.PARTIAL];
+  if(attention)attention.textContent=String(taskOutcomeTotal(outcomes)-outcomes[TASK_OUTCOMES.FULL]-outcomes[TASK_OUTCOMES.PARTIAL]);
   updateReviewMetrics(m);
 }
 function copyTextToClipboard(txt:string):Promise<void>{
@@ -1471,7 +1479,7 @@ function clipboardPlainText(value:unknown,{rich=false}:Readonly<{rich?:boolean}>
   return text.replace(/\r\n?/gu,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu,'');
 }
 const REVIEW_REPORT_OUTPUT_ORDER=freeze(['summary','subjects','ongoing','other','diary']);
-const REVIEW_REPORT_CATALOG=freeze([
+const REVIEW_REPORT_CATALOG:readonly Readonly<{id:string;label:string;children?:(context:ReviewReportSelectorContext)=>ReviewReportChild[];compose:(context:ReviewReportContext,selected:readonly ReviewReportChild[])=>string}[] = freeze([
   freeze({id:'summary',label:'Summary / statistics',compose:composeReviewSummary}),
   freeze({id:'diary',label:'Diary reflection',compose:composeReviewDiary}),
   freeze({id:'subjects',label:'Subject details',children:reviewReportSubjectChildren,compose:composeReviewSubjects}),
@@ -1482,7 +1490,7 @@ const copyReportExcluded=new Set(),copyReportExpanded=new Set();
 let copyReportMenuBound=false;
 function reviewReportArea(task:Task|ReviewTaskRow|ReviewRecordViewTask){return taskAreaValue(task)||'General';}
 function reviewReportSubjectChildren(context:ReviewReportSelectorContext):ReviewReportChild[]{
-  const seen=new Set(),children=[];
+  const seen=new Set<string>(),children:ReviewReportChild[]=[];
   (context.reportTasks||[]).forEach(task=>{
     const label=reviewReportArea(task),id=`subjects:${label}`;
     if(seen.has(id))return;seen.add(id);children.push(freeze({id,label,value:label}));
@@ -1509,17 +1517,17 @@ function copyReportIsCustom(sections:readonly ReviewReportSection[]=reviewReport
     return section.children.some(child=>copyReportExcluded.has(child.id));
   });
 }
-function syncCopyReportCustom(sections:readonly ReviewReportSection[]){
+function syncCopyReportCustom(sections:readonly ReviewReportSection[]=reviewReportSections(reviewReportSelectorContext())){
   const badge=document.getElementById('copy-report-custom');if(badge)badge.hidden=!copyReportIsCustom(sections);
 }
 function syncCopyReportChecks(sections:readonly ReviewReportSection[]){
   const root=document.getElementById('copy-report-sections');if(!root)return;
   const sectionMap=new Map(sections.map(section=>[section.id,section]));
-  root.querySelectorAll('input[data-report-section]').forEach(input=>{
-    const section=sectionMap.get(input.dataset['reportSection']);if(!section)return;
+  root.querySelectorAll<HTMLInputElement>('input[data-report-section]').forEach(input=>{
+    const section=sectionMap.get(input.dataset['reportSection']||'');if(!section)return;
     const state=copyReportSectionState(section);input.checked=state.checked;input.indeterminate=state.indeterminate;
   });
-  root.querySelectorAll('input[data-report-component]').forEach(input=>{input.checked=!copyReportExcluded.has(input.dataset['reportComponent']);});
+  root.querySelectorAll<HTMLInputElement>('input[data-report-component]').forEach(input=>{input.checked=!copyReportExcluded.has(input.dataset['reportComponent']||'');});
   syncCopyReportCustom(sections);
 }
 function renderCopyReportMenu(){
@@ -1565,11 +1573,11 @@ function ensureCopyReportMenuEvents(){
     syncCopyReportChecks(sections);
   });
   on(menu,'click',event=>{
-    const button=event.target.closest('[data-copy-report-disclosure]');if(!button)return;
+    const button=eventElement(event)?.closest<HTMLButtonElement>('[data-copy-report-disclosure]');if(!button)return;
     const id=button.dataset['copyReportDisclosure'],expanded=!copyReportExpanded.has(id),section=button.closest('.copy-report-section');expanded?copyReportExpanded.add(id):copyReportExpanded.delete(id);button.setAttribute('aria-expanded',String(expanded));const label=section?.querySelector('.copy-report-row-label')?.textContent||'section';button.setAttribute('aria-label',`${expanded?'Hide':'Show'} ${label.toLowerCase()}`);const children=section?.querySelector('.copy-report-children');if(children)children.hidden=!expanded;
   });
-  on(document,'click',event=>{const control=event.target.closest('.copy-report-control');if(!control)closeCopyReportMenu();});
-  on(document,'keydown',event=>{if(event.key==='Escape')closeCopyReportMenu();});
+  on(document,'click',event=>{const control=eventElement(event)?.closest('.copy-report-control');if(!control)closeCopyReportMenu();});
+  on(document,'keydown',event=>{if(event instanceof KeyboardEvent&&event.key==='Escape')closeCopyReportMenu();});
 }
 function toggleCopyReportMenu(){
   ensureCopyReportMenuEvents();const menu=document.getElementById('copy-report-menu'),button=document.querySelector('[data-action="toggle-copy-report-menu"]');if(!menu)return false;
@@ -1626,7 +1634,7 @@ function composeReviewReport(context:ReviewReportContext){
   let txt=`STUDY REVIEW — ${context.dowFull} ${context.monFull} ${context.reviewDay.getDate()}\n\n`;
   REVIEW_REPORT_OUTPUT_ORDER.forEach(id=>{
     const section=byId.get(id);if(!section)return;
-    let selected=[];
+    let selected:ReviewReportChild[]=[];
     if(section.children.length){selected=section.children.filter(child=>!copyReportExcluded.has(child.id));if(!selected.length)return;}
     else if(copyReportExcluded.has(section.id))return;
     const content=section.compose(context,selected);if(content)txt+=content+'\n';
@@ -1641,8 +1649,8 @@ function copyReview(){
   const reviewDay=new Date(`${rec.date}T00:00:00`),currentReview=currentReviewState(),quality=currentReview.studyQuality;
   const context=freeze({
     m,rec,reviewDay,quality,refl:clipboardPlainText(currentReview.reflection,{rich:true}),
-    dowFull:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][reviewDay.getDay()],
-    monFull:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][reviewDay.getMonth()],
+    dowFull:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][reviewDay.getDay()]??'',
+    monFull:['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][reviewDay.getMonth()]??'',
     reportTasks:rec.tasks,subjectEntries:currentNoteEntriesForWorkTasks(TASKS),unfinished:String(rec.carryForwardDraft||Runtime.carryForward()||'').trim()
   });
   const txt=composeReviewReport(context);

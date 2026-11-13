@@ -50,7 +50,7 @@ export interface ReviewNoteInfo{
   readonly inherited:readonly Readonly<{key:string;label:string;value:string;text:string}>[];
 }
 export interface ReviewTaskRow{
-  readonly idx:number;readonly i:number;readonly id:string;readonly name:string;readonly kind:string;readonly area:string;readonly measure:string;readonly target:number|null;
+  readonly idx:number;readonly i:number;readonly id:string;readonly name:string;readonly kind:Task['kind'];readonly area:string;readonly measure:string;readonly target:number|null;
   readonly duration:number;readonly dur:number;readonly originalStart:string;readonly originalStartMin:number;readonly originalEndMin:number;
   readonly adjustedStart:string;readonly adjustedStartMin:number;readonly adjustedEndMin:number;readonly shifted:boolean;readonly trackable:boolean;readonly work:boolean;
   readonly completion:number;readonly completionSource:CompletionSource;readonly outcome:TaskOutcome;readonly resolvedState:''|'done'|'skipped';
@@ -63,8 +63,8 @@ export interface ReviewTaskEvidence {
 export interface ReviewEvidence{
   readonly format:'study-director.review-evidence';readonly version:number;readonly date:string;readonly schedule?:string;readonly adjustmentsRevision?:number;
   readonly contentRevision:number;readonly savedRevision:number;readonly currentTaskIndex?:number;readonly currentTaskId?:string|null;readonly timerMode?:TimerMode;
-  readonly paused?:boolean;readonly pendingGap?:boolean;readonly actualTime:Readonly<Record<string,number>>;
-  readonly taskEvidence:Readonly<Record<string,ReviewTaskEvidence>>;readonly reviewTasks:readonly ReviewTaskRow[];
+  readonly paused?:boolean;readonly pendingGap?:boolean;readonly actualTime:Record<string,number>;
+  readonly taskEvidence:Record<string,ReviewTaskEvidence>;readonly reviewTasks:readonly ReviewTaskRow[];
   readonly practice?:unknown;readonly practiceRuns:readonly PracticeRun[];readonly practiceActive?:boolean;readonly quote:string;
   readonly realTimeSnapshot:RealTimeSnapshot|null;readonly carryForward?:string;
 }
@@ -160,11 +160,11 @@ export interface ReviewSubsystemInput{
       originalEndMin(index:number):number;originalStartMin(index:number):number;scheduleFingerprint():string;
     }>;
     evidence:Readonly<Pick<CompletionEvidenceController,'clearManualCompletionOverride'|'liveTaskOutcome'|'progressInputState'|'resolveTaskCompletion'|'storeResolvedCompletion'|'setCompletionState'|'syncProgressInputsToState'> & {
-      actualRecordsSnapshot():Readonly<Record<string,ReviewActualRecord>>;applicableNotesForTask(task:Task):ReviewNoteInfo;recordCurrentActiveToTask(index:number,reason:string):unknown;updateTimerFocusMetrics():unknown;
+      actualRecordsSnapshot():Readonly<Record<string,ReviewActualRecord>>;applicableNotesForTask(task:Task|ReviewTaskRow):ReviewNoteInfo;recordCurrentActiveToTask(index:number,reason:string):unknown;updateTimerFocusMetrics(metrics?:ReviewMetrics):unknown;
     }>;
     session:Readonly<{
       acknowledgeSavedStudyDay(date:string,revision:number):PromiseLike<unknown>;clearCanonicalSessionAfterSavedDay():PromiseLike<unknown>;cancelPendingLiveDraftSave():unknown;clearSaveReminder(date:string,revision:number):unknown;
-      flushLiveDraft():unknown|PromiseLike<unknown>;getLifecycleRevision():number;getOwnershipRevision():number;getReviewDate():string;handleActiveSessionRepositoryResult(value:unknown):unknown;
+      flushLiveDraft(options?:Readonly<Record<string,unknown>>):unknown|PromiseLike<unknown>;getLifecycleRevision():number;getOwnershipRevision():number;getReviewDate():string;handleActiveSessionRepositoryResult(value:unknown):unknown;
       lifecycleCanWrite():boolean;markDayContentChanged():unknown;markDayContentSaved(date:string,revision:number):unknown;resetRuntimeSessionState(options:Readonly<Record<string,unknown>>):unknown;
       runLifecycle<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>;runLifecycleSync<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T):T;
       saveLiveDraft(options?:Readonly<Record<string,unknown>>):unknown;setReviewDateTitle(date:string):unknown;setSessionPanelMode(mode:string,value?:unknown):unknown;stopTimerExecution():unknown;
@@ -172,7 +172,7 @@ export interface ReviewSubsystemInput{
     }>;
     notesDefaults:Readonly<{
       noteStoredValueForKey(key:string):string;bindTaskNoteEditor(field:HTMLTextAreaElement,index:number,source:string):unknown;closeRichTextField(field:HTMLTextAreaElement|null):unknown;
-      commitTaskNoteEditor(field:HTMLTextAreaElement,event?:Event|null):unknown;currentNoteEntriesForWorkTasks(tasks:readonly Task[]):readonly Readonly<{key:string;label:string;text:string}>[];
+      commitTaskNoteEditor(field:HTMLTextAreaElement,value:string,event?:Event|null):unknown;currentNoteEntriesForWorkTasks(tasks:readonly Task[]):readonly Readonly<{key:string;label:string;text:string}>[];
       refreshPlanAfterSessionReset(message:string,title:string):unknown;renderInheritedNotes(container:HTMLElement|null,key:string,compact?:boolean):unknown;setPlanStatus(message:string):unknown;
       syncUnfinishedNoteDraft():unknown;unfinishedNoteDraftText():string;
     }>;
