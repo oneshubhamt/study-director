@@ -653,7 +653,7 @@ async function handleStudyDayRollover(){
     },async()=>{
       await clearCanonicalSessionAfterSavedDay();
       resetRuntimeSessionState({lifecycleManaged:true,source:'study-day-rollover',date:todayISO()});
-      clearReviewForNewDay({lifecycleManaged:true});
+      await clearReviewForNewDay({lifecycleManaged:true});
       setSessionPanelMode('none');
       refreshPlanAfterSessionReset('Previous study day is closed. Apply today’s schedule when ready.','New Study Day');
       setPlanStatus('New study day ready. Apply today’s schedule when ready.');
