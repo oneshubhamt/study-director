@@ -42,15 +42,15 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     }
     if(current?.recordKind==='study'){
       const next={...current,reflection:candidate,updatedAt:environment.nowIso()};
-      const receipt=await records.save(next,{backupCapture});durableReceipt(receipt,'Daily Reflection');
+      const receipt=await records.save(next,{backupCapture,expectedCanonical:current});durableReceipt(receipt,'Daily Reflection');
       await records.verifyCanonical(next);
     }else if(hasContent){
       const diary=codec.createDiaryRecord(date,candidate,{savedAt:current?.savedAt||undefined,sourceRevision:current?.sourceRevision||0});
       if(!diary)throw new Error('Daily Reflection failed canonical validation.');
-      const receipt=await records.save(diary,{backupCapture});durableReceipt(receipt,'Daily Reflection');
+      const receipt=await records.save(diary,{backupCapture,expectedCanonical:null});durableReceipt(receipt,'Daily Reflection');
       await records.verifyCanonical(diary);
     }else if(current?.recordKind==='diary'){
-      await records.remove(date,{backupCapture});
+      await records.remove(date,{backupCapture,expectedCanonical:current});
       await records.verifyCanonicalAbsent(date);
     }
     const fresh=await canonicalRecord(date);
