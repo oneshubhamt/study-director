@@ -101,6 +101,10 @@ Tags are written as `#tag` in the text, the way Apple Notes, Bear and Obsidian w
 - **Storage:** none. Tags are read from the notes' text, each note read again only when it changes, and exports keep them as plain `#tags`. (Built on the main thread rather than in the search worker, because the list and the suggestions need them at once. Step 5 measured it at about 80 ms, once per session, for 2,000 notes, so it stays there.)
 - The `#` suggestions, the `[[` picker and the bar's `+` share one picker.
 
+### Image full view
+
+Every image in a note has a small expand button at its top-left corner (shown on hover, focus or selection, and always on touch screens); double-clicking an image in the editor, or clicking one in a read-only note, does the same. The image opens in the shared workspace overlay, fitted to the screen and never enlarged past its own size at first. The wheel, a pinch, a double click, the header's − and + and the keyboard (+, −, 0 to fit) zoom from fit up to eight times fit; dragging or the arrow keys move it once it is larger than the view, and it never leaves the view. The header shows "Fit" or the size as a percentage, which fits it again when clicked. Escape or × closes it, and the back button closes it as it does the PDF and audio views (history kind `image`).
+
 ### Dropping files into a note
 
 An image, PDF or audio file dropped into the editor is added where it lands, exactly as from the Attach menu, one file at a time. Wordgard's own drop reads only text and formatting, so the editor takes file drops first. Anything else dropped is refused with a message, and a file dropped anywhere in the app that does not take it is ignored rather than opened by the browser in a new tab.

@@ -7,7 +7,7 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
 const {exactFrozenObject:exactObject}=registry.contracts;
 registry.define('workspace-overlay',1,()=>{
   const freeze=Object.freeze;
-  const HISTORY_KINDS=new Set(['focus','pdf','audio']);
+  const HISTORY_KINDS=new Set(['focus','pdf','audio','image']);
   const REPLAY_LIMIT=32;
   const CLOSE_FALLBACK_MS=220;
   function createController(controllerInput){

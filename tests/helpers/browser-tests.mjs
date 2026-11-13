@@ -39,6 +39,7 @@ export const BROWSER_TEST_MANIFEST=Object.freeze({
     test('pwa-update','tests/browser/pwa/pwa-update.mjs',['pwa','service-worker','trusted-types','multi-tab','offline','recovery','update'],0,{alone:'Chromium activates a new service worker only when the old one is idle and the CPU has time; diagnosed and fixed, kept alone as a safeguard.'}),
     test('image-clipboard-bridge','tests/browser/rich-text/image-bridge.mjs',['rich-editor','wordgard','native-file-selection','clipboard-image','selection','asset-storage']),
     test('image-controls','tests/browser/rich-text/image-controls.mjs',['rich-editor','image','controls','mobile']),
+    test('image-viewer','tests/browser/rich-text/image-viewer.mjs',['rich-editor','image','drop','workspace-overlay','zoom']),
     test('image-resize-toolbar-coherence','tests/browser/rich-text/image-resize-toolbar.mjs',['rich-editor','wordgard','image','resize','toolbar','contrast','mobile','desktop']),
     test('contextual-link','tests/browser/rich-text/link-context.mjs',['rich-editor','wordgard','link','popover','selection','keyboard','lifecycle']),
     test('mobile-rich-editor','tests/browser/rich-text/mobile-rich-editor.mjs',['rich-editor','wordgard','mobile','touch','viewport','focus-mode','popup','checklist','accessibility']),

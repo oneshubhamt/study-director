@@ -2019,7 +2019,7 @@ function cachedElements(owner,spec){
 /* SHARED INTERACTION AND SYSTEM-ALERT SERVICES */
 let NavigationController=null;
 const WorkspaceRouteCoordinator=(()=>{
-  const handlers=new Map(),overlayKinds=new Set(['focus','pdf','audio']);
+  const handlers=new Map(),overlayKinds=new Set(['focus','pdf','audio','image']);
   const same=(a,b)=>{if(!a&&!b)return true;return !!a&&!!b&&a.kind===b.kind&&a.token===b.token&&(a.key||'')===(b.key||'');};
   const cleanKind=value=>String(value||'').trim().toLowerCase();
   function register(kind,handler){

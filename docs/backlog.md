@@ -139,8 +139,6 @@ The full plan, its rules and live status are in [test-programme.md](test-program
 
 ## Owner's requests (noted 2026-11-03)
 
-**Notes: images.** Enlarge an image, pan and zoom it, and focus on it (a full-view mode).
-
 **Notes: interface review and redesign.** Tags, links and other note features may be buried: someone could use the app and never find them, or never get their full use. Review how each is discovered and used, and whether the rest of the app makes the most of them. Then propose a redesign. Not started; after the test programme.
 
 **Backup and sync review.** Questions to settle first, as a report, before any building. In this order:
