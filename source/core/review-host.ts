@@ -1,5 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {ReviewHostInput,ReviewHostModule as ReviewHostContract} from '../../types/review-host.ts';
+import type {ActiveSession,DailyRecord} from '../../types/record-models.ts';
 
 const sdReviewHostFactory=(()=>{
 'use strict';
@@ -133,7 +134,7 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
     let suspended:ActiveSession|null=null;
     if(!runtime.tasks().length||runtime.panelMode()==='suspended'){
       const loaded=await repositories.loadActiveSession(0,{strict:true}),candidate=loaded?.value||null;
-      if(runtime.isSuspended(candidate)){
+      if(candidate&&runtime.isSuspended(candidate)){
         if(!runtime.appCanMutate()){view.setStatus('save-status','Take control in this tab before saving the suspended session.',false);return false;}
         if(!runtime.tasks().length){
           const snapshot=runtime.activeSessionSnapshot(candidate);
