@@ -1311,7 +1311,7 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
   if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record deletion precondition failed canonical validation.');
   const ownershipToken=issueWriteToken('deleting the daily record');
   const finishWrite=beginAuthoritativeWrite();
-  let removed=false;
+  let removed=false,idbRemoved=false;
   try{
     const fallbackBefore=fallbackDailyRecordsRawGet(),fallbackHadRecord=fallbackBefore.some(record=>record.date===date);
     const deletedAt=new Date().toISOString(),recoveryKey=deletionRecoveryKey('dailyRecord',date);
