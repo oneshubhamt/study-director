@@ -85,7 +85,7 @@ export interface ReviewRecordView{
   readonly completedEquivalentMinutes:number;readonly actualFocusMinutes:number;readonly completionPercent:number;
 }
 export interface ReviewTaskHeaderInput{readonly name:string;readonly area:string;readonly pct:number|null;readonly statusInfo:Readonly<{label:string;status:string}>;readonly shifted?:boolean;readonly tracked?:boolean;readonly pctId?:string;readonly source?:string}
-export interface ReviewTimingRowInput{readonly original:string;readonly adjusted:string;readonly shifted?:boolean;readonly actualSec?:number|null;readonly deltaSec?:number|null;readonly wallStart?:string|undefined;readonly wallEnd?:string|undefined}
+export interface ReviewTimingRowInput{readonly original:string;readonly adjusted:string;readonly shifted?:boolean;readonly actualSec?:number|null;readonly deltaSec?:number|null;readonly wallStart?:string|null|undefined;readonly wallEnd?:string|null|undefined}
 export interface ReviewProgressLineInput{readonly done:number|null|undefined;readonly total:number|null|undefined;readonly measure:string;readonly suffixNoTotal?:string}
 export interface ReviewCardModel{
   readonly idx:number;readonly task:ReviewTaskRow;readonly pct:number;readonly hasPct:boolean;readonly sourceText:string;readonly statusInfo:Readonly<{label:string;status:string}>;
@@ -184,7 +184,7 @@ export interface ReviewSubsystemInput{
 export interface ReviewModel{calculate(evidence:ReviewEvidence):ReviewMetrics;projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState):ReviewProjectedStudyRecord;readonly evidenceFormat:'study-director.review-evidence'}
 export interface ReviewEditor{
   captureInputs():void;captureToday():void;getQuality():ReviewQuality;setQuality(value:unknown,options?:Readonly<{save?:boolean}>):void;
-  saveReview(options?:ReviewSaveOptions):boolean;queueReview(options?:ReviewSaveOptions):boolean;flushPending(options?:ReviewSaveOptions):boolean;
+  saveReview(options?:ReviewSaveOptions):boolean;queueReview(options?:ReviewSaveOptions):boolean;flushPending(options?:ReviewSaveOptions):boolean|Promise<unknown>;
   settled():Promise<boolean>;hydrate(options?:ReviewHydrateOptions):ReviewState;selectDate():unknown;state():ReviewCurrentState;contentForDate(date?:string):string;activeSessionReview():ReviewSnapshot;
   bindSession():boolean;persistenceCommitted():boolean;persistenceFailed(error?:unknown):boolean;invalidateBindings():boolean;clearForNewDay(options?:Readonly<{lifecycleManaged?:boolean}>):unknown;
   clearFutureUntouched():boolean;setCompletionState(index:number,pct:number,source?:CompletionSource):void;editMeasure(index:number,measure:string,defaultTotal?:number|null):unknown;deletePracticeRun(event:Event):Promise<boolean>;
