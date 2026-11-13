@@ -165,7 +165,7 @@ export interface ReviewSubsystemInput{
     }>;
     session:Readonly<{
       acknowledgeSavedStudyDay(date:string,revision:number):PromiseLike<unknown>;clearCanonicalSessionAfterSavedDay():PromiseLike<unknown>;cancelPendingLiveDraftSave():unknown;clearSaveReminder(date:string,revision:number):unknown;
-      flushLiveDraft(options?:Readonly<Record<string,unknown>>):unknown|PromiseLike<unknown>;getLifecycleRevision():number;getOwnershipRevision():number;getReviewDate():string;handleActiveSessionRepositoryResult(value:unknown):unknown;
+      flushLiveDraft(options?:Readonly<Record<string,unknown>>):unknown|PromiseLike<unknown>;getLifecycleRevision():number;getOwnershipRevision():number;getReviewDate():string;
       lifecycleCanWrite():boolean;markDayContentChanged():unknown;markDayContentSaved(date:string,revision:number):unknown;resetRuntimeSessionState(options:Readonly<Record<string,unknown>>):unknown;
       runLifecycle<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>;
       saveLiveDraft(options?:Readonly<Record<string,unknown>>):unknown;setReviewDateTitle(date:string):unknown;setSessionPanelMode(mode:string,value?:unknown):unknown;stopTimerExecution():unknown;
