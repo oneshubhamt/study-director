@@ -38,7 +38,7 @@ const NON_FAST_COVERAGE_OWNERS=Object.freeze([
   Object.freeze({file:'portable/worker.ts',owner:'build/worker',reason:'Worker build source; runtime behavior is exercised through emitted worker tests.'}),
   Object.freeze({file:'source/core/library.js',owner:'browser',reason:'Library UI orchestration is exercised through browser workflows; destructive data logic lives in fast library-clear contracts.'}),
   Object.freeze({file:'source/core/note-links.js',owner:'browser',reason:'Note-link picker, linked-note bar and tag suggestions are DOM interaction orchestration exercised by browser note-management workflows; canonical note/link storage remains covered by fast repository tests.'}),
-  Object.freeze({file:'source/core/review.js',owner:'browser',reason:'Review UI orchestration is exercised through the core browser journey.'}),
+  Object.freeze({file:'source/core/review.ts',owner:'browser',reason:'Review UI orchestration is exercised through the core browser journey.'}),
   Object.freeze({file:'source/external/export-worker.js',owner:'integration-worker',reason:'Executed inside a worker_threads child by the export integration test; parent Inspector coverage does not attach to child workers.'}),
   Object.freeze({file:'source/external/image-worker.js',owner:'browser/worker',reason:'Image worker behavior is owned by browser image workflows and release build checks.'}),
   Object.freeze({file:'source/external/glass.js',owner:'browser',reason:'Visual UI layer.'}),
