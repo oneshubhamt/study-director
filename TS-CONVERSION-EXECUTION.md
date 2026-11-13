@@ -1,8 +1,16 @@
 # TypeScript conversion — execution record
 
-**Branch: `ts-exp`. P5.2, P5.4 and P5.5 CLOSED — VERIFIED — TARGETED. P5.6A is next; P5.6–P5.7 remain planned, not implemented.** Main intake remains `2638619`. Preserve main, `TS-Conversion` and vendored Wordgard. [Procedure](AGENTS.md) · [scope and next plans](docs/typescript/PHASE-5.md) · [decisions](docs/typescript/DECISIONS.md) · [verification commands](docs/VERIFICATION.md).
+**Branch: `ts-exp`. P5.2 and P5.4 remain CLOSED — VERIFIED — TARGETED. P5.5 is REOPENED — AUDIT CORRECTION IN PROGRESS; P5.6A is blocked until P5.5 is reverified. P5.6–P5.7 remain planned, not implemented.** Main intake remains `2638619`. Preserve main, `TS-Conversion` and vendored Wordgard. [Procedure](AGENTS.md) · [scope and next plans](docs/typescript/PHASE-5.md) · [decisions](docs/typescript/DECISIONS.md) · [verification commands](docs/VERIFICATION.md).
 
-## Latest closure — P5.5B Durable save, Diary and date transitions, 2026-11-13
+## Active worklog — P5.5 audit correction, 2026-11-13
+
+- **Baseline / scope:** reopened from prior closure `81fc47dd848d159f0556f97999d1824eeddaeab6` after a de novo source-level audit. No P5.6 implementation is permitted in this pass.
+- **Audit objectives:** (1) make the final Active Session checkpoint actually execute and verify before close/rollover persistence blocking; (2) make reflection-only optimistic-concurrency baselines date-stable across asynchronous saves and date transitions; (3) distinguish verified reflection persistence from post-save Library refresh so follow-up failure is never retried/reported as storage failure; (4) strengthen actual-provider assignability for Review subsystem/day-state/Saved-Day composition; (5) add regressions for the corrected failure paths and execute the previously omitted directly scoped tests; (6) reconcile the Phase-5 status register only after green verification.
+- **Preserve:** canonical schemas/data, richer Saved-Day evidence, active-session reflection versus canonical Saved Day distinction, historical Review no-rollover/no-restart behavior, initialization order, recovery behavior and current UI. No vendor, schema, release, workflow, `main` or `TS-Conversion` changes.
+- **Verification plan:** strict compiler/lint; focused Review/session/storage/architecture regressions including `previous-day-convergence` and `application-outcomes`; fresh source build, generated-build verification and generated syntax; relevant browser evidence when available under existing policy.
+- **Status:** **OPEN.** Temporary pad: `/tmp/study-director-P5.5-audit-correction.md` (ephemeral, not evidence).
+
+## Prior closure — P5.5B Durable save, Diary and date transitions, 2026-11-13
 
 - **Scope / publication:** baseline `408edb21d36d56c439fda2334f39abae2ab5ca02`; source/regression endpoint `8dcce15801d27b78bae1e99d272aed31b7a1991a`. P5.5A remained closed. The commit containing this entry closes P5.5B and parent P5.5; P5.6 is not started.
 - **Owned implementation:** new strict `review-persistence.ts` owns `DailyReflectionPersistence` and `DiaryEditor`; `review-host.ts` now owns Review date/revision/reminder state plus Saved-Day reminder convergence, acknowledgement, suspended Review Save Today, date selection and rollover host orchestration. Main-host remnants are deferred thin forwarders/composition only. Actual repository/codec/SaveLane providers are compile-checked.
