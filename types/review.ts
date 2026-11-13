@@ -18,7 +18,7 @@ export type ReviewReflectionBinding=Pick<ReviewState,'date'|'reflection'>;
 export type ReviewReflectionPending=
   |Readonly<{mode:'session';date:string;reflection:string;backupCapture:boolean}>
   |Readonly<{mode:'saved-day';date:string;reflection:string;backupCapture:boolean}>;
-export interface ReviewDailyReflectionResult{readonly canonical:string;readonly recordKind:string|null;readonly record?:DailyRecord|null}
+export interface ReviewDailyReflectionResult{readonly canonical:string;readonly revision:number;readonly recordKind:string|null;readonly record?:DailyRecord|null}
 export interface ReviewDailyReflectionPort{
   load(date:string):PromiseLike<ReviewDailyReflectionResult>;
   commit(date:string,reflection:string,options:Readonly<{expectedCanonical:string;backupCapture:boolean}>):PromiseLike<ReviewDailyReflectionResult>;

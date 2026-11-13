@@ -46,6 +46,7 @@ const RepositoryJournalModule=INTERNAL_MODULES.load('repository-journals',1,'stu
 const SaveLaneModule=INTERNAL_MODULES.load('save-lane',1,'study-director.save-lane-module',1);
 const NotesRepositoryModule=INTERNAL_MODULES.load('repositories-notes',1,'study-director.notes-repository-module',1);
 const RepositoryModule=INTERNAL_MODULES.load('repositories',1,'study-director.repositories',1);
+const ReviewPersistenceModule=INTERNAL_MODULES.load('review-persistence',1,'study-director.review-persistence-module',1);
 const ReviewHostModule=INTERNAL_MODULES.load('review-host',1,'study-director.review-host-module',1);
 const ReviewModule=INTERNAL_MODULES.load('review',1,'study-director.review',1);
 const ExportsModule=INTERNAL_MODULES.load('exports',1,'study-director.exports-module',1,Object.freeze({lifecycle:OperationLifecycle}));
@@ -3455,98 +3456,29 @@ function commitTaskNoteEditor(field,value,event=null){
   if(result.status==='changed')saveLiveDraft();
   return true;
 }
-/* DAILY REFLECTION PERSISTENCE · shared by Review and Library */
-const DailyReflectionPersistence=(()=>{
-  const snapshot=record=>Object.freeze({record:record||null,canonical:String(record?.reflection||''),revision:record?AppData.dailyRecords.timestamp(record):0,recordKind:record?.recordKind||null});
-  async function load(date){
-    if(!isSupportedSavedDate(date))return snapshot(null);
-    return snapshot(await AppData.dailyRecords.get(date));
-  }
-  async function commit(date,value,options={}){
-    if(!appCanMutate())throw new Error('Use the primary tab to edit Daily Reflections.');
-    if(!isSupportedSavedDate(date))throw new Error('That reflection date is not available.');
-    const candidate=clampEditorContent(value,APP_LIMITS.maxReflectionChars);
-    if(!editorContentWithinLimits(candidate))throw new Error('Daily Reflection exceeds the rich-text limit.');
-    const current=await AppData.dailyRecords.get(date),currentCanonical=String(current?.reflection||'');
-    if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
-    if(currentCanonical===candidate)return snapshot(current);
-    const backupCapture=options.backupCapture===true,hasContent=!!String(candidate||'').trim();
-    if(current?.recordKind==='study')await AppData.dailyRecords.save({...current,reflection:candidate,updatedAt:new Date().toISOString()},{backupCapture});
-    else if(hasContent){
-      const diary=createDiaryRecord(date,candidate,{savedAt:current?.savedAt||undefined,sourceRevision:current?.sourceRevision||0});
-      if(!diary)throw new Error('Daily Reflection failed canonical validation.');
-      await AppData.dailyRecords.save(diary,{backupCapture});
-    }else if(current?.recordKind==='diary')await AppData.dailyRecords.remove(date,{backupCapture});
-    const fresh=await AppData.dailyRecords.get(date);
-    if(hasContent&&String(fresh?.reflection||'')!==candidate)throw new Error('Daily Reflection did not pass its save read-back check.');
-    if(!hasContent&&current?.recordKind==='study'&&(!fresh||fresh.recordKind!=='study'||String(fresh.reflection||'').trim()))throw new Error('Daily Reflection clear did not pass its save read-back check.');
-    if(!hasContent&&current?.recordKind==='diary'&&fresh)throw new Error('Daily Reflection deletion did not pass its save read-back check.');
-    return snapshot(fresh);
-  }
-  return Object.freeze({load,commit});
-})();
-/* LIBRARY DIARY EDITOR · canonical saved-date reflections */
-const LibraryDiaryEditor=(()=>{
-  const bindings=new WeakMap();
-  function clear(field){
-    if(!(field instanceof HTMLTextAreaElement))return false;
-    bindings.get(field)?.lane.cancel();
-    richTextCloseField(field);bindings.delete(field);
-    ['diaryDate','diaryRevision','richSyncState','richSyncStatus','richExternalConflict'].forEach(key=>delete field.dataset[key]);
-    return true;
-  }
-  function draft(date){
-    if(!isSupportedSavedDate(date))return null;
-    const now=new Date().toISOString();
-    return Object.freeze({version:DATA_CONTRACT.schemas.DailyRecord.version,recordKind:'diary',date:String(date),savedAt:now,updatedAt:now,sourceRevision:0,reflection:'',dayOfWeek:dateInsightsMeta(date).dayOfWeek,dayName:dateInsightsMeta(date).dayName});
-  }
-  // An open Diary editor saves through its own lane of the shared save engine.
-  async function write(field,state,value,options={}){
-    const candidate=clampEditorContent(value,APP_LIMITS.maxReflectionChars);
-    if(!editorContentWithinLimits(candidate))throw new Error('Diary reflection exceeds the rich-text limit.');
-    const saved=await DailyReflectionPersistence.commit(state.date,candidate,{expectedCanonical:state.canonical,backupCapture:options.backupCapture===true}),fresh=saved.record;
-    state.canonical=saved.canonical;state.revision=saved.revision;state.recordKind=saved.recordKind||'diary';
-    field.dataset.diaryRevision=String(state.revision);richTextSyncField(field);state.onSaved?.(fresh);return fresh;
-  }
-  function laneState(field,state,status,error){
-    const message=status==='error'?SaveLaneModule.failureMessage('Diary reflection',error):status==='saving'?'Saving…':'Saved';
-    field.dataset.richSyncState=status;field.dataset.richSyncStatus=message;state.onState?.(status,message);
-  }
-  function bind(field,date,record,{onSaved=null,onState=null}={}){
-    if(!(field instanceof HTMLTextAreaElement)||!isSupportedSavedDate(date)||!record)return null;
-    clear(field);
-    const canonical=String(record.reflection||''),revision=AppData.dailyRecords.timestamp(record);
-    const state={date,canonical,revision,recordKind:record.recordKind==='diary'?'diary':'study',onSaved,onState};
-    state.lane=SaveLaneModule.createLane(Object.freeze({label:'Diary reflection',write:(value,options)=>write(field,state,value,options),onState:(status,error)=>laneState(field,state,status,error),environment:Object.freeze({setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer)})}));
-    bindings.set(field,state);
-    field.dataset.diaryDate=date;field.dataset.diaryRevision=String(revision);
-    field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
-    field.value=plainTextContent(canonical);field.maxLength=APP_LIMITS.maxReflectionChars;
-    field.setAttribute('aria-label',`Diary reflection for ${date}`);
-    queueMicrotask(()=>richTextSyncField(field));
-    return Object.freeze({date,revision});
-  }
-  function documentFor(field){
-    const state=bindings.get(field);
-    if(!state||!field.isConnected||field.dataset.diaryDate!==state.date)return null;
-    return Object.freeze({documentId:`diary:${state.date}`,label:`Diary reflection for ${state.date}`,initialValue:state.canonical,maxWords:APP_LIMITS.maxRichTextWords,surface:'reflection'});
-  }
-  function capture(field,event){
-    const state=bindings.get(field);if(!state)return '';
-    const trusted=validatedRichInputMeta(event,field),value=trusted?trusted.canonical:String(field.value||'');
-    if(trusted||RichTextApi.isRichTextValue(value))return value;
-    return value===plainTextContent(state.canonical)?state.canonical:value;
-  }
-  function schedule(field,value){const state=bindings.get(field);return state?state.lane.schedule(String(value??'')):false;}
-  function flush(field,options={}){const state=bindings.get(field);return state?state.lane.flush(options):Promise.reject(new Error('Diary editor is no longer active.'));}
-  async function deleteEntry(date,options={}){
-    const current=await AppData.dailyRecords.get(date);if(!current)return true;
-    const result=await DailyReflectionPersistence.commit(date,'',{expectedCanonical:String(current.reflection||''),backupCapture:options.backupCapture===true});
-    return current.recordKind==='study'?!!result.record&&result.record.recordKind==='study'&&!String(result.record.reflection||'').trim():!result.record;
-  }
-  async function settled(field){const state=bindings.get(field);if(!state)return true;return await state.lane.settled();}
-  return Object.freeze({bind,capture,clear,deleteEntry,documentFor,draft,flush,schedule,settled});
-})();
+/* DAILY REFLECTION + DIARY PERSISTENCE · P5.5B CHECKED OWNER */
+const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze({
+  configuration:Object.freeze({limits:APP_LIMITS,dataContract:DATA_CONTRACT}),
+  records:Object.freeze({
+    get:(...args)=>AppData.dailyRecords.get(...args),
+    save:(...args)=>AppData.dailyRecords.save(...args),
+    remove:(...args)=>AppData.dailyRecords.remove(...args),
+    verifyCanonical:(...args)=>AppData.dailyRecords.verifyCanonical(...args),
+    verifyCanonicalAbsent:(...args)=>AppData.dailyRecords.verifyCanonicalAbsent(...args),
+    timestamp:(...args)=>AppData.dailyRecords.timestamp(...args)
+  }),
+  codec:Object.freeze({createDiaryRecord}),
+  ownership:Object.freeze({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
+  text:Object.freeze({clampEditorContent,editorContentWithinLimits,plain:plainTextContent,isRich:value=>RichTextApi.isRichTextValue(value)}),
+  richText:Object.freeze({
+    closeField:field=>richTextCloseField(field),syncField:field=>richTextSyncField(field),
+    validatedInput:(event,field)=>validatedRichInputMeta(event,field)
+  }),
+  dates:Object.freeze({isSupported:isSupportedSavedDate,insights:dateInsightsMeta}),
+  saveLane:SaveLaneModule,
+  environment:Object.freeze({nowIso:()=>new Date().toISOString(),queueMicrotask,setTimeout,clearTimeout})
+}));
+const {DailyReflectionPersistence,DiaryEditor:LibraryDiaryEditor}=ReviewPersistence;
 /* RICH TEXT */
 function richTextDocumentFor(field,options={}){
   if(!(field instanceof HTMLTextAreaElement)||!field.isConnected)return null;
