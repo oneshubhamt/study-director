@@ -1315,7 +1315,7 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
   try{
     const fallbackBefore=fallbackDailyRecordsRawGet(),fallbackHadRecord=fallbackBefore.some(record=>record.date===date);
     const deletedAt=new Date().toISOString(),recoveryKey=deletionRecoveryKey('dailyRecord',date);
-    const staged=rollback?false:stageDeletionRecovery('dailyRecord',date,deletedAt);
+    const staged=rollback||conditional?false:stageDeletionRecovery('dailyRecord',date,deletedAt);
     try{
       assertWriteToken(ownershipToken,'the daily-record deletion');
       if(!staged&&!conditional){
@@ -1333,7 +1333,7 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
       removed=true;
     }catch(e){
       if(isOwnershipLostError(e))throw e;
-      if(conditional){if(!idbRemoved&&staged)clearDeletionRecoveryKeys([recoveryKey]);throw e;}
+      if(conditional)throw e;
       if(rollback||!staged)throw e;
       assertWriteToken(ownershipToken,'the daily-record fallback deletion');
       showStorageFallbackWarning(e&&(e as {message?:unknown;code?:unknown;name?:unknown;reason?:unknown}|null|undefined)?.message?(e as {message?:unknown;code?:unknown;name?:unknown;reason?:unknown}|null|undefined)?.message:'saved-date database failed');
