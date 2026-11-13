@@ -252,7 +252,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
       const rollback=persistence.snapshotForWrite();let cleared:SessionResult|null=null;
       try{
         cleared=await clearCanonical('resetting today’s session');
-        resetRuntime({lifecycleManaged:true,source:'session-reset',date});
+        resetCore(date,'session-reset');
         return cleared;
       }catch(error){
         if(rollback){
@@ -267,7 +267,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
     if(!session||!value)return false;
     const source=String(options.source||'stored-session-apply'),pendingDraft=apply.readPlanDraft();
     const perform=()=>{
-      resetRuntime({lifecycleManaged:true,source,date:session.date});apply.setStudyDate(session.date,session.date===domain.todayISO());
+      resetCore(session.date,source);apply.setStudyDate(session.date,session.date===domain.todayISO());
       let restored:unknown=false;
       try{restored=apply.applySessionSchedule({source,studyDate:session.date,reviewOnly:options.reviewOnly===true,snapshot:value,scheduleText:session.scheduleText});return restored;}
       finally{apply.writePlanDraft(pendingDraft);if(restored!==false)apply.previewPlanDraft();}
@@ -283,7 +283,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
         reset.pausePracticeForSessionEnd();cancelPendingLiveDraftSave();
         const value=persistence.snapshotForWrite(),session=payload(value,{status:'suspended'});if(!session)throw new Error('No active study session is available to suspend.');
         const saved=await saveCanonicalSession(session,'suspending today’s session');
-        resetRuntime({lifecycleManaged:true,source,date:session.date});
+        resetCore(session.date,source);
         return saved.value as ActiveSession;
       }catch(error){
         try{await rollbackLocalTransition(rollback,'rolling back a failed session suspension');}
@@ -304,11 +304,11 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
         await saveCanonicalSession(active,'restoring today’s suspended session',{expectedCanonical:current});
         const value=sessionSnapshot(active);if(!value)throw new Error('The restored Active Session snapshot is incompatible.');
         applying=true;
-        const restored=applyStoredSession(active,value,{source:'session-restore',lifecycleManaged:true});
+        const restored=await applyStoredSession(active,value,{source:'session-restore',lifecycleManaged:true});
         if(restored===false)throw new Error('The suspended Active Session could not be applied to the runtime.');
         return active;
       }catch(error){
-        if(applying)resetRuntime({lifecycleManaged:true,source:'session-restore-rollback',date:current.date});
+        if(applying)resetCore(current.date,'session-restore-rollback');
         try{
           const latest=await repository.load(0,{strict:true});
           if(!latest.ok||latest.error||!latest.storage.idb)throw latest.error||new Error('The canonical session could not be verified for rollback.');
