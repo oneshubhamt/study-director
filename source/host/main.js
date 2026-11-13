@@ -4014,7 +4014,6 @@ const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze({
       acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
       cancelPendingLiveDraftSave,clearSaveReminder,flushLiveDraft,
       getLifecycleRevision:()=>SessionLifecycle.revision,getOwnershipRevision:()=>AppOwnership.revision,getReviewDate,
-      handleActiveSessionRepositoryResult,
       lifecycleCanWrite:()=>SessionLifecycle.canWrite(),markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,
       runLifecycle:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),
       saveLiveDraft,setReviewDateTitle,setSessionPanelMode,stopTimerExecution:()=>TimerEngine.stopExecution(),
