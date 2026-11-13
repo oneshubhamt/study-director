@@ -158,7 +158,7 @@ registry.define('session-lifecycle',1,()=>{
       format:'study-director.session-lifecycle-coordinator',contractVersion:1,
       run,runSync,invalidate,reconcile,canWrite,status,
       get revision(){return revision;},
-      get transitioning(){return !!active;}
+      get transitioning(){return !!active||!!pendingFlush;}
     });
   }
   return freeze({
