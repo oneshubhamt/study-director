@@ -2021,10 +2021,16 @@ button.profile-more-row{display:block;min-height:40px;padding:8px var(--profile-
 .library-note-tag.current{border-color:rgba(var(--sd-rgb-info),.24);color:var(--sd-color-info)}
 .library-note-nav-item.has-note .library-note-tag.note{border-color:rgba(var(--sd-rgb-accent-secondary),.22);color:var(--sd-color-accent-secondary)}
 .library-note-review{align-self:center;justify-self:start;margin-top:4px;background:none;border-color:rgba(var(--sd-rgb-warning),.32);color:var(--sd-color-warning);cursor:pointer}.library-note-review:hover,.library-note-review:focus-visible{border-color:var(--sd-color-warning)}
-.library-note-tree-item{grid-template-columns:12px minmax(0,1fr) auto;align-items:center;column-gap:5px}
-.library-note-tree-item[aria-expanded]::before{display:none}
+.library-note-tree-item{grid-template-columns:18px minmax(0,1fr) auto;align-items:center;column-gap:4px}
+.library-note-tree-item::before{display:none}
+.library-note-tree-item:not([aria-expanded]) .library-note-twisty::before{content:"";width:3px;height:3px;background:var(--sd-color-border-2)}
+.library-note-tree-item.active:not([aria-expanded]) .library-note-twisty::before{background:var(--sd-color-accent-primary)}
+.library-note-tree-name{display:flex;align-items:center;gap:6px;min-width:0}.library-note-tree-name .library-note-nav-name{min-width:0}.library-note-tree-name .library-note-tag{flex:none;padding:1px 4px}
+.library-note-tree-item .library-note-nav-edited{min-width:5.5ch;text-align:right}
 .library-note-tree-item:focus-visible{outline:2px solid var(--sd-color-accent-primary);outline-offset:-2px}
-.library-note-twisty{width:12px;color:var(--sd-color-text-muted);font-size:11px;line-height:1;text-align:center;cursor:pointer;user-select:none}
+.library-note-twisty{display:grid;place-items:center;width:18px;height:24px;margin-left:-3px;color:var(--sd-color-text-secondary);font-size:14px;line-height:1;cursor:pointer;user-select:none}
+.library-note-tree-item[aria-expanded] .library-note-twisty:hover{color:var(--sd-color-accent-primary)}
+@media (pointer:coarse){.library-note-twisty{width:28px;height:36px;margin:-7px 0 -7px -8px}.library-note-tree-item{grid-template-columns:20px minmax(0,1fr) auto}}
 .library-note-nav-edited{color:var(--sd-color-text-secondary);font-family:var(--sd-font-mono);font-size:var(--sd-type-role-label-size);white-space:nowrap}
 .library-notes-more{align-self:stretch;margin:4px 0 2px;min-height:30px;padding:4px 8px;border:1px dashed var(--sd-color-border-1);color:var(--sd-color-text-secondary);font-family:var(--sd-font-mono);font-size:var(--sd-type-role-caption-size)}
 /* Recently deleted stays at the bottom of the list and opens upward. */

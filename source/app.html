@@ -2486,6 +2486,9 @@ const SUPPORT_NOTE=Object.freeze({
   key:'__study_director_support_activities__',
   label:'Support Activities'
 });
+// The shared support note is stored with its reserved key as its label, which
+// keeps it apart from any Area. Wherever a stored note is shown, it shows its name.
+function shownNote(note){return note&&note.key===SUPPORT_NOTE.key?Object.freeze({...note,label:SUPPORT_NOTE.label}):note;}
 function noteKeyForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.key:taskAreaKey(task);}
 function noteLabelForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.label:taskAreaLabel(task);}
 const {
@@ -8536,10 +8539,14 @@ function richTextDocumentFor(field,options={}){
 // Links between notes: the one note picker and the linked-notes bar.
 const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.freeze({
   view:Object.freeze({document}),
-  notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
+  notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>shownNote(AppData.notes.get(ref)),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref).map(shownNote),list:()=>AppData.notes.metadataSnapshot().records.map(shownNote)}),
   text:Object.freeze({tagsIn:value=>RichTextApi.tagsIn(value)}),
   ownership:Object.freeze({canMutate:()=>appCanMutate()})
 })}));
+// A file dropped anywhere that does not take it would open in a new tab or in
+// place of the app; the note editor takes its own drops before this runs.
+window.addEventListener('dragover',event=>{if(!event.defaultPrevented&&event.dataTransfer?.types.includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='none';}});
+window.addEventListener('drop',event=>{if(event.dataTransfer?.types.includes('Files'))event.preventDefault();});
 // A link to a note opens it in Execute's editor when clicked there, and in
 // the Library everywhere else.
 async function openLinkedNote(id,field=null){
@@ -8548,7 +8555,7 @@ async function openLinkedNote(id,field=null){
   if(!await goTab('library',{source:'note-link'}))return false;
   return LibraryView.revealNoteReference(id);
 }
-function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>AppData.notes.get(id)?.label??null,open:id=>void openLinkedNote(id,field),tag:(name,passive)=>void showNotesTagged(name,passive,field),pickTag:options=>NoteLinks.pickTag(options)});}
+function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>shownNote(AppData.notes.get(id))?.label??null,open:id=>void openLinkedNote(id,field),tag:(name,passive)=>void showNotesTagged(name,passive,field),pickTag:options=>NoteLinks.pickTag(options)});}
 // A tag tapped in the Library's open note narrows the list beside it; a tag
 // tapped anywhere else, or with Ctrl or Cmd, opens the Library's notes with it.
 async function showNotesTagged(name,passive,field){
@@ -9714,7 +9721,7 @@ window.addEventListener('pagehide',()=>BackupProtection.lock());
 window.addEventListener('pageshow',event=>{if(event.persisted)void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);});
 const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.freeze({
   assets:Object.freeze({get:id=>RichTextAssets.get(id)}),
-  notes:Object.freeze({get:key=>AppData.notes.get(key)}),
+  notes:Object.freeze({get:key=>shownNote(AppData.notes.get(key))}),
   processing:Object.freeze({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
   scheduling:Object.freeze({yieldTask:BackgroundTasks.yieldTask,budget:BackgroundTasks.budget}),
   output:Object.freeze({chooseSave:Exports.chooseSave,save:Exports.save}),
