@@ -23,6 +23,8 @@ registry.define('session-lifecycle',1,()=>{
     let active:SessionContext|null=null;
     let last:SessionCompletion|null=null;
     let ready=false;
+    let pendingFlush:{readonly token:number;readonly kind:string}|null=null;
+    let flushToken=0;
     function normalizedKind(kind:unknown){return String(kind||'lifecycle-transition').trim()||'lifecycle-transition';}
     function normalizedOptions(options:SessionOptions|null|undefined){
       const source=options&&typeof options==='object'&&!Array.isArray(options)?options:{};
@@ -35,21 +37,49 @@ registry.define('session-lifecycle',1,()=>{
         startedAt:new Date().toISOString()
       });
     }
-    function begin(kind:unknown,options:SessionOptions={}){
-      if(active)throw new LifecycleBusyError(`${active.kind} is still reconciling.`);
-      const normalized=normalizedOptions(options);
-      hooks.flushPending(normalizedKind(kind),normalized);
+    function busyKind(){return active?.kind||pendingFlush?.kind||'';}
+    function requireIdle(){
+      const busy=busyKind();
+      if(busy)throw new LifecycleBusyError(`${busy} is still reconciling.`);
+    }
+    function start(kind:unknown,normalized:SessionOptions){
       revision+=1;
       ready=false;
       const next=context(kind,normalized);
       active=next;
-      hooks.prepare(next);
+      try{hooks.prepare(next);}
+      catch(error){
+        finish(next,{reconciled:false,failed:true});
+        throw error;
+      }
       return next;
+    }
+    function beginSync(kind:unknown,options:SessionOptions={}){
+      requireIdle();
+      const normalized=normalizedOptions(options),name=normalizedKind(kind);
+      ready=false;
+      const pending=hooks.flushPending(name,normalized);
+      if(pending&&typeof (pending as {then?:unknown}).then==='function'){
+        void Promise.resolve(pending).catch(error=>hooks.capture('session-lifecycle.sync-flush-rejected',error,'error'));
+        throw new TypeError('Synchronous lifecycle transition cannot await the pending Review flush.');
+      }
+      return start(name,normalized);
+    }
+    async function begin(kind:unknown,options:SessionOptions={}){
+      requireIdle();
+      const normalized=normalizedOptions(options),name=normalizedKind(kind),token=++flushToken;
+      ready=false;
+      const ticket=freeze({token,kind:name});pendingFlush=ticket;
+      try{await hooks.flushPending(name,normalized);}
+      finally{if(pendingFlush===ticket)pendingFlush=null;}
+      if(token!==flushToken)throw new LifecycleBusyError(`${name} was superseded before its pending Review flush settled.`);
+      return start(name,normalized);
     }
     function isCurrent(ctx:SessionContext){return !!(active&&active.id===ctx.id);}
     function supersedeActive(reason:unknown='lifecycle invalidation'){
-      if(!active)return null;
       const superseded=active;
+      if(pendingFlush){flushToken+=1;pendingFlush=null;}
+      if(!superseded){ready=false;return null;}
       active=null;
       ready=false;
       last=freeze({...superseded,reconciled:false,failed:true,superseded:true,supersededBy:normalizedKind(reason),finishedAt:new Date().toISOString()});
@@ -57,7 +87,7 @@ registry.define('session-lifecycle',1,()=>{
     }
     function finish(ctx:SessionContext,{reconciled=false,failed=false}={}){
       if(active&&active.id===ctx.id)active=null;
-      ready=!!reconciled;
+      ready=!!reconciled&&!failed;
       last=freeze({...ctx,reconciled:!!reconciled,failed:!!failed,finishedAt:new Date().toISOString()});
       hooks.complete(last);
       return last;
@@ -69,7 +99,7 @@ registry.define('session-lifecycle',1,()=>{
     }
     function runSync<T>(kind:unknown,options:SessionOptions,operation:(context:SessionContext)=>T extends PromiseLike<unknown>?never:T):T{
       if(typeof operation!=='function')throw new TypeError('Synchronous lifecycle transition requires an operation.');
-      const ctx=begin(kind,options);
+      const ctx=beginSync(kind,options);
       try{
         const result=operation(ctx);
         if(result&&typeof (result as {then?:unknown}).then==='function')throw new TypeError('Synchronous lifecycle operation returned a Promise.');
@@ -79,14 +109,13 @@ registry.define('session-lifecycle',1,()=>{
         return result;
       }catch(error){
         if(!isCurrent(ctx))throw error;
-        try{reconcileContext(ctx,null);}catch(reconcileError){hooks.capture('session-lifecycle.reconcile-after-failure',reconcileError,'error');}
-        finish(ctx,{reconciled:ctx.options.reconcile!==false,failed:true});
+        finish(ctx,{reconciled:false,failed:true});
         throw error;
       }
     }
     async function run<T>(kind:unknown,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>{
       if(typeof operation!=='function')throw new TypeError('Lifecycle transition requires an operation.');
-      const ctx=begin(kind,options);
+      const ctx=await begin(kind,options);
       try{
         const result=await operation(ctx);
         if(!isCurrent(ctx))return result;
@@ -95,23 +124,34 @@ registry.define('session-lifecycle',1,()=>{
         return result;
       }catch(error){
         if(!isCurrent(ctx))throw error;
-        try{if(ctx.options.reconcile!==false)await hooks.reconcile(ctx,null);}catch(reconcileError){hooks.capture('session-lifecycle.reconcile-after-failure',reconcileError,'error');}
-        finish(ctx,{reconciled:ctx.options.reconcile!==false,failed:true});
+        finish(ctx,{reconciled:false,failed:true});
         throw error;
       }
     }
     function invalidate(kind:unknown,options:SessionOptions={}){
       supersedeActive(kind);
-      const ctx=begin(kind,{...options,reconcile:false});
+      requireIdle();
+      const ctx=start(kind,normalizedOptions({...options,reconcile:false}));
       finish(ctx,{reconciled:false});
       return ctx;
     }
-    function reconcile(kind:unknown,options:SessionOptions={}){return runSync(kind,options,()=>true);}
-    function canWrite(){return !active&&ready&&hooks.canMutate();}
+    function reconcile(kind:unknown,options:SessionOptions={}){
+      requireIdle();
+      const ctx=start(kind,normalizedOptions(options));
+      try{
+        const reconciled=reconcileContext(ctx,true);
+        finish(ctx,{reconciled});
+        return reconciled;
+      }catch(error){
+        if(isCurrent(ctx))finish(ctx,{reconciled:false,failed:true});
+        throw error;
+      }
+    }
+    function canWrite(){return !active&&!pendingFlush&&ready&&hooks.canMutate();}
     function status(){
       return freeze({
         format:'study-director.session-lifecycle-status',contractVersion:1,
-        revision,transitioning:!!active,ready,active,last,canWrite:canWrite()
+        revision,transitioning:!!active||!!pendingFlush,ready,active,last,canWrite:canWrite()
       });
     }
     return freeze({
