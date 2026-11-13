@@ -152,9 +152,10 @@ assert.match(reviewPersistence,/await records\.verifyCanonicalAbsent\(date\)/u,'
 assert.match(reviewPersistence,/diaryOwnershipRevision[\s\S]{0,300}ownership\.revision\(\)/u,'Diary editor bindings are fenced by ownership revision');
 assert.match(reviewHost,/function createDayState\(/u,'Review date/revision/reminder state has a checked P5.5B owner');
 assert.match(reviewHost,/function createSavedDayCoordinator\(/u,'Saved-Day reminder, acknowledgement, suspended-save and rollover orchestration have one checked P5.5B owner');
-for(const stale of ['function promptSaveToday(','function revalidateSaveReminderAfterCanonicalConvergence(','async function acknowledgeSavedStudyDay(','const DailyReflectionPersistence=(()=>','const LibraryDiaryEditor=(()=>']){
-  assert.equal(host.includes(stale),false,`main host must not retain extracted P5.5B behavior: ${stale}`);
+for(const stale of ['function savedDayCoversReminderEvidence(','async function savedDayHasUncoveredKeptSession(','const DailyReflectionPersistence=(()=>','const LibraryDiaryEditor=(()=>','let saveReminderDate=']){
+  assert.equal(host.includes(stale),false,`main host must not retain extracted P5.5B algorithms: ${stale}`);
 }
+assert.match(host,/function promptSaveToday\(\.\.\.args\)\{return requireReviewSavedDayRuntime\(\)\.promptSaveToday\(\.\.\.args\);\}/u,'the retained reminder name is a thin deferred host forwarder only');
 
 for(const stale of ['function latestTrackableEndMin(','const TaskSessionState=(()=>','function getRealTimeState(','function rebuildOriginalSchedule(','function resolveTaskCompletion(','function toggleDoneMarker(','function recoveryCaptureActiveBeforeSwitch(','function resolveActivePauseBeforeTimerSwitch(']){
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.4A runtime logic: ${stale}`);
