@@ -33,6 +33,20 @@ const beforeDaily=strictCount();
 await app.dailyRecords.save({version:1,date:'2026-09-15',updatedAt:'2026-09-15T12:01:00.000Z',savedAt:'2026-09-15T12:01:00.000Z'});
 assert.ok(strictCount()>beforeDaily,'authoritative Daily Record save must use strict durability');
 
+// Same-date Diary edits use a full-record compare-and-swap. A newer Saved Day
+// that arrives after the Diary read must survive both stale update and delete.
+const expectedDay=await app.dailyRecords.get('2026-09-15',{strict:true});
+assert.ok(expectedDay);
+const richerDay={...expectedDay,sourceRevision:Number(expectedDay.sourceRevision||0)+1,reflection:String(expectedDay.reflection||''),updatedAt:'2026-09-15T12:02:00.000Z'};
+await app.dailyRecords.save(richerDay);
+const staleReflection={...expectedDay,reflection:'stale diary edit',updatedAt:'2026-09-15T12:03:00.000Z'};
+await assert.rejects(app.dailyRecords.save(staleReflection,{expectedCanonical:expectedDay}),error=>error?.code==='DAILY_RECORD_CHANGED');
+let preserved=await app.dailyRecords.get('2026-09-15',{strict:true});
+assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary update must not replace newer study evidence');
+await assert.rejects(app.dailyRecords.remove('2026-09-15',{expectedCanonical:expectedDay}),error=>error?.code==='DAILY_RECORD_CHANGED');
+preserved=await app.dailyRecords.get('2026-09-15',{strict:true});
+assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary deletion must not remove newer study evidence');
+
 const beforePlanDraftStrict=strictCount();
 await app.planData.writeDraft('temporary draft');
 assert.equal(strictCount(),beforePlanDraftStrict,'high-frequency Plan draft persistence must remain normal/default durability');
@@ -71,4 +85,4 @@ const beforeJournalClear=strictCount();
 await app.restoreJournal.clear(restoreId);
 assert.equal(strictCount(),beforeJournalClear+1,'Restore journal retirement must use strict durability so a verified restore does not retain a stale rollback marker after an abrupt failure');
 
-console.log(JSON.stringify({status:'PASS',suite:'strict-durability-boundaries',strictTransactions:idbDurability.strict,normalTransactions:idbDurability.normal,contracts:['review/session recovery checkpoints stay normal','canonical notes and records are strict','saved plan library is strict while draft is normal','final session deletion is strict','destructive-operation journal prepare/phase/retirement is strict','mutation lease acquisition is strict while expiring lease cleanup stays normal']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'strict-durability-boundaries',strictTransactions:idbDurability.strict,normalTransactions:idbDurability.normal,contracts:['review/session recovery checkpoints stay normal','canonical notes and records are strict','Daily Record conditional writes preserve newer same-date evidence','saved plan library is strict while draft is normal','final session deletion is strict','destructive-operation journal prepare/phase/retirement is strict','mutation lease acquisition is strict while expiring lease cleanup stays normal']},null,2));
