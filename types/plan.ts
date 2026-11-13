@@ -8,22 +8,21 @@ export interface PlanDraftSaveOptions{strictDurability?:boolean;backupCapture?:b
 export interface PlanDraftPreviewOptions{enterDraft?:boolean;silent?:boolean;source?:string}
 export interface PlanApplyOptions{
   scheduleText?:string;projection?:PlanDraftProjection;currentEditor?:()=>boolean;forceReload?:boolean;reviewOnly?:boolean;
-  persistDraft?:boolean;source?:string;studyDate?:unknown;sessionSnapshot?:unknown;lifecycleManaged?:boolean;skipNotify?:boolean;
+  persistDraft?:boolean;source?:string;studyDate?:string;sessionSnapshot?:import('./record-models.ts').SessionSnapshot|null;lifecycleManaged?:boolean;skipNotify?:boolean;
 }
 export interface PlanApplyPreparation{handled?:boolean;result?:boolean;cancelled?:boolean;scheduleChanged?:boolean;progressMigration?:PlanMigration|null}
 export interface PlanMigrationSummary{total?:number;matched?:number;practiceTotal?:number;practiceMatched?:number}
 
 export interface PlanRow{
   [key:string]:string|number|null|undefined;
-  start:string;dur:number|string;name:string;kind:string;area:string;measure:string;target:number|string|null;
-  id?:string;
+  start:string;dur:number|string;name:string;kind:string;area:string;measure:string;target:number|string|null;id?:string;
 }
 export interface PlanParseResult{
-  ok:boolean;kind:string;message?:string;parsed:readonly PlanRow[];errors:readonly string[];warnings:readonly string[];
+  ok:boolean;kind:string;message?:string;parsed:readonly import('./domain.ts').ScheduleRow[];errors:readonly string[];warnings:readonly string[];
   rawOriginal?:string;raw?:string;
 }
 export interface ImmutablePlanDraft{
-  readonly ok:boolean;readonly kind:string;readonly message:string;readonly parsed:readonly Readonly<PlanRow>[];
+  readonly ok:boolean;readonly kind:string;readonly message:string;readonly parsed:readonly Readonly<import('./domain.ts').ScheduleRow>[];
   readonly errors:readonly string[];readonly warnings:readonly string[];
 }
 export interface PlanDraftProjection{
@@ -44,50 +43,31 @@ export interface PlanLimits{
   readonly maxStatusMessageChars:number;readonly maxDurationMinutes:number;readonly maxScheduleChars:number;
   readonly maxTaskNameChars:number;readonly maxAreaNameChars:number;readonly maxUnitChars:number;
 }
-export interface PlanDataset{
-  savedPlan?:string;savedPlanId?:string;ownerMutation?:string;taskIndex?:string;completionState?:string;draftIdx?:string;
-  draftField?:string;draftAction?:string;draftDelegation?:string;mode?:string;
-}
-export interface PlanElement{
-  value:string;textContent:string|null;className:string;title:string;type:string;placeholder:string;min:string;step:string;inputMode:string;
-  hidden:boolean;disabled:boolean;open:boolean;draggable:boolean;isConnected:boolean;
-  readonly dataset:PlanDataset;readonly classList:DOMTokenList;readonly tagName:string;readonly childNodes:readonly unknown[];readonly style:CSSStyleDeclaration;selected:boolean;
-  append(...nodes:unknown[]):void;appendChild<T>(node:T):T;replaceChildren(...nodes:unknown[]):void;setAttribute(name:string,value:string):void;
-  querySelector(selector:string):PlanElement|null;querySelectorAll(selector:string):Iterable<PlanElement>;
-  addEventListener(type:string,listener:(event:PlanEvent)=>unknown,options?:unknown):void;
-  contains(node:unknown):boolean;closest(selector:string):PlanElement|null;matches(selector:string):boolean;focus():void;
-}
-export interface PlanDocument{
-  readonly activeElement:PlanElement|null;getElementById(id:string):PlanElement|null;querySelector(selector:string):PlanElement|null;querySelectorAll(selector:string):PlanElement[];
-  createElement(tag:string):PlanElement;createTextNode(text:string):unknown;
-}
-export interface PlanDataTransfer{effectAllowed:string;dropEffect:string;setData(type:string,value:string):void;getData(type:string):string}
-export interface PlanEvent{
-  readonly target:PlanElement;readonly relatedTarget:PlanElement|null;readonly dataTransfer:PlanDataTransfer|null;readonly animationName?:string;
-  preventDefault():void;stopPropagation():void;
-}
+export type PlanElement=HTMLElement;
+export type PlanDocument=Document;
+export type PlanEvent=Event;
 export interface PlanTimelineRow{idx:number;t:PlanRow;startMin:number;endMin:number}
 export interface PlanRuntimeRowState{
   done?:boolean;skipped?:boolean;adjusted?:boolean;adjustedStartMin?:number;adjustedEndMin?:number;
-  originalStartMin?:number;originalEndMin?:number;actualTime?:number;actualClock?:Readonly<{startedAt?:unknown;endedAt?:unknown}>;
+  originalStartMin?:number;originalEndMin?:number;actualTime?:number|undefined;actualClock?:Readonly<{startedAt?:unknown;endedAt?:unknown}>|null;
 }
 export interface PlanRealtimeState{
-  scheduledIdx:number|null;currentIdx?:number|null;nowEff:number;first:number;driftKind?:string;match?:boolean;
+  scheduledIdx:number|null;currentIdx?:number|null;nowEff:number;first:number|null;driftKind?:string;match?:boolean;
 }
 export interface PlanGatewayRead{
-  tasks:PlanRow[];fingerprint:string;anchor:number;currentIndex?:number;renderDirty?:boolean;
+  tasks:readonly import('./domain.ts').Task[];fingerprint:string;anchor:number;currentIndex?:number;renderDirty?:boolean;
 }
 export interface PlanMigrationPreview{matched?:number;total?:number;practiceTotal?:number;practiceMatched?:number}
-export interface PlanMigration{preview?:PlanMigrationPreview}
-export interface PlanGatewayApplyResult{migrationSummary?:PlanMigrationSummary}
+export type PlanMigration=import('./execution-host.ts').ScheduleProgressSnapshot;
+export interface PlanGatewayApplyResult{migrationSummary?:PlanMigrationSummary|null}
 export interface PlanScheduleGateway{
   act(action:string,index:number):unknown;
-  apply(rows:readonly PlanRow[],options:Readonly<Record<string,unknown>>):PlanGatewayApplyResult|boolean|null;
+  apply(rows:readonly import('./domain.ts').ScheduleRow[],options:Readonly<import('./execution-host.ts').ScheduleGatewayOptions>):PlanGatewayApplyResult|boolean|null;
   breakState(action?:string):unknown;
-  captureMigration(rows:readonly PlanRow[]):PlanMigration;
+  captureMigration(rows:readonly import('./domain.ts').ScheduleRow[]):PlanMigration;
   clearSafety(reason:string):unknown;flush():unknown;hasLiveState():boolean;markRender(state:string):unknown;
   read():PlanGatewayRead;reconcile(source:string):unknown;
-  renameAreas(mapper:(row:PlanRow)=>string|undefined):number;
+  renameAreas(mapper:(row:Readonly<import('./domain.ts').TaskInput>)=>string|undefined):number;
   row(index:number):PlanRuntimeRowState;
   timeline():Readonly<{rows:readonly PlanTimelineRow[];realtime:PlanRealtimeState}>;
 }
@@ -119,7 +99,7 @@ export interface PlanModuleInput{
       clockHM():string;clockMinuteToStudyMinute(value:number):number;getMinuteOfDay():number;isValidHHMM(value:unknown):boolean;
       normalizeHHMM(value:unknown):string;studyMinuteToHHMM(value:number):string;t2m(value:string):number;timeLabelFromIso(value:unknown):string;
     }>;
-    view:Readonly<{document:PlanDocument;on(target:PlanElement,type:string,handler:(event:PlanEvent)=>unknown):unknown;textEl(tag:string,className:string,text:string):PlanElement;updateRealTimeAwareness(...args:unknown[]):unknown;window:Readonly<{matchMedia?(query:string):Readonly<{matches:boolean}>;requestAnimationFrame(callback:()=>void):number}>}>;
+    view:Readonly<{document:PlanDocument;on<K extends keyof HTMLElementEventMap>(target:PlanElement,type:K,handler:(event:HTMLElementEventMap[K])=>unknown):unknown;textEl(tag:string,className:string,text:string):PlanElement;updateRealTimeAwareness(...args:unknown[]):unknown;window:Readonly<{matchMedia?(query:string):Readonly<{matches:boolean}>;requestAnimationFrame(callback:()=>void):number}>}>;
     scheduleGateway:Readonly<PlanScheduleGateway>;
     ownership:Readonly<{canMutate():boolean;requirePrimary(event:PlanEvent|null,reason:string):boolean}>;
     interactions:Readonly<{

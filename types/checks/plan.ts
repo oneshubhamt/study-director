@@ -16,3 +16,13 @@ void controller.apply({persistDraft:'no'});
 void controller.draft.preview({enterDraft:'yes'});
 // @ts-expect-error -- module identity is closed.
 registry.load('plan',1,'study-director.startup-lifecycle',1);
+
+declare const document:Document;
+const nativeDocument:PlanModuleInput['ports']['view']['document']=document;
+void nativeDocument;
+declare const event:import('../plan.ts').PlanEvent;
+// @ts-expect-error -- an event target can be null or a non-element target.
+event.target.closest('button');
+declare const element:import('../plan.ts').PlanElement;
+// @ts-expect-error -- generic HTML elements do not have form-control values.
+element.value='unsafe';

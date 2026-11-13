@@ -46,8 +46,9 @@ vm.runInThisContext(readRuntimeSource('source/core/plan.ts'),{filename:'source/c
 const PlanModule=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('plan',1);
 assert.ok(PlanModule);
 
+globalThis.Element=FakeElement;
 const document=new FakeDocument();
-const panel=document.add('saved-plans-panel');
+const panel=document.add('saved-plans-panel',new FakeElement('details'));
 const list=document.add('saved-plans-list');panel.append(list);
 const count=document.add('saved-plans-count');panel.append(count);
 const name=document.add('saved-plan-name',new FakeElement('input'));panel.append(name);

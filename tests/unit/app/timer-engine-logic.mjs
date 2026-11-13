@@ -6,7 +6,7 @@ import {createNotifications} from '../../helpers/notifications.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 import {checkCases} from '../../helpers/generated-cases.mjs';
 
-for(const file of ['source/core/internal.ts','source/core/practice-pacer.ts','source/core/timer-engine.ts'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/practice-pacer.ts','source/core/timer-engine.ts','source/core/execution-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const {coordinator:notifications}=createNotifications();
 const practiceModule=registry.require('practice-pacer',1);
@@ -82,7 +82,7 @@ const ports=freeze({
     setTimerMode:(mode,reason)=>{modeTransitions.push([timerState.mode,mode,reason]);timerState.mode=mode;return mode;}
   }),
   domain:freeze({KeyedRecord:domainPort.KeyedRecord,boundedInt:domainPort.boundedInt,clampText:domainPort.clampText,cleanDayRevision:domainPort.cleanDayRevision,fmtOver:domainPort.fmtOver,fmtS:domainPort.fmtS,makeTaskId:domainPort.makeTaskId,positiveMinutes:domainPort.positiveMinutes,shortTaskLabel:domainPort.shortTaskLabel,studyMinuteToHHMM:domainPort.studyMinuteToHHMM,taskAreaValue:domainPort.taskAreaValue,taskMeasureValue:domainPort.taskMeasureValue,taskTargetValue:domainPort.taskTargetValue}),
-  schedule:fields(['adjustedEndMin','adjustedStartMin','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver'],{getScheduleDerivedState:()=>({adjustmentsRevision:0}),plannedRows:()=>scheduleRows,scheduleFingerprint:()=>'',isFixedBlock:task=>task?.kind==='fixed',isTrackableBlock:task=>!!task&&task.kind!=='fixed',isWorkBlock:task=>!task?.kind||task.kind==='work',isLiveTrackableTimer:()=>true,studyDayRolledOver:()=>false,effectiveNowMin:(date=new Date(clock.now()))=>date.getUTCHours()*60+date.getUTCMinutes()}),
+  schedule:fields(['adjustedEndMin','adjustedStartMin','effectiveNowMin','findNextIncompleteTrackableAfter','getLatestCarryForward','getScheduleDerivedState','handleStudyDayRollover','hasAdjustedTiming','isFixedBlock','isLiveTrackableTimer','isTaskResolved','isTrackableBlock','isWorkBlock','originalEndMin','originalStartMin','plannedRows','scheduleFingerprint','studyDayRolledOver'],{findNextIncompleteTrackableAfter:()=>tasks.length,getScheduleDerivedState:()=>({adjustmentsRevision:0}),plannedRows:()=>scheduleRows,scheduleFingerprint:()=>'',isFixedBlock:task=>task?.kind==='fixed',isTrackableBlock:task=>!!task&&task.kind!=='fixed',isWorkBlock:task=>!task?.kind||task.kind==='work',isLiveTrackableTimer:()=>true,studyDayRolledOver:()=>false,effectiveNowMin:(date=new Date(clock.now()))=>date.getUTCHours()*60+date.getUTCMinutes()}),
   persistence:fields(['compactPauseEvents','compactRealTimeSnapshot','flushLiveDraft','maybeSnapshotRunningTimer','recoverySetStatus','saveLiveDraft','saveNote','writeLiveDraftNow'],{compactPauseEvents:(value,extra)=>{const out=Array.isArray(value)?value.map(row=>({...row})):[];if(extra)out.push({...extra});return out.slice(-100);},compactRealTimeSnapshot:()=>null}),
   view:fields(['cachedElements','clearExecuteStateOverlay','invalidateExecuteIdleDisplay','refreshPnote','refreshExecuteIdleDisplay','requestRender','setElementStyle','setElementText','setTextSafe','setExecuteControlsEnabled','setExecuteShellVisible','showDone','showEmpty','textEl'],{cachedElements:()=>({}),textEl:()=>({})}),
   clock:fields(['nowMs'],{nowMs:()=>clock.now()+clockSkew}),
@@ -282,3 +282,24 @@ const restoreCases=await checkCases('restored focus',{seed:20261104,count:200},(
 });
 
 console.log(JSON.stringify({status:'PASS',contract:'timer-engine-state-machine',timerCases,restoreCases,restoreFreezeNotAwayGap:true,restoreEvidence:true,pauseResume:true,inactiveGap:true,staleGapReleased:true,fixedAndSupportTimeExcluded:true,wakeRebase:true,crossDeviceRunningRestore:true,pausedRestore:true},null,2));
+
+// Exercise the real checked restore owner with the timer engine, including
+// persisted pause/gap time and the intentionally bounded Pomodoro overrun.
+let restoreFlushes=0;
+const restorer=registry.require('execution-host',1).createTimerRestoration({
+  runtime:{...ports.state,TimerEngine:engine,Pomodoro:ports.userPreferences.Pomodoro,isTaskResolved:()=>false},
+  DecisionClock:ports.clock,isTrackableBlock:ports.schedule.isTrackableBlock,clampText:domainPort.clampText,
+  invalidateIdleDisplay(){},setExecuteShellVisible(){},setExecuteControlsEnabled(){},clearExecuteStateOverlay(){},refreshPnote(){},requestRender(){},updateBadges(){},flushLiveDraft(){restoreFlushes++;}
+});
+const restoreNow=clock.now();
+const savedTimer={version:2,taskId:tasks[0].id,mode:'paused',paused:true,updatedAt:new Date(restoreNow-30000).toISOString(),timerState:{startMs:restoreNow-10800000,durationSec:600,totalPausedMs:0,pausedStartedMs:restoreNow-7200000,recordedSec:3600,overtimeNotified:false,lastTickMs:restoreNow-60000,sleepPausedMs:0},activeBreak:{type:'pomodoro',startedAtMs:restoreNow-7200000,plannedSeconds:300,cueIssuedAt:null,doneNotified:false},pendingInactiveGap:{gapMs:20000,promptMs:5000,detectedAtMs:restoreNow-30000,lastMs:restoreNow-50000,source:'restore'}};
+assert.equal(restorer.validateTimerRestoreCandidate({...savedTimer,taskId:'missing'}),null);
+const capped=restorer.deriveRestoredBreakState(savedTimer,0);
+assert.equal(capped.overrunCapped,true);assert.equal(capped.startedAtMs,restoreNow-2100000);
+assert.equal(restorer.deriveRestoredInactiveGap(savedTimer,0).promptMs,35000);
+timerState.pendingRestore=savedTimer;
+assert.equal(restorer.restoreTimerRuntimeIfAny(),true);
+assert.equal(timerState.pendingRestore,null);assert.equal(timerState.paused,true);assert.equal(restoreFlushes,1);
+assert.equal(restorer.restoreTimerRuntimeIfAny(),false,'a pending timer is consumed once');
+const roundTrip=restorer.timerRuntimePayload();assert.equal(roundTrip.taskId,savedTimer.taskId);assert.equal(roundTrip.pendingInactiveGap.gapMs,20000);assert.ok(roundTrip.timerState.recordedSec>=60);
+engine.stopExecution();

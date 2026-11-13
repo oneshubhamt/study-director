@@ -18,3 +18,7 @@ state.setResolved(0,'finished');
 state.getField(0,'unknown-field');
 // @ts-expect-error -- module identity is closed.
 registry.load('execution-host',1,'study-director.timer-engine-module',1);
+
+declare const gatewayInput:import('../execution-host.ts').ScheduleGatewayInput;
+const planGateway:import('../plan.ts').PlanScheduleGateway=execution.createScheduleGateway(gatewayInput);
+void planGateway;

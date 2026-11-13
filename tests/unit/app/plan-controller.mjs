@@ -25,10 +25,11 @@ class Node {
   addEventListener(type,handler){(this.handlers??={})[type]=handler;}
   contains(node){return this===node||this.childNodes.some(child=>typeof child.contains==='function'?child.contains(node):child===node);}
 }
+globalThis.Element=Node;globalThis.Node=Node;
 const ids=Object.fromEntries([
   'plan-input','sched-list','plan-board','plan-board-state','plan-board-caption',
   'plan-edit-btn','plan-done-edit-btn','plan-cancel-edit-btn'
-].map(id=>[id,new Node()]));
+].map(id=>[id,new Node(id==='plan-input'?'textarea':id.endsWith('-btn')?'button':'div')]));
 ids['plan-input'].value='Draft different';
 const composer=new Node(),applyButton=new Node();
 const document={
@@ -267,17 +268,20 @@ assert.doesNotMatch(nodeText(ids['sched-list']),/Earlier queued preview|Pending 
 // Structured row edits supersede a delayed Composer preview. It must not
 // rerender the row and unexpectedly move focus after the row was edited.
 plan.draft.install();
+for(const type of ['input','change','focusout','click','dragstart','dragover','dragleave','drop','dragend']){
+  for(const target of [null,{}, {nodeType:3}])assert.doesNotThrow(()=>ids['sched-list'].handlers[type]({target}),'non-element event targets are ignored');
+}
 ids['plan-input'].value='ROW:'+JSON.stringify([row('Row before edit')]);
 plan.draft.preview({silent:true,enterDraft:true});
 ids['plan-input'].value='ROW:'+JSON.stringify([row('Composer pending')]);
 plan.draft.composerInput();
 assert.equal(pendingTimers(220),1);
 const editorRow=ids['sched-list'].childNodes[0];
-const editedField={
+const editedField=Object.assign(new Node('input'),{
   tagName:'INPUT',value:'Row wins',dataset:{draftField:'name'},
   closest:selector=>selector==='[data-draft-field]'?editedField:
     selector==='.si.draft[data-draft-idx]'?editorRow:null
-};
+});
 ids['sched-list'].handlers.input({target:editedField});
 assert.equal(pendingTimers(220),0,'row edits cancel the stale Composer projection');
 assert.match(ids['plan-input'].value,/Row wins/u);

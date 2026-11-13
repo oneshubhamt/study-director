@@ -148,3 +148,44 @@ export interface ExecutionHostInput{
   }>;
   hooks:Readonly<{syncStudyQuiet():void}>;
 }
+
+export type ExecutionRuntime=ReturnType<import('../source/core/execution-host.ts').ExecutionHostModule['createRuntime']>;
+export type TimerRestoreCandidate={runtime:import('./record-models.ts').TimerPayload;idx:number;task:Task;rawState:import('./record-models.ts').TimerPayload['timerState'];durationSec:number};
+export interface TimerRestorationInput{
+  runtime:ExecutionRuntime;
+  DecisionClock:{nowMs():number};
+  isTrackableBlock(task:Task|undefined):boolean;
+  clampText(value:unknown,limit:number):string;
+  invalidateIdleDisplay():void;
+  setExecuteShellVisible(visible:boolean):void;
+  setExecuteControlsEnabled(enabled:boolean):void;
+  clearExecuteStateOverlay():void;
+  refreshPnote():void;
+  requestRender(...surfaces:string[]):void;
+  updateBadges():void;
+  flushLiveDraft(options:{markChanged:boolean}):unknown;
+}
+
+export type ScheduleProgressMatch={primaryKey:string;areaKey:string};
+export type ScheduleProgressFields={[K in keyof RuntimeTaskSessionFields]?:RuntimeTaskSessionFields[K]|undefined}&{target?:number|null;done?:boolean;skipped?:boolean};
+export type ScheduleProgressEntry=ScheduleProgressMatch&{idx:number;progress:ScheduleProgressFields};
+export type ScheduleProgressSnapshot={date:string;entries:ScheduleProgressEntry[];practiceLinks:(ScheduleProgressMatch&{oldTaskId:string})[];latestCarryForward:string;preview:{total:number;matched:number;practiceTotal:number;practiceMatched:number}};
+export type ScheduleGatewayOptions={studyDate?:string;source?:string;progressMigration?:ScheduleProgressSnapshot|null;sessionSnapshot?:import('./record-models.ts').SessionSnapshot|null;reviewOnly?:boolean;lifecycleManaged?:boolean};
+export type ScheduleStartupDecision={kind:'done'|'forward-complete'}|{kind:'start';idx:number;seconds:number}|{kind:'wait';idx:number};
+export interface ScheduleGatewayInput{
+  runtime:ExecutionRuntime;document:Document;ScheduleDerivedState:{renderDirty:boolean};APP_LIMITS:{maxCarryForwardChars:number};
+  completionSources:CompletionEvidenceInput['sources'];
+  getCarryForward():string;setCarryForward(value:string):void;
+  taskAreaKey:ScheduleModel['areaKey'];taskMeasureValue:ScheduleModel['measureValue'];taskTargetValue:ScheduleModel['targetValue'];
+  isTrackableBlock:ScheduleModel['isTrackable'];normalizeCompletionSource:CompletionModel['normalizeSource'];
+  makeTaskId:import('./domain.ts').DomainModule['makeTaskId'];buildTasks:ScheduleModel['buildTasks'];
+  clampText(value:unknown,limit:number):string;isLiveTrackableTimer():boolean;
+  saveNote():unknown;captureReviewInputs():unknown;syncUnfinishedNoteDraft():unknown;getReviewDate():string;
+  showEmpty(message:string,title?:string):void;refreshCoreUi(options:{header:boolean}):void;showDone():void;
+  isValidIsoDate(value:unknown):boolean;todayISO():string;isValidHHMM(value:unknown):boolean;clockMinuteToStudyMinute(value:number):number;t2m(value:string):number;
+  invalidateScheduleDerived(options:{identity?:boolean;render?:boolean}):void;
+  applySessionSnapshot(snapshot:import('./record-models.ts').SessionSnapshot):boolean;restoreLiveDraftIfAny():boolean;restoreTimerRuntimeIfAny():boolean;
+  clearFutureUntouchedProgress():unknown;flushLiveDraft():unknown;scheduleFingerprint():string;writeLiveDraftNow():unknown;
+  advanceTaskNoteScheduleRevision():unknown;markDayContentChanged():unknown;clearSessionSafetyMessage(reason:string):unknown;
+  SessionLifecycle:Pick<import('./session-lifecycle.ts').SessionCoordinator,'runSync'|'reconcile'>;
+}

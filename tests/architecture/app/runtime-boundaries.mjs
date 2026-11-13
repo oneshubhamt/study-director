@@ -12,6 +12,7 @@ const foundation=readRuntimeSource('source/core/foundation-host.ts');
 { // decision-clock-boundary
 const host=readHostHtml();
 const timer=readScript('source/core/timer-engine.ts');
+const execution=readScript('source/core/execution-host.ts');
 const sessionHost=readScript('source/core/session-host.ts');
 const sessionHandoff=readScript('source/core/session-handoff.ts');
 const attachments=readScript('source/core/attachments.ts');
@@ -43,9 +44,9 @@ assert.match(mutation,/const id=`mutation_\$\{nowMs\(\)\.toString\(36\)\}_/,'mut
 assert.match(mutation,/startedAt:new Date\(\)\.toISOString\(\)/,'human/audit mutation start time remains informational wall clock');
 
 assert.doesNotMatch(host,/PracticePacer\.pauseFromMain\(PRACTICE_PAUSE_CAUSES\.MAIN\s*,\s*Date\.now\(\)\)/,'host Pacer bridges must not bypass the injected Pacer clock');
-assert.equal((host.match(/PracticePacer\.pauseFromMain\(PRACTICE_PAUSE_CAUSES\.MAIN\);/g)||[]).length,2,'both host Pacer pause bridges defer to the Pacer clock');
+assert.equal(((host+execution).match(/PracticePacer\.pauseFromMain\(PRACTICE_PAUSE_CAUSES\.MAIN\);/g)||[]).length,2,'both host Pacer pause bridges defer to the Pacer clock');
 
-const runtimePayload=section(host,'function timerRuntimePayload(){','/* DATE AND REVIEW-DAY HELPERS */');
+const runtimePayload=section(execution,'function timerRuntimePayload(', 'function validateTimerRestoreCandidate(');
 assert.doesNotMatch(runtimePayload,/Date\.now\(\)/,'persisted timer runtime arithmetic uses DecisionClock');
 assert.match(runtimePayload,/DecisionClock\.nowMs\(\)/,'timer runtime captures decision time from DecisionClock');
 
@@ -80,11 +81,11 @@ assert.match(finishTransition,/rollbackSnapshot=ActiveSessionRuntime\.captureSna
 assert.match(finishTransition,/ActiveSessionRuntime\.rollbackLocalTransition\(rollbackSnapshot,'finish-today-rollback'\)/u,'failed finish delegates runtime and recovery compensation to the checked local-session owner');
 assert.doesNotMatch(finishTransition,/withPersistenceSuppressed|applyStoredSession\(rollbackSession|writeSnapshot\(rollbackSnapshot/u,'finish host wiring must not duplicate the local-session rollback state machine');
 
-const restoreTimer=section(host,'function deriveRestoredTimerState(candidate){','function isRestorableActiveSession(session){');
+const restoreTimer=section(execution,'function deriveRestoredTimerState(', 'function createScheduleGateway(');
 assert.doesNotMatch(restoreTimer,/Date\.now\(\)/,'restored timer/gap/break arithmetic uses DecisionClock');
 assert.match(restoreTimer,/now=DecisionClock\.nowMs\(\)/,'restored timer fallbacks capture DecisionClock once');
-assert.match(restoreTimer,/deriveRestoredInactiveGap\(runtime,idx,now=DecisionClock\.nowMs\(\)\)/,'restored inactive-gap arithmetic uses DecisionClock');
-assert.match(restoreTimer,/deriveRestoredBreakState\(runtime,idx,now=DecisionClock\.nowMs\(\)\)/,'restored break arithmetic uses DecisionClock');
+assert.match(restoreTimer,/deriveRestoredInactiveGap\(runtime\s*,idx\s*,now=DecisionClock\.nowMs\(\)\)/,'restored inactive-gap arithmetic uses DecisionClock');
+assert.match(restoreTimer,/deriveRestoredBreakState\(runtime\s*,idx\s*,now=DecisionClock\.nowMs\(\)\)/,'restored break arithmetic uses DecisionClock');
 
 assert.match(host,/nowIso:\(\)=>new Date\(\)\.toISOString\(\)\n\}\)\);/,'Library-clear informational rollback stamps remain wall clock');
 
@@ -127,7 +128,7 @@ assert.match(timer,/function syncTimerAfterWake\(\)\{[\s\S]*?if\(!appCanMutate\(
 assert.match(timer,/function resumeRestoredPaused\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;/u,'paused timer restoration is authority fenced inside the engine');
 assert.match(timer,/function resumeRestoredRunning\(\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;/u,'running timer restoration is authority fenced inside the engine');
 assert.match(timer,/function recoveryCaptureActiveBeforeSwitch\(\)\{[\s\S]*?if\(!appCanMutate\(\)[\s\S]*?recordCurrentActiveToTask[\s\S]*?storeResolvedCompletion/u,'timer switching captures focus/completion inside the checked engine under current authority');
-assert.match(host,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|resolveActivePauseBeforeTimerSwitch\(\)!==true\)return false;[\s\S]*?writeLiveDraftNow\(\)/u,'Plan break termination delegates to the ownership-fenced checked timer transition after confirmation');
+assert.match(executionHost,/function breakState\(action='status'\)[\s\S]*?if\(!active\|\|resolveActivePauseBeforeTimerSwitch\(\)!==true\)return false;[\s\S]*?writeLiveDraftNow\(\)/u,'Plan break termination delegates to the ownership-fenced checked timer transition after confirmation');
 assert.match(plan,/return scheduleGateway\.breakState\('end'\)===true;/u,'Plan application propagates a failed break termination instead of claiming success');
 assert.doesNotMatch(review,/function setCompletionState\(/u,'Review must consume the checked completion-state owner instead of maintaining a duplicate mutator');
 assert.match(review,/resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState/u,'Review completion editing consumes the checked execution evidence port');
@@ -174,7 +175,7 @@ const host=readHostHtml();
 for(const token of ['TimerEngine','TimerState','SessionLifecycle','AppData.activeSession','flushLiveDraft','restoreSessionState','setCurrentTask','Pomodoro','PracticePacer']){
   assert.equal(plan.includes(token),false,`Plan authoring must not absorb live runtime ownership: ${token}`);
 }
-assert.match(plan,/scheduleGateway\.apply\(lastParsed,/u,'validated Plan application must cross the scheduleGateway runtime port');
+assert.match(plan,/scheduleGateway\.apply\(parsed,/u,'validated Plan application must cross the scheduleGateway runtime port');
 assert.match(plan,/if\(opts\.persistDraft===false\)return apply\(\);/u,'canonical session restoration must retain its synchronous no-draft-write seam');
 assert.match(plan,/save\(\{strictDurability:true\}\)/u,'user-authored Apply/Done remains gated by strict durable draft persistence');
 assert.match(host,/PlanHostModule\.createData\(/u,'PlanData composition must cross the checked Plan host boundary');

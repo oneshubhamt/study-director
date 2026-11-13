@@ -1,3 +1,9 @@
+import type {TaskInput,ScheduleRow} from '../../types/domain.ts';
+import type {ScheduleGatewayInput,ScheduleProgressMatch,ScheduleProgressFields,ScheduleProgressEntry,ScheduleProgressSnapshot,ScheduleStartupDecision,ScheduleGatewayOptions} from '../../types/execution-host.ts';
+import type {TimerPayload} from '../../types/record-models.ts';
+import type {Runtime,InactiveGap} from '../../types/timer-state.ts';
+import type {RestoredBreak} from '../../types/timer-engine.ts';
+import type {TimerRestorationInput,TimerRestoreCandidate} from '../../types/execution-host.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {CompletionEvidenceController,CompletionEvidenceInput,ExecutionAnchorRow,ExecutionHostInput,ExecutionScheduleController,ExecutionScheduleInput,ExecutionScheduleRow,RealTimeScheduleState,RuntimeTaskSessionFields,TaskIdentityPort,TaskResolvedState,TaskSessionField,TaskSessionStore} from '../../types/execution-host.ts';
 import type {TimerEngineInput} from '../../types/timer-engine.ts';
@@ -365,6 +371,486 @@ function createCompletionEvidence(input:Readonly<CompletionEvidenceInput>):Reado
     exactTaskCompletionPercent,storeResolvedCompletion,setCompletionState,toggleDoneState,setTaskDoneState,setTaskSkippedState
   });
 }
+function createTimerRestoration(ports:Readonly<TimerRestorationInput>){
+  const {TimerState,TaskIdentity,TASKS,TIMER_MODES,TimerEngine,Pomodoro}=ports.runtime;
+  const {currentTimerActiveSeconds,restoredRuntimeRecordedSec,reopenActualSessionForTimer,setTimerIdentity}=TimerEngine;
+  const {setCurrentTask,isTaskResolved}=ports.runtime;
+  const {DecisionClock,isTrackableBlock,clampText,setExecuteShellVisible,setExecuteControlsEnabled,clearExecuteStateOverlay,refreshPnote,requestRender,updateBadges,flushLiveDraft}=ports;
+  const POMODORO_RESTORE_OVERRUN_GRACE_SEC=30*60;
+function timerRuntimePayload():TimerPayload|null{
+  if(!TimerState.runtime||TimerState.runtime.startMs===null||!(TimerState.currentIndex<TASKS.length)||!isTrackableBlock(TASKS[TimerState.currentIndex]))return null;
+  const taskId=TaskIdentity.idAt(TimerState.currentIndex);if(!taskId)return null;
+  const cycle=Pomodoro.timerEvent('cycle-snapshot');
+  const runtime:TimerPayload={
+    version:2,taskId,mode:TimerState.paused?TIMER_MODES.PAUSED:TIMER_MODES.RUNNING,paused:!!TimerState.paused,updatedAt:new Date().toISOString(),
+    timerState:{
+      startMs:Math.max(0,Math.round(Number(TimerState.runtime.startMs)||0)),durationSec:Math.max(1,Math.round(Number(TimerState.runtime.durationSec)||0)),
+      totalPausedMs:Math.max(0,Math.round(Number(TimerState.runtime.totalPausedMs)||0)),
+      pausedStartedMs:TimerState.runtime.pausedStartedMs?Math.max(0,Math.round(Number(TimerState.runtime.pausedStartedMs)||0)):null,
+      recordedSec:Math.max(0,Math.round(Number(currentTimerActiveSeconds())||0)),overtimeNotified:!!TimerState.runtime.overtimeNotified,
+      lastTickMs:TimerState.runtime.lastTickMs?Math.max(0,Math.round(Number(TimerState.runtime.lastTickMs)||0)):null,
+      sleepPausedMs:Math.max(0,Math.round(Number(TimerState.runtime.sleepPausedMs)||0))
+    },
+    ...(cycle?{nudgeCycle:cycle}:{})
+  };
+  if(TimerState.paused&&TimerState.activeBreak&&TimerState.activeBreak.taskIdx===TimerState.currentIndex){
+    runtime.activeBreak={
+      type:TimerState.activeBreak.type==='pomodoro'?'pomodoro':'manual',startedAtMs:Math.max(0,Math.round(Number(TimerState.activeBreak.startedAtMs)||DecisionClock.nowMs())),
+      plannedSeconds:TimerState.activeBreak.type==='pomodoro'?Math.max(60,Math.round(Number(TimerState.activeBreak.plannedSeconds)||Pomodoro.configuration.breakSeconds())):0,
+      cueIssuedAt:TimerState.activeBreak.type==='pomodoro'&&TimerState.activeBreak.cueIssuedAt?clampText(TimerState.activeBreak.cueIssuedAt,40):null,doneNotified:!!TimerState.activeBreak.doneNotified
+    };
+  }
+  if(TimerState.inactiveGap&&TimerState.inactiveGap.taskIdx===TimerState.currentIndex){
+    const capturedAt=DecisionClock.nowMs();
+    runtime.pendingInactiveGap={
+      gapMs:Math.max(0,Math.round(Number(TimerState.inactiveGap.gapMs)||0)),
+      promptMs:Math.max(0,Math.round(Number(TimerState.inactiveGap.promptMs)||0))+Math.max(0,capturedAt-(Number(TimerState.inactiveGap.detectedAtMs)||capturedAt)),
+      detectedAtMs:capturedAt,lastMs:Math.max(0,Math.round(Number(TimerState.inactiveGap.lastMs)||0)),source:clampText(TimerState.inactiveGap.source||'restore',40)
+    };
+  }
+  return runtime;
+}
+function validateTimerRestoreCandidate(runtime:TimerPayload|null):TimerRestoreCandidate|null{
+  if(!runtime||!TASKS.length)return null;
+  const taskId=clampText(runtime.taskId||'',80),idx=TaskIdentity.indexForId(taskId);
+  const task=idx===null?undefined:TASKS[idx];
+  if(idx===null||!task||!isTrackableBlock(task)||isTaskResolved(idx))return null;
+  const rawState=runtime.timerState||{};
+  const durationSec=Math.max(1,Math.round(Number(rawState.durationSec)||task.dur*60));
+  return {runtime,idx,task,rawState,durationSec};
+}
+function deriveRestoredTimerState(candidate:TimerRestoreCandidate):Runtime{
+  const {runtime,idx,rawState,durationSec}=candidate,now=DecisionClock.nowMs();
+  const restored={
+    ...TimerState.emptyRuntime(),
+    taskIdx:idx,
+    startMs:Math.max(0,Math.round(Number(rawState.startMs)||now)),
+    durationSec,
+    totalPausedMs:Math.max(0,Math.round(Number(rawState.totalPausedMs)||0)),
+    pausedStartedMs:rawState.pausedStartedMs?Math.max(0,Math.round(Number(rawState.pausedStartedMs)||0)):null,
+    recordedSec:Math.max(0,Math.round(Number(rawState.recordedSec)||0)),
+    overtimeNotified:!!rawState.overtimeNotified,
+    lastTickMs:rawState.lastTickMs?Math.max(0,Math.round(Number(rawState.lastTickMs)||0)):now,
+    sleepPausedMs:Math.max(0,Math.round(Number(rawState.sleepPausedMs)||0))
+  };
+  restored.recordedSec=restoredRuntimeRecordedSec(runtime,restored);
+  return restored;
+}
+function applyRestoredTimerState(candidate:TimerRestoreCandidate,restoredState:Runtime){
+  setCurrentTask(candidate.idx);
+  ports.invalidateIdleDisplay();
+  TimerEngine.setCountdownDuration(candidate.durationSec);
+  TimerState.runtime=restoredState;
+  reopenActualSessionForTimer(candidate.idx,candidate.durationSec,(candidate.runtime.paused&&candidate.runtime.activeBreak)?'paused':'in_progress');
+}
+function renderRestoredTimer(candidate:TimerRestoreCandidate){
+  setTimerIdentity(candidate.task,candidate.idx);
+  setExecuteShellVisible(true);
+  setExecuteControlsEnabled(true);
+  clearExecuteStateOverlay();
+  refreshPnote();
+  requestRender('schedule','realtime');
+}
+function deriveRestoredInactiveGap(runtime:TimerPayload,idx:number,now=DecisionClock.nowMs()):InactiveGap|null{
+  if(!runtime.pendingInactiveGap)return null;
+  const gap=runtime.pendingInactiveGap;
+  const savedAt=Date.parse(runtime.updatedAt||'');
+  return {
+    id:`gap_${gap.detectedAtMs||now}`,
+    taskIdx:idx,
+    gapMs:Math.max(0,Math.round(Number(gap.gapMs)||0)),
+    promptMs:Math.max(0,Math.round(Number(gap.promptMs)||0))+(Number.isFinite(savedAt)?Math.max(0,now-savedAt):0),
+    lastMs:Math.max(0,Math.round(Number(gap.lastMs)||0)),
+    detectedAtMs:now,
+    source:gap.source||'restore'
+  };
+}
+function deriveRestoredBreakState(runtime:TimerPayload,idx:number,now=DecisionClock.nowMs()):RestoredBreak|null{
+  if(!(runtime.paused&&runtime.activeBreak))return null;
+  const raw=runtime.activeBreak;
+  const type=raw.type==='pomodoro'?'pomodoro':'manual';
+  let startedAtMs=Math.max(0,Math.round(Number(raw.startedAtMs)||now));
+  const plannedSeconds=type==='pomodoro'?Math.max(60,Math.round(Number(raw.plannedSeconds)||Pomodoro.configuration.breakSeconds())):0;
+  let elapsedSeconds=Math.max(0,Math.floor((now-startedAtMs)/1000));
+  let overrunCapped=false;
+  if(type==='pomodoro'&&elapsedSeconds>plannedSeconds+POMODORO_RESTORE_OVERRUN_GRACE_SEC){
+    elapsedSeconds=plannedSeconds+POMODORO_RESTORE_OVERRUN_GRACE_SEC;
+    startedAtMs=now-elapsedSeconds*1000;
+    overrunCapped=true;
+  }
+  return {
+    now,startedAtMs,overrunCapped,
+    activeBreak:{
+      type,taskIdx:idx,startedAtMs,plannedSeconds,
+      cueIssuedAt:type==='pomodoro'?raw.cueIssuedAt||null:null,
+      doneNotified:!!raw.doneNotified&&elapsedSeconds>=plannedSeconds
+    }
+  };
+}
+function resumeRestoredPausedTimer(restoredBreak:RestoredBreak){return TimerEngine.resumeRestoredPaused(restoredBreak);}
+function resumeRestoredRunningTimer(){return TimerEngine.resumeRestoredRunning();}
+function finalizeRestoredTimerPersistence(){
+  updateBadges();
+  flushLiveDraft({markChanged:false});
+}
+function restoreTimerRuntimeIfAny(){
+  const runtime=TimerState.pendingRestore;
+  TimerState.pendingRestore=null;
+  const candidate=validateTimerRestoreCandidate(runtime);
+  if(!candidate||!runtime)return false;
+  const restoredState=deriveRestoredTimerState(candidate);
+  applyRestoredTimerState(candidate,restoredState);
+  renderRestoredTimer(candidate);
+  Pomodoro.timerEvent('restore-cycle',{cycle:runtime.nudgeCycle||null,activeSec:currentTimerActiveSeconds()});
+  TimerState.inactiveGap=deriveRestoredInactiveGap(runtime,candidate.idx);
+  const restoredBreak=deriveRestoredBreakState(runtime,candidate.idx);
+  if(restoredBreak)resumeRestoredPausedTimer(restoredBreak);
+  else resumeRestoredRunningTimer();
+  finalizeRestoredTimerPersistence();
+  return true;
+}
+return freeze({timerRuntimePayload,validateTimerRestoreCandidate,deriveRestoredTimerState,applyRestoredTimerState,renderRestoredTimer,deriveRestoredInactiveGap,deriveRestoredBreakState,resumeRestoredPausedTimer,resumeRestoredRunningTimer,finalizeRestoredTimerPersistence,restoreTimerRuntimeIfAny});
+}
+function createScheduleGateway(ports:Readonly<ScheduleGatewayInput>){
+
+  const {TASKS,TimerState,TaskSessionState,PracticePacer,TaskIdentity,TIMER_MODES,
+    plannedRows,getRealTimeState,isTaskResolved,remainingWindowSeconds,setCurrentTask,resetScheduleLayers,
+    resetCountdownRuntime,setTimerMode,clearProgressRuntime,buildLiveTimeline,hasAdjustedTiming,
+    adjustedStartMin,adjustedEndMin,originalStartMin,originalEndMin}=ports.runtime;
+  const {currentTimerActiveSeconds,recordCurrentActiveToTask,startCur,toggleDone,jumpTo,resolveActivePauseBeforeTimerSwitch}=ports.runtime.TimerEngine;
+  const {taskAreaKey,taskMeasureValue,taskTargetValue,isTrackableBlock,clampText,normalizeCompletionSource,makeTaskId,
+    isLiveTrackableTimer,saveNote,captureReviewInputs,syncUnfinishedNoteDraft,getReviewDate,
+    showEmpty,refreshCoreUi,showDone,isValidIsoDate,todayISO,buildTasks,isValidHHMM,clockMinuteToStudyMinute,t2m,
+    invalidateScheduleDerived,applySessionSnapshot,restoreLiveDraftIfAny,restoreTimerRuntimeIfAny,
+    clearFutureUntouchedProgress,flushLiveDraft,scheduleFingerprint,writeLiveDraftNow,advanceTaskNoteScheduleRevision,
+    markDayContentChanged,clearSessionSafetyMessage,SessionLifecycle,document,ScheduleDerivedState,APP_LIMITS}=ports;
+  const PRACTICE_PAUSE_CAUSES=ports.runtime.PracticePacerModel.PRACTICE_PAUSE_CAUSES;
+  const COMPLETION_SOURCES=ports.completionSources;
+function hasProtectedLiveProgress(){
+  const hasTrackedTime=Object.values(TaskSessionState.indexSnapshot('actualTime')).some(value=>Number(value)>0);
+  const activeSeconds=(TimerState.runtime&&TimerState.runtime.startMs!==null)?currentTimerActiveSeconds():0;
+  const practice=PracticePacer.status();
+  return hasTrackedTime || activeSeconds>5 || !!practice.active || practice.runs.length>0 || TaskSessionState.resolvedIndices('done').length>0 || TaskSessionState.resolvedIndices('skipped').length>0 ||
+    Object.keys(TaskSessionState.indexSnapshot('completion')).length>0 || Object.keys(TaskSessionState.indexSnapshot('completionSource')).length>0 ||
+    Object.keys(TaskSessionState.indexSnapshot('notes')).length>0 || Object.keys(TimerState.adjustedSchedule||{}).length>0 || !!String(ports.getCarryForward()||'').trim();
+}
+function cloneProgressData<T>(value:T):T{
+  if(value===undefined)return value;
+  if(value===null||typeof value!=='object')return value;
+  try{return JSON.parse(JSON.stringify(value)) as T;}
+  catch(e){return (Array.isArray(value)?value.slice():{...value}) as T;}
+}
+function progressIdentityText(value:unknown){
+  return String(value||'').trim().replace(/\s+/g,' ').toLowerCase();
+}
+function taskProgressPrimaryKey(t:TaskInput){
+  return [
+    t&&t.kind||'work',
+    taskAreaKey(t),
+    progressIdentityText(t&&t.name),
+    progressIdentityText(taskMeasureValue(t,'')),
+    progressIdentityText(taskTargetValue(t)??'')
+  ].join('|');
+}
+function taskProgressAreaKey(t:TaskInput){
+  return [
+    t&&t.kind||'work',
+    taskAreaKey(t),
+    progressIdentityText(taskMeasureValue(t,''))
+  ].join('|');
+}
+function hasObjectData(value:unknown){
+  return !!(value&&typeof value==='object'&&Object.keys(value).length);
+}
+function hasBlockProgressAtIndex(idx:number){
+  const progress=TaskSessionState.getField(idx,'notes');
+  return TaskSessionState.getField(idx,'completion')!==undefined || TaskSessionState.isResolved(idx) ||
+    (progress&&(progress.done!==undefined||progress.total!==undefined)) ||
+    TaskSessionState.getField(idx,'actualTime')!==undefined || hasObjectData(TaskSessionState.getField(idx,'actualClock')) || hasObjectData(TaskSessionState.getField(idx,'actualRecords'));
+}
+function captureProgressBeforeScheduleChange(){
+  PracticePacer.pauseFromMain(PRACTICE_PAUSE_CAUSES.MAIN);
+  try{
+    if(isLiveTrackableTimer())recordCurrentActiveToTask(TimerState.currentIndex,'partial');
+  }catch(e){}
+  try{if(TASKS[TimerState.currentIndex]&&isTrackableBlock(TASKS[TimerState.currentIndex]))saveNote();}catch(e){}
+  try{captureReviewInputs();}catch(e){}
+  try{syncUnfinishedNoteDraft();}catch(e){}
+}
+function buildProgressMatchIndex(rows:readonly TaskInput[]){
+  const primary=new Map<string,number[]>(),area=new Map<string,number[]>();
+  (rows||[]).forEach((t,idx)=>{
+    if(!isTrackableBlock(t))return;
+    const pk=taskProgressPrimaryKey(t);
+    const ak=taskProgressAreaKey(t);
+    if(!primary.has(pk))primary.set(pk,[]);
+    if(!area.has(ak))area.set(ak,[]);
+    primary.get(pk)!.push(idx);
+    area.get(ak)!.push(idx);
+  });
+  return {primary,area};
+}
+function uniqueIndex(map:ReadonlyMap<string,number[]>,key:string){
+  const rows=map.get(key)||[];
+  return rows.length===1?rows[0]!:null;
+}
+function matchProgressEntriesToRows<T extends ScheduleProgressMatch>(entries:readonly T[],rows:readonly TaskInput[]){
+  const idx=buildProgressMatchIndex(rows);
+  const oldAreaCounts=new Map<string,number>();
+  (entries||[]).forEach(entry=>oldAreaCounts.set(entry.areaKey,(oldAreaCounts.get(entry.areaKey)||0)+1));
+  const used=new Set();
+  return (entries||[]).map(entry=>{
+    let target=uniqueIndex(idx.primary,entry.primaryKey);
+    let matchType:'exact'|'area'='exact';
+    if(target===null&&oldAreaCounts.get(entry.areaKey)===1){
+      target=uniqueIndex(idx.area,entry.areaKey);
+      matchType='area';
+    }
+    if(target===null||used.has(target))return null;
+    used.add(target);
+    return {entry,target,matchType};
+  }).filter((value):value is NonNullable<typeof value>=>value!==null);
+}
+function snapshotPracticeTaskLinksForMigration(){
+  const practice=PracticePacer.snapshot();
+  if(!practice)return [];
+  const referenced=new Set();
+  if(practice.active&&practice.active.taskId)referenced.add(practice.active.taskId);
+  (practice.runs||[]).forEach(run=>{if(run.taskId)referenced.add(run.taskId);});
+  return TASKS.map((task,idx)=>{
+    const oldTaskId=TaskIdentity.idAt(idx);
+    if(!oldTaskId||!referenced.has(oldTaskId)||!isTrackableBlock(task))return null;
+    return {oldTaskId,primaryKey:taskProgressPrimaryKey(task),areaKey:taskProgressAreaKey(task)};
+  }).filter((value):value is NonNullable<typeof value>=>value!==null);
+}
+function progressTargetsDiffer(oldTarget:unknown,newTarget:unknown){
+  const oldEmpty=oldTarget===null||oldTarget===undefined||oldTarget==='';
+  const newEmpty=newTarget===null||newTarget===undefined||newTarget==='';
+  if(oldEmpty&&newEmpty)return false;
+  return Number(oldTarget)!==Number(newTarget);
+}
+function recalcMigratedProgressForNewTarget(p:ScheduleProgressFields,targetIdx:number,matchType:'exact'|'area'){
+  const out=cloneProgressData(p||{});
+  if(matchType!=='area')return out;
+  const oldTarget=out.target;
+  const newTarget=taskTargetValue(TASKS[targetIdx]);
+  if(!progressTargetsDiffer(oldTarget,newTarget))return out;
+  if(out.notes&&typeof out.notes==='object')delete out.notes.total;
+  const done=out.notes&&Number.isFinite(Number(out.notes.done))?Number(out.notes.done):null;
+  const total=Number(newTarget);
+  if(done!==null&&Number.isFinite(total)&&total>0){
+    out.completion=Math.min(100,Math.max(0,Math.round((done/total)*100)));
+    out.completionSource=COMPLETION_SOURCES.UNITS;
+    out.done=!!out.done||out.completion>=100;
+    if(out.done)out.skipped=false;
+  }
+  return out;
+}
+function snapshotScheduleProgressForMigration(newRows:readonly TaskInput[]){
+  captureProgressBeforeScheduleChange();
+  const entries:ScheduleProgressEntry[]=[];
+  TASKS.forEach((t,idx)=>{
+    if(!isTrackableBlock(t)||!hasBlockProgressAtIndex(idx))return;
+    entries.push({
+      idx,
+      primaryKey:taskProgressPrimaryKey(t),
+      areaKey:taskProgressAreaKey(t),
+      progress:{
+        completion:TaskSessionState.getField(idx,'completion'),
+        completionSource:TaskSessionState.getField(idx,'completionSource'),
+        notes:TaskSessionState.getField(idx,'notes')?cloneProgressData(TaskSessionState.getField(idx,'notes')):undefined,
+        done:TaskSessionState.isDone(idx),
+        skipped:TaskSessionState.isSkipped(idx),
+        target:taskTargetValue(t),
+        actualTime:TaskSessionState.getField(idx,'actualTime'),
+        actualClock:TaskSessionState.getField(idx,'actualClock')?cloneProgressData(TaskSessionState.getField(idx,'actualClock')):undefined,
+        actualRecords:TaskSessionState.getField(idx,'actualRecords')?cloneProgressData(TaskSessionState.getField(idx,'actualRecords')):undefined
+      }
+    });
+  });
+  const practiceLinks=snapshotPracticeTaskLinksForMigration();
+  const matched=matchProgressEntriesToRows(entries,newRows).length;
+  const practiceMatched=matchProgressEntriesToRows(practiceLinks,newRows).length;
+  return {
+    date:getReviewDate(),
+    entries,
+    practiceLinks,
+    latestCarryForward:clampText(ports.getCarryForward(),APP_LIMITS.maxCarryForwardChars),
+    preview:{total:entries.length,matched,practiceTotal:practiceLinks.length,practiceMatched}
+  };
+}
+function restoreMigratedScheduleProgress(snapshot:ScheduleProgressSnapshot|null){
+  const total=snapshot&&Array.isArray(snapshot.entries)?snapshot.entries.length:0;
+  const practiceTotal=snapshot&&Array.isArray(snapshot.practiceLinks)?snapshot.practiceLinks.length:0;
+  if(!snapshot||snapshot.date!==getReviewDate())return {total,matched:0,areaMatched:0,practiceTotal,practiceMatched:0,practiceRemapped:0};
+  const matches=matchProgressEntriesToRows(snapshot.entries||[],TASKS);
+  matches.forEach(({entry,target,matchType})=>{
+    const p=recalcMigratedProgressForNewTarget(entry.progress,target,matchType);
+    if(p.completion!==undefined)TaskSessionState.setField(target,'completion',Number(p.completion));
+    if(p.completionSource!==undefined)TaskSessionState.setField(target,'completionSource',normalizeCompletionSource(p.completionSource));
+    if(p.notes!==undefined)TaskSessionState.setField(target,'notes',cloneProgressData(p.notes));
+    if(p.actualTime!==undefined)TaskSessionState.setField(target,'actualTime',Number(p.actualTime)||0);
+    if(p.actualClock!==undefined)TaskSessionState.setField(target,'actualClock',cloneProgressData(p.actualClock));
+    if(p.actualRecords!==undefined){
+      const rec=cloneProgressData(p.actualRecords);
+      rec.idx=target;
+      rec.taskId=TASKS[target]?.id||makeTaskId(TASKS[target]||{},target);
+      TaskSessionState.setField(target,'actualRecords',rec);
+    }
+    if(p.done)TaskSessionState.setResolved(target,'done');
+    if(p.skipped)TaskSessionState.setResolved(target,'skipped');
+  });
+  const practiceMatches=matchProgressEntriesToRows(snapshot.practiceLinks||[],TASKS);
+  const taskIdMap=new Map<string,string>();
+  practiceMatches.forEach(({entry,target})=>{
+    const nextTaskId=TaskIdentity.idAt(target);
+    if(entry.oldTaskId&&nextTaskId)taskIdMap.set(entry.oldTaskId,nextTaskId);
+  });
+  const practiceRemapped=PracticePacer.remapTaskLinks(taskIdMap);
+  if(String(snapshot.latestCarryForward||'').trim())ports.setCarryForward(snapshot.latestCarryForward);
+  return {
+    total,
+    matched:matches.length,
+    areaMatched:matches.filter(m=>m.matchType==='area').length,
+    practiceTotal,
+    practiceMatched:practiceMatches.length,
+    practiceRemapped
+  };
+}
+function enterRecoveredReviewMode(){
+  const firstUnresolved=plannedRows().find(row=>isTrackableBlock(row.t)&&!isTaskResolved(row.idx));
+  setCurrentTask(firstUnresolved?firstUnresolved.idx:TASKS.length);
+  showEmpty('Recovered evidence is available in Review. The previous timer was intentionally not restarted.','Previous Study Day Recovered');
+  refreshCoreUi({header:true});
+}
+function deriveScheduleStartupDecision():ScheduleStartupDecision{
+  const unresolvedRows=plannedRows().filter(row=>isTrackableBlock(row.t)&&!isTaskResolved(row.idx));
+  if(!unresolvedRows.length)return {kind:'done'};
+  const state=getRealTimeState();
+  const scheduledIdx=state.scheduledIdx;
+  if(scheduledIdx!==null&&isTrackableBlock(TASKS[scheduledIdx])&&!isTaskResolved(scheduledIdx)){
+    return {kind:'start',idx:scheduledIdx,seconds:remainingWindowSeconds(scheduledIdx)};
+  }
+  const nextRow=unresolvedRows.find(row=>row.start>=state.nowEff);
+  if(nextRow)return {kind:'wait',idx:nextRow.idx};
+  return {kind:'forward-complete'};
+}
+function applyScheduleStartupDecision(decision:ScheduleStartupDecision){
+  if(decision.kind==='done'){
+    setCurrentTask(TASKS.length);
+    showDone();
+    return;
+  }
+  if(decision.kind==='start'){
+    setCurrentTask(decision.idx);
+    startCur(decision.seconds);
+    return;
+  }
+  if(decision.kind==='wait'){
+    setCurrentTask(decision.idx);
+    showEmpty('Waiting for a trackable schedule window. The timer will auto-start when the wall-clock enters the next unfinished work/support block.');
+    refreshCoreUi({header:true});
+    return;
+  }
+  setCurrentTask(TASKS.length);
+  showEmpty('No later trackable block remains in today’s forward plan. Earlier untouched blocks stay available for deliberate selection or Review.','Forward Plan Complete');
+  refreshCoreUi({header:true});
+}
+function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}){
+  TimerState.loadSchedule(buildTasks(rows),{
+    studyDate:options.studyDate&&isValidIsoDate(options.studyDate)?options.studyDate:todayISO()
+  });
+  TimerState.scheduleAnchorMin=rows.length&&isValidHHMM(rows[0]!.start)?clockMinuteToStudyMinute(t2m(rows[0]!.start)):0;
+  invalidateScheduleDerived({identity:true,render:true});
+  resetScheduleLayers();setCurrentTask(0);resetCountdownRuntime();setTimerMode(TIMER_MODES.READY,'schedule-apply');clearProgressRuntime();ports.setCarryForward('');
+  const restoredLiveDraft=options.progressMigration?false:(options.sessionSnapshot?applySessionSnapshot(options.sessionSnapshot):restoreLiveDraftIfAny());
+  const migrationSummary=options.progressMigration?restoreMigratedScheduleProgress(options.progressMigration):null;
+  const restoredTimerRuntime=restoredLiveDraft&&!options.reviewOnly?restoreTimerRuntimeIfAny():false;
+  if(restoredLiveDraft)clearFutureUntouchedProgress();
+  const restored={restoredLiveDraft,migrationSummary,restoredTimerRuntime};
+  if(options.reviewOnly){enterRecoveredReviewMode();return {...restored,restoredTimerRuntime:false};}
+  if(!restoredTimerRuntime){applyScheduleStartupDecision(deriveScheduleStartupDecision());flushLiveDraft();}
+  return restored;
+}
+
+  function apply(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}){
+    const opts=options&&typeof options==='object'?options:{};
+    if(opts.lifecycleManaged)return applyRows(rows,opts);
+    const date=isValidIsoDate(opts.studyDate)?opts.studyDate:todayISO();
+    return SessionLifecycle.runSync(opts.source||'schedule-apply',{
+      scheduleIdentity:true,date,autoDate:date===todayISO(),snapshotReview:null,
+    },()=>applyRows(rows,{...opts,lifecycleManaged:true}));
+  }
+  function reconcile(source='schedule-reapply'){
+    return SessionLifecycle.reconcile(source,{
+      scheduleIdentity:true,date:getReviewDate(),
+      autoDate:document.getElementById('day-date')?.dataset['autoDate']==='1',
+
+    });
+  }
+  function read(){
+    return Object.freeze({
+      tasks:TASKS,
+      currentIndex:TimerState.currentIndex,
+      anchor:TimerState.scheduleAnchorMin,
+      fingerprint:scheduleFingerprint(),
+      renderDirty:!!ScheduleDerivedState.renderDirty
+    });
+  }
+  function timeline(){return Object.freeze({rows:buildLiveTimeline(),realtime:getRealTimeState()});}
+  function row(index:number){
+    const i=Number(index);
+    return Object.freeze({
+      done:TaskSessionState.isDone(i),
+      skipped:TaskSessionState.isSkipped(i),
+      adjusted:hasAdjustedTiming(i),
+      adjustedStartMin:adjustedStartMin(i),
+      adjustedEndMin:adjustedEndMin(i),
+      originalStartMin:originalStartMin(i),
+      originalEndMin:originalEndMin(i),
+      actualTime:TaskSessionState.getField(i,'actualTime'),
+      actualClock:TaskSessionState.getField(i,'actualClock')||null
+    });
+  }
+  function act(action:string,index:number){
+    if(action==='toggle')return toggleDone(index);
+    if(action==='jump')return jumpTo(index);
+    throw new TypeError('Unknown Plan schedule action.');
+  }
+  function hasLiveState(){
+    const hasTimer=!!(TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]));
+    return hasTimer||TimerState.paused||!!TimerState.activeBreak||hasProtectedLiveProgress();
+  }
+  function breakState(action='status'){
+    const active=!!(TimerState.paused&&TimerState.activeBreak&&TimerState.runtime&&TimerState.runtime.startMs!==null);
+    if(action==='status')return active;
+    if(action!=='end')throw new TypeError('Unknown Plan schedule break action.');
+    if(!active||resolveActivePauseBeforeTimerSwitch()!==true)return false;
+    writeLiveDraftNow();
+    return true;
+  }
+  // A note renamed with its Area: today's blocks take the new Area in place,
+  // keeping their times, progress and the running timer.
+  function renameAreas(rename:(row:Readonly<TaskInput>)=>string|undefined){
+    const changed=TimerState.renameTaskAreas(rename);
+    if(!changed)return 0;
+    advanceTaskNoteScheduleRevision();invalidateScheduleDerived({identity:true,render:true});markDayContentChanged();writeLiveDraftNow();
+    return changed;
+  }
+  function markRender(state:string){
+    if(state==='dirty'){invalidateScheduleDerived({render:true});return true;}
+    if(state==='clean'){ScheduleDerivedState.renderDirty=false;return true;}
+    throw new TypeError('Unknown Plan render state.');
+  }
+  return Object.freeze({
+    read,timeline,row,act,hasLiveState,
+    captureMigration:snapshotScheduleProgressForMigration,
+    breakState,apply,reconcile,renameAreas,
+    flush:flushLiveDraft,
+    clearSafety:clearSessionSafetyMessage,
+    markRender
+  });
+}
 function createRuntime(input:Readonly<ExecutionHostInput>){
   exactObject(input,['modules','timerState','pomodoro','practiceModel','practice','timer','schedule','evidence','hooks'],'Execution host input');
   exactObject(input.modules,['timerState','pomodoro','practicePacer','timerEngine'],'Execution host modules');
@@ -479,7 +965,7 @@ function createRuntime(input:Readonly<ExecutionHostInput>){
 }
 const createModule=()=>freeze({
   format:'study-director.execution-host-module' as const,contractVersion:1 as const,
-  createTaskSessionState,createExecutionSchedule,createCompletionEvidence,createRuntime
+  createTaskSessionState,createExecutionSchedule,createCompletionEvidence,createRuntime,createTimerRestoration,createScheduleGateway
 });
 registry.define('execution-host',1,createModule);
 return createModule;

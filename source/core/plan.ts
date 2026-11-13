@@ -1,7 +1,8 @@
+import type {ScheduleRow} from '../../types/domain.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {
   PlanModule as PlanModuleContract,PlanModuleInput,PlanRow,PlanParseResult,ImmutablePlanDraft,PlanDraftProjection,
-  PlanTone,PlanElement,PlanEvent,PlanRealtimeState,PlanMigration,PlanTimelineRow,PlanHydrateOptions,PlanLoadDraftOptions,
+  PlanTone,PlanElement,PlanRealtimeState,PlanMigration,PlanTimelineRow,PlanHydrateOptions,PlanLoadDraftOptions,
   PlanDraftSaveOptions,PlanDraftPreviewOptions,PlanApplyOptions,PlanApplyPreparation,PlanMigrationSummary
 } from '../../types/plan.ts';
 const sdPlanFactory=(()=>{
@@ -56,13 +57,18 @@ const createModule=():PlanModuleContract=>{
     const ownership=ports.ownership;
     const {confirm,input:requestInput}=ports.interactions;
     const {clearTimeout,setTimeout}=ports.environment;
+    function fieldById<K extends keyof HTMLElementTagNameMap>(id:string,tag:K):HTMLElementTagNameMap[K]|null{
+      const element=document.getElementById(id);
+      return element?.tagName.toLowerCase()===tag?element as HTMLElementTagNameMap[K]:null;
+    }
+    const eventElement=(target:EventTarget|null)=>target instanceof Element?target:null;
     const TASKS=scheduleGateway.read().tasks;
     let lastParsed:PlanRow[]=[];
     let lastAppliedScheduleText='';
     let lastScheduleNowMinuteKey:string|null=null;
 
     function hydratePlanDraft(options:Readonly<PlanHydrateOptions>={}){
-      const input=document.getElementById('plan-input');
+      const input=fieldById('plan-input','textarea');
       const fallback=!!(options&&options.fallback);
       const active=fallback?DefaultStore.factory:DefaultStore.active();
       const saved=fallback?null:persistence.readDraft();
@@ -72,7 +78,7 @@ const createModule=():PlanModuleContract=>{
     }
 function loadDefaultPlan(){return loadScheduleIntoDraft(DefaultStore.active().scheduleText,{label:'Default',allowIncomplete:true});}
 function getPlanDraftText(){
-  return String(document.getElementById('plan-input')?.value||'');
+  return String(fieldById('plan-input','textarea')?.value||'');
 }
 async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<PlanLoadDraftOptions>={}){
   if(!ownership.requirePrimary(null,'load a plan template'))return {ok:false,error:'ownership_unavailable'};
@@ -82,7 +88,7 @@ async function loadScheduleIntoDraft(scheduleText:unknown,options:Readonly<PlanL
     setPlanStatus('Template could not load. Fix its row format or timeline order.',false);
     return {ok:false,error:'invalid_schedule'};
   }
-  const ta=document.getElementById('plan-input');
+  const ta=fieldById('plan-input','textarea');
   if(!ta)return {ok:false,error:'missing_plan_input'};
   const previous=ta.value;
   if(previous&&previous!==text){
@@ -103,10 +109,10 @@ const SavedPlans=(()=>{
   const node=(id:string)=>document.getElementById(id);
   const clearMenus=()=>{for(const item of menuControllers)item.controller.destroy();menuControllers=[];};
   const syncAccess=()=>{
-    const panel=node('saved-plans-panel');if(!panel)return false;
+    const panel=fieldById('saved-plans-panel','details');if(!panel)return false;
     const locked=busy||!ownership.canMutate();
-    for(const button of panel.querySelectorAll('[data-saved-plan]'))button.disabled=locked;
-    for(const trigger of panel.querySelectorAll('.saved-plan-menu-trigger'))trigger.disabled=locked;
+    for(const button of panel.querySelectorAll<HTMLButtonElement>('[data-saved-plan]'))button.disabled=locked;
+    for(const trigger of panel.querySelectorAll<HTMLButtonElement>('.saved-plan-menu-trigger'))trigger.disabled=locked;
     if(locked)for(const item of menuControllers)item.controller.hide();
     return !locked;
   };
@@ -115,17 +121,17 @@ const SavedPlans=(()=>{
     return notifications.feedback({id:'saved-plan-status',surfaceId:'saved-plan-status',surface:'inline',message,severity:ok?'info':'error',lifecycle:ok?'succeeded':'failed',retainInline:false,duration:2600});
   };
   const actionButton=(label:string,action:string,id:string,className='saved-plan-menu-action ui-btn ghost')=>{
-    const button=document.createElement('button');button.type='button';button.className=className;button.textContent=label;button.dataset.savedPlan=action;if(id)button.dataset.savedPlanId=id;if(className.includes('saved-plan-menu-action'))button.setAttribute('role','menuitem');return button;
+    const button=document.createElement('button');button.type='button';button.className=className;button.textContent=label;button.dataset['savedPlan']=action;if(id)button.dataset['savedPlanId']=id;if(className.includes('saved-plan-menu-action'))button.setAttribute('role','menuitem');return button;
   };
   function render(selected:string=''){
-    const panel=node('saved-plans-panel'),list=node('saved-plans-list');if(!panel||!list)return;
+    const panel=fieldById('saved-plans-panel','details'),list=node('saved-plans-list');if(!panel||!list)return;
     const data=persistence.readLibrary();
     if(selected&&data.savedPlans.some(plan=>plan.id===selected))selectedId=selected;
     if(!data.savedPlans.some(plan=>plan.id===selectedId))selectedId=data.savedPlans[0]?.id||'';
     clearMenus();list.replaceChildren();
     if(!data.savedPlans.length){const empty=document.createElement('div');empty.className='saved-plans-empty ui-body';empty.textContent='No saved plans yet.';list.append(empty);}
     for(const plan of data.savedPlans){
-      const item=document.createElement('div');item.className='saved-plan-item';item.setAttribute('role','listitem');item.dataset.savedPlanId=plan.id;
+      const item=document.createElement('div');item.className='saved-plan-item';item.setAttribute('role','listitem');item.dataset['savedPlanId']=plan.id;
       const identity=document.createElement('div');identity.className='saved-plan-identity';
       const label=document.createElement('span');label.className='saved-plan-label';label.textContent=plan.label;label.title=plan.label;identity.append(label);
       if(plan.id===data.defaultId){const badge=document.createElement('span');badge.className='saved-plan-default ui-mono';badge.textContent='Default';identity.append(badge);}
@@ -143,7 +149,7 @@ const SavedPlans=(()=>{
     }
     node('saved-plans-count')!.textContent=String(data.savedPlans.length);
     syncAccess();
-    if(!installed){installed=true;panel.addEventListener('click',event=>{const button=event.target.closest('[data-saved-plan]');if(!button)return;const popup=button.closest('.saved-plan-menu-popover');if(popup){const entry=menuControllers.find(item=>item.popup===popup);entry?.controller.hide();}void act(button.dataset.savedPlan||'',button.dataset.savedPlanId||'');});panel.addEventListener('toggle',()=>{if(!panel.open)for(const item of menuControllers)item.controller.hide();});}
+    if(!installed){installed=true;panel.addEventListener('click',event=>{const button=eventElement(event.target)?.closest<HTMLButtonElement>('[data-saved-plan]');if(!button)return;const popup=button.closest('.saved-plan-menu-popover');if(popup){const entry=menuControllers.find(item=>item.popup===popup);entry?.controller.hide();}void act(button.dataset['savedPlan']||'',button.dataset['savedPlanId']||'');});panel.addEventListener('toggle',()=>{if(!panel.open)for(const item of menuControllers)item.controller.hide();});}
   }
   async function act(action:string,planId=''){
     if(busy||!ownership.requirePrimary(null,'manage saved plans'))return false;
@@ -157,7 +163,7 @@ const SavedPlans=(()=>{
       selectedId=id;
       if(action==='load'){if(!selected)return false;const result=await loadScheduleIntoDraft(selected.scheduleText,{label:selected.label,allowIncomplete:true});status(result.ok?'Working copy loaded into Draft.':result.error==='cancelled'?'Current draft kept.':'Could not load the plan.',result.ok);return result.ok;}
       if(action==='save'){
-        const name=node('saved-plan-name')!.value.trim();
+        const name=fieldById('saved-plan-name','input')!.value.trim();
         if(!name)throw new Error('Enter a name for the plan.');
         if(!draft.trim())throw new Error('Add something to the draft first.');
         if(library.savedPlans.length>=100)throw new Error('You have 100 saved plans. Delete one before saving another.');
@@ -245,14 +251,14 @@ function createScheduleRow(row:PlanTimelineRow,rt:PlanRealtimeState){
     const rowState=scheduleGateway.row(i),done=rowState.done,skipped=rowState.skipped;
     const completionState=done?'complete':skipped?'skipped':'incomplete';
     const actionLabel=done?`Mark ${t.name} incomplete`:skipped?`Reopen skipped task ${t.name}`:`Mark ${t.name} complete`;
-    const chk=document.createElement('button');chk.type='button';chk.className='si-chk ui-btn';chk.dataset.ownerMutation='plan-completion';chk.dataset.taskIndex=String(i);chk.dataset.completionState=completionState;chk.textContent=done?'✓':skipped?'×':'';
+    const chk=document.createElement('button');chk.type='button';chk.className='si-chk ui-btn';chk.dataset['ownerMutation']='plan-completion';chk.dataset['taskIndex']=String(i);chk.dataset['completionState']=completionState;chk.textContent=done?'✓':skipped?'×':'';
     chk.setAttribute('aria-label',actionLabel);chk.setAttribute('aria-pressed',done?'true':'false');chk.setAttribute('aria-description',`Current state: ${completionState}.`);chk.title=actionLabel;
     on(chk,'click',e=>{
       e.stopPropagation();if(!ownership.requirePrimary(e,'change plan completion'))return;
       const restoreFocus=document.activeElement===chk;
       scheduleGateway.act('toggle',i);
       if(restoreFocus)window.requestAnimationFrame(()=>{
-        const control=[...document.querySelectorAll('.si-chk[data-task-index]')].find(candidate=>candidate.dataset.taskIndex===String(i));
+        const control=[...document.querySelectorAll<HTMLButtonElement>('.si-chk[data-task-index]')].find(candidate=>candidate.dataset['taskIndex']===String(i));
         if(control)control.focus();
       });
     });card.appendChild(chk);
@@ -299,7 +305,7 @@ function createScheduleRow(row:PlanTimelineRow,rt:PlanRealtimeState){
   right.appendChild(dur);
   card.appendChild(right);
   if(trackable){
-    card.dataset.ownerMutation='plan-navigation';
+    card.dataset['ownerMutation']='plan-navigation';
     on(card,'click',event=>{if(!ownership.requirePrimary(event,'change the active timer block'))return;scheduleGateway.act('jump',i);});
   }
   wrap.appendChild(tm);wrap.appendChild(card);
@@ -394,7 +400,7 @@ function keepAppliedScheduleOnReapply(parsed:readonly PlanRow[],rawOriginal:unkn
   return true;
 }
 function setPlanComposerOpen(open:boolean){
-  const composer=document.querySelector('.plan-composer');
+  const composer=document.querySelector<HTMLDetailsElement>('.plan-composer');
   if(composer)composer.open=!!open;
 }
 function setPlanStatus(message:unknown,tone:PlanTone=true){
@@ -402,9 +408,9 @@ function setPlanStatus(message:unknown,tone:PlanTone=true){
 }
 
 function updatePlanBoardControls(projection:PlanDraftProjection=createPlanDraftProjection()){
-  const edit=document.getElementById('plan-edit-btn');
-  const done=document.getElementById('plan-done-edit-btn');
-  const cancel=document.getElementById('plan-cancel-edit-btn');
+  const edit=fieldById('plan-edit-btn','button');
+  const done=fieldById('plan-done-edit-btn','button');
+  const cancel=fieldById('plan-cancel-edit-btn','button');
   const controls=projection.controls;
   if(edit){
     edit.hidden=!controls.showEdit;
@@ -421,14 +427,14 @@ function updatePlanBoardControls(projection:PlanDraftProjection=createPlanDraftP
     cancel.disabled=!controls.cancelEnabled;
     cancel.textContent='Cancel';
   }
-  const apply=document.querySelector('button[data-action="apply-schedule"]');
+  const apply=document.querySelector<HTMLButtonElement>('button[data-action="apply-schedule"]');
   if(apply)apply.disabled=!controls.applyEnabled;
 }
 function updatePlanBoardState(projection:PlanDraftProjection=createPlanDraftProjection()){
   const board=document.getElementById('plan-board');
   const state=document.getElementById('plan-board-state');
   const cap=document.getElementById('plan-board-caption');
-  if(board)board.dataset.mode=projection.board.mode;
+  if(board)board.dataset['mode']=projection.board.mode;
   if(state)state.textContent=projection.board.label;
   if(cap)cap.textContent=projection.board.caption;
   updatePlanBoardControls(projection);
@@ -481,7 +487,7 @@ function closeActiveBreakForScheduleChange(stillCurrent:()=>boolean=()=>true){
     return scheduleGateway.breakState('end')===true;
   });
 }
-function confirmScheduleChangeWillMigrateProgress(newRows:readonly PlanRow[],stillCurrent:()=>boolean=()=>true){
+function confirmScheduleChangeWillMigrateProgress(newRows:readonly ScheduleRow[],stillCurrent:()=>boolean=()=>true){
   if(!scheduleGateway.hasLiveState())return null;
   const snapshot=scheduleGateway.captureMigration(newRows||[]);
   const matched=snapshot.preview?snapshot.preview.matched:0;
@@ -501,7 +507,7 @@ function confirmScheduleChangeWillMigrateProgress(newRows:readonly PlanRow[],sti
     return ok?snapshot:false;
   });
 }
-function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>):Readonly<PlanApplyPreparation>|PromiseLike<Readonly<PlanApplyPreparation>>{
+function prepareScheduleApply(parsed:readonly ScheduleRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>):Readonly<PlanApplyPreparation>|PromiseLike<Readonly<PlanApplyPreparation>>{
   const stillCurrent=()=>typeof opts.currentEditor!=='function'||opts.currentEditor();
   const hasApplied=TASKS.length>0;
   const scheduleChanged=hasApplied&&scheduleFingerprintForRows(parsed)!==scheduleGateway.read().fingerprint;
@@ -519,7 +525,7 @@ function prepareScheduleApply(parsed:readonly PlanRow[],rawOriginal:unknown,opts
   if(typeof breakDecision!=='boolean')return Promise.resolve(breakDecision).then((ok:boolean)=>ok?finish():{cancelled:true});
   return breakDecision?finish():{cancelled:true};
 }
-function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraft,opts:Readonly<PlanApplyOptions>,migrationSummary:PlanMigrationSummary|undefined):{text:string;state:PlanTone}{
+function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraft,opts:Readonly<PlanApplyOptions>,migrationSummary:PlanMigrationSummary|null|undefined):{text:string;state:PlanTone}{
   const migrationParts=[];
   if(migrationSummary&&migrationSummary.total)migrationParts.push(`${migrationSummary.matched}/${migrationSummary.total} progress entries`);
   if(migrationSummary&&migrationSummary.practiceTotal)migrationParts.push(`${migrationSummary.practiceMatched}/${migrationSummary.practiceTotal} Pacer links`);
@@ -536,15 +542,15 @@ function appliedScheduleStatus(parsed:readonly PlanRow[],draft:ImmutablePlanDraf
     : '✓ Schedule loaded — ' + parsed.filter(isWorkBlock).length + ' work blocks' + migrationText + ' · switch to Execute tab';
   return {text:warningText?baseStatus+' · '+warningText:baseStatus,state:warningText?'warn':true};
 }
-function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed:readonly PlanRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>,draft:ImmutablePlanDraft){
+function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed:readonly import('../../types/domain.ts').ScheduleRow[],rawOriginal:unknown,opts:Readonly<PlanApplyOptions>,draft:ImmutablePlanDraft){
   if(preparation.handled)return preparation.result===true;
   if(preparation.cancelled)return false;
   setParsedScheduleDraft(parsed);
   PlanDraftEditor.deactivate();
   lastAppliedScheduleText='';
-  const applyResult=scheduleGateway.apply(lastParsed,{
-    appliedScheduleText:rawOriginal,studyDate:opts.studyDate,source:opts.source,
-    progressMigration:preparation.progressMigration,reviewOnly:!!opts.reviewOnly,
+  const applyResult=scheduleGateway.apply(parsed,{
+    ...(opts.studyDate===undefined?{}:{studyDate:opts.studyDate}),...(opts.source===undefined?{}:{source:opts.source}),
+    progressMigration:preparation.progressMigration||null,reviewOnly:!!opts.reviewOnly,
     sessionSnapshot:opts.sessionSnapshot||null,lifecycleManaged:!!opts.lifecycleManaged
   });
   renderSched();
@@ -567,7 +573,7 @@ function applySchedule(options:Readonly<PlanApplyOptions>={}){
   const canApply=()=>
     (explicitSchedule!==null||ownership.canMutate())&&
     (typeof opts.currentEditor!=='function'||opts.currentEditor());
-  const finish=(preparation:Readonly<PlanApplyPreparation>,draft:ImmutablePlanDraft,parsed:readonly PlanRow[])=>{
+  const finish=(preparation:Readonly<PlanApplyPreparation>,draft:ImmutablePlanDraft,parsed:readonly ScheduleRow[])=>{
     if(!canApply())return false;
     if(!currentDraft()){
       setPlanStatus('The working draft changed while applying. Review it and apply again.',false);
@@ -617,7 +623,7 @@ const PlanDraftEditor=(()=>{
     return false;
   }
   function boundDraftInput(){
-    const input=document.getElementById('plan-input');
+    const input=fieldById('plan-input','textarea');
     if(!input)return null;
     const bounded=clampText(input.value,APP_LIMITS.maxScheduleChars);
     if(input.value!==bounded)input.value=bounded;
@@ -666,7 +672,7 @@ const PlanDraftEditor=(()=>{
   // anyone wrote, and saving it would invent a change on this device that
   // later clashes with a real plan from another.
   function authoredText(){
-    const input=document.getElementById('plan-input');if(!input)return null;
+    const input=fieldById('plan-input','textarea');if(!input)return null;
     return persistence.readDraft()===null&&!draftSaveTimer&&input.value===DefaultStore.active().scheduleText?null:input.value;
   }
   function enter(){
@@ -770,7 +776,7 @@ const PlanDraftEditor=(()=>{
   function syncTextFromRows(){
     // Structured row editing supersedes any pending Composer preview.
     editEpoch++;clearTimer('preview');
-    const input=document.getElementById('plan-input');
+    const input=fieldById('plan-input','textarea');
     if(input)input.value=draftTextFromRows(lastParsed);
     queueSave();
   }
@@ -791,7 +797,7 @@ const PlanDraftEditor=(()=>{
   function rowClass(t:PlanRow){return 'si draft'+scheduleKindClass(t);}
   function refreshRowVisual(idx:number){
     const row=lastParsed[idx];
-    const wrap=[...document.querySelectorAll('.si.draft[data-draft-idx]')].find(candidate=>candidate.dataset.draftIdx===String(idx))||null;
+    const wrap=[...document.querySelectorAll<HTMLElement>('.si.draft[data-draft-idx]')].find(candidate=>candidate.dataset['draftIdx']===String(idx))||null;
     if(!row||!wrap)return;
     const start=clockMinuteToStudyMinute(t2m(row.start));
     const timeEl=wrap.querySelector('.si-time');
@@ -845,7 +851,7 @@ const PlanDraftEditor=(()=>{
   function input(key:string,value:unknown,label:string,type='text',idx:number|null=null){
     const control=document.createElement('input');
     control.className='plan-draft-field ui-field ui-mono '+key;
-    control.dataset.draftField=key;
+    control.dataset['draftField']=key;
     control.type=type==='name'?'text':type;
     control.value=String(value??'');
     control.placeholder=label;
@@ -856,7 +862,7 @@ const PlanDraftEditor=(()=>{
   function select(key:string,value:string,idx:number|null=null){
     const control=document.createElement('select');
     control.className='plan-draft-field ui-field ui-mono '+key;
-    control.dataset.draftField=key;
+    control.dataset['draftField']=key;
     control.setAttribute('aria-label',fieldAccessibleLabel(key,idx));
     const placeholder=document.createElement('option');
     placeholder.value='';placeholder.textContent='CHOOSE KIND';placeholder.disabled=true;
@@ -879,20 +885,20 @@ const PlanDraftEditor=(()=>{
     target.appendChild(control);
     return target;
   }
-  function rowFromTarget(target:PlanElement|null,container:PlanElement){
-    const row=target&&target.closest&&target.closest('.si.draft[data-draft-idx]');
+  function rowFromTarget(target:EventTarget|null,container:PlanElement){
+    const row=eventElement(target)?.closest<HTMLElement>('.si.draft[data-draft-idx]');
     return row&&container.contains(row)?row:null;
   }
   function rowIndex(row:PlanElement|null){
-    const idx=Number(row&&row.dataset.draftIdx);
+    const idx=Number(row&&row.dataset['draftIdx']);
     return Number.isInteger(idx)?idx:null;
   }
   function clearDragState(row:PlanElement|null=null){
     if(row)row.classList.remove('dragging','drag-over');
-    document.querySelectorAll('.si.draft.dragging,.si.draft.drag-over').forEach(el=>el.classList.remove('dragging','drag-over'));
+    document.querySelectorAll<HTMLElement>('.si.draft.dragging,.si.draft.drag-over').forEach(el=>el.classList.remove('dragging','drag-over'));
     draftDragIndex=null;
   }
-  function dragStart(ev:PlanEvent,row:PlanElement,idx:number){
+  function dragStart(ev:DragEvent,row:PlanElement,idx:number){
     draftDragIndex=idx;
     row.classList.add('dragging');
     if(ev.dataTransfer){
@@ -900,16 +906,16 @@ const PlanDraftEditor=(()=>{
       ev.dataTransfer.setData('text/plain',String(idx));
     }
   }
-  function dragOver(ev:PlanEvent,row:PlanElement){
+  function dragOver(ev:DragEvent,row:PlanElement){
     ev.preventDefault();
     row.classList.add('drag-over');
     if(ev.dataTransfer)ev.dataTransfer.dropEffect='move';
   }
-  function dragLeave(ev:PlanEvent,row:PlanElement){
-    if(ev.relatedTarget&&row.contains(ev.relatedTarget))return;
+  function dragLeave(ev:DragEvent,row:PlanElement){
+    if(ev.relatedTarget instanceof Node&&row.contains(ev.relatedTarget))return;
     row.classList.remove('drag-over');
   }
-  function drop(ev:PlanEvent,row:PlanElement,targetIdx:number){
+  function drop(ev:DragEvent,row:PlanElement,targetIdx:number){
     ev.preventDefault();
     row.classList.remove('drag-over');
     const transferred=Number(ev.dataTransfer&&ev.dataTransfer.getData('text/plain'));
@@ -966,7 +972,7 @@ const PlanDraftEditor=(()=>{
     wrap.className=rowClass(t);
     const touchPrimary=window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches;
     wrap.draggable=!touchPrimary;
-    wrap.dataset.draftIdx=String(idx);
+    wrap.dataset['draftIdx']=String(idx);
     const time=document.createElement('div');
     time.className='si-time ui-mono';
     time.append(document.createTextNode(studyMinuteToHHMM(start)),document.createElement('br'),document.createTextNode(duration?studyMinuteToHHMM(start+duration):'—'));
@@ -999,7 +1005,7 @@ const PlanDraftEditor=(()=>{
     actions.className='plan-draft-row-actions';
     const action=(name:string,label:string,title:string,className='plan-draft-action ui-btn')=>{
       const button=document.createElement('button');
-      button.type='button';button.className=className;button.title=title;button.dataset.draftAction=name;button.textContent=label;
+      button.type='button';button.className=className;button.title=title;button.dataset['draftAction']=name;button.textContent=label;
       return button;
     };
     const up=action('up','↑','Move this block up','plan-draft-action reorder ui-btn');
@@ -1023,52 +1029,52 @@ const PlanDraftEditor=(()=>{
       const actions=document.createElement('div');
       actions.className='plan-draft-empty-actions';
       const add=document.createElement('button');
-      add.type='button';add.className='plan-board-btn ui-btn';add.dataset.draftAction='add';add.textContent='Add Row';
+      add.type='button';add.className='plan-board-btn ui-btn';add.dataset['draftAction']='add';add.textContent='Add Row';
       actions.appendChild(add);container.appendChild(actions);return;
     }
     lastParsed.forEach((row,idx)=>container.appendChild(createRow(row,idx)));
   }
   function install(){
     const container=document.getElementById('sched-list');
-    if(!container||container.dataset.draftDelegation==='1')return false;
-    container.dataset.draftDelegation='1';
+    if(!container||container.dataset['draftDelegation']==='1')return false;
+    container.dataset['draftDelegation']='1';
     container.addEventListener('input',ev=>{
-      const field=ev.target.closest&&ev.target.closest('[data-draft-field]');
+      const field=eventElement(ev.target)?.closest<HTMLInputElement|HTMLSelectElement>('[data-draft-field]');
       if(!field||field.tagName==='SELECT')return;
       const row=rowFromTarget(field,container),idx=rowIndex(row);
       if(idx===null)return;
       if(!ownership.requirePrimary(ev,'edit the plan draft')){renderSched();return;}
-      setField(idx,field.dataset.draftField||'',field.value);
+      setField(idx,field.dataset['draftField']||'',field.value);
     });
     container.addEventListener('change',ev=>{
-      const field=ev.target.closest&&ev.target.closest('select[data-draft-field]');
+      const field=eventElement(ev.target)?.closest<HTMLSelectElement>('select[data-draft-field]');
       if(!field)return;
       const row=rowFromTarget(field,container),idx=rowIndex(row);
       if(idx===null)return;
       if(!ownership.requirePrimary(ev,'edit the plan draft')){renderSched();return;}
-      setField(idx,field.dataset.draftField||'',field.value);
+      setField(idx,field.dataset['draftField']||'',field.value);
       renderSched();
     });
     container.addEventListener('focusout',ev=>{
-      if(!ev.target.matches||!ev.target.matches('[data-draft-field]'))return;
+      if(!eventElement(ev.target)?.matches('[data-draft-field]'))return;
       requestAnimationFrame(()=>{if(container.isConnected)renderSched();});
     });
     container.addEventListener('click',ev=>{
-      const field=ev.target.closest&&ev.target.closest('[data-draft-field]');
+      const field=eventElement(ev.target)?.closest<HTMLInputElement|HTMLSelectElement>('[data-draft-field]');
       if(field){ev.stopPropagation();return;}
-      const target=ev.target.closest&&ev.target.closest('[data-draft-action]');
+      const target=eventElement(ev.target)?.closest<HTMLButtonElement>('[data-draft-action]');
       if(!target||!container.contains(target))return;
       ev.preventDefault();ev.stopPropagation();
       if(!ownership.requirePrimary(ev,'edit the plan draft'))return;
       const row=rowFromTarget(target,container);
       const idx=row?rowIndex(row):-1;
-      if(target.dataset.draftAction==='add')insertRowAfter(idx===null?-1:idx);
-      else if(target.dataset.draftAction==='remove'&&idx!==null)removeRow(idx);
-      else if(target.dataset.draftAction==='up'&&idx!==null&&Number.isInteger(idx)&&idx>0)moveRow(idx,idx-1);
-      else if(target.dataset.draftAction==='down'&&idx!==null&&Number.isInteger(idx)&&idx>=0&&idx<lastParsed.length-1)moveRow(idx,idx+1);
+      if(target.dataset['draftAction']==='add')insertRowAfter(idx===null?-1:idx);
+      else if(target.dataset['draftAction']==='remove'&&idx!==null)removeRow(idx);
+      else if(target.dataset['draftAction']==='up'&&idx!==null&&Number.isInteger(idx)&&idx>0)moveRow(idx,idx-1);
+      else if(target.dataset['draftAction']==='down'&&idx!==null&&Number.isInteger(idx)&&idx>=0&&idx<lastParsed.length-1)moveRow(idx,idx+1);
     });
     container.addEventListener('dragstart',ev=>{
-      if(ev.target.closest&&ev.target.closest('[data-draft-field]')){ev.preventDefault();return;}
+      if(eventElement(ev.target)?.closest<HTMLInputElement|HTMLSelectElement>('[data-draft-field]')){ev.preventDefault();return;}
       const row=rowFromTarget(ev.target,container),idx=rowIndex(row);
       if(!row||idx===null)return;
       if(!ownership.requirePrimary(ev,'reorder the plan draft'))return;
@@ -1084,7 +1090,7 @@ const PlanDraftEditor=(()=>{
     if(!ownership.requirePrimary(null,'clear the plan draft'))return false;
     const previous=getPlanDraftText();
     clearTimer('save');clearTimer('preview');clearDragState();
-    editEpoch++;const input=document.getElementById('plan-input');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
+    editEpoch++;const input=fieldById('plan-input','textarea');if(input)input.value='';lastParsed=[];draftMode=true;renderSched();
     const ok=await save({strictDurability:true});
     if(ok&&input?.value===''){setPlanStatus('Draft cleared. Use Load Default or paste a new schedule.');return true;}
     if(!ok&&input&&input.value===''){input.value=previous;preview({silent:true});}
@@ -1119,8 +1125,8 @@ const PlanDraftEditor=(()=>{
     // plans" takes its Area along. Blocks under that Area, or nested inside it,
     // change their Area: today's plan in place (times, progress and the timer
     // stay), and the draft and saved plans as text. Finished days keep theirs.
-    const areaMatches=(row:PlanRow,from:string)=>{const key=taskAreaKey(row);return key===from||key.startsWith(`${from} > `);};
-    function renamedArea(row:PlanRow,from:string,toLabel:string){
+    const areaMatches=(row:Readonly<{area?:unknown}>,from:string)=>{const key=taskAreaKey(row);return key===from||key.startsWith(`${from} > `);};
+    function renamedArea(row:Readonly<{area?:unknown}>,from:string,toLabel:string){
       if(!areaMatches(row,from))return undefined;
       const rest=String(taskAreaValue(row)||'').split('>').map(part=>part.trim()).filter(Boolean).slice(from.split(' > ').length);
       return [toLabel,...rest].join(' > ');
@@ -1138,7 +1144,7 @@ const PlanDraftEditor=(()=>{
       const blocks=scheduleGateway.renameAreas(row=>renamedArea(row,from,label));
       if(lastParsed.some(row=>areaMatches(row,from))){lastParsed=lastParsed.map(row=>{const area=renamedArea(row,from,label);return area===undefined?row:{...row,area};});}
       if(lastAppliedScheduleText)lastAppliedScheduleText=renameAreaInText(lastAppliedScheduleText,from,label)??lastAppliedScheduleText;
-      const input=document.getElementById('plan-input'),draft=input?renameAreaInText(input.value,from,label):null;
+      const input=fieldById('plan-input','textarea'),draft=input?renameAreaInText(input.value,from,label):null;
       if(input&&draft!==null){input.value=draft;await persistence.writeDraft(draft);}
       const library=persistence.readLibrary(),now=new Date().toISOString();let savedPlans=0;
       library.savedPlans=library.savedPlans.map(plan=>{const text=renameAreaInText(plan.scheduleText,from,label);if(text===null)return plan;savedPlans++;return {...plan,scheduleText:text,updatedAt:now};});
