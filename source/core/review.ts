@@ -1479,7 +1479,7 @@ function clipboardPlainText(value:unknown,{rich=false}:Readonly<{rich?:boolean}>
   return text.replace(/\r\n?/gu,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu,'');
 }
 const REVIEW_REPORT_OUTPUT_ORDER=freeze(['summary','subjects','ongoing','other','diary']);
-const REVIEW_REPORT_CATALOG:readonly Readonly<{id:string;label:string;children?:(context:ReviewReportSelectorContext)=>ReviewReportChild[];compose:(context:ReviewReportContext,selected:readonly ReviewReportChild[])=>string}[] = freeze([
+const REVIEW_REPORT_CATALOG:readonly Readonly<{id:string;label:string;children?:(context:ReviewReportSelectorContext)=>ReviewReportChild[];compose:(context:ReviewReportContext,selected:readonly ReviewReportChild[])=>string}>[] = freeze([
   freeze({id:'summary',label:'Summary / statistics',compose:composeReviewSummary}),
   freeze({id:'diary',label:'Diary reflection',compose:composeReviewDiary}),
   freeze({id:'subjects',label:'Subject details',children:reviewReportSubjectChildren,compose:composeReviewSubjects}),
