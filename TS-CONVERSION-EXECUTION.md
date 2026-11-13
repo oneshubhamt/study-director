@@ -2,6 +2,14 @@
 
 **Branch: `ts-exp`. P5.2 and P5.4 CLOSED — VERIFIED — TARGETED. P5.5 is next; P5.5–P5.7 are planned, not implemented.** Main intake remains `2638619`. Preserve main, `TS-Conversion` and vendored Wordgard. [Procedure](AGENTS.md) · [scope and next plans](docs/typescript/PHASE-5.md) · [decisions](docs/typescript/DECISIONS.md) · [verification commands](docs/VERIFICATION.md).
 
+## Active worklog — P5.5A Review model, editing and presentation
+
+- Baseline/remote HEAD: `db4587ae037f97f5ae7473f18e6c9c4d2e2aa946`; no later remote `ts-exp` commits. P5.5A only; P5.5B durable Save Today/Diary/date-transition ownership stays open.
+- Outcome: strict TypeScript for the Review module; complete ReviewModel/ReviewEditor/ReviewView/shared saved-day presentation, subsystem composition, owned host callbacks and actual consumer/provider contracts. Preserve canonical evidence/session data, editor ownership/date fencing, initialization order, copy/report behavior and existing recovery.
+- Boundaries: ongoing subject-note persistence remains P5.6; DailyReflectionPersistence, Diary editor and durable save/rollover orchestration remain P5.5B except where their existing interfaces must be typed to compile and be consumed safely.
+- Targeted evidence: reflection-session codec, timer-engine/session-lifecycle integration, Review-specific contract/regression checks, affected core-flow/session-draft browser journeys, strict compiler/lint, source/generated syntax and fresh build verification. No full QA.
+- Temporary pad: `/tmp/study-director-P5.5A.md` (ephemeral; not evidence). Next: convert/reconcile source and host consumers, then run the checks above and update this entry with actual results before closure.
+
 ## Latest closure — P5.2/P5.4 audit corrections, 2026-11-13
 
 - Owner authorized this interim audit, necessary corrections and closure, then P5.5–P5.7 planning. Audit baseline `6f81937`; programme comparison `de4872a`. Published reconstruction checkpoints: `e1f51ce`, `700fd5d`, `b6debde`, `51c4be5`, `33160c9`; the commit containing this entry closes the follow-up.
