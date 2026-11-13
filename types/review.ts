@@ -156,7 +156,7 @@ export interface ReviewSubsystemInput{
     }>;
     schedule:Readonly<{
       adjustedEndMin(index:number):number;adjustedStartMin(index:number):number;effectiveNowMin(date?:Date):number;hasAdjustedTiming(index:number):boolean;isLiveTrackableTimer():boolean;
-      isTaskResolved(index:number):boolean;isTrackableBlock(task:Task|undefined):boolean;isWorkBlock(task:Task|undefined):boolean;latestTrackableEndMin():number|null;
+      isTaskResolved(index:number):boolean;isTrackableBlock(task:Task|ReviewRecordViewTask|undefined):boolean;isWorkBlock(task:Task|ReviewRecordViewTask|undefined):boolean;latestTrackableEndMin():number|null;
       originalEndMin(index:number):number;originalStartMin(index:number):number;scheduleFingerprint():string;
     }>;
     evidence:Readonly<Pick<CompletionEvidenceController,'clearManualCompletionOverride'|'liveTaskOutcome'|'progressInputState'|'resolveTaskCompletion'|'storeResolvedCompletion'|'setCompletionState'|'syncProgressInputsToState'> & {

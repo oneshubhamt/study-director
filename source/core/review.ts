@@ -164,7 +164,7 @@ const createModule=():ReviewModuleContract=>{
       return Number.isInteger(parsed)&&parsed>=1&&parsed<=5?parsed:null;
     }
     function reviewRichInputMeta(event:Event|null|undefined,value:unknown):ReviewRichInputMeta|null{
-      const meta:unknown=event&&typeof event==='object'?(event as Record<PropertyKey,unknown>)[REVIEW_RICH_INPUT_META]:null;
+      const meta:unknown=event&&typeof event==='object'?(event as unknown as Record<PropertyKey,unknown>)[REVIEW_RICH_INPUT_META]:null;
       if(!meta||typeof meta!=='object')return null;
       if(!('format' in meta)||!('version' in meta)||!('canonical' in meta)||!('plain' in meta))return null;
       return meta.format==='study-director.rich-validated-input'&&meta.version===1&&meta.canonical===String(value||'')&&typeof meta.plain==='string'
