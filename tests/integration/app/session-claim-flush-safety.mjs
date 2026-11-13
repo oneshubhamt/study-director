@@ -132,6 +132,71 @@ function fixture(options={}){
   }
 }
 
+// Daily Reflection and Diary persistence cannot report Saved on rescue-only
+// writes or failed canonical verification; study evidence is preserved and a
+// stale ownership binding cannot write after authority changes.
+{
+  class FakeTextArea{
+    constructor(){this.dataset={};this.value='';this.maxLength=0;this.isConnected=true;}
+    setAttribute(){}
+  }
+  const context=vm.createContext({console,Object,Array,Set,Map,WeakMap,Promise,Date,Number,String,Boolean,Math,JSON,Error,TypeError,RangeError,Symbol,HTMLTextAreaElement:FakeTextArea});
+  vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'source/core/internal.ts'});
+  vm.runInContext(readRuntimeSource('source/core/review-persistence.ts'),context,{filename:'source/core/review-persistence.ts'});
+  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('review-persistence',1);
+  const stamp='2026-08-27T12:00:00.000Z';
+  const study={version:16,recordKind:'study',date,savedAt:stamp,updatedAt:stamp,sourceRevision:7,reflection:'Old',quote:'',studyQuality:4,realTimeSnapshot:null,schedule:[],results:{kept:{completion:50}},practiceRuns:[],carryForwardDraft:'keep'};
+  let current=study,receipt='indexeddb',verifyFailure=false,verifyAbsentFailure=false,ownerRevision=1,saveCalls=[],removeCalls=[],verifyCalls=0,absentCalls=0;
+  const records={
+    get:async()=>current,
+    save:async(value,options)=>{saveCalls.push([structuredClone(value),options]);if(receipt==='indexeddb')current=value;return {ok:true,storage:receipt};},
+    remove:async(_date,options)=>{removeCalls.push(options);current=null;return true;},
+    verifyCanonical:async()=>{verifyCalls++;if(verifyFailure)throw new Error('read-back failed');return true;},
+    verifyCanonicalAbsent:async()=>{absentCalls++;if(verifyAbsentFailure)throw new Error('absence failed');return true;},
+    timestamp:value=>Date.parse(value?.updatedAt||value?.savedAt||'')||0
+  };
+  const laneFactory=input=>{
+    let pending=false,value;
+    return Object.freeze({
+      schedule(next){value=next;pending=true;input.onState('saving',null);return true;},
+      async flush(options={}){if(!pending)return;pending=false;return input.write(value,options);},
+      cancel(){pending=false;},pending:()=>pending,writing:()=>false,tail:()=>Promise.resolve(),settled:()=>Promise.resolve(true),failure:()=>null
+    });
+  };
+  const persistence=module.createPersistence(Object.freeze({
+    configuration:Object.freeze({limits:{maxReflectionChars:5000,maxRichTextWords:1000},dataContract:{schemas:{DailyRecord:{version:16}}}}),
+    records,
+    codec:Object.freeze({createDiaryRecord:(day,reflection,options={})=>({version:16,recordKind:'diary',date:day,savedAt:options.savedAt||stamp,updatedAt:stamp,sourceRevision:options.sourceRevision||0,reflection})}),
+    ownership:Object.freeze({canMutate:()=>true,revision:()=>ownerRevision}),
+    text:Object.freeze({clampEditorContent:value=>String(value??''),editorContentWithinLimits:()=>true,plain:value=>String(value??''),isRich:()=>false}),
+    richText:Object.freeze({closeField:()=>{},syncField:()=>{},validatedInput:()=>null}),
+    dates:Object.freeze({isSupported:()=>true,insights:()=>({dayOfWeek:4,dayName:'Thursday'})}),
+    saveLane:Object.freeze({createLane:laneFactory,failureMessage:(_label,error)=>String(error?.message||error),DELAY_MS:250,RETRY_DELAYS_MS:[],onBeforeFlush:()=>{},prepareFlush:()=>{},format:'study-director.save-lane-module',contractVersion:1}),
+    environment:Object.freeze({nowIso:()=>stamp,queueMicrotask:fn=>fn(),setTimeout:()=>1,clearTimeout:()=>{}})
+  }));
+  receipt='fallback';
+  await assert.rejects(persistence.DailyReflectionPersistence.commit(date,'Fallback only',{expectedCanonical:'Old'}),/emergency recovery storage/u);
+  assert.equal(verifyCalls,0,'fallback receipt is refused before canonical verification');
+  receipt='indexeddb';current=study;verifyFailure=true;
+  await assert.rejects(persistence.DailyReflectionPersistence.commit(date,'Committed but unverified',{expectedCanonical:'Old'}),/read-back failed/u);
+  verifyFailure=false;current=study;saveCalls=[];
+  const updated=await persistence.DailyReflectionPersistence.commit(date,'New',{expectedCanonical:'Old',backupCapture:true});
+  assert.equal(updated.canonical,'New');assert.deepEqual(saveCalls[0][0].results,study.results,'Diary editing a study day preserves richer study evidence');
+  assert.equal(saveCalls[0][1].backupCapture,true);
+  current={version:16,recordKind:'diary',date,savedAt:stamp,updatedAt:stamp,sourceRevision:0,reflection:'Diary'};removeCalls=[];
+  await persistence.DailyReflectionPersistence.commit(date,'',{expectedCanonical:'Diary',backupCapture:true});
+  assert.equal(removeCalls[0].backupCapture,true);assert.equal(absentCalls,1,'Diary deletion requires canonical absence verification');
+  current=study;verifyCalls=0;
+  await persistence.DailyReflectionPersistence.commit(date,'Old',{expectedCanonical:'Old'});
+  assert.equal(verifyCalls,1,'no-op Saved state is still proven against canonical storage');
+
+  const field=new FakeTextArea();current=study;ownerRevision=1;
+  persistence.DiaryEditor.bind(field,date,study);
+  ownerRevision=2;
+  assert.equal(persistence.DiaryEditor.schedule(field,'stale'),false,'ownership turnover invalidates a bound Diary editor');
+  await assert.rejects(persistence.DiaryEditor.flush(field),/no longer active/u);
+}
+
 // BF-1R1: execute the real common Saved-Day evidence predicate and the
 // previous-day retirement gate together. Revisions across devices are not
 // content ancestry, and no local rescue copy is a canonical Saved Day.
