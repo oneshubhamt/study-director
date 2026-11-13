@@ -183,6 +183,10 @@ function fixture(options={}){
   const updated=await persistence.DailyReflectionPersistence.commit(date,'New',{expectedCanonical:'Old',backupCapture:true});
   assert.equal(updated.canonical,'New');assert.deepEqual(saveCalls[0][0].results,study.results,'Diary editing a study day preserves richer study evidence');
   assert.equal(saveCalls[0][1].backupCapture,true);
+  current=null;saveCalls=[];
+  const diaryCreated=await persistence.DailyReflectionPersistence.commit(date,'Diary only',{expectedCanonical:'',backupCapture:true});
+  assert.equal(diaryCreated.recordKind,'diary','a reflection-only date creates a Diary record, not a synthetic study day');
+  assert.equal(saveCalls[0][0].recordKind,'diary');
   current={version:16,recordKind:'diary',date,savedAt:stamp,updatedAt:stamp,sourceRevision:0,reflection:'Diary'};removeCalls=[];
   await persistence.DailyReflectionPersistence.commit(date,'',{expectedCanonical:'Diary',backupCapture:true});
   assert.equal(removeCalls[0].backupCapture,true);assert.equal(absentCalls,1,'Diary deletion requires canonical absence verification');
@@ -323,6 +327,14 @@ function fixture(options={}){
       verifyFailure:spec.verifyFailure,coverage:()=>spec.coverage});
     assert.equal(await trial.coordinator.savedRecordExistsForDate(date),spec.expected,spec.label);
   }
+}
+
+// Historical Review must never reach automatic rollover finalization.
+{
+  const previous=fixture({panel:'previous',rolloverResult:true});
+  assert.equal(await previous.coordinator.handleStudyDayRollover(),false);
+  assert.equal(previous.events.some(event=>event[0]==='save'),false);
+  assert.equal(previous.events.some(event=>event[0]==='rollover'),false);
 }
 
 // Suspended Review delegates canonical finalization to ReviewSaveService and
