@@ -135,6 +135,15 @@ assert.match(executionHost,/function breakState\(action='status'\)[\s\S]*?if\(!a
 assert.match(plan,/return scheduleGateway\.breakState\('end'\)===true;/u,'Plan application propagates a failed break termination instead of claiming success');
 assert.doesNotMatch(review,/function setCompletionState\(/u,'Review must consume the checked completion-state owner instead of maintaining a duplicate mutator');
 assert.match(review,/resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState/u,'Review completion editing consumes the checked execution evidence port');
+const reviewHost=readScript('source/core/review-host.ts');
+assert.match(host,/const ReviewHostModule=INTERNAL_MODULES\.load\('review-host',1,'study-director\.review-host-module',1\);/u,'Review composition loads the checked P5.5A host owner');
+assert.match(host,/const ReviewSubsystem=ReviewHostModule\.createSubsystem\(Object\.freeze\(\{[\s\S]*?module:ReviewModule,[\s\S]*?subsystem:Object\.freeze\(\{/u,'Review subsystem composition crosses the checked P5.5A host boundary');
+assert.doesNotMatch(host,/ReviewModule\.createReviewSubsystem\(/u,'the main host must not bypass the checked Review host boundary');
+assert.match(reviewHost,/input\.module\.format!=='study-director\.review'[\s\S]*input\.module\.contractVersion!==1/u,'Review host rejects an incompatible feature module');
+assert.match(reviewHost,/!Object\.isFrozen\(input\.subsystem\)/u,'Review host rejects mutable provider composition');
+assert.match(reviewHost,/!Object\.isFrozen\(subsystem\)[\s\S]*subsystem\.format!=='study-director\.review-subsystem'[\s\S]*subsystem\.contractVersion!==1/u,'Review host validates the composed subsystem before publication');
+assert.match(review,/qualityFields\.some\(field=>[\s\S]{0,420}reviewOwnershipRevision[\s\S]{0,240}getOwnershipRevision\(\)[\s\S]{0,240}reviewLifecycleRevision/u,'quality controls are fenced by both ownership and lifecycle revisions before Review persistence');
+
 for(const stale of ['function latestTrackableEndMin(','const TaskSessionState=(()=>','function getRealTimeState(','function rebuildOriginalSchedule(','function resolveTaskCompletion(','function toggleDoneMarker(','function recoveryCaptureActiveBeforeSwitch(','function resolveActivePauseBeforeTimerSwitch(']){
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.4A runtime logic: ${stale}`);
 }
