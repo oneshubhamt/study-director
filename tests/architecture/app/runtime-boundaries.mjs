@@ -151,6 +151,7 @@ assert.match(reviewPersistence,/await records\.verifyCanonical\(next\)|await rec
 assert.match(reviewPersistence,/await records\.verifyCanonicalAbsent\(date\)/u,'Diary-only deletion requires physical canonical absence');
 assert.match(reviewPersistence,/diaryOwnershipRevision[\s\S]{0,300}ownership\.revision\(\)/u,'Diary editor bindings are fenced by ownership revision');
 assert.match(reviewHost,/function createDayState\(/u,'Review date/revision/reminder state has a checked P5.5B owner');
+assert.ok(host.indexOf("const FULL_WEEKDAY_NAMES=")<host.indexOf("const ReviewDayState=ReviewHostModule.createDayState"),'Review day-state constants must be initialized before checked host composition');
 assert.match(reviewHost,/function createSavedDayCoordinator\(/u,'Saved-Day reminder, acknowledgement, suspended-save and rollover orchestration have one checked P5.5B owner');
 for(const stale of ['function savedDayCoversReminderEvidence(','async function savedDayHasUncoveredKeptSession(','const DailyReflectionPersistence=(()=>','const LibraryDiaryEditor=(()=>','let saveReminderDate=']){
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.5B algorithms: ${stale}`);
