@@ -4,7 +4,7 @@ import type {
   ReviewHydrateOptions,ReviewSaveOptions,ReviewReflectionBinding,ReviewReflectionPending,ReviewEvidence,ReviewMetrics,ReviewTaskRow,ReviewTaskHeaderInput,
   ReviewTimingRowInput,ReviewProgressLineInput,ReviewCardModel,ReviewCardView,ReviewPracticeRunSummary,PracticeUnitSummary,PracticeSegmentSummary,
   ReviewPracticeAggregate,ReviewPrepared,ReviewRenderOptions,ReviewUiState,ReviewFocusLocator,ReviewReportContext,ReviewReportChild,ReviewReportSection,
-  ReviewRecordViewTask,ReviewReportSelectorContext,ReviewPomodoroSummary,TaskWithPauses,ReviewProjectedStudyRecord
+  ReviewRecordViewTask,ReviewReportSelectorContext,ReviewPomodoroSummary,TaskWithPauses,ReviewProjectedStudyRecord,ReviewQuality
 } from '../../types/review.ts';
 import type {CompletionSource,Task,TaskOutcome} from '../../types/domain.ts';
 import type {DailyRecord,DailyResult,PauseEvent,PracticeRun} from '../../types/record-models.ts';
@@ -178,7 +178,7 @@ const createModule=():ReviewModuleContract=>{
     }
     function reviewBindingElements(){
       const box=textAreaById('daily-reflection');
-      return [box,...document.querySelectorAll<HTMLButtonElement>('.quality-btn')].filter((field):field is HTMLElement=>field instanceof HTMLElement);
+      return [box,...document.querySelectorAll<HTMLButtonElement>('.quality-btn')].filter((field):field is HTMLTextAreaElement|HTMLButtonElement=>field instanceof HTMLElement);
     }
     function setReflectionRichSync(state:unknown,message:unknown){
       const box=textAreaById('daily-reflection');if(!box)return false;
@@ -251,7 +251,7 @@ function reviewHasStudyDay(){return TASKS.some(isTrackableBlock);}
 function getStudyQuality(){
   const active=document.querySelector<HTMLButtonElement>('.quality-btn.on');
   if(!active)return null;
-  const q=parseInt(active.dataset['q'],10);
+  const q=parseInt(active.dataset['q']??'',10);
   return isNaN(q)?null:q;
 }
 function updateStudyQualitySummary(value:ReviewQuality=getStudyQuality()){
@@ -1003,12 +1003,12 @@ function renderReviewCard(model:ReviewCardModel){
   const measureRow=document.createElement('div');measureRow.className='rmeasure-row';
   const doneField=document.createElement('div');doneField.className='rfield';
   const doneLabel=document.createElement('label');doneLabel.className='ui-label';doneLabel.textContent='Done';
-  const doneInput=document.createElement('input');doneInput.type='number';doneInput.className='ui-field ui-mono';doneInput.id=`rd-done-${model.idx}`;doneInput.min=0;doneInput.placeholder='0';doneInput.value=model.progress.done!==undefined?String(model.progress.done):'';
+  const doneInput=document.createElement('input');doneInput.type='number';doneInput.className='ui-field ui-mono';doneInput.id=`rd-done-${model.idx}`;doneInput.min='0';doneInput.placeholder='0';doneInput.value=model.progress.done!==undefined?String(model.progress.done):'';
   doneField.append(doneLabel,doneInput);
   const divider=document.createElement('div');divider.className='rdiv';divider.textContent='/';
   const totalField=document.createElement('div');totalField.className='rfield';
   const totalLabel=document.createElement('label');totalLabel.className='ui-label';totalLabel.textContent='Total';
-  const totalInput=document.createElement('input');totalInput.type='number';totalInput.className='ui-field ui-mono';totalInput.id=`rd-total-${model.idx}`;totalInput.min=0;totalInput.placeholder='—';totalInput.value=model.progress.total!==undefined?String(model.progress.total):(model.target!==null?String(model.target):'');
+  const totalInput=document.createElement('input');totalInput.type='number';totalInput.className='ui-field ui-mono';totalInput.id=`rd-total-${model.idx}`;totalInput.min='0';totalInput.placeholder='—';totalInput.value=model.progress.total!==undefined?String(model.progress.total):(model.target!==null?String(model.target):'');
   totalField.append(totalLabel,totalInput);
   const unitTag=document.createElement('div');unitTag.className='rutag ui-label ui-chip';unitTag.textContent=model.measure||'—';
   measureRow.append(doneField,divider,totalField,unitTag);
@@ -1017,7 +1017,7 @@ function renderReviewCard(model:ReviewCardModel){
   else if(model.progress.done!==undefined)setProgressSummary(summary,model.progress.done,0,model.measure||'units',' done · enter target for %',true);
   const pctField=document.createElement('div');pctField.className='rfield';
   const pctLabel=document.createElement('label');pctLabel.className='ui-label';pctLabel.textContent='Completion %';
-  const pctInput=document.createElement('input');pctInput.type='number';pctInput.className='ui-field ui-mono';pctInput.id=`rd-pct-${model.idx}`;pctInput.min=0;pctInput.max=100;pctInput.value=model.hasPct?String(Math.round(model.pct)):'';
+  const pctInput=document.createElement('input');pctInput.type='number';pctInput.className='ui-field ui-mono';pctInput.id=`rd-pct-${model.idx}`;pctInput.min='0';pctInput.max='100';pctInput.value=model.hasPct?String(Math.round(model.pct)):'';
   pctField.append(pctLabel,pctInput);
   const noteEdit=document.createElement('textarea');
   noteEdit.className='review-edit-note ui-field task-note-field';
@@ -1221,7 +1221,7 @@ function renderPracticeReview(){
   const panel=document.getElementById('practice-review');if(!panel)return;
   const runs=PracticePacer.completedRuns(),active=!!PracticePacer.status().active,show=!!runs.length||active;
   panel.hidden=!show;if(!show)return;
-  const table=panel.querySelector('.practice-run-table'),note=panel.querySelector('.practice-review-note');
+  const table=panel.querySelector<HTMLElement>('.practice-run-table'),note=panel.querySelector<HTMLElement>('.practice-review-note');
   if(runs.length){
     if(table)table.hidden=false;populatePracticeRunTable(panel,runs,{includeActiveNote:true,normalized:true,allowDelete:true});
   }else{
@@ -1574,7 +1574,7 @@ function ensureCopyReportMenuEvents(){
   });
   on(menu,'click',event=>{
     const button=eventElement(event)?.closest<HTMLButtonElement>('[data-copy-report-disclosure]');if(!button)return;
-    const id=button.dataset['copyReportDisclosure'],expanded=!copyReportExpanded.has(id),section=button.closest('.copy-report-section');expanded?copyReportExpanded.add(id):copyReportExpanded.delete(id);button.setAttribute('aria-expanded',String(expanded));const label=section?.querySelector('.copy-report-row-label')?.textContent||'section';button.setAttribute('aria-label',`${expanded?'Hide':'Show'} ${label.toLowerCase()}`);const children=section?.querySelector('.copy-report-children');if(children)children.hidden=!expanded;
+    const id=button.dataset['copyReportDisclosure']||'',expanded=!copyReportExpanded.has(id),section=button.closest<HTMLElement>('.copy-report-section');expanded?copyReportExpanded.add(id):copyReportExpanded.delete(id);button.setAttribute('aria-expanded',String(expanded));const label=section?.querySelector('.copy-report-row-label')?.textContent||'section';button.setAttribute('aria-label',`${expanded?'Hide':'Show'} ${label.toLowerCase()}`);const children=section?.querySelector<HTMLElement>('.copy-report-children');if(children)children.hidden=!expanded;
   });
   on(document,'click',event=>{const control=eventElement(event)?.closest('.copy-report-control');if(!control)closeCopyReportMenu();});
   on(document,'keydown',event=>{if(event instanceof KeyboardEvent&&event.key==='Escape')closeCopyReportMenu();});
