@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const html=readHostHtml();
-const review=fs.readFileSync('source/core/review.js','utf8');
+const review=fs.readFileSync('source/core/review.ts','utf8');
 const plan=fs.readFileSync('source/core/plan.ts','utf8');
 const repositories=readScript('source/core/repositories.ts');
 
