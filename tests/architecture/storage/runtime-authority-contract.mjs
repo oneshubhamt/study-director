@@ -19,8 +19,8 @@ assert.match(hydrateBlock,/protectedPreferencesHydrated&&!force/u,'ordinary hydr
 assert.match(startupHost,/hydrateSavedDrafts\(freeze\(\{forcePreferences:true,failClosed:true\}\)\)/u,'ownership takeover must force a fresh canonical Preferences read before becoming writable');
 assert.match(app,/StartupHostModule\.createOwnershipController/u,'host ownership startup composition must cross the checked startup-host boundary');
 assert.doesNotMatch(app,/OwnershipModule\.createOwnershipController\(Object\.freeze/u,'host must not retain duplicate direct ownership startup composition');
-assert.match(app,/let planError=null,preferencesError=null;[\s\S]{0,260}try\{await PlanData\.hydrate\(\);\}[\s\S]{0,260}try\{await hydrateProtectedPreferences\(\{force:forcePreferences\}\);\}/u,'Plan and Preferences hydration failures must be isolated rather than sharing one Promise.all failure domain');
-assert.match(app,/if\(planError\)PlanRuntime\.hydrate\(\{fallback:true\}\);\s*else\{PlanRuntime\.hydrate\(\);PlanRuntime\.savedPlans\.render\(\);\}/u,'Preferences failure must not force Plan fallback when Plan hydration succeeded');
+assert.match(startupHost,/let planError[\s\S]*preferencesError[\s\S]*try\{await p\.hydratePlan\(\);\}[\s\S]*try\{await p\.hydratePreferences\(\{force:forcePreferences\}\);\}/u,'Plan and Preferences hydration failures are isolated');
+assert.match(startupHost,/if\(planError\)p\.projectPlan\(\{fallback:true\}\);else\{p\.projectPlan\(\);p\.renderSavedPlans\(\);\}/u,'Preferences failure must not force Plan fallback');
 assert.match(app,/if\(!appCanMutate\(\)\|\|!protectedPreferencesHydrated\)return false;/u,'portable Preferences writes must be blocked when canonical Preferences are not hydrated');
 
 const themeStart=app.indexOf('function applyTheme('),themeEnd=app.indexOf('function setTheme(',themeStart);
@@ -40,7 +40,7 @@ const maintenanceBlock=app.slice(maintenanceStart,maintenanceEnd);
 assert.match(maintenanceBlock,/if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return false;/u,'data maintenance must not start before canonical startup verification completes');
 const maintenanceAdmission=app.slice(app.indexOf('const DataMaintenanceJob=OperationLifecycle.createJob('),maintenanceStart);
 assert.match(app,/function backgroundBlocker\([^)]*\)\{[^}]*if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return 'startup';/u,'the shared background gate rechecks startup');
-assert.match(app,/markReady:async proof=>\{[\s\S]*proof&&proof\.canonical===true[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*scheduleDataMaintenance\(\);/u,'initial maintenance must remain inside the verified-ready boundary after canonical epoch reseeding');
+assert.match(startupHost,/markReady:async proof=>\{[\s\S]*proof\.canonical!==true[\s\S]*p\.reseedEpoch\(\)[\s\S]*p\.scheduleMaintenance\(\);/u,'maintenance follows verified canonical startup');
 
 
 const applyPreferencesStart=app.indexOf('async function applyPreferences(raw)');

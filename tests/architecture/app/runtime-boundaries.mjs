@@ -156,8 +156,8 @@ console.log(JSON.stringify({status:'PASS',boundary:'practice-pacer',pureModel:tr
 }
 
 { // profile-name-authority-boundary
-const host=readHostHtml();
-const from=host.indexOf('function applyStudentName(name){'),to=host.indexOf('function getStudentNameFromDisplay()',from);
+const host=readScript('source/core/profiles-host.ts');
+const from=host.indexOf('function applyStudentName(name'),to=host.indexOf('function getStudentNameFromDisplay()',from);
 assert.ok(from>=0&&to>from,'profile-name host boundary is present');
 const applyName=host.slice(from,to);
 assert.match(applyName,/mine=Profiles\.current\(\)/u,'profile-name mirror resolves the current profile');

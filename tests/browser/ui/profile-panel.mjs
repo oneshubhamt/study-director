@@ -20,10 +20,11 @@ const panel=`(()=>{const dialog=document.getElementById('profile-dialog'),done=d
     more:document.getElementById('profile-recent-more').hidden?'':document.getElementById('profile-recent-more').textContent};})()`;
 const name=`({heading:document.querySelector('#profile-name-button .profile-name-text').textContent,editing:!document.getElementById('profile-name-input').hidden,focused:document.activeElement?.id||'',tag:document.querySelector('#profile-tag .profile-tag-name')?.textContent||''})`;
 const key=async(page,keyName,code,windowsVirtualKeyCode)=>{for(const type of ['keyDown','keyUp'])await page.send('Input.dispatchKeyEvent',{type,key:keyName,code,windowsVirtualKeyCode});};
-const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'sd-profile-panel-'});
+const server=await startReleaseServer();let browser=null;
 const checks={};
 try{
   for(const [device,viewport,opener] of [['laptop',{width:1280,height:800,mobile:false,scale:1},'#profile-tag'],['phone',{width:390,height:844,mobile:true,scale:2},'#profile-badge']]){
+    browser=await launchChromium({profilePrefix:'sd-profile-panel-'+device+'-'});
     const page=await browser.createPage(server.url('deployment','instrumented.html'),{preload,viewport});
     await waitForStudyDirector(page,{instrumented:true});
     await page.evaluate(seed);
@@ -73,7 +74,7 @@ try{
       checks.renameInPlace=true;
     }
     assert.deepEqual(page.events.filter(event=>!/favicon|ResizeObserver loop/iu.test(event.text||'')),[]);
-    await browser.closePage(page);
+    await browser.closePage(page);await browser.close();browser=null;
   }
-}finally{await browser.close();await server.close();}
+}finally{if(browser)await browser.close();await server.close();}
 console.log(JSON.stringify({status:'PASS',suite:'profile-panel',checks}));

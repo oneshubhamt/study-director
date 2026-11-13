@@ -281,15 +281,14 @@ const Profiles=ProfilesHostModule.createController(Object.freeze({module:Profile
     remove:key=>LocalStorageContract.remove(key)
   }),
   names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(@@SD_LOCAL_STORAGE_KEYS@@).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key))}),
-  platform:Object.freeze({
-    deleteDatabase:name=>new Promise((resolve,reject)=>{const request=indexedDB.deleteDatabase(name);request.onsuccess=()=>resolve(true);request.onerror=()=>reject(request.error||new Error('A removed profile could not be deleted.'));request.onblocked=()=>reject(new Error('Profile deletion is waiting for another open Study Director tab. Close the other tabs and retry; your recovery data remains protected.'));}),
-    listen:handler=>{const listener=event=>{if(event.storageArea===localStorage)handler(event.key);};window.addEventListener('storage',listener);return ()=>window.removeEventListener('storage',listener);},
-    now:()=>Date.now(),random:bytes=>randomIdPart(bytes),reload:()=>location.reload(),
-    removeDirectory:async name=>{const root=await navigator.storage?.getDirectory?.();if(!root)return;await root.removeEntry(name,{recursive:true}).catch(error=>{if(error?.name!=='NotFoundError')throw error;});}
-  }),
+  platform:ProfilesHostModule.createPlatform({indexedDB,window,localStorage,storage:navigator.storage,now:()=>Date.now(),random:randomIdPart,reload:()=>location.reload()}),
   limits:Object.freeze({maxName:APP_LIMITS.maxStudentNameChars})
 })}));
 Profiles.watch();
+const ProfileViews=ProfilesHostModule.createViews({document,Profiles,APP_LIMITS,FACTORY_DEFAULTS,clampText,appCanMutate:()=>appCanMutate(),scheduleSyncStatus,
+ driveStatus:()=>BackupProviderRuntime.locationStatus('google-drive'),protectionStatus:()=>BackupProtection.status(),deviceName:()=>PersistenceModule.deviceName(InstallationIdentity.getId()),
+ connectDrive:()=>connectDriveForProfile(),disconnectDrive:()=>BackupProviderRuntime.disconnect('google-drive'),AppDiagnostics,Interactions:{notify:input=>Interactions.notify(input)}
+});
 const {deviceName,backupFolderName}=DataBootstrapHostModule.createNaming(Object.freeze({
   module:PersistenceModule,identity:InstallationIdentity,currentProfile:()=>Profiles.current(),repositories:EXTERNAL_REPOSITORY_IDENTITIES
 }));
@@ -718,7 +717,7 @@ const OWNERSHIP_STALE_MS=15000;
 const OWNERSHIP_PROBE_MS=700;
 const OWNERSHIP_WEB_LOCK_NAME=ProfileScope.scoped('study-director-app-owner-v1');
 const OWNERSHIP_STATES=OwnershipModule.OWNERSHIP_STATES;
-let ownershipBanner=null;
+
 let AppMutationCoordinator=null;
 let mutationUiOperationActive=false;
 let pwaUpdateReservation=null;
@@ -767,7 +766,7 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze({
     scheduleMaintenance:()=>scheduleDataMaintenance(),
     practiceRender:()=>PracticePacer.render(),
     blocked:(status,reason)=>renderPrimaryTabBlock(status,reason),
-    peerStorageReset:detectedAt=>{void handleBrowserStorageReset({detectedAt,peer:true}).catch(error=>AppDiagnostics.capture('storage-reset.peer',error,'error'));},
+    peerStorageReset:detectedAt=>handleBrowserStorageReset({detectedAt,peer:true}),
     invalidate:context=>SessionLifecycle.invalidate('primary-tab-loss',{...context,reconcile:false}),
     flush:()=>StartupLifecycle.flush(),
     settled:()=>settleCurrentProfileWriters()
@@ -1110,55 +1109,11 @@ function resumeTimerLoopAfterPrimaryRestore(){
     return resumed;
   }catch(e){AppDiagnostics.capture('ownership.resume-timer',e,'error');return false;}
 }
-function renderOwnershipBanner(){
-  const mutationStatus=AppMutationCoordinator&&AppMutationCoordinator.status?AppMutationCoordinator.status():null;
-  const recoveryFault=String(mutationStatus&&mutationStatus.recoveryFault||'').trim();
-  const recoveryKind=String(mutationStatus&&mutationStatus.recoveryKind||'');
-  const transient=[
-    OWNERSHIP_STATES.RESOLVING,OWNERSHIP_STATES.ACQUIRING,
-    OWNERSHIP_STATES.HYDRATING,OWNERSHIP_STATES.RELEASING
-  ].includes(AppOwnership.state);
-  if(!recoveryFault&&(AppOwnership.state===OWNERSHIP_STATES.PRIMARY||transient)){
-    if(ownershipBanner){ownershipBanner.remove();ownershipBanner=null;}
-    return;
-  }
-  const bannerState=recoveryFault?`recovery-fault:${recoveryKind||'data'}`:AppOwnership.state;
-  if(ownershipBanner&&ownershipBanner.dataset.ownershipState===bannerState)return;
-  if(ownershipBanner){ownershipBanner.remove();ownershipBanner=null;}
-  ownershipBanner=document.createElement('div');
-  ownershipBanner.className='ownership-banner ui-card on';
-  ownershipBanner.dataset.ownershipState=bannerState;
-  ownershipBanner.setAttribute('role','status');
-  const copy=document.createElement('div');
-  copy.className='ownership-copy';
-  const title=document.createElement('b');
-  title.textContent=recoveryFault?(recoveryKind==='library-clear'?'Library data recovery required':'Data recovery required'):AppOwnership.state===OWNERSHIP_STATES.FAULTED?'Study Director control unavailable':'Study Director controlled elsewhere';
-  const body=document.createElement('span');
-  body.textContent=recoveryFault
-    ? recoveryKind==='library-clear'?'Study Director retained the Library-clear journal. Reload to complete recovery. Do not clear site data.':'Study Director retained the recovery journal. Reload to complete recovery. Do not clear site data.'
-    : AppOwnership.state===OWNERSHIP_STATES.FAULTED
-    ? 'Study Director write ownership could not be established safely. Browsing remains available; retry after browser storage recovers.'
-    : 'Another live tab controls Study Director writes. This tab remains read-only until you take control.';
-  copy.append(title,body);
-  ownershipBanner.appendChild(copy);
-  if(!recoveryFault&&AppOwnership.state===OWNERSHIP_STATES.SECONDARY){
-    const btn=document.createElement('button');
-    btn.className='mini-btn ui-btn primary';
-    btn.type='button';
-    btn.textContent='Take control';
-    btn.addEventListener('click',()=>claimAppControl(true));
-    ownershipBanner.appendChild(btn);
-  }
-  document.body.appendChild(ownershipBanner);
-}
-function renderOwnershipUi(){
-  if(!appCanMutate())NoticeCoordinator.stopSound();
-  if(StartupLifecycle.status().fullyInitialized)PlanRuntime.savedPlans.syncAccess();
-  OwnershipUiProjection.apply();
-  renderOwnershipBanner();
-  wakeBackgroundOperations('ownership');
-  void NativeCapabilities?.syncWake();
-}
+const StartupOwnershipViews=StartupHostModule.createOwnershipViews({document,OWNERSHIP_STATES,AppOwnership,NoticeCoordinator,appCanMutate,
+ claimAppControl:(...args)=>claimAppControl(...args),setPlanStatus:(...args)=>setPlanStatus(...args),mutationStatus:()=>AppMutationCoordinator?.status()||null,ready:()=>StartupLifecycle.status().fullyInitialized,
+ syncPlanAccess:()=>PlanRuntime.savedPlans.syncAccess(),projectOwnership:()=>OwnershipUiProjection.apply(),wakeBackground:wakeBackgroundOperations,syncWake:()=>NativeCapabilities?.syncWake()});
+function renderOwnershipBanner(...args){return StartupOwnershipViews.renderOwnershipBanner(...args);}
+function renderOwnershipUi(...args){return StartupOwnershipViews.renderOwnershipUi(...args);}
 async function loadActiveSessionForRestore(){
   const loaded=await AppData.activeSession.load();
   if(loaded&&!loaded.ok&&loaded.error)markStorageHealthError('activeSession',`Live-session recovery could not be loaded: ${loaded.error.message||'active session load failed'}`);
@@ -1205,27 +1160,8 @@ const {
   setPrimary:setPrimaryTabState, takeOwnership:claimAppControl, install:installAppOwnership
 }=AppOwnership;
 function flushAndReleaseAppOwner(requestId=''){return AppOwnership.flushAndRelease(requestId);}
-function requirePrimaryTab(event,reason='change this tab'){
-  if(AppOwnership.canMutate())return true;
-  if(event){event.preventDefault();event.stopPropagation();}
-  return AppOwnership.requirePrimary(reason);
-}
-function renderPrimaryTabBlock(status,reason){
-  if(status.hydrating){
-    setPlanStatus('Reloading the latest canonical state from storage before enabling this tab.',false);
-    return;
-  }
-  if([OWNERSHIP_STATES.RESOLVING,OWNERSHIP_STATES.ACQUIRING,OWNERSHIP_STATES.RELEASING].includes(status.state)){
-    setPlanStatus('Study Director ownership is being resolved. Try again after the transfer finishes.',false);
-    return;
-  }
-  if(status.state===OWNERSHIP_STATES.FAULTED){
-    setPlanStatus(`Study Director control is unavailable because its ownership record failed. Restore browser storage before trying to ${reason}.`,false);
-    return;
-  }
-  renderOwnershipBanner();
-  setPlanStatus(`Study Director control is in another tab. Take control here to ${reason}.`,false);
-}
+function requirePrimaryTab(...args){return StartupOwnershipViews.requirePrimaryTab(...args);}
+function renderPrimaryTabBlock(...args){return StartupOwnershipViews.renderPrimaryTabBlock(...args);}
 /* DAILY RECORD COMPACTION AND SANITIZERS · IMPORTED */
 const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze({
   limits:APP_LIMITS,
@@ -3435,19 +3371,9 @@ function saveQuoteDraft(){
   if(!appCanMutate())return;
   try{const el=document.getElementById('quote-input');if(el){const value=clampText(el.value,APP_LIMITS.maxQuoteChars);if(el.value!==value)el.value=value;persistProtectedPreferences({quote:value});}}catch(e){}
 }
-async function hydrateSavedDrafts({forcePreferences=false,failClosed=false}={}){
-  let planError=null,preferencesError=null;
-  try{await PlanData.hydrate();}
-  catch(error){planError=error;AppDiagnostics.capture('startup.plan-hydrate',error,'error');markStorageHealthError('planDraft',error&&error.message?error.message:'Saved Plan data could not be hydrated.');}
-  try{await hydrateProtectedPreferences({force:forcePreferences});}
-  catch(error){preferencesError=error;AppDiagnostics.capture('startup.preferences-hydrate',error,'error');markStorageHealthError('personalPreferences',error&&error.message?error.message:'Personal settings could not be hydrated.');}
-  if(planError)PlanRuntime.hydrate({fallback:true});
-  else{PlanRuntime.hydrate();PlanRuntime.savedPlans.render();}
-  if(!preferencesError){const qi=document.getElementById('quote-input'),q=protectedPreferencesState.quote||'';if(qi&&q){qi.value=q;onQuoteChange({markChanged:false});}}
-  const failure=planError||preferencesError;
-  if(failure&&failClosed)throw failure;
-  return !failure;
-}
+const StartupDraftHydration=StartupHostModule.createDraftHydration({document,hydratePlan:()=>PlanData.hydrate(),hydratePreferences:options=>hydrateProtectedPreferences(options),
+ capture:AppDiagnostics.capture,markStorageError:markStorageHealthError,projectPlan:options=>PlanRuntime.hydrate(options),renderSavedPlans:()=>PlanRuntime.savedPlans.render(),quote:()=>protectedPreferencesState.quote,quoteChanged:options=>onQuoteChange(options)});
+async function hydrateSavedDrafts(options={}){return StartupDraftHydration(options);}
 function userDefaultsPayload(overrides={}){
   const saved=readUserDefaults()||{},has=key=>Object.prototype.hasOwnProperty.call(overrides,key);
   const studentName=normalizeStudentName(has('studentName')?overrides.studentName:saved.studentName||getStudentNameFromDisplay());
@@ -3461,10 +3387,7 @@ function persistPracticeTarget(targetMs){if(!appCanMutate())return false;const c
 function persistPracticeCueMode(mode){if(!appCanMutate())return false;return persistUserDefaults({practiceCueMode:sanitizePracticeCueMode(mode)});}
 function ensureTaskIds(){return TimerState.ensureTaskIds();}
 /* SHELL DEFAULTS AND CLOCK HEADER */
-function normalizeStudentName(name){
-  const clean=clampText(String(name||'').replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/gu,' ').trim().replace(/\s+/g,' '),APP_LIMITS.maxStudentNameChars);
-  return clean || FACTORY_DEFAULTS.studentName;
-}
+function normalizeStudentName(...args){return ProfileViews.normalizeStudentName(...args);}
 function filenameSafeStudentName(name){
   const base=normalizeStudentName(name).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,Math.max(1,APP_LIMITS.maxBackupFilenameChars-64)).replace(/-$/g,'');
   return base||'student';
@@ -3477,43 +3400,13 @@ function readUserDefaults(){
   return {studentName,practiceTargetMs:practiceTargetMs||null,practiceCueMode};
 }
 function getActiveDefaults(){return PlanData.activeDefaults();}
-function applyStudentName(name){
-  const clean=normalizeStudentName(name),mine=Profiles.current();
-  // The device-wide profile registry mirrors the synced personal name, but
-  // read-only/secondary tabs must never rewrite that device authority.
-  // Commit the registry mirror before presenting the new name in this tab.
-  if(mine&&mine.name!==clean&&appCanMutate())Profiles.rename(clean);
-  document.querySelectorAll('[data-student-name]').forEach(el=>{
-    if('value' in el)el.value=clean;
-    else el.textContent=clean;
-  });
-  const meta=document.querySelector('meta[name="apple-mobile-web-app-title"]');
-  if(meta)meta.setAttribute('content',`${clean} Study Director`);
-  renderProfileBadge();
-  return clean;
-}
-function getStudentNameFromDisplay(){
-  return normalizeStudentName(document.querySelector('.profile-tag-name')?.textContent||'');
-}
-function isDefaultStudentName(name){
-  return normalizeStudentName(name)===FACTORY_DEFAULTS.studentName;
-}
-/* PROFILE: the name tag, the phone letter circle, the Profile panel and the
-   first-start form (Add profile opens the same form). The name is the
-   library's own (personal preferences, synced); the device's profile list
-   mirrors it for the list and the circle. */
-function profileInitial(name){return (Array.from(String(name||'').trim())[0]||'?').toLocaleUpperCase();}
-function profileSince(row){const at=Date.parse(row?.createdAt||'');return Number.isFinite(at)?new Date(at).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'}):'';}
-// Two profiles with the same name are told apart by their Google account, or by when they were made.
-function profileLabel(row,rows=Profiles.list()){
-  const name=row?.name||'New profile',alike=rows.some(other=>other.scope!==row.scope&&(other.name||'New profile')===name);
-  return {name,meta:row?.email||(alike&&profileSince(row)?`since ${profileSince(row)}`:'')};
-}
-function renderProfileBadge(){
-  const letter=profileInitial(getStudentNameFromDisplay());
-  for(const glyph of document.querySelectorAll('.profile-badge-letter,.profile-avatar-letter'))if(glyph.textContent!==letter)glyph.textContent=letter;
-  scheduleSyncStatus();
-}
+function applyStudentName(...args){return ProfileViews.applyStudentName(...args);}
+function getStudentNameFromDisplay(...args){return ProfileViews.getStudentNameFromDisplay(...args);}
+function isDefaultStudentName(...args){return ProfileViews.isDefaultStudentName(...args);}
+function profileInitial(...args){return ProfileViews.profileInitial(...args);}
+function profileSince(...args){return ProfileViews.profileSince(...args);}
+function profileLabel(...args){return ProfileViews.profileLabel(...args);}
+function renderProfileBadge(...args){return ProfileViews.renderProfileBadge(...args);}
 // One status for the phone circle, the sidebar name and the profile panel:
 // a ring for sync health and a badge for what needs the person
 // (docs/areas/status-indicator.md). Drawn after the current task, so every input
@@ -3613,41 +3506,9 @@ async function syncStatusAction(ev){
     }
   }catch(error){AppDiagnostics.capture('sync-status.action',error,'warn');return false;}
 }
-function renderProfilePanel(){
-  const dialog=document.getElementById('profile-dialog');if(!dialog?.open)return;
-  const mine=Profiles.current(),rows=Profiles.list(),drive=BackupProviderRuntime.locationStatus('google-drive'),email=mine?.email||'',protection=BackupProtection.status();
-  // Sync state is the Sync & backups section's; the subtitle names the account.
-  const subtitle=document.getElementById('profile-subtitle');if(subtitle){subtitle.textContent=email;subtitle.hidden=!email;}
-  const driveValue=document.getElementById('profile-drive-value'),driveAction=document.getElementById('profile-drive-action');
-  if(driveValue)driveValue.textContent=drive?.connected?(email||'Connected'):email?`${email} · Signed out`:'Not connected';
-  if(driveAction){driveAction.textContent=drive?.connected?'Disconnect':email?'Sign in':'Connect';driveAction.dataset.state=drive?.connected?'connected':'';driveAction.disabled=!!drive?.engineBusy;}
-  const passwordValue=document.getElementById('profile-password-value'),passwordAction=document.getElementById('profile-password-action');
-  if(passwordValue)passwordValue.textContent=protection.enabled?(protection.unlocked?'On':'On · Not entered on this device yet'):'Off';
-  if(passwordAction)passwordAction.textContent=protection.enabled?(protection.unlocked?'Change…':'Enter…'):'Set…';
-  const list=document.getElementById('profile-list'),locked=Profiles.unsupported();
-  const unsupportedNote=document.getElementById('profile-unsupported');if(unsupportedNote)unsupportedNote.hidden=!locked;
-  const add=document.getElementById('profile-add');if(add)add.disabled=locked;
-  const remove=document.getElementById('profile-delete');if(remove)remove.disabled=locked;
-  if(list){
-    list.replaceChildren(...rows.map(row=>{
-      const item=document.createElement('li'),current=row.scope===mine?.scope,{name,meta}=profileLabel(row,rows);item.className='profile-item'+(current?' current':'');
-      const avatar=document.createElement('span');avatar.className='profile-item-avatar';avatar.setAttribute('aria-hidden','true');avatar.textContent=profileInitial(name);
-      const text=document.createElement('span');text.className='profile-item-text';const strong=document.createElement('strong');strong.textContent=name;text.append(strong);
-      if(meta){const small=document.createElement('small');small.textContent=meta;text.append(small);}
-      let end;
-      if(current){end=document.createElement('span');end.className='profile-item-tag ui-label';end.textContent='This profile';}
-      else{end=document.createElement('button');end.type='button';end.className='profile-act ui-btn profile-switch';end.textContent='Switch';end.dataset.action='switch-profile';end.dataset.profile=row.id;end.setAttribute('aria-label',`Switch to ${name}`);end.disabled=locked;}
-      item.append(avatar,text,end);return item;
-    }));
-  }
-  const device=document.getElementById('profile-device');if(device)device.textContent=`This device: ${PersistenceModule.deviceName(InstallationIdentity.getId())||'this browser'}`;
-  renderProfileBadge();
-}
-function renderProfile(){renderProfileBadge();renderProfilePanel();}
-function reportProfileActionError(error){
-  AppDiagnostics.capture('profile.action',error,'warn');
-  Interactions.notify({key:'profile-action',title:'Profile change stopped',message:'Study Director could not safely update the local profile list. Your current profile remains authoritative; retry after browser storage recovers.'});
-}
+function renderProfilePanel(...args){return ProfileViews.renderProfilePanel(...args);}
+function renderProfile(...args){return ProfileViews.renderProfile(...args);}
+function reportProfileActionError(...args){return ProfileViews.reportProfileActionError(...args);}
 const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze({
   document,
   getStudentName:()=>getStudentNameFromDisplay(),
@@ -3665,10 +3526,7 @@ function startProfileRename(){return ProfilePanelActions.startRename();}
 function finishProfileRename(){return ProfilePanelActions.finishRename();}
 function handleProfileNameKey(event){return ProfilePanelActions.handleNameKey(event);}
 
-async function profileDriveAction(){
-  if(BackupProviderRuntime.locationStatus('google-drive')?.connected)return BackupProviderRuntime.disconnect('google-drive');
-  return connectDriveForProfile();
-}
+function profileDriveAction(){return ProfileViews.profileDriveAction();}
 // Profile deletion composes backup/provider effects behind a checked profile-owned adapter.
 const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze({
   profiles:Profiles,
@@ -3792,29 +3650,12 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze({
 
 // A deliberate profile reload must not outrun writes owned by the current
 // profile. Page-exit flushing remains a last safety net, not the commit gate.
-async function settleCurrentProfileWriters(){
-  if(!AppOwnership.canMutate())throw new Error('Study Director does not currently have write control.');
-  // A mutation already owned by this tab is allowed to finish; only after it
-  // settles do we require the ordinary unblocked write state.
-  await AppMutationCoordinator.settled();
-  if(!appCanMutate())throw new Error('Study Director could not reach a safe write state.');
-  if(await Promise.resolve(PlanDraftEditor.flush({strictDurability:true}))===false)throw new Error('The current Plan draft could not be saved.');
-  await PlanData.settled();
-  // This existing writer barrier closes/settles rich-text and Diary edits,
-  // Notes, the current reflection and Active Session.
-  await settleAttachmentWriters();
-  if(await AppData.deletionRecovery.flush()!==true)throw new Error('Pending deletions could not be saved.');
-  await AppMutationCoordinator.settled();
-  return true;
-}
-async function settleCurrentProfileBeforeReload(){
-  try{return await settleCurrentProfileWriters();}
-  catch(error){
-    AppDiagnostics.capture('profiles.pre-reload-settlement',error,'error');
-    setPlanStatus('Profile change stopped because current work could not be safely saved. Keep this tab open and retry after storage recovers.',false);
-    return false;
-  }
-}
+const ProfileSettlement=ProfilesHostModule.createSettlement({AppOwnership,AppMutationCoordinator,appCanMutate,
+ PlanDraftEditor:{flush:options=>PlanDraftEditor.flush(options)},PlanData:{settled:()=>PlanData.settled()},settleAttachmentWriters,
+ deletionRecovery:AppData.deletionRecovery,AppDiagnostics,setPlanStatus:(...args)=>setPlanStatus(...args)
+});
+async function settleCurrentProfileWriters(){return ProfileSettlement.settleCurrentProfileWriters();}
+async function settleCurrentProfileBeforeReload(){return ProfileSettlement.settleCurrentProfileBeforeReload();}
 // Startup: make sure this page's profile is on the device's list, and offer
 // the first-start form to someone new.
 const ProfileLifecycle=ProfilesHostModule.createLifecycle(Object.freeze({
@@ -8364,7 +8205,6 @@ function installApplicationDomBindings(){
 function applyPwaLaunchRoute(){
   return NavigationController.hydrate({source:'launch-route',explicitOnly:true}).then(result=>result.ok===true);
 }
-let startupClockInterval=null,startupHeaderClockInterval=null;
 StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
   module:StartupLifecycleModule,
   environment:Object.freeze({document,window}),
@@ -8373,13 +8213,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
   ownership:AppOwnership,
   timer:Object.freeze({
     stopPresentation:TimerPresentation.stop,
-    syncAfterWake:()=>{
-      // Managed recovery freezes the live timer until the safety capture and canonical mutation finish.
-      if(managedRecoverySessionQuiesced())return false;
-      // Timer/date reconciliation is non-destructive here. Ownership changes and real
-      // study-day transitions already run their own SessionLifecycle transitions.
-      return syncTimerAfterWake();
-    }
+    syncAfterWake:StartupHostModule.createWake({quiesced:managedRecoverySessionQuiesced,sync:syncTimerAfterWake})
   }),
   flushers:Object.freeze({
     planDraft:PlanDraftEditor.flush,
@@ -8388,82 +8222,16 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
     notes:()=>AppData.notes.flush(),
     deletionRecovery:AppData.deletionRecovery.flush
   }),
-  startup:Object.freeze({
-    prepareCanonicalData:()=>{if(ProfileScope.safe!==true)throw Object.assign(new Error('The device profile list could not be read safely. Profile-owned storage was not opened for use.'),{code:'STUDY_DIRECTOR_PROFILE_REGISTRY_UNREADABLE'});return UnsupportedData.census();},
-    restoreAppearance:()=>{
-      if(protectedPreferencesHydrated){applyPortablePreferencesToRuntime(protectedPreferencesState);return;}
-      applyTheme(PRESENTATION_KERNEL.readStoredTheme((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false});
-      applyPresentation(PRESENTATION_KERNEL.readStoredPresentation((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false});
-      applyFontScale(readFontScale());
-    },
-    bindDom:installApplicationDomBindings,
-    recoverInterruptedLibraryClear:()=>LibraryClearCoordinator.recoverInterrupted(),
-    recoverInterruptedRestore:async()=>{await PlanData.hydrate();if(await AppData.restoreJournal.read().catch(()=>null))await waitForClosedTabLease();return BackupController.recoverInterruptedRestore();},
-    loadNotes:()=>AppData.notes.load(),
-    hydrateDrafts:hydrateSavedDrafts,
-    previewPlan:()=>PlanDraftEditor.preview({silent:true}),
-    startClock:()=>{tickClock();if(startupClockInterval===null)startupClockInterval=setInterval(tickClock,1000);},
-    startHeaderClock:()=>{updateHeaderInfo();if(startupHeaderClockInterval===null)startupHeaderClockInterval=setInterval(updateHeaderInfo,60000);},
-    refreshCoreUi:()=>refreshCoreUi(),
-    renderRecovery:renderRecoveryReview,
-    checkBackup:()=>maybePromptBackupNudge(true),
-    showEmptyIfNeeded:()=>{if(!TASKS.length)showEmpty();},
-    openInitialTab:()=>goTab('plan',{source:'startup-initial',history:'none',restoreScroll:false,force:true}),
-    restoreActiveSession:async()=>{
-      const restored=appCanMutate()?await attemptAutoRestoreActiveSession():false;
-      await refreshPersistedSessionBadge();
-      return restored;
-    },
-    applyLaunchRoute:applyPwaLaunchRoute,
-    showNameSetup:startProfile,
-    inspectStorage:async()=>{const state=await inspectStorageCapability();await CapabilityInstallation.offerInstallNotice();return state;},
-    verifyReady:async()=>{const topology=await IndexedDb.topology();if(!topology.usable)throw new Error('Canonical database topology is unavailable.');return Object.freeze({canonical:true});},
-    markReady:async proof=>{
-      backupFastFenceReady=false;
-      if(proof&&proof.canonical===true){
-        try{await AppData.mutationEpoch.reseed();backupFastFenceReady=true;}
-        catch(error){AppDiagnostics.capture('startup.canonical-mutation-epoch',error,'warn');}
-      }
-      // The durable mutation epoch must repair the fast mirror before the
-      // startup gate opens any automatic provider work.
-      await reconcileStartupChangeClock();
-      resumeUnresolvedStorageReset();
-      installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
-      void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
-      void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
-      document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
-      document.documentElement.dataset.studyDirectorStartupState='ready';
-      document.documentElement.dataset.studyDirectorReady='true';
-      NoticeCoordinator.dismiss('startup-failure');
-      window.dispatchEvent(new CustomEvent('studydirector:canonicalstatus',{detail:proof}));
-      window.dispatchEvent(new CustomEvent('studydirector:startupready',{detail:Object.freeze({version:APP_VERSION,canonical:proof.canonical})}));
-      scheduleInsightsPreload();
-      void PwaLifecycle.confirmBoot().catch(error=>AppDiagnostics.capture('pwa.boot-confirmation',error,'warn'));
-      setTimeout(()=>{void offerDeviceRecoveryIfLocalEmpty({reason:'startup'}).catch(error=>AppDiagnostics.capture('backup.device-recovery-offer',error,'warn'));},0);
-      return proof;
-    },
-    reportFailure:failure=>{
-      document.documentElement.dataset.studyDirectorStartupState='failed';
-      document.documentElement.dataset.studyDirectorReady='false';
-      if(UnsupportedData.reportBlocked()){setPlanStatus('This profile needs a newer version of Study Director. Its data is left as it is.',false);return;}
-      if(failure?.causeCode==='STUDY_DIRECTOR_PROFILE_REGISTRY_UNREADABLE'){
-        const message='Study Director could not safely identify the active local profile. Profile-owned data was left unopened. Reload once; if this continues, update or recover the browser data before creating or replacing profiles.';
-        NoticeCoordinator.publish('startup-failure',{visible:true,kind:'safety',title:'Profile list could not be read safely',message,compact:noticeCanCompact(message)});
-        setPlanStatus('Startup stopped before profile data opened. Do not create or replace profiles until the device profile list is recovered.',false);
-        return;
-      }
-      const message='Study Director could not safely finish loading your stored data. Your existing data has not been replaced. Reload or restore from backup if the problem continues.';
-      NoticeCoordinator.publish('startup-failure',{visible:true,kind:'safety',title:'Study Director could not finish starting',message,compact:noticeCanCompact(message)});
-      setPlanStatus(`Startup stopped safely at ${String(failure&&failure.stage||'startup')}. Reload the app before making changes.`,false);
-    },
-    clearFailure:()=>{
-      NoticeCoordinator.dismiss('startup-failure');
-      document.documentElement.dataset.studyDirectorStartupState='initializing';
-    },
-    reconcileLifecycle:()=>SessionLifecycle.reconcile('app-restart-ready',{
-      date:getReviewDate(),autoDate:document.getElementById('day-date')?.dataset.autoDate==='1',
-
-    })
+  startup:StartupHostModule.createStages({document,window,version:APP_VERSION,notices:NoticeCoordinator,
+    stages:{bindDom:installApplicationDomBindings,recoverInterruptedLibraryClear:()=>LibraryClearCoordinator.recoverInterrupted(),loadNotes:()=>AppData.notes.load(),hydrateDrafts:hydrateSavedDrafts,previewPlan:()=>PlanDraftEditor.preview({silent:true}),refreshCoreUi:()=>refreshCoreUi(),renderRecovery:renderRecoveryReview,checkBackup:()=>maybePromptBackupNudge(true),openInitialTab:()=>goTab('plan',{source:'startup-initial',history:'none',restoreScroll:false,force:true}),applyLaunchRoute:applyPwaLaunchRoute,showNameSetup:startProfile},
+    profileSafe:()=>ProfileScope.safe===true,census:()=>UnsupportedData.census(),preferencesHydrated:()=>protectedPreferencesHydrated,applyProtectedAppearance:()=>applyPortablePreferencesToRuntime(protectedPreferencesState),
+    restoreTheme:()=>applyTheme(PRESENTATION_KERNEL.readStoredTheme((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false}),restorePresentation:()=>applyPresentation(PRESENTATION_KERNEL.readStoredPresentation((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false}),restoreFontScale:()=>applyFontScale(readFontScale()),
+    hydratePlan:()=>PlanData.hydrate(),readRestoreJournal:()=>AppData.restoreJournal.read(),waitForClosedTabLease,recoverRestore:()=>BackupController.recoverInterruptedRestore(),tickClock,updateHeader:updateHeaderInfo,setInterval:(fn,ms)=>setInterval(fn,ms),setTimeout:(fn,ms)=>setTimeout(fn,ms),
+    hasTasks:()=>TASKS.length>0,showEmpty,canMutate:appCanMutate,restoreSession:attemptAutoRestoreActiveSession,refreshBadge:refreshPersistedSessionBadge,inspectStorage:inspectStorageCapability,offerInstallNotice:()=>CapabilityInstallation.offerInstallNotice(),topology:()=>IndexedDb.topology(),
+    setFastFenceReady:value=>{backupFastFenceReady=value;},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:reconcileStartupChangeClock,resumeStorageReset:resumeUnresolvedStorageReset,
+    installBackground:installBackgroundOwners,scheduleMaintenance:scheduleDataMaintenance,wakeBackground:reason=>BackgroundOperations.wake(reason),installSessionWatch,refreshKeptVersions:()=>KeptVersions.refresh(),announceUnsupported:()=>UnsupportedData.announce(),renderUnsupported:renderUnsupportedData,
+    collectProfiles:()=>Profiles.collect(),askProfilePassword,collectFiles:()=>BackupFiles.collect(),preloadInsights:scheduleInsightsPreload,confirmBoot:()=>PwaLifecycle.confirmBoot(),offerDeviceRecovery:()=>offerDeviceRecoveryIfLocalEmpty({reason:'startup'}),
+    reportUnsupported:()=>UnsupportedData.reportBlocked(),setPlanStatus,noticeCanCompact,getReviewDate,reconcileLifecycle:(...args)=>SessionLifecycle.reconcile(...args)
   })
 }));
 /* PUBLIC PLUGIN API */

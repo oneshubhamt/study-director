@@ -54,8 +54,34 @@ export interface StartupHostCoordinatorInput{
 }
 export interface StartupHostModule{
   readonly format:'study-director.startup-host-module';readonly contractVersion:1;
+  createOwnershipViews(input:Readonly<OwnershipViewsInput>):Readonly<{renderOwnershipBanner():void;renderOwnershipUi():void;requirePrimaryTab(event:Event|null,reason?:string):boolean;renderPrimaryTabBlock(status:import('./ownership.ts').OwnershipStatus,reason:string):void}>;
+  createStages(input:Readonly<StartupStagesInput>):StartupLifecycleInput['startup'];
+  createDraftHydration(input:Readonly<StartupDraftHydrationInput>):(options?:{forcePreferences?:boolean;failClosed?:boolean})=>Promise<boolean>;
+  createWake(input:Readonly<{quiesced():boolean;sync():unknown}>):()=>unknown;
   createActivation(input:Readonly<ActivationInput>):Readonly<ActivationContract>;
   createOwnershipController(input:Readonly<OwnershipHostInput>):Readonly<OwnershipController>;
   createCoordinator(input:Readonly<StartupHostCoordinatorInput>):Readonly<StartupCoordinator>;
 }
 export type {ActivationEvent,ActivationKind};
+export interface StartupStagesInput{
+ document:Document;window:Window;version:string;notices:Pick<import('../source/core/notice-coordinator.ts').NoticeCoordinator,'dismiss'|'publish'>;
+ stages:Pick<StartupLifecycleInput['startup'],'bindDom'|'recoverInterruptedLibraryClear'|'loadNotes'|'hydrateDrafts'|'previewPlan'|'refreshCoreUi'|'renderRecovery'|'checkBackup'|'openInitialTab'|'applyLaunchRoute'|'showNameSetup'>;
+ profileSafe():boolean;census():unknown;preferencesHydrated():boolean;applyProtectedAppearance():unknown;restoreTheme():unknown;restorePresentation():unknown;restoreFontScale():unknown;
+ hydratePlan():PromiseLike<unknown>;readRestoreJournal():Promise<unknown>;waitForClosedTabLease():PromiseLike<unknown>;recoverRestore():PromiseLike<unknown>;
+ tickClock():unknown;updateHeader():unknown;setInterval(callback:()=>unknown,ms:number):number;setTimeout(callback:()=>unknown,ms:number):number;
+ hasTasks():boolean;showEmpty():unknown;canMutate():boolean;restoreSession():PromiseLike<boolean>;refreshBadge():PromiseLike<unknown>;inspectStorage():PromiseLike<unknown>;offerInstallNotice():PromiseLike<unknown>;topology():PromiseLike<{usable:boolean}>;
+ setFastFenceReady(value:boolean):void;reseedEpoch():PromiseLike<unknown>;capture(scope:string,error:unknown,level:'warn'|'error'):unknown;reconcileChangeClock():PromiseLike<unknown>;resumeStorageReset():unknown;
+ installBackground():unknown;scheduleMaintenance():unknown;wakeBackground(reason:string):unknown;installSessionWatch():unknown;refreshKeptVersions():PromiseLike<unknown>;announceUnsupported():unknown;renderUnsupported():unknown;
+ collectProfiles():PromiseLike<{error?:unknown}>;askProfilePassword():unknown;collectFiles():Promise<unknown>;preloadInsights():unknown;confirmBoot():Promise<unknown>;offerDeviceRecovery():Promise<unknown>;
+ reportUnsupported():boolean;setPlanStatus(message:string,ok:boolean):unknown;noticeCanCompact(message:string):boolean;getReviewDate():string;reconcileLifecycle(kind:string,options:{date:string;autoDate:boolean}):unknown;
+}
+export interface StartupDraftHydrationInput{
+ document:Document;hydratePlan():PromiseLike<unknown>;hydratePreferences(options:{force:boolean}):PromiseLike<unknown>;capture(scope:string,error:unknown,level:'error'):unknown;markStorageError(scope:string,message:string):unknown;
+ projectPlan(options?:{fallback:true}):unknown;renderSavedPlans():unknown;quote():string;quoteChanged(options:{markChanged:false}):unknown;
+}
+
+export interface OwnershipViewsInput{
+ document:Document;OWNERSHIP_STATES:OwnershipModule['OWNERSHIP_STATES'];AppOwnership:OwnershipController;NoticeCoordinator:Pick<import('../source/core/notice-coordinator.ts').NoticeCoordinator,'stopSound'>;
+ appCanMutate():boolean;claimAppControl(force:boolean):unknown;setPlanStatus(message:string,ok:boolean):unknown;
+ mutationStatus():{recoveryFault?:unknown;recoveryKind?:unknown}|null;ready():boolean;syncPlanAccess():unknown;projectOwnership():unknown;wakeBackground(reason:string):unknown;syncWake():unknown;
+}

@@ -57,6 +57,17 @@ try{
   assert.equal(backupDeletes,1);assert.equal(removes,1);assert.equal(holdSettled,true);assert.equal(holdReleased,1,'successful deletion releases its publication hold exactly once');
   assert.equal(captures,0);assert.equal(notices,0);
 
+  // A reload only follows a complete writer barrier; any failed stage is contained.
+  for(const failure of ['', 'draft', 'deletions', 'authority']){
+    const order=[];
+    const settlement=Host.createSettlement({AppOwnership:{canMutate:()=>true},AppMutationCoordinator:{settled:async()=>order.push('mutation')},appCanMutate:()=>failure!=='authority',
+      PlanDraftEditor:{flush:async options=>{assert.equal(options.strictDurability,true);order.push('draft');return failure!=='draft';}},PlanData:{settled:async()=>order.push('plan')},
+      settleAttachmentWriters:async()=>order.push('editors'),deletionRecovery:{flush:async()=>{order.push('deletions');return failure!=='deletions';}},AppDiagnostics:{capture:()=>order.push('error')},setPlanStatus:()=>order.push('status')});
+    assert.equal(await settlement.settleCurrentProfileBeforeReload(),!failure);
+    if(!failure)assert.deepEqual(order,['mutation','draft','plan','editors','deletions','mutation']);
+    else{assert.deepEqual(order.slice(-2),['error','status']);if(failure==='draft')assert.ok(!order.includes('editors'));}
+  }
+
   console.log(JSON.stringify({status:'PASS',contract:'profiles-host',checks:['switch-settlement-gate','add-settlement-gate','delegated-action-error-containment','deletion-quiescence','successful-hold-release']},null,2));
 }finally{
   if(priorElement===undefined)delete globalThis.Element;else globalThis.Element=priorElement;

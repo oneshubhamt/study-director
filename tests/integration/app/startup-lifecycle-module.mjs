@@ -165,3 +165,21 @@ console.log(JSON.stringify({
   wakeOrdering:true,
   activationContract:true
 },null,2));
+
+// The checked hydration adapter isolates failures and keeps the successful
+// half visible; fail-closed takeover must still reject either failure.
+for(const failed of ['plan','preferences','none']){
+ const calls=[],quote={value:''};
+ const hydrate=StartupHost.createDraftHydration({document:{querySelector:()=>quote},
+  hydratePlan:async()=>{calls.push('plan');if(failed==='plan')throw new Error('plan failed');},
+  hydratePreferences:async options=>{assert.equal(options.force,true);calls.push('preferences');if(failed==='preferences')throw new Error('preferences failed');},
+  capture:()=>{},markStorageError:()=>{},projectPlan:options=>calls.push(options?.fallback?'fallback':'project'),renderSavedPlans:()=>calls.push('library'),quote:()=> 'Quote',quoteChanged:()=>calls.push('quote')
+ });
+ const attempt=hydrate({forcePreferences:true,failClosed:true});
+ if(failed==='none')assert.equal(await attempt,true);else await assert.rejects(attempt,new RegExp(failed+' failed'));
+ assert.deepEqual(calls.slice(0,2),['plan','preferences']);
+ assert.equal(calls.includes('fallback'),failed==='plan');assert.equal(calls.includes('library'),failed!=='plan');assert.equal(quote.value,failed==='preferences'?'':'Quote');
+}
+const wakeCalls=[];let quiesced=true;
+const wake=StartupHost.createWake({quiesced:()=>quiesced,sync:()=>wakeCalls.push('sync')});
+assert.equal(wake(),false);quiesced=false;wake();assert.deepEqual(wakeCalls,['sync']);

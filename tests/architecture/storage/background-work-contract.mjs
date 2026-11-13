@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const app=readHostHtml();
+const startupOwner=readScript('source/core/startup-host.ts');
 const background=readScript('source/core/repository-background.ts');
 const device=readScript('source/core/device-backup.ts');
 const provider=readScript('source/core/backup-provider.ts');
@@ -30,7 +31,8 @@ assert.match(background,/function createMaintenanceScheduler[\s\S]*state-read-fa
 assert.match(background,/function createIntegrityScheduler[\s\S]*integrityTargetDue[\s\S]*beginBackground\('integrity'[\s\S]*signal:scope\.signal[\s\S]*failureRetryMs/u,'repository integrity recurrence, ownership, cancellation and budget enforcement must be centralized in the shared background module');
 assert.match(app,/function currentBackupSourceRevision\(\)\{[\s\S]*stored=AppData\.local\.getJson\(STORAGE_KEYS\.storageHealth,null\),memory=readStorageHealth\(\)[\s\S]*Date\.parse\(revision\)[\s\S]*at>latestAt[\s\S]*return latest;/u,'backup source revision must choose the newest valid fast projection instead of trusting a stale raw localStorage mirror first');
 assert.doesNotMatch(app,/return stored&&stored\.lastLocalSaveAt\|\|readStorageHealth\(\)\.lastLocalSaveAt/u,'raw localStorage must never short-circuit a newer in-memory source revision');
-assert.match(app,/let startupChangeClockReady=null;[\s\S]*function reconcileStartupChangeClock\(\)[\s\S]*startupChangeClockReady=reconcileChangeClock\(\)\.catch\(error=>\{startupChangeClockReady=null;throw error;\}\)[\s\S]*markReady:async proof=>\{[\s\S]*await reconcileStartupChangeClock\(\);[\s\S]*installBackgroundOwners\(\)/u,'startup must reconcile the durable mutation epoch before automatic background owners can activate');
+assert.match(app,/startupChangeClockReady=reconcileChangeClock\(\)\.catch\(error=>\{startupChangeClockReady=null;throw error;\}\)/u,'failed change-clock reconciliation stays retryable');
+assert.match(startupOwner,/markReady:async proof=>\{[\s\S]*await p\.reconcileChangeClock\(\);[\s\S]*p\.installBackground\(\)/u,'startup reconciles durable epoch before automatic background owners');
 assert.match(app,/async function reconcileChangeClock\(\)[\s\S]*backup\.change-clock-read',error,'error'\);throw error;\}[\s\S]*function reconcileStartupChangeClock\(\)/u,'a failed authoritative change-clock read must reject startup rather than silently open automatic backup with stale freshness');
 assert.match(app,/function ensureDeviceBackupInstalled\(\)[\s\S]*reconcileStartupChangeClock\(\)\.then\(\(\)=>DeviceBackup\.install\(\)[\s\S]*void ensureDeviceBackupInstalled\(\)\.then\(\(\)=>installRepositoryIntegrityScrub\(\)\)/u,'Device Folder startup and reset recovery must reuse the same authoritative change-clock and installation promise');
 assert.match(background,/function suspend\(reason='suspended',\{preserveForegroundController=null\}\s*=\{\}\)[\s\S]*foreground\?\.respectBackgroundSuspension===true&&foreground\.controller!==preserveForegroundController[\s\S]*REPOSITORY_BACKGROUND_SUSPENDED[\s\S]*waiting\.push\(foreground\.settlement\)/u,'unrelated provider suspensions must pre-empt and await an automatic foreground handoff, while the same managed sync may retain its own controller');
@@ -103,7 +105,7 @@ const lifecycle=readScript('source/core/operation-lifecycle.ts');
 assert.match(lifecycle,/function createJob[\s\S]*function reconcile[\s\S]*function wake[\s\S]*function complete/u);
 assert.match(background,/Lifecycle\.createJob/u);
 assert.match(provider,/background\.registerJob\('convergence'/u);
-assert.match(app,/OperationLifecycle\.createGroup/u);assert.match(app,/wakeBackgroundOperations\('ownership'\)/u);assert.match(app,/wakeBackgroundOperations\('encryption-unlocked'\)/u);
+assert.match(app,/OperationLifecycle\.createGroup/u);assert.match(startupOwner,/ports\.wakeBackground\('ownership'\)/u);assert.match(app,/wakeBackgroundOperations\('encryption-unlocked'\)/u);
 assert.match(provider,/budgetMs:background\.integrity\.workBudgetMs/u,'integrity policy must come from the bound coordinator');
 assert.doesNotMatch(provider,/Background\.integrity|PROVIDER_CONVERGENCE_BUDGET|backgroundAfter|convergenceAfter|resumePendingProviderBackup/u,'retired handoffs and transfer deadlines must be absent');
 assert.doesNotMatch(app,/dataMaintenanceTimer|attachmentIntegrityTimer|attachmentIntegrityRunning|attachmentIntegrityAwaitingControl|attachmentMaintenanceDailyTimer/u,'host timers must not duplicate lifecycle ownership');
@@ -195,8 +197,8 @@ function claimHarness(){
 }
 // BS11/17 retain safety-critical boundaries: read-only planning precedes the
 // destructive lease, and startup orphan collection is not replaced by a wake.
-assert.match(app,/installBackgroundOwners\(\);scheduleDataMaintenance\(\);BackgroundOperations\.wake\('startup'\);installSessionWatch\(\)/u);
-assert.match(app,/void BackupFiles\.collect\(\)\.catch/u,'cold startup must discover orphan scratch bytes even without a pending job');
+assert.match(startupOwner,/p\.installBackground\(\);p\.scheduleMaintenance\(\);p\.wakeBackground\('startup'\);p\.installSessionWatch\(\)/u);
+assert.match(startupOwner,/void p\.collectFiles\(\)\.catch/u,'cold startup must discover orphan scratch bytes even without a pending job');
 // An app killed while a sync applied changes leaves an interrupted-step
 // journal and its write lease (at most 20 s). Reopened at once, start-up
 // recovery waits for that closed page's lease to end instead of locking the
@@ -213,7 +215,7 @@ assert.match(app,/void BackupFiles\.collect\(\)\.catch/u,'cold startup must disc
  assert.deepEqual(await run({foreignPolls:0}),{ended:true,waits:0},'no lease: no wait');
  const stuck=await run({foreignPolls:1000});assert.equal(stuck.ended,false,'a lease that never ends is not waited for forever');assert.equal(stuck.waits,100,'at most 25 s');
  assert.equal((await run({owner:false,foreignPolls:3})).waits,0,'without control this tab does not wait: recovery reports it');
- assert.match(app,/recoverInterruptedRestore:async\(\)=>\{await PlanData\.hydrate\(\);if\(await AppData\.restoreJournal\.read\(\)\.catch\(\(\)=>null\)\)await waitForClosedTabLease\(\);/u,'start-up waits only when an interrupted step must be recovered');
+ assert.match(startupOwner,/recoverInterruptedRestore:async\(\)=>\{await p\.hydratePlan\(\);if\(await p\.readRestoreJournal\(\)\.catch\(\(\)=>null\)\)await p\.waitForClosedTabLease\(\);/u,'interrupted restore waits for its closed-tab lease');
 }
 // Background sync waits while offline; coming back online wakes it at once.
 assert.match(app,/window\.addEventListener\('online',\(\)=>\{try\{BackupProviderRuntime\.wakeBackground\('online'\);/u,'back online, background sync goes at once rather than at its next retry');
