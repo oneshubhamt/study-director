@@ -44,7 +44,7 @@ const createModule=():ReviewModuleContract=>{
       'acknowledgeSavedStudyDay','clearCanonicalSessionAfterSavedDay',
       'cancelPendingLiveDraftSave','clearSaveReminder','flushLiveDraft','getLifecycleRevision','getOwnershipRevision','getReviewDate',
       'handleActiveSessionRepositoryResult','lifecycleCanWrite',
-      'markDayContentChanged','markDayContentSaved','resetRuntimeSessionState','runLifecycle','runLifecycleSync','saveLiveDraft',
+      'markDayContentChanged','markDayContentSaved','resetRuntimeSessionState','runLifecycle','saveLiveDraft',
       'setReviewDateTitle','setSessionPanelMode','stopTimerExecution','appCanMutate',
       'writeCanonicalNow','writeLiveDraftNow'
     ]),
@@ -117,7 +117,7 @@ const createModule=():ReviewModuleContract=>{
       acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
       cancelPendingLiveDraftSave,clearSaveReminder,flushLiveDraft,getLifecycleRevision,getOwnershipRevision,getReviewDate,
       handleActiveSessionRepositoryResult,lifecycleCanWrite,
-      markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,runLifecycle,runLifecycleSync,saveLiveDraft,
+      markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,runLifecycle,saveLiveDraft,
       setReviewDateTitle,setSessionPanelMode,stopTimerExecution,appCanMutate,
       writeCanonicalNow,writeLiveDraftNow
     }=ports.session;
@@ -359,22 +359,40 @@ function queueReviewSave(options:ReviewSaveOptions={}){
   if(!binding)return false;
   return persistReviewBinding(binding,options);
 }
-function flushPendingReviewSave(options:ReviewSaveOptions={}){
+async function flushPendingReviewSave(options:ReviewSaveOptions={}){
   SaveLane.prepareFlush();
-  if(!reviewHasStudyDay())return flushReflectionOnlySave(options);
+  if(!reviewHasStudyDay())return await flushReflectionOnlySave(options);
   const binding=resolveReviewEditorBinding(getReviewDate(),options.event||null);
   if(binding)persistedReview=normalizeReviewState(binding,binding.date,{validatedRich:true});
-  // The session is written at once, with its synchronous recovery copy; a
-  // queued session save would only repeat it.
+  // The transition waits for the real Active Session write. Its emergency
+  // recovery checkpoint is synchronous, but readiness is published only after
+  // the canonical write settles.
   if(reflectionLane.pending())reflectionLane.cancel();
-  const result=flushLiveDraft({markChanged:false,backupCapture:options.backupCapture===true});
-  return result===null?lifecycleCanWrite():true;
+  const result=await flushLiveDraft({markChanged:false,backupCapture:options.backupCapture===true});
+  if(result===null){
+    if(options.strict)throw new Error('The pending Review could not be checkpointed before this transition.');
+    return lifecycleCanWrite();
+  }
+  const saved=result&&typeof result==='object'?result as Readonly<{ok?:unknown;error?:unknown;storage?:Readonly<{idb?:unknown}>}>:null;
+  const accepted=handleActiveSessionRepositoryResult(result);
+  if(options.strict&&(!saved||saved.ok!==true||saved.error||saved.storage?.idb!==true)){
+    throw saved?.error||new Error('The pending Review did not reach canonical storage before this transition.');
+  }
+  return accepted!==false;
 }
 function reviewPersistenceCommitted(){setReflectionRichSync('saved','Saved');return true;}
 function reviewPersistenceFailed(error?:unknown){setReflectionRichSync('error','Save failed');if(error)AppDiagnostics.capture('review.active-session-save',error,'warn');return false;}
-function selectReviewDate(){
-  const dd=inputById('day-date'),date=reviewDate(dd&&dd.value||getReviewDate());
-  return runLifecycleSync('date-change',{date,review:true},()=>{if(dd){dd.value=date;dd.dataset['autoDate']='0';}return true;});
+async function selectReviewDate(){
+  const dd=inputById('day-date'),previousDate=reviewDate(persistedReview.date||SessionState.studyDate||todayISO()),date=reviewDate(dd&&dd.value||getReviewDate());
+  try{
+    return await runLifecycle('date-change',{date,review:true},()=>{if(dd){dd.value=date;dd.dataset['autoDate']='0';}return true;});
+  }catch(error){
+    if(dd){dd.value=previousDate;dd.dataset['autoDate']='0';}
+    syncReviewDateMode();
+    setStatus('save-status','Could not change the Review date until the pending Reflection is saved. '+errorMessage(error),false);
+    AppDiagnostics.capture('review.date-change',error,'warn');
+    return false;
+  }
 }
 function reviewSnapshot(){
   const state=currentReviewState();
@@ -575,7 +593,7 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
     if(closesPriorDay){
       Runtime.setSafetyMessage(`Recovered ${prettyDate(rec.date)} was saved to Library. Apply the current study-day schedule when ready.`);
       resetRuntimeSessionState({source:'recovered-day-close',date:todayISO()});
-      clearReviewForNewDay();
+      await clearReviewForNewDay();
       setSessionPanelMode('none');
       refreshPlanAfterSessionReset('Recovered previous study day was saved. Apply the current study-day schedule when ready.','New Study Day');
       setPlanStatus('Recovered previous study day saved. Apply the current study-day schedule when ready.');
@@ -600,7 +618,7 @@ function clearReviewForNewDay(options:Readonly<{lifecycleManaged?:boolean}>={}){
     syncReviewDateMode();
     return true;
   };
-  return options.lifecycleManaged?apply():runLifecycleSync('date-rollover',{date,review:true},apply);
+  return options.lifecycleManaged?apply():runLifecycle('date-rollover',{date,review:true},apply);
 }
 function studyDayRolledOver(now:Date=new Date()){
   return !!(SessionState.studyDate&&SessionState.studyDate!==todayISO(now));
