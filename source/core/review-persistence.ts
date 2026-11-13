@@ -33,11 +33,11 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     if(!dates.isSupported(date))throw new Error('That reflection date is not available.');
     const candidate=text.clampEditorContent(value,limits.maxReflectionChars);
     if(!text.editorContentWithinLimits(candidate))throw new Error('Daily Reflection exceeds the rich-text limit.');
-    const current=await records.get(date),currentCanonical=String(current?.reflection||'');
+    const current=await records.get(date,{strict:true}),currentCanonical=String(current?.reflection||'');
     if(options.expectedCanonical!==undefined&&currentCanonical!==String(options.expectedCanonical||''))throw new Error('This Daily Reflection changed elsewhere. Reopen it before editing.');
     const hasContent=!!String(candidate||'').trim(),backupCapture=options.backupCapture===true;
     if(currentCanonical===candidate){
-      if(current)await records.verifyCanonical(current);
+      if(current)await records.verifyCanonical(current);else await records.verifyCanonicalAbsent(date);
       return snapshot(current);
     }
     if(current?.recordKind==='study'){
