@@ -483,7 +483,7 @@ registry.define('library',1,()=>{
       // The name starts with the row's visible text (name, TODAY, last edit), as
       // WCAG 2.5.3 asks, then adds what the row shows only by style.
       const edited=editedLabel(entry.updatedAt);
-      row.setAttribute('aria-label',`${leaf}${entry.current?' TODAY':''}${edited?` ${edited}`:''}${entry.hasNote?'':', empty'}${entry.current?', in today’s plan':''}`);
+      row.setAttribute('aria-label',`${leaf}${node.children?` ${node.children}`:''}${entry.current?' TODAY':''}${edited?` ${edited}`:''}${entry.hasNote?'':', empty'}${node.children?`, ${node.children} nested ${node.children===1?'note':'notes'}`:''}${entry.current?', in today’s plan':''}`);
       if(node.children)row.setAttribute('aria-expanded',node.expanded?'true':'false');
       row.tabIndex=-1;
       const twisty=textEl('span','library-note-twisty',node.children?(node.expanded?'▾':'▸'):'');twisty.setAttribute('aria-hidden','true');
@@ -491,6 +491,8 @@ registry.define('library',1,()=>{
       // Columns stay put: the name with TODAY beside it, then the last edit
       // always at the right edge.
       const name=document.createElement('span');name.className='library-note-tree-name';name.append(textEl('span','library-note-nav-name',leaf));
+      // A parent shows how many notes sit directly inside it, open or closed.
+      if(node.children){const count=textEl('span','library-note-child-count',String(node.children));count.title=`${node.children} nested ${node.children===1?'note':'notes'}`;name.append(' ',count);}
       if(entry.current)name.append(' ',textEl('span','library-note-tag current','TODAY'));
       // Spaces between the parts keep words apart for assistive technology; a
       // grid does not draw them.
