@@ -1,6 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {ReviewHostInput,ReviewHostModule as ReviewHostContract} from '../../types/review-host.ts';
-import type {ActiveSession,DailyRecord} from '../../types/record-models.ts';
+import type {ActiveSession,DailyRecord,SessionEvidence} from '../../types/record-models.ts';
 
 const sdReviewHostFactory=(()=>{
 'use strict';
@@ -30,7 +30,7 @@ function createSubsystem(input:Readonly<ReviewHostInput>){
 function createDayState(input:import('../../types/review-host.ts').ReviewDayStateInput){
   exactObject(input,['document','timerState','tasks','isTrackableBlock','isValidIsoDate','todayISO','fullWeekdayNames'],'Review day-state input');
   const {document,timerState,tasks,isTrackableBlock,isValidIsoDate,todayISO,fullWeekdayNames}=input;
-  const reminder={date:'',evidence:null as unknown,generation:0};
+  const reminder={date:'',evidence:null as SessionEvidence|null,generation:0};
   function cleanRevision(value:unknown){const n=Number(value);return Number.isFinite(n)?Math.max(0,Math.min(Number.MAX_SAFE_INTEGER,Math.floor(n))):0;}
   function getReviewDate(){
     const selected=document.getElementById('day-date');
@@ -64,12 +64,12 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
       return snapshot?.date===date&&scheduleText.trim()?freeze({date,scheduleText,snapshot}):null;
     }catch(error){view.diagnostics('session.reminder-runtime-evidence',error,'warn');return null;}
   }
-  function covers(record:DailyRecord|undefined,subjects:readonly unknown[]){return !!record&&subjects.length>0&&subjects.every(subject=>!!subject&&codecs.savedDayCoversSessionEvidence(record,subject,{allowAdvances:true}));}
+  function covers(record:DailyRecord|undefined,subjects:readonly SessionEvidence[]){return !!record&&subjects.length>0&&subjects.every(subject=>codecs.savedDayCoversSessionEvidence(record,subject,{allowAdvances:true}));}
   async function hasUncoveredKept(record:DailyRecord,date:string){
     const pending=await repositories.pendingReviews();
     return pending.some(row=>row.subject==='session'&&!row.resolvedAt&&(row.kept as ActiveSession|null)?.date===date&&!codecs.savedDayCoversSessionEvidence(record,row.kept,{allowAdvances:true}));
   }
-  async function savedDayCoversWork(date:string,captured:unknown=null){
+  async function savedDayCoversWork(date:string,captured:SessionEvidence|null=null){
     const live=liveEvidence(date);if(day.isDirty(date)&&!live)return false;
     const loaded=await repositories.loadActiveSession(0,{strict:true}),active=loaded?.value||null;
     if(!loaded?.ok||loaded.error||active?.date===date&&loaded.storage?.idb!==true)return false;
@@ -89,7 +89,7 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
     const date=day.getReviewDate(),reminder=day.reminder;
     if(!runtime.tasks().some(runtime.isTrackableBlock)||reminder.date===date)return;
     if(await savedRecordExistsForDate(date)||reminder.date===date)return;
-    let evidence:unknown=null;
+    let evidence:SessionEvidence|null=null;
     try{
       const loaded=await repositories.loadActiveSession(0,{strict:true});
       if(loaded?.ok&&!loaded.error&&loaded.storage?.idb===true&&loaded.value?.date===date&&runtime.timerState.studyDate===date&&

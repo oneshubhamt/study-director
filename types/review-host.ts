@@ -1,10 +1,10 @@
 import type {Task} from './domain.ts';
-import type {ActiveSession,DailyRecord,PendingReview,SessionSnapshot} from './record-models.ts';
+import type {ActiveSession,DailyRecord,PendingReview,SessionEvidence,SessionSnapshot} from './record-models.ts';
 import type {ReviewEditor,ReviewModule,ReviewSaveService,ReviewSubsystem,ReviewSubsystemInput} from './review.ts';
 import type {SessionResult} from './repositories.ts';
 
 export interface ReviewHostInput{readonly module:ReviewModule;readonly subsystem:Readonly<ReviewSubsystemInput>;}
-export interface ReviewReminderState{date:string;evidence:unknown;generation:number}
+export interface ReviewReminderState{date:string;evidence:SessionEvidence|null;generation:number}
 export interface ReviewDayStateInput{
   readonly document:Document;
   readonly timerState:{studyDate:string|null;contentRevision:number;savedRevision:number};
@@ -36,7 +36,7 @@ export interface ReviewSavedDayCoordinatorInput{
   }>;
   readonly codecs:Readonly<{
     sanitizeSession:(value:unknown)=>ActiveSession|null;
-    savedDayCoversSessionEvidence:(record:DailyRecord|undefined,subject:unknown,options:Readonly<{allowAdvances:true}>)=>boolean;
+    savedDayCoversSessionEvidence:(record:DailyRecord|undefined,subject:SessionEvidence,options:Readonly<{allowAdvances:true}>)=>boolean;
   }>;
   readonly session:Readonly<{
     writeCanonicalNow:(label:string,options:Readonly<{markChanged:false}>)=>PromiseLike<Readonly<{value?:ActiveSession|null;error?:unknown}>>;

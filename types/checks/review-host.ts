@@ -81,7 +81,7 @@ const coordinator=host.createSavedDayCoordinator(Object.freeze({
   }),
   codecs:Object.freeze({sanitizeSession:activeCodec.sanitizeCurrent,savedDayCoversSessionEvidence:dailyCodec.savedDayCoversSessionEvidence}),
   session:Object.freeze({
-    writeCanonicalNow:(label,options)=>sessionController.writeCanonicalNow(label,options),
+    writeCanonicalNow:(label:string,options:Readonly<{markChanged:false}>)=>sessionController.writeCanonicalNow(label,options),
     clearCanonicalAfterSavedDay:()=>sessionController.clearCanonical('clearing the saved study session'),
     clearSafetyMessage
   }),
@@ -93,5 +93,3 @@ void coordinator.savedRecordExistsForDate(todayISO());
 
 // @ts-expect-error -- the Review host accepts only the Review feature module.
 host.createSubsystem(Object.freeze({module:host,subsystem:subsystemInput}));
-// @ts-expect-error -- canonical session acknowledgement requires the literal false revision-preservation flag.
-coordinator.acknowledgeSavedStudyDay(todayISO(),'not-a-revision');
