@@ -53,7 +53,7 @@ export function createSavedDayFixture(options={}){
         const value=typeof options.dayValue==='function'?options.dayValue():dayRecord;
         return value?[value]:[];
       },
-      verifyDaily:async record=>{events.push(['verify',record]);if(options.verifyFailure)throw new Error('canonical verification failed');return true;},
+      verifyDaily:async record=>{events.push(['verify',record]);if(typeof options.verifyDaily==='function')return options.verifyDaily(record);if(options.verifyFailure)throw new Error('canonical verification failed');return true;},
       pendingReviews:async()=>typeof options.pendingReviews==='function'?options.pendingReviews():options.pendingReviews||[]
     }),
     codecs:Object.freeze({
