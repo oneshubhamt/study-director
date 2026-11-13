@@ -70,6 +70,18 @@ declare const diagnostics:(scope:string,error:unknown,level:'warn'|'error')=>unk
 declare const staleSaveStatus:()=>boolean;
 declare const publishRollover:()=>unknown;
 
+const sessionActions=registry.require('session-actions',1);
+declare const lifecycleViewInput:Parameters<typeof sessionActions.createLifecycleViews>[0];
+const lifecycleViews=sessionActions.createLifecycleViews(lifecycleViewInput);
+const lifecycleHooks=host.createLifecycleHooks(Object.freeze({
+  canMutate:appCanMutate,
+  reviewEditor:subsystem.ReviewEditor,
+  lifecycleViews,
+  diagnostics:Object.freeze({capture:diagnostics})
+}));
+const lifecycle=registry.require('session-lifecycle',1).createCoordinator(Object.freeze({hooks:lifecycleHooks}));
+void lifecycle.status().canWrite;
+
 const coordinator=host.createSavedDayCoordinator(Object.freeze({
   document,day,
   runtime:Object.freeze({tasks:()=>tasks,timerState,isTrackableBlock,captureSessionSnapshot,appliedScheduleText,appCanMutate,panelMode,safetyMessage,setSafetyMessage,isSuspended,activeSessionSnapshot,applyStoredSessionSnapshot,setPanelMode,setTimerDone,updateSessionControls}),
