@@ -610,6 +610,7 @@ const {
   buildLiveTimeline,getRealTimeState,buildRealTimeSnapshot,latestTrackableEndMin,
   setCurrentTask,resetBreakState,resetCountdownRuntime,clearProgressRuntime,isTaskResolved
 }=ExecutionRuntime;
+const FULL_WEEKDAY_NAMES=Object.freeze(['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']);
 const ReviewDayState=ReviewHostModule.createDayState(Object.freeze({
   document,timerState:TimerState,tasks:()=>TASKS,isTrackableBlock,isValidIsoDate,todayISO,fullWeekdayNames:FULL_WEEKDAY_NAMES
 }));
@@ -1237,7 +1238,6 @@ function prettyDate(iso){
   const d=new Date(iso+'T00:00:00');
   return d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
 }
-const FULL_WEEKDAY_NAMES=Object.freeze(['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']);
 function dateInsightsMeta(iso){
   const d=new Date(iso+'T00:00:00');
   const dayOfWeek=d.getDay();
