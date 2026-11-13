@@ -2,8 +2,19 @@ import type {Task} from './domain.ts';
 import type {ActiveSession,DailyRecord,PendingReview,SessionEvidence,SessionSnapshot} from './record-models.ts';
 import type {ReviewEditor,ReviewModule,ReviewSaveService,ReviewSubsystem,ReviewSubsystemInput} from './review.ts';
 import type {SessionResult} from './repositories.ts';
+import type {SessionCompletion,SessionContext,SessionHooks} from './session-lifecycle.ts';
 
 export interface ReviewHostInput{readonly module:ReviewModule;readonly subsystem:Readonly<ReviewSubsystemInput>;}
+export interface ReviewLifecycleHooksInput{
+  readonly canMutate:()=>boolean;
+  readonly reviewEditor:Readonly<Pick<ReviewEditor,'flushPending'>>;
+  readonly lifecycleViews:Readonly<{
+    invalidateLifecycleEditors(context:SessionContext):unknown;
+    reconcileLifecycleEditors(context:SessionContext):unknown;
+    completeLifecycleTransition(context:SessionCompletion):unknown;
+  }>;
+  readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level:'error'):unknown}>;
+}
 export interface ReviewReminderState{date:string;evidence:SessionEvidence|null;generation:number}
 export interface ReviewDayStateInput{
   readonly document:Document;
@@ -61,6 +72,7 @@ export interface ReviewSavedDayCoordinator{
 export interface ReviewHostModule{
   readonly format:'study-director.review-host-module';readonly contractVersion:1;
   createSubsystem(input:Readonly<ReviewHostInput>):Readonly<ReviewSubsystem>;
+  createLifecycleHooks(input:Readonly<ReviewLifecycleHooksInput>):Readonly<SessionHooks>;
   createDayState(input:Readonly<ReviewDayStateInput>):Readonly<ReviewDayState>;
   createSavedDayCoordinator(input:Readonly<ReviewSavedDayCoordinatorInput>):Readonly<ReviewSavedDayCoordinator>;
 }
