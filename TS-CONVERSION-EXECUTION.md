@@ -1,5 +1,12 @@
 # TypeScript conversion — execution record
 
+## Active correction — P5.5 lifecycle / Diary concurrency audit, 2026-11-13
+
+- **Scope:** reopen P5.5 only for the five supplied audit findings: failed-rollover lifecycle coherence, awaited pre-transition Review flush, atomic same-date Diary/Saved-Day writes, actual-provider type coverage, and validated rich-input event forwarding. P5.6 remains not started.
+- **Invariants:** preserve canonical Active Session/DailyRecord schemas, recovery and initialization order; no vendor, main-branch, TS-Conversion, release or later-group changes. Failure paths must not publish writable target-date state or overwrite/delete newer same-date evidence.
+- **Verification required before reclose:** strict type/lint, affected lifecycle/review/storage regressions (including async flush rejection, post-Saved-Day clear failure and deliberately interleaved Diary writer), fresh source build and generated checks. No full QA.
+- **State:** OPEN — implementation in progress.
+
 **Branch: `ts-exp`. P5.2, P5.4 and P5.5 are CLOSED — VERIFIED — TARGETED. P5.6A is next; P5.6–P5.7 remain planned, not implemented.** Main intake remains `2638619`. Preserve main, `TS-Conversion` and vendored Wordgard. [Procedure](AGENTS.md) · [scope and next plans](docs/typescript/PHASE-5.md) · [decisions](docs/typescript/DECISIONS.md) · [verification commands](docs/VERIFICATION.md).
 
 ## Latest closure — P5.5 de novo audit correction, 2026-11-13
