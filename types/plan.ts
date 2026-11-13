@@ -62,7 +62,7 @@ export type PlanMigration=import('./execution-host.ts').ScheduleProgressSnapshot
 export interface PlanGatewayApplyResult{migrationSummary?:PlanMigrationSummary|null}
 export interface PlanScheduleGateway{
   act(action:string,index:number):unknown;
-  apply(rows:readonly import('./domain.ts').ScheduleRow[],options:Readonly<import('./execution-host.ts').ScheduleGatewayOptions>):PlanGatewayApplyResult|boolean|null;
+  apply(rows:readonly import('./domain.ts').ScheduleRow[],options:Readonly<import('./execution-host.ts').ScheduleGatewayOptions>):PlanGatewayApplyResult|boolean|null|PromiseLike<PlanGatewayApplyResult|boolean|null>;
   breakState(action?:string):unknown;
   captureMigration(rows:readonly import('./domain.ts').ScheduleRow[]):PlanMigration;
   clearSafety(reason:string):unknown;flush():unknown;hasLiveState():boolean;markRender(state:string):unknown;
