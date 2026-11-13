@@ -1719,7 +1719,7 @@ function handleCanonicalCommit(event){
     invalidateAttachmentLibrary();
   }
   if(event&&event.entityType==='pendingReview'&&StartupLifecycle.status().fullyInitialized)void KeptVersions.refresh();
-  if(event?.entityType==='dailyRecord'&&saveReminderDate)
+  if(event?.entityType==='dailyRecord'&&ReviewDayState.reminder.date)
     void revalidateSaveReminderAfterCanonicalConvergence();
 }
 
@@ -4049,7 +4049,7 @@ hydrateReviewState=ReviewEditor.hydrate;
 currentReviewSnapshot=ReviewEditor.activeSessionReview;
 bindReviewSession=ReviewEditor.bindSession;
 const {
-  selectDate:selectReviewDate, captureInputs:captureReviewInputs,
+  captureInputs:captureReviewInputs,
   clearFutureUntouched:clearFutureUntouchedProgress, deletePracticeRun
 }=ReviewEditor;
 const {isRolledOver:studyDayRolledOver}=ReviewSaveService;
@@ -4947,7 +4947,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     deviceName:(id,others)=>deviceName(id,others)
   }),
   events:Object.freeze({
-    libraryChanged:()=>{LibraryView.render();if(saveReminderDate)void revalidateSaveReminderAfterCanonicalConvergence();},
+    libraryChanged:()=>{LibraryView.render();if(ReviewDayState.reminder.date)void revalidateSaveReminderAfterCanonicalConvergence();},
     reconcileNotes:reconcileNotesThroughLifecycle,
     restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,
     restoreSessionState:restoreSessionStateThroughLifecycle,
