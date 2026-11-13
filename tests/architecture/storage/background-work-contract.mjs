@@ -157,8 +157,9 @@ for(const mode of [{busy:true},{backingUp:true},{lockRace:true}]){
  assert.equal(t.calls.update,0);assert.equal(t.calls.lock,0);
 }
 const claimRuntime=productionFunction('async function checkSessionOwnershipClaim(){')+'\n'
- +productionFunction('function wakeSessionOwnershipClaim(slackMs=0){')+'\n'
- +productionFunction('function installSessionWatch(){');
+ +productionFunction('function wakeSessionOwnershipClaim(slackMs=0){');
+for(const path of ['source/core/internal.ts','source/core/execution-views.ts'])vm.runInThisContext(readScript(path),{filename:path});
+const executionViews=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('execution-views',1);
 function claimHarness(){
  const handlers=new Map(),intervals=[],wakes=[],checks=[];
  let visible=true,syncing=false;
@@ -175,7 +176,9 @@ function claimHarness(){
   AppDiagnostics:{capture:()=>{}},SESSION_CLAIM_WATCH_MS:15000,SESSION_WATCH_MS:120000,
   setInterval:(fn,ms)=>{intervals.push({fn,ms});return intervals.length;}
  });
- vm.runInContext('let sessionWatchTimer=null,sessionClaimWatchTimer=null;\n'+claimRuntime+'\nglobalThis.p5Start=installSessionWatch;globalThis.p5Wake=wakeSessionOwnershipClaim;globalThis.p5Check=checkSessionOwnershipClaim;',context);
+ vm.runInContext(claimRuntime+'\nglobalThis.p5Wake=wakeSessionOwnershipClaim;globalThis.p5Check=checkSessionOwnershipClaim;',context);
+ const views=executionViews.createController({...context,state:{sessionPanelMode:'active'},runtime:{TASKS:[{}],TimerEngine:{}},actions:{},cache:{},wakeSessionOwnershipClaim:context.p5Wake});
+ context.p5Start=views.installSessionWatch;
  const settle=async()=>{for(let k=0;k<4;k++)await Promise.resolve();};
  return {
   start:()=>context.p5Start(),wake:()=>context.p5Wake(),check:()=>context.p5Check(),intervals,wakes,checks,

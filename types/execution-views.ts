@@ -1,0 +1,35 @@
+import type {ExecutionRuntime,RealTimeScheduleState} from './execution-host.ts';
+import type {SessionActionState,SessionActionInput} from './session-actions.ts';
+import type {SessionActionsModule} from '../source/core/session-actions.ts';
+import type {Task,ScheduleModel,TimeModel} from './domain.ts';
+import type {NoticeCoordinator} from '../source/core/notice-coordinator.ts';
+import type {PlanController} from './plan.ts';
+import type {TimerEngineInput} from './timer-engine.ts';
+export type ExecuteIdleOptions={title?:string;message?:string;force?:boolean};
+export type TimerViewEvidence=ReturnType<ExecutionRuntime['SessionEvidenceGateway']['snapshot']>;
+export type TimerFocusMetrics={evidence:TimerViewEvidence;actualFocusMinutes:number};
+export type RecoveryShiftPlan={idx:number;nowEff:number;adjustments:{idx:number;startMin:number;endMin:number}[];overflow:number[];shifted:number;firstStart:number|null};
+export type RecoveryCarryItem={idx:number;t:Task;pct:number;suggested:number;remainingUnits:string|number;note:string;reason:string};
+export interface ExecutionViewInput{
+ runtime:ExecutionRuntime;state:SessionActionState;actions:ReturnType<SessionActionsModule['createController']>;
+ cache:{executePanelsRenderKey:string;executeIdleDisplayKey:string;realTimeAwarenessRenderKey:string;scheduleEndPromptKey:string};
+ document:Document;window:Window;APP_LIMITS:{maxCarryForwardChars:number};STUDY_DAY_MINUTES:number;
+ SESSION_WATCH_MS:number;SESSION_CLAIM_WATCH_MS:number;setInterval(callback:()=>void,delay:number):number;
+ getCarryForward():string;setCarryForward(value:string):void;
+ NoticeCoordinator:NoticeCoordinator;AppDiagnostics:SessionActionInput['AppDiagnostics'];PlanDraftEditor:PlanController['draft'];PlanRuntime:Pick<PlanController,'needsRealtimeRefresh'>;
+ StartupLifecycle:SessionActionInput['StartupLifecycle'];BackupProviderRuntime:{syncing():boolean;wakeBackground(reason:string):unknown};
+ NativeCapabilities:{syncWake(options:{forceCycle:boolean}):PromiseLike<unknown>}|null;Interactions:SessionActionInput['Interactions'];
+ isTrackableBlock:ScheduleModel['isTrackable'];isWorkBlock:ScheduleModel['isWork'];isFixedBlock:ScheduleModel['isFixed'];isSupportBlock:ScheduleModel['isSupport'];
+ shortTaskLabel(task:Task):string;clockHMS(now:Date):string;setElementText(element:HTMLElement|null|undefined,value:unknown):unknown;
+ textEl(tag:string,className:string,text:string):HTMLElement;requestRender(...surfaces:string[]):unknown;appCanMutate():boolean;
+ fmtS(value:number):string;studyMinuteToHHMM:TimeModel['studyMinuteToHHMM'];invalidateScheduleDerived(options:{adjustments?:boolean;render?:boolean}):unknown;
+ clearFutureUntouchedProgress():unknown;getTaskCompletion(index:number):number;taskTargetValue:ScheduleModel['targetValue'];
+ applicableNotesForTask:TimerEngineInput['ports']['reviewEvidence']['applicableNotesForTask'];
+ taskMeasureValue:ScheduleModel['measureValue'];taskAreaValue:ScheduleModel['areaValue'];clampText(value:unknown,max:number):string;
+ renderReviewUnfinishedNote():unknown;copyTextToClipboard(value:string):PromiseLike<unknown>;setTextSafe(id:string,value:unknown):unknown;
+ studyDayRolledOver(now:Date):boolean;todayISO(now:Date):string;scheduleFingerprint():string;promptSaveToday():PromiseLike<unknown>;
+ refreshCoreUi():unknown;saveLiveDraft():unknown;flushLiveDraft():unknown;refreshSessionSafetyUi():unknown;
+ calculateReviewMetrics(evidence:TimerViewEvidence):TimerFocusMetrics;durationLabel(minutes:number):string;
+ cachedElements(owner:{cache?:Record<string,HTMLElement|null>},ids:Readonly<Record<string,string>>):Record<string,HTMLElement|null>;
+ notifyBackupChange:SessionActionInput['notifyBackupChange'];schedulePwaUpdateEvaluation(delay:number):unknown;wakeSessionOwnershipClaim(slackMs?:number):unknown;
+}

@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const source=readHostHtml();
 function productionFunction(name){
-  const start=source.indexOf(name),end=start<0?-1:source.indexOf('\n}',start);
+  const start=source.indexOf(name),lineEnd=source.indexOf('\n',start),singleLine=start>=0&&source.slice(start,lineEnd).endsWith('}'),end=start<0?-1:singleLine?lineEnd-2:source.indexOf('\n}',start);
   assert.ok(start>=0&&end>start, 'Production function missing: '+name);
   return source.slice(start,end+2);
 }
@@ -126,7 +126,9 @@ function productionFunction(name){
   const sourceCodec=readRuntimeSource(new URL('../../../source/core/record-codecs.ts',import.meta.url));
   const start=sourceCodec.search(/function savedDayCoversSessionEvidence\(record\s*,session\s*,\{allowAdvances=false\}\s*=\{\}\)\s*\{/u),end=start<0?-1:sourceCodec.indexOf('\n}',start);
   assert.ok(start>=0&&end>start,'production Saved-Day coverage predicate must exist');
-  const src=[sourceCodec.slice(start,end+2),productionFunction('async function savedDayCoversActiveSession(session){')].join('\n');
+  for(const file of ['source/core/internal.ts','source/core/session-actions.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
+  const actions=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('session-actions',1);
+  const src=sourceCodec.slice(start,end+2);
   const date='2026-08-27';
   const row={start:'07:00',duration:60,name:'Ethics',kind:'work',area:'Ethics',measure:'units',target:1,id:'ethics-1'};
   const task={completion:50,completionSource:'manual',progress:{done:1,total:2},actual:{seconds:300}};
@@ -150,7 +152,8 @@ function productionFunction(name){
       sameDataValue:(a,b)=>JSON.stringify(a)===JSON.stringify(b),
       Number,Object,Array
     });
-    vm.runInContext(src+'\nconst DailyRecordCodec={savedDayCoversSessionEvidence};globalThis.covers=savedDayCoversActiveSession;globalThis.covered=savedDayCoversSessionEvidence;',ctx);
+    vm.runInContext(src+'\nglobalThis.covered=savedDayCoversSessionEvidence;',ctx);
+    ctx.covers=actions.createController({runtime:{TimerEngine:{}},state:{},ActiveSessionRuntime:{classify:()=> 'previous',sessionSnapshot:()=>snap},ActiveSessionCodec:{sanitizeCurrent:v=>v},AppData:ctx.AppData,DailyRecordCodec:{savedDayCoversSessionEvidence:ctx.covered},AppDiagnostics:ctx.AppDiagnostics}).savedDayCoversActiveSession;
     return {ctx,checks:()=>checked};
   };
   const cases=[

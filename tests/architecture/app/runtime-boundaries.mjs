@@ -13,6 +13,8 @@ const foundation=readRuntimeSource('source/core/foundation-host.ts');
 const host=readHostHtml();
 const timer=readScript('source/core/timer-engine.ts');
 const execution=readScript('source/core/execution-host.ts');
+const executionViews=readScript('source/core/execution-views.ts');
+const actions=readScript('source/core/session-actions.ts');
 const sessionHost=readScript('source/core/session-host.ts');
 const sessionHandoff=readScript('source/core/session-handoff.ts');
 const attachments=readScript('source/core/attachments.ts');
@@ -44,7 +46,7 @@ assert.match(mutation,/const id=`mutation_\$\{nowMs\(\)\.toString\(36\)\}_/,'mut
 assert.match(mutation,/startedAt:new Date\(\)\.toISOString\(\)/,'human/audit mutation start time remains informational wall clock');
 
 assert.doesNotMatch(host,/PracticePacer\.pauseFromMain\(PRACTICE_PAUSE_CAUSES\.MAIN\s*,\s*Date\.now\(\)\)/,'host Pacer bridges must not bypass the injected Pacer clock');
-assert.equal(((host+execution).match(/PracticePacer\.pauseFromMain\(PRACTICE_PAUSE_CAUSES\.MAIN\);/g)||[]).length,2,'both host Pacer pause bridges defer to the Pacer clock');
+assert.equal(((host+execution+executionViews).match(/PracticePacer\.pauseFromMain\(PRACTICE_PAUSE_CAUSES\.MAIN\);/g)||[]).length,2,'both host Pacer pause bridges defer to the Pacer clock');
 
 const runtimePayload=section(execution,'function timerRuntimePayload(', 'function validateTimerRestoreCandidate(');
 assert.doesNotMatch(runtimePayload,/Date\.now\(\)/,'persisted timer runtime arithmetic uses DecisionClock');
@@ -71,13 +73,13 @@ assert.match(sessionHandoff,/timerRuntime:current\.snapshot\.timerRuntime/u,'fro
 assert.match(sessionHandoff,/claimOwnership\([\s\S]*saveCanonicalSession\(next,'claiming Active Session ownership'/u,'Continue Here linearizes the provider claim before strict local ownership commit');
 assert.match(sessionHandoff,/saveCanonicalSession\(previous,'compensating a failed ownership transfer'[\s\S]*releaseClaim/u,'failed local handoff compensates only after canonical rollback');
 assert.match(sessionHandoff,/session-handoff-source-advanced[\s\S]*SESSION_CONTINUE_SYNC_REQUIRED/u,'unproven advanced remote content is delegated to ordinary sync rather than guessed');
-const handoffAdapter=section(host,'async function transferSessionOwnershipHere(session,','// Continue Here in progress:');
+const handoffAdapter=section(actions,'async function transferSessionOwnershipHere(', 'function setSessionHandoff(');
 assert.doesNotMatch(handoffAdapter,/AppData\.activeSession|claimSessionOwnership|releaseSessionClaim|readSessionClaim/u,'host Continue Here adapter contains no distributed state-machine implementation');
 assert.equal((host.match(/readSessionHandoffSource\(/gu)||[]).length,1,'host reaches the provider handoff-source reader only through P5.4C composition');
-const continueFlow=section(host,'async function continueSessionHere(){','// From a pop-up or the profile panel:');
+const continueFlow=section(actions,'async function continueSessionHere(', 'async function continueSessionOnExecute(');
 assert.match(continueFlow,/SessionHandoffRuntime\?\.prefetchSource\(\)/u,'Continue Here latency prefetch remains inside the checked P5.4C provider boundary');
-const finishTransition=section(host,'async function finishTodaySession(){','async function resetTodaySession(){');
-assert.match(finishTransition,/rollbackSnapshot=ActiveSessionRuntime\.captureSnapshot\(\)[\s\S]*writeCanonicalNow\('finishing today’s session'/u,'finish captures a recoverable runtime before its strict canonical commit');
+const finishTransition=section(actions,'async function finishTodaySession(', 'async function resetTodaySession(');
+assert.match(finishTransition,/rollbackSnapshot=ports\.ActiveSessionRuntime\.captureSnapshot\(\)[\s\S]*writeCanonicalNow\('finishing today’s session'/u,'finish captures a recoverable runtime before its strict canonical commit');
 assert.match(finishTransition,/ActiveSessionRuntime\.rollbackLocalTransition\(rollbackSnapshot,'finish-today-rollback'\)/u,'failed finish delegates runtime and recovery compensation to the checked local-session owner');
 assert.doesNotMatch(finishTransition,/withPersistenceSuppressed|applyStoredSession\(rollbackSession|writeSnapshot\(rollbackSnapshot/u,'finish host wiring must not duplicate the local-session rollback state machine');
 
@@ -97,6 +99,7 @@ console.log(JSON.stringify({status:'PASS',boundary:'decision-clock',decisionCloc
 { // live-execution-host-boundary
 const host=readHostHtml();
 const executionHost=readScript('source/core/execution-host.ts');
+const views=readScript('source/core/execution-views.ts');
 const timer=readScript('source/core/timer-engine.ts');
 const plan=readScript('source/core/plan.ts');
 const review=readScript('source/core/review.js');
@@ -114,8 +117,8 @@ assert.match(executionHost,/taskIdentity\.indexForId\(row\.taskId,indexMap\)/u,'
 for(const token of ['AppData.activeSession','BackupProviderRuntime','claimSessionOwnership','continueSessionHere','sessionHandoff']){
   assert.equal(executionHost.includes(token),false,`P5.4A execution host must not absorb later Active Session/handoff ownership: ${token}`);
 }
-assert.match(host,/function togglePause\(\)\{const result=togglePauseTimer\(\);if\(result===true\)\{sendSessionChangeSoon[\s\S]*?schedulePwaUpdateEvaluation\(150\);\}return result;\}/u,'pause/resume publication and update work occur only after a real timer transition');
-assert.match(host,/function skipTask\(\)\{[\s\S]*?if\(result===true\)\{notifyDeviceBackupIfStudyDayResolved\(\);sendSessionChangeSoon\('block-skipped'\);schedulePwaUpdateEvaluation\(150\);/u,'skip side effects occur only after a real block transition');
+assert.match(views,/function togglePause\(\)\{const result=togglePauseTimer\(\);if\(result===true\)\{sendSessionChangeSoon[\s\S]*?schedulePwaUpdateEvaluation\(150\);\}return result;\}/u,'pause/resume publication and update work occur only after a real timer transition');
+assert.match(views,/function skipTask\(\)\{[\s\S]*?if\(result===true\)\{notifyDeviceBackupIfStudyDayResolved\(\);sendSessionChangeSoon\('block-skipped'\);schedulePwaUpdateEvaluation\(150\);/u,'skip side effects occur only after a real block transition');
 assert.match(timer,/function beginTimerPause\([^)]*[\s\S]*?if\(!appCanMutate\(\)\|\|TimerState\.mode!==TIMER_MODES\.RUNNING/u,'pause begins only while this tab retains mutation authority');
 assert.match(timer,/function jumpTo\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\)return false;[\s\S]*?return startCur\(\)===true;/u,'jump refuses before capture/task mutation when ownership is lost and reports the real start result');
 assert.match(timer,/function finishTrackableBlock\([^)]*\)\{[\s\S]*?if\(!appCanMutate\(\)\|\|!isTrackableBlock/u,'finish and skip share an ownership-fenced transition');
@@ -441,9 +444,9 @@ console.log(JSON.stringify({status:'PASS',boundary:'presentation-surfaces',level
 assert.doesNotMatch(readScript('source/core/timer-engine.ts'),/startCueDelayMs/,'start cue spacing must not rely on delayed callbacks');
 
 { // Production session/recovery boundaries retained across TS erasure.
-const app=readHostHtml(),review=readScript('source/core/review.js'),background=readScript('source/core/repository-background.ts');
+const app=readScript('source/core/session-actions.ts'),review=readScript('source/core/review.js'),background=readScript('source/core/repository-background.ts');
 const sessionRestoreBlock=app.slice(app.indexOf('async function restoreSessionStateThroughLifecycle('),app.indexOf('async function verifyRestoredSessionRuntime',app.indexOf('async function restoreSessionStateThroughLifecycle(')));
-assert.match(app,/async function restoreSessionStateThroughLifecycle\s*\(importedSession,options\s*=\s*\{\s*\}\s*\)\s*\{\n\s*const session\s*=[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*const keepRunning\s*=options\s*\.keepRunning\s*=\s*=\s*=true&&/u,'Portable Active Session restore must use the lifecycle host without a Plan-draft transport parameter.');
+assert.match(app,/async function restoreSessionStateThroughLifecycle\s*\(importedSession\s*,options\s*=\s*\{\s*\}\s*\)\s*\{\n\s*const session\s*=[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*const keepRunning\s*=options\s*\.keepRunning\s*=\s*=\s*=true&&/u,'Portable Active Session restore must use the lifecycle host without a Plan-draft transport parameter.');
 assert.doesNotMatch(sessionRestoreBlock,/PlanData\s*\.writeDraft|enterDraft:true/u,'Active Session restore must not write or enter the independent Plan draft.');
 assert.match(review,/async function saveDayRecord\s*\(options\s*=\s*\{\s*\}\s*\)[\s\S]{0,1100}captureTodayState\s*\(\s*\)[\s\S]{0,260}await flushLiveDraft\s*\(\s*\)[\s\S]{0,260}commitDailyRecord/u,'Save Today must flush Active Session Review state before committing the canonical DailyRecord.');
 assert.match(background,/const PRIORITY\s*=freeze\s*\(\s*\{integrity:10,maintenance:20,convergence:30\s*\}\s*\)[\s\S]*scheduled\s*=new Map\s*\(\s*\),active\s*=new Map\s*\(\s*\)/u,'Repository integrity, maintenance and convergence must be explicitly tracked by the shared coordinator so foreground work can pre-empt them.');

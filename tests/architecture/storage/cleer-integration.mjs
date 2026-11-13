@@ -207,7 +207,8 @@ assert.doesNotMatch(backup,/schemaVersion:Number\s*\(manifest\s*\.schemaVersion/
 
 { // Production session/recovery boundaries retained across TS erasure.
 const sessionClaimRelease=backupProvider.slice(backupProvider.indexOf('async function releaseSessionClaim('),backupProvider.indexOf('async function readSessionClaim('));
-const sessionTransfer=app.slice(app.indexOf('async function transferSessionOwnershipHere('),app.indexOf('// Another device continued today'));
+const sessionTransfer=readScript('source/core/session-handoff.ts');
+const sessionActions=readScript('source/core/session-actions.ts');
 const combineBody=backupProvider.slice(backupProvider.indexOf('async function bringInRepositoryProvider('),backupProvider.indexOf('async function restoreRepositoryProviderVersion('));
 assert.match(app,/ready:async\s*\(\s*\)\s*=>\s*\{const empty\s*=await canonicalLocalRecoveryEmpty\s*\(\s*\);return empty\s*=\s*=\s*=null\?null:!empty;\s*\}/u,'failed canonical emptiness reads remain unknown, not safe to skip');
 assert.match(app,/async function canonicalLocalRecoveryEmpty\s*\(\s*\)[\s\S]*AppData\s*\.pendingReviews\s*\.list\s*\(\s*\)[\s\S]*!reviews\s*\.some\s*\(review\s*=>!review\s*\.resolvedAt\s*\)/u,'a locally retained unresolved Kept Version rules out empty-device restore');
@@ -221,6 +222,7 @@ assert.match(backupProvider,/state:'released'/u,'session end must use a higher-e
 assert.match(backupProvider,/claim\s*\.state\s*=\s*=\s*='released'&&current\s*\.claim\s*\.revision>\s*=observedRevision/u,'a released ownership epoch blocks only the session revision it closed or an older one; a strictly newer same-day canonical session may establish a fresh handoff epoch.');
 assert.doesNotMatch(backupProvider,/publishSharedStateNow/u,'live ownership transfer must not put a full checkpoint publication on the timer critical path');
 assert.doesNotMatch(sessionClaimRelease,/deleteSessionClaim/u,'failed takeover rollback must never delete the newest immutable claim and expose an older owner');
-assert.ok(sessionTransfer.indexOf("claimSessionOwnership('google-drive'")>=0&&sessionTransfer.indexOf("claimSessionOwnership('google-drive'")<sessionTransfer.indexOf('AppData.activeSession.save(next,{strictDurability:true'),'Drive ownership must become durable before the new local owner is saved or allowed to run');
-assert.match(app,/'apply-schedule': async\s*\(\s*\)\s*=>\s*\{[\s\S]{0,700}transferSessionOwnershipHere\s*\(sessionPanelSession\s*\)/u,'Start a new plan here must use the same durable ownership transfer as Continue Here');
+assert.ok(sessionTransfer.indexOf("await provider.claimOwnership(")>=0&&sessionTransfer.indexOf("await provider.claimOwnership(")<sessionTransfer.indexOf("saveCanonicalSession(next,'claiming Active Session ownership'"),'Drive ownership must become durable before the new local owner is saved or allowed to run');
+assert.match(app,/'apply-schedule': SessionActions\.applyScheduleAction/u,'Apply routes through the checked session action owner');
+assert.match(sessionActions,/async function applyScheduleAction\([\s\S]*?transferSessionOwnershipHere\(session\)[\s\S]*?ports\.applySchedule\(takeover/u,'Start a new plan here transfers durable ownership before applying');
 }

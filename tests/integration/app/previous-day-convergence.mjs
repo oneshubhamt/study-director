@@ -10,11 +10,6 @@ function production(signature){
   assert.ok(start>=0&&end>start,'Production function missing: '+signature);
   return app.slice(start,end+2);
 }
-const previous=production('function isPreviousActiveSessionRecord(session){');
-const continueHere=production('async function continueSessionHere(){');
-const restoreSuspended=production('async function restoreSuspendedTodaySession(){');
-const restore=production('async function attemptAutoRestoreActiveSession(){');
-const choose=production('async function handlePreviousActiveSession(session){');
 const reminderLive=production('function liveSaveReminderEvidence(date){');
 const reminderCovers=production('function savedDayCoversReminderEvidence(record,subjects){');
 const reminderPending=production('async function savedDayHasUncoveredKeptSession(record,date){');
@@ -27,140 +22,59 @@ const session=(status,runningOn='inst_here',date=day)=>({
   id:'current',version:10,revision:7,date,status,runningOn,
   scheduleText:'valid plan',snapshot:{contentRevision:7,savedRevision:0}
 });
-const validSession=s=>!!s&&s.id==='current'&&s.date<today;
-const canonical=x=>x||null;
-
-// The actual startup router must reach previous-day handling BEFORE foreign
-// ownership or today's suspended-state handlers, and retire covered rows first.
-for(const [label,state,covered,expected] of [
-  ['old local active',session('active'),false,'previous'],
-  ['old local suspended',session('suspended'),false,'previous'],
-  ['old remote active',session('active','inst_other'),false,'previous'],
-  ['old remote suspended',session('suspended','inst_other'),false,'previous'],
-  ['covered old remote active',session('active','inst_other'),true,'retired'],
-  ['today remote active',session('active','inst_other',today),false,'elsewhere']
-]){
-  const events=[];
-  const context=vm.createContext({
-    TASKS:[],PlanScheduleGateway:{hasLiveState:()=>false},
-    loadActiveSessionForRestore:async()=>state,
-    isValidIsoDate:()=>true,todayISO:()=>today,
-    isCanonicalScheduleText:()=>true,activeSessionSnapshot:()=>state.snapshot,
-    DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
-    retireCoveredPreviousActiveSession:async()=>{if(covered)events.push('retired');return covered;},
-    sessionRunsElsewhere:x=>x.status!=='suspended'&&x.runningOn!=='inst_here',
-    handlePreviousActiveSession:async()=>{events.push('previous');return false;},
-    setSessionPanelMode:mode=>events.push(mode),
-    isSuspendedActiveSession:()=>false,isRestorableActiveSession:()=>false,
-    AppDiagnostics:{capture:()=>{}}
-  });
-  vm.runInContext(previous+'\n'+restore+'\nglobalThis.restore=attemptAutoRestoreActiveSession;',context);
-  await context.restore();
-  assert.equal(events.at(-1),expected,label+' must not restart or transfer historical work');
+for(const file of ['source/core/internal.ts','source/core/session-actions.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
+const SessionActions=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('session-actions',1);
+function prepare(current,{covered=false,choice=null,changeDuringChoice=false}={}){
+  let stored=current,applies=0,claims=0,clears=0,restores=0,exclusive=0,chosen=null;
+  const events=[],state={sessionPanelMode:'none',sessionPanelSession:null,sessionSafetyMessage:'',sessionHandoff:{step:'',error:''},sessionMovingHere:null,sessionYieldedAt:0,saveReminderDate:'',saveReminderEvidence:null,saveReminderGeneration:0};
+  const clone=v=>structuredClone(v),same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+  const load=async()=>({ok:true,value:clone(stored),storage:{idb:true},error:null});
+  const runtime={TASKS:[],TimerState:{},TIMER_MODES:{},TimerEngine:{},TaskIdentity:{}};
+  const ports={state,runtime,completionSources:{},
+    AppData:{activeSession:{load},dailyRecords:{documents:async()=>[{date:day}],verifyCanonical:async()=>true}},
+    ActiveSessionCodec:{sanitizeCurrent:v=>v},DailyRecordCodec:{savedDayCoversSessionEvidence:()=>covered},CanonicalModule:{same},
+    ActiveSessionRuntime:{load,classify:s=>!s?'none':s.date<today?'previous':s.status==='suspended'?'today-suspended':'today-active',sessionSnapshot:s=>s?.snapshot,
+      applyStoredSession(s,snapshot,options){applies++;assert.equal(snapshot.timerRuntime,null);assert.equal(options.reviewOnly,true);return true;},
+      clearCanonical:async()=>{clears++;stored=null;},restoreSuspendedLocal:async s=>{restores++;return {...s,status:'active'};}},
+    SessionHandoffRuntime:{runsElsewhere:s=>!!s&&s.status!=='suspended'&&s.runningOn!=='inst_here',fromElsewhere:s=>!!s&&s.runningOn!=='inst_here',prefetchSource:async()=>null,
+      transferHere:async s=>{claims++;stored={...s,runningOn:'inst_here'};return {previous:s,session:stored};}},
+    AppMutationCoordinator:{runExclusive:async(kind,operation)=>{assert.equal(kind,'discard-previous-session');exclusive++;return operation();}},
+    Interactions:{choose:async spec=>{chosen=spec;if(changeDuringChoice)stored={...stored,revision:99};return choice;},confirm:async()=>true,notify(){}},NoticeCoordinator:{resolveEvent(){},emit(){}},
+    AppDiagnostics:{capture(scope,error){events.push([scope,String(error)]);}},PlanScheduleGateway:{hasLiveState:()=>false},
+    markStorageHealthError(){},setPlanStatus(message){events.push(message);},prettyDate:x=>x,refreshStorageFallbackWarning(){},notifyBackupChange(){},
+    updateExecuteSessionStatus(){},refreshExecuteIdleDisplay(){},updateSessionControls(){},scheduleSyncStatus(){},goTab(){},appCanMutate:()=>true,
+    storageHealthTime:x=>x,deviceName:()=>'',navigator:{onLine:true},clearCanonicalSessionAfterSavedDay:async()=>{clears++;stored=null;}
+  };
+  return {controller:SessionActions.createController(ports),ports,state,events,counts:()=>({applies,claims,clears,restores,exclusive}),chosen:()=>chosen};
 }
-
-// Continue Here classifies the canonical record's date before any Continue
-// Here or Restore path.
 for(const status of ['active','suspended'])for(const owner of ['inst_here','inst_other']){
-  const current=session(status,owner,day),events=[],handoff={step:'',error:''};
-  const ctx=vm.createContext({
-    appCanMutate:()=>true,sessionHandoff:handoff,
-    setSessionHandoff:(step='',error='')=>{handoff.step=step;handoff.error=error;},
-    NoticeCoordinator:{resolveEvent:()=>{}},
-    AppData:{activeSession:{load:async()=>({ok:true,value:current,storage:{idb:true}})}},
-    isValidIsoDate:()=>true,todayISO:()=>today,isCanonicalScheduleText:()=>true,
-    activeSessionSnapshot:s=>s?.snapshot,
-    DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
-    sessionFromElsewhere:s=>s.runningOn!=='inst_here',
-    sessionRunsElsewhere:s=>s.status!=='suspended'&&s.runningOn!=='inst_here',
-    setSessionPanelMode:mode=>events.push(mode),setPlanStatus:()=>{},
-    attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},
-    restoreSuspendedTodaySession:async()=>{events.push('restore');return true;},
-    confirmSessionTakeover:async()=>true,
-    transferSessionOwnershipHere:async()=>{events.push('claim');return {previous:current,session:current};},
-    AppDiagnostics:{capture:()=>{}},sessionHandoffProblem:e=>String(e?.message||e),
-    Interactions:{notify:()=>{}},navigator:{onLine:true}
-  });
-  vm.runInContext(previous+'\n'+continueHere+'\nglobalThis.continueOld=continueSessionHere;',ctx);
-  assert.equal(await ctx.continueOld(),false,status+' / '+owner+' must not continue a historical timer');
-  assert.ok(events.includes('previous'),'historical session must remain visible for Review');
-  assert.ok(!events.some(e=>['timer','restore','claim','elsewhere'].includes(e)),'no today-only execution');
+  const old=session(status,owner),fixture=prepare(old);
+  await fixture.controller.attemptAutoRestoreActiveSession();
+  assert.equal(fixture.state.sessionPanelMode,'previous');
+  assert.equal(fixture.counts().claims,0);assert.equal(fixture.counts().applies,0);
+  assert.equal(await fixture.controller.continueSessionHere(),false);
+  assert.equal(await fixture.controller.restoreSuspendedTodaySession(),false);
+  assert.equal(fixture.counts().claims,0,'previous days never transfer ownership');
+  assert.equal(fixture.counts().restores,0,'previous timers never restart');
+  const acknowledged={...old,snapshot:{...old.snapshot,savedRevision:7}};
+  const retired=prepare(acknowledged,{covered:true});await retired.controller.attemptAutoRestoreActiveSession();
+  assert.equal(retired.counts().clears,1);assert.equal(retired.chosen(),null,'covered recovery retires before a dialog');
 }
-
-// Restore Session does the same, and keeps today's routing.
-for(const [label,stored,expected] of [
-  ['previous day, here',session('suspended','inst_here',day),'previous'],
-  ['previous day, elsewhere',session('suspended','inst_other',day),'previous'],
-  ['previous day, active',session('active','inst_here',day),'previous'],
-  ['today, here',session('suspended','inst_here',today),'restore'],
-  ['today, elsewhere',session('suspended','inst_other',today),'claim']
-]){
-  const events=[];
-  const ctx=vm.createContext({
-    appCanMutate:()=>true,
-    AppData:{activeSession:{load:async()=>({ok:true,value:stored,storage:{idb:true}})}},
-    isValidIsoDate:()=>true,todayISO:()=>today,isCanonicalScheduleText:()=>true,
-    DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
-    isSuspendedActiveSession:s=>s?.status==='suspended'&&s.date===today,
-    sessionFromElsewhere:s=>s?.runningOn!=='inst_here',
-    setSessionPanelMode:mode=>events.push(mode),setPlanStatus:()=>{},
-    attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},
-    continueSessionHere:async()=>{events.push('claim');return true;},
-    activeSessionSnapshot:()=>({}),
-    applyStoredSessionSnapshot:()=>{events.push('restore');return true;},
-    goTab:async()=>{},Interactions:{notify:()=>{}}
-  });
-  vm.runInContext(previous+'\n'+restoreSuspended+'\nglobalThis.restoreStored=restoreSuspendedTodaySession;',ctx);
-  await ctx.restoreStored();
-  assert.ok(events.includes(expected),label+' routes to '+expected);
-  const others=['previous','restore','claim','timer','none'].filter(e=>e!==expected);
-  assert.ok(!events.some(e=>others.includes(e)),label+' takes no other path');
+for(const owner of ['inst_here','inst_other']){
+  const fixture=prepare(session('suspended',owner,today));
+  assert.equal(await fixture.controller.restoreSuspendedTodaySession(),true);
+  assert.equal(fixture.counts().claims,owner==='inst_other'?1:0);assert.equal(fixture.counts().restores,1);
 }
-
-// The choice dialog must expose a safe local recovery for a remote-owned
-// previous day, retain a repeatable "keep stored" path, and reject changes
-// during an outstanding decision.
-for(const [label,owner,selection,mutated,expected] of [
-  ['remote recover','inst_other','recover',false,'recover'],
-  ['remote keep','inst_other','keep',false,'previous'],
-  ['local keep','inst_here','keep',false,'previous'],
-  ['stale decision','inst_here','recover',true,'changed'],
-  ['local discard','inst_here','discard',false,'discarded']
-]){
-  const original=session('active',owner),events=[];
-  let stored=original,clears=0;
-  const context=vm.createContext({
-    isPreviousActiveSessionRecord:validSession,
-    sessionFromElsewhere:x=>x.runningOn!=='inst_here',
-    Interactions:{
-      choose:async options=>{
-        assert.match(options.message,/will not restart yesterday.s timer or transfer ownership/u);
-        assert.equal(options.choices.some(row=>row.value==='discard'),owner==='inst_here',
-          'the remote owner must not be offered local session destruction');
-        if(mutated)stored={...original,revision:8};
-        return selection;
-      },
-      notify:()=>events.push('notify')
-    },
-    AppData:{activeSession:{
-      load:async(_retry,options)=>{assert.equal(options.strict,true);return {ok:true,value:stored,storage:{idb:!!stored}};},
-      clear:async()=>{clears++;stored=null;return {ok:true,value:null,storage:{idb:true}};}
-    }},
-    ActiveSessionCodec:{sanitizeCurrent:canonical},
-    CanonicalModule:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
-    AppMutationCoordinator:{runExclusive:async(_kind,operation)=>operation()},
-    retireCoveredPreviousActiveSession:async()=>false,
-    recoverPreviousSessionForReview:async()=>{events.push('recover');return true;},
-    setPlanStatus:value=>{if(value.includes('changed while'))events.push('changed');else if(value.includes('Discarded'))events.push('discarded');},
-    setSessionPanelMode:mode=>events.push(mode),
-    handleActiveSessionRepositoryResult:()=>{},
-    prettyDate:x=>x,refreshStorageFallbackWarning:()=>{},
-    sessionSafetyMessage:''
-  });
-  vm.runInContext(choose+'\nglobalThis.choosePrevious=handlePreviousActiveSession;',context);
-  await context.choosePrevious(original);
-  assert.ok(events.includes(expected),label+' must preserve its decision semantics');
-  assert.equal(clears,selection==='discard'&&!mutated?1:0,label+' cannot delete implicitly');
+const elsewhere=prepare(session('active','inst_other',today));
+await elsewhere.controller.attemptAutoRestoreActiveSession();assert.equal(elsewhere.state.sessionPanelMode,'elsewhere');assert.equal(elsewhere.counts().claims,0);
+for(const [owner,choice,changed] of [['inst_other','recover',false],['inst_other',null,false],['inst_here','discard',false],['inst_here','discard',true],['inst_here','recover',true]]){
+  const original=session('active',owner),fixture=prepare(original,{choice,changeDuringChoice:changed});
+  await fixture.controller.handlePreviousActiveSession(original);
+  assert.equal(fixture.chosen().choices.some(row=>row.value==='discard'),owner==='inst_here');
+  assert.equal(fixture.counts().applies,choice==='recover'&&!changed?1:0);
+  assert.equal(fixture.counts().clears,choice==='discard'&&!changed?1:0);
+  assert.equal(fixture.counts().exclusive,choice==='discard'&&!changed?1:0);
+  if(changed)assert.ok(fixture.events.some(event=>typeof event==='string'&&event.includes('changed while')));
 }
 
 // A Save Today notice may disappear only after canonical Saved Day coverage

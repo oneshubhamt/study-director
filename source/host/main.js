@@ -80,6 +80,8 @@ const SessionLifecycleModule=INTERNAL_MODULES.load('session-lifecycle',1,'study-
 const PomodoroModule=INTERNAL_MODULES.load('pomodoro',1,'study-director.pomodoro-module',1);
 const PracticePacerModule=INTERNAL_MODULES.load('practice-pacer',1,'study-director.practice-pacer-module',1);
 const TimerEngineModule=INTERNAL_MODULES.load('timer-engine',2,'study-director.timer-engine-module',2);
+const SessionActionsModule=INTERNAL_MODULES.load('session-actions',1,'study-director.session-actions-module',1);
+const ExecutionViewsModule=INTERNAL_MODULES.load('execution-views',1,'study-director.execution-views-module',1);
 const ExecutionHostModule=INTERNAL_MODULES.load('execution-host',1,'study-director.execution-host-module',1);
 const SessionHostModule=INTERNAL_MODULES.load('session-host',1,'study-director.session-host-module',1);
 const SessionHandoffModule=INTERNAL_MODULES.load('session-handoff',1,'study-director.session-handoff-module',1);
@@ -521,65 +523,19 @@ const {
   sanitizeCounts:sanitizeTaskOutcomeCounts, total:taskOutcomeTotal, info:taskOutcomeInfo,
   summary:taskOutcomeSummaryText
 }=OutcomeModel;
-function updateExecutePanels(state=null,options={}){
-  updateExecuteSessionStatus();
-  let recoveryState='',key='';
-  try{
-    const s=state||getRealTimeState();
-    if(TASKS.length){
-      recoveryState=s.driftKind==='behind'||s.driftKind==='mismatch'?'warn':s.match?'ok':s.driftKind==='ahead'?'info':'';
-      key=[TimerState.mode,recoveryState,TASKS.length,TimerState.currentIndex,TaskSessionState.resolvedIndices('done').length,TaskSessionState.resolvedIndices('skipped').length].join('|');
-      if(!options.force&&key===executePanelsRenderKey)return;
-      executePanelsRenderKey=key;
-      const panel=document.getElementById('rt-actions');
-      if(panel)panel.classList.toggle('recommended',recoveryState==='warn');
-    }else{
-      key=[TimerState.mode,'empty',0].join('|');
-      if(!options.force&&key===executePanelsRenderKey)return;
-      executePanelsRenderKey=key;
-      const panel=document.getElementById('rt-actions');
-      if(panel)panel.classList.remove('recommended');
-    }
-  }catch(e){}
-}
+function updateExecutePanels(...args){return ExecutionViews.updateExecutePanels(...args);}
 // Today's session as another device runs it, while this one shows it there.
-function sessionShownElsewhere(){return sessionPanelMode==='elsewhere'&&!TASKS.length?sessionPanelSession:null;}
+function sessionShownElsewhere(...args){return ExecutionViews.sessionShownElsewhere(...args);}
 // Today's session parked on this device (Suspend Today, or handed over by another).
-function sessionParkedHere(){return sessionPanelMode==='suspended'&&!TASKS.some(isTrackableBlock);}
-function executeSessionStatusModel(){
-  const elsewhere=sessionShownElsewhere();
-  if(sessionPanelMode==='previous')return {state:'suspended',label:'PREVIOUS DAY'};
-  if(elsewhere)return {state:'elsewhere',label:`RUNNING ${sessionDevice(elsewhere).toUpperCase()}`};
-  if(sessionParkedHere())return {state:'suspended',label:'SUSPENDED'};
-  if(!TASKS.length)return {state:'empty',label:'NO SESSION'};
-  if(TimerState.mode===TIMER_MODES.SUSPENDED)return {state:'suspended',label:'SUSPENDED'};
-  if(TimerState.mode===TIMER_MODES.DONE)return {state:'complete',label:'COMPLETE'};
-  if(isLiveTrackableTimer()){
-    if(TimerState.mode===TIMER_MODES.PAUSED||TimerState.paused)return {state:'paused',label:'SESSION PAUSED'};
-    return {state:'live',label:'LIVE SESSION'};
-  }
-  return {state:'ready',label:'PLAN READY'};
-}
-function updateExecuteSessionStatus(){
-  const model=executeSessionStatusModel();
-  const segment=document.getElementById('status-session');
-  const label=document.getElementById('status-session-label');
-  const pane=document.getElementById('pane-execute');
-  const bar=document.querySelector('#pane-execute .status-bar');
-  const openPlan=document.getElementById('execute-open-plan');
-  if(segment)segment.dataset.sessionState=model.state;
-  if(label)label.textContent=model.label;
-  if(pane)pane.dataset.sessionState=model.state;
-  if(bar)bar.setAttribute('aria-label',`Execute session status: ${model.label.toLowerCase()}`);
-  if(openPlan)openPlan.hidden=model.state!=='empty';
-  return model;
-}
+function sessionParkedHere(...args){return ExecutionViews.sessionParkedHere(...args);}
+function executeSessionStatusModel(...args){return ExecutionViews.executeSessionStatusModel(...args);}
+function updateExecuteSessionStatus(...args){return ExecutionViews.updateExecuteSessionStatus(...args);}
 /* RUNTIME STATE · CHECKED LIVE EXECUTION HOST */
 const SLEEP_GAP_THRESHOLD_MS=120000;
 // While the timer runs on a work block here, pop-ups that block nothing
 // wait; support and fixed blocks, a pause or the end let them show
 // (docs/areas/status-indicator.md, noise rules).
-function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING&&isWorkBlock(TASKS[TimerState.currentIndex]));}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
+function syncStudyQuiet(...args){return ExecutionViews.syncStudyQuiet(...args);}
 const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
   modules:Object.freeze({timerState:TimerStateModule,pomodoro:PomodoroModule,practicePacer:PracticePacerModule,timerEngine:TimerEngineModule}),
   timerState:Object.freeze({
@@ -674,6 +630,127 @@ function restoreTimerRuntimeIfAny(){return TimerRestoration.restoreTimerRuntimeI
 const LIVE_DRAFT_SAVE_DEBOUNCE_MS=1000;
 const TIMER_SNAPSHOT_INTERVAL_MS=60*1000;
 let ActiveSessionRuntime=null,SessionHandoffRuntime=null;
+const SessionActionState={
+ get sessionPanelMode(){return sessionPanelMode;},set sessionPanelMode(value){sessionPanelMode=value;},
+ get sessionPanelSession(){return sessionPanelSession;},set sessionPanelSession(value){sessionPanelSession=value;},
+ get sessionSafetyMessage(){return sessionSafetyMessage;},set sessionSafetyMessage(value){sessionSafetyMessage=value;},
+ get sessionHandoff(){return sessionHandoff;},set sessionHandoff(value){sessionHandoff=value;},
+ get sessionMovingHere(){return sessionMovingHere;},set sessionMovingHere(value){sessionMovingHere=value;},
+ get sessionYieldedAt(){return sessionYieldedAt;},set sessionYieldedAt(value){sessionYieldedAt=value;},
+ get saveReminderDate(){return saveReminderDate;},set saveReminderDate(value){saveReminderDate=value;},
+ get saveReminderEvidence(){return saveReminderEvidence;},set saveReminderEvidence(value){saveReminderEvidence=value;},
+ get saveReminderGeneration(){return saveReminderGeneration;},set saveReminderGeneration(value){saveReminderGeneration=value;}
+};
+const SessionActions=SessionActionsModule.createController(Object.freeze({
+  checkUnsupportedUpdate:(...args)=>checkUnsupportedUpdate(...args),applySchedule:(...args)=>applySchedule(...args),schedulePwaUpdateEvaluation:(...args)=>schedulePwaUpdateEvaluation(...args),
+  state:SessionActionState,runtime:ExecutionRuntime,completionSources:COMPLETION_SOURCES,
+  get AppData(){return AppData;},
+  get ActiveSessionRuntime(){return ActiveSessionRuntime;},
+  get SessionHandoffRuntime(){return SessionHandoffRuntime;},
+  get ActiveSessionCodec(){return ActiveSessionCodec;},
+  get DailyRecordCodec(){return DailyRecordCodec;},
+  get CanonicalModule(){return CanonicalModule;},
+  get AppDiagnostics(){return AppDiagnostics;},
+  get AppMutationCoordinator(){return AppMutationCoordinator;},
+  get Interactions(){return Interactions;},
+  get NoticeCoordinator(){return NoticeCoordinator;},
+  get PlanDraftEditor(){return PlanDraftEditor;},
+  get PlanScheduleGateway(){return PlanScheduleGateway;},
+  get ReviewEditor(){return ReviewEditor;},
+  get ReviewView(){return ReviewView;},
+  get SessionLifecycle(){return SessionLifecycle;},
+  get StartupLifecycle(){return StartupLifecycle;},
+  get BackupProviderRuntime(){return BackupProviderRuntime;},
+  get InstallationIdentity(){return InstallationIdentity;},
+  get KeptVersions(){return KeptVersions;},
+  markStorageHealthError:(...args)=>markStorageHealthError(...args),
+  markStorageHealthOk:(...args)=>markStorageHealthOk(...args),
+  refreshStorageFallbackWarning:(...args)=>refreshStorageFallbackWarning(...args),
+  setPlanStatus:(...args)=>setPlanStatus(...args),
+  prettyDate:(...args)=>prettyDate(...args),
+  notifyBackupChange:(...args)=>notifyBackupChange(...args),
+  updateExecuteSessionStatus:(...args)=>updateExecuteSessionStatus(...args),
+  refreshExecuteIdleDisplay:(...args)=>refreshExecuteIdleDisplay(...args),
+  updateSessionControls:(...args)=>updateSessionControls(...args),
+  scheduleSyncStatus:(...args)=>scheduleSyncStatus(...args),
+  goTab:(...args)=>goTab(...args),
+  appCanMutate:(...args)=>appCanMutate(...args),
+  getReviewDate:(...args)=>getReviewDate(...args),
+  resetCountdownRuntime:(...args)=>resetCountdownRuntime(...args),
+  restoreTimerRuntimeIfAny:(...args)=>restoreTimerRuntimeIfAny(...args),
+  showEmpty:(...args)=>showEmpty(...args),
+  renderSched:(...args)=>renderSched(...args),
+  updateBadges:(...args)=>updateBadges(...args),
+  updateHeaderInfo:(...args)=>updateHeaderInfo(...args),
+  updateRealTimeAwareness:(...args)=>updateRealTimeAwareness(...args),
+  renderRecoveryReview:(...args)=>renderRecoveryReview(...args),
+  updateExecutePanels:(...args)=>updateExecutePanels(...args),
+  storageHealthTime:(...args)=>storageHealthTime(...args),
+  deviceName:(...args)=>deviceName(...args),
+  refreshCoreUi:(...args)=>refreshCoreUi(...args),
+  clearCanonicalSessionAfterSavedDay:(...args)=>clearCanonicalSessionAfterSavedDay(...args),
+  scheduleFingerprint:(...args)=>scheduleFingerprint(...args),
+  parseScheduleDraftText:(...args)=>parseScheduleDraftText(...args),
+  scheduleFingerprintForRows:(...args)=>scheduleFingerprintForRows(...args),
+  isTrackableBlock:(...args)=>isTrackableBlock(...args),
+  makeTaskId:(...args)=>makeTaskId(...args),
+  shortTaskLabel:(...args)=>shortTaskLabel(...args),
+  isValidIsoDate:(...args)=>isValidIsoDate(...args),
+  todayISO:(...args)=>todayISO(...args),
+  DecisionClock,SLEEP_GAP_THRESHOLD_MS,HANDOFF_RETRY_MESSAGE:SessionHandoffModule.retryMessage,navigator
+}));
+
+const ExecutionViewCache={get executePanelsRenderKey(){return executePanelsRenderKey;},set executePanelsRenderKey(value){executePanelsRenderKey=value;},get executeIdleDisplayKey(){return executeIdleDisplayKey;},set executeIdleDisplayKey(value){executeIdleDisplayKey=value;},get realTimeAwarenessRenderKey(){return realTimeAwarenessRenderKey;},set realTimeAwarenessRenderKey(value){realTimeAwarenessRenderKey=value;},get scheduleEndPromptKey(){return scheduleEndPromptKey;},set scheduleEndPromptKey(value){scheduleEndPromptKey=value;}};
+const ExecutionViews=ExecutionViewsModule.createController(Object.freeze({
+ state:SessionActionState,cache:ExecutionViewCache,runtime:ExecutionRuntime,actions:SessionActions,document,window,APP_LIMITS,STUDY_DAY_MINUTES,
+ SESSION_WATCH_MS:2*60*1000,SESSION_CLAIM_WATCH_MS:15*1000,setInterval:(fn,delay)=>setInterval(fn,delay),
+ getCarryForward:()=>latestCarryForward,setCarryForward:value=>{latestCarryForward=value;},
+get NoticeCoordinator(){return NoticeCoordinator;},
+get AppDiagnostics(){return AppDiagnostics;},
+get PlanDraftEditor(){return PlanDraftEditor;},
+get PlanRuntime(){return PlanRuntime;},
+get StartupLifecycle(){return StartupLifecycle;},
+get BackupProviderRuntime(){return BackupProviderRuntime;},
+get NativeCapabilities(){return NativeCapabilities;},
+get Interactions(){return Interactions;},
+isTrackableBlock:(...args)=>isTrackableBlock(...args),
+isWorkBlock:(...args)=>isWorkBlock(...args),
+isFixedBlock:(...args)=>isFixedBlock(...args),
+isSupportBlock:(...args)=>isSupportBlock(...args),
+shortTaskLabel:(...args)=>shortTaskLabel(...args),
+clockHMS:(...args)=>clockHMS(...args),
+setElementText:(...args)=>setElementText(...args),
+textEl:(...args)=>textEl(...args),
+requestRender:(...args)=>requestRender(...args),
+appCanMutate:(...args)=>appCanMutate(...args),
+fmtS:(...args)=>fmtS(...args),
+studyMinuteToHHMM:(...args)=>studyMinuteToHHMM(...args),
+invalidateScheduleDerived:(...args)=>invalidateScheduleDerived(...args),
+clearFutureUntouchedProgress:(...args)=>clearFutureUntouchedProgress(...args),
+getTaskCompletion:(...args)=>getTaskCompletion(...args),
+taskTargetValue:(...args)=>taskTargetValue(...args),
+applicableNotesForTask:(...args)=>applicableNotesForTask(...args),
+taskMeasureValue:(...args)=>taskMeasureValue(...args),
+taskAreaValue:(...args)=>taskAreaValue(...args),
+clampText:(...args)=>clampText(...args),
+renderReviewUnfinishedNote:(...args)=>renderReviewUnfinishedNote(...args),
+copyTextToClipboard:(...args)=>copyTextToClipboard(...args),
+setTextSafe:(...args)=>setTextSafe(...args),
+studyDayRolledOver:(...args)=>studyDayRolledOver(...args),
+todayISO:(...args)=>todayISO(...args),
+scheduleFingerprint:(...args)=>scheduleFingerprint(...args),
+promptSaveToday:(...args)=>promptSaveToday(...args),
+refreshCoreUi:(...args)=>refreshCoreUi(...args),
+saveLiveDraft:(...args)=>saveLiveDraft(...args),
+flushLiveDraft:(...args)=>flushLiveDraft(...args),
+refreshSessionSafetyUi:(...args)=>refreshSessionSafetyUi(...args),
+calculateReviewMetrics:(...args)=>calculateReviewMetrics(...args),
+durationLabel:(...args)=>durationLabel(...args),
+cachedElements:(...args)=>cachedElements(...args),
+notifyBackupChange:(...args)=>notifyBackupChange(...args),
+schedulePwaUpdateEvaluation:(...args)=>schedulePwaUpdateEvaluation(...args),
+wakeSessionOwnershipClaim:(...args)=>wakeSessionOwnershipClaim(...args)
+}));
 let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
@@ -690,12 +767,7 @@ async function withRestoreSessionPersistenceSuppressed(operation){
   if(!ActiveSessionRuntime)throw new Error('Active Session runtime is unavailable.');
   return ActiveSessionRuntime.withPersistenceSuppressed(operation);
 }
-function hasBlockingActiveSession(){
-  const active=TASKS.some(isTrackableBlock);
-  if(sessionPanelMode==='suspended'&&!active)return false;
-  if(TimerState.mode===TIMER_MODES.SUSPENDED&&!active)return false;
-  return sessionPanelMode==='active'||active;
-}
+function hasBlockingActiveSession(...args){return SessionActions.hasBlockingActiveSession(...args);}
 let hydrateReviewState=()=>false;
 let currentReviewSnapshot=()=>Object.freeze({reflection:'',studyQuality:null});
 let bindReviewSession=()=>false;
@@ -807,10 +879,8 @@ if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='st
 // within seconds (an urgent change), not at the next quiet-period upload:
 // Continue Here elsewhere takes the timer from Drive's newest version, so a
 // pause still waiting here would count the paused time there as study.
-function sendSessionChangeSoon(reason){
-  void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.session-change-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason}));
-}
-function togglePause(){const result=togglePauseTimer();if(result===true){sendSessionChangeSoon(TimerState.paused?'timer-pause':'timer-resume');schedulePwaUpdateEvaluation(150);}return result;}
+function sendSessionChangeSoon(...args){return ExecutionViews.sendSessionChangeSoon(...args);}
+function togglePause(...args){return ExecutionViews.togglePause(...args);}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
@@ -841,53 +911,20 @@ async function backUpBeforeUpdate(){
 }
 // A plan applied by hand goes to Drive within seconds, like Suspend and
 // Continue Here, so the other device sees today's session at its next check.
-function uploadSoonAfterPlanApply(result){
-  // After the session is saved: with nothing waiting yet the signal is dropped.
-  const done=applied=>{if(applied)void Promise.resolve(flushLiveDraft()).catch(error=>AppDiagnostics.capture('backup.plan-apply-flush',error,'warn')).then(()=>notifyBackupChange({urgent:true,reason:'plan-apply'}));return applied;};
-  return result&&typeof result.then==='function'?result.then(done):done(result);
-}
+function uploadSoonAfterPlanApply(...args){return SessionActions.uploadSoonAfterPlanApply(...args);}
 // During a live session, the checked P5.4C controller owns remote-claim
 // observation, timer preemption, frozen evidence and retry cadence. The host
 // keeps only scheduling and browser lifecycle adapters.
 const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
-let sessionWatchTimer=null,sessionClaimWatchTimer=null;
+
 async function checkSessionOwnershipClaim(){return SessionHandoffRuntime?SessionHandoffRuntime.checkClaim():false;}
 function wakeSessionOwnershipClaim(slackMs=0){return SessionHandoffRuntime?SessionHandoffRuntime.wakeClaim(slackMs):false;}
-function installSessionWatch(){
-  if(sessionWatchTimer||sessionClaimWatchTimer)return false;
-  sessionWatchTimer=setInterval(()=>{
-    if(document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return;
-    if(!TASKS.length&&sessionPanelMode!=='elsewhere')return;
-    try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
-    catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
-  },SESSION_WATCH_MS);
-  sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim(1000);},SESSION_CLAIM_WATCH_MS);
-  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void wakeSessionOwnershipClaim();});
-  window.addEventListener('online',()=>{void wakeSessionOwnershipClaim();});
-  return true;
-}
-function notifyDeviceBackupIfStudyDayResolved(reason='study-day-completed'){
-  const trackable=TASKS.map((task,index)=>({task,index})).filter(row=>isTrackableBlock(row.task));
-  if(!trackable.length||!trackable.every(row=>isTaskResolved(row.index)))return false;
-  return notifyBackupChange({urgent:true,reason});
-}
-function markDone(){
-  const finishWasAvailable=isTrackableBlock(TASKS[TimerState.currentIndex]);
-  const result=markDoneTimer();
-  if(finishWasAvailable&&result===true){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-finished');}
-  if(result===true){schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});}
-  return result;
-}
-function skipTask(){
-  const result=skipTaskTimer();
-  if(result===true){notifyDeviceBackupIfStudyDayResolved();sendSessionChangeSoon('block-skipped');schedulePwaUpdateEvaluation(150);void NativeCapabilities?.syncWake({forceCycle:true});}
-  return result;
-}
-function finishPracticePacer(){
-  const result=PracticePacer.finish();
-  schedulePwaUpdateEvaluation(150);return result;
-}
-function handlePracticeStartKey(event){if(event&&event.key==='Enter'){PracticePacer.start();return false;}return true;}
+function installSessionWatch(...args){return ExecutionViews.installSessionWatch(...args);}
+function notifyDeviceBackupIfStudyDayResolved(...args){return ExecutionViews.notifyDeviceBackupIfStudyDayResolved(...args);}
+function markDone(...args){return ExecutionViews.markDone(...args);}
+function skipTask(...args){return ExecutionViews.skipTask(...args);}
+function finishPracticePacer(...args){return ExecutionViews.finishPracticePacer(...args);}
+function handlePracticeStartKey(...args){return ExecutionViews.handlePracticeStartKey(...args);}
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
 function emptyStorageHealth(){
@@ -1107,60 +1144,16 @@ function dismissStorageWarning(){
     NoticeCoordinator.acknowledge(active.id);
   }
 }
-function resumeTimerLoopAfterPrimaryRestore(){
-  try{
-    if(SessionHandoffRuntime?.frozen())return false;
-    const resumed=TimerEngine.resumeAfterPrimaryRestore();
-    if(StartupLifecycle.status().fullyInitialized)SessionLifecycle.reconcile('ownership-primary',{date:getReviewDate()});
-    return resumed;
-  }catch(e){AppDiagnostics.capture('ownership.resume-timer',e,'error');return false;}
-}
+function resumeTimerLoopAfterPrimaryRestore(...args){return SessionActions.resumeTimerLoopAfterPrimaryRestore(...args);}
 const StartupOwnershipViews=StartupHostModule.createOwnershipViews({document,OWNERSHIP_STATES,AppOwnership,NoticeCoordinator,appCanMutate,
  claimAppControl:(...args)=>claimAppControl(...args),setPlanStatus:(...args)=>setPlanStatus(...args),mutationStatus:()=>AppMutationCoordinator?.status()||null,ready:()=>StartupLifecycle.status().fullyInitialized,
  syncPlanAccess:()=>PlanRuntime.savedPlans.syncAccess(),projectOwnership:()=>OwnershipUiProjection.apply(),wakeBackground:wakeBackgroundOperations,syncWake:()=>NativeCapabilities?.syncWake()});
 function renderOwnershipBanner(...args){return StartupOwnershipViews.renderOwnershipBanner(...args);}
 function renderOwnershipUi(...args){return StartupOwnershipViews.renderOwnershipUi(...args);}
-async function loadActiveSessionForRestore(){
-  const loaded=await AppData.activeSession.load();
-  if(loaded&&!loaded.ok&&loaded.error)markStorageHealthError('activeSession',`Live-session recovery could not be loaded: ${loaded.error.message||'active session load failed'}`);
-  return loaded&&loaded.value||null;
-}
-function activeSessionScheduleFingerprint(session){
-  const draft=parseScheduleDraftText(String(session&&session.scheduleText||''));
-  return draft.ok?scheduleFingerprintForRows(draft.parsed):'';
-}
-function applyStoredSessionSnapshot(session,snapshot,{source,reviewOnly=false,lifecycleManaged=false}={}){
-  if(!ActiveSessionRuntime)return false;
-  return ActiveSessionRuntime.applyStoredSession(session,snapshot,{source,reviewOnly,lifecycleManaged});
-}
-async function hydratePrimaryStateFromStorage(options={}){
-  const sameTabReload=!!options.sameTabReload;
-  const notesReloaded=await AppData.notes.reloadFresh();
-  if(!notesReloaded)throw new Error('The latest notes could not be reloaded before ownership transfer.');
-  const session=await loadActiveSessionForRestore();
-  // Historical sessions must never be offered today's Continue Here path,
-  // including suspended copies and those last owned on another device.
-  if(isPreviousActiveSessionRecord(session)&&!TASKS.length)return attemptAutoRestoreActiveSession();
-  if(sessionRunsElsewhere(session)&&!TASKS.length){setSessionPanelMode('elsewhere',session);return false;}
-  if(isRestorableActiveSession(session)){
-    const snapshot=activeSessionSnapshot(session);
-    if(snapshot){
-      const restored=applyStoredSessionSnapshot(session,snapshot,{source:sameTabReload?'active-session-restore':'ownership-takeover'});
-      if(restored!==false){
-        if(sameTabReload)setPlanStatus('✓ Restored today’s active session.');
-        await goTab('execute',{source:'ownership-restore',history:'replace'});return true;
-      }
-    }
-  }
-  if(TASKS.length){
-    SessionLifecycle.reconcile('ownership-takeover-no-session',{date:getReviewDate()});
-    resetCountdownRuntime();
-    const restored=restoreLiveDraftIfAny();
-    if(restored&&restoreTimerRuntimeIfAny())return true;
-    showEmpty('No canonical running timer was found after ownership transfer. Start a block deliberately from the loaded plan.','Control Transferred');
-  }
-  return false;
-}
+function loadActiveSessionForRestore(...args){return SessionActions.loadActiveSessionForRestore(...args);}
+function activeSessionScheduleFingerprint(...args){return SessionActions.activeSessionScheduleFingerprint(...args);}
+function applyStoredSessionSnapshot(...args){return SessionActions.applyStoredSessionSnapshot(...args);}
+function hydratePrimaryStateFromStorage(...args){return SessionActions.hydratePrimaryStateFromStorage(...args);}
 const {
   writeLease:writeAppOwner, release:releaseAppOwner, evaluate:evaluateAppOwnership,
   setPrimary:setPrimaryTabState, takeOwnership:claimAppControl, install:installAppOwnership
@@ -1289,12 +1282,7 @@ function setReviewDateTitle(iso){
   const rptDate=document.getElementById('review-date');
   if(rptDate)rptDate.textContent=reviewDateTitle(iso);
 }
-function clearSessionSafetyMessage(match=''){
-  if(!match||sessionSafetyMessage.includes(match)){
-    sessionSafetyMessage='';
-    refreshStorageFallbackWarning();
-  }
-}
+function clearSessionSafetyMessage(...args){return SessionActions.clearSessionSafetyMessage(...args);}
 // Reminder clearance is notice-only: never change the canonical session's
 // saved revision because another device supplied equivalent Saved Day evidence.
 // Capture the live state afresh, so a stale dirty counter can be disproved
@@ -1472,21 +1460,7 @@ async function activeSessionContentFingerprint(session){
 }
 function activeSessionPayload(snapshot=null,options={}){return ActiveSessionRuntime?.payload(snapshot,options)||null;}
 function readLocalRecoverySession(){return ActiveSessionRuntime?.readLocal()||null;}
-function handleActiveSessionRepositoryResult(result,action='save'){
-  if(result&&result.ok){
-    if(action==='save'&&result.storage&&result.storage.idb===true)markStorageHealthOk('activeSession');
-    else if(action==='save')markStorageHealthOk('activeSession');
-    else if(action==='clear')markStorageHealthOk('activeSession');
-    if(action==='save')ReviewEditor?.persistenceCommitted?.();
-    return true;
-  }
-  const reason=result&&result.error?(result.error.message||String(result.error)):`active session ${action} failed`;
-  if(action==='save'){
-    markStorageHealthError('activeSession',`Active-session recovery save failed: ${reason}. Export a backup if this persists.`);
-    ReviewEditor?.persistenceFailed?.(result&&result.error||new Error(reason));
-  }
-  return false;
-}
+function handleActiveSessionRepositoryResult(...args){return SessionActions.handleActiveSessionRepositoryResult(...args);}
 function clearCanonicalSessionAfterSavedDay(){return ActiveSessionRuntime.clearCanonical('clearing the saved study session');}
 function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){return ActiveSessionRuntime.requireCanonicalWrite(saved,expected,operation);}
 function writeActiveSessionNow(snapshot,options={}){return ActiveSessionRuntime.writeSnapshot(snapshot,options);}
@@ -1496,188 +1470,26 @@ function cancelPendingLiveDraftSave(){return ActiveSessionRuntime?.cancelPending
 function flushLiveDraft(options={}){return ActiveSessionRuntime?.flushLiveDraft(options)||null;}
 function maybeSnapshotRunningTimer(){return ActiveSessionRuntime?.maybeSnapshotRunningTimer()||false;}
 function applySessionSnapshot(snapshot){return ActiveSessionRuntime?.applySnapshot(snapshot)||false;}
-function restoreLiveDraftIfAny(){
-  TimerState.pendingRestore=null;
-  try{return ActiveSessionRuntime?.restoreLocalRecovery()||false;}catch(e){return false;}
-}
-function activeSessionSnapshot(session){
-  const current=ActiveSessionCodec.sanitizeCurrent(session);
-  return current&&ActiveSessionRuntime?ActiveSessionRuntime.sessionSnapshot(current):null;
-}
+function restoreLiveDraftIfAny(...args){return SessionActions.restoreLiveDraftIfAny(...args);}
+function activeSessionSnapshot(...args){return SessionActions.activeSessionSnapshot(...args);}
 
 // A session another device runs: this device shows it and never runs its timer.
-function sessionRunsElsewhere(session){return SessionHandoffRuntime?SessionHandoffRuntime.runsElsewhere(session):!!session&&typeof session==='object'&&session.status!=='suspended'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
-function sessionFromElsewhere(session){return SessionHandoffRuntime?SessionHandoffRuntime.fromElsewhere(session):!!session&&typeof session==='object'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
-function isRestorableActiveSession(session){
-  return !sessionRunsElsewhere(session)&&ActiveSessionRuntime?.classify(session)==='today-active';
-}
-function isSuspendedActiveSession(session){return ActiveSessionRuntime?.classify(session)==='today-suspended';}
-function isPreviousActiveSessionRecord(session){return ActiveSessionRuntime?.classify(session)==='previous';}
+function sessionRunsElsewhere(...args){return SessionActions.sessionRunsElsewhere(...args);}
+function sessionFromElsewhere(...args){return SessionActions.sessionFromElsewhere(...args);}
+function isRestorableActiveSession(...args){return SessionActions.isRestorableActiveSession(...args);}
+function isSuspendedActiveSession(...args){return SessionActions.isSuspendedActiveSession(...args);}
+function isPreviousActiveSessionRecord(...args){return SessionActions.isPreviousActiveSessionRecord(...args);}
 // Verify the actual canonical Saved Day, not just a date match or two
 // unrelated devices' numeric revision counters. The session must first carry
 // its own durable save acknowledgement; its study evidence must still be
 // represented by the Day presently in Library.
-async function savedDayCoversActiveSession(session){
-  if(!isPreviousActiveSessionRecord(session))return false;
-  const snapshot=activeSessionSnapshot(session),contentRevision=Number(snapshot?.contentRevision),savedRevision=Number(snapshot?.savedRevision);
-  if(!Number.isSafeInteger(contentRevision)||contentRevision<0||
-      !Number.isSafeInteger(savedRevision)||savedRevision<contentRevision)return false;
-  try{
-    const rows=await AppData.dailyRecords.documents([session.date],{requireCanonical:true}),record=rows.find(item=>item.date===session.date);
-    if(!DailyRecordCodec.savedDayCoversSessionEvidence(record,session,{allowAdvances:true}))return false;
-    await AppData.dailyRecords.verifyCanonical(record);
-    return true;
-  }catch(error){
-    AppDiagnostics.capture('session.previous-day-saved-check',error,'warn');
-    return false;
-  }
-}
-async function retireCoveredPreviousActiveSession(session){
-  if(!await savedDayCoversActiveSession(session))return false;
-  const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
-  if(!current||!CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session)))return false;
-  try{
-    await clearCanonicalSessionAfterSavedDay();
-  }catch(error){
-    const reason=error?.message||String(error);
-    sessionSafetyMessage=`${prettyDate(session.date)} is saved in Library, but its redundant recovery copy could not be verified as cleared: ${reason}`;
-    setSessionPanelMode('previous',session);
-    refreshStorageFallbackWarning();
-    setPlanStatus(sessionSafetyMessage,false);
-    return true;
-  }
-  if(saveReminderDate===session.date){saveReminderDate='';saveReminderEvidence=null;saveReminderGeneration+=1;}
-  if(sessionSafetyMessage.includes('unsaved')||sessionSafetyMessage.includes('Review reminder'))sessionSafetyMessage='';
-  setSessionPanelMode('none');
-  refreshStorageFallbackWarning();
-  setPlanStatus(`✓ ${prettyDate(session.date)} is already saved in Library.`);
-  notifyBackupChange({urgent:true,reason:'saved-session-retired'});
-  return true;
-}
-function setSessionPanelMode(mode,session=null){
-  sessionPanelMode=mode||'none';
-  sessionPanelSession=['suspended','elsewhere','previous'].includes(sessionPanelMode)?session:null;
-  if(!sessionPanelSession&&sessionHandoff.error)sessionHandoff={...sessionHandoff,error:''};
-  // The Execute header names the device running the session, or stops doing
-  // so. Before the panel's own controls, which the idle display disables.
-  try{updateExecuteSessionStatus();refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-elsewhere-header',error,'warn');}
-  updateSessionControls();scheduleSyncStatus();
-}
-async function recoverPreviousSessionForReview(session){
-  const snapshot=activeSessionSnapshot(session);
-  if(!snapshot)return false;
-  const reviewSnapshot={...snapshot,timerRuntime:null};
-  const restored=applyStoredSessionSnapshot(session,reviewSnapshot,{source:'previous-session-review',reviewOnly:true});
-  if(restored===false)return false;
-  sessionSafetyMessage=`Recovered unsaved ${prettyDate(session.date)} into Review. Its timer was not restarted. Save or discard it before applying a new study day.`;
-  refreshStorageFallbackWarning();
-  setSessionPanelMode('previous',session);
-  setPlanStatus('✓ Recovered the previous study day into Review without restarting its timer.');
-  await goTab('review',{source:'session-recovery',history:'none'});
-  return true;
-}
-async function handlePreviousActiveSession(session){
-  if(!isPreviousActiveSessionRecord(session))return false;
-  const remote=sessionFromElsewhere(session);
-  const choice=await Interactions.choose({
-    title:'Previous study day needs review',
-    message:`Study Director found study evidence from ${prettyDate(session.date)}. It will not restart yesterday’s timer or transfer ownership.`,
-    details:[
-      'Recover opens the previous day in Review without restarting its timer.',
-      remote?'This copy was last owned on another device. Review it here without using Continue Here.':'Keep stored preserves the recovery copy for later.',
-      'A different or unproven Saved Day will never silently replace this evidence.'
-    ],
-    cancelLabel:'Keep stored',
-    choices:[
-      {value:'recover',label:'Recover in Review',kind:'primary',description:'Review and save the previous study day.'},
-      ...(!remote?[{value:'discard',label:'Discard session',kind:'danger',description:'Remove this unsaved local recovery copy after an explicit decision.'}]:[])
-    ]
-  });
-  // A dialog is not a storage lock. Reject choices against a session that
-  // changed while the person was deciding, and verify durable retirement.
-  let loaded=null;
-  try{loaded=await AppData.activeSession.load(0,{strict:true});}
-  catch(error){
-    setSessionPanelMode('previous',session);
-    setPlanStatus('Could not verify previous-day recovery: '+(error?.message||String(error)),false);
-    return false;
-  }
-  const current=loaded?.ok&&!loaded.error?ActiveSessionCodec.sanitizeCurrent(loaded.value):null;
-  if(!current||!CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session))){
-    setPlanStatus('Previous-day recovery changed while you were deciding. Review the latest saved state before proceeding.',false);
-    setSessionPanelMode(isPreviousActiveSessionRecord(current)?'previous':'none',current);
-    return false;
-  }
-  if(await retireCoveredPreviousActiveSession(current))return false;
-  if(choice==='recover')return recoverPreviousSessionForReview(current);
-  if(choice==='discard'&&!remote){
-    try{
-      // The repository's existing exclusive mutation owner serializes this
-      // deliberate deletion against backup/restore. Reread after acquiring
-      // that owner; the earlier dialog check is not a storage lock.
-      await AppMutationCoordinator.runExclusive('discard-previous-session',async()=>{
-        const latest=await AppData.activeSession.load(0,{strict:true});
-        if(!latest?.ok||latest.error||
-            !CanonicalModule.same(ActiveSessionCodec.sanitizeCurrent(latest.value),current))
-          throw new Error('The previous-day session changed while discard was starting.');
-        await ActiveSessionRuntime.clearCanonical('discarding the previous-day recovery session');
-      });
-    }catch(error){
-      setSessionPanelMode('previous',current);
-      setPlanStatus('Could not verify deletion of the previous-day recovery copy: '+(error?.message||String(error)),false);
-      return false;
-    }
-    setSessionPanelMode('none');
-    setPlanStatus(`Discarded the unsaved ${prettyDate(current.date)} session.`);
-    Interactions.notify({source:'session',kind:'success',key:'previous-session',title:'Unsaved session discarded',message:prettyDate(current.date)});
-    return false;
-  }
-  setSessionPanelMode('previous',current);
-  sessionSafetyMessage=`Unsaved ${prettyDate(current.date)} remains stored. Choose Review Previous Day in Execute or Plan to recover it, or export a backup.`;
-  refreshStorageFallbackWarning();
-  setPlanStatus(sessionSafetyMessage,false);
-  return false;
-}
-async function revisitPreviousStoredSession(){
-  if(!appCanMutate())return false;
-  try{
-    const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
-    if(!isPreviousActiveSessionRecord(session)){
-      setSessionPanelMode('none');
-      setPlanStatus('No previous-day recovery session remains. Open Library to review saved days.');
-      return false;
-    }
-    if(await retireCoveredPreviousActiveSession(session))return false;
-    return handlePreviousActiveSession(session);
-  }catch(error){
-    setPlanStatus('Could not read previous-day recovery safely: '+(error?.message||String(error)),false);
-    return false;
-  }
-}
-async function attemptAutoRestoreActiveSession(){
-  try{
-    if(TASKS.length||PlanScheduleGateway.hasLiveState())return false;
-    const session=await loadActiveSessionForRestore();
-    if(TASKS.length||PlanScheduleGateway.hasLiveState())return false;
-    // A previous-day recovery row is not evidence of an unsaved day by
-    // itself. If the canonical Saved Day covers its latest content revision,
-    // retire the redundant recovery copy before considering ownership/UI.
-    if(isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session))return false;
-    if(isPreviousActiveSessionRecord(session))return handlePreviousActiveSession(session);
-    if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
-    if(isSuspendedActiveSession(session)){setSessionPanelMode('suspended',session);return false;}
-    if(!isRestorableActiveSession(session)){setSessionPanelMode('none');return false;}
-    const snapshot=activeSessionSnapshot(session);
-    const restored=applyStoredSessionSnapshot(session,snapshot,{source:'active-session-restore'});
-    if(restored!==false){
-      setSessionPanelMode('active');
-      setPlanStatus('✓ Restored today’s active session.');
-      await goTab('execute',{source:'session-auto-restore',history:'none'});
-      return true;
-    }
-  }catch(e){AppDiagnostics.capture('session.auto-restore',e,'error');}
-  return false;
-}
+function savedDayCoversActiveSession(...args){return SessionActions.savedDayCoversActiveSession(...args);}
+function retireCoveredPreviousActiveSession(...args){return SessionActions.retireCoveredPreviousActiveSession(...args);}
+function setSessionPanelMode(...args){return SessionActions.setSessionPanelMode(...args);}
+function recoverPreviousSessionForReview(...args){return SessionActions.recoverPreviousSessionForReview(...args);}
+function handlePreviousActiveSession(...args){return SessionActions.handlePreviousActiveSession(...args);}
+function revisitPreviousStoredSession(...args){return SessionActions.revisitPreviousStoredSession(...args);}
+function attemptAutoRestoreActiveSession(...args){return SessionActions.attemptAutoRestoreActiveSession(...args);}
 /* INDEXEDDB STORE ADAPTERS · IMPORTED */
 const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze({
   module:PersistenceModule,
@@ -2147,264 +1959,39 @@ NativeCapabilities=CapabilitiesHostModule.createController(Object.freeze({
 StorageHealthController.activate();
 
 /* SESSION RESET ORCHESTRATION */
-function resetRuntimeSessionState(options={}){
-  if(!ActiveSessionRuntime)return false;
-  return ActiveSessionRuntime.resetRuntime(options);
-}
-function refreshPlanAfterSessionReset(emptyMessage='',emptyTitle=''){
-  // A session reset, suspension or remote handoff is not an edit action.
-  PlanDraftEditor.preview({silent:true,enterDraft:false});
-  renderSched();
-  updateBadges();
-  updateHeaderInfo();
-  updateRealTimeAwareness();
-  renderRecoveryReview();
-  showEmpty(emptyMessage,emptyTitle);
-  void goTab('plan',{source:'session-reset'});
-}
-async function suspendTodaySession(){
-  const ok=await Interactions.confirm({
-    title:'Suspend today’s session?',
-    message:'The live timer will stop and today’s session will no longer restore automatically.',
-    details:['The live draft is kept; Restore Session can continue it without re-applying the schedule.','You can also open Review and save the suspended progress to Library. Saved Library Study Days and notes are unchanged.'],
-    confirmLabel:'Suspend session',cancelLabel:'Keep session active'
-  });
-  if(!ok||!appCanMutate())return false;
-  try{
-    const session=await ActiveSessionRuntime.suspendLocal();
-    setSessionPanelMode('suspended',session);
-    refreshPlanAfterSessionReset();
-    setTimerMode(TIMER_MODES.SUSPENDED,'session-suspend');
-    updateExecutePanels();
-    setPlanStatus('Today’s session is suspended. Restore it to continue, save it from Review to preserve the suspended progress in Library, or Reset Today to start fresh.');
-    const synced=BackupProviderRuntime.connected('google-drive');
-    Interactions.notify({source:'session',kind:'success',key:'session-suspend',title:'Session suspended',message:synced?'Saving it to Google Drive now. Continue it here with Restore Session, or on another device once it syncs.':'Restore Session continues it; Review can save the suspended progress to Library.'});
-    notifyBackupChange({urgent:true,reason:'session-suspend'});
-    return true;
-  }catch(e){
-    setPlanStatus('Could not suspend today’s session: '+(e&&e.message?e.message:e),false);
-    return false;
-  }
-}
-function sessionUpdateTime(session){return storageHealthTime(String(session&&session.updatedAt||''));}
+function resetRuntimeSessionState(...args){return SessionActions.resetRuntimeSessionState(...args);}
+function refreshPlanAfterSessionReset(...args){return SessionActions.refreshPlanAfterSessionReset(...args);}
+function suspendTodaySession(...args){return SessionActions.suspendTodaySession(...args);}
+function sessionUpdateTime(...args){return SessionActions.sessionUpdateTime(...args);}
 // The device a session runs on, by name: "on iPhone · Safari", or "on another device".
-function sessionDevice(session){const name=deviceName(session&&session.runningOn);return name&&name!=='This device'?`on ${name}`:'on another device';}
+function sessionDevice(...args){return SessionActions.sessionDevice(...args);}
 // Continue Here: this device runs the session from now on. A session still
 // running on another device moves only after a warning; that device stops its
 // timer at its next sync and offers what it recorded since for review.
-async function confirmSessionTakeover(session,{replace=false}={}){
-  const time=sessionUpdateTime(session);
-  return Interactions.confirm({
-    title:replace?'Start a new plan here?':'Continue here?',
-    message:`Today’s session is still running ${sessionDevice(session)} (last update ${time}).`,
-    details:[replace?'Applying this plan replaces that session on every device.':'The session moves to this device and its timer runs here.','The other device stops its timer at its next sync.',`Anything it recorded after ${time} is kept there for you to review.`],
-    confirmLabel:replace?'Apply here':'Continue here',cancelLabel:'Not now'
-  });
-}
+function confirmSessionTakeover(...args){return SessionActions.confirmSessionTakeover(...args);}
 const HANDOFF_RETRY_MESSAGE=SessionHandoffModule.retryMessage;
 // P5.4C owns the distributed claim/compensation state machine. This host
 // adapter supplies UI progress only; provider and persistence semantics live
 // behind the checked controller.
-async function transferSessionOwnershipHere(session,{onStep=null,preread=null}={}){
-  if(!SessionHandoffRuntime)throw new Error('Session handoff runtime is unavailable.');
-  return SessionHandoffRuntime.transferHere(session,{onStep,preread});
-}
+function transferSessionOwnershipHere(...args){return SessionActions.transferSessionOwnershipHere(...args);}
 // Continue Here in progress: every Continue Here button says so and the
 // Execute card shows the step; a failure stays in the card until the next
 // try or until the session moves on.
-function setSessionHandoff(step='',error=''){
-  sessionHandoff={step:String(step||''),error:String(error||'')};
-  updateSessionControls();
-  try{refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-moving',error,'warn');}
-}
+function setSessionHandoff(...args){return SessionActions.setSessionHandoff(...args);}
 // The block a stored session is on and how many of its blocks are done.
-function sessionProgressSummary(session){
-  const snapshot=activeSessionSnapshot(session),draft=parseScheduleDraftText(String(session&&session.scheduleText||''));
-  if(!snapshot||!draft.ok)return null;
-  const taskState=snapshot.taskState&&typeof snapshot.taskState==='object'?snapshot.taskState:{},finished=row=>['done','skipped'].includes(taskState[row.id]?.resolvedState);
-  const rows=draft.parsed.map((task,index)=>({task,id:String(task.id||makeTaskId(task,index))})).filter(row=>isTrackableBlock(row.task));
-  const current=rows.find(row=>row.id===String(snapshot.currentTaskId||''))||rows.find(row=>!finished(row));
-  return {block:current?shortTaskLabel(current.task):'',done:rows.filter(finished).length,total:rows.length};
-}
-function sessionHandoffProblem(error){
-  const code=String(error&&error.code||'');
-  if(navigator.onLine===false)return 'You’re offline. Connect to the internet, then try again.';
-  if(code==='SESSION_CONTINUE_BUSY')return 'Google Drive is busy with another backup or restore. Try again in a moment.';
-  if(code==='SESSION_CONTINUE_NOT_CONNECTED')return 'Google Drive isn’t connected. Sign in from your profile, then try again.';
-  if(code==='SESSION_CONTINUE_SYNC_REQUIRED')return 'Today’s shared session advanced. This device is syncing it first; retry Continue Here after sync.';
-  if(code==='SESSION_CONTINUE_INCOMPLETE')return HANDOFF_RETRY_MESSAGE;
-  if(code==='SESSION_CONTINUE_CHANGED')return 'Today’s session changed on this device while Continue Here was starting. Nothing moved; try again.';
-  if(code==='REPOSITORY_SYNC_NEEDS_UPDATE')return String(error.message||'Update the app to continue here.');
-  if(code==='REPOSITORY_SESSION_CLAIM_STALE')return 'Today’s session changed on another device. Wait for this device to catch up, then try again.';
-  if(code==='REPOSITORY_SYNC_TURN')return 'Another device is saving to Google Drive. Try again in a moment.';
-  return String(error&&error.message||error||'Something went wrong.');
-}
-async function continueSessionHere(){
-  if(!appCanMutate()||sessionHandoff.step)return false;
-  // The "Today’s session is ready" pop-up has done its job.
-  NoticeCoordinator.resolveEvent('session','session-handoff');
-  setSessionHandoff('Checking today’s session…');
-  try{
-    const loaded=await ActiveSessionRuntime.load(),session=loaded&&loaded.value||null;
-    if(!session){setSessionPanelMode('none');return false;}
-    // Classify the date before any today-only continuation, restoration or
-    // ownership operation.
-    if(isPreviousActiveSessionRecord(session)){
-      setSessionPanelMode('previous',session);
-      setPlanStatus('This session belongs to a previous study day. Review it without transferring or restarting its timer.',false);
-      return false;
-    }
-    if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
-    // Drive is read while the person confirms, so pressing Continue here
-    // waits only on the claim when Drive has not moved on. Nothing is written.
-    const preread=SessionHandoffRuntime?.prefetchSource()||Promise.resolve(null);
-    if(sessionRunsElsewhere(session)&&!await confirmSessionTakeover(session))return false;
-    if(!appCanMutate())return false;
-    // From here Execute shows the session moving here; its timer starts only
-    // once Google Drive confirms the claim.
-    sessionMovingHere=session;setSessionHandoff('Moving the session here…');
-    const moved=await transferSessionOwnershipHere(session,{onStep:text=>setSessionHandoff(text),preread});
-    setSessionHandoff('Starting here…');
-    if(moved.previous.status==='suspended')return restoreSuspendedTodaySession();
-    // The timer runs here now: Resume, as Restore Session plays.
-    const restored=await attemptAutoRestoreActiveSession();
-    if(restored)NoticeCoordinator.emit({source:'session',id:'session-continued',surface:'quiet',foreground:false,cue:'resume',occurrence:String(Date.now())});
-    return restored;
-  }catch(error){
-    const problem=sessionHandoffProblem(error);
-    setPlanStatus('Could not continue today’s session here: '+problem,false);
-    // Catch-up may legitimately have advanced or ended the session before a
-    // later claim fence rejected the takeover. Re-project from canonical
-    // storage; never redraw the stale object captured before Continue Here.
-    try{
-      const loaded=await ActiveSessionRuntime.load(),current=loaded&&loaded.value||null;
-      if(!current)setSessionPanelMode('none');
-      else if(isPreviousActiveSessionRecord(current))setSessionPanelMode('previous',current);
-      else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
-      else if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
-      else setSessionPanelMode('active',current);
-    }catch(renderError){AppDiagnostics.capture('session.continue-failure-refresh',renderError,'warn');}
-    setSessionHandoff('','Couldn’t continue here. '+problem);
-    Interactions.notify({source:'session',kind:'error',key:'session-continue',title:'Couldn’t continue here',message:problem});
-    return false;
-  }finally{sessionMovingHere=null;if(sessionHandoff.step)setSessionHandoff('',sessionHandoff.error);}
-}
+function sessionProgressSummary(...args){return SessionActions.sessionProgressSummary(...args);}
+function sessionHandoffProblem(...args){return SessionActions.sessionHandoffProblem(...args);}
+function continueSessionHere(...args){return SessionActions.continueSessionHere(...args);}
 // From a pop-up or the profile panel: open Execute first, where the card
 // shows each Continue Here step.
-async function continueSessionOnExecute(source){
-  if(sessionHandoff.step)return false;
-  await goTab('execute',{source});
-  return continueSessionHere();
-}
+function continueSessionOnExecute(...args){return SessionActions.continueSessionOnExecute(...args);}
 // Another device continued today's session after this one changed it: the
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
-async function yieldSessionToOtherDevice(options={}){
-  if(!SessionHandoffRuntime)return false;
-  const deferReview=options&&options.deferReview===true,session=await SessionHandoffRuntime.yieldLocal();
-  if(!session)return false;
-  setSessionPanelMode('suspended',session);
-  refreshPlanAfterSessionReset();
-  setTimerMode(TIMER_MODES.SUSPENDED,'session-yield');
-  updateExecutePanels();
-  sessionYieldedAt=DecisionClock.nowMs();
-  if(deferReview)Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. Any late progress on this device will be compared when the new owner’s session arrives.'});
-  else Interactions.notify({source:'session',key:'session-yield',tier:'news',cue:'session-moved',system:true,title:'Session continued on another device',message:'The timer here stopped. What this device recorded is kept for you under Needs review.',
-    action:{label:'Review',opens:true,run:()=>void KeptVersions.review()}});
-  return true;
-}
-async function restoreSuspendedTodaySession(){
-  if(!appCanMutate())return false;
-  try{
-    const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
-    if(isPreviousActiveSessionRecord(session)){
-      setSessionPanelMode('previous',session);
-      setPlanStatus('This session belongs to a previous study day. Review it without restarting its timer.',false);
-      return false;
-    }
-    if(!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
-    if(sessionFromElsewhere(session))return continueSessionHere();
-    const restored=await ActiveSessionRuntime.restoreSuspendedLocal(session);
-    setSessionPanelMode('active',restored);
-    setPlanStatus('✓ Suspended session restored.');
-    Interactions.notify({source:'session',kind:'success',key:'session-restore',cue:'resume',title:'Session restored',message:'Today’s suspended session is active again.'});
-    await goTab('execute',{source:'session-restore'});
-    return true;
-  }catch(error){
-    setPlanStatus('Could not restore today’s suspended session: '+(error&&error.message?error.message:error),false);
-    return false;
-  }
-}
-async function finishTodaySession(){
-  if(!appCanMutate())return false;
-  if(!TASKS.some(isTrackableBlock)){setPlanStatus('No active study plan is available to finish.',false);return false;}
-  const accepted=await Interactions.confirm({
-    title:'Finish today and open Review?',
-    message:'The live timer will stop and your current progress will be kept for Review.',
-    details:['The current block is recorded as partial if it is still running.','Untouched future blocks remain unattempted; they are not marked skipped.','Nothing is added to Library until you choose Save Today to Library in Review.'],
-    confirmLabel:'Finish today',cancelLabel:'Keep studying'
-  });
-  if(!accepted||!appCanMutate())return false;
-  const rollbackSnapshot=ActiveSessionRuntime.captureSnapshot();
-  let completionNotice=null;
-  try{
-    const hadActiveTimer=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
-    if(hadActiveTimer)resolveActivePauseBeforeTimerSwitch();
-    if(hadActiveTimer&&!isTaskResolved(TimerState.currentIndex)){
-      const active=recordCurrentActiveToTask(TimerState.currentIndex,'partial');
-      if(active>0&&TaskSessionState.getField(TimerState.currentIndex,'completion')===undefined){
-        const pct=focusCompletionForTask(TimerState.currentIndex,actualTimeSnapshot(),{cap:99});
-        if(pct!==null)storeResolvedCompletion(TimerState.currentIndex,{pct,source:COMPLETION_SOURCES.TIME});
-      }
-    }
-    PracticePacer.pauseForSessionEnd({persist:false});
-    TimerEngine.stopExecution();
-    completionNotice=NoticeCoordinator.begin({source:'timer',id:'execution',surface:'quiet',foreground:false});
-    TimerState.runtime=TimerState.emptyRuntime();
-    setTimerMode(TIMER_MODES.DONE,'manual-finish-day');
-    resetBreakState();
-    refreshCoreUi();
-    await ActiveSessionRuntime.writeCanonicalNow('finishing today’s session',{markChanged:true});
-    setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
-    await goTab('review',{source:'finish-today'});
-    ReviewView.refresh({force:true});
-    completionNotice.update({lifecycle:'succeeded',cue:'day-complete',occurrence:completionNotice.operationId});
-    notifyBackupChange({urgent:true,reason:'finish-today'});
-    return true;
-  }catch(error){
-    let rollbackError=null;
-    if(rollbackSnapshot){
-      try{await ActiveSessionRuntime.rollbackLocalTransition(rollbackSnapshot,'finish-today-rollback');}
-      catch(recoveryError){rollbackError=recoveryError;}
-    }
-    if(rollbackError&&TimerState.mode===TIMER_MODES.DONE)setTimerMode(TIMER_MODES.READY,'manual-finish-save-failed');
-    refreshCoreUi();
-    completionNotice?.update({lifecycle:'cancelled'});
-    const base='Could not finish today safely: '+(error&&error.message?error.message:error);
-    setPlanStatus(rollbackError?base+' Rollback also failed: '+(rollbackError&&rollbackError.message?rollbackError.message:rollbackError):base+' The active runtime and recovery snapshot were restored.',false);
-    return false;
-  }
-}
-async function resetTodaySession(){
-  const ok=await Interactions.confirm({
-    title:'Reset today’s active session?',danger:true,
-    message:'This clears today’s loaded Plan progress and live recovery state.',
-    details:['Timer audit, skips, completion marks and the live draft will be removed.','Saved Library Study Days and notes are unchanged.'],
-    confirmLabel:'Reset today',cancelLabel:'Keep current session'
-  });
-  if(!ok||!appCanMutate())return false;
-  try{
-    await ActiveSessionRuntime.resetLocal();
-    setSessionPanelMode('none');
-    refreshPlanAfterSessionReset();
-    setPlanStatus('Today’s active session was reset. Paste, edit, or apply a schedule when ready.');
-    Interactions.notify({source:'session',kind:'success',key:'session-reset',title:'Today reset',message:'The active session was cleared; saved days and notes were kept.'});
-    return true;
-  }catch(e){
-    setPlanStatus('Could not reset today’s session: '+(e&&e.message?e.message:e),false);
-    return false;
-  }
-}
+function yieldSessionToOtherDevice(...args){return SessionActions.yieldSessionToOtherDevice(...args);}
+function restoreSuspendedTodaySession(...args){return SessionActions.restoreSuspendedTodaySession(...args);}
+function finishTodaySession(...args){return SessionActions.finishTodaySession(...args);}
+function resetTodaySession(...args){return SessionActions.resetTodaySession(...args);}
 let latestCarryForward='';
 /* AREA NOTES REPOSITORY */
 
@@ -3758,44 +3345,9 @@ function shortTaskLabel(t){
   const prefix=isFixedBlock(t)?(taskAreaValue(t)||'fixed').toUpperCase()+': ':'';
   return prefix+t.name;
 }
-function realTimeAwarenessKey(s){
-  const doneKey=TaskSessionState.resolvedIndices('done').sort((a,b)=>a-b).join(',');
-  const skipKey=TaskSessionState.resolvedIndices('skipped').sort((a,b)=>a-b).join(',');
-  const adjustmentKey=Object.keys(TimerState.adjustedSchedule||{}).sort().join(',');
-  const drift=s.driftMin===null?'':Math.round(s.driftMin);
-  return [TASKS.length,TimerState.currentIndex,TimerState.mode,s.nowEff,s.scheduledIdx,s.currentIdx,s.driftKind,drift,s.match?1:0,doneKey,skipKey,adjustmentKey,PlanDraftEditor.active()?1:0].join('|');
-}
-function realTimeElements(){
-  return cachedElements(realTimeElements,{
-    now:'rt-now',scheduled:'rt-scheduled',current:'rt-current',drift:'rt-drift',subline:'rt-subline',
-    driftCard:'rt-drift-card',currentCard:'rt-current-card',planPane:'pane-plan'
-  });
-}
-function updateRealTimeAwareness(state=null,options={}){
-  const now=new Date();
-  const s=state||getRealTimeState(now);
-  const els=realTimeElements();
-  setElementText(els.now,clockHMS(now));
-  const key=realTimeAwarenessKey(s);
-  if(!options.force&&key===realTimeAwarenessRenderKey)return s;
-  realTimeAwarenessRenderKey=key;
-  setElementText(els.scheduled,s.scheduledTask?`${shortTaskLabel(s.scheduledTask)} · ${scheduleWindowLabel(s.scheduledIdx,s.scheduledStart,s.scheduledEnd)}`:(TASKS.length?(s.nowEff<(s.first??0)?'Before first block':'After final block'):'No schedule loaded'));
-  setElementText(els.current,s.currentTask?`${shortTaskLabel(s.currentTask)} · ${scheduleWindowLabel(s.currentIdx,s.currentStart,s.currentEnd)}`:'No active timer block');
-  setElementText(els.drift,s.driftLabel);
-  if(els.subline){
-    const cls=s.driftKind==='behind'?'warn':s.driftKind==='ahead'?'info':'hi';
-    els.subline.replaceChildren(textEl('span',cls,s.match?'MATCH':'REAL-TIME CHECK'),document.createTextNode(' · '+s.subline));
-  }
-  if(els.driftCard){
-    const className='rt-card ui-card '+(s.driftKind==='behind'?'behind':s.driftKind==='ahead'?'ahead':s.match?'ontrack':s.driftKind==='mismatch'?'mismatch':'');
-    if(els.driftCard.className!==className)els.driftCard.className=className;
-  }
-  if(els.currentCard)els.currentCard.classList.toggle('mismatch',!!TASKS.length&&!s.match&&!!s.currentTask);
-  renderRecoveryTarget(s);
-  if(PlanRuntime.needsRealtimeRefresh(s))requestRender('schedule');
-  updateExecutePanels(s);
-  return s;
-}
+function realTimeAwarenessKey(...args){return ExecutionViews.realTimeAwarenessKey(...args);}
+function realTimeElements(...args){return ExecutionViews.realTimeElements(...args);}
+function updateRealTimeAwareness(...args){return ExecutionViews.updateRealTimeAwareness(...args);}
 const renderQueue=new Set();
 let renderQueueFrame=0;
 const markScheduleRenderDirty=()=>PlanRuntime.markRenderDirty();
@@ -3847,246 +3399,30 @@ function queueProtectedMutationUiReconcile(){
   return true;
 }
 /* TIMER RECOVERY ACTIONS AND UNFINISHED NOTE DRAFT */
-function recoverySetStatus(msg,ok=true){
-  if(!msg)return NoticeCoordinator.resolveEvent('timer','recovery-status');
-  return NoticeCoordinator.emit({source:'timer',id:'recovery-status',surfaceId:'recovery-status',surface:'inline',foreground:false,cue:'none',severity:ok?'info':'error',lifecycle:ok?'succeeded':'failed',message:String(msg)});
-}
+function recoverySetStatus(...args){return ExecutionViews.recoverySetStatus(...args);}
 
-function recoveryTargetTrackableIdx(opts={}){
-  const s=getRealTimeState();
-  if(s.scheduledIdx!==null && isTrackableBlock(TASKS[s.scheduledIdx]) && !isTaskResolved(s.scheduledIdx))return s.scheduledIdx;
-  if(opts.allowNextAfterNonStudy && s.scheduledIdx!==null){
-    const next=nextIncompleteTrackableFrom(s.scheduledIdx+1);
-    if(next!==null)return next;
-  }
-  if(opts.allowCurrentFallback && TimerState.currentIndex<TASKS.length && isTrackableBlock(TASKS[TimerState.currentIndex]) && !isTaskResolved(TimerState.currentIndex))return TimerState.currentIndex;
-  return null;
-}
-function recoveryFallbackTrackableIdx(){
-  if(TimerState.currentIndex<TASKS.length && isTrackableBlock(TASKS[TimerState.currentIndex]) && !isTaskResolved(TimerState.currentIndex))return TimerState.currentIndex;
-  const s=getRealTimeState();
-  if(s.scheduledIdx!==null){
-    for(let i=s.scheduledIdx;i<TASKS.length;i++)if(isTrackableBlock(TASKS[i])&&!isTaskResolved(i))return i;
-  }
-  return null;
-}
-function renderRecoveryTarget(state=null){
-  const el=document.getElementById('recovery-target');if(!el)return;
-  const s=state||getRealTimeState();
-  if(!TASKS.length){el.textContent='TARGET: NO SCHEDULE';return;}
-  if(s.scheduledTask)el.textContent='TARGET: '+shortTaskLabel(s.scheduledTask);
-  else el.textContent=s.nowEff<(s.first??0)?'TARGET: BEFORE FIRST BLOCK':'TARGET: AFTER FINAL BLOCK';
-}
-function recoveryStartTimerAt(idx,seconds,actionLabel){
-  if(!appCanMutate()){
-    recoverySetStatus('Timer could not start because this tab no longer has execution control.',false);return false;
-  }
-  if(idx===null||idx===undefined||!isTrackableBlock(TASKS[idx])||isTaskResolved(idx)){
-    recoverySetStatus('No unfinished trackable block is available for this action.',false);return false;
-  }
-  recoveryCaptureActiveBeforeSwitch();
-  TimerEngine.stopExecution();
-  setCurrentTask(idx);
-  if(startCur(seconds||TASKS[idx].dur*60)!==true){
-    recoverySetStatus('Timer could not start because this tab no longer has execution control.',false);
-    return false;
-  }
-  const t=TASKS[idx];
-  const label=seconds?`${actionLabel}: ${t.name} · ${fmtS(TimerEngine.status().totalSec)}`:`${actionLabel}: ${t.name}`;
-  recoverySetStatus(label,true);
-  requestRender('schedule','badges','header','realtime');saveLiveDraft();
-  return true;
-}
-function recoveryJumpToScheduledNow(){
-  const s=getRealTimeState();
-  const idx=recoveryTargetTrackableIdx({allowNextAfterNonStudy:true,allowCurrentFallback:true});
-  if(idx===null){recoverySetStatus('No incomplete trackable block is available from the current schedule position.',false);return;}
-  const label=(s.scheduledIdx!==null&&isFixedBlock(TASKS[s.scheduledIdx]))
-    ? 'Scheduled-now is fixed; jumped to next trackable block'
-    : 'Jumped to scheduled-now block';
-  recoveryStartTimerAt(idx,TASKS[idx].dur*60,label);
-}
-function recoveryStartScheduledFull(){
-  let idx=recoveryTargetTrackableIdx({allowNextAfterNonStudy:true,allowCurrentFallback:true});
-  if(idx===null)idx=recoveryFallbackTrackableIdx();
-  if(idx===null){recoverySetStatus('No incomplete trackable block found.',false);return;}
-  recoveryStartTimerAt(idx,TASKS[idx].dur*60,'Started full block');
-}
-function recoveryStartRemainingWindow(){
-  let idx=recoveryTargetTrackableIdx({allowNextAfterNonStudy:true,allowCurrentFallback:true});
-  if(idx===null)idx=recoveryFallbackTrackableIdx();
-  if(idx===null){recoverySetStatus('No incomplete trackable block found for remaining-window start.',false);return;}
-  const secs=remainingWindowSeconds(idx);
-  const action=isInsideAdjustedWindow(idx)?'Started remaining scheduled window':'Started available trackable block window';
-  recoveryStartTimerAt(idx,secs,action);
-}
-function recoveryShiftStartIndex(){
-  let idx=(TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex])&&!isTaskResolved(TimerState.currentIndex))?TimerState.currentIndex:recoveryTargetTrackableIdx({allowNextAfterNonStudy:true,allowCurrentFallback:true});
-  if(idx===null)idx=recoveryFallbackTrackableIdx();
-  return idx;
-}
-function deriveRecoveryShiftPlan(idx,nowEff=effectiveNowMin()){
-  const anchors=fixedAnchorRowsFrom(idx);
-  const adjustments=[];
-  const overflow=[];
-  let minute=nowEff;
-  for(let i=idx;i<TASKS.length;i++){
-    const task=TASKS[i];
-    if(!task||!isTrackableBlock(task)||isTaskResolved(i))continue;
-    minute=avoidFixedAnchorOverlap(minute,task.dur,anchors);
-    if(minute+task.dur>STUDY_DAY_MINUTES){
-      for(let j=i;j<TASKS.length;j++)if(isTrackableBlock(TASKS[j])&&!isTaskResolved(j))overflow.push(j);
-      break;
-    }
-    adjustments.push({idx:i,startMin:minute,endMin:minute+task.dur});
-    minute+=task.dur;
-  }
-  return {idx,nowEff,adjustments,overflow,shifted:adjustments.length,firstStart:adjustments.length?adjustments[0].startMin:null};
-}
-function applyRecoveryShiftPlan(plan){
-  const changedAt=new Date().toISOString();
-  plan.adjustments.forEach(row=>{
-    TimerState.setAdjustment(row.idx,{startMin:row.startMin,endMin:row.endMin,reason:'push_study_blocks_later_fixed_breaks',changedAt});
-  });
-  plan.overflow.forEach(idx=>TimerState.removeAdjustment(idx));
-  invalidateScheduleDerived({adjustments:true,render:true});
-  if(plan.overflow.length){
-    const overflowDraft=buildCarryForwardText(new Set(plan.overflow));
-    const existing=unfinishedNoteDraftText();
-    setCarryForwardDraft(existing&&overflowDraft&&!existing.includes(overflowDraft)?existing+'\n\n'+overflowDraft:(existing||overflowDraft));
-  }
-}
-function recoveryShiftOverflowText(plan){
-  return plan.overflow.length?` ${plan.overflow.length} block${plan.overflow.length===1?'':'s'} did not fit before 04:00 and moved to the unfinished note.`:'';
-}
-function finishRecoveryShiftPlan(plan){
-  if(!plan.shifted){
-    recoverySetStatus(plan.overflow.length?`No unfinished block fits before 04:00. ${plan.overflow.length} block${plan.overflow.length===1?'':'s'} moved to the unfinished note.`:'No unfinished trackable blocks found to shift.',false);
-    return;
-  }
-  const overflowText=recoveryShiftOverflowText(plan);
-  if(plan.firstStart>plan.nowEff){
-    recoveryCaptureActiveBeforeSwitch();
-    setCurrentTask(plan.idx);
-    TimerEngine.resetToReady('schedule-recovery');
-    recoverySetStatus(`Pushed ${plan.shifted} trackable block${plan.shifted===1?'':'s'} later. Next starts at ${studyMinuteToHHMM(plan.firstStart)}; fixed timings stayed fixed.${overflowText}`,true);
-    requestRender('schedule','badges','header','realtime');
-    saveLiveDraft();
-    return;
-  }
-  const startSecs=isInsideAdjustedWindow(plan.idx)?remainingWindowSeconds(plan.idx):TASKS[plan.idx].dur*60;
-  recoveryStartTimerAt(plan.idx,startSecs,'Pushed trackable blocks later; fixed breaks preserved');
-  recoverySetStatus(`Pushed ${plan.shifted} trackable block${plan.shifted===1?'':'s'} later from ${studyMinuteToHHMM(plan.firstStart)}. Fixed timings stayed fixed.${overflowText}`,true);
-}
-async function recoveryShiftRemainingDay(){
-  if(!TASKS.length){recoverySetStatus('Load a schedule first.',false);return;}
-  const idx=recoveryShiftStartIndex();
-  if(idx===null){recoverySetStatus('No remaining trackable block found to shift.',false);return;}
-  const accepted=await Interactions.confirm({
-    title:'Push remaining work later?',
-    message:'Unfinished trackable blocks will move later while fixed meal and rest anchors stay in place.',
-    details:['Anything that no longer fits before 04:00 will be added to the unfinished note.'],
-    confirmLabel:'Push remaining Plan',cancelLabel:'Keep current timing'
-  });
-  if(!accepted||!appCanMutate())return;
-  const plan=deriveRecoveryShiftPlan(idx);
-  applyRecoveryShiftPlan(plan);
-  finishRecoveryShiftPlan(plan);
-}
-function recoveryCarryForwardItems(forcedIndexes=null){
-  clearFutureUntouchedProgress();
-  const nowEff=effectiveNowMin();
-  const items=[];
-  TASKS.forEach((t,i)=>{
-    if(!isTrackableBlock(t))return;
-    const pct=getTaskCompletion(i);
-    const plannedEnd=adjustedEndMin(i);
-    const n=TaskSessionState.getField(i,'notes')||{};
-    const forced=forcedIndexes instanceof Set&&forcedIndexes.has(i);
-    const missed=nowEff>=plannedEnd && pct<100;
-    const skipped=TaskSessionState.isSkipped(i);
-    const partial=pct>0&&pct<100;
-    if(!(forced||missed||skipped||partial))return;
-    const remainingPct=Math.max(0,100-pct);
-    const suggested=Math.max(20,Math.round(t.dur*remainingPct/100/5)*5||20);
-    const fallbackTarget=taskTargetValue(t);
-    const total=n.total!==undefined?n.total:fallbackTarget;
-    const done=Number(n.done);
-    let remainingUnits='—';
-    if(total&& !isNaN(done))remainingUnits=Math.max(0,total-done);
-    else if(total)remainingUnits=total;
-    const subjectNotes=applicableNotesForTask(t);
-    const note=[...subjectNotes.inherited.map(x=>x.text),subjectNotes.exactText].filter(Boolean).join('\n').trim();
-    items.push({idx:i,t,pct,suggested,remainingUnits,note,reason:forced?'study-day boundary':skipped?'skipped':partial?'partial':'missed'});
-  });
-  return items;
-}
-function buildCarryForwardText(forcedIndexes=null){
-  const items=recoveryCarryForwardItems(forcedIndexes);
-  if(!items.length)return '';
-  let m=Number.isFinite(TimerState.scheduleAnchorMin)?TimerState.scheduleAnchorMin:5*60+30;
-  const lines=[];
-  lines.push('// Unfinished note generated from today’s Study Director');
-  lines.push('// Edit times/durations before using tomorrow.');
-  items.forEach(it=>{
-    const t=it.t;
-    const measure=taskMeasureValue(t,'block');
-    const total=it.remainingUnits===0?0:(it.remainingUnits||'—');
-    const carryKind=isSupportBlock(t)?'support':'work';
-    lines.push(`${studyMinuteToHHMM(m)} | ${it.suggested} | Unfinished: ${t.name} | ${carryKind} | ${taskAreaValue(t)||'Revision'} | ${measure} | ${total}`);
-    lines.push(`// Reason: ${it.reason}; today completion ${it.pct}%.`);
-    if(it.note)lines.push(`// Note for ${t.name}: ${it.note.replace(/\n+/g,' / ')}`);
-    m+=it.suggested;
-  });
-  return lines.join('\n');
-}
-function setCarryForwardDraft(text){
-  latestCarryForward=clampText(String(text||'').trim(),APP_LIMITS.maxCarryForwardChars);
-  const box=document.getElementById('recovery-carry-box'),ta=document.getElementById('recovery-carry-text');
-  if(ta)ta.value=latestCarryForward;
-  if(box)box.classList.toggle('on',!!latestCarryForward);
-  renderRecoveryReview();
-  renderReviewUnfinishedNote();
-  saveLiveDraft();
-}
-function recoveryGenerateCarryForward(){
-  const txt=buildCarryForwardText();
-  setCarryForwardDraft(txt);
-  recoverySetStatus(txt?'Unfinished note generated. It will appear separately in Review and Library.':'No unfinished trackable work detected.',true);
-}
-function syncUnfinishedNoteDraft(){
-  const ta=document.getElementById('recovery-carry-text');
-  const next=clampText((ta&&ta.value)||latestCarryForward||'',APP_LIMITS.maxCarryForwardChars);
-  if(next===latestCarryForward){renderReviewUnfinishedNote();return false;}
-  latestCarryForward=next;
-  renderReviewUnfinishedNote();
-  saveLiveDraft();
-  return true;
-}
-function copyCarryForward(){
-  const txt=unfinishedNoteDraftText();
-  if(!txt){recoverySetStatus('No unfinished note to copy.',false);return;}
-  latestCarryForward=txt;
-  copyTextToClipboard(txt).then(()=>recoverySetStatus('Unfinished note copied.',true)).catch(()=>recoverySetStatus('Clipboard unavailable. Select and copy the unfinished note manually.',false));
-}
-function unfinishedNoteDraftText(){
-  return clampText((document.getElementById('recovery-carry-text')?.value||latestCarryForward||'').trim(),APP_LIMITS.maxCarryForwardChars);
-}
-function closeUnfinishedNotePanel(){
-  syncUnfinishedNoteDraft();
-  const box=document.getElementById('recovery-carry-box');
-  if(box)box.classList.remove('on');
-  const details=document.getElementById('rt-actions');
-  if(details)details.removeAttribute('open');
-  recoverySetStatus('Unfinished note saved in today’s draft.',true);
-}
-function renderRecoveryReview(){
-  renderRecoveryTarget();
-  const ta=document.getElementById('recovery-carry-text');
-  const box=document.getElementById('recovery-carry-box');
-  if(ta&&latestCarryForward&&ta.value!==latestCarryForward)ta.value=latestCarryForward;
-  if(box)box.classList.toggle('on',!!latestCarryForward);
-}
+function recoveryTargetTrackableIdx(...args){return ExecutionViews.recoveryTargetTrackableIdx(...args);}
+function recoveryFallbackTrackableIdx(...args){return ExecutionViews.recoveryFallbackTrackableIdx(...args);}
+function renderRecoveryTarget(...args){return ExecutionViews.renderRecoveryTarget(...args);}
+function recoveryStartTimerAt(...args){return ExecutionViews.recoveryStartTimerAt(...args);}
+function recoveryJumpToScheduledNow(...args){return ExecutionViews.recoveryJumpToScheduledNow(...args);}
+function recoveryStartScheduledFull(...args){return ExecutionViews.recoveryStartScheduledFull(...args);}
+function recoveryStartRemainingWindow(...args){return ExecutionViews.recoveryStartRemainingWindow(...args);}
+function recoveryShiftStartIndex(...args){return ExecutionViews.recoveryShiftStartIndex(...args);}
+function deriveRecoveryShiftPlan(...args){return ExecutionViews.deriveRecoveryShiftPlan(...args);}
+function applyRecoveryShiftPlan(...args){return ExecutionViews.applyRecoveryShiftPlan(...args);}
+function recoveryShiftOverflowText(...args){return ExecutionViews.recoveryShiftOverflowText(...args);}
+function finishRecoveryShiftPlan(...args){return ExecutionViews.finishRecoveryShiftPlan(...args);}
+function recoveryShiftRemainingDay(...args){return ExecutionViews.recoveryShiftRemainingDay(...args);}
+function recoveryCarryForwardItems(...args){return ExecutionViews.recoveryCarryForwardItems(...args);}
+function buildCarryForwardText(...args){return ExecutionViews.buildCarryForwardText(...args);}
+function setCarryForwardDraft(...args){return ExecutionViews.setCarryForwardDraft(...args);}
+function recoveryGenerateCarryForward(...args){return ExecutionViews.recoveryGenerateCarryForward(...args);}
+function syncUnfinishedNoteDraft(...args){return ExecutionViews.syncUnfinishedNoteDraft(...args);}
+function copyCarryForward(...args){return ExecutionViews.copyCarryForward(...args);}
+function unfinishedNoteDraftText(...args){return ExecutionViews.unfinishedNoteDraftText(...args);}
+function closeUnfinishedNotePanel(...args){return ExecutionViews.closeUnfinishedNotePanel(...args);}
+function renderRecoveryReview(...args){return ExecutionViews.renderRecoveryReview(...args);}
 /* TASK PROGRESS AND ONGOING NOTE EDITORS */
 function getTaskCompletion(idx){
   return resolveTaskCompletion(idx).pct;
@@ -4822,221 +4158,24 @@ function onPnoteChange(){
   if(resolved.changed)saveLiveDraft();
 }
 /* EXECUTE IDLE DISPLAY AND SESSION CONTROLS */
-function isLiveTrackableTimer(){
-  return !!(TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex])&&[TIMER_MODES.RUNNING,TIMER_MODES.PAUSED].includes(TimerState.mode));
-}
-function setExecuteControlsEnabled(active){
-  const enabled=!!active;
-  document.querySelectorAll('button[data-action="toggle-pause"],button[data-action="mark-done"],button[data-action="skip-task"]').forEach(btn=>{btn.disabled=!enabled;});
-  const rpt=document.querySelector('button[data-tab="review"]');
-  if(rpt)rpt.disabled=false;
-}
-function setExecuteShellVisible(visible=true){
-  const show=visible?'':'none';
-  const nameplate=document.querySelector('.nameplate');if(nameplate)nameplate.style.display=show;
-  const status=document.querySelector('.status-bar');if(status)status.style.display=show;
-  const grid=document.querySelector('.execute-grid');if(grid)grid.style.display=show;
-}
-function nextTrackableWindowLabel(d=new Date()){
-  if(!TASKS.length)return '';
-  const nowEff=effectiveNowMin(d);
-  const rows=plannedRows().filter(r=>isTrackableBlock(r.t)&&!isTaskResolved(r.idx)&&r.end>nowEff);
-  if(!rows.length)return 'No unfinished trackable block remains in today’s plan.';
-  const row=rows[0];
-  if(nowEff>=row.start&&nowEff<row.end)return `Scheduled now: ${row.t.name} · ${scheduleWindowLabel(row.idx,row.start,row.end)}.`;
-  return `Next trackable block: ${row.t.name} · ${scheduleWindowLabel(row.idx,row.start,row.end)}.`;
-}
-function stripScheduleLead(label){
-  return String(label||'')
-    .replace(/^Next trackable block:\s*/,'')
-    .replace(/^Scheduled now:\s*/,'')
-    .replace(/\.$/,'');
-}
-function executeIdleView(name,badge,overlayTitle,overlayMessage,nextText){return {name,badge,overlayTitle,overlayMessage,kicker:'Execute Status',nextText};}
-function executeIdlePresentation(d=new Date(),options={}){
-  const explicitTitle=String(options.title||'').trim(),explicitMessage=String(options.message||'').trim();
-  const hasRows=TASKS.length>0,hasTrackable=TASKS.some(isTrackableBlock),s=hasRows?getRealTimeState(d):null;
-  const nextLabel=nextTrackableWindowLabel(d),nextShort=stripScheduleLead(nextLabel);
-  const applyOverrides=view=>{
-    if(explicitTitle){view.name=explicitTitle;view.overlayTitle=explicitTitle;}
-    if(explicitMessage)view.overlayMessage=explicitMessage;
-    return view;
-  };
-  const elsewhere=sessionShownElsewhere();
-  if(sessionPanelMode==='previous')return applyOverrides(executeIdleView('Previous Day Needs Review','PREVIOUS DAY','Previous Day Needs Review',
-    'This study day is stored for review. Its timer will not restart. Choose Review Previous Day to recover it safely.','NEXT: REVIEW'));
-  if(sessionParkedHere()){
-    const handed=sessionFromElsewhere(sessionPanelSession);
-    return applyOverrides(executeIdleView('Session Suspended','SUSPENDED','Today’s Session Suspended',handed?`Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`:'Restore Session continues it here. Review → Save Today can also save its progress without restarting the timer.','NEXT: —'));
-  }
-  if(elsewhere&&sessionMovingHere&&sessionHandoff.step){
-    const summary=sessionProgressSummary(sessionMovingHere),done=summary&&summary.total?` (${summary.done} of ${summary.total} blocks done)`:'';
-    return applyOverrides(executeIdleView(summary?.block||'Moving Here…','MOVING HERE','Moving Here…',`Today’s session is moving to this device${done}. Its timer starts here as soon as Google Drive confirms.`,'NEXT: STARTING HERE'));
-  }
-  if(elsewhere)return applyOverrides(executeIdleView('Running on Another Device',sessionDevice(elsewhere).replace(/^on /,'').toUpperCase(),'Running on Another Device',`Today’s session is running ${sessionDevice(elsewhere)} (last update ${sessionUpdateTime(elsewhere)}). Continue Here moves it to this device.`,'NEXT: —'));
-  if(!hasRows)return applyOverrides(executeIdleView('No Schedule Loaded','—','No Schedule Loaded','Open Plan and apply today’s schedule to begin.','NEXT: —'));
-  if(!hasTrackable)return applyOverrides(executeIdleView('Plan Has No Study Blocks','FIXED / NON-TRACKABLE ONLY','No Trackable Blocks','This plan has no work or support blocks for the timer to run. Edit it in Plan before starting.','NEXT: —'));
-  if(TimerState.mode===TIMER_MODES.DONE){
-    const unresolved=TASKS.some((t,i)=>isTrackableBlock(t)&&!isTaskResolved(i));
-    return applyOverrides(executeIdleView(unresolved?'Forward Plan Complete':'Session Complete',unresolved?'NO LATER BLOCK':'SESSION COMPLETE',unresolved?'Forward Plan Complete':'Session Complete',unresolved?'No later unfinished block remains. Earlier untouched blocks remain available for deliberate selection or Review.':'Open Review for the end-of-day summary, or return to Plan to build another schedule.','NEXT: REVIEW'));
-  }
-  if(s?.scheduledTask&&isFixedBlock(s.scheduledTask)){
-    const slotLabel=shortTaskLabel(s.scheduledTask);
-    return applyOverrides(executeIdleView(slotLabel,`FIXED SLOT · ${scheduleWindowLabel(s.scheduledIdx,s.scheduledStart,s.scheduledEnd)}`,'Fixed Slot',`${slotLabel} is scheduled now. Fixed slots are not counted as focus time. ${nextLabel||'No unfinished trackable block remains in today’s plan.'}`,'NOW: '+slotLabel.slice(0,42)));
-  }
-  if(s?.scheduledTask&&isTrackableBlock(s.scheduledTask)){
-    const slotLabel=shortTaskLabel(s.scheduledTask),finished=isTaskResolved(s.scheduledIdx);
-    return applyOverrides(executeIdleView(slotLabel,`${finished?'COMPLETED SLOT':'TRACKABLE SLOT'} · ${scheduleWindowLabel(s.scheduledIdx,s.scheduledStart,s.scheduledEnd)}`,finished?'Trackable Slot Complete':'Trackable Slot Ready',finished?`${slotLabel} is scheduled now but is already marked done/skipped. ${nextLabel||'No unfinished trackable block remains in today’s plan.'}`:`${slotLabel} is scheduled now. The timer should auto-start; this ready state is kept as a defensive fallback.`,'NOW: '+slotLabel.slice(0,42)));
-  }
-  if(s&&s.first!==null&&s.nowEff<s.first)return applyOverrides(executeIdleView('Plan Ready','BEFORE FIRST BLOCK','Before First Block',nextLabel||'The timer will start when the first unfinished work/support block begins.',nextShort?'NEXT: '+nextShort.slice(0,42):'NEXT: —'));
-  if(s&&s.last!==null&&s.nowEff>=s.last)return applyOverrides(executeIdleView('Day Window Ended','AFTER FINAL BLOCK','After Final Block',nextLabel||'No unfinished trackable block remains in today’s plan. Open Review when you are ready to save.','NEXT: REVIEW'));
-  return applyOverrides(executeIdleView('Plan Waiting','BETWEEN TRACKABLE BLOCKS','Waiting',nextLabel||'The timer is waiting for the next unfinished work/support block.',nextShort?'NEXT: '+nextShort.slice(0,42):'NEXT: —'));
-}
-function setExecuteStateOverlay(title='',message='',kicker='Execute Status'){
-  const overlay=document.getElementById('execute-state-overlay');
-  const card=document.getElementById('cd-card');
-  if(!overlay||!card)return;
-  const show=!!(title||message);
-  overlay.hidden=!show;
-  card.classList.toggle('overlay-on',show);
-  setTextSafe('execute-overlay-kicker',kicker||'Execute Status');
-  setTextSafe('execute-overlay-title',title||'Execute Status');
-  setTextSafe('execute-overlay-sub',message||'');
-}
-function clearExecuteStateOverlay(){setExecuteStateOverlay('','','');}
-function refreshExecuteIdleDisplay(d=new Date(),options={}){
-  if(isLiveTrackableTimer())return;
-  const view=executeIdlePresentation(d,options);
-  const key=JSON.stringify(view);
-  if(!options.force&&key===executeIdleDisplayKey)return;
-  executeIdleDisplayKey=key;
-  setExecuteShellVisible(true);
-  setExecuteControlsEnabled(false);
-  setTextSafe('task-name',view.name||'—');
-  setTextSafe('task-area-badge',view.badge||'—');
-  setTextSafe('cd','00:00:00');
-  const prog=document.getElementById('prog');if(prog)prog.style.width='0%';
-  setTextSafe('prog-pct','0%');
-  setTextSafe('next-name',stripScheduleLead(nextTrackableWindowLabel(d))||'—');
-  setTextSafe('status-next',view.nextText||'NEXT: —');
-  setPausedUI(false);
-  setExecuteStateOverlay(view.overlayTitle,view.overlayMessage,view.kicker);
-}
-function showExecuteWaitingState(title,message){
-  refreshExecuteIdleDisplay(new Date(),{title,message,force:true});
-}
-function maybeAutoStartScheduledBlock(d=new Date()){
-  if(!appCanMutate()||!TASKS.some(isTrackableBlock))return false;
-  if(studyDayRolledOver(d))return false;
-  if(TimerState.mode===TIMER_MODES.SUSPENDED||TimerState.mode===TIMER_MODES.DONE)return false;
-  if(isLiveTrackableTimer()||TimerState.paused)return false;
-  const s=getRealTimeState(d);
-  const idx=s.scheduledIdx;
-  if(idx===null||!isTrackableBlock(TASKS[idx]))return false;
-  if(isTaskResolved(idx))return false;
-  setCurrentTask(idx);
-  if(startCur(remainingWindowSeconds(idx,d))!==true)return false;
-  recoverySetStatus('Auto-started the scheduled trackable block at its wall-clock window.');
-  return true;
-}
-function maybePromptScheduleEndSave(d=new Date()){
-  if(!appCanMutate()||!TASKS.some(isTrackableBlock)||!TimerState.studyDate)return;
-  if(TimerState.studyDate!==todayISO(d))return;
-  const lastEnd=latestTrackableEndMin();
-  if(lastEnd===null)return;
-  if(effectiveNowMin(d)<lastEnd)return;
-  const key=`${TimerState.studyDate}:${scheduleFingerprint()}:${lastEnd}`;
-  if(key===scheduleEndPromptKey)return;
-  scheduleEndPromptKey=key;
-  promptSaveToday();
-}
-function showDone(){
-  PracticePacer.pauseForSessionEnd({persist:false});
-  TimerEngine.stopExecution();
-  TimerState.runtime=TimerState.emptyRuntime();
-  setTimerMode(TIMER_MODES.DONE,'schedule-complete');
-  resetBreakState();
-  const unresolved=TASKS.some((task,index)=>isTrackableBlock(task)&&!isTaskResolved(index));
-  showExecuteWaitingState(
-    unresolved?'Forward Plan Complete':'Session Complete',
-    unresolved
-      ? 'No later unfinished block remains. Earlier untouched blocks stay available for deliberate selection or Review.'
-      : 'Open Review for the end-of-day summary, or return to Plan to build another schedule.'
-  );
-  refreshCoreUi();
-  saveLiveDraft();
-  if(!unresolved)promptSaveToday();
-  schedulePwaUpdateEvaluation(150);
-}
-function showEmpty(message='',title=''){
-  PracticePacer.pauseFromMain(PRACTICE_PAUSE_CAUSES.MAIN);
-  TimerEngine.stopExecution();
-  TimerState.runtime=TimerState.emptyRuntime();
-  const hasSchedule=TASKS.length>0;
-  setTimerMode(hasSchedule?TIMER_MODES.READY:TIMER_MODES.EMPTY,'timer-empty');
-  resetBreakState();
-  refreshExecuteIdleDisplay(new Date(),{title,message,force:true});
-  refreshCoreUi();
-}
-function badgeElements(){return cachedElements(badgeElements,{done:'bdone-sb',left:'bleft-sb',bar:'done-bar'});}
-function updateBadges(){
-  const st=TASKS.filter(isTrackableBlock);
-  const resolvedCount=TASKS.reduce((count,t,i)=>count+(isTrackableBlock(t)&&isTaskResolved(i)?1:0),0);
-  const els=badgeElements();
-  setElementText(els.done,resolvedCount);
-  setElementText(els.left,st.length-resolvedCount);
-  const width=(st.length?Math.round((resolvedCount/st.length)*100):0)+'%';
-  if(els.bar&&els.bar.style.width!==width)els.bar.style.width=width;
-  updateTimerFocusMetrics();
-  updateSessionControls();
-}
-function updateSessionControls(){
-  const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions'),cardAction=document.getElementById('execute-session-action');
-  const active=TASKS.some(isTrackableBlock);
-  const running=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
-  const finished=active&&TimerState.mode===TIMER_MODES.DONE;
-  const previous=sessionPanelMode==='previous',suspended=sessionPanelMode==='suspended'&&!active,elsewhere=sessionPanelMode==='elsewhere'&&!active,handedOff=suspended&&sessionFromElsewhere(sessionPanelSession);
-  const visible=active||suspended||elsewhere||previous;
-  if(panel){
-    panel.hidden=!visible;
-    panel.classList.toggle('suspended',suspended||elsewhere||previous);
-    const title=document.getElementById('session-panel-title');
-    const note=document.getElementById('session-panel-note');
-    if(title)title.textContent=previous?'Previous Day Needs Review':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
-    if(note)note.textContent=previous
-      ? 'This historical session is preserved for Review. Its timer will not restart or transfer ownership. Open Review and Save Today to Library when ready.'
-      : elsewhere
-      ? `Today’s session is running ${sessionDevice(sessionPanelSession)} (last update ${sessionUpdateTime(sessionPanelSession)}). Everything else works here as usual. Continue Here moves the session to this device.`
-      : handedOff
-      ? `Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`
-      : suspended
-      ? 'Restore Session continues the parked session. Review → Save Today can save the suspended progress to Library without restarting its timer. Reset Today discards the parked session.'
-      : finished
-      ? 'Today is closed for this plan. Open Review and Save Today to Library when ready.'
-      : running
-      ? 'The timer is actively tracking a block. Suspend or reset only if you intentionally want to stop this live session.'
-      : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and notes are kept.';
-  }
-  const continuing=!!sessionHandoff.step,progress=document.getElementById('execute-session-progress'),progressText=continuing?sessionHandoff.step:sessionHandoff.error;
-  if(progress){progress.hidden=!progressText;progress.classList.toggle('error',!continuing&&!!progressText);if(progress.textContent!==progressText)progress.textContent=progressText;}
-  if(planControls){
-    planControls.hidden=!visible;
-    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:previous?'Previous day needs review':elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
-    if(state&&state.textContent!==label)state.textContent=label;
-  }
-  // The same controls in Execute's status card, its session panel and Plan's
-  // strip: the next step first, then Suspend, Finish and Reset. A session
-  // running elsewhere offers only Continue Here.
-  [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
-    const action=btn.dataset.action;
-    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere&&!previous;btn.disabled=continuing||!suspended&&!elsewhere&&!previous;const label=continuing?'Continuing…':previous?(active?'Open Review':'Review Previous Day'):elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
-    else if(action==='suspend-session'){btn.hidden=previous||suspended||elsewhere;btn.disabled=!active||previous;}
-    else if(action==='finish-session'){btn.hidden=previous||elsewhere||suspended;btn.disabled=!active||finished||previous;}
-    else if(action==='reset-session'){btn.hidden=previous||elsewhere;btn.disabled=!visible||elsewhere||previous;}
-  }));
-  updateExecutePanels();
-  refreshSessionSafetyUi();
-}
+function isLiveTrackableTimer(...args){return ExecutionViews.isLiveTrackableTimer(...args);}
+function setExecuteControlsEnabled(...args){return ExecutionViews.setExecuteControlsEnabled(...args);}
+function setExecuteShellVisible(...args){return ExecutionViews.setExecuteShellVisible(...args);}
+function nextTrackableWindowLabel(...args){return ExecutionViews.nextTrackableWindowLabel(...args);}
+function stripScheduleLead(...args){return ExecutionViews.stripScheduleLead(...args);}
+function executeIdleView(...args){return ExecutionViews.executeIdleView(...args);}
+function executeIdlePresentation(...args){return ExecutionViews.executeIdlePresentation(...args);}
+function setExecuteStateOverlay(...args){return ExecutionViews.setExecuteStateOverlay(...args);}
+function clearExecuteStateOverlay(...args){return ExecutionViews.clearExecuteStateOverlay(...args);}
+function refreshExecuteIdleDisplay(...args){return ExecutionViews.refreshExecuteIdleDisplay(...args);}
+function showExecuteWaitingState(...args){return ExecutionViews.showExecuteWaitingState(...args);}
+function maybeAutoStartScheduledBlock(...args){return ExecutionViews.maybeAutoStartScheduledBlock(...args);}
+function maybePromptScheduleEndSave(...args){return ExecutionViews.maybePromptScheduleEndSave(...args);}
+function showDone(...args){return ExecutionViews.showDone(...args);}
+function showEmpty(...args){return ExecutionViews.showEmpty(...args);}
+function badgeElements(...args){return ExecutionViews.badgeElements(...args);}
+function updateBadges(...args){return ExecutionViews.updateBadges(...args);}
+function updateSessionControls(...args){return ExecutionViews.updateSessionControls(...args);}
 /* REVIEW SUBSYSTEM · PRIVATE MODULE */
 const ReviewSubsystem=ReviewModule.createReviewSubsystem(Object.freeze({
   constants:Object.freeze({
@@ -5169,68 +4308,29 @@ const {
 }=SharedReviewPresentation;
 
 /* CANONICAL SESSION / EDITOR LIFECYCLE */
-function lifecycleEditorElements(){
-  return [...document.querySelectorAll('.task-note-field,#daily-reflection,.quality-btn,#review-list input,#review-list textarea')];
-}
-function setLifecycleEditorsBlocked(blocked){
-  lifecycleEditorElements().forEach(field=>{
-    if(blocked){
-      if(field.dataset.lifecycleWasDisabled===undefined)field.dataset.lifecycleWasDisabled=field.disabled?'1':'0';
-      field.disabled=true;
-      field.dataset.lifecycleBlocked='1';
-      return;
-    }
-    const wasDisabled=field.dataset.lifecycleWasDisabled==='1';
-    delete field.dataset.lifecycleWasDisabled;delete field.dataset.lifecycleBlocked;
-    if(field.matches('.task-note-field'))field.disabled=field.dataset.noteBinding!==NOTE_EDITOR_BINDING_VERSION;
-    else if(field.id==='daily-reflection'||field.matches('.quality-btn'))field.disabled=false;
-    else field.disabled=wasDisabled;
-  });
-}
-function invalidateLifecycleEditors(context){
-  void richTextClose();
-  cancelPendingLiveDraftSave();
-  if(context.options.scheduleIdentity)advanceTaskNoteScheduleRevision();
-  document.documentElement.dataset.studyDirectorLifecycle='transitioning';
-  document.documentElement.dataset.studyDirectorLifecycleRevision=String(context.revision);
-  setLifecycleEditorsBlocked(true);
-  document.querySelectorAll('.task-note-field').forEach(clearTaskNoteEditorBinding);
-  const executeNote=document.getElementById('pn-extra');
-  if(executeNote){clearTaskNoteEditorBinding(executeNote);executeNote.value='';}
-  executeProgressPanelRenderKey='';
-  ReviewEditor.invalidateBindings();
-  ReviewView.invalidate();
-  const reviewList=document.getElementById('review-list');
-  if(reviewList)reviewList.replaceChildren();
-}
-function reconcileLifecycleEditors(context){
-  const options=context.options||{};
-  const targetDate=isValidIsoDate(options.date)?options.date:getReviewDate();
-  const dd=document.getElementById('day-date');
-  if(dd&&isValidIsoDate(targetDate)){
-    dd.value=targetDate;
-    if(options.autoDate!==undefined)dd.dataset.autoDate=options.autoDate?'1':'0';
-  }
-  refreshAllSubjectNoteFieldsFromRepository();
-  refreshPnote({force:true});
-  hydrateReviewState({date:targetDate,snapshotReview:options.snapshotReview,source:context.kind});
-  refreshLibraryNotes();
-  ReviewView.invalidate();
-  if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.refresh({force:true});
-  requestRender('schedule','badges','header','realtime','recovery');
-  return true;
-}
-function completeLifecycleTransition(context){
-  const writable=!!context.reconciled&&appCanMutate();
-  setLifecycleEditorsBlocked(!writable);
-  ReviewView.syncMode();
-  if(writable&&document.getElementById('pane-review')?.classList.contains('on'))ReviewView.activate({restoreScroll:false});
-  document.documentElement.dataset.studyDirectorLifecycle=writable?'ready':(context.reconciled?'read-only':'blocked');
-  document.documentElement.dataset.studyDirectorLifecycleRevision=String(context.revision);
-  // A waiting update blocked by the transition retries now, not at the safety retry.
-  // Deferred: start-up transitions finish before the update state is declared.
-  setTimeout(()=>schedulePwaUpdateEvaluation(250),0);
-}
+const SessionLifecycleViews=SessionActionsModule.createLifecycleViews(Object.freeze({
+ document,NOTE_EDITOR_BINDING_VERSION,setTimeout:(fn,delay)=>setTimeout(fn,delay),
+ get ReviewEditor(){return ReviewEditor;},get ReviewView(){return ReviewView;},
+ invalidateProgressPanel:()=>{executeProgressPanelRenderKey='';},
+richTextClose:(...args)=>richTextClose(...args),
+cancelPendingLiveDraftSave:(...args)=>cancelPendingLiveDraftSave(...args),
+advanceTaskNoteScheduleRevision:(...args)=>advanceTaskNoteScheduleRevision(...args),
+clearTaskNoteEditorBinding:(...args)=>clearTaskNoteEditorBinding(...args),
+isValidIsoDate:(...args)=>isValidIsoDate(...args),
+getReviewDate:(...args)=>getReviewDate(...args),
+refreshAllSubjectNoteFieldsFromRepository:(...args)=>refreshAllSubjectNoteFieldsFromRepository(...args),
+refreshPnote:(...args)=>refreshPnote(...args),
+hydrateReviewState:(...args)=>hydrateReviewState(...args),
+refreshLibraryNotes:(...args)=>refreshLibraryNotes(...args),
+requestRender:(...args)=>requestRender(...args),
+appCanMutate:(...args)=>appCanMutate(...args),
+schedulePwaUpdateEvaluation:(...args)=>schedulePwaUpdateEvaluation(...args)
+}));
+function lifecycleEditorElements(...args){return SessionLifecycleViews.lifecycleEditorElements(...args);}
+function setLifecycleEditorsBlocked(...args){return SessionLifecycleViews.setLifecycleEditorsBlocked(...args);}
+function invalidateLifecycleEditors(...args){return SessionLifecycleViews.invalidateLifecycleEditors(...args);}
+function reconcileLifecycleEditors(...args){return SessionLifecycleViews.reconcileLifecycleEditors(...args);}
+function completeLifecycleTransition(...args){return SessionLifecycleViews.completeLifecycleTransition(...args);}
 const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze({hooks:Object.freeze({
   canMutate:()=>appCanMutate(),
   flushPending:()=>appCanMutate()?flushPendingReviewSave({strict:true}):false,
@@ -5303,15 +4403,8 @@ if(!Object.isFrozen(ActiveSessionRuntime)||ActiveSessionRuntime.format!=='study-
 }
 
 /* LIVE FOCUS EVIDENCE IN THE EXECUTION HEADER */
-function timerMetricElements(){return cachedElements(timerMetricElements,{actual:'timer-actual-focus',block:'timer-block-focus'});}
-function updateTimerFocusMetrics(metrics=null){
-  const evidence=metrics?.evidence||SessionEvidenceGateway.snapshot({includeRecords:false});
-  const summary=metrics||calculateReviewMetrics(evidence);
-  const liveSnapshot=evidence.actualTime,els=timerMetricElements();
-  setElementText(els.actual,durationLabel(summary.actualFocusMinutes));
-  const blockSec=(TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]))?(Number(liveSnapshot[TimerState.currentIndex])||0):0;
-  setElementText(els.block,fmtS(Math.max(0,Math.round(blockSec))));
-}
+function timerMetricElements(...args){return ExecutionViews.timerMetricElements(...args);}
+function updateTimerFocusMetrics(...args){return ExecutionViews.updateTimerFocusMetrics(...args);}
 /* PORTABLE ONGOING-NOTE EXPORT · READ-ONLY */
 async function retainedBackupFileNames(){
   const payload=await JournalAppMeta.read('restoreJournalPayload');
@@ -5875,85 +4968,9 @@ async function restoreNotesSnapshotThroughLifecycle(snapshotNotes){
     date:getReviewDate(),
   },()=>AppData.notes.replace(snapshotNotes));
 }
-async function restoreSessionStateThroughLifecycle(importedSession,options={}){
-  const session=importedSession?ActiveSessionCodec.sanitizeCurrent(importedSession):null;
-  // A sync merge into the session running here keeps the timer running: when
-  // the merged session has no timer (the other device had stopped), the
-  // current block runs on here. A pause the other device made stays paused.
-  const keepRunning=options.keepRunning===true&&TimerState.mode===TIMER_MODES.RUNNING&&!TimerState.paused;let runOn=false;
-  const date=session&&isValidIsoDate(session.date)?session.date:todayISO();
-  const snapshot=session?activeSessionSnapshot(session):null;
-  if(session&&!snapshot)throw new Error('The rollback active-session snapshot is incompatible.');
-  const result=await SessionLifecycle.run('restore-journal-rollback',{
-    scheduleIdentity:true,date,autoDate:date===todayISO(),sessionRevision:session&&session.revision||0,
-    snapshotReview:snapshot&&snapshot.review
-  },async()=>{
-    if(session){
-      const saved=await ActiveSessionRuntime.saveCanonicalSession(session,'restoring an Active Session');
-      if(isPreviousActiveSessionRecord(session)){
-        resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date:todayISO()});
-        PlanDraftEditor.preview({silent:true,enterDraft:false});
-        setSessionPanelMode('previous',session);
-      }else if(session.status==='suspended'){
-        resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-        PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('suspended',session);
-        if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))Interactions.notify({source:'session',key:'session-handoff',tier:'news',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
-      }else if(sessionRunsElsewhere(session)){
-        resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-        PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('elsewhere',session);
-      }else{
-        const restored=applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
-        if(restored===false)throw new Error('Rollback active-session runtime could not be applied.');
-        setSessionPanelMode('active');
-        runOn=keepRunning&&!snapshot.timerRuntime;
-      }
-      return saved;
-    }
-    const cleared=await ActiveSessionRuntime.clearCanonical('restoring an empty Active Session');
-    resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
-    PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('none');
-    return cleared;
-  });
-  const idx=TimerState.currentIndex;
-  if(runOn&&!TimerState.runtime?.startMs&&idx<TASKS.length&&isTrackableBlock(TASKS[idx])&&!isTaskResolved(idx))TimerEngine.startCur();
-  return result;
-}
-function verifyRestoredTimerRuntimeSemantics(expectedRuntime){
-  if(!expectedRuntime)return true;
-  const expectedTaskId=String(expectedRuntime.taskId||''),expectedState=expectedRuntime.timerState&&typeof expectedRuntime.timerState==='object'?expectedRuntime.timerState:null;
-  if(!expectedTaskId||!expectedState)throw new Error('Post-restore verification found an invalid backed-up timer runtime.');
-  if(!TimerState.runtime||TimerState.runtime.startMs===null)throw new Error('Post-restore verification found that the backed-up timer is not active.');
-  const actualTaskId=TaskIdentity.idAt(TimerState.currentIndex);
-  if(actualTaskId!==expectedTaskId||TimerState.runtime.taskIdx!==TimerState.currentIndex)throw new Error('Post-restore verification found the timer on the wrong applied-plan task.');
-  const expectedPaused=!!expectedRuntime.paused||expectedRuntime.mode===TIMER_MODES.PAUSED;
-  if(expectedPaused){
-    if(TimerState.mode!==TIMER_MODES.PAUSED||!TimerState.paused)throw new Error('Post-restore verification failed to preserve the paused timer state.');
-  }else if(TimerState.mode!==TIMER_MODES.RUNNING||TimerState.paused){
-    throw new Error('Post-restore verification failed to resume the backed-up running timer.');
-  }
-  if(Math.round(Number(TimerState.runtime.durationSec)||0)!==Math.round(Number(expectedState.durationSec)||0))throw new Error('Post-restore verification found a different timer duration.');
-  if(Math.max(0,Math.round(Number(TimerState.runtime.recordedSec)||0))<Math.max(0,Math.round(Number(expectedState.recordedSec)||0)))throw new Error('Post-restore verification found regressed timer evidence.');
-  if(expectedRuntime.pendingInactiveGap&&!TimerState.inactiveGap)throw new Error('Post-restore verification lost the backed-up inactive-gap state.');
-  if(!expectedPaused&&!expectedRuntime.pendingInactiveGap&&expectedState.lastTickMs&&DecisionClock.nowMs()-Number(expectedState.lastTickMs)>SLEEP_GAP_THRESHOLD_MS&&!TimerState.inactiveGap){
-    throw new Error('Post-restore verification failed to protect the cross-device inactive interval.');
-  }
-  if(expectedPaused&&expectedRuntime.activeBreak&&!TimerState.activeBreak)throw new Error('Post-restore verification lost the active break state.');
-  return true;
-}
-async function verifyRestoredSessionRuntime(expected,scheduleText=''){
-  const session=expected?ActiveSessionCodec.sanitizeCurrent(expected):null;
-  if(session&&session.status!=='suspended'&&!sessionRunsElsewhere(session)&&!isPreviousActiveSessionRecord(session)){
-    const expectedFingerprint=activeSessionScheduleFingerprint(session);
-    if(!TASKS.length||scheduleFingerprint()!==expectedFingerprint)throw new Error('Post-restore verification failed to apply the Active Session plan.');
-    const expectedSnapshot=activeSessionSnapshot(session);
-    if(!expectedSnapshot)throw new Error('Post-restore verification could not read the Active Session snapshot.');
-    verifyRestoredTimerRuntimeSemantics(expectedSnapshot.timerRuntime);
-  }else{
-    // The working draft is independently verified through portable Plan data.
-    if(TASKS.length||TimerState.mode!==TIMER_MODES.EMPTY)throw new Error('Post-restore verification found an unexpected live timer.');
-  }
-  return true;
-}
+function restoreSessionStateThroughLifecycle(...args){return SessionActions.restoreSessionStateThroughLifecycle(...args);}
+function verifyRestoredTimerRuntimeSemantics(...args){return SessionActions.verifyRestoredTimerRuntimeSemantics(...args);}
+function verifyRestoredSessionRuntime(...args){return SessionActions.verifyRestoredSessionRuntime(...args);}
 
 // Byte staging finishes before the single attachment metadata commit. Rollback
 // replaces the catalogue; physical reclamation still waits for all readers.
@@ -6218,13 +5235,9 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze({
   presentation:Object.freeze({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     setStatus:(message,ok)=>setPlanStatus(message,ok),
-    warnStorage:message=>{markStorageHealthError('activeSession',message);sessionSafetyMessage=message;refreshStorageFallbackWarning();},
-    clearStorageWarning:message=>{if(sessionSafetyMessage===message)clearSessionSafetyMessage(message);},
-    notifyNewerClaim:()=>{
-      const message='Another device runs a newer version of Study Director and may be running today’s session. The timer here stopped and your progress is saved. Update the app to continue here.';
-      setPlanStatus(message,false);
-      Interactions.notify({source:'session',kind:'warning',key:'session-newer-claim',title:'Update the app to continue',message,action:{label:'Update app',opens:true,run:()=>void checkUnsupportedUpdate()}});
-    },
+    warnStorage:SessionActions.warnStorage,
+    clearStorageWarning:SessionActions.clearStorageWarning,
+    notifyNewerClaim:SessionActions.notifyNewerClaim,
     noteBackupChange:reason=>notifyBackupChange({urgent:true,reason})
   }),
   installation:Object.freeze({id:()=>InstallationIdentity.getId()}),
@@ -7349,9 +6362,7 @@ const CLICK_ACTIONS=Object.freeze({
   'test-sound': ()=>NoticeCoordinator.testSound(),
   'test-system-alert': ()=>SystemNotifications.test(),
   'toggle-pomodoro': Pomodoro.configuration.toggleNudges,
-  'restore-session': ()=>sessionPanelMode==='previous'
-    ? (TASKS.some(isTrackableBlock)?goTab('review',{source:'previous-day-review'}):revisitPreviousStoredSession())
-    : sessionPanelMode==='elsewhere'?continueSessionHere():restoreSuspendedTodaySession(),
+  'restore-session': SessionActions.restoreSessionAction,
   'suspend-session': suspendTodaySession,
   'finish-session': finishTodaySession,
   'reset-session': resetTodaySession,
@@ -7359,19 +6370,7 @@ const CLICK_ACTIONS=Object.freeze({
   'confirm-plan-edit': ()=>uploadSoonAfterPlanApply(PlanDraftEditor.confirm()),
   'cancel-plan-edit': PlanDraftEditor.cancel,
   'load-default': loadDefaultPlan,
-  'apply-schedule': async()=>{
-    let takeover=null;
-    if(sessionPanelMode==='elsewhere'&&!TASKS.length){
-      if(!await confirmSessionTakeover(sessionPanelSession,{replace:true}))return false;
-      try{takeover=await transferSessionOwnershipHere(sessionPanelSession);}
-      catch(error){setPlanStatus('Could not move today’s session here: '+(error&&error.message?error.message:error),false);return false;}
-    }
-    try{
-      let result=uploadSoonAfterPlanApply(applySchedule(takeover?{source:'ownership-takeover'}:{}));if(result&&typeof result.then==='function')result=await result;
-      if(result===false&&takeover)await attemptAutoRestoreActiveSession();
-      return result;
-    }finally{schedulePwaUpdateEvaluation(250);}
-  },
+  'apply-schedule': SessionActions.applyScheduleAction,
   'clear-schedule-draft': PlanDraftEditor.clear,
   'open-notes': openNotesLibrary,
   'toggle-pnote-info': togglePnoteInfo,
