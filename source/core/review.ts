@@ -633,24 +633,29 @@ async function handleStudyDayRollover(){
   if(!endedDate){activeSessionPersistenceBlocked=false;rolloverSaveInProgress=false;return false;}
   let savedDay:null|{date:string;revision:number}=null;
   try{
-    if(hasSaveableStudyDay()){
+    const saveable=hasSaveableStudyDay();
+    if(saveable){
       if(isLiveTrackableTimer())recordCurrentActiveToTask(Runtime.currentIndex(),'partial');
       PracticePacer.finalizeForDayClose();
       captureReviewInputs();
       syncUnfinishedNoteDraft();
       saveReviewState({markChanged:false,strict:true});
       await flushFinalActiveSessionCheckpoint('saving the rollover Active Session checkpoint');
-      activeSessionPersistenceBlocked=true;
-      const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
-      savedDay={date:rec.date,revision:doc.sourceRevision};
-      markStorageHealthTimestamp('lastStudyDataSaveAt');
-    }else{
-      activeSessionPersistenceBlocked=true;
-      Runtime.setSafetyMessage('New study day: no schedule was loaded, so no Study Day record was created. Apply today’s schedule when ready.');
     }
     await runLifecycle('study-day-rollover',{
       scheduleIdentity:true,date:todayISO(),autoDate:true,review:true
     },async()=>{
+      // Lifecycle entry has now completed its mandatory pending-Review flush.
+      // Freeze further Active Session writes only for the authoritative
+      // Saved-Day commit / session-retirement window.
+      activeSessionPersistenceBlocked=true;
+      if(saveable){
+        const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
+        savedDay={date:rec.date,revision:doc.sourceRevision};
+        markStorageHealthTimestamp('lastStudyDataSaveAt');
+      }else{
+        Runtime.setSafetyMessage('New study day: no schedule was loaded, so no Study Day record was created. Apply today’s schedule when ready.');
+      }
       await clearCanonicalSessionAfterSavedDay();
       resetRuntimeSessionState({lifecycleManaged:true,source:'study-day-rollover',date:todayISO()});
       await clearReviewForNewDay({lifecycleManaged:true});
