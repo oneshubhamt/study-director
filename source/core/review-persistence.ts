@@ -132,7 +132,8 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
   function flush(field:HTMLTextAreaElement,options:FlushOptions={}){const state=activeState(field);return state&&ownership.canMutate()?state.lane.flush(options):Promise.reject(new Error('Diary editor is no longer active for the current study owner.'));}
   async function deleteEntry(date:string,options:Readonly<{backupCapture?:boolean}>={}){
     if(!ownership.canMutate()||!dates.isSupported(date))return false;
-    const current=await records.get(date);if(!current)return true;
+    const current=await records.get(date,{strict:true});
+    if(!current){await records.verifyCanonicalAbsent(date);return true;}
     const result=await commit(date,'',{expectedCanonical:String(current.reflection||''),backupCapture:options.backupCapture===true});
     return current.recordKind==='study'?!!result.record&&result.record.recordKind==='study'&&!String(result.record.reflection||'').trim():!result.record;
   }

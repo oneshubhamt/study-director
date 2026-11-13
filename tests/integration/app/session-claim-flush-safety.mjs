@@ -193,6 +193,9 @@ function fixture(options={}){
   current=study;verifyCalls=0;
   await persistence.DailyReflectionPersistence.commit(date,'Old',{expectedCanonical:'Old'});
   assert.equal(verifyCalls,1,'no-op Saved state is still proven against canonical storage');
+  current=null;absentCalls=0;
+  assert.equal(await persistence.DiaryEditor.deleteEntry(date),true);
+  assert.equal(absentCalls,1,'an apparently empty Diary date still requires canonical absence proof');
 
   const field=new FakeTextArea();current=study;ownerRevision=1;
   persistence.DiaryEditor.bind(field,date,study);
