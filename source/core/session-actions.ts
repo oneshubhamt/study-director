@@ -520,15 +520,15 @@ async function restoreSessionStateThroughLifecycle(importedSession:unknown,optio
     if(session&&snapshot){
       const saved=await ports.ActiveSessionRuntime.saveCanonicalSession(session,'restoring an Active Session');
       if(isPreviousActiveSessionRecord(session)){
-        resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date:todayISO()});
+        await resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date:todayISO()});
         ports.PlanDraftEditor.preview({silent:true,enterDraft:false});
         setSessionPanelMode('previous',session);
       }else if(session.status==='suspended'){
-        resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
+        await resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         ports.PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('suspended',session);
         if(sessionFromElsewhere(session)&&isSuspendedActiveSession(session))ports.Interactions.notify({source:'session',key:'session-handoff',tier:'news',title:'Today’s session is ready',message:'It was suspended on another device. Continue it here when you are ready.',action:{label:'Continue here',run:()=>void continueSessionOnExecute('session-handoff')}});
       }else if(sessionRunsElsewhere(session)){
-        resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
+        await resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         ports.PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('elsewhere',session);
       }else{
         const restored=await applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
@@ -539,7 +539,7 @@ async function restoreSessionStateThroughLifecycle(importedSession:unknown,optio
       return saved;
     }
     const cleared=await ports.ActiveSessionRuntime.clearCanonical('restoring an empty Active Session');
-    resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
+    await resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
     ports.PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('none');
     return cleared;
   });
