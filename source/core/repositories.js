@@ -53,7 +53,7 @@ registry.define('repositories',1,()=>{
     if(!Array.isArray(input.obsoleteMetaKeys)||input.obsoleteMetaKeys.some(key=>typeof key!=='string'||!key)||new Set(input.obsoleteMetaKeys).size!==input.obsoleteMetaKeys.length)throw new TypeError('AppData obsolete metadata keys are invalid.');
     functions(input.helpers,[
       'boundedInt','boundedNumber','clampText','clampEditorContent','editorContentWithinLimits','wipeObject','isValidIsoDate','isCanonicalScheduleText','sameDataValue',
-      'activeSessionScheduleFingerprint','normalizeAreaName','displayAreaName','isoDateDay','normalizeTimestamp','jsonByteLength'
+      'activeSessionScheduleFingerprint','normalizeAreaName','displayAreaName','noteName','isoDateDay','normalizeTimestamp','jsonByteLength'
     ],'AppData helpers');
     functions(input.hooks,[
       'canMutate','getOwnershipRevision','issueWriteToken','assertWriteToken','isOwnershipLostError','capture','onStorageOk','onStorageError',
@@ -105,7 +105,7 @@ registry.define('repositories',1,()=>{
     const RepositoryJournals=input.journals;
     const {
       boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
-      activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay,normalizeTimestamp,jsonByteLength
+      activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,noteName,isoDateDay,normalizeTimestamp,jsonByteLength
     }=input.helpers;
     const {
       canMutate:appCanMutate,
@@ -1327,7 +1327,7 @@ const NotesRepository=NotesRepositoryModule.create(freeze({
       }),
       storage:freeze({local:LocalStorageContract,meta:Meta,idbGetAll,idbStoreTransaction,idbStrictTransaction,storageResets:()=>IndexedDb.lifecycle().resets}),
       codecs:freeze({sanitizeCurrentNote,noteKeys:DailyRecordCodec.noteKeys}),keyedRecord:KeyedRecord,
-      helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom:()=>rescueRoom(STORAGE_KEYS.noteRescue,APP_LIMITS.noteRescueBytes)}),
+      helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,noteName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom:()=>rescueRoom(STORAGE_KEYS.noteRescue,APP_LIMITS.noteRescueBytes)}),
       hooks:freeze({
         canMutate:appCanMutate,storageOk:markStorageHealthOk,reportCommit:reportCanonicalCommit,
         onNotesChanged:refreshNoteConsumers,onNoteSyncState:setNoteSyncStateForKey,onNoteConflict:reportNoteConflict,saveWarning:showSubjectNoteSaveWarning,

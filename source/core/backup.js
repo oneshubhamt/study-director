@@ -22,7 +22,7 @@ registry.define('backup',1,input=>{
     noteReconciliation:freeze(['resolve','merge']),
     exports:freeze(['backgroundAvailable','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
-    domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
+    domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','noteName','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule','deviceName']),
     events:freeze(['libraryChanged','backupCompleted','reconcileNotes','restoreNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
     operations:freeze(['assertAuthority','canShare','clearFault','failClosed','runExclusive']),
@@ -82,7 +82,7 @@ registry.define('backup',1,input=>{
     const NoteReconciliation=ports.noteReconciliation;
     const Exports=ports.exports;
     const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed,yieldSession}=ports.session;
-    const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
+    const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,noteName,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
     const {refreshPnote,refreshReview,renderSchedule:renderSched,deviceName}=ports.view;
     const {libraryChanged,backupCompleted,reconcileNotes,restoreNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
     const {assertAuthority,clearFault,failClosed,runExclusive}=ports.operations;
@@ -1651,10 +1651,10 @@ async function reviewKeptVersions({ref=''}={}){
     if(review.subject==='note'){
       const note=notes.get(review.ref);
       if(!note)choice(review,'','Note · absent here',`${kept?'This alternative contains only the changed Note fields, not a complete Note. Restore the original from Library → Recently deleted (if available), then reopen Kept versions to compare. Until explicitly discarded, this alternative is preserved.':'Both the current Note and a retained deletion are absent. No Note will be changed here.'} ${keptReviewProvenance(review,devices)}`,{label:'Keep for later',description:'The original alternative remains available; no Note is changed.'},{label:'Discard kept alternative',description:'Only this retained alternative is resolved; no Note is created or deleted.'},true);
-      else if(!kept)choice(review,'',`Note · ${note.label}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review,devices)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
+      else if(!kept)choice(review,'',`Note · ${noteName(note.label)}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review,devices)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
       else{
-        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Titles differ. ${keptReviewProvenance(review,devices)}`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
-        if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:keptColumn(review),ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
+        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${noteName(note.label)}`,`Titles differ. ${keptReviewProvenance(review,devices)}`,{label:`Keep “${noteName(note.label)}”`,description:''},{label:`Use “${noteName(kept.label)}”`,description:''});
+        if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:noteName(note.label),localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:keptColumn(review),ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
       }
     }else if(review.subject==='savedDay'){
       const record=days.get(review.ref)||null;
@@ -2719,7 +2719,7 @@ async function planReplacement(stored,parsed){
 function replacementExtrasSummary(plan){
   const extras=plan.extras,dayLabel=date=>{const at=new Date(date+'T12:00:00');return Number.isFinite(at.getTime())?at.toLocaleDateString(undefined,{day:'numeric',month:'short'}):date;};
   const part=(items,one,many,name)=>{if(!items.length)return '';const names=name?items.slice(0,3).map(name):[];return `${items.length} ${items.length===1?one:many}${names.length?` (${names.join(', ')}${items.length>3?` and ${items.length-3} more`:''})`:''}`;};
-  return [part(extras.notes,'note','notes',key=>`“${String(plan.local[key].label||'Untitled')}”`),part(extras.days,'Saved Day','Saved Days',dayLabel),part(extras.assets,'attachment','attachments'),part(extras.plans,'saved plan','saved plans')].filter(Boolean).join(', ');
+  return [part(extras.notes,'note','notes',key=>`“${noteName(plan.local[key].label)||'Untitled'}”`),part(extras.days,'Saved Day','Saved Days',dayLabel),part(extras.assets,'attachment','attachments'),part(extras.plans,'saved plan','saved plans')].filter(Boolean).join(', ');
 }
 const REPLACEMENT_EXTRA_CHOICES=freeze([
   freeze({value:'keep',label:'Keep them',kind:'primary',description:'They stay on this device alongside the restored backup.'}),

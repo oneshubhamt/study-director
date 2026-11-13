@@ -291,7 +291,7 @@ function createHarness(state,{decisions={},noteResolver=null,restoredFromFile=nu
     codecs:freeze({activeSession:activeSessionCodec,backup:runtimeCodec,dailyRecord:dailyRecordCodec,pendingReview:pendingReviewCodec}),
     reconciliation:freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),noteReconciliation:freeze({merge:paragraphMerge,resolve:async options=>noteResolver?noteResolver(options,state):freeze({format:'study-director.note-reconciliation-result',version:1,notes:freeze(Object.fromEntries((options.conflicts||[]).map(item=>[item.key,freeze({text:options.manualOnly&&decisions.reflections==='incoming'?item.incomingValue:item.localValue,localCandidateId:item.localCandidateId,incomingCandidateId:item.incomingCandidateId})])))})}),
     session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('preflight-session-cancel'),captureSnapshot:()=>hasLiveTasks&&state.activeSession?state.activeSession.snapshot:null,hasActiveSession:()=>!!state.activeSession&&state.running!==false&&state.activeSession.runningOn===(state.installationId||'inst_device_local'),hasTasks:()=>hasLiveTasks,toActiveSession:()=>hasLiveTasks?state.activeSession:null,withPersistenceSuppressed:async operation=>operation(),yieldSession:async()=>{events.push('session-yield');if(state.activeSession?.status==='finished')return false;state.activeSession=freeze({...state.activeSession,status:'suspended',...(state.yieldAddsProgress?{snapshot:freeze({...state.activeSession.snapshot,label:'A-FINAL-TICK',taskState:freeze({...state.activeSession.snapshot.taskState,focus:freeze({actual:freeze({seconds:(Number(state.activeSession.snapshot.taskState?.focus?.actual?.seconds)||0)+70})})})})}:{})});state.running=false;return true;}}),
-    domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
+    domain:freeze({clampText:(value,max=100000)=>String(value??'').slice(0,max),filenameSafeStudentName:()=> 'student',getStudentName:()=>state.personal.preferences.studentName,noteName:value=>String(value??'')==='__study_director_support_activities__'?'Support Activities':String(value??''),materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-31'}),
     view:freeze({presentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn,deviceName:()=>"iPad · Safari"}),
     events:freeze({libraryChanged:fn,backupCompleted:fn,
       reconcileNotes:async(payload,deletions=[])=>{state.notes=normalizeNotes({...state.notes,...payload});const deletedKeys=new Set((deletions||[]).map(item=>String(item.key)));for(const key of deletedKeys)delete state.notes[key];state.noteDeletions=state.noteDeletions.filter(item=>!Object.hasOwn(state.notes,item.key)&&!Object.values(payload||{}).some(note=>note&&note.key===item.key));for(const item of deletions||[]){state.noteDeletions=state.noteDeletions.filter(existing=>existing.key!==item.key);state.noteDeletions.push({...item});}for(const note of Object.values(payload||{}))state.noteDeletions=state.noteDeletions.filter(item=>item.key!==note.key);events.push('notes');return state.notes;},
@@ -2397,6 +2397,21 @@ for(const changedAuthoredPlan of [false,true]){
   assert.match(group.description,/only the changed Note fields|not a guaranteed complete/iu,
     'The dialog explains why a retained field-only alternative cannot create a whole Note.');
   assert.equal(state.reviews.open().length,1,'Keeping the alternative cannot silently discard its text.');
+}
+
+// The shared support note is stored with its reserved key as its label; the
+// kept-versions dialog names it "Support Activities".
+{
+  const S='__study_director_support_activities__';
+  const state={installationId:'inst_support_note_name',records:new Map(),deletions:[],
+    notes:{[S]:freeze({version:2,key:S,label:S,text:'current support text',updatedAt:'2026-08-22T10:00:00.000Z'})},noteDeletions:[],activeSession:null,personal:personal('Support names'),journal:null};
+  state.reviews=memoryPendingReviews(pendingReviewCodec,{limit:limits.maxPendingReviews});
+  await state.reviews.ports.pendingReviewsMerge([pendingReviewCodec.create({subject:'note',ref:S,kept:{label:'Gym notes'}})]);
+  const h=createHarness(state);
+  await h.runtime.controller.reviewKeptVersions();
+  const labels=(h.prompts.find(item=>item.title==='Kept versions')?.groups||[]).map(item=>item.label);
+  assert.ok(labels.includes('Note title · Support Activities'),`the dialog names the support note: ${JSON.stringify(labels)}`);
+  assert.ok(!JSON.stringify(h.prompts).includes(S+'”'),'no choice shows the reserved key');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'sync-shared-base',mergeRuleCases,preflightVariants:preflightCases.length,coverage:['two-device Drive sync','a restore reaches every device and keeps reviews','Combining Drive’s newest from any location moves the shared base','versions kept for review travel and resolve everywhere','study session hand-off and takeover','a takeover is not undone by an upload saved before it','current protected deletion manifest','unified reconciliation preserves local defaults','explicit Saved-Day deletion choices','explicit conflict choices beat timestamps','non-today Active Session portability','incoming-only Active Session transfers automatically','checkpoint absence preserves local Active Session','A→B→A divergent sequential Combine','scratch note reconciliation before canonical commit','restore preflight flushes pending canonical state','stale reconciliation rebuild fence','file reconciliation Device Backup convergence','standalone file Replace exact replacement']},null,2));

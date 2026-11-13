@@ -2489,6 +2489,8 @@ const SUPPORT_NOTE=Object.freeze({
 // The shared support note is stored with its reserved key as its label, which
 // keeps it apart from any Area. Wherever a stored note is shown, it shows its name.
 function shownNote(note){return note&&note.key===SUPPORT_NOTE.key?Object.freeze({...note,label:SUPPORT_NOTE.label}):note;}
+// A stored label as people read it: the shared support note by its name.
+function noteName(label){return normalizeAreaName(label)===SUPPORT_NOTE.key?SUPPORT_NOTE.label:displayAreaName(label);}
 function noteKeyForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.key:taskAreaKey(task);}
 function noteLabelForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.label:taskAreaLabel(task);}
 const {
@@ -5530,7 +5532,7 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
   clock:Object.freeze({nowMs:DecisionClock.nowMs}),
   helpers:Object.freeze({
     boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
-    activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay,normalizeTimestamp,jsonByteLength
+    activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,noteName,isoDateDay,normalizeTimestamp,jsonByteLength
   }),
   hooks:Object.freeze({
     canMutate:appCanMutate,
@@ -10646,7 +10648,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   domain:Object.freeze({
     clampText,filenameSafeStudentName,
     getStudentName:getStudentNameFromDisplay,
-    materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO
+    materializeDailyRecordView,noteName,sanitizeCurrentDailyRecord,todayISO
   }),
   view:Object.freeze({presentation:BackupPresentation,
     refreshPnote,
