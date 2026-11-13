@@ -6,18 +6,19 @@ const html=readHostHtml();
 const start=html.indexOf('function canonicalAttachmentReferenceDescriptor(event){');
 const end=html.indexOf('\nasync function refreshPersistedSessionBadge()',start);
 assert.ok(start>=0&&end>start,'The reference-aware canonical commit handler must be available.');
-const commits=[],notifications=[],maintenanceDelays=[];
+const commits=[],notifications=[],maintenanceDelays=[],badgeEvents=[];
 const RichTextApi={scanAttachmentReferences:value=>({trusted:true,assetIds:[...String(value||'').matchAll(/img-[a-z0-9-]{20,80}/g)].map(match=>match[0])})};
-const handler=new Function('writeStorageHealth','renderStorageHealth','document','NativeCapabilities','notifyBackupChange','scheduleRichTextAssetMaintenance','invalidateAttachmentLibrary','RichTextApi','ACTIVE_SESSION_ID',
+const handler=new Function('writeStorageHealth','renderStorageHealth','document','CapabilityBadge','notifyBackupChange','scheduleRichTextAssetMaintenance','invalidateAttachmentLibrary','RichTextApi','ACTIVE_SESSION_ID',
   `let richAssetReferenceRevision=0;const canonicalAttachmentReferenceSignatures=new Map();
    let saveReminderDate='',noticeRechecks=0;
    function revalidateSaveReminderAfterCanonicalConvergence(){noticeRechecks++;return Promise.resolve(true);}
    ${html.slice(start,end)};
    return {handleCanonicalCommit,getRevision:()=>richAssetReferenceRevision,
      setReminderDate:value=>saveReminderDate=value,reminderRechecks:()=>noticeRechecks};`)(
-  state=>commits.push(state),()=>{}, {querySelector:()=>null},null,change=>notifications.push(change),delay=>maintenanceDelays.push(delay),()=>{},RichTextApi,'active-session'
+  state=>commits.push(state),()=>{}, {querySelector:()=>null},{syncFromCanonicalCommit:event=>badgeEvents.push(event)},change=>notifications.push(change),delay=>maintenanceDelays.push(delay),()=>{},RichTextApi,'active-session'
 );
 handler.handleCanonicalCommit({entityType:'activeSession',operation:'upsert',value:{snapshot:{review:{reflection:'',studyQuality:null}}},committedAt:'2026-09-23T17:00:00.000Z',backupCapture:true});
+assert.equal(badgeEvents.length,1,'the capability badge observes even a backup-capture commit');
 assert.equal(commits.length,1,'A backup session flush still updates local storage health.');
 assert.equal(notifications.length,0,'A backup capture cannot schedule another automatic device backup.');
 assert.equal(maintenanceDelays.length,0,'The first routine active-session snapshot must not manufacture attachment GC work.');

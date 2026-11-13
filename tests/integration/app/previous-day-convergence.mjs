@@ -77,6 +77,26 @@ for(const [owner,choice,changed] of [['inst_other','recover',false],['inst_other
   if(changed)assert.ok(fixture.events.some(event=>typeof event==='string'&&event.includes('changed while')));
 }
 
+// Finish may announce success only after the canonical write; failures restore
+// the captured evidence and never navigate as though the day was committed.
+for(const failure of ['', 'write', 'readback']){
+  const fixture=prepare(session('active','inst_here',today)),events=[],snapshot={date:today,contentRevision:7};
+  const timer={mode:'ready',runtime:{startMs:null},currentIndex:0,emptyRuntime:()=>({startMs:null})};
+  const controller=SessionActions.createController({...fixture.ports,
+    runtime:{...fixture.ports.runtime,TASKS:[{kind:'work'}],TimerState:timer,TIMER_MODES:{DONE:'done',READY:'ready'},
+      TimerEngine:{stopExecution:()=>events.push('stop')},PracticePacer:{pauseForSessionEnd:()=>events.push('pause')},
+      setTimerMode:mode=>{timer.mode=mode;},resetBreakState(){}},
+    isTrackableBlock:task=>task?.kind==='work',refreshCoreUi(){},goTab:tab=>events.push(tab),ReviewView:{refresh(){}},
+    NoticeCoordinator:{begin:()=>({operationId:'finish',update:value=>events.push(value.lifecycle)})},notifyBackupChange:()=>events.push('backup'),
+    ActiveSessionRuntime:{captureSnapshot:()=>snapshot,writeCanonicalNow:async()=>{events.push('write');if(failure)throw {message:`${failure} failed`};},
+      rollbackLocalTransition:async(value,source)=>{assert.equal(value,snapshot);assert.equal(source,'finish-today-rollback');timer.mode='ready';events.push('rollback');}},
+  });
+  assert.equal(await controller.finishTodaySession(),!failure);
+  assert.equal(events.includes('rollback'),!!failure);assert.equal(events.includes('review'),!failure);assert.equal(events.includes('succeeded'),!failure);assert.equal(events.includes('backup'),!failure);
+  assert.equal(timer.mode,failure?'ready':'done');
+  if(failure)assert.ok(fixture.events.some(message=>typeof message==='string'&&message.includes(`${failure} failed`)),'structured errors retain their useful message');
+}
+
 // A Save Today notice may disappear only after canonical Saved Day coverage
 // proves it: after a current acknowledged session, or after sync retired
 // the old session without leaving an uncovered divergent review version.

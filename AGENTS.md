@@ -16,7 +16,7 @@ After P5.13, reconcile all Phase 5 objectives and leave a concise audit handoff 
 2. **Fix evident bugs and make justified local improvements** encountered in converted surfaces. Explain intentional behavior changes and preserve other behavior. Do not turn conversion into an unrelated redesign or bug hunt. Defects preventing the objective working correctly belong in the pass.
 3. **Strengthen relevant tests** where useful, especially for fixes. Necessary verification is part of completion; optional test expansion must not displace conversion.
 
-Use native DOM/event types and actual provider assignability checks. A typed port calling unchecked feature behavior does not complete conversion; only thin composition belongs to P5.13. Test critical transitions with failed writes and committed writes whose verification fails, preserving newer successors.
+Use native DOM/event types and actual provider assignability checks. Preserve initialization order when extracting closures: providers declared later must remain deferred. A typed port calling unchecked feature behavior does not complete conversion; only thin composition belongs to P5.13. Test critical transitions with failed writes and committed writes whose verification fails, preserving newer successors.
 
 Keep one current canonical topology with validation, integrity and recovery intact; no historical migration/compatibility code. `vendor/wordgard/**` is immutable; our editor/adapters may change.
 

@@ -171,4 +171,9 @@ function makeHarness(options={}){
   const t=makeHarness();const yielded=await t.controller.yieldLocal();
   assert.equal(yielded.status,'suspended');assert.equal(t.calls.pauses,0);assert.equal(t.calls.resets,0);assert.equal(t.calls.writes.length,0);assert.deepEqual(t.calls.lifecycles,['session-yield']);
 }
+{
+ const t=makeHarness();t.strictQueue.push(new Error('Suspension failed'));
+ await assert.rejects(()=>t.controller.yieldLocal(),/Suspension failed/);
+ assert.equal(t.calls.resets,0);assert.equal(t.calls.writes.length,0);
+}
 console.log(JSON.stringify({status:'PASS',suite:'session-handoff-runtime',remotePreemption:true,strictFreeze:true,staleSource:true,compensation:true,yield:true}));

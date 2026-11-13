@@ -56,6 +56,9 @@ const preSuspend=structuredClone(practice),preSuspendSnapshot=controller.capture
 saveMode='local';
 await assert.rejects(()=>controller.suspendLocal(),/idb unavailable|durably committed/);
 assert.deepEqual(practice,preSuspend);assert.equal(repoValue.status,'active');assert.deepEqual(repoValue.snapshot,preSuspendSnapshot);assert.equal(planDraft,'draft survives reload');
+saveMode='local';
+await assert.rejects(()=>controller.suspendLocal({source:'session-yield'}),/idb unavailable|durably committed/);
+assert.deepEqual(practice,preSuspend);assert.equal(repoValue.status,'active');assert.deepEqual(repoValue.snapshot,preSuspendSnapshot);
 saveMode='idb';
 // Suspension is canonical before runtime reset, and restore is canonical active before apply.
 const suspended=await controller.suspendLocal();assert.equal(suspended.status,'suspended');assert.ok(resetCount>0);assert.equal(repoValue.status,'suspended');

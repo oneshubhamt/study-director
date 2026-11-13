@@ -10,7 +10,7 @@ const sdSessionActionsFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'session-actions','study-director.session-actions-module'>|undefined;
 if(!registry||registry.version!==1)throw new Error('Study Director internal module registry is unavailable.');
-function errorMessage(error:unknown){return error instanceof Error?error.message:String(error??'');}
+function errorMessage(error:unknown){return error&&typeof error==='object'&&'message' in error&&error.message?String(error.message):String(error??'');}
 function createController(ports:Readonly<SessionActionInput>){
   const {state}=ports;
   const {TASKS,TimerState,TIMER_MODES,TaskIdentity,TaskSessionState,PracticePacer,TimerEngine,setTimerMode,isTaskResolved,focusCompletionForTask,storeResolvedCompletion,resetBreakState}=ports.runtime;

@@ -27,9 +27,9 @@ Running coverage without selection flags retains the complete final-certificatio
 
 `build/typecheck.mjs` checks every environment project and inventories all first-party `.ts`/`.mts`. New typed files must be admitted explicitly; stale/overlapping entries fail. Phase 2 admitted all 25 existing authored editor/worker TS files; the unchecked inventory is now empty. Generated upstream declarations are separately inventoried and reproduced before compilation.
 
-| Project | Implementation boundary through Phase 4 | Environment |
+| Project | Admitted implementation boundary | Environment |
 | --- | --- | --- |
-| browser | prior domain/editor modules plus Phase 4 persistence, records/backup codecs, repositories, ownership, session/timer, attachment, export, backup/provider/recovery orchestration and contracts; P5.1 registry, interaction/navigation/notice/audio/overlay foundations and extracted host adapters | ES2022 + DOM |
+| browser | prior domain/editor modules plus Phase 4 persistence, records/backup codecs, repositories, ownership, session/timer, attachment, export, backup/provider/recovery orchestration and contracts; P5.1 foundations; P5.2 profile/startup/capability hosts; P5.3 Plan; P5.4 execution, session actions/lifecycle and presentation owners | ES2022 + DOM |
 | portable | shared contracts, domain/time, WG1, Markdown, tags and reconciliation | ES2022 only |
 | worker | search/image/attachment/export workers, validated processing requests and portable file/codec modules | ES2022 + WebWorker |
 | service-worker | boundary assertions; implementation deferred | ES2022 + WebWorker, service-worker scope |
