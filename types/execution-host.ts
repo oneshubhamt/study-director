@@ -187,5 +187,5 @@ export interface ScheduleGatewayInput{
   applySessionSnapshot(snapshot:import('./record-models.ts').SessionSnapshot):boolean;restoreLiveDraftIfAny():boolean;restoreTimerRuntimeIfAny():boolean;
   clearFutureUntouchedProgress():unknown;flushLiveDraft():unknown;scheduleFingerprint():string;writeLiveDraftNow():unknown;
   advanceTaskNoteScheduleRevision():unknown;markDayContentChanged():unknown;clearSessionSafetyMessage(reason:string):unknown;
-  SessionLifecycle:Pick<import('./session-lifecycle.ts').SessionCoordinator,'runSync'|'reconcile'>;
+  SessionLifecycle:Pick<import('./session-lifecycle.ts').SessionCoordinator,'run'|'reconcile'>;
 }
