@@ -4017,7 +4017,6 @@ const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze({
       handleActiveSessionRepositoryResult,
       lifecycleCanWrite:()=>SessionLifecycle.canWrite(),markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,
       runLifecycle:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),
-      runLifecycleSync:(kind,options,operation)=>SessionLifecycle.runSync(kind,options,operation),
       saveLiveDraft,setReviewDateTitle,setSessionPanelMode,stopTimerExecution:()=>TimerEngine.stopExecution(),
       appCanMutate,writeCanonicalNow:(operation,options)=>ActiveSessionRuntime.writeCanonicalNow(operation,options),writeLiveDraftNow
     }),
@@ -4088,14 +4087,13 @@ function setLifecycleEditorsBlocked(...args){return SessionLifecycleViews.setLif
 function invalidateLifecycleEditors(...args){return SessionLifecycleViews.invalidateLifecycleEditors(...args);}
 function reconcileLifecycleEditors(...args){return SessionLifecycleViews.reconcileLifecycleEditors(...args);}
 function completeLifecycleTransition(...args){return SessionLifecycleViews.completeLifecycleTransition(...args);}
-const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze({hooks:Object.freeze({
+const SessionLifecycleHooks=ReviewHostModule.createLifecycleHooks(Object.freeze({
   canMutate:()=>appCanMutate(),
-  flushPending:()=>appCanMutate()?flushPendingReviewSave({strict:true}):false,
-  prepare:invalidateLifecycleEditors,
-  reconcile:reconcileLifecycleEditors,
-  complete:completeLifecycleTransition,
-  capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
-})}));
+  reviewEditor:ReviewEditor,
+  lifecycleViews:SessionLifecycleViews,
+  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+}));
+const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze({hooks:SessionLifecycleHooks}));
 if(!Object.isFrozen(SessionLifecycle)||SessionLifecycle.format!=='study-director.session-lifecycle-coordinator'||SessionLifecycle.contractVersion!==1){
   throw new Error('Study Director session lifecycle coordinator is unavailable or incompatible.');
 }
@@ -6217,7 +6215,7 @@ const CHANGE_ACTIONS=Object.freeze({
 const INPUT_ACTIONS=Object.freeze({
   'first-start-password': ()=>FirstStart.confirmField(),
   'pnote-progress': onPnoteChange,
-  'save-reflection': queueReviewSave,
+  'save-reflection': event=>queueReviewSave({event}),
   'quote': onQuoteChange,
   'schedule-draft': PlanDraftEditor.composerInput,
   'render-library': LibraryView.requestRender,
