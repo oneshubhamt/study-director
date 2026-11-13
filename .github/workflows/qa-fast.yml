@@ -55,6 +55,9 @@ jobs:
           tests/integration/app/ownership-hydration-fail-closed.mjs
           tests/integration/app/session-handoff-runtime.mjs
           tests/integration/app/session-claim-flush-safety.mjs
+          tests/integration/app/previous-day-convergence.mjs
+          tests/integration/ui/application-outcomes.mjs
+          tests/integration/storage/save-lane.mjs
           tests/integration/storage/strict-durability-boundaries.mjs
           tests/architecture/app/runtime-boundaries.mjs
           tests/architecture/storage/background-work-contract.mjs

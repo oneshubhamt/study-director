@@ -68,6 +68,19 @@ function fixture(options={}){
   return {coordinator,day,timerState,events,state:()=>({stored,panelMode,safety,clears,writes})};
 }
 
+
+// The Review subsystem receives the checked strict canonical Active Session
+// writer. Close/rollover publication therefore cannot silently degrade to the
+// best-effort flush path that persistence blocking suppresses.
+{
+  const host=readRuntimeSource('source/host/main.js');
+  assert.match(host,/writeCanonicalNow:\(operation,options\)=>ActiveSessionRuntime\.writeCanonicalNow\(operation,options\),writeLiveDraftNow/u);
+  const review=readRuntimeSource('source/core/review.ts');
+  assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the Study Day Active Session checkpoint'\);\s*if\(closesSession\)activeSessionPersistenceBlocked=true/u);
+  assert.match(review,/await flushFinalActiveSessionCheckpoint\('saving the rollover Active Session checkpoint'\);\s*activeSessionPersistenceBlocked=true/u);
+  assert.doesNotMatch(review,/activeSessionPersistenceBlocked=true;\s*stopTimerExecution\(\);\s*cancelPendingLiveDraftSave\(\)/u);
+}
+
 // Saved-Day acknowledgement advances the session receipt only after the strict
 // canonical session write succeeds. Failure restores the previous revision.
 {

@@ -1,10 +1,11 @@
 import {readCoreScript} from '../../helpers/core-script.mjs';
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
-const html=readHostHtml(),review=fs.readFileSync('source/core/review.ts','utf8');
+const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const noop=()=>{};
 
@@ -33,21 +34,68 @@ const noop=()=>{};
 // Commit succeeds before refresh/cleanup. A later error must never say that the
 // locally committed record was not saved, or emit a success followed by failure.
 {
-  const {coordinator,port}=createNotifications('review');let failCommit=false,failFollowup=true,failAck=false,failClear=false,acknowledged=0,clears=0;
-  const context={notifications:port,saveDayInProgress:false,activeSessionPersistenceBlocked:false,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,flushLiveDraft:async()=>{},ReviewView:{refresh:()=>({evidence:{}}),sync:noop},commitDailyRecord:async()=>{if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,writeLiveDraftNow:async()=>{},refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop};
+  const {coordinator,port}=createNotifications('review');let failCommit=false,failFollowup=true,failAck=false,failClear=false,failCheckpoint=false,acknowledged=0,clears=0,checkpoints=0,expectBlockedAtCommit=false;
+  const context={notifications:port,saveDayInProgress:false,activeSessionPersistenceBlocked:false,reviewHasStudyDay:()=>true,saveReflectionOnlyRecord:noop,appCanMutate:()=>true,document:{querySelector:()=>({})},setStatus:noop,SessionEvidenceGateway:{snapshot:()=>({date:'2026-09-30'})},todayISO:()=> '2026-09-30',PracticePacer:{finalizeForDayClose:noop},captureTodayState:noop,
+    flushFinalActiveSessionCheckpoint:async()=>{assert.equal(context.activeSessionPersistenceBlocked,false,'final checkpoint must run before later Active Session writes are blocked');checkpoints++;if(failCheckpoint)throw new Error('checkpoint unavailable');return {ok:true,error:null,storage:{idb:true}};},
+    ReviewView:{refresh:()=>({evidence:{}}),sync:noop},commitDailyRecord:async()=>{assert.equal(context.activeSessionPersistenceBlocked,expectBlockedAtCommit,'close paths block only after the verified checkpoint');if(failCommit)throw new Error('disk full');return {doc:{sourceRevision:'r1'},rec:{date:'2026-09-30'}};},markStorageHealthTimestamp:noop,stopTimerExecution:noop,cancelPendingLiveDraftSave:noop,clearCanonicalSessionAfterSavedDay:async()=>{if(failClear)throw new Error('session close failed');clears++;},acknowledgeSavedStudyDay:async()=>{if(failAck)throw new Error('acknowledgement write failed');acknowledged++;},clearSaveReminder:noop,refreshLibraryAfterSave:async()=>{if(failFollowup)throw new Error('refresh unavailable');},prettyDate:v=>v,durationLabel:()=>'',displayPercent:()=>'',syncReviewSurfaceMode:noop};
   vm.createContext(context);vm.runInContext(review.slice(review.indexOf('async function saveDayRecord('),review.indexOf('/* ROLLOVER SAVE ORCHESTRATION */')),context);
   assert.equal(await context.saveDayRecord(),false);
   let event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed');assert.match(event.message,/saved locally.*follow-up/i);assert.equal(coordinator.eventStatus().toasts.length,1);
   failFollowup=false;assert.equal(await context.saveDayRecord(),true);event=coordinator.readEvent('review','save-study-day');assert.equal(event.lifecycle,'succeeded');assert.equal(event.persistent,false);
   assert.equal(acknowledged,2,'successful Save Today must pass the acknowledgement gate');
-   failAck=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed');failAck=false;
-   assert.equal(await context.saveDayRecord({closeSession:true}),true);
-   assert.equal(clears,1,'a suspended Study Day closes the original session in the save lifecycle');
-   assert.equal(acknowledged,2,'closing a suspended session must not publish an interim Active Session acknowledgement');
-   failClear=true;assert.equal(await context.saveDayRecord({closeSession:true}),false);
-   event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed','a saved Day with an uncleared suspended session is not called complete');failClear=false;
-   failCommit=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-failed');assert.equal(event.persistent,true);assert.match(event.message,/Keep this tab open/);
+  failAck=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed');failAck=false;
+  expectBlockedAtCommit=true;assert.equal(await context.saveDayRecord({closeSession:true}),true);
+  assert.equal(clears,1,'a suspended Study Day closes the original session in the save lifecycle');
+  assert.equal(acknowledged,2,'closing a suspended session must not publish an interim Active Session acknowledgement');
+  failClear=true;assert.equal(await context.saveDayRecord({closeSession:true}),false);
+  event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-completed','a saved Day with an uncleared suspended session is not called complete');failClear=false;
+  failCheckpoint=true;const commitsBeforeCheckpointFailure=checkpoints;assert.equal(await context.saveDayRecord({closeSession:true}),false);assert.equal(context.activeSessionPersistenceBlocked,false);assert.equal(checkpoints,commitsBeforeCheckpointFailure+1);failCheckpoint=false;
+  expectBlockedAtCommit=false;failCommit=true;assert.equal(await context.saveDayRecord(),false);event=coordinator.readEvent('review','save-study-day');assert.equal(event.outcome,'local-save-failed');assert.equal(event.persistent,true);assert.match(event.message,/Keep this tab open/);
   coordinator.dismissEvent(event.key,event.deliveryId);assert.equal(await context.saveDayRecord(),false);assert.equal(coordinator.eventStatus().toasts.length,1,'a new failed attempt re-arms the dismissed warning');coordinator.clear();
+}
+
+
+// Reflection-only persistence keeps the date-specific concurrency baseline and
+// treats Library refresh as a post-commit follow-up, never as a storage retry.
+{
+  let currentDate='2026-10-02',reflectionOnlyState=Object.freeze({date:currentDate,canonical:'Current B',recordKind:'diary'}),persistedReview=null,refreshFailure=new Error('refresh unavailable'),commitOptions=null;
+  const context={Object,Promise,Error,freeze:Object.freeze,reflectionOnlyState,persistedReview,
+    writeLiveDraftNow:async()=>({ok:true}),DailyReflection:{commit:async(_date,reflection,options)=>{commitOptions=options;return {canonical:reflection,revision:1,recordKind:'diary'};}},
+    getReviewDate:()=>currentDate,reviewDate:value=>String(value),normalizeReviewState:(value,date)=>Object.freeze({date,reflection:value.reflection,studyQuality:null}),syncReviewSurfaceMode:noop,
+    markStorageHealthTimestamp:noop,refreshLibraryAfterSave:async()=>{if(refreshFailure)throw refreshFailure;},AppDiagnostics:{capture:noop}
+  };
+  vm.createContext(context);
+  const start=review.indexOf('function reflectionLibraryFollowup('),end=review.indexOf('function reflectionLaneState(',start);
+  vm.runInContext(review.slice(start,end),context);
+  const oldDate='2026-10-01';
+  const pending={mode:'saved-day',date:oldDate,reflection:'Saved A',expectedCanonical:'Original A',backupCapture:false};
+  const saved=await context.writeReflection(pending);
+  assert.equal(commitOptions.expectedCanonical,'Original A','the queued write uses its captured date-A baseline after date B becomes current');
+  assert.equal(context.reflectionOnlyState.date,currentDate,'an old-date completion must not replace the newly selected date state');
+  assert.equal(await saved.followup,refreshFailure,'post-commit refresh failure is contained in the follow-up result');
+  currentDate=oldDate;context.reflectionOnlyState=Object.freeze({date:oldDate,canonical:'Original A',recordKind:'diary'});refreshFailure=null;
+  const current=await context.writeReflection({...pending,reflection:'Saved A2'});
+  assert.equal(context.reflectionOnlyState.canonical,'Saved A2','a still-current date adopts its verified committed value');
+  assert.equal(await current.followup,null);
+}
+
+// Manual Save Reflection reports a verified commit honestly when only Library
+// refresh fails, while a real persistence failure remains a failed save.
+{
+  const {coordinator,port}=createNotifications('review');let refreshError=new Error('refresh unavailable'),storageError=null;
+  const context={notifications:port,saveDayInProgress:false,appCanMutate:()=>true,reflectionOnlyReady:()=>true,getReviewDate:()=> '2026-10-01',
+    resolveReviewEditorBinding:()=>({date:'2026-10-01',reflection:'Committed reflection'}),document:{querySelector:()=>({})},
+    flushReflectionOnlySave:async()=>{if(storageError)throw storageError;return {canonical:'Committed reflection',followup:Promise.resolve(refreshError)};},
+    ReviewView:{sync:noop},syncReviewSurfaceMode:noop,errorMessage:error=>String(error?.message||error)
+  };
+  vm.createContext(context);
+  const start=review.indexOf('async function saveReflectionOnlyRecord('),end=review.indexOf('async function saveDayRecord(',start);
+  vm.runInContext(review.slice(start,end),context);
+  assert.equal(await context.saveReflectionOnlyRecord(),false);
+  let event=coordinator.readEvent('review','save-reflection');assert.equal(event.outcome,'local-save-completed');assert.match(event.message,/Reflection saved locally; refreshing Library failed/u);
+  refreshError=null;assert.equal(await context.saveReflectionOnlyRecord(),true);event=coordinator.readEvent('review','save-reflection');assert.equal(event.lifecycle,'succeeded');
+  storageError=new Error('disk full');assert.equal(await context.saveReflectionOnlyRecord(),false);event=coordinator.readEvent('review','save-reflection');assert.equal(event.outcome,'local-save-failed');assert.match(event.message,/Could not save reflection/u);
+  coordinator.clear();
 }
 
 // Generic feature handles project to the existing surfaces without owning the
@@ -74,4 +122,4 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','date-stable reflection baseline','reflection commit versus Library refresh failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
