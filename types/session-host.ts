@@ -65,7 +65,6 @@ export interface SessionPersistencePorts{
 }
 export interface SessionLifecyclePorts{
   run<T>(kind:string,options:Readonly<SessionOptions>,operation:()=>T|PromiseLike<T>):Promise<T>;
-  runSync<T>(kind:string,options:Readonly<SessionOptions>,operation:()=>T):T;
 }
 export interface SessionApplyPorts{
   readPlanDraft():string;
@@ -158,8 +157,8 @@ export interface SessionHostController{
   persistenceSuppressed():boolean;
   withPersistenceSuppressed<T>(operation:()=>T|PromiseLike<T>):Promise<T>;
   rollbackLocalTransition(snapshot:SessionSnapshot,source:string,options?:Readonly<{restoreRuntime?:boolean}>):Promise<boolean>;
-  applyStoredSession(session:ActiveSession,snapshot:SessionSnapshot,options?:Readonly<{source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean}>):unknown;
-  resetRuntime(options?:Readonly<{source?:string;date?:string;lifecycleManaged?:boolean}>):unknown;
+  applyStoredSession(session:ActiveSession,snapshot:SessionSnapshot,options?:Readonly<{source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean}>):unknown|Promise<unknown>;
+  resetRuntime(options?:Readonly<{source?:string;date?:string;lifecycleManaged?:boolean}>):boolean|Promise<boolean>;
   resetLocal():Promise<SessionResult>;
   suspendLocal(options?:Readonly<{source?:string}>):Promise<ActiveSession>;
   restoreSuspendedLocal(session:ActiveSession):Promise<ActiveSession>;
