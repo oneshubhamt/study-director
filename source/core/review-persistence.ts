@@ -1,6 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {DailyRecord} from '../../types/record-models.ts';
-import type {FlushOptions,SaveLane} from '../../types/pilot.ts';
+import type {FlushOptions,SaveLane,SaveState} from '../../types/pilot.ts';
 import type {ReviewDailyReflectionResult} from '../../types/review.ts';
 import type {DiaryEditorCallbacks,ReviewPersistenceInput,ReviewPersistenceModule as ReviewPersistenceModuleContract,SavedDayRecord} from '../../types/review-persistence.ts';
 
@@ -107,8 +107,8 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     const canonical=String(record.reflection||''),revision=records.timestamp(record),ownershipRevision=ownership.revision();
     let state!:EditorState;
     const lane=saveLane.createLane<string,SavedDayRecord|null>(freeze({
-      label:'Diary reflection',write:(next,options)=>write(field,state,next,options),
-      onState:(status,error)=>laneState(field,state,status,error),
+      label:'Diary reflection',write:(next:string,options:FlushOptions)=>write(field,state,next,options),
+      onState:(status:SaveState,error:unknown)=>laneState(field,state,status,error),
       environment:freeze({setTimeout:environment.setTimeout,clearTimeout:environment.clearTimeout})
     }));
     state={date,canonical,revision,recordKind:record.recordKind==='diary'?'diary':'study',ownershipRevision,onSaved:callbacks.onSaved||null,onState:callbacks.onState||null,lane};
