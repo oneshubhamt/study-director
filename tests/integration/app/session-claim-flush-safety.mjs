@@ -13,7 +13,7 @@ const {module:ReviewHost,FakeInput}=loadReviewHost();
 const date='2026-08-27';
 function fixture(options={}){
   const input=new FakeInput(date),title={textContent:''},document={getElementById:id=>id==='day-date'?input:id==='review-date'?title:null};
-  const timerState={studyDate:date,contentRevision:7,savedRevision:0},tasks=options.tasks??[{kind:'work'}];
+  const timerState={studyDate:date,contentRevision:7,savedRevision:options.savedRevision??0},tasks=options.tasks??[{kind:'work'}];
   const day=ReviewHost.createDayState(Object.freeze({
     document,timerState,tasks:()=>tasks,isTrackableBlock:task=>task?.kind==='work',isValidIsoDate:value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||'')),
     todayISO:()=>date,fullWeekdayNames:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
@@ -87,15 +87,15 @@ function fixture(options={}){
 // a canonical receipt.
 {
   let current={date,recordKind:'study',reflection:'Saved'},reads=0;
-  const trial=fixture({active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},dayRecord:current,
+  const trial=fixture({savedRevision:7,active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},dayRecord:current,
     coverage:(record)=>record?.reflection==='Saved'});
   const original=trial.coordinator;
   assert.equal(await original.savedRecordExistsForDate(date),true);
   // Recreate against changed canonical providers: there is deliberately no positive cache.
-  const changed=fixture({active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},dayRecord:{...current,reflection:'Other'},
+  const changed=fixture({savedRevision:7,active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},dayRecord:{...current,reflection:'Other'},
     coverage:(record)=>record?.reflection==='Saved'});
   assert.equal(await changed.coordinator.savedRecordExistsForDate(date),false);
-  const rescue=fixture({active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},activeInIdb:false,dayRecord:current,
+  const rescue=fixture({savedRevision:7,active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},activeInIdb:false,dayRecord:current,
     coverage:()=>true});
   assert.equal(await rescue.coordinator.savedRecordExistsForDate(date),false);
 }
@@ -254,7 +254,7 @@ function fixture(options={}){
     {label:'failed canonical verification',activeInIdb:true,coverage:true,verifyFailure:true,expected:false}
   ]){
     const dayRecord=spec.missing?null:{date,recordKind:'study',reflection:'Saved'};
-    const trial=fixture({active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},activeInIdb:spec.activeInIdb,dayRecord,
+    const trial=fixture({savedRevision:7,active:{date,status:'active',snapshot:{contentRevision:7,savedRevision:7}},activeInIdb:spec.activeInIdb,dayRecord,
       verifyFailure:spec.verifyFailure,coverage:()=>spec.coverage});
     assert.equal(await trial.coordinator.savedRecordExistsForDate(date),spec.expected,spec.label);
   }
