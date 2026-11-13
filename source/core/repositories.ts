@@ -5,6 +5,8 @@ import type {WriteToken} from '../../types/ownership.ts';
 import type {DailyRecord,ActiveSession,SavedPlans,PendingReview,PersonalData} from '../../types/record-models.ts';
 import type {RepositoriesInput,ValidatorInput,RepositoryMetadata,MetadataFields,SessionResult,RecoveryEnvelope,DeletionEntry,DayDeletion,NoteDeletion,AttachmentDeletion,WriteOptions,BatchOptions,RevisionValue,RevisionState,MaintenanceOptions,MaintenanceResult,WindowOptions,ImportOptions,CanonicalReadOptions,DailyView,DailySummary,SummaryView,PortablePreferences} from '../../types/repositories.ts';
 type RawFields=MetadataFields&Partial<Record<'kind'|'id'|'entries'|'shell'|'snapshot'|'revision'|'type'|'scheduleText'|'runningOn'|'suspendedAt'|'savedAt'|'entityType'|'entityId'|'schemaVersion'|'deviceId'|'createdAt'|'deleted'|'syncStatus'|'dayOfWeek'|'dayName',unknown>>;
+type DailyRecordBatchOptions=BatchOptions&{expectedCanonical?:DailyRecord|null};
+type DailyRecordMutationOptions={backupCapture?:boolean;expectedCanonical?:DailyRecord|DailyView|null};
 // Inspection only: properties stay unknown until the existing validators accept them.
 const repositoryFields=(value:unknown)=>value as RawFields|null|undefined;
 const sdRepositoriesFactory=(()=>{
@@ -731,9 +733,13 @@ function currentDailyRecordDocuments(records:unknown,label:string='Daily Records
   if(docs.some(record=>!record))throw new Error(`${label} contain noncanonical data. Only current canonical data may be persisted.`);
   return docs as DailyRecord[];
 }
-async function idbPutDailyRecordBatch(records:readonly unknown[],{bumpRevision=true,ownershipToken=null,preserveNewer=false}:BatchOptions={}){
+async function idbPutDailyRecordBatch(records:readonly unknown[],options:DailyRecordBatchOptions={}){
+  const {bumpRevision=true,ownershipToken=null,preserveNewer=false}=options;
   const docs=currentDailyRecordDocuments(records,'Daily Record batch');
   if(!docs.length)return true;
+  const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
+  if(conditional&&docs.length!==1)throw new Error('A conditional Daily Record write requires exactly one record.');
+  const expected=conditional?options.expectedCanonical??null:null;
   const stores=[DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_APP_META_STORE];
   return idbStrictTransaction<{ok:true}>(stores,'readwrite',(tx,finish)=>{
     if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record transaction');
@@ -742,6 +748,23 @@ async function idbPutDailyRecordBatch(records:readonly unknown[],{bumpRevision=t
     stageCanonicalMutationEpoch(tx,[...new Set(docs.map(doc=>dailyPreparationUnit(doc.date)))]);
     const write=(doc:DailyRecord)=>{recordStore.put(doc);summaryStore.put(buildDailyRecordSummary(doc));meta.remove('savedDayDeletionPrefix',doc.date);};
     docs.forEach(doc=>{
+      if(conditional){
+        const request=recordStore.get(doc.date);
+        request.onerror=()=>finish(false,request.error||new Error('Daily Record precondition read failed'));
+        request.onsuccess=()=>{
+          try{
+            if(ownershipToken)assertWriteToken(ownershipToken,'the conditional daily-record write');
+            const current=readableDailyRecord(request.result)||null;
+            if(current===null?expected!==null:expected===null||!sameDataValue(current,expected)){
+              try{tx.abort();}catch{}
+              finish(false,Object.assign(new Error('Daily Record changed before this save.'),{code:'DAILY_RECORD_CHANGED'}));
+              return;
+            }
+            write(doc);
+          }catch(error){try{tx.abort();}catch{}finish(false,error);}
+        };
+        return;
+      }
       if(!preserveNewer){write(doc);return;}
       const request=recordStore.get(doc.date);
       request.onerror=()=>finish(false,request.error||new Error('DailyRecord reconciliation read failed'));
@@ -757,9 +780,11 @@ async function idbPutDailyRecordBatch(records:readonly unknown[],{bumpRevision=t
     tx.oncomplete=()=>{InsightsDatasetRevision.committed(revisionState);finish(true,{ok:true});};
   },'daily record batch write aborted');
 }
-async function idbPut(rec:unknown,options:BatchOptions={}){
+async function idbPut(rec:unknown,options:DailyRecordBatchOptions={}){
   const clean=sanitizeCurrentDailyRecord(rec);
   if(!clean)throw new Error('invalid daily record');
+  const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
+  if(conditional&&options.expectedCanonical!==null&&!sanitizeCurrentDailyRecord(options.expectedCanonical))throw new Error('Daily Record precondition is not canonical.');
   return idbPutDailyRecordBatch([clean],options);
 }
 function idbAllRecords(){return idbGetAll(DB_DAILY_RECORD_STORE,'read aborted');}
@@ -793,13 +818,23 @@ async function getVerifiedIdbDailyRecordSummaries(){
   return clean as DailySummary[];
 }
 function idbGetRecord(date:string){return idbGet(DB_DAILY_RECORD_STORE,date,'record read aborted');}
-async function idbDelete(date:string,{trackDeletion=true,ownershipToken=null,deletedAt=new Date().toISOString()}:{trackDeletion?:boolean;ownershipToken?:WriteToken|null;deletedAt?:string}={}){
+async function idbDelete(date:string,options:{trackDeletion?:boolean;ownershipToken?:WriteToken|null;deletedAt?:string;expectedCanonical?:DailyRecord|null}={}){
+  const {trackDeletion=true,ownershipToken=null,deletedAt=new Date().toISOString()}=options;
+  const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical'),expected=conditional?options.expectedCanonical??null:null;
   return idbStrictTransaction<{changed:boolean}>([DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     if(ownershipToken)assertWriteToken(ownershipToken,'the daily-record deletion');
     const records=tx.objectStore(DB_DAILY_RECORD_STORE),summaries=tx.objectStore(DB_DAILY_SUMMARY_STORE),meta=Meta.view(tx);
     let changed=false,revisionState:RevisionState|null=null;
     const req=records.get(date);
     req.onsuccess=()=>{
+      if(conditional){
+        const current=readableDailyRecord(req.result)||null;
+        if(current===null?expected!==null:expected===null||!sameDataValue(current,expected)){
+          try{tx.abort();}catch{}
+          finish(false,Object.assign(new Error('Daily Record changed before this deletion.'),{code:'DAILY_RECORD_CHANGED'}));
+          return;
+        }
+      }
       changed=!!req.result;records.delete(date);summaries.delete(date);
       stageCanonicalMutationEpoch(tx,[dailyPreparationUnit(date)]);
       if(trackDeletion){const deletion=savedDayDeletionValue(date,deletedAt);meta.put('savedDayDeletionPrefix',deletion,{suffix:date,updatedAt:deletion.deletedAt});}else meta.remove('savedDayDeletionPrefix',date);
@@ -1089,8 +1124,9 @@ async function verifyCanonicalDailyRecordAbsent(date:string){
   if(stored||fallback||deletion)throw new Error('Canonical Saved Day deletion did not pass its durable read-back check.');
   return true;
 }
-async function storeDailyRecord(rec:DailyRecord|DailyView,options:{backupCapture?:boolean}={}){
+async function storeDailyRecord(rec:DailyRecord|DailyView,options:DailyRecordMutationOptions={}){
   const ownershipToken=issueWriteToken('saving the daily record');
+  const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
   if(!rec||!isValidIsoDate(rec.date))throw new Error('Invalid daily record date');
   const finishWrite=beginAuthoritativeWrite();
   let stored=false;
@@ -1101,16 +1137,18 @@ async function storeDailyRecord(rec:DailyRecord|DailyView,options:{backupCapture
   const candidate:RawFields={...storedDailyRecordFields(rec),version:DATA_CONTRACT.schemas.DailyRecord.version,updatedAt};
   const clean=sanitizeCurrentDailyRecord(candidate);
   if(!clean||('degraded' in clean&&clean.degraded))throw new Error('New daily record failed its canonical validation.');
+  const expected=conditional?(options.expectedCanonical===null?null:sanitizeCurrentDailyRecord(storedDailyRecordFields(options.expectedCanonical))):null;
+  if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record save precondition failed canonical validation.');
   try{
       assertWriteToken(ownershipToken,'the daily-record IndexedDB write');
-    await idbPut(clean,{markDirty:true,ownershipToken});
+    await idbPut(clean,{markDirty:true,ownershipToken,...(conditional?{expectedCanonical:expected}:{})});
     assertWriteToken(ownershipToken,'the daily-record post-write cleanup');
     cleanupCommittedDailyRecords([clean]);
     reportCanonicalCommit('dailyRecord','upsert',null,{backupCapture:options.backupCapture===true});
     stored=true;return freeze({ok:true,storage:'indexeddb'});
   }
   catch(e){
-    if(isOwnershipLostError(e))throw e;
+    if(isOwnershipLostError(e)||conditional)throw e;
     assertWriteToken(ownershipToken,'the daily-record fallback write');
     const existing=fallbackDailyRecordsGet(),arr=existing.filter(r=>r.date!==clean.date);arr.push(clean);
     const capped=capFallbackDailyRecords(arr,rescueRoom(STORAGE_KEYS.fallbackDailyRecords,APP_LIMITS.fallbackDailyRecordsBytes)),retainedDates=new Set(capped.map(record=>record.date));
@@ -1266,8 +1304,11 @@ async function materializeDailyRecordViews(records:DailyRecord[],{yieldProjectio
   }
   return out;
 }
-async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCapture?:boolean}={}){
+async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCapture?:boolean;expectedCanonical?:DailyRecord|DailyView|null}={}){
   const rollback=options&&options.rollback===true,backupCapture=options&&options.backupCapture===true;
+  const conditional=Object.prototype.hasOwnProperty.call(options,'expectedCanonical');
+  const expected=conditional?(options.expectedCanonical===null?null:sanitizeCurrentDailyRecord(storedDailyRecordFields(options.expectedCanonical))):null;
+  if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record deletion precondition failed canonical validation.');
   const ownershipToken=issueWriteToken('deleting the daily record');
   const finishWrite=beginAuthoritativeWrite();
   let removed=false;
@@ -1277,13 +1318,13 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
     const staged=rollback?false:stageDeletionRecovery('dailyRecord',date,deletedAt);
     try{
       assertWriteToken(ownershipToken,'the daily-record deletion');
-      if(!staged){
+      if(!staged&&!conditional){
         if(!fallbackDailyRecordsSet(fallbackBefore.filter(record=>record.date!==date)))throw LocalStorageContract.lastError||new Error('DailyRecord fallback could not be cleared and no durable deletion marker could be established.');
         assertWriteToken(ownershipToken,'the daily-record IndexedDB deletion');
       }
-      const result=await idbDelete(date,{trackDeletion:!rollback,ownershipToken,deletedAt});
+      const result=await idbDelete(date,{trackDeletion:!rollback,ownershipToken,deletedAt,...(conditional?{expectedCanonical:expected}:{})});idbRemoved=true;
       assertWriteToken(ownershipToken,'the daily-record fallback cleanup');
-      const fallbackCleared=staged?fallbackDailyRecordsSet(fallbackDailyRecordsRawGet().filter(r=>r.date!==date)):true;
+      const fallbackCleared=staged||conditional?fallbackDailyRecordsSet(fallbackDailyRecordsRawGet().filter(r=>r.date!==date)):true;
       if(!fallbackCleared&&!staged)throw LocalStorageContract.lastError||new Error('DailyRecord fallback cleanup failed.');
       if(!rollback&&fallbackCleared)clearDeletionRecoveryKeys([recoveryKey]);
       confirmDailyRecordStorage();
@@ -1292,6 +1333,7 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
       removed=true;
     }catch(e){
       if(isOwnershipLostError(e))throw e;
+      if(conditional){if(!idbRemoved&&staged)clearDeletionRecoveryKeys([recoveryKey]);throw e;}
       if(rollback||!staged)throw e;
       assertWriteToken(ownershipToken,'the daily-record fallback deletion');
       showStorageFallbackWarning(e&&(e as {message?:unknown;code?:unknown;name?:unknown;reason?:unknown}|null|undefined)?.message?(e as {message?:unknown;code?:unknown;name?:unknown;reason?:unknown}|null|undefined)?.message:'saved-date database failed');
