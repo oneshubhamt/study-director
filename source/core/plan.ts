@@ -553,18 +553,22 @@ function completeScheduleApply(preparation:Readonly<PlanApplyPreparation>,parsed
     progressMigration:preparation.progressMigration||null,reviewOnly:!!opts.reviewOnly,
     sessionSnapshot:opts.sessionSnapshot||null,lifecycleManaged:!!opts.lifecycleManaged
   });
-  renderSched();
-  setPlanComposerOpen(false);
-  const migrationSummary=applyResult&&typeof applyResult==='object'?applyResult.migrationSummary:undefined;
-  const status=appliedScheduleStatus(parsed,draft,opts,migrationSummary);
-  setPlanStatus(status.text,status.state);
-  scheduleGateway.clearSafety('New study day');
-  return true;
+  const finishApply=(result:import('../../types/plan.ts').PlanGatewayApplyResult|boolean|null)=>{
+    if(result===false)return false;
+    renderSched();
+    setPlanComposerOpen(false);
+    const migrationSummary=result&&typeof result==='object'?result.migrationSummary:undefined;
+    const status=appliedScheduleStatus(parsed,draft,opts,migrationSummary);
+    setPlanStatus(status.text,status.state);
+    scheduleGateway.clearSafety('New study day');
+    return true;
+  };
+  return isPromiseLike(applyResult)?Promise.resolve(applyResult).then(finishApply):finishApply(applyResult);
 }
 function applySchedule(options:Readonly<PlanApplyOptions>={}){
   const opts=options&&typeof options==='object'?options:{};
-  // A canonical Active Session is already durable: restore it synchronously
-  // without writing or replacing the independent working Plan draft.
+  // A canonical Active Session is already durable: restore it through the
+  // lifecycle without writing or replacing the independent working Plan draft.
   const explicitSchedule=typeof opts.scheduleText==='string'?opts.scheduleText:null;
   const rawOriginal=explicitSchedule===null?getPlanDraftText():explicitSchedule;
   const projection=opts.projection&&opts.projection.format==='study-director.plan-draft-projection'
