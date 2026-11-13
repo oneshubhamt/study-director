@@ -631,7 +631,7 @@ async function handleStudyDayRollover(){
   rolloverSaveInProgress=true;
   const endedDate=SessionState.studyDate;
   if(!endedDate){activeSessionPersistenceBlocked=false;rolloverSaveInProgress=false;return false;}
-  let savedDay:null|{date:string;revision:number}=null;
+  const rolloverState:{savedDay:null|{date:string;revision:number}}={savedDay:null};
   try{
     const saveable=hasSaveableStudyDay();
     if(saveable){
@@ -651,7 +651,7 @@ async function handleStudyDayRollover(){
       activeSessionPersistenceBlocked=true;
       if(saveable){
         const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
-        savedDay={date:rec.date,revision:doc.sourceRevision};
+        rolloverState.savedDay={date:rec.date,revision:doc.sourceRevision};
         markStorageHealthTimestamp('lastStudyDataSaveAt');
       }else{
         Runtime.setSafetyMessage('New study day: no schedule was loaded, so no Study Day record was created. Apply today’s schedule when ready.');
@@ -665,15 +665,15 @@ async function handleStudyDayRollover(){
       refreshStorageFallbackWarning();
       return true;
     });
-    if(savedDay){
-      markDayContentSaved(savedDay.date,savedDay.revision);
+    if(rolloverState.savedDay){
+      markDayContentSaved(rolloverState.savedDay.date,rolloverState.savedDay.revision);
       notifyUser('Study day auto-saved',`${prettyDate(endedDate)} was saved to Library. Apply today’s schedule when ready.`,`sdm-rollover-${endedDate}`);
       Runtime.setSafetyMessage(`New study day: ${prettyDate(endedDate)} was auto-saved to Library. Apply today’s schedule when ready.`);
     }
     return true;
   }catch(e){
     AppDiagnostics.capture('session.rollover-save',e,'error');
-    Runtime.setSafetyMessage(savedDay
+    Runtime.setSafetyMessage(rolloverState.savedDay
       ? `Saved ${prettyDate(endedDate)} to Library, but its old session could not be finalized: ${errorMessage(e)}. Keep the recovery data and retry after storage recovers.`
       : `New study day safety check could not auto-save ${prettyDate(endedDate)}: ${errorMessage(e)}. Open Review and save manually before starting a new day.`);
     refreshStorageFallbackWarning();
