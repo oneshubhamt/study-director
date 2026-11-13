@@ -35,7 +35,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   if(!snapshot.taskIdentity||!snapshot.taskState||!snapshot.timerState)throw new TypeError('Session runtime state ports are incomplete.');
   functions(domain,['normalizeCompletionSource','clampCompletion','cleanDayRevision','clampText','isCanonicalScheduleText','isValidIsoDate','todayISO'],'Session domain port');
   functions(persistence,['canMutate','recoveryQuiesced','persistenceBlocked','recoveryWorkActive','timerSnapshotEligible','markContentChanged','snapshotForWrite','reportResult','warn'],'Session persistence port');
-  functions(lifecycle,['run','runSync'],'Session lifecycle port');
+  functions(lifecycle,['run'],'Session lifecycle port');
   functions(apply,['readPlanDraft','writePlanDraft','previewPlanDraft','setStudyDate','applySessionSchedule'],'Session apply port');
   functions(reset,['stopTimerPresentation','invalidatePresentation','resetCountdown','setCurrentTask','resetBreak','setEmptyTimerMode','clearTimerSession','hydrateReview','invalidateSchedule','resetPlanSession','clearProgress','clearCarryForward','resetPractice','pausePracticeForSessionEnd'],'Session reset port');
   functions(installation,['id'],'Session installation port');
@@ -244,7 +244,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   function resetRuntime(options:Readonly<{source?:string;date?:string;lifecycleManaged?:boolean}>={}){
     const date=domain.isValidIsoDate(options.date)?String(options.date):domain.todayISO(),source=String(options.source||'session-reset');
     if(options.lifecycleManaged===true)return resetCore(date,source);
-    return lifecycle.runSync(source,{scheduleIdentity:true,date,autoDate:date===domain.todayISO()},()=>resetCore(date,source));
+    return lifecycle.run(source,{scheduleIdentity:true,date,autoDate:date===domain.todayISO()},()=>resetCore(date,source));
   }
   async function resetLocal():Promise<SessionResult>{
     const date=domain.todayISO();
@@ -273,7 +273,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
       finally{apply.writePlanDraft(pendingDraft);if(restored!==false)apply.previewPlanDraft();}
     };
     if(options.lifecycleManaged===true)return perform();
-    return lifecycle.runSync(source,{scheduleIdentity:true,date:session.date,autoDate:session.date===domain.todayISO(),snapshotReview:value.review},perform);
+    return lifecycle.run(source,{scheduleIdentity:true,date:session.date,autoDate:session.date===domain.todayISO(),snapshotReview:value.review},perform);
   }
   async function suspendLocal(options:Readonly<{source?:string}>={}):Promise<ActiveSession>{
     const source=options.source||'session-suspend';
