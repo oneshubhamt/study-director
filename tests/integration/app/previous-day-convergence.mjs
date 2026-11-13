@@ -1,22 +1,8 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
+import {createSavedDayFixture} from '../../helpers/review-saved-day-fixture.mjs';
 
-const app=readHostHtml();
-function production(signature){
-  const start=app.indexOf(signature),end=start<0?-1:app.indexOf('\n}',start);
-  assert.ok(start>=0&&end>start,'Production function missing: '+signature);
-  return app.slice(start,end+2);
-}
-const reminderLive=production('function liveSaveReminderEvidence(date){');
-const reminderCovers=production('function savedDayCoversReminderEvidence(record,subjects){');
-const reminderPending=production('async function savedDayHasUncoveredKeptSession(record,date){');
-const coversWork=production('async function savedDayCoversWork(date,captured=null){');
-const savedExists=production('async function savedRecordExistsForDate(date){');
-const reminder=production('async function revalidateSaveReminderAfterCanonicalConvergence(){');
-const prompt=production('async function promptSaveToday(){');
 const day='2026-11-04',today='2026-11-05';
 const session=(status,runningOn='inst_here',date=day)=>({
   id:'current',version:10,revision:7,date,status,runningOn,
@@ -98,8 +84,8 @@ for(const failure of ['', 'write', 'readback']){
 }
 
 // A Save Today notice may disappear only after canonical Saved Day coverage
-// proves it: after a current acknowledged session, or after sync retired
-// the old session without leaving an uncovered divergent review version.
+// proves it, including the same failure/race cases that previously exercised
+// host-local reminder functions.
 for(const spec of [
   {label:'acknowledged current session',current:true,ack:true,covered:true,want:true},
   {label:'newer Review feedback is preserved',current:true,ack:true,covered:true,newerStatus:true,want:true},
@@ -116,87 +102,48 @@ for(const spec of [
   {label:'null capture, retired canonical session, live work covered',current:false,evidence:false,runtime:true,dirty:true,covered:true,want:true},
   {label:'canonical session changed during readback',current:true,ack:true,covered:true,postReadDrift:true,want:false}
 ]){
-  let verified=0,statusClears=0,activeReads=0;
-  const snapshot={contentRevision:7,savedRevision:spec.ack?7:0};
-  const current=spec.current?{date:day,snapshot}:null;
-  const evidence=spec.evidence===false?null:{date:day,snapshot:{contentRevision:7,savedRevision:0}};
-  const record={date:day,recordKind:'study'};
-  const context=vm.createContext({
-    saveReminderDate:day,saveReminderEvidence:evidence,saveReminderGeneration:1,
-    sessionSafetyMessage:'Review reminder: historical work is unsaved',
-    daySaveDirty:()=>!!spec.dirty,
-    TASKS:spec.runtime?[{}]:[],
-    isTrackableBlock:()=>true,TimerState:{studyDate:day},getReviewDate:()=>day,
-    PlanRuntime:{appliedScheduleText:()=> 'valid plan'},
-    captureSessionSnapshot:()=>({date:day,uncovered:!!spec.runtimeUncovered}),
-    cleanDayRevision:value=>Number(value)||0,
-    AppData:{
-      activeSession:{load:async()=>({ok:true,value:++activeReads>1&&spec.postReadDrift
-        ?{date:day,snapshot:{...snapshot,uncovered:true}}:current,storage:{idb:!spec.rescue}})},
-      dailyRecords:{
-        documents:async()=>{if(spec.readFailure)throw new Error('Canonical IndexedDB read failed');return spec.covered?[record]:[];},
-        verifyCanonical:async()=>{verified++;return true;}
-      },
-      pendingReviews:{list:async()=>spec.uncoveredReview?[{
-        subject:'session',resolvedAt:'',kept:{date:day,uncovered:true}
-      }]:[]}
-    },
-    DailyRecordCodec:{savedDayCoversSessionEvidence:(stored,value)=>{
-      return !!stored&&stored.date===value.date&&!value.uncovered&&!value.snapshot?.uncovered;
-    }},
-    clearSessionSafetyMessage:()=>{context.sessionSafetyMessage='';},
-    NoticeCoordinator:{eventStatus:()=>({events:[{source:'review',id:'status-save-status',
-      message:spec.newerStatus?'Newer user feedback':'Review is ready. Save today to Library when you are done.'}]})},
-    setStatus:(id,message)=>{assert.equal(id,'save-status');assert.equal(message,'');statusClears++;},
-    AppDiagnostics:{capture:()=>{}}
+  const snapshot={contentRevision:7,savedRevision:spec.ack?7:0},current=spec.current?{date:day,status:'active',snapshot}:null;
+  const captured=spec.evidence===false?null:{date:day,snapshot:{contentRevision:7,savedRevision:0}};
+  const dayRecord=spec.covered?{date:day,recordKind:'study',reflection:'Saved'}:null;
+  const trial=createSavedDayFixture({
+    date:day,studyDate:day,contentRevision:7,savedRevision:spec.dirty?6:7,
+    tasks:spec.runtime?[{kind:'work'}]:[],active:current,activeInIdb:!spec.rescue,dayRecord,
+    reminder:true,reminderEvidence:captured,safetyMessage:'Review reminder: historical work is unsaved',
+    liveSnapshot:spec.runtime?()=>({date:day,uncovered:!!spec.runtimeUncovered}):null,
+    pendingReviews:spec.uncoveredReview?[{subject:'session',resolvedAt:'',kept:{date:day,uncovered:true}}]:[],
+    dayReadFailure:!!spec.readFailure,staleSaveStatus:!spec.newerStatus,
+    activeValue:spec.postReadDrift?(read,value)=>read>1?{...value,snapshot:{...snapshot,uncovered:true}}:value:undefined,
+    coverage:(record,value)=>!!record&&record.date===value?.date&&!value?.uncovered&&!value?.snapshot?.uncovered
   });
-  vm.runInContext([reminderLive,reminderCovers,reminderPending,coversWork,reminder,
-    'globalThis.revalidate=revalidateSaveReminderAfterCanonicalConvergence;'].join('\n'),context);
-  assert.equal(await context.revalidate(),spec.want,spec.label);
-  assert.equal(context.saveReminderDate,spec.want?'':day,spec.label+' reminder state');
-  assert.equal(context.sessionSafetyMessage==='',spec.want,spec.label+' visible warning');
-  assert.equal(verified,spec.want||spec.postReadDrift?1:0,spec.label+' canonical Day verification');
+  assert.equal(await trial.coordinator.revalidateSaveReminder(),spec.want,spec.label);
+  assert.equal(trial.day.reminder.date,spec.want?'':day,spec.label+' reminder state');
+  assert.equal(trial.state().safety==='',spec.want,spec.label+' visible warning');
+  const verifies=trial.events.filter(event=>event[0]==='verify').length;
+  assert.equal(verifies,spec.want||spec.postReadDrift?1:0,spec.label+' canonical Day verification');
+  const statusClears=trial.events.filter(event=>event[0]==='status'&&event[1]==='save-status'&&event[2]==='').length;
   assert.equal(statusClears,spec.want&&!spec.newerStatus?1:0,spec.label+' stale inline status');
 }
 
-// A concurrent newer reminder on the same study date cannot be dismissed
-// by an earlier canonical read-back. Null evidence is not a unique token.
+// A concurrent newer reminder on the same date cannot be dismissed by an
+// earlier read-back. The generation token, not nullable evidence, fences it.
 {
-  let resumeVerification,verificationEntered;
-  const blockingVerification=new Promise(resolve=>{resumeVerification=resolve;});
-  const entered=new Promise(resolve=>{verificationEntered=resolve;});
-  const dayRecord={date:day,recordKind:'study'};
-  const ctx=vm.createContext({
-    saveReminderDate:day,saveReminderEvidence:null,saveReminderGeneration:4,
-    sessionSafetyMessage:'Review reminder: keep my latest study work',
-    daySaveDirty:()=>false,TASKS:[],TimerState:{studyDate:day},
-    getReviewDate:()=>day,isTrackableBlock:()=>true,
-    AppData:{
-      activeSession:{load:async()=>({ok:true,value:{date:day,snapshot:{}},storage:{idb:true}})},
-      dailyRecords:{documents:async()=>[dayRecord],verifyCanonical:async()=>{verificationEntered();await blockingVerification;}},
-      pendingReviews:{list:async()=>[]}
-    },
-    DailyRecordCodec:{savedDayCoversSessionEvidence:()=>true},
-    clearSessionSafetyMessage:()=>{ctx.sessionSafetyMessage='';},
-    NoticeCoordinator:{eventStatus:()=>({events:[]})},
-    setStatus:()=>{throw new Error('newer reminder status should never be cleared');},
-    AppDiagnostics:{capture:()=>{}}
+  let resume,enteredResolve;
+  const blocked=new Promise(resolve=>{resume=resolve;});
+  const entered=new Promise(resolve=>{enteredResolve=resolve;});
+  const trial=createSavedDayFixture({
+    date:day,studyDate:day,savedRevision:7,tasks:[],active:{date:day,status:'active',snapshot:{contentRevision:7,savedRevision:7}},
+    dayRecord:{date:day,recordKind:'study'},reminder:true,reminderEvidence:null,reminderGeneration:4,
+    safetyMessage:'Review reminder: keep my latest study work',coverage:()=>true,
+    verifyDaily:async()=>{enteredResolve();await blocked;}
   });
-  vm.runInContext([reminderLive,reminderCovers,reminderPending,coversWork,reminder,
-    'globalThis.revalidate=revalidateSaveReminderAfterCanonicalConvergence;'].join('\n'),ctx);
-  const oldRevalidation=ctx.revalidate();
-  await entered;
-  ctx.saveReminderGeneration+=1;
-  ctx.saveReminderEvidence={date:day,snapshot:{newer:true}};
-  resumeVerification();
-  assert.equal(await oldRevalidation,false,'new same-day notice must invalidate earlier read-back');
-  assert.equal(ctx.saveReminderDate,day);
-  assert.equal(ctx.saveReminderGeneration,5);
-  assert.ok(ctx.sessionSafetyMessage.startsWith('Review reminder:'));
+  const pending=trial.coordinator.revalidateSaveReminder();await entered;
+  trial.day.reminder.generation+=1;trial.day.reminder.evidence={date:day,snapshot:{newer:true}};resume();
+  assert.equal(await pending,false);assert.equal(trial.day.reminder.date,day);assert.equal(trial.day.reminder.generation,5);
+  assert.ok(trial.state().safety.startsWith('Review reminder:'));
 }
 
-// A subsequent Save Today prompt uses the same canonical/live proof instead
-// of repeating a stale warning when a cross-device Saved Day covers the work.
+// Prompting uses the same canonical/live proof and captures only trustworthy
+// same-date session evidence when a reminder really remains necessary.
 for(const spec of [
   {name:'unacknowledged canonical session fully covered',dirty:false,runtime:true,want:true},
   {name:'dirty counter but matching live work',dirty:true,runtime:true,want:true},
@@ -205,31 +152,16 @@ for(const spec of [
   {name:'pending divergent kept session',dirty:false,runtime:true,uncoveredReview:true,want:false},
   {name:'canonical read unavailable',dirty:false,runtime:true,invalidRead:true,want:false}
 ]){
-  let verifies=0;
-  const ctx=vm.createContext({
-    TASKS:spec.runtime?[{}]:[],isTrackableBlock:()=>true,
-    TimerState:{studyDate:day},getReviewDate:()=>day,daySaveDirty:()=>spec.dirty,
-    PlanRuntime:{appliedScheduleText:()=> 'valid plan'},
-    captureSessionSnapshot:()=>({date:day,uncovered:!!spec.uncovered}),
-    AppData:{
-      activeSession:{load:async()=>({ok:!spec.invalidRead,error:spec.invalidRead?new Error('read failure'):null,
-        storage:{idb:true},value:{date:day,snapshot:{contentRevision:5,savedRevision:0}}})},
-      dailyRecords:{documents:async()=>[{date:day}],verifyCanonical:async()=>{verifies++;return true;}},
-      pendingReviews:{list:async()=>spec.uncoveredReview?[{subject:'session',resolvedAt:'',kept:{date:day,uncovered:true}}]:[]}
-    },
-    DailyRecordCodec:{savedDayCoversSessionEvidence:(record,value)=>
-      !!record&&record.date===value.date&&!value.uncovered&&!value.snapshot?.uncovered},
-    AppDiagnostics:{capture:()=>{}}
+  const trial=createSavedDayFixture({
+    date:day,studyDate:day,contentRevision:7,savedRevision:spec.dirty?6:7,tasks:spec.runtime?[{kind:'work'}]:[],
+    active:{date:day,status:'active',snapshot:{contentRevision:7,savedRevision:0}},activeReadFailure:!!spec.invalidRead,
+    dayRecord:{date:day,recordKind:'study'},liveSnapshot:spec.runtime?()=>({date:day,uncovered:!!spec.uncovered}):null,
+    pendingReviews:spec.uncoveredReview?[{subject:'session',resolvedAt:'',kept:{date:day,uncovered:true}}]:[],
+    coverage:(record,value)=>!!record&&record.date===value?.date&&!value?.uncovered&&!value?.snapshot?.uncovered
   });
-  vm.runInContext([reminderLive,reminderCovers,reminderPending,coversWork,savedExists,
-    'globalThis.checkSaved=savedRecordExistsForDate;'].join('\n'),ctx);
-  assert.equal(await ctx.checkSaved(day),spec.want,spec.name);
-  assert.equal(verifies,spec.want?1:0,spec.name+' canonical readback');
+  assert.equal(await trial.coordinator.savedRecordExistsForDate(day),spec.want,spec.name);
 }
 
-// Captured notice evidence must be a committed same-date session with a
-// matching local content revision. A failed/partial canonical read can never
-// become proof used later to dismiss an alert.
 for(const [label,canonicalReady,revisionMatches,runtimeReady,expectedEvidence] of [
   ['canonical and matching',true,true,false,true],
   ['rescue-only without live evidence',false,true,false,false],
@@ -237,61 +169,23 @@ for(const [label,canonicalReady,revisionMatches,runtimeReady,expectedEvidence] o
   ['lagging canonical without live evidence',true,false,false,false],
   ['lagging canonical with live evidence',true,false,true,true]
 ]){
-  const record={date:day,snapshot:{contentRevision:7}};
-  const ctx=vm.createContext({
-    TASKS:[{}],isTrackableBlock:()=>true,
-    getReviewDate:()=>day,savedRecordExistsForDate:async()=>false,
-    saveReminderDate:'',saveReminderEvidence:null,saveReminderGeneration:0,
-    TimerState:{studyDate:day,contentRevision:7},
-    cleanDayRevision:v=>Number(v)||0,
-    PlanRuntime:{appliedScheduleText:()=> 'valid plan'},
-    captureSessionSnapshot:()=>runtimeReady?{date:day,contentRevision:7}:null,
-    AppData:{activeSession:{load:async()=>({
-      ok:true,storage:{idb:canonicalReady},value:revisionMatches?record:{...record,snapshot:{contentRevision:6}}
-    })}},
-    ActiveSessionCodec:{sanitizeCurrent:v=>v},
-    AppDiagnostics:{capture:()=>{}},
-    prettyDate:v=>v,refreshStorageFallbackWarning:()=>{},
-    notifyUser:()=>{},setStatus:()=>{},setReviewDetailDisclosures:()=>{},
-    sessionSafetyMessage:''
+  const record={date:day,status:'active',snapshot:{contentRevision:revisionMatches?7:6,savedRevision:0}};
+  const trial=createSavedDayFixture({
+    date:day,studyDate:day,contentRevision:7,savedRevision:6,tasks:[{kind:'work'}],active:record,activeInIdb:canonicalReady,
+    dayRecord:null,liveSnapshot:runtimeReady?()=>({date:day,contentRevision:7}):null,coverage:()=>false
   });
-  vm.runInContext(reminderLive+'\n'+prompt+'\nglobalThis.prompt=promptSaveToday;',ctx);
-  await ctx.prompt();
-  assert.equal(!!ctx.saveReminderEvidence,expectedEvidence,label);
-  if(runtimeReady&&!canonicalReady)assert.equal(ctx.saveReminderEvidence.scheduleText,'valid plan','memory-only evidence keeps authored schedule');
-  assert.equal(ctx.saveReminderDate,day,label+' still displays an honest reminder');
+  await trial.coordinator.promptSaveToday();
+  assert.equal(!!trial.day.reminder.evidence,expectedEvidence,label);
+  if(runtimeReady&&!canonicalReady)assert.equal(trial.day.reminder.evidence.scheduleText,'valid plan','memory-only evidence keeps authored schedule');
+  assert.equal(trial.day.reminder.date,day,label+' still displays an honest reminder');
 }
 
-// Historical Review keeps yesterday's date deliberately. Neither the
-// second-by-second shell clock nor the timer's rollover callback may auto-save
-// or close it before the person has reviewed the evidence.
-{
-  const clock=production('function tickClock(){');
-  const rollover=production('async function handleStudyDayRollover(...args){');
-  for(const mode of ['previous','active']){
-    let clockRollover=0,serviceRollover=0,announced=0;
-    const ctx=vm.createContext({
-      sessionPanelMode:mode,
-      document:{getElementById:()=>null},
-      setTextSafe:()=>{},todayISO:()=>today,
-      studyDayRolledOver:()=>true,
-      handleStudyDayRollover:()=>{clockRollover++;},
-      maybePromptScheduleEndSave:()=>{},maybePromptBackupNudge:()=>{},
-      maybeAutoStartScheduledBlock:()=>true,
-      ReviewSaveService:{handleRollover:async()=>{serviceRollover++;return true;}},
-      AppActivation:{publish:()=>{announced++;}},
-      APP_ACTIVATION_KINDS:{DATE_ROLLOVER:'date-rollover'}
-    });
-    vm.runInContext(clock+'\nglobalThis.clock=tickClock;',ctx);
-    ctx.clock();
-    assert.equal(clockRollover,mode==='previous'?0:1,
-      mode+' clock must not schedule an automatic historical Review save');
-
-    vm.runInContext(rollover+'\nglobalThis.rollover=handleStudyDayRollover;',ctx);
-    assert.equal(await ctx.rollover(),mode!=='previous');
-    assert.equal(serviceRollover,mode==='previous'?0:1,'historical Review must not reach automatic rollover service');
-    assert.equal(announced,mode==='previous'?0:1,'no premature destructive rollover broadcast');
-  }
+// Historical Review never reaches the rollover service; active Review does.
+for(const mode of ['previous','active']){
+  const trial=createSavedDayFixture({date:day,panel:mode,rolloverResult:true});
+  assert.equal(await trial.coordinator.handleStudyDayRollover(),mode!=='previous');
+  assert.equal(trial.events.some(event=>event[0]==='service-rollover'),mode!=='previous');
+  assert.equal(trial.events.some(event=>event[0]==='rollover'),mode!=='previous');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'previous-day-convergence',
