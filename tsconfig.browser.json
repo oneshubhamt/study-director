@@ -181,6 +181,8 @@
     "source/core/plan-host.ts",
     "source/core/plan.ts",
     "types/plan-host.ts",
+    "types/review.ts",
+    "source/core/review.ts",
     "types/plan.ts",
     "types/session-host.ts",
     "types/session-actions.ts",

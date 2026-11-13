@@ -1,11 +1,21 @@
-(()=>{
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+import type {
+  ReviewModule as ReviewModuleContract,ReviewSubsystemInput,ReviewState,ReviewCurrentState,ReviewStateInput,ReviewInputEvent,ReviewRichInputMeta,
+  ReviewHydrateOptions,ReviewSaveOptions,ReviewReflectionBinding,ReviewReflectionPending,ReviewEvidence,ReviewMetrics,ReviewTaskRow,ReviewTaskHeaderInput,
+  ReviewTimingRowInput,ReviewProgressLineInput,ReviewCardModel,ReviewCardView,ReviewPracticeRunSummary,PracticeUnitSummary,PracticeSegmentSummary,
+  ReviewPracticeAggregate,ReviewPrepared,ReviewRenderOptions,ReviewUiState,ReviewFocusLocator,ReviewReportContext,ReviewReportChild,ReviewReportSection,
+  ReviewRecordViewTask
+} from '../../types/review.ts';
+import type {CompletionSource,Task,TaskOutcome} from '../../types/domain.ts';
+import type {DailyRecord,PracticeRun} from '../../types/record-models.ts';
+const sdReviewFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as typeof globalThis & {[key:symbol]:ModuleRegistration<'review','study-director.review'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
-registry.define('review',1,()=>{
+const createModule=():ReviewModuleContract=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     notifications:freeze(['begin','feedback']),
@@ -47,7 +57,7 @@ registry.define('review',1,()=>{
     interactions:freeze(['confirm','notify']),
     environment:freeze(['cancelAnimationFrame','clearTimeout','requestAnimationFrame','setTimeout','todayISO'])
   });
-  function createReviewSubsystem(input){
+  function createReviewSubsystem(input:Readonly<ReviewSubsystemInput>){
     if(!input||!Object.isFrozen(input))throw new TypeError('Review subsystem input must be frozen.');
     exactObject(input,['constants','services','runtime','ports'],'Review subsystem input');
     exactObject(input.constants,[
@@ -61,7 +71,7 @@ registry.define('review',1,()=>{
       'carryForward','originalSchedule','setSafetyMessage'
     ],'Review runtime adapter');
     const ports=exactObject(input.ports,Object.keys(PORT_FIELDS),'Review ports');
-    for(const [name,fields] of Object.entries(PORT_FIELDS))functions(ports[name],fields,'Review '+name+' port');
+    for(const [name,fields] of Object.entries(PORT_FIELDS) as [keyof typeof PORT_FIELDS,readonly string[]][])functions(ports[name],fields,'Review '+name+' port');
     const APP_LIMITS=input.constants.limits;
     const DATA_CONTRACT=input.constants.dataContract;
     const COMPLETION_SOURCES=input.constants.completionSources;
@@ -128,25 +138,25 @@ registry.define('review',1,()=>{
     const REVIEW_EDITOR_BINDING_VERSION='review-v2';
     const REVIEW_RICH_INPUT_META=Symbol.for('studyDirector.richValidatedInput.v1');
 
-    function validReviewDate(value){
+    function validReviewDate(value:unknown){
       const text=String(value||'');
       if(!/^\d{4}-\d{2}-\d{2}$/.test(text))return false;
       const parsed=new Date(text+'T00:00:00Z');
       return !Number.isNaN(parsed.getTime())&&parsed.toISOString().slice(0,10)===text;
     }
-    function reviewDate(value){
+    function reviewDate(value:unknown){
       const requested=String(value||'');
       return validReviewDate(requested)?requested:getReviewDate();
     }
-    function reflectionQuality(value){
+    function reflectionQuality(value:unknown){
       const parsed=Number(value);
       return Number.isInteger(parsed)&&parsed>=1&&parsed<=5?parsed:null;
     }
-    function reviewRichInputMeta(event,value){
+    function reviewRichInputMeta(event:ReviewInputEvent|null|undefined,value:unknown):ReviewRichInputMeta|null{
       const meta=event&&event[REVIEW_RICH_INPUT_META];
       return meta&&meta.format==='study-director.rich-validated-input'&&meta.version===1&&meta.canonical===String(value||'')&&typeof meta.plain==='string'?meta:null;
     }
-    function normalizeReviewState(value,date=getReviewDate(),options={}){
+    function normalizeReviewState(value:ReviewStateInput|ReviewState|null|undefined,date:unknown=getReviewDate(),options:Readonly<{validatedRich?:boolean}>={}):ReviewState{
       const target=reviewDate(date),source=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
       const reflection=options.validatedRich===true?String(source.reflection||''):clampEditorContent(source.reflection||'',APP_LIMITS.maxReflectionChars);
       if(!editorContentWithinLimits(reflection))throw new RangeError(`Daily Reflection is limited to ${APP_LIMITS.maxRichTextWords.toLocaleString()} rich-text words.`);
@@ -156,7 +166,7 @@ registry.define('review',1,()=>{
       const box=document.getElementById('daily-reflection');
       return [box,...document.querySelectorAll('.quality-btn')].filter(Boolean);
     }
-    function setReflectionRichSync(state,message){
+    function setReflectionRichSync(state:unknown,message:unknown){
       const box=document.getElementById('daily-reflection');if(!box)return false;
       const syncState=String(state||'saved'),syncStatus=String(message||'Saved'),indicator=document.getElementById('reflection-sync');
       box.dataset.richSyncState=syncState;box.dataset.richSyncStatus=syncStatus;
@@ -168,7 +178,7 @@ registry.define('review',1,()=>{
       }
       return true;
     }
-    function bindReviewEditors(date=getReviewDate()){
+    function bindReviewEditors(date:unknown=getReviewDate()){
       const target=reviewDate(date),owner=Number(getOwnershipRevision())||0,lifecycle=Number(getLifecycleRevision())||0;
       reviewBindingElements().forEach(field=>{
         field.dataset.reviewBinding=REVIEW_EDITOR_BINDING_VERSION;
@@ -186,22 +196,22 @@ registry.define('review',1,()=>{
       });
       return true;
     }
-    function reflectionEditorContent(date=getReviewDate()){
+    function reflectionEditorContent(date:unknown=getReviewDate()){
       const target=reviewDate(date),box=document.getElementById('daily-reflection');
       const current=String(box&&box.value||''),stored=persistedReview.date===target?String(persistedReview.reflection||''):'';
       return current===plainTextContent(stored)?stored:current;
     }
-    function resolveReviewEditorBinding(date=getReviewDate(),event=null){
+    function resolveReviewEditorBinding(date:unknown=getReviewDate(),event:ReviewInputEvent|null=null):ReviewState|null{
       if(!lifecycleCanWrite())return null;
       const target=reviewDate(date),box=document.getElementById('daily-reflection');
       if(!box||box.dataset.reviewBinding!==REVIEW_EDITOR_BINDING_VERSION||box.dataset.reviewDate!==target)return null;
       if(Number(box.dataset.reviewOwnershipRevision)!==Number(getOwnershipRevision())||Number(box.dataset.reviewLifecycleRevision)!==Number(getLifecycleRevision()))return null;
       const qualityFields=[...document.querySelectorAll('.quality-btn')];
-      if(qualityFields.some(field=>field.dataset.reviewBinding!==REVIEW_EDITOR_BINDING_VERSION||field.dataset.reviewDate!==target||Number(field.dataset.reviewLifecycleRevision)!==Number(getLifecycleRevision())))return null;
+      if(qualityFields.some(field=>field.dataset.reviewBinding!==REVIEW_EDITOR_BINDING_VERSION||field.dataset.reviewDate!==target||Number(field.dataset.reviewOwnershipRevision)!==Number(getOwnershipRevision())||Number(field.dataset.reviewLifecycleRevision)!==Number(getLifecycleRevision())))return null;
       const trusted=reviewRichInputMeta(event,box.value);
       return normalizeReviewState({reflection:trusted?trusted.canonical:reflectionEditorContent(target),studyQuality:getStudyQuality()},target,{validatedRich:!!trusted});
     }
-    function applyReviewState(value,date=getReviewDate()){
+    function applyReviewState(value:ReviewStateInput|ReviewState,date:unknown=getReviewDate()){
       const clean=normalizeReviewState(value,date);
       persistedReview=clean;
       const box=document.getElementById('daily-reflection');if(box)box.value=plainTextContent(clean.reflection);
@@ -210,7 +220,7 @@ registry.define('review',1,()=>{
       if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
       return clean;
     }
-    function hydrateReviewState(options={}){
+    function hydrateReviewState(options:ReviewHydrateOptions={}):ReviewState{
       const target=reviewDate(options.date||getReviewDate());
       const review=options.snapshotReview===undefined&&persistedReview.date===target?persistedReview:options.snapshotReview&&typeof options.snapshotReview==='object'?options.snapshotReview:{reflection:'',studyQuality:null};
       const dd=document.getElementById('day-date');if(dd&&dd.value!==target)dd.value=target;
@@ -234,7 +244,7 @@ function updateStudyQualitySummary(value=getStudyQuality()){
   const target=document.getElementById('review-study-quality-summary');
   if(target)target.textContent=Number.isInteger(value)&&value>=1&&value<=5?`${value}/5`:'Not rated';
 }
-function setStudyQuality(q,options={}){
+function setStudyQuality(q:unknown,options:Readonly<{save?:boolean}>={}){
   const val=reviewHasStudyDay()&&(q!==null&&q!==undefined&&q!=='')?Number(q):null;
   document.querySelectorAll('.quality-btn').forEach(btn=>{
     const selected=val!==null && Number(btn.dataset.q)===val;
@@ -244,8 +254,8 @@ function setStudyQuality(q,options={}){
   updateStudyQualitySummary(val);
   if(options.save!==false&&reviewHasStudyDay())queueReviewSave();
 }
-function reflectionOnlyReady(date=getReviewDate()){return reflectionOnlyState.date===reviewDate(date);}
-async function hydrateReflectionOnlyState(date=getReviewDate()){
+function reflectionOnlyReady(date:unknown=getReviewDate()){return reflectionOnlyState.date===reviewDate(date);}
+async function hydrateReflectionOnlyState(date:unknown=getReviewDate()){
   const target=reviewDate(date),token=++reflectionOnlyHydration;
   if(reviewHasStudyDay())return false;
   reflectionOnlyLoading=true;syncReviewSurfaceMode();setReflectionRichSync('busy','Loading reflection…');
@@ -266,7 +276,7 @@ async function hydrateReflectionOnlyState(date=getReviewDate()){
 // on a day without a study session, otherwise into the session. Each pending
 // value names its date and store, so a date change mid-save still writes the
 // right day.
-async function writeReflection(pending,options={}){
+async function writeReflection(pending:ReviewReflectionPending,options:Readonly<{backupCapture?:boolean}>={}){
   if(pending.mode==='session'){
     const result=await writeLiveDraftNow({markChanged:false,backupCapture:pending.backupCapture||options.backupCapture===true});
     if(!result||result.ok!==true)throw result&&result.error||new Error('the session could not be saved');
@@ -278,25 +288,25 @@ async function writeReflection(pending,options={}){
   if(reviewDate(getReviewDate())===pending.date){persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});syncReviewSurfaceMode();}
   markStorageHealthTimestamp('lastStudyDataSaveAt');await refreshLibraryAfterSave(pending.date);return saved;
 }
-function reflectionLaneState(state,error){
+function reflectionLaneState(state:'saving'|'saved'|'error',error:unknown){
   if(state==='saving')setReflectionRichSync('saving','Saving…');
   else if(state==='saved')setReflectionRichSync('saved','Saved');
   else{setReflectionRichSync('error',SaveLane.failureMessage('Reflection',error));AppDiagnostics.capture('review.reflection-save',error,'warn');}
 }
 const reflectionLane=SaveLane.createLane(freeze({label:'Reflection',write:writeReflection,onState:reflectionLaneState,environment:freeze({setTimeout,clearTimeout})}));
-function queueReflectionOnlySave(binding,options={}){
+function queueReflectionOnlySave(binding:ReviewReflectionBinding,options:Readonly<{backupCapture?:boolean}>={}){
   if(!binding||!lifecycleCanWrite())return false;
   const clean=normalizeReviewState({reflection:binding.reflection,studyQuality:null},binding.date,{validatedRich:true});
   persistedReview=clean;reflectionLane.schedule(freeze({mode:'saved-day',date:clean.date,reflection:clean.reflection,backupCapture:options.backupCapture===true}));
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
   return true;
 }
-function flushReflectionOnlySave(options={}){
+function flushReflectionOnlySave(options:ReviewSaveOptions={}){
   const bound=resolveReviewEditorBinding(getReviewDate(),options.event||null);
   if(bound)reflectionLane.schedule(freeze({mode:'saved-day',date:bound.date,reflection:bound.reflection,backupCapture:options.backupCapture===true}));
   return reflectionLane.flush(options);
 }
-function persistReviewBinding(binding,options={}){
+function persistReviewBinding(binding:ReviewState,options:ReviewSaveOptions={}){
   if(!binding||!lifecycleCanWrite())return false;
   if(!reviewHasStudyDay())return queueReflectionOnlySave(binding,options);
   persistedReview=normalizeReviewState(binding,binding.date,{validatedRich:true});
@@ -305,18 +315,18 @@ function persistReviewBinding(binding,options={}){
   reflectionLane.schedule(freeze({mode:'session',date:binding.date,backupCapture:options.backupCapture===true}));
   return true;
 }
-function saveReviewState(options={}){
+function saveReviewState(options:ReviewSaveOptions={}){
   if(!lifecycleCanWrite())return false;
   const binding=resolveReviewEditorBinding(getReviewDate(),options.event||null);
   if(!binding){setReflectionRichSync('error','Save failed');if(options.strict)throw new Error('This Review editor is no longer bound to the current date.');return false;}
   return persistReviewBinding(binding,options);
 }
-function queueReviewSave(options={}){
+function queueReviewSave(options:ReviewSaveOptions={}){
   const binding=resolveReviewEditorBinding(getReviewDate(),options.event||options);
   if(!binding)return false;
   return persistReviewBinding(binding,options);
 }
-function flushPendingReviewSave(options={}){
+function flushPendingReviewSave(options:ReviewSaveOptions={}){
   SaveLane.prepareFlush();
   if(!reviewHasStudyDay())return flushReflectionOnlySave(options);
   const binding=resolveReviewEditorBinding(getReviewDate(),options.event||null);
@@ -328,7 +338,7 @@ function flushPendingReviewSave(options={}){
   return result===null?lifecycleCanWrite():true;
 }
 function reviewPersistenceCommitted(){setReflectionRichSync('saved','Saved');return true;}
-function reviewPersistenceFailed(error){setReflectionRichSync('error','Save failed');if(error)AppDiagnostics.capture('review.active-session-save',error,'warn');return false;}
+function reviewPersistenceFailed(error?:unknown){setReflectionRichSync('error','Save failed');if(error)AppDiagnostics.capture('review.active-session-save',error,'warn');return false;}
 function selectReviewDate(){
   const dd=document.getElementById('day-date'),date=reviewDate(dd&&dd.value||getReviewDate());
   return runLifecycleSync('date-change',{date,review:true},()=>{if(dd){dd.value=date;dd.dataset.autoDate='0';}return true;});
@@ -337,7 +347,7 @@ function reviewSnapshot(){
   const state=currentReviewState();
   return freeze({reflection:state.reflection,studyQuality:state.studyQuality});
 }
-function reflectionContentForDate(date=getReviewDate()){
+function reflectionContentForDate(date:unknown=getReviewDate()){
   const target=reviewDate(date);return target===getReviewDate()?String(currentReviewState().reflection||''):'';
 }
 function bindReviewSession(){return bindReviewEditors(getReviewDate());}
@@ -402,7 +412,7 @@ function captureTodayState(){
   saveReviewState({markChanged:false,strict:true});
   saveLiveDraft();
 }
-function projectDailyRecord(evidence,review){
+function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState){
   if(!evidence||!Object.isFrozen(evidence)||!Array.isArray(evidence.reviewTasks)){
     throw new TypeError('ReviewModel requires a frozen SessionEvidenceGateway snapshot.');
   }
@@ -438,10 +448,10 @@ function projectDailyRecord(evidence,review){
     schedule,results,practiceRuns:evidence.practiceRuns,carryForwardDraft:review.unfinished
   };
 }
-function buildDailyRecord(evidence=SessionEvidenceGateway.snapshot({includeRecords:true}),review=currentReviewState()){
+function buildDailyRecord(evidence:ReviewEvidence=SessionEvidenceGateway.snapshot({includeRecords:true}),review:ReviewCurrentState=currentReviewState()){
   return projectDailyRecord(evidence,review);
 }
-async function commitDailyRecord(evidence=SessionEvidenceGateway.snapshot({includeRecords:true}),label='canonical daily record'){
+async function commitDailyRecord(evidence:ReviewEvidence=SessionEvidenceGateway.snapshot({includeRecords:true}),label='canonical daily record'){
   const review=currentReviewState();
   let doc=projectDailyRecord(evidence,review);
   const existing=await AppData.dailyRecords.get(doc.date);
@@ -482,7 +492,7 @@ async function saveReflectionOnlyRecord(){
     syncReviewSurfaceMode();
   }
 }
-async function saveDayRecord(options={}){
+async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
   if(!reviewHasStudyDay())return saveReflectionOnlyRecord();
   if(saveDayInProgress)return false;
   if(!appCanMutate()){setStatus('save-status','Study control is in another tab. Take control here before saving.',false);return false;}
@@ -531,7 +541,7 @@ async function saveDayRecord(options={}){
 function hasSaveableStudyDay(){
   return TASKS.some(isTrackableBlock);
 }
-function clearReviewForNewDay(options={}){
+function clearReviewForNewDay(options:Readonly<{lifecycleManaged?:boolean}>={}){
   const date=todayISO();
   const apply=()=>{
     const dd=document.getElementById('day-date');
@@ -541,7 +551,7 @@ function clearReviewForNewDay(options={}){
   };
   return options.lifecycleManaged?apply():runLifecycleSync('date-rollover',{date,review:true},apply);
 }
-function studyDayRolledOver(now=new Date()){
+function studyDayRolledOver(now:Date=new Date()){
   return !!(SessionState.studyDate&&SessionState.studyDate!==todayISO(now));
 }
 async function handleStudyDayRollover(){
@@ -598,12 +608,12 @@ async function handleStudyDayRollover(){
   }
 }
 
-function reviewRichInputPlain(event,value){
+function reviewRichInputPlain(event:ReviewInputEvent|null|undefined,value:unknown){
   const meta=reviewRichInputMeta(event,value);
   return meta?meta.plain:plainTextContent(value);
 }
 const REVIEW_PROGRESS_TONE_CLASSES=Object.freeze(['pct-tone-zero','pct-tone-low','pct-tone-mid','pct-tone-high','pct-tone-complete']);
-function reviewProgressToneClass(p){
+function reviewProgressToneClass(p:number){
   if(p<=0)return'pct-tone-zero';
   if(p<=25)return'pct-tone-low';
   if(p<=50)return'pct-tone-mid';
@@ -611,17 +621,17 @@ function reviewProgressToneClass(p){
   return'pct-tone-complete';
 }
 
-function applyReviewProgressVisual(card,pct){
+function applyReviewProgressVisual(card:HTMLElement|null,pct:number){
   if(!card)return;
   card.classList.remove(...REVIEW_PROGRESS_TONE_CLASSES);
   card.classList.add(reviewProgressToneClass(pct));
 }
-function applyReviewOutcomeVisual(card,outcome){
+function applyReviewOutcomeVisual(card:HTMLElement|null,outcome:TaskOutcome){
   if(!card)return;
   card.classList.remove(...Object.values(TASK_OUTCOMES));
   card.classList.add(outcome);
 }
-function renderCompletionChange(idx,pct,refreshStats=true,options={}){
+function renderCompletionChange(idx:number,pct:number,refreshStats=true,options:Readonly<{syncTimer?:boolean;timerSummary?:string}>={}){
   const card=document.getElementById(`rcard-${idx}`);
   applyReviewProgressVisual(card,pct);
   const outcome=liveTaskOutcome(idx,{exactPct:pct});
@@ -646,20 +656,20 @@ function renderCompletionChange(idx,pct,refreshStats=true,options={}){
   }
   if(refreshStats){recalcStats();updateBadges();}
 }
-function setCompletion(idx,pct,updateUI,source=COMPLETION_SOURCES.MANUAL){
+function setCompletion(idx:number,pct:number,updateUI:boolean,source:CompletionSource=COMPLETION_SOURCES.MANUAL){
   setCompletionState(idx,pct,source);
   saveLiveDraft();
   if(updateUI)renderCompletionChange(idx,pct,true);
 }
 /* REVIEW/TIMER UI BRIDGE */
-function syncRptFromTimer(idx,pct,done,total){
+function syncRptFromTimer(idx:number,pct:number,done:number|null,total:number|null){
   renderCompletionChange(idx,pct,false,{syncTimer:false});
   const rdi=document.getElementById(`rd-done-${idx}`);const rti=document.getElementById(`rd-total-${idx}`);
   if(rdi)rdi.value=done!==null&&done!==undefined?done:'';
   if(rti)rti.value=total!==null&&total!==undefined?total:'';
   refreshRsum(idx,taskMeasureValue(TASKS[idx],'units'),done,total);
 }
-function durationLabel(min){
+function durationLabel(min:number){
   const n=Math.round(Math.abs(min||0));
   const h=Math.floor(n/60);
   const m=n%60;
@@ -667,22 +677,22 @@ function durationLabel(min){
   if(h)return `${h}h`;
   return `${m}m`;
 }
-function displayPercent(value){
+function displayPercent(value:unknown){
   const bounded=Math.max(0,Math.min(100,Number(value)||0));
   return `${Math.round((bounded+Number.EPSILON)*100)/100}%`;
 }
-function optionalDurationLabel(value){
+function optionalDurationLabel(value:unknown){
   return value===null||value===undefined||!Number.isFinite(Number(value))?'—':durationLabel(Number(value));
 }
-function optionalPercentLabel(value){
+function optionalPercentLabel(value:unknown){
   return value===null||value===undefined||!Number.isFinite(Number(value))?'—':displayPercent(Number(value));
 }
-function signedHoursLabel(min){
+function signedHoursLabel(min:number){
   const n=Math.round(min||0);
   if(n===0)return '0m';
   return (n>0?'+':'-')+durationLabel(n);
 }
-function calculateReviewMetrics(evidence){
+function calculateReviewMetrics(evidence:ReviewEvidence):ReviewMetrics{
   if(!evidence||!Object.isFrozen(evidence)||!Array.isArray(evidence.reviewTasks)){
     throw new TypeError('ReviewModel requires a frozen SessionEvidenceGateway snapshot.');
   }
@@ -707,16 +717,16 @@ function calculateReviewMetrics(evidence){
     shiftedStudyBlocks,totalScheduleShiftMinutes,netScheduleShiftMinutes
   };
 }
-function calculateCurrentReviewMetrics(evidence=SessionEvidenceGateway.snapshot({includeRecords:false})){
+function calculateCurrentReviewMetrics(evidence:ReviewEvidence=SessionEvidenceGateway.snapshot({includeRecords:false})){
   return calculateReviewMetrics(evidence);
 }
-function setMetricText(id,value){const el=document.getElementById(id);if(el)el.textContent=value;}
-function setMetricCardState(id,state){
+function setMetricText(id:string,value:unknown){const el=document.getElementById(id);if(el)el.textContent=value;}
+function setMetricCardState(id:string,state:string){
   const el=document.getElementById(id);if(!el)return;
   el.classList.remove('warn','ok','info','primary');
   if(state)el.classList.add(state);
 }
-function updateReviewMetrics(metrics=null){
+function updateReviewMetrics(metrics:ReviewMetrics|null=null){
   const m=metrics||calculateCurrentReviewMetrics();
   setMetricText('review-original-planned',durationLabel(m.originalPlannedStudyMinutes));
   setMetricText('review-completed-equivalent',durationLabel(m.completedEquivalentMinutes));
@@ -745,24 +755,24 @@ const COMPLETION_SOURCE_INFO=Object.freeze({
   [COMPLETION_SOURCES.FINISHED_UNVERIFIED]:Object.freeze({label:'Finished · unverified',description:'Completion source: finished status only. No focus/progress evidence yet, so it is not counted as completed work.'}),
   [COMPLETION_SOURCES.SKIPPED]:Object.freeze({label:'Skipped',description:'Completion source: skipped block, counted as 0%.'})
 });
-function completionSourceLabel(source){return COMPLETION_SOURCE_INFO[normalizeCompletionSource(source)]?.label||'No source';}
-function completionSourceDescription(source,pct){
+function completionSourceLabel(source:unknown){return COMPLETION_SOURCE_INFO[normalizeCompletionSource(source)]?.label||'No source';}
+function completionSourceDescription(source:unknown,pct:number){
   const description=COMPLETION_SOURCE_INFO[normalizeCompletionSource(source)]?.description;
   return typeof description==='function'?description(pct):(description||'');
 }
-function appendReviewBadge(container,label,cls){
+function appendReviewBadge(container:HTMLElement,label:string,cls:string){
   const b=document.createElement('span');
   b.className='rcard-badge ui-mono '+(cls||'');
   b.textContent=label;
   container.appendChild(b);
   return b;
 }
-function createTimeChip(label,value,className='',muted=false){
+function createTimeChip(label:string,value:string,className='',muted=false){
   const chip=textEl('div','time-chip ui-card '+className+(muted?' muted':''));
   chip.append(textEl('span','tl ui-label',label),textEl('span','tv ui-mono',value));
   return chip;
 }
-function createTaskReviewHeader({name,area,pct,statusInfo,shifted=false,tracked=false,pctId='',source=''}) {
+function createTaskReviewHeader({name,area,pct,statusInfo,shifted=false,tracked=false,pctId='',source=''}:ReviewTaskHeaderInput) {
   const top=document.createElement('div');top.className='rcard-top';
   const nw=document.createElement('div');
   nw.append(textEl('div','rcard-name ui-label',name||'Task'),textEl('div','rcard-area ui-label',area||'—'));
@@ -782,7 +792,7 @@ function createTaskReviewHeader({name,area,pct,statusInfo,shifted=false,tracked=
   top.appendChild(nw);top.appendChild(pd);
   return top;
 }
-function createActualFocusChip(actualSec,deltaSec=null){
+function createActualFocusChip(actualSec:number|null,deltaSec:number|null=null){
   const chip=textEl('div','time-chip ui-card actual');
   const actualValue=textEl('span','tv ui-mono',fmtS(finiteNumber(actualSec))+' ');
   if(deltaSec!==null&&deltaSec!==undefined){
@@ -794,7 +804,7 @@ function createActualFocusChip(actualSec,deltaSec=null){
   chip.append(textEl('span','tl ui-label','ACTUAL FOCUS'),actualValue);
   return chip;
 }
-function createTaskTimingRow({original,adjusted,shifted=false,actualSec=null,deltaSec=null,wallStart='',wallEnd=''}) {
+function createTaskTimingRow({original,adjusted,shifted=false,actualSec=null,deltaSec=null,wallStart='',wallEnd=''}:ReviewTimingRowInput) {
   const timingRow=document.createElement('div');
   timingRow.className='rtiming ui-mono timing-grid';
   const tracked=actualSec!==null&&actualSec!==undefined;
@@ -808,15 +818,15 @@ function createTaskTimingRow({original,adjusted,shifted=false,actualSec=null,del
   );
   return timingRow;
 }
-function createStaticProgressLine({done,total,measure,suffixNoTotal=' done · no target'}) {
+function createStaticProgressLine({done,total,measure,suffixNoTotal=' done · no target'}:ReviewProgressLineInput) {
   const sm=document.createElement('div');sm.className='rsum ui-body';
   if(done!==undefined&&total)setProgressSummary(sm,done,total,measure||'units');
   else if(done!==undefined)setProgressSummary(sm,done,0,measure||'units',suffixNoTotal,true);
   else sm.textContent='No manual output recorded.';
   return sm;
 }
-function minutesFromSeconds(seconds){return Math.round(Math.max(0,Number(seconds)||0)/60);}
-function pomodoroSummaryFromTasks(tasks){
+function minutesFromSeconds(seconds:unknown){return Math.round(Math.max(0,Number(seconds)||0)/60);}
+function pomodoroSummaryFromTasks(tasks:readonly ReviewRecordViewTask[]){
   const summary={breaks:0,recoverySeconds:0,overrunSeconds:0,actualSeconds:0,excludedUnknown:0};
   (Array.isArray(tasks)?tasks:[]).forEach(task=>{
     if(!isWorkBlock(task))return;
@@ -834,7 +844,7 @@ function pomodoroSummaryFromTasks(tasks){
   });
   return summary;
 }
-function pomodoroSummaryText(summary){
+function pomodoroSummaryText(summary:Readonly<{sessions:number;focusSeconds:number;pausedSeconds:number;pauseCount:number}>){
   const s=summary||{};
   const excluded=s.excludedUnknown?` · ${s.excludedUnknown} break${s.excludedUnknown===1?'':'s'} without a saved allowance excluded`:'';
   if(!s.breaks)return `Pomodoro: no comparable accepted work-block breaks saved yet${excluded}.`;
@@ -848,18 +858,18 @@ function currentPomodoroSummary(){
   const tasks=TASKS.map((t,i)=>({...(t||{}),pauseEvents:(records[i]||records[String(i)]||{}).pauseEvents||[]}));
   return pomodoroSummaryFromTasks(tasks);
 }
-function updateReviewPomodoroLine(record=null){
+function updateReviewPomodoroLine(record:Readonly<{tasks:readonly ReviewRecordViewTask[]}>|null=null){
   const el=document.getElementById('review-pomodoro-line');
   if(!el)return;
   el.textContent=pomodoroSummaryText(record?pomodoroSummaryFromTasks(record.tasks||[]):currentPomodoroSummary());
 }
-function createPomodoroSummaryLine(tasks){
+function createPomodoroSummaryLine(tasks:readonly ReviewRecordViewTask[]){
   const line=document.createElement('div');
   line.className='review-flow-note ui-helper';
   line.textContent=pomodoroSummaryText(pomodoroSummaryFromTasks(tasks||[]));
   return line;
 }
-function createSavedDayTaskReviewCard(task){
+function createSavedDayTaskReviewCard(task:ReviewRecordViewTask){
   const pct=task&&task.completion!==null&&task.completion!==undefined&&Number.isFinite(Number(task.completion))
     ? Math.max(0,Math.min(100,Math.round(Number(task.completion)))):null;
   const measure=taskMeasureValue(task,'units');
@@ -889,12 +899,12 @@ function createSavedDayTaskReviewCard(task){
   if(sourceDescription)card.appendChild(textEl('div','review-flow-note ui-helper',sourceDescription));
   return card;
 }
-function taskHasActualWork(idx){
+function taskHasActualWork(idx:number){
   const rec=TaskSessionState.getField(idx,'actualRecords')||{};
   const clk=TaskSessionState.getField(idx,'actualClock')||{};
   return Number(TaskSessionState.getField(idx,'actualTime'))>0 || !!clk.startedAt || !!clk.endedAt || !!rec.firstStartedAt || (Array.isArray(rec.sessions)&&rec.sessions.length>0);
 }
-function isFutureUntouchedBlock(idx){
+function isFutureUntouchedBlock(idx:number){
   const t=TASKS[idx];
   if(!t||!isWorkBlock(t))return false;
   if(idx===Runtime.currentIndex()&&isLiveTrackableTimer())return false;
@@ -915,7 +925,7 @@ function clearFutureUntouchedProgress(){
   });
   return changed;
 }
-function buildReviewCardModel(task,evidence=null){
+function buildReviewCardModel(task:ReviewTaskRow,evidence:ReviewEvidence|null=null):ReviewCardModel{
   const idx=task.i,row=evidence?.taskEvidence[TaskIdentity.idAt(idx)];
   const resolved=row?.resolved||resolveTaskCompletion(idx,{actualSnapshot:evidence?.actualTime});
   const pct=row?.pct??resolved.pct;
@@ -939,7 +949,7 @@ function buildReviewCardModel(task,evidence=null){
     adjustedTiming:`${studyMinuteToHHMM(adjustedStartMin(idx))}-${studyMinuteToHHMM(adjustedEndMin(idx))}`
   };
 }
-function refreshReviewCardStaticProgress(model,progressLine){
+function refreshReviewCardStaticProgress(model:ReviewCardModel,progressLine:HTMLElement){
   const current=TaskSessionState.getField(model.idx,'notes')||{};
   const done=current.done;
   const total=current.total||model.target;
@@ -947,7 +957,7 @@ function refreshReviewCardStaticProgress(model,progressLine){
   else if(done!==undefined)setProgressSummary(progressLine,done,0,model.measure||'units',' done · no target',true);
   else progressLine.textContent='No manual output recorded.';
 }
-function renderReviewCard(model){
+function renderReviewCard(model:ReviewCardModel){
   const card=document.createElement('div');
   card.className=`rcard ui-card ${model.statusInfo.status}${model.shifted?' shifted':''}`;
   card.id=`rcard-${model.idx}`;
@@ -1009,7 +1019,7 @@ function renderReviewCard(model){
   if(sourceLine)card.insertBefore(sourceLine,noteBox);
   return {card,progressLine,noteBox,editBtn,doneInput,totalInput,pctInput,noteEdit};
 }
-function bindReviewCardInputs(model,view){
+function bindReviewCardInputs(model:ReviewCardModel,view:ReviewCardView){
   const refresh=()=>refreshReviewCardStaticProgress(model,view.progressLine);
   on(view.doneInput,'input',()=>{onReviewMeasure(model.idx,model.measure,model.target);refresh();ReviewView.sync();});
   on(view.totalInput,'input',()=>{onReviewMeasure(model.idx,model.measure,model.target);refresh();ReviewView.sync();});
@@ -1041,7 +1051,7 @@ function bindReviewCardInputs(model,view){
     }
   });
 }
-function createReviewCard(task,evidence=null){
+function createReviewCard(task:ReviewTaskRow,evidence:ReviewEvidence|null=null){
   const model=buildReviewCardModel(task,evidence);
   const view=renderReviewCard(model);
   bindReviewCardInputs(model,view);
@@ -1055,28 +1065,28 @@ function renderReviewUnfinishedNote(){
   box.textContent=txt||'No unfinished note saved for today.';
   box.classList.toggle('has-note',!!txt);
 }
-function formatPracticeVariance(value,{partial=false}={}){
+function formatPracticeVariance(value:unknown,{partial=false}:Readonly<{partial?:boolean}>={}){
   const ms=Math.round(Number(value)||0);
   if(Math.abs(ms)<1000)return partial?'On pace so far':'On plan';
   return `${ms>0?'+':'−'}${formatPracticeMs(Math.abs(ms))}`;
 }
-function practiceVarianceClass(value){
+function practiceVarianceClass(value:unknown){
   const ms=Math.round(Number(value)||0);
   return ms>999?'behind':ms<-999?'ahead':'';
 }
-function practiceTaskName(taskId,tasks=TASKS){
+function practiceTaskName(taskId:unknown,tasks:readonly Task[]=TASKS){
   const id=String(taskId||'');
   const task=(Array.isArray(tasks)?tasks:[]).find(row=>String(row&&row.id||'')===id);
   return clampText(task&&task.name||'',APP_LIMITS.maxTaskNameChars);
 }
-function practiceTableCell(className,text){return textEl('span',className,String(text??'—'));}
-function practiceRunUnitsLabel(run){
+function practiceTableCell(className:string,text:unknown){return textEl('span',className,String(text??'—'));}
+function practiceRunUnitsLabel(run:ReviewPracticeRunSummary){
   const count=run.plannedUnits?`${run.units}/${run.plannedUnits}`:String(run.units);
   return run.partial?`Partial run · ${count} units`:count;
 }
-function practicePaceBandCountsLabel(run){return `${run.fast} fast · ${run.controlled} controlled · ${run.overTarget} over`;}
-function practiceRunTimeLabel(run){return `${formatPracticeMs(run.actualMs)} / ${formatPracticeMs(run.comparisonTargetMs)}`;}
-function appendPracticeRunCells(row,{name,units,time,bands,variance,partial=false}){
+function practicePaceBandCountsLabel(run:Pick<ReviewPracticeRunSummary,'fast'|'controlled'|'overTarget'>){return `${run.fast} fast · ${run.controlled} controlled · ${run.overTarget} over`;}
+function practiceRunTimeLabel(run:Pick<ReviewPracticeRunSummary,'actualMs'|'comparisonTargetMs'>){return `${formatPracticeMs(run.actualMs)} / ${formatPracticeMs(run.comparisonTargetMs)}`;}
+function appendPracticeRunCells(row:HTMLElement,{name,units,time,bands,variance,partial=false}:Readonly<{name:string;units:string|number;time:string;bands:string;variance:number;partial?:boolean}>):HTMLElement{
   const varianceClass=practiceVarianceClass(variance);
   row.append(
     practiceTableCell('practice-run-name',name),
@@ -1087,11 +1097,11 @@ function appendPracticeRunCells(row,{name,units,time,bands,variance,partial=fals
   );
   return row;
 }
-function practiceUnitBudgetLabel(unit){
+function practiceUnitBudgetLabel(unit:PracticeUnitSummary){
   const target=formatPracticeMs(unit.targetMs);
   return unit.marks===null||unit.marks===undefined?target:`${unit.marks} marks · ${target}`;
 }
-function createPracticeSegmentRow(segment){
+function createPracticeSegmentRow(segment:PracticeSegmentSummary){
   const row=textEl('div','practice-segment-row');
   const varianceClass=practiceVarianceClass(segment.varianceMs);
   row.append(
@@ -1101,7 +1111,7 @@ function createPracticeSegmentRow(segment){
   );
   return row;
 }
-function createPracticeRunDetail(run,{allowDelete=false}={}){
+function createPracticeRunDetail(run:ReviewPracticeRunSummary,{allowDelete=false}:Readonly<{allowDelete?:boolean}>={}){
   const detail=textEl('div','practice-run-detail');
   const stats=[
     `Median ${formatPracticeMs(run.medianMs)}`,
@@ -1139,7 +1149,7 @@ function createPracticeRunDetail(run,{allowDelete=false}={}){
   }
   return detail;
 }
-function createPracticeRunEntry(run,tasks,options={}){
+function createPracticeRunEntry(run:ReviewPracticeRunSummary,tasks:readonly Task[],options:Readonly<{allowDelete?:boolean}>={}){
   const entry=textEl('details','practice-run-entry');
   const summary=textEl('summary','practice-run-summary');
   const taskName=practiceTaskName(run.run.taskId,tasks);
@@ -1161,7 +1171,7 @@ function createPracticeRunEntry(run,tasks,options={}){
   });
   return entry;
 }
-function populatePracticeRunTable(root,runs,{tasks=TASKS,includeActiveNote=false,normalized=false,allowDelete=false}={}){
+function populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],{tasks=TASKS,includeActiveNote=false,normalized=false,allowDelete=false}:Readonly<{tasks?:readonly Task[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>={}):ReviewPracticeAggregate|null{
   if(!root)return null;
   const cleanRuns=normalized?runs:sanitizePracticeRuns(runs);
   const summary=summarizeCleanPracticeRuns(cleanRuns),table=root.querySelector('.practice-run-table')||root;
@@ -1199,7 +1209,7 @@ function renderPracticeReview(){
     if(note)note.textContent='Practice Pacer run currently active in Execute.';
   }
 }
-async function deletePracticeRun(event){
+async function deletePracticeRun(event:Event){
   const button=event&&event.target&&event.target.closest('[data-run-index]');
   const index=Number(button&&button.dataset.runIndex);
   if(!Number.isInteger(index))return false;
@@ -1223,7 +1233,7 @@ function reviewViewLocalState(){
     unfinished:unfinishedNoteDraftText()
   };
 }
-function reviewViewEvidenceKey(evidence){
+function reviewViewEvidenceKey(evidence:ReviewEvidence){
   const rows=TASKS.map((task,idx)=>{
     if(!isTrackableBlock(task))return null;
     const taskId=TaskIdentity.idAt(idx),row=evidence.taskEvidence[taskId]||{};
@@ -1254,13 +1264,13 @@ function reviewViewEvidenceKey(evidence){
     rows,practice,local:reviewViewLocalState()
   });
 }
-function prepareReviewRender(options={}){
+function prepareReviewRender(options:ReviewRenderOptions={}):ReviewPrepared{
   syncUnfinishedNoteDraft();
   const cleared=clearFutureUntouchedProgress();
   const evidence=options.evidence||SessionEvidenceGateway.snapshot({includeRecords:true});
   return {cleared,evidence,key:reviewViewEvidenceKey(evidence)};
 }
-function buildReview(options={}){
+function buildReview(options:ReviewRenderOptions={}):ReviewMetrics{
   const prepared=options.prepared||prepareReviewRender(options);
   const {cleared,evidence}=prepared;
   const metrics=calculateReviewMetrics(evidence),st=evidence.reviewTasks.filter(row=>row.work);
@@ -1279,7 +1289,7 @@ const ReviewView=(()=>{
     scrollState={documentTop:Math.max(0,Number(root&&root.scrollTop)||Number(window.scrollY)||0),mainTop:Math.max(0,Number(main&&main.scrollTop)||0)};
     return {...scrollState};
   }
-  function restoreScroll(state=scrollState,{immediate=false}={}){
+  function restoreScroll(state:Readonly<{documentTop:number;mainTop:number}>=scrollState,{immediate=false}:Readonly<{immediate?:boolean}>={}){
     const apply=()=>{
       const root=document.scrollingElement||document.documentElement,main=document.querySelector('.main');
       if(root)root.scrollTop=Math.max(0,Number(state&&state.documentTop)||0);
@@ -1299,7 +1309,7 @@ const ReviewView=(()=>{
     if(!locator)return null;
     return {locator,start:Number.isInteger(active.selectionStart)?active.selectionStart:null,end:Number.isInteger(active.selectionEnd)?active.selectionEnd:null};
   }
-  function resolveFocusTarget(pane,locator){
+  function resolveFocusTarget(pane:HTMLElement|null,locator:ReviewFocusLocator|null):HTMLElement|null{
     if(!pane||!locator)return null;
     if(locator.kind==='id'){
       const target=document.getElementById(locator.value);
@@ -1323,7 +1333,7 @@ const ReviewView=(()=>{
       focus:focusState()
     };
   }
-  function restoreUi(state,{focus=true,immediateScroll=false}={}){
+  function restoreUi(state:ReviewUiState|null,{focus=true,immediateScroll=false}:Readonly<{focus?:boolean;immediateScroll?:boolean}>={}){
     if(!state)return;
     const pane=document.getElementById('pane-review');
     const blocks=pane&&pane.querySelector('.review-blocks-collapse');if(blocks)blocks.open=!!state.blocksOpen;
@@ -1345,7 +1355,7 @@ const ReviewView=(()=>{
       });
     }
   }
-  function refresh(options={}){
+  function refresh(options:ReviewRenderOptions={}):ReviewMetrics{
     const pane=document.getElementById('pane-review'),visible=!!pane&&pane.classList.contains('on');
     const ui=hasRendered?captureUi():null;
     const prepared=options.prepared||prepareReviewRender(options);
@@ -1355,7 +1365,7 @@ const ReviewView=(()=>{
     else if(options.restoreScroll)restoreScroll(scrollState,{immediate:options.immediateScroll===true});
     return metrics;
   }
-  function activate(options={}){
+  function activate(options:ReviewRenderOptions={}):ReviewMetrics|null{
     const prepared=prepareReviewRender({includeRecords:true});
     let result=null;
     if(hasRendered&&prepared.key===renderedKey&&!prepared.cleared){
@@ -1380,7 +1390,7 @@ const ReviewView=(()=>{
   function status(){return Object.freeze({hasRendered,renderedKey});}
   return Object.freeze({activate,deactivate,refresh,sync,syncMode:syncReviewSurfaceMode,invalidate,status});
 })();
-function onReviewMeasure(idx,measure,defTotal){
+function onReviewMeasure(idx:number,measure:string,defTotal?:number|null){
   const di=document.getElementById(`rd-done-${idx}`);const ti=document.getElementById(`rd-total-${idx}`);
   if(!di||!ti)return;
   const state=progressInputState(idx,di.value,ti.value,defTotal);
@@ -1397,13 +1407,13 @@ function onReviewMeasure(idx,measure,defTotal){
   }
   return resolved;
 }
-function refreshRsum(idx,measure,done,total){
+function refreshRsum(idx:number,measure:string,done:unknown,total:unknown){
   const el=document.getElementById(`rsum-${idx}`);if(!el)return;
   if(done!==undefined&&total)setProgressSummary(el,done,total,measure||'units');
   else if(done!==undefined)setProgressSummary(el,done,0,measure||'units',' done · enter target for %',true);
   else el.textContent='';
 }
-function reviewDetailsShouldOpen(d=new Date()){
+function reviewDetailsShouldOpen(d:Date=new Date()){
   const trackable=TASKS.map((t,i)=>({t,i})).filter(x=>isTrackableBlock(x.t));
   if(!trackable.length)return false;
   if(Runtime.timerMode()===TIMER_MODES.DONE)return true;
@@ -1411,10 +1421,10 @@ function reviewDetailsShouldOpen(d=new Date()){
   const lastEnd=latestTrackableEndMin();
   return SessionState.studyDate===todayISO(d)&&lastEnd!==null&&effectiveNowMin(d)>=lastEnd;
 }
-function setReviewDetailDisclosures(open){
+function setReviewDetailDisclosures(open:boolean){
   document.querySelectorAll('#pane-review .review-collapse').forEach(el=>{el.open=!!open;});
 }
-function recalcStats(metrics=null){
+function recalcStats(metrics:ReviewMetrics|null=null){
   const m=metrics||calculateCurrentReviewMetrics();
   document.getElementById('review-avg').textContent=displayPercent(m.completionPercent);
   const outcomes=sanitizeTaskOutcomeCounts(m.outcomeCounts);
@@ -1424,7 +1434,7 @@ function recalcStats(metrics=null){
   if(attention)attention.textContent=taskOutcomeTotal(outcomes)-outcomes[TASK_OUTCOMES.FULL]-outcomes[TASK_OUTCOMES.PARTIAL];
   updateReviewMetrics(m);
 }
-function copyTextToClipboard(txt){
+function copyTextToClipboard(txt:string):Promise<void>{
   if(navigator.clipboard&&navigator.clipboard.writeText){
     return navigator.clipboard.writeText(txt);
   }
@@ -1442,7 +1452,7 @@ function copyTextToClipboard(txt){
     }catch(e){reject(e);}
   });
 }
-function clipboardPlainText(value,{rich=false}={}){
+function clipboardPlainText(value:unknown,{rich=false}:Readonly<{rich?:boolean}>={}){
   const text=rich?plainTextContent(value):String(value??'');
   return text.replace(/\r\n?/gu,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu,'');
 }
@@ -1456,8 +1466,8 @@ const REVIEW_REPORT_CATALOG=freeze([
 ]);
 const copyReportExcluded=new Set(),copyReportExpanded=new Set();
 let copyReportMenuBound=false;
-function reviewReportArea(task){return taskAreaValue(task)||'General';}
-function reviewReportSubjectChildren(context){
+function reviewReportArea(task:Task|ReviewRecordViewTask){return taskAreaValue(task)||'General';}
+function reviewReportSubjectChildren(context:ReviewReportContext):ReviewReportChild[]{
   const seen=new Set(),children=[];
   (context.reportTasks||[]).forEach(task=>{
     const label=reviewReportArea(task),id=`subjects:${label}`;
@@ -1465,30 +1475,30 @@ function reviewReportSubjectChildren(context){
   });
   return children.sort((a,b)=>a.label.localeCompare(b.label));
 }
-function reviewReportOngoingChildren(context){
+function reviewReportOngoingChildren(context:ReviewReportContext):ReviewReportChild[]{
   return (context.subjectEntries||[]).map(entry=>freeze({id:`ongoing:${entry.key}`,label:String(entry.label||entry.key),value:entry.key})).sort((a,b)=>a.label.localeCompare(b.label));
 }
-function reviewReportSections(context){
+function reviewReportSections(context:ReviewReportContext):ReviewReportSection[]{
   return REVIEW_REPORT_CATALOG.map(section=>freeze({...section,children:typeof section.children==='function'?section.children(context):[]}));
 }
 function reviewReportSelectorContext(){
   return freeze({reportTasks:TASKS.filter(isTrackableBlock),subjectEntries:currentNoteEntriesForWorkTasks(TASKS)});
 }
-function copyReportSectionState(section){
+function copyReportSectionState(section:ReviewReportSection){
   if(!section.children.length)return freeze({checked:!copyReportExcluded.has(section.id),indeterminate:false});
   const selected=section.children.reduce((count,child)=>count+(!copyReportExcluded.has(child.id)?1:0),0);
   return freeze({checked:selected===section.children.length,indeterminate:selected>0&&selected<section.children.length});
 }
-function copyReportIsCustom(sections=reviewReportSections(reviewReportSelectorContext())){
+function copyReportIsCustom(sections:readonly ReviewReportSection[]=reviewReportSections(reviewReportSelectorContext())){
   return sections.some(section=>{
     if(!section.children.length)return copyReportExcluded.has(section.id);
     return section.children.some(child=>copyReportExcluded.has(child.id));
   });
 }
-function syncCopyReportCustom(sections){
+function syncCopyReportCustom(sections:readonly ReviewReportSection[]){
   const badge=document.getElementById('copy-report-custom');if(badge)badge.hidden=!copyReportIsCustom(sections);
 }
-function syncCopyReportChecks(sections){
+function syncCopyReportChecks(sections:readonly ReviewReportSection[]){
   const root=document.getElementById('copy-report-sections');if(!root)return;
   const sectionMap=new Map(sections.map(section=>[section.id,section]));
   root.querySelectorAll('input[data-report-section]').forEach(input=>{
@@ -1554,7 +1564,7 @@ function toggleCopyReportMenu(){
   return !menu.hidden;
 }
 function resetCopyReportSelection(){copyReportExcluded.clear();renderCopyReportMenu();return true;}
-function composeReviewSummary(context){
+function composeReviewSummary(context:ReviewReportContext){
   const {m,rec,quality}=context;let txt='SUMMARY\n';
   txt+=`- Original planned work: ${durationLabel(m.originalPlannedStudyMinutes)}\n`;
   txt+=`- Completed equivalent: ${durationLabel(m.completedEquivalentMinutes)}\n`;
@@ -1570,7 +1580,7 @@ function composeReviewSummary(context){
   if(quality)txt+=`- Study quality: ${quality}/5\n`;
   return txt;
 }
-function composeReviewSubjects(context,selectedChildren){
+function composeReviewSubjects(context:ReviewReportContext,selectedChildren:readonly ReviewReportChild[]){
   const selected=new Set(selectedChildren.map(child=>child.value)),tasks=context.rec.tasks.filter(task=>selected.has(reviewReportArea(task)));
   let txt="TODAY'S BLOCKS\n";
   if(!tasks.length)return txt;
@@ -1584,7 +1594,7 @@ function composeReviewSubjects(context,selectedChildren){
   });
   return txt;
 }
-function composeReviewOngoing(context,selectedChildren){
+function composeReviewOngoing(context:ReviewReportContext,selectedChildren:readonly ReviewReportChild[]){
   const selected=new Set(selectedChildren.map(child=>child.value)),entries=context.subjectEntries.filter(entry=>selected.has(entry.key));
   if(!context.subjectEntries.length)return 'CURRENT ONGOING NOTES\n—\n';
   if(!entries.length)return '';
@@ -1592,12 +1602,12 @@ function composeReviewOngoing(context,selectedChildren){
   entries.sort((a,b)=>String(a.label||a.key).localeCompare(String(b.label||b.key))).forEach(entry=>{txt+=`${clipboardPlainText(entry.label||entry.key)}\n${clipboardPlainText(entry.text).trim()}\n\n`;});
   return txt.trimEnd()+'\n';
 }
-function composeReviewOther(context,selectedChildren){
+function composeReviewOther(context:ReviewReportContext,selectedChildren:readonly ReviewReportChild[]){
   if(!selectedChildren.some(child=>child.id==='other:unfinished'))return '';
   return `UNFINISHED NOTE\n${context.unfinished?clipboardPlainText(context.unfinished):'—'}\n`;
 }
-function composeReviewDiary(context){return `DIARY / REFLECTION\n${context.refl||'—'}\n`;}
-function composeReviewReport(context){
+function composeReviewDiary(context:ReviewReportContext){return `DIARY / REFLECTION\n${context.refl||'—'}\n`;}
+function composeReviewReport(context:ReviewReportContext){
   const sections=reviewReportSections(context),byId=new Map(sections.map(section=>[section.id,section]));
   let txt=`STUDY REVIEW — ${context.dowFull} ${context.monFull} ${context.reviewDay.getDate()}\n\n`;
   REVIEW_REPORT_OUTPUT_ORDER.forEach(id=>{
@@ -1703,5 +1713,7 @@ function copyReview(){
     contractVersion:1,
     createReviewSubsystem
   });
-});
+};
+registry.define('review',1,createModule);return createModule;
 })();
+export type ReviewModule=ReturnType<typeof sdReviewFactory>;

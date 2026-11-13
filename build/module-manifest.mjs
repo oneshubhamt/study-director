@@ -39,7 +39,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'session-handoff',source:'core/session-handoff.ts',stem:'sd.session-handoff'}),
   Object.freeze({id:'plan-host',source:'core/plan-host.ts',stem:'sd.plan-host'}),
   Object.freeze({id:'plan',source:'core/plan.ts',stem:'sd.plan'}),
-  Object.freeze({id:'review',source:'core/review.js',stem:'sd.review'}),
+  Object.freeze({id:'review',source:'core/review.ts',stem:'sd.review'}),
   Object.freeze({id:'asset-maintenance',source:'core/asset-maintenance.ts',stem:'sd.asset-maintenance'}),
   Object.freeze({id:'exports',source:'core/exports.ts',stem:'sd.exports'}),
   Object.freeze({id:'integrity-continuation',source:'core/integrity-continuation.ts',stem:'sd.integrity-continuation'}),
