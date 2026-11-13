@@ -777,7 +777,7 @@ function applyRows(rows:readonly ScheduleRow[],options:ScheduleGatewayOptions={}
     const opts=options&&typeof options==='object'?options:{};
     if(opts.lifecycleManaged)return applyRows(rows,opts);
     const date=isValidIsoDate(opts.studyDate)?opts.studyDate:todayISO();
-    return SessionLifecycle.runSync(opts.source||'schedule-apply',{
+    return SessionLifecycle.run(opts.source||'schedule-apply',{
       scheduleIdentity:true,date,autoDate:date===todayISO(),snapshotReview:null,
     },()=>applyRows(rows,{...opts,lifecycleManaged:true}));
   }
