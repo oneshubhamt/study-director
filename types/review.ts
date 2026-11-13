@@ -167,7 +167,7 @@ export interface ReviewSubsystemInput{
       acknowledgeSavedStudyDay(date:string,revision:number):PromiseLike<unknown>;clearCanonicalSessionAfterSavedDay():PromiseLike<unknown>;cancelPendingLiveDraftSave():unknown;clearSaveReminder(date:string,revision:number):unknown;
       flushLiveDraft(options?:Readonly<Record<string,unknown>>):unknown|PromiseLike<unknown>;getLifecycleRevision():number;getOwnershipRevision():number;getReviewDate():string;handleActiveSessionRepositoryResult(value:unknown):unknown;
       lifecycleCanWrite():boolean;markDayContentChanged():unknown;markDayContentSaved(date:string,revision:number):unknown;resetRuntimeSessionState(options:Readonly<Record<string,unknown>>):unknown;
-      runLifecycle<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>;runLifecycleSync<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T):T;
+      runLifecycle<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>;
       saveLiveDraft(options?:Readonly<Record<string,unknown>>):unknown;setReviewDateTitle(date:string):unknown;setSessionPanelMode(mode:string,value?:unknown):unknown;stopTimerExecution():unknown;
       appCanMutate():boolean;writeCanonicalNow(operation:string,options?:Readonly<{markChanged?:boolean;backupCapture?:boolean}>):PromiseLike<SessionResult>;writeLiveDraftNow(options?:Readonly<Record<string,unknown>>):PromiseLike<Readonly<{ok:boolean;error?:unknown}>>;
     }>;
@@ -185,9 +185,9 @@ export interface ReviewSubsystemInput{
 export interface ReviewModel{calculate(evidence:ReviewEvidence):ReviewMetrics;projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState):ReviewProjectedStudyRecord;readonly evidenceFormat:'study-director.review-evidence'}
 export interface ReviewEditor{
   captureInputs():void;captureToday():void;getQuality():ReviewQuality;setQuality(value:unknown,options?:Readonly<{save?:boolean}>):void;
-  saveReview(options?:ReviewSaveOptions):boolean;queueReview(options?:ReviewSaveOptions):boolean;flushPending(options?:ReviewSaveOptions):boolean|Promise<unknown>;
-  settled():Promise<boolean>;hydrate(options?:ReviewHydrateOptions):ReviewState;selectDate():unknown;state():ReviewCurrentState;contentForDate(date?:string):string;activeSessionReview():ReviewSnapshot;
-  bindSession():boolean;persistenceCommitted():boolean;persistenceFailed(error?:unknown):boolean;invalidateBindings():boolean;clearForNewDay(options?:Readonly<{lifecycleManaged?:boolean}>):unknown;
+  saveReview(options?:ReviewSaveOptions):boolean;queueReview(options?:ReviewSaveOptions):boolean;flushPending(options?:ReviewSaveOptions):Promise<unknown>;
+  settled():Promise<boolean>;hydrate(options?:ReviewHydrateOptions):ReviewState;selectDate():Promise<boolean>;state():ReviewCurrentState;contentForDate(date?:string):string;activeSessionReview():ReviewSnapshot;
+  bindSession():boolean;persistenceCommitted():boolean;persistenceFailed(error?:unknown):boolean;invalidateBindings():boolean;clearForNewDay(options?:Readonly<{lifecycleManaged?:boolean}>):boolean|Promise<boolean>;
   clearFutureUntouched():boolean;setCompletionState(index:number,pct:number,source?:CompletionSource):void;editMeasure(index:number,measure:string,defaultTotal?:number|null):unknown;deletePracticeRun(event:Event):Promise<boolean>;
 }
 export interface ReviewView{
