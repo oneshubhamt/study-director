@@ -1,24 +1,23 @@
 import type {CompletionResult,CompletionSource,Task,TaskOutcome} from './domain.ts';
-import type {ActualRecord,ClockRecord,DailyRecord,DailyResult,KeyedRecord,Limits,PauseEvent,PracticeRun,RealTimeSnapshot,RecordHelpers} from './record-models.ts';
+import type {ActualRecord,ClockRecord,DailyRecord,DailyResult,KeyedRecord,Limits,PauseEvent,PracticeRun,RealTimeSnapshot,RecordHelpers,StoredSchedule} from './record-models.ts';
 import type {CompletionEvidenceController,TaskIdentityPort,TaskSessionStore} from './execution-host.ts';
 import type {SaveLaneModule} from './pilot.ts';
 import type {SessionContext,SessionOptions} from './session-lifecycle.ts';
 import type {TimerMode} from './timer-state.ts';
 
-export type ReviewQuality=1|2|3|4|5|null;
+export type ReviewQuality=number|null;
 export type ReviewTimerModes=Readonly<{EMPTY?:TimerMode;READY?:TimerMode;RUNNING?:TimerMode;PAUSED?:TimerMode;DONE:TimerMode;SUSPENDED?:TimerMode}>;
 export interface ReviewState{readonly date:string;readonly reflection:string;readonly studyQuality:ReviewQuality}
 export interface ReviewCurrentState extends ReviewState{readonly unfinished:string}
 export interface ReviewSnapshot{readonly reflection:string;readonly studyQuality:ReviewQuality}
 export interface ReviewStateInput{reflection?:unknown;studyQuality?:unknown}
 export interface ReviewRichInputMeta{readonly format:'study-director.rich-validated-input';readonly version:1;readonly canonical:string;readonly plain:string}
-export interface ReviewInputEvent extends Event{readonly [key:symbol]:unknown}
 export interface ReviewHydrateOptions{readonly date?:string;readonly snapshotReview?:ReviewStateInput|null}
-export interface ReviewSaveOptions{readonly event?:ReviewInputEvent|null;readonly strict?:boolean;readonly markChanged?:boolean;readonly backupCapture?:boolean}
-export interface ReviewReflectionBinding extends ReviewState{readonly studyQuality:null}
+export interface ReviewSaveOptions{readonly event?:Event|null;readonly strict?:boolean;readonly markChanged?:boolean;readonly backupCapture?:boolean}
+export type ReviewReflectionBinding=Pick<ReviewState,'date'|'reflection'>;
 export type ReviewReflectionPending=
   |Readonly<{mode:'session';date:string;reflection:string;backupCapture:boolean}>
-  |Readonly<{mode:'daily';date:string;reflection:string;backupCapture:boolean}>;
+  |Readonly<{mode:'saved-day';date:string;reflection:string;backupCapture:boolean}>;
 export interface ReviewDailyReflectionResult{readonly canonical:string;readonly recordKind:string|null;readonly record?:DailyRecord|null}
 export interface ReviewDailyReflectionPort{
   load(date:string):PromiseLike<ReviewDailyReflectionResult>;
@@ -43,12 +42,8 @@ export interface ReviewPracticeController{
   snapshot():unknown;
   status():ReviewPracticeStatus;
 }
-export interface ReviewEvidenceClock extends ClockRecord{
-  readonly startedAtLocalMinute?:number|null;readonly startedAtUtcOffsetMinutes?:number|null;readonly startedAtTimeZone?:string;
-}
-export interface ReviewActualRecord extends Partial<ActualRecord>{
-  readonly firstStartedAt?:string|null;readonly lastEndedAt?:string|null;readonly pauseCount?:number;readonly status?:string;
-}
+export type ReviewEvidenceClock=ClockRecord;
+export type ReviewActualRecord=Partial<ActualRecord>;
 export interface ReviewTaskProgress{readonly done?:number|null;readonly total?:number|null}
 export interface ReviewNoteInfo{
   readonly exactKey:string;readonly exactLabel:string;readonly exactText:string;
@@ -74,25 +69,23 @@ export interface ReviewEvidence{
   readonly realTimeSnapshot:RealTimeSnapshot|null;readonly carryForward?:string;
 }
 export interface ReviewMetrics{
-  readonly evidence:ReviewEvidence;readonly originalPlannedStudyMinutes:number;readonly completedEquivalentMinutes:number;readonly actualFocusMinutes:number;
-  readonly completionPercent:number;readonly averageBlockCompletion:number;readonly actualVsPlannedMinutes:number;readonly shiftedStudyBlocks:number;
+  readonly evidence:ReviewEvidence;readonly workBlocks:readonly ReviewTaskRow[];readonly completions:readonly number[];readonly originalPlannedStudyMinutes:number;readonly completedEquivalentMinutes:number;readonly actualFocusMinutes:number;
+  readonly completionPercent:number;readonly averageBlockCompletion:number;readonly actualVsPlannedMinutes:number;readonly actualVsCompletedMinutes:number;readonly shiftedStudyBlocks:number;
   readonly totalScheduleShiftMinutes:number;readonly netScheduleShiftMinutes:number;readonly outcomeCounts:Record<TaskOutcome,number>;
 }
-export interface ReviewScheduleRow{id:string;start:string;duration:number;name:string;kind:string;area:string;measure:string;target:number|null}
-export interface ReviewProjectedStudyRecord extends Omit<Extract<DailyRecord,{recordKind:'study'}>,'schedule'|'results'>{
-  schedule:ReviewScheduleRow[];results:Record<string,DailyResult>;
-}
+export type ReviewScheduleRow=StoredSchedule;
+export type ReviewProjectedStudyRecord=Extract<DailyRecord,{recordKind:'study'}>;
 export interface ReviewRecordViewTask{
-  readonly idx:number;readonly name:string;readonly area:string;readonly completion:number;readonly completionSource:CompletionSource;
+  readonly idx:number;readonly id:string;readonly name:string;readonly kind:'work'|'support'|'fixed';readonly area:string;readonly dur:number;readonly measure:string;readonly target:number|null;readonly completion:number;readonly completionSource:CompletionSource;
   readonly actualSeconds:number|null;readonly actualDeltaSeconds:number|null;readonly hasAdjustment:boolean;readonly originalStart:string;readonly originalEnd:string;
-  readonly adjustedStart:string;readonly adjustedEnd:string;readonly done:number|null;readonly enteredTotal:number|null;readonly skipped:boolean;readonly doneFlag:boolean;
+  readonly adjustedStart:string;readonly adjustedEnd:string;readonly actualStart:string|null;readonly actualEnd:string|null;readonly pauseEvents:readonly PauseEvent[];readonly done:number|null;readonly enteredTotal:number|null;readonly skipped:boolean;readonly doneFlag:boolean;
 }
 export interface ReviewRecordView{
   readonly date:string;readonly tasks:readonly ReviewRecordViewTask[];readonly practiceRuns:readonly PracticeRun[];readonly carryForwardDraft:string;
   readonly completedEquivalentMinutes:number;readonly actualFocusMinutes:number;readonly completionPercent:number;
 }
-export interface ReviewTaskHeaderInput{readonly name:string;readonly area:string;readonly pct:number;readonly statusInfo:Readonly<{label:string;status:string}>;readonly shifted?:boolean;readonly tracked?:boolean;readonly pctId?:string;readonly source?:string}
-export interface ReviewTimingRowInput{readonly original:string;readonly adjusted:string;readonly shifted?:boolean;readonly actualSec?:number|null;readonly deltaSec?:number|null;readonly wallStart?:string;readonly wallEnd?:string}
+export interface ReviewTaskHeaderInput{readonly name:string;readonly area:string;readonly pct:number|null;readonly statusInfo:Readonly<{label:string;status:string}>;readonly shifted?:boolean;readonly tracked?:boolean;readonly pctId?:string;readonly source?:string}
+export interface ReviewTimingRowInput{readonly original:string;readonly adjusted:string;readonly shifted?:boolean;readonly actualSec?:number|null;readonly deltaSec?:number|null;readonly wallStart?:string|undefined;readonly wallEnd?:string|undefined}
 export interface ReviewProgressLineInput{readonly done:number|null|undefined;readonly total:number|null|undefined;readonly measure:string;readonly suffixNoTotal?:string}
 export interface ReviewCardModel{
   readonly idx:number;readonly task:ReviewTaskRow;readonly pct:number;readonly hasPct:boolean;readonly sourceText:string;readonly statusInfo:Readonly<{label:string;status:string}>;
@@ -101,7 +94,7 @@ export interface ReviewCardModel{
 }
 export interface ReviewCardView{
   readonly card:HTMLElement;readonly pctInput:HTMLInputElement;readonly doneInput:HTMLInputElement;readonly totalInput:HTMLInputElement;
-  readonly progressLine:HTMLElement;readonly editBtn:HTMLButtonElement;readonly noteBox:HTMLTextAreaElement;readonly noteEdit:HTMLButtonElement;
+  readonly progressLine:HTMLElement;readonly editBtn:HTMLButtonElement;readonly noteBox:HTMLDivElement;readonly noteEdit:HTMLTextAreaElement;
 }
 export interface PracticeUnitSummary{readonly index:number;readonly segmentIndex:number|null;readonly segmentUnitIndex:number|null;readonly marks:number|null;readonly targetMs:number;readonly actualMs:number;readonly deltaMs:number;readonly paceBand:string}
 export interface PracticeSegmentSummary{readonly index:number;readonly label:string;readonly units:number;readonly plannedUnits:number;readonly actualMs:number;readonly targetMs:number;readonly varianceMs:number}
@@ -121,7 +114,8 @@ export interface ReviewRenderOptions{readonly evidence?:ReviewEvidence;readonly 
 export interface ReviewPrepared{readonly cleared:boolean;readonly evidence:ReviewEvidence;readonly key:string}
 export interface ReviewReportChild{readonly id:string;readonly label:string;readonly value?:string}
 export interface ReviewReportSection{readonly id:string;readonly label:string;readonly children:readonly ReviewReportChild[];readonly compose:(context:ReviewReportContext,selected:readonly ReviewReportChild[])=>string}
-export interface ReviewReportContext{
+export interface ReviewReportSelectorContext{readonly reportTasks:readonly (Task|ReviewRecordViewTask)[];readonly subjectEntries:readonly Readonly<{key:string;label:string;text:string}>[]}
+export interface ReviewReportContext extends ReviewReportSelectorContext{
   readonly m:ReviewMetrics;readonly rec:ReviewRecordView;readonly reviewDay:Date;readonly quality:ReviewQuality;readonly refl:string;readonly dowFull:string;readonly monFull:string;
   readonly reportTasks:readonly ReviewRecordViewTask[];readonly subjectEntries:readonly Readonly<{key:string;label:string;text:string}>[];readonly unfinished:string;
 }
@@ -130,7 +124,10 @@ export interface ReviewNotificationOperation{
   finish(lifecycle:string,message:string,options?:Readonly<Record<string,unknown>>):boolean;
 }
 export interface ReviewSubsystemInput{
-  readonly constants:Readonly<{limits:Limits;dataContract:Readonly<{schemas:Readonly<{DailyRecord:Readonly<{version:number}>}>}>;completionSources:Readonly<Record<string,CompletionSource>>;taskOutcomes:Readonly<Record<string,TaskOutcome>>;timerModes:ReviewTimerModes}>;
+  readonly constants:Readonly<{limits:Limits;dataContract:Readonly<{schemas:Readonly<{DailyRecord:Readonly<{version:number}>}>}>;
+    completionSources:Readonly<{UNITS:'units';MANUAL:'manual';TIME:'time';FINISHED_TIME:'finished-time';FINISHED_UNVERIFIED:'finished-unverified';SKIPPED:'skipped';NONE:'none'}>;
+    taskOutcomes:Readonly<{FULL:'full';PARTIAL:'partial';SKIPPED:'skipped';UNTOUCHED:'untouched';FINISHED_UNVERIFIED:'finished-unverified';ZERO_OUTPUT:'zero-output'}>;
+    timerModes:ReviewTimerModes}>;
   readonly services:Readonly<{
     appData:ReviewAppDataPort;diagnostics:ReviewDiagnosticsPort;practicePacer:ReviewPracticeController;taskIdentity:TaskIdentityPort;taskSessionState:TaskSessionStore;keyedRecord:KeyedRecord;
     evidenceGateway:Readonly<{snapshot(options?:Readonly<{includeRecords?:boolean}>):ReviewEvidence}>;dailyReflection:ReviewDailyReflectionPort;saveLane:SaveLaneModule;
@@ -142,14 +139,14 @@ export interface ReviewSubsystemInput{
   readonly ports:Readonly<{
     notifications:Readonly<{begin(options:Readonly<Record<string,unknown>>):ReviewNotificationOperation;feedback(options:Readonly<Record<string,unknown>>):unknown}>;
     domain:Readonly<Pick<RecordHelpers,'boundedInt'|'clampText'|'clampEditorContent'|'editorContentWithinLimits'> & {
-      plainTextContent(value:unknown):string;classifyTaskOutcome(task:Task):TaskOutcome;cleanDayRevision(value:unknown):number;
+      plainTextContent(value:unknown):string;classifyTaskOutcome(task:Task|ReviewRecordViewTask):TaskOutcome;cleanDayRevision(value:unknown):number;
       dailyRecordMetricsFromEvidence(value:unknown):ReviewMetrics;emptyTaskOutcomeCounts():Record<TaskOutcome,number>;finiteNumber(value:unknown):number|null;
       materializeDailyRecordView(value:DailyRecord):ReviewRecordView|null;normalizeCompletionSource(value:unknown):CompletionSource;
       normalizeDailyResultEntry(value:unknown,schedule:ReviewScheduleRow):DailyResult|null;positiveMinutes(value:unknown):number;
       sanitizePracticeRuns(value:unknown):PracticeRun[];sanitizeTaskOutcomeCounts(value:unknown):Record<TaskOutcome,number>;
-      summarizeCleanPracticeRuns(value:readonly PracticeRun[]):ReviewPracticeAggregate;taskAreaValue(task:Task|ReviewRecordViewTask):string;taskMeasureValue(task:Task|ReviewRecordViewTask,fallback?:string):string;
+      summarizeCleanPracticeRuns(value:readonly PracticeRun[]):ReviewPracticeAggregate;taskAreaValue(task:Task|ReviewTaskRow|ReviewRecordViewTask):string;taskMeasureValue(task:Task|ReviewTaskRow|ReviewRecordViewTask,fallback?:string):string;
       taskOutcomeInfo(outcome:TaskOutcome):Readonly<{status:string;label:string}>;taskOutcomeSummaryText(value:Record<TaskOutcome,number>):string;taskOutcomeTotal(value:Record<TaskOutcome,number>):number;
-      taskTargetValue(task:Task|ReviewRecordViewTask):number|null;
+      taskTargetValue(task:Task|ReviewTaskRow|ReviewRecordViewTask):number|null;
     }>;
     presentation:Readonly<{
       dateInsightsMeta(date:string):Readonly<{dayOfWeek:number;dayName:string}>;fmtS(seconds:number):string;formatPracticeMs(ms:number):string;practicePaceBandLabel(value:string):string;
@@ -198,11 +195,13 @@ export interface ReviewView{
   renderCompletionChange(index:number,pct:number,refreshStats?:boolean,options?:Readonly<{syncTimer?:boolean;timerSummary?:string}>):void;renderUnfinishedNote():void;setDisclosures(open:boolean):void;syncFromTimer(index:number,pct:number,done:number|null,total:number|null):void;
 }
 export interface ReviewSaveService{saveToday(options?:Readonly<{closeSession?:boolean}>):Promise<boolean>;handleRollover():Promise<boolean>;hasSaveableDay():boolean;isRolledOver(now?:Date):boolean;status():Readonly<{rolloverSaveInProgress:boolean;saveDayInProgress:boolean;activeSessionPersistenceBlocked:boolean}>}
+export interface ReviewPomodoroSummary{readonly breaks:number;readonly recoverySeconds:number;readonly overrunSeconds:number;readonly actualSeconds:number;readonly excludedUnknown:number}
+export type TaskWithPauses=Task&{readonly pauseEvents?:readonly PauseEvent[]};
 export interface SharedReviewPresentation{
   createSavedDayTaskCard(task:ReviewRecordViewTask):HTMLElement;createPomodoroSummaryLine(tasks:readonly ReviewRecordViewTask[]):HTMLElement;
   populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],options?:Readonly<{tasks?:readonly Task[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>):ReviewPracticeAggregate|null;
-  pomodoroSummaryFromTasks(tasks:readonly ReviewRecordViewTask[]):Readonly<{sessions:number;focusSeconds:number;pausedSeconds:number;pauseCount:number}>;
-  pomodoroSummaryText(value:Readonly<{sessions:number;focusSeconds:number;pausedSeconds:number;pauseCount:number}>):string;
+  pomodoroSummaryFromTasks(tasks:readonly (ReviewRecordViewTask|TaskWithPauses)[]):ReviewPomodoroSummary;
+  pomodoroSummaryText(value:ReviewPomodoroSummary):string;
   completionSourceLabel(source:unknown):string;durationLabel(value:number):string;optionalDurationLabel(value:unknown):string;optionalPercentLabel(value:unknown):string;
 }
 export interface ReviewSubsystem{readonly format:'study-director.review-subsystem';readonly contractVersion:1;readonly ReviewModel:Readonly<ReviewModel>;readonly ReviewEditor:Readonly<ReviewEditor>;readonly ReviewSaveService:Readonly<ReviewSaveService>;readonly ReviewView:Readonly<ReviewView>;readonly SharedReviewPresentation:Readonly<SharedReviewPresentation>}

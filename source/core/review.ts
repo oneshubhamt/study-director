@@ -1,10 +1,10 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {
-  ReviewModule as ReviewModuleContract,ReviewSubsystemInput,ReviewState,ReviewCurrentState,ReviewStateInput,ReviewInputEvent,ReviewRichInputMeta,
+  ReviewModule as ReviewModuleContract,ReviewSubsystemInput,ReviewState,ReviewCurrentState,ReviewStateInput,ReviewRichInputMeta,
   ReviewHydrateOptions,ReviewSaveOptions,ReviewReflectionBinding,ReviewReflectionPending,ReviewEvidence,ReviewMetrics,ReviewTaskRow,ReviewTaskHeaderInput,
   ReviewTimingRowInput,ReviewProgressLineInput,ReviewCardModel,ReviewCardView,ReviewPracticeRunSummary,PracticeUnitSummary,PracticeSegmentSummary,
   ReviewPracticeAggregate,ReviewPrepared,ReviewRenderOptions,ReviewUiState,ReviewFocusLocator,ReviewReportContext,ReviewReportChild,ReviewReportSection,
-  ReviewRecordViewTask
+  ReviewRecordViewTask,ReviewReportSelectorContext,ReviewPomodoroSummary,TaskWithPauses
 } from '../../types/review.ts';
 import type {CompletionSource,Task,TaskOutcome} from '../../types/domain.ts';
 import type {DailyRecord,PracticeRun} from '../../types/record-models.ts';
@@ -131,12 +131,22 @@ const createModule=():ReviewModuleContract=>{
     let rolloverSaveInProgress=false;
     let saveDayInProgress=false;
     let activeSessionPersistenceBlocked=false;
-    let currentReview=freeze({date:'',reflection:'',studyQuality:null,unfinished:''});
-    let persistedReview=freeze({date:'',reflection:'',studyQuality:null});
-    let reflectionOnlyState=freeze({date:'',canonical:'',recordKind:null});
+    let currentReview:Readonly<ReviewCurrentState>=freeze({date:'',reflection:'',studyQuality:null,unfinished:''});
+    let persistedReview:Readonly<ReviewState>=freeze({date:'',reflection:'',studyQuality:null});
+    let reflectionOnlyState:Readonly<{date:string;canonical:string;recordKind:string|null}>=freeze({date:'',canonical:'',recordKind:null});
     let reflectionOnlyHydration=0,reflectionOnlyLoading=false;
     const REVIEW_EDITOR_BINDING_VERSION='review-v2';
     const REVIEW_RICH_INPUT_META=Symbol.for('studyDirector.richValidatedInput.v1');
+    function inputById(id:string):HTMLInputElement|null{
+      const element=document.getElementById(id);
+      return element instanceof HTMLInputElement?element:null;
+    }
+    function textAreaById(id:string):HTMLTextAreaElement|null{
+      const element=document.getElementById(id);
+      return element instanceof HTMLTextAreaElement?element:null;
+    }
+    function eventElement(event:Event):Element|null{return event.target instanceof Element?event.target:null;}
+    function errorMessage(error:unknown):string{return error instanceof Error?error.message:String(error??'');}
 
     function validReviewDate(value:unknown){
       const text=String(value||'');
@@ -152,9 +162,13 @@ const createModule=():ReviewModuleContract=>{
       const parsed=Number(value);
       return Number.isInteger(parsed)&&parsed>=1&&parsed<=5?parsed:null;
     }
-    function reviewRichInputMeta(event:ReviewInputEvent|null|undefined,value:unknown):ReviewRichInputMeta|null{
-      const meta=event&&event[REVIEW_RICH_INPUT_META];
-      return meta&&meta.format==='study-director.rich-validated-input'&&meta.version===1&&meta.canonical===String(value||'')&&typeof meta.plain==='string'?meta:null;
+    function reviewRichInputMeta(event:Event|null|undefined,value:unknown):ReviewRichInputMeta|null{
+      const meta=event&&typeof event==='object'?Reflect.get(event,REVIEW_RICH_INPUT_META):null;
+      if(!meta||typeof meta!=='object')return null;
+      if(!('format' in meta)||!('version' in meta)||!('canonical' in meta)||!('plain' in meta))return null;
+      return meta.format==='study-director.rich-validated-input'&&meta.version===1&&meta.canonical===String(value||'')&&typeof meta.plain==='string'
+        ?Object.freeze({format:'study-director.rich-validated-input',version:1,canonical:meta.canonical,plain:meta.plain})
+        :null;
     }
     function normalizeReviewState(value:ReviewStateInput|ReviewState|null|undefined,date:unknown=getReviewDate(),options:Readonly<{validatedRich?:boolean}>={}):ReviewState{
       const target=reviewDate(date),source=value&&typeof value==='object'&&!Array.isArray(value)?value:{};
@@ -163,13 +177,13 @@ const createModule=():ReviewModuleContract=>{
       return freeze({date:target,reflection,studyQuality:reflectionQuality(source.studyQuality)});
     }
     function reviewBindingElements(){
-      const box=document.getElementById('daily-reflection');
-      return [box,...document.querySelectorAll('.quality-btn')].filter(Boolean);
+      const box=textAreaById('daily-reflection');
+      return [box,...document.querySelectorAll<HTMLButtonElement>('.quality-btn')].filter(Boolean);
     }
     function setReflectionRichSync(state:unknown,message:unknown){
-      const box=document.getElementById('daily-reflection');if(!box)return false;
+      const box=textAreaById('daily-reflection');if(!box)return false;
       const syncState=String(state||'saved'),syncStatus=String(message||'Saved'),indicator=document.getElementById('reflection-sync');
-      box.dataset.richSyncState=syncState;box.dataset.richSyncStatus=syncStatus;
+      box.dataset['richSyncState']=syncState;box.dataset['richSyncStatus']=syncStatus;
       if(indicator){
         const saving=syncState==='saving'||syncState==='busy',failed=syncState==='conflict'||syncState==='error',readOnly=syncState==='read-only';
         indicator.textContent=saving?'…':failed?'!':readOnly?'—':'✓';
@@ -181,10 +195,10 @@ const createModule=():ReviewModuleContract=>{
     function bindReviewEditors(date:unknown=getReviewDate()){
       const target=reviewDate(date),owner=Number(getOwnershipRevision())||0,lifecycle=Number(getLifecycleRevision())||0;
       reviewBindingElements().forEach(field=>{
-        field.dataset.reviewBinding=REVIEW_EDITOR_BINDING_VERSION;
-        field.dataset.reviewDate=target;
-        field.dataset.reviewOwnershipRevision=String(owner);
-        field.dataset.reviewLifecycleRevision=String(lifecycle);
+        field.dataset['reviewBinding']=REVIEW_EDITOR_BINDING_VERSION;
+        field.dataset['reviewDate']=target;
+        field.dataset['reviewOwnershipRevision']=String(owner);
+        field.dataset['reviewLifecycleRevision']=String(lifecycle);
       });
       setReflectionRichSync(lifecycleCanWrite()?'saved':'read-only',lifecycleCanWrite()?'Saved':'Read-only');
       return true;
@@ -197,24 +211,24 @@ const createModule=():ReviewModuleContract=>{
       return true;
     }
     function reflectionEditorContent(date:unknown=getReviewDate()){
-      const target=reviewDate(date),box=document.getElementById('daily-reflection');
+      const target=reviewDate(date),box=textAreaById('daily-reflection');
       const current=String(box&&box.value||''),stored=persistedReview.date===target?String(persistedReview.reflection||''):'';
       return current===plainTextContent(stored)?stored:current;
     }
-    function resolveReviewEditorBinding(date:unknown=getReviewDate(),event:ReviewInputEvent|null=null):ReviewState|null{
+    function resolveReviewEditorBinding(date:unknown=getReviewDate(),event:Event|null=null):ReviewState|null{
       if(!lifecycleCanWrite())return null;
-      const target=reviewDate(date),box=document.getElementById('daily-reflection');
-      if(!box||box.dataset.reviewBinding!==REVIEW_EDITOR_BINDING_VERSION||box.dataset.reviewDate!==target)return null;
-      if(Number(box.dataset.reviewOwnershipRevision)!==Number(getOwnershipRevision())||Number(box.dataset.reviewLifecycleRevision)!==Number(getLifecycleRevision()))return null;
-      const qualityFields=[...document.querySelectorAll('.quality-btn')];
-      if(qualityFields.some(field=>field.dataset.reviewBinding!==REVIEW_EDITOR_BINDING_VERSION||field.dataset.reviewDate!==target||Number(field.dataset.reviewOwnershipRevision)!==Number(getOwnershipRevision())||Number(field.dataset.reviewLifecycleRevision)!==Number(getLifecycleRevision())))return null;
+      const target=reviewDate(date),box=textAreaById('daily-reflection');
+      if(!box||box.dataset['reviewBinding']!==REVIEW_EDITOR_BINDING_VERSION||box.dataset['reviewDate']!==target)return null;
+      if(Number(box.dataset['reviewOwnershipRevision'])!==Number(getOwnershipRevision())||Number(box.dataset['reviewLifecycleRevision'])!==Number(getLifecycleRevision()))return null;
+      const qualityFields=[...document.querySelectorAll<HTMLButtonElement>('.quality-btn')];
+      if(qualityFields.some(field=>field.dataset['reviewBinding']!==REVIEW_EDITOR_BINDING_VERSION||field.dataset['reviewDate']!==target||Number(field.dataset['reviewOwnershipRevision'])!==Number(getOwnershipRevision())||Number(field.dataset['reviewLifecycleRevision'])!==Number(getLifecycleRevision())))return null;
       const trusted=reviewRichInputMeta(event,box.value);
       return normalizeReviewState({reflection:trusted?trusted.canonical:reflectionEditorContent(target),studyQuality:getStudyQuality()},target,{validatedRich:!!trusted});
     }
     function applyReviewState(value:ReviewStateInput|ReviewState,date:unknown=getReviewDate()){
       const clean=normalizeReviewState(value,date);
       persistedReview=clean;
-      const box=document.getElementById('daily-reflection');if(box)box.value=plainTextContent(clean.reflection);
+      const box=textAreaById('daily-reflection');if(box)box.value=plainTextContent(clean.reflection);
       setStudyQuality(clean.studyQuality,{save:false});
       bindReviewEditors(clean.date);
       if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
@@ -223,7 +237,7 @@ const createModule=():ReviewModuleContract=>{
     function hydrateReviewState(options:ReviewHydrateOptions={}):ReviewState{
       const target=reviewDate(options.date||getReviewDate());
       const review=options.snapshotReview===undefined&&persistedReview.date===target?persistedReview:options.snapshotReview&&typeof options.snapshotReview==='object'?options.snapshotReview:{reflection:'',studyQuality:null};
-      const dd=document.getElementById('day-date');if(dd&&dd.value!==target)dd.value=target;
+      const dd=inputById('day-date');if(dd&&dd.value!==target)dd.value=target;
       return applyReviewState(review,target);
     }
     function currentReviewState(){
@@ -235,9 +249,9 @@ const createModule=():ReviewModuleContract=>{
     }
 function reviewHasStudyDay(){return TASKS.some(isTrackableBlock);}
 function getStudyQuality(){
-  const active=document.querySelector('.quality-btn.on');
+  const active=document.querySelector<HTMLButtonElement>('.quality-btn.on');
   if(!active)return null;
-  const q=parseInt(active.dataset.q,10);
+  const q=parseInt(active.dataset['q'],10);
   return isNaN(q)?null:q;
 }
 function updateStudyQualitySummary(value=getStudyQuality()){
@@ -246,10 +260,10 @@ function updateStudyQualitySummary(value=getStudyQuality()){
 }
 function setStudyQuality(q:unknown,options:Readonly<{save?:boolean}>={}){
   const val=reviewHasStudyDay()&&(q!==null&&q!==undefined&&q!=='')?Number(q):null;
-  document.querySelectorAll('.quality-btn').forEach(btn=>{
-    const selected=val!==null && Number(btn.dataset.q)===val;
+  document.querySelectorAll<HTMLButtonElement>('.quality-btn').forEach(btn=>{
+    const selected=val!==null && Number(btn.dataset['q'])===val;
     btn.classList.toggle('on',selected);
-    if(btn.dataset.q!==''&&typeof btn.setAttribute==='function')btn.setAttribute('aria-pressed',selected?'true':'false');
+    if(btn.dataset['q']!==''&&typeof btn.setAttribute==='function')btn.setAttribute('aria-pressed',selected?'true':'false');
   });
   updateStudyQualitySummary(val);
   if(options.save!==false&&reviewHasStudyDay())queueReviewSave();
@@ -312,7 +326,7 @@ function persistReviewBinding(binding:ReviewState,options:ReviewSaveOptions={}){
   persistedReview=normalizeReviewState(binding,binding.date,{validatedRich:true});
   if(options.markChanged!==false)markDayContentChanged();
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
-  reflectionLane.schedule(freeze({mode:'session',date:binding.date,backupCapture:options.backupCapture===true}));
+  reflectionLane.schedule(freeze({mode:'session',date:binding.date,reflection:binding.reflection,backupCapture:options.backupCapture===true}));
   return true;
 }
 function saveReviewState(options:ReviewSaveOptions={}){
@@ -322,7 +336,7 @@ function saveReviewState(options:ReviewSaveOptions={}){
   return persistReviewBinding(binding,options);
 }
 function queueReviewSave(options:ReviewSaveOptions={}){
-  const binding=resolveReviewEditorBinding(getReviewDate(),options.event||options);
+  const binding=resolveReviewEditorBinding(getReviewDate(),options.event||null);
   if(!binding)return false;
   return persistReviewBinding(binding,options);
 }
@@ -340,8 +354,8 @@ function flushPendingReviewSave(options:ReviewSaveOptions={}){
 function reviewPersistenceCommitted(){setReflectionRichSync('saved','Saved');return true;}
 function reviewPersistenceFailed(error?:unknown){setReflectionRichSync('error','Save failed');if(error)AppDiagnostics.capture('review.active-session-save',error,'warn');return false;}
 function selectReviewDate(){
-  const dd=document.getElementById('day-date'),date=reviewDate(dd&&dd.value||getReviewDate());
-  return runLifecycleSync('date-change',{date,review:true},()=>{if(dd){dd.value=date;dd.dataset.autoDate='0';}return true;});
+  const dd=inputById('day-date'),date=reviewDate(dd&&dd.value||getReviewDate());
+  return runLifecycleSync('date-change',{date,review:true},()=>{if(dd){dd.value=date;dd.dataset['autoDate']='0';}return true;});
 }
 function reviewSnapshot(){
   const state=currentReviewState();
@@ -355,25 +369,25 @@ function bindReviewSession(){return bindReviewEditors(getReviewDate());}
 function syncReviewSurfaceMode(){
   const hasStudyDay=reviewHasStudyDay(),date=getReviewDate();
   const pane=document.getElementById('pane-review');
-  if(pane)pane.dataset.reviewMode=hasStudyDay?'study':'reflection';
+  if(pane)pane.dataset['reviewMode']=hasStudyDay?'study':'reflection';
   [
-    document.querySelector('#pane-review .review-stats'),
+    document.querySelector<HTMLElement>('#pane-review .review-stats'),
     document.getElementById('review-summary'),
     document.getElementById('practice-review'),
-    document.querySelector('#pane-review .review-blocks-collapse')
+    document.querySelector<HTMLDetailsElement>('#pane-review .review-blocks-collapse')
   ].filter(Boolean).forEach(element=>{element.hidden=!hasStudyDay;});
-  const quality=document.querySelector('#pane-review .quality-wrap');
+  const quality=document.querySelector<HTMLElement>('#pane-review .quality-wrap');
   if(quality)quality.hidden=!hasStudyDay;
-  document.querySelectorAll('.quality-btn').forEach(button=>{button.disabled=!hasStudyDay||!lifecycleCanWrite();});
-  const copyControl=document.querySelector('#pane-review .copy-report-control');
+  document.querySelectorAll<HTMLButtonElement>('.quality-btn').forEach(button=>{button.disabled=!hasStudyDay||!lifecycleCanWrite();});
+  const copyControl=document.querySelector<HTMLElement>('#pane-review .copy-report-control');
   if(copyControl)copyControl.hidden=!hasStudyDay;
-  const copyMain=document.querySelector('button[data-action="copy-review"]'),copyMenu=document.querySelector('button[data-action="toggle-copy-report-menu"]');
+  const copyMain=document.querySelector<HTMLButtonElement>('button[data-action="copy-review"]'),copyMenu=document.querySelector<HTMLButtonElement>('button[data-action="toggle-copy-report-menu"]');
   if(copyMain)copyMain.disabled=!hasStudyDay;
   if(copyMenu)copyMenu.disabled=!hasStudyDay;
   if(!hasStudyDay)closeCopyReportMenu();
-  const reflection=document.getElementById('daily-reflection'),ready=hasStudyDay||(reflectionOnlyReady(date)&&!reflectionOnlyLoading);
+  const reflection=textAreaById('daily-reflection'),ready=hasStudyDay||(reflectionOnlyReady(date)&&!reflectionOnlyLoading);
   if(reflection)reflection.disabled=!lifecycleCanWrite()||!ready;
-  const saveBtn=document.querySelector('button[data-action="save-day"]');
+  const saveBtn=document.querySelector<HTMLButtonElement>('button[data-action="save-day"]');
   if(saveBtn)saveBtn.disabled=saveDayInProgress||!lifecycleCanWrite()||(!hasStudyDay&&!ready);
   return hasStudyDay;
 }
@@ -381,8 +395,8 @@ function syncReviewDateMode(){
   const date=getReviewDate(),hasStudyDay=syncReviewSurfaceMode();
   const kicker=document.getElementById('review-kicker');
   const summaryTitle=document.getElementById('review-summary-title');
-  const saveBtn=document.querySelector('button[data-action="save-day"]');
-  const copyBtn=document.querySelector('button[data-action="copy-review"]');
+  const saveBtn=document.querySelector<HTMLButtonElement>('button[data-action="save-day"]');
+  const copyBtn=document.querySelector<HTMLButtonElement>('button[data-action="copy-review"]');
   const isToday=date===todayISO();
   const label=isToday?'Today':prettyDate(date);
   const journalDateLabel=document.getElementById('journal-date-label');
@@ -398,7 +412,7 @@ function syncReviewDateMode(){
 function captureReviewInputs(){
   TASKS.forEach((t,i)=>{
     if(!isTrackableBlock(t))return;
-    const di=document.getElementById(`rd-done-${i}`),ti=document.getElementById(`rd-total-${i}`);
+    const di=inputById(`rd-done-${i}`),ti=inputById(`rd-total-${i}`);
     if(di||ti){
       const progress=TaskSessionState.getField(i,'notes');
     const state=progressInputState(i,di?di.value:progress?.done,ti?ti.value:progress?.total,taskTargetValue(t));
@@ -475,7 +489,7 @@ async function saveReflectionOnlyRecord(){
   if(!reflectionOnlyReady(getReviewDate())){setStatus('save-status','Reflection is still loading. Try again after it finishes.',false);return false;}
   const binding=resolveReviewEditorBinding(getReviewDate());
   if(!binding){setStatus('save-status','This Reflection editor is no longer bound to the current date.',false);return false;}
-  const saveButton=document.querySelector('[data-action="save-day"]');
+  const saveButton=document.querySelector<HTMLButtonElement>('[data-action="save-day"]');
   saveDayInProgress=true;if(saveButton)saveButton.disabled=true;
   const notice=notifications.begin({id:'save-reflection',surfaceId:'save-status',title:'Save reflection',message:'Saving reflection…'});
   let committed=false;
@@ -485,7 +499,7 @@ async function saveReflectionOnlyRecord(){
     ReviewView.sync();
     notice.finish('succeeded',hasContent?'✓ Reflection saved in Diary.':'No reflection saved. Empty reflections are not kept in Diary.',{announce:hasContent,title:'Reflection saved'});return true;
   }catch(error){
-    notice.finish('failed',(committed?'Reflection saved locally; refreshing the view failed. ':'Could not save reflection. Keep this tab open and retry after storage recovers. ')+(error&&error.message||error),{title:committed?'Reflection saved; follow-up needs attention':'Reflection not saved',outcome:committed?'local-save-completed':'local-save-failed'});
+    notice.finish('failed',(committed?'Reflection saved locally; refreshing the view failed. ':'Could not save reflection. Keep this tab open and retry after storage recovers. ')+errorMessage(error),{title:committed?'Reflection saved; follow-up needs attention':'Reflection not saved',outcome:committed?'local-save-completed':'local-save-failed'});
     return false;
   }finally{
     saveDayInProgress=false;
@@ -496,7 +510,7 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
   if(!reviewHasStudyDay())return saveReflectionOnlyRecord();
   if(saveDayInProgress)return false;
   if(!appCanMutate()){setStatus('save-status','Study control is in another tab. Take control here before saving.',false);return false;}
-  const saveButton=document.querySelector('[data-action="save-day"]');
+  const saveButton=document.querySelector<HTMLButtonElement>('[data-action="save-day"]');
   saveDayInProgress=true;if(saveButton)saveButton.disabled=true;
   const notice=notifications.begin({id:'save-study-day',surfaceId:'save-status',title:'Save Study Day',message:'Saving this day…'});
   let committed=null;
@@ -532,7 +546,7 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
     }
     notice.finish('succeeded',`✓ Saved ${prettyDate(rec.date)} · completed equivalent ${durationLabel(rec.completedEquivalentMinutes)} · actual focus ${durationLabel(rec.actualFocusMinutes)} · ${displayPercent(rec.completionPercent)}`);
   }catch(e){
-    notice.finish('failed',(committed?'Study Day saved locally in Library; follow-up did not complete. Keep this tab open and review the saved record. ':'Could not save this Study Day. Keep this tab open and retry after storage recovers. ')+(e&&e.message?e.message:e),{title:committed?'Study Day saved; follow-up needs attention':'Study Day not saved',outcome:committed?'local-save-completed':'local-save-failed'});
+    notice.finish('failed',(committed?'Study Day saved locally in Library; follow-up did not complete. Keep this tab open and review the saved record. ':'Could not save this Study Day. Keep this tab open and retry after storage recovers. ')+errorMessage(e),{title:committed?'Study Day saved; follow-up needs attention':'Study Day not saved',outcome:committed?'local-save-completed':'local-save-failed'});
     return false;
   }finally{activeSessionPersistenceBlocked=false;saveDayInProgress=false;syncReviewSurfaceMode();}
   return true;
@@ -544,8 +558,8 @@ function hasSaveableStudyDay(){
 function clearReviewForNewDay(options:Readonly<{lifecycleManaged?:boolean}>={}){
   const date=todayISO();
   const apply=()=>{
-    const dd=document.getElementById('day-date');
-    if(dd){dd.value=date;dd.dataset.autoDate='1';}
+    const dd=inputById('day-date');
+    if(dd){dd.value=date;dd.dataset['autoDate']='1';}
     syncReviewDateMode();
     return true;
   };
@@ -598,8 +612,8 @@ async function handleStudyDayRollover(){
   }catch(e){
     AppDiagnostics.capture('session.rollover-save',e,'error');
     Runtime.setSafetyMessage(savedDay
-      ? `Saved ${prettyDate(endedDate)} to Library, but its old session could not be finalized: ${(e&&e.message)||e}. Keep the recovery data and retry after storage recovers.`
-      : `New study day safety check could not auto-save ${prettyDate(endedDate)}: ${(e&&e.message)||e}. Open Review and save manually before starting a new day.`);
+      ? `Saved ${prettyDate(endedDate)} to Library, but its old session could not be finalized: ${errorMessage(e)}. Keep the recovery data and retry after storage recovers.`
+      : `New study day safety check could not auto-save ${prettyDate(endedDate)}: ${errorMessage(e)}. Open Review and save manually before starting a new day.`);
     refreshStorageFallbackWarning();
     return false;
   }finally{
@@ -608,7 +622,7 @@ async function handleStudyDayRollover(){
   }
 }
 
-function reviewRichInputPlain(event:ReviewInputEvent|null|undefined,value:unknown){
+function reviewRichInputPlain(event:Event|null|undefined,value:unknown){
   const meta=reviewRichInputMeta(event,value);
   return meta?meta.plain:plainTextContent(value);
 }
@@ -644,7 +658,7 @@ function renderCompletionChange(idx:number,pct:number,refreshStats=true,options:
   if(sourceBadge)sourceBadge.textContent=completionSourceLabel(source);
   const rd=document.getElementById(`rpct-${idx}`);
   if(rd)rd.textContent=displayPercent(pct);
-  const pctInput=document.getElementById(`rd-pct-${idx}`);
+  const pctInput=inputById(`rd-pct-${idx}`);
   if(pctInput)pctInput.value=source!==COMPLETION_SOURCES.NONE?Math.round(pct):'';
   const sourceLine=document.getElementById(`rsource-${idx}`);
   if(sourceLine)sourceLine.textContent=completionSourceDescription(source,pct);
@@ -664,7 +678,7 @@ function setCompletion(idx:number,pct:number,updateUI:boolean,source:CompletionS
 /* REVIEW/TIMER UI BRIDGE */
 function syncRptFromTimer(idx:number,pct:number,done:number|null,total:number|null){
   renderCompletionChange(idx,pct,false,{syncTimer:false});
-  const rdi=document.getElementById(`rd-done-${idx}`);const rti=document.getElementById(`rd-total-${idx}`);
+  const rdi=inputById(`rd-done-${idx}`);const rti=inputById(`rd-total-${idx}`);
   if(rdi)rdi.value=done!==null&&done!==undefined?done:'';
   if(rti)rti.value=total!==null&&total!==undefined?total:'';
   refreshRsum(idx,taskMeasureValue(TASKS[idx],'units'),done,total);
@@ -778,10 +792,10 @@ function createTaskReviewHeader({name,area,pct,statusInfo,shifted=false,tracked=
   nw.append(textEl('div','rcard-name ui-label',name||'Task'),textEl('div','rcard-area ui-label',area||'—'));
   const badges=document.createElement('div');badges.className='rcard-badges';
   const statusBadge=appendReviewBadge(badges,statusInfo.label,statusInfo.status);
-  statusBadge.dataset.badge='status';
+  statusBadge.dataset['badge']='status';
   if(source&&normalizeCompletionSource(source)!==COMPLETION_SOURCES.NONE){
     const sourceBadge=appendReviewBadge(badges,completionSourceLabel(source),'muted');
-    sourceBadge.dataset.badge='source';
+    sourceBadge.dataset['badge']='source';
   }
   if(shifted)appendReviewBadge(badges,'Shifted','shifted');
   appendReviewBadge(badges,tracked?'Tracked':'Not tracked',tracked?'tracked':'muted');
@@ -826,7 +840,7 @@ function createStaticProgressLine({done,total,measure,suffixNoTotal=' done · no
   return sm;
 }
 function minutesFromSeconds(seconds:unknown){return Math.round(Math.max(0,Number(seconds)||0)/60);}
-function pomodoroSummaryFromTasks(tasks:readonly ReviewRecordViewTask[]){
+function pomodoroSummaryFromTasks(tasks:readonly (ReviewRecordViewTask|TaskWithPauses)[]):ReviewPomodoroSummary{
   const summary={breaks:0,recoverySeconds:0,overrunSeconds:0,actualSeconds:0,excludedUnknown:0};
   (Array.isArray(tasks)?tasks:[]).forEach(task=>{
     if(!isWorkBlock(task))return;
@@ -844,7 +858,7 @@ function pomodoroSummaryFromTasks(tasks:readonly ReviewRecordViewTask[]){
   });
   return summary;
 }
-function pomodoroSummaryText(summary:Readonly<{sessions:number;focusSeconds:number;pausedSeconds:number;pauseCount:number}>){
+function pomodoroSummaryText(summary:ReviewPomodoroSummary){
   const s=summary||{};
   const excluded=s.excludedUnknown?` · ${s.excludedUnknown} break${s.excludedUnknown===1?'':'s'} without a saved allowance excluded`:'';
   if(!s.breaks)return `Pomodoro: no comparable accepted work-block breaks saved yet${excluded}.`;
@@ -863,7 +877,7 @@ function updateReviewPomodoroLine(record:Readonly<{tasks:readonly ReviewRecordVi
   if(!el)return;
   el.textContent=pomodoroSummaryText(record?pomodoroSummaryFromTasks(record.tasks||[]):currentPomodoroSummary());
 }
-function createPomodoroSummaryLine(tasks:readonly ReviewRecordViewTask[]){
+function createPomodoroSummaryLine(tasks:readonly (ReviewRecordViewTask|TaskWithPauses)[]){
   const line=document.createElement('div');
   line.className='review-flow-note ui-helper';
   line.textContent=pomodoroSummaryText(pomodoroSummaryFromTasks(tasks||[]));
@@ -967,8 +981,8 @@ function renderReviewCard(model:ReviewCardModel){
   if(sourceLine)sourceLine.id=`rsource-${model.idx}`;
   const noteBox=document.createElement('div');
   noteBox.className='review-block-note ui-body';
-  noteBox.dataset.areaKey=model.noteAreaKey;
-  noteBox.dataset.noteSupport=model.task.kind==='support'?'true':'false';
+  noteBox.dataset['areaKey']=model.noteAreaKey;
+  noteBox.dataset['noteSupport']=model.task.kind==='support'?'true':'false';
   const emptyNoteText=model.task.kind==='support'?'No current shared support note.':'No current note for this area.';
   renderRichTextContent(noteBox,noteStoredValueForKey(model.noteAreaKey),emptyNoteText,`Note for ${model.noteAreaLabel}`);
   if(!model.noteText)noteBox.classList.add('review-block-empty');
@@ -976,7 +990,7 @@ function renderReviewCard(model:ReviewCardModel){
   const actions=document.createElement('div');
   actions.className='review-block-actions';
   const editBtn=document.createElement('button');
-  editBtn.type='button';editBtn.className='mini-action-btn ui-btn';editBtn.dataset.ownerMutation='review-edit';editBtn.textContent='Edit';
+  editBtn.type='button';editBtn.className='mini-action-btn ui-btn';editBtn.dataset['ownerMutation']='review-edit';editBtn.textContent='Edit';
   actions.appendChild(editBtn);
   const editPanel=document.createElement('div');
   editPanel.className='review-edit-panel';
@@ -1144,7 +1158,7 @@ function createPracticeRunDetail(run:ReviewPracticeRunSummary,{allowDelete=false
   if(allowDelete){
     const actions=textEl('div','practice-run-detail-actions');
     const remove=textEl('button','btn ui-btn practice-run-delete','Delete Run');
-    remove.type='button';remove.dataset.action='practice-delete-run';remove.dataset.runIndex=String(run.index);
+    remove.type='button';remove.dataset['action']='practice-delete-run';remove.dataset['runIndex']=String(run.index);
     actions.appendChild(remove);detail.appendChild(actions);
   }
   return detail;
@@ -1211,7 +1225,7 @@ function renderPracticeReview(){
 }
 async function deletePracticeRun(event:Event){
   const button=event&&event.target&&event.target.closest('[data-run-index]');
-  const index=Number(button&&button.dataset.runIndex);
+  const index=Number(button&&button.dataset['runIndex']);
   if(!Number.isInteger(index))return false;
   const accepted=await confirm({
     title:`Delete Practice Run ${index+1}?`,danger:true,
@@ -1228,7 +1242,7 @@ async function deletePracticeRun(event:Event){
 }
 function reviewViewLocalState(){
   return {
-    reflection:plainTextContent(document.getElementById('daily-reflection')?.value||''),
+    reflection:plainTextContent(textAreaById('daily-reflection')?.value||''),
     quality:getStudyQuality(),
     unfinished:unfinishedNoteDraftText()
   };
@@ -1304,8 +1318,8 @@ const ReviewView=(()=>{
     if(!pane||!active||!pane.contains(active))return null;
     let locator=null;
     if(active.id)locator={kind:'id',value:active.id};
-    else if(active.dataset&&active.dataset.taskId)locator={kind:'task',value:String(active.dataset.taskId)};
-    else if(active.dataset&&active.dataset.runIndex!==undefined)locator={kind:'practice-run',value:String(active.dataset.runIndex)};
+    else if(active.dataset&&active.dataset['taskId'])locator={kind:'task',value:String(active.dataset['taskId'])};
+    else if(active.dataset&&active.dataset['runIndex']!==undefined)locator={kind:'practice-run',value:String(active.dataset['runIndex'])};
     if(!locator)return null;
     return {locator,start:Number.isInteger(active.selectionStart)?active.selectionStart:null,end:Number.isInteger(active.selectionEnd)?active.selectionEnd:null};
   }
@@ -1391,13 +1405,13 @@ const ReviewView=(()=>{
   return Object.freeze({activate,deactivate,refresh,sync,syncMode:syncReviewSurfaceMode,invalidate,status});
 })();
 function onReviewMeasure(idx:number,measure:string,defTotal?:number|null){
-  const di=document.getElementById(`rd-done-${idx}`);const ti=document.getElementById(`rd-total-${idx}`);
+  const di=inputById(`rd-done-${idx}`);const ti=inputById(`rd-total-${idx}`);
   if(!di||!ti)return;
   const state=progressInputState(idx,di.value,ti.value,defTotal);
   const resolved=syncProgressInputsToState(idx,state,{updateUI:true,save:true});
   refreshRsum(idx,measure,state.done,state.total);
   if(idx===Runtime.currentIndex()){
-    const pd=document.getElementById('pn-done');const pt=document.getElementById('pn-total');
+    const pd=inputById('pn-done');const pt=inputById('pn-total');
     if(pd)pd.value=state.hasDone?state.done:'';
     if(pt)pt.value=state.hasTotal?state.total:'';
     const pbar=document.getElementById('pbar');
@@ -1422,7 +1436,7 @@ function reviewDetailsShouldOpen(d:Date=new Date()){
   return SessionState.studyDate===todayISO(d)&&lastEnd!==null&&effectiveNowMin(d)>=lastEnd;
 }
 function setReviewDetailDisclosures(open:boolean){
-  document.querySelectorAll('#pane-review .review-collapse').forEach(el=>{el.open=!!open;});
+  document.querySelectorAll<HTMLDetailsElement>('#pane-review .review-collapse').forEach(el=>{el.open=!!open;});
 }
 function recalcStats(metrics:ReviewMetrics|null=null){
   const m=metrics||calculateCurrentReviewMetrics();
@@ -1466,8 +1480,8 @@ const REVIEW_REPORT_CATALOG=freeze([
 ]);
 const copyReportExcluded=new Set(),copyReportExpanded=new Set();
 let copyReportMenuBound=false;
-function reviewReportArea(task:Task|ReviewRecordViewTask){return taskAreaValue(task)||'General';}
-function reviewReportSubjectChildren(context:ReviewReportContext):ReviewReportChild[]{
+function reviewReportArea(task:Task|ReviewTaskRow|ReviewRecordViewTask){return taskAreaValue(task)||'General';}
+function reviewReportSubjectChildren(context:ReviewReportSelectorContext):ReviewReportChild[]{
   const seen=new Set(),children=[];
   (context.reportTasks||[]).forEach(task=>{
     const label=reviewReportArea(task),id=`subjects:${label}`;
@@ -1475,10 +1489,10 @@ function reviewReportSubjectChildren(context:ReviewReportContext):ReviewReportCh
   });
   return children.sort((a,b)=>a.label.localeCompare(b.label));
 }
-function reviewReportOngoingChildren(context:ReviewReportContext):ReviewReportChild[]{
+function reviewReportOngoingChildren(context:ReviewReportSelectorContext):ReviewReportChild[]{
   return (context.subjectEntries||[]).map(entry=>freeze({id:`ongoing:${entry.key}`,label:String(entry.label||entry.key),value:entry.key})).sort((a,b)=>a.label.localeCompare(b.label));
 }
-function reviewReportSections(context:ReviewReportContext):ReviewReportSection[]{
+function reviewReportSections(context:ReviewReportSelectorContext):ReviewReportSection[]{
   return REVIEW_REPORT_CATALOG.map(section=>freeze({...section,children:typeof section.children==='function'?section.children(context):[]}));
 }
 function reviewReportSelectorContext(){
@@ -1502,10 +1516,10 @@ function syncCopyReportChecks(sections:readonly ReviewReportSection[]){
   const root=document.getElementById('copy-report-sections');if(!root)return;
   const sectionMap=new Map(sections.map(section=>[section.id,section]));
   root.querySelectorAll('input[data-report-section]').forEach(input=>{
-    const section=sectionMap.get(input.dataset.reportSection);if(!section)return;
+    const section=sectionMap.get(input.dataset['reportSection']);if(!section)return;
     const state=copyReportSectionState(section);input.checked=state.checked;input.indeterminate=state.indeterminate;
   });
-  root.querySelectorAll('input[data-report-component]').forEach(input=>{input.checked=!copyReportExcluded.has(input.dataset.reportComponent);});
+  root.querySelectorAll('input[data-report-component]').forEach(input=>{input.checked=!copyReportExcluded.has(input.dataset['reportComponent']);});
   syncCopyReportCustom(sections);
 }
 function renderCopyReportMenu(){
@@ -1513,10 +1527,10 @@ function renderCopyReportMenu(){
   const sections=reviewReportSections(reviewReportSelectorContext());root.replaceChildren();
   sections.forEach(section=>{
     const group=textEl('div','copy-report-section'),row=textEl('div','copy-report-row');
-    const check=document.createElement('input');check.type='checkbox';check.className='copy-report-check';check.dataset.reportSection=section.id;check.id=`copy-report-section-${section.id}`;
+    const check=document.createElement('input');check.type='checkbox';check.className='copy-report-check';check.dataset['reportSection']=section.id;check.id=`copy-report-section-${section.id}`;
     const label=textEl('label','copy-report-row-label',section.label);label.htmlFor=check.id;row.append(check,label);
     if(section.children.length){
-      const disclosure=textEl('button','copy-report-disclosure','⌄');disclosure.type='button';disclosure.dataset.copyReportDisclosure=section.id;
+      const disclosure=textEl('button','copy-report-disclosure','⌄');disclosure.type='button';disclosure.dataset['copyReportDisclosure']=section.id;
       disclosure.setAttribute('aria-label',`Show ${section.label.toLowerCase()}`);disclosure.setAttribute('aria-expanded',String(copyReportExpanded.has(section.id)));row.appendChild(disclosure);
     }
     group.appendChild(row);
@@ -1524,7 +1538,7 @@ function renderCopyReportMenu(){
       const children=textEl('div','copy-report-children');children.hidden=!copyReportExpanded.has(section.id);
       section.children.forEach(child=>{
         const childRow=textEl('label','copy-report-row'),childCheck=document.createElement('input');
-        childCheck.type='checkbox';childCheck.className='copy-report-check';childCheck.dataset.reportComponent=child.id;
+        childCheck.type='checkbox';childCheck.className='copy-report-check';childCheck.dataset['reportComponent']=child.id;
         childRow.append(childCheck,textEl('span','copy-report-row-label',child.label));children.appendChild(childRow);
       });
       group.appendChild(children);
@@ -1543,16 +1557,16 @@ function ensureCopyReportMenuEvents(){
   on(menu,'change',event=>{
     const input=event.target;if(!(input instanceof HTMLInputElement)||input.type!=='checkbox')return;
     const sections=reviewReportSections(reviewReportSelectorContext());
-    if(input.dataset.reportSection){
-      const section=sections.find(item=>item.id===input.dataset.reportSection);if(!section)return;
+    if(input.dataset['reportSection']){
+      const section=sections.find(item=>item.id===input.dataset['reportSection']);if(!section)return;
       if(section.children.length)section.children.forEach(child=>input.checked?copyReportExcluded.delete(child.id):copyReportExcluded.add(child.id));
       else input.checked?copyReportExcluded.delete(section.id):copyReportExcluded.add(section.id);
-    }else if(input.dataset.reportComponent)input.checked?copyReportExcluded.delete(input.dataset.reportComponent):copyReportExcluded.add(input.dataset.reportComponent);
+    }else if(input.dataset['reportComponent'])input.checked?copyReportExcluded.delete(input.dataset['reportComponent']):copyReportExcluded.add(input.dataset['reportComponent']);
     syncCopyReportChecks(sections);
   });
   on(menu,'click',event=>{
     const button=event.target.closest('[data-copy-report-disclosure]');if(!button)return;
-    const id=button.dataset.copyReportDisclosure,expanded=!copyReportExpanded.has(id),section=button.closest('.copy-report-section');expanded?copyReportExpanded.add(id):copyReportExpanded.delete(id);button.setAttribute('aria-expanded',String(expanded));const label=section?.querySelector('.copy-report-row-label')?.textContent||'section';button.setAttribute('aria-label',`${expanded?'Hide':'Show'} ${label.toLowerCase()}`);const children=section?.querySelector('.copy-report-children');if(children)children.hidden=!expanded;
+    const id=button.dataset['copyReportDisclosure'],expanded=!copyReportExpanded.has(id),section=button.closest('.copy-report-section');expanded?copyReportExpanded.add(id):copyReportExpanded.delete(id);button.setAttribute('aria-expanded',String(expanded));const label=section?.querySelector('.copy-report-row-label')?.textContent||'section';button.setAttribute('aria-label',`${expanded?'Hide':'Show'} ${label.toLowerCase()}`);const children=section?.querySelector('.copy-report-children');if(children)children.hidden=!expanded;
   });
   on(document,'click',event=>{const control=event.target.closest('.copy-report-control');if(!control)closeCopyReportMenu();});
   on(document,'keydown',event=>{if(event.key==='Escape')closeCopyReportMenu();});
