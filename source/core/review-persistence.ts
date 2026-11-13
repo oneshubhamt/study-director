@@ -1,8 +1,7 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {DailyRecord} from '../../types/record-models.ts';
 import type {FlushOptions,SaveLane,SaveState} from '../../types/pilot.ts';
 import type {ReviewDailyReflectionResult} from '../../types/review.ts';
-import type {DiaryEditorCallbacks,ReviewPersistenceInput,ReviewPersistenceModule as ReviewPersistenceModuleContract,SavedDayRecord} from '../../types/review-persistence.ts';
+import type {DiaryDraft,DiaryEditorCallbacks,ReviewPersistenceInput,ReviewPersistenceModule as ReviewPersistenceModuleContract,SavedDayRecord} from '../../types/review-persistence.ts';
 
 const sdReviewPersistenceFactory=(()=>{
 'use strict';
@@ -85,7 +84,7 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     if(!dates.isSupported(date))return null;
     const now=environment.nowIso();
     const meta=dates.insights(date);
-    return freeze({version:dataContract.schemas.DailyRecord.version,recordKind:'diary' as const,date,savedAt:now,updatedAt:now,sourceRevision:0,reflection:'',dayOfWeek:meta.dayOfWeek,dayName:meta.dayName} as unknown as DailyRecord);
+    const value:DiaryDraft={version:dataContract.schemas.DailyRecord.version,recordKind:'diary',date,savedAt:now,updatedAt:now,sourceRevision:0,reflection:'',dayOfWeek:meta.dayOfWeek,dayName:meta.dayName};return freeze(value);
   }
   async function write(field:HTMLTextAreaElement,state:EditorState,value:string,options:FlushOptions={}){
     if(activeState(field)!==state||!ownership.canMutate())throw new Error('This Diary editor is no longer bound to the current study owner.');

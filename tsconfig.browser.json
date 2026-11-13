@@ -196,6 +196,7 @@
     "types/checks/session-host.ts",
     "types/checks/session-handoff.ts",
     "types/checks/plan-host.ts",
+    "types/checks/review-persistence.ts",
     "types/checks/review-host.ts",
     "types/checks/plan.ts"
   ]

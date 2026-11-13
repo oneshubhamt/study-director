@@ -1,10 +1,11 @@
 import type {AppData} from './data-bootstrap-host.ts';
-import type {DailyRecord,Limits,RecordHelpers} from './record-models.ts';
+import type {DailyRecord,DiaryRecord,Limits,RecordHelpers} from './record-models.ts';
 import type {DailyCodec,DailyView} from './repositories.ts';
 import type {SaveLane,SaveLaneModule,SaveState,FlushOptions} from './pilot.ts';
 import type {ReviewDailyReflectionPort,ReviewDailyReflectionResult,ReviewRichInputMeta} from './review.ts';
 
 export type SavedDayRecord=DailyRecord|DailyView;
+export interface DiaryDraft extends DiaryRecord{readonly dayOfWeek:number;readonly dayName:string}
 export interface DiaryEditorCallbacks{
   readonly onSaved?:((record:SavedDayRecord|null)=>void)|null;
   readonly onState?:((state:SaveState,message:string)=>void)|null;
@@ -32,7 +33,7 @@ export interface DiaryEditor{
   clear(field:HTMLTextAreaElement):boolean;
   deleteEntry(date:string,options?:Readonly<{backupCapture?:boolean}>):Promise<boolean>;
   documentFor(field:HTMLTextAreaElement):Readonly<DiaryEditorDocument>|null;
-  draft(date:string):Readonly<DailyRecord>|null;
+  draft(date:string):Readonly<DiaryDraft>|null;
   flush(field:HTMLTextAreaElement,options?:FlushOptions):Promise<SavedDayRecord|null|void>;
   schedule(field:HTMLTextAreaElement,value:string):boolean;
   settled(field:HTMLTextAreaElement):Promise<boolean>;
