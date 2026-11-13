@@ -1272,7 +1272,7 @@ const PlanScheduleGateway=ExecutionHostModule.createScheduleGateway(Object.freez
   invalidateScheduleDerived,applySessionSnapshot,restoreLiveDraftIfAny,restoreTimerRuntimeIfAny,
   clearFutureUntouchedProgress:(...args)=>clearFutureUntouchedProgress(...args),
   flushLiveDraft,scheduleFingerprint,writeLiveDraftNow,advanceTaskNoteScheduleRevision,markDayContentChanged,clearSessionSafetyMessage,
-  SessionLifecycle:{runSync:(...args)=>SessionLifecycle.runSync(...args),reconcile:(...args)=>SessionLifecycle.reconcile(...args)}
+  SessionLifecycle:{run:(...args)=>SessionLifecycle.run(...args),reconcile:(...args)=>SessionLifecycle.reconcile(...args)}
 }));
 async function maybePromptBackupNudge(force=false){
   if(!appCanMutate())return;
@@ -2711,10 +2711,10 @@ function tickClock(){
   // Previous-day Review is an explicit recovery choice, not a live study
   // session eligible for automatic rollover or a surprise Day save.
   if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover();return;}
-  if(dd&&dd.dataset.autoDate==='1'&&dd.value!==autoDate){
-    SessionLifecycle.runSync('date-rollover',{date:autoDate,autoDate:true,},()=>{
+  if(dd&&dd.dataset.autoDate==='1'&&dd.value!==autoDate&&!SessionLifecycle.transitioning){
+    void SessionLifecycle.run('date-rollover',{date:autoDate,autoDate:true},()=>{
       dd.value=autoDate;return true;
-    });
+    }).catch(error=>AppDiagnostics.capture('review.auto-date-rollover',error,'warn'));
   }
   maybePromptScheduleEndSave(n);
   maybePromptBackupNudge();
@@ -4132,7 +4132,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze({
     snapshotForWrite:()=>SessionHandoffRuntime?.snapshotForWrite()||ActiveSessionRuntime.captureSnapshot(),
     reportResult:handleActiveSessionRepositoryResult,warn:showLiveDraftSaveWarning
   }),
-  lifecycle:Object.freeze({run:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),runSync:(kind,options,operation)=>SessionLifecycle.runSync(kind,options,operation)}),
+  lifecycle:Object.freeze({run:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation)}),
   apply:Object.freeze({
     readPlanDraft:()=>String(document.getElementById('plan-input')?.value||''),
     writePlanDraft:value=>{const input=document.getElementById('plan-input');if(input)input.value=value;},
