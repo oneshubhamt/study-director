@@ -40,9 +40,9 @@ function activeSessionScheduleFingerprint(session:ActiveSession|null){
   const draft=parseScheduleDraftText(String(session&&session.scheduleText||''));
   return draft.ok?scheduleFingerprintForRows(draft.parsed):'';
 }
-function applyStoredSessionSnapshot(session:ActiveSession|null,snapshot:SessionSnapshot|null,{source,reviewOnly=false,lifecycleManaged=false}:SessionApplyOptions={}){
+async function applyStoredSessionSnapshot(session:ActiveSession|null,snapshot:SessionSnapshot|null,{source,reviewOnly=false,lifecycleManaged=false}:SessionApplyOptions={}){
   if(!ports.ActiveSessionRuntime||!session||!snapshot)return false;
-  return ports.ActiveSessionRuntime.applyStoredSession(session,snapshot,{...(source?{source}:{}),reviewOnly,lifecycleManaged});
+  return await ports.ActiveSessionRuntime.applyStoredSession(session,snapshot,{...(source?{source}:{}),reviewOnly,lifecycleManaged});
 }
 async function hydratePrimaryStateFromStorage(options:{sameTabReload?:boolean}={}){
   const sameTabReload=!!options.sameTabReload;
@@ -56,7 +56,7 @@ async function hydratePrimaryStateFromStorage(options:{sameTabReload?:boolean}={
   if(isRestorableActiveSession(session)){
     const snapshot=activeSessionSnapshot(session);
     if(snapshot){
-      const restored=applyStoredSessionSnapshot(session,snapshot,{source:sameTabReload?'active-session-restore':'ownership-takeover'});
+      const restored=await applyStoredSessionSnapshot(session,snapshot,{source:sameTabReload?'active-session-restore':'ownership-takeover'});
       if(restored!==false){
         if(sameTabReload)setPlanStatus('✓ Restored today’s active session.');
         await goTab('execute',{source:'ownership-restore',history:'replace'});return true;
@@ -152,7 +152,7 @@ async function recoverPreviousSessionForReview(session:ActiveSession|null){
   const snapshot=activeSessionSnapshot(session);
   if(!session||!snapshot)return false;
   const reviewSnapshot={...snapshot,timerRuntime:null};
-  const restored=applyStoredSessionSnapshot(session,reviewSnapshot,{source:'previous-session-review',reviewOnly:true});
+  const restored=await applyStoredSessionSnapshot(session,reviewSnapshot,{source:'previous-session-review',reviewOnly:true});
   if(restored===false)return false;
   state.sessionSafetyMessage=`Recovered unsaved ${prettyDate(session.date)} into Review. Its timer was not restarted. Save or discard it before applying a new study day.`;
   refreshStorageFallbackWarning();
@@ -253,7 +253,7 @@ async function attemptAutoRestoreActiveSession(){
     if(isSuspendedActiveSession(session)){setSessionPanelMode('suspended',session);return false;}
     if(!isRestorableActiveSession(session)){setSessionPanelMode('none');return false;}
     const snapshot=activeSessionSnapshot(session);
-    const restored=applyStoredSessionSnapshot(session,snapshot,{source:'active-session-restore'});
+    const restored=await applyStoredSessionSnapshot(session,snapshot,{source:'active-session-restore'});
     if(restored!==false){
       setSessionPanelMode('active');
       setPlanStatus('✓ Restored today’s active session.');
@@ -531,7 +531,7 @@ async function restoreSessionStateThroughLifecycle(importedSession:unknown,optio
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         ports.PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('elsewhere',session);
       }else{
-        const restored=applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
+        const restored=await applyStoredSessionSnapshot(session,snapshot,{source:'restore-journal-rollback',lifecycleManaged:true});
         if(restored===false)throw new Error('Rollback active-session runtime could not be applied.');
         setSessionPanelMode('active');
         runOn=keepRunning&&!snapshot.timerRuntime;
