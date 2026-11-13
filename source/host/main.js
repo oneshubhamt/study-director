@@ -610,6 +610,25 @@ const {
   buildLiveTimeline,getRealTimeState,buildRealTimeSnapshot,latestTrackableEndMin,
   setCurrentTask,resetBreakState,resetCountdownRuntime,clearProgressRuntime,isTaskResolved
 }=ExecutionRuntime;
+const ReviewDayState=ReviewHostModule.createDayState(Object.freeze({
+  document,timerState:TimerState,tasks:()=>TASKS,isTrackableBlock,isValidIsoDate,todayISO,fullWeekdayNames:FULL_WEEKDAY_NAMES
+}));
+function getReviewDate(){return ReviewDayState.getReviewDate();}
+function cleanDayRevision(value){return ReviewDayState.cleanRevision(value);}
+function daySaveDirty(date=getReviewDate()){return ReviewDayState.isDirty(date);}
+function markDayContentChanged(){return ReviewDayState.markChanged();}
+function markDayContentSaved(date,revision){return ReviewDayState.markSaved(date,revision);}
+function reviewDateTitle(iso){return ReviewDayState.dateTitle(iso);}
+function setReviewDateTitle(iso){return ReviewDayState.setDateTitle(iso);}
+let ReviewSavedDayRuntime=null;
+function requireReviewSavedDayRuntime(){if(!ReviewSavedDayRuntime)throw new Error('Study Director Saved Day coordinator is unavailable.');return ReviewSavedDayRuntime;}
+function promptSaveToday(...args){return requireReviewSavedDayRuntime().promptSaveToday(...args);}
+function clearSaveReminder(...args){return requireReviewSavedDayRuntime().clearSaveReminder(...args);}
+function revalidateSaveReminderAfterCanonicalConvergence(...args){return requireReviewSavedDayRuntime().revalidateSaveReminder(...args);}
+function acknowledgeSavedStudyDay(...args){return requireReviewSavedDayRuntime().acknowledgeSavedStudyDay(...args);}
+function clearCanonicalSessionAfterSavedDay(...args){return requireReviewSavedDayRuntime().clearCanonicalSessionAfterSavedDay(...args);}
+function saveDayRecord(...args){return requireReviewSavedDayRuntime().saveDayRecord(...args);}
+function handleStudyDayRollover(...args){return requireReviewSavedDayRuntime().handleStudyDayRollover(...args);}
 const {
   PRACTICE_CUE_DEFAULT,PRACTICE_PAUSE_CAUSES,formatPracticeMs,practicePaceBandLabel,sanitizePracticeCueMode,
   sanitizePracticeRun,sanitizePracticeRuns,sanitizePracticeState,summarizeCleanPracticeRuns,
@@ -639,9 +658,9 @@ const SessionActionState={
  get sessionHandoff(){return sessionHandoff;},set sessionHandoff(value){sessionHandoff=value;},
  get sessionMovingHere(){return sessionMovingHere;},set sessionMovingHere(value){sessionMovingHere=value;},
  get sessionYieldedAt(){return sessionYieldedAt;},set sessionYieldedAt(value){sessionYieldedAt=value;},
- get saveReminderDate(){return saveReminderDate;},set saveReminderDate(value){saveReminderDate=value;},
- get saveReminderEvidence(){return saveReminderEvidence;},set saveReminderEvidence(value){saveReminderEvidence=value;},
- get saveReminderGeneration(){return saveReminderGeneration;},set saveReminderGeneration(value){saveReminderGeneration=value;}
+ get saveReminderDate(){return ReviewDayState.reminder.date;},set saveReminderDate(value){ReviewDayState.reminder.date=value;},
+ get saveReminderEvidence(){return ReviewDayState.reminder.evidence;},set saveReminderEvidence(value){ReviewDayState.reminder.evidence=value;},
+ get saveReminderGeneration(){return ReviewDayState.reminder.generation;},set saveReminderGeneration(value){ReviewDayState.reminder.generation=value;}
 };
 const SessionActions=SessionActionsModule.createController(Object.freeze({
   checkUnsupportedUpdate:(...args)=>checkUnsupportedUpdate(...args),applySchedule:(...args)=>applySchedule(...args),schedulePwaUpdateEvaluation:(...args)=>schedulePwaUpdateEvaluation(...args),
@@ -760,7 +779,6 @@ let sessionSafetyMessage='';
 let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},sessionMovingHere=null,driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
 let backupNudgeCheckedAt=0;
 let backupNudgeNotifiedDate='';
-let saveReminderDate='',saveReminderEvidence=null,saveReminderGeneration=0;
 let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return !!ActiveSessionRuntime?.persistenceSuppressed();}
@@ -1256,163 +1274,6 @@ const PlanScheduleGateway=ExecutionHostModule.createScheduleGateway(Object.freez
   flushLiveDraft,scheduleFingerprint,writeLiveDraftNow,advanceTaskNoteScheduleRevision,markDayContentChanged,clearSessionSafetyMessage,
   SessionLifecycle:{runSync:(...args)=>SessionLifecycle.runSync(...args),reconcile:(...args)=>SessionLifecycle.reconcile(...args)}
 }));
-function getReviewDate(){
-  const selected=document.getElementById('day-date')?.value||'';
-  return isValidIsoDate(selected)?selected:(TimerState.studyDate||todayISO());
-}
-function cleanDayRevision(value){return Math.max(0,Math.floor(boundedNumber(value,{min:0,max:Number.MAX_SAFE_INTEGER,fallback:0})));}
-function daySaveDirty(date=getReviewDate()){
-  return date===getReviewDate()&&cleanDayRevision(TimerState.contentRevision)>cleanDayRevision(TimerState.savedRevision);
-}
-function markDayContentChanged(){
-  if(!TimerState.studyDate&&!TASKS.length)return 0;
-  TimerState.contentRevision=Math.max(cleanDayRevision(TimerState.contentRevision),cleanDayRevision(TimerState.savedRevision))+1;
-  return TimerState.contentRevision;
-}
-function markDayContentSaved(date,revision){
-  if(date===getReviewDate())TimerState.savedRevision=Math.max(cleanDayRevision(TimerState.savedRevision),cleanDayRevision(revision));
-  return !daySaveDirty(date);
-}
-function reviewDateTitle(iso){
-  const d=new Date(iso+'T00:00:00');
-  if(Number.isNaN(d.getTime()))return '—';
-  const dowFull=FULL_WEEKDAY_NAMES[d.getDay()];
-  const monFull=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-  return `${dowFull} · ${monFull} ${d.getDate()}`;
-}
-function setReviewDateTitle(iso){
-  const rptDate=document.getElementById('review-date');
-  if(rptDate)rptDate.textContent=reviewDateTitle(iso);
-}
-function clearSessionSafetyMessage(...args){return SessionActions.clearSessionSafetyMessage(...args);}
-// Reminder clearance is notice-only: never change the canonical session's
-// saved revision because another device supplied equivalent Saved Day evidence.
-// Capture the live state afresh, so a stale dirty counter can be disproved
-// without pretending that genuinely new, unsaved work was committed.
-function liveSaveReminderEvidence(date){
-  if(date!==getReviewDate()||TimerState.studyDate!==date||!TASKS.some(isTrackableBlock))return null;
-  try{
-    const snapshot=captureSessionSnapshot(),scheduleText=PlanRuntime.appliedScheduleText();
-    return snapshot?.date===date&&typeof scheduleText==='string'&&scheduleText.trim()
-      ?{date,scheduleText,snapshot}:null;
-  }catch(error){AppDiagnostics.capture('session.reminder-runtime-evidence',error,'warn');return null;}
-}
-function savedDayCoversReminderEvidence(record,subjects){
-  return !!record&&subjects.length>0&&subjects.every(subject=>
-    !!subject&&DailyRecordCodec.savedDayCoversSessionEvidence(record,subject,{allowAdvances:true}));
-}
-async function savedDayHasUncoveredKeptSession(record,date){
-  const pending=await AppData.pendingReviews.list();
-  return pending.some(review=>review.subject==='session'&&!review.resolvedAt&&
-    review.kept?.date===date&&!DailyRecordCodec.savedDayCoversSessionEvidence(record,review.kept,{allowAdvances:true}));
-}
-// True only when the canonical Saved Day for this date covers all the work it
-// must: the evidence a reminder captured (if any), the strict canonical session
-// for that date and the live timer, with no retained kept session left
-// uncovered. Work can move during the reads, so it is checked again after them.
-async function savedDayCoversWork(date,captured=null){
-  const runtime=liveSaveReminderEvidence(date);
-  if(daySaveDirty(date)&&!runtime)return false;
-  const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
-  if(!loaded?.ok||loaded.error||session?.date===date&&loaded.storage?.idb!==true)return false;
-  const subjects=[...(captured?[captured]:[]),...(session?.date===date?[session]:[]),...(runtime?[runtime]:[])];
-  if(!subjects.length)return false;
-  const record=(await AppData.dailyRecords.documents([date],{requireCanonical:true})).find(item=>item.date===date);
-  if(!savedDayCoversReminderEvidence(record,subjects)||await savedDayHasUncoveredKeptSession(record,date))return false;
-  await AppData.dailyRecords.verifyCanonical(record);
-  const latest=liveSaveReminderEvidence(date);
-  if((runtime||latest)&&(!latest||!savedDayCoversReminderEvidence(record,[latest]))||
-      daySaveDirty(date)&&!latest)return false;
-  const checked=await AppData.activeSession.load(0,{strict:true});
-  if(!checked?.ok||checked.error||checked.value?.date===date&&
-      (checked.storage?.idb!==true||!savedDayCoversReminderEvidence(record,[checked.value])))return false;
-  return !await savedDayHasUncoveredKeptSession(record,date);
-}
-async function savedRecordExistsForDate(date){
-  try{return await savedDayCoversWork(date);}
-  catch(error){AppDiagnostics.capture('session.saved-day-reminder',error,'warn');return false;}
-}
-async function promptSaveToday(){
-  const date=getReviewDate();
-  if(!TASKS.some(isTrackableBlock)||saveReminderDate===date)return;
-  if(await savedRecordExistsForDate(date))return;
-  if(saveReminderDate===date)return;
-  // Keep bounded, in-memory evidence of what this notice referred to.
-  // If sync legitimately retires the canonical session, a later Saved Day
-  // must still cover this precise evidence before the notice may disappear.
-  let evidence=null;
-  try{
-    const loaded=await AppData.activeSession.load(0,{strict:true});
-    if(loaded?.ok&&!loaded.error&&loaded.storage?.idb===true&&loaded.value?.date===date&&
-        TimerState.studyDate===date&&
-        cleanDayRevision(loaded.value.snapshot?.contentRevision)===cleanDayRevision(TimerState.contentRevision))
-      evidence=ActiveSessionCodec.sanitizeCurrent(loaded.value);
-  }catch(error){AppDiagnostics.capture('session.save-reminder-evidence',error,'warn');}
-  // A temporarily inaccessible or lagging canonical session must not lose
-  // the exact live work that caused the reminder. This is memory-only
-  // evidence, not a claim of persisted Active Session data.
-  if(!evidence)evidence=liveSaveReminderEvidence(date);
-  if(saveReminderDate===date)return;
-  saveReminderDate=date;saveReminderEvidence=evidence;saveReminderGeneration+=1;
-  sessionSafetyMessage=`Review reminder: ${prettyDate(date)} has unsaved study data. Open Review and Save Today to Library.`;
-  refreshStorageFallbackWarning();
-  notifyUser('Save today’s study record','Open Review and save today to Library.',`sdm-save-${date}`);
-  setStatus('save-status','Review is ready. Save today to Library when you are done.');
-  setReviewDetailDisclosures(true);
-}
-function clearSaveReminder(date=getReviewDate(),revision=TimerState.contentRevision){
-  if(saveReminderDate===date){saveReminderDate='';saveReminderEvidence=null;saveReminderGeneration+=1;}
-  markDayContentSaved(date,revision);
-  if(sessionSafetyMessage.includes('Review reminder'))sessionSafetyMessage='';
-  refreshStorageFallbackWarning();
-}
-// This is a notice-only reconciliation: it does not alter savedRevision,
- // the Active Session or any canonical record. In particular an unacknowledged
- // current session cannot be called saved merely because a date exists.
-async function revalidateSaveReminderAfterCanonicalConvergence(){
-  const date=saveReminderDate,evidence=saveReminderEvidence,generation=saveReminderGeneration;
-  if(!date||!sessionSafetyMessage.startsWith('Review reminder:'))return false;
-  try{
-    // Both the originally captured notice and the latest canonical/runtime
-    // evidence must be covered; neither can silently supersede the other.
-    if(!await savedDayCoversWork(date,evidence))return false;
-    if(saveReminderDate!==date||saveReminderGeneration!==generation||
-        !sessionSafetyMessage.startsWith('Review reminder:'))return false;
-    saveReminderDate='';saveReminderEvidence=null;saveReminderGeneration+=1;
-    clearSessionSafetyMessage('Review reminder:');
-    // Do not erase a newer manual-save result that is unrelated to this notice.
-    const staleStatus=NoticeCoordinator.eventStatus().events.some(event=>
-      event.source==='review'&&event.id==='status-save-status'&&
-      event.message==='Review is ready. Save today to Library when you are done.');
-    if(staleStatus)setStatus('save-status','');
-    return true;
-  }catch(error){AppDiagnostics.capture('session.reminder-convergence',error,'warn');return false;}
-}
-async function acknowledgeSavedStudyDay(date,revision){
-  // Do not acknowledge newer study content than the Saved Day actually
-  // captured. Keep the same lineage's savedRevision in its canonical session.
-  const covered=cleanDayRevision(revision),previous=TimerState.savedRevision;
-  if(!TASKS.length||getReviewDate()!==date||TimerState.studyDate!==date||
-      !Number.isSafeInteger(Number(revision))||Number(revision)<0||
-      covered>cleanDayRevision(TimerState.contentRevision)||covered<cleanDayRevision(previous)){
-    throw new Error('The Saved Day and Active Session revision no longer identify the same study evidence.');
-  }
-  TimerState.savedRevision=covered;
-  try{
-    const saved=await ActiveSessionRuntime.writeCanonicalNow('acknowledging the Saved Day',{markChanged:false});
-    if(!saved?.value||saved.value.date!==date||
-        cleanDayRevision(saved.value.snapshot?.savedRevision)<covered){
-      throw saved?.error||new Error('The Saved Day acknowledgement was not saved in the Active Session.');
-    }
-    clearSaveReminder(date,covered);
-    return true;
-  }catch(error){
-    // A rejected acknowledgement must not teach later ordinary timer saves
-    // to claim that content was saved. Keep the actual Saved Day in Library.
-    TimerState.savedRevision=previous;
-    throw error;
-  }
-}
 async function maybePromptBackupNudge(force=false){
   if(!appCanMutate())return;
   const now=Date.now();
@@ -1463,7 +1324,6 @@ async function activeSessionContentFingerprint(session){
 function activeSessionPayload(snapshot=null,options={}){return ActiveSessionRuntime?.payload(snapshot,options)||null;}
 function readLocalRecoverySession(){return ActiveSessionRuntime?.readLocal()||null;}
 function handleActiveSessionRepositoryResult(...args){return SessionActions.handleActiveSessionRepositoryResult(...args);}
-function clearCanonicalSessionAfterSavedDay(){return ActiveSessionRuntime.clearCanonical('clearing the saved study session');}
 function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){return ActiveSessionRuntime.requireCanonicalWrite(saved,expected,operation);}
 function writeActiveSessionNow(snapshot,options={}){return ActiveSessionRuntime.writeSnapshot(snapshot,options);}
 function writeLiveDraftNow(options={}){return ActiveSessionRuntime.writeNow(options);}
@@ -4192,46 +4052,7 @@ const {
   selectDate:selectReviewDate, captureInputs:captureReviewInputs,
   clearFutureUntouched:clearFutureUntouchedProgress, deletePracticeRun
 }=ReviewEditor;
-const {saveToday:saveDayRecordCore,isRolledOver:studyDayRolledOver}=ReviewSaveService;
-async function saveDayRecord(){
-  let suspendedSession=null;
-  if(!TASKS.length||sessionPanelMode==='suspended'){
-    const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
-    if(isSuspendedActiveSession(session)){
-      if(!appCanMutate()){setStatus('save-status','Take control in this tab before saving the suspended session.',false);return false;}
-      if(!TASKS.length){
-        const snapshot=activeSessionSnapshot(session);
-        if(!snapshot){setStatus('save-status','The suspended session could not be read safely. Restore it before saving.',false);return false;}
-        const restored=applyStoredSessionSnapshot(session,{...snapshot,timerRuntime:null},{source:'suspended-session-review',reviewOnly:true});
-        if(restored===false){setStatus('save-status','The suspended session could not be loaded into Review safely.',false);return false;}
-      }
-      suspendedSession=session;
-    }
-  }
-  // The Review save owner commits the Day and closes this suspended session
-  // without creating an interim, incorrectly owned Active Session.
-  const saved=await saveDayRecordCore({closeSession:!!suspendedSession});
-  if(!suspendedSession)return saved;
-  if(!saved){
-    try{
-      const loaded=await AppData.activeSession.load(0,{strict:true}),current=loaded?.value||null;
-      if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
-      else if(loaded?.ok&&!current)setSessionPanelMode('none');
-    }catch(error){AppDiagnostics.capture('review.suspended-session-status',error,'warn');}
-    return false;
-  }
-  setTimerMode(TIMER_MODES.DONE,'suspended-session-saved');
-  setSessionPanelMode('none');
-  updateSessionControls();
-  return true;
-}
-
-async function handleStudyDayRollover(...args){
-  if(sessionPanelMode==='previous')return false;
-  const changed=await ReviewSaveService.handleRollover(...args);
-  if(changed)AppActivation.publish(APP_ACTIVATION_KINDS.DATE_ROLLOVER,'study-day-rollover',{destructive:true});
-  return changed;
-}
+const {isRolledOver:studyDayRolledOver}=ReviewSaveService;
 const calculateReviewMetrics=ReviewModel.calculate;
 const {
   copy:copyReview, toggleCopyMenu:toggleCopyReportMenu, resetCopySelection:resetCopyReportSelection, copyText:copyTextToClipboard, recalculateStats:recalcStats, renderCompletionChange,
@@ -4337,6 +4158,44 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze({
 if(!Object.isFrozen(ActiveSessionRuntime)||ActiveSessionRuntime.format!=='study-director.session-host'||ActiveSessionRuntime.contractVersion!==1){
   throw new Error('Study Director Active Session runtime is unavailable or incompatible.');
 }
+
+ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze({
+  document,day:ReviewDayState,
+  runtime:Object.freeze({
+    tasks:()=>TASKS,timerState:TimerState,isTrackableBlock,captureSessionSnapshot:()=>captureSessionSnapshot(),
+    appliedScheduleText:()=>PlanRuntime.appliedScheduleText(),appCanMutate:()=>appCanMutate(),panelMode:()=>sessionPanelMode,
+    safetyMessage:()=>sessionSafetyMessage,setSafetyMessage:value=>{sessionSafetyMessage=String(value||'');},
+    isSuspended:session=>isSuspendedActiveSession(session),activeSessionSnapshot:session=>activeSessionSnapshot(session),
+    applyStoredSessionSnapshot:(session,snapshot,options)=>applyStoredSessionSnapshot(session,snapshot,options),
+    setPanelMode:(mode,session)=>setSessionPanelMode(mode,session),setTimerDone:()=>setTimerMode(TIMER_MODES.DONE,'suspended-session-saved'),
+    updateSessionControls
+  }),
+  repositories:Object.freeze({
+    loadActiveSession:(...args)=>AppData.activeSession.load(...args),
+    dailyDocuments:(...args)=>AppData.dailyRecords.documents(...args),
+    verifyDaily:record=>AppData.dailyRecords.verifyCanonical(record),
+    pendingReviews:()=>AppData.pendingReviews.list()
+  }),
+  codecs:Object.freeze({
+    sanitizeSession:value=>ActiveSessionCodec.sanitizeCurrent(value),
+    savedDayCoversSessionEvidence:(record,subject,options)=>DailyRecordCodec.savedDayCoversSessionEvidence(record,subject,options)
+  }),
+  session:Object.freeze({
+    writeCanonicalNow:(label,options)=>ActiveSessionRuntime.writeCanonicalNow(label,options),
+    clearCanonicalAfterSavedDay:()=>ActiveSessionRuntime.clearCanonical('clearing the saved study session'),
+    clearSafetyMessage:prefix=>clearSessionSafetyMessage(prefix)
+  }),
+  review:Object.freeze({
+    saveService:ReviewSaveService,editor:ReviewEditor,
+    closeReflectionEditor:()=>richTextCloseField(document.getElementById('daily-reflection'))
+  }),
+  view:Object.freeze({
+    prettyDate,refreshStorageWarning:refreshStorageFallbackWarning,notifyUser,setStatus,openDetails:setReviewDetailDisclosures,
+    diagnostics:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+    staleSaveStatus:()=>NoticeCoordinator.eventStatus().events.some(event=>event.source==='review'&&event.id==='status-save-status'&&event.message==='Review is ready. Save today to Library when you are done.')
+  }),
+  activation:Object.freeze({publishRollover:()=>AppActivation.publish(APP_ACTIVATION_KINDS.DATE_ROLLOVER,'study-day-rollover',{destructive:true})})
+}));
 
 /* LIVE FOCUS EVIDENCE IN THE EXECUTION HEADER */
 function timerMetricElements(...args){return ExecutionViews.timerMetricElements(...args);}
@@ -6351,7 +6210,7 @@ const CLICK_ACTIONS=Object.freeze({
 const CHANGE_ACTIONS=Object.freeze({
   'render-library': ()=>LibraryView.render(),
   'import-backup': ev=>BackupController.importLocal(ev),
-  'change-reflection-date': ev=>{richTextCloseField(document.getElementById('daily-reflection'));return selectReviewDate(ev);},
+  'change-reflection-date': ()=>requireReviewSavedDayRuntime().selectReviewDate(),
   'sound-mode': handleSoundModeChange,
   'keep-screen-awake': ev=>CapabilityInstallation.setKeepAwake(ev.target.checked)
 });
