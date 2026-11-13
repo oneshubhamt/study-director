@@ -147,6 +147,7 @@ const createModule=():ReviewModuleContract=>{
     }
     function eventElement(event:Event):Element|null{return event.target instanceof Element?event.target:null;}
     function errorMessage(error:unknown):string{return error instanceof Error?error.message:String(error??'');}
+    function runtimeArray(value:unknown):boolean{return Array.isArray(value);}
 
     function validReviewDate(value:unknown){
       const text=String(value||'');
@@ -163,7 +164,7 @@ const createModule=():ReviewModuleContract=>{
       return Number.isInteger(parsed)&&parsed>=1&&parsed<=5?parsed:null;
     }
     function reviewRichInputMeta(event:Event|null|undefined,value:unknown):ReviewRichInputMeta|null{
-      const meta=event&&typeof event==='object'?Reflect.get(event,REVIEW_RICH_INPUT_META):null;
+      const meta:unknown=event&&typeof event==='object'?(event as Record<PropertyKey,unknown>)[REVIEW_RICH_INPUT_META]:null;
       if(!meta||typeof meta!=='object')return null;
       if(!('format' in meta)||!('version' in meta)||!('canonical' in meta)||!('plain' in meta))return null;
       return meta.format==='study-director.rich-validated-input'&&meta.version===1&&meta.canonical===String(value||'')&&typeof meta.plain==='string'
@@ -427,7 +428,7 @@ function captureTodayState(){
   saveLiveDraft();
 }
 function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState):ReviewProjectedStudyRecord{
-  if(!evidence||!Object.isFrozen(evidence)||!Array.isArray(evidence.reviewTasks)){
+  if(!evidence||!Object.isFrozen(evidence)||!runtimeArray(evidence.reviewTasks)){
     throw new TypeError('ReviewModel requires a frozen SessionEvidenceGateway snapshot.');
   }
   if(!review||!Object.isFrozen(review))throw new TypeError('ReviewModel requires a frozen ReviewEditor state.');
@@ -713,7 +714,7 @@ function signedHoursLabel(min:number){
   return (n>0?'+':'-')+durationLabel(n);
 }
 function calculateReviewMetrics(evidence:ReviewEvidence):ReviewMetrics{
-  if(!evidence||!Object.isFrozen(evidence)||!Array.isArray(evidence.reviewTasks)){
+  if(!evidence||!Object.isFrozen(evidence)||!runtimeArray(evidence.reviewTasks)){
     throw new TypeError('ReviewModel requires a frozen SessionEvidenceGateway snapshot.');
   }
   const workBlocks:ReviewTaskRow[]=evidence.reviewTasks.filter(row=>row.work);
@@ -848,7 +849,7 @@ function createStaticProgressLine({done,total,measure,suffixNoTotal=' done · no
 function minutesFromSeconds(seconds:unknown){return Math.round(Math.max(0,Number(seconds)||0)/60);}
 function pomodoroSummaryFromTasks(tasks:readonly (ReviewRecordViewTask|TaskWithPauses)[]):ReviewPomodoroSummary{
   const summary={breaks:0,recoverySeconds:0,overrunSeconds:0,actualSeconds:0,excludedUnknown:0};
-  (Array.isArray(tasks)?tasks:[]).forEach(task=>{
+  tasks.forEach(task=>{
     if(!isWorkBlock(task))return;
     (task.pauseEvents||[]).forEach((ev:PauseEvent)=>{
       if(!ev||ev.type!=='pomodoro')return;
@@ -1096,7 +1097,7 @@ function practiceVarianceClass(value:unknown){
 }
 function practiceTaskName(taskId:unknown,tasks:readonly Task[]=TASKS){
   const id=String(taskId||'');
-  const task=(Array.isArray(tasks)?tasks:[]).find(row=>String(row&&row.id||'')===id);
+  const task=tasks.find(row=>String(row.id||'')===id);
   return clampText(task&&task.name||'',APP_LIMITS.maxTaskNameChars);
 }
 function practiceTableCell(className:string,text:unknown){return textEl('span',className,String(text??'—'));}
