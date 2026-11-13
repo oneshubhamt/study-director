@@ -67,7 +67,10 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
   function covers(record:DailyRecord|undefined,subjects:readonly SessionEvidence[]){return !!record&&subjects.length>0&&subjects.every(subject=>codecs.savedDayCoversSessionEvidence(record,subject,{allowAdvances:true}));}
   async function hasUncoveredKept(record:DailyRecord,date:string){
     const pending=await repositories.pendingReviews();
-    return pending.some(row=>row.subject==='session'&&!row.resolvedAt&&(row.kept as ActiveSession|null)?.date===date&&!codecs.savedDayCoversSessionEvidence(record,row.kept,{allowAdvances:true}));
+    return pending.some(row=>{
+      if(row.subject!=='session'||row.resolvedAt||!row.kept)return false;
+      return row.kept.date===date&&!codecs.savedDayCoversSessionEvidence(record,row.kept,{allowAdvances:true});
+    });
   }
   async function savedDayCoversWork(date:string,captured:SessionEvidence|null=null){
     const live=liveEvidence(date);if(day.isDirty(date)&&!live)return false;
