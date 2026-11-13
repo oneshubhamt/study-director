@@ -2,6 +2,13 @@
 
 **Branch: `ts-exp`. P5.2, P5.4 and P5.5A CLOSED — VERIFIED — TARGETED. P5.5B is next; P5.6–P5.7 remain planned, not implemented.** Main intake remains `2638619`. Preserve main, `TS-Conversion` and vendored Wordgard. [Procedure](AGENTS.md) · [scope and next plans](docs/typescript/PHASE-5.md) · [decisions](docs/typescript/DECISIONS.md) · [verification commands](docs/VERIFICATION.md).
 
+## Active worklog — P5.5B Durable save, Diary and date transitions
+
+- Baseline/remote HEAD: `408edb21d36d56c439fda2334f39abae2ab5ca02`; P5.5A remains closed. P5.5B owns ReviewSaveService completion, DailyReflectionPersistence, DiaryEditor, Save Today/suspended Review actions, acknowledgement/reminders, date selection and rollover host behavior, plus final Review export reconciliation.
+- Preserve: active-session reflection versus canonical Saved Day separation; Library publication only after acknowledged durable save; richer existing study records on Diary edits; historical recovery never rolls over/restarts; existing initialization/recovery order.
+- Required closure evidence: stale date/ownership/editor rejection; flush-before-save; rejected and committed-but-unverified writes without false saved state; successor preservation; Diary-only versus study-day writes; targeted durability/session/recovery tests, strict compiler/lint, fresh build/generated verification. No full QA.
+- Temporary pad: `/tmp/study-director-P5.5B.md` (ephemeral, not evidence). Next: audit current Review/host/DailyReflection/Diary ownership and actual repository contracts, implement the complete owned path, reconcile source/consumers, then run selected QA and close only if all required checks pass.
+
 ## Latest closure — P5.5A Review model, editing and presentation, 2026-11-13
 
 - **Scope / publication:** baseline `db4587ae037f97f5ae7473f18e6c9c4d2e2aa946`; no later remote work existed at intake. Source/regression endpoint `f439125f0d4f8e8a1327c3582c854c6ba432bb69`; the commit containing this entry is the closure checkpoint. P5.5B remains open.
