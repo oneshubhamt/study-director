@@ -3,6 +3,7 @@ import type {ActualRecord,ClockRecord,DailyRecord,DailyResult,KeyedRecord,Limits
 import type {CompletionEvidenceController,TaskIdentityPort,TaskSessionStore} from './execution-host.ts';
 import type {SaveLaneModule} from './pilot.ts';
 import type {SessionContext,SessionOptions} from './session-lifecycle.ts';
+import type {SessionResult} from './repositories.ts';
 import type {TimerMode} from './timer-state.ts';
 
 export type ReviewQuality=number|null;
@@ -17,7 +18,7 @@ export interface ReviewSaveOptions{readonly event?:Event|null;readonly strict?:b
 export type ReviewReflectionBinding=Pick<ReviewState,'date'|'reflection'>;
 export type ReviewReflectionPending=
   |Readonly<{mode:'session';date:string;reflection:string;backupCapture:boolean}>
-  |Readonly<{mode:'saved-day';date:string;reflection:string;backupCapture:boolean}>;
+  |Readonly<{mode:'saved-day';date:string;reflection:string;expectedCanonical:string;backupCapture:boolean}>;
 export interface ReviewDailyReflectionResult{readonly canonical:string;readonly revision:number;readonly recordKind:string|null;readonly record?:DailyRecord|null}
 export interface ReviewDailyReflectionPort{
   load(date:string):PromiseLike<ReviewDailyReflectionResult>;
@@ -168,7 +169,7 @@ export interface ReviewSubsystemInput{
       lifecycleCanWrite():boolean;markDayContentChanged():unknown;markDayContentSaved(date:string,revision:number):unknown;resetRuntimeSessionState(options:Readonly<Record<string,unknown>>):unknown;
       runLifecycle<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T|PromiseLike<T>):Promise<T>;runLifecycleSync<T>(kind:string,options:SessionOptions,operation:(context:SessionContext)=>T):T;
       saveLiveDraft(options?:Readonly<Record<string,unknown>>):unknown;setReviewDateTitle(date:string):unknown;setSessionPanelMode(mode:string,value?:unknown):unknown;stopTimerExecution():unknown;
-      appCanMutate():boolean;writeLiveDraftNow(options?:Readonly<Record<string,unknown>>):PromiseLike<Readonly<{ok:boolean;error?:unknown}>>;
+      appCanMutate():boolean;writeCanonicalNow(operation:string,options?:Readonly<{markChanged?:boolean;backupCapture?:boolean}>):PromiseLike<SessionResult>;writeLiveDraftNow(options?:Readonly<Record<string,unknown>>):PromiseLike<Readonly<{ok:boolean;error?:unknown}>>;
     }>;
     notesDefaults:Readonly<{
       noteStoredValueForKey(key:string):string;bindTaskNoteEditor(field:HTMLTextAreaElement,index:number,source:string):unknown;closeRichTextField(field:HTMLTextAreaElement|null):unknown;

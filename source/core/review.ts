@@ -46,7 +46,7 @@ const createModule=():ReviewModuleContract=>{
       'handleActiveSessionRepositoryResult','lifecycleCanWrite',
       'markDayContentChanged','markDayContentSaved','resetRuntimeSessionState','runLifecycle','runLifecycleSync','saveLiveDraft',
       'setReviewDateTitle','setSessionPanelMode','stopTimerExecution','appCanMutate',
-      'writeLiveDraftNow'
+      'writeCanonicalNow','writeLiveDraftNow'
     ]),
     notesDefaults:freeze([
       'noteStoredValueForKey','bindTaskNoteEditor','closeRichTextField','commitTaskNoteEditor','currentNoteEntriesForWorkTasks',
@@ -119,7 +119,7 @@ const createModule=():ReviewModuleContract=>{
       handleActiveSessionRepositoryResult,lifecycleCanWrite,
       markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,runLifecycle,runLifecycleSync,saveLiveDraft,
       setReviewDateTitle,setSessionPanelMode,stopTimerExecution,appCanMutate,
-      writeLiveDraftNow
+      writeCanonicalNow,writeLiveDraftNow
     }=ports.session;
     const {
       noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField,commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
@@ -291,17 +291,25 @@ async function hydrateReflectionOnlyState(date:unknown=getReviewDate()){
 // on a day without a study session, otherwise into the session. Each pending
 // value names its date and store, so a date change mid-save still writes the
 // right day.
+function reflectionLibraryFollowup(date:string){
+  return Promise.resolve().then(()=>refreshLibraryAfterSave(date)).then(
+    ()=>null,
+    (error:unknown)=>{AppDiagnostics.capture('review.reflection-library-refresh',error,'warn');return error;}
+  );
+}
 async function writeReflection(pending:ReviewReflectionPending,options:Readonly<{backupCapture?:boolean}>={}){
   if(pending.mode==='session'){
     const result=await writeLiveDraftNow({markChanged:false,backupCapture:pending.backupCapture||options.backupCapture===true});
     if(!result||result.ok!==true)throw result&&result.error||new Error('the session could not be saved');
     return result;
   }
-  const expected=reflectionOnlyState.date===pending.date?reflectionOnlyState.canonical:'';
-  const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:expected,backupCapture:pending.backupCapture||options.backupCapture===true});
-  reflectionOnlyState=freeze({date:pending.date,canonical:String(saved.canonical||''),recordKind:saved.recordKind||null});
-  if(reviewDate(getReviewDate())===pending.date){persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});syncReviewSurfaceMode();}
-  markStorageHealthTimestamp('lastStudyDataSaveAt');await refreshLibraryAfterSave(pending.date);return saved;
+  const saved=await DailyReflection.commit(pending.date,pending.reflection,{expectedCanonical:pending.expectedCanonical,backupCapture:pending.backupCapture||options.backupCapture===true});
+  if(reviewDate(getReviewDate())===pending.date){
+    reflectionOnlyState=freeze({date:pending.date,canonical:String(saved.canonical||''),recordKind:saved.recordKind||null});
+    persistedReview=normalizeReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},pending.date,{validatedRich:true});syncReviewSurfaceMode();
+  }
+  markStorageHealthTimestamp('lastStudyDataSaveAt');
+  return freeze({...saved,followup:reflectionLibraryFollowup(pending.date)});
 }
 function reflectionLaneState(state:'saving'|'saved'|'error',error:unknown){
   if(state==='saving')setReflectionRichSync('saving','Saving…');
@@ -309,16 +317,26 @@ function reflectionLaneState(state:'saving'|'saved'|'error',error:unknown){
   else{setReflectionRichSync('error',SaveLane.failureMessage('Reflection',error));AppDiagnostics.capture('review.reflection-save',error,'warn');}
 }
 const reflectionLane=SaveLane.createLane(freeze({label:'Reflection',write:writeReflection,onState:reflectionLaneState,environment:freeze({setTimeout,clearTimeout})}));
+function reflectionOnlyPending(binding:ReviewReflectionBinding,options:Readonly<{backupCapture?:boolean}>={}):ReviewReflectionPending|null{
+  if(reflectionOnlyState.date!==binding.date)return null;
+  const clean=normalizeReviewState({reflection:binding.reflection,studyQuality:null},binding.date,{validatedRich:true});
+  return freeze({mode:'saved-day',date:clean.date,reflection:clean.reflection,expectedCanonical:reflectionOnlyState.canonical,backupCapture:options.backupCapture===true});
+}
 function queueReflectionOnlySave(binding:ReviewReflectionBinding,options:Readonly<{backupCapture?:boolean}>={}){
   if(!binding||!lifecycleCanWrite())return false;
-  const clean=normalizeReviewState({reflection:binding.reflection,studyQuality:null},binding.date,{validatedRich:true});
-  persistedReview=clean;reflectionLane.schedule(freeze({mode:'saved-day',date:clean.date,reflection:clean.reflection,backupCapture:options.backupCapture===true}));
+  const pending=reflectionOnlyPending(binding,options);if(!pending)return false;
+  persistedReview=normalizeReviewState({reflection:pending.reflection,studyQuality:null},pending.date,{validatedRich:true});
+  reflectionLane.schedule(pending);
   if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.sync();
   return true;
 }
 function flushReflectionOnlySave(options:ReviewSaveOptions={}){
   const bound=resolveReviewEditorBinding(getReviewDate(),options.event||null);
-  if(bound)reflectionLane.schedule(freeze({mode:'saved-day',date:bound.date,reflection:bound.reflection,backupCapture:options.backupCapture===true}));
+  if(bound){
+    const pending=reflectionOnlyPending(bound,options);
+    if(!pending){if(options.strict)return Promise.reject(new Error('This Reflection editor no longer has a verified baseline for its date.'));return false;}
+    reflectionLane.schedule(pending);
+  }
   return reflectionLane.flush(options);
 }
 function persistReviewBinding(binding:ReviewState,options:ReviewSaveOptions={}){
@@ -427,6 +445,12 @@ function captureTodayState(){
   saveReviewState({markChanged:false,strict:true});
   saveLiveDraft();
 }
+async function flushFinalActiveSessionCheckpoint(operation:string){
+  if(reflectionLane.pending())reflectionLane.cancel();
+  const saved=await writeCanonicalNow(operation);
+  if(!saved||saved.ok!==true||saved.error||saved.storage?.idb!==true)throw saved?.error||new Error('The Active Session final checkpoint could not be verified in canonical storage.');
+  return saved;
+}
 function projectDailyRecord(evidence:ReviewEvidence,review:ReviewCurrentState):ReviewProjectedStudyRecord{
   if(!evidence||!Object.isFrozen(evidence)||!runtimeArray(evidence.reviewTasks)){
     throw new TypeError('ReviewModel requires a frozen SessionEvidenceGateway snapshot.');
@@ -501,8 +525,15 @@ async function saveReflectionOnlyRecord(){
   let committed=false;
   try{
     const saved=await flushReflectionOnlySave();
-    const hasContent=!!String(saved&&typeof saved==='object'&&'canonical' in saved?saved.canonical:'').trim();committed=true;
+    if(!saved||typeof saved!=='object'||!('canonical' in saved))throw new Error('Reflection persistence did not return a canonical receipt.');
+    const committedReflection=saved as Readonly<{canonical:unknown;followup?:PromiseLike<unknown|null>}>;
+    const hasContent=!!String(committedReflection.canonical||'').trim();committed=true;
+    const followupError=committedReflection.followup?await committedReflection.followup:null;
     ReviewView.sync();
+    if(followupError){
+      notice.finish('failed','Reflection saved locally; refreshing Library failed. '+errorMessage(followupError),{title:'Reflection saved; view refresh needs attention',outcome:'local-save-completed'});
+      return false;
+    }
     notice.finish('succeeded',hasContent?'✓ Reflection saved in Diary.':'No reflection saved. Empty reflections are not kept in Diary.',{announce:hasContent,title:'Reflection saved'});return true;
   }catch(error){
     notice.finish('failed',(committed?'Reflection saved locally; refreshing the view failed. ':'Could not save reflection. Keep this tab open and retry after storage recovers. ')+errorMessage(error),{title:committed?'Reflection saved; follow-up needs attention':'Reflection not saved',outcome:committed?'local-save-completed':'local-save-failed'});
@@ -523,14 +554,14 @@ async function saveDayRecord(options:Readonly<{closeSession?:boolean}>={}){
   const closesPriorDay=SessionEvidenceGateway.snapshot({includeRecords:false}).date<todayISO();
   const closesSession=closesPriorDay||options.closeSession===true;
   if(closesSession){
-    activeSessionPersistenceBlocked=true;
     stopTimerExecution();
     cancelPendingLiveDraftSave();
   }
   try{
     PracticePacer.finalizeForDayClose();
     captureTodayState();
-    await flushLiveDraft();
+    await flushFinalActiveSessionCheckpoint('saving the Study Day Active Session checkpoint');
+    if(closesSession)activeSessionPersistenceBlocked=true;
     const metrics=ReviewView.refresh({includeRecords:true,force:true});
     const {doc,rec}=await commitDailyRecord(metrics.evidence,'canonical daily record');committed=rec;
     markStorageHealthTimestamp('lastStudyDataSaveAt');
@@ -577,7 +608,6 @@ function studyDayRolledOver(now:Date=new Date()){
 async function handleStudyDayRollover(){
   if(rolloverSaveInProgress||!appCanMutate())return false;
   if(!studyDayRolledOver())return false;
-  activeSessionPersistenceBlocked=true;
   stopTimerExecution();
   cancelPendingLiveDraftSave();
   rolloverSaveInProgress=true;
@@ -591,11 +621,13 @@ async function handleStudyDayRollover(){
       captureReviewInputs();
       syncUnfinishedNoteDraft();
       saveReviewState({markChanged:false,strict:true});
-      await flushLiveDraft();
+      await flushFinalActiveSessionCheckpoint('saving the rollover Active Session checkpoint');
+      activeSessionPersistenceBlocked=true;
       const {doc,rec}=await commitDailyRecord(SessionEvidenceGateway.snapshot({includeRecords:true}),'canonical rollover record');
       savedDay={date:rec.date,revision:doc.sourceRevision};
       markStorageHealthTimestamp('lastStudyDataSaveAt');
     }else{
+      activeSessionPersistenceBlocked=true;
       Runtime.setSafetyMessage('New study day: no schedule was loaded, so no Study Day record was created. Apply today’s schedule when ready.');
     }
     await runLifecycle('study-day-rollover',{

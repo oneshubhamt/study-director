@@ -4019,7 +4019,7 @@ const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze({
       runLifecycle:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),
       runLifecycleSync:(kind,options,operation)=>SessionLifecycle.runSync(kind,options,operation),
       saveLiveDraft,setReviewDateTitle,setSessionPanelMode,stopTimerExecution:()=>TimerEngine.stopExecution(),
-      appCanMutate,writeLiveDraftNow
+      appCanMutate,writeCanonicalNow:(operation,options)=>ActiveSessionRuntime.writeCanonicalNow(operation,options),writeLiveDraftNow
     }),
     notesDefaults:Object.freeze({
       noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField:field=>richTextCloseField(field),commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
