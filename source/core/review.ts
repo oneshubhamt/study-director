@@ -43,7 +43,7 @@ const createModule=():ReviewModuleContract=>{
     session:freeze([
       'acknowledgeSavedStudyDay','clearCanonicalSessionAfterSavedDay',
       'cancelPendingLiveDraftSave','clearSaveReminder','flushLiveDraft','getLifecycleRevision','getOwnershipRevision','getReviewDate',
-      'handleActiveSessionRepositoryResult','lifecycleCanWrite',
+      'lifecycleCanWrite',
       'markDayContentChanged','markDayContentSaved','resetRuntimeSessionState','runLifecycle','saveLiveDraft',
       'setReviewDateTitle','setSessionPanelMode','stopTimerExecution','appCanMutate',
       'writeCanonicalNow','writeLiveDraftNow'
@@ -116,7 +116,7 @@ const createModule=():ReviewModuleContract=>{
     const {
       acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
       cancelPendingLiveDraftSave,clearSaveReminder,flushLiveDraft,getLifecycleRevision,getOwnershipRevision,getReviewDate,
-      handleActiveSessionRepositoryResult,lifecycleCanWrite,
+      lifecycleCanWrite,
       markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,runLifecycle,saveLiveDraft,
       setReviewDateTitle,setSessionPanelMode,stopTimerExecution,appCanMutate,
       writeCanonicalNow,writeLiveDraftNow
@@ -374,11 +374,10 @@ async function flushPendingReviewSave(options:ReviewSaveOptions={}){
     return lifecycleCanWrite();
   }
   const saved=result&&typeof result==='object'?result as Readonly<{ok?:unknown;error?:unknown;storage?:Readonly<{idb?:unknown}>}>:null;
-  const accepted=handleActiveSessionRepositoryResult(result);
   if(options.strict&&(!saved||saved.ok!==true||saved.error||saved.storage?.idb!==true)){
     throw saved?.error||new Error('The pending Review did not reach canonical storage before this transition.');
   }
-  return accepted!==false;
+  return saved?.ok===true;
 }
 function reviewPersistenceCommitted(){setReflectionRichSync('saved','Saved');return true;}
 function reviewPersistenceFailed(error?:unknown){setReflectionRichSync('error','Save failed');if(error)AppDiagnostics.capture('review.active-session-save',error,'warn');return false;}
