@@ -1073,10 +1073,20 @@ async function replayFallbackDailyRecords(records:readonly DailyRecord[],{strict
 // Canonical Saved Day receipts never consult localStorage rescue. A successful
 // fallback write is recoverable work, not proof that the day reached IndexedDB.
 async function verifyCanonicalDailyRecord(record:unknown){
-  const clean=sanitizeCurrentDailyRecord(record);
+  const clean=sanitizeCurrentDailyRecord(storedDailyRecordFields(record));
   if(!clean)throw new Error('Saved Day verification requires a canonical record.');
   const stored=readableDailyRecord(await idbGetRecord(clean.date));
-  if(!stored||!sameDataValue(stored,clean))throw new Error('Canonical Saved Day read-back did not match the committed study evidence.');
+  const fallback=fallbackDailyRecordsRawGet().find(row=>row.date===clean.date)||null;
+  if(!stored||pendingDeletionShadowsEntity('dailyRecord',clean.date,stored)||!sameDataValue(stored,clean)||
+      fallback&&!sameDataValue(fallback,clean))throw new Error('Canonical Saved Day read-back did not match the committed study evidence.');
+  return true;
+}
+async function verifyCanonicalDailyRecordAbsent(date:string){
+  if(!isValidIsoDate(date))throw new Error('Saved Day deletion verification requires a valid date.');
+  const stored=readableDailyRecord(await idbGetRecord(date));
+  const fallback=fallbackDailyRecordsRawGet().find(row=>row.date===date)||null;
+  const deletion=pendingDeletionEntries().some(entry=>entry.kind==='dailyRecord'&&entry.id===date);
+  if(stored||fallback||deletion)throw new Error('Canonical Saved Day deletion did not pass its durable read-back check.');
   return true;
 }
 async function storeDailyRecord(rec:DailyRecord|DailyView,options:{backupCapture?:boolean}={}){
@@ -1256,8 +1266,8 @@ async function materializeDailyRecordViews(records:DailyRecord[],{yieldProjectio
   }
   return out;
 }
-async function removeDailyRecord(date:string,options:{rollback?:boolean}={}){
-  const rollback=options&&options.rollback===true;
+async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCapture?:boolean}={}){
+  const rollback=options&&options.rollback===true,backupCapture=options&&options.backupCapture===true;
   const ownershipToken=issueWriteToken('deleting the daily record');
   const finishWrite=beginAuthoritativeWrite();
   let removed=false;
@@ -1277,7 +1287,7 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean}={}){
       if(!fallbackCleared&&!staged)throw LocalStorageContract.lastError||new Error('DailyRecord fallback cleanup failed.');
       if(!rollback&&fallbackCleared)clearDeletionRecoveryKeys([recoveryKey]);
       confirmDailyRecordStorage();
-      if(!rollback)reportCanonicalCommit('dailyRecord','delete');
+      if(!rollback)reportCanonicalCommit('dailyRecord','delete',null,{backupCapture});
       if(fallbackHadRecord&&!(result&&result.changed))InsightsDatasetRevision.invalidateVolatile('fallback-daily-record-delete');
       removed=true;
     }catch(e){
@@ -1537,6 +1547,7 @@ async function runDataMaintenance(options:MaintenanceOptions={}):Promise<Mainten
     const dailyRecords=freeze({
       save:storeDailyRecord,
       verifyCanonical:verifyCanonicalDailyRecord,
+      verifyCanonicalAbsent:verifyCanonicalDailyRecordAbsent,
       saveBatch:storeDailyRecordBatch,
       restoreBatch:(records:readonly unknown[])=>storeDailyRecordBatch(records),
       get:getDailyRecord,

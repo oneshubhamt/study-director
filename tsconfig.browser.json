@@ -182,6 +182,8 @@
     "source/core/plan.ts",
     "types/plan-host.ts",
     "types/review.ts",
+    "types/review-persistence.ts",
+    "source/core/review-persistence.ts",
     "source/core/review.ts",
     "types/review-host.ts",
     "source/core/review-host.ts",
