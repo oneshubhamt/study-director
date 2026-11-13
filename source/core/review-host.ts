@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {ReviewHostInput,ReviewHostModule as ReviewHostContract} from '../../types/review-host.ts';
+import type {ReviewHostInput,ReviewLifecycleHooksInput,ReviewHostModule as ReviewHostContract} from '../../types/review-host.ts';
 import type {ActiveSession,DailyRecord,SessionEvidence} from '../../types/record-models.ts';
 
 const sdReviewHostFactory=(()=>{
@@ -25,6 +25,20 @@ function createSubsystem(input:Readonly<ReviewHostInput>){
     throw new TypeError('Study Director Review subsystem is unavailable or incompatible.');
   }
   return subsystem;
+}
+
+function createLifecycleHooks(input:Readonly<ReviewLifecycleHooksInput>){
+  exactObject(input,['canMutate','reviewEditor','lifecycleViews','diagnostics'],'Review lifecycle provider input');
+  if(!Object.isFrozen(input.reviewEditor)||!Object.isFrozen(input.lifecycleViews)||!Object.isFrozen(input.diagnostics))throw new TypeError('Review lifecycle providers must be frozen.');
+  const {canMutate,reviewEditor,lifecycleViews,diagnostics}=input;
+  return freeze({
+    canMutate,
+    flushPending:()=>canMutate()?reviewEditor.flushPending({strict:true}):false,
+    prepare:(context)=>lifecycleViews.invalidateLifecycleEditors(context),
+    reconcile:(context)=>lifecycleViews.reconcileLifecycleEditors(context),
+    complete:(context)=>lifecycleViews.completeLifecycleTransition(context),
+    capture:(scope,error,level)=>diagnostics.capture(scope,error,level)
+  });
 }
 
 function createDayState(input:import('../../types/review-host.ts').ReviewDayStateInput){
@@ -168,7 +182,7 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
   return freeze({promptSaveToday,clearSaveReminder,revalidateSaveReminder,acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,saveDayRecord,handleStudyDayRollover,selectReviewDate,savedRecordExistsForDate});
 }
 
-const createModule=():ReviewHostContract=>freeze({format:'study-director.review-host-module',contractVersion:1,createSubsystem,createDayState,createSavedDayCoordinator});
+const createModule=():ReviewHostContract=>freeze({format:'study-director.review-host-module',contractVersion:1,createSubsystem,createLifecycleHooks,createDayState,createSavedDayCoordinator});
 registry.define('review-host',1,createModule);
 return createModule;
 })();
