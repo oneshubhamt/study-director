@@ -102,7 +102,7 @@ const executionHost=readScript('source/core/execution-host.ts');
 const views=readScript('source/core/execution-views.ts');
 const timer=readScript('source/core/timer-engine.ts');
 const plan=readScript('source/core/plan.ts');
-const review=readScript('source/core/review.js');
+const review=readScript('source/core/review.ts');
 assert.match(host,/ExecutionHostModule\.createRuntime\(Object\.freeze\(\{/u,'live execution composition crosses the checked execution host');
 assert.doesNotMatch(host,/const TaskSessionState=\(\(\)=>\{/u,'per-task runtime evidence no longer has an untyped host implementation');
 for(const direct of [
@@ -444,7 +444,7 @@ console.log(JSON.stringify({status:'PASS',boundary:'presentation-surfaces',level
 assert.doesNotMatch(readScript('source/core/timer-engine.ts'),/startCueDelayMs/,'start cue spacing must not rely on delayed callbacks');
 
 { // Production session/recovery boundaries retained across TS erasure.
-const app=readScript('source/core/session-actions.ts'),review=readScript('source/core/review.js'),background=readScript('source/core/repository-background.ts');
+const app=readScript('source/core/session-actions.ts'),review=readScript('source/core/review.ts'),background=readScript('source/core/repository-background.ts');
 const sessionRestoreBlock=app.slice(app.indexOf('async function restoreSessionStateThroughLifecycle('),app.indexOf('async function verifyRestoredSessionRuntime',app.indexOf('async function restoreSessionStateThroughLifecycle(')));
 assert.match(app,/async function restoreSessionStateThroughLifecycle\s*\(importedSession\s*,options\s*=\s*\{\s*\}\s*\)\s*\{\n\s*const session\s*=[^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*const keepRunning\s*=options\s*\.keepRunning\s*=\s*=\s*=true&&/u,'Portable Active Session restore must use the lifecycle host without a Plan-draft transport parameter.');
 assert.doesNotMatch(sessionRestoreBlock,/PlanData\s*\.writeDraft|enterDraft:true/u,'Active Session restore must not write or enter the independent Plan draft.');
