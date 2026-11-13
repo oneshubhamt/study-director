@@ -55,6 +55,64 @@ const noop=()=>{};
 }
 
 
+// The production Review flush is Promise-based for an active Study Day. Its
+// rejection is a transition blocker, not a fire-and-forget background failure.
+{
+  const events=[],date='2026-10-03';
+  const context={SaveLane:{prepareFlush:()=>events.push('prepare')},reviewHasStudyDay:()=>true,
+    resolveReviewEditorBinding:()=>({date,reflection:'pending',studyQuality:null}),getReviewDate:()=>date,
+    persistedReview:Object.freeze({date,reflection:'old',studyQuality:null}),normalizeReviewState:value=>value,
+    reflectionLane:{pending:()=>false,cancel:noop},flushLiveDraft:async()=>{events.push('flush');throw new Error('async Active Session flush failed');},
+    lifecycleCanWrite:()=>true,handleActiveSessionRepositoryResult:()=>true};
+  vm.createContext(context);
+  const start=review.indexOf('async function flushPendingReviewSave('),end=review.indexOf('function reviewPersistenceCommitted(',start);
+  vm.runInContext(review.slice(start,end),context);
+  await assert.rejects(context.flushPendingReviewSave({strict:true}),/async Active Session flush failed/);
+  assert.deepEqual(events,['prepare','flush']);
+}
+
+// Rollover is production Review orchestration over the real lifecycle module:
+// after the Saved Day commit, a failed Active Session clear must not reconcile
+// Review to the requested new date or publish writable readiness.
+{
+  const oldDate='2026-11-12',newDate='2026-11-13',events=[];let reconciledDate=oldDate;
+  const context={console,Promise,Object,Date,Error,TypeError,Symbol,
+    rolloverSaveInProgress:false,activeSessionPersistenceBlocked:false,appCanMutate:()=>true,
+    SessionState:{studyDate:oldDate},todayISO:()=>newDate,stopTimerExecution:()=>events.push('stop'),cancelPendingLiveDraftSave:()=>events.push('cancel'),
+    TASKS:[{kind:'work'}],isTrackableBlock:()=>true,isLiveTrackableTimer:()=>false,
+    Runtime:{currentIndex:()=>0,setSafetyMessage:message=>events.push(['safety',message])},
+    PracticePacer:{finalizeForDayClose:()=>events.push('finalize')},captureReviewInputs:noop,syncUnfinishedNoteDraft:noop,saveReviewState:()=>true,
+    flushFinalActiveSessionCheckpoint:async()=>{events.push('checkpoint');return {ok:true,error:null,storage:{idb:true}};},
+    commitDailyRecord:async()=>{events.push('commit');return {doc:{sourceRevision:9},rec:{date:oldDate}};},
+    SessionEvidenceGateway:{snapshot:()=>({date:oldDate})},markStorageHealthTimestamp:noop,
+    clearCanonicalSessionAfterSavedDay:async()=>{events.push('clear');throw new Error('canonical clear failed');},
+    resetRuntimeSessionState:()=>events.push('reset'),inputById:()=>null,syncReviewDateMode:noop,setSessionPanelMode:()=>events.push('panel'),
+    refreshPlanAfterSessionReset:()=>events.push('plan'),setPlanStatus:()=>events.push('plan-status'),refreshStorageFallbackWarning:()=>events.push('storage-warning'),
+    markDayContentSaved:()=>events.push('mark-saved'),notifyUser:()=>events.push('notify'),prettyDate:value=>value,errorMessage:error=>String(error?.message||error),
+    AppDiagnostics:{capture:(scope,error)=>events.push(['capture',scope,String(error?.message||error)])}
+  };
+  vm.createContext(context);
+  vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'source/core/internal.ts'});
+  vm.runInContext(readRuntimeSource('source/core/session-lifecycle.ts'),context,{filename:'source/core/session-lifecycle.ts'});
+  const lifecycleModule=context[Symbol.for('studyDirector.internalModules.v1')].require('session-lifecycle',1);
+  const lifecycle=lifecycleModule.createCoordinator(Object.freeze({hooks:Object.freeze({
+    canMutate:()=>true,flushPending:async()=>{events.push('flush');return true;},prepare:()=>events.push('prepare'),
+    reconcile:ctx=>{events.push('reconcile');reconciledDate=ctx.options.date;},
+    complete:ctx=>events.push(['complete',ctx.kind,ctx.failed,ctx.reconciled]),capture:noop
+  })}));
+  context.runLifecycle=(...args)=>lifecycle.run(...args);
+  const start=review.indexOf('/* ROLLOVER SAVE ORCHESTRATION */'),end=review.indexOf('function reviewRichInputPlain(',start);
+  vm.runInContext(review.slice(start,end),context);
+  assert.equal(await context.handleStudyDayRollover(),false);
+  assert.ok(events.indexOf('commit')<events.indexOf('clear'),'Saved Day commits before final session retirement');
+  assert.equal(events.includes('reset'),false,'runtime reset must not run after a failed canonical clear');
+  assert.equal(events.includes('reconcile'),false,'failed rollover must not reconcile to its target date');
+  assert.equal(reconciledDate,oldDate,'Review stays associated with the surviving old session/date');
+  assert.equal(lifecycle.canWrite(),false,'failed rollover leaves lifecycle editors fail-closed');
+  assert.equal(lifecycle.status().last.failed,true);
+  assert.equal(lifecycle.status().last.reconciled,false);
+}
+
 // Reflection-only persistence keeps the date-specific concurrency baseline and
 // treats Library refresh as a post-commit follow-up, never as a storage retry.
 {
@@ -122,4 +180,4 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','date-stable reflection baseline','reflection commit versus Library refresh failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','date-stable reflection baseline','reflection commit versus Library refresh failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
