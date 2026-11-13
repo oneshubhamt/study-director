@@ -672,11 +672,11 @@ function reconcileLifecycleEditors(context:SessionContext){
   return true;
 }
 function completeLifecycleTransition(context:SessionCompletion){
-  const writable=!!context.reconciled&&appCanMutate();
+  const writable=!context.failed&&!!context.reconciled&&appCanMutate();
   setLifecycleEditorsBlocked(!writable);
   ports.ReviewView.syncMode();
   if(writable&&document.getElementById('pane-review')?.classList.contains('on'))ports.ReviewView.activate({restoreScroll:false});
-  document.documentElement.dataset['studyDirectorLifecycle']=writable?'ready':(context.reconciled?'read-only':'blocked');
+  document.documentElement.dataset['studyDirectorLifecycle']=writable?'ready':(!context.failed&&context.reconciled?'read-only':'blocked');
   document.documentElement.dataset['studyDirectorLifecycleRevision']=String(context.revision);
   // A waiting update blocked by the transition retries now, not at the safety retry.
   // Deferred: start-up transitions finish before the update state is declared.
