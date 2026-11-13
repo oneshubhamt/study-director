@@ -37,7 +37,7 @@ export interface ReviewSavedDayCoordinatorInput{
     captureSessionSnapshot:()=>SessionSnapshot|null;appliedScheduleText:()=>string;appCanMutate:()=>boolean;
     panelMode:()=>string;safetyMessage:()=>string;setSafetyMessage:(value:string)=>void;
     isSuspended:(session:ActiveSession|null)=>boolean;activeSessionSnapshot:(session:ActiveSession|null)=>SessionSnapshot|null;
-    applyStoredSessionSnapshot:(session:ActiveSession,snapshot:SessionSnapshot,options:Readonly<{source:string;reviewOnly:true}>)=>boolean;
+    applyStoredSessionSnapshot:(session:ActiveSession,snapshot:SessionSnapshot,options:Readonly<{source:string;reviewOnly:true}>)=>boolean|PromiseLike<boolean>;
     setPanelMode:(mode:string,session?:ActiveSession|null)=>unknown;setTimerDone:()=>unknown;updateSessionControls:()=>unknown;
   }>;
   readonly repositories:Readonly<{
