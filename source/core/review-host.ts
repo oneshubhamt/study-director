@@ -157,7 +157,7 @@ function createSavedDayCoordinator(input:import('../../types/review-host.ts').Re
         if(!runtime.tasks().length){
           const snapshot=runtime.activeSessionSnapshot(candidate);
           if(!snapshot){view.setStatus('save-status','The suspended session could not be read safely. Restore it before saving.',false);return false;}
-          if(runtime.applyStoredSessionSnapshot(candidate,{...snapshot,timerRuntime:null},{source:'suspended-session-review',reviewOnly:true})===false){
+          if(await runtime.applyStoredSessionSnapshot(candidate,{...snapshot,timerRuntime:null},{source:'suspended-session-review',reviewOnly:true})===false){
             view.setStatus('save-status','The suspended session could not be loaded into Review safely.',false);return false;
           }
         }
