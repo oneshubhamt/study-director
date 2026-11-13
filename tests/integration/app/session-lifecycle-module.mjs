@@ -40,6 +40,22 @@ assert.throws(()=>blocked.runSync('date-change',{},()=>true),/pending reflection
 assert.equal(blocked.revision,0);
 assert.deepEqual(blockedEvents,['flush']);
 
+// The real Review provider is asynchronous. A rejected pending flush must
+// prevent prepare/operation/reconcile exactly as a synchronous failure does.
+const asyncBlockedEvents=[];
+let asyncOperationCalled=false;
+const asyncBlocked=LifecycleModule.createCoordinator(Object.freeze({hooks:Object.freeze({
+  canMutate:()=>true,
+  flushPending:async()=>{asyncBlockedEvents.push('flush');await Promise.resolve();throw new Error('pending async reflection flush failed');},
+  prepare:()=>asyncBlockedEvents.push('prepare'),reconcile:()=>asyncBlockedEvents.push('reconcile'),complete:()=>asyncBlockedEvents.push('complete'),capture:()=>false
+})}));
+await assert.rejects(asyncBlocked.run('date-change',{},()=>{asyncOperationCalled=true;return true;}),/pending async reflection flush failed/);
+assert.equal(asyncOperationCalled,false);
+assert.equal(asyncBlocked.revision,0);
+assert.equal(asyncBlocked.transitioning,false);
+assert.equal(asyncBlocked.canWrite(),false);
+assert.deepEqual(asyncBlockedEvents,['flush']);
+
 const syncResult=coordinator.runSync('schedule-replacement',{scheduleIdentity:true},ctx=>{
   assert.equal(coordinator.transitioning,true);
   assert.equal(coordinator.canWrite(),false);
@@ -84,13 +100,15 @@ const final=coordinator.status();
 assert.equal(final.transitioning,false);
 assert.equal(final.last.kind,'failing-transition');
 assert.equal(final.last.failed,true);
-assert.ok(events.includes('reconcile:failing-transition:null'));
+assert.equal(final.last.reconciled,false);
+assert.equal(coordinator.canWrite(),false,'a failed transition must not publish writable readiness');
+assert.equal(events.includes('reconcile:failing-transition:null'),false,'failed transitions never reconcile target state');
 assert.ok(events.includes('complete:failing-transition:failed'));
 
 console.log(JSON.stringify({
   status:'PASS',
   module:'source/core/session-lifecycle.ts',
   finalRevision:coordinator.revision,
-  supersessionProtected:true,
+  supersessionProtected:true,asyncFlushFailureProtected:true,failedTransitionFailClosed:true,
   eventCount:events.length
 },null,2));
