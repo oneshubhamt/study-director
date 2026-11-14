@@ -327,7 +327,7 @@ const noop=()=>{};
 {
   const source=library,{coordinator,port}=createNotifications('library');
   let result={status:'cancelled'},failure=null;
-  const context={notifications:port,noteExportBusy:false,noteSelection:new Set(['one']),noteSelectionMode:true,noteEntries:()=>[],updateNoteSelectionControls:noop,renderNotes:noop,console:{error:noop},exportKeys:async()=>{if(failure)throw failure;return result;}};
+  const context={notifications:port,noteExportBusy:false,noteSelection:new Set(['one']),noteSelectionMode:true,noteEntries:()=>[],updateNoteSelectionControls:noop,renderNotes:noop,console:{error:noop},errorMessage:error=>String(error?.message||error),exportKeys:async()=>{if(failure)throw failure;return result;}};
   vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    async function exportSelectedNotes('),source.indexOf('    function setNotesStatus(')),context);
   assert.equal(await context.exportSelectedNotes(),false);assert.equal(context.noteSelection.size,1);assert.equal(coordinator.readEvent('library','note-export').lifecycle,'cancelled');assert.equal(coordinator.eventStatus().toasts.length,0);
   failure=new Error('file access denied');assert.equal(await context.exportSelectedNotes(),false);assert.equal(coordinator.readEvent('library','note-export').lifecycle,'failed');assert.equal(context.noteSelection.size,1);
