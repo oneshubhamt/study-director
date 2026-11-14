@@ -55,10 +55,11 @@ try{
     const fmt=value=>String(Math.floor((value+1440)%1440/60)).padStart(2,'0')+':'+String((value+1440)%1440%60).padStart(2,'0');
     const rows=[['Alpha Task','Alpha Empty'],['Zeta Task','Zeta Filled'],['Child Task','Parent > Child Empty']];
     document.getElementById('plan-input').value=rows.map((row,index)=>fmt(base+index*20)+' | 20 | '+row[0]+' | work | '+row[1]+' | pages | 10').join('\\n');
-    const applied=await d.applySchedule({skipNotify:true});
+    const applied=await d.applySchedule({skipNotify:true}),attempts=[];
     let navigated=await d.goTab('library');
-    if(!navigated){await new Promise(resolve=>setTimeout(resolve,50));navigated=await d.goTab('library');}
-    if(!navigated)throw new Error('Library navigation was repeatedly superseded during test setup.');
+    attempts.push({navigated,status:StudyDirector.ui.navigationStatus(),active:document.querySelector('.pane.on')?.id||''});
+    if(!navigated){await new Promise(resolve=>setTimeout(resolve,50));navigated=await d.goTab('library');attempts.push({navigated,status:StudyDirector.ui.navigationStatus(),active:document.querySelector('.pane.on')?.id||''});}
+    if(!navigated)throw new Error('Library navigation was repeatedly superseded during test setup: '+JSON.stringify(attempts));
     __PWA6.LibraryView.showSection('notes');
     return {applied};
   })()`);
