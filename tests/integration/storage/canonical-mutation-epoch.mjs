@@ -65,12 +65,12 @@ assert.equal(noteChange.status,'changed');
 const generalUnit=`note:${app.notes.get('general').id}`;
 await assertAdvances('Note canonical flush',()=>app.notes.flush({strict:true}),generalUnit);
 
-await assertAdvances('Review-state Active Session save',()=>app.activeSession.save({id:'active',revision:1,date:'2026-09-22',status:'active',scheduleText:'',snapshot:{elapsedMs:1,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-22T04:45:02.000Z'}),'activeSession');
+await assertAdvances('Review-state Active Session save',()=>app.activeSession.save({id:'active',type:'activeSession',version:1,revision:1,date:'2026-09-22',status:'active',runningOn:'inst_test',scheduleText:'',snapshot:{elapsedMs:1,review:{reflection:'draft',studyQuality:null}},suspendedAt:null,updatedAt:'2026-09-22T04:45:02.000Z'}),'activeSession');
 assert.equal(commits.at(-1).entityType,'activeSession','Review persistence must invalidate the Active Session backup unit, not a separate draft family.');
 
-await assertAdvances('Active Session save',()=>app.activeSession.save({id:'active',revision:2,date:'2026-09-22',status:'active',scheduleText:'',snapshot:{elapsedMs:2,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-22T04:45:03.000Z'}),'activeSession');
+await assertAdvances('Active Session save',()=>app.activeSession.save({id:'active',type:'activeSession',version:1,revision:2,date:'2026-09-22',status:'active',runningOn:'inst_test',scheduleText:'',snapshot:{elapsedMs:2,review:{reflection:'draft',studyQuality:null}},suspendedAt:null,updatedAt:'2026-09-22T04:45:03.000Z'}),'activeSession');
 assert.equal(commits.at(-1).backupCapture,false,'ordinary live-session saves still schedule automatic backup');
-await assertAdvances('Backup capture session save',()=>app.activeSession.save({id:'active',revision:3,date:'2026-09-22',status:'active',scheduleText:'',snapshot:{elapsedMs:3,review:{reflection:'draft',studyQuality:null}},updatedAt:'2026-09-22T04:45:04.000Z'},{backupCapture:true}),'activeSession');
+await assertAdvances('Backup capture session save',()=>app.activeSession.save({id:'active',type:'activeSession',version:1,revision:3,date:'2026-09-22',status:'active',runningOn:'inst_test',scheduleText:'',snapshot:{elapsedMs:3,review:{reflection:'draft',studyQuality:null}},suspendedAt:null,updatedAt:'2026-09-22T04:45:04.000Z'},{backupCapture:true}),'activeSession');
 assert.equal(commits.at(-1).backupCapture,true,'backup preparation saves advance canonical storage without scheduling themselves again');
 
 await assertAdvances('Plan draft save',()=>app.planData.writeDraft('Plan epoch draft'),'personalData');

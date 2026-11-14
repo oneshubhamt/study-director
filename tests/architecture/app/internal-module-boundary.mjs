@@ -27,8 +27,8 @@ assert.match(sources.get(path.basename(attachmentsSource)),/format:'study-direct
 const localExact=coreFiles.filter(name=>/function\s+exactObject\s*\(/u.test(sources.get(name)));
 const localFunctions=coreFiles.filter(name=>/function\s+functions\s*\(/u.test(sources.get(name)));
 const localDeclared=coreFiles.filter(name=>/function\s+requireFunctions\s*\(/u.test(sources.get(name)));
-assert.deepEqual(localExact,['interactions.ts','reconciliation-ui.js'],'only the intentional diagnostic/non-frozen exact-object validators remain local');
-assert.deepEqual(localFunctions,['interactions.ts'],'only the diagnostic interaction function validator remains local');
+assert.deepEqual(localExact,['execution-host.ts','interactions.ts','plan-host.ts','reconciliation-ui.js','review-host.ts','session-handoff.ts','session-host.ts'],'only modules intentionally accepting non-frozen runtime composition keep local exact-object validation');
+assert.deepEqual(localFunctions,['execution-host.ts','interactions.ts','plan-host.ts','session-handoff.ts','session-host.ts'],'only the intentional non-frozen runtime-composition function validators remain local');
 assert.deepEqual(localDeclared,[],'declared-function validation is fully centralized');
 assert.equal(coreFiles.filter(name=>sources.get(name).includes('registry.contracts')).length,39,'all modules using the ordinary shared validators consume the registry primitives');
 
