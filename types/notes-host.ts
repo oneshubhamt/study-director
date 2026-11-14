@@ -56,7 +56,7 @@ export interface NotesHostInput{
     fromText(value:string):string;fromMarkdown(value:string):string;
     quiesce<T>(operation:()=>T|PromiseLike<T>):Promise<T>;
   }>;
-  readonly tags:Readonly<{tagged(names:readonly string[]):readonly string[]}>;
+  readonly tags:Readonly<{tagged(names:readonly string[]):ReadonlySet<string>}>;
   readonly mutation:Readonly<{runExclusive<T>(name:string,operation:()=>T|PromiseLike<T>):Promise<T>}>;
   readonly view:Readonly<{
     document:Document;currentTaskIndex():number;saveLiveDraft():unknown;

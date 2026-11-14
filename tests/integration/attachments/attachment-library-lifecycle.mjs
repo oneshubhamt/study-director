@@ -279,3 +279,81 @@ assert.notEqual(newRename,oldRename);assert.equal(document.activeElement,newRena
 
 console.log(JSON.stringify({status:'PASS',suite:'attachment-integrity-ui',tile:'integrity-issue',detail:'specific missing-file guidance',getCalls},null,2));
 }
+
+{ // attachment-download-reader-lifetime
+const context={console,Blob,TextEncoder,TextDecoder,URL:{createObjectURL:()=> 'blob:download-handoff',revokeObjectURL(){}},AbortController,crypto:globalThis.crypto,Map,Set,Object,Promise,Number,String,Math,Uint8Array,DataView,queueMicrotask,structuredClone};
+context.globalThis=context;vm.createContext(context);
+for(const file of ['source/core/internal.ts','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
+const attachments=context[Symbol.for('studyDirector.internalModules.v1')].require('attachments',1);
+const id='att-'+ 'd'.repeat(24),row={id,name:'Download.png',type:'image/png',size:4,hash:'f'.repeat(64),library:true,version:2,storage:'opfs',file:'attblob-download'};
+const file=new Blob(['test'],{type:'image/png'});
+
+function viewHarness(){
+  let now=0,next=0;const timers=new Map(),listeners=new Map();
+  const view={
+    setTimeout(callback,delay=0){const token=++next;timers.set(token,{callback,due:now+delay});return token;},
+    clearTimeout(token){timers.delete(token);},
+    addEventListener(type,callback){if(!listeners.has(type))listeners.set(type,new Set());listeners.get(type).add(callback);},
+    removeEventListener(type,callback){listeners.get(type)?.delete(callback);}
+  };
+  const advance=ms=>{now+=ms;let changed=true;while(changed){changed=false;for(const [token,item] of [...timers])if(item.due<=now){timers.delete(token);item.callback();changed=true;}}};
+  const pagehide=()=>{for(const callback of [...listeners.get('pagehide')||[]])callback({persisted:true});};
+  return {view,advance,pagehide,pending:()=>timers.size};
+}
+function element(tag='div',id=''){
+  const listeners=new Map(),node={tagName:String(tag).toUpperCase(),id,open:false,value:'',textContent:'',hidden:false,children:[],dataset:{},scrollTop:0,files:[],parentNode:null,disabled:false};
+  node.classList={add(){},toggle(){}};
+  node.setAttribute=()=>{};node.removeAttribute=()=>{};node.hasAttribute=()=>false;
+  node.append=(...children)=>{for(const child of children){node.children.push(child);if(child&&typeof child==='object')child.parentNode=node;}};
+  node.appendChild=child=>{node.append(child);return child;};node.replaceChildren=(...children)=>{node.children=[];node.append(...children);};
+  node.querySelector=selector=>walk(node).find(child=>selector==='audio'&&child.tagName==='AUDIO')||null;
+  node.querySelectorAll=selector=>selector==='[data-attachment-id]'?walk(node).filter(child=>!!child.dataset?.attachmentId):[];
+  node.closest=()=>null;node.focus=()=>{};node.scrollIntoView=()=>{};node.load=()=>{};node.pause=()=>{};
+  node.addEventListener=(type,callback,options={})=>{if(!listeners.has(type))listeners.set(type,[]);listeners.get(type).push({callback,once:options===true||options?.once===true});};
+  node.click=()=>{const event={target:node,preventDefault(){this.defaultPrevented=true;},stopImmediatePropagation(){},defaultPrevented:false};for(const entry of [...listeners.get('click')||[]]){entry.callback(event);if(entry.once)listeners.set('click',(listeners.get('click')||[]).filter(value=>value!==entry));}return event;};
+  return node;
+}
+function walk(node){const out=[];for(const child of node.children||[]){if(!child||typeof child!=='object')continue;out.push(child,...walk(child));}return out;}
+function makeHarness(){
+  const timer=viewHarness(),ids=new Map();
+  for(const key of ['library-attachments','attachment-status','attachment-preview','attachment-detail','attachment-list','attachment-search','attachment-count','attachment-cancel','attachment-add','attachment-files','attachment-import','attachment-archive','attachment-export','attachment-progress','attachment-progress-bar','attachment-progress-label','attachment-progress-value'])ids.set(key,element('div',key));
+  ids.get('library-attachments').open=true;ids.get('attachment-search').value='';
+  const document={defaultView:timer.view,activeElement:null,getElementById:key=>ids.get(key)||null,querySelectorAll:selector=>selector==='#attachment-list [data-attachment-id]'?walk(ids.get('attachment-list')).filter(node=>!!node.dataset?.attachmentId):[],querySelector(){return null},createElement:tag=>element(tag),createDocumentFragment:()=>element('fragment'),addEventListener(){}};
+  let readers=0,retainCalls=0,releaseCalls=0;
+  const store={
+    list:async()=>[row],get:async()=>file,requireAvailable(){},during:async fn=>fn(),
+    retain:async()=>{const lease=++retainCalls;readers++;let done=false;return()=>{if(done)return;done=true;readers--;releaseCalls++;return lease;};},
+    collect:async()=>readers?{status:'skipped',reason:'active-editor-or-file-operation',removed:0}:{status:'completed',removed:0},
+    setLibrary:async()=>{},rename:async()=>{}
+  };
+  const library=attachments.create({notifications:createNotifications('attachments').port,store,
+    processing:{check(){},job:fn=>fn(),cancel(){},run:async()=>'',chooseSave:async()=>null,download(){}},document,
+    interactions:{choose:async()=>null,confirm:async()=>false,notify(){},input:async()=>null},
+    canMutate:()=>true,requireOwner(){},token:()=>1,isActive:()=>true,cleanup(){},renderReference(){},sources:async()=>[],destinations:async()=>[],settle:async()=>{},openLibrary(){},openSource(){},deletionGuard:async()=>()=>true,runExclusive:async(_kind,fn)=>fn(),quiesce:async fn=>fn(),removeReferences:async()=>null,insert:async()=>{}
+  });
+  const prepare=async()=>{library.install();await library.refresh();await library.select(id);const download=walk(ids.get('attachment-detail')).find(node=>node.tagName==='A'&&node.textContent==='Download');assert.ok(download,'ordinary Attachment Library detail must expose Download');return download;};
+  return {library,store,timer,prepare,stats:()=>({readers,retainCalls,releaseCalls})};
+}
+
+{
+  const h=makeHarness(),download=await h.prepare();
+  assert.deepEqual(h.stats(),{readers:1,retainCalls:1,releaseCalls:0},'preview owns one reader before download');
+  download.click();await drainMicrotasks();h.library.close();
+  assert.deepEqual(h.stats(),{readers:1,retainCalls:2,releaseCalls:1},'download handoff must outlive the preview without leaking a second permanent reader');
+  assert.equal((await h.store.collect()).reason,'active-editor-or-file-operation','physical cleanup must wait while the download handoff can still consume the Blob');
+  h.timer.advance(2*60*1000-1);assert.equal(h.stats().readers,1);
+  h.timer.advance(1);assert.deepEqual(h.stats(),{readers:0,retainCalls:2,releaseCalls:2},'bounded handoff must release exactly once at expiry');
+  assert.equal((await h.store.collect()).status,'completed','attachment cleanup must resume immediately after the bounded download handoff');
+  h.timer.pagehide();assert.equal(h.stats().releaseCalls,2,'pagehide after expiry must not double-release');
+}
+{
+  const h=makeHarness(),download=await h.prepare();
+  download.click();await drainMicrotasks();h.library.close();h.timer.pagehide();
+  assert.deepEqual(h.stats(),{readers:0,retainCalls:2,releaseCalls:2},'pagehide must terminate the download handoff exactly once');
+  h.timer.advance(2*60*1000);assert.equal(h.stats().releaseCalls,2,'expired timer after pagehide must not double-release');
+  assert.equal((await h.store.collect()).status,'completed','pagehide termination must wake the cleanup path instead of leaving reader contention');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'attachment-download-reader-lifetime',boundedHandoff:true,pagehide:true,cleanupResumes:true}));
+}
+

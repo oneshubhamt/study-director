@@ -1,37 +1,47 @@
 import type {BrowserRegistry} from '../browser-registry.ts';
 import type {AppData} from '../data-bootstrap-host.ts';
-import type {DocumentIntegrationInput,NotePrinterInput,PdfControllerInput} from '../document-host.ts';
+import type {DocumentHostModule,DocumentIntegrationInput,NotePrinterInput,PdfControllerInput} from '../document-host.ts';
+import type {DomainModule} from '../domain.ts';
 import type {NoteExportInput} from '../note-export.ts';
 import type {RichTextRuntimeInput} from '../rich-text-host.ts';
 import type {ReviewSubsystem} from '../review.ts';
 import type {LibraryView} from '../library.ts';
+import type {OwnershipController,StartupHostModule} from '../startup-host.ts';
 import type {AssetStorageModule} from '../../source/core/asset-storage.ts';
 import type {AttachmentsModule} from '../../source/core/attachments.ts';
 import type {ExportsModule} from '../../source/core/exports.ts';
-import type {RichTextApi,AttachmentPort,WorkspaceOverlayPort} from '../../rich-text/editor.ts';
+import type {InteractionsModule} from '../../source/core/interactions.ts';
+import type {NativeCapabilitiesModule} from '../../source/core/native-capabilities.ts';
+import type {NoticeCoordinator} from '../../source/core/notice-coordinator.ts';
+import type {WorkspaceOverlayModule} from '../../source/core/workspace-overlay.ts';
+import type {RichTextApi} from '../../rich-text/editor.ts';
 
 declare const registry:BrowserRegistry;
 declare const appData:AppData;
 declare const assetStorage:Readonly<ReturnType<AssetStorageModule['create']>>;
 declare const attachmentLibrary:Readonly<ReturnType<AttachmentsModule['create']>>;
 declare const exports:Readonly<ReturnType<ExportsModule['createCoordinator']>>;
+declare const backgroundTasks:Readonly<ReturnType<NativeCapabilitiesModule['createTaskScheduler']>>;
 declare const richText:RichTextApi;
 declare const review:Readonly<ReviewSubsystem>;
 declare const library:Readonly<LibraryView>;
-declare const attachmentPort:AttachmentPort;
-declare const workspaceOverlay:WorkspaceOverlayPort;
+declare const domain:Readonly<DomainModule>;
+declare const workspace:Readonly<ReturnType<WorkspaceOverlayModule['createController']>>;
+declare const interactions:Readonly<ReturnType<InteractionsModule['createController']>>;
+declare const notices:Readonly<NoticeCoordinator>;
+declare const ownership:Readonly<OwnershipController>;
+declare const activation:Readonly<ReturnType<StartupHostModule['createActivation']>>;
+declare const attachmentIntegrationProvider:Readonly<ReturnType<DocumentHostModule['createIntegration']>>;
 declare const document:Document;
 declare const browserWindow:Window;
-declare const output:Pick<NoteExportInput['ports']['output'],'chooseSave'|'save'>;
-declare const scheduling:NoteExportInput['ports']['scheduling'];
 
 const noteExportInput=Object.freeze({ports:Object.freeze({
   notes:Object.freeze({get:(key:string)=>appData.notes.get(key)}),
   assets:Object.freeze({get:(id:string)=>assetStorage.get(id)}),
   richText:Object.freeze({assetIds:richText.assetIds,exportDocument:richText.exportDocument}),
-  output:Object.freeze({chooseSave:output.chooseSave,save:output.save}),
+  output:Object.freeze({chooseSave:exports.chooseSave,save:exports.save}),
   processing:Object.freeze({job:exports.job,run:exports.run,cancel:exports.cancel,check:exports.check}),
-  scheduling
+  scheduling:Object.freeze({yieldTask:backgroundTasks.yieldTask,budget:backgroundTasks.budget})
 })}) satisfies Readonly<NoteExportInput>;
 const noteExporter=registry.require('note-export',1).createExporter(noteExportInput);
 void noteExporter.exportKeys(['note']);
@@ -50,13 +60,12 @@ declare const visible:RichTextRuntimeInput['view']['visible'];
 declare const validatedInput:RichTextRuntimeInput['view']['validatedInput'];
 declare const applyOwnership:RichTextRuntimeInput['view']['applyOwnership'];
 declare const noteLinks:RichTextRuntimeInput['notes']['links'];
-declare const activation:RichTextRuntimeInput['activation'];
 declare const diagnostics:RichTextRuntimeInput['diagnostics'];
 const richHostInput=Object.freeze({
   configuration:Object.freeze({maxRichTextBytes:1024*1024}),document,window:browserWindow,richText,assets:richAssets,
-  attachments:Object.freeze({port:()=>attachmentPort,createImageWorker:()=>new Worker('about:blank'),workspaceOverlay,onBusy:(_busy:boolean)=>{}}),
+  attachments:Object.freeze({port:()=>attachmentIntegrationProvider.richAttachmentPort,createImageWorker:()=>new Worker('about:blank'),workspaceOverlay:workspace,onBusy:(_busy:boolean)=>{}}),
   notes:Object.freeze({
-    repository:appData.notes,links:noteLinks,normalizeArea:(value:unknown)=>String(value||'').trim().toLowerCase(),
+    repository:appData.notes,links:noteLinks,normalizeArea:domain.ScheduleModel.normalizeArea,
     setSyncState:(_key:string,_state:'conflict'|'synced')=>undefined,updateSearchText:(_key:string,_plain:string)=>undefined
   }),
   review:Object.freeze({date:()=> '2026-11-14',flushPending:(options:{strict:boolean})=>review.ReviewEditor.flushPending(options),settled:()=>review.ReviewEditor.settled()}),
@@ -67,10 +76,11 @@ const richHostInput=Object.freeze({
 const richRuntime=registry.require('rich-text-host',1).createRuntime(richHostInput);
 void richRuntime.status();
 
-declare const overlay:PdfControllerInput['overlay'];
-declare const notifications:PdfControllerInput['notifications'];
 const documentHost=registry.require('document-host',1);
-const pdfInput=Object.freeze({document,window:browserWindow,urls:URL,store:assetStorage,overlay,notifications,diagnostics}) satisfies Readonly<PdfControllerInput>;
+const pdfInput=Object.freeze({
+  document,window:browserWindow,urls:URL,store:assetStorage,overlay:workspace,
+  notifications:Object.freeze({notify:interactions.notify,resolve:notices.resolveEvent}),diagnostics
+}) satisfies Readonly<PdfControllerInput>;
 const pdf=documentHost.createPdfController(pdfInput);
 void pdf.prepareNativeWindow();
 
@@ -79,10 +89,11 @@ const printerInput=Object.freeze({
 }) satisfies Readonly<NotePrinterInput>;
 const printer=documentHost.createPrinter(printerInput);
 
-declare const ownership:DocumentIntegrationInput['ownership'];
 const integrationInput=Object.freeze({
   limits:Object.freeze({maxRichAssetPerDocument:20,maxRichAssetBytesPerDocument:64*1024*1024}),
-  notes:appData.notes,ownership,editor:richRuntime,review:review.ReviewEditor,
+  notes:appData.notes,
+  ownership:Object.freeze({issue:(reason:string)=>ownership.issueWriteToken(reason),assert:(token:unknown,reason:string)=>ownership.assertWriteToken(token,reason)}),
+  editor:richRuntime,review:review.ReviewEditor,
   session:Object.freeze({settled:()=>appData.activeSession.settled()}),
   library:()=>library,attachmentLibrary:()=>attachmentLibrary,attachmentTypes:registry.require('attachments',1),
   assets:richAssets,richText,content:Object.freeze({withinLimits:(_value:unknown)=>true}),printer,exporter:noteExporter

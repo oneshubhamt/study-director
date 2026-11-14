@@ -1,12 +1,24 @@
 import type {BrowserRegistry} from '../browser-registry.ts';
 import type {AppData} from '../data-bootstrap-host.ts';
-import type {Task} from '../domain.ts';
+import type {DomainModule} from '../domain.ts';
+import type {LibraryView} from '../library.ts';
 import type {NoteLinksInput,NoteLinkNavigationInput} from '../note-links.ts';
+import type {OwnershipController} from '../startup-host.ts';
+import type {ExecutionHostModule} from '../../source/core/execution-host.ts';
+import type {RichTextApi} from '../../rich-text/editor.ts';
 
 declare const registry:BrowserRegistry;
 declare const appData:AppData;
 declare const document:Document;
-declare const task:Task|undefined;
+declare const domain:Readonly<DomainModule>;
+declare const execution:Readonly<ReturnType<ExecutionHostModule['createRuntime']>>;
+declare const library:Readonly<LibraryView>;
+declare const ownership:Readonly<OwnershipController>;
+declare const rich:RichTextApi;
+declare const isLiveTrackableTimer:()=>boolean;
+declare const openExecute:(id:string,taskId:string,ownNote:ReturnType<typeof appData.notes.get>)=>boolean|PromiseLike<boolean>;
+declare const openLibrary:()=>boolean|PromiseLike<boolean>;
+
 const module=registry.require('note-links',1);
 const input=Object.freeze({ports:Object.freeze({
   view:Object.freeze({document}),
@@ -17,8 +29,8 @@ const input=Object.freeze({ports:Object.freeze({
     linkedFrom:(ref:unknown)=>appData.notes.linkedFrom(ref),
     list:()=>appData.notes.metadataSnapshot().records
   }),
-  text:Object.freeze({tagsIn:(_value:string)=>[] as readonly string[]}),
-  ownership:Object.freeze({canMutate:()=>true})
+  text:Object.freeze({tagsIn:(value:string)=>rich.tagsIn(value)}),
+  ownership:Object.freeze({canMutate:()=>ownership.canMutate()})
 })}) satisfies Readonly<NoteLinksInput>;
 const controller=module.createController(input);
 void controller.tags();void controller.tagged(['focus']);void controller.pick({query:'focus'});controller.cancel();
@@ -27,11 +39,21 @@ const navigationInput=Object.freeze({
   controller,
   notes:Object.freeze({get:(ref:unknown)=>appData.notes.get(ref)}),
   execution:Object.freeze({
-    isLiveTrackableTimer:()=>true,
-    current:()=>Object.freeze({task,taskId:task?.id||'',ownNote:null}),
-    open:async(_id:string,_taskId:string,_ownNote:ReturnType<typeof appData.notes.get>)=>true
+    isLiveTrackableTimer,
+    current:()=>{
+      const index=execution.TimerState.currentIndex,task=execution.TASKS[index];
+      return Object.freeze({
+        task,taskId:execution.TaskIdentity.idAt(index),
+        ownNote:task&&domain.ScheduleModel.hasNotes(task)?appData.notes.get(domain.ScheduleModel.areaKey(task)):null
+      });
+    },
+    open:openExecute
   }),
-  library:Object.freeze({open:async()=>true,reveal:(_ref:string)=>true,filterTag:(_name:string,_options?:Readonly<{show?:boolean}>)=>true})
+  library:Object.freeze({
+    open:openLibrary,
+    reveal:(ref:string)=>library.revealNoteReference(ref),
+    filterTag:(name:string,options?:Readonly<{show?:boolean}>)=>library.filterTag(name,options)
+  })
 }) satisfies Readonly<NoteLinkNavigationInput>;
 const navigation=module.createNavigation(navigationInput);
 void navigation.open('note-id');void navigation.richText().pickTag({query:'fo'});
