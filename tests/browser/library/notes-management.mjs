@@ -70,10 +70,11 @@ try{
     let rows=[...document.querySelectorAll('[data-note-key]')];
     const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==1;i++)await wait(20);
     const filtered=[...document.querySelectorAll('[data-note-key]')].map(item=>item.dataset.noteKey);
+    const debug={count:document.getElementById('library-notes-nav-count')?.textContent||'',query:search.value,persisted:d.AppData.notes.get('zeta filled')?.text||''};
     search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==4;i++)await wait(20);rows=[...document.querySelectorAll('[data-note-key]')];
     return {
       keys:rows.map(item=>item.dataset.noteKey),
-      filtered,
+      filtered,debug,
       classes:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,item.className])),
       colors:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,getComputedStyle(item).color])),
       weights:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,Number(getComputedStyle(item.querySelector('.library-note-nav-name')).fontWeight)])),
@@ -81,7 +82,7 @@ try{
     };
   })()`);
   assert.deepEqual(filled.keys,['alpha empty','parent','parent > child empty','zeta filled'],'notes are listed by name; a branch holding today’s Areas is open');
-  console.error('[qa-notes-debug]',JSON.stringify(await page.evaluate(`({count:document.getElementById('library-notes-nav-count')?.textContent||'',query:document.getElementById('library-notes-search')?.value||''})`)));
+  console.error('[qa-notes-debug]',JSON.stringify(filled.debug));
   assert.deepEqual(filled.filtered,['zeta filled']);
   assert.match(filled.classes['zeta filled'],/has-note/);assert.match(filled.classes['alpha empty'],/empty-note/);
   assert.ok(filled.weights['zeta filled']>filled.weights['alpha empty'],'saved and empty notes must remain visually distinct in every presentation');
