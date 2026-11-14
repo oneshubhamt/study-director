@@ -6,6 +6,7 @@ import type {
 } from '../../types/library.ts';
 import type {LibraryNoteWorkflows} from '../../types/notes-host.ts';
 import type {DiaryEditor} from '../../types/review-persistence.ts';
+import type {LibrarySelection} from '../../types/library-clear.ts';
 
 const sdLibraryFactory=(()=>{
 'use strict';
@@ -1655,7 +1656,7 @@ const createModule=():LibraryModuleContract=>{
     function clearLibrarySelectionFromFields(fields:ClearFields){
       return freeze({savedDays:!!fields.savedDays?.checked,notes:!!fields.notes?.checked,attachments:!!fields.attachments?.checked});
     }
-    function clearLibrarySelectionHasValue(selection:Partial<LibraryInput['ports']['clearLibrary'] extends never?never:import('../../types/library-clear.ts').LibrarySelection>|null|undefined){return !!(selection&&selection.savedDays||selection&&selection.notes||selection&&selection.attachments);}
+    function clearLibrarySelectionHasValue(selection:Partial<LibrarySelection>|null|undefined){return !!(selection&&selection.savedDays||selection&&selection.notes||selection&&selection.attachments);}
     function libraryClearAttachmentSummary(plan:ClearChoice['plan']){
       const safe=plan?.attachments?.safeIds?.length||0,protectedCount=plan?.attachments?.protectedIds?.length||0;
       if(!protectedCount)return `${safe} attachment${safe===1?'':'s'} can be deleted. No surviving references need protection.`;
