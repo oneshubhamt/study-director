@@ -81,6 +81,7 @@ try{
     };
   })()`);
   assert.deepEqual(filled.keys,['alpha empty','parent','parent > child empty','zeta filled'],'notes are listed by name; a branch holding today’s Areas is open');
+  console.error('[qa-notes-debug]',JSON.stringify(await page.evaluate(`({count:document.getElementById('library-notes-nav-count')?.textContent||'',query:document.getElementById('library-notes-search')?.value||''})`)));
   assert.deepEqual(filled.filtered,['zeta filled']);
   assert.match(filled.classes['zeta filled'],/has-note/);assert.match(filled.classes['alpha empty'],/empty-note/);
   assert.ok(filled.weights['zeta filled']>filled.weights['alpha empty'],'saved and empty notes must remain visually distinct in every presentation');
