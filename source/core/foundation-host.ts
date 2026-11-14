@@ -600,8 +600,10 @@ async function prepareTabDeparture(context:DepartureContext){
   if(context.from===context.to)return true;
   if(context.from==='library'&&!await ports.library().settleDiary())return false;
   if(context.from==='review'){
-    if(flushPendingReviewSave({strict:true})===false)return false;
-    try{await ports.reviewEditor().settled();}catch(error){
+    try{
+      if(await flushPendingReviewSave({strict:true})===false)return false;
+      await ports.reviewEditor().settled();
+    }catch(error){
       const message=error&&typeof error==='object'&&'message' in error?error.message:undefined;
       setStatus('save-status',String(message||'Reflection could not be saved safely.'),false);return false;
     }
