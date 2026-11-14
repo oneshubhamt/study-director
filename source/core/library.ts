@@ -102,7 +102,8 @@ const createModule=():LibraryModuleContract=>{
     let noteSort:'name'|'recent'=savedView.sort==='recent'?'recent':'name';
     // The notes list width a person dragged to, in pixels; 0 keeps a third of the panel.
     const NOTE_LIST_MIN=200,NOTE_LIST_MAX_SHARE=0.6;
-    let noteListWidth=Number.isFinite(savedView.listWidth)&&savedView.listWidth>0?savedView.listWidth:0;
+    const savedListWidth=Number(savedView.listWidth);
+    let noteListWidth=Number.isFinite(savedListWidth)&&savedListWidth>0?savedListWidth:0;
     // The note and query whose matches were last marked in the open note.
     let noteSearchLanded='';
     let selectedLibraryDate:string|null=null;
@@ -1193,7 +1194,7 @@ const createModule=():LibraryModuleContract=>{
     }
     function diaryHeader(record:LibraryDiaryRecord,editing:boolean){
       const head=document.createElement('div');head.className='library-notes-editor-head';
-      const identity=document.createElement('div');identity.className='library-notes-editor-identity';identity.append(textEl('div','library-notes-editor-title',diaryDateLabel(record.date)),textEl('span','library-notes-editor-meta ui-mono',record.dayName||''));
+      const identity=document.createElement('div');identity.className='library-notes-editor-identity';identity.append(textEl('div','library-notes-editor-title',diaryDateLabel(record.date)),textEl('span','library-notes-editor-meta ui-mono',('dayName' in record?String(record.dayName||''):'')));
       const tools=document.createElement('div');tools.className='library-notes-editor-tools';
       const remove=document.createElement('button');remove.type='button';remove.className='library-note-action ui-btn';remove.textContent='Delete';remove.disabled=!canMutate();remove.setAttribute('aria-label','Delete this reflection');remove.addEventListener('click',()=>{void deleteDiaryEntry(record.date);});
       const action=document.createElement('button');action.type='button';action.className='library-note-action ui-btn';action.textContent=editing?'Done':'Edit';action.disabled=!editing&&!canMutate();action.setAttribute('aria-label',editing?'Finish editing reflection':'Edit reflection');
@@ -1491,7 +1492,7 @@ const createModule=():LibraryModuleContract=>{
       if(selectedLibraryDate&&previousRenderedRevision!==librarySummaryRevision){
         const selectedDate=selectedLibraryDate,dayRequest=libraryDayRequestToken;
         let selected:LibraryDay|null=null;
-        try{selected=await getDailyRecord(selectedDate);}
+        try{const loaded=await getDailyRecord(selectedDate);selected=loaded?.recordKind==='study'?loaded:null;}
         catch(error){
           if(token===libraryRenderToken&&dayRequest===libraryDayRequestToken&&selectedLibraryDate===selectedDate){
             setStatus('library-status','Could not refresh '+prettyDate(selectedDate)+': '+errorMessage(error),false);
@@ -1625,7 +1626,7 @@ const createModule=():LibraryModuleContract=>{
         if(!await goTab('library',{source:'library-day'})||request!==libraryDayRequestToken)return false;
       }
       let record:LibraryDay|null=null;
-      try{record=await getDailyRecord(target);}
+      try{const loaded=await getDailyRecord(target);record=loaded?.recordKind==='study'?loaded:null;}
       catch(error){
         if(request===libraryDayRequestToken&&document.getElementById('pane-library')?.classList.contains('on')){
           setStatus('library-status','Could not load saved record for '+target+': '+errorMessage(error),false);
