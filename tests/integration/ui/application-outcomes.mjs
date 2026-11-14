@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
 const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts'),library=readRuntimeSource('source/core/library.ts'),hostMain=fs.readFileSync('source/host/main.js','utf8');
-const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
+const deferred=()=>{let resolve,reject;const promise=new Promise((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};};
 const noop=()=>{};
 
 // The actual delegated input table must pass the original validated rich-input
