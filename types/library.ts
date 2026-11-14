@@ -3,7 +3,8 @@ import type {InteractionOptions,InteractionInputValue} from './interactions.ts';
 import type {LibraryPlan,LibrarySelection} from './library-clear.ts';
 import type {NoteLinkBar,NoteLinkBarOptions,NoteTag} from './note-links.ts';
 import type {LibraryNoteWorkflows,NoteAreaIdentity,NoteCatalogueEntry,NotesRepository,NotesRuntime,NoteView} from './notes-host.ts';
-import type {PracticeRun,Task} from './record-models.ts';
+import type {Task} from './domain.ts';
+import type {PracticeRun} from './record-models.ts';
 import type {DiaryEditor,DiaryDraft,SavedDayRecord} from './review-persistence.ts';
 import type {ReviewRecordViewTask,SharedReviewPresentation} from './review.ts';
 
