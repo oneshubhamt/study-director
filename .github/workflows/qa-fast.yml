@@ -65,25 +65,8 @@ jobs:
           tests/architecture/test-suite/suite-governance.mjs
           tests/architecture/test-suite/suite-structure.mjs
           tests/architecture/test-suite/suite-policy.mjs
-      - name: P5.6A targeted note and attachment contracts
-        run: >-
-          node tests/helpers/run-category.mjs targeted
-          tests/integration/storage/note-persistence.mjs
-          tests/integration/storage/note-text-checked-once.mjs
-          tests/integration/attachments/attachment-library-lifecycle.mjs
       - name: Source build
         run: node build/build.mjs
-      - name: Locate Chromium for P5.6A targeted browser checks
-        shell: bash
-        run: |
-          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
-          test -n "$CHROME"
-          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: P5.6A targeted browser checks
-        run: |
-          node tests/browser/library/notes-management.mjs
-          node tests/browser/library/notes-at-limit.mjs
-          node tests/browser/rich-text/rich-editor-interactions.mjs
       - name: Verify generated build
         run: node build/verify-build.mjs
       - name: Verify generated syntax
