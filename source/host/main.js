@@ -1996,6 +1996,7 @@ function renderInheritedNotes(container,areaKey,compact=false,options={}){return
 function renderInheritedSubjectNotes(container,task,compact=false){return notesRuntime().renderInheritedForTask(container,task,compact);}
 function currentNoteEntriesForWorkTasks(tasks){return notesRuntime().currentEntriesForTasks(tasks);}
 function clearTaskNoteEditorBinding(field){return NotesRuntime?NotesRuntime.clearEditor(field):false;}
+function taskNoteEditorIsVisible(field){return NotesRuntime?NotesRuntime.editorVisible(field):false;}
 function bindTaskNoteEditor(field,idx,source='field'){return legacyNoteBinding(notesRuntime().bindTaskEditor(field,idx,source));}
 function bindNoteEditor(field,areaKey,areaLabel,source='library'){return legacyNoteBinding(notesRuntime().bindAreaEditor(field,areaKey,areaLabel,source));}
 function resolveTaskNoteEditorBinding(field,options={}){return legacyNoteBinding(notesRuntime().resolveEditor(field,options));}
