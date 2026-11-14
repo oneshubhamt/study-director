@@ -37,6 +37,7 @@ const createModule=():LibraryModuleContract=>{
   function createView(input:Readonly<LibraryInput>):Readonly<LibraryView>{
   type NoteTreeNode={entry:NoteCatalogueEntry;depth:number;parent:NoteTreeNode|null;children:number;holdsActive:boolean;expanded:boolean};
   type LibraryCounts=Readonly<{savedDays:number;notes:number;attachments:number}>;
+  type ClearFields=Readonly<{savedDays:HTMLInputElement;notes:HTMLInputElement;attachments:HTMLInputElement}>;
   const errorMessage=(error:unknown):string=>error instanceof Error?error.message:String(error);
   const asSavedView=(value:unknown):LibrarySavedView=>{
     if(!value||typeof value!=='object'||Array.isArray(value))return {};
@@ -1372,7 +1373,7 @@ const createModule=():LibraryModuleContract=>{
     function libraryViewIsCurrent(){
       return libraryHasRendered&&libraryRenderedRevision===librarySummaryRevision&&libraryRenderedFilterSignature===libraryFilterSignature(libraryFilterState())&&libraryRenderedVisibleLimit===libraryVisibleLimit;
     }
-    function markLibraryViewRendered(signature){
+    function markLibraryViewRendered(signature:string){
       libraryHasRendered=true;
       libraryRenderedRevision=librarySummaryRevision;
       libraryRenderedFilterSignature=signature;
@@ -1651,10 +1652,10 @@ const createModule=():LibraryModuleContract=>{
         attachments:Math.max(0,Number(attachments)||0)
       });
     }
-    function clearLibrarySelectionFromFields(fields){
+    function clearLibrarySelectionFromFields(fields:ClearFields){
       return freeze({savedDays:!!fields.savedDays?.checked,notes:!!fields.notes?.checked,attachments:!!fields.attachments?.checked});
     }
-    function clearLibrarySelectionHasValue(selection){return !!(selection&&selection.savedDays||selection&&selection.notes||selection&&selection.attachments);}
+    function clearLibrarySelectionHasValue(selection:Partial<LibraryInput['ports']['clearLibrary'] extends never?never:import('../../types/library-clear.ts').LibrarySelection>|null|undefined){return !!(selection&&selection.savedDays||selection&&selection.notes||selection&&selection.attachments);}
     function libraryClearAttachmentSummary(plan:ClearChoice['plan']){
       const safe=plan?.attachments?.safeIds?.length||0,protectedCount=plan?.attachments?.protectedIds?.length||0;
       if(!protectedCount)return `${safe} attachment${safe===1?'':'s'} can be deleted. No surviving references need protection.`;
