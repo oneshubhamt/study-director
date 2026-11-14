@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
-const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts'),hostMain=fs.readFileSync('source/host/main.js','utf8');
+const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts'),library=readRuntimeSource('source/core/library.ts'),hostMain=fs.readFileSync('source/host/main.js','utf8');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const noop=()=>{};
 
@@ -249,6 +249,45 @@ const noop=()=>{};
   assert.equal(partial.status,'renamed');assert.equal(partial.plan.ok,false,'a failed Plan fan-out is reported separately after the note rename committed');
 }
 
+// P5.6B Saved-Day presentation is request-generation fenced: a slower older
+// read, including a stale failure, cannot replace or error over the newest day.
+{
+  const rendered=[],statuses=[],reads=new Map();
+  const study=date=>({recordKind:'study',date,tasks:[]});
+  const context={
+    Promise,String,Error,
+    libraryDayRequestToken:0,
+    isValidIsoDate:value=>/^\d{4}-\d{2}-\d{2}$/u.test(String(value||'')),
+    document:{getElementById:id=>id==='pane-library'?{classList:{contains:name=>name==='on'}}:null},
+    goTab:async()=>true,
+    getDailyRecord:date=>reads.get(String(date)).promise,
+    setStatus:(id,message,ok)=>statuses.push({id,message,ok}),
+    errorMessage:error=>String(error?.message||error),
+    renderLibraryDayDetail:record=>rendered.push(record.date)
+  };
+  vm.createContext(context);
+  const start=library.indexOf('    async function openLibraryDayDetail('),end=library.indexOf('    function libraryMutationBlocked(',start);
+  assert.ok(start>0&&end>start,'P5.6B Saved-Day navigation source remains independently testable');
+  vm.runInContext(library.slice(start,end),context);
+
+  const oldRead=deferred(),newRead=deferred();reads.set('2026-11-10',oldRead);reads.set('2026-11-11',newRead);
+  const oldOpen=context.openLibraryDayDetail('2026-11-10'),newOpen=context.openLibraryDayDetail('2026-11-11');
+  newRead.resolve(study('2026-11-11'));assert.equal(await newOpen,true);
+  oldRead.resolve(study('2026-11-10'));assert.equal(await oldOpen,false);
+  assert.deepEqual(rendered,['2026-11-11'],'an older successful read cannot republish stale day detail');
+
+  const staleFailure=deferred(),currentRead=deferred();reads.set('2026-11-12',staleFailure);reads.set('2026-11-13',currentRead);
+  const staleOpen=context.openLibraryDayDetail('2026-11-12'),currentOpen=context.openLibraryDayDetail('2026-11-13');
+  staleFailure.reject(new Error('old storage failure'));currentRead.resolve(study('2026-11-13'));
+  assert.equal(await staleOpen,false);assert.equal(await currentOpen,true);
+  assert.equal(statuses.some(row=>String(row.message).includes('old storage failure')),false,'a superseded storage failure stays silent');
+
+  const currentFailure=deferred();reads.set('2026-11-14',currentFailure);
+  const failedOpen=context.openLibraryDayDetail('2026-11-14');currentFailure.reject(new Error('current storage failure'));
+  assert.equal(await failedOpen,false);
+  assert.ok(statuses.some(row=>String(row.message).includes('current storage failure')),'the current Saved-Day storage failure remains truthful and visible');
+}
+
 // A strict writer-settlement flush may see an untouched, bound Reflection
 // before the Diary-only baseline has ever been hydrated. That is a no-op, not
 // evidence that an edit can be discarded; a changed unverified binding still fails closed.
@@ -286,7 +325,7 @@ const noop=()=>{};
 // Actual Library export completion policy, including selection retention on
 // cancellation/failure and honest download-versus-verification wording.
 {
-  const source=fs.readFileSync('source/core/library.js','utf8'),{coordinator,port}=createNotifications('library');
+  const source=library,{coordinator,port}=createNotifications('library');
   let result={status:'cancelled'},failure=null;
   const context={notifications:port,noteExportBusy:false,noteSelection:new Set(['one']),noteSelectionMode:true,noteEntries:()=>[],updateNoteSelectionControls:noop,renderNotes:noop,console:{error:noop},exportKeys:async()=>{if(failure)throw failure;return result;}};
   vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    async function exportSelectedNotes('),source.indexOf('    function setNotesStatus(')),context);
@@ -295,4 +334,4 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','P5.6B stale Saved-Day read fence','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
