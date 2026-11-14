@@ -2253,7 +2253,7 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze({
 // A deliberate profile reload must not outrun writes owned by the current
 // profile. Page-exit flushing remains a last safety net, not the commit gate.
 const ProfileSettlement=ProfilesHostModule.createSettlement({AppOwnership,AppMutationCoordinator,appCanMutate,
- PlanDraftEditor:{flush:options=>PlanDraftEditor.flush(options)},PlanData:{settled:()=>PlanData.settled()},settleAttachmentWriters,
+ PlanDraftEditor:{flush:options=>PlanDraftEditor.flush(options)},PlanData:{settled:()=>PlanData.settled()},settleAttachmentWriters:()=>LibraryDocuments.settleAttachmentWriters(),
  deletionRecovery:AppData.deletionRecovery,AppDiagnostics,setPlanStatus:(...args)=>setPlanStatus(...args)
 });
 async function settleCurrentProfileWriters(){return ProfileSettlement.settleCurrentProfileWriters();}
