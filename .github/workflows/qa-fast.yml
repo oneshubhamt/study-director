@@ -47,6 +47,8 @@ jobs:
           tests/integration/backup/repository-checkpoint.mjs
           tests/integration/backup/drive-security.mjs
           tests/integration/storage/attachment-integrity-audit.mjs
+          tests/integration/attachments/attachment-library-lifecycle.mjs
+          tests/integration/attachments/pdf-reader-lifetime.mjs
           tests/integration/storage/integrity-continuation.mjs
           tests/integration/exports/scratch-gc.mjs
           tests/integration/app/recovery-timer-snapshot.mjs
