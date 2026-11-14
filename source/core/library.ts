@@ -295,7 +295,7 @@ const createModule=():LibraryModuleContract=>{
     function syncNoteSelectionRows(entries:readonly NoteCatalogueEntry[],index:Map<string,string[]>=noteSelectionIndex(entries)){
       const rows=entries,byKey=new Map(rows.map(entry=>[entry.key,entry]));
       for(const row of document.querySelectorAll<HTMLElement>('[data-note-key]')){
-        const entry=byKey.get(row.dataset['noteKey']);if(!entry)continue;
+        const entry=byKey.get(row.dataset['noteKey']||'');if(!entry)continue;
         const state=noteSelectionState(entry,index),checkbox=row.querySelector<HTMLInputElement>('.library-note-checkbox');
         row.classList.toggle('selected',state.checked);row.classList.toggle('partial',state.indeterminate);
         if(checkbox){checkbox.checked=state.checked;checkbox.indeterminate=state.indeterminate;checkbox.disabled=!state.keys.length;}
