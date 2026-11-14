@@ -22,11 +22,12 @@ const app=readHostHtml();
 const backup=readScript('source/core/backup.ts');
 const provider=readScript('source/core/backup-provider.ts');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
+const notesHost=readScript('source/core/notes-host.ts');
 
-const applicable=app.match(/function applicableNotesForTask\(t\)\{[\s\S]*?\n\}/u)?.[0]||'';
-assert.ok(applicable,'applicableNotesForTask must remain present');
-assert.match(applicable,/AppData\.notes\.get\(exactKey,exactLabel\)/u,'viewing a note may read the current note');
-assert.doesNotMatch(applicable,/create\s*:\s*true/u,'read-only Note rendering must not create a noncanonical placeholder in the repository cache');
+assert.match(app,/function applicableNotesForTask\(task\)\{return notesRuntime\(\)\.applicableForTask\(task\);\}/u,'host note presentation must remain a thin bridge to the checked notes owner');
+assert.match(notesHost,/function applicableForTask\(task/u,'checked notes owner must retain read-only task-note projection');
+assert.match(notesHost,/const exact=repository\.get\(exactKey\)/u,'viewing a note may read the current canonical note');
+assert.doesNotMatch(notesHost,/create\s*:\s*true/u,'read-only Note rendering must not create a noncanonical placeholder in the repository cache');
 
 assert.match(app,/id="backup-file-status"[^>]*role="status"/u,'standalone backup must have a status surface beside its own controls');
 const exportFn=backup.match(/async function exportPortableBackup\(\)\{[\s\S]*?\n\}/u)?.[0]||'';
