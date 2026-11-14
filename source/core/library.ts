@@ -197,7 +197,14 @@ const createModule=():LibraryModuleContract=>{
       clearNoteSearchTimer();if(noteSearchWorker)return true;if(noteSearchFailed)return false;
       try{
         const worker=createSearchWorker();
-        worker.onmessage=event=>{if(noteSearchWorker!==worker)return;const message=event?.data||{};if(message.type==='error'){failNoteSearch();return;}if(message.type!=='result'||Number(message.id)!==noteSearchId||!noteSearchQuery)return;clearNoteSearchDeadline();noteSearchReady=true;noteSearchMatches=new Set(Array.isArray(message.keys)?message.keys.map(String):[]);requestNotesRender();};
+        worker.onmessage=event=>{
+          if(noteSearchWorker!==worker)return;
+          const raw:unknown=event.data;if(!raw||typeof raw!=='object'||Array.isArray(raw))return;
+          const message=raw as Partial<Record<'type'|'id'|'keys',unknown>>,type=String(message['type']||'');
+          if(type==='error'){failNoteSearch();return;}
+          if(type!=='result'||Number(message['id'])!==noteSearchId||!noteSearchQuery)return;
+          const keys=message['keys'];clearNoteSearchDeadline();noteSearchReady=true;noteSearchMatches=new Set<string>(Array.isArray(keys)?keys.map(String):[]);requestNotesRender();
+        };
         worker.onerror=event=>{if(noteSearchWorker!==worker)return;event?.preventDefault?.();failNoteSearch();};worker.onmessageerror=()=>{if(noteSearchWorker===worker)failNoteSearch();};noteSearchWorker=worker;startNoteSearchBuild(worker);return noteSearchWorker===worker;
       }catch{stopNoteSearch(true);return false;}
     }
@@ -245,7 +252,7 @@ const createModule=():LibraryModuleContract=>{
     function noteLeaf(label:unknown){return labelParts(label).at(-1)||String(label||'Area');}
     function noteParentPath(label:unknown){const parts=labelParts(label);return parts.length>1?parts.slice(0,-1).join(' > '):'';}
     function noteSelectionIndex(entries:readonly NoteCatalogueEntry[]){
-      const rows=Array.isArray(entries)?entries:[],byLabel=new Map<string,NoteCatalogueEntry>(rows.map(entry=>[String(entry.label||''),entry] as const)),index=new Map<string,string[]>();
+      const rows=entries,byLabel=new Map<string,NoteCatalogueEntry>(rows.map(entry=>[String(entry.label||''),entry] as const)),index=new Map<string,string[]>();
       rows.forEach(entry=>index.set(entry.key,[]));
       for(const entry of rows){
         if(!entry.hasNote)continue;
@@ -286,7 +293,7 @@ const createModule=():LibraryModuleContract=>{
     }
     function cancelNoteSelection(){if(noteExportBusy){cancelExport();return false;}noteSelectionMode=false;noteSelection.clear();renderNotes();return true;}
     function syncNoteSelectionRows(entries:readonly NoteCatalogueEntry[],index:Map<string,string[]>=noteSelectionIndex(entries)){
-      const rows=Array.isArray(entries)?entries:[],byKey=new Map(rows.map(entry=>[entry.key,entry]));
+      const rows=entries,byKey=new Map(rows.map(entry=>[entry.key,entry]));
       for(const row of document.querySelectorAll<HTMLElement>('[data-note-key]')){
         const entry=byKey.get(row.dataset['noteKey']);if(!entry)continue;
         const state=noteSelectionState(entry,index),checkbox=row.querySelector<HTMLInputElement>('.library-note-checkbox');
@@ -1091,7 +1098,7 @@ const createModule=():LibraryModuleContract=>{
       refreshNotes();
     }
     installNotesWorkspace();
-    function diaryEntries(entries:readonly LibraryPreparedSummary[]){return (Array.isArray(entries)?entries:[]).filter(entry=>entry?.hasReflection===true).sort((a,b)=>b.date.localeCompare(a.date));}
+    function diaryEntries(entries:readonly LibraryPreparedSummary[]){return [...entries].filter(entry=>entry.hasReflection===true).sort((a,b)=>b.date.localeCompare(a.date));}
     function updateDiarySummaryCount(entries:readonly LibraryPreparedSummary[]){
       const count=diaryEntries(entries).length;
       setTextSafe('library-diary-nav-count',String(count));setTextSafe('library-diary-summary-count',`· ${count} ${count===1?'Entry':'Entries'}`);diarySummaryCountRevision=librarySummaryRevision;return count;
@@ -1370,7 +1377,7 @@ const createModule=():LibraryModuleContract=>{
     function requestLibraryRender(){
       if(attachmentMutationHold){attachmentMutationNeedsLibrary=true;return false;}
       if(libraryRenderFrame)return false;
-      libraryRenderFrame=requestAnimationFrame(()=>{libraryRenderFrame=0;renderLibrary();});return true;
+      libraryRenderFrame=requestAnimationFrame(()=>{libraryRenderFrame=0;void renderLibrary();});return true;
     }
     function libraryFilterState(){
       return {
@@ -1533,7 +1540,7 @@ const createModule=():LibraryModuleContract=>{
     function loadMoreLibrary(){
       libraryVisibleLimit+=LIBRARY_PAGE_SIZE;
       libraryPreserveLimitOnce=true;
-      renderLibrary();
+      void renderLibrary();
     }
     function createLibraryDetailHeader(record:LibraryDay){
       const header=document.createElement('div');
@@ -1554,7 +1561,7 @@ const createModule=():LibraryModuleContract=>{
       deleteBtn.className='mini-btn ui-btn danger';
       deleteBtn.dataset['ownerMutation']='library-delete';
       deleteBtn.textContent='Delete Saved Day';
-      deleteBtn.addEventListener('click',()=>deleteLibraryDay(record.date));
+      deleteBtn.addEventListener('click',()=>{void deleteLibraryDay(record.date);});
       actions.append(closeBtn);
       actions.appendChild(deleteBtn);
       header.append(titleWrap,actions);
