@@ -70,7 +70,7 @@ try{
     let rows=[...document.querySelectorAll('[data-note-key]')];
     const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==1;i++)await wait(20);
     const filtered=[...document.querySelectorAll('[data-note-key]')].map(item=>item.dataset.noteKey);
-    const debug={count:document.getElementById('library-notes-nav-count')?.textContent||'',query:search.value,persisted:d.AppData.notes.get('zeta filled')?.text||''};
+    const debug={count:document.getElementById('library-notes-nav-count')?.textContent||'',query:search.value,persisted:d.AppData.notes.get('zeta filled')?.text||'',fieldValue:field.value,fieldConnected:field.isConnected,fieldHidden:field.hidden,fieldDataset:Object.fromEntries(Object.entries(field.dataset).filter(([key])=>/note|rich|area|lifecycle|schedule/i.test(key)))};
     search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==4;i++)await wait(20);rows=[...document.querySelectorAll('[data-note-key]')];
     return {
       keys:rows.map(item=>item.dataset.noteKey),
