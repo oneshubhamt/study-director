@@ -370,12 +370,16 @@ async function flushPendingReviewSave(options:ReviewSaveOptions={}){
   if(reflectionLane.pending())reflectionLane.cancel();
   const result=await flushLiveDraft({markChanged:false,backupCapture:options.backupCapture===true});
   if(result===null){
-    if(options.strict)throw new Error('The pending Review could not be checkpointed before this transition.');
+    if(options.strict){
+      const error=new Error('The pending Review could not be checkpointed before this transition.');
+      reviewPersistenceFailed(error);throw error;
+    }
     return lifecycleCanWrite();
   }
   const saved=result&&typeof result==='object'?result as Readonly<{ok?:unknown;error?:unknown;storage?:Readonly<{idb?:unknown}>}>:null;
   if(options.strict&&(!saved||saved.ok!==true||saved.error||saved.storage?.idb!==true)){
-    throw saved?.error||new Error('The pending Review did not reach canonical storage before this transition.');
+    const error=saved?.error||new Error('The pending Review did not reach canonical storage before this transition.');
+    reviewPersistenceFailed(error);throw error;
   }
   return saved?.ok===true;
 }
