@@ -1,5 +1,12 @@
 # TypeScript conversion — execution record
 
+## Active pass — P5.6C Attachments, preview and export integration, 2026-11-14
+
+- **Intake:** continuing from the latest remote `ts-exp`; P5.6B is CLOSED — VERIFIED — TARGETED in the live record. This pass closes only P5.6C and then reconciles parent P5.6 before stopping.
+- **Outcome:** convert `core/note-export.js` and move the remaining P5.6 host document/editor ownership behind checked feature contracts: attachment/PDF navigation and retained reader/URL lifetimes, attachment insertion/quiescence, rich-editor attachment port, note print lifetime and note export composition. Reuse checked `attachments.ts`, export/storage engines and first-party rich-text modules; do not duplicate codecs/storage or alter vendored Wordgard.
+- **Invariants:** preserve canonical note/Saved-Day evidence, verified note-write/rollback behavior, editor settlement before attachment mutation, stale/deleted/concurrent-note rejection, cancellation/failure truthfulness, and attachment reader/reference lifetimes. Viewing, printing and exporting remain read-only to Saved-Day evidence.
+- **Verification target:** strict compiler/typed lint, registry/manifest/readers, fresh build/generated checks, P5.6C unit/integration anchors and affected isolated Chromium attachment/export journeys. Parent P5.6 closes only after A/B/C source reconciliation. No full/Promotion QA. Temporary pad: `/tmp/study-director-P5.6C.md`.
+
 ## Latest closure — P5.6B Library navigation and record operations, 2026-11-14
 
 - **Scope / publication:** started from remote `ts-exp` at `f111f8b686e19f1089f4fc81d8d9e3156375ddaa` with P5.6A still CLOSED — VERIFIED — TARGETED. Source/regression endpoint is `a13acb0863a8a3763a35d0e2f5ec74f22722fbd6`; the commit containing this entry closes P5.6B only. Parent P5.6 remains open for P5.6C.
