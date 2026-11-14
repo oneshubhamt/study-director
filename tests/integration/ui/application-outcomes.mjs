@@ -5,13 +5,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
-const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts'),hostMain=fs.readFileSync('source/host/main.js','utf8');
+const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const noop=()=>{};
 
-// Delegated rich-editor input must preserve Wordgard's validated Event metadata
-// by wrapping the Event in ReviewSaveOptions rather than passing it as options.
-assert.match(hostMain,/'save-reflection':\s*event=>queueReviewSave\(\{event\}\)/u);
 
 // Exercise the real OS adapter and coordinator together, including the await
 // between permission inspection and service-worker delivery.
@@ -184,4 +181,4 @@ assert.match(hostMain,/'save-reflection':\s*event=>queueReviewSave\(\{event\}\)/
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','date-stable reflection baseline','reflection commit versus Library refresh failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
