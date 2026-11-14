@@ -3557,7 +3557,7 @@ const RichTextRuntime=(()=>{
   async function disposeBackgroundIdleEditors(){
     backgroundDisposeTimer=null;
     if(!document.hidden||closingAll||pickerLeaseActive())return false;
-    try{if(flushPendingReviewSave({strict:true})===false)return false;await ReviewEditor.settled();}catch(error){capture('rich-text.background-reflection-flush',error);return false;}
+    try{if(await flushPendingReviewSave({strict:true})===false)return false;await ReviewEditor.settled();}catch(error){capture('rich-text.background-reflection-flush',error);return false;}
     try{await AppData.notes.flush({strict:true});}catch(error){capture('rich-text.background-note-flush',error);return false;}
     if(!document.hidden||pickerLeaseActive())return false;
     for(const field of [...mounted.keys()]){const safe=await dispose(field,{resync:true});if(!safe&&field.isConnected)syncField(field);}
@@ -3625,7 +3625,7 @@ const RichTextRuntime=(()=>{
       try{
         if(record.field.id==='daily-reflection'){
           try{
-            if(flushPendingReviewSave({strict:true})===false)assetFlushFailed=true;else await ReviewEditor.settled();
+            if(await flushPendingReviewSave({strict:true})===false)assetFlushFailed=true;else await ReviewEditor.settled();
           }catch(error){assetFlushFailed=true;capture('rich-text.reflection-flush',error);}
         }
         await record.mounted.destroy();
@@ -3718,7 +3718,7 @@ const RichTextRuntime=(()=>{
     if(installed)return false;installed=true;
     document.addEventListener('focusin',onFocusIn,true);document.addEventListener('beforeinput',onBeforeInput,true);document.addEventListener('input',onInput,true);
     document.addEventListener('toggle',event=>{if(event.target instanceof HTMLDetailsElement)queueMicrotask(()=>syncAll(document));},true);
-    AppActivation.subscribe(handleActivation);window.addEventListener('pagehide',()=>{flushEditors();try{flushPendingReviewSave({strict:false});}catch{}AppData.notes.protectUnsaved();void AppData.notes.flush();});
+    AppActivation.subscribe(handleActivation);window.addEventListener('pagehide',()=>{flushEditors();void flushPendingReviewSave({strict:false}).catch(error=>capture('rich-text.pagehide-reflection-flush',error));AppData.notes.protectUnsaved();void AppData.notes.flush();});
     observer=new MutationObserver(records=>{
       const selector='textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection';
       const addedEditor=records.some(record=>[...record.addedNodes].some(node=>
@@ -4245,7 +4245,7 @@ async function settleAttachmentWriters(){
   if(typeof LibraryView?.settleDiary==='function'&&!await LibraryView.settleDiary())throw new Error('The open Diary edit could not be saved safely.');
   await AppData.notes.flush({strict:true});
   if(AppData.notes.failure().failed)throw new Error('Notes have not saved. Retry after storage recovers.');
-  if(flushPendingReviewSave({strict:true})===false)throw new Error('The current reflection could not be saved safely.');
+  if(await flushPendingReviewSave({strict:true})===false)throw new Error('The current reflection could not be saved safely.');
   await ReviewEditor.settled();
   await AppData.activeSession.settled();
 }
@@ -5679,7 +5679,7 @@ async function prepareApplicationUpdate(context={}){
     if(planText!==null&&storedPlan.draft!==planText){
       return Object.freeze({ok:false,reason:'The Plan draft did not pass the update read-back check.'});
     }
-    if(flushPendingReviewSave({strict:true})===false)return Object.freeze({ok:false,reason:'The pending reflection could not be saved. Keep this tab open and retry.'});
+    if(await flushPendingReviewSave({strict:true})===false)return Object.freeze({ok:false,reason:'The pending reflection could not be saved. Keep this tab open and retry.'});
     await ReviewEditor.settled();
     check();
     const liveResult=TASKS.length?await writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:!!reservation}):null;
@@ -6223,7 +6223,7 @@ const INPUT_ACTIONS=Object.freeze({
 });
 const BLUR_ACTIONS=Object.freeze({
   'profile-name': finishProfileRename,
-  'save-reflection': ()=>flushPendingReviewSave()
+  'save-reflection': ()=>{void flushPendingReviewSave().catch(error=>AppDiagnostics.capture('review.blur-flush',error,'warn'));}
 });
 const KEYDOWN_ACTIONS=Object.freeze({
   'profile-name': handleProfileNameKey,
