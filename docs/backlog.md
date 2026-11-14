@@ -184,11 +184,21 @@ A redesign must fit each kind of data, not one rule for all. Likely a fusion: me
 
 ## Owner's requests (noted 2026-11-14)
 
-Notes: creating, moving and renaming. Noted, not started; the owner asked for the findings first.
+Notes: creating, moving, renaming and empty notes. Noted, not started; the owner asked for the findings first.
 
 1. **Rename "does not work" on a new note.** A note is stored only once it has text, so until then Rename, Move, Earlier versions, Export, Print and Delete in its ⋯ menu are all disabled, and its title is plain text instead of a button. The reason is only a hover tooltip ("Write something in this note first"), which touch screens never show. Proposed: an unsaved note can be renamed and moved at once (only its in-memory name changes, nothing is stored) and Delete discards it; the other items say why they are unavailable in the menu itself. Also start the inline rename after the menu has closed, so a browser that hands focus back to ⋯ late (possibly Safari) cannot end it at once; Chromium was checked and works.
 2. **New and Move dialogs are unrefined.** Move asks for a typed full path with `>` (`GS2 > Polity`); there is no list of places, no search, no "Top level", and the preview only echoes the text. New offers only "Inside <open note>" or "At top level", so another parent must be opened first; its copy uses "Area or topic" and "Creates a child", and its hint and preview are noisy. Proposed: one destination picker shared by both, built on the existing note picker (search, paths, "Top level", the note itself and its children excluded). Move picks a place and keeps the name; the result line reads "Polity › Articles, with 2 nested notes", and a name already there shows the merge question in place. New asks for the name first, with a "Location: GS2 › Polity · Change" line that opens the same picker. Rename stays separate (the title).
 3. **Right-click a note in the list** for its actions (Rename, Move, New note inside, Earlier versions, Export, Print, Delete), the same items as ⋯, opened at the pointer; a long press does the same on touch screens. Support Activities offers none, as now.
+4. **Empty notes.** Four different things look the same in the list (muted, "empty") but behave differently, checked 2026-11-14:
+
+   | Kind | How it arises | Today |
+   |---|---|---|
+   | New, unsaved | New, before anything is typed | Every ⋯ item disabled, title not clickable; it vanishes without a word when another note is opened |
+   | Plan placeholder | An Area in today's plan with no note | Same disabled menu; meta reads only "In today’s plan" |
+   | Parent placeholder | A child's path names a parent with no note ("Geo" for "Geo > Rivers") | Same disabled menu, so the parent cannot be renamed or moved except by moving each child; the stray "Support Activities" was one of these |
+   | Cleared | A saved note whose text was deleted | Stays stored with a full menu; Export and Print then say "Write something first" |
+
+   The header count also counts placeholders (4 for 3 real notes and a parent placeholder in the check). Proposed: let all three unstored kinds be renamed and moved (a parent placeholder carries its children; a plan placeholder offers to rename the Area in the plan, as Rename does now); give each a plain line in place of "empty" ("Not written yet", "In today’s plan · not written yet", "Holds 2 notes"); keep a new note in the list until it is written or discarded, with Delete discarding it; count real notes only; and offer "Delete" for a cleared note as for any other. To decide with the owner: whether a cleared note should be removed by itself after a while (it never is today).
 
 ## Decided, not yet scheduled
 
