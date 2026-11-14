@@ -17,7 +17,7 @@ registry.define('library',1,()=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','importFiles','linksBar','normalizeArea','normalizeTag','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renameTag','renderInherited','restore','reviewKept','keptVersion','searchDocuments','size','tagged','tags','trash','trashSnapshot','versions']),
+    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','importFiles','linksBar','normalizeArea','normalizeTag','orderEntries','print','purgeTrash','remove','rename','renameTag','renderInherited','restore','reviewKept','keptVersion','searchDocuments','size','tagged','tags','trash','trashSnapshot','versions']),
     attachments:freeze(['batch','close','count','invalidate','reconcile','refresh']),
     preferences:freeze(['read','write']),
     clearLibrary:freeze(['preflight','execute']),
@@ -55,7 +55,7 @@ registry.define('library',1,()=>{
     const {exportKeys,cancel:cancelExport}=ports.exporter;
     const {bindEditor:bindDiaryEditor,captureEditor:captureDiaryEditor,clearEditor:clearDiaryEditor,deleteEntry:deleteDiaryEntryRecord,flushEditor:flushDiaryEditor,scheduleEditor:scheduleDiaryEditor,draft:createDiaryDraft,settled:settleDiaryEditor}=ports.diary;
     const {
-      areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateNote,catalogue:noteCatalogue,clearEditor,clearFind,commitEditor,find:findInEditor,findStep,focusEditor,
+      areaUse:planAreaUse,bindEditor,canCreate:canCreateNote,catalogue:noteCatalogue,clearEditor,clearFind,commitEditor,find:findInEditor,findStep,focusEditor,
       get:getNote,importFiles:importNoteFiles,linksBar,normalizeArea:normalizeNoteArea,normalizeTag,orderEntries:orderNoteEntries,print:printNote,
       purgeTrash:purgeExpiredNotes,remove:removeNote,rename:renameNote,renameTag:renameNoteTag,renderInherited,restore:restoreNote,reviewKept,keptVersion,searchDocuments:noteSearchDocuments,size:notesSize,
       tagged:taggedNotes,tags:noteTags,trash:trashNote,trashSnapshot:noteTrash,versions:openNoteVersions
@@ -985,23 +985,25 @@ registry.define('library',1,()=>{
       const where=planAreaPlaces(planAreaUse(entry.key));
       const notice=notifications.begin({id:'note-rename',surfaceId:'notes-status',title:'Rename note',message:'Renaming the note…'});
       try{
-        let outcome=await renameNote(entry.key,identity.label,{merge:false});
-        if(outcome.status==='collision'){
-          const into=outcome.labels[0]||identity.label,others=outcome.labels.length-1;
-          const accepted=await confirm({title:'Merge notes?',message:`Merge “${entry.label}” into “${into}”? Its text is added to the end of “${into}”.`,details:others>0?[`${others} more note${others===1?'':'s'} inside it ${others===1?'is':'are'} merged the same way.`]:[],confirmLabel:'Merge',cancelLabel:'Cancel'});
-          if(!accepted||!canMutate()){notice.finish('cancelled','Nothing was renamed.');return false;}
-          outcome=await renameNote(entry.key,identity.label,{merge:true});
-        }
+        const outcome=await renameNote(entry,value,{renamePlans:!!where&&inPlans});
+        if(outcome.status==='cancelled'){notice.finish('cancelled','Nothing was renamed.');return false;}
         if(outcome.status!=='renamed'){
-          notice.finish('failed',outcome.status==='inside-itself'?'A note cannot move inside itself.':outcome.status==='content-limit'?`Merging would make “${outcome.label}” longer than one note can be. Nothing was changed.`:'The note could not be renamed. Nothing was changed.');
+          notice.finish('failed',outcome.status==='inside-itself'?'A note cannot move inside itself.':'The note could not be renamed. Nothing was changed.');
           return false;
         }
+        const selected=outcome.moved.find(move=>move.from===entry.key)?.to||outcome.identity.key;
+        selectedNoteKey=selected;noteTree(noteEntries());expandNoteAncestors(selected);renderNotes();
+        const moved=Math.max(0,outcome.moved.length-1);
+        const action=outcome.merged?'Merged into':'Renamed to';
+        if(outcome.plan.requested&&!outcome.plan.ok){
+          const detail=outcome.plan.error&&outcome.plan.error.message?outcome.plan.error.message:String(outcome.plan.error||'the plan update failed');
+          notice.finish('failed',`${action} “${outcome.identity.label}”${moved>0?`, with ${moved} note${moved===1?'':'s'} inside it`:''}. The note change is saved, but ${where} could not be updated: ${detail}`);
+          return true;
+        }
         let plans='';
-        if(where&&inPlans){await renameAreaInPlans(entry.key,identity.label);plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} now ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the new name.`;}
+        if(where&&outcome.plan.requested)plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} now ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the new name.`;
         else if(where)plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} still ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the old name.`;
-        selectedNoteKey=outcome.key;noteTree(noteEntries());expandNoteAncestors(outcome.key);renderNotes();
-        const moved=outcome.moved.length-1;
-        notice.finish('succeeded',`${outcome.merged?'Merged into':'Renamed to'} “${identity.label}”${moved>0?`, with ${moved} note${moved===1?'':'s'} inside it`:''}.${plans}`);
+        notice.finish('succeeded',`${action} “${outcome.identity.label}”${moved>0?`, with ${moved} note${moved===1?'':'s'} inside it`:''}.${plans}`);
         return true;
       }catch(error){notice.finish('failed',error&&error.message||'The note could not be renamed. Keep this tab open and retry.');return false;}
     }

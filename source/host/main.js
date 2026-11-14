@@ -54,6 +54,7 @@ const IntegrityContinuationModule=INTERNAL_MODULES.load('integrity-continuation'
 const NoteExportModule=INTERNAL_MODULES.load('note-export',2,'study-director.note-export-module',2);
 const LibraryClearModule=INTERNAL_MODULES.load('library-clear',1,'study-director.library-clear-module',2);
 const NoteLinksModule=INTERNAL_MODULES.load('note-links',1,'study-director.note-links-module',1);
+const NotesHostModule=INTERNAL_MODULES.load('notes-host',1,'study-director.notes-host-module',1);
 const ProfilesModule=INTERNAL_MODULES.load('profiles',1,'study-director.profiles-module',1);
 const ProfilesHostModule=INTERNAL_MODULES.load('profiles-host',1,'study-director.profiles-host-module',1);
 const LibraryModule=INTERNAL_MODULES.load('library',1,'study-director.library-module',1);
@@ -797,6 +798,7 @@ let richTextCloseField=()=>false;
 let richTextSyncField=()=>false;
 let richTextSyncAll=()=>false;
 let richTextReconcileExternal=()=>Object.freeze({status:'unmounted'});
+let NotesRuntime=null,LibraryNoteWorkflows=null;
 let executeIdleDisplayKey='';
 let realTimeAwarenessRenderKey='';
 let executePanelsRenderKey='';
@@ -1857,142 +1859,30 @@ function resetTodaySession(...args){return SessionActions.resetTodaySession(...a
 let latestCarryForward='';
 /* AREA NOTES REPOSITORY */
 
-function noteStoredValueForKey(key){
-  const entry=AppData.notes.get(key);
-  return entry&&entry.text?String(entry.text):'';
+function notesRuntime(){
+  if(!NotesRuntime)throw new Error('Notes runtime is unavailable.');
+  return NotesRuntime;
 }
-function noteTextForKey(key){return plainTextContent(noteStoredValueForKey(key));}
-function noteEditorContent(binding,value){
-  const current=String(value??'');
-  if(current.startsWith(RichTextApi.storagePrefix))return current;
-  const stored=noteStoredValueForKey(binding&&binding.areaKey);
-  return current===plainTextContent(stored)?stored:current;
+function legacyNoteBinding(binding){
+  return binding?Object.freeze({...binding,areaKey:binding.key,areaLabel:binding.label}):null;
 }
-function applicableNotesForTask(t){
-  const exactKey=noteKeyForTask(t),exactLabel=noteLabelForTask(t);
-  if(!hasOngoingTaskNotes(t))return {exactKey,exactLabel,exactText:'',inherited:[]};
-  const exact=AppData.notes.get(exactKey,exactLabel);
-  const inherited=isSupportBlock(t)?[]:inheritedNoteEntries(exactKey);
-  return {exactKey,exactLabel:exact?exact.label:exactLabel,exactText:exact?plainTextContent(exact.text||''):'',inherited};
-}
-function inheritedNoteEntries(areaKey){
-  return areaParentKeys(normalizeAreaName(areaKey))
-    .map(key=>AppData.notes.get(key))
-    .filter(entry=>entry&&String(entry.text||'').trim())
-    .map(entry=>({key:entry.key,label:entry.label||displayAreaName(entry.key),value:String(entry.text||''),text:plainTextContent(entry.text||'')}))
-    .reverse();
-}
-function normalizeOngoingAreaInput(value){
-  const raw=clampText(String(value||'').trim(),APP_LIMITS.maxAreaNameChars);
-  const key=normalizeAreaName(raw);
-  if(!key)return null;
-  return Object.freeze({key,label:clampText(displayAreaName(raw),APP_LIMITS.maxAreaNameChars)});
-}
-function orderOngoingAreaEntries(source){
-  const entries=new Map();
-  (source||[]).forEach(raw=>{
-    if(!raw||typeof raw!=='object')return;
-    const key=normalizeAreaName(raw.key||raw.label);
-    if(!key)return;
-    const existing=entries.get(key)||{
-      key,id:'',label:displayAreaName(raw.label||key),text:'',hasNote:false,current:false,updatedAt:'',ephemeral:false,support:false
-    };
-    if(raw.id)existing.id=String(raw.id);
-    if(raw.label)existing.label=displayAreaName(raw.label);
-    if(raw.text!==undefined)existing.text=String(raw.text||'');
-    existing.hasNote=existing.hasNote||!!raw.hasNote||!!existing.text.trim();
-    existing.current=existing.current||!!raw.current;
-    existing.ephemeral=existing.ephemeral||!!raw.ephemeral;
-    existing.support=existing.support||!!raw.support||key===SUPPORT_NOTE.key;
-    if(raw.updatedAt)existing.updatedAt=String(raw.updatedAt);
-    entries.set(key,existing);
-  });
-  const parentKey=key=>{
-    const parts=String(key||'').split(' > ');
-    return parts.length>1?parts.slice(0,-1).join(' > '):'';
-  };
-  const values=[...entries.values()];
-  const children=new Map();
-  values.forEach(entry=>{
-    const parent=parentKey(entry.key);
-    const group=children.get(parent)||[];
-    group.push(entry);children.set(parent,group);
-  });
-  // Support Activities first, then by name at every level.
-  const compare=(a,b)=>(Number(b.support)-Number(a.support))
-    ||a.label.localeCompare(b.label,undefined,{sensitivity:'base',numeric:true});
-  children.forEach(group=>group.sort(compare));
-  const ordered=[],seen=new Set();
-  const visit=entry=>{
-    if(!entry||seen.has(entry.key))return;
-    seen.add(entry.key);ordered.push(entry);
-    (children.get(entry.key)||[]).forEach(visit);
-  };
-  (children.get('')||[]).forEach(visit);
-  values.filter(entry=>!seen.has(entry.key)).sort(compare).forEach(visit);
-  return ordered.map(entry=>Object.freeze({
-    ...entry,depth:Math.max(0,entry.key.split(' > ').length-1)
-  }));
-}
-let noteCatalogueCache=null;
-function ongoingAreaTaskHierarchySignature(){return TASKS.filter(hasOngoingTaskNotes).map(task=>`${noteKeyForTask(task)}\u0000${noteLabelForTask(task)}`).join('\u0001');}
-function noteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
-function noteCatalogue(){
-  const snapshot=AppData.notes.metadataSnapshot(),hierarchy=ongoingAreaTaskHierarchySignature();
-  if(noteCatalogueCache&&noteCatalogueCache.revision===snapshot.revision&&noteCatalogueCache.hierarchy===hierarchy)return noteCatalogueCache.entries;
-  const entries=new Map();
-  // Notes are listed by title key; a stored note also carries its permanent id.
-  const ensure=(key,label,{hasNote=false,current=false,updatedAt='',id=''}={})=>{
-    const safeKey=normalizeAreaName(key);
-    if(!safeKey)return;
-    const support=safeKey===SUPPORT_NOTE.key;
-    const existing=entries.get(safeKey)||{key:safeKey,id:'',label:support?SUPPORT_NOTE.label:displayAreaName(label||safeKey),hasNote:false,current:false,updatedAt:'',support};
-    if(id)existing.id=String(id);
-    if(label)existing.label=support?SUPPORT_NOTE.label:displayAreaName(label);
-    existing.hasNote=existing.hasNote||!!hasNote;
-    existing.current=existing.current||!!current;
-    if(updatedAt)existing.updatedAt=String(updatedAt);
-    entries.set(safeKey,existing);
-  };
-  snapshot.records.forEach(entry=>ensure(entry.key,entry.label,{hasNote:entry.hasNote,updatedAt:entry.updatedAt,id:entry.id}));
-  TASKS.filter(hasOngoingTaskNotes).forEach(task=>ensure(noteKeyForTask(task),noteLabelForTask(task),{current:true}));
-  [...entries.values()].forEach(entry=>{
-    const labelParts=displayAreaName(entry.label).split(' > ');
-    areaParentKeys(entry.key).forEach((key,index)=>ensure(key,labelParts.slice(0,index+1).join(' > ')));
-  });
-  const ordered=Object.freeze(orderOngoingAreaEntries([...entries.values()]));
-  noteCatalogueCache=Object.freeze({revision:snapshot.revision,hierarchy,entries:ordered});
-  return ordered;
-}
+function noteStoredValueForKey(key){return notesRuntime().storedValueForKey(key);}
+function noteTextForKey(key){return notesRuntime().textForKey(key);}
+function noteEditorContent(binding,value){return notesRuntime().editorContent({key:binding?.areaKey||binding?.key||''},value);}
+function applicableNotesForTask(task){return notesRuntime().applicableForTask(task);}
+function inheritedNoteEntries(areaKey){return notesRuntime().inheritedEntries(areaKey);}
+function normalizeOngoingAreaInput(value){return notesRuntime().normalizeAreaInput(value);}
+function orderOngoingAreaEntries(source){return notesRuntime().orderEntries(source);}
+function noteSearchDocuments(){return notesRuntime().searchDocuments();}
+function noteCatalogue(){return notesRuntime().catalogue();}
 let refreshLibraryNotes=()=>false;
 let updateNoteSearchDocument=()=>false;
-function updateNoteSearchText(key,plain){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
+function updateNoteSearchText(key,plain){return NotesRuntime?NotesRuntime.updateSearchText(key,plain):false;}
 function refreshNoteConsumers(){
   richAssetReferenceRevision++;
-  if(!SessionLifecycle.canWrite())return false;
-  try{
-    refreshAllSubjectNoteFieldsFromRepository();
-    refreshPnote();
-    refreshLibraryNotes();
-    requestRender('schedule');
-    if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.refresh();
-    if(document.getElementById('recovery-carry-text'))renderRecoveryReview();
-  }catch(e){AppDiagnostics.capture('notes.consumer-render',e);}
+  return NotesRuntime?NotesRuntime.refreshConsumers():false;
 }
-function reportNoteConflict(info={}){
-  const key=normalizeAreaName(info.key),label=displayAreaName(info.label||key||'this area');
-  if(!key)return false;
-  const copyLabel=String(info.copyLabel||'').trim();
-  const message=copyLabel
-    ?`A different version of the ${label} note was already stored. Study Director kept that version and saved your edit as the note “${copyLabel}”.`
-    :`A newer note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
-  setNoteSyncStateForKey(key,'conflict');
-  setPlanStatus(message,false);
-  setStatus('save-status',message,false);
-  setStatus('notes-status',message,false);
-  publishSafetyNotice(message,'Note editing conflict','note-conflict');
-  return true;
-}
+function reportNoteConflict(info={}){return NotesRuntime?NotesRuntime.reportConflict(info):false;}
 
 /* BOUNDED DATA MAINTENANCE */
 const DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=AppData.maintenance.intervalMs,DATA_MAINTENANCE_FAILURE_RETRY_MS=30*60*1000,ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS=5000;
@@ -2098,212 +1988,22 @@ function scheduleDataMaintenance(delay=1200,trigger='scheduled'){
   return DataMaintenanceJob.schedule(Math.max(0,Number(delay)||0),trigger);
 }
 
-/* ONGOING SUBJECT NOTES */
-function inheritedSubjectNotesHtml(t){
-  const inherited=applicableNotesForTask(t).inherited;
-  if(!inherited.length)return '';
-  return inherited.map(entry=>`From ${entry.label}:\n${entry.text}`).join('\n\n');
-}
-// The Library shows each parent note as a closed "From GS2" section, drawn
-// when opened; other views show them all open.
-function renderInheritedNotes(container,areaKey,compact=false,{collapsible=false}={}){
-  if(!container)return;
-  const inherited=inheritedNoteEntries(areaKey);
-  container.className='subject-note-context'+(compact?' compact':'')+(collapsible?' collapsible':'')+(inherited.length?' on':'');
-  container.replaceChildren();
-  if(!inherited.length)return;
-  if(collapsible){
-    inherited.forEach(entry=>{
-      const section=document.createElement('details');section.className='subject-note-context-entry';
-      const label=document.createElement('summary');label.className='subject-note-context-entry-label ui-label';label.textContent=`From ${entry.label.replace(/\s*>\s*/g,' › ')}`;
-      const body=document.createElement('div');body.className='subject-note-context-entry-body';
-      section.append(label,body);container.appendChild(section);
-      section.addEventListener('toggle',()=>{if(section.open&&!body.dataset.rendered){body.dataset.rendered='1';renderRichTextContent(body,entry.value,'',`Parent note from ${entry.label}`);}});
-    });
-    return;
-  }
-  const title=document.createElement('div');
-  title.className='subject-note-context-title ui-label';
-  title.textContent='Inherited Parent Notes · Read-only';
-  container.appendChild(title);
-  inherited.forEach(entry=>{
-    const section=document.createElement('section');section.className='subject-note-context-entry';
-    const label=document.createElement('div');label.className='subject-note-context-entry-label ui-label';label.textContent=`From ${entry.label}`;
-    const body=document.createElement('div');body.className='subject-note-context-entry-body';
-    section.append(label,body);container.appendChild(section);
-    renderRichTextContent(body,entry.value,'',`Inherited note from ${entry.label}`);
-  });
-}
-function renderInheritedSubjectNotes(container,t,compact=false){
-  renderInheritedNotes(container,hasOngoingTaskNotes(t)&&!isSupportBlock(t)?noteKeyForTask(t):'',compact);
-}
-function currentNoteEntriesForWorkTasks(tasks){
-  const seen=new Set();
-  const entries=[];
-  (tasks||[]).filter(t=>hasOngoingTaskNotes(t)).forEach(t=>{
-    const key=noteKeyForTask(t);
-    if(!key||seen.has(key))return;
-    seen.add(key);
-    const entry=AppData.notes.get(key);
-    if(entry&&String(entry.text||'').trim())entries.push(Object.freeze({...entry,text:plainTextContent(entry.text||'')}));
-  });
-  return entries;
-}
-const NOTE_EDITOR_BINDING_VERSION='area-v2';
-const NOTE_EDITOR_SCOPES=Object.freeze({TASK:'task',AREA:'area'});
-function taskNoteEditorIdentity(idx){
-  const validIdx=TaskIdentity.validIndex(idx);
-  if(validIdx===null)return null;
-  const task=TASKS[validIdx];
-  if(!hasOngoingTaskNotes(task))return null;
-  const areaKey=noteKeyForTask(task),taskId=TaskIdentity.idAt(validIdx),scheduleRevision=taskNoteScheduleRevision;
-  if(!areaKey||!taskId||!Number.isInteger(scheduleRevision)||scheduleRevision<1)return null;
-  return Object.freeze({
-    idx:validIdx,
-    areaKey,
-    areaLabel:noteLabelForTask(task),
-    taskId,
-    scheduleRevision,
-    noteRevision:String(AppData.notes.get(areaKey)?.updatedAt||'')
-  });
-}
-function clearTaskNoteEditorBinding(field){
-  if(!field)return false;
-  richTextCloseField(field);
-  ['noteIdx','areaKey','areaLabel','taskId','scheduleRevision','lifecycleRevision','noteRevision','noteBinding','noteBindingState','noteScope','richSyncState','richSyncStatus'].forEach(key=>delete field.dataset[key]);
-  field.removeAttribute('aria-label');
-  return true;
-}
-function bindTaskNoteEditor(field,idx,source='field'){
-  if(!field)return null;
-  const identity=taskNoteEditorIdentity(idx);
-  if(!identity){clearTaskNoteEditorBinding(field);return null;}
-  const previousArea=normalizeAreaName(field.dataset.areaKey);
-  if(field.dataset.noteBinding===NOTE_EDITOR_BINDING_VERSION&&previousArea&&previousArea!==identity.areaKey)richTextCloseField(field);
-  field.dataset.noteIdx=String(identity.idx);
-  field.dataset.areaKey=identity.areaKey;
-  field.dataset.areaLabel=identity.areaLabel;
-  field.dataset.taskId=identity.taskId;
-  field.dataset.scheduleRevision=String(identity.scheduleRevision);
-  field.dataset.lifecycleRevision=String(SessionLifecycle.revision);
-  field.dataset.noteRevision=identity.noteRevision;
-  field.dataset.noteBinding=NOTE_EDITOR_BINDING_VERSION;
-  field.dataset.noteBindingState='current';
-  field.dataset.noteScope=NOTE_EDITOR_SCOPES.TASK;
-  field.dataset.noteSource=String(source||'field');
-  field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
-  field.setAttribute('aria-label',`Note for ${identity.areaLabel}`);
-  field.maxLength=APP_LIMITS.maxNoteChars;
-  queueMicrotask(()=>richTextSyncField(field));
-  return identity;
-}
-function bindNoteEditor(field,areaKey,areaLabel,source='library'){
-  if(!field)return null;
-  const safeKey=normalizeAreaName(areaKey);
-  if(!safeKey){clearTaskNoteEditorBinding(field);return null;}
-  const entry=AppData.notes.get(safeKey,areaLabel||displayAreaName(safeKey));
-  const label=entry&&entry.label?entry.label:displayAreaName(areaLabel||safeKey);
-  clearTaskNoteEditorBinding(field);
-  field.dataset.areaKey=safeKey;
-  field.dataset.areaLabel=label;
-  field.dataset.lifecycleRevision=String(SessionLifecycle.revision);
-  field.dataset.noteRevision=String(entry&&entry.updatedAt||'');
-  field.dataset.noteBinding=NOTE_EDITOR_BINDING_VERSION;
-  field.dataset.noteBindingState='current';
-  field.dataset.noteScope=NOTE_EDITOR_SCOPES.AREA;
-  field.dataset.noteSource=String(source||'library');
-  field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
-  field.setAttribute('aria-label',`Note for ${label}`);
-  field.maxLength=APP_LIMITS.maxNoteChars;
-  queueMicrotask(()=>richTextSyncField(field));
-  return Object.freeze({idx:null,areaKey:safeKey,areaLabel:label,taskId:'',scheduleRevision:null,noteRevision:String(entry&&entry.updatedAt||'')});
-}
-function taskNoteEditorIsVisible(field){
-  if(!field||field.isConnected===false)return false;
-  const pane=field.closest&&field.closest('.pane');
-  if(pane&&(pane.hidden||!pane.classList.contains('on')))return false;
-  const details=field.closest&&field.closest('details');
-  if(details&&!details.open)return false;
-  const reviewPanel=field.closest&&field.closest('.review-edit-panel');
-  if(reviewPanel&&!reviewPanel.closest('.rcard.editing'))return false;
-  return true;
-}
-function resolveTaskNoteEditorBinding(field,{requireVisible=true}={}){
-  if(!field||field.isConnected===false)return null;
-  if(requireVisible&&!taskNoteEditorIsVisible(field))return null;
-  if(field.dataset.richExternalConflict==='1'){field.dataset.noteBindingState='conflict';return null;}
-  if(field.dataset.noteBinding!==NOTE_EDITOR_BINDING_VERSION)return null;
-  const areaKey=normalizeAreaName(field.dataset.areaKey);
-  const areaLabel=displayAreaName(field.dataset.areaLabel||areaKey);
-  const lifecycleRevision=Number(field.dataset.lifecycleRevision);
-  if(!SessionLifecycle.canWrite()||!areaKey)return null;
-  if(!Number.isInteger(lifecycleRevision)||lifecycleRevision!==SessionLifecycle.revision)return null;
-  if(field.dataset.noteScope===NOTE_EDITOR_SCOPES.AREA){
-    field.dataset.noteBindingState='current';
-    return Object.freeze({idx:null,areaKey,areaLabel,taskId:'',scheduleRevision:null,lifecycleRevision,noteRevision:String(field.dataset.noteRevision||'')});
-  }
-  const taskId=String(field.dataset.taskId||'').trim();
-  const scheduleRevision=Number(field.dataset.scheduleRevision);
-  if(!taskId||!Number.isInteger(scheduleRevision)||scheduleRevision!==taskNoteScheduleRevision)return null;
-  const idx=TaskIdentity.indexForId(taskId);
-  if(idx===null)return null;
-  const task=TASKS[idx];
-  if(!hasOngoingTaskNotes(task)||noteKeyForTask(task)!==areaKey)return null;
-  field.dataset.noteIdx=String(idx);
-  field.dataset.noteBindingState='current';
-  return Object.freeze({idx,areaKey,areaLabel:noteLabelForTask(task),taskId,scheduleRevision,lifecycleRevision,noteRevision:String(field.dataset.noteRevision||'')});
-}
-function refreshSubjectNoteFieldsForKey(key,originField=null,derived=null,options={}){
-  const safeKey=normalizeAreaName(key);
-  if(!safeKey)return;
-  const deferRichMirrors=options&&options.deferRichMirrors===true;
-  const entry=AppData.notes.get(safeKey),stored=entry&&entry.text?String(entry.text):'',noteRevision=String(entry&&entry.updatedAt||'');
-  const knownPlain=derived&&String(derived.canonical||'')===stored&&typeof derived.plain==='string'?derived.plain:null;
-  let plainCache=knownPlain;
-  const plain=()=>plainCache===null?(plainCache=plainTextContent(stored)):plainCache;
-  document.querySelectorAll('.task-note-field[data-area-key]').forEach(field=>{
-    if(normalizeAreaName(field.dataset.areaKey)!==safeKey)return;
-    const external=field===originField?Object.freeze({status:'origin'}):richTextReconcileExternal(field,stored,noteRevision);
-    if(external.status==='conflict')return;
-    if(field!==originField){const value=plain();if(field.value!==value)field.value=value;}
-    field.dataset.noteRevision=noteRevision;
-    if(field===originField||!deferRichMirrors)richTextSyncField(field);
-  });
-  document.querySelectorAll('.review-block-note[data-area-key]').forEach(box=>{
-    if(normalizeAreaName(box.dataset.areaKey)!==safeKey)return;
-    if(!deferRichMirrors)renderRichTextContent(box,stored,box.dataset.noteSupport==='true'?'No current shared support note.':'No current note for this area.',`Note for ${entry?.label||displayAreaName(safeKey)}`);
-    box.classList.toggle('review-block-empty',!plain().trim());
-  });
-}
-function refreshAllSubjectNoteFieldsFromRepository(){
-  const keys=new Set();
-  document.querySelectorAll('.task-note-field[data-area-key]').forEach(field=>{
-    const key=normalizeAreaName(field.dataset.areaKey);if(key)keys.add(key);
-  });
-  document.querySelectorAll('.review-block-note[data-area-key]').forEach(box=>{
-    const key=normalizeAreaName(box.dataset.areaKey);if(key)keys.add(key);
-  });
-  keys.forEach(key=>refreshSubjectNoteFieldsForKey(key));
-}
-function setNoteSyncStateForKey(key,state){
-  const safeKey=normalizeAreaName(key);
-  if(!safeKey)return;
-  const message=state==='saving'?'Saving note…':state==='conflict'?'Newer saved note detected · this edit is not being saved. Reopen the note to load it.':'Synced';
-  const symbol=state==='saving'?'…':state==='conflict'?'!':'✓';
-  const apply=el=>{el.textContent=symbol;el.removeAttribute('title');el.setAttribute('aria-label',message);el.classList.remove('idle');el.classList.toggle('saving',state==='saving');el.classList.toggle('err',state==='conflict');NoteSyncPopover.refresh(el);};
-  document.querySelectorAll('textarea.task-note-field[data-area-key]').forEach(field=>{if(normalizeAreaName(field.dataset.areaKey)!==safeKey)return;field.dataset.richSyncState=state;field.dataset.richSyncStatus=message;});
-  document.querySelectorAll('.note-sync[data-area-key]').forEach(element=>{
-    if(normalizeAreaName(element.dataset.areaKey)===safeKey)apply(element);
-  });
-  const pn=document.getElementById('pn-sync');
-  // Execute's indicator follows the note its editor shows, which may be a linked note.
-  const curKey=(TASKS[TimerState.currentIndex]&&isTrackableBlock(TASKS[TimerState.currentIndex]))?(document.getElementById('pn-extra')?.dataset.areaKey||noteKeyForTask(TASKS[TimerState.currentIndex])):'';
-  if(pn&&normalizeAreaName(curKey)===safeKey)apply(pn);
-  if(state==='synced')publishSafetyNotice('','Note saved','note-conflict');
-}
+/* ONGOING SUBJECT NOTES · P5.6A CHECKED OWNER */
+const NOTE_EDITOR_BINDING_VERSION=NotesHostModule.bindingVersion;
+function inheritedSubjectNotesHtml(task){return notesRuntime().inheritedTextForTask(task);}
+function renderInheritedNotes(container,areaKey,compact=false,options={}){return notesRuntime().renderInherited(container,areaKey,compact,options);}
+function renderInheritedSubjectNotes(container,task,compact=false){return notesRuntime().renderInheritedForTask(container,task,compact);}
+function currentNoteEntriesForWorkTasks(tasks){return notesRuntime().currentEntriesForTasks(tasks);}
+function clearTaskNoteEditorBinding(field){return NotesRuntime?NotesRuntime.clearEditor(field):false;}
+function bindTaskNoteEditor(field,idx,source='field'){return legacyNoteBinding(notesRuntime().bindTaskEditor(field,idx,source));}
+function bindNoteEditor(field,areaKey,areaLabel,source='library'){return legacyNoteBinding(notesRuntime().bindAreaEditor(field,areaKey,areaLabel,source));}
+function resolveTaskNoteEditorBinding(field,options={}){return legacyNoteBinding(notesRuntime().resolveEditor(field,options));}
+function refreshSubjectNoteFieldsForKey(key,originField=null,derived=null,options={}){return notesRuntime().refreshFieldsForKey(key,originField,derived,options);}
+function refreshAllSubjectNoteFieldsFromRepository(){return NotesRuntime?NotesRuntime.refreshAllFields():false;}
+function setNoteSyncStateForKey(key,state){return NotesRuntime?NotesRuntime.setSyncState(key,state):false;}
 function updateNoteSyncIndicators(idx,key){
-  const safeKey=key?normalizeAreaName(key):(TASKS[idx]?noteKeyForTask(TASKS[idx]):'');
-  setNoteSyncStateForKey(safeKey,'synced');
+  const task=TASKS[idx],safeKey=key?normalizeAreaName(key):(task?noteKeyForTask(task):'');
+  return setNoteSyncStateForKey(safeKey,'synced');
 }
 /* PLAN DRAFTS, SAVED DEFAULTS, AND QUOTE DRAFT */
 const PROTECTED_PREFERENCES_SAVE_DELAY_MS=250;
@@ -3289,33 +2989,7 @@ function renderRecoveryReview(...args){return ExecutionViews.renderRecoveryRevie
 function getTaskCompletion(idx){
   return resolveTaskCompletion(idx).pct;
 }
-function commitTaskNoteEditor(field,value,event=null){
-  if(!SessionLifecycle.canWrite())return false;
-  const binding=resolveTaskNoteEditorBinding(field,{requireVisible:true});
-  if(!binding){if(field&&field.dataset&&field.dataset.richExternalConflict!=='1')field.dataset.noteBindingState='stale';return false;}
-  const trusted=validatedRichInputMeta(event,field),candidate=trusted?trusted.canonical:noteEditorContent(binding,value);
-  const result=trusted
-    ?AppData.notes.updateValidatedRich(binding.areaKey,binding.areaLabel,candidate,binding.noteRevision)
-    :AppData.notes.update(binding.areaKey,binding.areaLabel,candidate,binding.noteRevision);
-  if(result.status==='conflict'){
-    refreshSubjectNoteFieldsForKey(binding.areaKey);
-    if(field.dataset.richExternalConflict==='1'){field.dataset.noteBindingState='conflict';setNoteSyncStateForKey(binding.areaKey,'conflict');}
-    return false;
-  }
-  const canonical=noteStoredValueForKey(binding.areaKey),derived=trusted&&trusted.canonical===canonical?trusted:null;
-  if(field.value!==canonical)field.value=canonical;
-  if(!String(canonical||'').startsWith(RichTextApi.storagePrefix))updateNoteSearchText(binding.areaKey,canonical);
-  refreshSubjectNoteFieldsForKey(binding.areaKey,field,derived,{deferRichMirrors:!!trusted});
-  if(result.status==='limit'||result.status==='content-limit'){
-    const message=result.status==='content-limit'
-      ?`Notes are limited to ${APP_LIMITS.maxRichTextWords.toLocaleString()} rich-text words per note.`
-      :`Notes are limited to ${APP_LIMITS.maxNotes.toLocaleString()} saved notes.`;
-    setStatus('notes-status',message,false);setStatus('save-status',message,false);setPlanStatus(message,false);return false;
-  }
-  if(result.status==='rejected')return false;
-  if(result.status==='changed')saveLiveDraft();
-  return true;
-}
+function commitTaskNoteEditor(field,value,event=null){return notesRuntime().commitEditor(field,value,event);}
 /* DAILY REFLECTION + DIARY PERSISTENCE · P5.5B CHECKED OWNER */
 const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze({
   configuration:Object.freeze({limits:APP_LIMITS,dataContract:DATA_CONTRACT}),
@@ -3383,51 +3057,8 @@ async function showNotesTagged(name,passive,field){
 }
 // Renames a tag in every note that has it, then saves. A note that changed
 // meanwhile is left as it is and named in the result.
-async function renameNoteTag(from,to){
-  if(!appCanMutate())throw new Error('Use the primary tab to rename tags.');
-  const source=RichTextApi.normalizeTag(from),target=RichTextApi.normalizeTag(to);
-  if(!source||!target)throw new Error('A tag starts with a letter and uses letters, digits, - or _.');
-  return RichTextRuntime.quiesce(()=>AppMutationCoordinator.runExclusive('rename-tag',async()=>{
-    await AppData.notes.flush({strict:true});
-    let changed=0;const failed=[];
-    for(const key of NoteLinks.tagged([source])){
-      const note=AppData.notes.get(key);if(!note)continue;
-      const value=RichTextApi.renameTag(note.text,source,target);if(value===note.text)continue;
-      const result=AppData.notes.update(note.id,note.label,value,note.updatedAt);
-      if(result.status==='changed')changed++;else failed.push(note.label);
-    }
-    await AppData.notes.flush({strict:true});
-    if(AppData.notes.failure().failed)throw new Error('The renamed tags have not saved yet. They will be retried.');
-    return {changed,failed};
-  }));
-}
-// Each .txt or .md file becomes a new note named after it, at the top level or
-// inside the note named; a title already in use gets " (2)". Files that cannot
-// become a note are named in the result with the reason.
-async function importNoteFiles(files,parent=''){
-  if(!appCanMutate())throw new Error('Use the primary tab to import notes.');
-  const list=[...(files||[])],made=[],skipped=[];
-  const titleFor=name=>{const base=clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;AppData.notes.get(title);count++)title=`${full} (${count})`;return title;};
-  return RichTextRuntime.quiesce(()=>AppMutationCoordinator.runExclusive('import-notes',async()=>{
-    let full=false;
-    for(const file of list){
-      const name=String(file?.name||'file'),kind=/\.(md|markdown|txt)$/i.exec(name)?.[1]?.toLowerCase();
-      if(full){skipped.push(`${name} (notes are at their limit)`);continue;}
-      if(!kind){skipped.push(`${name} (not a .txt or .md file)`);continue;}
-      if(file.size>APP_LIMITS.maxRichTextBytes){skipped.push(`${name} (too large for one note)`);continue;}
-      let value;
-      try{const text=await file.text();value=kind==='txt'?RichTextApi.fromText(text):RichTextApi.fromMarkdown(text);}
-      catch(error){skipped.push(`${name} (${String(error?.message||'could not be read').replace(/\.$/,'')})`);continue;}
-      if(!value){skipped.push(`${name} (empty)`);continue;}
-      const title=titleFor(name),result=AppData.notes.update(title,title,value,'');
-      if(result.status==='changed'){made.push(Object.freeze({id:AppData.notes.get(title)?.id||'',label:title}));continue;}
-      skipped.push(`${name} (${result.status==='limit'?'notes are at their limit':result.status==='content-limit'?'too large for one note':'could not be saved'})`);
-      full=result.status==='limit';
-    }
-    if(made.length){await AppData.notes.flush({strict:true});if(AppData.notes.failure().failed)throw new Error('The imported notes have not saved yet. They will be retried.');}
-    return {made,skipped};
-  }));
-}
+async function renameNoteTag(from,to){return notesRuntime().renameTag(from,to);}
+async function importNoteFiles(files,parent=''){return notesRuntime().importFiles(files,parent);}
 const RichTextRuntime=(()=>{
   const BACKGROUND_IDLE_DISPOSE_MS=90000;
   let installed=false,sequence=0,observer=null,closingAll=false,mutationHold=0,mutationFocusState=null,lastActiveField=null,backgroundDisposeTimer=null;
@@ -3755,6 +3386,48 @@ richTextCloseField=field=>RichTextRuntime.closeField(field);
 richTextSyncField=field=>RichTextRuntime.syncField(field);
 richTextSyncAll=()=>RichTextRuntime.syncAll(document);
 richTextReconcileExternal=(field,canonical,revision)=>RichTextRuntime.reconcileExternal(field,canonical,revision);
+NotesRuntime=NotesHostModule.createController(Object.freeze({
+  configuration:Object.freeze({
+    maxAreaNameChars:APP_LIMITS.maxAreaNameChars,maxNoteChars:APP_LIMITS.maxNoteChars,maxNotes:APP_LIMITS.maxNotes,
+    maxRichTextWords:APP_LIMITS.maxRichTextWords,maxRichTextBytes:APP_LIMITS.maxRichTextBytes,supportNote:SUPPORT_NOTE
+  }),
+  repository:AppData.notes,
+  tasks:()=>TASKS,
+  taskIdentity:Object.freeze({
+    validIndex:value=>TaskIdentity.validIndex(value),idAt:index=>TaskIdentity.idAt(index),indexForId:id=>TaskIdentity.indexForId(id),
+    scheduleRevision:()=>taskNoteScheduleRevision
+  }),
+  domain:Object.freeze({
+    normalizeAreaName,displayAreaName,areaParentKeys,clampText,hasOngoingTaskNotes,noteKeyForTask,noteLabelForTask,isSupportBlock,isTrackableBlock
+  }),
+  lifecycle:Object.freeze({canWrite:()=>SessionLifecycle.canWrite(),revision:()=>SessionLifecycle.revision}),
+  ownership:Object.freeze({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
+  richText:Object.freeze({
+    closeField:field=>RichTextRuntime.closeField(field),syncField:field=>RichTextRuntime.syncField(field),
+    reconcileExternal:(field,canonical,revision)=>RichTextRuntime.reconcileExternal(field,canonical,revision),
+    validatedInput:(event,field)=>validatedRichInputMeta(event,field),plain:plainTextContent,
+    isRich:value=>RichTextApi.isRichTextValue(String(value??'')),
+    render:(container,value,empty,label)=>renderRichTextContent(container,value,empty,label),
+    normalizeTag:value=>RichTextApi.normalizeTag(value),renameTag:(value,from,to)=>RichTextApi.renameTag(value,from,to),
+    fromText:value=>RichTextApi.fromText(value),fromMarkdown:value=>RichTextApi.fromMarkdown(value),
+    quiesce:operation=>RichTextRuntime.quiesce(operation)
+  }),
+  tags:Object.freeze({tagged:names=>NoteLinks.tagged(names)}),
+  mutation:Object.freeze({runExclusive:(name,operation)=>AppMutationCoordinator.runExclusive(name,operation)}),
+  view:Object.freeze({
+    document,currentTaskIndex:()=>TimerState.currentIndex,saveLiveDraft:()=>saveLiveDraft(),
+    updateSearchDocument:value=>updateNoteSearchDocument(value),refreshExecute:()=>refreshPnote(),refreshLibrary:()=>refreshLibraryNotes(),
+    requestScheduleRender:()=>requestRender('schedule'),
+    refreshReviewIfVisible:()=>document.getElementById('pane-review')?.classList.contains('on')?ReviewView.refresh():false,
+    refreshRecovery:()=>document.getElementById('recovery-carry-text')?renderRecoveryReview():false,
+    setStatus:(...args)=>setStatus(...args),setPlanStatus:(...args)=>setPlanStatus(...args),
+    publishSafetyNotice:(...args)=>publishSafetyNotice(...args),syncPopover:element=>NoteSyncPopover.refresh(element)
+  }),
+  environment:Object.freeze({queueMicrotask:callback=>queueMicrotask(callback)})
+}));
+if(!Object.isFrozen(NotesRuntime)||NotesRuntime.format!=='study-director.notes-runtime'||NotesRuntime.contractVersion!==1){
+  throw new Error('Study Director notes runtime is unavailable or incompatible.');
+}
 /* PERSONAL PLAN DOCUMENTS · checked host persistence/default adapter */
 const PlanData=PlanHostModule.createData(Object.freeze({
   codec:PersonalDataCodec,
@@ -3835,6 +3508,14 @@ const {
   loadDefault:loadDefaultPlan, getDraft:getPlanDraftText,
   loadDraft:loadScheduleIntoDraft
 }=PlanRuntime;
+LibraryNoteWorkflows=NotesHostModule.createLibraryWorkflows(Object.freeze({
+  runtime:NotesRuntime,repository:AppData.notes,plan:PlanRuntime,
+  interactions:Object.freeze({confirm:options=>Interactions.confirm(options)}),
+  mergeText:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value
+}));
+if(!Object.isFrozen(LibraryNoteWorkflows)||LibraryNoteWorkflows.format!=='study-director.library-note-workflows'||LibraryNoteWorkflows.contractVersion!==1){
+  throw new Error('Study Director note workflows are unavailable or incompatible.');
+}
 /* TIMER COUNTDOWN EXECUTION · PRIVATE ENGINE */
 /* EXECUTE ONGOING PROGRESS NOTE PANEL */
 function saveNote(){
@@ -4649,11 +4330,11 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     settled:field=>LibraryDiaryEditor.settled(field)
   }),
   notes:Object.freeze({
-    areaUse:title=>PlanRuntime.areaUse(title),
+    areaUse:title=>LibraryNoteWorkflows.areaUse(title),
     bindEditor:bindNoteEditor,
     focusEditor:field=>{void RichTextRuntime.activate(field,{focus:true}).catch(error=>AppDiagnostics.capture('library.note-focus',error,'warn'));},
     // Recently deleted gives way at the limit, so only live notes count here.
-    canCreate:()=>AppData.notes.metadataSnapshot().records.length<APP_LIMITS.maxNotes,
+    canCreate:()=>NotesRuntime.canCreate(),
     catalogue:noteCatalogue,
     clearEditor:clearTaskNoteEditorBinding,
     clearFind:field=>RichTextRuntime.clearFind(field),
@@ -4667,20 +4348,18 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     normalizeTag:value=>RichTextApi.normalizeTag(value),
     orderEntries:orderOngoingAreaEntries,
     purgeTrash:()=>AppData.notes.purgeExpiredTrash(),
-    remove:key=>AppData.notes.remove(key),
-    renameAreaInPlans:(title,label)=>PlanRuntime.renameArea(title,label),
+    remove:key=>LibraryNoteWorkflows.remove(key),
     renameTag:(from,to)=>renameNoteTag(from,to),
-    // A merge appends what the moved note adds, as Combine does.
-    rename:(key,label,options)=>AppData.notes.rename(key,label,options&&options.merge?{merge:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value}:{}),
+    rename:(entry,value,options)=>LibraryNoteWorkflows.rename(entry,value,options),
     renderInherited:renderInheritedNotes,
-    restore:key=>AppData.notes.restore(key),
+    restore:key=>LibraryNoteWorkflows.restore(key),
     reviewKept:id=>void KeptVersions.review(id),
     keptVersion:id=>KeptVersions.note(id),
     searchDocuments:noteSearchDocuments,
-    size:()=>AppData.notes.size(),
+    size:()=>NotesRuntime.size(),
     tagged:names=>NoteLinks.tagged(names),
     tags:()=>NoteLinks.tags(),
-    trash:key=>AppData.notes.trash(key),
+    trash:key=>LibraryNoteWorkflows.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
     versions:target=>withBackupPassword(()=>BackupRecoveryHost.history.openNote(target)),
     print:(key,title)=>{RichTextRuntime.flushEditors();const note=AppData.notes.get(key);return note?printNote(title,note.text):false;}
