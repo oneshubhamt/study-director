@@ -53,6 +53,7 @@ const ExportsModule=INTERNAL_MODULES.load('exports',1,'study-director.exports-mo
 const IntegrityContinuationModule=INTERNAL_MODULES.load('integrity-continuation',1,'study-director.integrity-continuation-module',1);
 const NoteExportModule=INTERNAL_MODULES.load('note-export',2,'study-director.note-export-module',2);
 const LibraryClearModule=INTERNAL_MODULES.load('library-clear',1,'study-director.library-clear-module',2);
+const RichTextHostModule=INTERNAL_MODULES.load('rich-text-host',1,'study-director.rich-text-host-module',1);
 const NoteLinksModule=INTERNAL_MODULES.load('note-links',1,'study-director.note-links-module',1);
 const NotesHostModule=INTERNAL_MODULES.load('notes-host',1,'study-director.notes-host-module',1);
 const ProfilesModule=INTERNAL_MODULES.load('profiles',1,'study-director.profiles-module',1);
@@ -3066,311 +3067,32 @@ const showNotesTagged=NoteLinkNavigation.showTagged;
 // meanwhile is left as it is and named in the result.
 async function renameNoteTag(from,to){return notesRuntime().renameTag(from,to);}
 async function importNoteFiles(files,parent=''){return notesRuntime().importFiles(files,parent);}
-const RichTextRuntime=(()=>{
-  const BACKGROUND_IDLE_DISPOSE_MS=90000;
-  let installed=false,sequence=0,observer=null,closingAll=false,mutationHold=0,mutationFocusState=null,lastActiveField=null,backgroundDisposeTimer=null;
-  const mutationFields=new Map(),mutationSurfaces=new Map();
-  const mounted=new Map(),pending=new Map();
-  const previews=new WeakMap(),lastCanonical=new WeakMap(),mountErrors=new WeakMap();
-  function capture(scope,error){AppDiagnostics.capture(scope,error,'warn');}
-  function eligible(field){return field instanceof HTMLTextAreaElement&&(field.id==='daily-reflection'||field.matches('.task-note-field,.library-diary-textarea'));}
-  function applyMutationField(field){
-    if(!eligible(field)||mutationFields.has(field))return false;
-    mutationFields.set(field,Object.freeze({readOnly:field.readOnly,ariaBusy:field.getAttribute('aria-busy')}));
-    field.readOnly=true;field.setAttribute('aria-busy','true');field.dataset.richMutationReadonly='1';return true;
-  }
-  function applyMutationFields(root=document){
-    const fields=[];if(root instanceof HTMLTextAreaElement&&eligible(root))fields.push(root);
-    root.querySelectorAll?.('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection').forEach(field=>{if(!fields.includes(field))fields.push(field);});
-    fields.forEach(applyMutationField);return fields;
-  }
-  function restoreMutationFields(){
-    for(const [field,state] of mutationFields){
-      if(!field?.isConnected)continue;
-      field.readOnly=!!state.readOnly;
-      if(state.ariaBusy==null)field.removeAttribute('aria-busy');else field.setAttribute('aria-busy',state.ariaBusy);
-      delete field.dataset.richMutationReadonly;
-    }
-    mutationFields.clear();
-  }
-  function applyMutationSurface(surface){
-    if(!(surface instanceof HTMLElement)||mutationSurfaces.has(surface))return false;
-    mutationSurfaces.set(surface,Object.freeze({inert:surface.inert,ariaBusy:surface.getAttribute('aria-busy')}));
-    surface.inert=true;surface.setAttribute('aria-busy','true');surface.dataset.richMutationSurface='1';return true;
-  }
-  function applyMutationSurfaces(root=document){root.querySelectorAll?.('.sd-rte').forEach(applyMutationSurface);}
-  function restoreMutationSurfaces(){
-    for(const [surface,state] of mutationSurfaces){
-      if(!surface?.isConnected)continue;
-      surface.inert=!!state.inert;
-      if(state.ariaBusy==null)surface.removeAttribute('aria-busy');else surface.setAttribute('aria-busy',state.ariaBusy);
-      delete surface.dataset.richMutationSurface;
-    }
-    mutationSurfaces.clear();
-  }
-  function captureMutationFocus(){
-    const active=document.activeElement;if(!(active instanceof HTMLElement)||active===document.body||active===document.documentElement)return null;
-    const action=active.closest?.('[data-attachment-action]')?.dataset?.attachmentAction||'';
-    return Object.freeze({node:active,id:String(active.id||''),action:String(action||'')});
-  }
-  function restoreMutationFocus(state){
-    if(!state)return false;let target=state.node?.isConnected?state.node:null;
-    if((!target||target.disabled)&&state.action)target=[...document.querySelectorAll('#library-attachments [data-attachment-action]')].find(node=>node.dataset.attachmentAction===state.action)||null;
-    if((!target||target.disabled)&&state.id)target=document.getElementById(state.id);
-    if(!(target instanceof HTMLElement)||target.disabled||target.inert)return false;
-    target.focus({preventScroll:true});return document.activeElement===target;
-  }
-  function mutationActive(){return mutationHold>0;}
-  function hidePreview(field){const preview=previews.get(field);if(preview){preview.shell.hidden=true;preview.body.replaceChildren();}}
-  function clearPreview(field){hidePreview(field);if(field instanceof HTMLTextAreaElement)field.hidden=false;}
-  function clearMountError(field){const known=mountErrors.get(field);if(known)known.remove();mountErrors.delete(field);if(field instanceof HTMLTextAreaElement)delete field.dataset.richMountFailed;}
-  function showMountError(field,descriptor){
-    clearPreview(field);field.hidden=false;field.style.display='';field.removeAttribute('aria-hidden');field.value=plainTextContent(descriptor.initialValue||field.value||'');field.dataset.richMountFailed=descriptor.documentId;
-    const shell=document.createElement('div'),message=document.createElement('span'),retry=document.createElement('button');shell.className='rich-text-mount-error';shell.setAttribute('role','alert');message.textContent='The rich editor could not start. Plain-text fallback is active and still saves your writing.';retry.type='button';retry.className='rich-text-mount-retry';retry.textContent='Retry';retry.addEventListener('click',()=>{clearMountError(field);void activate(field,{retry:true,focus:true});});shell.append(message,retry);field.insertAdjacentElement('afterend',shell);mountErrors.set(field,shell);return shell;
-  }
-  function previewFor(field){
-    const known=previews.get(field);if(known&&known.shell.isConnected)return known;
-    const shell=document.createElement('div'),body=document.createElement('div'),edit=document.createElement('button');
-    shell.className='sd-rte sd-rte-dormant-shell';shell.hidden=true;shell.dataset.richDormant='1';
-    body.className='sd-rte-dormant-content';
-    edit.type='button';edit.className='sd-rte-dormant-edit';edit.textContent='Edit';
-    edit.addEventListener('click',()=>{hidePreview(field);void activate(field,{focus:true}).then(ok=>{if(!ok)syncField(field);});});
-    shell.append(body,edit);field.insertAdjacentElement('afterend',shell);
-    const preview=Object.freeze({shell,body,edit});previews.set(field,preview);return preview;
-  }
-  function fieldRichRevision(field){
-    if(field.id==='daily-reflection')return `${field.dataset.reviewDate||''}:${field.dataset.reviewOwnershipRevision||''}:${field.dataset.reviewLifecycleRevision||''}`;
-    if(field.matches('.library-diary-textarea'))return String(field.dataset.diaryRevision||'');
-    return String(field.dataset.noteRevision||'');
-  }
-  function fieldRichDocumentId(field){
-    if(field.id==='daily-reflection')return `review:${field.dataset.reviewDate||getReviewDate()}`;
-    if(field.matches('.library-diary-textarea'))return field.dataset.diaryDate?`diary:${field.dataset.diaryDate}`:'';
-    const areaKey=normalizeAreaName(field.dataset.areaKey);return areaKey?`area:${areaKey}`:'';
-  }
-  function canonicalFor(field,descriptor){
-    const remembered=lastCanonical.get(field),visible=String(field.value||'');
-    if(remembered&&remembered.documentId===descriptor.documentId&&remembered.revision===fieldRichRevision(field)){
-      if(typeof remembered.plain==='string'&&remembered.plain===visible)return remembered.value;
-      if(RichTextApi.isRichTextValue(remembered.value)&&plainTextContent(remembered.value)===visible)return remembered.value;
-    }
-    if(remembered)lastCanonical.delete(field);
-    return String(descriptor&&descriptor.initialValue||'');
-  }
-  function recordDirty(record){
-    if(!record)return false;
-    if(record.field.matches('.task-note-field'))return record.field.dataset.richSyncState==='saving'||record.field.dataset.richExternalConflict==='1';
-    return record.localCanonical!==record.baselineCanonical||record.field.dataset.richSyncState==='saving';
-  }
-  function clearExternalConflict(field){
-    if(!(field instanceof HTMLTextAreaElement))return;
-    delete field.dataset.richExternalConflict;
-    if(field.dataset.noteBindingState==='conflict')field.dataset.noteBindingState='current';
-  }
-  function markExternalConflict(field,record){
-    if(!(field instanceof HTMLTextAreaElement))return Object.freeze({status:'unmounted'});
-    field.dataset.richExternalConflict='1';
-    if(field.matches('.library-diary-textarea')){field.dataset.richSyncState='conflict';field.dataset.richSyncStatus='Newer saved reflection detected';}
-    if(field.matches('.task-note-field')){
-      field.dataset.noteBindingState='conflict';
-      const key=normalizeAreaName(field.dataset.areaKey);if(key)setNoteSyncStateForKey(key,'conflict');
-    }
-    return Object.freeze({status:'conflict',documentId:record?.documentId||fieldRichDocumentId(field),revision:record?.revision||fieldRichRevision(field)});
-  }
-  function reconcileExternal(field,canonicalValue,nextRevision){
-    if(!eligible(field))return Object.freeze({status:'unmounted'});
-    const record=mounted.get(field);if(!record)return Object.freeze({status:'unmounted'});
-    const canonical=String(canonicalValue||''),revision=String(nextRevision||'');
-    if(revision===record.revision&&canonical===record.baselineCanonical)return Object.freeze({status:'same'});
-    if(canonical===record.localCanonical){
-      record.revision=revision;record.baselineCanonical=canonical;clearExternalConflict(field);
-      return Object.freeze({status:'acknowledged'});
-    }
-    if(recordDirty(record))return markExternalConflict(field,record);
-    clearExternalConflict(field);
-    return Object.freeze({status:'reload'});
-  }
-  function cancelBackgroundDisposal(){if(backgroundDisposeTimer){clearTimeout(backgroundDisposeTimer);backgroundDisposeTimer=null;}}
-  function pickerLeaseActive(){return [...mounted.keys()].some(field=>field.dataset.richAssetPicker==='active');}
-  async function disposeBackgroundIdleEditors(){
-    backgroundDisposeTimer=null;
-    if(!document.hidden||closingAll||pickerLeaseActive())return false;
-    try{if(await flushPendingReviewSave({strict:true})===false)return false;await ReviewEditor.settled();}catch(error){capture('rich-text.background-reflection-flush',error);return false;}
-    try{await AppData.notes.flush({strict:true});}catch(error){capture('rich-text.background-note-flush',error);return false;}
-    if(!document.hidden||pickerLeaseActive())return false;
-    for(const field of [...mounted.keys()]){const safe=await dispose(field,{resync:true});if(!safe&&field.isConnected)syncField(field);}
-    return true;
-  }
-  function scheduleBackgroundDisposal(){
-    cancelBackgroundDisposal();
-    backgroundDisposeTimer=setTimeout(()=>{void disposeBackgroundIdleEditors();},BACKGROUND_IDLE_DISPOSE_MS);
-  }
-  function handleActivation(event){
-    if(!event||event.format!=='study-director.activation-event')return;
-    if(event.kind===APP_ACTIVATION_KINDS.BACKGROUND){flushEditors();AppData.notes.protectUnsaved();void AppData.notes.flush();scheduleBackgroundDisposal();return;}
-    if(event.kind===APP_ACTIVATION_KINDS.ORDINARY_FOCUS){cancelBackgroundDisposal();if(!document.hidden)syncAll(document);return;}
-    if(event.kind===APP_ACTIVATION_KINDS.VISIBILITY_RETURN){cancelBackgroundDisposal();if(!document.hidden)syncAll(document);return;}
-    if(event.kind===APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER||event.kind===APP_ACTIVATION_KINDS.DATE_ROLLOVER||event.kind===APP_ACTIVATION_KINDS.EXIT)cancelBackgroundDisposal();
-  }
-  function syncField(field){
-    if(!eligible(field))return false;
-    const record=mounted.get(field);
-    if(record){
-      const descriptor=richTextDocumentFor(field,{requireVisible:false});
-      if(!descriptor||descriptor.documentId!==record.documentId){void dispose(field,{resync:true});return false;}
-      const currentRevision=fieldRichRevision(field),canonical=String(descriptor.initialValue||'');
-      if(currentRevision!==record.revision||canonical!==record.baselineCanonical){
-        if(canonical===record.localCanonical){record.revision=currentRevision;record.baselineCanonical=canonical;clearExternalConflict(field);}
-        else if(recordDirty(record)){markExternalConflict(field,record);clearPreview(field);return false;}
-        else{clearExternalConflict(field);void dispose(field,{resync:false}).then(()=>{if(field.isConnected&&!document.hidden)void activate(field);else syncField(field);});return true;}
-      }
-      clearPreview(field);return false;
-    }
-    if(pending.has(field)){hidePreview(field);return false;}
-    const failedId=String(field.dataset.richMountFailed||''),currentId=fieldRichDocumentId(field);if(failedId&&failedId===currentId){clearPreview(field);return false;}if(failedId)clearMountError(field);
-    const descriptor=richTextDocumentFor(field,{requireVisible:false,editable:false});
-    if(!descriptor){clearPreview(field);return false;}
-    const canonical=canonicalFor(field,descriptor);
-    if(!canonical.startsWith(RichTextApi.storagePrefix)){clearPreview(field);return false;}
-    const preview=previewFor(field);if(mutationActive())applyMutationSurface(preview.shell);
-    preview.edit.disabled=mutationActive();preview.edit.textContent=mutationActive()?'Updating…':'Edit';
-    preview.edit.setAttribute('aria-label',mutationActive()?`Updating ${descriptor.label}`:`Edit ${descriptor.label}`);
-    if(!renderRichTextContent(preview.body,canonical,'',descriptor.label)){clearPreview(field);return false;}
-    field.hidden=true;preview.shell.hidden=false;return true;
-  }
-  function syncAll(root=document){
-    for(const [field,record] of mounted){const descriptor=richTextDocumentFor(field,{requireVisible:false}),visible=field.id==='daily-reflection'?!!field.closest('.pane.on'):taskNoteEditorIsVisible(field),pickerOpen=field.dataset.richAssetPicker==='active';if(!field.isConnected||!descriptor||descriptor.documentId!==record.documentId||(!document.hidden&&!visible&&!pickerOpen))void dispose(field,{resync:false});}
-    const fields=[];
-    if(root instanceof HTMLTextAreaElement&&eligible(root))fields.push(root);
-    root.querySelectorAll?.('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection').forEach(field=>{if(!fields.includes(field))fields.push(field);});
-    if(mutationActive())fields.forEach(applyMutationField);
-    const editable=(!closingAll&&!mutationActive()&&!document.hidden)?fields.filter(field=>field.isConnected&&!field.disabled&&!field.readOnly&&field.closest('.pane.on')&&(field.id==='daily-reflection'||taskNoteEditorIsVisible(field))&&field.dataset.richMountFailed!==fieldRichDocumentId(field)&&richTextDocumentFor(field)):[];
-    const candidate=editable.find(field=>field.id==='daily-reflection')||editable[0]||null;
-    fields.forEach(field=>{if(field===candidate||pending.has(field))hidePreview(field);else if(mounted.has(field))clearPreview(field);else syncField(field);});
-    if(candidate&&!mounted.has(candidate)&&!pending.has(candidate))return activate(candidate);
-    return false;
-  }
-  async function dispose(field,options={}){
-    if(!field)return false;
-    pending.delete(field);
-    const record=mounted.get(field);if(!record){clearPreview(field);return false;}
-    let assetFlushFailed=false,leaseReleaseFailed=false;
-    const conflictDescriptor=field.dataset.richExternalConflict==='1'?richTextDocumentFor(field,{requireVisible:false,editable:false}):null;
-    const conflictCanonical=conflictDescriptor?.documentId===record.documentId?String(conflictDescriptor.initialValue||''):null;
-    mounted.delete(field);if(lastActiveField===field)lastActiveField=[...mounted.keys()].at(-1)||null;
-    record.field.hidden=true;
-    try{
-      try{
-        if(record.field.id==='daily-reflection'){
-          try{
-            if(await flushPendingReviewSave({strict:true})===false)assetFlushFailed=true;else await ReviewEditor.settled();
-          }catch(error){assetFlushFailed=true;capture('rich-text.reflection-flush',error);}
-        }
-        await record.mounted.destroy();
-      }catch(error){assetFlushFailed=true;capture('rich-text.destroy',error);}
-      try{await AppData.notes.flush();await AppData.activeSession.settled();}catch(error){assetFlushFailed=true;capture('rich-text.asset-flush',error);}
-    }finally{
-      try{record.releaseAssets?.();}catch(error){leaseReleaseFailed=true;capture('rich-text.asset-release',error);}
-    }
-    if(assetFlushFailed||leaseReleaseFailed)return false;
-    if(conflictCanonical!==null){
-      record.field.value=plainTextContent(conflictCanonical);lastCanonical.delete(record.field);clearExternalConflict(record.field);
-      if(record.field.matches('.task-note-field')){const key=normalizeAreaName(record.field.dataset.areaKey),entry=key?AppData.notes.get(key):null;record.field.dataset.noteRevision=String(entry&&entry.updatedAt||'');if(key)setNoteSyncStateForKey(key,'synced');}
-    }
-    if((options.resync!==false||mutationActive())&&record.field.isConnected)syncField(record.field);
-    return true;
-  }
-  async function close(){
-    cancelBackgroundDisposal();sequence+=1;closingAll=true;let safe=true;
-    try{
-      for(const field of [...pending.keys()])pending.delete(field);
-      for(const field of [...mounted.keys()])if(!await dispose(field,{resync:false}))safe=false;
-      return safe;
-    }finally{closingAll=false;if(!mutationActive())queueMicrotask(()=>syncAll(document));}
-  }
-  function closeField(field){
-    if(!field)return false;
-    const existed=pending.delete(field)||mounted.has(field);if(existed)sequence+=1;
-    if(mounted.has(field))void dispose(field,{resync:false});else clearPreview(field);
-    return existed;
-  }
-  async function activate(field,options={}){
-    if(mutationActive()){applyMutationField(field);if(!mounted.has(field))syncField(field);return false;}
-    hidePreview(field);
-    const descriptor=richTextDocumentFor(field);
-    if(!descriptor){syncField(field);return false;}
-    if(field.dataset.richMountFailed===descriptor.documentId&&!options.retry)return false;clearMountError(field);
-    if(closingAll)return false;
-    const existing=mounted.get(field);if(existing?.documentId===descriptor.documentId){lastActiveField=field;if(options.focus===true)existing.mounted.focus();return true;}
-    if(existing)await dispose(field,{resync:false});
-    for(const [other,record] of mounted)if(other!==field&&record.documentId===descriptor.documentId)await dispose(other,{resync:true});
-    const request=++sequence;pending.set(field,request);
-    if(pending.get(field)!==request||!field.isConnected){syncField(field);return false;}
-    const current=richTextDocumentFor(field);
-    if(!current||current.documentId!==descriptor.documentId){pending.delete(field);syncField(field);return false;}
-    let releaseAssets=null;
-    try{
-      releaseAssets=await AttachmentStorage.retain();
-      if(pending.get(field)!==request||!field.isConnected){releaseAssets();return false;}
-      const initialCanonical=canonicalFor(field,current),editorMount=await RichTextApi.mountRichTextEditor({
-        field,label:current.label,initialValue:initialCanonical,maxWords:current.maxWords,maxBytes:APP_LIMITS.maxRichTextBytes,assets:RichTextAssets,surface:current.surface,notes:richTextNotes(field),
-        onAssetBusy:busy=>{imagePreparationCount+=busy?1:-1;if(busy)pwaWorkRevision++;else schedulePwaUpdateEvaluation(250);},
-        createImageWorker:()=>new Worker(trustedAssetURL('@@SD_IMAGE_WORKER_FILENAME@@'),{name:'study-director-image'}),workspaceOverlay:RichTextWorkspaceOverlay,attachments:RichTextAttachmentPort,
-        focusOnMount:options.focus===true,onDerivedText:field.matches('.task-note-field')?(_canonical,plain)=>updateNoteSearchText(normalizeAreaName(field.dataset.areaKey),plain):undefined
-      });
-      if(pending.get(field)!==request||!field.isConnected){await editorMount.destroy();releaseAssets();syncField(field);return false;}
-      pending.delete(field);mounted.set(field,{field,documentId:current.documentId,mounted:editorMount,releaseAssets,revision:fieldRichRevision(field),baselineCanonical:initialCanonical,localCanonical:initialCanonical});lastActiveField=field;
-      OwnershipUiProjection.apply(field.parentElement||document);
-      return true;
-    }catch(error){releaseAssets?.();if(pending.get(field)===request)pending.delete(field);capture('rich-text.mount',error);showMountError(field,descriptor);return false;}
-  }
-  // Search matches inside one editor: mount it if needed, mark every match and
-  // scroll to the first; the editor clears them on any edit or Escape.
-  async function find(field,query,onClear){if(!await activate(field))return 0;const record=mounted.get(field);return record?record.mounted.search(query,onClear):0;}
-  function findStep(field,direction){const record=mounted.get(field);return record?record.mounted.stepSearch(direction):{index:-1,count:0};}
-  function clearFind(field){mounted.get(field)?.mounted.clearSearch();}
-  // Editors that group keystrokes publish them now.
-  function flushEditors(){for(const record of mounted.values()){try{record.mounted.flush();}catch(error){capture('rich-text.flush',error);}}}
-  async function quiesce(work){
-    if(typeof work!=='function')throw new TypeError('Rich-text quiescence requires an operation.');
-    flushEditors();
-    const outer=mutationHold===0;if(outer)mutationFocusState=captureMutationFocus();mutationHold++;
-    if(outer){
-      document.documentElement.dataset.richTextQuiesced='1';applyMutationFields(document);applyMutationSurfaces(document);
-      const active=document.activeElement;if(active instanceof Element&&(active.closest?.('.sd-rte')||eligible(active)))active.blur?.();
-    }
-    try{return await work();}
-    finally{
-      mutationHold--;
-      if(!mutationHold){
-        const focusState=mutationFocusState;mutationFocusState=null;
-        restoreMutationFields();restoreMutationSurfaces();delete document.documentElement.dataset.richTextQuiesced;
-        OwnershipUiProjection.apply(document);await Promise.resolve(syncAll(document));restoreMutationFocus(focusState);
-      }
-    }
-  }
-  function onBeforeInput(event){if(!mutationActive())return;const target=event.target;if((target instanceof HTMLTextAreaElement&&eligible(target))||(target instanceof Element&&target.closest?.('.sd-rte'))){event.preventDefault();event.stopImmediatePropagation();}}
-  function onFocusIn(event){const field=event.target instanceof HTMLTextAreaElement?event.target:null;if(eligible(field))void activate(field,{focus:true});}
-  function onInput(event){const field=event.target instanceof HTMLTextAreaElement?event.target:null;if(!eligible(field))return;const current=String(field.value||''),record=mounted.get(field),trusted=validatedRichInputMeta(event,field);if(record&&(trusted||RichTextApi.isRichTextValue(current)))record.localCanonical=trusted?trusted.canonical:current;queueMicrotask(()=>{const canonical=String(field.value||''),accepted=trusted&&trusted.canonical===canonical?trusted:null;if(accepted||RichTextApi.isRichTextValue(canonical))lastCanonical.set(field,Object.freeze({value:accepted?accepted.canonical:canonical,plain:accepted?accepted.plain:undefined,documentId:fieldRichDocumentId(field),revision:fieldRichRevision(field)}));else lastCanonical.delete(field);if(!mounted.has(field))syncField(field);});}
-  function install(){
-    if(installed)return false;installed=true;
-    document.addEventListener('focusin',onFocusIn,true);document.addEventListener('beforeinput',onBeforeInput,true);document.addEventListener('input',onInput,true);
-    document.addEventListener('toggle',event=>{if(event.target instanceof HTMLDetailsElement)queueMicrotask(()=>syncAll(document));},true);
-    AppActivation.subscribe(handleActivation);window.addEventListener('pagehide',()=>{flushEditors();void flushPendingReviewSave({strict:false}).catch(error=>capture('rich-text.pagehide-reflection-flush',error));AppData.notes.protectUnsaved();void AppData.notes.flush();});
-    observer=new MutationObserver(records=>{
-      const selector='textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection';
-      const addedEditor=records.some(record=>[...record.addedNodes].some(node=>
-        (node instanceof HTMLTextAreaElement&&eligible(node))||(node instanceof Element&&!!node.querySelector(selector))
-      ));
-      const removedEditor=records.some(record=>record.removedNodes.length>0);
-      if(removedEditor)for(const field of mounted.keys())if(!field.isConnected)void dispose(field,{resync:false});
-      if(addedEditor)syncAll(document);
-    });observer.observe(document.body,{childList:true,subtree:true});
-    queueMicrotask(()=>syncAll(document));return true;
-  }
-  function status(){return Object.freeze({installed,loaded:true,activeDocumentId:mounted.get(lastActiveField)?.documentId||'',activeDocumentIds:Object.freeze([...new Set([...mounted.values()].map(record=>record.documentId))]),mounted:mounted.size,pending:pending.size>0,quiesced:mutationActive(),backgroundDisposalPending:backgroundDisposeTimer!==null,backgroundIdleDisposeMs:BACKGROUND_IDLE_DISPOSE_MS,externalConflicts:[...mounted.values()].filter(record=>record.field.dataset.richExternalConflict==='1').length});}
-  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,find,findStep,clearFind,status});
-})();
+const RichTextRuntime=RichTextHostModule.createRuntime(Object.freeze({
+  configuration:Object.freeze({maxRichTextBytes:APP_LIMITS.maxRichTextBytes}),document,window,
+  richText:RichTextApi,assets:RichTextAssets,
+  attachments:Object.freeze({
+    port:()=>RichTextAttachmentPort,
+    createImageWorker:()=>new Worker(trustedAssetURL('@@SD_IMAGE_WORKER_FILENAME@@'),{name:'study-director-image'}),
+    workspaceOverlay:RichTextWorkspaceOverlay,
+    onBusy:busy=>{imagePreparationCount+=busy?1:-1;if(busy)pwaWorkRevision++;else schedulePwaUpdateEvaluation(250);}
+  }),
+  notes:Object.freeze({
+    repository:AppData.notes,links:field=>richTextNotes(field),normalizeArea:normalizeAreaName,
+    setSyncState:(key,state)=>setNoteSyncStateForKey(key,state),updateSearchText:(key,plain)=>updateNoteSearchText(key,plain)
+  }),
+  review:Object.freeze({date:()=>getReviewDate(),flushPending:options=>ReviewEditor.flushPending(options),settled:()=>ReviewEditor.settled()}),
+  session:Object.freeze({settled:()=>AppData.activeSession.settled()}),
+  view:Object.freeze({
+    documentFor:(field,options)=>richTextDocumentFor(field,options),render:(container,value,emptyText,label)=>renderRichTextContent(container,value,emptyText,label),
+    plain:value=>plainTextContent(value),visible:field=>taskNoteEditorIsVisible(field),validatedInput:(event,field)=>validatedRichInputMeta(event,field),
+    applyOwnership:root=>OwnershipUiProjection.apply(root)
+  }),
+  activation:Object.freeze({kinds:APP_ACTIVATION_KINDS,subscribe:callback=>AppActivation.subscribe(callback)}),
+  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+}));
+if(!Object.isFrozen(RichTextRuntime)||RichTextRuntime.format!=='study-director.rich-text-runtime'||RichTextRuntime.contractVersion!==1){
+  throw new Error('Study Director rich-text host runtime is unavailable or incompatible.');
+}
 SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
 async function quiesceManagedRecoveryRuntime(operation){
   if(typeof operation!=='function')throw new TypeError('Managed recovery quiescence requires an operation.');
