@@ -7,7 +7,7 @@ import type {LibraryNoteWorkflows,NoteAreaIdentity,NoteCatalogueEntry,NotesRepos
 import type {Task} from './domain.ts';
 import type {PracticeRun} from './record-models.ts';
 import type {DiaryEditor,DiaryDraft,SavedDayRecord} from './review-persistence.ts';
-import type {ReviewRecordViewTask,SharedReviewPresentation} from './review.ts';
+import type {SavedDayPresentationTask,SharedReviewPresentation} from './review.ts';
 import type {DailyView,SummaryView} from './repositories.ts';
 
 type DailyRecords=AppData['dailyRecords'];
@@ -60,8 +60,8 @@ export interface LibraryInput{
       sortedSummaries():PromiseLike<readonly LibrarySummary[]>|readonly LibrarySummary[];
     }>;
     domain:Readonly<{
-      countTaskOutcomes(tasks:readonly ReviewRecordViewTask[]):unknown;
-      earliestSupportedSavedDate():string;isTrackableBlock(task:Task|ReviewRecordViewTask|undefined):boolean;isValidIsoDate(value:unknown):boolean;isSupportedSavedDate(value:string):boolean;todayISO():string;
+      countTaskOutcomes(tasks:readonly SavedDayPresentationTask[]):unknown;
+      earliestSupportedSavedDate():string;isTrackableBlock(task:Task|SavedDayPresentationTask|undefined):boolean;isValidIsoDate(value:unknown):boolean;isSupportedSavedDate(value:string):boolean;todayISO():string;
       sanitizePracticeRuns(value:unknown):readonly PracticeRun[];sanitizeTaskOutcomeCounts(value:unknown):unknown;taskOutcomeSummaryText(value:unknown,options?:Readonly<{includeZero?:boolean}>):string;
     }>;
     presentation:Readonly<Pick<SharedReviewPresentation,'createPomodoroSummaryLine'|'populatePracticeRunTable'|'optionalDurationLabel'|'optionalPercentLabel'>&{
