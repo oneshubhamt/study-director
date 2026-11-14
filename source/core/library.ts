@@ -1474,7 +1474,15 @@ const createModule=():LibraryModuleContract=>{
       const restoreAfter=!!(options&&options.restoreScroll);
       const token=++libraryRenderToken;
       const previousRenderedRevision=libraryRenderedRevision;
-      const allRecords=await loadLibrarySummaries();
+      let allRecords:readonly LibraryPreparedSummary[];
+      try{allRecords=await loadLibrarySummaries();}
+      catch(error){
+        if(token===libraryRenderToken){
+          setStatus('library-status','Could not load Library: '+errorMessage(error),false);
+          if(restoreAfter)restoreLibraryScroll();
+        }
+        return false;
+      }
       const records=allRecords.filter(record=>record.recordKind==='study');
       if(token!==libraryRenderToken)return false;
       populateLibraryFilterOptions(records);

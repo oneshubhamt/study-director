@@ -288,6 +288,28 @@ const noop=()=>{};
   assert.ok(statuses.some(row=>String(row.message).includes('current storage failure')),'the current Saved-Day storage failure remains truthful and visible');
 }
 
+// P5.6B summary refresh failures retain the last rendered Library state instead
+// of escaping from requestAnimationFrame as an unhandled rejection.
+{
+  const statuses=[];let restored=0;
+  const context={
+    Promise,Error,
+    attachmentMutationHold:0,libraryRenderToken:0,libraryRenderedRevision:0,
+    document:{getElementById:id=>id==='library-list'?{}:null},
+    loadLibrarySummaries:()=>Promise.reject(new Error('summary storage failure')),
+    setStatus:(id,message,ok)=>statuses.push({id,message,ok}),
+    errorMessage:error=>String(error?.message||error),
+    restoreLibraryScroll:()=>{restored+=1;}
+  };
+  vm.createContext(context);
+  const start=library.indexOf('    async function renderLibrary('),end=library.indexOf('    async function activateLibrary(',start);
+  assert.ok(start>0&&end>start,'P5.6B Library refresh source remains independently testable');
+  vm.runInContext(library.slice(start,end),context);
+  assert.equal(await context.renderLibrary({restoreScroll:true}),false);
+  assert.equal(restored,1,'a current failed refresh restores the preserved viewport');
+  assert.ok(statuses.some(row=>String(row.message).includes('summary storage failure')),'the current summary storage failure is visible');
+}
+
 // A strict writer-settlement flush may see an untouched, bound Reflection
 // before the Diary-only baseline has ever been hydrated. That is a no-op, not
 // evidence that an edit can be discarded; a changed unverified binding still fails closed.
@@ -334,4 +356,4 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','P5.6B stale Saved-Day read fence','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','P5.6B stale Saved-Day read fence','P5.6B summary refresh failure containment','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
