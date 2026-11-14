@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import vm from 'node:vm';
 function fixture(){
   let now=0,next=0,query='planet',renders=0,failPost=false;const timers=new Map(),workers=[];
   const window={setTimeout(fn,ms){const id=++next;timers.set(id,{fn,at:now+ms});return id;},clearTimeout:id=>timers.delete(id)};
-  const source=fs.readFileSync('source/core/library.js','utf8'),context={window,notesSearch:()=>query,noteSearchDocuments:()=>[{key:'one',value:'a planet orbit'}],plainTextContent:value=>value,requestNotesRender:()=>renders++,createSearchWorker:()=>{const worker={messages:[],terminated:0,postMessage(value){if(failPost)throw new Error('clone');this.messages.push(value);},terminate(){this.terminated++;}};workers.push(worker);return worker;}};
+  const source=readRuntimeSource('source/core/library.ts'),context={window,notesSearch:()=>query,noteSearchDocuments:()=>[{key:'one',value:'a planet orbit'}],plainTextContent:value=>value,requestNotesRender:()=>renders++,createSearchWorker:()=>{const worker={messages:[],terminated:0,postMessage(value){if(failPost)throw new Error('clone');this.messages.push(value);},terminate(){this.terminated++;}};workers.push(worker);return worker;}};
   vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    const NOTE_SEARCH_IDLE_MS='),source.indexOf('    function notesSection('))+';globalThis.api={filterNoteEntries,stopNoteSearch,resetNoteSearchFailure,requestNoteSearch};',context);
   return {api:context.api,workers,timers,setQuery:value=>query=value,failPost:()=>failPost=true,get renders(){return renders;},tick(ms){now+=ms;for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn();}}};
 }

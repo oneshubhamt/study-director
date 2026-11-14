@@ -79,7 +79,7 @@ console.log(JSON.stringify({status:'PASS',suite:'workspace-history-ownership',ow
 
 { // library-sections-contract
 const app=readHostHtml();
-const library=fs.readFileSync('source/core/library.js','utf8');
+const library=readRuntimeSource('source/core/library.ts');
 const editor=fs.readFileSync('rich-text/editor.ts','utf8');
 // Notes · Days · Data: one switch, one panel each, Notes first.
 const tabs=[...app.matchAll(/role="tab" id="library-tab-(\w+)" data-library-section="\1" aria-controls="library-\1"/gu)].map(match=>match[1]);

@@ -1,11 +1,19 @@
 import type {BrowserRegistry} from '../browser-registry.ts';
 import type {AppData} from '../data-bootstrap-host.ts';
+import type {DocumentIntegration} from '../document-host.ts';
+import type {DomainModule} from '../domain.ts';
 import type {LibraryInput} from '../library.ts';
-import type {LibraryClearModule} from '../../source/core/library-clear.ts';
 import type {LibraryNoteWorkflows,NotesRuntime} from '../notes-host.ts';
 import type {NoteLinksController} from '../note-links.ts';
 import type {ReviewPersistence} from '../review-persistence.ts';
 import type {ReviewSubsystem} from '../review.ts';
+import type {OwnershipController} from '../startup-host.ts';
+import type {AttachmentsModule} from '../../source/core/attachments.ts';
+import type {InteractionsModule} from '../../source/core/interactions.ts';
+import type {LibraryClearModule} from '../../source/core/library-clear.ts';
+import type {NoticeCoordinator} from '../../source/core/notice-coordinator.ts';
+import type {SessionActionsModule} from '../../source/core/session-actions.ts';
+import type {RichTextApi} from '../../rich-text/editor.ts';
 
 type Ports=LibraryInput['ports'];
 
@@ -19,24 +27,59 @@ declare const notesRuntime:Readonly<NotesRuntime>;
 declare const noteWorkflows:Readonly<LibraryNoteWorkflows>;
 declare const noteLinks:Readonly<NoteLinksController>;
 declare const clearCoordinator:Readonly<ReturnType<LibraryClearModule['createCoordinator']>>;
+declare const domain:Readonly<DomainModule>;
+declare const interactions:Readonly<ReturnType<InteractionsModule['createController']>>;
+declare const notices:Readonly<NoticeCoordinator>;
+declare const documents:Readonly<DocumentIntegration>;
+declare const attachmentLibrary:Readonly<ReturnType<AttachmentsModule['create']>>;
+declare const richText:RichTextApi;
+declare const ownershipController:Readonly<OwnershipController>;
+declare const sessionActions:Readonly<ReturnType<SessionActionsModule['createController']>>;
 
-declare const notifications:Ports['notifications'];
-declare const domain:Ports['domain'];
+declare const earliestSupportedSavedDate:Ports['domain']['earliestSupportedSavedDate'];
+declare const isSupportedSavedDate:Ports['domain']['isSupportedSavedDate'];
+declare const todayISO:Ports['domain']['todayISO'];
+declare const sanitizePracticeRuns:Ports['domain']['sanitizePracticeRuns'];
 declare const viewHelpers:Pick<Ports['view'],'goTab'|'setStatus'|'setTextSafe'>;
-declare const interactions:Ports['interactions'];
 declare const environment:Ports['environment'];
-declare const exporter:Ports['exporter'];
 declare const richNoteHelpers:Pick<Ports['notes'],'clearFind'|'find'|'findStep'|'focusEditor'|'normalizeTag'|'print'|'reviewKept'|'keptVersion'|'versions'>;
-declare const attachments:Ports['attachments'];
-declare const ownership:Ports['ownership'];
-declare const overlays:Ports['overlays'];
-declare const session:Ports['session'];
 declare const emptyMsg:Ports['presentation']['emptyMsg'];
 declare const optionalHoursLabel:Ports['presentation']['optionalHoursLabel'];
 declare const prettyDate:Ports['presentation']['prettyDate'];
 declare const renderRichTextContent:Ports['presentation']['renderRichTextContent'];
 declare const textEl:Ports['presentation']['textEl'];
 declare const plainTextContent:Ports['presentation']['plainTextContent'];
+
+const notifications=notices.presentation('library') satisfies Ports['notifications'];
+const libraryDomain=Object.freeze({
+  countTaskOutcomes:domain.OutcomeModel.count,
+  earliestSupportedSavedDate,
+  isTrackableBlock:domain.ScheduleModel.isTrackable,
+  isValidIsoDate:domain.TimeModel.isValidIsoDate,
+  isSupportedSavedDate,
+  todayISO,
+  sanitizePracticeRuns,
+  sanitizeTaskOutcomeCounts:domain.OutcomeModel.sanitizeCounts,
+  taskOutcomeSummaryText:domain.OutcomeModel.summary
+}) satisfies Ports['domain'];
+const libraryInteractions=Object.freeze({
+  choose:(options:Parameters<typeof interactions.choose>[0])=>interactions.choose(options),
+  confirm:(options:Parameters<typeof interactions.confirm>[0])=>interactions.confirm(options),
+  input:(options:Parameters<typeof interactions.input>[0])=>interactions.input(options)
+}) satisfies Ports['interactions'];
+const attachments=Object.freeze({
+  batch:<T>(operation:()=>T|PromiseLike<T>)=>attachmentLibrary.batch(operation),
+  close:()=>attachmentLibrary.close(),
+  count:()=>attachmentLibrary.count(),
+  invalidate:()=>attachmentLibrary.invalidate(),
+  reconcile:()=>attachmentLibrary.reconcile(),
+  refresh:()=>attachmentLibrary.refresh()
+}) satisfies Ports['attachments'];
+const overlays=Object.freeze({
+  createAnchoredPopover:(popup:HTMLElement,options?:Parameters<RichTextApi['createAnchoredPopover']>[1])=>richText.createAnchoredPopover(popup,options)
+}) satisfies Ports['overlays'];
+const ownership=Object.freeze({canMutate:()=>ownershipController.canMutate()}) satisfies Ports['ownership'];
+const session=Object.freeze({hasActiveSession:()=>sessionActions.hasBlockingActiveSession()}) satisfies Ports['session'];
 
 const input=Object.freeze({ports:Object.freeze({
   notifications,
@@ -45,7 +88,7 @@ const input=Object.freeze({ports:Object.freeze({
     remove:(date:string)=>appData.dailyRecords.remove(date),
     sortedSummaries:()=>appData.dailyRecords.sortedSummaries()
   }),
-  domain,
+  domain:libraryDomain,
   presentation:Object.freeze({
     createSavedDayTaskReviewCard:reviewSubsystem.SharedReviewPresentation.createSavedDayTaskCard,
     createPomodoroSummaryLine:reviewSubsystem.SharedReviewPresentation.createPomodoroSummaryLine,
@@ -60,9 +103,9 @@ const input=Object.freeze({ports:Object.freeze({
     textEl
   }),
   view:Object.freeze({document,window:browserWindow,...viewHelpers}),
-  interactions,
+  interactions:libraryInteractions,
   environment,
-  exporter,
+  exporter:documents.exporter,
   diary:Object.freeze({
     bindEditor:reviewPersistence.DiaryEditor.bind,
     captureEditor:reviewPersistence.DiaryEditor.capture,

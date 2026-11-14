@@ -72,7 +72,7 @@ export interface LibraryInput{
       plainTextContent(value:unknown):string;
     }>;
     view:Readonly<{document:Document;window:Window;goTab(tab:string,options?:Readonly<Record<string,unknown>>):boolean|PromiseLike<boolean>;setStatus(id:string,message:string,ok?:boolean,state?:string):unknown;setTextSafe(id:string,value:unknown):unknown}>;
-    interactions:Readonly<{choose(options:InteractionOptions):PromiseLike<string|null>|string|null;confirm(options:InteractionOptions):PromiseLike<boolean>|boolean;input(options:InteractionOptions):PromiseLike<InteractionInputValue|null>|InteractionInputValue|null}>;
+    interactions:Readonly<{choose(options:InteractionOptions):PromiseLike<string|null>|string|null;confirm(options:InteractionOptions):PromiseLike<boolean|null>|boolean|null;input(options:InteractionOptions):PromiseLike<InteractionInputValue|null>|InteractionInputValue|null}>;
     environment:Readonly<{cancelAnimationFrame(handle:number):void;createOption(text:string,value:string):HTMLOptionElement;createSearchWorker():Worker;requestAnimationFrame(callback:FrameRequestCallback):number}>;
     exporter:Readonly<{exportKeys(keys:readonly string[]):PromiseLike<LibraryExportResult|null>|LibraryExportResult|null;cancel():unknown}>;
     diary:LibraryDiaryPort;notes:LibraryNotePort;
@@ -80,7 +80,7 @@ export interface LibraryInput{
     preferences:Readonly<{read():unknown;write(value:LibrarySavedView):unknown}>;
     clearLibrary:Readonly<{preflight(selection:Partial<LibrarySelection>):PromiseLike<LibraryPlan>|LibraryPlan;execute(options:Readonly<{selection:LibrarySelection;signature:string;forceReferenced:boolean}>):PromiseLike<LibraryClearResult>|LibraryClearResult}>;
     ownership:Readonly<{canMutate():boolean}>;
-    overlays:Readonly<{createAnchoredPopover(popup:HTMLElement,options?:Readonly<{align?:string;onClose?:()=>unknown}>):AnchoredPopover}>;
+    overlays:Readonly<{createAnchoredPopover(popup:HTMLElement,options?:Readonly<{align?:'start'|'end';onClose?:()=>unknown}>):AnchoredPopover}>;
     session:Readonly<{hasActiveSession():boolean}>;
   }>;
 }
