@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
@@ -46,6 +48,52 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary upda
 await assert.rejects(app.dailyRecords.remove('2026-09-15',{expectedCanonical:expectedDay}),error=>error?.code==='DAILY_RECORD_CHANGED');
 preserved=await app.dailyRecords.get('2026-09-15',{strict:true});
 assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary deletion must not remove newer study evidence');
+
+// Deliberately interleave the real Reflection persistence sequence:
+// read R -> concurrent Save Today writes R2 -> Reflection attempts { ...R }.
+// The repository CAS must reject the stale replacement and preserve R2.
+{
+  const date='2026-09-16';
+  const base={version:1,recordKind:'study',date,reflection:'baseline',sourceRevision:4,evidence:'base',savedAt:'2026-09-16T08:00:00.000Z',updatedAt:'2026-09-16T08:00:00.000Z'};
+  await app.dailyRecords.save(base);
+  let enteredResolve,releaseResolve,intercepted=false;
+  const entered=new Promise(resolve=>{enteredResolve=resolve;});
+  const release=new Promise(resolve=>{releaseResolve=resolve;});
+  const context=vm.createContext({console,Promise,Object,Symbol,Error,TypeError,String,Number,Math,Array,Set,Map,WeakMap,Date,setTimeout,clearTimeout,queueMicrotask,HTMLTextAreaElement:class{}});
+  vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'source/core/internal.ts'});
+  vm.runInContext(readRuntimeSource('source/core/review-persistence.ts'),context,{filename:'source/core/review-persistence.ts'});
+  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('review-persistence',1);
+  const persistence=module.createPersistence(Object.freeze({
+    configuration:Object.freeze({limits:Object.freeze({maxReflectionChars:5000,maxRichTextWords:1000}),dataContract:Object.freeze({schemas:Object.freeze({DailyRecord:Object.freeze({version:1})})})}),
+    records:Object.freeze({
+      get:async(target,options)=>{
+        const value=await app.dailyRecords.get(target,options);
+        if(!intercepted&&options?.strict===true){intercepted=true;enteredResolve();await release;}
+        return value;
+      },
+      save:(...args)=>app.dailyRecords.save(...args),
+      remove:(...args)=>app.dailyRecords.remove(...args),
+      verifyCanonical:(...args)=>app.dailyRecords.verifyCanonical(...args),
+      verifyCanonicalAbsent:(...args)=>app.dailyRecords.verifyCanonicalAbsent(...args),
+      timestamp:(...args)=>app.dailyRecords.timestamp(...args)
+    }),
+    codec:Object.freeze({createDiaryRecord:()=>{throw new Error('study-record path must not create a diary record');}}),
+    ownership:Object.freeze({canMutate:()=>true,revision:()=>1}),
+    text:Object.freeze({clampEditorContent:value=>String(value??''),editorContentWithinLimits:()=>true,plain:value=>String(value??''),isRich:()=>false}),
+    richText:Object.freeze({closeField:()=>true,syncField:()=>true,validatedInput:()=>null}),
+    dates:Object.freeze({isSupported:value=>/^\d{4}-\d{2}-\d{2}$/.test(value),insights:()=>Object.freeze({dayOfWeek:3,dayName:'Wednesday'})}),
+    saveLane:Object.freeze({}),environment:Object.freeze({nowIso:()=> '2026-09-16T08:02:00.000Z',queueMicrotask,setTimeout,clearTimeout})
+  }));
+  const stale=persistence.DailyReflectionPersistence.commit(date,'stale diary edit',{expectedCanonical:'baseline',backupCapture:false});
+  await entered;
+  const newer={...base,sourceRevision:5,evidence:'newer-study-evidence',updatedAt:'2026-09-16T08:01:00.000Z'};
+  await app.dailyRecords.save(newer);
+  releaseResolve();
+  await assert.rejects(stale,error=>error?.code==='DAILY_RECORD_CHANGED');
+  const final=await app.dailyRecords.get(date,{strict:true});
+  assert.equal(final.sourceRevision,5);
+  assert.equal(final.evidence,'newer-study-evidence','interleaved Reflection write must preserve the concurrently saved Study Day');
+}
 
 const beforePlanDraftStrict=strictCount();
 await app.planData.writeDraft('temporary draft');
