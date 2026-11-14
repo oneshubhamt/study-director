@@ -1,5 +1,11 @@
 # TypeScript conversion — execution record
 
+## Active pass — P5.6B Library navigation and record operations, 2026-11-14
+
+- **Intake:** remote `ts-exp` is `f111f8b686e19f1089f4fc81d8d9e3156375ddaa`; P5.6A remains CLOSED — VERIFIED — TARGETED. Preserve all subsequent work and the P5.6A checked note boundary.
+- **Outcome:** finish P5.6B only: checked Library section/search/selection/pagination and Saved-Day read views, persisted UI state, destructive-operation coordination, checked `note-links` and link-navigation consumers. Preserve P5.5 shared Review presentation and keep attachment/preview/export lifetime in P5.6C.
+- **Invariants / verification:** asynchronous refresh must not publish stale selection/focus; storage or destructive-operation failure must retain recoverable canonical state and truthful UI; viewing/navigation must not mutate Saved-Day evidence. Reconcile real providers/callers, then run strict type/lint, fresh build/verify/syntax and the P5.6B targeted unit/integration/browser checks. No full QA. Temporary pad: `/tmp/study-director-P5.6B.md` (ephemeral).
+
 ## Latest closure — P5.6A Ongoing notes and editor bindings, 2026-11-14
 
 - **Scope / publication:** started from latest remote `ts-exp` at `82ea5b90e8f357a8ae327ead3ed85026a3048f01`, preserving all work after audit checkpoint `db4587ae037f97f5ae7473f18e6c9c4d2e2aa946`. Source/regression endpoint is `dd0be6a4bcedaa1379972a013eef71be7db5d2e9`; the commit containing this entry closes P5.6A only. Parent P5.6 remains open for P5.6B/C.
