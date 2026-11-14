@@ -76,7 +76,7 @@ export interface LibraryInput{
     environment:Readonly<{cancelAnimationFrame(handle:number):void;createOption(text:string,value:string):HTMLOptionElement;createSearchWorker():Worker;requestAnimationFrame(callback:FrameRequestCallback):number}>;
     exporter:Readonly<{exportKeys(keys:readonly string[]):PromiseLike<LibraryExportResult|null>|LibraryExportResult|null;cancel():unknown}>;
     diary:LibraryDiaryPort;notes:LibraryNotePort;
-    attachments:Readonly<{batch<T>(operation:()=>T|PromiseLike<T>):Promise<T>;close():unknown;count():PromiseLike<number>|number;invalidate():unknown;reconcile():PromiseLike<unknown>|unknown;refresh():PromiseLike<unknown>|unknown}>;
+    attachments:Readonly<{batch<T>(operation:()=>Promise<T>):Promise<T>;close():unknown;count():PromiseLike<number>|number;invalidate():unknown;reconcile():PromiseLike<unknown>|unknown;refresh():PromiseLike<unknown>|unknown}>;
     preferences:Readonly<{read():unknown;write(value:LibrarySavedView):unknown}>;
     clearLibrary:Readonly<{preflight(selection:Partial<LibrarySelection>):PromiseLike<LibraryPlan>|LibraryPlan;execute(options:Readonly<{selection:LibrarySelection;signature:string;forceReferenced:boolean}>):PromiseLike<LibraryClearResult>|LibraryClearResult}>;
     ownership:Readonly<{canMutate():boolean}>;

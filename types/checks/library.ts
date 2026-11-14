@@ -52,7 +52,7 @@ declare const plainTextContent:Ports['presentation']['plainTextContent'];
 
 const notifications=notices.presentation('library') satisfies Ports['notifications'];
 const libraryDomain=Object.freeze({
-  countTaskOutcomes:domain.OutcomeModel.count,
+  countTaskOutcomes:tasks=>domain.OutcomeModel.count([...tasks]),
   earliestSupportedSavedDate,
   isTrackableBlock:domain.ScheduleModel.isTrackable,
   isValidIsoDate:domain.TimeModel.isValidIsoDate,
@@ -68,7 +68,7 @@ const libraryInteractions=Object.freeze({
   input:(options:Parameters<typeof interactions.input>[0])=>interactions.input(options)
 }) satisfies Ports['interactions'];
 const attachments=Object.freeze({
-  batch:<T>(operation:()=>T|PromiseLike<T>)=>attachmentLibrary.batch(operation),
+  batch:<T>(operation:()=>Promise<T>)=>attachmentLibrary.batch(operation),
   close:()=>attachmentLibrary.close(),
   count:()=>attachmentLibrary.count(),
   invalidate:()=>attachmentLibrary.invalidate(),
