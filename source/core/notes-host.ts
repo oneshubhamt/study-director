@@ -165,7 +165,7 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   }
   function updateSearchText(key:unknown,plain:unknown){const entry=key?repository.get(key):null;if(entry)view.updateSearchDocument(freeze({key:entry.key,revision:String(entry.updatedAt||''),plain:String(plain||'')}));}
   function commitEditor(field:HTMLTextAreaElement,value:unknown,event:Event|null=null){
-    if(!ownership.canMutate()||!lifecycle.canWrite()){field.dataset['noteBindingState']='stale';return false;}const binding=resolveEditor(field,{requireVisible:true});if(!binding)return false;
+    if(!ownership.canMutate()||!lifecycle.canWrite()){field.dataset['noteBindingState']='stale';return false;}const binding=resolveEditor(field,{requireVisible:true});if(!binding){if(field.dataset['richExternalConflict']!=='1')field.dataset['noteBindingState']='stale';return false;}
     const trusted=richText.validatedInput(event,field),candidate=trusted?trusted.canonical:editorContent(binding,value);
     const result=trusted?repository.updateValidatedRich(binding.key,binding.label,candidate,binding.noteRevision):repository.update(binding.key,binding.label,candidate,binding.noteRevision);
     if(result.status==='conflict'){refreshFieldsForKey(binding.key);if(field.dataset['richExternalConflict']==='1'){field.dataset['noteBindingState']='conflict';setSyncState(binding.key,'conflict');}return false;}
