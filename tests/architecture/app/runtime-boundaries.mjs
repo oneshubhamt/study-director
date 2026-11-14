@@ -212,7 +212,7 @@ assert.match(library,/createPomodoroSummaryLine/u,'Library reuses the checked P5
 assert.match(library,/populatePracticeRunTable/u,'Library reuses the checked P5.5 practice presentation');
 assert.doesNotMatch(library,/function createSavedDayTaskReviewCard\(|function createPomodoroSummaryLine\(|function populatePracticeRunTable\(/u,'Library does not duplicate Review presentation algorithms');
 assert.match(library,/const \{exportKeys,cancel:cancelExport\}=ports\.exporter/u,'P5.6B keeps export implementation behind its existing provider for P5.6C');
-assert.match(library,/const \{batch:attachmentBatch,close:closeAttachmentLibrary,count:attachmentCount,remove:[^\n]*\}=ports\.attachments/u,'P5.6B keeps attachment lifetime behind its existing provider for P5.6C');
+assert.match(library,/const \{batch:batchAttachments,close:closeAttachments,count:attachmentCount,invalidate:invalidateAttachments,reconcile:reconcileAttachments,refresh:refreshAttachments\}=ports\.attachments/u,'P5.6B keeps attachment lifetime behind its existing provider for P5.6C');
 console.log(JSON.stringify({status:'PASS',boundary:'p5.6b-library-navigation',checkedLibrary:true,checkedLinks:true,savedDayGenerationFence:true,sharedReviewPresentation:true,p56cBoundary:true},null,2));
 }
 
