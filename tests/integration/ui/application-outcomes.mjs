@@ -5,10 +5,28 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createNotifications} from '../../helpers/notifications.mjs';
-const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts');
+const html=readHostHtml(),review=readRuntimeSource('source/core/review.ts'),hostMain=fs.readFileSync('source/host/main.js','utf8');
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const noop=()=>{};
 
+// The actual delegated input table must pass the original validated rich-input
+// Event inside ReviewSaveOptions, not treat the Event itself as the options bag.
+{
+  let captured=null;
+  const context={
+    Object,FirstStart:{confirmField:noop},onPnoteChange:noop,onQuoteChange:noop,
+    PlanDraftEditor:{composerInput:noop},LibraryView:{requestRender:noop},
+    syncUnfinishedNoteDraft:noop,ReviewView:{sync:noop},PracticePacer:{previewSetup:noop},
+    queueReviewSave:options=>{captured=options;return true;}
+  };
+  vm.createContext(context);
+  const start=hostMain.indexOf('const INPUT_ACTIONS=Object.freeze({'),end=hostMain.indexOf('const BLUR_ACTIONS=Object.freeze({',start);
+  assert.ok(start>=0&&end>start,'input action table must be executable from the production host');
+  vm.runInContext(hostMain.slice(start,end)+';globalThis.__inputActions=INPUT_ACTIONS;',context);
+  const event={kind:'validated-rich-input'};
+  assert.equal(context.__inputActions['save-reflection'](event),true);
+  assert.equal(captured?.event,event,'delegated Review input must preserve the exact rich-editor Event object');
+}
 
 // Exercise the real OS adapter and coordinator together, including the await
 // between permission inspection and service-worker delivery.
@@ -181,4 +199,4 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','date-stable reflection baseline','reflection commit versus Library refresh failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
