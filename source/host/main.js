@@ -723,6 +723,7 @@ const SessionActions=SessionActionsModule.createController(Object.freeze({
   DecisionClock,SLEEP_GAP_THRESHOLD_MS,HANDOFF_RETRY_MESSAGE:SessionHandoffModule.retryMessage,navigator
 }));
 
+function clearSessionSafetyMessage(...args){return SessionActions.clearSessionSafetyMessage(...args);}
 const ExecutionViewCache={get executePanelsRenderKey(){return executePanelsRenderKey;},set executePanelsRenderKey(value){executePanelsRenderKey=value;},get executeIdleDisplayKey(){return executeIdleDisplayKey;},set executeIdleDisplayKey(value){executeIdleDisplayKey=value;},get realTimeAwarenessRenderKey(){return realTimeAwarenessRenderKey;},set realTimeAwarenessRenderKey(value){realTimeAwarenessRenderKey=value;},get scheduleEndPromptKey(){return scheduleEndPromptKey;},set scheduleEndPromptKey(value){scheduleEndPromptKey=value;}};
 const ExecutionViews=ExecutionViewsModule.createController(Object.freeze({
  state:SessionActionState,cache:ExecutionViewCache,runtime:ExecutionRuntime,actions:SessionActions,document,window,APP_LIMITS,STUDY_DAY_MINUTES,
