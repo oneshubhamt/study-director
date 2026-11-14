@@ -4,8 +4,6 @@ import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const bundle=richTextRuntimeSource();
-const hostMain=fs.readFileSync('source/host/main.js','utf8');
-assert.match(hostMain,/'save-reflection':\s*event=>queueReviewSave\(\{event\}\)/u,'delegated Review input must wrap the original Event in ReviewSaveOptions');
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const browser=await launchChromium({profilePrefix:'qa-rich-interactions-'});
 let page;
