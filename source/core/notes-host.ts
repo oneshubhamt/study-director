@@ -15,12 +15,12 @@ const BINDING_VERSION='area-v3' as const;
 const TASK_SCOPE='task',AREA_SCOPE='area';
 
 function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>{
-  exactObject(input,['configuration','repository','tasks','taskIdentity','domain','lifecycle','ownership','richText','tags','mutation','view','environment'],'Notes host input');
+  exactObject(input,['configuration','repository','tasks','taskIdentity','domain','lifecycle','ownership','richText','tags','mutation','view','diagnostics','environment'],'Notes host input');
   for(const [label,value] of Object.entries({
     configuration:input.configuration,repository:input.repository,taskIdentity:input.taskIdentity,domain:input.domain,lifecycle:input.lifecycle,
-    ownership:input.ownership,richText:input.richText,tags:input.tags,mutation:input.mutation,view:input.view,environment:input.environment
+    ownership:input.ownership,richText:input.richText,tags:input.tags,mutation:input.mutation,view:input.view,diagnostics:input.diagnostics,environment:input.environment
   })) if(!Object.isFrozen(value))throw new TypeError(`Notes ${label} provider must be frozen.`);
-  const {configuration,repository,taskIdentity,domain,lifecycle,ownership,richText,tags,mutation,view,environment}=input;
+  const {configuration,repository,taskIdentity,domain,lifecycle,ownership,richText,tags,mutation,view,diagnostics,environment}=input;
   let catalogueCache:Readonly<{revision:number;hierarchy:string;entries:readonly NoteCatalogueEntry[]}>|null=null;
 
   const taskList=()=>input.tasks();
@@ -183,7 +183,7 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   }
   function renderInheritedForTask(container:HTMLElement|null,task:Task|undefined,compact=false){renderInherited(container,task&&domain.hasOngoingTaskNotes(task)&&!domain.isSupportBlock(task)?domain.noteKeyForTask(task):'',compact);}
   function currentEntriesForTasks(tasks:readonly Task[]){const seen=new Set<string>(),entries:Readonly<{key:string;label:string;text:string}>[]=[];(tasks||[]).filter(domain.hasOngoingTaskNotes).forEach(task=>{const key=domain.noteKeyForTask(task);if(!key||seen.has(key))return;seen.add(key);const entry=repository.get(key);if(entry&&String(entry.text||'').trim())entries.push(freeze({key:entry.key,label:entry.label,text:richText.plain(entry.text||'')}));});return freeze(entries);}
-  function refreshConsumers(){catalogueCache=null;if(!lifecycle.canWrite())return false;try{refreshAllFields();view.refreshExecute();view.refreshLibrary();view.requestScheduleRender();view.refreshReviewIfVisible();view.refreshRecovery();return true;}catch{return false;}}
+  function refreshConsumers(){catalogueCache=null;if(!lifecycle.canWrite())return false;try{refreshAllFields();view.refreshExecute();view.refreshLibrary();view.requestScheduleRender();view.refreshReviewIfVisible();view.refreshRecovery();return true;}catch(error){diagnostics.capture('notes.consumer-render',error,'warn');return false;}}
   async function renameTag(from:unknown,to:unknown){
     if(!ownership.canMutate())throw new Error('Use the primary tab to rename tags.');const source=richText.normalizeTag(from),target=richText.normalizeTag(to);if(!source||!target)throw new Error('A tag starts with a letter and uses letters, digits, - or _.');
     return richText.quiesce(()=>mutation.runExclusive('rename-tag',async()=>{await repository.flush({strict:true});let changed=0;const failed:string[]=[];for(const key of tags.tagged([source])){const note=repository.get(key);if(!note)continue;const value=richText.renameTag(note.text,source,target);if(value===note.text)continue;const result=repository.update(note.id,note.label,value,String(note.updatedAt||''));if(result.status==='changed')changed++;else failed.push(note.label);}await repository.flush({strict:true});if(repository.failure().failed)throw new Error('The renamed tags have not saved yet. They will be retried.');return freeze({changed,failed:freeze(failed)});}));
@@ -213,6 +213,7 @@ function createLibraryWorkflows(input:Readonly<LibraryNoteWorkflowInput>):Readon
       const labels=outcome.labels.join(', '),ok=await interactions.confirm(freeze({title:'Combine existing notes?',message:`“${identity.label}” would overlap ${labels}. Combine the moved note text into the existing note and keep the existing note’s earlier versions?`,confirmLabel:'Combine',cancelLabel:'Cancel'}));
       if(!ok)return freeze({status:'cancelled',identity});outcome=await repository.rename(entry.key,identity.label,{merge:mergeText});
     }
+    if(outcome.status==='content-limit')return freeze({status:'content-limit',identity,label:String(outcome.label||identity.label)});
     if(outcome.status!=='renamed')return freeze({status:outcome.status==='inside-itself'?'inside-itself':'rejected',identity});
     let planResult={blocks:0,savedPlans:0},planError:unknown=null;const requested=renamePlans;
     if(requested)try{planResult=await plan.renameArea(entry.key,identity.label);}catch(error){planError=error;}

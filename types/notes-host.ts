@@ -66,6 +66,7 @@ export interface NotesHostInput{
     setStatus(id:string,message:string,ok?:boolean):unknown;setPlanStatus(message:string,ok?:boolean):unknown;
     publishSafetyNotice(message:string,title:string,key:string):unknown;syncPopover(element:HTMLElement):unknown;
   }>;
+  readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level?:'warn'|'error'):unknown}>;
   readonly environment:Readonly<{queueMicrotask(callback:()=>void):void}>;
 }
 export interface NotesRuntime{
@@ -94,6 +95,7 @@ export interface LibraryNoteWorkflowInput{
 }
 export type LibraryNoteRenameResult=
   |Readonly<{status:'cancelled'|'rejected'|'inside-itself';identity:NoteAreaIdentity|null}>
+  |Readonly<{status:'content-limit';identity:NoteAreaIdentity;label:string}>
   |Readonly<{status:'renamed';identity:NoteAreaIdentity;moved:readonly Readonly<{from:string;to:string}>[];merged:number;
       plan:Readonly<{requested:boolean;ok:boolean;blocks:number;savedPlans:number;error:unknown}>}>;
 export interface LibraryNoteWorkflows{

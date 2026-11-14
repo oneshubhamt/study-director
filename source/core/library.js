@@ -988,7 +988,7 @@ registry.define('library',1,()=>{
         const outcome=await renameNote(entry,value,{renamePlans:!!where&&inPlans});
         if(outcome.status==='cancelled'){notice.finish('cancelled','Nothing was renamed.');return false;}
         if(outcome.status!=='renamed'){
-          notice.finish('failed',outcome.status==='inside-itself'?'A note cannot move inside itself.':'The note could not be renamed. Nothing was changed.');
+          notice.finish('failed',outcome.status==='inside-itself'?'A note cannot move inside itself.':outcome.status==='content-limit'?`Merging would make “${outcome.label}” longer than one note can be. Nothing was changed.`:'The note could not be renamed. Nothing was changed.');
           return false;
         }
         const selected=outcome.moved.find(move=>move.from===entry.key)?.to||outcome.identity.key;
