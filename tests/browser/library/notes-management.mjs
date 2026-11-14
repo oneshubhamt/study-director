@@ -55,9 +55,12 @@ try{
     const fmt=value=>String(Math.floor((value+1440)%1440/60)).padStart(2,'0')+':'+String((value+1440)%1440%60).padStart(2,'0');
     const rows=[['Alpha Task','Alpha Empty'],['Zeta Task','Zeta Filled'],['Child Task','Parent > Child Empty']];
     document.getElementById('plan-input').value=rows.map((row,index)=>fmt(base+index*20)+' | 20 | '+row[0]+' | work | '+row[1]+' | pages | 10').join('\\n');
-    const applied=await d.applySchedule({skipNotify:true});const navigated=await d.goTab('library');
+    const applied=await d.applySchedule({skipNotify:true});
+    let navigated=await d.goTab('library');
+    if(!navigated){await new Promise(resolve=>setTimeout(resolve,50));navigated=await d.goTab('library');}
+    if(!navigated)throw new Error('Library navigation was repeatedly superseded during test setup.');
     __PWA6.LibraryView.showSection('notes');
-    return {applied,navigated,paneOn:document.getElementById('pane-library')?.classList.contains('on')||false,sectionHidden:document.getElementById('library-notes')?.hidden??null};
+    return {applied};
   })()`);
   assert.equal(prepared.applied,true);
   await page.settle(3);
@@ -65,8 +68,7 @@ try{
   const filled=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),nextRender=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     const row=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='zeta filled');row.click();await wait(30);
-    const immediate={active:document.querySelector('.library-note-nav-item.active')?.dataset.noteKey||'',title:document.querySelector('.library-notes-editor-title')?.textContent||'',paneOn:document.getElementById('pane-library')?.classList.contains('on')||false};
-    const field=document.querySelector('#library-notes-editor .library-notes-textarea'),bindingBefore=field?{...field.dataset}:null;field.value='Durable Zeta note';field.dispatchEvent(new Event('input',{bubbles:true}));const bindingAfter={...field.dataset},persistedAfterInput=d.AppData.notes.get('zeta filled')?.text||'';await d.AppData.notes.flush();
+    const field=document.querySelector('#library-notes-editor .library-notes-textarea');field.value='Durable Zeta note';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
     __PWA6.LibraryView.showSection('days');await wait(30);__PWA6.LibraryView.showSection('notes');await wait(60);
     let rows=[...document.querySelectorAll('[data-note-key]')];
     const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==1;i++)await wait(20);
@@ -74,7 +76,7 @@ try{
     search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==4;i++)await wait(20);rows=[...document.querySelectorAll('[data-note-key]')];
     return {
       keys:rows.map(item=>item.dataset.noteKey),
-      filtered,debug:{immediate,bindingBefore,bindingAfter,persistedAfterInput,persisted:d.AppData.notes.get('zeta filled')?.text||''},
+      filtered,
       classes:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,item.className])),
       colors:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,getComputedStyle(item).color])),
       weights:Object.fromEntries(rows.map(item=>[item.dataset.noteKey,Number(getComputedStyle(item.querySelector('.library-note-nav-name')).fontWeight)])),
@@ -82,7 +84,6 @@ try{
     };
   })()`);
   assert.deepEqual(filled.keys,['alpha empty','parent','parent > child empty','zeta filled'],'notes are listed by name; a branch holding today’s Areas is open');
-  console.error('[qa-p56-debug]',JSON.stringify({prepared,filled:filled.debug}));
   assert.deepEqual(filled.filtered,['zeta filled']);
   assert.match(filled.classes['zeta filled'],/has-note/);assert.match(filled.classes['alpha empty'],/empty-note/);
   assert.ok(filled.weights['zeta filled']>filled.weights['alpha empty'],'saved and empty notes must remain visually distinct in every presentation');
