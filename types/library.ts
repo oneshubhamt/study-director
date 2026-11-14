@@ -11,9 +11,10 @@ import type {ReviewRecordViewTask,SharedReviewPresentation} from './review.ts';
 import type {DailyView,SummaryView} from './repositories.ts';
 
 type DailyRecords=AppData['dailyRecords'];
-export type LibraryDay=DailyView;
+export type LibraryStoredDay=DailyView;
+export type LibraryDay=Extract<DailyView,{recordKind:'study'}>;
 export type LibrarySummary=SummaryView;
-export type LibraryDiaryRecord=LibraryDay|DiaryDraft;
+export type LibraryDiaryRecord=SavedDayRecord|DiaryDraft;
 export type LibraryPreparedSummary=LibrarySummary&Readonly<{libraryView:Readonly<{dateLabel:string;outcomeText:string;searchText:string}>}>;
 export type LibrarySection='notes'|'days'|'data';
 export type LibrarySavedView=Readonly<{section?:LibrarySection;diary?:boolean;sort?:'name'|'recent';listWidth?:number}>;
@@ -54,7 +55,7 @@ export interface LibraryInput{
   readonly ports:Readonly<{
     notifications:Readonly<{begin(input:NotificationInput):LibraryNotice;feedback(input:NotificationInput):unknown}>;
     records:Readonly<{
-      get(date:string):PromiseLike<LibraryDay|null>|LibraryDay|null;
+      get(date:string):PromiseLike<LibraryStoredDay|null>|LibraryStoredDay|null;
       remove(date:string):PromiseLike<unknown>|unknown;
       sortedSummaries():PromiseLike<readonly LibrarySummary[]>|readonly LibrarySummary[];
     }>;
