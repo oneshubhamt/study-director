@@ -202,7 +202,7 @@
     "types/checks/session-host.ts",
     "types/checks/session-handoff.ts",
     "types/checks/plan-host.ts",
-    "types/checks/note-links.ts",
+    "types/checks/note-links.ts",\n    "types/checks/library.ts",
     "types/checks/notes-host.ts",
     "types/checks/review-persistence.ts",
     "types/checks/review-host.ts",
