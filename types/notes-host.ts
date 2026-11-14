@@ -76,7 +76,7 @@ export interface NotesRuntime{
   catalogue():readonly NoteCatalogueEntry[];canCreate():boolean;size():number;
   bindTaskEditor(field:HTMLTextAreaElement,index:number,source?:string):NoteEditorBinding|null;
   bindAreaEditor(field:HTMLTextAreaElement,areaKey:unknown,areaLabel?:unknown,source?:string):NoteEditorBinding|null;
-  clearEditor(field:HTMLTextAreaElement|null):boolean;resolveEditor(field:HTMLTextAreaElement|null,options?:Readonly<{requireVisible?:boolean}>):NoteEditorBinding|null;
+  clearEditor(field:HTMLTextAreaElement|null):boolean;editorVisible(field:HTMLTextAreaElement):boolean;resolveEditor(field:HTMLTextAreaElement|null,options?:Readonly<{requireVisible?:boolean}>):NoteEditorBinding|null;
   commitEditor(field:HTMLTextAreaElement,value:unknown,event?:Event|null):boolean;
   refreshFieldsForKey(key:unknown,originField?:HTMLTextAreaElement|null,derived?:ValidatedRichInput|null,options?:Readonly<{deferRichMirrors?:boolean}>):void;
   refreshAllFields():void;setSyncState(key:unknown,state:NoteSyncState):boolean;reportConflict(info?:NoteConflictInfo):boolean;refreshConsumers():boolean;

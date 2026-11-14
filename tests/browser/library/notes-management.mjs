@@ -55,15 +55,11 @@ try{
     const fmt=value=>String(Math.floor((value+1440)%1440/60)).padStart(2,'0')+':'+String((value+1440)%1440%60).padStart(2,'0');
     const rows=[['Alpha Task','Alpha Empty'],['Zeta Task','Zeta Filled'],['Child Task','Parent > Child Empty']];
     document.getElementById('plan-input').value=rows.map((row,index)=>fmt(base+index*20)+' | 20 | '+row[0]+' | work | '+row[1]+' | pages | 10').join('\\n');
-    const applied=await d.applySchedule({skipNotify:true}),attempts=[];
-    let navigated=await d.goTab('library');
-    attempts.push({navigated,status:StudyDirector.ui.navigationStatus(),active:document.querySelector('.pane.on')?.id||''});
-    if(!navigated){await new Promise(resolve=>setTimeout(resolve,50));navigated=await d.goTab('library');attempts.push({navigated,status:StudyDirector.ui.navigationStatus(),active:document.querySelector('.pane.on')?.id||''});}
-    if(!navigated)throw new Error('Library navigation was repeatedly superseded during test setup: '+JSON.stringify(attempts));
+    const applied=await d.applySchedule({skipNotify:true}),navigated=await d.goTab('library');
     __PWA6.LibraryView.showSection('notes');
-    return {applied};
+    return {applied,navigated};
   })()`);
-  assert.equal(prepared.applied,true);
+  assert.deepEqual(prepared,{applied:true,navigated:true},'schedule applies before the Library note journey begins');
   await page.settle(3);
 
   const filled=await page.evaluate(`(async()=>{

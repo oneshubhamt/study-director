@@ -195,7 +195,7 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   const runtime=freeze({
     format:'study-director.notes-runtime' as const,contractVersion:1 as const,bindingVersion:BINDING_VERSION,
     storedValueForKey,textForKey,editorContent,applicableForTask,inheritedEntries,normalizeAreaInput,orderEntries,catalogue,canCreate:()=>repository.metadataSnapshot().records.length<configuration.maxNotes,size:()=>repository.size(),
-    bindTaskEditor,bindAreaEditor,clearEditor,resolveEditor,commitEditor,refreshFieldsForKey,refreshAllFields,setSyncState,reportConflict,refreshConsumers,renderInherited,renderInheritedForTask,inheritedTextForTask,currentEntriesForTasks,renameTag,importFiles
+    bindTaskEditor,bindAreaEditor,clearEditor,editorVisible,resolveEditor,commitEditor,refreshFieldsForKey,refreshAllFields,setSyncState,reportConflict,refreshConsumers,renderInherited,renderInheritedForTask,inheritedTextForTask,currentEntriesForTasks,renameTag,importFiles
   });
   return runtime;
 }
