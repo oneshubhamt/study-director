@@ -7,6 +7,23 @@ import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const foundation=readRuntimeSource('source/core/foundation-host.ts');
 
+{ // p5.6-document-editor-ownership
+const host=readHostHtml();
+const documentHost=readScript('source/core/document-host.ts');
+const richHost=readScript('source/core/rich-text-host.ts');
+const noteExport=readScript('source/core/note-export.ts');
+assert.match(host,/DocumentHostModule\.createPdfController/,'PDF host composition must use the checked document owner');
+assert.match(host,/DocumentHostModule\.createPrinter/,'note print composition must use the checked document owner');
+assert.match(host,/DocumentHostModule\.createIntegration/,'attachment/export integration must use the checked document owner');
+assert.match(host,/RichTextHostModule\.createRuntime/,'rich editor lifetime must use the checked rich-text host owner');
+for(const stale of ['function openPdfWorkspace(','function openPdfFallback(','async function printNote(','async function insertAttachmentIntoNote(','const RichTextRuntime=(()=>'])assert.ok(!host.includes(stale),`host must not regain P5.6C implementation: ${stale}`);
+assert.match(host,/richText:Object\.freeze\(\{assetIds:value=>RichTextApi\.assetIds\(value\),exportDocument:value=>RichTextApi\.exportDocument\(value\)\}\)/,'actual note-export host provider uses exportDocument');
+assert.match(documentHost,/function createPdfController/);assert.match(documentHost,/function createPrinter/);assert.match(documentHost,/function createIntegration/);
+assert.match(richHost,/function createRuntime/);assert.match(noteExport,/function createExporter/);
+assert.doesNotMatch(documentHost,/WG1:|Wordgard|indexedDB|dailyRecords/,'document owner orchestrates checked providers instead of duplicating rich-text/storage codecs or Saved-Day storage');
+assert.doesNotMatch(noteExport,/dailyRecords|pendingReviews|activeSession/,'note export remains read-only and cannot mutate Saved-Day evidence');
+}
+
 // Current runtime boundary invariants: decision time, pacing, presentation, and bounded background/display work.
 
 { // decision-clock-boundary
