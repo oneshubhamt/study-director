@@ -36,7 +36,7 @@ declare const document:Document;
 declare const browserWindow:Window;
 
 const richWorkspaceOverlay:Readonly<WorkspaceOverlayPort>=Object.freeze({
-  open:options=>{
+  open:(options:Parameters<WorkspaceOverlayPort['open']>[0])=>{
     const {history,...surface}=options;
     if(!history)return workspace.open(surface);
     const mappedHistory=Object.freeze({
