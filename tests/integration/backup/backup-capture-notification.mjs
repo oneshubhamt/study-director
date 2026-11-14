@@ -10,11 +10,11 @@ const commits=[],notifications=[],maintenanceDelays=[],badgeEvents=[];
 const RichTextApi={scanAttachmentReferences:value=>({trusted:true,assetIds:[...String(value||'').matchAll(/img-[a-z0-9-]{20,80}/g)].map(match=>match[0])})};
 const handler=new Function('writeStorageHealth','renderStorageHealth','document','CapabilityBadge','notifyBackupChange','scheduleRichTextAssetMaintenance','invalidateAttachmentLibrary','RichTextApi','ACTIVE_SESSION_ID',
   `let richAssetReferenceRevision=0;const canonicalAttachmentReferenceSignatures=new Map();
-   let saveReminderDate='',noticeRechecks=0;
+   const ReviewDayState={reminder:{date:''}};let noticeRechecks=0;
    function revalidateSaveReminderAfterCanonicalConvergence(){noticeRechecks++;return Promise.resolve(true);}
    ${html.slice(start,end)};
    return {handleCanonicalCommit,getRevision:()=>richAssetReferenceRevision,
-     setReminderDate:value=>saveReminderDate=value,reminderRechecks:()=>noticeRechecks};`)(
+     setReminderDate:value=>ReviewDayState.reminder.date=value,reminderRechecks:()=>noticeRechecks};`)(
   state=>commits.push(state),()=>{}, {querySelector:()=>null},{syncFromCanonicalCommit:event=>badgeEvents.push(event)},change=>notifications.push(change),delay=>maintenanceDelays.push(delay),()=>{},RichTextApi,'active-session'
 );
 handler.handleCanonicalCommit({entityType:'activeSession',operation:'upsert',value:{snapshot:{review:{reflection:'',studyQuality:null}}},committedAt:'2026-09-23T17:00:00.000Z',backupCapture:true});

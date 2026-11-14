@@ -27,7 +27,7 @@ const start=source.indexOf('function handleCanonicalCommit(event){'),end=source.
 const writes=[];
 const context=vm.createContext({
   writeStorageHealth:patch=>writes.push(patch),renderStorageHealth:()=>{},canonicalCommitChangesAttachmentReferences:()=>false,
-  NativeCapabilities:null,notifyBackupChange:()=>{},StartupLifecycle:{status:()=>({fullyInitialized:false})},saveReminderDate:'',richAssetReferenceRevision:0
+  NativeCapabilities:null,CapabilityBadge:null,ReviewDayState:{reminder:{date:''}},notifyBackupChange:()=>{},StartupLifecycle:{status:()=>({fullyInitialized:false})},richAssetReferenceRevision:0
 });
 vm.runInContext(`${constant}\n${source.slice(start,end+2)}\nglobalThis.commit=handleCanonicalCommit;`,context);
 const committedAt='2026-11-07T09:30:00.000Z',marked=event=>{writes.length=0;context.commit({committedAt,operation:'upsert',...event});return writes[0].lastStudyDataSaveAt===committedAt;};

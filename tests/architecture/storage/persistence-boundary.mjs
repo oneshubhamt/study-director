@@ -12,6 +12,7 @@ const repositories=read('source/core/repositories.ts');
 const notes=read('source/core/repositories-notes.ts');
 const app=readHostHtml();
 const appMeta=read('source/core/app-meta.ts');
+const startupHost=read('source/core/startup-host.ts');
 
 assert.match(persistence,/createLocalStorage[\s\S]*createInstallationIdentity[\s\S]*createIndexedDb/,'persistence primitives must retain browser storage ownership and separate installation identity');
 assert.doesNotMatch(persistence,/createSyncMetadata/,'distributed-sync metadata must not remain a current persistence primitive');
@@ -35,7 +36,7 @@ assert.match(repositories,/function stageCanonicalMutationEpoch\(tx\s*,preparati
 assert.match(app,/async function fullBackupSnapshotRevision\(\)[\s\S]*AppData\.dailyRecords\.datasetRevision\(\)[\s\S]*PlanData\.exportData\(\{flush:false\}\)[\s\S]*AttachmentStorage\.list\(\)/,'the full snapshot fence must remain available as a conservative fallback');
 assert.match(app,/async function backupSnapshotRevision\(options=\{\}\)[\s\S]*options&&options\.full===true[\s\S]*AppData\.mutationEpoch\.eligible\(\)[\s\S]*study-director\.fast-capture-fence\.v1/,'healthy backup fencing must use the constant-size epoch/generation guard and fail back to the full snapshot fence when explicitly requested or ineligible');
 assert.match(app,/captureMutationGeneration\+\+/,'in-process textarea mutations must advance the local capture generation before canonical persistence necessarily settles');
-assert.match(app,/markReady:async proof=>\{[\s\S]*backupFastFenceReady=false;[\s\S]*proof&&proof\.canonical===true[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*backupFastFenceReady=true/,'the fast fence must activate only after startup proves canonical readiness and successfully reseeds the durable epoch');
+assert.match(startupHost,/markReady:async proof=>\{[\s\S]*proof\.canonical!==true[\s\S]*p\.setFastFenceReady\(false\)[\s\S]*await p\.reseedEpoch\(\)[\s\S]*p\.setFastFenceReady\(true\)/,'the fast fence must activate only after startup proves canonical readiness and successfully reseeds the durable epoch');
 
 assert.match(app,/commit:\(rows,remove,token,guard=\(\)=>true,deletionState=null\)=>IndexedDb\.strictTransaction\(\[DB_ASSET_STORE,DB_APP_META_STORE\],'readwrite',[\s\S]*AppData\.deletionRecovery\.stageAttachments\(tx,deletionState\)/u,'verified attachment metadata, deletion state, and the canonical mutation epoch must publish atomically with strict durability');
 assert.match(app,/const units=\[\.\.\.new Set\(\[\.\.\.rows\.map\(\(\[id\]\)=>`attachmentAsset:\$\{String\(id\)\}`\),\.\.\.remove\.map\(id=>`attachmentAsset:\$\{String\(id\)\}`\)\]\)\];[\s\S]*AppData\.mutationEpoch\.stage\(tx,units\)/u,'attachment metadata publication/removal must invalidate exactly the affected attachment preparation identities inside the canonical transaction');
