@@ -113,7 +113,8 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
     return writeBinding(field,identity,TASK_SCOPE,String(source||'field'));
   }
   function bindAreaEditor(field:HTMLTextAreaElement,areaKey:unknown,areaLabel:unknown='',source='library'){
-    const key=domain.normalizeAreaName(areaKey);if(!key){clearEditor(field);return null;}const entry=repository.get(key),label=entry?.label||domain.displayAreaName(areaLabel||key);
+    field.dataset['qaP56BindCalled']='1';field.dataset['qaP56BindInput']=String(areaKey??'');
+    const key=domain.normalizeAreaName(areaKey);field.dataset['qaP56BindKey']=String(key||'');if(!key){clearEditor(field);return null;}const entry=repository.get(key),label=entry?.label||domain.displayAreaName(areaLabel||key);
     clearEditor(field);
     return writeBinding(field,freeze({idx:null,key,label,taskId:'',scheduleRevision:null,lifecycleRevision:lifecycle.revision(),ownershipRevision:ownership.revision(),noteRevision:String(entry?.updatedAt||''),noteId:String(entry?.id||'')}),AREA_SCOPE,String(source||'library'));
   }
