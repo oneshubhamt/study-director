@@ -6,8 +6,8 @@ import {drive,faults,ledger,sync,open,connect,markers,uploadsBy,waiting,sleep} f
 // The phone (B) runs today's session. The PC (A) shows it running elsewhere,
 // pastes a new plan and applies it: it asks first, then uploads within
 // seconds without waiting for the app to go to the background. The phone,
-// open on its timer, takes it in at its next session check (every two
-// minutes while a session runs) and shows the session running on the PC
+// open on its timer, takes it in at its next session check (every 10
+// seconds while a session is open) and shows the session running on the PC
 // with the new plan, its Execute header naming the PC; Continue Here brings
 // that plan's timer to the phone.
 
@@ -36,7 +36,7 @@ async function releaseBackground(page,key){await page.evaluate(`(()=>{window[${J
 const runSession=name=>`(async()=>{const d=__PWA6,wait=ms=>new Promise(r=>setTimeout(r,ms));document.getElementById('plan-input').value=${sched(name)};const result=d.applySchedule({skipNotify:true});if(result&&result.then)await result;d.goTab('execute');await wait(50);d.setCurrentTask(0);d.TimerEngine.startCur();await wait(300);await d.flushLiveDraft();return d.TimerState.snapshot().mode;})()`;
 async function checkAgain(page,label){
   for(let wait=1;wait>0;){wait=(Date.parse((await sync(page)).checkedAt)||0)+61000-Date.now();if(wait>0)await sleep(wait);}
-  // What the two-minute session check does.
+  // A sync check, as a return to the app asks for one.
   await page.evaluate(`__PWA6.BackupProviderRuntime.wakeBackground('session-watch')`);
 }
 

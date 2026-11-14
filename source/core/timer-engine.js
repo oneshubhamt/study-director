@@ -349,10 +349,26 @@ function classifyInactiveGap(mode,focusMs=null){
   saveLiveDraft();
   try{recoverySetStatus(`Classified inactive gap as ${label.toLowerCase()}${excluded>0?`; ${fmtS(Math.round(excluded/1000))} after ${shortTaskLabel(span.limit.task)} began was not counted`:''}.`,true);}catch(e){}
 }
-function currentTimerActiveSeconds(){
-  return currentTimerActiveSecondsAt((TimerState.paused&&TimerState.runtime&&TimerState.runtime.pausedStartedMs)?TimerState.runtime.pausedStartedMs:nowMs());
+// A session stopped because another device claimed it holds its time at the
+// moment it stopped: the handover takes that time, so neither the screen nor
+// a record made meanwhile counts on past it. The hold belongs to the timer
+// that was running, so a session taken in from the other device is not held.
+let heldClock=null;
+function holdClockAt(ms){
+  const at=Number(ms);
+  heldClock=Number.isFinite(at)&&TimerState.runtime&&TimerState.runtime.startMs!==null?{startMs:TimerState.runtime.startMs,atMs:at}:null;
+  return !!heldClock;
 }
-function currentTimerActiveMs(endMs=(TimerState.paused&&TimerState.runtime&&TimerState.runtime.pausedStartedMs)?TimerState.runtime.pausedStartedMs:nowMs()){
+function releaseHeldClock(){heldClock=null;return true;}
+function activeEndMs(){
+  if(TimerState.paused&&TimerState.runtime&&TimerState.runtime.pausedStartedMs)return TimerState.runtime.pausedStartedMs;
+  if(heldClock&&TimerState.runtime&&TimerState.runtime.startMs===heldClock.startMs)return Math.min(nowMs(),heldClock.atMs);
+  return nowMs();
+}
+function currentTimerActiveSeconds(){
+  return currentTimerActiveSecondsAt(activeEndMs());
+}
+function currentTimerActiveMs(endMs=activeEndMs()){
   if(!TimerState.runtime||TimerState.runtime.startMs===null)return Math.max(0,(totS-remS+overflowS)*1000);
   return Math.max(0,endMs-TimerState.runtime.startMs-(TimerState.runtime.totalPausedMs||0)-pendingInactiveGapMs(endMs));
 }
@@ -821,6 +837,8 @@ const SessionEvidenceProjector=(()=>{
     }
     function resumeAfterPrimaryRestore({frozenSinceMs=null}={}){
       if(!appCanMutate())return false;
+      // Ownership stayed here: the time since the stop was study time.
+      releaseHeldClock();
       if(TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex])&&[TIMER_MODES.RUNNING,TIMER_MODES.PAUSED].includes(TimerState.mode)){
         // A restore that kept the session running paused only the display. If
         // the timer was ticking when it froze, that time is study time, not an
@@ -871,7 +889,7 @@ const SessionEvidenceProjector=(()=>{
     return freeze({
       format:'study-director.timer-engine',contractVersion:2,
       practice:PracticePacer,evidenceGateway:SessionEvidenceGateway,presentation,status,
-      stopExecution,resetCountdownRuntime,setCountdownDuration,resetToReady,resumeAfterPrimaryRestore,
+      stopExecution,holdClockAt,releaseHeldClock,resetCountdownRuntime,setCountdownDuration,resetToReady,resumeAfterPrimaryRestore,
       resumeRestoredPaused,resumeRestoredRunning,
       PRACTICE_CUE_DEFAULT,PRACTICE_PAUSE_CAUSES,formatPracticeMs,practicePaceBandLabel,
       sanitizePracticeCueMode,sanitizePracticeRun,sanitizePracticeRuns,sanitizePracticeState,

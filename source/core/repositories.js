@@ -53,7 +53,7 @@ registry.define('repositories',1,()=>{
     if(!Array.isArray(input.obsoleteMetaKeys)||input.obsoleteMetaKeys.some(key=>typeof key!=='string'||!key)||new Set(input.obsoleteMetaKeys).size!==input.obsoleteMetaKeys.length)throw new TypeError('AppData obsolete metadata keys are invalid.');
     functions(input.helpers,[
       'boundedInt','boundedNumber','clampText','clampEditorContent','editorContentWithinLimits','wipeObject','isValidIsoDate','isCanonicalScheduleText','sameDataValue',
-      'activeSessionScheduleFingerprint','normalizeAreaName','displayAreaName','isoDateDay','normalizeTimestamp','jsonByteLength'
+      'activeSessionScheduleFingerprint','normalizeAreaName','displayAreaName','noteName','isoDateDay','normalizeTimestamp','jsonByteLength'
     ],'AppData helpers');
     functions(input.hooks,[
       'canMutate','getOwnershipRevision','issueWriteToken','assertWriteToken','isOwnershipLostError','capture','onStorageOk','onStorageError',
@@ -105,7 +105,7 @@ registry.define('repositories',1,()=>{
     const RepositoryJournals=input.journals;
     const {
       boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
-      activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay,normalizeTimestamp,jsonByteLength
+      activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,noteName,isoDateDay,normalizeTimestamp,jsonByteLength
     }=input.helpers;
     const {
       canMutate:appCanMutate,
@@ -390,7 +390,7 @@ function activeSessionRecoveryEnvelope(session){
   const revision=boundedNumber(session.revision,{min:1,max:Number.MAX_SAFE_INTEGER,fallback:1});
   return {
     version:DATA_CONTRACT.schemas.LocalRecoveryEnvelope.version,revision,
-    shell:{id:ACTIVE_SESSION_ID,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:session.date,status:session.status==='suspended'?'suspended':'active',runningOn:String(session.runningOn||''),scheduleText:session.scheduleText,suspendedAt:session.suspendedAt||null,updatedAt:session.updatedAt||new Date().toISOString()},
+    shell:{id:ACTIVE_SESSION_ID,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:session.date,status:['suspended','finished'].includes(session.status)?session.status:'active',runningOn:String(session.runningOn||''),scheduleText:session.scheduleText,suspendedAt:session.suspendedAt||null,updatedAt:session.updatedAt||new Date().toISOString()},
     snapshot:session.snapshot,updatedAt:session.updatedAt||new Date().toISOString()
   };
 }
@@ -400,7 +400,7 @@ function sanitizeCurrentLocalRecoveryEnvelope(raw){
   if(Object.keys(raw).sort().join('|')!==expected.sort().join('|'))return null;
   const shell=raw.shell&&typeof raw.shell==='object'&&!Array.isArray(raw.shell)?raw.shell:null;
   const shellExpected=['id','type','version','revision','date','status','runningOn','scheduleText','suspendedAt','updatedAt'];
-  if(!shell||Object.keys(shell).sort().join('|')!==shellExpected.sort().join('|')||shell.id!==ACTIVE_SESSION_ID||shell.type!=='activeSession'||Number(shell.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!isValidIsoDate(shell.date)||!isCanonicalScheduleText(shell.scheduleText)||!['active','suspended'].includes(shell.status))return null;
+  if(!shell||Object.keys(shell).sort().join('|')!==shellExpected.sort().join('|')||shell.id!==ACTIVE_SESSION_ID||shell.type!=='activeSession'||Number(shell.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!isValidIsoDate(shell.date)||!isCanonicalScheduleText(shell.scheduleText)||!['active','suspended','finished'].includes(shell.status))return null;
   const revision=boundedNumber(raw.revision,{min:1,max:Number.MAX_SAFE_INTEGER,fallback:0});
   if(!revision||Number(shell.revision)!==revision)return null;
   const snapshot=ActiveSessionCodec.sanitizeSessionSnapshot(raw.snapshot,shell.date,activeSessionScheduleFingerprint(shell),revision);if(!snapshot)return null;
@@ -1327,7 +1327,7 @@ const NotesRepository=NotesRepositoryModule.create(freeze({
       }),
       storage:freeze({local:LocalStorageContract,meta:Meta,idbGetAll,idbStoreTransaction,idbStrictTransaction,storageResets:()=>IndexedDb.lifecycle().resets}),
       codecs:freeze({sanitizeCurrentNote,noteKeys:DailyRecordCodec.noteKeys}),keyedRecord:KeyedRecord,
-      helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom:()=>rescueRoom(STORAGE_KEYS.noteRescue,APP_LIMITS.noteRescueBytes)}),
+      helpers:freeze({clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,noteName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom:()=>rescueRoom(STORAGE_KEYS.noteRescue,APP_LIMITS.noteRescueBytes)}),
       hooks:freeze({
         canMutate:appCanMutate,storageOk:markStorageHealthOk,reportCommit:reportCanonicalCommit,
         onNotesChanged:refreshNoteConsumers,onNoteSyncState:setNoteSyncStateForKey,onNoteConflict:reportNoteConflict,saveWarning:showSubjectNoteSaveWarning,

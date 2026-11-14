@@ -17,6 +17,12 @@ Report exactly what was run, what failed and what was not run. When the app and 
 
 Run targeted tests for each affected surface; run the full suites only after substantial change or before a release.
 
+**Which tests to add (owner, 2026-11-11).** Tests follow how much is at stake.
+
+- *Sensitive areas:* sync and Drive, storage, backup and restore, data formats and codecs, the session lifecycle, timer, handoff and ownership, and anything else that keeps the owner's data. Every change or fix there, however small, comes with a test that covers it at the right layer, usually a journey or integration test of the flow it touches. A fix in these areas can break something downstream; on 2026-11-11 the Finish Today journey found two such bugs (a saved day written back, and devices rewriting a finished day on each sync).
+- *Everywhere else* (layout, wording, a control's state, a small UI bug): a fix needs no test of its own once it is fixed. Add one only when the change sets how an important feature behaves.
+- Prefer extending an existing test of that flow to adding a new file, and keep the addition short.
+
 | Change | Tests |
 |---|---|
 | Persistence or codecs | Repository, migration, recovery and import tests |
@@ -26,7 +32,7 @@ Run targeted tests for each affected surface; run the full suites only after sub
 | UI | Presentation architecture tests and the relevant browser tests, at laptop and phone widths |
 | Build or modules | Syntax, architecture, generated syntax, build verification and the deployment contract |
 
-A pull request titled as a bug fix (`fix: …`) must add or strengthen a regression test at the right layer; CI checks this. Test rules and layers: [tests/README.md](../tests/README.md).
+A pull request titled as a bug fix (`fix: …`) that changes a sensitive area must add or strengthen a test at the right layer; CI checks this for the sensitive modules listed in `tests/helpers/bug-regression-policy.mjs` (`app.html` mixes every area, so fixes there rely on review). Test rules and layers: [tests/README.md](../tests/README.md).
 
 **Testing rhythm (owner, 2026-10-10).** Make all the changes for a piece of work, build once and run the suites once. Fix what fails, then rerun only the failing tests.
 

@@ -303,4 +303,16 @@ const cases=[];
   await tick(t,12*1000);assert.equal(attempts,2,'same failed revision retries on the governed backoff');
   cases.push('same-revision urgency obeys backoff');
 }
+{
+  // Cleanup holding Drive (here or on another device) is a short wait, not a
+  // failure: each refused upload retries in about 15 s, with no growing
+  // backoff, so sync never pauses for half an hour over a brief clash.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z'});await tick(t,1000);
+  let attempts=0;t.onPublication(()=>{attempts++;if(attempts<=6)throw Object.assign(new Error('cleanup busy'),{code:'STUDY_DIRECTOR_REPOSITORY_MAINTENANCE_BUSY'});});
+  t.change(true);await tick(t,t.policy.automaticUrgentMs+1000);assert.equal(attempts,1);
+  await tick(t,6*20*1000);
+  assert.equal(attempts,7,'six refusals, each retried within about 15 s, then the upload goes through');
+  assert.equal(t.runtime.backgroundStatus().find(row=>row.job==='google-drive convergence').retryBackoffCapped??false,false);
+  cases.push('cleanup busy retries soon, never on the failure backoff');
+}
 console.log(JSON.stringify({status:'PASS',suite:'automatic-provider-backup',productionRuntime:true,cases},null,2));

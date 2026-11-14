@@ -370,6 +370,22 @@ for(const failEpochRead of [false,true]){
   assert.deepEqual(app.notes.linkedFrom('pharm').map(note=>note.label),['cardio'],'the backlink survives the combine');
 }
 
+// The shared support note keeps its reserved key as its stored label, which is
+// its identity. What people read uses its name: a clash names it and its kept
+// copy "Support Activities", and the copy is an ordinary note.
+{
+  const {app,stores,clock,reports}=await setup();
+  const SUPPORT='__study_director_support_activities__';
+  app.notes.update(SUPPORT,'Support Activities','shared start','');await app.notes.flush({strict:true});await clock.advance(2000);
+  assert.equal(app.notes.get(SUPPORT).label,SUPPORT,'the stored label stays the reserved key');
+  app.notes.update(SUPPORT,'Support Activities','local line',app.notes.get(SUPPORT).updatedAt);
+  const id=app.notes.get(SUPPORT).id;stores.area.set(id,{version:3,key:id,label:SUPPORT,text:'stored line',updatedAt:'2026-09-15T12:00:05.000Z'});
+  await app.notes.flush();await settle(clock);await app.notes.flush({strict:true});
+  assert.equal(storedNote(stores.area,SUPPORT).text,'stored line','the support note keeps its key and the stored text');
+  assert.equal(storedNote(stores.area,'support activities (unsaved copy)')?.text,'local line','the kept copy is named for people');
+  assert.deepEqual(reports.map(report=>[report.label,report.copyLabel]),[['Support Activities','Support Activities (unsaved copy)']],'the notice names the note, not its key');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'queued batches use the revision committed by the earlier batch',
   'rows lost to a browser data clear are rewritten from memory',
@@ -384,5 +400,6 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'a clash stores its copy in the transaction that finds it; names never run out; the limit never drops either version',
   'Recently deleted gives way at the note limit; the rescue names notes it cannot hold',
   'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back',
-  'a backup note that takes a local id keeps the bars and text links that point to it'
+  'a backup note that takes a local id keeps the bars and text links that point to it',
+  'the support note keeps its key; clash notices and its kept copy use its name'
 ]},null,2));

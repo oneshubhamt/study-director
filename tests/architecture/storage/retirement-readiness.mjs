@@ -20,6 +20,7 @@ const migrationEvidence=Object.freeze({
   'plan-legacy-schedule':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/plans/saved-plans-logic.mjs'],
   'reflection-drafts-retirement':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/review/reflection-session-codec.mjs'],
   'active-session-v7-domain-separation':['tests/integration/review/reflection-session-codec.mjs'],
+  'active-session-v10':['tests/integration/review/reflection-session-codec.mjs'],
   'note-historical-rows':['tests/integration/storage/canonical-baseline.mjs','tests/integration/rich-text/editor-persistence.mjs'],
   'note-recovery-v1':['tests/integration/rich-text/editor-persistence.mjs'],
   'daily-record-historical-shapes':['tests/integration/storage/canonical-baseline.mjs'],

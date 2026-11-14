@@ -483,17 +483,20 @@ registry.define('library',1,()=>{
       // The name starts with the row's visible text (name, TODAY, last edit), as
       // WCAG 2.5.3 asks, then adds what the row shows only by style.
       const edited=editedLabel(entry.updatedAt);
-      row.setAttribute('aria-label',`${leaf}${entry.current?' TODAY':''}${edited?` ${edited}`:''}${entry.hasNote?'':', empty'}${entry.current?', in today’s plan':''}`);
+      row.setAttribute('aria-label',`${leaf}${node.children?` ${node.children}`:''}${entry.current?' TODAY':''}${edited?` ${edited}`:''}${entry.hasNote?'':', empty'}${node.children?`, ${node.children} nested ${node.children===1?'note':'notes'}`:''}${entry.current?', in today’s plan':''}`);
       if(node.children)row.setAttribute('aria-expanded',node.expanded?'true':'false');
       row.tabIndex=-1;
       const twisty=textEl('span','library-note-twisty',node.children?(node.expanded?'▾':'▸'):'');twisty.setAttribute('aria-hidden','true');
       if(node.children)twisty.addEventListener('click',event=>{event.stopPropagation();toggleNoteBranch(entry.key,!node.expanded);});
-      const meta=document.createElement('span');meta.className='library-note-nav-tags';
-      if(entry.current)meta.appendChild(textEl('span','library-note-tag current','TODAY'));
-      if(edited){if(meta.childNodes.length)meta.append(' ');meta.appendChild(textEl('span','library-note-nav-edited',edited));}
+      // Columns stay put: the name with TODAY beside it, then the last edit
+      // always at the right edge.
+      const name=document.createElement('span');name.className='library-note-tree-name';name.append(textEl('span','library-note-nav-name',leaf));
+      // A parent shows how many notes sit directly inside it, open or closed.
+      if(node.children){const count=textEl('span','library-note-child-count',String(node.children));count.title=`${node.children} nested ${node.children===1?'note':'notes'}`;name.append(' ',count);}
+      if(entry.current)name.append(' ',textEl('span','library-note-tag current','TODAY'));
       // Spaces between the parts keep words apart for assistive technology; a
       // grid does not draw them.
-      row.append(twisty,' ',textEl('span','library-note-nav-name',leaf),' ',meta);
+      row.append(twisty,' ',name,' ',textEl('span','library-note-nav-edited',edited));
       row.addEventListener('click',()=>selectNote(entry.key));
       return row;
     }
@@ -761,6 +764,8 @@ registry.define('library',1,()=>{
       if(!match)return false;
       if(pendingNote&&match.key!==pendingNote.key){pendingNote=null;invalidateAttachments();}
       selectedNoteKey=match.key;selectedTrashKey='';
+      // Opening a note opens its branch too, so its nested notes show.
+      if(noteTreeNodes.get(match.key)?.children)noteExpanded.set(match.key,true);
       renderNotes();openNoteView();
       return true;
     }
@@ -859,7 +864,9 @@ registry.define('library',1,()=>{
         setNotesStatus('Notes are at their note limit. Delete a note to make room.',{error:true});
         return false;
       }
-      const selected=noteEntries().find(entry=>entry.key===selectedNoteKey)||null;
+      // Support Activities is one shared note, not a folder: new notes go
+      // inside other notes only.
+      const selected=noteEntries().find(entry=>entry.key===selectedNoteKey&&!entry.support)||null;
       const options=selected?[
         {value:'nested',label:`Inside ${noteLeaf(selected.label)}`,description:`Creates a child under ${selected.label}.`},
         {value:'top',label:'At top level',description:'Creates an independent Area.'}

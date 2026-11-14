@@ -140,6 +140,18 @@ try{
       assert.deepEqual(found.notice.buttons,['Restore from backup','Continue with current data']);
       assert.equal(found.paused,true,'automatic backups pause so the empty copy cannot replace one');
       result.checks.databaseRemovedWhileClosed=true;
+      // Removed again before the notice is answered: this loss is dated by
+      // its own start, not the earlier one's.
+      noRuntimeErrors(page);await browser.closePage(page);await new Promise(resolve=>setTimeout(resolve,1100));
+      const again=await browser.createPage(server.url('deployment','manifest.webmanifest'),{viewport:{width:800,height:600,mobile:false,scale:1}});
+      await again.send('Storage.clearDataForOrigin',{origin:server.origin,storageTypes:'indexeddb'});await browser.closePage(again);
+      page=await browser.createPage(appUrl,{preload,viewport:{width:1280,height:860,mobile:false,scale:1}});
+      await waitForStudyDirector(page,{instrumented:true});
+      await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership after the second removal'});
+      await waitFor(()=>page.evaluate(`${read}.then(state=>!!state.notice)`),{label:'notice after the second removal'});
+      const second=await page.evaluate(read);
+      assert.ok(Date.parse(second.cleared)>Date.parse(found.cleared),`the second loss records its own time (${found.cleared}, then ${second.cleared})`);
+      result.checks.eachLossDated=true;
       await click(page,'Continue with current data');
       await waitFor(()=>page.evaluate(`${read}.then(state=>!state.notice&&!state.cleared)`),{label:'clear settled'});
       await reload(page);await page.evaluate(`new Promise(resolve=>setTimeout(resolve,1000))`);

@@ -43,7 +43,7 @@ Stop and ask before you:
 - Change first-party code only in `source`, `portable` or `rich-text`. Never hand-edit generated `dist` output or external bundles.
 - `release.config.mjs` is the only source of release identity. `LICENSE` must stay identical to `source/legal/LICENSE.txt`.
 - A pull request that changes the shipped app (anything under `source`, `portable` or `rich-text`) raises `release` in `release.config.mjs` by one, for example `SDVB75F16` → `SDVB75F17`. Do this once per pull request, not once per commit, and only when the pull request's `release` is not already above `main`'s. Change nothing else in `release.config.mjs` without asking. Pull requests that change only tests, docs or tooling keep the release.
-- A pull request titled like a bug fix (for example `fix: ...`) must include a regression test; CI enforces this.
+- A pull request titled like a bug fix (for example `fix: ...`) that changes a sensitive area (sync, storage, backup, data formats, sessions, timer, ownership) must include a test; CI enforces this for those modules.
 - Never run a browser test marked `alone` in `tests/helpers/browser-tests.mjs` at the same time as another browser test; they fail under CPU load. The browser runner runs the others two at a time and the `alone` tests by themselves. Report browser runs as one summary, not test by test. Before you treat a failure seen under concurrency as a bug, rerun that test alone. [tests/README.md](tests/README.md#browser-test-reliability) has the full rules.
 - Storage, backup and restore code protects the owner's data. Changes there need targeted tests at the right layer.
 - If `npm run` refuses to start because of the pinned npm version, run the equivalent `node` command from [docs/workflow.md](docs/workflow.md#commands).
@@ -52,5 +52,6 @@ Stop and ask before you:
 
 - Clean, lean and reliable: simple things done very well, no unnecessary features or over-engineering.
 - The owner's data is never put at risk.
-- Fix the app, not just the tests. When work finds a bug, dead code or a clear improvement in the app, fix the app code in the same change, with a test that would have caught it, and say so in the summary. Never weaken a test to make it pass. Ask first only when the right behaviour is unclear or the change is large.
+- Fix the app, not just the tests. When work finds a bug, dead code or a clear improvement in the app, fix the app code in the same change and say so in the summary. Never weaken a test to make it pass. Ask first only when the right behaviour is unclear or the change is large.
+- Tests follow how much is at stake, not how many bugs were fixed ([docs/workflow.md](docs/workflow.md#choosing-tests)). Sensitive areas (sync and Drive, storage, backup and restore, data formats, the session lifecycle, timer, handoff and ownership) need a test covering every change and fix, however small: a fix there can break a journey downstream. Elsewhere a small fix needs no test of its own. Running the existing tests for what changed always applies.
 - Short, plain replies, with tables where they help.

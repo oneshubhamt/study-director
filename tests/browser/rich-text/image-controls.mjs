@@ -56,10 +56,10 @@ try{
     const root=document.querySelector('#alt + .sd-rte'),figure=root.querySelector('.sd-rte-image');
     const probe=selector=>{const el=figure.querySelector(selector),r=el.getBoundingClientRect(),style=getComputedStyle(el);return {w:r.width,h:r.height,opacity:Number(style.opacity||1),visibility:style.visibility,display:style.display,borderWidth:parseFloat(style.borderTopWidth)||0,borderColor:style.borderTopColor,background:style.backgroundColor}};
     const alt=figure.querySelector('.sd-rte-image-alt'),resize=figure.querySelector('.sd-rte-image-resize'),altGlyph=getComputedStyle(alt,'::before'),resizeGlyph=getComputedStyle(resize,'::after');
-    return {coarse:matchMedia('(pointer: coarse)').matches,alt:probe('.sd-rte-image-alt'),remove:probe('.sd-rte-image-remove'),resize:probe('.sd-rte-image-resize'),altGlyph:{content:altGlyph.content,fontSize:parseFloat(altGlyph.fontSize)||0},resizeGlyph:{width:parseFloat(resizeGlyph.width)||0,height:parseFloat(resizeGlyph.height)||0,borderRight:parseFloat(resizeGlyph.borderRightWidth)||0},overflow:document.documentElement.scrollWidth-innerWidth};
+    return {coarse:matchMedia('(pointer: coarse)').matches,alt:probe('.sd-rte-image-alt'),remove:probe('.sd-rte-image-remove'),resize:probe('.sd-rte-image-resize'),expand:probe('.sd-rte-image-expand'),altGlyph:{content:altGlyph.content,fontSize:parseFloat(altGlyph.fontSize)||0},resizeGlyph:{width:parseFloat(resizeGlyph.width)||0,height:parseFloat(resizeGlyph.height)||0,borderRight:parseFloat(resizeGlyph.borderRightWidth)||0},overflow:document.documentElement.scrollWidth-innerWidth};
   })()`);
   assert.equal(mobileControls.coarse,true,JSON.stringify(mobileControls));
-  for(const [name,control] of Object.entries({alt:mobileControls.alt,remove:mobileControls.remove,resize:mobileControls.resize})){
+  for(const [name,control] of Object.entries({alt:mobileControls.alt,remove:mobileControls.remove,resize:mobileControls.resize,expand:mobileControls.expand})){
     assert.ok(control.w>=44&&control.h>=44,`${name} image control is not touch-safe: ${JSON.stringify(control)}`);
     assert.ok(control.opacity>=0.75&&control.visibility!=='hidden'&&control.display!=='none',`${name} image control is visually hidden: ${JSON.stringify(control)}`);
     assert.ok(control.borderWidth>=1&&!/rgba\([^)]*,\s*0\)$/.test(control.borderColor)&&control.borderColor!=='transparent',`${name} image control lacks visible border chrome: ${JSON.stringify(control)}`);

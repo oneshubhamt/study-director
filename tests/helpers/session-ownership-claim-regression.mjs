@@ -16,7 +16,7 @@ const pipeline=freeze({
 const presentation=freeze({
   begin:()=>freeze({update:noop,finish:noop}),read:()=>null,feedback:noop,condition:noop,notice:noop,detail:noop,outcome:noop,locationLabel:()=>'',resolve:noop,reset:noop,subscribe:()=>noop
 });
-const files=new Map();let publicationId=0,claimDownloads=0;
+const files=new Map(),claimOrder=new Map(),watchCommits=[];let publicationId=0,claimDownloads=0,claimLists=0,tick=0,operations=0,watchFails=false,oddWatch={ignored:0,ignoredCommits:0};
 const HEAD_A='cp_'+'a'.repeat(32),HEAD_B='cp_'+'b'.repeat(32),CONTENT_FINGERPRINT='c'.repeat(64),HANDOFF_TOKEN='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',OTHER_TOKEN='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';let headId=HEAD_A;
 const descriptor=file=>freeze({kind:'session-claim',id:file.id,name:file.name,size:file.blob.size,digest:file.digest,serverDigest:file.digest,createdAt:file.exportedAt,modifiedAt:file.exportedAt,remoteId:'claim-'+file.id,remoteVersion:'1',verificationScope:'claim-scope'});
 const headDescriptor=kind=>freeze({kind,id:headId,name:headId+(kind==='checkpoint'?'.sdcheckpoint':'.sdcommit'),size:1,digest:'d'.repeat(64),serverDigest:'d'.repeat(64),createdAt:'2026-10-27T08:00:00.000Z',modifiedAt:'2026-10-27T08:00:00.000Z',remoteId:kind+'-'+headId,...(kind==='checkpoint'?{history:freeze({format:15,logicalFingerprint:'e'.repeat(64),exportedAt:'2026-10-27T08:00:00.000Z',counts:freeze({dailyRecord:0,note:0}),encrypted:false,retention:freeze({role:'normal'}),origin:B})}:{})});
@@ -25,8 +25,16 @@ const repository=freeze({
   list:async({kind})=>freeze({items:freeze(['checkpoint','commit'].includes(kind)?[headDescriptor(kind)]:[]),overflow:false,ignored:0}),upload:unexpected,download:unexpected,delete:unexpected,
   beginPublication:async()=>freeze({id:'pub_'+(++publicationId),createdAt:new Date().toISOString(),sameDevice:false}),
   listPublications:async()=>freeze({items:freeze([]),overflow:false,ignored:0}),assertPublication:async()=>true,endPublication:async()=>true,
-  listSessionClaims:async()=>freeze({items:freeze([...files.values()].map(descriptor)),overflow:false,ignored:0}),
-  uploadSessionClaim:async file=>{files.set(file.id,freeze({...file}));return descriptor(file);},
+  listSessionClaims:async()=>{claimLists++;return freeze({items:freeze([...files.values()].map(descriptor)),overflow:false,ignored:0});},
+  // Newest first, takeover notes and version-complete records together.
+  listSessionWatch:async({limit})=>{
+    if(watchFails){watchFails=false;throw new Error('QA_FIXTURE network failure');}
+    const rows=[...[...files.values()].map(file=>({at:claimOrder.get(file.id)||0,item:descriptor(file)})),...watchCommits].sort((x,y)=>y.at-x.at).slice(0,limit).map(row=>row.item);
+    return freeze({claims:freeze(rows.filter(row=>row.kind==='session-claim')),commits:freeze(rows.filter(row=>row.kind==='commit')),incomplete:false,...oddWatch});
+  },
+  // Each operation verifies Drive's folder once (counted here).
+  beginOperation:()=>{operations++;return repository;},
+  uploadSessionClaim:async file=>{files.set(file.id,freeze({...file}));claimOrder.set(file.id,++tick);return descriptor(file);},
   downloadSessionClaim:async item=>{claimDownloads++;const file=files.get(item.id);if(!file)throw new Error('missing claim');return freeze({blob:file.blob,release:async()=>{}});},
   deleteSessionClaim:async item=>files.delete(item.id)
 });
@@ -122,6 +130,46 @@ await assert.rejects(()=>b.readSessionClaim('google-drive'),error=>error?.code==
 await replaceLast(oldValue);
 assert.equal((await b.readSessionClaim('google-drive')).newer,undefined,'a readable claim reads as before');
 assert.equal(b.diagnosticSync().find(row=>row.id==='google-drive')?.needsUpdate,false,'and the update notice goes');
+// The session check (watchSession, every 10 s): one listing of the newest
+// takeover notes and version-complete records. A version another device
+// finished is reported once; when only newer versions fill the answer, no
+// note was added since, and the last verified claim stands without listing
+// every note again.
+{
+  const commit=id=>freeze({...headDescriptor('commit'),id,name:id+'.sdcommit',remoteId:'commit-'+id});
+  const known=await b.readSessionClaim('google-drive'),listsBefore=claimLists,first=await b.watchSession('google-drive');
+  assert.equal(first.claim.epoch,known.epoch,'the check sees the current claim from its one listing');
+  assert.equal(claimLists,listsBefore,'without listing every claim');
+  assert.equal(first.newVersions,false,'no version finished elsewhere yet');
+  watchCommits.push({at:++tick,item:commit('cp_'+'e'.repeat(32))});
+  assert.equal((await b.watchSession('google-drive')).newVersions,true,'a version finished elsewhere is reported');
+  // Not brought in yet (a takeover was being saved): the next check reports it again.
+  assert.equal((await b.watchSession('google-drive')).newVersions,true,'reported until it is brought in');
+  b.bringInSessionVersions('google-drive');
+  assert.equal((await b.watchSession('google-drive')).newVersions,false,'once brought in, not again');
+  for(let index=0;index<25;index++)watchCommits.push({at:++tick,item:commit('cp_'+String(index).padStart(32,'f'))});
+  const crowded=await b.watchSession('google-drive');
+  assert.equal(crowded.claim.epoch,known.epoch,'with only newer versions in the answer, the last verified claim stands');
+  assert.equal(claimLists,listsBefore,'still without listing every claim');
+  assert.equal(crowded.newVersions,true);b.bringInSessionVersions('google-drive');
+  // After a gap (offline, in the background) a claim may have been pushed out
+  // of the answer by later versions: every note is read once more.
+  const realNow=Date.now,operationsBefore=operations;Date.now=()=>realNow()+61000;
+  try{
+    const afterGap=await b.watchSession('google-drive');assert.equal(afterGap.claim.epoch,known.epoch);assert.equal(claimLists,listsBefore+1,'after a gap the claims are read in full');
+    // One operation serves every check: one request each, Drive's folder
+    // verified when checks start and again only after an error.
+    await b.watchSession('google-drive');await b.watchSession('google-drive');
+    assert.equal(operations,operationsBefore,'the checks share one operation, even after a gap');
+    watchFails=true;await assert.rejects(()=>b.watchSession('google-drive'));
+    await b.watchSession('google-drive');
+    assert.equal(operations,operationsBefore+1,'after an error the folder is verified again');
+    // An unreadable version record does not hide a takeover; an unreadable
+    // takeover note leaves ownership uncertain, and the check says so.
+    oddWatch={ignored:0,ignoredCommits:1};assert.equal((await b.watchSession('google-drive')).claim.epoch,known.epoch);
+    oddWatch={ignored:1,ignoredCommits:0};await assert.rejects(()=>b.watchSession('google-drive'),error=>error.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN');
+  }finally{Date.now=realNow;oddWatch={ignored:0,ignoredCommits:0};}
+}
 // Version 3 was written only by unreleased builds; it is refused like any unknown form.
 const v3Value={...oldValue,version:3};delete v3Value.handoffToken;
 await replaceLast(v3Value);

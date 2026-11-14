@@ -22,7 +22,7 @@ registry.define('backup',1,input=>{
     noteReconciliation:freeze(['resolve','merge']),
     exports:freeze(['backgroundAvailable','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
     session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
-    domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
+    domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','noteName','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule','deviceName']),
     events:freeze(['libraryChanged','backupCompleted','reconcileNotes','restoreNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
     operations:freeze(['assertAuthority','canShare','clearFault','failClosed','runExclusive']),
@@ -82,7 +82,7 @@ registry.define('backup',1,input=>{
     const NoteReconciliation=ports.noteReconciliation;
     const Exports=ports.exports;
     const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed,yieldSession}=ports.session;
-    const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
+    const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,noteName,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
     const {refreshPnote,refreshReview,renderSchedule:renderSched,deviceName}=ports.view;
     const {libraryChanged,backupCompleted,reconcileNotes,restoreNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
     const {assertAuthority,clearFault,failClosed,runExclusive}=ports.operations;
@@ -959,7 +959,7 @@ function sessionDecisions(session){
   const review=snapshot.review&&(snapshot.review.reflection||snapshot.review.studyQuality)?JSON.stringify([String(snapshot.review.reflection||''),snapshot.review.studyQuality||null]):'';
   const shifts=Object.create(null);for(const [id,row] of Object.entries(snapshot.scheduleAdjustments||{}))shifts[id]=JSON.stringify([row.startMin,row.endMin,row.reason]);
   const runs=(snapshot.practice?.runs||[]).map(run=>Canonical.signature(run));
-  return freeze({date:clean.date,schedule:String(clean.scheduleText||'')+'\u0000'+String(snapshot.fingerprint||''),current:String(snapshot.currentTaskId||''),tasks,shifts,runs,carryForward:String(snapshot.latestCarryForward||''),review});
+  return freeze({date:clean.date,schedule:String(clean.scheduleText||'')+'\u0000'+String(snapshot.fingerprint||''),current:String(snapshot.currentTaskId||''),tasks,shifts,runs,carryForward:String(snapshot.latestCarryForward||''),review,finished:clean.status==='finished'});
 }
 // Whether copy x holds every decision copy y holds: 'equal', 'ahead' (x
 // also decided more, such as a block y had not finished yet) or 'no'.
@@ -967,6 +967,8 @@ function sessionDecisionsCover(x,y){
   if(!x||!y||x.date!==y.date||x.schedule!==y.schedule)return 'no';
   let ahead=false,fails=false;
   const value=(a,b)=>{if(a===b)return;if(!b){ahead=true;return;}fails=true;};
+  // Finish Today is a decision too, and a final one.
+  if(y.finished&&!x.finished)fails=true;else if(x.finished&&!y.finished)ahead=true;
   value(x.carryForward,y.carryForward);value(x.review,y.review);
   for(const id of new Set([...Object.keys(x.shifts),...Object.keys(y.shifts)]))value(x.shifts[id]||'',y.shifts[id]||'');
   if(y.runs.some(run=>!x.runs.includes(run)))fails=true;else if(x.runs.some(run=>!y.runs.includes(run)))ahead=true;
@@ -1029,8 +1031,10 @@ function sessionWithDecisions(owner,other){
     latestCarryForward:their.latestCarryForward||own.latestCarryForward,
     review:decided(their.review)?their.review:own.review,
     contentRevision:nextMergedSessionRevision(own.contentRevision,their.contentRevision),savedRevision:0,updatedAt:now};
-  return ActiveSessionCodec.sanitizeCurrent({...mine,revision:nextMergedSessionRevision(mine.revision,theirs.revision),snapshot,updatedAt:now});
+  return ActiveSessionCodec.sanitizeCurrent({...mine,...finishedFrom(mine,theirs),revision:nextMergedSessionRevision(mine.revision,theirs.revision),snapshot,updatedAt:now});
 }
+// A day finished on either copy stays finished in what is made of both.
+function finishedFrom(...sessions){return sessions.some(session=>session?.status==='finished')?{status:'finished',suspendedAt:null}:{};}
 // Incoming content can advance after a device has claimed ownership. Preserve
 // the current owner's control state while adopting that later pre-claim work,
 // and start a fresh local content revision so no foreign save acknowledgement
@@ -1051,6 +1055,7 @@ function rebaseSessionContentToOwner(local,incoming){
     runningOn:mine.runningOn,
     snapshot,
     suspendedAt:mine.status==='suspended'?mine.suspendedAt:null,
+    ...finishedFrom(mine,theirs),
     updatedAt:now
   });
 }
@@ -1256,8 +1261,12 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
   let decision=await sessionSettlement(base,parsed,{hold:(sync||review)&&hasActiveSession(),sync,sessionClaim});
   let state=decision.state,value=decision.value,priorReviews=null;
   const decisionReviews=[];
-  const keepSession=async candidate=>{
+  // why: which settlement kept it. The sync trace records it with whether the
+  // kept and the incoming copies were this device's, so a review that keeps
+  // coming back says where it comes from.
+  const keepSession=async(candidate,why)=>{
     const kept=candidate&&ActiveSessionCodec.sanitizeCurrent(candidate);if(!kept)return false;
+    OperationDiagnostics.mark('session-kept-for-review',{reason:why,keptHere:kept.runningOn===installationId(),incomingHere:parsed.importedActiveSession?.runningOn===installationId()});
     if(priorReviews===null)priorReviews=await AppData.pendingReviews.list();
     if([...priorReviews,...decisionReviews].some(item=>item.subject==='session'&&!item.resolvedAt&&Canonical.same(item.kept,kept)))return true;
     // A session names the device running it.
@@ -1265,7 +1274,7 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     if(!keep(()=>item))return false;
     decisionReviews.push(item);return true;
   };
-  if(sync&&decision.kept&&!(await keepSession(decision.kept)))return freeze({needsDecision:true});
+  if(sync&&decision.kept&&!(await keepSession(decision.kept,'settlement')))return freeze({needsDecision:true});
   if(state==='yield-hold'){
     await yieldSession({deferReview:true});state='hold';value=null;
   }else if(state==='hand-over'&&sync){
@@ -1277,14 +1286,14 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     if(merged){state='graft';value=merged;}
     else{
       state='incoming';
-      if(mine&&relation!=='same'&&relation!=='incoming'&&!(await keepSession(mine)))return freeze({needsDecision:true});
+      if(mine&&relation!=='same'&&relation!=='incoming'&&!(await keepSession(mine,'hand-over')))return freeze({needsDecision:true});
     }
   }else if(state==='yield'||state==='hand-over'){
     await yieldSession();
     if(sync){
       const mine=(await readCanonicalActiveSession()).value;
       state='incoming';
-      if(mine&&!(await keepSession(mine)))return freeze({needsDecision:true});
+      if(mine&&!(await keepSession(mine,'yield')))return freeze({needsDecision:true});
     }else{
       decision=await sessionSettlement(base,parsed);state=decision.state;value=decision.value;
     }
@@ -1301,11 +1310,11 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     if(frozen&&!Canonical.same(ActiveSessionCodec.contentValue(before),ActiveSessionCodec.contentValue(frozen))&&
         !checkpointSavedDayCoversSession(parsed,frozen)&&
         !['same','incoming'].includes(parsed.importedActiveSession?sessionProgressRelation(frozen,parsed.importedActiveSession):'diverged')&&
-        !(await keepSession(frozen)))return freeze({needsDecision:true});
+        !(await keepSession(frozen,'yield-capture')))return freeze({needsDecision:true});
   }
   if(sync&&state==='claimed-conflict'){
     const other=parsed.importedActiveSession||null;
-    if(other&&!(await keepSession(other)))return freeze({needsDecision:true});
+    if(other&&!(await keepSession(other,'claimed-conflict')))return freeze({needsDecision:true});
     state='local';
   }
   if(sync&&(state==='conflict'||state===''||state==='ended')){
@@ -1314,7 +1323,7 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
     const incomingShows=state==='ended'||!mine||!!theirs&&time(theirs)>time(mine);
     const hidden=incomingShows?mine:theirs;
     state=incomingShows?'incoming':'local';
-    if(hidden&&!(await keepSession(hidden)))return freeze({needsDecision:true});
+    if(hidden&&!(await keepSession(hidden,state==='local'?'unsettled-local':'unsettled-incoming')))return freeze({needsDecision:true});
   }
   return freeze({needsDecision:false,state,value});
 }
@@ -1642,10 +1651,10 @@ async function reviewKeptVersions({ref=''}={}){
     if(review.subject==='note'){
       const note=notes.get(review.ref);
       if(!note)choice(review,'','Note · absent here',`${kept?'This alternative contains only the changed Note fields, not a complete Note. Restore the original from Library → Recently deleted (if available), then reopen Kept versions to compare. Until explicitly discarded, this alternative is preserved.':'Both the current Note and a retained deletion are absent. No Note will be changed here.'} ${keptReviewProvenance(review,devices)}`,{label:'Keep for later',description:'The original alternative remains available; no Note is changed.'},{label:'Discard kept alternative',description:'Only this retained alternative is resolved; no Note is created or deleted.'},true);
-      else if(!kept)choice(review,'',`Note · ${note.label}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review,devices)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
+      else if(!kept)choice(review,'',`Note · ${noteName(note.label)}`,`A note deletion is kept as an alternative. ${keptReviewProvenance(review,devices)}`,{label:'Keep the note',description:'The current note stays.'},{label:'Delete it',description:'Moves the current note to Recently deleted.'});
       else{
-        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${note.label}`,`Titles differ. ${keptReviewProvenance(review,devices)}`,{label:`Keep “${note.label}”`,description:''},{label:`Use “${kept.label}”`,description:''});
-        if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:note.label,localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:keptColumn(review),ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
+        if(typeof kept.label==='string'&&kept.label!==note.label)choice(review,'label',`Note title · ${noteName(note.label)}`,`Titles differ. ${keptReviewProvenance(review,devices)}`,{label:`Keep “${noteName(note.label)}”`,description:''},{label:`Use “${noteName(kept.label)}”`,description:''});
+        if(typeof kept.text==='string'&&kept.text!==note.text)texts.push(freeze({key:review.ref,label:noteName(note.label),localCandidateId:'current',incomingCandidateId:review.id,localValue:note.text,incomingValue:kept.text,incomingLabel:keptColumn(review),ancestorAvailable:typeof review.base?.text==='string',ancestorValue:String(review.base?.text||'')}));
       }
     }else if(review.subject==='savedDay'){
       const record=days.get(review.ref)||null;
@@ -1806,7 +1815,8 @@ async function reviewKeptVersions({ref=''}={}){
           if(!committed||!Canonical.same(committed,personalSelection))
             throw new Error('The selected Personal Data did not reach canonical storage. The review remains open.');
         }
-        if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,status:'suspended',suspendedAt:keptSession.suspendedAt||now,revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
+        // A kept copy comes back stopped: suspended, or finished if that day was.
+        if(keptSession)await applyResolvedActiveSession(freeze({activeSession:freeze({changed:true,value:freeze({...keptSession,...(keptSession.status==='finished'?{status:'finished',suspendedAt:null}:{status:'suspended',suspendedAt:keptSession.suspendedAt||now}),revision:Math.max(Number(session&&session.revision)||0,Number(keptSession.revision)||0)+1,updatedAt:now})})}));
         if(clearSession){
           await applyResolvedActiveSession(freeze({activeSession:freeze({value:session})}),{clear:true});
           const cleared=await readCanonicalActiveSession();
@@ -2709,7 +2719,7 @@ async function planReplacement(stored,parsed){
 function replacementExtrasSummary(plan){
   const extras=plan.extras,dayLabel=date=>{const at=new Date(date+'T12:00:00');return Number.isFinite(at.getTime())?at.toLocaleDateString(undefined,{day:'numeric',month:'short'}):date;};
   const part=(items,one,many,name)=>{if(!items.length)return '';const names=name?items.slice(0,3).map(name):[];return `${items.length} ${items.length===1?one:many}${names.length?` (${names.join(', ')}${items.length>3?` and ${items.length-3} more`:''})`:''}`;};
-  return [part(extras.notes,'note','notes',key=>`“${String(plan.local[key].label||'Untitled')}”`),part(extras.days,'Saved Day','Saved Days',dayLabel),part(extras.assets,'attachment','attachments'),part(extras.plans,'saved plan','saved plans')].filter(Boolean).join(', ');
+  return [part(extras.notes,'note','notes',key=>`“${noteName(plan.local[key].label)||'Untitled'}”`),part(extras.days,'Saved Day','Saved Days',dayLabel),part(extras.assets,'attachment','attachments'),part(extras.plans,'saved plan','saved plans')].filter(Boolean).join(', ');
 }
 const REPLACEMENT_EXTRA_CHOICES=freeze([
   freeze({value:'keep',label:'Keep them',kind:'primary',description:'They stay on this device alongside the restored backup.'}),

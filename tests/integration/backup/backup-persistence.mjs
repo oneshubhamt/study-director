@@ -202,7 +202,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
   session:freeze({canMutate:()=>true,cancelLiveDraftSave:()=>events.push('cancel-save'),captureSnapshot:()=>null,hasActiveSession:()=>activeSessionBlocking,hasTasks:()=>false,toActiveSession:()=>null,withPersistenceSuppressed:async operation=>{events.push('suppression:start');try{return await operation();}finally{events.push('suppression:end');}},yieldSession:async()=>false}),
   domain:freeze({
     clampText,filenameSafeStudentName:()=> 'student',getStudentName:()=> 'Student',
-    materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-05'
+    noteName:value=>String(value??''),materializeDailyRecordView:value=>value,sanitizeCurrentDailyRecord:dailyRecordCodec.sanitizeCurrentDailyRecord,todayISO:()=> '2026-08-05'
   }),
   view:freeze({presentation:backupPresentation,refreshPnote:fn,refreshReview:fn,renderSchedule:fn,deviceName:()=>"iPad · Safari"}),
   events:freeze({

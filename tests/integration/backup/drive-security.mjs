@@ -57,6 +57,29 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   assert.equal(await provider.repository.deleteSessionClaim(uploaded),true);assert.equal((await provider.repository.listSessionClaims()).items.length,0);
 }
 
+// The session check (backlog item 23): one request lists the newest takeover
+// notes and version-complete records together and never the pieces. An
+// unreadable record does not hide a takeover; an unreadable note makes
+// ownership uncertain.
+{
+  const {state,provider}=createHarness();await provider.prepare();await provider.authorize();
+  const claimId='sc_'+'2'.padStart(16,'0'),commitId='cp_'+'b'.repeat(32),claimText=JSON.stringify({format:'study-director.active-session-claim',version:1,date:'2026-09-19',epoch:2,owner:'inst_qa_laptop_mve00000_aaaaaaaa',observedRevision:7,claimedAt:'2026-09-19T12:00:00.000Z'});
+  await provider.repository.upload(await makeRepositoryFile('object','obj_'+'a'.repeat(32),'piece'));
+  await provider.repository.upload(await makeRepositoryFile('commit',commitId,'{"commit":true}'));
+  await provider.repository.uploadSessionClaim(await makeRepositoryFile('session-claim',claimId,claimText));
+  // The check keeps one operation: Drive's folder is verified once, then each check is one request.
+  const op=provider.repository.beginOperation();await op.listSessionWatch({limit:20});
+  const before=state.requests.length,watched=await op.listSessionWatch({limit:20});
+  assert.equal(state.requests.length-before,1,'the session check is one request');
+  assert.deepEqual({claims:Array.from(watched.claims,item=>item.id),commits:Array.from(watched.commits,item=>item.id),ignored:watched.ignored,ignoredCommits:watched.ignoredCommits,incomplete:watched.incomplete},{claims:[claimId],commits:[commitId],ignored:0,ignoredCommits:0,incomplete:false},'notes and records only, no pieces');
+  const kindOf=file=>file.appProperties?.studyDirectorRepositoryKind;
+  for(const file of state.files.values())if(kindOf(file)==='commit')file.shared=true;
+  const oddCommit=await op.listSessionWatch({limit:20});
+  assert.deepEqual({claims:Array.from(oddCommit.claims,item=>item.id),ignored:oddCommit.ignored,ignoredCommits:oddCommit.ignoredCommits},{claims:[claimId],ignored:0,ignoredCommits:1},'an unreadable record leaves the takeover note readable');
+  for(const file of state.files.values())if(kindOf(file)==='session-claim')file.shared=true;
+  assert.equal((await op.listSessionWatch({limit:20})).ignored,1,'an unreadable takeover note is counted against ownership');
+}
+
 // Complete history discovery is independent of retention capacity. Page work
 // stays bounded, while incomplete searches and repeated tokens cannot certify it.
 {
