@@ -1,11 +1,20 @@
-(()=>{
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+import type {
+  AnchoredPopover,AttachmentBatchOptions,ClearChoice,LibraryClearResult,LibraryDay,LibraryInput,LibraryModule as LibraryModuleContract,
+  LibraryNoteSearchDocument,LibraryNoteTrashItem,LibraryPreparedSummary,LibrarySavedView,LibrarySection,LibrarySummary,LibraryView,
+  NoteCatalogueEntry,SavedDayRecord
+} from '../../types/library.ts';
+import type {LibraryNoteWorkflows} from '../../types/notes-host.ts';
+import type {DiaryEditor} from '../../types/review-persistence.ts';
+
+const sdLibraryFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as typeof globalThis&{[key:symbol]:ModuleRegistration<'library','study-director.library-module'>|undefined})[Symbol.for('studyDirector.internalModules.v1')];
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject,declaredFunctions:requireFunctions}=registry.contracts;
-registry.define('library',1,()=>{
+const createModule=():LibraryModuleContract=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
     notifications:freeze(['begin','feedback']),
@@ -25,7 +34,21 @@ registry.define('library',1,()=>{
     overlays:freeze(['createAnchoredPopover']),
     session:freeze(['hasActiveSession'])
   });
-  function createView(input){
+  function createView(input:Readonly<LibraryInput>):Readonly<LibraryView>{
+  type NoteTreeNode={entry:NoteCatalogueEntry;depth:number;parent:NoteTreeNode|null;children:number;holdsActive:boolean;expanded:boolean};
+  type LibraryCounts=Readonly<{savedDays:number;notes:number;attachments:number}>;
+  const errorMessage=(error:unknown):string=>error instanceof Error?error.message:String(error);
+  const asSavedView=(value:unknown):LibrarySavedView=>{
+    if(!value||typeof value!=='object'||Array.isArray(value))return {};
+    const row=value as Record<string,unknown>,section=row.section==='notes'||row.section==='days'||row.section==='data'?row.section:undefined;
+    const sort=row.sort==='recent'?'recent':row.sort==='name'?'name':undefined,listWidth=Number(row.listWidth);
+    return Object.freeze({...section?{section}:{},...(typeof row.diary==='boolean'?{diary:row.diary}:{}),...sort?{sort}:{},...(Number.isFinite(listWidth)&&listWidth>0?{listWidth}:{})});
+  };
+  const inputById=(id:string)=>document.querySelector<HTMLInputElement>('#'+id);
+  const buttonById=(id:string)=>document.querySelector<HTMLButtonElement>('#'+id);
+  const selectById=(id:string)=>document.querySelector<HTMLSelectElement>('#'+id);
+  const dialogById=(id:string)=>document.querySelector<HTMLDialogElement>('#'+id);
+  const detailsById=(id:string)=>document.querySelector<HTMLDetailsElement>('#'+id);
     exactObject(input,['ports'],'Library input');
     const ports=exactObject(input.ports,Object.keys(PORT_FIELDS),'Library ports');
     for(const [name,fields] of Object.entries(PORT_FIELDS))exactObject(ports[name],fields,'Library '+name+' port');
@@ -69,9 +92,9 @@ registry.define('library',1,()=>{
     // The Library shows one section at a time and remembers it, with whether
     // the Diary panel was open. Only the shown section renders, and only while
     // the Library tab is active.
-    const LIBRARY_SECTIONS=freeze(['notes','days','data']);
-    const savedView=(()=>{try{const value=ports.preferences.read();return value&&typeof value==='object'?value:{};}catch{return {};}})();
-    let librarySection=LIBRARY_SECTIONS.includes(savedView.section)?savedView.section:'notes',libraryActive=false;
+    const LIBRARY_SECTIONS=freeze(['notes','days','data'] as const);
+    const savedView=(()=>{try{return asSavedView(ports.preferences.read());}catch{return Object.freeze({});}})();
+    let librarySection:LibrarySection=savedView.section&&LIBRARY_SECTIONS.includes(savedView.section)?savedView.section:'notes',libraryActive=false;
     // Notes list order: 'name' is the tree, 'recent' a flat list, newest edit first.
     let noteSort=savedView.sort==='recent'?'recent':'name';
     // The notes list width a person dragged to, in pixels; 0 keeps a third of the panel.
@@ -79,15 +102,15 @@ registry.define('library',1,()=>{
     let noteListWidth=Number.isFinite(savedView.listWidth)&&savedView.listWidth>0?savedView.listWidth:0;
     // The note and query whose matches were last marked in the open note.
     let noteSearchLanded='';
-    let selectedLibraryDate=null;
+    let selectedLibraryDate:string|null=null;
     const LIBRARY_PAGE_SIZE=100;
     let libraryVisibleLimit=LIBRARY_PAGE_SIZE;
     let libraryLastFilterSignature='';
     let libraryPreserveLimitOnce=false;
-    let librarySummaryCache=null;
-    let librarySummaryLoad=null;
+    let librarySummaryCache:readonly LibraryPreparedSummary[]|null=null;
+    let librarySummaryLoad:Promise<readonly LibraryPreparedSummary[]>|null=null;
     let librarySummaryRevision=0;
-    let libraryFilterOptionsSignature=null;
+    let libraryFilterOptionsSignature:string|null=null;
     let libraryRenderFrame=0;
     let libraryRenderToken=0;
     let libraryRenderedRevision=-1;
@@ -96,30 +119,30 @@ registry.define('library',1,()=>{
     let libraryHasRendered=false;
     let libraryRestoreFrame=0;
     let libraryScrollState={documentTop:0,mainTop:0};
-    let selectedDiaryDate='',diaryDraftRecord=null,diaryEditing=false,diaryEntryListed=false,diaryInstalled=false,diaryRenderFrame=0,diaryRenderToken=0,diarySummaryCountQueued=false,diarySummaryCountRevision=-1;
+    let selectedDiaryDate='',diaryDraftRecord:SavedDayRecord|null=null,diaryEditing=false,diaryEntryListed=false,diaryInstalled=false,diaryRenderFrame=0,diaryRenderToken=0,diarySummaryCountQueued=false,diarySummaryCountRevision=-1;
     let selectedNoteKey='';
     let noteEditorSignature='',noteParentSignature='';
     let noteRenderFrame=0;
     let noteRevealFrame=0;
     let notesInstalled=false;
-    let pendingNote=null;
+    let pendingNote:NoteCatalogueEntry|null=null;
     let noteSelectionMode=false;
-    let noteSelection=new Set();
+    let noteSelection=new Set<string>();
     let noteExportBusy=false;
     // The notes list is a tree in the catalogue's depth-first order. Branches the
     // person opens or closes keep that state for this session; others open only
     // while they hold today's Areas or the open note.
-    const noteExpanded=new Map(),NOTE_PAGE_SIZE=100;
-    let noteVisibleLimit=NOTE_PAGE_SIZE,noteTreeNodes=new Map();
+    const noteExpanded=new Map<string,boolean>(),NOTE_PAGE_SIZE=100;
+    let noteVisibleLimit=NOTE_PAGE_SIZE,noteTreeNodes=new Map<string,NoteTreeNode>();
     // Tags picked in the tag list: the list shows notes that have all of them.
-    let noteTagFilter=[],noteTagsRendered=null,noteTagsSignature='',noteTagsExpanded=false;
+    let noteTagFilter:string[]=[],noteTagsRendered:HTMLElement|null=null,noteTagsSignature='',noteTagsExpanded=false;
     const NOTE_TAGS_SHOWN=12;
     // Recently deleted: the open state of its list and the deleted note shown.
     let noteTrashOpen=false,selectedTrashKey='',noteFocusKey='';
     const LIBRARY_MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     let attachmentMutationHold=0,attachmentMutationNeedsNotes=false,attachmentMutationNeedsDiary=false,attachmentMutationNeedsLibrary=false,attachmentMutationRestoreViewport=false;
     const NOTE_SEARCH_IDLE_MS=120000,NOTE_SEARCH_RESPONSE_MS=30000,NOTE_SEARCH_BATCH_CHARS=2*1024*1024;
-    let noteSearchDeadline=0,noteSearchWorker=null,noteSearchTimer=0,noteSearchBuildTimer=0,noteSearchBuildDocuments=null,noteSearchBuildIndex=0,noteSearchBuilding=false,noteSearchId=0,noteSearchQuery='',noteSearchReady=false,noteSearchMatches=new Set(),noteSearchFailed=false,noteSearchPendingUpdates=new Map(),noteSearchFallbackText=null;
+    let noteSearchDeadline=0,noteSearchWorker:Worker|null=null,noteSearchTimer=0,noteSearchBuildTimer=0,noteSearchBuildDocuments:readonly LibraryNoteSearchDocument[]|null=null,noteSearchBuildIndex=0,noteSearchBuilding=false,noteSearchId=0,noteSearchQuery='',noteSearchReady=false,noteSearchMatches=new Set<string>(),noteSearchFailed=false,noteSearchPendingUpdates=new Map<string,LibraryNoteSearchDocument>(),noteSearchFallbackText:Map<string,string>|null=null;
 
     function clearNoteSearchTimer(){if(noteSearchTimer){window.clearTimeout(noteSearchTimer);noteSearchTimer=0;}}
     function clearNoteSearchBuildTimer(){if(noteSearchBuildTimer){window.clearTimeout(noteSearchBuildTimer);noteSearchBuildTimer=0;}}
@@ -134,12 +157,12 @@ registry.define('library',1,()=>{
     }
     function idleNoteSearch(){clearNoteSearchTimer();if(noteSearchWorker)noteSearchTimer=window.setTimeout(()=>{noteSearchTimer=0;stopNoteSearch();},NOTE_SEARCH_IDLE_MS);}
     function failNoteSearch(){stopNoteSearch(true);requestNotesRender();}
-    function postSearch(message){try{noteSearchWorker.postMessage(message);return true;}catch{failNoteSearch();return false;}}
+    function postSearch(message:unknown){try{noteSearchWorker.postMessage(message);return true;}catch{failNoteSearch();return false;}}
     function watchNoteSearch(){
       if(noteSearchDeadline)return;const current=noteSearchWorker;
       noteSearchDeadline=window.setTimeout(()=>{noteSearchDeadline=0;if(noteSearchWorker===current)failNoteSearch();},NOTE_SEARCH_RESPONSE_MS);
     }
-    function postNoteSearchUpdate(record){
+    function postNoteSearchUpdate(record:LibraryNoteSearchDocument){
       if(!noteSearchWorker||!record)return false;const key=String(record.key||'').trim();if(!key)return false;
       if(record.deleted===true)postSearch({type:'delete',key});
       else{const document={key,revision:String(record.revision||'')};if(record.plain!==undefined)document.plain=String(record.plain||'');else document.value=String(record.value||'');postSearch({type:'upsert',document});}
@@ -161,7 +184,7 @@ registry.define('library',1,()=>{
       if(batch.length&&!postSearch({type:'batch',documents:batch}))return;
       if(noteSearchBuildIndex<noteSearchBuildDocuments.length)noteSearchBuildTimer=window.setTimeout(feedNoteSearchBuild,0);else finishNoteSearchBuild();
     }
-    function startNoteSearchBuild(worker){
+    function startNoteSearchBuild(worker:Worker){
       noteSearchBuildDocuments=noteSearchDocuments();noteSearchBuildIndex=0;noteSearchBuilding=true;noteSearchPendingUpdates.clear();
       watchNoteSearch();if(postSearch({type:'sync',documents:[]}))noteSearchBuildTimer=window.setTimeout(feedNoteSearchBuild,0);
     }
@@ -173,24 +196,24 @@ registry.define('library',1,()=>{
         worker.onerror=event=>{if(noteSearchWorker!==worker)return;event?.preventDefault?.();failNoteSearch();};worker.onmessageerror=()=>{if(noteSearchWorker===worker)failNoteSearch();};noteSearchWorker=worker;startNoteSearchBuild(worker);return noteSearchWorker===worker;
       }catch{stopNoteSearch(true);return false;}
     }
-    function requestNoteSearch(query,force=false){
+    function requestNoteSearch(query:unknown,force=false){
       const clean=String(query||'').trim().toLowerCase();if(!clean){resetNoteSearch();return false;}
       if(!ensureNoteSearch())return false;if(!force&&noteSearchQuery===clean)return true;
       noteSearchQuery=clean;noteSearchReady=false;watchNoteSearch();if(noteSearchBuilding)return true;
       const id=++noteSearchId;return postSearch({type:'query',id,query:clean});
     }
-    function updateNoteSearchDocument(record){
+    function updateNoteSearchDocument(record:LibraryNoteSearchDocument){
       if(!record)return false;clearNoteSearchTimer();const key=String(record.key||'').trim();if(!key)return false;
       if(noteSearchFallbackText){if(record.deleted===true)noteSearchFallbackText.delete(key);else noteSearchFallbackText.set(key,String(record.plain===undefined?plainTextContent(record.value||''):record.plain||'').toLowerCase());}
       if(!noteSearchWorker)return !!noteSearchFallbackText;
       if(noteSearchBuilding)noteSearchPendingUpdates.set(key,record);else postNoteSearchUpdate(record);
       noteSearchQuery='';noteSearchReady=false;const query=notesSearch();if(query)requestNoteSearch(query,true);return true;
     }
-    function fallbackNoteSearch(entries,query){
+    function fallbackNoteSearch(entries:readonly NoteCatalogueEntry[],query:string){
       if(!noteSearchFallbackText){noteSearchFallbackText=new Map();for(const record of noteSearchDocuments())noteSearchFallbackText.set(String(record.key||''),plainTextContent(record.value||'').toLowerCase());}
       return entries.filter(entry=>String(entry.label||'').toLowerCase().includes(query)||String(noteSearchFallbackText.get(entry.key)||'').includes(query));
     }
-    function filterNoteEntries(entries,query){
+    function filterNoteEntries(entries:readonly NoteCatalogueEntry[],query:string){
       if(!query)return {entries,pending:false};
       if(noteSearchFailed)return {entries:fallbackNoteSearch(entries,query),pending:false};
       requestNoteSearch(query);if(noteSearchFailed)return {entries:fallbackNoteSearch(entries,query),pending:false};
@@ -199,9 +222,9 @@ registry.define('library',1,()=>{
     }
 
     function notesSection(){return document.getElementById('library-notes');}
-    function notesEditorField(){return document.querySelector('#library-notes-editor .library-notes-textarea');}
+    function notesEditorField(){return document.querySelector<HTMLTextAreaElement>('#library-notes-editor .library-notes-textarea');}
     function notesShown(){return libraryActive&&librarySection==='notes';}
-    function notesSearch(){return String(document.getElementById('library-notes-search')?.value||'').trim().toLowerCase();}
+    function notesSearch(){return String(inputById('library-notes-search')?.value||'').trim().toLowerCase();}
     function noteEntries(){
       const entries=noteCatalogue();
       if(!pendingNote)return entries;
@@ -212,10 +235,10 @@ registry.define('library',1,()=>{
       return freeze(noteEntries().map(entry=>freeze({key:entry.key,label:entry.label,hasNote:!!entry.hasNote,pending:!!entry.ephemeral})));
     }
     // A note's title is its path, such as "Medicine > Cardiology".
-    function labelParts(label){return String(label||'').split('>').map(part=>part.trim()).filter(Boolean);}
-    function noteLeaf(label){return labelParts(label).at(-1)||String(label||'Area');}
-    function noteParentPath(label){const parts=labelParts(label);return parts.length>1?parts.slice(0,-1).join(' > '):'';}
-    function noteSelectionIndex(entries){
+    function labelParts(label:unknown){return String(label||'').split('>').map(part=>part.trim()).filter(Boolean);}
+    function noteLeaf(label:unknown){return labelParts(label).at(-1)||String(label||'Area');}
+    function noteParentPath(label:unknown){const parts=labelParts(label);return parts.length>1?parts.slice(0,-1).join(' > '):'';}
+    function noteSelectionIndex(entries:readonly NoteCatalogueEntry[]){
       const rows=Array.isArray(entries)?entries:[],byLabel=new Map(rows.map(entry=>[String(entry.label||''),entry])),index=new Map(rows.map(entry=>[entry.key,[]]));
       for(const entry of rows){
         if(!entry.hasNote)continue;
@@ -228,19 +251,19 @@ registry.define('library',1,()=>{
       }
       return index;
     }
-    function noteSelectionState(entry,index){
+    function noteSelectionState(entry:NoteCatalogueEntry,index:Map<string,string[]>){
       const keys=index.get(entry.key)||[],selected=keys.reduce((count,key)=>count+(noteSelection.has(key)?1:0),0);
       return {keys,checked:!!keys.length&&selected===keys.length,indeterminate:selected>0&&selected<keys.length};
     }
-    function updateNoteSelectionControls(entries){
-      const select=document.getElementById('library-note-select'),selectAll=document.getElementById('library-note-select-all'),clear=document.getElementById('library-note-selection-clear'),exportButton=document.getElementById('library-note-export'),cancel=document.getElementById('library-note-select-cancel'),count=document.getElementById('library-note-selection-count'),navCount=document.getElementById('library-notes-nav-count');
+    function updateNoteSelectionControls(entries:readonly NoteCatalogueEntry[]){
+      const select=buttonById('library-note-select'),selectAll=buttonById('library-note-select-all'),clear=buttonById('library-note-selection-clear'),exportButton=buttonById('library-note-export'),cancel=buttonById('library-note-select-cancel'),count=document.getElementById('library-note-selection-count'),navCount=document.getElementById('library-notes-nav-count');
       const exportable=(entries||[]).filter(entry=>entry.hasNote),valid=new Set(exportable.map(entry=>entry.key)),allSelected=!!exportable.length&&exportable.every(entry=>noteSelection.has(entry.key));
       for(const key of [...noteSelection])if(!valid.has(key))noteSelection.delete(key);
-      const add=document.getElementById('library-note-add'),drawer=notesSection();
+      const add=buttonById('library-note-add'),drawer=notesSection();
       if(drawer){drawer.classList.toggle('export-selecting',noteSelectionMode);drawer.setAttribute('aria-busy',noteExportBusy?'true':'false');}
       if(select)select.hidden=noteSelectionMode;
       if(add)add.hidden=noteSelectionMode;
-      const importButton=document.getElementById('library-note-import');if(importButton)importButton.hidden=noteSelectionMode;
+      const importButton=buttonById('library-note-import');if(importButton)importButton.hidden=noteSelectionMode;
       if(navCount)navCount.hidden=noteSelectionMode;
       if(selectAll){selectAll.hidden=!noteSelectionMode;selectAll.disabled=!exportable.length||allSelected||noteExportBusy;selectAll.textContent='All';}
       if(clear){clear.hidden=!noteSelectionMode;clear.disabled=!noteSelection.size||noteExportBusy;}
@@ -255,16 +278,16 @@ registry.define('library',1,()=>{
       clearNotesEditorBinding();renderNotes();return true;
     }
     function cancelNoteSelection(){if(noteExportBusy){cancelExport();return false;}noteSelectionMode=false;noteSelection.clear();renderNotes();return true;}
-    function syncNoteSelectionRows(entries,index=noteSelectionIndex(entries)){
+    function syncNoteSelectionRows(entries:readonly NoteCatalogueEntry[],index:Map<string,string[]>=noteSelectionIndex(entries)){
       const rows=Array.isArray(entries)?entries:[],byKey=new Map(rows.map(entry=>[entry.key,entry]));
-      for(const row of document.querySelectorAll('[data-note-key]')){
+      for(const row of document.querySelectorAll<HTMLElement>('[data-note-key]')){
         const entry=byKey.get(row.dataset.noteKey);if(!entry)continue;
-        const state=noteSelectionState(entry,index),checkbox=row.querySelector('.library-note-checkbox');
+        const state=noteSelectionState(entry,index),checkbox=row.querySelector<HTMLInputElement>('.library-note-checkbox');
         row.classList.toggle('selected',state.checked);row.classList.toggle('partial',state.indeterminate);
         if(checkbox){checkbox.checked=state.checked;checkbox.indeterminate=state.indeterminate;checkbox.disabled=!state.keys.length;}
       }
     }
-    function toggleNoteSelection(key){
+    function toggleNoteSelection(key:unknown){
       const entries=noteEntries(),entry=entries.find(candidate=>candidate.key===String(key||''));if(!entry)return false;
       const index=noteSelectionIndex(entries),state=noteSelectionState(entry,index);if(!state.keys.length)return false;
       state.keys.forEach(noteKey=>state.checked?noteSelection.delete(noteKey):noteSelection.add(noteKey));
@@ -288,11 +311,11 @@ registry.define('library',1,()=>{
           if(result.missing)status+=` ${result.missing} unavailable image(s) are marked in the exported notes.`;
           noteSelectionMode=false;noteSelection.clear();
         }else if(result&&result.status==='cancelled'){status='Notes export cancelled.';statusError=false;}else if(result&&result.status==='too-large')status=`This export is larger than the ${Math.round((Number(result.maxBytes)||0)/(1024*1024))} MiB safety limit. Select fewer notes and export again.`;
-      }catch(error){console.error('Note export failed:',error);status='Notes export did not complete: '+error.message;}
+      }catch(error){console.error('Note export failed:',error);status='Notes export did not complete: '+errorMessage(error);}
       finally{noteExportBusy=false;if(noteSelectionMode)updateNoteSelectionControls(noteEntries());else renderNotes();notice.finish(success?'succeeded':statusError?'failed':'cancelled',status);}
       return success;
     }
-    function setNotesStatus(message,{error=false,readOnly=false}={}){
+    function setNotesStatus(message:unknown,{error=false,readOnly=false}:Readonly<{error?:boolean;readOnly?:boolean}>={}){
       const status=document.getElementById('notes-status');
       if(!status)return false;
       status.className='library-notes-status ui-status'+(error?' err':'')+(readOnly?' read-only':'');
@@ -300,18 +323,18 @@ registry.define('library',1,()=>{
       return true;
     }
     function updateNoteActions(){
-      const add=document.getElementById('library-note-add'),canAdd=canMutate()&&canCreateNote();
+      const add=buttonById('library-note-add'),canAdd=canMutate()&&canCreateNote();
       if(!add)return;
       add.disabled=!canAdd;add.setAttribute('aria-disabled',canAdd?'false':'true');
       add.title=canAdd?'Create a note':'Notes are at their note limit';
     }
-    function parentNotesSignature(entry){
+    function parentNotesSignature(entry:NoteCatalogueEntry){
       const byKey=new Map(noteEntries().map(candidate=>[candidate.key,candidate])),parts=entry.key.split(' > '),out=[];
       for(let index=1;index<parts.length;index++){const key=parts.slice(0,index).join(' > ');out.push(`${key}\u0000${byKey.get(key)?.updatedAt||''}`);}
       return out.join('\u0001');
     }
     // Where the open note sits: each parent Area opens its own note.
-    function noteBreadcrumb(entry){
+    function noteBreadcrumb(entry:NoteCatalogueEntry){
       const crumbs=document.createElement('nav');crumbs.className='library-notes-crumbs';crumbs.setAttribute('aria-label','Location');
       const parts=labelParts(entry.label).slice(0,-1),keys=entry.key.split(' > ');
       parts.forEach((part,index)=>{
@@ -322,7 +345,7 @@ registry.define('library',1,()=>{
       crumbs.hidden=!parts.length;return crumbs;
     }
     // When it last changed and whether today's plan uses it.
-    function noteMeta(entry,stored){
+    function noteMeta(entry:NoteCatalogueEntry,stored:ReturnType<LibraryInput['ports']['notes']['get']>){
       if(entry.support)return 'Shared by every support block';
       if(entry.ephemeral)return 'New · saved when you write';
       const edited=stored&&stored.updatedAt?editedLabel(stored.updatedAt):'',parts=[];
@@ -332,20 +355,20 @@ registry.define('library',1,()=>{
     }
     // The title renames the note in place: Enter or leaving the field saves,
     // Escape keeps the old name.
-    function noteTitle(entry,renameable){
+    function noteTitle(entry:NoteCatalogueEntry,renameable:boolean){
       const title=textEl(renameable?'button':'div','library-notes-editor-title',noteLeaf(entry.label));
       if(!renameable)return title;
       title.type='button';title.title='Rename';title.setAttribute('aria-label',`Rename ${noteLeaf(entry.label)}`);
       title.addEventListener('click',()=>renameNoteInPlace(entry,title));
       return title;
     }
-    function renameNoteInPlace(entry,title=document.querySelector('#library-notes-editor button.library-notes-editor-title')){
+    function renameNoteInPlace(entry:NoteCatalogueEntry,title:HTMLElement|null=document.querySelector<HTMLElement>('#library-notes-editor button.library-notes-editor-title')){
       if(!title||!title.isConnected||!canMutate())return false;
       const leaf=noteLeaf(entry.label),input=document.createElement('input');
       input.type='text';input.className='library-notes-title-input ui-field';input.value=leaf;input.maxLength=160;input.setAttribute('aria-label','Note name');
       title.replaceWith(input);input.focus();input.select();
       let done=false;
-      const finish=save=>{
+      const finish=(save:boolean)=>{
         if(done)return;done=true;
         const next=input.value.trim();if(input.isConnected)input.replaceWith(title);
         if(!save||!next||next===leaf)return;
@@ -358,11 +381,11 @@ registry.define('library',1,()=>{
       input.addEventListener('blur',()=>finish(true));
       return true;
     }
-    async function printNoteEntry(entry){
+    async function printNoteEntry(entry:NoteCatalogueEntry){
       try{if(await printNote(entry.key,noteLeaf(entry.label)))return true;setNotesStatus('Write something in this note before printing it.');return false;}
-      catch(error){setNotesStatus('The note could not be printed: '+(error&&error.message||error),{error:true});return false;}
+      catch(error){setNotesStatus('The note could not be printed: '+errorMessage(error),{error:true});return false;}
     }
-    async function exportNoteEntry(entry){
+    async function exportNoteEntry(entry:NoteCatalogueEntry){
       if(noteExportBusy)return false;
       if(!entry||!getNote(entry.key,entry.label)){setNotesStatus('Write something in this note before exporting it.');return false;}
       noteExportBusy=true;
@@ -374,13 +397,13 @@ registry.define('library',1,()=>{
         else if(result&&result.status==='too-large')notice.finish('failed',`This note is larger than the ${Math.round((Number(result.maxBytes)||0)/(1024*1024))} MiB export limit.`);
         else notice.finish('failed','This note had nothing to export.');
         return true;
-      }catch(error){notice.finish('failed','The export did not complete: '+(error&&error.message||error));return false;}
+      }catch(error){notice.finish('failed','The export did not complete: '+errorMessage(error));return false;}
       finally{noteExportBusy=false;}
     }
     // Earlier versions come from the backups; restoring one shows the two
     // texts side by side first, so it also works for a note emptied by mistake.
-    async function showNoteVersions(entry){
-      const restored=value=>{const at=new Date(value.exportedAt);setNotesStatus(`Restored “${entry.label}” from the backup of ${Number.isFinite(at.getTime())?at.toLocaleString():'an earlier date'}.`);};
+    async function showNoteVersions(entry:NoteCatalogueEntry){
+      const restored=(value:Readonly<{exportedAt?:unknown}>)=>{const at=new Date(value.exportedAt);setNotesStatus(`Restored “${entry.label}” from the backup of ${Number.isFinite(at.getTime())?at.toLocaleString():'an earlier date'}.`);};
       const result=await openNoteVersions(freeze({id:String(entry.id||''),label:entry.label,text:String(getNote(entry.key)?.text||''),onRestored:restored}));
       if(result?.reason==='no-source')setNotesStatus('Earlier versions come from your backups. Connect a Device Folder or Google Drive in Library → Data first.');
       else if(result?.reason==='busy')setNotesStatus('Another backup task is running. Try again when it finishes.');
@@ -389,12 +412,12 @@ registry.define('library',1,()=>{
     // The open note's own actions: rename or move, earlier versions, export
     // and delete. Support Activities keeps its name and is never deleted, so
     // it has none.
-    function noteActionsMenu(entry){
+    function noteActionsMenu(entry:NoteCatalogueEntry){
       const trigger=textEl('button','library-note-tool ui-btn','⋯');trigger.type='button';trigger.id='library-note-actions';
       trigger.setAttribute('aria-label',`Actions for ${entry.label}`);trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');trigger.title='Rename, move or delete this note';
       const menu=document.createElement('div');menu.className='library-note-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label',`Actions for ${entry.label}`);
       const controller=createAnchoredPopover(menu,{align:'end',onClose:()=>trigger.setAttribute('aria-expanded','false')});
-      const item=(id,label,hint,run,danger=false)=>{
+      const item=(id:string,label:string,hint:string,run:()=>unknown,danger=false)=>{
         const button=document.createElement('button');button.type='button';button.id=id;button.className='library-note-menu-item'+(danger?' danger':'');button.setAttribute('role','menuitem');
         button.append(textEl('span','',label),textEl('span','library-note-menu-hint ui-mono',hint));
         button.addEventListener('click',()=>{controller.hide();void run();});return button;
@@ -409,11 +432,11 @@ registry.define('library',1,()=>{
         const stored=!!getNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=versions.disabled=!stored||!canMutate();print.disabled=!stored;
         for(const button of [rename,move,exportNote,print,remove])if(!stored)button.title='Write something in this note first';else button.removeAttribute('title');
         controller.show(trigger);trigger.setAttribute('aria-expanded','true');
-        requestAnimationFrame(()=>{const first=menu.querySelector('[role="menuitem"]:not(:disabled)');if(first)first.focus();});
+        requestAnimationFrame(()=>{const first=menu.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)');if(first)first.focus();});
       });
       return [trigger,menu];
     }
-    function chooseNote(entries,filtered){
+    function chooseNote(entries:readonly NoteCatalogueEntry[],filtered:readonly NoteCatalogueEntry[]){
       const visible=(filtered||[]).find(entry=>entry.key===selectedNoteKey);
       if(visible)return visible;
       const preferred=(filtered||[]).find(entry=>entry.current&&entry.hasNote)
@@ -426,7 +449,7 @@ registry.define('library',1,()=>{
     }
     // Builds the tree from the catalogue's depth-first order: each note's parent
     // is the nearest earlier note one level up.
-    function noteTree(entries){
+    function noteTree(entries:readonly NoteCatalogueEntry[]){
       const nodes=entries.map(entry=>({entry,depth:Math.max(0,Number(entry.depth)||0),parent:null,children:0,holdsActive:false,expanded:false})),stack=[];
       for(const node of nodes){
         while(stack.length&&stack.at(-1).depth>=node.depth)stack.pop();
@@ -445,7 +468,7 @@ registry.define('library',1,()=>{
       return visible;
     }
     // Opens every branch above a note, so it is shown however the tree was left.
-    function expandNoteAncestors(key){
+    function expandNoteAncestors(key:unknown){
       const node=noteTreeNodes.get(key);
       for(let up=node&&node.parent;up;up=up.parent)noteExpanded.set(up.entry.key,true);
     }
@@ -463,19 +486,19 @@ registry.define('library',1,()=>{
       const back=textEl('button','library-notes-back ui-btn','‹ Notes');back.type='button';back.setAttribute('aria-label','Back to the notes list');
       back.addEventListener('click',closeNoteView);return back;
     }
-    function toggleNoteBranch(key,expanded){noteExpanded.set(key,!!expanded);noteFocusKey=key;renderNotes();return true;}
-    function startOfLocalDay(time){const date=new Date(time);return new Date(date.getFullYear(),date.getMonth(),date.getDate()).getTime();}
-    function daysBefore(value){const time=Date.parse(String(value||''));return Number.isFinite(time)?Math.max(0,Math.round((startOfLocalDay(Date.now())-startOfLocalDay(time))/86400000)):-1;}
+    function toggleNoteBranch(key:unknown,expanded:boolean){noteExpanded.set(key,!!expanded);noteFocusKey=key;renderNotes();return true;}
+    function startOfLocalDay(time:unknown){const date=new Date(time);return new Date(date.getFullYear(),date.getMonth(),date.getDate()).getTime();}
+    function daysBefore(value:unknown){const time=Date.parse(String(value||''));return Number.isFinite(time)?Math.max(0,Math.round((startOfLocalDay(Date.now())-startOfLocalDay(time))/86400000)):-1;}
     // When a note last changed: a time today, "Yesterday", then a date.
-    function editedLabel(value){
+    function editedLabel(value:unknown){
       const days=daysBefore(value);if(days<0)return '';
       const date=new Date(Date.parse(value));
       if(days===0)return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
       if(days===1)return 'Yesterday';
       return `${date.getDate()} ${LIBRARY_MONTHS[date.getMonth()]}${date.getFullYear()!==new Date().getFullYear()?` ${date.getFullYear()}`:''}`;
     }
-    function deletedLabel(value){const days=daysBefore(value);return days<=0?'Deleted today':days===1?'Deleted yesterday':`Deleted ${days} days ago`;}
-    function buildNoteTreeItem(node){
+    function deletedLabel(value:unknown){const days=daysBefore(value);return days<=0?'Deleted today':days===1?'Deleted yesterday':`Deleted ${days} days ago`;}
+    function buildNoteTreeItem(node:NoteTreeNode){
       const {entry}=node,active=entry.key===selectedNoteKey&&!selectedTrashKey,leaf=noteLeaf(entry.label),row=document.createElement('div');
       row.className='library-note-nav-item library-note-tree-item '+(entry.hasNote?'has-note':'empty-note')+(entry.support?' support-note':'')+(active?' active':'');
       row.style.setProperty('--note-indent',`${Math.min(6,node.depth)*15}px`);
@@ -499,7 +522,7 @@ registry.define('library',1,()=>{
     }
     // Arrow keys move through the tree, Right and Left open and close a branch,
     // Enter opens a note and F2 renames it.
-    function handleNoteTreeKey(event){
+    function handleNoteTreeKey(event:KeyboardEvent){
       const row=event.target&&event.target.closest?event.target.closest('[role="treeitem"]'):null;if(!row)return;
       const rows=[...document.querySelectorAll('#library-notes-list [role="treeitem"]')],index=rows.indexOf(row),key=row.dataset.noteKey,node=noteTreeNodes.get(key);
       const focusRow=target=>{if(!target)return;for(const item of rows)item.tabIndex=-1;target.tabIndex=0;target.focus();};
@@ -518,7 +541,7 @@ registry.define('library',1,()=>{
     function noteTrashItems(){
       return [...noteTrash()].sort((a,b)=>String(a.label).localeCompare(String(b.label),undefined,{sensitivity:'base',numeric:true})||String(b.deletedAt).localeCompare(String(a.deletedAt)));
     }
-    function buildTrashedNoteItem(item){
+    function buildTrashedNoteItem(item:LibraryNoteTrashItem){
       const button=document.createElement('button');button.type='button';
       button.className='library-note-nav-item library-note-trash-item'+(item.hasNote?' has-note':' empty-note')+(item.key===selectedTrashKey?' active':'');
       button.dataset.trashKey=item.key;button.setAttribute('aria-current',item.key===selectedTrashKey?'true':'false');
@@ -545,12 +568,12 @@ registry.define('library',1,()=>{
       if(noteTrashOpen&&canMutate())purgeExpiredNotes();
       renderNotes();return true;
     }
-    function selectTrashedNote(key){
+    function selectTrashedNote(key:unknown){
       if(!noteTrashItems().some(item=>item.key===key))return false;
       if(pendingNote){pendingNote=null;invalidateAttachments();}
       selectedTrashKey=key;renderNotes();openNoteView();return true;
     }
-    function buildNoteNavItem(entry,selectionIndex){
+    function buildNoteNavItem(entry:NoteCatalogueEntry,selectionIndex:Map<string,string[]>){
       if(noteSelectionMode){
         const state=noteSelectionState(entry,selectionIndex),row=document.createElement('div');
         row.className='library-note-nav-item library-note-select-item '+(entry.hasNote?'has-note':'empty-note')+(entry.support?' support-note':'')+(entry.key===selectedNoteKey?' active':'')+(state.checked?' selected':'')+(state.indeterminate?' partial':'');
@@ -592,7 +615,7 @@ registry.define('library',1,()=>{
         else if(activeRect.bottom>navRect.bottom)nav.scrollTop+=activeRect.bottom-navRect.bottom;
       });
     }
-    function noteEditorRenderSignature(entry,canonical,readOnly,writable){
+    function noteEditorRenderSignature(entry:NoteCatalogueEntry,canonical:ReturnType<LibraryInput['ports']['notes']['get']>,readOnly:boolean,writable:boolean){
       if(!entry)return `empty|${readOnly?'1':'0'}`;
       return [
         entry.key,entry.label,entry.support?'1':'0',entry.current?'1':'0',entry.ephemeral?'1':'0',entry.hasNote?'1':'0',
@@ -601,7 +624,7 @@ registry.define('library',1,()=>{
         readOnly?'1':'0',writable?'1':'0',String(canonical?.text||'')
       ].join('\u0000');
     }
-    function renderNoteEditor(entry,readOnly=false){
+    function renderNoteEditor(entry:NoteCatalogueEntry,readOnly=false){
       const panel=document.getElementById('library-notes-editor');
       if(!panel)return false;
       const canonical=entry?getNote(entry.key,entry.label):null,richValue=String(canonical?.text||''),value=richValue?plainTextContent(richValue):'';
@@ -648,7 +671,7 @@ registry.define('library',1,()=>{
       editor.value=value;editorShell.appendChild(editor);
       bindEditor(editor,entry.key,entry.label,'library');
       const matches=document.createElement('div');matches.className='library-note-matches';matches.id='library-note-matches';matches.hidden=true;matches.setAttribute('role','status');
-      const matchTool=(text,label,run)=>{const button=textEl('button','library-note-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
+      const matchTool=(text:string,label:string,run:()=>unknown)=>{const button=textEl('button','library-note-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
       matches.append(textEl('span','library-note-matches-count ui-mono',''),matchTool('↑','Previous match',()=>stepNoteMatch(-1)),matchTool('↓','Next match',()=>stepNoteMatch(1)),matchTool('×','Clear highlights',clearNoteMatches));
       // Linked notes sit under the text, out of the way until used.
       const links=linksBar({ref:canonical?.id||entry.key,label:entry.label,onOpen:revealNoteReference});
@@ -661,7 +684,7 @@ registry.define('library',1,()=>{
         noteEditorSignature=noteEditorRenderSignature({...entry,hasNote:!!String(editor.value||'').trim()},refreshed,false,canMutate());
         meta.textContent=noteMeta({...entry,ephemeral:false},refreshed);
         const hasNote=!!String(editor.value||'').trim();
-        const row=[...document.querySelectorAll('[data-note-key]')].find(candidate=>candidate.dataset.noteKey===entry.key);
+        const row=[...document.querySelectorAll<HTMLElement>('[data-note-key]')].find(candidate=>candidate.dataset.noteKey===entry.key);
         if(row){
           row.classList.toggle('has-note',hasNote);
           row.classList.toggle('empty-note',!hasNote);
@@ -673,7 +696,7 @@ registry.define('library',1,()=>{
     }
     // 5.2: a quiet "Needs review" mark after the meta line while a sync has
     // kept another version of this note; it opens that review.
-    function syncReviewMark(meta,canonical){
+    function syncReviewMark(meta:HTMLElement,canonical:ReturnType<LibraryInput['ports']['notes']['get']>){
       const id=String(canonical?.id||''),wanted=!!id&&keptVersion(id);let mark=meta.nextElementSibling?.classList.contains('library-note-review')?meta.nextElementSibling:null;
       if(!wanted){mark?.remove();return;}
       if(mark)return;
@@ -681,7 +704,7 @@ registry.define('library',1,()=>{
       mark.addEventListener('click',()=>reviewKept(id));meta.after(mark);
     }
     // A deleted note opens read-only, with Restore and Delete forever.
-    function renderTrashedNote(item){
+    function renderTrashedNote(item:LibraryNoteTrashItem){
       const panel=document.getElementById('library-notes-editor');if(!panel)return false;
       const stored=getNote(item.key,item.label),text=String(stored&&stored.text||''),signature=`trash\u0000${item.key}\u0000${String(stored&&stored.updatedAt||'')}\u0000${canMutate()?'1':'0'}`;
       updateNoteActions();
@@ -745,18 +768,18 @@ registry.define('library',1,()=>{
       if(!target){if(field)clearFind(field);showNoteMatches(0);return;}
       void findInEditor(field,query,()=>{if(noteSearchLanded===target)showNoteMatches(0);}).then(count=>{if(noteSearchLanded===target)showNoteMatches(count,0);}).catch(()=>{});
     }
-    function showNoteMatches(count,index=0){
+    function showNoteMatches(count:unknown,index=0){
       const bar=document.getElementById('library-note-matches');if(!bar)return;
       bar.hidden=!count;if(count)bar.querySelector('.library-note-matches-count').textContent=`${index+1} of ${count}`;
     }
-    function stepNoteMatch(direction){const field=notesEditorField();if(!field)return false;const {index,count}=findStep(field,direction);showNoteMatches(count,index);return count>0;}
+    function stepNoteMatch(direction:number){const field=notesEditorField();if(!field)return false;const {index,count}=findStep(field,direction);showNoteMatches(count,index);return count>0;}
     function clearNoteMatches(){const field=notesEditorField();if(field)clearFind(field);showNoteMatches(0);}
     function requestNotesRender(){
       if(attachmentMutationHold){attachmentMutationNeedsNotes=true;return false;}
       if(noteRenderFrame)return false;
       noteRenderFrame=requestAnimationFrame(()=>{noteRenderFrame=0;renderNotes();});return true;
     }
-    function selectNote(key){
+    function selectNote(key:unknown){
       const match=noteEntries().find(entry=>entry.key===String(key||''));
       if(!match)return false;
       if(pendingNote&&match.key!==pendingNote.key){pendingNote=null;invalidateAttachments();}
@@ -765,10 +788,10 @@ registry.define('library',1,()=>{
       return true;
     }
     // Attachments name the note they sit in by its permanent id.
-    function revealNoteReference(key){
+    function revealNoteReference(key:unknown){
       const target=String(key||''),match=noteEntries().find(entry=>entry.id===target||entry.key===target);
       if(!match)return false;
-      const search=document.getElementById('library-notes-search');
+      const search=inputById('library-notes-search');
       if(search&&search.value)search.value='';
       resetNoteSearch();
       if(noteTagFilter.length&&!taggedNotes(noteTagFilter).has(match.key))noteTagFilter=[];
@@ -778,7 +801,7 @@ registry.define('library',1,()=>{
       noteTree(noteEntries());expandNoteAncestors(match.key);
       renderNotes();openNoteView();
       requestAnimationFrame(()=>requestAnimationFrame(()=>{
-        const row=[...document.querySelectorAll('[data-note-key]')].find(candidate=>candidate.dataset.noteKey===match.key);
+        const row=[...document.querySelectorAll<HTMLElement>('[data-note-key]')].find(candidate=>candidate.dataset.noteKey===match.key);
         if(row)row.scrollIntoView({block:'nearest'});
         const editor=document.getElementById('library-notes-editor');if(editor)editor.scrollIntoView({block:'nearest'});
       }));
@@ -793,7 +816,7 @@ registry.define('library',1,()=>{
       if(all===noteTagsRendered&&signature===noteTagsSignature)return;
       noteTagsRendered=all;noteTagsSignature=signature;
       const counts=new Map(all.map(item=>[item.tag,item.count])),picked=new Set(noteTagFilter),chips=[];
-      const tool=(text,label,run)=>{const button=textEl('button','library-tag-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
+      const tool=(text:string,label:string,run:()=>unknown)=>{const button=textEl('button','library-tag-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
       if(picked.size)chips.push(tool('× Clear','Show all notes',clearNoteTags));
       if(picked.size===1&&writable)chips.push(tool('Rename',`Rename #${noteTagFilter[0]} in every note`,()=>{void renameSelectedTag();}));
       const others=[...all].filter(item=>!picked.has(item.tag)).sort((a,b)=>b.count-a.count||a.tag.localeCompare(b.tag)).map(item=>item.tag);
@@ -806,14 +829,14 @@ registry.define('library',1,()=>{
       if(hidden>0||noteTagsExpanded&&others.length>NOTE_TAGS_SHOWN)chips.push(tool(hidden>0?`+${hidden} more`:'Fewer',hidden>0?'Show every tag':'Show the most used tags',()=>{noteTagsExpanded=!noteTagsExpanded;renderNoteTags();}));
       row.replaceChildren(...chips);row.hidden=!chips.length;
     }
-    function setNoteTagFilter(tags){noteTagFilter=tags;noteVisibleLimit=NOTE_PAGE_SIZE;renderNotes();}
-    function toggleNoteTag(tag){setNoteTagFilter(noteTagFilter.includes(tag)?noteTagFilter.filter(other=>other!==tag):[...noteTagFilter,tag]);}
+    function setNoteTagFilter(tags:readonly string[]){noteTagFilter=tags;noteVisibleLimit=NOTE_PAGE_SIZE;renderNotes();}
+    function toggleNoteTag(tag:string){setNoteTagFilter(noteTagFilter.includes(tag)?noteTagFilter.filter(other=>other!==tag):[...noteTagFilter,tag]);}
     function clearNoteTags(){setNoteTagFilter([]);}
     // A tag tapped in a note's text shows the notes with it. From the open
     // note the list changes behind it; from elsewhere the list is shown.
-    function filterTag(tag,{show=false}={}){
+    function filterTag(tag:unknown,{show=false}:Readonly<{show?:boolean}>={}){
       const name=normalizeTag(tag);if(!name)return false;
-      const search=document.getElementById('library-notes-search');if(search&&search.value){search.value='';resetNoteSearch();}
+      const search=inputById('library-notes-search');if(search&&search.value){search.value='';resetNoteSearch();}
       showSection('notes');setNoteTagFilter([name]);if(show)closeNoteView();return true;
     }
     async function renameSelectedTag(){
@@ -834,7 +857,7 @@ registry.define('library',1,()=>{
     }
     // Text and Markdown files become new notes named after them, at the top
     // level or inside the open note.
-    async function importNotes(files){
+    async function importNotes(files:Iterable<File>|ArrayLike<File>){
       const list=[...(files||[])];if(!list.length||!canMutate())return false;
       const open=noteEntries().find(entry=>entry.key===selectedNoteKey&&!entry.support&&!entry.ephemeral)||null;
       let parent='';
@@ -895,7 +918,7 @@ registry.define('library',1,()=>{
       });
       selectedNoteKey=identity.key;selectedTrashKey='';
       invalidateAttachments();
-      const search=document.getElementById('library-notes-search');
+      const search=inputById('library-notes-search');
       if(search&&search.value)search.value='';
       noteTree(noteEntries());expandNoteAncestors(identity.key);
       renderNotes();openNoteView();
@@ -925,7 +948,7 @@ registry.define('library',1,()=>{
       notice.finish('succeeded',`Moved “${entry.label}” to Recently deleted.`,{action:{label:'Undo',run:()=>{void restoreTrashedNote(trashKey);}}});
       return true;
     }
-    async function restoreTrashedNote(trashKey){
+    async function restoreTrashedNote(trashKey:unknown){
       if(!canMutate())return false;
       const item=noteTrashItems().find(candidate=>candidate.key===trashKey);if(!item)return false;
       const notice=notifications.begin({id:'note-restore',surfaceId:'notes-status',title:'Restore note',message:'Restoring the note…'});
@@ -939,7 +962,7 @@ registry.define('library',1,()=>{
       notice.finish('succeeded',restored&&restored.label!==item.label?`Restored “${item.label}” as “${restored.label}”, beside the note that now uses its name.`:`Restored “${item.label}”.`);
       return true;
     }
-    async function deleteTrashedNoteForever(trashKey){
+    async function deleteTrashedNoteForever(trashKey:unknown){
       if(!canMutate())return false;
       const item=noteTrashItems().find(candidate=>candidate.key===trashKey);if(!item)return false;
       const accepted=await confirm({title:'Delete this note forever?',danger:true,message:`“${item.label}” will be removed for good. This cannot be undone.`,details:['Existing backups are unchanged.'],confirmLabel:'Delete forever',cancelLabel:'Keep it'});
@@ -973,13 +996,13 @@ registry.define('library',1,()=>{
       return applyNoteRename(entry,result.value,{inPlans:!where||result.checked===true});
     }
     // Where a note's Area is used: "today’s plan", "2 saved plans", or both.
-    function planAreaPlaces(use){
+    function planAreaPlaces(use:ReturnType<LibraryNoteWorkflows['areaUse']>){
       const parts=[use&&use.today?'today’s plan':'',use&&use.savedPlans?`${use.savedPlans===1?'a saved plan':`${use.savedPlans} saved plans`}`:''].filter(Boolean);
       return parts.join(' and ');
     }
     // Renames or moves the note; with inPlans (the default, and the rename
     // dialog's tick box) the Area in today's plan and saved plans follows it.
-    async function applyNoteRename(entry,value,{inPlans=true}={}){
+    async function applyNoteRename(entry:NoteCatalogueEntry,value:unknown,{inPlans=true}:Readonly<{inPlans?:boolean}>={}){
       const identity=normalizeNoteArea(value);
       if(!identity||identity.label===entry.label||!canMutate())return false;
       const where=planAreaPlaces(planAreaUse(entry.key));
@@ -1024,14 +1047,14 @@ registry.define('library',1,()=>{
       if(notesInstalled)return;
       notesInstalled=true;
       const drawer=notesSection();
-      const search=document.getElementById('library-notes-search');
-      const add=document.getElementById('library-note-add');
+      const search=inputById('library-notes-search');
+      const add=buttonById('library-note-add');
       const list=document.getElementById('library-notes-list'),trashToggle=document.getElementById('library-notes-trash-toggle'),info=document.getElementById('library-notes-info'),infoPopover=document.getElementById('library-notes-info-popover');
       if(info&&infoPopover){
         const about=createAnchoredPopover(infoPopover,{align:'start',onClose:()=>info.setAttribute('aria-expanded','false')});
         info.addEventListener('click',event=>{event.preventDefault();if(infoPopover.hidden){about.show(info);info.setAttribute('aria-expanded','true');}else about.hide();});
       }
-      const select=document.getElementById('library-note-select'),selectAll=document.getElementById('library-note-select-all'),clearSelection=document.getElementById('library-note-selection-clear'),exportButton=document.getElementById('library-note-export'),cancel=document.getElementById('library-note-select-cancel');
+      const select=buttonById('library-note-select'),selectAll=buttonById('library-note-select-all'),clearSelection=buttonById('library-note-selection-clear'),exportButton=buttonById('library-note-export'),cancel=buttonById('library-note-select-cancel');
       if(drawer)drawer.addEventListener('keydown',event=>{if(event.key==='Escape'&&noteSelectionMode){event.preventDefault();cancelNoteSelection();}});
       if(search){
         search.addEventListener('input',requestNotesRender);
@@ -1043,7 +1066,7 @@ registry.define('library',1,()=>{
       const sort=document.getElementById('library-notes-sort');
       if(sort){sort.value=noteSort;sort.addEventListener('change',()=>{noteSort=sort.value==='recent'?'recent':'name';noteVisibleLimit=NOTE_PAGE_SIZE;rememberView();renderNotes();});}
       if(add)add.addEventListener('click',createNote);
-      const importButton=document.getElementById('library-note-import'),importFile=document.getElementById('library-note-import-file');
+      const importButton=buttonById('library-note-import'),importFile=document.getElementById('library-note-import-file');
       if(importButton&&importFile){importButton.addEventListener('click',()=>{importFile.value='';importFile.click();});importFile.addEventListener('change',()=>{const files=[...(importFile.files||[])];importFile.value='';void importNotes(files);});}
       if(list)list.addEventListener('keydown',handleNoteTreeKey);
       if(trashToggle)trashToggle.addEventListener('click',toggleNoteTrash);
@@ -1055,8 +1078,8 @@ registry.define('library',1,()=>{
       refreshNotes();
     }
     installNotesWorkspace();
-    function diaryEntries(entries){return (Array.isArray(entries)?entries:[]).filter(entry=>entry?.hasReflection===true).sort((a,b)=>b.date.localeCompare(a.date));}
-    function updateDiarySummaryCount(entries){
+    function diaryEntries(entries:readonly LibraryPreparedSummary[]){return (Array.isArray(entries)?entries:[]).filter(entry=>entry?.hasReflection===true).sort((a,b)=>b.date.localeCompare(a.date));}
+    function updateDiarySummaryCount(entries:readonly LibraryPreparedSummary[]){
       const count=diaryEntries(entries).length;
       setTextSafe('library-diary-nav-count',String(count));setTextSafe('library-diary-summary-count',`· ${count} ${count===1?'Entry':'Entries'}`);diarySummaryCountRevision=librarySummaryRevision;return count;
     }
@@ -1072,16 +1095,16 @@ registry.define('library',1,()=>{
     function invalidateLibrarySummaryCache(){librarySummaryRevision++;librarySummaryCache=null;librarySummaryLoad=null;libraryFilterOptionsSignature=null;requestDiarySummaryCountRefresh();requestDiaryRender();}
     function captureLibraryScroll(){
       const root=document.scrollingElement||document.documentElement;
-      const main=document.querySelector('.main');
+      const main=document.querySelector<HTMLElement>('.main');
       libraryScrollState={
         documentTop:Math.max(0,Number(root&&root.scrollTop)||Number(window.scrollY)||0),
         mainTop:Math.max(0,Number(main&&main.scrollTop)||0)
       };
     }
-    function restoreLibraryScroll(options={}){
+    function restoreLibraryScroll(options:Readonly<{immediate?:boolean}>={}){
       const apply=()=>{
         const root=document.scrollingElement||document.documentElement;
-        const main=document.querySelector('.main');
+        const main=document.querySelector<HTMLElement>('.main');
         if(root)root.scrollTop=libraryScrollState.documentTop;
         if(main)main.scrollTop=libraryScrollState.mainTop;
       };
@@ -1089,7 +1112,7 @@ registry.define('library',1,()=>{
       if(options.immediate===true){apply();return;}
       libraryRestoreFrame=requestAnimationFrame(()=>{libraryRestoreFrame=0;apply();});
     }
-    async function batchAttachmentMutation(work,options={}){
+    async function batchAttachmentMutation<T>(work:()=>T|PromiseLike<T>,options:AttachmentBatchOptions={}):Promise<T>{
       if(typeof work!=='function')throw new TypeError('Library attachment mutation batch requires an operation.');
       const outer=attachmentMutationHold===0;
       if(outer){
@@ -1118,7 +1141,7 @@ registry.define('library',1,()=>{
         }
       }
     }
-    function prepareLibrarySummary(value){
+    function prepareLibrarySummary(value:LibrarySummary|null|undefined):LibraryPreparedSummary|null{
       const r=value&&typeof value==='object'&&!Array.isArray(value)&&isValidIsoDate(value.date)?value:null;if(!r)return null;
       const dateLabel=prettyDate(r.date),outcomeText=taskOutcomeSummaryText(sanitizeTaskOutcomeCounts(r.outcomeCounts),{includeZero:false});
       return freeze({...r,libraryView:freeze({dateLabel,outcomeText,searchText:[r.date,dateLabel,r.dayName||'',String(r.weightedCompletion||'')].join(' ').toLowerCase()})});
@@ -1136,26 +1159,26 @@ registry.define('library',1,()=>{
       }).catch(error=>{if(librarySummaryLoad===pending)librarySummaryLoad=null;throw error;});
       librarySummaryLoad=pending;return pending;
     }
-    function diaryDrawer(){return document.getElementById('library-diary');}
-    function diaryEditorField(){return document.querySelector('#library-diary-editor .library-diary-textarea');}
+    function diaryDrawer(){return detailsById('library-diary');}
+    function diaryEditorField(){return document.querySelector<HTMLTextAreaElement>('#library-diary-editor .library-diary-textarea');}
     function diaryShown(){return libraryActive&&librarySection==='days'&&!!diaryDrawer()?.open;}
-    function diaryDateLabel(date){const [year,month,day]=String(date||'').split('-');return `${Number(day)||day} ${LIBRARY_MONTHS[(Number(month)||1)-1]||month} ${year}`;}
-    function diaryMonthLabel(date){const [year,month]=String(date||'').split('-');return `${LIBRARY_MONTHS[(Number(month)||1)-1]||month} ${year}`;}
-    function setDiaryStatus(message,error=false){const status=document.getElementById('library-diary-status');if(!status)return false;status.className='library-notes-status ui-status'+(error?' err':'');status.textContent=String(message||'');return true;}
+    function diaryDateLabel(date:unknown){const [year,month,day]=String(date||'').split('-');return `${Number(day)||day} ${LIBRARY_MONTHS[(Number(month)||1)-1]||month} ${year}`;}
+    function diaryMonthLabel(date:unknown){const [year,month]=String(date||'').split('-');return `${LIBRARY_MONTHS[(Number(month)||1)-1]||month} ${year}`;}
+    function setDiaryStatus(message:unknown,error=false){const status=document.getElementById('library-diary-status');if(!status)return false;status.className='library-notes-status ui-status'+(error?' err':'');status.textContent=String(message||'');return true;}
     function requestDiaryRender(){if(attachmentMutationHold){attachmentMutationNeedsDiary=true;return false;}if(!diaryShown()||diaryRenderFrame)return false;diaryRenderFrame=requestAnimationFrame(()=>{diaryRenderFrame=0;void renderDiary();});return true;}
-    function diaryNavItem(summary){
+    function diaryNavItem(summary:LibraryPreparedSummary){
       const button=document.createElement('button');button.type='button';button.className='library-note-nav-item library-diary-item has-note'+(summary.date===selectedDiaryDate?' active':'');button.dataset.diaryDate=summary.date;button.setAttribute('aria-pressed',summary.date===selectedDiaryDate?'true':'false');
       button.append(textEl('span','library-note-nav-name',diaryDateLabel(summary.date)),textEl('span','library-note-nav-path',summary.dayName||''));
       button.addEventListener('click',()=>{void selectDiaryDate(summary.date);});return button;
     }
-    function renderDiaryList(entries){
+    function renderDiaryList(entries:readonly LibraryPreparedSummary[]){
       const list=document.getElementById('library-diary-list');if(!list)return;
       const filled=diaryEntries(entries),fragment=document.createDocumentFragment();let month='';
       for(const entry of filled){const key=entry.date.slice(0,7);if(key!==month){month=key;fragment.appendChild(textEl('div','library-diary-month',diaryMonthLabel(entry.date)));}fragment.appendChild(diaryNavItem(entry));}
       if(!filled.length)fragment.appendChild(textEl('div','library-notes-zero ui-status','No reflections yet.'));
       list.replaceChildren(fragment);updateDiarySummaryCount(entries);
     }
-    function diaryHeader(record,editing){
+    function diaryHeader(record:SavedDayRecord,editing:boolean){
       const head=document.createElement('div');head.className='library-notes-editor-head';
       const identity=document.createElement('div');identity.className='library-notes-editor-identity';identity.append(textEl('div','library-notes-editor-title',diaryDateLabel(record.date)),textEl('span','library-notes-editor-meta ui-mono',record.dayName||''));
       const tools=document.createElement('div');tools.className='library-notes-editor-tools';
@@ -1163,13 +1186,13 @@ registry.define('library',1,()=>{
       const action=document.createElement('button');action.type='button';action.className='library-note-action ui-btn';action.textContent=editing?'Done':'Edit';action.disabled=!editing&&!canMutate();action.setAttribute('aria-label',editing?'Finish editing reflection':'Edit reflection');
       action.addEventListener('click',()=>{void (editing?finishDiaryEdit():startDiaryEdit(record.date));});tools.append(remove,action);head.append(identity,tools);return head;
     }
-    function renderDiaryRead(record){
+    function renderDiaryRead(record:SavedDayRecord){
       const panel=document.getElementById('library-diary-editor');if(!panel)return false;
       const body=document.createElement('div');body.className='library-diary-read';
       renderRichTextContent(body,record.reflection,'',`Diary reflection for ${record.date}`);
       panel.replaceChildren(diaryHeader(record,false),body);return true;
     }
-    function renderDiaryEdit(record){
+    function renderDiaryEdit(record:SavedDayRecord){
       const panel=document.getElementById('library-diary-editor');if(!panel)return false;
       const shell=document.createElement('div');shell.className='library-notes-editor-shell';
       const field=document.createElement('textarea');field.className='library-notes-textarea library-diary-textarea ui-field';field.autocomplete='off';field.placeholder='Write this reflection…';shell.appendChild(field);panel.replaceChildren(diaryHeader(record,true),shell);
@@ -1187,20 +1210,20 @@ registry.define('library',1,()=>{
         const record=await getDailyRecord(selectedDiaryDate)||((diaryDraftRecord&&diaryDraftRecord.date===selectedDiaryDate)?diaryDraftRecord:null);if(token!==diaryRenderToken||!diaryShown())return false;
         if(record&&String(record.reflection||'').trim())renderDiaryRead(record);else if(panel)panel.replaceChildren(textEl('div','library-notes-editor-empty ui-status','This reflection is no longer available.'));
         return true;
-      }catch(error){setDiaryStatus('Diary could not be loaded: '+(error&&error.message||error),true);return false;}
+      }catch(error){setDiaryStatus('Diary could not be loaded: '+errorMessage(error),true);return false;}
     }
     // The editor's save lane writes after typing pauses and retries a failed
     // write; this keeps the list in step with what was saved.
-    function diarySaved(record){
+    function diarySaved(record:SavedDayRecord|null){
       const listed=!!String(record?.reflection||'').trim();
       if(listed!==diaryEntryListed){diaryEntryListed=listed;invalidateLibrarySummaryCache();}
     }
-    function flushDiarySave(options={}){const field=diaryEditorField();return field?flushDiaryEditor(field,options):Promise.resolve(null);}
-    async function startDiaryEdit(date,recordOverride=null){
+    function flushDiarySave(options:Parameters<DiaryEditor['flush']>[1]={}){const field=diaryEditorField();return field?flushDiaryEditor(field,options):Promise.resolve(null);}
+    async function startDiaryEdit(date:string,recordOverride:SavedDayRecord|null=null){
       if(!canMutate()){setDiaryStatus('Study control is in another tab. Take control here before editing Diary.',true);return false;}
       if(!isSupportedSavedDate(date))return false;
       try{const record=recordOverride||await getDailyRecord(date);if(!record)return false;selectedDiaryDate=date;diaryDraftRecord=record.recordKind==='diary'&&!String(record.reflection||'').trim()?record:null;diaryEntryListed=!!String(record.reflection||'').trim();diaryEditing=true;setDiaryStatus('');return renderDiaryEdit(record);}
-      catch(error){setDiaryStatus('Diary editor could not open: '+(error&&error.message||error),true);return false;}
+      catch(error){setDiaryStatus('Diary editor could not open: '+errorMessage(error),true);return false;}
     }
     async function createDiaryEntry(){
       if(!canMutate()){setDiaryStatus('Study control is in another tab. Take control here before creating a reflection.',true);return false;}
@@ -1213,7 +1236,7 @@ registry.define('library',1,()=>{
       const draft=existing||createDiaryDraft(date);if(!draft){setDiaryStatus('That reflection date is not available.',true);return false;}
       return startDiaryEdit(date,draft);
     }
-    async function deleteDiaryEntry(date){
+    async function deleteDiaryEntry(date:string){
       if(!canMutate()||!isSupportedSavedDate(date))return false;
       let current=await getDailyRecord(date);if(!current&&!diaryDraftRecord)return false;
       const confirmed=await confirm({title:'Delete reflection?',message:current?.recordKind==='study'?'The reflection will be removed. The saved Study Day will remain.':'This reflection will be deleted.',confirmLabel:'Delete',cancelLabel:'Cancel',danger:true});
@@ -1227,7 +1250,7 @@ registry.define('library',1,()=>{
       if(current)await deleteDiaryEntryRecord(date);
       selectedDiaryDate='';diaryDraftRecord=null;diaryEntryListed=false;invalidateLibrarySummaryCache();setDiaryStatus('');await renderDiary();return true;
     }
-    async function settleDiaryEdit(options={}){
+    async function settleDiaryEdit(options:Parameters<DiaryEditor['flush']>[1]={}){
       if(!diaryEditing)return true;const field=diaryEditorField();
       try{await flushDiarySave(options);return !field||await settleDiaryEditor(field)!==false;}
       catch{return false;}
@@ -1236,11 +1259,11 @@ registry.define('library',1,()=>{
       if(!diaryEditing)return true;const field=diaryEditorField();
       if(field)clearDiaryEditor(field);diaryEditing=false;diaryEntryListed=false;diaryDraftRecord=null;invalidateLibrarySummaryCache();return true;
     }
-    async function finishDiaryEdit(options={}){
+    async function finishDiaryEdit(options:Readonly<{render?:boolean}>={}){
       if(!await settleDiaryEdit())return false;
       finalizeDiaryEdit();if(options.render!==false&&diaryShown())await renderDiary();return true;
     }
-    async function selectDiaryDate(date){
+    async function selectDiaryDate(date:string){
       if(!isValidIsoDate(date)||date===selectedDiaryDate&&!diaryEditing)return false;
       if(diaryEditing&&!await finishDiaryEdit({render:false}))return false;selectedDiaryDate=date;diaryDraftRecord=null;return renderDiary();
     }
@@ -1253,7 +1276,7 @@ registry.define('library',1,()=>{
     }
     installDiaryWorkspace();
     function rememberView(){try{ports.preferences.write({section:librarySection,diary:!!diaryDrawer()?.open,sort:noteSort,...(noteListWidth?{listWidth:noteListWidth}:{})});}catch{}}
-    function noteListGrid(){return document.querySelector('#library-notes .library-notes-grid');}
+    function noteListGrid(){return document.querySelector<HTMLElement>('#library-notes .library-notes-grid');}
     function applyNoteListWidth(){
       const grid=noteListGrid(),handle=document.getElementById('library-notes-resizer');if(!grid)return;
       grid.classList.toggle('custom-width',noteListWidth>0);
@@ -1261,7 +1284,7 @@ registry.define('library',1,()=>{
       const nav=grid.querySelector('.library-notes-nav'),total=grid.clientWidth;
       if(handle&&nav&&total)handle.setAttribute('aria-valuenow',String(Math.round(nav.getBoundingClientRect().width/total*100)));
     }
-    function setNoteListWidth(width,{remember=true}={}){
+    function setNoteListWidth(width:unknown,{remember=true}:Readonly<{remember?:boolean}>={}){
       const max=Math.max(NOTE_LIST_MIN,(noteListGrid()?.clientWidth||0)*NOTE_LIST_MAX_SHARE);
       noteListWidth=width>0?Math.round(Math.min(max,Math.max(NOTE_LIST_MIN,width))):0;
       applyNoteListWidth();if(remember)rememberView();
@@ -1312,7 +1335,7 @@ registry.define('library',1,()=>{
       }
       document.getElementById('pane-library')?.setAttribute('data-library-section',librarySection);
     }
-    function showSection(name){
+    function showSection(name:unknown){
       if(!LIBRARY_SECTIONS.includes(name))return false;
       if(name===librarySection)return true;
       if(libraryActive)leaveSection();
@@ -1337,13 +1360,13 @@ registry.define('library',1,()=>{
     }
     function libraryFilterState(){
       return {
-        search:String(document.getElementById('library-search')?.value||'').trim().toLowerCase(),
-        year:String(document.getElementById('library-year')?.value||'all'),
-        month:String(document.getElementById('library-month')?.value||'all'),
-        sort:String(document.getElementById('library-sort')?.value||'newest')
+        search:String(inputById('library-search')?.value||'').trim().toLowerCase(),
+        year:String(selectById('library-year')?.value||'all'),
+        month:String(selectById('library-month')?.value||'all'),
+        sort:String(selectById('library-sort')?.value||'newest')
       };
     }
-    function libraryFilterSignature(state){
+    function libraryFilterSignature(state:Readonly<{search:string;year:string;month:string;sort:string}>){
       return [state.search,state.year,state.month,state.sort].join('|');
     }
     function libraryViewIsCurrent(){
@@ -1355,13 +1378,13 @@ registry.define('library',1,()=>{
       libraryRenderedFilterSignature=signature;
       libraryRenderedVisibleLimit=libraryVisibleLimit;
     }
-    function populateLibraryFilterOptions(records){
+    function populateLibraryFilterOptions(records:readonly LibraryPreparedSummary[]){
       const years=[...new Set((records||[]).map(r=>String(r.date||'').slice(0,4)).filter(Boolean))].sort((a,b)=>b.localeCompare(a));
       const signature=years.join('|');
       if(signature===libraryFilterOptionsSignature)return;
       libraryFilterOptionsSignature=signature;
-      const yearSel=document.getElementById('library-year');
-      const monthSel=document.getElementById('library-month');
+      const yearSel=selectById('library-year');
+      const monthSel=selectById('library-month');
       if(yearSel){
         const prev=yearSel.value||'all';
         yearSel.replaceChildren(createOption('All Years','all'),...years.map(y=>createOption(y,y)));
@@ -1374,7 +1397,7 @@ registry.define('library',1,()=>{
         monthSel.dataset.libraryOptionsReady='1';
       }
     }
-    function buildLibraryViewModel(records){
+    function buildLibraryViewModel(records:readonly LibraryPreparedSummary[]){
       const state=libraryFilterState(),sorted=state.sort==='oldest'?[...(records||[])].reverse():(records||[]);
       const filtered=sorted.filter(r=>{
         const date=String(r.date||'');
@@ -1382,7 +1405,7 @@ registry.define('library',1,()=>{
       });
       return {records:sorted,filtered,state};
     }
-    function setLibrarySelectedDate(date){
+    function setLibrarySelectedDate(date:unknown){
       selectedLibraryDate=isValidIsoDate(date)?String(date):null;
       setTextSafe('h-selected',selectedLibraryDate?prettyDate(selectedLibraryDate):'—');
       document.querySelectorAll('[data-library-date]').forEach(el=>{
@@ -1398,7 +1421,7 @@ registry.define('library',1,()=>{
       setLibrarySelectedDate(null);
       renderLibraryEmptyDetail();
     }
-    function createLibraryDayCard(r){
+    function createLibraryDayCard(r:LibraryPreparedSummary){
       const card=document.createElement('button');card.className='library-card ui-card';
       card.type='button';
       card.dataset.libraryDate=r.date;card.dataset.action='open-library-day';
@@ -1422,7 +1445,7 @@ registry.define('library',1,()=>{
       card.appendChild(top);
       return card;
     }
-    async function renderLibrary(options={}){
+    async function renderLibrary(options:Readonly<{restoreScroll?:boolean}>={}):Promise<boolean>{
       if(attachmentMutationHold){attachmentMutationNeedsLibrary=true;return false;}
       const list=document.getElementById('library-list');if(!list)return false;
       const restoreAfter=!!(options&&options.restoreScroll);
@@ -1472,7 +1495,7 @@ registry.define('library',1,()=>{
       if(restoreAfter)restoreLibraryScroll();
       return true;
     }
-    async function activateLibrary(options={}){
+    async function activateLibrary(options:Readonly<{restoreScroll?:boolean;immediateScroll?:boolean}>={}):Promise<boolean>{
       libraryActive=true;clearNoteSearchTimer();if(noteSearchFailed)resetNoteSearchFailure();
       refreshNotes();requestDiarySummaryCountRefresh();if(diaryShown())void renderDiary();
       if(options&&options.restoreScroll&&options.immediateScroll===true)restoreLibraryScroll({immediate:true});
@@ -1483,13 +1506,13 @@ registry.define('library',1,()=>{
       await renderLibrary({restoreScroll:!!(options&&options.restoreScroll)});
       return false;
     }
-    function deactivateLibrary(options={}){libraryActive=false;captureLibraryScroll();pendingNote=null;clearNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
+    function deactivateLibrary(options:Readonly<{diarySettled?:boolean}>={}){libraryActive=false;captureLibraryScroll();pendingNote=null;clearNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
     function loadMoreLibrary(){
       libraryVisibleLimit+=LIBRARY_PAGE_SIZE;
       libraryPreserveLimitOnce=true;
       renderLibrary();
     }
-    function createLibraryDetailHeader(record){
+    function createLibraryDetailHeader(record:LibraryDay){
       const header=document.createElement('div');
       header.className='library-detail-head';
       const titleWrap=document.createElement('div');
@@ -1514,7 +1537,7 @@ registry.define('library',1,()=>{
       header.append(titleWrap,actions);
       return header;
     }
-    function createLibraryDetailMetrics(record){
+    function createLibraryDetailMetrics(record:LibraryDay){
       const metrics=document.createElement('div');
       metrics.className='library-detail-metrics';
       [
@@ -1532,7 +1555,7 @@ registry.define('library',1,()=>{
       });
       return metrics;
     }
-    function createLibraryPracticeSummary(record){
+    function createLibraryPracticeSummary(record:LibraryDay){
       const runs=sanitizePracticeRuns(record&&record.practiceRuns);
       if(!runs.length)return null;
       const panel=textEl('section','practice-review ui-panel');
@@ -1540,7 +1563,7 @@ registry.define('library',1,()=>{
       populatePracticeRunTable(panel,runs,{tasks:record&&record.tasks||[],normalized:true});
       return panel;
     }
-    function createSavedDayTaskGrid(record){
+    function createSavedDayTaskGrid(record:LibraryDay){
       const grid=document.createElement('div');
       grid.className='review-grid review-grid-polished library-day-grid';
       const tasks=(record.tasks||[]).filter(isTrackableBlock);
@@ -1548,7 +1571,7 @@ registry.define('library',1,()=>{
       else grid.appendChild(emptyMsg('No saved trackable block details for this day.'));
       return grid;
     }
-    function createLibraryTextSection(title,text,emptyText,{rich=false}={}){
+    function createLibraryTextSection(title:string,text:unknown,emptyText:string,{rich=false}:Readonly<{rich?:boolean}>={}){
       const heading=textEl('div','library-section ui-label',title);
       const box=document.createElement('div');
       box.className='library-ref ui-body';
@@ -1556,7 +1579,7 @@ registry.define('library',1,()=>{
       else box.textContent=plainTextContent(text).trim()||emptyText;
       return [heading,box];
     }
-    function renderLibraryDayDetail(record){
+    function renderLibraryDayDetail(record:LibraryDay|null){
       const box=document.getElementById('library-detail');
       if(!box)return;
       if(!record){
@@ -1576,7 +1599,7 @@ registry.define('library',1,()=>{
         ...unfinished
       ].filter(Boolean));
     }
-    async function openLibraryDayDetail(date){
+    async function openLibraryDayDetail(date:unknown):Promise<boolean>{
       if(!document.getElementById('pane-library')?.classList.contains('on')&&!await goTab('library',{source:'library-day'}))return false;
       const r=await getDailyRecord(date);
       if(!r){
@@ -1586,7 +1609,7 @@ registry.define('library',1,()=>{
       renderLibraryDayDetail(r);
       return true;
     }
-    function libraryMutationBlocked(action,options={}){
+    function libraryMutationBlocked(action:string,options:Readonly<{activeSession?:boolean}>={}){
       if(options.activeSession===true&&hasActiveSession()){
         setStatus('library-status','End or suspend the active session before clearing Library data.',false);
         return true;
@@ -1597,7 +1620,7 @@ registry.define('library',1,()=>{
       }
       return false;
     }
-    async function deleteLibraryDay(date){
+    async function deleteLibraryDay(date:unknown){
       if(libraryMutationBlocked('deleting a saved day'))return;
       if(!isValidIsoDate(date)){setStatus('library-status','Invalid saved-day date.',false);return;}
       const accepted=await confirm({
@@ -1617,7 +1640,7 @@ registry.define('library',1,()=>{
         }
         await renderLibrary();notice.finish('succeeded','Deleted '+date+'.');
       }catch(e){
-        notice.finish('failed',(deleted?'Saved day deleted; refreshing Library failed: ':'Could not delete '+date+': ')+(e&&e.message?e.message:e));
+        notice.finish('failed',(deleted?'Saved day deleted; refreshing Library failed: ':'Could not delete '+date+': ')+errorMessage(e));
       }
     }
     async function loadClearLibraryCounts(){
@@ -1632,12 +1655,12 @@ registry.define('library',1,()=>{
       return freeze({savedDays:!!fields.savedDays?.checked,notes:!!fields.notes?.checked,attachments:!!fields.attachments?.checked});
     }
     function clearLibrarySelectionHasValue(selection){return !!(selection&&selection.savedDays||selection&&selection.notes||selection&&selection.attachments);}
-    function libraryClearAttachmentSummary(plan){
+    function libraryClearAttachmentSummary(plan:ClearChoice['plan']){
       const safe=plan?.attachments?.safeIds?.length||0,protectedCount=plan?.attachments?.protectedIds?.length||0;
       if(!protectedCount)return `${safe} attachment${safe===1?'':'s'} can be deleted. No surviving references need protection.`;
       return `${safe} can be deleted · ${protectedCount} ${protectedCount===1?'is':'are'} still used and will be kept by default.`;
     }
-    async function requestClearLibrarySelectionFallback(counts){
+    async function requestClearLibrarySelectionFallback(counts:LibraryCounts):Promise<ClearChoice|null>{
       const available=[counts.savedDays?'S = Saved Dates / Reflections':'',counts.notes?'N = Notes':'',counts.attachments?'A = Attachments':''].filter(Boolean);
       const result=await requestInput({
         title:'Clear Library',danger:true,
@@ -1663,19 +1686,19 @@ registry.define('library',1,()=>{
       }
       return freeze({selection,plan,forceReferenced});
     }
-    function requestClearLibrarySelection(counts){
-      const dialog=document.getElementById('library-clear-dialog');
+    function requestClearLibrarySelection(counts:LibraryCounts):Promise<ClearChoice|null>{
+      const dialog=dialogById('library-clear-dialog');
       if(!dialog||typeof dialog.showModal!=='function')return requestClearLibrarySelectionFallback(counts);
       const fields={
-        savedDays:document.getElementById('library-clear-saved-days'),
-        notes:document.getElementById('library-clear-notes'),
-        attachments:document.getElementById('library-clear-attachments')
+        savedDays:inputById('library-clear-saved-days'),
+        notes:inputById('library-clear-notes'),
+        attachments:inputById('library-clear-attachments')
       };
-      const policyBox=document.getElementById('library-clear-attachment-policy'),summary=document.getElementById('library-clear-attachment-summary'),safePolicy=document.getElementById('library-clear-attachments-safe'),forcePolicy=document.getElementById('library-clear-attachments-force');
+      const policyBox=document.getElementById('library-clear-attachment-policy'),summary=document.getElementById('library-clear-attachment-summary'),safePolicy=inputById('library-clear-attachments-safe'),forcePolicy=inputById('library-clear-attachments-force');
       setTextSafe('library-clear-saved-days-count',counts.savedDays);setTextSafe('library-clear-notes-count',counts.notes);setTextSafe('library-clear-attachments-count',counts.attachments);
       fields.savedDays.disabled=!counts.savedDays;fields.savedDays.checked=!!counts.savedDays;fields.notes.disabled=!counts.notes;fields.notes.checked=false;fields.attachments.disabled=!counts.attachments;fields.attachments.checked=false;
       if(safePolicy)safePolicy.checked=true;if(forcePolicy){forcePolicy.checked=false;forcePolicy.disabled=true;}if(policyBox)policyBox.hidden=true;
-      const cancelButton=document.getElementById('library-clear-cancel'),continueButton=document.getElementById('library-clear-continue'),error=document.getElementById('library-clear-selection-error');
+      const cancelButton=buttonById('library-clear-cancel'),continueButton=buttonById('library-clear-continue'),error=document.getElementById('library-clear-selection-error');
       if(error)error.hidden=true;
       let planRevision=0,latestPlan=null;
       const updatePlan=async selection=>{
@@ -1700,7 +1723,7 @@ registry.define('library',1,()=>{
         try{dialog.showModal();}catch{return requestClearLibrarySelectionFallback(counts).then(finish);}
       });
     }
-    async function requestClearLibraryConfirmation(choice,counts){
+    async function requestClearLibraryConfirmation(choice:ClearChoice,counts:LibraryCounts):Promise<boolean>{
       const selection=choice.selection,plan=choice.plan,forceReferenced=choice.forceReferenced===true&&!!plan?.attachments?.protectedIds?.length;
       const onlySavedDays=selection.savedDays&&!selection.notes&&!selection.attachments,details=[];
       if(selection.savedDays)details.push(`${counts.savedDays} Saved Date / Reflection record${counts.savedDays===1?'':'s'}.`);
@@ -1717,7 +1740,7 @@ registry.define('library',1,()=>{
       });
       return !!typed;
     }
-    function clearLibraryResultMessage(result){
+    function clearLibraryResultMessage(result:LibraryClearResult){
       const parts=[];
       if(result.selection.savedDays)parts.push(`${result.savedDays} saved day${result.savedDays===1?'':'s'}`);
       if(result.selection.notes)parts.push(`${result.notes} note${result.notes===1?'':'s'}`);
@@ -1729,7 +1752,7 @@ registry.define('library',1,()=>{
     }
     async function clearLibraryRecords(){
       if(libraryMutationBlocked('clearing Library data',{activeSession:true}))return;
-      let counts;try{counts=await loadClearLibraryCounts();}catch(error){setStatus('library-status','Could not inspect Library data safely: '+(error&&error.message||error),false);return;}
+      let counts;try{counts=await loadClearLibraryCounts();}catch(error){setStatus('library-status','Could not inspect Library data safely: '+errorMessage(error),false);return;}
       if(!counts.savedDays&&!counts.notes&&!counts.attachments){setStatus('library-status','Library data is already empty.');return;}
       for(let attempt=0;attempt<2;attempt++){
         const choice=await requestClearLibrarySelection(counts);if(!choice){setStatus('library-status','Clear Library cancelled.',true,'cancelled');return;}
@@ -1776,5 +1799,8 @@ registry.define('library',1,()=>{
     });
   }
   return freeze({format:'study-director.library-module',contractVersion:1,createView});
-});
+};
+registry.define('library',1,createModule);
+return createModule;
 })();
+export type LibraryModule=ReturnType<typeof sdLibraryFactory>;

@@ -52,7 +52,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'profiles',source:'core/profiles.ts',stem:'sd.profiles'}),
   Object.freeze({id:'profiles-host',source:'core/profiles-host.ts',stem:'sd.profiles-host'}),
   Object.freeze({id:'data-bootstrap-host',source:'core/data-bootstrap-host.ts',stem:'sd.data-bootstrap-host'}),
-  Object.freeze({id:'library',source:'core/library.js',stem:'sd.library'}),
+  Object.freeze({id:'library',source:'core/library.ts',stem:'sd.library'}),
   Object.freeze({id:'managed-repository',source:'core/managed-repository.ts',stem:'sd.managed-repository'}),
   Object.freeze({id:'repository-policy',source:'core/repository-policy.ts',stem:'sd.repository-policy'}),
   Object.freeze({id:'repository-background',source:'core/repository-background.ts',stem:'sd.repository-background'}),
