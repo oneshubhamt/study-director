@@ -8,7 +8,7 @@ import {createProcessingEngine} from '../../../portable/processing.ts';
 const run=file=>vm.runInThisContext(readRuntimeSource(new URL(file,import.meta.url)),{filename:file});
 run('../../../source/core/internal.ts');run('../../../source/core/note-export.ts');
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
-const module=registry.require('note-export',2);
+const module=registry.require('note-export',1);
 assert.equal(module.format,'study-director.note-export-module');
 assert.equal(module.contractVersion,2);
 assert.equal(module.limits.maxExportBytes,128*1024*1024);
@@ -34,12 +34,11 @@ const downloads=[];const png=makeBlob([new Uint8Array([137,80,78,71])],'image/pn
 let payload={plain:{key:'plain',label:'../Ethics:*?',text:'hello'}};
 const create=(assetGet=async id=>id===assetId?png:null)=>module.createExporter(Object.freeze({ports:Object.freeze({
   assets:Object.freeze({get:assetGet}),
-  environment,
   processing:Object.freeze({...createProcessingEngine((doc,text,options)=>markdown(text,options)),scope:fn=>fn(),job:fn=>fn(),cancel:()=>{},check:()=>{}}),
   notes:Object.freeze({get:key=>payload[key]||null}),
   output:Object.freeze({chooseSave:async()=>null,save:async({blob,filename})=>{downloads.push({blob,filename});return {status:'downloaded',filename};}}),
   scheduling:Object.freeze({yieldTask:async()=>{},budget:()=>()=>false}),
-  richText:Object.freeze({assetIds:collectAssets,document:value=>({doc:null,text:value})})
+  richText:Object.freeze({assetIds:collectAssets,exportDocument:value=>({doc:null,text:value})})
 })}));
 let result=await create().exportKeys(['plain']);assert.equal(result.kind,'markdown');assert.equal(downloads.at(-1).filename,'Ethics.md');assert.equal(await downloads.at(-1).blob.text(),'hello');
 payload={a:{key:'a',label:'Topic',text:richImage}};result=await create().exportKeys(['a']);assert.equal(result.kind,'zip');assert.equal(result.assets,1);assert.equal(result.filename,'Topic.zip');assert.deepEqual((await zipEntries(downloads.at(-1).blob)).map(x=>x.name),['Topic.md',`assets/${assetId}.png`]);
