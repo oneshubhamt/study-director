@@ -82,6 +82,7 @@ export interface ReviewRecordViewTask{
   readonly adjustedStart:string;readonly adjustedEnd:string;readonly actualStart:string|null;readonly actualEnd:string|null;readonly pauseEvents:readonly PauseEvent[];readonly done:number|null;readonly enteredTotal:number|null;readonly skipped:boolean;readonly doneFlag:boolean;
 }
 export type SavedDayPresentationTask=Omit<ReviewRecordViewTask,'completion'>&Readonly<{completion:number|null}>;
+export type PracticeTaskRef=Readonly<Pick<Task,'id'|'name'>>;
 export interface ReviewRecordView{
   readonly date:string;readonly tasks:readonly ReviewRecordViewTask[];readonly practiceRuns:readonly PracticeRun[];readonly carryForwardDraft:string;
   readonly completedEquivalentMinutes:number;readonly actualFocusMinutes:number;readonly completionPercent:number;
@@ -141,14 +142,14 @@ export interface ReviewSubsystemInput{
   readonly ports:Readonly<{
     notifications:Readonly<{begin(options:Readonly<Record<string,unknown>>):ReviewNotificationOperation;feedback(options:Readonly<Record<string,unknown>>):unknown}>;
     domain:Readonly<Pick<RecordHelpers,'boundedInt'|'clampText'|'clampEditorContent'|'editorContentWithinLimits'> & {
-      plainTextContent(value:unknown):string;classifyTaskOutcome(task:Task|ReviewRecordViewTask):TaskOutcome;cleanDayRevision(value:unknown):number;
+      plainTextContent(value:unknown):string;classifyTaskOutcome(task:Task|ReviewRecordViewTask|SavedDayPresentationTask):TaskOutcome;cleanDayRevision(value:unknown):number;
       dailyRecordMetricsFromEvidence(value:unknown):ReviewMetrics;emptyTaskOutcomeCounts():Record<TaskOutcome,number>;finiteNumber(value:unknown):number|null;
       materializeDailyRecordView(value:DailyRecord):ReviewRecordView|null;normalizeCompletionSource(value:unknown):CompletionSource;
       normalizeDailyResultEntry(value:unknown,schedule:ReviewScheduleRow):DailyResult|null;positiveMinutes(value:unknown):number;
       sanitizePracticeRuns(value:unknown):PracticeRun[];sanitizeTaskOutcomeCounts(value:unknown):Record<TaskOutcome,number>;
-      summarizeCleanPracticeRuns(value:readonly PracticeRun[]):ReviewPracticeAggregate;taskAreaValue(task:Task|ReviewTaskRow|ReviewRecordViewTask):string;taskMeasureValue(task:Task|ReviewTaskRow|ReviewRecordViewTask,fallback?:string):string;
+      summarizeCleanPracticeRuns(value:readonly PracticeRun[]):ReviewPracticeAggregate;taskAreaValue(task:Task|ReviewTaskRow|ReviewRecordViewTask|SavedDayPresentationTask):string;taskMeasureValue(task:Task|ReviewTaskRow|ReviewRecordViewTask|SavedDayPresentationTask,fallback?:string):string;
       taskOutcomeInfo(outcome:TaskOutcome):Readonly<{status:string;label:string}>;taskOutcomeSummaryText(value:Record<TaskOutcome,number>):string;taskOutcomeTotal(value:Record<TaskOutcome,number>):number;
-      taskTargetValue(task:Task|ReviewTaskRow|ReviewRecordViewTask):number|null;
+      taskTargetValue(task:Task|ReviewTaskRow|ReviewRecordViewTask|SavedDayPresentationTask):number|null;
     }>;
     presentation:Readonly<{
       dateInsightsMeta(date:string):Readonly<{dayOfWeek:number;dayName:string}>;fmtS(seconds:number):string;formatPracticeMs(ms:number):string;practicePaceBandLabel(value:string):string;
@@ -158,7 +159,7 @@ export interface ReviewSubsystemInput{
     }>;
     schedule:Readonly<{
       adjustedEndMin(index:number):number;adjustedStartMin(index:number):number;effectiveNowMin(date?:Date):number;hasAdjustedTiming(index:number):boolean;isLiveTrackableTimer():boolean;
-      isTaskResolved(index:number):boolean;isTrackableBlock(task:Task|ReviewRecordViewTask|undefined):boolean;isWorkBlock(task:Task|ReviewRecordViewTask|undefined):boolean;latestTrackableEndMin():number|null;
+      isTaskResolved(index:number):boolean;isTrackableBlock(task:Task|ReviewRecordViewTask|SavedDayPresentationTask|undefined):boolean;isWorkBlock(task:Task|ReviewRecordViewTask|SavedDayPresentationTask|undefined):boolean;latestTrackableEndMin():number|null;
       originalEndMin(index:number):number;originalStartMin(index:number):number;scheduleFingerprint():string;
     }>;
     evidence:Readonly<Pick<CompletionEvidenceController,'clearManualCompletionOverride'|'liveTaskOutcome'|'progressInputState'|'resolveTaskCompletion'|'storeResolvedCompletion'|'setCompletionState'|'syncProgressInputsToState'> & {
@@ -201,7 +202,7 @@ export interface ReviewPomodoroSummary{readonly breaks:number;readonly recoveryS
 export type TaskWithPauses=Task&{readonly pauseEvents?:readonly PauseEvent[]};
 export interface SharedReviewPresentation{
   createSavedDayTaskCard(task:SavedDayPresentationTask):HTMLElement;createPomodoroSummaryLine(tasks:readonly SavedDayPresentationTask[]):HTMLElement;
-  populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],options?:Readonly<{tasks?:readonly (Task|SavedDayPresentationTask)[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>):ReviewPracticeAggregate|null;
+  populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],options?:Readonly<{tasks?:readonly PracticeTaskRef[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>):ReviewPracticeAggregate|null;
   pomodoroSummaryFromTasks(tasks:readonly (SavedDayPresentationTask|TaskWithPauses)[]):ReviewPomodoroSummary;
   pomodoroSummaryText(value:ReviewPomodoroSummary):string;
   completionSourceLabel(source:unknown):string;durationLabel(value:number):string;optionalDurationLabel(value:unknown):string;optionalPercentLabel(value:unknown):string;
