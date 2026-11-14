@@ -53,7 +53,7 @@ const createModule=():LibraryModuleContract=>{
   const detailsById=(id:string)=>document.querySelector<HTMLDetailsElement>('#'+id);
     exactObject(input,['ports'],'Library input');
     const ports=exactObject(input.ports,Object.keys(PORT_FIELDS),'Library ports');
-    for(const [name,fields] of Object.entries(PORT_FIELDS))exactObject(ports[name],fields,'Library '+name+' port');
+    for(const name of Object.keys(PORT_FIELDS) as (keyof typeof PORT_FIELDS)[]){const fields=PORT_FIELDS[name];exactObject(ports[name],fields,'Library '+name+' port');}
     requireFunctions(ports.notifications,PORT_FIELDS.notifications,'Library notifications port');
     requireFunctions(ports.records,PORT_FIELDS.records,'Library records port');
     requireFunctions(ports.domain,PORT_FIELDS.domain,'Library domain port');
@@ -160,7 +160,7 @@ const createModule=():LibraryModuleContract=>{
     }
     function idleNoteSearch(){clearNoteSearchTimer();if(noteSearchWorker)noteSearchTimer=window.setTimeout(()=>{noteSearchTimer=0;stopNoteSearch();},NOTE_SEARCH_IDLE_MS);}
     function failNoteSearch(){stopNoteSearch(true);requestNotesRender();}
-    function postSearch(message:unknown){try{noteSearchWorker.postMessage(message);return true;}catch{failNoteSearch();return false;}}
+    function postSearch(message:unknown){const worker=noteSearchWorker;if(!worker)return false;try{worker.postMessage(message);return true;}catch{failNoteSearch();return false;}}
     function watchNoteSearch(){
       if(noteSearchDeadline)return;const current=noteSearchWorker;
       noteSearchDeadline=window.setTimeout(()=>{noteSearchDeadline=0;if(noteSearchWorker===current)failNoteSearch();},NOTE_SEARCH_RESPONSE_MS);
@@ -242,7 +242,8 @@ const createModule=():LibraryModuleContract=>{
     function noteLeaf(label:unknown){return labelParts(label).at(-1)||String(label||'Area');}
     function noteParentPath(label:unknown){const parts=labelParts(label);return parts.length>1?parts.slice(0,-1).join(' > '):'';}
     function noteSelectionIndex(entries:readonly NoteCatalogueEntry[]){
-      const rows=Array.isArray(entries)?entries:[],byLabel=new Map(rows.map(entry=>[String(entry.label||''),entry])),index=new Map(rows.map(entry=>[entry.key,[]]));
+      const rows=Array.isArray(entries)?entries:[],byLabel=new Map<string,NoteCatalogueEntry>(rows.map(entry=>[String(entry.label||''),entry] as const)),index=new Map<string,string[]>();
+      rows.forEach(entry=>index.set(entry.key,[]));
       for(const entry of rows){
         if(!entry.hasNote)continue;
         const parts=labelParts(entry.label),seen=new Set();
@@ -359,8 +360,8 @@ const createModule=():LibraryModuleContract=>{
     // The title renames the note in place: Enter or leaving the field saves,
     // Escape keeps the old name.
     function noteTitle(entry:NoteCatalogueEntry,renameable:boolean){
-      const title=textEl(renameable?'button':'div','library-notes-editor-title',noteLeaf(entry.label));
-      if(!renameable)return title;
+      if(!renameable)return textEl('div','library-notes-editor-title',noteLeaf(entry.label));
+      const title=textEl('button','library-notes-editor-title',noteLeaf(entry.label));
       title.type='button';title.title='Rename';title.setAttribute('aria-label',`Rename ${noteLeaf(entry.label)}`);
       title.addEventListener('click',()=>renameNoteInPlace(entry,title));
       return title;
@@ -453,7 +454,7 @@ const createModule=():LibraryModuleContract=>{
     // Builds the tree from the catalogue's depth-first order: each note's parent
     // is the nearest earlier note one level up.
     function noteTree(entries:readonly NoteCatalogueEntry[]){
-      const nodes=entries.map(entry=>({entry,depth:Math.max(0,Number(entry.depth)||0),parent:null,children:0,holdsActive:false,expanded:false})),stack=[];
+      const nodes:NoteTreeNode[]=entries.map(entry=>({entry,depth:Math.max(0,Number(entry.depth)||0),parent:null,children:0,holdsActive:false,expanded:false})),stack:NoteTreeNode[]=[];
       for(const node of nodes){
         while(stack.length&&stack.at(-1).depth>=node.depth)stack.pop();
         node.parent=stack.at(-1)||null;if(node.parent)node.parent.children+=1;
@@ -754,7 +755,7 @@ const createModule=():LibraryModuleContract=>{
         if(filtered.length)list.replaceChildren(...rows);
         else list.replaceChildren(textEl('div','library-notes-zero ui-status',query?'No notes match this search.':'No notes have all of these tags.'));
         const focusable=list.querySelector('[role="treeitem"].active')||list.querySelector('[role="treeitem"]');if(focusable)focusable.tabIndex=0;
-        if(noteFocusKey){const target=[...list.querySelectorAll('[role="treeitem"]')].find(row=>row.dataset.noteKey===noteFocusKey);noteFocusKey='';if(target){for(const row of list.querySelectorAll('[role="treeitem"]'))row.tabIndex=-1;target.tabIndex=0;target.focus();}}
+        if(noteFocusKey){const target=[...list.querySelectorAll<HTMLElement>('[role="treeitem"]')].find(row=>row.dataset.noteKey===noteFocusKey);noteFocusKey='';if(target){for(const row of list.querySelectorAll<HTMLElement>('[role="treeitem"]'))row.tabIndex=-1;target.tabIndex=0;target.focus();}}
       }
       setTextSafe('library-notes-nav-count',filtering?(searchState.pending?`Searching… / ${entries.length}`:`${filtered.length} / ${entries.length}`):String(entries.length));
       renderNoteTrash();
