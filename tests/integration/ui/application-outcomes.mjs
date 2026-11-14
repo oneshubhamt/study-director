@@ -220,7 +220,7 @@ const noop=()=>{};
     }),
     tags:Object.freeze({tagged:()=>Object.freeze([])}),mutation:Object.freeze({runExclusive:async(_name,operation)=>await operation()}),
     view:Object.freeze({
-      document:fakeDocument,currentTaskIndex:()=>0,saveLiveDraft:()=>{savedDrafts++;},updateSearchDocument:()=>true,
+      document:fakeDocument,currentTaskIndex:()=>0,saveLiveDraft:()=>{savedDrafts++;},updateSearchText:()=>true,
       refreshExecute:()=>true,refreshLibrary:()=>true,requestScheduleRender:()=>true,refreshReviewIfVisible:()=>true,refreshRecovery:()=>true,
       setStatus:()=>true,setPlanStatus:()=>true,publishSafetyNotice:()=>true,syncPopover:()=>true
     }),

@@ -1874,11 +1874,11 @@ function applicableNotesForTask(task){return notesRuntime().applicableForTask(ta
 function inheritedNoteEntries(areaKey){return notesRuntime().inheritedEntries(areaKey);}
 function normalizeOngoingAreaInput(value){return notesRuntime().normalizeAreaInput(value);}
 function orderOngoingAreaEntries(source){return notesRuntime().orderEntries(source);}
-function noteSearchDocuments(){return notesRuntime().searchDocuments();}
+function noteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
 function noteCatalogue(){return notesRuntime().catalogue();}
 let refreshLibraryNotes=()=>false;
 let updateNoteSearchDocument=()=>false;
-function updateNoteSearchText(key,plain){return NotesRuntime?NotesRuntime.updateSearchText(key,plain):false;}
+function updateNoteSearchText(key,plain){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
 function refreshNoteConsumers(){
   richAssetReferenceRevision++;
   return NotesRuntime?NotesRuntime.refreshConsumers():false;
@@ -3417,7 +3417,7 @@ NotesRuntime=NotesHostModule.createController(Object.freeze({
   mutation:Object.freeze({runExclusive:(name,operation)=>AppMutationCoordinator.runExclusive(name,operation)}),
   view:Object.freeze({
     document,currentTaskIndex:()=>TimerState.currentIndex,saveLiveDraft:()=>saveLiveDraft(),
-    updateSearchDocument:value=>updateNoteSearchDocument(value),refreshExecute:()=>refreshPnote(),refreshLibrary:()=>refreshLibraryNotes(),
+    updateSearchText:(key,plain)=>updateNoteSearchText(key,plain),refreshExecute:()=>refreshPnote(),refreshLibrary:()=>refreshLibraryNotes(),
     requestScheduleRender:()=>requestRender('schedule'),
     refreshReviewIfVisible:()=>document.getElementById('pane-review')?.classList.contains('on')?ReviewView.refresh():false,
     refreshRecovery:()=>document.getElementById('recovery-carry-text')?renderRecoveryReview():false,

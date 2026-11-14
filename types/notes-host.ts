@@ -5,7 +5,6 @@ import type {NotesRepositoryModule} from '../source/core/repositories-notes.ts';
 export type NotesRepository=ReturnType<NotesRepositoryModule['create']>;
 export type NoteView=NonNullable<ReturnType<NotesRepository['get']>>;
 export type NoteMetadataSnapshot=ReturnType<NotesRepository['metadataSnapshot']>;
-export type NoteSearchSnapshot=ReturnType<NotesRepository['searchSnapshot']>;
 
 export interface NoteAreaIdentity{readonly key:string;readonly label:string}
 export interface NoteCatalogueInput{readonly key?:unknown;readonly id?:unknown;readonly label?:unknown;readonly text?:unknown;readonly hasNote?:unknown;readonly current?:unknown;readonly updatedAt?:unknown;readonly support?:unknown;readonly ephemeral?:unknown}
@@ -61,7 +60,7 @@ export interface NotesHostInput{
   readonly mutation:Readonly<{runExclusive<T>(name:string,operation:()=>T|PromiseLike<T>):Promise<T>}>;
   readonly view:Readonly<{
     document:Document;currentTaskIndex():number;saveLiveDraft():unknown;
-    updateSearchDocument(value:Readonly<{key:string;revision:string;plain:string}>):unknown;
+    updateSearchText(key:string,plain:string):unknown;
     refreshExecute():unknown;refreshLibrary():unknown;requestScheduleRender():unknown;refreshReviewIfVisible():unknown;refreshRecovery():unknown;
     setStatus(id:string,message:string,ok?:boolean):unknown;setPlanStatus(message:string,ok?:boolean):unknown;
     publishSafetyNotice(message:string,title:string,key:string):unknown;syncPopover(element:HTMLElement):unknown;
@@ -74,14 +73,14 @@ export interface NotesRuntime{
   storedValueForKey(key:unknown):string;textForKey(key:unknown):string;editorContent(binding:Pick<NoteEditorBinding,'key'>,value:unknown):string;
   applicableForTask(task:Task|undefined):ApplicableNotes;inheritedEntries(areaKey:unknown):readonly NoteInheritedEntry[];
   normalizeAreaInput(value:unknown):NoteAreaIdentity|null;orderEntries(source:readonly NoteCatalogueInput[]):readonly NoteCatalogueEntry[];
-  catalogue():readonly NoteCatalogueEntry[];searchDocuments():NoteSearchSnapshot['documents'];canCreate():boolean;size():number;
+  catalogue():readonly NoteCatalogueEntry[];canCreate():boolean;size():number;
   bindTaskEditor(field:HTMLTextAreaElement,index:number,source?:string):NoteEditorBinding|null;
   bindAreaEditor(field:HTMLTextAreaElement,areaKey:unknown,areaLabel?:unknown,source?:string):NoteEditorBinding|null;
   clearEditor(field:HTMLTextAreaElement|null):boolean;resolveEditor(field:HTMLTextAreaElement|null,options?:Readonly<{requireVisible?:boolean}>):NoteEditorBinding|null;
   commitEditor(field:HTMLTextAreaElement,value:unknown,event?:Event|null):boolean;
   refreshFieldsForKey(key:unknown,originField?:HTMLTextAreaElement|null,derived?:ValidatedRichInput|null,options?:Readonly<{deferRichMirrors?:boolean}>):void;
   refreshAllFields():void;setSyncState(key:unknown,state:NoteSyncState):boolean;reportConflict(info?:NoteConflictInfo):boolean;refreshConsumers():boolean;
-  updateSearchText(key:unknown,plain:unknown):void;renderInherited(container:HTMLElement|null,areaKey:unknown,compact?:boolean,options?:Readonly<{collapsible?:boolean}>):void;
+  renderInherited(container:HTMLElement|null,areaKey:unknown,compact?:boolean,options?:Readonly<{collapsible?:boolean}>):void;
   renderInheritedForTask(container:HTMLElement|null,task:Task|undefined,compact?:boolean):void;
   inheritedTextForTask(task:Task|undefined):string;currentEntriesForTasks(tasks:readonly Task[]):readonly Readonly<{key:string;label:string;text:string}>[];
   renameTag(from:unknown,to:unknown):Promise<Readonly<{changed:number;failed:readonly string[]}>>;

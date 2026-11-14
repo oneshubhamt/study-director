@@ -163,13 +163,12 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
     const message=copyLabel?`A different version of the ${label} note was already stored. Study Director kept that version and saved your edit as the note “${copyLabel}”.`:`A newer note for ${label} was saved elsewhere. Study Director kept the newer note and rejected the outdated edit.`;
     setSyncState(key,'conflict');view.setPlanStatus(message,false);view.setStatus('save-status',message,false);view.setStatus('notes-status',message,false);view.publishSafetyNotice(message,'Note editing conflict','note-conflict');return true;
   }
-  function updateSearchText(key:unknown,plain:unknown){const entry=key?repository.get(key):null;if(entry)view.updateSearchDocument(freeze({key:entry.key,revision:String(entry.updatedAt||''),plain:String(plain||'')}));}
   function commitEditor(field:HTMLTextAreaElement,value:unknown,event:Event|null=null){
     if(!ownership.canMutate()||!lifecycle.canWrite()){field.dataset['noteBindingState']='stale';return false;}const binding=resolveEditor(field,{requireVisible:true});if(!binding){if(field.dataset['richExternalConflict']!=='1')field.dataset['noteBindingState']='stale';return false;}
     const trusted=richText.validatedInput(event,field),candidate=trusted?trusted.canonical:editorContent(binding,value);
     const result=trusted?repository.updateValidatedRich(binding.key,binding.label,candidate,binding.noteRevision):repository.update(binding.key,binding.label,candidate,binding.noteRevision);
     if(result.status==='conflict'){refreshFieldsForKey(binding.key);if(field.dataset['richExternalConflict']==='1'){field.dataset['noteBindingState']='conflict';setSyncState(binding.key,'conflict');}return false;}
-    const canonical=storedValueForKey(binding.key),derived=trusted&&trusted.canonical===canonical?trusted:null;if(field.value!==canonical)field.value=canonical;if(!richText.isRich(canonical))updateSearchText(binding.key,canonical);
+    const canonical=storedValueForKey(binding.key),derived=trusted&&trusted.canonical===canonical?trusted:null;if(field.value!==canonical)field.value=canonical;if(!richText.isRich(canonical))view.updateSearchText(binding.key,canonical);
     refreshFieldsForKey(binding.key,field,derived,{deferRichMirrors:!!trusted});
     if(result.status==='limit'||result.status==='content-limit'){const message=result.status==='content-limit'?`Notes are limited to ${configuration.maxRichTextWords.toLocaleString()} rich-text words per note.`:`Notes are limited to ${configuration.maxNotes.toLocaleString()} saved notes.`;view.setStatus('notes-status',message,false);view.setStatus('save-status',message,false);view.setPlanStatus(message,false);return false;}
     if(result.status==='rejected')return false;if(result.status==='changed')view.saveLiveDraft();return true;
@@ -195,8 +194,8 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   }
   const runtime=freeze({
     format:'study-director.notes-runtime' as const,contractVersion:1 as const,bindingVersion:BINDING_VERSION,
-    storedValueForKey,textForKey,editorContent,applicableForTask,inheritedEntries,normalizeAreaInput,orderEntries,catalogue,searchDocuments:()=>repository.searchSnapshot().documents,canCreate:()=>repository.metadataSnapshot().records.length<configuration.maxNotes,size:()=>repository.size(),
-    bindTaskEditor,bindAreaEditor,clearEditor,resolveEditor,commitEditor,refreshFieldsForKey,refreshAllFields,setSyncState,reportConflict,refreshConsumers,updateSearchText,renderInherited,renderInheritedForTask,inheritedTextForTask,currentEntriesForTasks,renameTag,importFiles
+    storedValueForKey,textForKey,editorContent,applicableForTask,inheritedEntries,normalizeAreaInput,orderEntries,catalogue,canCreate:()=>repository.metadataSnapshot().records.length<configuration.maxNotes,size:()=>repository.size(),
+    bindTaskEditor,bindAreaEditor,clearEditor,resolveEditor,commitEditor,refreshFieldsForKey,refreshAllFields,setSyncState,reportConflict,refreshConsumers,renderInherited,renderInheritedForTask,inheritedTextForTask,currentEntriesForTasks,renameTag,importFiles
   });
   return runtime;
 }
