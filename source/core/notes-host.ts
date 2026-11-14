@@ -2,7 +2,7 @@ import type {Task} from '../../types/domain.ts';
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {
   ApplicableNotes,LibraryNoteRenameResult,LibraryNoteWorkflowInput,LibraryNoteWorkflows,
-  NoteAreaIdentity,NoteCatalogueEntry,NoteConflictInfo,NoteEditorBinding,NoteInheritedEntry,NoteSyncState,
+  NoteAreaIdentity,NoteCatalogueEntry,NoteCatalogueInput,NoteConflictInfo,NoteEditorBinding,NoteInheritedEntry,NoteSyncState,
   NotesHostInput,NotesHostModule as NotesHostContract,NotesRuntime,ValidatedRichInput
 } from '../../types/notes-host.ts';
 
@@ -48,12 +48,12 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
     const raw=domain.clampText(String(value||'').trim(),configuration.maxAreaNameChars),key=domain.normalizeAreaName(raw);
     return key?freeze({key,label:domain.clampText(domain.displayAreaName(raw),configuration.maxAreaNameChars)}):null;
   }
-  function orderEntries(source:readonly Readonly<Record<string,unknown>>[]):readonly NoteCatalogueEntry[]{
+  function orderEntries(source:readonly NoteCatalogueInput[]):readonly NoteCatalogueEntry[]{
     type WorkEntry={key:string;id:string;label:string;hasNote:boolean;current:boolean;updatedAt:string;ephemeral:boolean;support:boolean;depth?:number};
     const entries=new Map<string,WorkEntry>();
     (source||[]).forEach(raw=>{
       if(!raw||typeof raw!=='object')return;
-      const row=raw as Readonly<{key?:unknown;label?:unknown;id?:unknown;text?:unknown;hasNote?:unknown;current?:unknown;ephemeral?:unknown;support?:unknown;updatedAt?:unknown}>;
+      const row=raw;
       const key=domain.normalizeAreaName(row.key||row.label);if(!key)return;
       const existing=entries.get(key)||{key,id:'',label:domain.displayAreaName(row.label||key),hasNote:false,current:false,updatedAt:'',ephemeral:false,support:false};
       if(row.id)existing.id=String(row.id);if(row.label)existing.label=domain.displayAreaName(row.label);
@@ -75,7 +75,7 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   function catalogue():readonly NoteCatalogueEntry[]{
     const snapshot=repository.metadataSnapshot(),hierarchy=hierarchySignature();
     if(catalogueCache&&catalogueCache.revision===snapshot.revision&&catalogueCache.hierarchy===hierarchy)return catalogueCache.entries;
-    const entries=new Map<string,Record<string,unknown>>();
+    const entries=new Map<string,{key:string;id:string;label:string;hasNote:boolean;current:boolean;updatedAt:string;support:boolean}>();
     const ensure=(key:unknown,label:unknown,options:Readonly<{hasNote?:boolean;current?:boolean;updatedAt?:string;id?:string}>={})=>{
       const safeKey=domain.normalizeAreaName(key);if(!safeKey)return;
       const support=safeKey===configuration.supportNote.key,existing=entries.get(safeKey)||{key:safeKey,id:'',label:support?configuration.supportNote.label:domain.displayAreaName(label||safeKey),hasNote:false,current:false,updatedAt:'',support};

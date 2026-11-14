@@ -8,6 +8,7 @@ export type NoteMetadataSnapshot=ReturnType<NotesRepository['metadataSnapshot']>
 export type NoteSearchSnapshot=ReturnType<NotesRepository['searchSnapshot']>;
 
 export interface NoteAreaIdentity{readonly key:string;readonly label:string}
+export interface NoteCatalogueInput{readonly key?:unknown;readonly id?:unknown;readonly label?:unknown;readonly text?:unknown;readonly hasNote?:unknown;readonly current?:unknown;readonly updatedAt?:unknown;readonly support?:unknown;readonly ephemeral?:unknown}
 export interface NoteCatalogueEntry extends NoteAreaIdentity{
   readonly id:string;readonly hasNote:boolean;readonly current:boolean;readonly updatedAt:string;
   readonly support:boolean;readonly depth:number;readonly ephemeral:boolean;
@@ -71,7 +72,7 @@ export interface NotesRuntime{
   readonly format:'study-director.notes-runtime';readonly contractVersion:1;readonly bindingVersion:'area-v3';
   storedValueForKey(key:unknown):string;textForKey(key:unknown):string;editorContent(binding:Pick<NoteEditorBinding,'key'>,value:unknown):string;
   applicableForTask(task:Task|undefined):ApplicableNotes;inheritedEntries(areaKey:unknown):readonly NoteInheritedEntry[];
-  normalizeAreaInput(value:unknown):NoteAreaIdentity|null;orderEntries(source:readonly Readonly<Record<string,unknown>>[]):readonly NoteCatalogueEntry[];
+  normalizeAreaInput(value:unknown):NoteAreaIdentity|null;orderEntries(source:readonly NoteCatalogueInput[]):readonly NoteCatalogueEntry[];
   catalogue():readonly NoteCatalogueEntry[];searchDocuments():NoteSearchSnapshot['documents'];canCreate():boolean;size():number;
   bindTaskEditor(field:HTMLTextAreaElement,index:number,source?:string):NoteEditorBinding|null;
   bindAreaEditor(field:HTMLTextAreaElement,areaKey:unknown,areaLabel?:unknown,source?:string):NoteEditorBinding|null;
