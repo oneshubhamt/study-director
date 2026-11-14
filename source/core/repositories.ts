@@ -1311,7 +1311,7 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
   if(conditional&&options.expectedCanonical!==null&&!expected)throw new Error('Daily Record deletion precondition failed canonical validation.');
   const ownershipToken=issueWriteToken('deleting the daily record');
   const finishWrite=beginAuthoritativeWrite();
-  let removed=false,idbRemoved=false;
+  let removed=false;
   try{
     const fallbackBefore=fallbackDailyRecordsRawGet(),fallbackHadRecord=fallbackBefore.some(record=>record.date===date);
     const deletedAt=new Date().toISOString(),recoveryKey=deletionRecoveryKey('dailyRecord',date);
@@ -1322,7 +1322,7 @@ async function removeDailyRecord(date:string,options:{rollback?:boolean;backupCa
         if(!fallbackDailyRecordsSet(fallbackBefore.filter(record=>record.date!==date)))throw LocalStorageContract.lastError||new Error('DailyRecord fallback could not be cleared and no durable deletion marker could be established.');
         assertWriteToken(ownershipToken,'the daily-record IndexedDB deletion');
       }
-      const result=await idbDelete(date,{trackDeletion:!rollback,ownershipToken,deletedAt,...(conditional?{expectedCanonical:expected}:{})});idbRemoved=true;
+      const result=await idbDelete(date,{trackDeletion:!rollback,ownershipToken,deletedAt,...(conditional?{expectedCanonical:expected}:{})});
       assertWriteToken(ownershipToken,'the daily-record fallback cleanup');
       const fallbackCleared=staged||conditional?fallbackDailyRecordsSet(fallbackDailyRecordsRawGet().filter(r=>r.date!==date)):true;
       if(!fallbackCleared&&!staged)throw LocalStorageContract.lastError||new Error('DailyRecord fallback cleanup failed.');
