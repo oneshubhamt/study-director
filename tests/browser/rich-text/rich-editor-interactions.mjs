@@ -4,6 +4,8 @@ import {launchChromium,waitFor} from '../../helpers/browser-harness.mjs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
 
 const bundle=richTextRuntimeSource();
+const hostMain=fs.readFileSync('source/host/main.js','utf8');
+assert.match(hostMain,/'save-reflection':\s*event=>queueReviewSave\(\{event\}\)/u,'delegated Review input must wrap the original Event in ReviewSaveOptions');
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const browser=await launchChromium({profilePrefix:'qa-rich-interactions-'});
 let page;
@@ -67,8 +69,12 @@ try{
   // Native Wordgard history and blockquote behavior must remain observable through the Study Director toolbar.
   const historyRoot='#history + .sd-rte';
   assert.equal(await page.evaluate(`document.querySelector('${historyRoot} button[aria-label="Undo"]').disabled`),true,'Undo starts disabled before an edit.');
-  await page.evaluate(`selectText('${historyRoot} .sd-rte-editor p',5,5)`);await page.send('Input.insertText',{text:' Beta'});
+  await page.evaluate(`window.validatedInputMeta=null;document.getElementById('history').addEventListener('input',event=>{const meta=event[Symbol.for('studyDirector.richValidatedInput.v1')];if(meta)window.validatedInputMeta={format:meta.format,version:meta.version,canonical:meta.canonical,plain:meta.plain};},{once:true});selectText('${historyRoot} .sd-rte-editor p',5,5)`);
+  await page.send('Input.insertText',{text:' Beta'});
   await waitFor(()=>page.evaluate(`StudyDirectorRichText.toPlainText(document.getElementById('history').value)==='Alpha Beta'`),{label:'history edit'});
+  const validatedInput=await page.evaluate(`({meta:window.validatedInputMeta,canonical:document.getElementById('history').value})`);
+  assert.equal(validatedInput.meta?.format,'study-director.rich-validated-input');assert.equal(validatedInput.meta?.version,1);
+  assert.equal(validatedInput.meta?.plain,'Alpha Beta');assert.equal(validatedInput.meta?.canonical,validatedInput.canonical,'validated input metadata must describe the exact canonical value published to the host field');
   await waitFor(()=>page.evaluate(`document.querySelector('${historyRoot} button[aria-label="Undo"]')?.disabled===false`),{label:'Undo enabled after edit'});
   await page.click(`${historyRoot} button[aria-label="Undo"]`);await waitFor(()=>page.evaluate(`StudyDirectorRichText.toPlainText(document.getElementById('history').value)==='Alpha'`),{label:'Wordgard undo'});
   assert.equal(await page.evaluate(`document.querySelector('${historyRoot} button[aria-label="Redo"]').disabled`),false,'Undo must enable Redo.');
