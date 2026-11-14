@@ -249,6 +249,28 @@ const noop=()=>{};
   assert.equal(partial.status,'renamed');assert.equal(partial.plan.ok,false,'a failed Plan fan-out is reported separately after the note rename committed');
 }
 
+// A strict writer-settlement flush may see an untouched, bound Reflection
+// before the Diary-only baseline has ever been hydrated. That is a no-op, not
+// evidence that an edit can be discarded; a changed unverified binding still fails closed.
+{
+  const date='2026-11-14',binding={date,reflection:'',studyQuality:null},calls=[];
+  const context={
+    Promise,Error,
+    getReviewDate:()=>date,
+    resolveReviewEditorBinding:()=>binding,
+    reflectionOnlyPending:()=>null,
+    persistedReview:{date,reflection:'',studyQuality:null},
+    reflectionLane:{pending:()=>false,schedule:value=>calls.push(['schedule',value]),flush:async options=>{calls.push(['flush',options]);return true;}}
+  };
+  vm.createContext(context);
+  const start=review.indexOf('function flushReflectionOnlySave('),end=review.indexOf('function persistReviewBinding(',start);
+  vm.runInContext(review.slice(start,end),context);
+  assert.equal(await context.flushReflectionOnlySave({strict:true}),true,'untouched unhydrated Reflection is a safe strict no-op during writer settlement');
+  assert.equal(calls.filter(row=>row[0]==='schedule').length,0);
+  binding.reflection='unsaved edit';
+  await assert.rejects(context.flushReflectionOnlySave({strict:true}),/no longer has a verified baseline/,'changed unverified Reflection still fails closed');
+}
+
 // Generic feature handles project to the existing surfaces without owning the
 // cancellation action, and never accept callbacks from a prior generation.
 {
@@ -273,4 +295,4 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));

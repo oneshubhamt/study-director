@@ -334,7 +334,12 @@ function flushReflectionOnlySave(options:ReviewSaveOptions={}){
   const bound=resolveReviewEditorBinding(getReviewDate(),options.event||null);
   if(bound){
     const pending=reflectionOnlyPending(bound,options);
-    if(!pending){if(options.strict)return Promise.reject(new Error('This Reflection editor no longer has a verified baseline for its date.'));return false;}
+    if(!pending){
+      const unchanged=!reflectionLane.pending()&&persistedReview.date===bound.date&&persistedReview.reflection===bound.reflection&&persistedReview.studyQuality===bound.studyQuality;
+      if(unchanged)return reflectionLane.flush(options);
+      if(options.strict)return Promise.reject(new Error('This Reflection editor no longer has a verified baseline for its date.'));
+      return false;
+    }
     reflectionLane.schedule(pending);
   }
   return reflectionLane.flush(options);
