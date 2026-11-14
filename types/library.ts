@@ -61,7 +61,7 @@ export interface LibraryInput{
     }>;
     domain:Readonly<{
       countTaskOutcomes(tasks:readonly ReviewRecordViewTask[]):unknown;
-      earliestSupportedSavedDate():string;isTrackableBlock(task:Task|undefined):boolean;isValidIsoDate(value:unknown):boolean;isSupportedSavedDate(value:string):boolean;todayISO():string;
+      earliestSupportedSavedDate():string;isTrackableBlock(task:Task|ReviewRecordViewTask|undefined):boolean;isValidIsoDate(value:unknown):boolean;isSupportedSavedDate(value:string):boolean;todayISO():string;
       sanitizePracticeRuns(value:unknown):readonly PracticeRun[];sanitizeTaskOutcomeCounts(value:unknown):unknown;taskOutcomeSummaryText(value:unknown,options?:Readonly<{includeZero?:boolean}>):string;
     }>;
     presentation:Readonly<Pick<SharedReviewPresentation,'createPomodoroSummaryLine'|'populatePracticeRunTable'|'optionalDurationLabel'|'optionalPercentLabel'>&{
