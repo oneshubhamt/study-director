@@ -1589,7 +1589,7 @@ const createModule=():LibraryModuleContract=>{
     function createSavedDayTaskGrid(record:LibraryDay){
       const grid=document.createElement('div');
       grid.className='review-grid review-grid-polished library-day-grid';
-      const tasks=(record.tasks||[]).filter(isTrackableBlock);
+      const tasks=(record.tasks||[]).filter(task=>isTrackableBlock(task));
       if(tasks.length)tasks.forEach(t=>grid.appendChild(createSavedDayTaskReviewCard(t)));
       else grid.appendChild(emptyMsg('No saved trackable block details for this day.'));
       return grid;
