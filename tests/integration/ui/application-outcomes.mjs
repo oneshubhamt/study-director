@@ -224,6 +224,7 @@ const noop=()=>{};
       refreshExecute:()=>true,refreshLibrary:()=>true,requestScheduleRender:()=>true,refreshReviewIfVisible:()=>true,refreshRecovery:()=>true,
       setStatus:()=>true,setPlanStatus:()=>true,publishSafetyNotice:()=>true,syncPopover:()=>true
     }),
+    diagnostics:Object.freeze({capture:()=>true}),
     environment:Object.freeze({queueMicrotask:callback=>callback()})
   }));
   const field={dataset:{},isConnected:true,value:'old',closest:()=>null,setAttribute:()=>{},removeAttribute:()=>{},maxLength:0};
