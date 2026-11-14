@@ -188,7 +188,7 @@ const createModule=():NoteLinksModuleContract=>{
         }
         if(writable){
           const add=button('note-links-add',linked.length?'+':'+ Link note',linked.length?'Link another note':'Link note');
-          add.addEventListener('click',async()=>{const chosen=await pick({exclude:[id,...linked.map(other=>other.id)]});if(chosen&&notes.link(ref,chosen.id,{label}).status==='changed'){render();onChange();}});row.append(add);
+          add.addEventListener('click',()=>{void pick({exclude:[id,...linked.map(other=>other.id)]}).then(chosen=>{if(chosen&&notes.link(ref,chosen.id,{label}).status==='changed'){render();onChange();}});});row.append(add);
         }
         const from=id?notes.linkedFrom(id):[],parts:HTMLElement[]=[row];
         if(from.length){const line=element('div','note-links-from');line.append(element('span','note-links-from-label','Linked from'));for(const other of from){if(!other)continue;const openButton=button('note-link-from',leaf(other.label));openButton.title=other.label;openButton.addEventListener('click',()=>{onOpen(other.id);});line.append(openButton);}parts.push(line);}
