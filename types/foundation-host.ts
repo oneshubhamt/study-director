@@ -24,7 +24,7 @@ export interface NavigationUIInput {
  library():{settleDiary():Promise<boolean>;deactivate(options:{diarySettled:true}):unknown;activate(options:ActivationOptions):unknown};
  review():{deactivate():unknown;activate(options:ActivationOptions):unknown};
  attachments():{close():unknown;refresh():unknown};
- reviewEditor():{settled():Promise<unknown>};flushPendingReviewSave(options:{strict:true}):boolean|void;
+ reviewEditor():{settled():Promise<unknown>};flushPendingReviewSave(options:{strict:true}):Promise<unknown>;
  setStatus(id:string,message:string,ok:boolean):unknown;clearPreview(tab:string):void;
  refreshPnote(options:{force:true}):unknown;updateCD():unknown;isLiveTrackableTimer():boolean;refreshExecuteIdleDisplay(date:Date,options:{force:true}):unknown;paused():boolean;updateBreakMeter():unknown;renderPacer():unknown;startTimerPresentation():unknown;stopTimerPresentation():unknown;
  renderScheduleOnPlanOpen():unknown;updateRealTimeAwareness(value:null,options:{force:true}):unknown;requestPluginTab(tab:string):unknown;applyOwnership():unknown;richTextSyncAll():unknown;
