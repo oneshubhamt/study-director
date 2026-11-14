@@ -54,7 +54,7 @@ export interface ReviewTaskRow{
   readonly idx:number;readonly i:number;readonly id:string;readonly name:string;readonly kind:Task['kind'];readonly area:string;readonly measure:string;readonly target:number|null;
   readonly duration:number;readonly dur:number;readonly originalStart:string;readonly originalStartMin:number;readonly originalEndMin:number;
   readonly adjustedStart:string;readonly adjustedStartMin:number;readonly adjustedEndMin:number;readonly shifted:boolean;readonly trackable:boolean;readonly work:boolean;
-  readonly completion:number|null;readonly completionSource:CompletionSource;readonly outcome:TaskOutcome;readonly resolvedState:''|'done'|'skipped';
+  readonly completion:number;readonly completionSource:CompletionSource;readonly outcome:TaskOutcome;readonly resolvedState:''|'done'|'skipped';
   readonly progress:ReviewTaskProgress;readonly actualSeconds:number|null;readonly clock:ReviewEvidenceClock;readonly actualRecord:ReviewActualRecord;readonly note:ReviewNoteInfo;
 }
 export interface ReviewTaskEvidence {
@@ -81,6 +81,7 @@ export interface ReviewRecordViewTask{
   readonly actualSeconds:number|null;readonly actualDeltaSeconds:number|null;readonly hasAdjustment:boolean;readonly originalStart:string;readonly originalEnd:string;
   readonly adjustedStart:string;readonly adjustedEnd:string;readonly actualStart:string|null;readonly actualEnd:string|null;readonly pauseEvents:readonly PauseEvent[];readonly done:number|null;readonly enteredTotal:number|null;readonly skipped:boolean;readonly doneFlag:boolean;
 }
+export type SavedDayPresentationTask=Omit<ReviewRecordViewTask,'completion'>&Readonly<{completion:number|null}>;
 export interface ReviewRecordView{
   readonly date:string;readonly tasks:readonly ReviewRecordViewTask[];readonly practiceRuns:readonly PracticeRun[];readonly carryForwardDraft:string;
   readonly completedEquivalentMinutes:number;readonly actualFocusMinutes:number;readonly completionPercent:number;
@@ -199,9 +200,9 @@ export interface ReviewSaveService{saveToday(options?:Readonly<{closeSession?:bo
 export interface ReviewPomodoroSummary{readonly breaks:number;readonly recoverySeconds:number;readonly overrunSeconds:number;readonly actualSeconds:number;readonly excludedUnknown:number}
 export type TaskWithPauses=Task&{readonly pauseEvents?:readonly PauseEvent[]};
 export interface SharedReviewPresentation{
-  createSavedDayTaskCard(task:ReviewRecordViewTask):HTMLElement;createPomodoroSummaryLine(tasks:readonly ReviewRecordViewTask[]):HTMLElement;
-  populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],options?:Readonly<{tasks?:readonly (Task|ReviewRecordViewTask)[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>):ReviewPracticeAggregate|null;
-  pomodoroSummaryFromTasks(tasks:readonly (ReviewRecordViewTask|TaskWithPauses)[]):ReviewPomodoroSummary;
+  createSavedDayTaskCard(task:SavedDayPresentationTask):HTMLElement;createPomodoroSummaryLine(tasks:readonly SavedDayPresentationTask[]):HTMLElement;
+  populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],options?:Readonly<{tasks?:readonly (Task|SavedDayPresentationTask)[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>):ReviewPracticeAggregate|null;
+  pomodoroSummaryFromTasks(tasks:readonly (SavedDayPresentationTask|TaskWithPauses)[]):ReviewPomodoroSummary;
   pomodoroSummaryText(value:ReviewPomodoroSummary):string;
   completionSourceLabel(source:unknown):string;durationLabel(value:number):string;optionalDurationLabel(value:unknown):string;optionalPercentLabel(value:unknown):string;
 }
