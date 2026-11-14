@@ -3040,23 +3040,28 @@ const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.fre
   text:Object.freeze({tagsIn:value=>RichTextApi.tagsIn(value)}),
   ownership:Object.freeze({canMutate:()=>appCanMutate()})
 })}));
-// A link to a note opens it in Execute's editor when clicked there, and in
-// the Library everywhere else.
-async function openLinkedNote(id,field=null){
-  if(!AppData.notes.get(id))return false;
-  if(field&&field.id==='pn-extra'&&isLiveTrackableTimer()){const task=TASKS[TimerState.currentIndex];return openExecuteNote(id,TaskIdentity.idAt(TimerState.currentIndex),hasOngoingTaskNotes(task)?AppData.notes.get(noteKeyForTask(task)):null);}
-  if(!await goTab('library',{source:'note-link'}))return false;
-  return LibraryView.revealNoteReference(id);
-}
-function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>AppData.notes.get(id)?.label??null,open:id=>void openLinkedNote(id,field),tag:(name,passive)=>void showNotesTagged(name,passive,field),pickTag:options=>NoteLinks.pickTag(options)});}
-// A tag tapped in the Library's open note narrows the list beside it; a tag
-// tapped anywhere else, or with Ctrl or Cmd, opens the Library's notes with it.
-async function showNotesTagged(name,passive,field){
-  const inLibrary=!!field?.closest?.('#library-notes-editor');
-  if(passive){if(inLibrary)LibraryView.filterTag(name);return;}
-  if(!inLibrary&&!await goTab('library',{source:'note-tag'}))return;
-  LibraryView.filterTag(name,{show:!inLibrary});
-}
+// Checked P5.6B navigation keeps link context with the rich-text surface while
+// deferring Library access until a user actually follows a link or tag.
+const NoteLinkNavigation=NoteLinksModule.createNavigation(Object.freeze({
+  controller:NoteLinks,
+  notes:Object.freeze({get:ref=>AppData.notes.get(ref)}),
+  execution:Object.freeze({
+    isLiveTrackableTimer:()=>isLiveTrackableTimer(),
+    current:()=>{
+      const index=TimerState.currentIndex,task=TASKS[index];
+      return Object.freeze({task,taskId:TaskIdentity.idAt(index),ownNote:task&&hasOngoingTaskNotes(task)?AppData.notes.get(noteKeyForTask(task)):null});
+    },
+    open:(id,taskId,ownNote)=>openExecuteNote(id,taskId,ownNote)
+  }),
+  library:Object.freeze({
+    open:()=>goTab('library',{source:'note-link'}),
+    reveal:ref=>LibraryView.revealNoteReference(ref),
+    filterTag:(name,options)=>LibraryView.filterTag(name,options)
+  })
+}));
+const openLinkedNote=NoteLinkNavigation.open;
+const richTextNotes=NoteLinkNavigation.richText;
+const showNotesTagged=NoteLinkNavigation.showTagged;
 // Renames a tag in every note that has it, then saves. A note that changed
 // meanwhile is left as it is and named in the result.
 async function renameNoteTag(from,to){return notesRuntime().renameTag(from,to);}
