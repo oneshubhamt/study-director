@@ -64,13 +64,13 @@ try{
 
   const filled=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),nextRender=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-    const row=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='zeta filled');row.click();await wait(30);
+    const row=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='zeta filled');row.click();const immediateField=document.querySelector('#library-notes-editor .library-notes-textarea'),bindingImmediate=immediateField?{...immediateField.dataset}:null;await wait(30);
     const field=document.querySelector('#library-notes-editor .library-notes-textarea');const bindingBefore={...field.dataset};field.value='Durable Zeta note';field.dispatchEvent(new Event('input',{bubbles:true}));const bindingAfter={...field.dataset},persistedAfterInput=d.AppData.notes.get('zeta filled')?.text||'';await d.AppData.notes.flush();
     __PWA6.LibraryView.showSection('days');await wait(30);__PWA6.LibraryView.showSection('notes');await wait(60);
     let rows=[...document.querySelectorAll('[data-note-key]')];
     const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==1;i++)await wait(20);
     const filtered=[...document.querySelectorAll('[data-note-key]')].map(item=>item.dataset.noteKey);
-    const debug={count:document.getElementById('library-notes-nav-count')?.textContent||'',query:search.value,persisted:d.AppData.notes.get('zeta filled')?.text||'',persistedAfterInput,bindingBefore,bindingAfter,fieldValue:field.value,fieldConnected:field.isConnected,fieldHidden:field.hidden,fieldDataset:Object.fromEntries(Object.entries(field.dataset).filter(([key])=>/note|rich|area|lifecycle|schedule/i.test(key)))};
+    const debug={count:document.getElementById('library-notes-nav-count')?.textContent||'',query:search.value,persisted:d.AppData.notes.get('zeta filled')?.text||'',persistedAfterInput,bindingImmediate,bindingBefore,bindingAfter,fieldValue:field.value,fieldConnected:field.isConnected,fieldHidden:field.hidden,fieldDataset:Object.fromEntries(Object.entries(field.dataset).filter(([key])=>/note|rich|area|lifecycle|schedule/i.test(key)))};
     search.value='';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==4;i++)await wait(20);rows=[...document.querySelectorAll('[data-note-key]')];
     return {
       keys:rows.map(item=>item.dataset.noteKey),
