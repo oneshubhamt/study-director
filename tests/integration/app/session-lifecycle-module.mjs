@@ -8,11 +8,12 @@ import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readScript(path.join(ROOT,relative));
-for(const file of ['source/core/internal.ts','source/core/session-lifecycle.ts']){
+for(const file of ['source/core/internal.ts','source/core/session-lifecycle.ts','source/core/session-actions.ts']){
   vm.runInThisContext(read(file),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const LifecycleModule=registry.require('session-lifecycle',1);
+const SessionActions=registry.require('session-actions',1);
 assert.equal(LifecycleModule.format,'study-director.session-lifecycle');
 
 let mutable=true;
@@ -108,10 +109,36 @@ assert.equal(coordinator.canWrite(),false,'a failed transition must not publish 
 assert.equal(events.includes('reconcile:failing-transition:null'),false,'failed transitions never reconcile target state');
 assert.ok(events.includes('complete:failing-transition:failed'));
 
+// Even a defensive failed completion that arrives with reconciled=true must
+// never re-enable lifecycle-owned editors or advertise target-date readiness.
+{
+  const document={
+    documentElement:{dataset:{}},
+    querySelectorAll:()=>[],
+    querySelector:()=>null,
+    getElementById:()=>null
+  };
+  const views=SessionActions.createLifecycleViews(Object.freeze({
+    document,NOTE_EDITOR_BINDING_VERSION:'v1',setTimeout:callback=>{callback();return 1;},
+    ReviewEditor:Object.freeze({invalidateBindings:()=>true}),
+    ReviewView:Object.freeze({invalidate:()=>true,refresh:()=>true,syncMode:()=>true,activate:()=>true}),
+    invalidateProgressPanel:()=>true,richTextClose:async()=>true,cancelPendingLiveDraftSave:()=>true,advanceTaskNoteScheduleRevision:()=>1,
+    clearTaskNoteEditorBinding:()=>true,isValidIsoDate:()=>true,getReviewDate:()=> '2026-08-04',
+    refreshAllSubjectNoteFieldsFromRepository:()=>true,refreshPnote:()=>true,hydrateReviewState:()=>true,refreshLibraryNotes:()=>true,
+    requestRender:()=>true,appCanMutate:()=>true,schedulePwaUpdateEvaluation:()=>true
+  }));
+  views.completeLifecycleTransition(Object.freeze({
+    format:'study-director.session-lifecycle-context',contractVersion:1,id:'failed-ui',kind:'study-day-rollover',revision:99,
+    options:Object.freeze({date:'2026-08-05'}),startedAt:'2026-08-05T00:00:00.000Z',
+    reconciled:true,failed:true,finishedAt:'2026-08-05T00:00:01.000Z'
+  }));
+  assert.equal(document.documentElement.dataset.studyDirectorLifecycle,'blocked');
+}
+
 console.log(JSON.stringify({
   status:'PASS',
   module:'source/core/session-lifecycle.ts',
   finalRevision:coordinator.revision,
-  supersessionProtected:true,asyncFlushFailureProtected:true,failedTransitionFailClosed:true,
+  supersessionProtected:true,asyncFlushFailureProtected:true,failedTransitionFailClosed:true,failedCompletionUiBlocked:true,
   eventCount:events.length
 },null,2));
