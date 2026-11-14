@@ -169,7 +169,7 @@ console.log(JSON.stringify({status:'PASS',boundary:'live-execution-host',checked
 }
 
 { // p5.6a-notes-host-boundary
-const host=readHostHtml(),notesHost=readScript('source/core/notes-host.ts'),library=fs.readFileSync('source/core/library.js','utf8');
+const host=readHostHtml(),notesHost=readScript('source/core/notes-host.ts'),library=fs.readFileSync('source/core/library.ts','utf8');
 assert.match(host,/const NotesHostModule=INTERNAL_MODULES\.load\('notes-host',1,'study-director\.notes-host-module',1\);/u,'P5.6A host loads the checked notes owner');
 assert.match(host,/NotesRuntime=NotesHostModule\.createController\(Object\.freeze\(\{/u,'note/editor host behavior crosses the checked P5.6A boundary');
 assert.match(host,/function taskNoteEditorIsVisible\(field\)\{return NotesRuntime\?NotesRuntime\.editorVisible\(field\):false;\}/u,'rich-text visibility checks retain a thin checked P5.6A host bridge');
@@ -188,6 +188,32 @@ assert.doesNotMatch(library,/renameAreaInPlans/u,'Library no longer owns an unty
 assert.match(library,/The note change is saved, but/u,'Library reports a committed note rename truthfully when the Plan follow-up fails');
 assert.match(host,/rename:\(entry,value,options\)=>LibraryNoteWorkflows\.rename\(entry,value,options\)/u,'Library callers use the checked note workflow rather than the repository rename primitive');
 console.log(JSON.stringify({status:'PASS',boundary:'p5.6a-notes-host',ownershipFence:true,noteIdentityFence:true,planFanout:true,diaryOutOfScope:true},null,2));
+}
+
+{ // p5.6b-library-navigation-boundary
+const host=readHostHtml(),library=readRuntimeSource('source/core/library.ts'),links=readRuntimeSource('source/core/note-links.ts');
+assert.match(host,/const NoteLinksModule=INTERNAL_MODULES\.load\('note-links',1,'study-director\.note-links-module',1\);/u,'P5.6B host loads the checked note-links owner');
+assert.match(host,/const LibraryModule=INTERNAL_MODULES\.load\('library',1,'study-director\.library-module',1\);/u,'P5.6B host loads the checked Library owner');
+assert.match(host,/const NoteLinkNavigation=NoteLinksModule\.createNavigation\(Object\.freeze\(\{/u,'note-link navigation crosses the checked P5.6B boundary');
+assert.match(host,/const LibraryView=LibraryModule\.createView\(Object\.freeze\(\{ports:Object\.freeze\(\{/u,'Library navigation and record presentation cross the checked P5.6B boundary');
+for(const stale of ['async function openLinkedNote(','function richTextNotes(','async function showNotesTagged(']){
+  assert.equal(host.includes(stale),false,`main host must not retain legacy P5.6B link-navigation owner: ${stale}`);
+}
+assert.match(links,/function createNavigation\(input/u,'note-links owns the checked navigation adapter');
+assert.match(links,/await library\.open\(\)/u,'link navigation defers Library opening to its provider');
+assert.match(links,/return library\.reveal\(id\)/u,'link navigation delegates note reveal rather than owning Library state');
+assert.match(links,/library\.filterTag\(name/u,'tag navigation delegates Library filtering through the checked adapter');
+assert.match(library,/let libraryDayRequestToken=0/u,'Saved-Day presentation owns an explicit asynchronous request generation');
+assert.match(library,/request!==libraryDayRequestToken/u,'a superseded Saved-Day read cannot publish stale presentation');
+assert.match(library,/invalidateLibraryDayRequest\(\);captureLibraryScroll/u,'leaving Library invalidates pending Saved-Day presentation');
+assert.match(library,/if\(selection\.savedDays\)invalidateLibraryDayRequest\(\)/u,'clearing Saved Days invalidates pending Saved-Day presentation');
+assert.match(library,/createSavedDayTaskReviewCard/u,'Library reuses the checked P5.5 saved-day task presentation');
+assert.match(library,/createPomodoroSummaryLine/u,'Library reuses the checked P5.5 pomodoro presentation');
+assert.match(library,/populatePracticeRunTable/u,'Library reuses the checked P5.5 practice presentation');
+assert.doesNotMatch(library,/function createSavedDayTaskReviewCard\(|function createPomodoroSummaryLine\(|function populatePracticeRunTable\(/u,'Library does not duplicate Review presentation algorithms');
+assert.match(library,/const \{exportKeys,cancel:cancelExport\}=ports\.exporter/u,'P5.6B keeps export implementation behind its existing provider for P5.6C');
+assert.match(library,/const \{batch:attachmentBatch,close:closeAttachmentLibrary,count:attachmentCount,remove:[^\n]*\}=ports\.attachments/u,'P5.6B keeps attachment lifetime behind its existing provider for P5.6C');
+console.log(JSON.stringify({status:'PASS',boundary:'p5.6b-library-navigation',checkedLibrary:true,checkedLinks:true,savedDayGenerationFence:true,sharedReviewPresentation:true,p56cBoundary:true},null,2));
 }
 
 { // practice-pacer-boundary
@@ -371,7 +397,7 @@ for(const token of ['--sd-motion-workspace-open-duration','--sd-motion-workspace
   assert.ok(app.includes(token),`presentation manifest exposes ${token}`);
   assert.ok(core.includes(token),`core presentation profile defines ${token}`);
 }
-for(const source of [foundation,insights,readRuntimeSource('source/core/navigation.ts'),fs.readFileSync('source/core/library.js','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
+for(const source of [foundation,insights,readRuntimeSource('source/core/navigation.ts'),fs.readFileSync('source/core/library.ts','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
   assert.doesNotMatch(source,/startViewTransition|viewTransitionName|view-transition-name/,
     'navigation and lazy feature surfaces must not start snapshot transitions');
 }
@@ -402,7 +428,7 @@ assert.doesNotMatch(readRuntimeSource('source/core/interactions.ts'),/presentati
   'interaction prompts have no dead snapshot-interruption dependency');
 assert.doesNotMatch(fs.readFileSync('source/external/guide.js','utf8'),/replaceGuidePanel|motion\.replace|appearance\.presentation\.motion/,
   'Guide structural replacements update the live DOM directly');
-assert.doesNotMatch(fs.readFileSync('source/core/library.js','utf8'),/transition\(\{oldElement|motion\.replace/,
+assert.doesNotMatch(fs.readFileSync('source/core/library.ts','utf8'),/transition\(\{oldElement|motion\.replace/,
   'Library saved-day replacement updates the live DOM directly');
 assert.doesNotMatch(app,/FloatingTimer|documentPictureInPicture|minimise-timer|sd-floating-timer/,
   'retired manual/fallback floating-timer and Document PiP UI cannot re-enter the application shell');
