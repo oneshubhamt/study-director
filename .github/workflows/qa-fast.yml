@@ -71,3 +71,19 @@ jobs:
         run: node build/verify-build.mjs
       - name: Verify generated syntax
         run: node tests/architecture/build/generated-syntax-check.mjs
+      - name: P5.6B targeted Library contracts
+        run: >-
+          node tests/helpers/run-category.mjs targeted
+          tests/unit/library/library-clear-planner.mjs
+          tests/integration/library/library-clear.mjs
+          tests/integration/storage/pending-reviews.mjs
+          tests/integration/ui/application-outcomes.mjs
+          tests/architecture/app/runtime-boundaries.mjs
+      - name: P5.6B targeted Chromium journeys
+        env:
+          CHROMIUM_PATH: /usr/bin/google-chrome
+        run: |
+          node tests/browser/library/library-selection.mjs
+          node tests/browser/library/notes-at-limit.mjs
+          node tests/browser/library/notes-management.mjs
+          node tests/browser/rich-text/link-context.mjs
