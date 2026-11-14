@@ -30,6 +30,17 @@ export const CRITICAL_PATHS=Object.freeze([
 
 
 const NON_FAST_COVERAGE_OWNERS=Object.freeze([
+  Object.freeze({file:'source/core/data-bootstrap-host.ts',owner:'browser/storage + app/core-flow',reason:'Bootstrap configuration and repository composition execute in the built application; canonical-storage, unsupported-data, recovery and core-flow browser journeys exercise the live startup boundary.'}),
+  Object.freeze({file:'source/core/execution-views.ts',owner:'browser/app/core-flow + execute journeys',reason:'Execute presentation is DOM orchestration exercised through core-flow, session and populated-accessibility browser journeys.'}),
+  Object.freeze({file:'source/core/navigation.ts',owner:'browser/app + ui/interactions + workspace',reason:'Native/history navigation and workspace reconciliation are exercised through core-flow, interaction-history and workspace browser journeys.'}),
+  Object.freeze({file:'source/core/notes-host.ts',owner:'browser/library/notes-management + notes-at-limit + rich-text',reason:'The checked note/editor owner is exercised through real Library note management, capacity and rich-editor workflows; persistence mathematics remains covered by fast repository tests.'}),
+  Object.freeze({file:'source/core/profiles.ts',owner:'browser/ui/profile-panel + backup/sync-and-profiles',reason:'Profile lifecycle and switching are exercised by the profile-panel and multi-device sync/profile browser journeys.'}),
+  Object.freeze({file:'source/core/rich-text-host.ts',owner:'browser/rich-text + attachments',reason:'Rich editor mount/dispose, focus, quiescence and attachment integration are exercised by rich-editor and attachment-editor browser journeys.'}),
+  Object.freeze({file:'source/core/session-handoff.ts',owner:'browser/backup/session-handoff-journeys + sync-journeys',reason:'Cross-device ownership transfer and claim reconciliation are exercised by dedicated multi-device handoff and sync browser journeys.'}),
+  Object.freeze({file:'source/core/workspace-overlay.ts',owner:'browser/rich-text/workspace-overlay + ui/interactions',reason:'Workspace overlay/history behavior is exercised through workspace, attachment and interaction-history browser journeys.'}),
+  Object.freeze({file:'source/host/install-capture.js',owner:'browser/release',reason:'Install/startup capture runs only as part of the built application and is exercised by the release browser application/PWA journeys.'}),
+  Object.freeze({file:'source/host/main.js',owner:'browser/release',reason:'The application composition host is executed as the built runtime across the complete release browser suite; fast tests cover extracted domain owners directly.'}),
+  Object.freeze({file:'source/host/presentation-metadata.js',owner:'browser/release',reason:'Presentation metadata is host/UI composition exercised through the built release browser journeys rather than the Node fast runtime.'}),
   Object.freeze({file:'source/external/wordgard.js',owner:'browser/rich-text + release/bundle',reason:'Generated vendor runtime; browser rich-editor journeys exercise it and release QA verifies bundle provenance.'}),
   Object.freeze({prefix:'rich-text/',owner:'browser/release',reason:'TypeScript editor source is compiled and exercised through browser/release QA rather than the Node fast runtime.'}),
   Object.freeze({file:'portable/attachment-worker.ts',owner:'build/worker',reason:'Worker build source; runtime behavior is exercised through the emitted worker/integration path.'}),
