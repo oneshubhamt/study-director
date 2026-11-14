@@ -5,7 +5,7 @@ import {launchChromium,CdpPage,waitFor} from '../../helpers/browser-harness.mjs'
 
 const internal=readRuntimeSource(new URL('../../../source/core/internal.ts',import.meta.url));
 const noticeSource=readRuntimeSource(new URL('../../../source/core/notice-coordinator.ts',import.meta.url));
-const librarySource=fs.readFileSync(new URL('../../../source/core/library.js',import.meta.url),'utf8');
+const librarySource=readRuntimeSource(new URL('../../../source/core/library.ts',import.meta.url));
 const coreCss=fs.readFileSync(new URL('../../../source/styles/core.css',import.meta.url),'utf8');
 const browser=await launchChromium({profilePrefix:'study-director-library-selection-'});
 let page=null;
