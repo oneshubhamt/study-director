@@ -1065,10 +1065,10 @@ const createModule=():LibraryModuleContract=>{
           else if(event.key==='Escape'&&!document.getElementById('library-note-matches')?.hidden){event.preventDefault();clearNoteMatches();}
         });
       }
-      const sort=document.getElementById('library-notes-sort');
+      const sort=selectById('library-notes-sort');
       if(sort){sort.value=noteSort;sort.addEventListener('change',()=>{noteSort=sort.value==='recent'?'recent':'name';noteVisibleLimit=NOTE_PAGE_SIZE;rememberView();renderNotes();});}
-      if(add)add.addEventListener('click',createNote);
-      const importButton=buttonById('library-note-import'),importFile=document.getElementById('library-note-import-file');
+      if(add)add.addEventListener('click',()=>{void createNote();});
+      const importButton=buttonById('library-note-import'),importFile=inputById('library-note-import-file');
       if(importButton&&importFile){importButton.addEventListener('click',()=>{importFile.value='';importFile.click();});importFile.addEventListener('change',()=>{const files=[...(importFile.files||[])];importFile.value='';void importNotes(files);});}
       if(list)list.addEventListener('keydown',handleNoteTreeKey);
       if(trashToggle)trashToggle.addEventListener('click',toggleNoteTrash);
