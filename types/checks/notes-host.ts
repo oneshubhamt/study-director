@@ -28,7 +28,7 @@ const input=Object.freeze({
 const notes=host.createController(input);
 notes.bindAreaEditor(noteField,'core','Core','library');
 notes.commitEditor(noteField,noteField.value,new Event('input'));
-const workflows=host.createLibraryWorkflows(Object.freeze({runtime:notes,repository:appData.notes,plan,interactions:Object.freeze({confirm:async()=>true}),mergeText:(existing,moved)=>rich.appendIncomingAdditions(existing,moved)}));
+const workflows=host.createLibraryWorkflows(Object.freeze({runtime:notes,repository:appData.notes,plan,interactions:Object.freeze({confirm:async()=>true}),mergeText:(existing:string,moved:string)=>rich.appendIncomingAdditions(existing,moved)}));
 void workflows.areaUse('core');
 void workflows.rename(Object.freeze({key:'core',label:'Core'}),'Core > New',{renamePlans:true});
 // @ts-expect-error -- the note host is a closed registry contract.

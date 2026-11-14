@@ -53,12 +53,13 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
     const entries=new Map<string,WorkEntry>();
     (source||[]).forEach(raw=>{
       if(!raw||typeof raw!=='object')return;
-      const key=domain.normalizeAreaName(raw.key||raw.label);if(!key)return;
-      const existing=entries.get(key)||{key,id:'',label:domain.displayAreaName(raw.label||key),hasNote:false,current:false,updatedAt:'',ephemeral:false,support:false};
-      if(raw.id)existing.id=String(raw.id);if(raw.label)existing.label=domain.displayAreaName(raw.label);
-      const text=raw.text===undefined?'':String(raw.text||'');existing.hasNote=existing.hasNote||!!raw.hasNote||!!text.trim();
-      existing.current=existing.current||!!raw.current;existing.ephemeral=existing.ephemeral||!!raw.ephemeral;
-      existing.support=existing.support||!!raw.support||key===configuration.supportNote.key;if(raw.updatedAt)existing.updatedAt=String(raw.updatedAt);
+      const row=raw as Readonly<{key?:unknown;label?:unknown;id?:unknown;text?:unknown;hasNote?:unknown;current?:unknown;ephemeral?:unknown;support?:unknown;updatedAt?:unknown}>;
+      const key=domain.normalizeAreaName(row.key||row.label);if(!key)return;
+      const existing=entries.get(key)||{key,id:'',label:domain.displayAreaName(row.label||key),hasNote:false,current:false,updatedAt:'',ephemeral:false,support:false};
+      if(row.id)existing.id=String(row.id);if(row.label)existing.label=domain.displayAreaName(row.label);
+      const text=row.text===undefined?'':String(row.text||'');existing.hasNote=existing.hasNote||!!row.hasNote||!!text.trim();
+      existing.current=existing.current||!!row.current;existing.ephemeral=existing.ephemeral||!!row.ephemeral;
+      existing.support=existing.support||!!row.support||key===configuration.supportNote.key;if(row.updatedAt)existing.updatedAt=String(row.updatedAt);
       entries.set(key,existing);
     });
     const parentKey=(key:string)=>{const parts=key.split(' > ');return parts.length>1?parts.slice(0,-1).join(' > '):'';};
@@ -87,7 +88,7 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
     const ordered=orderEntries([...entries.values()]);catalogueCache=freeze({revision:snapshot.revision,hierarchy,entries:ordered});return ordered;
   }
   function taskIdentityFor(index:number):NoteEditorBinding|null{
-    const idx=taskIdentity.validIndex(index);if(idx===null)return null;const task=taskList()[idx];if(!domain.hasOngoingTaskNotes(task))return null;
+    const idx=taskIdentity.validIndex(index);if(idx===null)return null;const task=taskList()[idx];if(!task||!domain.hasOngoingTaskNotes(task))return null;
     const key=domain.noteKeyForTask(task),taskId=taskIdentity.idAt(idx),scheduleRevision=taskIdentity.scheduleRevision(),entry=repository.get(key);
     if(!key||!taskId||!Number.isInteger(scheduleRevision)||scheduleRevision<1)return null;
     return freeze({idx,key,label:domain.noteLabelForTask(task),taskId,scheduleRevision,lifecycleRevision:lifecycle.revision(),ownershipRevision:ownership.revision(),noteRevision:String(entry?.updatedAt||''),noteId:String(entry?.id||'')});
@@ -98,17 +99,17 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
     field.removeAttribute('aria-label');return true;
   }
   function writeBinding(field:HTMLTextAreaElement,binding:NoteEditorBinding,scope:string,source:string){
-    field.dataset.areaKey=binding.key;field.dataset.areaLabel=binding.label;field.dataset.lifecycleRevision=String(binding.lifecycleRevision);field.dataset.noteOwnershipRevision=String(binding.ownershipRevision);
-    field.dataset.noteRevision=binding.noteRevision;field.dataset.noteId=binding.noteId;field.dataset.noteBinding=BINDING_VERSION;field.dataset.noteBindingState='current';field.dataset.noteScope=scope;field.dataset.noteSource=source;
-    if(binding.idx!==null)field.dataset.noteIdx=String(binding.idx);else delete field.dataset.noteIdx;
-    if(binding.taskId)field.dataset.taskId=binding.taskId;else delete field.dataset.taskId;
-    if(binding.scheduleRevision!==null)field.dataset.scheduleRevision=String(binding.scheduleRevision);else delete field.dataset.scheduleRevision;
-    field.dataset.richSyncState=ownership.canMutate()?'saved':'read-only';field.dataset.richSyncStatus=ownership.canMutate()?'Saved':'Read-only';
+    field.dataset['areaKey']=binding.key;field.dataset['areaLabel']=binding.label;field.dataset['lifecycleRevision']=String(binding.lifecycleRevision);field.dataset['noteOwnershipRevision']=String(binding.ownershipRevision);
+    field.dataset['noteRevision']=binding.noteRevision;field.dataset['noteId']=binding.noteId;field.dataset['noteBinding']=BINDING_VERSION;field.dataset['noteBinding']State='current';field.dataset['noteScope']=scope;field.dataset['noteSource']=source;
+    if(binding.idx!==null)field.dataset['noteId']x=String(binding.idx);else delete field.dataset['noteId']x;
+    if(binding.taskId)field.dataset['taskId']=binding.taskId;else delete field.dataset['taskId'];
+    if(binding.scheduleRevision!==null)field.dataset['scheduleRevision']=String(binding.scheduleRevision);else delete field.dataset['scheduleRevision'];
+    field.dataset['richSyncState']=ownership.canMutate()?'saved':'read-only';field.dataset['richSyncStatus']=ownership.canMutate()?'Saved':'Read-only';
     field.setAttribute('aria-label',`Note for ${binding.label}`);field.maxLength=configuration.maxNoteChars;environment.queueMicrotask(()=>{if(field.isConnected)richText.syncField(field);});return binding;
   }
   function bindTaskEditor(field:HTMLTextAreaElement,index:number,source='field'){
     const identity=taskIdentityFor(index);if(!identity){clearEditor(field);return null;}
-    const previous=domain.normalizeAreaName(field.dataset.areaKey);if(field.dataset.noteBinding===BINDING_VERSION&&previous&&previous!==identity.key)richText.closeField(field);
+    const previous=domain.normalizeAreaName(field.dataset['areaKey']);if(field.dataset['noteBinding']===BINDING_VERSION&&previous&&previous!==identity.key)richText.closeField(field);
     return writeBinding(field,identity,TASK_SCOPE,String(source||'field'));
   }
   function bindAreaEditor(field:HTMLTextAreaElement,areaKey:unknown,areaLabel:unknown='',source='library'){
@@ -117,44 +118,44 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
     return writeBinding(field,freeze({idx:null,key,label,taskId:'',scheduleRevision:null,lifecycleRevision:lifecycle.revision(),ownershipRevision:ownership.revision(),noteRevision:String(entry?.updatedAt||''),noteId:String(entry?.id||'')}),AREA_SCOPE,String(source||'library'));
   }
   function editorVisible(field:HTMLTextAreaElement){
-    if(field.isConnected===false)return false;const pane=field.closest('.pane');if(pane&&(pane.hidden||!pane.classList.contains('on')))return false;
+    if(field.isConnected===false)return false;const pane=field.closest('.pane');if(pane instanceof HTMLElement&&(pane.hidden||!pane.classList.contains('on')))return false;
     const details=field.closest('details');if(details instanceof HTMLDetailsElement&&!details.open)return false;
     const reviewPanel=field.closest('.review-edit-panel');if(reviewPanel&&!reviewPanel.closest('.rcard.editing'))return false;return true;
   }
-  const stale=(field:HTMLTextAreaElement)=>{field.dataset.noteBindingState='stale';return null;};
+  const stale=(field:HTMLTextAreaElement)=>{field.dataset['noteBinding']State='stale';return null;};
   function resolveEditor(field:HTMLTextAreaElement|null,{requireVisible=true}:Readonly<{requireVisible?:boolean}>={}):NoteEditorBinding|null{
     if(!field||field.isConnected===false||requireVisible&&!editorVisible(field))return null;
-    if(field.dataset.richExternalConflict==='1'){field.dataset.noteBindingState='conflict';return null;}
-    if(field.dataset.noteBinding!==BINDING_VERSION)return null;
-    const key=domain.normalizeAreaName(field.dataset.areaKey),label=domain.displayAreaName(field.dataset.areaLabel||key),life=Number(field.dataset.lifecycleRevision),owner=Number(field.dataset.noteOwnershipRevision);
+    if(field.dataset['richExternalConflict']==='1'){field.dataset['noteBinding']State='conflict';return null;}
+    if(field.dataset['noteBinding']!==BINDING_VERSION)return null;
+    const key=domain.normalizeAreaName(field.dataset['areaKey']),label=domain.displayAreaName(field.dataset['areaLabel']||key),life=Number(field.dataset['lifecycleRevision']),owner=Number(field.dataset['noteOwnershipRevision']);
     if(!ownership.canMutate()||!lifecycle.canWrite()||!key||!Number.isInteger(life)||life!==lifecycle.revision()||!Number.isInteger(owner)||owner!==ownership.revision())return stale(field);
-    const entry=repository.get(key),noteId=String(field.dataset.noteId||''),noteRevision=String(field.dataset.noteRevision||'');
+    const entry=repository.get(key),noteId=String(field.dataset['noteId']||''),noteRevision=String(field.dataset['noteRevision']||'');
     if(noteId&&(!entry||entry.id!==noteId))return stale(field);
-    if(field.dataset.noteScope===AREA_SCOPE){field.dataset.noteBindingState='current';return freeze({idx:null,key,label,taskId:'',scheduleRevision:null,lifecycleRevision:life,ownershipRevision:owner,noteRevision,noteId});}
-    const taskId=String(field.dataset.taskId||'').trim(),scheduleRevision=Number(field.dataset.scheduleRevision);
+    if(field.dataset['noteScope']===AREA_SCOPE){field.dataset['noteBinding']State='current';return freeze({idx:null,key,label,taskId:'',scheduleRevision:null,lifecycleRevision:life,ownershipRevision:owner,noteRevision,noteId});}
+    const taskId=String(field.dataset['taskId']||'').trim(),scheduleRevision=Number(field.dataset['scheduleRevision']);
     if(!taskId||!Number.isInteger(scheduleRevision)||scheduleRevision!==taskIdentity.scheduleRevision())return stale(field);
     const idx=taskIdentity.indexForId(taskId);if(idx===null)return stale(field);const task=taskList()[idx];
-    if(!domain.hasOngoingTaskNotes(task)||domain.noteKeyForTask(task)!==key)return stale(field);
-    field.dataset.noteIdx=String(idx);field.dataset.noteBindingState='current';
+    if(!task||!domain.hasOngoingTaskNotes(task)||domain.noteKeyForTask(task)!==key)return stale(field);
+    field.dataset['noteId']x=String(idx);field.dataset['noteBinding']State='current';
     return freeze({idx,key,label:domain.noteLabelForTask(task),taskId,scheduleRevision,lifecycleRevision:life,ownershipRevision:owner,noteRevision,noteId});
   }
   function refreshFieldsForKey(key:unknown,originField:HTMLTextAreaElement|null=null,derived:ValidatedRichInput|null=null,options:Readonly<{deferRichMirrors?:boolean}>={}){
     const safeKey=domain.normalizeAreaName(key);if(!safeKey)return;const defer=options.deferRichMirrors===true,entry=repository.get(safeKey),stored=entry?.text?String(entry.text):'',revision=String(entry?.updatedAt||''),id=String(entry?.id||'');
     let plainCache=derived&&derived.canonical===stored?derived.plain:null;const plain=()=>plainCache===null?(plainCache=richText.plain(stored)):plainCache;
     view.document.querySelectorAll<HTMLTextAreaElement>('.task-note-field[data-area-key]').forEach(field=>{
-      if(domain.normalizeAreaName(field.dataset.areaKey)!==safeKey)return;const external=field===originField?freeze({status:'origin'}):richText.reconcileExternal(field,stored,revision);if(external.status==='conflict')return;
-      if(field!==originField){const value=plain();if(field.value!==value)field.value=value;}field.dataset.noteRevision=revision;field.dataset.noteId=id;if(field===originField||!defer)richText.syncField(field);
+      if(domain.normalizeAreaName(field.dataset['areaKey'])!==safeKey)return;const external=field===originField?freeze({status:'origin'}):richText.reconcileExternal(field,stored,revision);if(external.status==='conflict')return;
+      if(field!==originField){const value=plain();if(field.value!==value)field.value=value;}field.dataset['noteRevision']=revision;field.dataset['noteId']=id;if(field===originField||!defer)richText.syncField(field);
     });
-    view.document.querySelectorAll<HTMLElement>('.review-block-note[data-area-key]').forEach(box=>{if(domain.normalizeAreaName(box.dataset.areaKey)!==safeKey)return;if(!defer)richText.render(box,stored,box.dataset.noteSupport==='true'?'No current shared support note.':'No current note for this area.',`Note for ${entry?.label||domain.displayAreaName(safeKey)}`);box.classList.toggle('review-block-empty',!plain().trim());});
+    view.document.querySelectorAll<HTMLElement>('.review-block-note[data-area-key]').forEach(box=>{if(domain.normalizeAreaName(box.dataset['areaKey'])!==safeKey)return;if(!defer)richText.render(box,stored,box.dataset['noteSupport']==='true'?'No current shared support note.':'No current note for this area.',`Note for ${entry?.label||domain.displayAreaName(safeKey)}`);box.classList.toggle('review-block-empty',!plain().trim());});
   }
-  function refreshAllFields(){const keys=new Set<string>();view.document.querySelectorAll<HTMLElement>('.task-note-field[data-area-key],.review-block-note[data-area-key]').forEach(node=>{const key=domain.normalizeAreaName(node.dataset.areaKey);if(key)keys.add(key);});keys.forEach(key=>refreshFieldsForKey(key));}
+  function refreshAllFields(){const keys=new Set<string>();view.document.querySelectorAll<HTMLElement>('.task-note-field[data-area-key],.review-block-note[data-area-key]').forEach(node=>{const key=domain.normalizeAreaName(node.dataset['areaKey']);if(key)keys.add(key);});keys.forEach(key=>refreshFieldsForKey(key));}
   function setSyncState(key:unknown,state:NoteSyncState){
     const safeKey=domain.normalizeAreaName(key);if(!safeKey)return false;const message=state==='saving'?'Saving note…':state==='conflict'?'Newer saved note detected · this edit is not being saved. Reopen the note to load it.':'Synced',symbol=state==='saving'?'…':state==='conflict'?'!':'✓';
     const apply=(el:HTMLElement)=>{el.textContent=symbol;el.removeAttribute('title');el.setAttribute('aria-label',message);el.classList.remove('idle');el.classList.toggle('saving',state==='saving');el.classList.toggle('err',state==='conflict');view.syncPopover(el);};
-    view.document.querySelectorAll<HTMLTextAreaElement>('textarea.task-note-field[data-area-key]').forEach(field=>{if(domain.normalizeAreaName(field.dataset.areaKey)===safeKey){field.dataset.richSyncState=state;field.dataset.richSyncStatus=message;}});
-    view.document.querySelectorAll<HTMLElement>('.note-sync[data-area-key]').forEach(element=>{if(domain.normalizeAreaName(element.dataset.areaKey)===safeKey)apply(element);});
+    view.document.querySelectorAll<HTMLTextAreaElement>('textarea.task-note-field[data-area-key]').forEach(field=>{if(domain.normalizeAreaName(field.dataset['areaKey'])===safeKey){field.dataset['richSyncState']=state;field.dataset['richSyncStatus']=message;}});
+    view.document.querySelectorAll<HTMLElement>('.note-sync[data-area-key]').forEach(element=>{if(domain.normalizeAreaName(element.dataset['areaKey'])===safeKey)apply(element);});
     const pn=view.document.getElementById('pn-sync'),idx=view.currentTaskIndex(),task=taskList()[idx],field=view.document.getElementById('pn-extra') as HTMLTextAreaElement|null;
-    const current=task&&domain.isTrackableBlock(task)?(field?.dataset.areaKey||domain.noteKeyForTask(task)):'';
+    const current=task&&domain.isTrackableBlock(task)?(field?.dataset['areaKey']||domain.noteKeyForTask(task)):'';
     if(pn&&domain.normalizeAreaName(current)===safeKey)apply(pn);if(state==='synced')view.publishSafetyNotice('','Note saved','note-conflict');return true;
   }
   function reportConflict(info:NoteConflictInfo={}){
@@ -164,10 +165,10 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   }
   function updateSearchText(key:unknown,plain:unknown){const entry=key?repository.get(key):null;if(entry)view.updateSearchDocument(freeze({key:entry.key,revision:String(entry.updatedAt||''),plain:String(plain||'')}));}
   function commitEditor(field:HTMLTextAreaElement,value:unknown,event:Event|null=null){
-    if(!ownership.canMutate()||!lifecycle.canWrite()){field.dataset.noteBindingState='stale';return false;}const binding=resolveEditor(field,{requireVisible:true});if(!binding)return false;
+    if(!ownership.canMutate()||!lifecycle.canWrite()){field.dataset['noteBinding']State='stale';return false;}const binding=resolveEditor(field,{requireVisible:true});if(!binding)return false;
     const trusted=richText.validatedInput(event,field),candidate=trusted?trusted.canonical:editorContent(binding,value);
     const result=trusted?repository.updateValidatedRich(binding.key,binding.label,candidate,binding.noteRevision):repository.update(binding.key,binding.label,candidate,binding.noteRevision);
-    if(result.status==='conflict'){refreshFieldsForKey(binding.key);if(field.dataset.richExternalConflict==='1'){field.dataset.noteBindingState='conflict';setSyncState(binding.key,'conflict');}return false;}
+    if(result.status==='conflict'){refreshFieldsForKey(binding.key);if(field.dataset['richExternalConflict']==='1'){field.dataset['noteBinding']State='conflict';setSyncState(binding.key,'conflict');}return false;}
     const canonical=storedValueForKey(binding.key),derived=trusted&&trusted.canonical===canonical?trusted:null;if(field.value!==canonical)field.value=canonical;if(!richText.isRich(canonical))updateSearchText(binding.key,canonical);
     refreshFieldsForKey(binding.key,field,derived,{deferRichMirrors:!!trusted});
     if(result.status==='limit'||result.status==='content-limit'){const message=result.status==='content-limit'?`Notes are limited to ${configuration.maxRichTextWords.toLocaleString()} rich-text words per note.`:`Notes are limited to ${configuration.maxNotes.toLocaleString()} saved notes.`;view.setStatus('notes-status',message,false);view.setStatus('save-status',message,false);view.setPlanStatus(message,false);return false;}
@@ -176,7 +177,7 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   function inheritedTextForTask(task:Task|undefined){const inherited=applicableForTask(task).inherited;return inherited.length?inherited.map(entry=>`From ${entry.label}:\n${entry.text}`).join('\n\n'):'';}
   function renderInherited(container:HTMLElement|null,areaKey:unknown,compact=false,{collapsible=false}:Readonly<{collapsible?:boolean}>={}){
     if(!container)return;const inherited=inheritedEntries(areaKey);container.className='subject-note-context'+(compact?' compact':'')+(collapsible?' collapsible':'')+(inherited.length?' on':'');container.replaceChildren();if(!inherited.length)return;
-    if(collapsible){inherited.forEach(entry=>{const section=view.document.createElement('details'),label=view.document.createElement('summary'),body=view.document.createElement('div');section.className='subject-note-context-entry';label.className='subject-note-context-entry-label ui-label';label.textContent=`From ${entry.label.replace(/\s*>\s*/g,' › ')}`;body.className='subject-note-context-entry-body';section.append(label,body);container.append(section);section.addEventListener('toggle',()=>{if(section.open&&!body.dataset.rendered){body.dataset.rendered='1';richText.render(body,entry.value,'',`Parent note from ${entry.label}`);}});});return;}
+    if(collapsible){inherited.forEach(entry=>{const section=view.document.createElement('details'),label=view.document.createElement('summary'),body=view.document.createElement('div');section.className='subject-note-context-entry';label.className='subject-note-context-entry-label ui-label';label.textContent=`From ${entry.label.replace(/\s*>\s*/g,' › ')}`;body.className='subject-note-context-entry-body';section.append(label,body);container.append(section);section.addEventListener('toggle',()=>{if(section.open&&!body.dataset['rendered']){body.dataset['rendered']='1';richText.render(body,entry.value,'',`Parent note from ${entry.label}`);}});});return;}
     const title=view.document.createElement('div');title.className='subject-note-context-title ui-label';title.textContent='Inherited Parent Notes · Read-only';container.append(title);
     inherited.forEach(entry=>{const section=view.document.createElement('section'),label=view.document.createElement('div'),body=view.document.createElement('div');section.className='subject-note-context-entry';label.className='subject-note-context-entry-label ui-label';label.textContent=`From ${entry.label}`;body.className='subject-note-context-entry-body';section.append(label,body);container.append(section);richText.render(body,entry.value,'',`Inherited note from ${entry.label}`);});
   }
