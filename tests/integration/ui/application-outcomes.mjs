@@ -175,6 +175,79 @@ const noop=()=>{};
   coordinator.clear();
 }
 
+// P5.6A notes host fences stale editors and reports partial Plan follow-up
+// failures without pretending the committed note rename rolled back.
+{
+  const context={Object,Symbol,Map,Set,Promise,Date,Number,String,Error,TypeError,HTMLElement:class{},HTMLDetailsElement:class{}};
+  vm.createContext(context);
+  vm.runInContext(readCoreScript('internal'),context);
+  vm.runInContext(readCoreScript('notes-host'),context);
+  const host=context[Symbol.for('studyDirector.internalModules.v1')].require('notes-host',1);
+  let ownershipRevision=1,scheduleRevision=1,savedDrafts=0,lastExpected=null,renameMode='renamed',confirmRename=true,planRenameFails=false;
+  let note={id:'n1',key:'core',label:'Core',text:'old',updatedAt:'r1'};
+  const repository=Object.freeze({
+    get:ref=>note&&(String(ref).toLowerCase()==='core'||ref===note.id)?Object.freeze({...note}):null,
+    update:(key,label,value,expected)=>{
+      lastExpected=expected;
+      if(note&&String(expected||'')!==String(note.updatedAt||''))return Object.freeze({status:'conflict'});
+      note={id:note?.id||'n1',key:'core',label:String(label),text:String(value),updatedAt:'r2'};
+      return Object.freeze({status:'changed'});
+    },
+    updateValidatedRich:(key,label,value,expected)=>repository.update(key,label,value,expected),
+    flush:async()=>true,failure:()=>Object.freeze({failed:false,message:''}),
+    metadataSnapshot:()=>Object.freeze({revision:1,records:Object.freeze(note?[Object.freeze({id:note.id,key:'core',label:note.label,hasNote:!!note.text,updatedAt:note.updatedAt})]:[])}),
+    searchSnapshot:()=>Object.freeze({revision:1,documents:Object.freeze([])}),size:()=>note?1:0,
+    rename:async(_from,to)=>renameMode==='collision'?Object.freeze({status:'collision',labels:Object.freeze([String(to)])}):Object.freeze({status:'renamed',key:'renamed',target:'renamed',moved:Object.freeze([Object.freeze({from:'core',to:'renamed'})]),merged:0}),
+    trash:async()=>null,restore:async()=>null,remove:async()=>false,trashSnapshot:()=>Object.freeze([]),purgeExpiredTrash:async()=>0
+  });
+  const tasks=Object.freeze([Object.freeze({id:'t1',kind:'work',area:'Core'})]);
+  const fakeDocument={querySelectorAll:()=>[],getElementById:()=>null,createElement:()=>({})};
+  const runtime=host.createController(Object.freeze({
+    configuration:Object.freeze({maxAreaNameChars:120,maxNoteChars:100000,maxNotes:500,maxRichTextWords:50000,maxRichTextBytes:1000000,supportNote:Object.freeze({key:'support',label:'Support'})}),
+    repository,tasks:()=>tasks,
+    taskIdentity:Object.freeze({validIndex:value=>Number(value)===0?0:null,idAt:()=> 't1',indexForId:id=>id==='t1'?0:null,scheduleRevision:()=>scheduleRevision}),
+    domain:Object.freeze({
+      normalizeAreaName:value=>String(value||'').trim().toLowerCase(),displayAreaName:value=>String(value||'').trim(),areaParentKeys:()=>[],
+      clampText:(value,max)=>String(value||'').slice(0,max),hasOngoingTaskNotes:task=>!!task,noteKeyForTask:()=> 'core',noteLabelForTask:()=> 'Core',
+      isSupportBlock:()=>false,isTrackableBlock:()=>true
+    }),
+    lifecycle:Object.freeze({canWrite:()=>true,revision:()=>1}),ownership:Object.freeze({canMutate:()=>true,revision:()=>ownershipRevision}),
+    richText:Object.freeze({
+      closeField:()=>true,syncField:()=>true,reconcileExternal:()=>Object.freeze({status:'synced'}),
+      validatedInput:event=>event?.canonical?Object.freeze({canonical:event.canonical,plain:event.plain||event.canonical}):null,
+      plain:value=>String(value||''),isRich:()=>false,render:()=>true,normalizeTag:value=>String(value||''),renameTag:value=>value,
+      fromText:value=>value,fromMarkdown:value=>value,quiesce:async operation=>await operation()
+    }),
+    tags:Object.freeze({tagged:()=>Object.freeze([])}),mutation:Object.freeze({runExclusive:async(_name,operation)=>await operation()}),
+    view:Object.freeze({
+      document:fakeDocument,currentTaskIndex:()=>0,saveLiveDraft:()=>{savedDrafts++;},updateSearchDocument:()=>true,
+      refreshExecute:()=>true,refreshLibrary:()=>true,requestScheduleRender:()=>true,refreshReviewIfVisible:()=>true,refreshRecovery:()=>true,
+      setStatus:()=>true,setPlanStatus:()=>true,publishSafetyNotice:()=>true,syncPopover:()=>true
+    }),
+    environment:Object.freeze({queueMicrotask:callback=>callback()})
+  }));
+  const field={dataset:{},isConnected:true,value:'old',closest:()=>null,setAttribute:()=>{},removeAttribute:()=>{},maxLength:0};
+  runtime.bindTaskEditor(field,0,'test');
+  assert.equal(field.dataset.noteId,'n1');
+  ownershipRevision=2;
+  assert.equal(runtime.commitEditor(field,'ownership-stale'),false,'ownership handoff invalidates an editor binding before mutation');
+  assert.equal(note.text,'old');
+  ownershipRevision=1;runtime.bindTaskEditor(field,0,'test');note=null;
+  assert.equal(runtime.commitEditor(field,'deleted-stale'),false,'a deleted/renamed bound note cannot be silently recreated by a stale editor');
+  note={id:'n1',key:'core',label:'Core',text:'old',updatedAt:'r1'};runtime.bindTaskEditor(field,0,'test');
+  assert.equal(runtime.commitEditor(field,'ignored',{canonical:'rich-current',plain:'rich current'}),true);
+  assert.equal(lastExpected,'r1','the checked repository receives the editor revision fence');
+  assert.equal(note.text,'rich-current');assert.equal(savedDrafts,1);
+
+  const plan=Object.freeze({areaUse:()=>Object.freeze({today:true,savedPlans:1}),renameArea:async()=>{if(planRenameFails)throw new Error('plan write failed');return Object.freeze({blocks:1,savedPlans:1});}});
+  const workflows=host.createLibraryWorkflows(Object.freeze({runtime,repository,plan,interactions:Object.freeze({confirm:async()=>confirmRename}),mergeText:(existing,moved)=>existing+moved}));
+  renameMode='collision';confirmRename=false;
+  assert.equal((await workflows.rename(Object.freeze({key:'core',label:'Core'}),'Renamed',{renamePlans:true})).status,'cancelled','declined collision leaves the rename cancelled');
+  renameMode='renamed';confirmRename=true;planRenameFails=true;
+  const partial=await workflows.rename(Object.freeze({key:'core',label:'Core'}),'Renamed',{renamePlans:true});
+  assert.equal(partial.status,'renamed');assert.equal(partial.plan.ok,false,'a failed Plan fan-out is reported separately after the note rename committed');
+}
+
 // Generic feature handles project to the existing surfaces without owning the
 // cancellation action, and never accept callbacks from a prior generation.
 {
@@ -199,4 +272,4 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
