@@ -16,7 +16,7 @@ declare const library:Readonly<LibraryView>;
 declare const ownership:Readonly<OwnershipController>;
 declare const rich:RichTextApi;
 declare const isLiveTrackableTimer:()=>boolean;
-declare const openExecute:(id:string,taskId:string,ownNote:ReturnType<typeof appData.notes.get>)=>boolean|PromiseLike<boolean>;
+declare const openExecute:(id:string,taskId:string|null,ownNote:ReturnType<typeof appData.notes.get>)=>boolean|PromiseLike<boolean>;
 declare const openLibrary:()=>boolean|PromiseLike<boolean>;
 
 const module=registry.require('note-links',1);

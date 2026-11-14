@@ -14,7 +14,7 @@ import type {InteractionsModule} from '../../source/core/interactions.ts';
 import type {NativeCapabilitiesModule} from '../../source/core/native-capabilities.ts';
 import type {NoticeCoordinator} from '../../source/core/notice-coordinator.ts';
 import type {WorkspaceOverlayModule} from '../../source/core/workspace-overlay.ts';
-import type {RichTextApi} from '../../rich-text/editor.ts';
+import type {RichTextApi,WorkspaceOverlayPort} from '../../rich-text/editor.ts';
 
 declare const registry:BrowserRegistry;
 declare const appData:AppData;
@@ -34,6 +34,24 @@ declare const activation:Readonly<ReturnType<StartupHostModule['createActivation
 declare const attachmentIntegrationProvider:Readonly<ReturnType<DocumentHostModule['createIntegration']>>;
 declare const document:Document;
 declare const browserWindow:Window;
+
+const richWorkspaceOverlay:Readonly<WorkspaceOverlayPort>=Object.freeze({
+  open:options=>{
+    const {history,...surface}=options;
+    if(!history)return workspace.open(surface);
+    const mappedHistory=Object.freeze({
+      kind:history.kind,
+      ...(history.key!==undefined?{key:history.key}:{}),
+      ...(history.token!==undefined?{token:history.token}:{}),
+      ...(history.valid?{valid:history.valid}:{}),
+      ...(history.reopen?{reopen:(descriptor:{kind:string;token:string;key?:string})=>{
+        if(descriptor.kind!=='focus'&&descriptor.kind!=='audio')return false;
+        return history.reopen!({kind:descriptor.kind,token:descriptor.token,...(descriptor.key!==undefined?{key:descriptor.key}:{})});
+      }}:{})
+    });
+    return workspace.open(Object.freeze({...surface,history:mappedHistory}));
+  }
+});
 
 const noteExportInput=Object.freeze({ports:Object.freeze({
   notes:Object.freeze({get:(key:string)=>appData.notes.get(key)}),
@@ -63,7 +81,7 @@ declare const noteLinks:RichTextRuntimeInput['notes']['links'];
 declare const diagnostics:RichTextRuntimeInput['diagnostics'];
 const richHostInput=Object.freeze({
   configuration:Object.freeze({maxRichTextBytes:1024*1024}),document,window:browserWindow,richText,assets:richAssets,
-  attachments:Object.freeze({port:()=>attachmentIntegrationProvider.richAttachmentPort,createImageWorker:()=>new Worker('about:blank'),workspaceOverlay:workspace,onBusy:(_busy:boolean)=>{}}),
+  attachments:Object.freeze({port:()=>attachmentIntegrationProvider.richAttachmentPort,createImageWorker:()=>new Worker('about:blank'),workspaceOverlay:richWorkspaceOverlay,onBusy:(_busy:boolean)=>{}}),
   notes:Object.freeze({
     repository:appData.notes,links:noteLinks,normalizeArea:domain.ScheduleModel.normalizeArea,
     setSyncState:(_key:string,_state:'conflict'|'synced')=>undefined,updateSearchText:(_key:string,_plain:string)=>undefined

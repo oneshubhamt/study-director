@@ -39,8 +39,8 @@ export interface NoteLinkNavigationInput{
   readonly notes:Readonly<{get(ref:unknown):NoteView|null}>;
   readonly execution:Readonly<{
     isLiveTrackableTimer():boolean;
-    current():Readonly<{task:Task|undefined;taskId:string;ownNote:NoteView|null}>;
-    open(id:string,taskId:string,ownNote:NoteView|null):boolean|PromiseLike<boolean>;
+    current():Readonly<{task:Task|undefined;taskId:string|null;ownNote:NoteView|null}>;
+    open(id:string,taskId:string|null,ownNote:NoteView|null):boolean|PromiseLike<boolean>;
   }>;
   readonly library:Readonly<{
     open():boolean|PromiseLike<boolean>;

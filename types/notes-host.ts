@@ -37,7 +37,7 @@ export interface NotesHostInput{
   readonly repository:NotesRepositoryPort;
   readonly tasks:()=>readonly Task[];
   readonly taskIdentity:Readonly<{
-    validIndex(value:unknown):number|null;idAt(index:number):string;indexForId(id:string):number|null;scheduleRevision():number;
+    validIndex(value:unknown):number|null;idAt(index:number):string|null;indexForId(id:string):number|null;scheduleRevision():number;
   }>;
   readonly domain:Readonly<{
     normalizeAreaName(value:unknown):string;displayAreaName(value:unknown):string;areaParentKeys(value:unknown):string[];
