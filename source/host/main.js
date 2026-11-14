@@ -54,6 +54,7 @@ const IntegrityContinuationModule=INTERNAL_MODULES.load('integrity-continuation'
 const NoteExportModule=INTERNAL_MODULES.load('note-export',2,'study-director.note-export-module',2);
 const LibraryClearModule=INTERNAL_MODULES.load('library-clear',1,'study-director.library-clear-module',2);
 const RichTextHostModule=INTERNAL_MODULES.load('rich-text-host',1,'study-director.rich-text-host-module',1);
+const DocumentHostModule=INTERNAL_MODULES.load('document-host',1,'study-director.document-host-module',1);
 const NoteLinksModule=INTERNAL_MODULES.load('note-links',1,'study-director.note-links-module',1);
 const NotesHostModule=INTERNAL_MODULES.load('notes-host',1,'study-director.notes-host-module',1);
 const ProfilesModule=INTERNAL_MODULES.load('profiles',1,'study-director.profiles-module',1);
@@ -367,101 +368,6 @@ if(!Object.isFrozen(WorkspaceOverlay)||WorkspaceOverlay.format!=='study-director
   throw new Error('Study Director workspace overlay controller is unavailable or incompatible.');
 }
 const RichTextWorkspaceOverlay=Object.freeze({open:options=>WorkspaceOverlay.open(options)});
-function prefersNativePdfNavigation(){return !!(window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches);}
-function prepareNativePdfWindow(){
-  if(!prefersNativePdfNavigation())return null;
-  try{const opened=window.open('about:blank','_blank');if(opened)opened.opener=null;return opened||null;}catch{return null;}
-}
-// Blob URLs and OPFS reader leases must outlive an external viewer handoff,
-// but must never become ownerless if the browser hides that viewer's lifetime.
-const PDF_DOWNLOAD_HANDOFF_MS=2*60*1000,PDF_UNTRACKED_VIEWER_MS=10*60*1000;
-function retainPdfUrl(url,releaseReader=()=>{}){
-  let released=false,poll=null,expiry=null;
-  const release=()=>{
-    if(released)return false;
-    released=true;
-    if(poll!==null)clearInterval(poll);
-    if(expiry!==null)clearTimeout(expiry);
-    window.removeEventListener('pagehide',release);
-    try{URL.revokeObjectURL(url);}finally{releaseReader();}
-    return true;
-  };
-  const expireAfter=delay=>{
-    if(released)return false;
-    if(expiry!==null)clearTimeout(expiry);
-    expiry=setTimeout(release,delay);
-    return true;
-  };
-  const track=opened=>{
-    if(!opened)return expireAfter(PDF_UNTRACKED_VIEWER_MS);
-    if(poll!==null)clearInterval(poll);
-    poll=setInterval(()=>{
-      try{if(opened.closed)release();}
-      catch{clearInterval(poll);poll=null;expireAfter(PDF_UNTRACKED_VIEWER_MS);}
-    },1000);
-    return true;
-  };
-  window.addEventListener('pagehide',release);
-  return Object.freeze({release,expireAfter,track});
-}
-function openPdfFallback(row,url,releaseReader=()=>{}){
-  const lease=retainPdfUrl(url,releaseReader);
-  const content=document.createElement('div'),message=document.createElement('p'),actions=document.createElement('div'),open=document.createElement('a'),download=document.createElement('a');
-  content.className='workspace-pdf-fallback';message.className='ui-helper';message.textContent='This browser could not open the PDF automatically. Open it in the browser viewer or download it.';actions.className='workspace-pdf-fallback-actions';
-  open.className='mini-btn ui-btn primary';open.textContent='Open PDF';open.href=url;open.target='_blank';open.rel='noopener noreferrer';
-  download.className='mini-btn ui-btn';download.textContent='Download';download.href=url;download.download=String(row?.name||'document.pdf');actions.append(open,download);content.append(message,actions);
-  let handedOff=false,handle=null;
-  const closeOnPagehide=()=>handle?.close();
-  const closeAfterClick=()=>setTimeout(()=>handle?.close(),0);
-  open.addEventListener('click',event=>{
-    let opened=null;
-    try{
-      opened=window.open('about:blank','_blank');
-      if(opened){opened.opener=null;opened.location.replace(url);}
-    }catch{try{opened?.close();}catch{}opened=null;}
-    if(opened)event.preventDefault(); // A tracked viewer replaces the noopener anchor.
-    handedOff=true;lease.track(opened);closeAfterClick();
-  });
-  download.addEventListener('click',()=>{handedOff=true;lease.expireAfter(PDF_DOWNLOAD_HANDOFF_MS);closeAfterClick();});
-  try{handle=WorkspaceOverlay.open({label:String(row?.name||'PDF'),content,className:'workspace-overlay-pdf-fallback',closeLabel:'Close PDF options',onBeforeClose:()=>{window.removeEventListener('pagehide',closeOnPagehide);if(!handedOff)lease.release();}});}
-  catch(error){lease.release();throw error;}
-  if(!handle){lease.release();Interactions.notify({source:'attachments',key:'pdf-open-failed',kind:'error',title:'PDF could not open',message:'Use the attachment Download action to save the PDF.'});return false;}
-  // If the opener enters BFCache, do not return to options with a dead Blob URL.
-  window.addEventListener('pagehide',closeOnPagehide);
-  NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');
-  return true;
-}
-function openPdfDirect(row,file,reservedWindow=null,releaseReader=()=>{}){
-  const url=URL.createObjectURL(file);let opened=reservedWindow;
-  if(!opened)try{opened=window.open('about:blank','_blank');if(opened)opened.opener=null;}catch{opened=null;}
-  if(opened)try{
-    opened.location.replace(url);
-    retainPdfUrl(url,releaseReader).track(opened);
-    NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');return true;
-  }catch{try{opened.close();}catch{}}
-  return openPdfFallback(row,url,releaseReader);
-}
-async function reopenPdfWorkspace(id,descriptor){
-  let release=()=>{};
-  try{
-    release=await AttachmentStorage.retain();
-    const row=(await AttachmentStorage.list()).find(item=>item.id===id);if(!row||row.type!=='application/pdf'){release();return false;}
-    const file=await AttachmentStorage.get(id);if(!(file instanceof Blob)){release();return false;}
-    return openPdfWorkspace(row,file,null,release,descriptor);
-  }catch(error){try{release();}catch{}AppDiagnostics.capture('pdf.workspace-reopen',error,'warn');return false;}
-}
-function openPdfWorkspace(row,file,reservedWindow=null,releaseReader=()=>{},replay=null){
-  if(!(file instanceof Blob)||String(row?.type||file.type)!=='application/pdf')throw new TypeError('PDF preview requires a PDF attachment.');
-  if(prefersNativePdfNavigation()&&!replay)return openPdfDirect(row,file,reservedWindow,releaseReader);
-  const url=URL.createObjectURL(file),content=document.createElement('div'),frame=document.createElement('iframe');let released=false;
-  content.className='workspace-pdf-viewer';frame.className='workspace-pdf-frame';frame.title=String(row?.name||'PDF document');frame.src=url;content.append(frame);
-  const release=()=>{if(released)return;released=true;try{frame.src='about:blank';}catch{}URL.revokeObjectURL(url);releaseReader();};
-  const options={label:String(row?.name||'PDF'),content,className:'workspace-overlay-pdf workspace-overlay-minimal',closeLabel:'Close PDF',onAfterClose:release,history:{kind:'pdf',key:String(row?.id||''),token:replay?.token,valid:()=>!!row?.id,reopen:descriptor=>reopenPdfWorkspace(String(row.id||''),descriptor)}};
-  let handle;try{handle=WorkspaceOverlay.open(options)}catch(error){release();throw error}
-  if(!handle){release();Interactions.notify({source:'attachments',key:'pdf-overlay-busy',kind:'error',title:'PDF could not open',message:'The PDF workspace is unavailable. Try again.'});return false;}
-  NoticeCoordinator.resolveEvent('attachments','pdf-open-failed');NoticeCoordinator.resolveEvent('attachments','pdf-overlay-busy');
-  return true;
-}
 const {SystemNotifications}=FoundationHostModule.createSystem({window,document,navigator,location,NoticeCoordinator,Interactions,AppDiagnostics,appCanMutate:()=>appCanMutate(),readPreference:()=>AppData.local.getJson(STORAGE_KEYS.systemAlerts,false),writePreference:value=>AppData.local.setJson(STORAGE_KEYS.systemAlerts,value)});
 const notifyUser=SystemNotifications.notify;
 /* SOUND DELIVERY */
@@ -1510,23 +1416,6 @@ function renderRichTextContent(container,value,emptyText='',label='Rich text'){
   if(!canonical.trim()){container.textContent=String(emptyText||'');return false;}
   try{return RichTextApi.renderRichText({container,value:canonical,label:String(label||'Rich text'),assets:RichTextAssets,workspaceOverlay:RichTextWorkspaceOverlay,notes:richTextNotes()});}
   catch(error){AppDiagnostics.capture('rich-text.display',error,'warn');container.textContent=plainTextContent(canonical).trim()||String(emptyText||'');return false;}
-}
-// Prints one note, its title and content with images, and nothing else on the page.
-async function printNote(heading,value){
-  for(const old of document.querySelectorAll('.note-print'))old.remove();
-  const sheet=document.createElement('article'),title=document.createElement('h1'),body=document.createElement('div');
-  sheet.className='note-print';title.textContent=String(heading||'Note');sheet.append(title,body);document.body.appendChild(sheet);
-  const text=String(value??'');
-  try{if(text.trim())RichTextApi.renderRichText({container:body,value:text,label:title.textContent,assets:RichTextAssets,eager:true});}
-  catch(error){AppDiagnostics.capture('rich-text.print',error,'warn');body.textContent=plainTextContent(text);}
-  // Images load before the print dialog opens; one that cannot load prints as its placeholder.
-  const deadline=Date.now()+10000,pending=()=>[...body.querySelectorAll('.sd-rte-image[data-sd-asset-id]')].some(figure=>!['ready','missing'].includes(figure.dataset.sdAssetHydrated));
-  while(pending()&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,50));
-  await Promise.all([...body.querySelectorAll('img')].map(image=>typeof image.decode==='function'?image.decode().catch(()=>{}):null));
-  document.documentElement.classList.add('printing-note');
-  window.addEventListener('afterprint',()=>{document.documentElement.classList.remove('printing-note');sheet.remove();},{once:true});
-  window.print();
-  return true;
 }
 function exactAppMetaFamily(capability,key,label='app metadata'){
   const resolved=AppMetaGateway.resolve(String(key||''));
@@ -3645,21 +3534,34 @@ const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.f
   processing:Object.freeze({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
   scheduling:Object.freeze({yieldTask:BackgroundTasks.yieldTask,budget:BackgroundTasks.budget}),
   output:Object.freeze({chooseSave:Exports.chooseSave,save:Exports.save}),
-  richText:Object.freeze({assetIds:value=>RichTextApi.assetIds(value),document:value=>RichTextApi.exportDocument(value)})
+  richText:Object.freeze({assetIds:value=>RichTextApi.assetIds(value),exportDocument:value=>RichTextApi.exportDocument(value)})
 })}));
 if(!Object.isFrozen(NoteExporter)||NoteExporter.format!=='study-director.note-exporter'||NoteExporter.contractVersion!==2){
   throw new Error('Study Director note exporter is unavailable or incompatible.');
 }
-/* LIBRARY MODULE COMPOSITION */
-async function settleAttachmentWriters(){
-  if(!await RichTextRuntime.close())throw new Error('Open rich-text editors could not be saved safely. Attachment changes were stopped.');
-  if(typeof LibraryView?.settleDiary==='function'&&!await LibraryView.settleDiary())throw new Error('The open Diary edit could not be saved safely.');
-  await AppData.notes.flush({strict:true});
-  if(AppData.notes.failure().failed)throw new Error('Notes have not saved. Retry after storage recovers.');
-  if(await flushPendingReviewSave({strict:true})===false)throw new Error('The current reflection could not be saved safely.');
-  await ReviewEditor.settled();
-  await AppData.activeSession.settled();
+const PdfDocuments=DocumentHostModule.createPdfController(Object.freeze({
+  document,window,urls:URL,store:AttachmentStorage,overlay:WorkspaceOverlay,
+  notifications:Object.freeze({notify:input=>Interactions.notify(input),resolve:(source,key)=>NoticeCoordinator.resolveEvent(source,key)}),
+  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+}));
+const NotePrinter=DocumentHostModule.createPrinter(Object.freeze({
+  document,window,richText:RichTextApi,assets:RichTextAssets,plain:value=>plainTextContent(value),
+  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
+}));
+let AttachmentLibrary=null;
+const LibraryDocuments=DocumentHostModule.createIntegration(Object.freeze({
+  limits:Object.freeze({maxRichAssetPerDocument:APP_LIMITS.richAssetMaxPerDocument,maxRichAssetBytesPerDocument:RichTextApi.assetPolicy.maxBytesPerDocument}),
+  notes:AppData.notes,
+  ownership:Object.freeze({issue:reason=>AppOwnership.issueWriteToken(reason),assert:(token,reason)=>AppOwnership.assertWriteToken(token,reason)}),
+  editor:RichTextRuntime,review:ReviewEditor,session:Object.freeze({settled:()=>AppData.activeSession.settled()}),
+  library:()=>LibraryView,attachmentLibrary:()=>AttachmentLibrary,attachmentTypes:AttachmentsModule,assets:RichTextAssets,richText:RichTextApi,
+  content:Object.freeze({withinLimits:value=>editorContentWithinLimits(value)}),printer:NotePrinter,exporter:NoteExporter
+}));
+if(!Object.isFrozen(LibraryDocuments)||LibraryDocuments.format!=='study-director.document-integration'||LibraryDocuments.contractVersion!==1){
+  throw new Error('Study Director Library document integration is unavailable or incompatible.');
 }
+/* LIBRARY MODULE COMPOSITION */
+const settleAttachmentWriters=LibraryDocuments.settleAttachmentWriters;
 const AttachmentReferences=AttachmentsModule.createReferenceCoordinator(Object.freeze({
   data:AppData,
   scan:value=>RichTextApi.scanAttachmentReferences(String(value||'')),
@@ -3689,60 +3591,25 @@ const LibraryClearState=LibraryClearModule.createState(Object.freeze({
   review:Object.freeze({hydrate:options=>ReviewEditor.hydrate(options),invalidateBindings:()=>ReviewEditor.invalidateBindings()}),
   nowIso:()=>new Date().toISOString()
 }));
-async function validateAttachmentInsertionValue(value,row){
-  if(!RichTextApi.isRichTextValue(value)||!editorContentWithinLimits(value))throw new Error('This note has no room for another attachment.');
-  if(!AttachmentsModule.validType(row.type))throw new Error('This attachment type cannot be inserted.');
-  if(String(row.type||'').startsWith('image/')){
-    const ids=RichTextApi.assetIds(value),policy=RichTextApi.assetPolicy||{};
-    if(ids.length>Number(policy.maxPerDocument||APP_LIMITS.richAssetMaxPerDocument||20))throw new Error('This note already has the maximum number of images.');
-    let bytes=0;for(const assetId of ids){const blob=await RichTextAssets.get(assetId);if(!blob)throw new Error('An image used by this note is missing.');bytes+=blob.size;}
-    if(bytes>Number(policy.maxBytesPerDocument||Number.MAX_SAFE_INTEGER))throw new Error('Images in this note exceed the safe storage allowance.');
-  }
-  return true;
-}
-async function insertAttachmentIntoNote(key,row){
-  const destination=LibraryView.noteDestinations().find(item=>item.key===String(key||''));if(!destination)throw new Error('This note destination is no longer available.');
-  const token=AppOwnership.issueWriteToken('insert attachment in note');await settleAttachmentWriters();
-  // Stored notes are keyed by their id; the destination names the note by title.
-  const fresh=await AppData.notes.readFreshPayload()||{},storedId=()=>AppData.notes.get(destination.key)?.id||'',id=storedId(),hadNote=!!id&&Object.hasOwn(fresh,id),note=hadNote?fresh[id]:{label:destination.label,text:'',updatedAt:''};
-  const type=String(row.type||''),mode=type.startsWith('image/')?'inline-image':type.startsWith('audio/')?'inline-audio':'link',transformed=RichTextApi.insertAttachmentReference(note.text,{id:row.id,name:row.name||'Attachment',mode}),value=transformed.value;
-  await validateAttachmentInsertionValue(value,row);
-  AppOwnership.assertWriteToken(token,'insert attachment in note');
-  const result=AppData.notes.updateValidatedRich(destination.key,note.label||destination.label,value,note.updatedAt||'');
-  if(!['changed','unchanged'].includes(result.status))throw new Error('The note changed. Reopen it and try again.');
-  try{
-    await AppData.notes.flush({strict:true});const verified=(await AppData.notes.readFreshPayload()||{})[storedId()];if(verified?.text!==value||AppData.notes.failure().failed)throw new Error('The attachment insertion could not be verified.');
-  }catch(error){
-    try{
-      const current=AppData.notes.get(destination.key),rollback=AppData.notes.updateValidatedRich(destination.key,note.label||destination.label,note.text||'',current?.updatedAt||result.revision||'');
-      if(!['changed','unchanged'].includes(rollback.status))throw new Error('The note changed before rollback.');
-      await AppData.notes.flush({strict:true});
-      if(!hadNote){if(AppData.notes.get(destination.key)&&!await AppData.notes.remove(destination.key))throw new Error('The newly materialized note could not be removed.');}
-      else if((await AppData.notes.readFreshPayload())?.[id]?.text!==String(note.text||''))throw new Error('The prior note state did not restore.');
-    }catch(rollbackError){throw new Error((error?.message||error)+' Automatic note rollback also failed: '+(rollbackError?.message||rollbackError));}
-    throw error;
-  }
-  LibraryView.refreshNotes();return true;
-}
-async function quiesceAttachmentMutation(work,options={}){
-  return RichTextRuntime.quiesce(()=>LibraryView.batchAttachmentMutation(work,options));
-}
-const AttachmentLibrary=AttachmentsModule.create({
+const validateAttachmentInsertionValue=LibraryDocuments.validateAttachmentInsertion;
+const insertAttachmentIntoNote=LibraryDocuments.insertAttachment;
+const quiesceAttachmentMutation=LibraryDocuments.quiesceAttachmentMutation;
+AttachmentLibrary=AttachmentsModule.create({
   notifications:NoticeCoordinator.presentation('attachments',Object.freeze({label:'Open attachments',run:async()=>{if(await goTab('library')){LibraryView.showSection('data');const panel=document.getElementById('library-attachments');panel.open=true;panel.scrollIntoView({block:'start'});}}})),
   onWorkStart:()=>{pwaWorkRevision++;},
   store:AttachmentStorage,processing:Exports,document,interactions:Interactions,
   canMutate:()=>appCanMutate(),requireOwner:()=>{if(!appCanMutate())throw new Error('Use the primary tab to manage attachments.');},token:()=>AppOwnership.issueWriteToken('manage attachments'),
   isActive:()=>document.getElementById('pane-library').classList.contains('on')&&!document.getElementById('library-data').hidden,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>attachmentIntegrityIssues.get(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');return goTab('library',{source:'attachment-library'});},
   openSource:async source=>{if(!await goTab('library',{source:'attachment-reference'}))return false;if(source.kind==='note')return LibraryView.revealNoteReference(source.key);if(source.kind==='day')return LibraryView.openDay(source.key);return false;},
-  preparePdfOpen:()=>prepareNativePdfWindow(),
-  openPdf:(row,file,reservedWindow,releaseReader)=>openPdfWorkspace(row,file,reservedWindow,releaseReader),
+  preparePdfOpen:()=>PdfDocuments.prepareNativeWindow(),
+  openPdf:(row,file,reservedWindow,releaseReader)=>PdfDocuments.open(row,file,reservedWindow,releaseReader),
   deletionGuard:async options=>{if((await AppData.restoreJournal.read())?.state)throw new Error('Finish backup recovery before deleting attachments.');if(!options?.allowLibraryClearJournal&&(await AppData.libraryClearJournal.read())?.state)throw new Error('Finish Library data recovery before deleting attachments.');const token=AppOwnership.issueWriteToken('delete attachment'),revision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();if(dataset===null)throw new Error('Saved notes could not be verified.');return ()=>{AppOwnership.assertWriteToken(token,'delete attachment');return revision===richAssetReferenceRevision;};},
   runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,authority=>withRestoreSessionPersistenceSuppressed(()=>operation(authority))),
   quiesce:(operation,options)=>quiesceAttachmentMutation(operation,options),
   removeReferences:id=>AttachmentReferences.removeEverywhere(id),
   insert:(key,row)=>insertAttachmentIntoNote(key,row)
  });
-const RichTextAttachmentPort=Object.freeze({upload:async(file,options={})=>{const row=await AttachmentLibrary.add(file,options);if(!row)throw new Error('Attachment upload did not complete.');return Object.freeze({id:row.id,name:row.name,type:row.type});}});
+const RichTextAttachmentPort=LibraryDocuments.richAttachmentPort;
 invalidateAttachmentLibrary=()=>AttachmentLibrary.invalidate();
 
 let attachmentIntegrityView=null,repositoryIntegrityView=null;const repositoryIntegrityBoundScopes=Object.create(null);
@@ -4048,7 +3915,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     createSearchWorker:()=>new Worker(trustedAssetURL(NOTES_SEARCH_WORKER_URL),{name:'study-director-note-search'}),
     requestAnimationFrame:callback=>requestAnimationFrame(callback)
   }),
-  exporter:Object.freeze({exportKeys:keys=>NoteExporter.exportKeys(keys),cancel:NoteExporter.cancel}),
+  exporter:LibraryDocuments.exporter,
   diary:Object.freeze({
     bindEditor:(field,date,record,options)=>LibraryDiaryEditor.bind(field,date,record,options),
     captureEditor:(field,event)=>LibraryDiaryEditor.capture(field,event),
@@ -4092,7 +3959,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     trash:key=>LibraryNoteWorkflows.trash(key),
     trashSnapshot:()=>AppData.notes.trashSnapshot(),
     versions:target=>withBackupPassword(()=>BackupRecoveryHost.history.openNote(target)),
-    print:(key,title)=>{RichTextRuntime.flushEditors();const note=AppData.notes.get(key);return note?printNote(title,note.text):false;}
+    print:(key,title)=>LibraryDocuments.printNote(key,title)
   }),
   attachments:Object.freeze({
     batch:operation=>AttachmentLibrary.batch(operation),

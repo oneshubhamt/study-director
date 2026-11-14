@@ -1,5 +1,6 @@
 import type {AssetRow} from './asset-storage.ts';
-import type {AttachmentsModule,AttachmentBatchOptions,UploadOptions} from '../source/core/attachments.ts';
+import type {AttachmentsModule} from '../source/core/attachments.ts';
+import type {AttachmentBatchOptions,UploadOptions} from './attachments.ts';
 import type {AppData} from './data-bootstrap-host.ts';
 import type {LibraryView} from './library.ts';
 import type {NoteExporter} from './note-export.ts';
