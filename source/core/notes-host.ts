@@ -210,7 +210,8 @@ function createLibraryWorkflows(input:Readonly<LibraryNoteWorkflowInput>):Readon
     const identity=runtime.normalizeAreaInput(value);if(!identity||identity.label===entry.label)return freeze({status:'rejected',identity});
     let outcome=await repository.rename(entry.key,identity.label);
     if(outcome.status==='collision'){
-      const labels=outcome.labels.join(', '),ok=await interactions.confirm(freeze({title:'Combine existing notes?',message:`“${identity.label}” would overlap ${labels}. Combine the moved note text into the existing note and keep the existing note’s earlier versions?`,confirmLabel:'Combine',cancelLabel:'Cancel'}));
+      const into=outcome.labels[0]||identity.label,others=outcome.labels.length-1;
+      const ok=await interactions.confirm(freeze({title:'Merge notes?',message:`Merge “${entry.label}” into “${into}”? Its text is added to the end of “${into}”.`,details:freeze(others>0?[`${others} more note${others===1?'':'s'} inside it ${others===1?'is':'are'} merged the same way.`]:[]),confirmLabel:'Merge',cancelLabel:'Cancel'}));
       if(!ok)return freeze({status:'cancelled',identity});outcome=await repository.rename(entry.key,identity.label,{merge:mergeText});
     }
     if(outcome.status==='content-limit')return freeze({status:'content-limit',identity,label:String(outcome.label||identity.label)});
