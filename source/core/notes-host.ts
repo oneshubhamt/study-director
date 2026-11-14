@@ -100,8 +100,8 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   }
   function writeBinding(field:HTMLTextAreaElement,binding:NoteEditorBinding,scope:string,source:string){
     field.dataset['areaKey']=binding.key;field.dataset['areaLabel']=binding.label;field.dataset['lifecycleRevision']=String(binding.lifecycleRevision);field.dataset['noteOwnershipRevision']=String(binding.ownershipRevision);
-    field.dataset['noteRevision']=binding.noteRevision;field.dataset['noteId']=binding.noteId;field.dataset['noteBinding']=BINDING_VERSION;field.dataset['noteBinding']State='current';field.dataset['noteScope']=scope;field.dataset['noteSource']=source;
-    if(binding.idx!==null)field.dataset['noteId']x=String(binding.idx);else delete field.dataset['noteId']x;
+    field.dataset['noteRevision']=binding.noteRevision;field.dataset['noteId']=binding.noteId;field.dataset['noteBinding']=BINDING_VERSION;field.dataset['noteBindingState']='current';field.dataset['noteScope']=scope;field.dataset['noteSource']=source;
+    if(binding.idx!==null)field.dataset['noteIdx']=String(binding.idx);else delete field.dataset['noteIdx'];
     if(binding.taskId)field.dataset['taskId']=binding.taskId;else delete field.dataset['taskId'];
     if(binding.scheduleRevision!==null)field.dataset['scheduleRevision']=String(binding.scheduleRevision);else delete field.dataset['scheduleRevision'];
     field.dataset['richSyncState']=ownership.canMutate()?'saved':'read-only';field.dataset['richSyncStatus']=ownership.canMutate()?'Saved':'Read-only';
@@ -122,21 +122,21 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
     const details=field.closest('details');if(details instanceof HTMLDetailsElement&&!details.open)return false;
     const reviewPanel=field.closest('.review-edit-panel');if(reviewPanel&&!reviewPanel.closest('.rcard.editing'))return false;return true;
   }
-  const stale=(field:HTMLTextAreaElement)=>{field.dataset['noteBinding']State='stale';return null;};
+  const stale=(field:HTMLTextAreaElement)=>{field.dataset['noteBindingState']='stale';return null;};
   function resolveEditor(field:HTMLTextAreaElement|null,{requireVisible=true}:Readonly<{requireVisible?:boolean}>={}):NoteEditorBinding|null{
     if(!field||field.isConnected===false||requireVisible&&!editorVisible(field))return null;
-    if(field.dataset['richExternalConflict']==='1'){field.dataset['noteBinding']State='conflict';return null;}
+    if(field.dataset['richExternalConflict']==='1'){field.dataset['noteBindingState']='conflict';return null;}
     if(field.dataset['noteBinding']!==BINDING_VERSION)return null;
     const key=domain.normalizeAreaName(field.dataset['areaKey']),label=domain.displayAreaName(field.dataset['areaLabel']||key),life=Number(field.dataset['lifecycleRevision']),owner=Number(field.dataset['noteOwnershipRevision']);
     if(!ownership.canMutate()||!lifecycle.canWrite()||!key||!Number.isInteger(life)||life!==lifecycle.revision()||!Number.isInteger(owner)||owner!==ownership.revision())return stale(field);
     const entry=repository.get(key),noteId=String(field.dataset['noteId']||''),noteRevision=String(field.dataset['noteRevision']||'');
     if(noteId&&(!entry||entry.id!==noteId))return stale(field);
-    if(field.dataset['noteScope']===AREA_SCOPE){field.dataset['noteBinding']State='current';return freeze({idx:null,key,label,taskId:'',scheduleRevision:null,lifecycleRevision:life,ownershipRevision:owner,noteRevision,noteId});}
+    if(field.dataset['noteScope']===AREA_SCOPE){field.dataset['noteBindingState']='current';return freeze({idx:null,key,label,taskId:'',scheduleRevision:null,lifecycleRevision:life,ownershipRevision:owner,noteRevision,noteId});}
     const taskId=String(field.dataset['taskId']||'').trim(),scheduleRevision=Number(field.dataset['scheduleRevision']);
     if(!taskId||!Number.isInteger(scheduleRevision)||scheduleRevision!==taskIdentity.scheduleRevision())return stale(field);
     const idx=taskIdentity.indexForId(taskId);if(idx===null)return stale(field);const task=taskList()[idx];
     if(!task||!domain.hasOngoingTaskNotes(task)||domain.noteKeyForTask(task)!==key)return stale(field);
-    field.dataset['noteId']x=String(idx);field.dataset['noteBinding']State='current';
+    field.dataset['noteIdx']=String(idx);field.dataset['noteBindingState']='current';
     return freeze({idx,key,label:domain.noteLabelForTask(task),taskId,scheduleRevision,lifecycleRevision:life,ownershipRevision:owner,noteRevision,noteId});
   }
   function refreshFieldsForKey(key:unknown,originField:HTMLTextAreaElement|null=null,derived:ValidatedRichInput|null=null,options:Readonly<{deferRichMirrors?:boolean}>={}){
@@ -165,10 +165,10 @@ function createController(input:Readonly<NotesHostInput>):Readonly<NotesRuntime>
   }
   function updateSearchText(key:unknown,plain:unknown){const entry=key?repository.get(key):null;if(entry)view.updateSearchDocument(freeze({key:entry.key,revision:String(entry.updatedAt||''),plain:String(plain||'')}));}
   function commitEditor(field:HTMLTextAreaElement,value:unknown,event:Event|null=null){
-    if(!ownership.canMutate()||!lifecycle.canWrite()){field.dataset['noteBinding']State='stale';return false;}const binding=resolveEditor(field,{requireVisible:true});if(!binding)return false;
+    if(!ownership.canMutate()||!lifecycle.canWrite()){field.dataset['noteBindingState']='stale';return false;}const binding=resolveEditor(field,{requireVisible:true});if(!binding)return false;
     const trusted=richText.validatedInput(event,field),candidate=trusted?trusted.canonical:editorContent(binding,value);
     const result=trusted?repository.updateValidatedRich(binding.key,binding.label,candidate,binding.noteRevision):repository.update(binding.key,binding.label,candidate,binding.noteRevision);
-    if(result.status==='conflict'){refreshFieldsForKey(binding.key);if(field.dataset['richExternalConflict']==='1'){field.dataset['noteBinding']State='conflict';setSyncState(binding.key,'conflict');}return false;}
+    if(result.status==='conflict'){refreshFieldsForKey(binding.key);if(field.dataset['richExternalConflict']==='1'){field.dataset['noteBindingState']='conflict';setSyncState(binding.key,'conflict');}return false;}
     const canonical=storedValueForKey(binding.key),derived=trusted&&trusted.canonical===canonical?trusted:null;if(field.value!==canonical)field.value=canonical;if(!richText.isRich(canonical))updateSearchText(binding.key,canonical);
     refreshFieldsForKey(binding.key,field,derived,{deferRichMirrors:!!trusted});
     if(result.status==='limit'||result.status==='content-limit'){const message=result.status==='content-limit'?`Notes are limited to ${configuration.maxRichTextWords.toLocaleString()} rich-text words per note.`:`Notes are limited to ${configuration.maxNotes.toLocaleString()} saved notes.`;view.setStatus('notes-status',message,false);view.setStatus('save-status',message,false);view.setPlanStatus(message,false);return false;}
