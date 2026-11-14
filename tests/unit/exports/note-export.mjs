@@ -6,7 +6,7 @@ import {createStoreZip} from '../../../portable/zip.ts';
 import {createProcessingEngine} from '../../../portable/processing.ts';
 
 const run=file=>vm.runInThisContext(readRuntimeSource(new URL(file,import.meta.url)),{filename:file});
-run('../../../source/core/internal.ts');run('../../../source/core/note-export.js');
+run('../../../source/core/internal.ts');run('../../../source/core/note-export.ts');
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const module=registry.require('note-export',2);
 assert.equal(module.format,'study-director.note-export-module');

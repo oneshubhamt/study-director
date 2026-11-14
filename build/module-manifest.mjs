@@ -45,7 +45,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'asset-maintenance',source:'core/asset-maintenance.ts',stem:'sd.asset-maintenance'}),
   Object.freeze({id:'exports',source:'core/exports.ts',stem:'sd.exports'}),
   Object.freeze({id:'integrity-continuation',source:'core/integrity-continuation.ts',stem:'sd.integrity-continuation'}),
-  Object.freeze({id:'note-export',source:'core/note-export.js',stem:'sd.note-export'}),
+  Object.freeze({id:'note-export',source:'core/note-export.ts',stem:'sd.note-export'}),
   Object.freeze({id:'library-clear',source:'core/library-clear.ts',stem:'sd.library-clear'}),
   Object.freeze({id:'note-links',source:'core/note-links.ts',stem:'sd.note-links'}),
   Object.freeze({id:'notes-host',source:'core/notes-host.ts',stem:'sd.notes-host'}),
