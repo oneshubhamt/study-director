@@ -12,7 +12,7 @@ const host=readHostHtml();
 const documentHost=readScript('source/core/document-host.ts');
 const richHost=readScript('source/core/rich-text-host.ts');
 const noteExport=readScript('source/core/note-export.ts');
-assert.match(host,/INTERNAL_MODULES\\.load\\('note-export',1,'study-director\\.note-export-module',2\\)/,'note exporter must load the registry contract version it registers');
+assert.match(host,/INTERNAL_MODULES\.load\('note-export',1,'study-director\.note-export-module',2\)/,'note exporter must load the registry contract version it registers');
 assert.match(host,/DocumentHostModule\.createPdfController/,'PDF host composition must use the checked document owner');
 assert.match(host,/DocumentHostModule\.createPrinter/,'note print composition must use the checked document owner');
 assert.match(host,/DocumentHostModule\.createIntegration/,'attachment/export integration must use the checked document owner');
