@@ -30,6 +30,6 @@ const localDeclared=coreFiles.filter(name=>/function\s+requireFunctions\s*\(/u.t
 assert.deepEqual(localExact,['execution-host.ts','interactions.ts','plan-host.ts','reconciliation-ui.js','review-host.ts','session-handoff.ts','session-host.ts'],'only modules intentionally accepting non-frozen runtime composition keep local exact-object validation');
 assert.deepEqual(localFunctions,['execution-host.ts','interactions.ts','plan-host.ts','session-handoff.ts','session-host.ts'],'only the intentional non-frozen runtime-composition function validators remain local');
 assert.deepEqual(localDeclared,[],'declared-function validation is fully centralized');
-assert.equal(coreFiles.filter(name=>sources.get(name).includes('registry.contracts')).length,39,'all modules using the ordinary shared validators consume the registry primitives');
+assert.equal(coreFiles.filter(name=>sources.get(name).includes('registry.contracts')).length,41,'all modules using the ordinary shared validators consume the registry primitives');
 
-console.log(JSON.stringify({status:'PASS',boundary:'internal-modules',validatedHostLoads:privateModules.length-1,sharedValidatorConsumers:39,localExactExceptions:localExact},null,2));
+console.log(JSON.stringify({status:'PASS',boundary:'internal-modules',validatedHostLoads:privateModules.length-1,sharedValidatorConsumers:41,localExactExceptions:localExact},null,2));
