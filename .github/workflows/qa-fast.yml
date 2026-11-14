@@ -14,7 +14,7 @@ concurrency:
 jobs:
   repository:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -67,6 +67,27 @@ jobs:
           tests/architecture/test-suite/suite-governance.mjs
           tests/architecture/test-suite/suite-structure.mjs
           tests/architecture/test-suite/suite-policy.mjs
+      - name: P5.6 closure targeted witnesses
+        run: >-
+          node tests/helpers/run-category.mjs targeted
+          tests/integration/search/search-client-lifetime.mjs
+          tests/architecture/app/workspace-contracts.mjs
+          tests/integration/storage/note-persistence.mjs
+          tests/integration/storage/note-text-checked-once.mjs
+          tests/integration/library/library-clear.mjs
+          tests/integration/storage/pending-reviews.mjs
+          tests/integration/ui/application-outcomes.mjs
+          tests/unit/exports/note-export.mjs
+          tests/integration/attachments/pdf-reader-lifetime.mjs
+          tests/integration/attachments/attachment-library-lifecycle.mjs
+          tests/integration/attachments/rich-attachment-api.mjs
+          tests/integration/rich-text/attachment-busy-lifecycle.mjs
+          tests/integration/attachments/document-host-lifecycle.mjs
+          tests/architecture/app/runtime-boundaries.mjs
+      - name: P5.6 closure complete fast suite
+        run: node tests/helpers/run-category.mjs fast
+      - name: P5.6 closure coverage-risk validation
+        run: node tests/helpers/coverage.mjs
       - name: Source build
         run: node build/build.mjs
       - name: Verify generated build
