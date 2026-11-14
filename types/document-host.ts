@@ -1,6 +1,7 @@
 import type {AssetRow} from './asset-storage.ts';
 import type {AttachmentsModule} from '../source/core/attachments.ts';
-import type {AttachmentBatchOptions,UploadOptions} from './attachments.ts';
+import type {UploadOptions} from './attachments.ts';
+import type {AttachmentBatchOptions} from './library.ts';
 import type {AppData} from './data-bootstrap-host.ts';
 import type {LibraryView} from './library.ts';
 import type {NoteExporter} from './note-export.ts';
@@ -28,7 +29,7 @@ export interface NotePrinterInput{
   readonly document:Document;readonly window:Window;
   readonly richText:Readonly<Pick<RichTextApi,'renderRichText'>>;
   readonly assets:AssetStore;
-  readonly plain(value:unknown):string;
+  readonly plain:(value:unknown)=>string;
   readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level?:'warn'|'error'):unknown}>;
   readonly now:()=>number;
 }

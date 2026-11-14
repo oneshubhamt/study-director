@@ -1,8 +1,9 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {AssetRow} from '../../types/asset-storage.ts';
-import type {AttachmentBatchOptions,UploadOptions} from '../../types/attachments.ts';
+import type {UploadOptions} from '../../types/attachments.ts';
+import type {AttachmentBatchOptions} from '../../types/library.ts';
 import type {DocumentHostModule as DocumentHostContract,DocumentIntegration,DocumentIntegrationInput,NotePrinter,NotePrinterInput,PdfController,PdfControllerInput} from '../../types/document-host.ts';
-import type {AttachmentProgress,AttachmentUploadOptions} from '../../rich-text/editor.ts';
+import type {AttachmentPort,AttachmentProgress,AttachmentUploadOptions} from '../../rich-text/editor.ts';
 import type {OverlayHandle,WorkspaceDescriptor} from '../../types/workspace.ts';
 
 const sdDocumentHostFactory=(()=>{
