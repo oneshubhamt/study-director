@@ -54,7 +54,7 @@ export interface ReviewTaskRow{
   readonly idx:number;readonly i:number;readonly id:string;readonly name:string;readonly kind:Task['kind'];readonly area:string;readonly measure:string;readonly target:number|null;
   readonly duration:number;readonly dur:number;readonly originalStart:string;readonly originalStartMin:number;readonly originalEndMin:number;
   readonly adjustedStart:string;readonly adjustedStartMin:number;readonly adjustedEndMin:number;readonly shifted:boolean;readonly trackable:boolean;readonly work:boolean;
-  readonly completion:number;readonly completionSource:CompletionSource;readonly outcome:TaskOutcome;readonly resolvedState:''|'done'|'skipped';
+  readonly completion:number|null;readonly completionSource:CompletionSource;readonly outcome:TaskOutcome;readonly resolvedState:''|'done'|'skipped';
   readonly progress:ReviewTaskProgress;readonly actualSeconds:number|null;readonly clock:ReviewEvidenceClock;readonly actualRecord:ReviewActualRecord;readonly note:ReviewNoteInfo;
 }
 export interface ReviewTaskEvidence {
@@ -200,7 +200,7 @@ export interface ReviewPomodoroSummary{readonly breaks:number;readonly recoveryS
 export type TaskWithPauses=Task&{readonly pauseEvents?:readonly PauseEvent[]};
 export interface SharedReviewPresentation{
   createSavedDayTaskCard(task:ReviewRecordViewTask):HTMLElement;createPomodoroSummaryLine(tasks:readonly ReviewRecordViewTask[]):HTMLElement;
-  populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],options?:Readonly<{tasks?:readonly Task[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>):ReviewPracticeAggregate|null;
+  populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],options?:Readonly<{tasks?:readonly (Task|ReviewRecordViewTask)[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>):ReviewPracticeAggregate|null;
   pomodoroSummaryFromTasks(tasks:readonly (ReviewRecordViewTask|TaskWithPauses)[]):ReviewPomodoroSummary;
   pomodoroSummaryText(value:ReviewPomodoroSummary):string;
   completionSourceLabel(source:unknown):string;durationLabel(value:number):string;optionalDurationLabel(value:unknown):string;optionalPercentLabel(value:unknown):string;
