@@ -115,6 +115,7 @@ const createModule=():LibraryModuleContract=>{
     let libraryFilterOptionsSignature:string|null=null;
     let libraryRenderFrame=0;
     let libraryRenderToken=0;
+    let libraryDayRequestToken=0;
     let libraryRenderedRevision=-1;
     let libraryRenderedFilterSignature='';
     let libraryRenderedVisibleLimit=0;
@@ -1419,7 +1420,9 @@ const createModule=():LibraryModuleContract=>{
       const box=document.getElementById('library-detail');
       if(box)box.replaceChildren(emptyMsg(message));
     }
+    function invalidateLibraryDayRequest(){libraryDayRequestToken+=1;return libraryDayRequestToken;}
     function closeLibraryDayDetail(){
+      invalidateLibraryDayRequest();
       setLibrarySelectedDate(null);
       renderLibraryEmptyDetail();
     }
@@ -1476,9 +1479,16 @@ const createModule=():LibraryModuleContract=>{
         renderLibraryEmptyDetail();
       }
       if(selectedLibraryDate&&previousRenderedRevision!==librarySummaryRevision){
-        const selected=await getDailyRecord(selectedLibraryDate).catch(()=>null);
+        const selectedDate=selectedLibraryDate,dayRequest=libraryDayRequestToken;
+        let selected:LibraryDay|null=null;
+        try{selected=await getDailyRecord(selectedDate);}
+        catch(error){
+          if(token===libraryRenderToken&&dayRequest===libraryDayRequestToken&&selectedLibraryDate===selectedDate){
+            setStatus('library-status','Could not refresh '+prettyDate(selectedDate)+': '+errorMessage(error),false);
+          }
+        }
         if(token!==libraryRenderToken)return false;
-        if(selected)renderLibraryDayDetail(selected);
+        if(dayRequest===libraryDayRequestToken&&selectedLibraryDate===selectedDate&&selected)renderLibraryDayDetail(selected);
       }
       if(!filtered.length){
         const more=document.getElementById('library-more');if(more)more.hidden=true;
@@ -1508,7 +1518,7 @@ const createModule=():LibraryModuleContract=>{
       await renderLibrary({restoreScroll:!!(options&&options.restoreScroll)});
       return false;
     }
-    function deactivateLibrary(options:Readonly<{diarySettled?:boolean}>={}){libraryActive=false;captureLibraryScroll();pendingNote=null;clearNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
+    function deactivateLibrary(options:Readonly<{diarySettled?:boolean}>={}){libraryActive=false;invalidateLibraryDayRequest();captureLibraryScroll();pendingNote=null;clearNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
     function loadMoreLibrary(){
       libraryVisibleLimit+=LIBRARY_PAGE_SIZE;
       libraryPreserveLimitOnce=true;
@@ -1602,13 +1612,23 @@ const createModule=():LibraryModuleContract=>{
       ].filter(Boolean));
     }
     async function openLibraryDayDetail(date:unknown):Promise<boolean>{
-      if(!document.getElementById('pane-library')?.classList.contains('on')&&!await goTab('library',{source:'library-day'}))return false;
-      const r=await getDailyRecord(date);
-      if(!r){
-        setStatus('library-status','Could not load saved record for '+date+'.',false);
+      const target=String(date||'');
+      if(!isValidIsoDate(target)){setStatus('library-status','Invalid saved-day date.',false);return false;}
+      const request=++libraryDayRequestToken;
+      if(!document.getElementById('pane-library')?.classList.contains('on')){
+        if(!await goTab('library',{source:'library-day'})||request!==libraryDayRequestToken)return false;
+      }
+      let record:LibraryDay|null=null;
+      try{record=await getDailyRecord(target);}
+      catch(error){
+        if(request===libraryDayRequestToken&&document.getElementById('pane-library')?.classList.contains('on')){
+          setStatus('library-status','Could not load saved record for '+target+': '+errorMessage(error),false);
+        }
         return false;
       }
-      renderLibraryDayDetail(r);
+      if(request!==libraryDayRequestToken||!document.getElementById('pane-library')?.classList.contains('on'))return false;
+      if(!record){setStatus('library-status','Could not load saved record for '+target+'.',false);return false;}
+      renderLibraryDayDetail(record);
       return true;
     }
     function libraryMutationBlocked(action:string,options:Readonly<{activeSession?:boolean}>={}){
@@ -1632,6 +1652,7 @@ const createModule=():LibraryModuleContract=>{
         confirmLabel:'Delete saved day',cancelLabel:'Keep saved day'
       });
       if(!accepted||libraryMutationBlocked('deleting a saved day'))return;
+      invalidateLibraryDayRequest();
       const notice=notifications.begin({id:'library-day-delete',surfaceId:'library-status',title:'Delete saved day',message:'Deleting '+date+'…'});
       let deleted=false;
       try{
@@ -1762,6 +1783,7 @@ const createModule=():LibraryModuleContract=>{
         if(libraryMutationBlocked('clearing Library data',{activeSession:true})){setStatus('library-status','Clear Library cancelled.',false);return;}
         if(!await requestClearLibraryConfirmation(choice,counts)){setStatus('library-status','Clear Library cancelled.',true,'cancelled');return;}
         if(libraryMutationBlocked('clearing Library data',{activeSession:true})){setStatus('library-status','Clear Library cancelled.',false);return;}
+        if(selection.savedDays)invalidateLibraryDayRequest();
         const notice=notifications.begin({id:'library-clear',surfaceId:'library-status',title:'Clear Library',message:'Clearing selected Library data…'});
         let cleared=false;
         try{
