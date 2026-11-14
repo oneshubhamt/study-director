@@ -49,11 +49,14 @@ const asyncBlocked=LifecycleModule.createCoordinator(Object.freeze({hooks:Object
   flushPending:async()=>{asyncBlockedEvents.push('flush');await Promise.resolve();throw new Error('pending async reflection flush failed');},
   prepare:()=>asyncBlockedEvents.push('prepare'),reconcile:()=>asyncBlockedEvents.push('reconcile'),complete:()=>asyncBlockedEvents.push('complete'),capture:()=>false
 })}));
+asyncBlocked.reconcile('initial-review',{date:'2026-08-04'});
+const readyRevision=asyncBlocked.revision;asyncBlockedEvents.length=0;
+assert.equal(asyncBlocked.canWrite(),true);
 await assert.rejects(asyncBlocked.run('date-change',{},()=>{asyncOperationCalled=true;return true;}),/pending async reflection flush failed/);
 assert.equal(asyncOperationCalled,false);
-assert.equal(asyncBlocked.revision,0);
+assert.equal(asyncBlocked.revision,readyRevision,'a rejected pre-transition flush never starts a new lifecycle revision');
 assert.equal(asyncBlocked.transitioning,false);
-assert.equal(asyncBlocked.canWrite(),false);
+assert.equal(asyncBlocked.canWrite(),true,'a rejected pre-transition flush preserves the valid prior lifecycle state');
 assert.deepEqual(asyncBlockedEvents,['flush']);
 
 const syncResult=coordinator.runSync('schedule-replacement',{scheduleIdentity:true},ctx=>{
