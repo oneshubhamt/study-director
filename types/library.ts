@@ -1,5 +1,6 @@
 import type {AppData} from './data-bootstrap-host.ts';
 import type {InteractionOptions,InteractionInputValue} from './interactions.ts';
+import type {NotificationInput} from './notifications.ts';
 import type {LibraryPlan,LibrarySelection} from './library-clear.ts';
 import type {NoteLinkBar,NoteLinkBarOptions,NoteTag} from './note-links.ts';
 import type {LibraryNoteWorkflows,NoteAreaIdentity,NoteCatalogueEntry,NotesRepository,NotesRuntime,NoteView} from './notes-host.ts';
@@ -7,10 +8,12 @@ import type {Task} from './domain.ts';
 import type {PracticeRun} from './record-models.ts';
 import type {DiaryEditor,DiaryDraft,SavedDayRecord} from './review-persistence.ts';
 import type {ReviewRecordViewTask,SharedReviewPresentation} from './review.ts';
+import type {DailyView,SummaryView} from './repositories.ts';
 
 type DailyRecords=AppData['dailyRecords'];
-export type LibraryDay=NonNullable<Awaited<ReturnType<DailyRecords['get']>>>;
-export type LibrarySummary=Awaited<ReturnType<DailyRecords['sortedSummaries']>>[number];
+export type LibraryDay=DailyView;
+export type LibrarySummary=SummaryView;
+export type LibraryDiaryRecord=LibraryDay|DiaryDraft;
 export type LibraryPreparedSummary=LibrarySummary&Readonly<{libraryView:Readonly<{dateLabel:string;outcomeText:string;searchText:string}>}>;
 export type LibrarySection='notes'|'days'|'data';
 export type LibrarySavedView=Readonly<{section?:LibrarySection;diary?:boolean;sort?:'name'|'recent';listWidth?:number}>;
@@ -19,7 +22,7 @@ export type LibraryNoteTrashItem=ReturnType<NotesRepository['trashSnapshot']>[nu
 export type NoteDestination=Readonly<{key:string;label:string;hasNote:boolean;pending:boolean}>;
 export type LibraryExportResult=Readonly<{status:string;kind?:string;notes?:number;assets?:number;missing?:number;maxBytes?:number}>;
 export type NoteVersionsResult=Readonly<{reason?:string;opened?:boolean}>;
-export type LibraryNotice=Readonly<{finish(outcome:'succeeded'|'failed'|'cancelled',message:string):unknown}>;
+export type LibraryNotice=Readonly<{finish(outcome:'succeeded'|'failed'|'cancelled',message:string,patch?:NotificationInput):unknown}>;
 export type LibraryClearResult=Readonly<{selection:LibrarySelection;savedDays:number;notes:number;attachmentsRemoved:number;attachmentsProtected:number;sweepPending:boolean}>;
 export type ClearChoice=Readonly<{selection:LibrarySelection;plan:LibraryPlan;forceReferenced:boolean}>;
 export type AttachmentReferenceSource=Readonly<{kind?:string;key?:string}>;
@@ -30,7 +33,7 @@ export type LibraryNotePort=Readonly<{
   areaUse:LibraryNoteWorkflows['areaUse'];
   bindEditor:NotesRuntime['bindAreaEditor'];canCreate:NotesRuntime['canCreate'];catalogue:NotesRuntime['catalogue'];clearEditor:NotesRuntime['clearEditor'];
   clearFind(field:HTMLTextAreaElement):unknown;commitEditor:NotesRuntime['commitEditor'];
-  find(field:HTMLTextAreaElement,query:string,onClear?:()=>unknown):NoteSearchMatch;
+  find(field:HTMLTextAreaElement,query:string,onClear?:()=>unknown):PromiseLike<number>;
   findStep(field:HTMLTextAreaElement,direction:number):NoteSearchMatch;
   focusEditor(field:HTMLTextAreaElement):unknown;
   get(ref:unknown,label?:string):NoteView|null;
@@ -43,17 +46,25 @@ export type LibraryNotePort=Readonly<{
   trash:LibraryNoteWorkflows['trash'];trashSnapshot():readonly LibraryNoteTrashItem[];
   versions(target:Readonly<{id:string;label:string;text:string;onRestored(value:Readonly<{exportedAt?:unknown}>):unknown}>):PromiseLike<NoteVersionsResult>|NoteVersionsResult;
 }>;
-export type LibraryDiaryPort=Readonly<Pick<DiaryEditor,'bind'|'capture'|'clear'|'deleteEntry'|'draft'|'flush'|'schedule'|'settled'>>;
+export type LibraryDiaryPort=Readonly<{
+  bindEditor:DiaryEditor['bind'];captureEditor:DiaryEditor['capture'];clearEditor:DiaryEditor['clear'];deleteEntry:DiaryEditor['deleteEntry'];draft:DiaryEditor['draft'];
+  flushEditor:DiaryEditor['flush'];scheduleEditor:DiaryEditor['schedule'];settled:DiaryEditor['settled'];
+}>;
 export interface LibraryInput{
   readonly ports:Readonly<{
-    notifications:Readonly<{begin(input:Readonly<Record<string,unknown>>):LibraryNotice;feedback(input:Readonly<Record<string,unknown>>):unknown}>;
-    records:Readonly<Pick<DailyRecords,'get'|'remove'|'sortedSummaries'>>;
+    notifications:Readonly<{begin(input:NotificationInput):LibraryNotice;feedback(input:NotificationInput):unknown}>;
+    records:Readonly<{
+      get(date:string):PromiseLike<LibraryDay|null>|LibraryDay|null;
+      remove(date:string):PromiseLike<unknown>|unknown;
+      sortedSummaries():PromiseLike<readonly LibrarySummary[]>|readonly LibrarySummary[];
+    }>;
     domain:Readonly<{
       countTaskOutcomes(tasks:readonly ReviewRecordViewTask[]):unknown;
       earliestSupportedSavedDate():string;isTrackableBlock(task:Task|undefined):boolean;isValidIsoDate(value:unknown):boolean;isSupportedSavedDate(value:string):boolean;todayISO():string;
       sanitizePracticeRuns(value:unknown):readonly PracticeRun[];sanitizeTaskOutcomeCounts(value:unknown):unknown;taskOutcomeSummaryText(value:unknown,options?:Readonly<{includeZero?:boolean}>):string;
     }>;
-    presentation:Readonly<Pick<SharedReviewPresentation,'createSavedDayTaskCard'|'createPomodoroSummaryLine'|'populatePracticeRunTable'|'optionalDurationLabel'|'optionalPercentLabel'>&{
+    presentation:Readonly<Pick<SharedReviewPresentation,'createPomodoroSummaryLine'|'populatePracticeRunTable'|'optionalDurationLabel'|'optionalPercentLabel'>&{
+      createSavedDayTaskReviewCard:SharedReviewPresentation['createSavedDayTaskCard'];
       emptyMsg(message:string):HTMLElement;optionalHoursLabel(value:unknown):string;prettyDate(date:string):string;
       renderRichTextContent(container:HTMLElement,value:unknown,emptyText:string,label:string):unknown;
       textEl<K extends keyof HTMLElementTagNameMap>(tag:K,className:string,text?:unknown):HTMLElementTagNameMap[K];
