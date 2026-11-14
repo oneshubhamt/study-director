@@ -73,6 +73,7 @@
     "source/core/integrity-continuation.ts",
     "source/core/library-clear.ts",
     "source/core/managed-recovery.ts",
+    "source/core/notes-host.ts",
     "source/core/managed-repository.ts",
     "source/core/mutation-coordinator.ts",
     "source/core/operation-lifecycle.ts",
@@ -125,6 +126,7 @@
     "types/module-registration.ts",
     "types/mutation-coordinator.ts",
     "types/notes-repository.ts",
+    "types/notes-host.ts",
     "types/ownership.ts",
     "types/persistence.ts",
     "types/pilot.ts",
@@ -196,6 +198,7 @@
     "types/checks/session-host.ts",
     "types/checks/session-handoff.ts",
     "types/checks/plan-host.ts",
+    "types/checks/notes-host.ts",
     "types/checks/review-persistence.ts",
     "types/checks/review-host.ts",
     "types/checks/plan.ts"
