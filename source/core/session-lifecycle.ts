@@ -57,7 +57,6 @@ registry.define('session-lifecycle',1,()=>{
     function beginSync(kind:unknown,options:SessionOptions={}){
       requireIdle();
       const normalized=normalizedOptions(options),name=normalizedKind(kind);
-      ready=false;
       const pending=hooks.flushPending(name,normalized);
       if(pending&&typeof (pending as {then?:unknown}).then==='function'){
         void Promise.resolve(pending).catch(error=>hooks.capture('session-lifecycle.sync-flush-rejected',error,'error'));
@@ -68,7 +67,6 @@ registry.define('session-lifecycle',1,()=>{
     async function begin(kind:unknown,options:SessionOptions={}){
       requireIdle();
       const normalized=normalizedOptions(options),name=normalizedKind(kind),token=++flushToken;
-      ready=false;
       const ticket=freeze({token,kind:name});pendingFlush=ticket;
       try{await hooks.flushPending(name,normalized);}
       finally{if(pendingFlush===ticket)pendingFlush=null;}
