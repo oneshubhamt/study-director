@@ -65,7 +65,7 @@ try{
   const filled=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),nextRender=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
     const row=[...document.querySelectorAll('[data-note-key]')].find(item=>item.dataset.noteKey==='zeta filled');row.click();await wait(30);
-    const field=document.querySelector('#library-notes-editor .library-notes-textarea');field.value='Durable Zeta note';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();
+    const field=document.querySelector('#library-notes-editor .library-notes-textarea');field.value='Durable Zeta note';field.dispatchEvent(new Event('input',{bubbles:true}));await d.AppData.notes.flush();console.error('[qa-p56-save]',JSON.stringify({stored:d.AppData.notes.get('zeta filled')?.text||'',binding:{...field.dataset}}));
     __PWA6.LibraryView.showSection('days');await wait(30);__PWA6.LibraryView.showSection('notes');await wait(60);
     let rows=[...document.querySelectorAll('[data-note-key]')];
     const search=document.getElementById('library-notes-search');search.value='Durable Zeta note';search.dispatchEvent(new Event('input',{bubbles:true}));for(let i=0;i<100&&document.querySelectorAll('[data-note-key]').length!==1;i++)await wait(20);
