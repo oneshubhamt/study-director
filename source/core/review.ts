@@ -4,7 +4,7 @@ import type {
   ReviewHydrateOptions,ReviewSaveOptions,ReviewReflectionBinding,ReviewReflectionPending,ReviewEvidence,ReviewMetrics,ReviewTaskRow,ReviewTaskHeaderInput,
   ReviewTimingRowInput,ReviewProgressLineInput,ReviewCardModel,ReviewCardView,ReviewPracticeRunSummary,PracticeUnitSummary,PracticeSegmentSummary,
   ReviewPracticeAggregate,ReviewPrepared,ReviewRenderOptions,ReviewUiState,ReviewFocusLocator,ReviewReportContext,ReviewReportChild,ReviewReportSection,
-  ReviewRecordViewTask,ReviewReportSelectorContext,ReviewPomodoroSummary,TaskWithPauses,ReviewProjectedStudyRecord,ReviewQuality
+  ReviewRecordViewTask,SavedDayPresentationTask,PracticeTaskRef,ReviewReportSelectorContext,ReviewPomodoroSummary,TaskWithPauses,ReviewProjectedStudyRecord,ReviewQuality
 } from '../../types/review.ts';
 import type {CompletionSource,Task,TaskOutcome} from '../../types/domain.ts';
 import type {DailyRecord,DailyResult,PauseEvent,PracticeRun} from '../../types/record-models.ts';
@@ -910,7 +910,7 @@ function createStaticProgressLine({done,total,measure,suffixNoTotal=' done · no
   return sm;
 }
 function minutesFromSeconds(seconds:unknown){return Math.round(Math.max(0,Number(seconds)||0)/60);}
-function pomodoroSummaryFromTasks(tasks:readonly (ReviewRecordViewTask|TaskWithPauses)[]):ReviewPomodoroSummary{
+function pomodoroSummaryFromTasks(tasks:readonly (SavedDayPresentationTask|TaskWithPauses)[]):ReviewPomodoroSummary{
   const summary={breaks:0,recoverySeconds:0,overrunSeconds:0,actualSeconds:0,excludedUnknown:0};
   tasks.forEach(task=>{
     if(!isWorkBlock(task))return;
@@ -947,13 +947,13 @@ function updateReviewPomodoroLine(record:Readonly<{tasks:readonly ReviewRecordVi
   if(!el)return;
   el.textContent=pomodoroSummaryText(record?pomodoroSummaryFromTasks(record.tasks||[]):currentPomodoroSummary());
 }
-function createPomodoroSummaryLine(tasks:readonly (ReviewRecordViewTask|TaskWithPauses)[]){
+function createPomodoroSummaryLine(tasks:readonly (SavedDayPresentationTask|TaskWithPauses)[]){
   const line=document.createElement('div');
   line.className='review-flow-note ui-helper';
   line.textContent=pomodoroSummaryText(pomodoroSummaryFromTasks(tasks||[]));
   return line;
 }
-function createSavedDayTaskReviewCard(task:ReviewRecordViewTask){
+function createSavedDayTaskReviewCard(task:SavedDayPresentationTask){
   const pct=task&&task.completion!==null&&task.completion!==undefined&&Number.isFinite(Number(task.completion))
     ? Math.max(0,Math.min(100,Math.round(Number(task.completion)))):null;
   const measure=taskMeasureValue(task,'units');
@@ -1158,7 +1158,7 @@ function practiceVarianceClass(value:unknown){
   const ms=Math.round(Number(value)||0);
   return ms>999?'behind':ms<-999?'ahead':'';
 }
-function practiceTaskName(taskId:unknown,tasks:readonly Task[]=TASKS){
+function practiceTaskName(taskId:unknown,tasks:readonly PracticeTaskRef[]=TASKS){
   const id=String(taskId||'');
   const task=tasks.find(row=>String(row.id||'')===id);
   return clampText(task&&task.name||'',APP_LIMITS.maxTaskNameChars);
@@ -1233,7 +1233,7 @@ function createPracticeRunDetail(run:ReviewPracticeRunSummary,{allowDelete=false
   }
   return detail;
 }
-function createPracticeRunEntry(run:ReviewPracticeRunSummary,tasks:readonly Task[],options:Readonly<{allowDelete?:boolean}>={}){
+function createPracticeRunEntry(run:ReviewPracticeRunSummary,tasks:readonly PracticeTaskRef[],options:Readonly<{allowDelete?:boolean}>={}){
   const entry=textEl('details','practice-run-entry');
   const summary=textEl('summary','practice-run-summary');
   const taskName=practiceTaskName(run.run.taskId,tasks);
@@ -1255,7 +1255,7 @@ function createPracticeRunEntry(run:ReviewPracticeRunSummary,tasks:readonly Task
   });
   return entry;
 }
-function populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],{tasks=TASKS,includeActiveNote=false,normalized=false,allowDelete=false}:Readonly<{tasks?:readonly Task[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>={}):ReviewPracticeAggregate|null{
+function populatePracticeRunTable(root:HTMLElement|null,runs:readonly PracticeRun[],{tasks=TASKS,includeActiveNote=false,normalized=false,allowDelete=false}:Readonly<{tasks?:readonly PracticeTaskRef[];includeActiveNote?:boolean;normalized?:boolean;allowDelete?:boolean}>={}):ReviewPracticeAggregate|null{
   if(!root)return null;
   const cleanRuns=normalized?runs:sanitizePracticeRuns(runs);
   const summary=summarizeCleanPracticeRuns(cleanRuns),table=root.querySelector<HTMLElement>('.practice-run-table')||root;
