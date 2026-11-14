@@ -82,7 +82,10 @@ const createModule=():NoteLinksModuleContract=>{
     function tags():readonly NoteTag[]{return tagState().list;}
     function tagged(names:readonly string[]):Set<string>{
       const byTag=tagState().byTag;let keys:Set<string>|null=null;
-      for(const name of names){const having=byTag.get(name)||new Set<string>();keys=keys?new Set([...keys].filter(key=>having.has(key))):new Set(having);}
+      for(const name of names){
+        const having=byTag.get(name)||new Set<string>();
+        keys=keys===null?new Set<string>(having):new Set<string>([...keys].filter((key:string)=>having.has(key)));
+      }
       return keys||new Set<string>();
     }
     const tagRows=(query:string):readonly PickerRow[]=>{
