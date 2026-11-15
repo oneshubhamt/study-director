@@ -17,7 +17,7 @@ const createModule=()=>{
   const freeze=Object.freeze;
   function activeSessionIssue(loaded:SessionResult|null|undefined){
     if(!loaded)return 'Saved session state could not be verified.';
-    if(loaded.error)return `Saved session recovery could not be verified: ${loaded.error.message||loaded.error}`;
+    if(loaded.error){const row=loaded.error&&typeof loaded.error==='object'?loaded.error as {message?:unknown}:null;return `Saved session recovery could not be verified: ${String(row?.message||loaded.error)}`;}
     if(loaded.value&&loaded.storage?.idb!==true)return 'The stored recovery session has not yet been confirmed in canonical browser storage.';
     return '';
   }
