@@ -224,6 +224,7 @@
     "types/checks/p5-6c.ts",
     "types/checks/backup-actions-host.ts",
     "types/checks/p5-7b.ts",
+    "types/checks/p5-7c.ts",
     "types/checks/review-persistence.ts",
     "types/checks/review-host.ts",
     "types/checks/plan.ts"
