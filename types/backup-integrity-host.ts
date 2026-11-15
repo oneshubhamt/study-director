@@ -29,7 +29,10 @@ export interface IntegrityContinuationPort{
 }
 export interface BackupIntegrityInput{
   readonly lifecycle:LifecycleModule;
-  readonly meta:MetaOwner;
+  readonly metadata:Readonly<{
+    attachment:Pick<MetaOwner,'owner'|'read'|'write'>;
+    repository:Pick<MetaOwner,'owner'|'read'|'transaction'>;
+  }>;
   readonly attachmentMetadataName:string;
   readonly repositoryMetadataName:string;
   readonly storage:Pick<AssetStore,'supported'|'shallowAudit'>;

@@ -9,6 +9,7 @@ import type {RepositoriesInput} from '../repositories.ts';
 import type {BackgroundMaintenanceInput,RepositoryMaintenanceController} from '../backup-maintenance-host.ts';
 import type {BackupIntegrityController,BackupIntegrityInput} from '../backup-integrity-host.ts';
 import type {CanonicalCommitController} from '../backup-readiness-host.ts';
+import type {MetadataOwners} from '../data-bootstrap-host.ts';
 
 type BackupRuntime=ReturnType<BackupModule['createRuntime']>;
 type AppData=ReturnType<RepositoriesModule['createAppData']>;
@@ -22,6 +23,7 @@ declare const integrity:BackupIntegrityController;
 declare const storage:AssetStore;
 declare const references:References;
 declare const canonical:CanonicalCommitController;
+declare const metadataOwners:MetadataOwners;
 declare const canonicalEvent:Parameters<RepositoriesInput['hooks']['onCanonicalCommit']>[0];
 
 runtime.providers.configureRepositoryMaintenance(repositoryMaintenance.hooks);
@@ -37,10 +39,11 @@ const providerForeground=runtime.providers satisfies BackgroundMaintenanceInput[
 const controllerForeground=runtime.controller satisfies BackgroundMaintenanceInput['foreground']['backupController'];
 void providerForeground;void controllerForeground;
 
+const integrityMetadata=Object.freeze({attachment:metadataOwners.HostAppMeta,repository:metadataOwners.BackupAppMeta}) satisfies BackupIntegrityInput['metadata'];
 const integrityStorage=storage satisfies BackupIntegrityInput['storage'];
 const integrityReferences=references satisfies BackupIntegrityInput['references'];
 const integrityProvider=runtime.providers satisfies BackupIntegrityInput['provider'];
-void integrityStorage;void integrityReferences;void integrityProvider;
+void integrityMetadata;void integrityStorage;void integrityReferences;void integrityProvider;
 
 canonical.handle(canonicalEvent);
 

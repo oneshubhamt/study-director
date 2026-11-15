@@ -31,10 +31,9 @@ async function fixture(){
   let durable={version:2,checkedAt:'',attemptedAt:'',lastOutcome:'yielded',issues:[{id,kind:'missing-file'}],progress:null};const scheduled=[],warnings=[];
   const controller=IntegrityHost.createController(Object.freeze({
     lifecycle:registry.require('operation-lifecycle',1),
-    meta:Object.freeze({
-      read:async()=>durable,
-      write:async(_key,state,options)=>{assert.equal(options.strict,true);durable=state;writes++;return {family:'integrity',value:state,updatedAt:new clock.Date().toISOString()};},
-      transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}
+    metadata:Object.freeze({
+      attachment:Object.freeze({owner:'host',read:async()=>durable,write:async(_key,state,options)=>{assert.equal(options.strict,true);durable=state;writes++;return {family:'integrity',value:state,updatedAt:new clock.Date().toISOString()};}}),
+      repository:Object.freeze({owner:'backup',read:async()=>{throw new Error('repository integrity path is not used by this attachment witness');},transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}})
     }),
     attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',storage:store,references,validAttachmentId:Attachments.validId,
     data:Object.freeze({datasetRevision:()=>data.dailyRecords.datasetRevision()}),referenceRevision:()=>0,authority:Object.freeze({canMutate:()=>true}),

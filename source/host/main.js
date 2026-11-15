@@ -4169,7 +4169,7 @@ if(!Object.isFrozen(BackupRecoveryHost)||BackupRecoveryHost.format!=='study-dire
 
 const RepositoryIntegrityContinuation=IntegrityContinuationModule.create({files:BackupFiles,processing:Exports,protection:BackupProtection,yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})});
 BackupIntegrity=BackupIntegrityHostModule.createController(Object.freeze({
-  lifecycle:OperationLifecycle,meta:BackupAppMeta,attachmentMetadataName:'attachmentIntegrityAudit',repositoryMetadataName:'repositoryIntegrityScrub',
+  lifecycle:OperationLifecycle,metadata:Object.freeze({attachment:HostAppMeta,repository:BackupAppMeta}),attachmentMetadataName:'attachmentIntegrityAudit',repositoryMetadataName:'repositoryIntegrityScrub',
   storage:AttachmentStorage,references:AttachmentReferences,validAttachmentId:AttachmentsModule.validId,
   data:Object.freeze({datasetRevision:()=>AppData.dailyRecords.datasetRevision()}),referenceRevision:()=>richAssetReferenceRevision,
   authority:Object.freeze({canMutate:()=>appCanMutate()}),

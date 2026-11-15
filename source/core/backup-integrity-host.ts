@@ -71,7 +71,9 @@ function projectRepositoryResult(current:RepositoryIntegrityTarget,result:Integr
 }
 
 function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupIntegrityController>{
-  const {lifecycle,meta,storage,references,provider,backgroundTasks,diagnostics,environment,limits}=input;
+  const {lifecycle,metadata,storage,references,provider,backgroundTasks,diagnostics,environment,limits}=input;
+  if(metadata.attachment.owner!=='host')throw new TypeError(`Attachment integrity metadata is owned by host, not ${metadata.attachment.owner||'unknown'}.`);
+  if(metadata.repository.owner!=='backup')throw new TypeError(`Repository integrity metadata is owned by backup, not ${metadata.repository.owner||'unknown'}.`);
   let attachmentView:ReturnType<typeof normalizeAttachmentState>|null=null,repositoryView:RepositoryIntegrityState|null=null,repositoryWriteChain=Promise.resolve();
   let attachmentIssues=new Map<string,AssetIssue>();
   const boundScopes:Record<string,string>=Object.create(null) as Record<string,string>,live:Record<string,{done:number;total:number}>=Object.create(null) as Record<string,{done:number;total:number}>,recheckAsked:Record<string,boolean>=Object.create(null) as Record<string,boolean>,rowError:Record<string,string>=Object.create(null) as Record<string,string>;
@@ -115,7 +117,7 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
   async function runAttachment({trigger,nextEligibleAt}:{trigger:string;nextEligibleAt:string}):Promise<AttachmentJobResult>{
     let traceId='',prior:ReturnType<typeof normalizeAttachmentState>|null=null;
     try{
-      prior=normalizeAttachmentState(await meta.read(input.attachmentMetadataName),input.validAttachmentId);
+      prior=normalizeAttachmentState(await metadata.attachment.read(input.attachmentMetadataName),input.validAttachmentId);
       if(!storage.supported()){applyAttachment(prior);return freeze({status:'skipped',reason:'storage-unavailable'});}
       const last=Date.parse(prior.checkedAt||''),now=environment.now();
       if(!prior.progress&&Number.isFinite(last)&&now-last<limits.attachmentIntervalMs){applyAttachment(prior);scheduleAttachment(limits.attachmentIntervalMs-(now-last)+1000);return freeze({status:'skipped',reason:'not-due'});}
@@ -129,10 +131,10 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
       const audit=await storage.shallowAudit([...refs].filter(input.validAttachmentId),{progress:prior.progress,workMs:5000,maxEntries:128,shouldYield:backgroundTasks.budget(),yieldTask:()=>backgroundTasks.yieldTask({priority:'background'}),check});
       check();if(revision!==input.referenceRevision()||dataset!==await input.data.datasetRevision())throw deferred();
       const complete=audit.complete!==false,state=normalizeAttachmentState({...prior,checkedAt:complete?environment.nowIso():prior.checkedAt,attemptedAt:environment.nowIso(),lastOutcome:complete?'completed':'yielded',progress:complete?null:audit.progress,issues:complete?audit.issues:prior.issues},input.validAttachmentId);
-      await meta.write(input.attachmentMetadataName,state,{strict:true});applyAttachment(state);scheduleAttachment(complete?limits.attachmentIntervalMs:2000,complete?'interval':'continue');diagnostics.finish(freeze({status:complete?'completed':'yielded',checked:Number(audit.checked)||0,issues:state.issues.length}),traceId);return freeze({status:complete?'completed':'yielded',reason:'',checked:Number(audit.checked)||0,issues:state.issues.length});
+      await metadata.attachment.write(input.attachmentMetadataName,state,{strict:true});applyAttachment(state);scheduleAttachment(complete?limits.attachmentIntervalMs:2000,complete?'interval':'continue');diagnostics.finish(freeze({status:complete?'completed':'yielded',checked:Number(audit.checked)||0,issues:state.issues.length}),traceId);return freeze({status:complete?'completed':'yielded',reason:'',checked:Number(audit.checked)||0,issues:state.issues.length});
     }catch(caught){
       let error=caught as Error&{code?:string;attachmentAuditProgress?:unknown};
-      if(error.attachmentAuditProgress&&prior&&input.authority.canMutate())try{const state=normalizeAttachmentState({...prior,progress:error.attachmentAuditProgress,attemptedAt:environment.nowIso(),lastOutcome:'yielded'},input.validAttachmentId);await meta.write(input.attachmentMetadataName,state,{strict:true});applyAttachment(state);}catch(writeError){error=writeError as Error&{code?:string};}
+      if(error.attachmentAuditProgress&&prior&&input.authority.canMutate())try{const state=normalizeAttachmentState({...prior,progress:error.attachmentAuditProgress,attemptedAt:environment.nowIso(),lastOutcome:'yielded'},input.validAttachmentId);await metadata.attachment.write(input.attachmentMetadataName,state,{strict:true});applyAttachment(state);}catch(writeError){error=writeError as Error&{code?:string};}
       if(error.code==='ATTACHMENT_INTEGRITY_NOT_PRIMARY'){if(traceId)diagnostics.finish(freeze({status:'skipped',reason:'not-primary'}),traceId);return freeze({status:'skipped',reason:'not-primary'});}
       if(error.code==='ATTACHMENT_INTEGRITY_DEFERRED'){if(traceId)diagnostics.finish(freeze({status:'skipped',reason:'deferred'}),traceId);scheduleAttachment(input.background.foregroundBusy()?0:limits.attachmentRetryMs,'deferred');return freeze({status:'skipped',reason:'deferred'});}
       attachmentView=normalizeAttachmentState({...prior||attachmentView||{},attemptedAt:environment.nowIso(),lastOutcome:'unavailable'},input.validAttachmentId);render();if(traceId)diagnostics.fail(error,freeze({background:true,status:'unavailable'}),traceId);diagnostics.capture('attachments.integrity-audit',error,'warn');input.storageHealth.markError('attachmentIntegrity','Attachment verification is unavailable. Previous findings are retained; Study Director will retry.',{level:'warn'});scheduleAttachment(30*60*1000,'error');return freeze({status:'unavailable',reason:error.message||String(error)});
@@ -140,13 +142,13 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
   }
   const attachmentJob=lifecycle.createJob<AttachmentJobResult>({environment:{now:environment.now,setTimeout:environment.setTimeout,clearTimeout:environment.clearTimeout},minDelayMs:1000,retryMs:30*60*1000,isAvailable:()=>input.background.upkeepBlocker()||(storage.supported()?true:'storage-unavailable'),capture:error=>diagnostics.capture('attachments.integrity-lifecycle',error,'warn'),execute:runAttachment});
   async function installAttachment(){
-    let state;try{state=normalizeAttachmentState(await meta.read(input.attachmentMetadataName),input.validAttachmentId);}
+    let state;try{state=normalizeAttachmentState(await metadata.attachment.read(input.attachmentMetadataName),input.validAttachmentId);}
     catch(error){diagnostics.capture('attachments.integrity-state-read',error,'warn');input.storageHealth.markError('attachmentIntegrity','Attachment verification state is unavailable. Study Director will retry.',{level:'warn'});scheduleAttachment(30*60*1000,'state-read-failed');return null;}
     applyAttachment(state);if(!storage.supported())return state;const last=Date.parse(state.checkedAt||''),age=Number.isFinite(last)?Math.max(0,environment.now()-last):limits.attachmentIntervalMs;scheduleAttachment(state.progress||age>=limits.attachmentIntervalMs?15000:limits.attachmentIntervalMs-age+1000);return state;
   }
 
   const changed=repositoryChanged;
-  async function readRepositoryState(){return normalizeRepositoryState(await meta.read(input.repositoryMetadataName),input.normalizeContinuation);}
+  async function readRepositoryState(){return normalizeRepositoryState(await metadata.repository.read(input.repositoryMetadataName),input.normalizeContinuation);}
   function applyRepository(state:RepositoryIntegrityState){
     repositoryView=state;render();const targets=Object.entries(state.locations).filter(([id,target])=>!!target.repositoryScope&&boundScopes[id]===target.repositoryScope).map(([,target])=>target);
     const quarantined=targets.some(target=>target.quarantinedObjectIds.length>0),failed=targets.some(target=>{const failure=Date.parse(target.failedAt),completed=Date.parse(target.completedAt);return Number.isFinite(failure)&&(!Number.isFinite(completed)||failure>=completed);});
@@ -156,7 +158,7 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
   }
   function mutateTarget(target:string,change:(current:RepositoryIntegrityTarget)=>unknown):Promise<RepositoryIntegrityTarget>{
     if(!LOCATION.test(String(target||'')))return Promise.reject(new Error('Unknown backup location.'));
-    const task=repositoryWriteChain.catch(()=>{}).then(()=>meta.transaction<RepositoryIntegrityState>('readwrite',(view,tx,finish)=>{
+    const task=repositoryWriteChain.catch(()=>{}).then(()=>metadata.repository.transaction<RepositoryIntegrityState>('readwrite',(view,tx,finish)=>{
       const handle=view.get(input.repositoryMetadataName);let updated:RepositoryIntegrityState|undefined;
       handle.request.onerror=()=>finish(false,handle.request.error||new Error('Integrity metadata could not be read.'));
       handle.request.onsuccess=()=>{try{

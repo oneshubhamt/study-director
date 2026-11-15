@@ -105,16 +105,22 @@ for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts
 const integrityModules=integrityContext[Symbol.for('studyDirector.internalModules.v1')],
   integrityLifecycle=integrityModules.require('operation-lifecycle',1),
   integrityHost=integrityModules.require('backup-integrity-host',1);
+{
+  const clock=createFakeClock(),wrong={owner:'backup',read:async()=>null,write:async()=>({family:'integrity',value:null,updatedAt:new clock.Date().toISOString()})},repository={owner:'backup',read:async()=>null,transaction:async()=>{throw new Error('unused');}};
+  assert.throws(()=>integrityHost.createController(Object.freeze({
+    lifecycle:integrityLifecycle,metadata:Object.freeze({attachment:wrong,repository}),attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',
+    storage:Object.freeze({supported:()=>false,shallowAudit:async()=>({status:'completed',complete:true,checked:0,issues:[],progress:null})}),references:Object.freeze({sources:async()=>new Set()}),validAttachmentId:()=>true,
+    data:Object.freeze({datasetRevision:async()=>1}),referenceRevision:()=>0,authority:Object.freeze({canMutate:()=>true}),background:Object.freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),backgroundTasks:Object.freeze({yieldTask:async()=>{},budget:()=>()=>false}),
+    provider:Object.freeze({backgroundStatus:()=>[],locationStatus:()=>null,repositoryScope:async()=>'',requestIntegrity:()=>false}),continuation:Object.freeze({verify:async()=>{throw new Error('unused');}}),normalizeContinuation:()=>null,unsafe:Object.freeze({mutation:()=>false,attachmentIngest:()=>false}),storageHealth:Object.freeze({markError(){},markOk(){}}),invalidateAttachmentLibrary(){},diagnostics:Object.freeze({capture(){},start:()=>'',mark(){},finish(){},fail(){}}),document:{getElementById:()=>null,createElement:()=>({})},environment:Object.freeze({now:()=>clock.now(),nowIso:()=>new clock.Date().toISOString(),uuid:()=> '00000000-0000-0000-0000-000000000001',setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),limits:Object.freeze({attachmentIntervalMs:1,attachmentRetryMs:1,repositoryBatchObjects:1,repositoryBatchBytes:1})
+  })),/owned by host/,'attachment integrity must reject a backup-owned metadata capability instead of degrading into an unavailable warning');
+}
 for(const failure of ['read','write']){
   const clock=createFakeClock();let cleared=0,writes=0,failRead=false,failWrite=false;
   let persisted={version:2,checkedAt:'',attemptedAt:'',lastOutcome:'completed',progress:null,issues:[{id:'asset-good',kind:'size-mismatch'}]};
-  const meta={
-    read:async()=>{if(failRead)throw new Error('read unavailable');return persisted;},
-    write:async(_name,value,options)=>{writes++;assert.equal(options.strict,true);if(failWrite)throw new Error('write unavailable');persisted=value;return {family:'integrity',value,updatedAt:new clock.Date().toISOString()};},
-    transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}
-  };
+  const attachmentMeta={owner:'host',read:async()=>{if(failRead)throw new Error('read unavailable');return persisted;},write:async(_name,value,options)=>{writes++;assert.equal(options.strict,true);if(failWrite)throw new Error('write unavailable');persisted=value;return {family:'integrity',value,updatedAt:new clock.Date().toISOString()};}};
+  const repositoryMeta={owner:'backup',read:async()=>{throw new Error('repository integrity path is not used by this attachment witness');},transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}};
   const controller=integrityHost.createController(Object.freeze({
-    lifecycle:integrityLifecycle,meta,attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',
+    lifecycle:integrityLifecycle,metadata:Object.freeze({attachment:attachmentMeta,repository:repositoryMeta}),attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',
     storage:Object.freeze({supported:()=>true,shallowAudit:async()=>({status:'completed',complete:true,checked:1,issues:[],progress:null})}),
     references:Object.freeze({sources:async options=>{assert.equal(options.referencesOnly,true);return new Set(['asset-good']);}}),
     validAttachmentId:value=>/^asset-/.test(String(value||'')),
