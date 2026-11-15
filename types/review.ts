@@ -14,7 +14,7 @@ export interface ReviewSnapshot{readonly reflection:string;readonly studyQuality
 export interface ReviewStateInput{reflection?:unknown;studyQuality?:unknown}
 export interface ReviewRichInputMeta{readonly format:'study-director.rich-validated-input';readonly version:1;readonly canonical:string;readonly plain:string}
 export interface ReviewHydrateOptions{readonly date?:string;readonly snapshotReview?:ReviewStateInput|null}
-export interface ReviewSaveOptions{readonly event?:Event|null;readonly strict?:boolean;readonly markChanged?:boolean;readonly backupCapture?:boolean}
+export interface ReviewSaveOptions{readonly event?:Event|null;readonly strict?:boolean;readonly markChanged?:boolean;readonly backupCapture?:boolean;readonly allowDuringRecoveryQuiescence?:boolean}
 export type ReviewReflectionBinding=Pick<ReviewState,'date'|'reflection'>;
 export type ReviewReflectionPending=
   |Readonly<{mode:'session';date:string;reflection:string;backupCapture:boolean}>

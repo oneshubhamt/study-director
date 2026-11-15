@@ -373,7 +373,7 @@ async function flushPendingReviewSave(options:ReviewSaveOptions={}){
   // recovery checkpoint is synchronous, but readiness is published only after
   // the canonical write settles.
   if(reflectionLane.pending())reflectionLane.cancel();
-  const result=await flushLiveDraft({markChanged:false,backupCapture:options.backupCapture===true});
+  const result=await flushLiveDraft({markChanged:false,backupCapture:options.backupCapture===true,allowDuringRecoveryQuiescence:options.allowDuringRecoveryQuiescence===true});
   if(result===null){
     if(options.strict){
       const error=new Error('The pending Review could not be checkpointed before this transition.');

@@ -8,12 +8,13 @@ import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>readScript(path.join(ROOT,relative));
-for(const file of ['source/core/internal.ts','source/core/session-lifecycle.ts','source/core/session-actions.ts']){
+for(const file of ['source/core/internal.ts','source/core/session-lifecycle.ts','source/core/session-actions.ts','source/core/review-host.ts']){
   vm.runInThisContext(read(file),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const LifecycleModule=registry.require('session-lifecycle',1);
 const SessionActions=registry.require('session-actions',1);
+const ReviewHost=registry.require('review-host',1);
 assert.equal(LifecycleModule.format,'study-director.session-lifecycle');
 
 let mutable=true;
@@ -59,6 +60,26 @@ assert.equal(asyncBlocked.revision,readyRevision,'a rejected pre-transition flus
 assert.equal(asyncBlocked.transitioning,false);
 assert.equal(asyncBlocked.canWrite(),true,'a rejected pre-transition flush preserves the valid prior lifecycle state');
 assert.deepEqual(asyncBlockedEvents,['flush']);
+
+// Recovery-owned note lifecycle transitions may checkpoint the pending Review
+// through recovery quiescence; unrelated lifecycle transitions may not.
+{
+  const forwarded=[];
+  const reviewHooks=ReviewHost.createLifecycleHooks(Object.freeze({
+    canMutate:()=>true,
+    reviewEditor:Object.freeze({flushPending:options=>{forwarded.push(options);return true;}}),
+    lifecycleViews:Object.freeze({invalidateLifecycleEditors:()=>true,reconcileLifecycleEditors:()=>true,completeLifecycleTransition:()=>true}),
+    diagnostics:Object.freeze({capture:()=>null})
+  }));
+  await reviewHooks.flushPending('reconciled-notes',Object.freeze({allowDuringRecoveryQuiescence:true}));
+  await reviewHooks.flushPending('restored-notes-snapshot',Object.freeze({allowDuringRecoveryQuiescence:true}));
+  await reviewHooks.flushPending('date-change',Object.freeze({allowDuringRecoveryQuiescence:true}));
+  assert.deepEqual(forwarded,[
+    {strict:true,allowDuringRecoveryQuiescence:true},
+    {strict:true,allowDuringRecoveryQuiescence:true},
+    {strict:true,allowDuringRecoveryQuiescence:false}
+  ],'only recovery-owned note transitions may pierce managed-recovery session quiescence');
+}
 
 const syncResult=coordinator.runSync('schedule-replacement',{scheduleIdentity:true},ctx=>{
   assert.equal(coordinator.transitioning,true);

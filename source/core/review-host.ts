@@ -32,9 +32,10 @@ function createLifecycleHooks(input:Readonly<ReviewLifecycleHooksInput>):Readonl
   exactObject(input,['canMutate','reviewEditor','lifecycleViews','diagnostics'],'Review lifecycle provider input');
   if(!Object.isFrozen(input.reviewEditor)||!Object.isFrozen(input.lifecycleViews)||!Object.isFrozen(input.diagnostics))throw new TypeError('Review lifecycle providers must be frozen.');
   const {canMutate,reviewEditor,lifecycleViews,diagnostics}=input;
+  const recoveryFlushKinds=new Set(['reconciled-notes','restored-notes-snapshot']);
   return freeze({
     canMutate,
-    flushPending:()=>canMutate()?reviewEditor.flushPending({strict:true}):false,
+    flushPending:(kind,options)=>canMutate()?reviewEditor.flushPending({strict:true,allowDuringRecoveryQuiescence:recoveryFlushKinds.has(String(kind||''))&&options?.allowDuringRecoveryQuiescence===true}):false,
     prepare:(context)=>lifecycleViews.invalidateLifecycleEditors(context),
     reconcile:(context)=>lifecycleViews.reconcileLifecycleEditors(context),
     complete:(context)=>lifecycleViews.completeLifecycleTransition(context),

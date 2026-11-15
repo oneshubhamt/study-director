@@ -3469,12 +3469,12 @@ const RuntimeBackupCodec=Object.freeze({...BackupCodec,inspect:BackupCodec.inspe
 
 async function reconcileNotesThroughLifecycle(importedNotes,deletions=[]){
   return SessionLifecycle.run('reconciled-notes',{
-    date:getReviewDate(),
+    date:getReviewDate(),allowDuringRecoveryQuiescence:true,
   },()=>AppData.notes.reconcile(importedNotes,deletions));
 }
 async function restoreNotesSnapshotThroughLifecycle(snapshotNotes){
   return SessionLifecycle.run('restored-notes-snapshot',{
-    date:getReviewDate(),
+    date:getReviewDate(),allowDuringRecoveryQuiescence:true,
   },()=>AppData.notes.replace(snapshotNotes));
 }
 function restoreSessionStateThroughLifecycle(...args){return SessionActions.restoreSessionStateThroughLifecycle(...args);}
