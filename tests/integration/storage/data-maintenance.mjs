@@ -87,14 +87,21 @@ console.log(JSON.stringify({status:'PASS',suite:'data-maintenance-phase-outcomes
 // to authority, durable data or unsaved rescue state invalidate retained proof.
 const {createFakeClock}=await import('../../helpers/fake-clock.mjs');
 const lifecycleContext=vm.createContext({Symbol,Object,Error,TypeError,Date,Promise,Map,Set,setTimeout,clearTimeout});
-for(const file of ['internal','operation-lifecycle'])vm.runInContext(readCoreScript(file),lifecycleContext);
-const lifecycle=lifecycleContext[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1),hostSource=readHostHtml();
+for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/backup-maintenance-host.ts'])vm.runInContext(readScript(file),lifecycleContext,{filename:file});
+const modules=lifecycleContext[Symbol.for('studyDirector.internalModules.v1')],lifecycle=modules.require('operation-lifecycle',1),maintenanceHost=modules.require('backup-maintenance-host',1);
 function automaticMaintenance(h,clock,controls){
- const context={Object,Error,Date:clock.Date,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,OperationLifecycle:lifecycle,AppData:h.app,StartupLifecycle:{status:()=>({fullyInitialized:true})},appCanMutate:()=>controls.owned!==false,UnsupportedData:{held:()=>false},backgroundMaintenanceForegroundBusy:()=>!!controls.foreground,AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},DATA_MAINTENANCE_FAILURE_RETRY_MS:300000,DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS:86400000,ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS:5000,scheduleDataMaintenance:(delay,reason)=>context.job.schedule(delay,reason),scheduleRichTextAssetMaintenance:delay=>{(controls.cleanups??=[]).push(delay);return true;},wakeBackgroundOperations:trigger=>{(controls.wakes??=[]).push(trigger);context.job.wake(trigger,true);return true;}};
- vm.createContext(context);controls.host=context;
- // The shared background gate, as the app defines it; maintenance keeps running through a browser-data clear.
- context.storageResetUnresolved=()=>!!controls.storageReset;vm.runInContext(hostSource.slice(hostSource.indexOf('function backgroundBlocker('),hostSource.indexOf('const BackgroundOperations=')),context);
- vm.runInContext(hostSource.slice(hostSource.indexOf('const DataMaintenanceJob='),hostSource.indexOf('function scheduleDataMaintenance('))+'\nglobalThis.job=DataMaintenanceJob;',context);return context.job;
+ const idle=Object.freeze({status:()=>Object.freeze({busy:false,active:false})}),foreground=Object.freeze({status:()=>Object.freeze({busy:!!controls.foreground,active:!!controls.foreground})});
+ const owner=maintenanceHost.createBackground(Object.freeze({
+  lifecycle,environment:Object.freeze({now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),
+  authority:Object.freeze({canMutate:()=>controls.owned!==false,fullyInitialized:()=>true,storageResetUnresolved:()=>!!controls.storageReset,unsupportedDataHeld:()=>false}),
+  foreground:Object.freeze({pwaReserved:()=>false,mutation:idle,attachmentIngest:idle,exports:foreground,backupController:idle,providers:idle}),
+  data:Object.freeze({maintenance:h.app.maintenance,notes:h.app.notes}),
+  diagnostics:Object.freeze({capture(){},start:()=>'',mark(){},finish(){},fail(){}}),
+  backgroundOwners:()=>Object.freeze([Object.freeze(['observer',Object.freeze({wake:trigger=>{(controls.wakes??=[]).push(trigger);}})])]),
+  scheduleAssetMaintenance:delay=>{(controls.cleanups??=[]).push(delay);return true;},
+  intervals:Object.freeze({maintenanceMs:86400000,failureRetryMs:300000,assetCleanupDelayMs:5000,foregroundRecheckMs:15000})
+ }));
+ controls.host=owner;return owner.job;
 }
 const progressCases=[];
 for(const slowStore of ['area','session','meta','all'])for(const delayMs of [0,1000,19999,20000,35000]){
@@ -194,12 +201,12 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-recovery-progress',pr
 // its own; one watcher checks back and wakes every job when the work ends.
 {
  const clock=createFakeClock(),controls={clock},h=createHarness(new Map(),null,controls);await h.app.notes.load();
- const job=automaticMaintenance(h,clock,controls),host=controls.host,watch=()=>vm.runInContext('foregroundWatch',host);controls.foreground=true;
+ const job=automaticMaintenance(h,clock,controls),host=controls.host,watch=()=>host.watchingForeground();controls.foreground=true;
  const deferred=await job.run('interval');assert.equal(deferred.status,'deferred');assert.equal(deferred.reason,'foreground-busy');
- assert.equal(job.status().blocker,'foreground-busy');assert.equal(job.status().scheduled,false,'no job timer while the person is busy');assert.notEqual(watch(),null,'the shared watcher is armed');
+ assert.equal(job.status().blocker,'foreground-busy');assert.equal(job.status().scheduled,false,'no job timer while the person is busy');assert.equal(watch(),true,'the shared watcher is armed');
  assert.equal(clock.pending(),1,'only the watcher waits');await clock.advance(15000);assert.equal(controls.wakes,undefined,'still busy: no wake');assert.equal(clock.pending(),1,'the watcher re-arms itself');
  assert.equal(host.foregroundChanged(),false,'a change while still busy keeps waiting');controls.foreground=false;
- assert.equal(host.foregroundChanged(),true);assert.deepEqual(controls.wakes,['foreground-released']);assert.equal(watch(),null);assert.equal(host.foregroundChanged(),false,'nothing to release twice');
+ assert.equal(host.foregroundChanged(),true);assert.deepEqual(controls.wakes,['foreground-released']);assert.equal(watch(),false);assert.equal(host.foregroundChanged(),false,'nothing to release twice');
  await clock.advance(0);await job.settled();assert.ok(h.stores.meta.get('dataMaintenance')?.value?.completedAt,'the woken job runs at once');assert.deepEqual(controls.cleanups,[5000]);job.dispose();
  console.log(JSON.stringify({status:'PASS',suite:'upkeep-foreground-watcher',namedWait:true,oneWatcher:true,wakeOnRelease:true}));
 }
