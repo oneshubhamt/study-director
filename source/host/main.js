@@ -1224,7 +1224,7 @@ const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.f
   storageHealth:Object.freeze({snapshot:()=>StorageHealthController.snapshot(),updateHistory:patch=>StorageHealthController.updateHistory(patch)}),
   mutationEpoch:Object.freeze({latestChangeAt:recorded=>AppData.mutationEpoch.latestChangeAt(recorded)}),
   backupVersion:DATA_CONTRACT.schemas.Backup.version,
-  sourceRevision:()=>currentBackupSourceRevision(),
+  sourceRevision:()=>BackupRuntimeHost.sourceRevision(),
   refreshProviders:()=>BackupProviderRuntime.refresh(),
   capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
   nowIso:()=>new Date().toISOString()
@@ -1717,7 +1717,7 @@ const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze({
   getStudentName:()=>getStudentNameFromDisplay(),
   renderProfile:()=>renderProfile(),
   verifiedSourceRevision:()=>VerifiedRecovery.verified('google-drive')?.sourceRevision||'',
-  currentBackupSourceRevision:()=>currentBackupSourceRevision()
+  currentBackupSourceRevision:()=>BackupRuntimeHost.sourceRevision()
 }));
 const deleteThisProfile=ProfileDeletion.deleteThisProfile;
 const driveProfileDeleted=ProfileDeletion.driveProfileDeleted;
@@ -3632,7 +3632,7 @@ DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze({
       choices:[...rows.map(row=>({value:row.name,label:row.name,description:`${row.versions} version${row.versions===1?'':'s'}${row.newest?` · newest ${new Date(row.newest).toLocaleString()}`:''}`})),{value:'',label:'Start a new backup folder',description:backupFolderName({device:true}),kind:'primary'}]
     }),
     repositoryOwner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId(),name:backupFolderName({device:true})}),
-    render:renderDeviceBackup,sourceRevision:()=>currentBackupSourceRevision(),verifiedAt:()=>VerifiedRecovery.verified('device-folder')?.at||''
+    render:renderDeviceBackup,sourceRevision:()=>BackupRuntimeHost.sourceRevision(),verifiedAt:()=>VerifiedRecovery.verified('device-folder')?.at||''
   }),
   presentation:BackupPresentation,
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
@@ -3712,7 +3712,7 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
     restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),suspendBackground:(reason,options)=>BackupProviderRuntime.suspendBackground(reason,options)
   }),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession()}),
-  sourceRevision:()=>currentBackupSourceRevision(),
+  sourceRevision:()=>BackupRuntimeHost.sourceRevision(),
   storage:Object.freeze({
     read:()=>BackupAppMeta.read('managedProviderBackupPending'),
     write:value=>BackupAppMeta.write('managedProviderBackupPending',value,{strict:true}),
@@ -3764,7 +3764,7 @@ AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTI
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
-BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>VerifiedRecovery.verified(id)?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>{const empty=await canonicalLocalRecoveryEmpty();return empty===null?null:!empty;}}));
+BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>VerifiedRecovery.verified(id)?.sourceRevision||'',current:()=>BackupRuntimeHost.sourceRevision(),ready:async()=>{const empty=await canonicalLocalRecoveryEmpty();return empty===null?null:!empty;}}));
 BackupProviderRuntime.configureSessionOwnership(Object.freeze({
   installationId:()=>InstallationIdentity.getId(),
   today:()=>todayISO(),
