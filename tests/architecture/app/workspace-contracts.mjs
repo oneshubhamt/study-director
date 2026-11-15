@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {readCompact} from '../../helpers/compact-source.mjs';
 
 // Current workspace composition invariants: attachment references, backup surfaces, diary records, and shared history ownership.
 
@@ -117,7 +118,7 @@ console.log(JSON.stringify({status:'PASS',suite:'workspace-history-ownership',ow
 { // library-sections-contract
 const app=fs.readFileSync('source/app.html','utf8');
 const library=fs.readFileSync('source/core/library.js','utf8')+'\n'+fs.readFileSync('source/core/library-notes.js','utf8');
-const editor=fs.readFileSync('rich-text/editor.ts','utf8');
+const editor=readCompact('rich-text/editor.ts');
 // Notes · Days · Data: one switch, one panel each, Notes first.
 const tabs=[...app.matchAll(/role="tab" id="library-tab-(\w+)" data-library-section="\1" aria-controls="library-\1"/gu)].map(match=>match[1]);
 assert.deepEqual(tabs,['notes','days','data'],'The Library switch names its three sections in order.');

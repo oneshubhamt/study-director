@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import {readCompact} from '../../helpers/compact-source.mjs';
 
 const read=file=>fs.readFileSync(file,'utf8');
 const posix=value=>value.split(path.sep).join('/');
@@ -14,8 +15,8 @@ function walk(dir){
 for(const file of ['rich-text/wordgard-adapter.ts','rich-text/typography.ts','rich-text/wordgard-patches/inert-html.ts','rich-text/wordgard-patches/cut.ts','build/wordgard-source-patches.mjs'])
   assert.ok(fs.existsSync(file),`Missing Wordgard architecture boundary: ${file}`);
 
-const editor=read('rich-text/editor.ts');
-assert.match(editor,/from ['"]\.\/wordgard-adapter['"]/,'Editor must use the Study Director Wordgard adapter.');
+const editor=readCompact('rich-text/editor.ts');
+assert.match(editor,/from ?['"]\.\/wordgard-adapter['"]/,'Editor must use the Study Director Wordgard adapter.');
 assert.doesNotMatch(editor,/vendor\/wordgard|wordgard-source\//,'Editor must not bypass the adapter.');
 assert.match(editor,/engineVersion:__SD_WORDGARD_VERSION__/,'Runtime engine version must come from canonical build metadata.');
 assert.match(editor,/focusOnMount\?:boolean/,'Rich editor mount must expose explicit focus intent instead of focusing by default.');
@@ -24,7 +25,7 @@ assert.doesNotMatch(editor,/refreshEditor\(\);queueMicrotask\(\(\)=>editor\.focu
 assert.match(editor,/\.sd-rte-editor wg-placeholder\{display:inline;/,'Study Director must keep Wordgard placeholder content inline so a wrapped placeholder exposes per-line client rects rather than one multi-line caret box.');
 assert.match(editor,/data-sd-suppress-gap-caret=true.*wg-cursor\.wg-cursor-h\{display:none!important\}/,'Atomic-gap caret suppression must remain scoped to atomic-node navigation and must not be repurposed for empty-editor caret sizing.');
 assert.match(editor,/\.sd-rte-toolbar\{grid-row:1[\s\S]*?\.sd-rte-editor-host\{grid-row:2/,'Normal rich editor must keep the toolbar above the editor.');
-assert.match(editor,/function mobileTouchLayout\(\)\{return matchMedia\('\(max-width:720px\)'\)\.matches&&\(matchMedia\('\(pointer: coarse\)'\)\.matches\|\|matchMedia\('\(any-pointer: coarse\)'\)\.matches\)\}/,'Focus-mode mobile toolbar routing must use the same coarse-pointer media contract as its CSS.');
+assert.match(editor,/function mobileTouchLayout\(\)\{return ?\(?matchMedia\('\(max-width:720px\)'\)\.matches&&\(matchMedia\('\(pointer: coarse\)'\)\.matches\|\|matchMedia\('\(any-pointer: coarse\)'\)\.matches\)\)?\}/,'Focus-mode mobile toolbar routing must use the same coarse-pointer media contract as its CSS.');
 assert.match(editor,/\.sd-rte-focus-body>\.sd-rte\{height:100%;min-height:0;grid-template-rows:minmax\(0,1fr\) auto auto\}[\s\S]*?\.sd-rte-focus-body>\.sd-rte>\.sd-rte-toolbar\{grid-row:2/,'Only mobile Focus Mode may place the toolbar below the editor.');
 assert.match(editor,/visual\?\.addEventListener\('resize',syncViewport[\s\S]*?visual\?\.addEventListener\('scroll',syncViewport[\s\S]*?--sd-rte-focus-obscured-bottom/,'Focus Mode must track the visual viewport so the software keyboard cannot cover its bottom controls.');
 assert.match(editor,/if\(selection instanceof GardSelection\.Node&&atomicNode\(selection\.node\)\)return atomicBackspace\(wg\);wg\.flush\(\);return atomicBackspace\(wg\)/,'Mobile beforeinput must delete an existing atomic node selection before any DOM-selection flush.');

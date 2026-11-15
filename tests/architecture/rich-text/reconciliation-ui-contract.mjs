@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {readCompact} from '../../helpers/compact-source.mjs';
 
 const read=file=>fs.readFileSync(file,'utf8');
-const editor=read('rich-text/editor.ts');
+const editor=readCompact('rich-text/editor.ts');
 const ui=read('source/core/reconciliation-ui.js');
 const backup=read('source/core/backup.js');
 const app=read('source/app.html');

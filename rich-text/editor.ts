@@ -1,454 +1,2176 @@
 import {prepareImage} from './image-preparation';
 import {
-  parseInertHTML,cutHandling,Wordgard,Decoration,PointSet,RangeSet,Widget,InputRule,KeyBinding,placeholder,
-  GardState,GardSelection,Transaction,Command,listIsActive,setTextblockType,toggleBlock,toggleList,toggleMark,
-  canAddMarkInRange,history,redo,redoDepth,undo,undoDepth,CellSelection,tableCore,ChangeSet,Elt,Leaf,Node,Plot,Mark,parse,serialize,
-  BlockCell,BlockHeaderCell,Blockquote,BulletList,Doc,Heading,HorizontalRule,LineBreak,Link,ListItem,OrderedList,Paragraph,
-  Strikethrough,Subscript,Strong,Superscript,Table,TableRow,Underline,Emphasis
+  parseInertHTML,
+  cutHandling,
+  Wordgard,
+  Decoration,
+  PointSet,
+  RangeSet,
+  Widget,
+  InputRule,
+  KeyBinding,
+  placeholder,
+  GardState,
+  GardSelection,
+  Transaction,
+  Command,
+  listIsActive,
+  setTextblockType,
+  toggleBlock,
+  toggleList,
+  toggleMark,
+  canAddMarkInRange,
+  history,
+  redo,
+  redoDepth,
+  undo,
+  undoDepth,
+  CellSelection,
+  tableCore,
+  ChangeSet,
+  Elt,
+  Leaf,
+  Node,
+  Plot,
+  Mark,
+  parse,
+  serialize,
+  BlockCell,
+  BlockHeaderCell,
+  Blockquote,
+  BulletList,
+  Doc,
+  Heading,
+  HorizontalRule,
+  LineBreak,
+  Link,
+  ListItem,
+  OrderedList,
+  Paragraph,
+  Strikethrough,
+  Subscript,
+  Strong,
+  Superscript,
+  Table,
+  TableRow,
+  Underline,
+  Emphasis
 } from './wordgard-adapter';
 import {
-  FONT_SIZE_MAX,FONT_SIZE_MIN,LINE_HEIGHT_STEPS,TYPOGRAPHY_SCHEMA_ELEMENTS,
-  adjustFontSize,adjustLineHeight,normalizeTypographyPasteStyle,resetLineHeight,setFontSize,setTypographyAlignment,
-  setTypographyPreset,typographyState,
+  FONT_SIZE_MAX,
+  FONT_SIZE_MIN,
+  LINE_HEIGHT_STEPS,
+  TYPOGRAPHY_SCHEMA_ELEMENTS,
+  adjustFontSize,
+  adjustLineHeight,
+  normalizeTypographyPasteStyle,
+  resetLineHeight,
+  setFontSize,
+  setTypographyAlignment,
+  setTypographyPreset,
+  typographyState
 } from './typography';
-import {looksLikeMarkdown,markdownDocument,markdownToHtml} from './markdown';
-import {normalizeTag,renameTagInInline,renameTagInText,tagMatches,tagsInText} from './tags';
-declare const __SD_WORDGARD_VERSION__:string;
+import {looksLikeMarkdown, markdownDocument, markdownToHtml} from './markdown';
+import {normalizeTag, renameTagInInline, renameTagInText, tagMatches, tagsInText} from './tags';
+declare const __SD_WORDGARD_VERSION__: string;
 import {PRODUCTION_LIMITS} from '../contracts/production-limits.mjs';
-import {WG1_STORAGE_PREFIX,WG1_DEFAULT_MAX_DEPTH,WG1_DEFAULT_MAX_NODES,decodeWG1Envelope,encodeWG1Document,normalizePlainText,wg1ToPlainText} from './wg1-codec';
-import {compareRichText,mergeIncomingAdditions,appendIncomingAdditions,mergeThreeWay,type MergeRange} from './reconciliation';
+import {
+  WG1_STORAGE_PREFIX,
+  WG1_DEFAULT_MAX_DEPTH,
+  WG1_DEFAULT_MAX_NODES,
+  decodeWG1Envelope,
+  encodeWG1Document,
+  normalizePlainText,
+  wg1ToPlainText
+} from './wg1-codec';
+import {compareRichText, mergeIncomingAdditions, appendIncomingAdditions, mergeThreeWay, type MergeRange} from './reconciliation';
 
-const STORAGE_PREFIX=WG1_STORAGE_PREFIX,STYLE_ID='sd-rich-text-style-v2',READONLY_TAG='sd-rich-readonly',REVERT_EVENT='sd.wordgard.revert',VALIDATED_INPUT_META=Symbol.for('studyDirector.richValidatedInput.v1'),READONLY_DISPOSE=Symbol.for('studyDirector.richReadonlyDispose.v1');
-const MAX_IMAGE_BYTES=PRODUCTION_LIMITS.richAssetMaxBytes,MAX_IMAGES_PER_DOCUMENT=PRODUCTION_LIMITS.richAssetMaxPerDocument,MAX_IMAGE_BYTES_PER_DOCUMENT=PRODUCTION_LIMITS.richAssetMaxBytesPerDocument,MAX_IMAGE_DIMENSION=PRODUCTION_LIMITS.richAssetMaxDimensionPx,MAX_IMAGE_PIXELS=PRODUCTION_LIMITS.richAssetMaxPixels;
-const IMAGE_MIME_TYPE_VALUES=Object.freeze(['image/png','image/jpeg','image/webp','image/gif','image/avif']),IMAGE_MIME_TYPES=new Set(IMAGE_MIME_TYPE_VALUES),AUDIO_MIME_TYPES=new Set(['audio/mpeg','audio/wav','audio/ogg','audio/flac','audio/mp4','audio/webm']);
-const ASSET_ID_PATTERN='^(?:att|img)-[a-z0-9-]{20,80}$',ASSET_ID_RE=new RegExp(ASSET_ID_PATTERN,'i'),ATTACHMENT_LINK_RE=/^#attachment=((?:att|img)-[a-z0-9-]{20,80})$/i,MAX_IMAGE_ALT_CHARS=PRODUCTION_LIMITS.richAssetMaxAltChars;
-const RICH_ASSET_POLICY=Object.freeze({idPattern:ASSET_ID_PATTERN,mimeTypes:IMAGE_MIME_TYPE_VALUES,maxBytes:MAX_IMAGE_BYTES,maxPerDocument:MAX_IMAGES_PER_DOCUMENT,maxBytesPerDocument:MAX_IMAGE_BYTES_PER_DOCUMENT,maxAltChars:MAX_IMAGE_ALT_CHARS,maxDimensionPx:MAX_IMAGE_DIMENSION,maxPixels:MAX_IMAGE_PIXELS});
+const STORAGE_PREFIX = WG1_STORAGE_PREFIX,
+  STYLE_ID = 'sd-rich-text-style-v2',
+  READONLY_TAG = 'sd-rich-readonly',
+  REVERT_EVENT = 'sd.wordgard.revert',
+  VALIDATED_INPUT_META = Symbol.for('studyDirector.richValidatedInput.v1'),
+  READONLY_DISPOSE = Symbol.for('studyDirector.richReadonlyDispose.v1');
+const MAX_IMAGE_BYTES = PRODUCTION_LIMITS.richAssetMaxBytes,
+  MAX_IMAGES_PER_DOCUMENT = PRODUCTION_LIMITS.richAssetMaxPerDocument,
+  MAX_IMAGE_BYTES_PER_DOCUMENT = PRODUCTION_LIMITS.richAssetMaxBytesPerDocument,
+  MAX_IMAGE_DIMENSION = PRODUCTION_LIMITS.richAssetMaxDimensionPx,
+  MAX_IMAGE_PIXELS = PRODUCTION_LIMITS.richAssetMaxPixels;
+const IMAGE_MIME_TYPE_VALUES = Object.freeze(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif']),
+  IMAGE_MIME_TYPES = new Set(IMAGE_MIME_TYPE_VALUES),
+  AUDIO_MIME_TYPES = new Set(['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/flac', 'audio/mp4', 'audio/webm']);
+const ASSET_ID_PATTERN = '^(?:att|img)-[a-z0-9-]{20,80}$',
+  ASSET_ID_RE = new RegExp(ASSET_ID_PATTERN, 'i'),
+  ATTACHMENT_LINK_RE = /^#attachment=((?:att|img)-[a-z0-9-]{20,80})$/i,
+  MAX_IMAGE_ALT_CHARS = PRODUCTION_LIMITS.richAssetMaxAltChars;
+const RICH_ASSET_POLICY = Object.freeze({
+  idPattern: ASSET_ID_PATTERN,
+  mimeTypes: IMAGE_MIME_TYPE_VALUES,
+  maxBytes: MAX_IMAGE_BYTES,
+  maxPerDocument: MAX_IMAGES_PER_DOCUMENT,
+  maxBytesPerDocument: MAX_IMAGE_BYTES_PER_DOCUMENT,
+  maxAltChars: MAX_IMAGE_ALT_CHARS,
+  maxDimensionPx: MAX_IMAGE_DIMENSION,
+  maxPixels: MAX_IMAGE_PIXELS
+});
 // Documents published to their field at least this long group their changes.
-const GROUPED_PUBLISH_MIN_LENGTH=64*1024,GROUPED_PUBLISH_DELAY_MS=200,GROUPED_PUBLISH_MAX_DELAY_MS=500;
-const MIN_IMAGE_WIDTH_PCT=20,DEFAULT_IMAGE_WIDTH_PCT=68,MOBILE_IMAGE_WIDTH_PCT=100,MOBILE_IMAGE_BREAKPOINT=640,MAX_TABLE_DIMENSION=15,MIN_TABLE_COLUMN_PCT=50/MAX_TABLE_DIMENSION,MIN_TABLE_CELL_PX=120,LEGACY_MIN_TABLE_WIDTH_PCT=45,LEGACY_MIN_TABLE_ROW_HEIGHT=34,LEGACY_MAX_TABLE_ROW_HEIGHT=240;
-const IMAGE_POSITION_ERROR='Image position is no longer available. Choose Image and try again.',IMAGE_TABLE_ERROR='Images cannot go inside tables.';
+const GROUPED_PUBLISH_MIN_LENGTH = 64 * 1024,
+  GROUPED_PUBLISH_DELAY_MS = 200,
+  GROUPED_PUBLISH_MAX_DELAY_MS = 500;
+const MIN_IMAGE_WIDTH_PCT = 20,
+  DEFAULT_IMAGE_WIDTH_PCT = 68,
+  MOBILE_IMAGE_WIDTH_PCT = 100,
+  MOBILE_IMAGE_BREAKPOINT = 640,
+  MAX_TABLE_DIMENSION = 15,
+  MIN_TABLE_COLUMN_PCT = 50 / MAX_TABLE_DIMENSION,
+  MIN_TABLE_CELL_PX = 120,
+  LEGACY_MIN_TABLE_WIDTH_PCT = 45,
+  LEGACY_MIN_TABLE_ROW_HEIGHT = 34,
+  LEGACY_MAX_TABLE_ROW_HEIGHT = 240;
+const IMAGE_POSITION_ERROR = 'Image position is no longer available. Choose Image and try again.',
+  IMAGE_TABLE_ERROR = 'Images cannot go inside tables.';
 
-interface AssetStore{retain?:()=>Promise<()=>void>;get(assetId:string):Promise<Blob|null>;put(assetId:string,blob:Blob):Promise<void>;remove(assetId:string):Promise<void>}
-interface AttachmentProgress{phase:'preparing'|'copying'|'verifying'|'complete';loaded:number;total:number;mode?:string}
-interface AttachmentUploadOptions{signal?:AbortSignal;onProgress?:(progress:AttachmentProgress)=>void}
-type AttachmentKind='pdf'|'audio';
-type AttachmentUploadDecorationState={pos:number;widget:Widget};
-interface AttachmentPort{upload(file:File,options?:AttachmentUploadOptions):Promise<{id:string;name:string;type:string}>}
-interface WorkspaceHistoryDescriptor{kind:'focus'|'audio'|'image';token:string;key?:string}
-interface WorkspaceHistoryOptions{kind:'focus'|'audio'|'image';key?:string;token?:string;reopen?:(descriptor:WorkspaceHistoryDescriptor)=>boolean|Promise<boolean>;valid?:()=>boolean}
-interface WorkspaceOverlayHandle{dialog:HTMLDialogElement;close():boolean;historyToken?:string;forget?:()=>boolean}
-interface WorkspaceOverlayPort{open(options:{label:string;content:HTMLElement;headerContent?:HTMLElement;className?:string;closeLabel?:string;onBeforeClose?:()=>void;onAfterClose?:()=>void;history?:WorkspaceHistoryOptions}):WorkspaceOverlayHandle|null}
+interface AssetStore {
+  retain?: () => Promise<() => void>;
+  get(assetId: string): Promise<Blob | null>;
+  put(assetId: string, blob: Blob): Promise<void>;
+  remove(assetId: string): Promise<void>;
+}
+interface AttachmentProgress {
+  phase: 'preparing' | 'copying' | 'verifying' | 'complete';
+  loaded: number;
+  total: number;
+  mode?: string;
+}
+interface AttachmentUploadOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: AttachmentProgress) => void;
+}
+type AttachmentKind = 'pdf' | 'audio';
+type AttachmentUploadDecorationState = {pos: number; widget: Widget};
+interface AttachmentPort {
+  upload(file: File, options?: AttachmentUploadOptions): Promise<{id: string; name: string; type: string}>;
+}
+interface WorkspaceHistoryDescriptor {
+  kind: 'focus' | 'audio' | 'image';
+  token: string;
+  key?: string;
+}
+interface WorkspaceHistoryOptions {
+  kind: 'focus' | 'audio' | 'image';
+  key?: string;
+  token?: string;
+  reopen?: (descriptor: WorkspaceHistoryDescriptor) => boolean | Promise<boolean>;
+  valid?: () => boolean;
+}
+interface WorkspaceOverlayHandle {
+  dialog: HTMLDialogElement;
+  close(): boolean;
+  historyToken?: string;
+  forget?: () => boolean;
+}
+interface WorkspaceOverlayPort {
+  open(options: {
+    label: string;
+    content: HTMLElement;
+    headerContent?: HTMLElement;
+    className?: string;
+    closeLabel?: string;
+    onBeforeClose?: () => void;
+    onAfterClose?: () => void;
+    history?: WorkspaceHistoryOptions;
+  }): WorkspaceOverlayHandle | null;
+}
 // Notes, for links to them: the picker, a note's title (null once deleted) and
 // opening one. Tags: showing the notes with one (passive when the click only
 // placed the caret) and the # suggestions, which resolve to the name to write
 // after the # and what follows it.
-interface TagChoice{text:string;end:string}
-interface NotePort{pick():Promise<{id:string;label:string}|null>;title(id:string):string|null;open(id:string):void;tag?(name:string,passive:boolean):void;pickTag?(options:{query:string;anchor:{left:number;top:number;bottom:number}|null}):Promise<TagChoice|null>}
-interface MountOptions{notes?:NotePort;field:HTMLTextAreaElement;label:string;initialValue:string;maxWords:number;maxBytes:number;assets:AssetStore;attachments?:AttachmentPort;createImageWorker?:()=>Worker;workspaceOverlay?:WorkspaceOverlayPort;surface?:'default'|'reflection'|'execute-note'|'note'|'reconciliation';focusOnMount?:boolean;allowAssetInsert?:boolean;readOnly?:boolean;onAssetBusy?:(busy:boolean)=>void;onStatus?:(message:string)=>void;onDerivedText?:(canonical:string,plain:string)=>void}
-interface RenderOptions{notes?:NotePort;container:HTMLElement;value:string;label:string;assets:AssetStore;workspaceOverlay?:WorkspaceOverlayPort;eager?:boolean}
-interface MountedRichTextEditor{getValue():string;setValue(value:string):boolean;setTransientRanges(ranges:readonly MergeRange[]):void;search(query:string,onClear?:()=>void):number;stepSearch(direction:1|-1):{index:number;count:number};clearSearch():void;focus():void;flush():void;destroy():Promise<void>}
-type ImageAlignment='left'|'center'|'right';
-type StudyImageValue={assetId:string;alt:string;widthPct:number;align?:ImageAlignment};
-type StudyAudioValue={attachmentId:string;name:string};
+interface TagChoice {
+  text: string;
+  end: string;
+}
+interface NotePort {
+  pick(): Promise<{id: string; label: string} | null>;
+  title(id: string): string | null;
+  open(id: string): void;
+  tag?(name: string, passive: boolean): void;
+  pickTag?(options: {query: string; anchor: {left: number; top: number; bottom: number} | null}): Promise<TagChoice | null>;
+}
+interface MountOptions {
+  notes?: NotePort;
+  field: HTMLTextAreaElement;
+  label: string;
+  initialValue: string;
+  maxWords: number;
+  maxBytes: number;
+  assets: AssetStore;
+  attachments?: AttachmentPort;
+  createImageWorker?: () => Worker;
+  workspaceOverlay?: WorkspaceOverlayPort;
+  surface?: 'default' | 'reflection' | 'execute-note' | 'note' | 'reconciliation';
+  focusOnMount?: boolean;
+  allowAssetInsert?: boolean;
+  readOnly?: boolean;
+  onAssetBusy?: (busy: boolean) => void;
+  onStatus?: (message: string) => void;
+  onDerivedText?: (canonical: string, plain: string) => void;
+}
+interface RenderOptions {
+  notes?: NotePort;
+  container: HTMLElement;
+  value: string;
+  label: string;
+  assets: AssetStore;
+  workspaceOverlay?: WorkspaceOverlayPort;
+  eager?: boolean;
+}
+interface MountedRichTextEditor {
+  getValue(): string;
+  setValue(value: string): boolean;
+  setTransientRanges(ranges: readonly MergeRange[]): void;
+  search(query: string, onClear?: () => void): number;
+  stepSearch(direction: 1 | -1): {index: number; count: number};
+  clearSearch(): void;
+  focus(): void;
+  flush(): void;
+  destroy(): Promise<void>;
+}
+type ImageAlignment = 'left' | 'center' | 'right';
+type StudyImageValue = {assetId: string; alt: string; widthPct: number; align?: ImageAlignment};
+type StudyAudioValue = {attachmentId: string; name: string};
 
-function validAssetId(value:unknown){return typeof value==='string'&&ASSET_ID_RE.test(value)}
-function validImageMimeType(value:unknown){return typeof value==='string'&&IMAGE_MIME_TYPES.has(value)}
-function normalizeImageAlt(value:unknown){return String(value??'').replace(/[\r\n\t]+/g,' ').trim().slice(0,MAX_IMAGE_ALT_CHARS)}
-function normalizeAttachmentName(value:unknown){return String(value??'Attachment').replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,160)||'Attachment'}
-function finiteWithin(value:unknown,min:number,max:number){const number=Number(value);return Number.isFinite(number)&&number>=min&&number<=max}
-function normalizeImageWidth(value:unknown){const number=Number(value);return Number.isFinite(number)?Math.max(MIN_IMAGE_WIDTH_PCT,Math.min(100,Math.round(number*10)/10)):100}
-function normalizeImageAlignment(value:unknown):ImageAlignment{return value==='center'||value==='right'?value:'left'}
-function normalizeCellWidth(value:unknown){const number=Number(value);return Number.isFinite(number)?Math.max(MIN_TABLE_COLUMN_PCT,Math.min(100,Math.round(number*100)/100)):50}
+function validAssetId(value: unknown) {
+  return typeof value === 'string' && ASSET_ID_RE.test(value);
+}
+function validImageMimeType(value: unknown) {
+  return typeof value === 'string' && IMAGE_MIME_TYPES.has(value);
+}
+function normalizeImageAlt(value: unknown) {
+  return String(value ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .trim()
+    .slice(0, MAX_IMAGE_ALT_CHARS);
+}
+function normalizeAttachmentName(value: unknown) {
+  return (
+    String(value ?? 'Attachment')
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .trim()
+      .slice(0, 160) || 'Attachment'
+  );
+}
+function finiteWithin(value: unknown, min: number, max: number) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max;
+}
+function normalizeImageWidth(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(MIN_IMAGE_WIDTH_PCT, Math.min(100, Math.round(number * 10) / 10)) : 100;
+}
+function normalizeImageAlignment(value: unknown): ImageAlignment {
+  return value === 'center' || value === 'right' ? value : 'left';
+}
+function normalizeCellWidth(value: unknown) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(MIN_TABLE_COLUMN_PCT, Math.min(100, Math.round(number * 100) / 100)) : 50;
+}
 // A link to another note names it by id: #note=<id>.
-const NOTE_LINK_RE=/^#note=(n_[0-9a-f]{16})$/;
-function noteLinkId(value:unknown){const match=typeof value==='string'?NOTE_LINK_RE.exec(value):null;return match?match[1]!:''}
-function validSerializedLinkUrl(value:unknown){return typeof value==='string'&&(/^(?:https?:\/\/|mailto:|tel:)/i.test(value)||/^#attachment=(?:att|img)-[a-z0-9-]{20,80}$/.test(value)||NOTE_LINK_RE.test(value))}
+const NOTE_LINK_RE = /^#note=(n_[0-9a-f]{16})$/;
+function noteLinkId(value: unknown) {
+  const match = typeof value === 'string' ? NOTE_LINK_RE.exec(value) : null;
+  return match ? match[1]! : '';
+}
+function validSerializedLinkUrl(value: unknown) {
+  return (
+    typeof value === 'string' &&
+    (/^(?:https?:\/\/|mailto:|tel:)/i.test(value) || /^#attachment=(?:att|img)-[a-z0-9-]{20,80}$/.test(value) || NOTE_LINK_RE.test(value))
+  );
+}
 // UTF-8 size counted without encoding a copy: a pair of surrogates is four
 // bytes, and an unpaired one is written as U+FFFD, three bytes.
-function utf8ByteLength(value:unknown){
-  const text=String(value??'');let bytes=0;
-  for(let index=0;index<text.length;index++){
-    const code=text.charCodeAt(index);
-    if(code<0x80)bytes+=1;else if(code<0x800)bytes+=2;
-    else if(code>=0xd800&&code<0xdc00&&(text.charCodeAt(index+1)&0xfc00)===0xdc00){bytes+=4;index++}
-    else bytes+=3;
+function utf8ByteLength(value: unknown) {
+  const text = String(value ?? '');
+  let bytes = 0;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code < 0xdc00 && (text.charCodeAt(index + 1) & 0xfc00) === 0xdc00) {
+      bytes += 4;
+      index++;
+    } else bytes += 3;
   }
   return bytes;
 }
 // A word is a run of characters outside \s, as splitting on /\s+/u counts
 // them; counting runs avoids building an array on every keystroke.
-function isWhitespace(code:number){return code===32||(code>=9&&code<=13)||code===160||code===5760||(code>=8192&&code<=8202)||code===8232||code===8233||code===8239||code===8287||code===12288||code===65279}
-function wordCount(text:string){let count=0,inWord=false;for(let index=0;index<text.length;index++){const space=isWhitespace(text.charCodeAt(index));if(!space&&!inWord)count++;inWord=!space}return count}
+function isWhitespace(code: number) {
+  return (
+    code === 32 ||
+    (code >= 9 && code <= 13) ||
+    code === 160 ||
+    code === 5760 ||
+    (code >= 8192 && code <= 8202) ||
+    code === 8232 ||
+    code === 8233 ||
+    code === 8239 ||
+    code === 8287 ||
+    code === 12288 ||
+    code === 65279
+  );
+}
+function wordCount(text: string) {
+  let count = 0,
+    inWord = false;
+  for (let index = 0; index < text.length; index++) {
+    const space = isWhitespace(text.charCodeAt(index));
+    if (!space && !inWord) count++;
+    inWord = !space;
+  }
+  return count;
+}
 // UTF-8 takes at most three bytes per UTF-16 unit, so the exact size is only
 // needed when that bound passes the limit.
-function withinBytes(text:string,maxBytes:number){return text.length*3<=maxBytes||utf8ByteLength(text)<=maxBytes}
-function escapeHtml(value:string){return value.replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]||char))}
-function attachmentProgressText(kind:AttachmentKind,progress:AttachmentProgress){const label=kind==='pdf'?'PDF':'audio',loaded=Math.max(0,Number(progress.loaded)||0),total=Math.max(0,Number(progress.total)||0),percent=total>0?Math.min(100,Math.max(0,Math.round(loaded/total*100))):0,loadedMb=loaded/1048576,totalMb=total/1048576,mb=(value:number)=>value.toFixed(value>=100?0:1);if(progress.phase==='copying'&&total>0)return `Copying ${mb(loadedMb)} / ${mb(totalMb)} MB · ${percent}%`;if(progress.phase==='verifying')return total>0?`Verifying ${label} · ${percent}%`:`Verifying ${label}…`;if(progress.phase==='complete')return `Finishing ${label.toLowerCase()}…`;return `Preparing ${label}…`}
-function setAudioStatus(status:HTMLElement|null,message:string){if(status&&status.textContent!==message)status.textContent=message}
+function withinBytes(text: string, maxBytes: number) {
+  return text.length * 3 <= maxBytes || utf8ByteLength(text) <= maxBytes;
+}
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, char => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'})[char] || char);
+}
+function attachmentProgressText(kind: AttachmentKind, progress: AttachmentProgress) {
+  const label = kind === 'pdf' ? 'PDF' : 'audio',
+    loaded = Math.max(0, Number(progress.loaded) || 0),
+    total = Math.max(0, Number(progress.total) || 0),
+    percent = total > 0 ? Math.min(100, Math.max(0, Math.round((loaded / total) * 100))) : 0,
+    loadedMb = loaded / 1048576,
+    totalMb = total / 1048576,
+    mb = (value: number) => value.toFixed(value >= 100 ? 0 : 1);
+  if (progress.phase === 'copying' && total > 0) return `Copying ${mb(loadedMb)} / ${mb(totalMb)} MB · ${percent}%`;
+  if (progress.phase === 'verifying') return total > 0 ? `Verifying ${label} · ${percent}%` : `Verifying ${label}…`;
+  if (progress.phase === 'complete') return `Finishing ${label.toLowerCase()}…`;
+  return `Preparing ${label}…`;
+}
+function setAudioStatus(status: HTMLElement | null, message: string) {
+  if (status && status.textContent !== message) status.textContent = message;
+}
 // Wordgard re-renders an atom's attributes from its shape, so what the editor
 // adds to the player itself is kept here, not in attributes.
-const boundAudioPlayers=new WeakSet<HTMLAudioElement>();
-function syncAudioPlayerState(player:HTMLAudioElement,status:HTMLElement|null,url:string){if(!boundAudioPlayers.has(player)){boundAudioPlayers.add(player);player.addEventListener('loadedmetadata',()=>setAudioStatus(player.closest('.sd-rte-audio')?.querySelector<HTMLElement>('.sd-rte-audio-status')||null,''));player.addEventListener('error',()=>setAudioStatus(player.closest('.sd-rte-audio')?.querySelector<HTMLElement>('.sd-rte-audio-status')||null,'Audio unavailable'))}if(player.src!==url){player.src=url;player.load()}setAudioStatus(status,player.readyState>=1?'':'Loading audio…')}
-
-const Highlight=Mark.define('SDHighlight',{rank:35,shape:{element:'mark'}});
-const Checklist=Mark.define('SDChecklist',{target:BulletList,shape:{attribute:'data-sd-checklist',value:()=> 'true'}});
-const ChecklistRole=Mark.define('SDChecklistRole',{target:ListItem,rank:60,keepOnSplit:true,shape:{attributes:{role:'checkbox','aria-checked':'false','aria-keyshortcuts':'Control+Enter Meta+Enter'}}});
-const ChecklistChecked=Mark.Type.define<boolean>('SDChecklistChecked',{target:ListItem,rank:61,keepOnSplit:tag=>tag.marks.some(mark=>mark.type.name==='SDChecklistChecked'&&mark.value===false),validate:value=>{if(typeof value!=='boolean')throw new RangeError('Invalid checklist state.')},shape:{attribute:'aria-checked',value:value=>String(value)}});
-const TableWidth=Mark.Type.define<number>('SDTableWidth',{target:Table,validate:value=>{if(!finiteWithin(value,LEGACY_MIN_TABLE_WIDTH_PCT,100))throw new RangeError('Invalid table width.')},shape:{attribute:'style/width',value:value=>`${value}%`}});
-const CellWidth=Mark.Type.define<number>('SDCellWidth',{target:Node.Group.TableCell,validate:value=>{if(!finiteWithin(value,MIN_TABLE_COLUMN_PCT,100))throw new RangeError('Invalid table column width.')},shape:{attribute:'style/width',value:value=>`${value}%`}});
-const CellHeight=Mark.Type.define<number>('SDCellHeight',{target:Node.Group.TableCell,validate:value=>{if(!finiteWithin(value,LEGACY_MIN_TABLE_ROW_HEIGHT,LEGACY_MAX_TABLE_ROW_HEIGHT))throw new RangeError('Invalid table row height.')},shape:{attribute:'style/height',value:value=>`${value}px`}});
-type ResizeDecoration={pos:number;style:string};
-const setResizeDecorations=Transaction.Effect.define<readonly ResizeDecoration[]>();
-const resizeDecorations=GardState.Field.define<PointSet<Decoration.Point>>({create:()=>PointSet.empty,update:(value,tr)=>{for(const effect of tr.effects)if(effect.is(setResizeDecorations))return PointSet.create([...effect.value].sort((a,b)=>a.pos-b.pos).map(item=>[Decoration.Point.attributes({style:item.style}),item.pos]));return tr.docChanged?value.map(tr.changes):value},provide:field=>Decoration.Point.source.of(state=>state.field(field))});
-function tableRequiredContentWidth(table:Plot){const first=table.firstChild;if(!first||!first.isPlot||!first.content.length)return MIN_TABLE_CELL_PX;const fallback=100/first.content.length,widths=first.content.map(cell=>normalizeCellWidth(cell.mark(CellWidth)??fallback)),minPct=Math.max(MIN_TABLE_COLUMN_PCT,Math.min(...widths));return Math.ceil(MIN_TABLE_CELL_PX*100/minPct)}
-function tableLayoutDecorationSet(state:GardState){const items:Array<[Decoration.Point,number]>=[];state.doc.iterate((node,pos)=>{if(node.type!==Table.type||!node.isPlot)return;const required=tableRequiredContentWidth(node);items.push([Decoration.Point.attributes({style:`min-width:${required}px`},{target:'tbody'}),pos]);return false});return PointSet.create(items)}
-const tableLayoutDecorations=GardState.Field.define<PointSet<Decoration.Point>>({create:tableLayoutDecorationSet,update:(value,tr)=>tr.docChanged?tableLayoutDecorationSet(tr.state):value,provide:field=>Decoration.Point.source.of(state=>state.field(field))});
-
-function studyImageShape(value:StudyImageValue,src?:string|null){
-  const alt=normalizeImageAlt(value.alt),align=normalizeImageAlignment(value.align),media:(Elt|string)[]=[src?Elt.mk('img',{src,alt,decoding:'async',loading:'lazy'}):Elt.mk('span',{class:'sd-rte-image-missing'},[src===null?'Image unavailable':'Loading image…'])];
-  media.push(Elt.mk('button',{type:'button',class:'sd-rte-image-expand',title:'View full size','aria-label':alt?`View full size: ${alt}`:'View image full size',contenteditable:'false'},[]));
-  media.push(Elt.mk('button',{type:'button',class:'sd-rte-image-alt','aria-label':'Edit image description',contenteditable:'false'},[]),Elt.mk('button',{type:'button',class:'sd-rte-image-remove',title:'Remove image','aria-label':'Remove image',contenteditable:'false'},[]),Elt.mk('button',{type:'button',class:'sd-rte-image-resize',title:'Drag to resize image','aria-label':'Resize image',contenteditable:'false'},[]));
-  const children:(Elt|string)[]=[Elt.mk('div',{class:'sd-rte-image-media'},media)];if(alt)children.push(Elt.mk('figcaption',{class:'sd-rte-image-caption','aria-hidden':'true'},[alt]));
-  const marginStart=align==='left'?'0':'auto',marginEnd=align==='right'?'0':'auto';
-  return Elt.mk('figure',{class:'sd-rte-image','data-sd-asset-id':value.assetId,'data-sd-asset-alt':alt,'data-sd-image-width':String(normalizeImageWidth(value.widthPct)),'data-sd-image-align':align,style:`width: ${normalizeImageWidth(value.widthPct)}%; margin-inline-start: ${marginStart}; margin-inline-end: ${marginEnd}`},children);
+const boundAudioPlayers = new WeakSet<HTMLAudioElement>();
+function syncAudioPlayerState(player: HTMLAudioElement, status: HTMLElement | null, url: string) {
+  if (!boundAudioPlayers.has(player)) {
+    boundAudioPlayers.add(player);
+    player.addEventListener('loadedmetadata', () =>
+      setAudioStatus(player.closest('.sd-rte-audio')?.querySelector<HTMLElement>('.sd-rte-audio-status') || null, '')
+    );
+    player.addEventListener('error', () =>
+      setAudioStatus(player.closest('.sd-rte-audio')?.querySelector<HTMLElement>('.sd-rte-audio-status') || null, 'Audio unavailable')
+    );
+  }
+  if (player.src !== url) {
+    player.src = url;
+    player.load();
+  }
+  setAudioStatus(status, player.readyState >= 1 ? '' : 'Loading audio…');
 }
-const StudyImage=Leaf.Type.define<StudyImageValue>('SDImage',{group:Node.Group.Content,selectable:true,validate:value=>{if(!value||typeof value!=='object'||!validAssetId(value.assetId)||typeof value.alt!=='string'||value.alt!==normalizeImageAlt(value.alt)||!finiteWithin(value.widthPct,MIN_IMAGE_WIDTH_PCT,100)||(value.align!==undefined&&!['left','center','right'].includes(value.align)))throw new RangeError('Invalid StudyDirector image node.')},shape:{structure:studyImageShape,atom:true},toText:node=>{const value=node.param as StudyImageValue;return value.alt?`[Image: ${value.alt}]`:'[Image]'}});
-function studyAudioShape(value:StudyAudioValue,url?:string|null){const name=normalizeAttachmentName(value.name);return Elt.mk('figure',{class:'sd-rte-audio','data-sd-attachment-id':value.attachmentId,'data-sd-audio-name':name},[Elt.mk('div',{class:'sd-rte-audio-head'},[Elt.mk('span',{class:'sd-rte-audio-name','aria-hidden':'true'},[name]),Elt.mk('button',{type:'button',class:'sd-rte-audio-expand','aria-label':`Expand audio ${name}`,title:'Expand audio',contenteditable:'false'},['↗'])]),Elt.mk('audio',{class:'sd-rte-audio-player',controls:'controls',preload:'metadata',contenteditable:'false','aria-label':name,...(typeof url==='string'?{src:url}:{})},[]),Elt.mk('span',{class:'sd-rte-audio-status','aria-live':'polite'},url===null?['Audio unavailable']:url===undefined?['Loading audio…']:[])])}
-const StudyAudio=Leaf.Type.define<StudyAudioValue>('SDAudio',{group:Node.Group.Content,selectable:true,validate:value=>{if(!value||typeof value!=='object'||!validAssetId(value.attachmentId)||typeof value.name!=='string'||value.name!==normalizeAttachmentName(value.name))throw new RangeError('Invalid StudyDirector audio node.')},shape:{structure:studyAudioShape,atom:true},toText:node=>`[Audio: ${normalizeAttachmentName((node.param as StudyAudioValue).name)}]`});
-const refreshImageRender=Transaction.Effect.define<null>(),imageRevision=GardState.Field.define<number>({create:()=>0,update:(value,tr)=>tr.effects.some(effect=>effect.is(refreshImageRender))?value+1:value});
-const setPendingImageSelection=Transaction.Effect.define<GardSelection|null>(),pendingImageSelection=GardState.Field.define<GardSelection|null>({create:()=>null,update:(value,tr)=>{for(const effect of tr.effects)if(effect.is(setPendingImageSelection))return effect.value;return value?value.map(tr.changes,tr.state):null}});
-const setPendingLinkedAttachmentSelection=Transaction.Effect.define<GardSelection|null>(),pendingLinkedAttachmentSelection=GardState.Field.define<GardSelection|null>({create:()=>null,update:(value,tr)=>{for(const effect of tr.effects)if(effect.is(setPendingLinkedAttachmentSelection))return effect.value;return value?value.map(tr.changes,tr.state):null}});
-const setTransientReconciliationRanges=Transaction.Effect.define<readonly MergeRange[]>();
-const transientReconciliationRanges=GardState.Field.define<RangeSet<Decoration.Range>>({create:()=>RangeSet.empty,update:(value,tr)=>{for(const effect of tr.effects)if(effect.is(setTransientReconciliationRanges)){let cursor=-1;const entries:[Decoration.Range,number,number][]=[];for(const range of [...effect.value].sort((a,b)=>a.from-b.from||a.to-b.to)){const from=Math.max(0,Math.min(tr.state.doc.contentLength,Math.trunc(Number(range.from)||0))),to=Math.max(from,Math.min(tr.state.doc.contentLength,Math.trunc(Number(range.to)||0)));if(to<=from||from<cursor)continue;cursor=to;const kind=['changed','format','local-only','incoming-only'].includes(range.kind)?range.kind:'changed';entries.push([Decoration.Range.wrapper('span',{attributes:{class:`sd-rte-reconcile-diff sd-rte-reconcile-diff-${kind}`,'data-sd-reconcile-diff':kind},spanning:false,scope:'all'}),from,to])}return entries.length?RangeSet.create(entries):RangeSet.empty}return value.map(tr.changes)},provide:field=>Decoration.Range.source.of(state=>state.field(field))});
+
+const Highlight = Mark.define('SDHighlight', {rank: 35, shape: {element: 'mark'}});
+const Checklist = Mark.define('SDChecklist', {target: BulletList, shape: {attribute: 'data-sd-checklist', value: () => 'true'}});
+const ChecklistRole = Mark.define('SDChecklistRole', {
+  target: ListItem,
+  rank: 60,
+  keepOnSplit: true,
+  shape: {attributes: {role: 'checkbox', 'aria-checked': 'false', 'aria-keyshortcuts': 'Control+Enter Meta+Enter'}}
+});
+const ChecklistChecked = Mark.Type.define<boolean>('SDChecklistChecked', {
+  target: ListItem,
+  rank: 61,
+  keepOnSplit: tag => tag.marks.some(mark => mark.type.name === 'SDChecklistChecked' && mark.value === false),
+  validate: value => {
+    if (typeof value !== 'boolean') throw new RangeError('Invalid checklist state.');
+  },
+  shape: {attribute: 'aria-checked', value: value => String(value)}
+});
+const TableWidth = Mark.Type.define<number>('SDTableWidth', {
+  target: Table,
+  validate: value => {
+    if (!finiteWithin(value, LEGACY_MIN_TABLE_WIDTH_PCT, 100)) throw new RangeError('Invalid table width.');
+  },
+  shape: {attribute: 'style/width', value: value => `${value}%`}
+});
+const CellWidth = Mark.Type.define<number>('SDCellWidth', {
+  target: Node.Group.TableCell,
+  validate: value => {
+    if (!finiteWithin(value, MIN_TABLE_COLUMN_PCT, 100)) throw new RangeError('Invalid table column width.');
+  },
+  shape: {attribute: 'style/width', value: value => `${value}%`}
+});
+const CellHeight = Mark.Type.define<number>('SDCellHeight', {
+  target: Node.Group.TableCell,
+  validate: value => {
+    if (!finiteWithin(value, LEGACY_MIN_TABLE_ROW_HEIGHT, LEGACY_MAX_TABLE_ROW_HEIGHT)) throw new RangeError('Invalid table row height.');
+  },
+  shape: {attribute: 'style/height', value: value => `${value}px`}
+});
+type ResizeDecoration = {pos: number; style: string};
+const setResizeDecorations = Transaction.Effect.define<readonly ResizeDecoration[]>();
+const resizeDecorations = GardState.Field.define<PointSet<Decoration.Point>>({
+  create: () => PointSet.empty,
+  update: (value, tr) => {
+    for (const effect of tr.effects)
+      if (effect.is(setResizeDecorations))
+        return PointSet.create(
+          [...effect.value].sort((a, b) => a.pos - b.pos).map(item => [Decoration.Point.attributes({style: item.style}), item.pos])
+        );
+    return tr.docChanged ? value.map(tr.changes) : value;
+  },
+  provide: field => Decoration.Point.source.of(state => state.field(field))
+});
+function tableRequiredContentWidth(table: Plot) {
+  const first = table.firstChild;
+  if (!first || !first.isPlot || !first.content.length) return MIN_TABLE_CELL_PX;
+  const fallback = 100 / first.content.length,
+    widths = first.content.map(cell => normalizeCellWidth(cell.mark(CellWidth) ?? fallback)),
+    minPct = Math.max(MIN_TABLE_COLUMN_PCT, Math.min(...widths));
+  return Math.ceil((MIN_TABLE_CELL_PX * 100) / minPct);
+}
+function tableLayoutDecorationSet(state: GardState) {
+  const items: Array<[Decoration.Point, number]> = [];
+  state.doc.iterate((node, pos) => {
+    if (node.type !== Table.type || !node.isPlot) return;
+    const required = tableRequiredContentWidth(node);
+    items.push([Decoration.Point.attributes({style: `min-width:${required}px`}, {target: 'tbody'}), pos]);
+    return false;
+  });
+  return PointSet.create(items);
+}
+const tableLayoutDecorations = GardState.Field.define<PointSet<Decoration.Point>>({
+  create: tableLayoutDecorationSet,
+  update: (value, tr) => (tr.docChanged ? tableLayoutDecorationSet(tr.state) : value),
+  provide: field => Decoration.Point.source.of(state => state.field(field))
+});
+
+function studyImageShape(value: StudyImageValue, src?: string | null) {
+  const alt = normalizeImageAlt(value.alt),
+    align = normalizeImageAlignment(value.align),
+    media: (Elt | string)[] = [
+      src
+        ? Elt.mk('img', {src, alt, decoding: 'async', loading: 'lazy'})
+        : Elt.mk('span', {class: 'sd-rte-image-missing'}, [src === null ? 'Image unavailable' : 'Loading image…'])
+    ];
+  media.push(
+    Elt.mk(
+      'button',
+      {
+        type: 'button',
+        class: 'sd-rte-image-expand',
+        title: 'View full size',
+        'aria-label': alt ? `View full size: ${alt}` : 'View image full size',
+        contenteditable: 'false'
+      },
+      []
+    )
+  );
+  media.push(
+    Elt.mk('button', {type: 'button', class: 'sd-rte-image-alt', 'aria-label': 'Edit image description', contenteditable: 'false'}, []),
+    Elt.mk(
+      'button',
+      {type: 'button', class: 'sd-rte-image-remove', title: 'Remove image', 'aria-label': 'Remove image', contenteditable: 'false'},
+      []
+    ),
+    Elt.mk(
+      'button',
+      {type: 'button', class: 'sd-rte-image-resize', title: 'Drag to resize image', 'aria-label': 'Resize image', contenteditable: 'false'},
+      []
+    )
+  );
+  const children: (Elt | string)[] = [Elt.mk('div', {class: 'sd-rte-image-media'}, media)];
+  if (alt) children.push(Elt.mk('figcaption', {class: 'sd-rte-image-caption', 'aria-hidden': 'true'}, [alt]));
+  const marginStart = align === 'left' ? '0' : 'auto',
+    marginEnd = align === 'right' ? '0' : 'auto';
+  return Elt.mk(
+    'figure',
+    {
+      class: 'sd-rte-image',
+      'data-sd-asset-id': value.assetId,
+      'data-sd-asset-alt': alt,
+      'data-sd-image-width': String(normalizeImageWidth(value.widthPct)),
+      'data-sd-image-align': align,
+      style: `width: ${normalizeImageWidth(value.widthPct)}%; margin-inline-start: ${marginStart}; margin-inline-end: ${marginEnd}`
+    },
+    children
+  );
+}
+const StudyImage = Leaf.Type.define<StudyImageValue>('SDImage', {
+  group: Node.Group.Content,
+  selectable: true,
+  validate: value => {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      !validAssetId(value.assetId) ||
+      typeof value.alt !== 'string' ||
+      value.alt !== normalizeImageAlt(value.alt) ||
+      !finiteWithin(value.widthPct, MIN_IMAGE_WIDTH_PCT, 100) ||
+      (value.align !== undefined && !['left', 'center', 'right'].includes(value.align))
+    )
+      throw new RangeError('Invalid StudyDirector image node.');
+  },
+  shape: {structure: studyImageShape, atom: true},
+  toText: node => {
+    const value = node.param as StudyImageValue;
+    return value.alt ? `[Image: ${value.alt}]` : '[Image]';
+  }
+});
+function studyAudioShape(value: StudyAudioValue, url?: string | null) {
+  const name = normalizeAttachmentName(value.name);
+  return Elt.mk('figure', {class: 'sd-rte-audio', 'data-sd-attachment-id': value.attachmentId, 'data-sd-audio-name': name}, [
+    Elt.mk('div', {class: 'sd-rte-audio-head'}, [
+      Elt.mk('span', {class: 'sd-rte-audio-name', 'aria-hidden': 'true'}, [name]),
+      Elt.mk(
+        'button',
+        {
+          type: 'button',
+          class: 'sd-rte-audio-expand',
+          'aria-label': `Expand audio ${name}`,
+          title: 'Expand audio',
+          contenteditable: 'false'
+        },
+        ['↗']
+      )
+    ]),
+    Elt.mk(
+      'audio',
+      {
+        class: 'sd-rte-audio-player',
+        controls: 'controls',
+        preload: 'metadata',
+        contenteditable: 'false',
+        'aria-label': name,
+        ...(typeof url === 'string' ? {src: url} : {})
+      },
+      []
+    ),
+    Elt.mk(
+      'span',
+      {class: 'sd-rte-audio-status', 'aria-live': 'polite'},
+      url === null ? ['Audio unavailable'] : url === undefined ? ['Loading audio…'] : []
+    )
+  ]);
+}
+const StudyAudio = Leaf.Type.define<StudyAudioValue>('SDAudio', {
+  group: Node.Group.Content,
+  selectable: true,
+  validate: value => {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      !validAssetId(value.attachmentId) ||
+      typeof value.name !== 'string' ||
+      value.name !== normalizeAttachmentName(value.name)
+    )
+      throw new RangeError('Invalid StudyDirector audio node.');
+  },
+  shape: {structure: studyAudioShape, atom: true},
+  toText: node => `[Audio: ${normalizeAttachmentName((node.param as StudyAudioValue).name)}]`
+});
+const refreshImageRender = Transaction.Effect.define<null>(),
+  imageRevision = GardState.Field.define<number>({
+    create: () => 0,
+    update: (value, tr) => (tr.effects.some(effect => effect.is(refreshImageRender)) ? value + 1 : value)
+  });
+const setPendingImageSelection = Transaction.Effect.define<GardSelection | null>(),
+  pendingImageSelection = GardState.Field.define<GardSelection | null>({
+    create: () => null,
+    update: (value, tr) => {
+      for (const effect of tr.effects) if (effect.is(setPendingImageSelection)) return effect.value;
+      return value ? value.map(tr.changes, tr.state) : null;
+    }
+  });
+const setPendingLinkedAttachmentSelection = Transaction.Effect.define<GardSelection | null>(),
+  pendingLinkedAttachmentSelection = GardState.Field.define<GardSelection | null>({
+    create: () => null,
+    update: (value, tr) => {
+      for (const effect of tr.effects) if (effect.is(setPendingLinkedAttachmentSelection)) return effect.value;
+      return value ? value.map(tr.changes, tr.state) : null;
+    }
+  });
+const setTransientReconciliationRanges = Transaction.Effect.define<readonly MergeRange[]>();
+const transientReconciliationRanges = GardState.Field.define<RangeSet<Decoration.Range>>({
+  create: () => RangeSet.empty,
+  update: (value, tr) => {
+    for (const effect of tr.effects)
+      if (effect.is(setTransientReconciliationRanges)) {
+        let cursor = -1;
+        const entries: [Decoration.Range, number, number][] = [];
+        for (const range of [...effect.value].sort((a, b) => a.from - b.from || a.to - b.to)) {
+          const from = Math.max(0, Math.min(tr.state.doc.contentLength, Math.trunc(Number(range.from) || 0))),
+            to = Math.max(from, Math.min(tr.state.doc.contentLength, Math.trunc(Number(range.to) || 0)));
+          if (to <= from || from < cursor) continue;
+          cursor = to;
+          const kind = ['changed', 'format', 'local-only', 'incoming-only'].includes(range.kind) ? range.kind : 'changed';
+          entries.push([
+            Decoration.Range.wrapper('span', {
+              attributes: {class: `sd-rte-reconcile-diff sd-rte-reconcile-diff-${kind}`, 'data-sd-reconcile-diff': kind},
+              spanning: false,
+              scope: 'all'
+            }),
+            from,
+            to
+          ]);
+        }
+        return entries.length ? RangeSet.create(entries) : RangeSet.empty;
+      }
+    return value.map(tr.changes);
+  },
+  provide: field => Decoration.Range.source.of(state => state.field(field))
+});
 // Matches of a Library search in the open note, on Wordgard's own decoration
 // API. Every match is marked, the current one more strongly; any edit to the
 // text clears them, and so does Escape.
-type SearchRange={from:number;to:number};type SearchMatches={ranges:readonly SearchRange[];current:number;set:RangeSet<Decoration.Range>};
-const setSearchMatches=Transaction.Effect.define<SearchMatches|null>();
-const searchMatches=GardState.Field.define<SearchMatches|null>({create:()=>null,update:(value,tr)=>{for(const effect of tr.effects)if(effect.is(setSearchMatches))return effect.value;return tr.docChanged?null:value},provide:field=>Decoration.Range.source.of(state=>state.field(field)?.set||RangeSet.empty)});
-function searchMatchState(ranges:readonly SearchRange[],current:number):SearchMatches{return {ranges,current,set:RangeSet.create(ranges.map((range,index)=>[Decoration.Range.wrapper('span',{attributes:{class:index===current?'sd-rte-search-match current':'sd-rte-search-match'},spanning:false,scope:'all'}),range.from,range.to] as [Decoration.Range,number,number]))}}
+type SearchRange = {from: number; to: number};
+type SearchMatches = {ranges: readonly SearchRange[]; current: number; set: RangeSet<Decoration.Range>};
+const setSearchMatches = Transaction.Effect.define<SearchMatches | null>();
+const searchMatches = GardState.Field.define<SearchMatches | null>({
+  create: () => null,
+  update: (value, tr) => {
+    for (const effect of tr.effects) if (effect.is(setSearchMatches)) return effect.value;
+    return tr.docChanged ? null : value;
+  },
+  provide: field => Decoration.Range.source.of(state => state.field(field)?.set || RangeSet.empty)
+});
+function searchMatchState(ranges: readonly SearchRange[], current: number): SearchMatches {
+  return {
+    ranges,
+    current,
+    set: RangeSet.create(
+      ranges.map(
+        (range, index) =>
+          [
+            Decoration.Range.wrapper('span', {
+              attributes: {class: index === current ? 'sd-rte-search-match current' : 'sd-rte-search-match'},
+              spanning: false,
+              scope: 'all'
+            }),
+            range.from,
+            range.to
+          ] as [Decoration.Range, number, number]
+      )
+    )
+  };
+}
 // Where the query occurs in the note's text, case-insensitively, within one
 // block at a time; images and line breaks end a run of text.
-function findTextMatches(doc:any,query:string):SearchRange[]{
-  const needle=Array.from(String(query||'').trim()).map(char=>{const lower=char.toLowerCase();return lower.length===char.length?lower:char}).join('');if(!needle)return [];
-  const out:SearchRange[]=[];let text='',positions:number[]=[];
-  const flush=()=>{let at=text.indexOf(needle);while(at>=0){out.push({from:positions[at]!,to:positions[at+needle.length-1]!+1});at=text.indexOf(needle,at+needle.length)}text='';positions=[]};
-  doc.iterate((node:any,pos:number)=>{
-    if(node.isText){const value=String(node.param||'');for(let index=0;index<value.length;index++){const char=value[index]!,lower=char.toLowerCase();text+=lower.length===1?lower:char;positions.push(pos+index)}}
-    else if(node.isBlock)flush();else{text+='\u0000';positions.push(pos)}
+function findTextMatches(doc: any, query: string): SearchRange[] {
+  const needle = Array.from(String(query || '').trim())
+    .map(char => {
+      const lower = char.toLowerCase();
+      return lower.length === char.length ? lower : char;
+    })
+    .join('');
+  if (!needle) return [];
+  const out: SearchRange[] = [];
+  let text = '',
+    positions: number[] = [];
+  const flush = () => {
+    let at = text.indexOf(needle);
+    while (at >= 0) {
+      out.push({from: positions[at]!, to: positions[at + needle.length - 1]! + 1});
+      at = text.indexOf(needle, at + needle.length);
+    }
+    text = '';
+    positions = [];
+  };
+  doc.iterate((node: any, pos: number) => {
+    if (node.isText) {
+      const value = String(node.param || '');
+      for (let index = 0; index < value.length; index++) {
+        const char = value[index]!,
+          lower = char.toLowerCase();
+        text += lower.length === 1 ? lower : char;
+        positions.push(pos + index);
+      }
+    } else if (node.isBlock) flush();
+    else {
+      text += '\u0000';
+      positions.push(pos);
+    }
   });
-  flush();return out;
+  flush();
+  return out;
 }
 // Tags in the text show as chips, on the same decorations; they follow every edit.
-function tagDecorationSet(state:GardState){
-  const entries:[Decoration.Range,number,number][]=[];
-  state.doc.iterate((node:any,pos:number)=>{
-    if(!node.isTextblock)return;
-    const map=state.textblockMap(state.doc.resolveNode(pos) as any);
-    for(const match of tagMatches(map.text))entries.push([Decoration.Range.wrapper('span',{attributes:{class:'sd-tag','data-sd-tag':match.tag},scope:'all'}),map.fromIndex(match.from),map.fromIndex(match.to)]);
+function tagDecorationSet(state: GardState) {
+  const entries: [Decoration.Range, number, number][] = [];
+  state.doc.iterate((node: any, pos: number) => {
+    if (!node.isTextblock) return;
+    const map = state.textblockMap(state.doc.resolveNode(pos) as any);
+    for (const match of tagMatches(map.text))
+      entries.push([
+        Decoration.Range.wrapper('span', {attributes: {class: 'sd-tag', 'data-sd-tag': match.tag}, scope: 'all'}),
+        map.fromIndex(match.from),
+        map.fromIndex(match.to)
+      ]);
     return false;
   });
-  return entries.length?RangeSet.create(entries):RangeSet.empty;
+  return entries.length ? RangeSet.create(entries) : RangeSet.empty;
 }
-const tagDecorations=GardState.Field.define<RangeSet<Decoration.Range>>({create:tagDecorationSet,update:(value,tr)=>tr.docChanged?tagDecorationSet(tr.state):value,provide:field=>Decoration.Range.source.of(state=>state.field(field))});
-const searchMatchEscape=KeyBinding.of({key:'Escape',run:wg=>{if(!wg.state.field(searchMatches))return false;wg.dispatch({effects:setSearchMatches.of(null)});return true}});
-const attachmentUploadWidget=Widget.define<HTMLElement>({render:value=>value,propagateEvent:false});
-function createAttachmentProgressWidget(kind:AttachmentKind,file:File,controller:AbortController){const root=document.createElement('span'),name=document.createElement('span'),state=document.createElement('span'),bar=document.createElement('progress'),cancel=document.createElement('button'),label=normalizeAttachmentName(file.name);root.className='sd-rte-attachment-upload';root.setAttribute('role','status');name.className='sd-rte-attachment-upload-name';name.textContent=label;state.className='sd-rte-attachment-upload-state';bar.className='sd-rte-attachment-upload-bar';cancel.type='button';cancel.className='sd-rte-attachment-upload-cancel';cancel.textContent='Cancel';cancel.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();controller.abort()});root.append(name,state,bar,cancel);return{widget:attachmentUploadWidget.of(root),update(progress:AttachmentProgress){const total=Math.max(0,Number(progress.total)||0),loaded=Math.max(0,Number(progress.loaded)||0);state.textContent=attachmentProgressText(kind,progress);bar.max=Math.max(1,total);if(total>0&&(progress.phase==='copying'||progress.phase==='verifying'||progress.phase==='complete'))bar.value=progress.phase==='complete'?total:Math.min(total,loaded);else bar.removeAttribute('value')}}}
-const setAttachmentUploadDecoration=Transaction.Effect.define<AttachmentUploadDecorationState|null>(),attachmentUploadDecorations=GardState.Field.define<PointSet<Decoration.Point>>({create:()=>PointSet.empty,update:(value,tr)=>{for(const effect of tr.effects)if(effect.is(setAttachmentUploadDecoration)){const next=effect.value;return next?PointSet.create([[Decoration.Point.widget(next.widget,{side:1}),next.pos]]):PointSet.empty}return value.map(tr.changes)},provide:field=>Decoration.Point.source.of(state=>state.field(field))});
+const tagDecorations = GardState.Field.define<RangeSet<Decoration.Range>>({
+  create: tagDecorationSet,
+  update: (value, tr) => (tr.docChanged ? tagDecorationSet(tr.state) : value),
+  provide: field => Decoration.Range.source.of(state => state.field(field))
+});
+const searchMatchEscape = KeyBinding.of({
+  key: 'Escape',
+  run: wg => {
+    if (!wg.state.field(searchMatches)) return false;
+    wg.dispatch({effects: setSearchMatches.of(null)});
+    return true;
+  }
+});
+const attachmentUploadWidget = Widget.define<HTMLElement>({render: value => value, propagateEvent: false});
+function createAttachmentProgressWidget(kind: AttachmentKind, file: File, controller: AbortController) {
+  const root = document.createElement('span'),
+    name = document.createElement('span'),
+    state = document.createElement('span'),
+    bar = document.createElement('progress'),
+    cancel = document.createElement('button'),
+    label = normalizeAttachmentName(file.name);
+  root.className = 'sd-rte-attachment-upload';
+  root.setAttribute('role', 'status');
+  name.className = 'sd-rte-attachment-upload-name';
+  name.textContent = label;
+  state.className = 'sd-rte-attachment-upload-state';
+  bar.className = 'sd-rte-attachment-upload-bar';
+  cancel.type = 'button';
+  cancel.className = 'sd-rte-attachment-upload-cancel';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', event => {
+    event.preventDefault();
+    event.stopPropagation();
+    controller.abort();
+  });
+  root.append(name, state, bar, cancel);
+  return {
+    widget: attachmentUploadWidget.of(root),
+    update(progress: AttachmentProgress) {
+      const total = Math.max(0, Number(progress.total) || 0),
+        loaded = Math.max(0, Number(progress.loaded) || 0);
+      state.textContent = attachmentProgressText(kind, progress);
+      bar.max = Math.max(1, total);
+      if (total > 0 && (progress.phase === 'copying' || progress.phase === 'verifying' || progress.phase === 'complete'))
+        bar.value = progress.phase === 'complete' ? total : Math.min(total, loaded);
+      else bar.removeAttribute('value');
+    }
+  };
+}
+const setAttachmentUploadDecoration = Transaction.Effect.define<AttachmentUploadDecorationState | null>(),
+  attachmentUploadDecorations = GardState.Field.define<PointSet<Decoration.Point>>({
+    create: () => PointSet.empty,
+    update: (value, tr) => {
+      for (const effect of tr.effects)
+        if (effect.is(setAttachmentUploadDecoration)) {
+          const next = effect.value;
+          return next ? PointSet.create([[Decoration.Point.widget(next.widget, {side: 1}), next.pos]]) : PointSet.empty;
+        }
+      return value.map(tr.changes);
+    },
+    provide: field => Decoration.Point.source.of(state => state.field(field))
+  });
 // Audio is drawn with its loaded address, so a re-render keeps the player's
 // source (the same revision refreshes images and audio).
-function audioRendering(cache:Map<string,string|null>):GardState.Extension{return Decoration.Tag.shape.derived(StudyAudio,state=>{state.field(imageRevision);return tag=>{const value=tag.param as StudyAudioValue;return studyAudioShape(value,cache.get(value.attachmentId))}},{atom:true})}
-function imageRendering(cache:Map<string,string|null>):GardState.Extension{return [imageRevision,Decoration.Tag.shape.derived(StudyImage,state=>{state.field(imageRevision);return tag=>{const value=tag.param as StudyImageValue;return studyImageShape(value,cache.get(value.assetId))}},{atom:true})]}
-
-interface EditorInteractionHooks{
-  click(event:MouseEvent,wg:Wordgard):boolean;
-  pointerDown(event:PointerEvent,wg:Wordgard):boolean;
-  pointerMove(event:PointerEvent,wg:Wordgard):void;
-  pointerLeave(event:PointerEvent,wg:Wordgard):void;
-  paste?(event:InputEvent|ClipboardEvent,wg:Wordgard):boolean;
-  beforeInput?(event:InputEvent,wg:Wordgard):boolean;
-  drop?(event:DragEvent,wg:Wordgard):boolean;
-  tab(wg:Wordgard,shift:boolean):boolean;
-  backspace(wg:Wordgard):boolean;
-  resizeImage(wg:Wordgard,delta:number):boolean;
-  openLink(wg:Wordgard):boolean;
-  noteLink?():void;
-  tagSuggest?(from:number,letter:string):void;
-  toggleChecklist(wg:Wordgard):boolean;
+function audioRendering(cache: Map<string, string | null>): GardState.Extension {
+  return Decoration.Tag.shape.derived(
+    StudyAudio,
+    state => {
+      state.field(imageRevision);
+      return tag => {
+        const value = tag.param as StudyAudioValue;
+        return studyAudioShape(value, cache.get(value.attachmentId));
+      };
+    },
+    {atom: true}
+  );
+}
+function imageRendering(cache: Map<string, string | null>): GardState.Extension {
+  return [
+    imageRevision,
+    Decoration.Tag.shape.derived(
+      StudyImage,
+      state => {
+        state.field(imageRevision);
+        return tag => {
+          const value = tag.param as StudyImageValue;
+          return studyImageShape(value, cache.get(value.assetId));
+        };
+      },
+      {atom: true}
+    )
+  ];
 }
 
-interface HeadlessAction{run:Command.Bound|Command;active?:(state:GardState)=>boolean;enabled?:(state:GardState)=>boolean}
-const editableAction=(run:Command.Bound|Command,active?:HeadlessAction['active']):HeadlessAction=>({run,active,enabled:state=>!state.readOnly});
-const markAction=(mark:Mark):HeadlessAction=>editableAction(Command.bind(toggleMark,mark),state=>state.selection.isCursor?!!mark.isInSet(state.sel.activeMarks):!state.selection.ranges.some(range=>canAddMarkInRange(state.doc,range.from,range.to,mark)));
-const paragraphAction=editableAction(Command.bind(setTypographyPreset,'N'),state=>typographyState(state).preset==='N');
-const h1Action=editableAction(Command.bind(setTypographyPreset,'H1'),state=>typographyState(state).preset==='H1');
-const h2Action=editableAction(Command.bind(setTypographyPreset,'H2'),state=>typographyState(state).preset==='H2');
-const headingAction=h2Action; // Compatibility alias: Study Director's historical Heading is Wordgard H2.
-const strongAction=markAction(Strong),emphasisAction=markAction(Emphasis),underlineAction=markAction(Underline),strikethroughAction=markAction(Strikethrough),subscriptAction=markAction(Subscript),superscriptAction=markAction(Superscript),highlightAction=markAction(Highlight);
-const bulletListAction=editableAction(Command.bind(toggleList,BulletList),listIsActive(BulletList));
-const orderedListAction=editableAction(Command.bind(toggleList,OrderedList.default!),listIsActive(OrderedList.default!));
-const blockquoteAction=editableAction(Command.bind(toggleBlock,Blockquote),state=>{for(let cur=state.sel.head.parent;cur;cur=cur.parent)if(cur.node.type===Blockquote.type)return true;return false});
-const undoAction:HeadlessAction={run:undo,enabled:state=>!state.readOnly&&undoDepth(state)>0},redoAction:HeadlessAction={run:redo,enabled:state=>!state.readOnly&&redoDepth(state)>0};
-const horizontalRuleInputRule=InputRule.define({expr:/^---$/,lookahead:/^$/,apply:(state,m)=>{const changes=ChangeSet.create(state.doc,{from:m[0].from.pos,to:m[0].to.pos,insert:[HorizontalRule],fit:true}),hr=changes.findInserted(tag=>tag===HorizontalRule);return hr==null?null:{changes,selection:cx=>GardSelection.near(cx,hr+1,1),annotations:history.isolate.of(true),userEvent:'insert.horizontalrule'}}});
-
-const DocumentSchemaElements=[Doc,Paragraph,Heading,...TYPOGRAPHY_SCHEMA_ELEMENTS,LineBreak,Strong,Emphasis,Underline,Strikethrough,Superscript,Subscript,Link,Highlight,Blockquote,BulletList,OrderedList,ListItem,HorizontalRule,Table,TableRow,BlockCell,BlockHeaderCell,Checklist,ChecklistRole,ChecklistChecked,TableWidth,CellWidth,CellHeight,StudyImage,StudyAudio];
-const DocumentSchemaExtensions=DocumentSchemaElements.map(element=>GardState.schemaElement.of(element)),DocumentSchema=GardState.Configuration.create(DocumentSchemaExtensions).schema!;
-function documentSchemaExtensions():GardState.Extension{return DocumentSchemaExtensions}
-
-function widgetKeyExtension(hooks:EditorInteractionHooks):GardState.Extension{
-  return Wordgard.Plugin.define(wg=>{
-    const keydown=(event:KeyboardEvent)=>{const delta=event.key==='ArrowLeft'?-5:event.key==='ArrowRight'?5:0;if(!delta||!hooks.resizeImage(wg,delta))return;event.preventDefault();event.stopPropagation()};
-    return {connect:()=>wg.contentDOM.addEventListener('keydown',keydown,true),disconnect:()=>wg.contentDOM.removeEventListener('keydown',keydown,true)}
-  }).extension
+interface EditorInteractionHooks {
+  click(event: MouseEvent, wg: Wordgard): boolean;
+  pointerDown(event: PointerEvent, wg: Wordgard): boolean;
+  pointerMove(event: PointerEvent, wg: Wordgard): void;
+  pointerLeave(event: PointerEvent, wg: Wordgard): void;
+  paste?(event: InputEvent | ClipboardEvent, wg: Wordgard): boolean;
+  beforeInput?(event: InputEvent, wg: Wordgard): boolean;
+  drop?(event: DragEvent, wg: Wordgard): boolean;
+  tab(wg: Wordgard, shift: boolean): boolean;
+  backspace(wg: Wordgard): boolean;
+  resizeImage(wg: Wordgard, delta: number): boolean;
+  openLink(wg: Wordgard): boolean;
+  noteLink?(): void;
+  tagSuggest?(from: number, letter: string): void;
+  toggleChecklist(wg: Wordgard): boolean;
 }
 
-function editorBehaviorExtensions(hooks:EditorInteractionHooks):GardState.Extension{return [
-  KeyBinding.of({key:'Ctrl-Shift-0',run:paragraphAction.run}),KeyBinding.of({key:'Ctrl-Shift-1',run:h1Action.run}),KeyBinding.of({key:'Ctrl-Shift-2',run:h2Action.run}),InputRule.textblockType(/^# $/,()=>Heading.of(1),true),InputRule.textblockType(/^## $/,()=>Heading.of(2),true),
-  KeyBinding.of({key:'Mod-b',run:strongAction.run}),KeyBinding.of({key:'Mod-i',run:emphasisAction.run}),KeyBinding.of({key:'Mod-u',run:underlineAction.run}),KeyBinding.of({key:'Mod-Shift-x',run:strikethroughAction.run}),KeyBinding.of({key:'Mod-.',run:superscriptAction.run}),KeyBinding.of({key:'Mod-,',run:subscriptAction.run}),
-  InputRule.wrapping(/^ ?- $/,BulletList,true),InputRule.wrapping(/^ ?(\d+)\. $/,match=>OrderedList.of(+match[1]!.text),true),horizontalRuleInputRule,InputRule.wrapping(/^> $/,Blockquote,true),
-  GardState.prec.highest(Wordgard.pasteHandler.of((wg,event)=>hooks.paste?.(event,wg)||false)),
-  // An image is taken from the paste event itself: Wordgard hands a paste to
-  // its paste handlers only when the paste's target is its own selection,
-  // which an empty editor focused from the keyboard may not yet match.
-  GardState.prec.highest(Wordgard.domEventHandler('paste',(event,wg)=>hooks.paste?.(event,wg)||false)),
-  // Wordgard's own drop reads text and formatting only, so a dropped file
-  // would fall through to the browser, which opens it in a new tab. Files are
-  // taken here: dragging one over the editor allows the drop, and the drop
-  // attaches it where it lands.
-  GardState.prec.highest(Wordgard.domEventHandler('dragover',event=>{if(!hooks.drop||!event.dataTransfer?.types.includes('Files'))return false;event.dataTransfer.dropEffect='copy';return true})),
-  GardState.prec.highest(Wordgard.domEventHandler('drop',(event,wg)=>hooks.drop?.(event,wg)||false)),
-  tableCore,history(),cutHandling,autoLinkOnSpace.extension,
-  // Typing [[ opens the note picker in place of the brackets. Pickers open
-  // once the keystroke is done, so it does not land in the picker's field.
-  InputRule.define({expr:/(\[\[)$/,apply:(_state,match)=>{const token=match[1];if(!token||!hooks.noteLink)return null;setTimeout(()=>hooks.noteLink?.(),0);return {changes:{from:token.from.pos,to:token.to.pos,insert:[]},userEvent:'input.notelink'}}}).extension,
-  // The first letter after a # offers the tags already in use; the text stays as typed.
-  InputRule.define({expr:/(?:^|[\s\uFFFC])#(\p{L})$/u,apply:(_state,match)=>{const letter=match[1];if(letter&&hooks.tagSuggest){const from=letter.from.pos;setTimeout(()=>hooks.tagSuggest?.(from,letter.text),0)}return null}}).extension,
-  KeyBinding.of({key:'Enter',allowDefault:true,run:wg=>{autoLinkBeforeCursor(wg);return false}}),
-  KeyBinding.of({key:'Tab',allowDefault:true,run:wg=>hooks.tab(wg,false),shift:wg=>hooks.tab(wg,true)}),
-  KeyBinding.of({key:'Backspace',allowDefault:true,run:wg=>hooks.backspace(wg)}),
-  KeyBinding.of({key:'Mod-k',run:wg=>hooks.openLink(wg)}),
-  KeyBinding.of({key:'Mod-Shift-7',run:orderedListAction.run}),
-  KeyBinding.of({key:'Mod-Shift-8',run:bulletListAction.run}),
-  KeyBinding.of({key:'Mod-Enter',run:wg=>hooks.toggleChecklist(wg)}),
-  widgetKeyExtension(hooks),
-  Wordgard.domEventHandler('click',(event,wg)=>hooks.click(event,wg)),
-  GardState.prec.highest(Wordgard.domEventHandler('beforeinput',(event,wg)=>hooks.beforeInput?.(event,wg)||false)),
-  Wordgard.domEventHandler('pointerdown',(event,wg)=>hooks.pointerDown(event,wg)),
-  Wordgard.domEventHandler('pointermove',(event,wg)=>hooks.pointerMove(event,wg)),
-  Wordgard.domEventHandler('pointerleave',(event,wg)=>hooks.pointerLeave(event,wg))
-]}
+interface HeadlessAction {
+  run: Command.Bound | Command;
+  active?: (state: GardState) => boolean;
+  enabled?: (state: GardState) => boolean;
+}
+const editableAction = (run: Command.Bound | Command, active?: HeadlessAction['active']): HeadlessAction => ({
+  run,
+  active,
+  enabled: state => !state.readOnly
+});
+const markAction = (mark: Mark): HeadlessAction =>
+  editableAction(Command.bind(toggleMark, mark), state =>
+    state.selection.isCursor
+      ? !!mark.isInSet(state.sel.activeMarks)
+      : !state.selection.ranges.some(range => canAddMarkInRange(state.doc, range.from, range.to, mark))
+  );
+const paragraphAction = editableAction(Command.bind(setTypographyPreset, 'N'), state => typographyState(state).preset === 'N');
+const h1Action = editableAction(Command.bind(setTypographyPreset, 'H1'), state => typographyState(state).preset === 'H1');
+const h2Action = editableAction(Command.bind(setTypographyPreset, 'H2'), state => typographyState(state).preset === 'H2');
+const headingAction = h2Action; // Compatibility alias: Study Director's historical Heading is Wordgard H2.
+const strongAction = markAction(Strong),
+  emphasisAction = markAction(Emphasis),
+  underlineAction = markAction(Underline),
+  strikethroughAction = markAction(Strikethrough),
+  subscriptAction = markAction(Subscript),
+  superscriptAction = markAction(Superscript),
+  highlightAction = markAction(Highlight);
+const bulletListAction = editableAction(Command.bind(toggleList, BulletList), listIsActive(BulletList));
+const orderedListAction = editableAction(Command.bind(toggleList, OrderedList.default!), listIsActive(OrderedList.default!));
+const blockquoteAction = editableAction(Command.bind(toggleBlock, Blockquote), state => {
+  for (let cur = state.sel.head.parent; cur; cur = cur.parent) if (cur.node.type === Blockquote.type) return true;
+  return false;
+});
+const undoAction: HeadlessAction = {run: undo, enabled: state => !state.readOnly && undoDepth(state) > 0},
+  redoAction: HeadlessAction = {run: redo, enabled: state => !state.readOnly && redoDepth(state) > 0};
+const horizontalRuleInputRule = InputRule.define({
+  expr: /^---$/,
+  lookahead: /^$/,
+  apply: (state, m) => {
+    const changes = ChangeSet.create(state.doc, {from: m[0].from.pos, to: m[0].to.pos, insert: [HorizontalRule], fit: true}),
+      hr = changes.findInserted(tag => tag === HorizontalRule);
+    return hr == null
+      ? null
+      : {
+          changes,
+          selection: cx => GardSelection.near(cx, hr + 1, 1),
+          annotations: history.isolate.of(true),
+          userEvent: 'insert.horizontalrule'
+        };
+  }
+});
 
-type DocumentInspection={valid:boolean;hasContent:boolean;assetIds:string[]};
-function inspectDocument(doc:Plot.Doc):DocumentInspection{
-  let valid=true,imageCount=0,atomic=false,hasText=false;const ids:string[]=[];
-  const walk=(node:Node,inTable=false,depth=0)=>{if(!valid||depth>WG1_DEFAULT_MAX_DEPTH){valid=false;return}for(const mark of node.marks)if(mark.type===Link&&!validSerializedLinkUrl(mark.value))valid=false;if(node.isText&&String(node.param??'').trim())hasText=true;if(node.type===StudyImage){imageCount++;atomic=true;const id=(node.param as StudyImageValue).assetId;if(validAssetId(id))ids.push(id);if(inTable)valid=false}else if(node.type===StudyAudio){atomic=true;if(inTable)valid=false}else if(node.type===Table.type||node.type===HorizontalRule.type)atomic=true;const nextInTable=inTable||node.type===Table.type;
-    if(node.type===Table.type&&node.isPlot){
-      if(inTable){valid=false;return}
-      const rows=node.content;if(rows.length<1||rows.length>MAX_TABLE_DIMENSION)valid=false;let columns=-1,canonicalWidths:number[]|null=null;
-      for(let rowIndex=0;rowIndex<rows.length;rowIndex++){
-        const row=rows[rowIndex];if(row.type!==TableRow.type||!row.isPlot){valid=false;continue}
-        const cells=row.content;if(columns<0)columns=cells.length;const headers=cells.filter(cell=>cell.type===BlockHeaderCell.type).length;
-        if(cells.length!==columns||cells.length<1||cells.length>MAX_TABLE_DIMENSION||cells.some(cell=>cell.type!==BlockCell.type&&cell.type!==BlockHeaderCell.type)||headers&&(rowIndex!==0||headers!==cells.length)){valid=false;continue}
-        const widths=cells.map(cell=>normalizeCellWidth(cell.mark(CellWidth)??100/cells.length));
-        if(Math.abs(widths.reduce((sum,width)=>sum+width,0)-100)>.5)valid=false;
-        if(canonicalWidths&&widths.some((width,index)=>Math.abs(width-canonicalWidths![index])>.1))valid=false;else if(!canonicalWidths)canonicalWidths=widths;
+const DocumentSchemaElements = [
+  Doc,
+  Paragraph,
+  Heading,
+  ...TYPOGRAPHY_SCHEMA_ELEMENTS,
+  LineBreak,
+  Strong,
+  Emphasis,
+  Underline,
+  Strikethrough,
+  Superscript,
+  Subscript,
+  Link,
+  Highlight,
+  Blockquote,
+  BulletList,
+  OrderedList,
+  ListItem,
+  HorizontalRule,
+  Table,
+  TableRow,
+  BlockCell,
+  BlockHeaderCell,
+  Checklist,
+  ChecklistRole,
+  ChecklistChecked,
+  TableWidth,
+  CellWidth,
+  CellHeight,
+  StudyImage,
+  StudyAudio
+];
+const DocumentSchemaExtensions = DocumentSchemaElements.map(element => GardState.schemaElement.of(element)),
+  DocumentSchema = GardState.Configuration.create(DocumentSchemaExtensions).schema!;
+function documentSchemaExtensions(): GardState.Extension {
+  return DocumentSchemaExtensions;
+}
+
+function widgetKeyExtension(hooks: EditorInteractionHooks): GardState.Extension {
+  return Wordgard.Plugin.define(wg => {
+    const keydown = (event: KeyboardEvent) => {
+      const delta = event.key === 'ArrowLeft' ? -5 : event.key === 'ArrowRight' ? 5 : 0;
+      if (!delta || !hooks.resizeImage(wg, delta)) return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    return {
+      connect: () => wg.contentDOM.addEventListener('keydown', keydown, true),
+      disconnect: () => wg.contentDOM.removeEventListener('keydown', keydown, true)
+    };
+  }).extension;
+}
+
+function editorBehaviorExtensions(hooks: EditorInteractionHooks): GardState.Extension {
+  return [
+    KeyBinding.of({key: 'Ctrl-Shift-0', run: paragraphAction.run}),
+    KeyBinding.of({key: 'Ctrl-Shift-1', run: h1Action.run}),
+    KeyBinding.of({key: 'Ctrl-Shift-2', run: h2Action.run}),
+    InputRule.textblockType(/^# $/, () => Heading.of(1), true),
+    InputRule.textblockType(/^## $/, () => Heading.of(2), true),
+    KeyBinding.of({key: 'Mod-b', run: strongAction.run}),
+    KeyBinding.of({key: 'Mod-i', run: emphasisAction.run}),
+    KeyBinding.of({key: 'Mod-u', run: underlineAction.run}),
+    KeyBinding.of({key: 'Mod-Shift-x', run: strikethroughAction.run}),
+    KeyBinding.of({key: 'Mod-.', run: superscriptAction.run}),
+    KeyBinding.of({key: 'Mod-,', run: subscriptAction.run}),
+    InputRule.wrapping(/^ ?- $/, BulletList, true),
+    InputRule.wrapping(/^ ?(\d+)\. $/, match => OrderedList.of(+match[1]!.text), true),
+    horizontalRuleInputRule,
+    InputRule.wrapping(/^> $/, Blockquote, true),
+    GardState.prec.highest(Wordgard.pasteHandler.of((wg, event) => hooks.paste?.(event, wg) || false)),
+    // An image is taken from the paste event itself: Wordgard hands a paste to
+    // its paste handlers only when the paste's target is its own selection,
+    // which an empty editor focused from the keyboard may not yet match.
+    GardState.prec.highest(Wordgard.domEventHandler('paste', (event, wg) => hooks.paste?.(event, wg) || false)),
+    // Wordgard's own drop reads text and formatting only, so a dropped file
+    // would fall through to the browser, which opens it in a new tab. Files are
+    // taken here: dragging one over the editor allows the drop, and the drop
+    // attaches it where it lands.
+    GardState.prec.highest(
+      Wordgard.domEventHandler('dragover', event => {
+        if (!hooks.drop || !event.dataTransfer?.types.includes('Files')) return false;
+        event.dataTransfer.dropEffect = 'copy';
+        return true;
+      })
+    ),
+    GardState.prec.highest(Wordgard.domEventHandler('drop', (event, wg) => hooks.drop?.(event, wg) || false)),
+    tableCore,
+    history(),
+    cutHandling,
+    autoLinkOnSpace.extension,
+    // Typing [[ opens the note picker in place of the brackets. Pickers open
+    // once the keystroke is done, so it does not land in the picker's field.
+    InputRule.define({
+      expr: /(\[\[)$/,
+      apply: (_state, match) => {
+        const token = match[1];
+        if (!token || !hooks.noteLink) return null;
+        setTimeout(() => hooks.noteLink?.(), 0);
+        return {changes: {from: token.from.pos, to: token.to.pos, insert: []}, userEvent: 'input.notelink'};
+      }
+    }).extension,
+    // The first letter after a # offers the tags already in use; the text stays as typed.
+    InputRule.define({
+      expr: /(?:^|[\s\uFFFC])#(\p{L})$/u,
+      apply: (_state, match) => {
+        const letter = match[1];
+        if (letter && hooks.tagSuggest) {
+          const from = letter.from.pos;
+          setTimeout(() => hooks.tagSuggest?.(from, letter.text), 0);
+        }
+        return null;
+      }
+    }).extension,
+    KeyBinding.of({
+      key: 'Enter',
+      allowDefault: true,
+      run: wg => {
+        autoLinkBeforeCursor(wg);
+        return false;
+      }
+    }),
+    KeyBinding.of({key: 'Tab', allowDefault: true, run: wg => hooks.tab(wg, false), shift: wg => hooks.tab(wg, true)}),
+    KeyBinding.of({key: 'Backspace', allowDefault: true, run: wg => hooks.backspace(wg)}),
+    KeyBinding.of({key: 'Mod-k', run: wg => hooks.openLink(wg)}),
+    KeyBinding.of({key: 'Mod-Shift-7', run: orderedListAction.run}),
+    KeyBinding.of({key: 'Mod-Shift-8', run: bulletListAction.run}),
+    KeyBinding.of({key: 'Mod-Enter', run: wg => hooks.toggleChecklist(wg)}),
+    widgetKeyExtension(hooks),
+    Wordgard.domEventHandler('click', (event, wg) => hooks.click(event, wg)),
+    GardState.prec.highest(Wordgard.domEventHandler('beforeinput', (event, wg) => hooks.beforeInput?.(event, wg) || false)),
+    Wordgard.domEventHandler('pointerdown', (event, wg) => hooks.pointerDown(event, wg)),
+    Wordgard.domEventHandler('pointermove', (event, wg) => hooks.pointerMove(event, wg)),
+    Wordgard.domEventHandler('pointerleave', (event, wg) => hooks.pointerLeave(event, wg))
+  ];
+}
+
+type DocumentInspection = {valid: boolean; hasContent: boolean; assetIds: string[]};
+function inspectDocument(doc: Plot.Doc): DocumentInspection {
+  let valid = true,
+    imageCount = 0,
+    atomic = false,
+    hasText = false;
+  const ids: string[] = [];
+  const walk = (node: Node, inTable = false, depth = 0) => {
+    if (!valid || depth > WG1_DEFAULT_MAX_DEPTH) {
+      valid = false;
+      return;
+    }
+    for (const mark of node.marks) if (mark.type === Link && !validSerializedLinkUrl(mark.value)) valid = false;
+    if (node.isText && String(node.param ?? '').trim()) hasText = true;
+    if (node.type === StudyImage) {
+      imageCount++;
+      atomic = true;
+      const id = (node.param as StudyImageValue).assetId;
+      if (validAssetId(id)) ids.push(id);
+      if (inTable) valid = false;
+    } else if (node.type === StudyAudio) {
+      atomic = true;
+      if (inTable) valid = false;
+    } else if (node.type === Table.type || node.type === HorizontalRule.type) atomic = true;
+    const nextInTable = inTable || node.type === Table.type;
+    if (node.type === Table.type && node.isPlot) {
+      if (inTable) {
+        valid = false;
+        return;
+      }
+      const rows = node.content;
+      if (rows.length < 1 || rows.length > MAX_TABLE_DIMENSION) valid = false;
+      let columns = -1,
+        canonicalWidths: number[] | null = null;
+      for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+        const row = rows[rowIndex];
+        if (row.type !== TableRow.type || !row.isPlot) {
+          valid = false;
+          continue;
+        }
+        const cells = row.content;
+        if (columns < 0) columns = cells.length;
+        const headers = cells.filter(cell => cell.type === BlockHeaderCell.type).length;
+        if (
+          cells.length !== columns ||
+          cells.length < 1 ||
+          cells.length > MAX_TABLE_DIMENSION ||
+          cells.some(cell => cell.type !== BlockCell.type && cell.type !== BlockHeaderCell.type) ||
+          (headers && (rowIndex !== 0 || headers !== cells.length))
+        ) {
+          valid = false;
+          continue;
+        }
+        const widths = cells.map(cell => normalizeCellWidth(cell.mark(CellWidth) ?? 100 / cells.length));
+        if (Math.abs(widths.reduce((sum, width) => sum + width, 0) - 100) > 0.5) valid = false;
+        if (canonicalWidths && widths.some((width, index) => Math.abs(width - canonicalWidths![index]) > 0.1)) valid = false;
+        else if (!canonicalWidths) canonicalWidths = widths;
       }
     }
-    if(node.isPlot)for(const child of node.content)walk(child,nextInTable,depth+1)
-  };walk(doc);return {valid:valid&&imageCount<=MAX_IMAGES_PER_DOCUMENT,hasContent:atomic||hasText,assetIds:[...new Set(ids)]}
+    if (node.isPlot) for (const child of node.content) walk(child, nextInTable, depth + 1);
+  };
+  walk(doc);
+  return {valid: valid && imageCount <= MAX_IMAGES_PER_DOCUMENT, hasContent: atomic || hasText, assetIds: [...new Set(ids)]};
 }
-function validateDocument(doc:Plot.Doc){return inspectDocument(doc).valid}
-type DecodedStoredValue={kind:'plain';text:string}|{kind:'invalid-rich';text:string}|{kind:'rich';text:string;doc:Plot.Doc};
-function decodeFresh(value:string):DecodedStoredValue{
-  const decoded=decodeWG1Envelope(value,WG1_DEFAULT_MAX_DEPTH,WG1_DEFAULT_MAX_NODES);
-  if(decoded.kind==='plain')return {kind:'plain',text:decoded.text};
-  if(decoded.kind==='invalid-envelope')return {kind:'invalid-rich',text:decoded.text};
-  try{const doc=DocumentSchema.docFromJSON(decoded.envelope.doc);return validateDocument(doc)?{kind:'rich',text:decoded.text,doc}:{kind:'invalid-rich',text:decoded.text}}catch{return {kind:'invalid-rich',text:decoded.text}}
+function validateDocument(doc: Plot.Doc) {
+  return inspectDocument(doc).valid;
+}
+type DecodedStoredValue =
+  | {kind: 'plain'; text: string}
+  | {kind: 'invalid-rich'; text: string}
+  | {kind: 'rich'; text: string; doc: Plot.Doc};
+function decodeFresh(value: string): DecodedStoredValue {
+  const decoded = decodeWG1Envelope(value, WG1_DEFAULT_MAX_DEPTH, WG1_DEFAULT_MAX_NODES);
+  if (decoded.kind === 'plain') return {kind: 'plain', text: decoded.text};
+  if (decoded.kind === 'invalid-envelope') return {kind: 'invalid-rich', text: decoded.text};
+  try {
+    const doc = DocumentSchema.docFromJSON(decoded.envelope.doc);
+    return validateDocument(doc) ? {kind: 'rich', text: decoded.text, doc} : {kind: 'invalid-rich', text: decoded.text};
+  } catch {
+    return {kind: 'invalid-rich', text: decoded.text};
+  }
 }
 // A text is often asked about several times in a row (its kind, then its
 // size), so the last one decoded is kept. Documents never change once made,
 // so it can be shared.
-let lastDecoded:{text:string;decoded:DecodedStoredValue}|null=null;
-function decodeStoredValue(value:unknown):DecodedStoredValue{
-  const text=String(value??'');if(lastDecoded&&lastDecoded.text===text)return lastDecoded.decoded;
-  const decoded=decodeFresh(text);if(decoded.kind!=='plain')lastDecoded={text,decoded};
+let lastDecoded: {text: string; decoded: DecodedStoredValue} | null = null;
+function decodeStoredValue(value: unknown): DecodedStoredValue {
+  const text = String(value ?? '');
+  if (lastDecoded && lastDecoded.text === text) return lastDecoded.decoded;
+  const decoded = decodeFresh(text);
+  if (decoded.kind !== 'plain') lastDecoded = {text, decoded};
   return decoded;
 }
-function decodeDocument(value:unknown):Plot.Doc|null{const decoded=decodeStoredValue(value);return decoded.kind==='rich'?decoded.doc:null}
-function classifySerializedValue(value:unknown){const decoded=decodeStoredValue(value);return decoded.kind==='rich'?'rich':decoded.kind==='plain'?'plain':'invalid-rich'}
-function isRichTextValue(value:unknown){return classifySerializedValue(value)==='rich'}
-function toPlainText(value:unknown){const decoded=decodeStoredValue(value);return decoded.kind==='rich'?decoded.doc.textContent():decoded.kind==='plain'?normalizePlainText(decoded.text):''}
-function measure(value:unknown){return Object.freeze({words:wordCount(toPlainText(value)),bytes:utf8ByteLength(value)})}
-function assetIdsFromDocument(doc:Plot.Doc){const ids:string[]=[];doc.iterate(node=>{if(node.type===StudyImage)ids.push((node.param as StudyImageValue).assetId)});return [...new Set(ids)]}
-function assetIds(value:unknown){const doc=decodeDocument(value);return doc?assetIdsFromDocument(doc):[]}
-function audioAttachmentIdsFromDocument(doc:Plot.Doc){const ids:string[]=[];doc.iterate(node=>{if(node.type===StudyAudio)ids.push((node.param as StudyAudioValue).attachmentId)});return [...new Set(ids)]}
-function scanAssetReferences(value:unknown){const text=String(value??'');if(!text.startsWith(STORAGE_PREFIX))return Object.freeze({trusted:true,assetIds:[] as string[]});const decoded=decodeStoredValue(text);return decoded.kind==='rich'?Object.freeze({trusted:true,assetIds:assetIdsFromDocument(decoded.doc)}):Object.freeze({trusted:false,assetIds:[] as string[]})}
-type AttachmentReferenceOccurrence={id:string;kind:'inline-image'|'inline-audio'|'link'};
-function attachmentLinkId(value:unknown){const match=typeof value==='string'?value.match(ATTACHMENT_LINK_RE):null;return match?match[1]:''}
-function scanAttachmentReferences(value:unknown){
-  const text=String(value??'');
-  if(!text.startsWith(STORAGE_PREFIX))return Object.freeze({trusted:true,assetIds:Object.freeze([] as string[]),occurrences:Object.freeze([] as AttachmentReferenceOccurrence[])});
-  const decoded=decodeStoredValue(text);
-  if(decoded.kind!=='rich')return Object.freeze({trusted:false,assetIds:Object.freeze([] as string[]),occurrences:Object.freeze([] as AttachmentReferenceOccurrence[])});
-  const occurrences:AttachmentReferenceOccurrence[]=[];
-  decoded.doc.iterate(node=>{
-    if(node.type===StudyImage){const id=(node.param as StudyImageValue).assetId;if(validAssetId(id))occurrences.push(Object.freeze({id,kind:'inline-image'}));}
-    else if(node.type===StudyAudio){const id=(node.param as StudyAudioValue).attachmentId;if(validAssetId(id))occurrences.push(Object.freeze({id,kind:'inline-audio'}));}
-    for(const mark of node.marks){if(mark.type!==Link)continue;const id=attachmentLinkId(mark.value);if(id)occurrences.push(Object.freeze({id,kind:'link'}));}
+function decodeDocument(value: unknown): Plot.Doc | null {
+  const decoded = decodeStoredValue(value);
+  return decoded.kind === 'rich' ? decoded.doc : null;
+}
+function classifySerializedValue(value: unknown) {
+  const decoded = decodeStoredValue(value);
+  return decoded.kind === 'rich' ? 'rich' : decoded.kind === 'plain' ? 'plain' : 'invalid-rich';
+}
+function isRichTextValue(value: unknown) {
+  return classifySerializedValue(value) === 'rich';
+}
+function toPlainText(value: unknown) {
+  const decoded = decodeStoredValue(value);
+  return decoded.kind === 'rich' ? decoded.doc.textContent() : decoded.kind === 'plain' ? normalizePlainText(decoded.text) : '';
+}
+function measure(value: unknown) {
+  return Object.freeze({words: wordCount(toPlainText(value)), bytes: utf8ByteLength(value)});
+}
+function assetIdsFromDocument(doc: Plot.Doc) {
+  const ids: string[] = [];
+  doc.iterate(node => {
+    if (node.type === StudyImage) ids.push((node.param as StudyImageValue).assetId);
   });
-  return Object.freeze({trusted:true,assetIds:Object.freeze([...new Set(occurrences.map(item=>item.id))]),occurrences:Object.freeze(occurrences)});
+  return [...new Set(ids)];
 }
-function plainDocumentJson(value:unknown){return {type:'Doc',content:normalizePlainText(value).split('\n').map(line=>({type:'Paragraph',content:line?[{type:'Text',param:line}]:[]}))};}
-function documentJsonForAttachmentMutation(value:unknown){
-  const text=String(value??''),decoded=decodeStoredValue(text);
-  if(text.startsWith(STORAGE_PREFIX)&&decoded.kind!=='rich')throw new RangeError('This rich note is invalid and cannot be changed safely.');
-  return decoded.kind==='rich'?decoded.doc.toJSON():plainDocumentJson(decoded.text);
+function assetIds(value: unknown) {
+  const doc = decodeDocument(value);
+  return doc ? assetIdsFromDocument(doc) : [];
 }
-function validatedDocumentFromJson(json:unknown){
-  try{const doc=DocumentSchema.docFromJSON(json);if(!validateDocument(doc))throw new Error('invalid');return doc;}
-  catch{throw new RangeError('The attachment change would create an invalid rich note.');}
+function audioAttachmentIdsFromDocument(doc: Plot.Doc) {
+  const ids: string[] = [];
+  doc.iterate(node => {
+    if (node.type === StudyAudio) ids.push((node.param as StudyAudioValue).attachmentId);
+  });
+  return [...new Set(ids)];
 }
-function insertAttachmentReference(value:unknown,options:{id:string;name?:string;mode:'inline-image'|'inline-audio'|'link'}){
-  const id=String(options&&options.id||''),mode=options&&options.mode;
-  if(!validAssetId(id))throw new TypeError('Invalid attachment identity.');
-  if(mode!=='inline-image'&&mode!=='inline-audio'&&mode!=='link')throw new TypeError('Invalid attachment insertion mode.');
-  const json=documentJsonForAttachmentMutation(value) as any,content=Array.isArray(json.content)?json.content:(json.content=[]);
-  if(mode==='inline-image')content.push({type:'SDImage',param:{assetId:id,alt:'',widthPct:DEFAULT_IMAGE_WIDTH_PCT}});
-  else if(mode==='inline-audio')content.push({type:'SDAudio',param:{attachmentId:id,name:normalizeAttachmentName(options.name)}});
-  else content.push({type:'Paragraph',content:[{type:'Text',param:normalizeAttachmentName(options.name),marks:{Link:'#attachment='+id}}]});
-  const doc=validatedDocumentFromJson(json),inspection=inspectDocument(doc);
-  return Object.freeze({value:encodeDocument(doc,inspection.hasContent),added:1,mode});
+function scanAssetReferences(value: unknown) {
+  const text = String(value ?? '');
+  if (!text.startsWith(STORAGE_PREFIX)) return Object.freeze({trusted: true, assetIds: [] as string[]});
+  const decoded = decodeStoredValue(text);
+  return decoded.kind === 'rich'
+    ? Object.freeze({trusted: true, assetIds: assetIdsFromDocument(decoded.doc)})
+    : Object.freeze({trusted: false, assetIds: [] as string[]});
 }
-function removeAttachmentReferences(value:unknown,ids:Iterable<string>){
-  const targets=new Set([...ids].map(String).filter(validAssetId));
-  if(!targets.size)return Object.freeze({value:String(value??''),removed:Object.freeze({images:0,audio:0,links:0,total:0})});
-  const text=String(value??''),decoded=decodeStoredValue(text);
-  if(text.startsWith(STORAGE_PREFIX)&&decoded.kind!=='rich')throw new RangeError('This rich note is invalid and cannot be changed safely.');
-  if(decoded.kind==='plain')return Object.freeze({value:decoded.text,removed:Object.freeze({images:0,audio:0,links:0,total:0})});
-  const root=decoded.doc.toJSON() as any;let images=0,audio=0,links=0;
-  const transform=(node:any,topLevel=false):any=>{
-    if(!node||typeof node!=='object'||Array.isArray(node))return node;
-    if(node.type==='SDImage'&&targets.has(String(node.param&&node.param.assetId||''))){images++;return null;}
-    if(node.type==='SDAudio'&&targets.has(String(node.param&&node.param.attachmentId||''))){audio++;return null;}
-    const children=Array.isArray(node.content)?node.content:null;
-    const copy={...node};
-    if(node.type==='Text'&&node.marks&&typeof node.marks==='object'&&!Array.isArray(node.marks)){
-      const id=attachmentLinkId(node.marks.Link);
-      if(id&&targets.has(id)){const marks={...node.marks};delete marks.Link;links++;if(Object.keys(marks).length)copy.marks=marks;else delete copy.marks;}
+type AttachmentReferenceOccurrence = {id: string; kind: 'inline-image' | 'inline-audio' | 'link'};
+function attachmentLinkId(value: unknown) {
+  const match = typeof value === 'string' ? value.match(ATTACHMENT_LINK_RE) : null;
+  return match ? match[1] : '';
+}
+function scanAttachmentReferences(value: unknown) {
+  const text = String(value ?? '');
+  if (!text.startsWith(STORAGE_PREFIX))
+    return Object.freeze({
+      trusted: true,
+      assetIds: Object.freeze([] as string[]),
+      occurrences: Object.freeze([] as AttachmentReferenceOccurrence[])
+    });
+  const decoded = decodeStoredValue(text);
+  if (decoded.kind !== 'rich')
+    return Object.freeze({
+      trusted: false,
+      assetIds: Object.freeze([] as string[]),
+      occurrences: Object.freeze([] as AttachmentReferenceOccurrence[])
+    });
+  const occurrences: AttachmentReferenceOccurrence[] = [];
+  decoded.doc.iterate(node => {
+    if (node.type === StudyImage) {
+      const id = (node.param as StudyImageValue).assetId;
+      if (validAssetId(id)) occurrences.push(Object.freeze({id, kind: 'inline-image'}));
+    } else if (node.type === StudyAudio) {
+      const id = (node.param as StudyAudioValue).attachmentId;
+      if (validAssetId(id)) occurrences.push(Object.freeze({id, kind: 'inline-audio'}));
     }
-    if(children){const next=[];for(const child of children){const changed=transform(child,false);if(changed)next.push(changed);}copy.content=next;}
+    for (const mark of node.marks) {
+      if (mark.type !== Link) continue;
+      const id = attachmentLinkId(mark.value);
+      if (id) occurrences.push(Object.freeze({id, kind: 'link'}));
+    }
+  });
+  return Object.freeze({
+    trusted: true,
+    assetIds: Object.freeze([...new Set(occurrences.map(item => item.id))]),
+    occurrences: Object.freeze(occurrences)
+  });
+}
+function plainDocumentJson(value: unknown) {
+  return {
+    type: 'Doc',
+    content: normalizePlainText(value)
+      .split('\n')
+      .map(line => ({type: 'Paragraph', content: line ? [{type: 'Text', param: line}] : []}))
+  };
+}
+function documentJsonForAttachmentMutation(value: unknown) {
+  const text = String(value ?? ''),
+    decoded = decodeStoredValue(text);
+  if (text.startsWith(STORAGE_PREFIX) && decoded.kind !== 'rich')
+    throw new RangeError('This rich note is invalid and cannot be changed safely.');
+  return decoded.kind === 'rich' ? decoded.doc.toJSON() : plainDocumentJson(decoded.text);
+}
+function validatedDocumentFromJson(json: unknown) {
+  try {
+    const doc = DocumentSchema.docFromJSON(json);
+    if (!validateDocument(doc)) throw new Error('invalid');
+    return doc;
+  } catch {
+    throw new RangeError('The attachment change would create an invalid rich note.');
+  }
+}
+function insertAttachmentReference(value: unknown, options: {id: string; name?: string; mode: 'inline-image' | 'inline-audio' | 'link'}) {
+  const id = String((options && options.id) || ''),
+    mode = options && options.mode;
+  if (!validAssetId(id)) throw new TypeError('Invalid attachment identity.');
+  if (mode !== 'inline-image' && mode !== 'inline-audio' && mode !== 'link') throw new TypeError('Invalid attachment insertion mode.');
+  const json = documentJsonForAttachmentMutation(value) as any,
+    content = Array.isArray(json.content) ? json.content : (json.content = []);
+  if (mode === 'inline-image') content.push({type: 'SDImage', param: {assetId: id, alt: '', widthPct: DEFAULT_IMAGE_WIDTH_PCT}});
+  else if (mode === 'inline-audio') content.push({type: 'SDAudio', param: {attachmentId: id, name: normalizeAttachmentName(options.name)}});
+  else
+    content.push({
+      type: 'Paragraph',
+      content: [{type: 'Text', param: normalizeAttachmentName(options.name), marks: {Link: '#attachment=' + id}}]
+    });
+  const doc = validatedDocumentFromJson(json),
+    inspection = inspectDocument(doc);
+  return Object.freeze({value: encodeDocument(doc, inspection.hasContent), added: 1, mode});
+}
+function removeAttachmentReferences(value: unknown, ids: Iterable<string>) {
+  const targets = new Set([...ids].map(String).filter(validAssetId));
+  if (!targets.size) return Object.freeze({value: String(value ?? ''), removed: Object.freeze({images: 0, audio: 0, links: 0, total: 0})});
+  const text = String(value ?? ''),
+    decoded = decodeStoredValue(text);
+  if (text.startsWith(STORAGE_PREFIX) && decoded.kind !== 'rich')
+    throw new RangeError('This rich note is invalid and cannot be changed safely.');
+  if (decoded.kind === 'plain')
+    return Object.freeze({value: decoded.text, removed: Object.freeze({images: 0, audio: 0, links: 0, total: 0})});
+  const root = decoded.doc.toJSON() as any;
+  let images = 0,
+    audio = 0,
+    links = 0;
+  const transform = (node: any, topLevel = false): any => {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
+    if (node.type === 'SDImage' && targets.has(String((node.param && node.param.assetId) || ''))) {
+      images++;
+      return null;
+    }
+    if (node.type === 'SDAudio' && targets.has(String((node.param && node.param.attachmentId) || ''))) {
+      audio++;
+      return null;
+    }
+    const children = Array.isArray(node.content) ? node.content : null;
+    const copy = {...node};
+    if (node.type === 'Text' && node.marks && typeof node.marks === 'object' && !Array.isArray(node.marks)) {
+      const id = attachmentLinkId(node.marks.Link);
+      if (id && targets.has(id)) {
+        const marks = {...node.marks};
+        delete marks.Link;
+        links++;
+        if (Object.keys(marks).length) copy.marks = marks;
+        else delete copy.marks;
+      }
+    }
+    if (children) {
+      const next = [];
+      for (const child of children) {
+        const changed = transform(child, false);
+        if (changed) next.push(changed);
+      }
+      copy.content = next;
+    }
     return copy;
   };
-  const nextContent=[];for(const child of Array.isArray(root.content)?root.content:[]){const changed=transform(child,true);if(changed)nextContent.push(changed);}
-  root.content=nextContent.length?nextContent:[{type:'Paragraph',content:[]}];
-  const doc=validatedDocumentFromJson(root);
-  return Object.freeze({value:encodeWG1Document(doc.toJSON()),removed:Object.freeze({images,audio,links,total:images+audio+links})});
+  const nextContent = [];
+  for (const child of Array.isArray(root.content) ? root.content : []) {
+    const changed = transform(child, true);
+    if (changed) nextContent.push(changed);
+  }
+  root.content = nextContent.length ? nextContent : [{type: 'Paragraph', content: []}];
+  const doc = validatedDocumentFromJson(root);
+  return Object.freeze({
+    value: encodeWG1Document(doc.toJSON()),
+    removed: Object.freeze({images, audio, links, total: images + audio + links})
+  });
 }
-function encodeDocument(doc:Plot.Doc,hasContent=inspectDocument(doc).hasContent){return hasContent?encodeWG1Document(doc.toJSON()):''}
+function encodeDocument(doc: Plot.Doc, hasContent = inspectDocument(doc).hasContent) {
+  return hasContent ? encodeWG1Document(doc.toJSON()) : '';
+}
 
 // Tags read from a stored note, plain or rich.
-function tagsIn(value:unknown){return tagsInText(wg1ToPlainText(value))}
+function tagsIn(value: unknown) {
+  return tagsInText(wg1ToPlainText(value));
+}
 // The note with #from written as #to wherever it is a tag; a rich note is
 // changed only in its text, so links and attachments stay as they are.
-function renameTag(value:unknown,from:unknown,to:unknown){
-  const source=normalizeTag(from),target=normalizeTag(to);if(!source||!target)throw new RangeError('Tags start with a letter and use letters, digits, - or _.');
-  const text=String(value??''),decoded=decodeStoredValue(text);
-  if(decoded.kind==='plain')return renameTagInText(decoded.text,source,target);
-  if(decoded.kind!=='rich')return text;
-  const json=decoded.doc.toJSON() as any;let count=0;
-  const visit=(node:any)=>{if(!node||!Array.isArray(node.content))return;if(node.content.some((child:any)=>child&&child.type==='Text')){count+=renameTagInInline(node.content,source,target);node.content=node.content.filter((child:any)=>!child||child.type!=='Text'||String(child.param??'')!=='')}else node.content.forEach(visit)};
-  visit(json);if(!count)return text;
-  let doc:Plot.Doc;try{doc=DocumentSchema.docFromJSON(json);if(!validateDocument(doc))throw new Error('invalid')}catch{throw new RangeError('This note could not be changed safely.')}
+function renameTag(value: unknown, from: unknown, to: unknown) {
+  const source = normalizeTag(from),
+    target = normalizeTag(to);
+  if (!source || !target) throw new RangeError('Tags start with a letter and use letters, digits, - or _.');
+  const text = String(value ?? ''),
+    decoded = decodeStoredValue(text);
+  if (decoded.kind === 'plain') return renameTagInText(decoded.text, source, target);
+  if (decoded.kind !== 'rich') return text;
+  const json = decoded.doc.toJSON() as any;
+  let count = 0;
+  const visit = (node: any) => {
+    if (!node || !Array.isArray(node.content)) return;
+    if (node.content.some((child: any) => child && child.type === 'Text')) {
+      count += renameTagInInline(node.content, source, target);
+      node.content = node.content.filter((child: any) => !child || child.type !== 'Text' || String(child.param ?? '') !== '');
+    } else node.content.forEach(visit);
+  };
+  visit(json);
+  if (!count) return text;
+  let doc: Plot.Doc;
+  try {
+    doc = DocumentSchema.docFromJSON(json);
+    if (!validateDocument(doc)) throw new Error('invalid');
+  } catch {
+    throw new RangeError('This note could not be changed safely.');
+  }
   return encodeDocument(doc);
 }
 // A file's text as a new note: Markdown through the same cleaner as pasted
 // HTML, plain text one paragraph per line. Refuses what would not load back.
-function importedValue(doc:Plot.Doc,source:string){
-  if(!validateDocument(doc))throw new RangeError('This file has content a note cannot hold.');
-  const value=encodeDocument(doc);
-  if(value?decodeStoredValue(value).kind!=='rich':source.trim())throw new RangeError('This file is too large or too deeply nested for one note.');
+function importedValue(doc: Plot.Doc, source: string) {
+  if (!validateDocument(doc)) throw new RangeError('This file has content a note cannot hold.');
+  const value = encodeDocument(doc);
+  if (value ? decodeStoredValue(value).kind !== 'rich' : source.trim())
+    throw new RangeError('This file is too large or too deeply nested for one note.');
   return value;
 }
-function fromMarkdown(markdown:unknown){const source=String(markdown??'');return importedValue(parse(DocumentSchema,parseInertHTML(sanitizePastedHtml(markdownToHtml(source)))),source)}
-function fromText(text:unknown){const source=normalizePlainText(text).replace(/^\uFEFF/,'');return importedValue(DocumentSchema.docFromJSON(plainDocumentJson(source)),source)}
-function exportDocument(value:unknown){const text=String(value??''),doc=decodeDocument(text);return {doc:doc?doc.toJSON():null,text:doc?'':text}}
-function toMarkdown(value:unknown,options:{assetPath?:(assetId:string)=>string}={}){const {doc,text}=exportDocument(value);return markdownDocument(doc,text,options)}
+function fromMarkdown(markdown: unknown) {
+  const source = String(markdown ?? '');
+  return importedValue(parse(DocumentSchema, parseInertHTML(sanitizePastedHtml(markdownToHtml(source)))), source);
+}
+function fromText(text: unknown) {
+  const source = normalizePlainText(text).replace(/^\uFEFF/, '');
+  return importedValue(DocumentSchema.docFromJSON(plainDocumentJson(source)), source);
+}
+function exportDocument(value: unknown) {
+  const text = String(value ?? ''),
+    doc = decodeDocument(text);
+  return {doc: doc ? doc.toJSON() : null, text: doc ? '' : text};
+}
+function toMarkdown(value: unknown, options: {assetPath?: (assetId: string) => string} = {}) {
+  const {doc, text} = exportDocument(value);
+  return markdownDocument(doc, text, options);
+}
 // Copy: the clipboard's plain-text version is Markdown when the selection has
 // formatting, so chat apps and Markdown editors keep headings, lists and
 // bold. Plain text stays plain (no escaping), and the formatted (HTML) version,
 // which this app and rich editors read first, is unchanged.
-function hasFormatting(node:any):boolean{if(!node||typeof node!=='object')return false;if(node.marks&&Object.keys(node.marks).length)return true;if(!['Doc','Paragraph','Text','LineBreak'].includes(node.type))return true;return (node.content||[]).some(hasFormatting)}
-function markdownForCopy(slice:any){try{const holder=document.createElement('div');holder.appendChild(serialize.slice(slice).toDOM());const json=parse(DocumentSchema,holder).toJSON();if(!hasFormatting(json))return null;return markdownDocument(json).trimEnd()||null}catch{return null}}
+function hasFormatting(node: any): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (node.marks && Object.keys(node.marks).length) return true;
+  if (!['Doc', 'Paragraph', 'Text', 'LineBreak'].includes(node.type)) return true;
+  return (node.content || []).some(hasFormatting);
+}
+function markdownForCopy(slice: any) {
+  try {
+    const holder = document.createElement('div');
+    holder.appendChild(serialize.slice(slice).toDOM());
+    const json = parse(DocumentSchema, holder).toJSON();
+    if (!hasFormatting(json)) return null;
+    return markdownDocument(json).trimEnd() || null;
+  } catch {
+    return null;
+  }
+}
 
-function imageMimeFromName(file:File){const extension=String(file.name||'').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]||'';return ({png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',gif:'image/gif',avif:'image/avif'} as Record<string,string>)[extension]||''}
-function heicLikeImage(file:File){return /(?:image\/(?:hei[cf]|heic-sequence|heif-sequence)|\.(?:hei[cf]))$/i.test(`${String(file.type||'')}|${String(file.name||'')}`)}
-async function resolvedImageMimeType(file:File){const declared=String(file.type||'').toLowerCase()==='image/jpg'?'image/jpeg':String(file.type||'').toLowerCase();let bytes=new Uint8Array();try{bytes=new Uint8Array(await file.slice(0,32).arrayBuffer())}catch{}const ascii=(from:number,to:number)=>String.fromCharCode(...bytes.slice(from,to));if(bytes.length>=8&&bytes[0]===0x89&&ascii(1,4)==='PNG')return 'image/png';if(bytes.length>=3&&bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff)return 'image/jpeg';if(bytes.length>=6&&(ascii(0,6)==='GIF87a'||ascii(0,6)==='GIF89a'))return 'image/gif';if(bytes.length>=12&&ascii(0,4)==='RIFF'&&ascii(8,12)==='WEBP')return 'image/webp';if(bytes.length>=12&&ascii(4,8)==='ftyp'&&/(?:avif|avis)/.test(ascii(8,32)))return 'image/avif';if(IMAGE_MIME_TYPES.has(declared))return declared;return imageMimeFromName(file)}
-function initialImageWidthPct(imageWidth:number,editor:Wordgard){const hostWidth=Math.max(1,editor.contentDOM.clientWidth||editor.contentDOM.getBoundingClientRect().width||window.innerWidth||1),viewportWidth=Math.min(window.innerWidth||hostWidth,hostWidth),target=viewportWidth<=MOBILE_IMAGE_BREAKPOINT?MOBILE_IMAGE_WIDTH_PCT:DEFAULT_IMAGE_WIDTH_PCT,natural=Math.min(100,imageWidth/hostWidth*100);return normalizeImageWidth(Math.min(target,natural||target))}
-function pointerDrag(pointerId:number,update:(event:PointerEvent)=>void,paint:()=>void,finish:(commit:boolean)=>void){let active=true;const oldSelect=document.body.style.userSelect;document.body.style.userSelect='none';const owns=(event:PointerEvent)=>event.pointerId===pointerId,consume=(event:PointerEvent)=>{event.preventDefault();event.stopPropagation()},move=(event:PointerEvent)=>{if(!owns(event))return;consume(event);update(event);paint()},end=(commit:boolean)=>{if(!active)return;active=false;window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',up,true);window.removeEventListener('pointercancel',cancel,true);document.body.style.userSelect=oldSelect;finish(commit)},up=(event:PointerEvent)=>{if(!owns(event))return;consume(event);end(true)},cancel=(event:PointerEvent)=>{if(!owns(event))return;consume(event);end(false)};window.addEventListener('pointermove',move,{capture:true,passive:false});window.addEventListener('pointerup',up,{capture:true,passive:false});window.addEventListener('pointercancel',cancel,{capture:true,passive:false});return ()=>end(false)}
-function imageStorageFailureMessage(error:unknown){const name=String((error as {name?:unknown})?.name||'');if(name==='NotSupportedError')return 'Image storage is not supported here. Open the app in a browser with private file storage enabled.';if(name==='QuotaExceededError')return 'Browser storage is full. Free some space, then retry the image.';if(['SecurityError','InvalidStateError','NotAllowedError'].includes(name))return 'Browser image storage is unavailable. Keep this editor open and retry after storage access is restored.';return 'Image could not be stored. Keep this editor open and retry.'}
-function randomAssetId(){const bytes=new Uint8Array(12);crypto.getRandomValues(bytes);return `img-${Date.now().toString(36)}-${[...bytes].map(value=>value.toString(16).padStart(2,'0')).join('')}`}
-function validAssetStore(value:AssetStore){return !!value&&typeof value.get==='function'&&typeof value.put==='function'&&typeof value.remove==='function'}
-function normalizeLinkUrl(value:string){let raw=String(value||'').trim();if(!raw)return '';if(/^#attachment=(?:att|img)-[a-z0-9-]{20,80}$/.test(raw)||NOTE_LINK_RE.test(raw))return raw;if(/^[\w.-]+\.[a-z]{2,}(?::\d+)?(?:[/?#]|$)/i.test(raw))raw=`https://${raw}`;try{const parsed=new URL(raw,location.href);if(!['http:','https:','mailto:','tel:'].includes(parsed.protocol))return null;return parsed.protocol==='http:'||parsed.protocol==='https:'?parsed.href:raw}catch{return null}}
-const AUTO_LINK_SPACE_RE=/(?:^|[\s(\[{])((?:(?:https?:\/\/|www\.)[^\s<>"']*[^\s<>"'.,!?;:)\]}]|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[/?#][^\s<>"']*[^\s<>"'.,!?;:)\]}])?)) $/i;
-const AUTO_LINK_END_RE=/(?:^|[\s(\[{])((?:(?:https?:\/\/|www\.)[^\s<>"']*[^\s<>"'.,!?;:)\]}]|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[/?#][^\s<>"']*[^\s<>"'.,!?;:)\]}])?))$/i;
-function hardenLinks(root:HTMLElement,notes?:NotePort){root.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(anchor=>{const href=anchor.getAttribute('href')||'';if(!validSerializedLinkUrl(href)){anchor.removeAttribute('href');return}const noteId=noteLinkId(href);if(noteId){const title=notes?notes.title(noteId):undefined,label=title===null?'This note was deleted':title?`Note: ${title}`:'';anchor.classList.add('sd-note-link');anchor.classList.toggle('sd-note-link-missing',title===null);if(anchor.title!==label)anchor.title=label;anchor.removeAttribute('target');anchor.removeAttribute('rel');return}if(anchor.rel!=='noopener noreferrer')anchor.rel='noopener noreferrer';if(/^https?:\/\//i.test(href)){if(anchor.target!=='_blank')anchor.target='_blank'}else if(anchor.hasAttribute('target'))anchor.removeAttribute('target')})}
-const autoLinkOnSpace=InputRule.define({expr:AUTO_LINK_SPACE_RE,apply:(state,match)=>{const token=match[1];if(!token)return null;const href=normalizeLinkUrl(token.text);if(!href)return null;return {changes:{from:token.from.pos,to:token.to.pos,add:Link.of(href)},userEvent:'autolink'}}});
-function insertLinkedText(wg:Wordgard,text:string,href:string,userEvent:string){const {from,to}=wg.state.selection,marks=Link.of(href).addToSet(wg.state.sel.activeMarks);wg.dispatch({changes:{from,to,insert:[Leaf.text(text,marks)],fit:true},selection:(context,changes)=>GardSelection.near(context,changes.mapPos(to,1),-1),userEvent,scrollIntoView:true})}
-function autoLinkPaste(wg:Wordgard,event:InputEvent){const data=event.dataTransfer;if(!data)return false;const raw=(data.getData('text/plain')||data.getData('Text')||data.getData('text/uri-list')||'').trim();if(!raw||/\s/.test(raw))return false;const href=normalizeLinkUrl(raw);if(!href)return false;insertLinkedText(wg,raw,href,'paste.autolink');return true}
-function autoLinkBeforeCursor(wg:Wordgard){const selection=wg.state.selection;if(!(selection instanceof GardSelection.Text)||!selection.empty)return false;const block=wg.state.sel.head.textblockParent;if(!block)return false;const map=wg.state.textblockMap(block),index=map.toIndex(selection.head),text=map.text.slice(0,index),match=AUTO_LINK_END_RE.exec(text),token=match?.[1];if(!match||!token)return false;const href=normalizeLinkUrl(token);if(!href)return false;const start=index-token.length,from=map.fromIndex(start),to=map.fromIndex(index);wg.dispatch({changes:{from,to,add:Link.of(href)},userEvent:'autolink'});return true}
-function sanitizePastedHtml(html:string){try{const body=parseInertHTML(String(html||'')),parsed=body.ownerDocument,allowed=new Set(['A','B','STRONG','I','EM','MARK','SPAN','U','S','SUB','SUP','BR','P','DIV','BLOCKQUOTE','UL','OL','LI','TABLE','TBODY','TR','TD','TH','HR','H1','H2']);body.querySelectorAll('*').forEach(element=>{const style=String(element.getAttribute('style')||'');if(element.hasAttribute('hidden')||element.getAttribute('aria-hidden')==='true'||/(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(style)||['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','SVG','MATH','FORM','VIDEO','AUDIO','CANVAS','IMG','INPUT'].includes(element.tagName)){element.remove();return}if(!allowed.has(element.tagName)){if(['H3','H4','H5','H6','PRE'].includes(element.tagName)){const paragraph=parsed.createElement('p');paragraph.append(...element.childNodes);element.replaceWith(paragraph)}else element.replaceWith(...element.childNodes);return}const href=element.tagName==='A'?normalizeLinkUrl(element.getAttribute('href')||''):'',safeStyle=style.split(';').map(part=>part.trim()).map(part=>normalizeTypographyPasteStyle(part)||(/^(?:font-weight\s*:\s*(?:bold|[6-9]00)|font-style\s*:\s*italic|text-decoration(?:-line)?\s*:\s*(?:underline|line-through)|vertical-align\s*:\s*(?:sub|super)|background-color\s*:\s*(?:#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]+))$/i.test(part)?part:'')).filter(Boolean).join('; ');for(const attribute of [...element.attributes])element.removeAttribute(attribute.name);if(element.tagName==='A'&&!href){element.replaceWith(...element.childNodes);return}if(href)element.setAttribute('href',href);if(safeStyle)element.setAttribute('style',safeStyle)});return body.innerHTML}catch{return ''}}
+function imageMimeFromName(file: File) {
+  const extension =
+    String(file.name || '')
+      .toLowerCase()
+      .match(/\.([a-z0-9]+)$/)?.[1] || '';
+  return (
+    (
+      {png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif'} as Record<
+        string,
+        string
+      >
+    )[extension] || ''
+  );
+}
+function heicLikeImage(file: File) {
+  return /(?:image\/(?:hei[cf]|heic-sequence|heif-sequence)|\.(?:hei[cf]))$/i.test(`${String(file.type || '')}|${String(file.name || '')}`);
+}
+async function resolvedImageMimeType(file: File) {
+  const declared = String(file.type || '').toLowerCase() === 'image/jpg' ? 'image/jpeg' : String(file.type || '').toLowerCase();
+  let bytes = new Uint8Array();
+  try {
+    bytes = new Uint8Array(await file.slice(0, 32).arrayBuffer());
+  } catch {}
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.slice(from, to));
+  if (bytes.length >= 8 && bytes[0] === 0x89 && ascii(1, 4) === 'PNG') return 'image/png';
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (bytes.length >= 6 && (ascii(0, 6) === 'GIF87a' || ascii(0, 6) === 'GIF89a')) return 'image/gif';
+  if (bytes.length >= 12 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') return 'image/webp';
+  if (bytes.length >= 12 && ascii(4, 8) === 'ftyp' && /(?:avif|avis)/.test(ascii(8, 32))) return 'image/avif';
+  if (IMAGE_MIME_TYPES.has(declared)) return declared;
+  return imageMimeFromName(file);
+}
+function initialImageWidthPct(imageWidth: number, editor: Wordgard) {
+  const hostWidth = Math.max(1, editor.contentDOM.clientWidth || editor.contentDOM.getBoundingClientRect().width || window.innerWidth || 1),
+    viewportWidth = Math.min(window.innerWidth || hostWidth, hostWidth),
+    target = viewportWidth <= MOBILE_IMAGE_BREAKPOINT ? MOBILE_IMAGE_WIDTH_PCT : DEFAULT_IMAGE_WIDTH_PCT,
+    natural = Math.min(100, (imageWidth / hostWidth) * 100);
+  return normalizeImageWidth(Math.min(target, natural || target));
+}
+function pointerDrag(pointerId: number, update: (event: PointerEvent) => void, paint: () => void, finish: (commit: boolean) => void) {
+  let active = true;
+  const oldSelect = document.body.style.userSelect;
+  document.body.style.userSelect = 'none';
+  const owns = (event: PointerEvent) => event.pointerId === pointerId,
+    consume = (event: PointerEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    move = (event: PointerEvent) => {
+      if (!owns(event)) return;
+      consume(event);
+      update(event);
+      paint();
+    },
+    end = (commit: boolean) => {
+      if (!active) return;
+      active = false;
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', up, true);
+      window.removeEventListener('pointercancel', cancel, true);
+      document.body.style.userSelect = oldSelect;
+      finish(commit);
+    },
+    up = (event: PointerEvent) => {
+      if (!owns(event)) return;
+      consume(event);
+      end(true);
+    },
+    cancel = (event: PointerEvent) => {
+      if (!owns(event)) return;
+      consume(event);
+      end(false);
+    };
+  window.addEventListener('pointermove', move, {capture: true, passive: false});
+  window.addEventListener('pointerup', up, {capture: true, passive: false});
+  window.addEventListener('pointercancel', cancel, {capture: true, passive: false});
+  return () => end(false);
+}
+function imageStorageFailureMessage(error: unknown) {
+  const name = String((error as {name?: unknown})?.name || '');
+  if (name === 'NotSupportedError')
+    return 'Image storage is not supported here. Open the app in a browser with private file storage enabled.';
+  if (name === 'QuotaExceededError') return 'Browser storage is full. Free some space, then retry the image.';
+  if (['SecurityError', 'InvalidStateError', 'NotAllowedError'].includes(name))
+    return 'Browser image storage is unavailable. Keep this editor open and retry after storage access is restored.';
+  return 'Image could not be stored. Keep this editor open and retry.';
+}
+function randomAssetId() {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return `img-${Date.now().toString(36)}-${[...bytes].map(value => value.toString(16).padStart(2, '0')).join('')}`;
+}
+function validAssetStore(value: AssetStore) {
+  return !!value && typeof value.get === 'function' && typeof value.put === 'function' && typeof value.remove === 'function';
+}
+function normalizeLinkUrl(value: string) {
+  let raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^#attachment=(?:att|img)-[a-z0-9-]{20,80}$/.test(raw) || NOTE_LINK_RE.test(raw)) return raw;
+  if (/^[\w.-]+\.[a-z]{2,}(?::\d+)?(?:[/?#]|$)/i.test(raw)) raw = `https://${raw}`;
+  try {
+    const parsed = new URL(raw, location.href);
+    if (!['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol)) return null;
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : raw;
+  } catch {
+    return null;
+  }
+}
+const AUTO_LINK_SPACE_RE =
+  /(?:^|[\s(\[{])((?:(?:https?:\/\/|www\.)[^\s<>"']*[^\s<>"'.,!?;:)\]}]|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[/?#][^\s<>"']*[^\s<>"'.,!?;:)\]}])?)) $/i;
+const AUTO_LINK_END_RE =
+  /(?:^|[\s(\[{])((?:(?:https?:\/\/|www\.)[^\s<>"']*[^\s<>"'.,!?;:)\]}]|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d+)?(?:[/?#][^\s<>"']*[^\s<>"'.,!?;:)\]}])?))$/i;
+function hardenLinks(root: HTMLElement, notes?: NotePort) {
+  root.querySelectorAll<HTMLAnchorElement>('a[href]').forEach(anchor => {
+    const href = anchor.getAttribute('href') || '';
+    if (!validSerializedLinkUrl(href)) {
+      anchor.removeAttribute('href');
+      return;
+    }
+    const noteId = noteLinkId(href);
+    if (noteId) {
+      const title = notes ? notes.title(noteId) : undefined,
+        label = title === null ? 'This note was deleted' : title ? `Note: ${title}` : '';
+      anchor.classList.add('sd-note-link');
+      anchor.classList.toggle('sd-note-link-missing', title === null);
+      if (anchor.title !== label) anchor.title = label;
+      anchor.removeAttribute('target');
+      anchor.removeAttribute('rel');
+      return;
+    }
+    if (anchor.rel !== 'noopener noreferrer') anchor.rel = 'noopener noreferrer';
+    if (/^https?:\/\//i.test(href)) {
+      if (anchor.target !== '_blank') anchor.target = '_blank';
+    } else if (anchor.hasAttribute('target')) anchor.removeAttribute('target');
+  });
+}
+const autoLinkOnSpace = InputRule.define({
+  expr: AUTO_LINK_SPACE_RE,
+  apply: (state, match) => {
+    const token = match[1];
+    if (!token) return null;
+    const href = normalizeLinkUrl(token.text);
+    if (!href) return null;
+    return {changes: {from: token.from.pos, to: token.to.pos, add: Link.of(href)}, userEvent: 'autolink'};
+  }
+});
+function insertLinkedText(wg: Wordgard, text: string, href: string, userEvent: string) {
+  const {from, to} = wg.state.selection,
+    marks = Link.of(href).addToSet(wg.state.sel.activeMarks);
+  wg.dispatch({
+    changes: {from, to, insert: [Leaf.text(text, marks)], fit: true},
+    selection: (context, changes) => GardSelection.near(context, changes.mapPos(to, 1), -1),
+    userEvent,
+    scrollIntoView: true
+  });
+}
+function autoLinkPaste(wg: Wordgard, event: InputEvent) {
+  const data = event.dataTransfer;
+  if (!data) return false;
+  const raw = (data.getData('text/plain') || data.getData('Text') || data.getData('text/uri-list') || '').trim();
+  if (!raw || /\s/.test(raw)) return false;
+  const href = normalizeLinkUrl(raw);
+  if (!href) return false;
+  insertLinkedText(wg, raw, href, 'paste.autolink');
+  return true;
+}
+function autoLinkBeforeCursor(wg: Wordgard) {
+  const selection = wg.state.selection;
+  if (!(selection instanceof GardSelection.Text) || !selection.empty) return false;
+  const block = wg.state.sel.head.textblockParent;
+  if (!block) return false;
+  const map = wg.state.textblockMap(block),
+    index = map.toIndex(selection.head),
+    text = map.text.slice(0, index),
+    match = AUTO_LINK_END_RE.exec(text),
+    token = match?.[1];
+  if (!match || !token) return false;
+  const href = normalizeLinkUrl(token);
+  if (!href) return false;
+  const start = index - token.length,
+    from = map.fromIndex(start),
+    to = map.fromIndex(index);
+  wg.dispatch({changes: {from, to, add: Link.of(href)}, userEvent: 'autolink'});
+  return true;
+}
+function sanitizePastedHtml(html: string) {
+  try {
+    const body = parseInertHTML(String(html || '')),
+      parsed = body.ownerDocument,
+      allowed = new Set([
+        'A',
+        'B',
+        'STRONG',
+        'I',
+        'EM',
+        'MARK',
+        'SPAN',
+        'U',
+        'S',
+        'SUB',
+        'SUP',
+        'BR',
+        'P',
+        'DIV',
+        'BLOCKQUOTE',
+        'UL',
+        'OL',
+        'LI',
+        'TABLE',
+        'TBODY',
+        'TR',
+        'TD',
+        'TH',
+        'HR',
+        'H1',
+        'H2'
+      ]);
+    body.querySelectorAll('*').forEach(element => {
+      const style = String(element.getAttribute('style') || '');
+      if (
+        element.hasAttribute('hidden') ||
+        element.getAttribute('aria-hidden') === 'true' ||
+        /(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(style) ||
+        ['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'FORM', 'VIDEO', 'AUDIO', 'CANVAS', 'IMG', 'INPUT'].includes(
+          element.tagName
+        )
+      ) {
+        element.remove();
+        return;
+      }
+      if (!allowed.has(element.tagName)) {
+        if (['H3', 'H4', 'H5', 'H6', 'PRE'].includes(element.tagName)) {
+          const paragraph = parsed.createElement('p');
+          paragraph.append(...element.childNodes);
+          element.replaceWith(paragraph);
+        } else element.replaceWith(...element.childNodes);
+        return;
+      }
+      const href = element.tagName === 'A' ? normalizeLinkUrl(element.getAttribute('href') || '') : '',
+        safeStyle = style
+          .split(';')
+          .map(part => part.trim())
+          .map(
+            part =>
+              normalizeTypographyPasteStyle(part) ||
+              (/^(?:font-weight\s*:\s*(?:bold|[6-9]00)|font-style\s*:\s*italic|text-decoration(?:-line)?\s*:\s*(?:underline|line-through)|vertical-align\s*:\s*(?:sub|super)|background-color\s*:\s*(?:#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]+))$/i.test(
+                part
+              )
+                ? part
+                : '')
+          )
+          .filter(Boolean)
+          .join('; ');
+      for (const attribute of [...element.attributes]) element.removeAttribute(attribute.name);
+      if (element.tagName === 'A' && !href) {
+        element.replaceWith(...element.childNodes);
+        return;
+      }
+      if (href) element.setAttribute('href', href);
+      if (safeStyle) element.setAttribute('style', safeStyle);
+    });
+    return body.innerHTML;
+  } catch {
+    return '';
+  }
+}
 
-function ensureReadonlyElement(){if(customElements.get(READONLY_TAG))return;customElements.define(READONLY_TAG,class extends HTMLElement{disconnectedCallback(){const dispose=(this as any)[READONLY_DISPOSE];if(typeof dispose==='function'){(this as any)[READONLY_DISPOSE]=null;dispose()}}})}
-function assetReader(assets:AssetStore){let disposed=false,release:(()=>void)|null=null,pending:Promise<void>|null=null;return {async get(id:string){if(disposed)return null;if(!pending)pending=(async()=>{release=await assets.retain?.()||(()=>{});if(disposed){release();release=null}})();await pending;return disposed?null:assets.get(id)},dispose(){disposed=true;release?.();release=null}}}
-function hydrateImages(root:HTMLElement,assets:AssetStore,eager=false){const reader=assetReader(assets);let disposed=false;const urls=new Set<string>(),figures=[...root.querySelectorAll<HTMLElement>('.sd-rte-image[data-sd-asset-id]')].filter(figure=>!figure.dataset.sdAssetHydrated),observer=!eager&&typeof IntersectionObserver==='function'?new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){observer!.unobserve(entry.target);void hydrate(entry.target as HTMLElement)}},{rootMargin:'256px'}):null;const revoke=(url:string)=>{if(urls.delete(url))URL.revokeObjectURL(url)},dispose=()=>{if(disposed)return;disposed=true;observer?.disconnect();reader.dispose();for(const url of [...urls])revoke(url)},hydrate=async(figure:HTMLElement)=>{if(disposed||figure.dataset.sdAssetHydrated)return;const id=String(figure.dataset.sdAssetId||''),placeholder=figure.querySelector<HTMLElement>('.sd-rte-image-missing');figure.dataset.sdAssetHydrated='loading';const blob=validAssetId(id)?await reader.get(id).catch(()=>null):null;if(disposed||!figure.isConnected||!root.contains(figure)||figure.dataset.sdAssetId!==id)return;if(!(blob instanceof Blob)||!IMAGE_MIME_TYPES.has(blob.type)){if(placeholder)placeholder.textContent='Image unavailable';figure.dataset.sdAssetHydrated='missing';return}const url=URL.createObjectURL(blob),img=document.createElement('img'),release=()=>revoke(url);urls.add(url);img.alt=normalizeImageAlt(figure.dataset.sdAssetAlt||'');img.decoding='async';img.loading='eager';img.addEventListener('load',release,{once:true});img.addEventListener('error',release,{once:true});img.src=url;placeholder?.replaceWith(img);figure.dataset.sdAssetHydrated='ready';if(typeof img.decode==='function')void img.decode().catch(()=>{}).finally(release)};for(const figure of figures)observer?observer.observe(figure):void hydrate(figure);return dispose}
+function ensureReadonlyElement() {
+  if (customElements.get(READONLY_TAG)) return;
+  customElements.define(
+    READONLY_TAG,
+    class extends HTMLElement {
+      disconnectedCallback() {
+        const dispose = (this as any)[READONLY_DISPOSE];
+        if (typeof dispose === 'function') {
+          (this as any)[READONLY_DISPOSE] = null;
+          dispose();
+        }
+      }
+    }
+  );
+}
+function assetReader(assets: AssetStore) {
+  let disposed = false,
+    release: (() => void) | null = null,
+    pending: Promise<void> | null = null;
+  return {
+    async get(id: string) {
+      if (disposed) return null;
+      if (!pending)
+        pending = (async () => {
+          release = (await assets.retain?.()) || (() => {});
+          if (disposed) {
+            release();
+            release = null;
+          }
+        })();
+      await pending;
+      return disposed ? null : assets.get(id);
+    },
+    dispose() {
+      disposed = true;
+      release?.();
+      release = null;
+    }
+  };
+}
+function hydrateImages(root: HTMLElement, assets: AssetStore, eager = false) {
+  const reader = assetReader(assets);
+  let disposed = false;
+  const urls = new Set<string>(),
+    figures = [...root.querySelectorAll<HTMLElement>('.sd-rte-image[data-sd-asset-id]')].filter(figure => !figure.dataset.sdAssetHydrated),
+    observer =
+      !eager && typeof IntersectionObserver === 'function'
+        ? new IntersectionObserver(
+            entries => {
+              for (const entry of entries)
+                if (entry.isIntersecting) {
+                  observer!.unobserve(entry.target);
+                  void hydrate(entry.target as HTMLElement);
+                }
+            },
+            {rootMargin: '256px'}
+          )
+        : null;
+  const revoke = (url: string) => {
+      if (urls.delete(url)) URL.revokeObjectURL(url);
+    },
+    dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      observer?.disconnect();
+      reader.dispose();
+      for (const url of [...urls]) revoke(url);
+    },
+    hydrate = async (figure: HTMLElement) => {
+      if (disposed || figure.dataset.sdAssetHydrated) return;
+      const id = String(figure.dataset.sdAssetId || ''),
+        placeholder = figure.querySelector<HTMLElement>('.sd-rte-image-missing');
+      figure.dataset.sdAssetHydrated = 'loading';
+      const blob = validAssetId(id) ? await reader.get(id).catch(() => null) : null;
+      if (disposed || !figure.isConnected || !root.contains(figure) || figure.dataset.sdAssetId !== id) return;
+      if (!(blob instanceof Blob) || !IMAGE_MIME_TYPES.has(blob.type)) {
+        if (placeholder) placeholder.textContent = 'Image unavailable';
+        figure.dataset.sdAssetHydrated = 'missing';
+        return;
+      }
+      const url = URL.createObjectURL(blob),
+        img = document.createElement('img'),
+        release = () => revoke(url);
+      urls.add(url);
+      img.alt = normalizeImageAlt(figure.dataset.sdAssetAlt || '');
+      img.decoding = 'async';
+      img.loading = 'eager';
+      img.addEventListener('load', release, {once: true});
+      img.addEventListener('error', release, {once: true});
+      img.src = url;
+      placeholder?.replaceWith(img);
+      figure.dataset.sdAssetHydrated = 'ready';
+      if (typeof img.decode === 'function')
+        void img
+          .decode()
+          .catch(() => {})
+          .finally(release);
+    };
+  for (const figure of figures) observer ? observer.observe(figure) : void hydrate(figure);
+  return dispose;
+}
 // The full view of an image: it opens fitted to the screen. The wheel, a
 // pinch, a double click, the − and + buttons and the keyboard (+, −, 0)
 // zoom; dragging or the arrow keys move it once it is larger than the view.
-function imageViewer(url:string,alt:string){
-  const content=document.createElement('div'),img=document.createElement('img'),header=document.createElement('div');
-  content.className='workspace-image-viewer';content.tabIndex=0;content.setAttribute('role','img');content.setAttribute('aria-label',alt||'Image');
-  img.className='workspace-image';img.src=url;img.alt=alt;img.draggable=false;content.append(img);
-  const button=(text:string,label:string)=>{const node=document.createElement('button');node.type='button';node.className='workspace-image-zoom ui-btn';node.textContent=text;node.title=label;node.setAttribute('aria-label',label);return node};
-  const out=button('−','Zoom out'),level=button('Fit','Fit to screen'),into=button('+','Zoom in');level.classList.add('workspace-image-level');
-  header.className='workspace-image-tools';header.append(out,level,into);
-  let natural={w:0,h:0},scale=1,fit=1,x=0,y=0,fitted=true;
-  const view=()=>({w:content.clientWidth,h:content.clientHeight}),maxScale=()=>Math.max(fit*8,4);
-  const clamp=()=>{const {w,h}=view(),iw=natural.w*scale,ih=natural.h*scale;x=iw<=w?(w-iw)/2:Math.min(0,Math.max(w-iw,x));y=ih<=h?(h-ih)/2:Math.min(0,Math.max(h-ih,y))};
-  const draw=()=>{clamp();img.style.transform=`translate(${x}px,${y}px) scale(${scale})`;fitted=Math.abs(scale-fit)<1e-3;level.textContent=fitted?'Fit':`${Math.round(scale*100)}%`;out.disabled=fitted;into.disabled=scale>=maxScale()-1e-3;content.classList.toggle('zoomed',!fitted)};
-  const fitView=()=>{const {w,h}=view();if(!natural.w||!w||!h)return;fit=Math.min(w/natural.w,h/natural.h,1);scale=fit;x=(w-natural.w*scale)/2;y=(h-natural.h*scale)/2;draw()};
-  const zoomAt=(px:number,py:number,next:number)=>{if(!natural.w)return;const target=Math.min(maxScale(),Math.max(fit,next));x=px-(px-x)*target/scale;y=py-(py-y)*target/scale;scale=target;draw()};
-  const centre=()=>{const {w,h}=view();return [w/2,h/2] as const};
-  const local=(event:{clientX:number;clientY:number})=>{const rect=content.getBoundingClientRect();return [event.clientX-rect.left,event.clientY-rect.top] as const};
-  img.addEventListener('load',()=>{natural={w:img.naturalWidth,h:img.naturalHeight};img.style.width=`${natural.w}px`;img.style.height=`${natural.h}px`;fitView();content.classList.add('ready')});
-  out.addEventListener('click',()=>{const [cx,cy]=centre();zoomAt(cx,cy,scale/1.5)});
-  into.addEventListener('click',()=>{const [cx,cy]=centre();zoomAt(cx,cy,scale*1.5)});
-  level.addEventListener('click',fitView);
-  content.addEventListener('wheel',event=>{event.preventDefault();const [px,py]=local(event);zoomAt(px,py,scale*Math.exp(-event.deltaY*(event.deltaMode===1?0.05:0.0015)))},{passive:false});
-  content.addEventListener('dblclick',event=>{const [px,py]=local(event);if(fitted)zoomAt(px,py,Math.max(1,fit*2.5));else fitView()});
-  const pointers=new Map<number,{x:number;y:number}>();let pinch:{distance:number;scale:number}|null=null;
-  const spread=()=>{const [a,b]=[...pointers.values()];return a&&b?{distance:Math.hypot(a.x-b.x,a.y-b.y),mid:{x:(a.x+b.x)/2,y:(a.y+b.y)/2}}:null};
-  content.addEventListener('pointerdown',event=>{if(event.button!==0&&event.pointerType==='mouse')return;content.setPointerCapture(event.pointerId);const [px,py]=local(event);pointers.set(event.pointerId,{x:px,y:py});const two=spread();pinch=two?{distance:two.distance,scale}:null;content.classList.add('dragging')});
-  content.addEventListener('pointermove',event=>{const last=pointers.get(event.pointerId);if(!last)return;const [px,py]=local(event);if(pinch&&pointers.size===2){pointers.set(event.pointerId,{x:px,y:py});const two=spread();if(two&&pinch.distance>0)zoomAt(two.mid.x,two.mid.y,pinch.scale*two.distance/pinch.distance);return}x+=px-last.x;y+=py-last.y;pointers.set(event.pointerId,{x:px,y:py});draw()});
-  const lift=(event:PointerEvent)=>{pointers.delete(event.pointerId);const two=spread();pinch=two?{distance:two.distance,scale}:null;if(!pointers.size)content.classList.remove('dragging')};
-  content.addEventListener('pointerup',lift);content.addEventListener('pointercancel',lift);
-  content.addEventListener('keydown',event=>{const [cx,cy]=centre(),step=60;
-    if(event.key==='+'||event.key==='=')zoomAt(cx,cy,scale*1.5);else if(event.key==='-'||event.key==='_')zoomAt(cx,cy,scale/1.5);else if(event.key==='0')fitView();
-    else if(event.key==='ArrowLeft'){x+=step;draw()}else if(event.key==='ArrowRight'){x-=step;draw()}else if(event.key==='ArrowUp'){y+=step;draw()}else if(event.key==='ArrowDown'){y-=step;draw()}else return;
-    event.preventDefault()});
-  const resize=typeof ResizeObserver==='function'?new ResizeObserver(()=>{if(fitted)fitView();else draw()}):null;resize?.observe(content);
-  return {content,header,dispose:()=>{resize?.disconnect();pointers.clear()}};
+function imageViewer(url: string, alt: string) {
+  const content = document.createElement('div'),
+    img = document.createElement('img'),
+    header = document.createElement('div');
+  content.className = 'workspace-image-viewer';
+  content.tabIndex = 0;
+  content.setAttribute('role', 'img');
+  content.setAttribute('aria-label', alt || 'Image');
+  img.className = 'workspace-image';
+  img.src = url;
+  img.alt = alt;
+  img.draggable = false;
+  content.append(img);
+  const button = (text: string, label: string) => {
+    const node = document.createElement('button');
+    node.type = 'button';
+    node.className = 'workspace-image-zoom ui-btn';
+    node.textContent = text;
+    node.title = label;
+    node.setAttribute('aria-label', label);
+    return node;
+  };
+  const out = button('−', 'Zoom out'),
+    level = button('Fit', 'Fit to screen'),
+    into = button('+', 'Zoom in');
+  level.classList.add('workspace-image-level');
+  header.className = 'workspace-image-tools';
+  header.append(out, level, into);
+  let natural = {w: 0, h: 0},
+    scale = 1,
+    fit = 1,
+    x = 0,
+    y = 0,
+    fitted = true;
+  const view = () => ({w: content.clientWidth, h: content.clientHeight}),
+    maxScale = () => Math.max(fit * 8, 4);
+  const clamp = () => {
+    const {w, h} = view(),
+      iw = natural.w * scale,
+      ih = natural.h * scale;
+    x = iw <= w ? (w - iw) / 2 : Math.min(0, Math.max(w - iw, x));
+    y = ih <= h ? (h - ih) / 2 : Math.min(0, Math.max(h - ih, y));
+  };
+  const draw = () => {
+    clamp();
+    img.style.transform = `translate(${x}px,${y}px) scale(${scale})`;
+    fitted = Math.abs(scale - fit) < 1e-3;
+    level.textContent = fitted ? 'Fit' : `${Math.round(scale * 100)}%`;
+    out.disabled = fitted;
+    into.disabled = scale >= maxScale() - 1e-3;
+    content.classList.toggle('zoomed', !fitted);
+  };
+  const fitView = () => {
+    const {w, h} = view();
+    if (!natural.w || !w || !h) return;
+    fit = Math.min(w / natural.w, h / natural.h, 1);
+    scale = fit;
+    x = (w - natural.w * scale) / 2;
+    y = (h - natural.h * scale) / 2;
+    draw();
+  };
+  const zoomAt = (px: number, py: number, next: number) => {
+    if (!natural.w) return;
+    const target = Math.min(maxScale(), Math.max(fit, next));
+    x = px - ((px - x) * target) / scale;
+    y = py - ((py - y) * target) / scale;
+    scale = target;
+    draw();
+  };
+  const centre = () => {
+    const {w, h} = view();
+    return [w / 2, h / 2] as const;
+  };
+  const local = (event: {clientX: number; clientY: number}) => {
+    const rect = content.getBoundingClientRect();
+    return [event.clientX - rect.left, event.clientY - rect.top] as const;
+  };
+  img.addEventListener('load', () => {
+    natural = {w: img.naturalWidth, h: img.naturalHeight};
+    img.style.width = `${natural.w}px`;
+    img.style.height = `${natural.h}px`;
+    fitView();
+    content.classList.add('ready');
+  });
+  out.addEventListener('click', () => {
+    const [cx, cy] = centre();
+    zoomAt(cx, cy, scale / 1.5);
+  });
+  into.addEventListener('click', () => {
+    const [cx, cy] = centre();
+    zoomAt(cx, cy, scale * 1.5);
+  });
+  level.addEventListener('click', fitView);
+  content.addEventListener(
+    'wheel',
+    event => {
+      event.preventDefault();
+      const [px, py] = local(event);
+      zoomAt(px, py, scale * Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015)));
+    },
+    {passive: false}
+  );
+  content.addEventListener('dblclick', event => {
+    const [px, py] = local(event);
+    if (fitted) zoomAt(px, py, Math.max(1, fit * 2.5));
+    else fitView();
+  });
+  const pointers = new Map<number, {x: number; y: number}>();
+  let pinch: {distance: number; scale: number} | null = null;
+  const spread = () => {
+    const [a, b] = [...pointers.values()];
+    return a && b ? {distance: Math.hypot(a.x - b.x, a.y - b.y), mid: {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2}} : null;
+  };
+  content.addEventListener('pointerdown', event => {
+    if (event.button !== 0 && event.pointerType === 'mouse') return;
+    content.setPointerCapture(event.pointerId);
+    const [px, py] = local(event);
+    pointers.set(event.pointerId, {x: px, y: py});
+    const two = spread();
+    pinch = two ? {distance: two.distance, scale} : null;
+    content.classList.add('dragging');
+  });
+  content.addEventListener('pointermove', event => {
+    const last = pointers.get(event.pointerId);
+    if (!last) return;
+    const [px, py] = local(event);
+    if (pinch && pointers.size === 2) {
+      pointers.set(event.pointerId, {x: px, y: py});
+      const two = spread();
+      if (two && pinch.distance > 0) zoomAt(two.mid.x, two.mid.y, (pinch.scale * two.distance) / pinch.distance);
+      return;
+    }
+    x += px - last.x;
+    y += py - last.y;
+    pointers.set(event.pointerId, {x: px, y: py});
+    draw();
+  });
+  const lift = (event: PointerEvent) => {
+    pointers.delete(event.pointerId);
+    const two = spread();
+    pinch = two ? {distance: two.distance, scale} : null;
+    if (!pointers.size) content.classList.remove('dragging');
+  };
+  content.addEventListener('pointerup', lift);
+  content.addEventListener('pointercancel', lift);
+  content.addEventListener('keydown', event => {
+    const [cx, cy] = centre(),
+      step = 60;
+    if (event.key === '+' || event.key === '=') zoomAt(cx, cy, scale * 1.5);
+    else if (event.key === '-' || event.key === '_') zoomAt(cx, cy, scale / 1.5);
+    else if (event.key === '0') fitView();
+    else if (event.key === 'ArrowLeft') {
+      x += step;
+      draw();
+    } else if (event.key === 'ArrowRight') {
+      x -= step;
+      draw();
+    } else if (event.key === 'ArrowUp') {
+      y += step;
+      draw();
+    } else if (event.key === 'ArrowDown') {
+      y -= step;
+      draw();
+    } else return;
+    event.preventDefault();
+  });
+  const resize =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          if (fitted) fitView();
+          else draw();
+        })
+      : null;
+  resize?.observe(content);
+  return {
+    content,
+    header,
+    dispose: () => {
+      resize?.disconnect();
+      pointers.clear();
+    }
+  };
 }
-async function openImageOverlay(assetId:string,alt:string,assets:AssetStore,overlay?:WorkspaceOverlayPort,replay?:WorkspaceHistoryDescriptor|null){if(!overlay||!validAssetId(assetId))return false;const reader=assetReader(assets),blob=await reader.get(assetId).catch(()=>null);if(!(blob instanceof Blob)||!IMAGE_MIME_TYPES.has(blob.type)){reader.dispose();return false}const url=URL.createObjectURL(blob),name=normalizeImageAlt(alt),viewer=imageViewer(url,name);let released=false;const release=()=>{if(released)return;released=true;viewer.dispose();URL.revokeObjectURL(url);reader.dispose()};let handle;try{handle=overlay.open({label:name||'Image',content:viewer.content,headerContent:viewer.header,className:'workspace-overlay-image',closeLabel:'Close image',onAfterClose:release,history:{kind:'image',key:assetId,token:replay?.token,reopen:descriptor=>openImageOverlay(assetId,alt,assets,overlay,descriptor)}})}catch(error){release();throw error}if(!handle){release();return false}queueMicrotask(()=>viewer.content.focus());return true}
+async function openImageOverlay(
+  assetId: string,
+  alt: string,
+  assets: AssetStore,
+  overlay?: WorkspaceOverlayPort,
+  replay?: WorkspaceHistoryDescriptor | null
+) {
+  if (!overlay || !validAssetId(assetId)) return false;
+  const reader = assetReader(assets),
+    blob = await reader.get(assetId).catch(() => null);
+  if (!(blob instanceof Blob) || !IMAGE_MIME_TYPES.has(blob.type)) {
+    reader.dispose();
+    return false;
+  }
+  const url = URL.createObjectURL(blob),
+    name = normalizeImageAlt(alt),
+    viewer = imageViewer(url, name);
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    viewer.dispose();
+    URL.revokeObjectURL(url);
+    reader.dispose();
+  };
+  let handle;
+  try {
+    handle = overlay.open({
+      label: name || 'Image',
+      content: viewer.content,
+      headerContent: viewer.header,
+      className: 'workspace-overlay-image',
+      closeLabel: 'Close image',
+      onAfterClose: release,
+      history: {
+        kind: 'image',
+        key: assetId,
+        token: replay?.token,
+        reopen: descriptor => openImageOverlay(assetId, alt, assets, overlay, descriptor)
+      }
+    });
+  } catch (error) {
+    release();
+    throw error;
+  }
+  if (!handle) {
+    release();
+    return false;
+  }
+  queueMicrotask(() => viewer.content.focus());
+  return true;
+}
 // Read-only notes open an image's full view from the image itself.
-function imageViewerClicks(root:HTMLElement,assets:AssetStore,overlay?:WorkspaceOverlayPort){if(!overlay)return ()=>{};const click=(event:Event)=>{const target=event.target instanceof Element?event.target:null,figure=target?.closest<HTMLElement>('.sd-rte-image');if(!figure||!target?.closest('img,.sd-rte-image-expand'))return;event.preventDefault();event.stopPropagation();void openImageOverlay(String(figure.dataset.sdAssetId||''),String(figure.dataset.sdAssetAlt||''),assets,overlay)};root.addEventListener('click',click);return ()=>root.removeEventListener('click',click)}
-async function openAudioOverlay(value:StudyAudioValue,assets:AssetStore,overlay?:WorkspaceOverlayPort,source?:HTMLAudioElement|null,replay?:WorkspaceHistoryDescriptor|null){if(!overlay)return false;const reader=assetReader(assets),blob=await reader.get(value.attachmentId).catch(()=>null);if(!(blob instanceof Blob)||!AUDIO_MIME_TYPES.has(blob.type)){reader.dispose();return false;}const url=URL.createObjectURL(blob),content=document.createElement('div'),player=document.createElement('audio'),name=normalizeAttachmentName(value.name);let released=false;content.className='workspace-audio-viewer';player.className='workspace-audio-player';player.controls=true;player.preload='metadata';player.src=url;player.setAttribute('aria-label',name);content.append(player);const release=()=>{if(released)return;released=true;try{player.pause();player.removeAttribute('src');player.load()}catch{}URL.revokeObjectURL(url);reader.dispose()};const startTime=replay?0:(Number.isFinite(source?.currentTime)?Number(source!.currentTime):0),rate=Number.isFinite(source?.playbackRate)?Number(source!.playbackRate):1;player.addEventListener('loadedmetadata',()=>{try{if(startTime>0&&Number.isFinite(player.duration))player.currentTime=Math.min(startTime,player.duration||startTime);player.playbackRate=rate}catch{}},{once:true});let handle;try{handle=overlay.open({label:name,content,className:'workspace-overlay-audio',closeLabel:'Close audio',onBeforeClose:()=>player.pause(),onAfterClose:release,history:{kind:'audio',key:value.attachmentId,token:replay?.token,reopen:descriptor=>openAudioOverlay(value,assets,overlay,null,descriptor)}})}catch(error){release();throw error}if(!handle){release();return false}source?.pause();queueMicrotask(()=>player.focus());return true}
-function hydrateAudio(root:HTMLElement,assets:AssetStore,overlay?:WorkspaceOverlayPort){const reader=assetReader(assets);let disposed=false;const urls=new Map<string,string|null>(),loads=new Map<string,Promise<Blob|null>>(),figures=[...root.querySelectorAll<HTMLElement>('.sd-rte-audio[data-sd-attachment-id]')];const release=(id:string)=>{const url=urls.get(id);if(url)URL.revokeObjectURL(url);urls.delete(id)},load=(id:string)=>{const active=loads.get(id);if(active)return active;const work=reader.get(id).catch(()=>null).finally(()=>loads.delete(id));loads.set(id,work);return work},hydrate=async(figure:HTMLElement)=>{if(disposed||figure.dataset.sdAudioHydrated)return;const id=String(figure.dataset.sdAttachmentId||''),player=figure.querySelector<HTMLAudioElement>('.sd-rte-audio-player'),status=figure.querySelector<HTMLElement>('.sd-rte-audio-status');figure.dataset.sdAudioHydrated='loading';let url=urls.get(id);if(url===undefined){setAudioStatus(status,'Loading audio…');const blob=validAssetId(id)?await load(id):null;if(disposed||!figure.isConnected||!root.contains(figure)||figure.dataset.sdAttachmentId!==id)return;url=blob instanceof Blob&&AUDIO_MIME_TYPES.has(blob.type)?URL.createObjectURL(blob):null;urls.set(id,url)}if(url&&player){syncAudioPlayerState(player,status,url);figure.dataset.sdAudioHydrated='ready'}else{setAudioStatus(status,'Audio unavailable');figure.dataset.sdAudioHydrated='missing'}},click=(event:Event)=>{const button=event.target instanceof Element?event.target.closest<HTMLButtonElement>('.sd-rte-audio-expand'):null,figure=button?.closest<HTMLElement>('.sd-rte-audio');if(!button||!figure||!overlay)return;event.preventDefault();event.stopPropagation();const value:StudyAudioValue={attachmentId:String(figure.dataset.sdAttachmentId||''),name:normalizeAttachmentName(figure.dataset.sdAudioName)};void openAudioOverlay(value,assets,overlay,figure.querySelector<HTMLAudioElement>('.sd-rte-audio-player'))};root.addEventListener('click',click);const dispose=()=>{if(disposed)return;disposed=true;reader.dispose();root.removeEventListener('click',click);for(const player of root.querySelectorAll<HTMLAudioElement>('.sd-rte-audio-player'))try{player.pause();player.removeAttribute('src');player.load()}catch{}for(const id of [...urls.keys()])release(id)};for(const figure of figures)void hydrate(figure);return dispose}
-function settlePendingAssets(pending:Set<string>,assets:AssetStore,keepIds:string[]){const keep=new Set(keepIds);for(const id of [...pending]){pending.delete(id);if(!keep.has(id))void assets.remove(id).catch(error=>console.warn('Unused rich-text image could not be removed.',error))}}
-function syncReadonlyTableContentWidths(root:ParentNode){for(const table of root.querySelectorAll<HTMLTableElement>('table')){const body=table.tBodies[0],cells=body?.rows[0]?.cells;if(!body||!cells?.length)continue;const fallback=100/cells.length,widths=[...cells].map(cell=>normalizeCellWidth(Number.parseFloat(cell.style.width)||fallback)),minPct=Math.max(MIN_TABLE_COLUMN_PCT,Math.min(...widths)),required=Math.ceil(MIN_TABLE_CELL_PX*100/minPct);body.style.minWidth=`${required}px`}}
+function imageViewerClicks(root: HTMLElement, assets: AssetStore, overlay?: WorkspaceOverlayPort) {
+  if (!overlay) return () => {};
+  const click = (event: Event) => {
+    const target = event.target instanceof Element ? event.target : null,
+      figure = target?.closest<HTMLElement>('.sd-rte-image');
+    if (!figure || !target?.closest('img,.sd-rte-image-expand')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void openImageOverlay(String(figure.dataset.sdAssetId || ''), String(figure.dataset.sdAssetAlt || ''), assets, overlay);
+  };
+  root.addEventListener('click', click);
+  return () => root.removeEventListener('click', click);
+}
+async function openAudioOverlay(
+  value: StudyAudioValue,
+  assets: AssetStore,
+  overlay?: WorkspaceOverlayPort,
+  source?: HTMLAudioElement | null,
+  replay?: WorkspaceHistoryDescriptor | null
+) {
+  if (!overlay) return false;
+  const reader = assetReader(assets),
+    blob = await reader.get(value.attachmentId).catch(() => null);
+  if (!(blob instanceof Blob) || !AUDIO_MIME_TYPES.has(blob.type)) {
+    reader.dispose();
+    return false;
+  }
+  const url = URL.createObjectURL(blob),
+    content = document.createElement('div'),
+    player = document.createElement('audio'),
+    name = normalizeAttachmentName(value.name);
+  let released = false;
+  content.className = 'workspace-audio-viewer';
+  player.className = 'workspace-audio-player';
+  player.controls = true;
+  player.preload = 'metadata';
+  player.src = url;
+  player.setAttribute('aria-label', name);
+  content.append(player);
+  const release = () => {
+    if (released) return;
+    released = true;
+    try {
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+    } catch {}
+    URL.revokeObjectURL(url);
+    reader.dispose();
+  };
+  const startTime = replay ? 0 : Number.isFinite(source?.currentTime) ? Number(source!.currentTime) : 0,
+    rate = Number.isFinite(source?.playbackRate) ? Number(source!.playbackRate) : 1;
+  player.addEventListener(
+    'loadedmetadata',
+    () => {
+      try {
+        if (startTime > 0 && Number.isFinite(player.duration)) player.currentTime = Math.min(startTime, player.duration || startTime);
+        player.playbackRate = rate;
+      } catch {}
+    },
+    {once: true}
+  );
+  let handle;
+  try {
+    handle = overlay.open({
+      label: name,
+      content,
+      className: 'workspace-overlay-audio',
+      closeLabel: 'Close audio',
+      onBeforeClose: () => player.pause(),
+      onAfterClose: release,
+      history: {
+        kind: 'audio',
+        key: value.attachmentId,
+        token: replay?.token,
+        reopen: descriptor => openAudioOverlay(value, assets, overlay, null, descriptor)
+      }
+    });
+  } catch (error) {
+    release();
+    throw error;
+  }
+  if (!handle) {
+    release();
+    return false;
+  }
+  source?.pause();
+  queueMicrotask(() => player.focus());
+  return true;
+}
+function hydrateAudio(root: HTMLElement, assets: AssetStore, overlay?: WorkspaceOverlayPort) {
+  const reader = assetReader(assets);
+  let disposed = false;
+  const urls = new Map<string, string | null>(),
+    loads = new Map<string, Promise<Blob | null>>(),
+    figures = [...root.querySelectorAll<HTMLElement>('.sd-rte-audio[data-sd-attachment-id]')];
+  const release = (id: string) => {
+      const url = urls.get(id);
+      if (url) URL.revokeObjectURL(url);
+      urls.delete(id);
+    },
+    load = (id: string) => {
+      const active = loads.get(id);
+      if (active) return active;
+      const work = reader
+        .get(id)
+        .catch(() => null)
+        .finally(() => loads.delete(id));
+      loads.set(id, work);
+      return work;
+    },
+    hydrate = async (figure: HTMLElement) => {
+      if (disposed || figure.dataset.sdAudioHydrated) return;
+      const id = String(figure.dataset.sdAttachmentId || ''),
+        player = figure.querySelector<HTMLAudioElement>('.sd-rte-audio-player'),
+        status = figure.querySelector<HTMLElement>('.sd-rte-audio-status');
+      figure.dataset.sdAudioHydrated = 'loading';
+      let url = urls.get(id);
+      if (url === undefined) {
+        setAudioStatus(status, 'Loading audio…');
+        const blob = validAssetId(id) ? await load(id) : null;
+        if (disposed || !figure.isConnected || !root.contains(figure) || figure.dataset.sdAttachmentId !== id) return;
+        url = blob instanceof Blob && AUDIO_MIME_TYPES.has(blob.type) ? URL.createObjectURL(blob) : null;
+        urls.set(id, url);
+      }
+      if (url && player) {
+        syncAudioPlayerState(player, status, url);
+        figure.dataset.sdAudioHydrated = 'ready';
+      } else {
+        setAudioStatus(status, 'Audio unavailable');
+        figure.dataset.sdAudioHydrated = 'missing';
+      }
+    },
+    click = (event: Event) => {
+      const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.sd-rte-audio-expand') : null,
+        figure = button?.closest<HTMLElement>('.sd-rte-audio');
+      if (!button || !figure || !overlay) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const value: StudyAudioValue = {
+        attachmentId: String(figure.dataset.sdAttachmentId || ''),
+        name: normalizeAttachmentName(figure.dataset.sdAudioName)
+      };
+      void openAudioOverlay(value, assets, overlay, figure.querySelector<HTMLAudioElement>('.sd-rte-audio-player'));
+    };
+  root.addEventListener('click', click);
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    reader.dispose();
+    root.removeEventListener('click', click);
+    for (const player of root.querySelectorAll<HTMLAudioElement>('.sd-rte-audio-player'))
+      try {
+        player.pause();
+        player.removeAttribute('src');
+        player.load();
+      } catch {}
+    for (const id of [...urls.keys()]) release(id);
+  };
+  for (const figure of figures) void hydrate(figure);
+  return dispose;
+}
+function settlePendingAssets(pending: Set<string>, assets: AssetStore, keepIds: string[]) {
+  const keep = new Set(keepIds);
+  for (const id of [...pending]) {
+    pending.delete(id);
+    if (!keep.has(id)) void assets.remove(id).catch(error => console.warn('Unused rich-text image could not be removed.', error));
+  }
+}
+function syncReadonlyTableContentWidths(root: ParentNode) {
+  for (const table of root.querySelectorAll<HTMLTableElement>('table')) {
+    const body = table.tBodies[0],
+      cells = body?.rows[0]?.cells;
+    if (!body || !cells?.length) continue;
+    const fallback = 100 / cells.length,
+      widths = [...cells].map(cell => normalizeCellWidth(Number.parseFloat(cell.style.width) || fallback)),
+      minPct = Math.max(MIN_TABLE_COLUMN_PCT, Math.min(...widths)),
+      required = Math.ceil((MIN_TABLE_CELL_PX * 100) / minPct);
+    body.style.minWidth = `${required}px`;
+  }
+}
 
-function ensureStyles(){
-  if(document.getElementById(STYLE_ID))return;
-  const style=document.createElement('style');style.id=STYLE_ID;style.textContent=`
+function ensureStyles() {
+  if (document.getElementById(STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = STYLE_ID;
+  style.textContent = `
 .sd-rte{display:grid;grid-template-rows:auto minmax(0,1fr) auto;overflow-anchor:none;border:1px solid var(--sd-color-border-2,#272c42);border-radius:var(--sd-shape-editor-radius,10px);background:var(--sd-material-panel,#0b0d16);overflow:visible;position:relative}.sd-rte[hidden]{display:none!important}.sd-rte-glyph::before{content:attr(data-glyph)}.sd-rte-dormant-shell{grid-template-rows:minmax(0,1fr) auto}.sd-rte-dormant-content{padding:var(--sd-rte-host-padding,18px 20px);overflow:auto;font-size:var(--sd-rte-host-font-size,inherit);line-height:var(--sd-rte-host-line-height,inherit)}.sd-rte-dormant-edit{min-height:34px;border:0;border-top:1px solid var(--sd-color-border-2,#272c42);background:none;color:inherit;font:inherit}
 .sd-rte:focus-within{border-color:var(--sd-focus-accent,var(--sd-color-accent-primary,#e8ff00));box-shadow:var(--sd-depth-focus,0 0 0 1px rgba(232,255,0,.14))}
 .sd-rte-toolbar{grid-row:1;position:relative;display:flex;align-items:stretch;gap:0;padding:0;overflow:hidden;border-bottom:1px solid var(--sd-color-border-2,#272c42);background:var(--sd-material-panel,#0b0d16);border-radius:var(--sd-shape-editor-radius,10px) var(--sd-shape-editor-radius,10px) 0 0}.sd-rte-toolbar-rail-shell{position:relative;min-width:0;flex:1 1 auto;overflow:hidden}.sd-rte-toolbar-rail{display:flex;align-items:center;gap:0;padding:5px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain}.sd-rte-toolbar-rail::-webkit-scrollbar{display:none}.sd-rte-toolbar-rail-shell::before,.sd-rte-toolbar-rail-shell::after{position:absolute;z-index:3;top:0;bottom:0;width:30px;display:grid;place-items:center;pointer-events:none;opacity:0;color:color-mix(in srgb,var(--sd-color-text-secondary-strong,#969bb4) 84%,var(--sd-color-text-primary,#f0f2ff));font-size:18px;font-weight:700;line-height:1;transition:opacity 120ms ease}.sd-rte-toolbar-rail-shell::before{content:'‹';left:0;background:linear-gradient(90deg,color-mix(in srgb,var(--sd-color-surface-1,#0b0d16) 94%,transparent),transparent)}.sd-rte-toolbar-rail-shell::after{content:'›';right:0;background:linear-gradient(270deg,color-mix(in srgb,var(--sd-color-surface-1,#0b0d16) 94%,transparent),transparent)}.sd-rte-toolbar-rail-shell[data-overflow-left=true]::before,.sd-rte-toolbar-rail-shell[data-overflow-right=true]::after{opacity:.9}
@@ -485,367 +2207,3134 @@ function ensureStyles(){
 .sd-overlay[data-sd-anchored]{position-area:var(--sd-overlay-area);justify-self:var(--sd-overlay-align);margin:6px 0;position-try-fallbacks:flip-inline,flip-block,flip-block flip-inline,--sd-overlay-center,--sd-overlay-center-top}
 @position-try --sd-overlay-center{position-area:none;inset:auto 8px;top:anchor(bottom);justify-self:center}
 @position-try --sd-overlay-center-top{position-area:none;inset:auto 8px;bottom:anchor(top);justify-self:center}
-`;document.head.appendChild(style)
+`;
+  document.head.appendChild(style);
 }
 
-let overlaySerial=0,closeActiveOverlay:(()=>void)|null=null;
-function createAnchoredPopover(popup:HTMLElement,{align='start',side='bottom',manual=false,onClose=()=>{},onEscape,anchorRect}:{align?:'start'|'end';side?:'top'|'bottom';manual?:boolean;onClose?:()=>void;onEscape?:()=>boolean;anchorRect?:(()=>DOMRect|null)}={}){
+let overlaySerial = 0,
+  closeActiveOverlay: (() => void) | null = null;
+function createAnchoredPopover(
+  popup: HTMLElement,
+  {
+    align = 'start',
+    side = 'bottom',
+    manual = false,
+    onClose = () => {},
+    onEscape,
+    anchorRect
+  }: {
+    align?: 'start' | 'end';
+    side?: 'top' | 'bottom';
+    manual?: boolean;
+    onClose?: () => void;
+    onEscape?: () => boolean;
+    anchorRect?: () => DOMRect | null;
+  } = {}
+) {
   ensureStyles();
-  const native=typeof popup.showPopover==='function',anchored=native&&CSS.supports('position-area','bottom span-right')&&CSS.supports('position-try-fallbacks','flip-block');
-  const name=`--sd-overlay-${++overlaySerial}`;
-  let trigger:HTMLElement|null=null,previousAnchor='',listening=false,trackScroll=!!anchorRect||!anchored;
-  popup.hidden=true;popup.classList.add('sd-overlay');
-  if(native)popup.setAttribute('popover',manual?'manual':'auto');
-  popup.style.setProperty('--sd-overlay-area',`${side} span-${align==='end'?'left':'right'}`);
-  popup.style.setProperty('--sd-overlay-align',align==='end'?'end':'start');
-  const position=()=>{
-    if(!trigger||popup.hidden)return;
-    if(!trigger.isConnected){hide();return}
-    const view=window.visualViewport,zoomed=!!view&&(view.scale!==1||view.offsetLeft!==0||view.offsetTop!==0||view.height<window.innerHeight-1);
-    const rect=anchorRect?.()||trigger.getBoundingClientRect();if(!rect){hide();return}
-    const useAnchor=anchored&&!anchorRect&&!zoomed&&rect.left>=0&&rect.right<=innerWidth&&rect.top>=0&&rect.bottom<=innerHeight;
-    if(listening&&trackScroll===useAnchor)window[useAnchor?'removeEventListener':'addEventListener']('scroll',scroll,true);trackScroll=!useAnchor;
-    popup.toggleAttribute('data-sd-anchored',useAnchor);
-    if(useAnchor){popup.style.removeProperty('left');popup.style.removeProperty('top');popup.style.removeProperty('max-height');popup.style.removeProperty('max-width');return}
-    const left=view?.offsetLeft||0,top=view?.offsetTop||0,width=view?.width||innerWidth,height=view?.height||innerHeight;
-    popup.style.maxHeight=`${Math.max(0,height-16)}px`;popup.style.maxWidth=`${Math.max(0,width-16)}px`;
-    const box=popup.getBoundingClientRect(),below=rect.bottom+6,above=rect.top-box.height-6;
-    const y=side==='top'?(above>=top+8?above:below):(below+box.height<=top+height-8?below:above);
-    popup.style.left=`${Math.max(left+8,Math.min(left+width-box.width-8,align==='end'?rect.right-box.width:rect.left))}px`;
-    popup.style.top=`${Math.max(top+8,Math.min(top+height-box.height-8,y))}px`;
+  const native = typeof popup.showPopover === 'function',
+    anchored = native && CSS.supports('position-area', 'bottom span-right') && CSS.supports('position-try-fallbacks', 'flip-block');
+  const name = `--sd-overlay-${++overlaySerial}`;
+  let trigger: HTMLElement | null = null,
+    previousAnchor = '',
+    listening = false,
+    trackScroll = !!anchorRect || !anchored;
+  popup.hidden = true;
+  popup.classList.add('sd-overlay');
+  if (native) popup.setAttribute('popover', manual ? 'manual' : 'auto');
+  popup.style.setProperty('--sd-overlay-area', `${side} span-${align === 'end' ? 'left' : 'right'}`);
+  popup.style.setProperty('--sd-overlay-align', align === 'end' ? 'end' : 'start');
+  const position = () => {
+    if (!trigger || popup.hidden) return;
+    if (!trigger.isConnected) {
+      hide();
+      return;
+    }
+    const view = window.visualViewport,
+      zoomed = !!view && (view.scale !== 1 || view.offsetLeft !== 0 || view.offsetTop !== 0 || view.height < window.innerHeight - 1);
+    const rect = anchorRect?.() || trigger.getBoundingClientRect();
+    if (!rect) {
+      hide();
+      return;
+    }
+    const useAnchor =
+      anchored && !anchorRect && !zoomed && rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight;
+    if (listening && trackScroll === useAnchor) window[useAnchor ? 'removeEventListener' : 'addEventListener']('scroll', scroll, true);
+    trackScroll = !useAnchor;
+    popup.toggleAttribute('data-sd-anchored', useAnchor);
+    if (useAnchor) {
+      popup.style.removeProperty('left');
+      popup.style.removeProperty('top');
+      popup.style.removeProperty('max-height');
+      popup.style.removeProperty('max-width');
+      return;
+    }
+    const left = view?.offsetLeft || 0,
+      top = view?.offsetTop || 0,
+      width = view?.width || innerWidth,
+      height = view?.height || innerHeight;
+    popup.style.maxHeight = `${Math.max(0, height - 16)}px`;
+    popup.style.maxWidth = `${Math.max(0, width - 16)}px`;
+    const box = popup.getBoundingClientRect(),
+      below = rect.bottom + 6,
+      above = rect.top - box.height - 6;
+    const y = side === 'top' ? (above >= top + 8 ? above : below) : below + box.height <= top + height - 8 ? below : above;
+    popup.style.left = `${Math.max(left + 8, Math.min(left + width - box.width - 8, align === 'end' ? rect.right - box.width : rect.left))}px`;
+    popup.style.top = `${Math.max(top + 8, Math.min(top + height - box.height - 8, y))}px`;
   };
-  const outside=(event:Event)=>{const target=event.target as globalThis.Node;if(!popup.contains(target)&&!trigger?.contains(target))hide()};
-  const key=(event:KeyboardEvent)=>{if(event.key!=='Escape'||popup.hidden)return;event.preventDefault();event.stopImmediatePropagation();if(onEscape?.())return;const target=trigger,restore=popup.contains(document.activeElement);hide();if(restore&&target?.isConnected)target.focus({preventScroll:true})};
-  const scroll=(event:Event)=>{if(event.target instanceof globalThis.Node&&popup.contains(event.target))return;position()};
-  const listen=(add:boolean)=>{
-    if(listening===add)return;listening=add;
-    const method=add?'addEventListener':'removeEventListener';
-    if(!manual)document[method]('keydown',key,true);
-    if(!native&&!manual)document[method]('pointerdown',outside,true);
+  const outside = (event: Event) => {
+    const target = event.target as globalThis.Node;
+    if (!popup.contains(target) && !trigger?.contains(target)) hide();
+  };
+  const key = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape' || popup.hidden) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (onEscape?.()) return;
+    const target = trigger,
+      restore = popup.contains(document.activeElement);
+    hide();
+    if (restore && target?.isConnected) target.focus({preventScroll: true});
+  };
+  const scroll = (event: Event) => {
+    if (event.target instanceof globalThis.Node && popup.contains(event.target)) return;
+    position();
+  };
+  const listen = (add: boolean) => {
+    if (listening === add) return;
+    listening = add;
+    const method = add ? 'addEventListener' : 'removeEventListener';
+    if (!manual) document[method]('keydown', key, true);
+    if (!native && !manual) document[method]('pointerdown', outside, true);
     // Anchor layout follows normal scrolling without JS. Visual viewport changes
     // still need the bounded fallback for zoom and an on-screen keyboard.
-    if(trackScroll)window[method]('scroll',scroll,true);
-    window[method]('resize',position);
-    window.visualViewport?.[method]('resize',position);window.visualViewport?.[method]('scroll',position);
+    if (trackScroll) window[method]('scroll', scroll, true);
+    window[method]('resize', position);
+    window.visualViewport?.[method]('resize', position);
+    window.visualViewport?.[method]('scroll', position);
   };
-  const closed=()=>{
-    if(popup.hidden)return;popup.hidden=true;listen(false);
-    if(trigger){if(!manual){trigger.setAttribute('aria-expanded','false');if(native&&trigger instanceof HTMLButtonElement)trigger.popoverTargetElement=null;}if(anchored){if(previousAnchor)trigger.style.setProperty('anchor-name',previousAnchor);else trigger.style.removeProperty('anchor-name')}}
-    trigger=null;if(closeActiveOverlay===hide)closeActiveOverlay=null;onClose();
+  const closed = () => {
+    if (popup.hidden) return;
+    popup.hidden = true;
+    listen(false);
+    if (trigger) {
+      if (!manual) {
+        trigger.setAttribute('aria-expanded', 'false');
+        if (native && trigger instanceof HTMLButtonElement) trigger.popoverTargetElement = null;
+      }
+      if (anchored) {
+        if (previousAnchor) trigger.style.setProperty('anchor-name', previousAnchor);
+        else trigger.style.removeProperty('anchor-name');
+      }
+    }
+    trigger = null;
+    if (closeActiveOverlay === hide) closeActiveOverlay = null;
+    onClose();
   };
-  function hide(){if(native&&popup.matches(':popover-open'))popup.hidePopover();closed()}
-  const beforeToggle=(event:Event)=>{if((event as ToggleEvent).newState==='closed')closed()};
-  if(native)popup.addEventListener('beforetoggle',beforeToggle);
-  function show(target:HTMLElement){
-    if(!target.isConnected||!popup.isConnected)return;
-    if(trigger===target&&!popup.hidden){position();return}
-    hide();if(!manual){closeActiveOverlay?.();closeActiveOverlay=hide}
-    trigger=target;previousAnchor=target.style.getPropertyValue('anchor-name');
-    if(anchored){target.style.setProperty('anchor-name',name);popup.style.setProperty('position-anchor',name)}
-    popup.hidden=false;if(!manual){target.setAttribute('aria-expanded','true');if(native&&target instanceof HTMLButtonElement)target.popoverTargetElement=popup;}
-    if(native)(popup.showPopover as any)({source:target});
-    position();listen(true);
+  function hide() {
+    if (native && popup.matches(':popover-open')) popup.hidePopover();
+    closed();
   }
-  return {show,hide,destroy(){hide();popup.removeEventListener('beforetoggle',beforeToggle)}};
+  const beforeToggle = (event: Event) => {
+    if ((event as ToggleEvent).newState === 'closed') closed();
+  };
+  if (native) popup.addEventListener('beforetoggle', beforeToggle);
+  function show(target: HTMLElement) {
+    if (!target.isConnected || !popup.isConnected) return;
+    if (trigger === target && !popup.hidden) {
+      position();
+      return;
+    }
+    hide();
+    if (!manual) {
+      closeActiveOverlay?.();
+      closeActiveOverlay = hide;
+    }
+    trigger = target;
+    previousAnchor = target.style.getPropertyValue('anchor-name');
+    if (anchored) {
+      target.style.setProperty('anchor-name', name);
+      popup.style.setProperty('position-anchor', name);
+    }
+    popup.hidden = false;
+    if (!manual) {
+      target.setAttribute('aria-expanded', 'true');
+      if (native && target instanceof HTMLButtonElement) target.popoverTargetElement = popup;
+    }
+    if (native) (popup.showPopover as any)({source: target});
+    position();
+    listen(true);
+  }
+  return {
+    show,
+    hide,
+    destroy() {
+      hide();
+      popup.removeEventListener('beforetoggle', beforeToggle);
+    }
+  };
 }
 
-function setStatus(element:HTMLElement,message:string,onStatus?:((value:string)=>void),state:''|'busy'|'error'|'success'=''){if(element.textContent!==message)element.textContent=message;if(state){if(element.dataset.state!==state)element.dataset.state=state}else if(element.dataset.state)delete element.dataset.state;if(onStatus)onStatus(message)}
+function setStatus(
+  element: HTMLElement,
+  message: string,
+  onStatus?: (value: string) => void,
+  state: '' | 'busy' | 'error' | 'success' = ''
+) {
+  if (element.textContent !== message) element.textContent = message;
+  if (state) {
+    if (element.dataset.state !== state) element.dataset.state = state;
+  } else if (element.dataset.state) delete element.dataset.state;
+  if (onStatus) onStatus(message);
+}
 // A button's visible label must be part of its name (WCAG 2.5.3). A short
 // label that is not (HL for Highlight, H1 for Heading 1) works as an icon, so
 // CSS draws it and the button's text is its name alone.
-const labelWords=(value:string)=>value.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
-function setButtonGlyph(button:HTMLElement,label:string){
-  const words=labelWords(label),name=` ${labelWords(button.getAttribute('aria-label')||button.title||'')} `;
-  if(!words||/^\p{L}$/u.test(words)||name.includes(` ${words} `)){button.textContent=label;return;}
-  const glyph=document.createElement('span');glyph.className='sd-rte-glyph';glyph.dataset.glyph=label;button.replaceChildren(glyph);
+const labelWords = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+function setButtonGlyph(button: HTMLElement, label: string) {
+  const words = labelWords(label),
+    name = ` ${labelWords(button.getAttribute('aria-label') || button.title || '')} `;
+  if (!words || /^\p{L}$/u.test(words) || name.includes(` ${words} `)) {
+    button.textContent = label;
+    return;
+  }
+  const glyph = document.createElement('span');
+  glyph.className = 'sd-rte-glyph';
+  glyph.dataset.glyph = label;
+  button.replaceChildren(glyph);
 }
-function createButton(label:string,title:string,action:()=>void,className=''){const button=document.createElement('button');button.type='button';button.title=title;button.setAttribute('aria-label',title);setButtonGlyph(button,label);if(className)button.className=className;button.addEventListener('mousedown',event=>event.preventDefault());button.addEventListener('click',event=>{event.preventDefault();action()});return button}
-function toolbarGroup(label:string,...controls:HTMLElement[]){const group=document.createElement('div');group.className='sd-rte-toolbar-group';group.setAttribute('role','group');group.setAttribute('aria-label',label);group.append(...controls);return group}
-function annotateShortcut(button:HTMLButtonElement,keys:string,hint:string){button.setAttribute('aria-keyshortcuts',keys);button.title=`${button.title} (${hint})`}
-function currentLink(editor:Wordgard){const {selection,doc}=editor.state;if(selection.isCursor)return Link.isInSet(editor.state.sel.activeMarks)||null;let found:Mark|null=null;for(const range of selection.ranges){doc.iterate(range.from,range.to,node=>{found=Link.isInSet(node.marks)||found;return !found});if(found)break}return found}
-function tablePosition(editor:Wordgard){return editor.state.sel.head.matchingParent(node=>node.type===Table.type)||null}
-function cellPosition(editor:Wordgard){return editor.state.sel.head.matchingParent(node=>node.type===BlockCell.type||node.type===BlockHeaderCell.type)||null}
-function listItemPosition(editor:Wordgard){return editor.state.sel.head.matchingParent(node=>node.type===ListItem.type)||null}
-function listPosition(editor:Wordgard){const item=listItemPosition(editor),parent=item?.parent;return parent&&(parent.node.type===BulletList.type||parent.node.type===OrderedList)?parent:null}
-function canIndentListItem(editor:Wordgard){const selection=editor.state.selection,item=listItemPosition(editor),list=item?.parent;if(!(selection instanceof GardSelection.Text)||!selection.empty||!item||!list||!list.node.isPlot||item.index<=0||selection.head<item.before||selection.head>item.after)return false;return !!(item.node.isPlot&&list.node.content[item.index-1]?.isPlot)}
-function childBefore(parentBefore:number,parent:Plot,index:number){let before=parentBefore+1;for(let i=0;i<index;i++)before+=parent.content[i].length;return before}
-function indentListItem(editor:Wordgard){const selection=editor.state.selection,item=listItemPosition(editor),list=item?.parent;if(!(selection instanceof GardSelection.Text)||!selection.empty||!item||!list||!list.node.isPlot||item.index<=0||selection.head<item.before||selection.head>item.after)return false;const relative=Math.max(1,Math.min(item.node.length-1,selection.head-item.before)),items=[...list.node.content] as Plot[],previous=items[item.index-1],current=items[item.index];if(!previous?.isPlot||!current?.isPlot)return false;const previousContent=[...previous.content] as Node[],last=previousContent.at(-1),hasNested=!!last?.isPlot&&last.type===list.node.type,nextNested=hasNested?(last as Plot).tag.create([...(last as Plot).content,current]):list.node.tag.create([current]),nextPrevious=previous.tag.create(hasNested?[...previousContent.slice(0,-1),nextNested]:[...previousContent,nextNested]),nextItems=[...items];nextItems.splice(item.index-1,2,nextPrevious);const nextList=list.node.tag.create(nextItems),previousBefore=childBefore(list.before,nextList,item.index-1),nestedIndex=nextPrevious.content.length-1,nestedBefore=childBefore(previousBefore,nextPrevious,nestedIndex),currentBefore=childBefore(nestedBefore,nextNested,nextNested.content.length-1),cursor=currentBefore+relative;editor.dispatch({changes:{from:list.before,to:list.after,insert:[nextList]},selection:context=>GardSelection.near(context,cursor,1),userEvent:'indent.list-item'});return true}
-function outdentListItem(editor:Wordgard){const selection=editor.state.selection,item=listItemPosition(editor),list=item?.parent,parentItem=list?.parent,outerList=parentItem?.parent;if(!(selection instanceof GardSelection.Text)||!selection.empty||!item||!list||!parentItem||!outerList||!list.node.isPlot||!parentItem.node.isPlot||!outerList.node.isPlot||parentItem.node.type!==ListItem.type||(outerList.node.type!==BulletList.type&&outerList.node.type!==OrderedList)||selection.head<item.before||selection.head>item.after)return false;const relative=Math.max(1,Math.min(item.node.length-1,selection.head-item.before)),nestedItems=[...list.node.content] as Plot[],current=nestedItems[item.index];if(!current?.isPlot)return false;nestedItems.splice(item.index,1);const parentContent=[...parentItem.node.content] as Node[];if(nestedItems.length)parentContent[list.index]=list.node.tag.create(nestedItems);else parentContent.splice(list.index,1);const nextParent=parentItem.node.tag.create(parentContent),outerItems=[...outerList.node.content] as Plot[];outerItems.splice(parentItem.index,1,nextParent,current);const nextOuter=outerList.node.tag.create(outerItems),currentBefore=childBefore(outerList.before,nextOuter,parentItem.index+1),cursor=currentBefore+relative;editor.dispatch({changes:{from:outerList.before,to:outerList.after,insert:[nextOuter]},selection:context=>GardSelection.near(context,cursor,1),userEvent:'outdent.list-item'});return true}
-function replaceDocument(editor:Wordgard,doc:Plot.Doc,userEvent=REVERT_EVENT){const current=editor.state.doc;editor.dispatch({changes:ChangeSet.create(current,{from:0,to:current.contentLength,insert:doc.content}),selection:context=>GardSelection.near(context,0,1),userEvent})}
-function topLevelBlockAtSelection(editor:Wordgard,selection:GardSelection=editor.state.selection){let block=editor.state.doc.resolve(selection.head).parent;while(block.parent&&block.parent.parent)block=block.parent;return block.parent&&!block.parent.parent?block:null}
-function structuralInsertionRange(editor:Wordgard,selection:GardSelection=editor.state.selection){const block=topLevelBlockAtSelection(editor,selection);if(!block)return selection.replacementRange;if(block.node.type===Paragraph.type&&!block.node.textContent().trim())return {from:block.before,to:block.after};return {from:block.after,to:block.after}}
-function selectionInsideTable(editor:Wordgard,selection:GardSelection){return !!editor.state.doc.resolve(selection.head).matchingParent(node=>node.type===BlockCell.type||node.type===BlockHeaderCell.type)}
-function insertStructuralBlockAt(editor:Wordgard,node:Node,userEvent:string,range:{from:number;to:number}|null=null,enterTable=false){const doc=editor.state.doc,fallback=structuralInsertionRange(editor),from=range&&range.from>=0&&range.to>=range.from&&range.to<=doc.contentLength?range.from:fallback.from,to=range&&range.from>=0&&range.to>=range.from&&range.to<=doc.contentLength?range.to:fallback.to,insert:Node[]=[node];if(to===doc.contentLength)insert.push(Paragraph.create([]));const changes=ChangeSet.create(doc,{from,to,insert,fit:true}),inserted=changes.findInserted(tag=>tag.type===node.type),base=inserted==null?from:inserted;editor.dispatch({changes,selection:context=>GardSelection.near(context,enterTable?base+3:base+node.length,1),userEvent})}
-function insertStructuralBlock(editor:Wordgard,node:Node,userEvent:string,enterTable=false){insertStructuralBlockAt(editor,node,userEvent,null,enterTable)}
-function tableCell(width:number,header=false){const cell=(header?BlockHeaderCell:BlockCell).create([Paragraph.create([])]);return cell.withMarks(CellWidth.of(normalizeCellWidth(width)).addToSet(cell.marks)) as Plot}
-function withCellWidth(cell:Node,width:number){return cell.withMarks(CellWidth.of(normalizeCellWidth(width)).addToSet(cell.marks)) as Plot}
-function makeTable(rows=2,columns=2){const width=100/columns,rowNodes:Plot[]=[];for(let row=0;row<rows;row++)rowNodes.push(TableRow.create(Array.from({length:columns},()=>tableCell(width))));return Table.create(rowNodes)}
-function currentTableContext(editor:Wordgard){const table=tablePosition(editor),cell=cellPosition(editor);if(!table||!cell||!cell.parent||cell.parent.parent!==table)return null;return {table,cell,rowIndex:cell.parent.index,colIndex:cell.index}}
-function tableWidths(table:Plot){const first=table.firstChild;return first&&first.isPlot?first.content.map(cell=>normalizeCellWidth(cell.mark(CellWidth)??100/first.content.length)):[]}
-function tableCellCursorPos(tableBefore:number,table:Plot,rowIndex:number,colIndex:number){let rowBefore=tableBefore+1;for(let row=0;row<rowIndex;row++)rowBefore+=table.content[row].length;const row=table.content[rowIndex] as Plot;let cellBefore=rowBefore+1;for(let col=0;col<colIndex;col++)cellBefore+=row.content[col].length;return cellBefore+1}
-function replaceTable(editor:Wordgard,tablePos:any,next:Plot,rowIndex:number,colIndex:number,userEvent:string){const safeRow=Math.max(0,Math.min(next.content.length-1,rowIndex)),row=next.content[safeRow] as Plot,safeCol=Math.max(0,Math.min(row.content.length-1,colIndex)),cursor=tableCellCursorPos(tablePos.before,next,safeRow,safeCol);editor.dispatch({changes:{from:tablePos.before,to:tablePos.after,insert:[next]},selection:context=>GardSelection.near(context,cursor,1),userEvent});editor.focus();return true}
-function addColumnWidths(widths:number[],index:number){const newWidth=100/(widths.length+1),factor=widths.length/(widths.length+1),next=widths.map(width=>normalizeCellWidth(width*factor));next.splice(index,0,normalizeCellWidth(newWidth));return next}
-function removeColumnWidths(widths:number[],index:number){const remaining=widths.filter((_,i)=>i!==index),total=remaining.reduce((sum,width)=>sum+width,0);return remaining.map(width=>normalizeCellWidth(width/total*100))}
-function editTable(editor:Wordgard,axis:'row'|'column',delta:1|-1){const cx=currentTableContext(editor);if(!cx)return false;const rows=[...cx.table.node.content] as Plot[],columns=(rows[0] as Plot).content.length;let rowIndex=cx.rowIndex,colIndex=cx.colIndex;if(axis==='row'){if(delta>0){if(rows.length>=MAX_TABLE_DIMENSION)return false;rowIndex++;rows.splice(rowIndex,0,TableRow.create(tableWidths(cx.table.node).map(width=>tableCell(width))))}else{if(rows.length<=1)return false;rows.splice(rowIndex,1);rowIndex=Math.min(rowIndex,rows.length-1)}}else{const count=columns+delta;if(count<1||count>MAX_TABLE_DIMENSION)return false;const widths=tableWidths(cx.table.node);if(delta>0)colIndex++;const nextWidths=delta>0?addColumnWidths(widths,colIndex):removeColumnWidths(widths,colIndex);for(let i=0;i<rows.length;i++){const row=rows[i],cells=[...row.content];if(delta>0)cells.splice(colIndex,0,tableCell(nextWidths[colIndex],row.content[0]?.type===BlockHeaderCell.type));else cells.splice(cx.colIndex,1);rows[i]=TableRow.create(cells.map((cell,index)=>withCellWidth(cell,nextWidths[index])))}colIndex=Math.min(colIndex,count-1)}return replaceTable(editor,cx.table,cx.table.node.tag.create(rows),rowIndex,colIndex,delta>0?`insert.${axis}`:`delete.${axis}`)}
-function toggleTableHeader(editor:Wordgard){const cx=currentTableContext(editor);if(!cx)return false;const rows=[...cx.table.node.content] as Plot[],first=rows[0],header=first.content.every(cell=>cell.type===BlockHeaderCell.type),target=header?BlockCell:BlockHeaderCell;rows[0]=TableRow.create(first.content.map(cell=>target.create((cell as Plot).content).withMarks(cell.marks) as Plot));return replaceTable(editor,cx.table,cx.table.node.tag.create(rows),cx.rowIndex,cx.colIndex,'toggle.table.header')}
-function coarsePointerAvailable(){return navigator.maxTouchPoints>0||matchMedia('(pointer: coarse)').matches||matchMedia('(any-pointer: coarse)').matches}
-function mobileTouchLayout(){return matchMedia('(max-width:720px)').matches&&(matchMedia('(pointer: coarse)').matches||matchMedia('(any-pointer: coarse)').matches)}
-function atomicNode(node:Node|null){return !!node&&(node.type===StudyImage||node.type===StudyAudio||node.type===HorizontalRule.type||node.type===Table.type)}
-function atomicBeforeDOMCursor(editor:Wordgard){const domSelection=editor.dom.ownerDocument.getSelection();if(!domSelection?.isCollapsed||!domSelection.anchorNode||!editor.contentDOM.contains(domSelection.anchorNode))return null;const anchor=domSelection.anchorNode,element=anchor instanceof Element?anchor:anchor.parentElement,block=element?.closest('p');if(!(block instanceof HTMLParagraphElement)||block.parentElement!==editor.contentDOM)return null;try{const prefix=editor.dom.ownerDocument.createRange();prefix.setStart(block,0);prefix.setEnd(anchor,domSelection.anchorOffset);if(prefix.toString())return null}catch{return null}const previous=block.previousElementSibling;if(!previous)return null;const found=editor.nodeFromDOM(previous);return found&&atomicNode(found.node)?{node:found.node,from:found.pos}:null}
-function atomicBeforeCursor(editor:Wordgard){const selection=editor.state.selection;if(selection instanceof GardSelection.Text&&selection.empty){const head=editor.state.sel.head;if(!head.parent.node.inlineContent&&atomicNode(head.nodeBefore)){const node=head.nodeBefore!;return {node,from:selection.head-node.length}}const block=head.textblockParent;if(block&&block.node.type===Paragraph.type&&block.parent&&!block.parent.parent&&head.isAtStart(block)&&atomicNode(block.previousSibling)){const node=block.previousSibling!;return {node,from:block.before-node.length}}}return atomicBeforeDOMCursor(editor)}
-function atomicGapAtSelection(editor:Wordgard){const selection=editor.state.selection;if(!(selection instanceof GardSelection.Text)||!selection.empty)return false;const head=editor.state.sel.head;if(!head.parent.node.inlineContent&&(atomicNode(head.nodeBefore)||atomicNode(head.nodeAfter)))return true;const block=head.textblockParent;if(!block||block.node.type!==Paragraph.type||block.node.content.length||!block.parent||block.parent.parent)return false;return head.isAtStart(block)&&atomicNode(block.previousSibling)||head.isAtEnd(block)&&atomicNode(block.nextSibling)}
-
-function installFocusMode(options:MountOptions,field:HTMLTextAreaElement,wrapper:HTMLElement,toolbar:HTMLElement,editor:Wordgard,closePopups:()=>void){
-  const overlay=options.workspaceOverlay;if(!overlay)return Object.freeze({close:()=>false,destroy(){}});
-  let trigger!:HTMLButtonElement,utilityGroup!:HTMLElement,handle:WorkspaceOverlayHandle|null=null,marker:Comment|null=null,observer:MutationObserver|null=null,scrollTop=0,selection:GardSelection|null=null,sync:HTMLElement|null=null,forgetHistory:(()=>boolean)|null=null,stopViewportSync:(()=>void)|null=null;
-  const syncTopStatus=()=>{if(!sync)return;const editorMessage=String(field.dataset.richEditorStatus||''),editorState=String(field.dataset.richEditorStatusState||'saved'),syncState=String(field.dataset.richSyncState||'saved'),syncMessage=String(field.dataset.richSyncStatus||'Saved'),message=editorMessage||syncMessage,state=editorMessage?editorState:syncState;sync.dataset.state=state;sync.textContent=state==='saving'||state==='busy'?'…':state==='conflict'||state==='error'?'!':state==='read-only'?'—':'✓';sync.removeAttribute('title');sync.setAttribute('aria-label',message)};
-  const restoreEditor=()=>queueMicrotask(()=>{if(selection)editor.dispatch({selection});editor.scrollDOM.scrollTop=scrollTop;editor.focus()});
-  const stopFocusViewportSync=()=>{stopViewportSync?.();stopViewportSync=null};
-  const startFocusViewportSync=()=>{const dialog=handle?.dialog;if(!dialog)return;stopFocusViewportSync();const visual=window.visualViewport,syncViewport=()=>{if(!dialog.isConnected)return;const top=Math.max(0,Number(visual?.offsetTop)||0),bottom=Math.max(0,window.innerHeight-(top+(Number(visual?.height)||window.innerHeight)));dialog.style.setProperty('--sd-rte-focus-viewport-top',`${Math.round(top*100)/100}px`);dialog.style.setProperty('--sd-rte-focus-obscured-bottom',`${Math.round(bottom*100)/100}px`)};window.addEventListener('resize',syncViewport,{passive:true});visual?.addEventListener('resize',syncViewport,{passive:true});visual?.addEventListener('scroll',syncViewport,{passive:true});syncViewport();stopViewportSync=()=>{window.removeEventListener('resize',syncViewport);visual?.removeEventListener('resize',syncViewport);visual?.removeEventListener('scroll',syncViewport);dialog.style.removeProperty('--sd-rte-focus-viewport-top');dialog.style.removeProperty('--sd-rte-focus-obscured-bottom')}};
-  const restoreContent=()=>{scrollTop=editor.scrollDOM.scrollTop;selection=editor.state.selection;stopFocusViewportSync();observer?.disconnect();observer=null;utilityGroup.hidden=false;wrapper.insertBefore(toolbar,wrapper.firstChild);if(marker?.parentNode)marker.replaceWith(wrapper);else if(field.isConnected)field.insertAdjacentElement('afterend',wrapper);marker=null;sync=null;handle=null};
-  const close=()=>handle?handle.close():false;
-  const open=(replay?:WorkspaceHistoryDescriptor|null)=>{if(handle||!wrapper.isConnected)return false;closePopups();scrollTop=editor.scrollDOM.scrollTop;selection=editor.state.selection;marker=document.createComment('sd-rte-focus-origin');wrapper.before(marker);const header=document.createElement('div');header.className='sd-rte-focus-header';sync=document.createElement('span');sync.className='sd-rte-focus-sync note-sync';sync.setAttribute('role','status');sync.setAttribute('aria-live','polite');sync.tabIndex=0;const body=document.createElement('div');body.className='sd-rte-focus-body';utilityGroup.hidden=true;const mobileToolbar=mobileTouchLayout();if(mobileToolbar)header.append(sync);else header.append(toolbar,sync);body.append(wrapper);syncTopStatus();observer=new MutationObserver(syncTopStatus);observer.observe(field,{attributes:true,attributeFilter:['data-rich-sync-state','data-rich-sync-status','data-rich-editor-status','data-rich-editor-status-state']});handle=overlay.open({label:options.label,headerContent:header,content:body,className:'workspace-overlay-rich-text',closeLabel:'Close focus mode',onBeforeClose:restoreContent,onAfterClose:restoreEditor,history:{kind:'focus',token:replay?.token,reopen:descriptor=>open(descriptor)}});if(!handle){observer.disconnect();observer=null;sync=null;utilityGroup.hidden=false;wrapper.insertBefore(toolbar,wrapper.firstChild);if(marker?.parentNode)marker.replaceWith(wrapper);marker=null;restoreEditor();return false}forgetHistory=handle.forget||forgetHistory;startFocusViewportSync();restoreEditor();return true};
-  trigger=createButton('',`Open ${options.label} focus mode`,()=>open(),'sd-rte-focus-trigger');const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');const corners=document.createElementNS('http://www.w3.org/2000/svg','path');corners.setAttribute('d','M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5');icon.appendChild(corners);trigger.appendChild(icon);utilityGroup=toolbarGroup('Editor view',trigger);utilityGroup.classList.add('sd-rte-toolbar-group-utility');toolbar.appendChild(utilityGroup);return Object.freeze({close,destroy(){if(handle)handle.close();forgetHistory?.();forgetHistory=null;utilityGroup.remove();observer?.disconnect();observer=null}})
+function createButton(label: string, title: string, action: () => void, className = '') {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.title = title;
+  button.setAttribute('aria-label', title);
+  setButtonGlyph(button, label);
+  if (className) button.className = className;
+  button.addEventListener('mousedown', event => event.preventDefault());
+  button.addEventListener('click', event => {
+    event.preventDefault();
+    action();
+  });
+  return button;
+}
+function toolbarGroup(label: string, ...controls: HTMLElement[]) {
+  const group = document.createElement('div');
+  group.className = 'sd-rte-toolbar-group';
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', label);
+  group.append(...controls);
+  return group;
+}
+function annotateShortcut(button: HTMLButtonElement, keys: string, hint: string) {
+  button.setAttribute('aria-keyshortcuts', keys);
+  button.title = `${button.title} (${hint})`;
+}
+function currentLink(editor: Wordgard) {
+  const {selection, doc} = editor.state;
+  if (selection.isCursor) return Link.isInSet(editor.state.sel.activeMarks) || null;
+  let found: Mark | null = null;
+  for (const range of selection.ranges) {
+    doc.iterate(range.from, range.to, node => {
+      found = Link.isInSet(node.marks) || found;
+      return !found;
+    });
+    if (found) break;
+  }
+  return found;
+}
+function tablePosition(editor: Wordgard) {
+  return editor.state.sel.head.matchingParent(node => node.type === Table.type) || null;
+}
+function cellPosition(editor: Wordgard) {
+  return editor.state.sel.head.matchingParent(node => node.type === BlockCell.type || node.type === BlockHeaderCell.type) || null;
+}
+function listItemPosition(editor: Wordgard) {
+  return editor.state.sel.head.matchingParent(node => node.type === ListItem.type) || null;
+}
+function listPosition(editor: Wordgard) {
+  const item = listItemPosition(editor),
+    parent = item?.parent;
+  return parent && (parent.node.type === BulletList.type || parent.node.type === OrderedList) ? parent : null;
+}
+function canIndentListItem(editor: Wordgard) {
+  const selection = editor.state.selection,
+    item = listItemPosition(editor),
+    list = item?.parent;
+  if (
+    !(selection instanceof GardSelection.Text) ||
+    !selection.empty ||
+    !item ||
+    !list ||
+    !list.node.isPlot ||
+    item.index <= 0 ||
+    selection.head < item.before ||
+    selection.head > item.after
+  )
+    return false;
+  return !!(item.node.isPlot && list.node.content[item.index - 1]?.isPlot);
+}
+function childBefore(parentBefore: number, parent: Plot, index: number) {
+  let before = parentBefore + 1;
+  for (let i = 0; i < index; i++) before += parent.content[i].length;
+  return before;
+}
+function indentListItem(editor: Wordgard) {
+  const selection = editor.state.selection,
+    item = listItemPosition(editor),
+    list = item?.parent;
+  if (
+    !(selection instanceof GardSelection.Text) ||
+    !selection.empty ||
+    !item ||
+    !list ||
+    !list.node.isPlot ||
+    item.index <= 0 ||
+    selection.head < item.before ||
+    selection.head > item.after
+  )
+    return false;
+  const relative = Math.max(1, Math.min(item.node.length - 1, selection.head - item.before)),
+    items = [...list.node.content] as Plot[],
+    previous = items[item.index - 1],
+    current = items[item.index];
+  if (!previous?.isPlot || !current?.isPlot) return false;
+  const previousContent = [...previous.content] as Node[],
+    last = previousContent.at(-1),
+    hasNested = !!last?.isPlot && last.type === list.node.type,
+    nextNested = hasNested ? (last as Plot).tag.create([...(last as Plot).content, current]) : list.node.tag.create([current]),
+    nextPrevious = previous.tag.create(hasNested ? [...previousContent.slice(0, -1), nextNested] : [...previousContent, nextNested]),
+    nextItems = [...items];
+  nextItems.splice(item.index - 1, 2, nextPrevious);
+  const nextList = list.node.tag.create(nextItems),
+    previousBefore = childBefore(list.before, nextList, item.index - 1),
+    nestedIndex = nextPrevious.content.length - 1,
+    nestedBefore = childBefore(previousBefore, nextPrevious, nestedIndex),
+    currentBefore = childBefore(nestedBefore, nextNested, nextNested.content.length - 1),
+    cursor = currentBefore + relative;
+  editor.dispatch({
+    changes: {from: list.before, to: list.after, insert: [nextList]},
+    selection: context => GardSelection.near(context, cursor, 1),
+    userEvent: 'indent.list-item'
+  });
+  return true;
+}
+function outdentListItem(editor: Wordgard) {
+  const selection = editor.state.selection,
+    item = listItemPosition(editor),
+    list = item?.parent,
+    parentItem = list?.parent,
+    outerList = parentItem?.parent;
+  if (
+    !(selection instanceof GardSelection.Text) ||
+    !selection.empty ||
+    !item ||
+    !list ||
+    !parentItem ||
+    !outerList ||
+    !list.node.isPlot ||
+    !parentItem.node.isPlot ||
+    !outerList.node.isPlot ||
+    parentItem.node.type !== ListItem.type ||
+    (outerList.node.type !== BulletList.type && outerList.node.type !== OrderedList) ||
+    selection.head < item.before ||
+    selection.head > item.after
+  )
+    return false;
+  const relative = Math.max(1, Math.min(item.node.length - 1, selection.head - item.before)),
+    nestedItems = [...list.node.content] as Plot[],
+    current = nestedItems[item.index];
+  if (!current?.isPlot) return false;
+  nestedItems.splice(item.index, 1);
+  const parentContent = [...parentItem.node.content] as Node[];
+  if (nestedItems.length) parentContent[list.index] = list.node.tag.create(nestedItems);
+  else parentContent.splice(list.index, 1);
+  const nextParent = parentItem.node.tag.create(parentContent),
+    outerItems = [...outerList.node.content] as Plot[];
+  outerItems.splice(parentItem.index, 1, nextParent, current);
+  const nextOuter = outerList.node.tag.create(outerItems),
+    currentBefore = childBefore(outerList.before, nextOuter, parentItem.index + 1),
+    cursor = currentBefore + relative;
+  editor.dispatch({
+    changes: {from: outerList.before, to: outerList.after, insert: [nextOuter]},
+    selection: context => GardSelection.near(context, cursor, 1),
+    userEvent: 'outdent.list-item'
+  });
+  return true;
+}
+function replaceDocument(editor: Wordgard, doc: Plot.Doc, userEvent = REVERT_EVENT) {
+  const current = editor.state.doc;
+  editor.dispatch({
+    changes: ChangeSet.create(current, {from: 0, to: current.contentLength, insert: doc.content}),
+    selection: context => GardSelection.near(context, 0, 1),
+    userEvent
+  });
+}
+function topLevelBlockAtSelection(editor: Wordgard, selection: GardSelection = editor.state.selection) {
+  let block = editor.state.doc.resolve(selection.head).parent;
+  while (block.parent && block.parent.parent) block = block.parent;
+  return block.parent && !block.parent.parent ? block : null;
+}
+function structuralInsertionRange(editor: Wordgard, selection: GardSelection = editor.state.selection) {
+  const block = topLevelBlockAtSelection(editor, selection);
+  if (!block) return selection.replacementRange;
+  if (block.node.type === Paragraph.type && !block.node.textContent().trim()) return {from: block.before, to: block.after};
+  return {from: block.after, to: block.after};
+}
+function selectionInsideTable(editor: Wordgard, selection: GardSelection) {
+  return !!editor.state.doc
+    .resolve(selection.head)
+    .matchingParent(node => node.type === BlockCell.type || node.type === BlockHeaderCell.type);
+}
+function insertStructuralBlockAt(
+  editor: Wordgard,
+  node: Node,
+  userEvent: string,
+  range: {from: number; to: number} | null = null,
+  enterTable = false
+) {
+  const doc = editor.state.doc,
+    fallback = structuralInsertionRange(editor),
+    from = range && range.from >= 0 && range.to >= range.from && range.to <= doc.contentLength ? range.from : fallback.from,
+    to = range && range.from >= 0 && range.to >= range.from && range.to <= doc.contentLength ? range.to : fallback.to,
+    insert: Node[] = [node];
+  if (to === doc.contentLength) insert.push(Paragraph.create([]));
+  const changes = ChangeSet.create(doc, {from, to, insert, fit: true}),
+    inserted = changes.findInserted(tag => tag.type === node.type),
+    base = inserted == null ? from : inserted;
+  editor.dispatch({changes, selection: context => GardSelection.near(context, enterTable ? base + 3 : base + node.length, 1), userEvent});
+}
+function insertStructuralBlock(editor: Wordgard, node: Node, userEvent: string, enterTable = false) {
+  insertStructuralBlockAt(editor, node, userEvent, null, enterTable);
+}
+function tableCell(width: number, header = false) {
+  const cell = (header ? BlockHeaderCell : BlockCell).create([Paragraph.create([])]);
+  return cell.withMarks(CellWidth.of(normalizeCellWidth(width)).addToSet(cell.marks)) as Plot;
+}
+function withCellWidth(cell: Node, width: number) {
+  return cell.withMarks(CellWidth.of(normalizeCellWidth(width)).addToSet(cell.marks)) as Plot;
+}
+function makeTable(rows = 2, columns = 2) {
+  const width = 100 / columns,
+    rowNodes: Plot[] = [];
+  for (let row = 0; row < rows; row++) rowNodes.push(TableRow.create(Array.from({length: columns}, () => tableCell(width))));
+  return Table.create(rowNodes);
+}
+function currentTableContext(editor: Wordgard) {
+  const table = tablePosition(editor),
+    cell = cellPosition(editor);
+  if (!table || !cell || !cell.parent || cell.parent.parent !== table) return null;
+  return {table, cell, rowIndex: cell.parent.index, colIndex: cell.index};
+}
+function tableWidths(table: Plot) {
+  const first = table.firstChild;
+  return first && first.isPlot ? first.content.map(cell => normalizeCellWidth(cell.mark(CellWidth) ?? 100 / first.content.length)) : [];
+}
+function tableCellCursorPos(tableBefore: number, table: Plot, rowIndex: number, colIndex: number) {
+  let rowBefore = tableBefore + 1;
+  for (let row = 0; row < rowIndex; row++) rowBefore += table.content[row].length;
+  const row = table.content[rowIndex] as Plot;
+  let cellBefore = rowBefore + 1;
+  for (let col = 0; col < colIndex; col++) cellBefore += row.content[col].length;
+  return cellBefore + 1;
+}
+function replaceTable(editor: Wordgard, tablePos: any, next: Plot, rowIndex: number, colIndex: number, userEvent: string) {
+  const safeRow = Math.max(0, Math.min(next.content.length - 1, rowIndex)),
+    row = next.content[safeRow] as Plot,
+    safeCol = Math.max(0, Math.min(row.content.length - 1, colIndex)),
+    cursor = tableCellCursorPos(tablePos.before, next, safeRow, safeCol);
+  editor.dispatch({
+    changes: {from: tablePos.before, to: tablePos.after, insert: [next]},
+    selection: context => GardSelection.near(context, cursor, 1),
+    userEvent
+  });
+  editor.focus();
+  return true;
+}
+function addColumnWidths(widths: number[], index: number) {
+  const newWidth = 100 / (widths.length + 1),
+    factor = widths.length / (widths.length + 1),
+    next = widths.map(width => normalizeCellWidth(width * factor));
+  next.splice(index, 0, normalizeCellWidth(newWidth));
+  return next;
+}
+function removeColumnWidths(widths: number[], index: number) {
+  const remaining = widths.filter((_, i) => i !== index),
+    total = remaining.reduce((sum, width) => sum + width, 0);
+  return remaining.map(width => normalizeCellWidth((width / total) * 100));
+}
+function editTable(editor: Wordgard, axis: 'row' | 'column', delta: 1 | -1) {
+  const cx = currentTableContext(editor);
+  if (!cx) return false;
+  const rows = [...cx.table.node.content] as Plot[],
+    columns = (rows[0] as Plot).content.length;
+  let rowIndex = cx.rowIndex,
+    colIndex = cx.colIndex;
+  if (axis === 'row') {
+    if (delta > 0) {
+      if (rows.length >= MAX_TABLE_DIMENSION) return false;
+      rowIndex++;
+      rows.splice(rowIndex, 0, TableRow.create(tableWidths(cx.table.node).map(width => tableCell(width))));
+    } else {
+      if (rows.length <= 1) return false;
+      rows.splice(rowIndex, 1);
+      rowIndex = Math.min(rowIndex, rows.length - 1);
+    }
+  } else {
+    const count = columns + delta;
+    if (count < 1 || count > MAX_TABLE_DIMENSION) return false;
+    const widths = tableWidths(cx.table.node);
+    if (delta > 0) colIndex++;
+    const nextWidths = delta > 0 ? addColumnWidths(widths, colIndex) : removeColumnWidths(widths, colIndex);
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i],
+        cells = [...row.content];
+      if (delta > 0) cells.splice(colIndex, 0, tableCell(nextWidths[colIndex], row.content[0]?.type === BlockHeaderCell.type));
+      else cells.splice(cx.colIndex, 1);
+      rows[i] = TableRow.create(cells.map((cell, index) => withCellWidth(cell, nextWidths[index])));
+    }
+    colIndex = Math.min(colIndex, count - 1);
+  }
+  return replaceTable(
+    editor,
+    cx.table,
+    cx.table.node.tag.create(rows),
+    rowIndex,
+    colIndex,
+    delta > 0 ? `insert.${axis}` : `delete.${axis}`
+  );
+}
+function toggleTableHeader(editor: Wordgard) {
+  const cx = currentTableContext(editor);
+  if (!cx) return false;
+  const rows = [...cx.table.node.content] as Plot[],
+    first = rows[0],
+    header = first.content.every(cell => cell.type === BlockHeaderCell.type),
+    target = header ? BlockCell : BlockHeaderCell;
+  rows[0] = TableRow.create(first.content.map(cell => target.create((cell as Plot).content).withMarks(cell.marks) as Plot));
+  return replaceTable(editor, cx.table, cx.table.node.tag.create(rows), cx.rowIndex, cx.colIndex, 'toggle.table.header');
+}
+function coarsePointerAvailable() {
+  return navigator.maxTouchPoints > 0 || matchMedia('(pointer: coarse)').matches || matchMedia('(any-pointer: coarse)').matches;
+}
+function mobileTouchLayout() {
+  return (
+    matchMedia('(max-width:720px)').matches && (matchMedia('(pointer: coarse)').matches || matchMedia('(any-pointer: coarse)').matches)
+  );
+}
+function atomicNode(node: Node | null) {
+  return !!node && (node.type === StudyImage || node.type === StudyAudio || node.type === HorizontalRule.type || node.type === Table.type);
+}
+function atomicBeforeDOMCursor(editor: Wordgard) {
+  const domSelection = editor.dom.ownerDocument.getSelection();
+  if (!domSelection?.isCollapsed || !domSelection.anchorNode || !editor.contentDOM.contains(domSelection.anchorNode)) return null;
+  const anchor = domSelection.anchorNode,
+    element = anchor instanceof Element ? anchor : anchor.parentElement,
+    block = element?.closest('p');
+  if (!(block instanceof HTMLParagraphElement) || block.parentElement !== editor.contentDOM) return null;
+  try {
+    const prefix = editor.dom.ownerDocument.createRange();
+    prefix.setStart(block, 0);
+    prefix.setEnd(anchor, domSelection.anchorOffset);
+    if (prefix.toString()) return null;
+  } catch {
+    return null;
+  }
+  const previous = block.previousElementSibling;
+  if (!previous) return null;
+  const found = editor.nodeFromDOM(previous);
+  return found && atomicNode(found.node) ? {node: found.node, from: found.pos} : null;
+}
+function atomicBeforeCursor(editor: Wordgard) {
+  const selection = editor.state.selection;
+  if (selection instanceof GardSelection.Text && selection.empty) {
+    const head = editor.state.sel.head;
+    if (!head.parent.node.inlineContent && atomicNode(head.nodeBefore)) {
+      const node = head.nodeBefore!;
+      return {node, from: selection.head - node.length};
+    }
+    const block = head.textblockParent;
+    if (
+      block &&
+      block.node.type === Paragraph.type &&
+      block.parent &&
+      !block.parent.parent &&
+      head.isAtStart(block) &&
+      atomicNode(block.previousSibling)
+    ) {
+      const node = block.previousSibling!;
+      return {node, from: block.before - node.length};
+    }
+  }
+  return atomicBeforeDOMCursor(editor);
+}
+function atomicGapAtSelection(editor: Wordgard) {
+  const selection = editor.state.selection;
+  if (!(selection instanceof GardSelection.Text) || !selection.empty) return false;
+  const head = editor.state.sel.head;
+  if (!head.parent.node.inlineContent && (atomicNode(head.nodeBefore) || atomicNode(head.nodeAfter))) return true;
+  const block = head.textblockParent;
+  if (!block || block.node.type !== Paragraph.type || block.node.content.length || !block.parent || block.parent.parent) return false;
+  return (head.isAtStart(block) && atomicNode(block.previousSibling)) || (head.isAtEnd(block) && atomicNode(block.nextSibling));
 }
 
-async function mountRichTextEditor(options:MountOptions):Promise<MountedRichTextEditor>{
-  const field=options.field;if(!(field instanceof HTMLTextAreaElement)||!field.isConnected)throw new Error('Editor target is unavailable.');if(!validAssetStore(options.assets))throw new Error('Rich-text image storage is unavailable.');ensureStyles();
-  const readOnly=options.readOnly===true,originalDisplay=field.style.display,originalAriaHidden=field.getAttribute('aria-hidden'),surface=options.surface||'default',hostStyle=getComputedStyle(field),measuredHeight=Math.round(field.getBoundingClientRect().height),hostHeight=Math.max(measuredHeight,260);
-  const wrapper=document.createElement('div');wrapper.className='sd-rte';wrapper.dataset.sdRichEditor='1';wrapper.dataset.ownerMutation='rich-text';wrapper.dataset.sdRichSurface=surface;
-  wrapper.style.setProperty('--sd-rte-host-padding',`${hostStyle.paddingTop} ${hostStyle.paddingRight} ${hostStyle.paddingBottom} ${hostStyle.paddingLeft}`);if(hostStyle.fontSize)wrapper.style.setProperty('--sd-rte-host-font-size',hostStyle.fontSize);if(hostStyle.lineHeight&&hostStyle.lineHeight!=='normal')wrapper.style.setProperty('--sd-rte-host-line-height',hostStyle.lineHeight);if(surface==='default'||surface==='note'||surface==='reconciliation')wrapper.style.setProperty('--sd-rte-host-height',`${hostHeight}px`)
-  const toolbar=document.createElement('div');toolbar.className='sd-rte-toolbar';toolbar.setAttribute('role','toolbar');toolbar.setAttribute('aria-label',`${options.label} formatting`);const toolbarRailShell=document.createElement('div');toolbarRailShell.className='sd-rte-toolbar-rail-shell';const toolbarRail=document.createElement('div');toolbarRail.className='sd-rte-toolbar-rail';toolbarRailShell.appendChild(toolbarRail);toolbar.appendChild(toolbarRailShell);
-  if(readOnly)toolbar.hidden=true;
-  const tableTools=document.createElement('div');tableTools.className='sd-rte-context-tools sd-rte-table-tools';tableTools.hidden=true;tableTools.setAttribute('role','group');tableTools.setAttribute('aria-label','Table controls');const tableToolsLabel=document.createElement('span');tableToolsLabel.className='sd-rte-context-tools-label sd-rte-table-tools-label';tableToolsLabel.textContent='Table';const listTools=document.createElement('div');listTools.className='sd-rte-context-tools sd-rte-list-tools';listTools.hidden=true;listTools.setAttribute('role','group');listTools.setAttribute('aria-label','List indentation');const listToolsLabel=document.createElement('span');listToolsLabel.className='sd-rte-context-tools-label sd-rte-list-tools-label';listToolsLabel.textContent='List';
-  const editorHost=document.createElement('div');editorHost.className='sd-rte-editor-host';const status=document.createElement('div');status.className='sd-rte-status';status.setAttribute('role','status');status.setAttribute('aria-live','polite');status.setAttribute('aria-atomic','true');
-  wrapper.append(toolbar,editorHost,status);field.insertAdjacentElement('afterend',wrapper);field.style.display='none';field.setAttribute('aria-hidden','true');
-  const canonicalInitial=String(options.initialValue||''),visibleInitial=toPlainText(canonicalInitial),liveInitial=String(field.value||''),chosenInitial=liveInitial===visibleInitial?canonicalInitial:liveInitial,initialDoc=decodeDocument(chosenInitial);
-  type TableResizePreview={tablePos:number;leftPositions:number[];rightPositions:number[];startA:number;startB:number;valueA:number;valueB:number};
-  type TableResizeTarget={cell:HTMLTableCellElement;table:HTMLTableElement;rowIndex:number;colIndex:number};
-  let editor!:Wordgard,destroyed=false,searchCleared:(()=>void)|null=null,reverting=false,lifecycle=0,lastAccepted:Plot.Doc,imageBusy=false,linkSelection:GardSelection|null=null,linkContextElement:HTMLAnchorElement|null=null,dragCleanup:(()=>void)|null=null,hoverResizeCell:HTMLTableCellElement|null=null,revealedTableCellPos:number|null=null,imageRefreshFrame=0,tableRevealFrame=0,tableRulerFrame=0,toolbarCueFrame=0,currentAssetIds:string[]=[],activeImageResize:{pos:number;widthPct:number}|null=null,activeTableResize:TableResizePreview|null=null,tableToolsWereVisible=false,listToolsWereVisible=false,scheduleTableRuler=()=>{};const imageAbort=new AbortController(),tableRulerAbort=new AbortController();const pendingAssets=new Set<string>(),imageCache=new Map<string,string|null>(),audioCache=new Map<string,string|null>(),loadingImages=new Set<string>(),loadingAudio=new Set<string>(),assetMeta=new Map<string,number>(),assetLoads=new Map<string,Promise<Blob|null>>();const refreshToolbarOverflow=()=>{if(destroyed)return;const max=Math.max(0,toolbarRail.scrollWidth-toolbarRail.clientWidth),left=toolbarRail.scrollLeft>2,right=max-toolbarRail.scrollLeft>2;toolbarRailShell.dataset.overflowLeft=String(left);toolbarRailShell.dataset.overflowRight=String(right)};const scheduleToolbarOverflow=()=>{if(toolbarCueFrame||destroyed)return;toolbarCueFrame=requestAnimationFrame(()=>{toolbarCueFrame=0;refreshToolbarOverflow()})};toolbarRail.addEventListener('scroll',scheduleToolbarOverflow,{passive:true,signal:tableRulerAbort.signal});const toolbarResizeObserver=typeof ResizeObserver==='function'?new ResizeObserver(scheduleToolbarOverflow):null;toolbarResizeObserver?.observe(toolbarRailShell);
-  const interactions:EditorInteractionHooks={click:()=>false,pointerDown:()=>false,pointerMove:()=>{},pointerLeave:()=>{},tab:()=>false,backspace:()=>false,resizeImage:()=>false,openLink:()=>false,toggleChecklist:()=>false};
-  const releaseImage=(id:string)=>{const url=imageCache.get(id);if(url)URL.revokeObjectURL(url);imageCache.delete(id)};
-  const releaseAudio=(id:string)=>{const url=audioCache.get(id);if(url)URL.revokeObjectURL(url);audioCache.delete(id)};
-  const clearImageResizePreview=(dispatch=true)=>{delete editor.dom.dataset.sdImageResizing;if(dispatch&&!destroyed&&activeImageResize)editor.dispatch({effects:setResizeDecorations.of([])})};
-  const paintImageResize=()=>{const preview=activeImageResize;if(!preview||destroyed)return;editor.dom.dataset.sdImageResizing='true';editor.dispatch({effects:setResizeDecorations.of([{pos:preview.pos,style:`width: ${preview.widthPct}%`}])})};
-  const tableResizeDecorationSet=(preview:TableResizePreview):ResizeDecoration[]=>{const items:ResizeDecoration[]=[];for(let i=0;i<preview.leftPositions.length;i++)items.push({pos:preview.leftPositions[i],style:`width: ${preview.valueA}%`},{pos:preview.rightPositions[i],style:`width: ${preview.valueB}%`});return items};
-  const paintTableResize=()=>{const preview=activeTableResize;if(!preview||destroyed)return;editor.dom.dataset.sdTableResizing='col';editor.dispatch({effects:setResizeDecorations.of(tableResizeDecorationSet(preview))});scheduleTableRuler()};
-  const clearTableResizePreview=(dispatch=true)=>{delete editor.dom.dataset.sdTableResizing;if(dispatch&&!destroyed&&activeTableResize)editor.dispatch({effects:setResizeDecorations.of([])})};
-  const loadAsset=(id:string)=>{const active=assetLoads.get(id);if(active)return active;const load=options.assets.get(id).catch(()=>null).then(blob=>{if(blob instanceof Blob)assetMeta.set(id,blob.size);return blob}).finally(()=>assetLoads.delete(id));assetLoads.set(id,load);return load};
-  const documentImageBytes=async(ids:string[])=>{const missing=ids.filter(id=>!assetMeta.has(id));if(missing.length)await Promise.all(missing.map(loadAsset));return ids.reduce((sum,id)=>sum+(assetMeta.get(id)||0),0)};
-  const queueImageRefresh=()=>{if(imageRefreshFrame||destroyed)return;imageRefreshFrame=requestAnimationFrame(()=>{imageRefreshFrame=0;if(!destroyed)editor.dispatch({effects:refreshImageRender.of(null)})})};
-  const syncImages=(ids=currentAssetIds)=>{if(destroyed)return;const keep=new Set(ids);for(const id of imageCache.keys())if(!keep.has(id))releaseImage(id);for(const id of assetMeta.keys())if(!keep.has(id)&&!pendingAssets.has(id))assetMeta.delete(id);const missing=ids.filter(id=>!imageCache.has(id)&&!loadingImages.has(id));if(!missing.length)return;for(const id of missing)loadingImages.add(id);void Promise.all(missing.map(async id=>[id,await loadAsset(id)] as const)).then(entries=>{if(destroyed)return;const current=new Set(assetIdsFromDocument(editor.state.doc));let changed=false;for(const [id,blob] of entries){if(!current.has(id)||imageCache.has(id))continue;imageCache.set(id,blob instanceof Blob&&IMAGE_MIME_TYPES.has(blob.type)?URL.createObjectURL(blob):null);changed=true}if(changed)queueImageRefresh()}).finally(()=>{for(const id of missing)loadingImages.delete(id)})};
-  const hydrateAudioElements=()=>{if(destroyed)return;const ids=audioAttachmentIdsFromDocument(editor.state.doc),keep=new Set(ids);for(const id of audioCache.keys())if(!keep.has(id))releaseAudio(id);const figures=[...editor.dom.querySelectorAll<HTMLElement>('.sd-rte-audio[data-sd-attachment-id]')];for(const figure of figures){const id=String(figure.dataset.sdAttachmentId||''),player=figure.querySelector<HTMLAudioElement>('.sd-rte-audio-player'),status=figure.querySelector<HTMLElement>('.sd-rte-audio-status'),url=audioCache.get(id);if(url&&player){syncAudioPlayerState(player,status,url)}else if(url===null)setAudioStatus(status,'Audio unavailable');else if(!audioCache.has(id))setAudioStatus(status,'Loading audio…')}const missing=ids.filter(id=>!audioCache.has(id)&&!loadingAudio.has(id));if(!missing.length)return;for(const id of missing)loadingAudio.add(id);void Promise.all(missing.map(async id=>[id,await loadAsset(id)] as const)).then(entries=>{if(destroyed)return;const current=new Set(audioAttachmentIdsFromDocument(editor.state.doc));for(const [id,blob] of entries){if(!current.has(id)||audioCache.has(id))continue;audioCache.set(id,blob instanceof Blob&&AUDIO_MIME_TYPES.has(blob.type)?URL.createObjectURL(blob):null)}queueImageRefresh();queueMicrotask(hydrateAudioElements)}).finally(()=>{for(const id of missing)loadingAudio.delete(id)})};
-  const updateEditorStatus=(message:string,state:''|'busy'|'error'|'success'='')=>{const projectedState=state||'saved';if(field.dataset.richEditorStatus!==message)field.dataset.richEditorStatus=message;if(field.dataset.richEditorStatusState!==projectedState)field.dataset.richEditorStatusState=projectedState;setStatus(status,message,options.onStatus,state)};
-  const revealTableCell=()=>{const at=cellPosition(editor),pos=at?.before??null;if(pos===revealedTableCellPos)return;revealedTableCellPos=pos;const cell=at&&editor.nodeDOM(at.before) as Element|null;if(cell)cell.scrollIntoView({block:'nearest',inline:'nearest'})};
-  const refreshEditor=(update?:Wordgard.Update)=>{if(destroyed)return;if(!update||update.docChanged){hardenLinks(editor.dom,options.notes);syncImages();hydrateAudioElements()}if(update?.selectionSet)revealTableCell();if(!update||update.docChanged||update.selectionSet||update.focusChanged){refreshToolbar();scheduleTableRuler()}};
+function installFocusMode(
+  options: MountOptions,
+  field: HTMLTextAreaElement,
+  wrapper: HTMLElement,
+  toolbar: HTMLElement,
+  editor: Wordgard,
+  closePopups: () => void
+) {
+  const overlay = options.workspaceOverlay;
+  if (!overlay) return Object.freeze({close: () => false, destroy() {}});
+  let trigger!: HTMLButtonElement,
+    utilityGroup!: HTMLElement,
+    handle: WorkspaceOverlayHandle | null = null,
+    marker: Comment | null = null,
+    observer: MutationObserver | null = null,
+    scrollTop = 0,
+    selection: GardSelection | null = null,
+    sync: HTMLElement | null = null,
+    forgetHistory: (() => boolean) | null = null,
+    stopViewportSync: (() => void) | null = null;
+  const syncTopStatus = () => {
+    if (!sync) return;
+    const editorMessage = String(field.dataset.richEditorStatus || ''),
+      editorState = String(field.dataset.richEditorStatusState || 'saved'),
+      syncState = String(field.dataset.richSyncState || 'saved'),
+      syncMessage = String(field.dataset.richSyncStatus || 'Saved'),
+      message = editorMessage || syncMessage,
+      state = editorMessage ? editorState : syncState;
+    sync.dataset.state = state;
+    sync.textContent =
+      state === 'saving' || state === 'busy' ? '…' : state === 'conflict' || state === 'error' ? '!' : state === 'read-only' ? '—' : '✓';
+    sync.removeAttribute('title');
+    sync.setAttribute('aria-label', message);
+  };
+  const restoreEditor = () =>
+    queueMicrotask(() => {
+      if (selection) editor.dispatch({selection});
+      editor.scrollDOM.scrollTop = scrollTop;
+      editor.focus();
+    });
+  const stopFocusViewportSync = () => {
+    stopViewportSync?.();
+    stopViewportSync = null;
+  };
+  const startFocusViewportSync = () => {
+    const dialog = handle?.dialog;
+    if (!dialog) return;
+    stopFocusViewportSync();
+    const visual = window.visualViewport,
+      syncViewport = () => {
+        if (!dialog.isConnected) return;
+        const top = Math.max(0, Number(visual?.offsetTop) || 0),
+          bottom = Math.max(0, window.innerHeight - (top + (Number(visual?.height) || window.innerHeight)));
+        dialog.style.setProperty('--sd-rte-focus-viewport-top', `${Math.round(top * 100) / 100}px`);
+        dialog.style.setProperty('--sd-rte-focus-obscured-bottom', `${Math.round(bottom * 100) / 100}px`);
+      };
+    window.addEventListener('resize', syncViewport, {passive: true});
+    visual?.addEventListener('resize', syncViewport, {passive: true});
+    visual?.addEventListener('scroll', syncViewport, {passive: true});
+    syncViewport();
+    stopViewportSync = () => {
+      window.removeEventListener('resize', syncViewport);
+      visual?.removeEventListener('resize', syncViewport);
+      visual?.removeEventListener('scroll', syncViewport);
+      dialog.style.removeProperty('--sd-rte-focus-viewport-top');
+      dialog.style.removeProperty('--sd-rte-focus-obscured-bottom');
+    };
+  };
+  const restoreContent = () => {
+    scrollTop = editor.scrollDOM.scrollTop;
+    selection = editor.state.selection;
+    stopFocusViewportSync();
+    observer?.disconnect();
+    observer = null;
+    utilityGroup.hidden = false;
+    wrapper.insertBefore(toolbar, wrapper.firstChild);
+    if (marker?.parentNode) marker.replaceWith(wrapper);
+    else if (field.isConnected) field.insertAdjacentElement('afterend', wrapper);
+    marker = null;
+    sync = null;
+    handle = null;
+  };
+  const close = () => (handle ? handle.close() : false);
+  const open = (replay?: WorkspaceHistoryDescriptor | null) => {
+    if (handle || !wrapper.isConnected) return false;
+    closePopups();
+    scrollTop = editor.scrollDOM.scrollTop;
+    selection = editor.state.selection;
+    marker = document.createComment('sd-rte-focus-origin');
+    wrapper.before(marker);
+    const header = document.createElement('div');
+    header.className = 'sd-rte-focus-header';
+    sync = document.createElement('span');
+    sync.className = 'sd-rte-focus-sync note-sync';
+    sync.setAttribute('role', 'status');
+    sync.setAttribute('aria-live', 'polite');
+    sync.tabIndex = 0;
+    const body = document.createElement('div');
+    body.className = 'sd-rte-focus-body';
+    utilityGroup.hidden = true;
+    const mobileToolbar = mobileTouchLayout();
+    if (mobileToolbar) header.append(sync);
+    else header.append(toolbar, sync);
+    body.append(wrapper);
+    syncTopStatus();
+    observer = new MutationObserver(syncTopStatus);
+    observer.observe(field, {
+      attributes: true,
+      attributeFilter: ['data-rich-sync-state', 'data-rich-sync-status', 'data-rich-editor-status', 'data-rich-editor-status-state']
+    });
+    handle = overlay.open({
+      label: options.label,
+      headerContent: header,
+      content: body,
+      className: 'workspace-overlay-rich-text',
+      closeLabel: 'Close focus mode',
+      onBeforeClose: restoreContent,
+      onAfterClose: restoreEditor,
+      history: {kind: 'focus', token: replay?.token, reopen: descriptor => open(descriptor)}
+    });
+    if (!handle) {
+      observer.disconnect();
+      observer = null;
+      sync = null;
+      utilityGroup.hidden = false;
+      wrapper.insertBefore(toolbar, wrapper.firstChild);
+      if (marker?.parentNode) marker.replaceWith(wrapper);
+      marker = null;
+      restoreEditor();
+      return false;
+    }
+    forgetHistory = handle.forget || forgetHistory;
+    startFocusViewportSync();
+    restoreEditor();
+    return true;
+  };
+  trigger = createButton('', `Open ${options.label} focus mode`, () => open(), 'sd-rte-focus-trigger');
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  const corners = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  corners.setAttribute('d', 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5');
+  icon.appendChild(corners);
+  trigger.appendChild(icon);
+  utilityGroup = toolbarGroup('Editor view', trigger);
+  utilityGroup.classList.add('sd-rte-toolbar-group-utility');
+  toolbar.appendChild(utilityGroup);
+  return Object.freeze({
+    close,
+    destroy() {
+      if (handle) handle.close();
+      forgetHistory?.();
+      forgetHistory = null;
+      utilityGroup.remove();
+      observer?.disconnect();
+      observer = null;
+    }
+  });
+}
+
+async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTextEditor> {
+  const field = options.field;
+  if (!(field instanceof HTMLTextAreaElement) || !field.isConnected) throw new Error('Editor target is unavailable.');
+  if (!validAssetStore(options.assets)) throw new Error('Rich-text image storage is unavailable.');
+  ensureStyles();
+  const readOnly = options.readOnly === true,
+    originalDisplay = field.style.display,
+    originalAriaHidden = field.getAttribute('aria-hidden'),
+    surface = options.surface || 'default',
+    hostStyle = getComputedStyle(field),
+    measuredHeight = Math.round(field.getBoundingClientRect().height),
+    hostHeight = Math.max(measuredHeight, 260);
+  const wrapper = document.createElement('div');
+  wrapper.className = 'sd-rte';
+  wrapper.dataset.sdRichEditor = '1';
+  wrapper.dataset.ownerMutation = 'rich-text';
+  wrapper.dataset.sdRichSurface = surface;
+  wrapper.style.setProperty(
+    '--sd-rte-host-padding',
+    `${hostStyle.paddingTop} ${hostStyle.paddingRight} ${hostStyle.paddingBottom} ${hostStyle.paddingLeft}`
+  );
+  if (hostStyle.fontSize) wrapper.style.setProperty('--sd-rte-host-font-size', hostStyle.fontSize);
+  if (hostStyle.lineHeight && hostStyle.lineHeight !== 'normal')
+    wrapper.style.setProperty('--sd-rte-host-line-height', hostStyle.lineHeight);
+  if (surface === 'default' || surface === 'note' || surface === 'reconciliation')
+    wrapper.style.setProperty('--sd-rte-host-height', `${hostHeight}px`);
+  const toolbar = document.createElement('div');
+  toolbar.className = 'sd-rte-toolbar';
+  toolbar.setAttribute('role', 'toolbar');
+  toolbar.setAttribute('aria-label', `${options.label} formatting`);
+  const toolbarRailShell = document.createElement('div');
+  toolbarRailShell.className = 'sd-rte-toolbar-rail-shell';
+  const toolbarRail = document.createElement('div');
+  toolbarRail.className = 'sd-rte-toolbar-rail';
+  toolbarRailShell.appendChild(toolbarRail);
+  toolbar.appendChild(toolbarRailShell);
+  if (readOnly) toolbar.hidden = true;
+  const tableTools = document.createElement('div');
+  tableTools.className = 'sd-rte-context-tools sd-rte-table-tools';
+  tableTools.hidden = true;
+  tableTools.setAttribute('role', 'group');
+  tableTools.setAttribute('aria-label', 'Table controls');
+  const tableToolsLabel = document.createElement('span');
+  tableToolsLabel.className = 'sd-rte-context-tools-label sd-rte-table-tools-label';
+  tableToolsLabel.textContent = 'Table';
+  const listTools = document.createElement('div');
+  listTools.className = 'sd-rte-context-tools sd-rte-list-tools';
+  listTools.hidden = true;
+  listTools.setAttribute('role', 'group');
+  listTools.setAttribute('aria-label', 'List indentation');
+  const listToolsLabel = document.createElement('span');
+  listToolsLabel.className = 'sd-rte-context-tools-label sd-rte-list-tools-label';
+  listToolsLabel.textContent = 'List';
+  const editorHost = document.createElement('div');
+  editorHost.className = 'sd-rte-editor-host';
+  const status = document.createElement('div');
+  status.className = 'sd-rte-status';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  status.setAttribute('aria-atomic', 'true');
+  wrapper.append(toolbar, editorHost, status);
+  field.insertAdjacentElement('afterend', wrapper);
+  field.style.display = 'none';
+  field.setAttribute('aria-hidden', 'true');
+  const canonicalInitial = String(options.initialValue || ''),
+    visibleInitial = toPlainText(canonicalInitial),
+    liveInitial = String(field.value || ''),
+    chosenInitial = liveInitial === visibleInitial ? canonicalInitial : liveInitial,
+    initialDoc = decodeDocument(chosenInitial);
+  type TableResizePreview = {
+    tablePos: number;
+    leftPositions: number[];
+    rightPositions: number[];
+    startA: number;
+    startB: number;
+    valueA: number;
+    valueB: number;
+  };
+  type TableResizeTarget = {cell: HTMLTableCellElement; table: HTMLTableElement; rowIndex: number; colIndex: number};
+  let editor!: Wordgard,
+    destroyed = false,
+    searchCleared: (() => void) | null = null,
+    reverting = false,
+    lifecycle = 0,
+    lastAccepted: Plot.Doc,
+    imageBusy = false,
+    linkSelection: GardSelection | null = null,
+    linkContextElement: HTMLAnchorElement | null = null,
+    dragCleanup: (() => void) | null = null,
+    hoverResizeCell: HTMLTableCellElement | null = null,
+    revealedTableCellPos: number | null = null,
+    imageRefreshFrame = 0,
+    tableRevealFrame = 0,
+    tableRulerFrame = 0,
+    toolbarCueFrame = 0,
+    currentAssetIds: string[] = [],
+    activeImageResize: {pos: number; widthPct: number} | null = null,
+    activeTableResize: TableResizePreview | null = null,
+    tableToolsWereVisible = false,
+    listToolsWereVisible = false,
+    scheduleTableRuler = () => {};
+  const imageAbort = new AbortController(),
+    tableRulerAbort = new AbortController();
+  const pendingAssets = new Set<string>(),
+    imageCache = new Map<string, string | null>(),
+    audioCache = new Map<string, string | null>(),
+    loadingImages = new Set<string>(),
+    loadingAudio = new Set<string>(),
+    assetMeta = new Map<string, number>(),
+    assetLoads = new Map<string, Promise<Blob | null>>();
+  const refreshToolbarOverflow = () => {
+    if (destroyed) return;
+    const max = Math.max(0, toolbarRail.scrollWidth - toolbarRail.clientWidth),
+      left = toolbarRail.scrollLeft > 2,
+      right = max - toolbarRail.scrollLeft > 2;
+    toolbarRailShell.dataset.overflowLeft = String(left);
+    toolbarRailShell.dataset.overflowRight = String(right);
+  };
+  const scheduleToolbarOverflow = () => {
+    if (toolbarCueFrame || destroyed) return;
+    toolbarCueFrame = requestAnimationFrame(() => {
+      toolbarCueFrame = 0;
+      refreshToolbarOverflow();
+    });
+  };
+  toolbarRail.addEventListener('scroll', scheduleToolbarOverflow, {passive: true, signal: tableRulerAbort.signal});
+  const toolbarResizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(scheduleToolbarOverflow) : null;
+  toolbarResizeObserver?.observe(toolbarRailShell);
+  const interactions: EditorInteractionHooks = {
+    click: () => false,
+    pointerDown: () => false,
+    pointerMove: () => {},
+    pointerLeave: () => {},
+    tab: () => false,
+    backspace: () => false,
+    resizeImage: () => false,
+    openLink: () => false,
+    toggleChecklist: () => false
+  };
+  const releaseImage = (id: string) => {
+    const url = imageCache.get(id);
+    if (url) URL.revokeObjectURL(url);
+    imageCache.delete(id);
+  };
+  const releaseAudio = (id: string) => {
+    const url = audioCache.get(id);
+    if (url) URL.revokeObjectURL(url);
+    audioCache.delete(id);
+  };
+  const clearImageResizePreview = (dispatch = true) => {
+    delete editor.dom.dataset.sdImageResizing;
+    if (dispatch && !destroyed && activeImageResize) editor.dispatch({effects: setResizeDecorations.of([])});
+  };
+  const paintImageResize = () => {
+    const preview = activeImageResize;
+    if (!preview || destroyed) return;
+    editor.dom.dataset.sdImageResizing = 'true';
+    editor.dispatch({effects: setResizeDecorations.of([{pos: preview.pos, style: `width: ${preview.widthPct}%`}])});
+  };
+  const tableResizeDecorationSet = (preview: TableResizePreview): ResizeDecoration[] => {
+    const items: ResizeDecoration[] = [];
+    for (let i = 0; i < preview.leftPositions.length; i++)
+      items.push(
+        {pos: preview.leftPositions[i], style: `width: ${preview.valueA}%`},
+        {pos: preview.rightPositions[i], style: `width: ${preview.valueB}%`}
+      );
+    return items;
+  };
+  const paintTableResize = () => {
+    const preview = activeTableResize;
+    if (!preview || destroyed) return;
+    editor.dom.dataset.sdTableResizing = 'col';
+    editor.dispatch({effects: setResizeDecorations.of(tableResizeDecorationSet(preview))});
+    scheduleTableRuler();
+  };
+  const clearTableResizePreview = (dispatch = true) => {
+    delete editor.dom.dataset.sdTableResizing;
+    if (dispatch && !destroyed && activeTableResize) editor.dispatch({effects: setResizeDecorations.of([])});
+  };
+  const loadAsset = (id: string) => {
+    const active = assetLoads.get(id);
+    if (active) return active;
+    const load = options.assets
+      .get(id)
+      .catch(() => null)
+      .then(blob => {
+        if (blob instanceof Blob) assetMeta.set(id, blob.size);
+        return blob;
+      })
+      .finally(() => assetLoads.delete(id));
+    assetLoads.set(id, load);
+    return load;
+  };
+  const documentImageBytes = async (ids: string[]) => {
+    const missing = ids.filter(id => !assetMeta.has(id));
+    if (missing.length) await Promise.all(missing.map(loadAsset));
+    return ids.reduce((sum, id) => sum + (assetMeta.get(id) || 0), 0);
+  };
+  const queueImageRefresh = () => {
+    if (imageRefreshFrame || destroyed) return;
+    imageRefreshFrame = requestAnimationFrame(() => {
+      imageRefreshFrame = 0;
+      if (!destroyed) editor.dispatch({effects: refreshImageRender.of(null)});
+    });
+  };
+  const syncImages = (ids = currentAssetIds) => {
+    if (destroyed) return;
+    const keep = new Set(ids);
+    for (const id of imageCache.keys()) if (!keep.has(id)) releaseImage(id);
+    for (const id of assetMeta.keys()) if (!keep.has(id) && !pendingAssets.has(id)) assetMeta.delete(id);
+    const missing = ids.filter(id => !imageCache.has(id) && !loadingImages.has(id));
+    if (!missing.length) return;
+    for (const id of missing) loadingImages.add(id);
+    void Promise.all(missing.map(async id => [id, await loadAsset(id)] as const))
+      .then(entries => {
+        if (destroyed) return;
+        const current = new Set(assetIdsFromDocument(editor.state.doc));
+        let changed = false;
+        for (const [id, blob] of entries) {
+          if (!current.has(id) || imageCache.has(id)) continue;
+          imageCache.set(id, blob instanceof Blob && IMAGE_MIME_TYPES.has(blob.type) ? URL.createObjectURL(blob) : null);
+          changed = true;
+        }
+        if (changed) queueImageRefresh();
+      })
+      .finally(() => {
+        for (const id of missing) loadingImages.delete(id);
+      });
+  };
+  const hydrateAudioElements = () => {
+    if (destroyed) return;
+    const ids = audioAttachmentIdsFromDocument(editor.state.doc),
+      keep = new Set(ids);
+    for (const id of audioCache.keys()) if (!keep.has(id)) releaseAudio(id);
+    const figures = [...editor.dom.querySelectorAll<HTMLElement>('.sd-rte-audio[data-sd-attachment-id]')];
+    for (const figure of figures) {
+      const id = String(figure.dataset.sdAttachmentId || ''),
+        player = figure.querySelector<HTMLAudioElement>('.sd-rte-audio-player'),
+        status = figure.querySelector<HTMLElement>('.sd-rte-audio-status'),
+        url = audioCache.get(id);
+      if (url && player) {
+        syncAudioPlayerState(player, status, url);
+      } else if (url === null) setAudioStatus(status, 'Audio unavailable');
+      else if (!audioCache.has(id)) setAudioStatus(status, 'Loading audio…');
+    }
+    const missing = ids.filter(id => !audioCache.has(id) && !loadingAudio.has(id));
+    if (!missing.length) return;
+    for (const id of missing) loadingAudio.add(id);
+    void Promise.all(missing.map(async id => [id, await loadAsset(id)] as const))
+      .then(entries => {
+        if (destroyed) return;
+        const current = new Set(audioAttachmentIdsFromDocument(editor.state.doc));
+        for (const [id, blob] of entries) {
+          if (!current.has(id) || audioCache.has(id)) continue;
+          audioCache.set(id, blob instanceof Blob && AUDIO_MIME_TYPES.has(blob.type) ? URL.createObjectURL(blob) : null);
+        }
+        queueImageRefresh();
+        queueMicrotask(hydrateAudioElements);
+      })
+      .finally(() => {
+        for (const id of missing) loadingAudio.delete(id);
+      });
+  };
+  const updateEditorStatus = (message: string, state: '' | 'busy' | 'error' | 'success' = '') => {
+    const projectedState = state || 'saved';
+    if (field.dataset.richEditorStatus !== message) field.dataset.richEditorStatus = message;
+    if (field.dataset.richEditorStatusState !== projectedState) field.dataset.richEditorStatusState = projectedState;
+    setStatus(status, message, options.onStatus, state);
+  };
+  const revealTableCell = () => {
+    const at = cellPosition(editor),
+      pos = at?.before ?? null;
+    if (pos === revealedTableCellPos) return;
+    revealedTableCellPos = pos;
+    const cell = at && (editor.nodeDOM(at.before) as Element | null);
+    if (cell) cell.scrollIntoView({block: 'nearest', inline: 'nearest'});
+  };
+  const refreshEditor = (update?: Wordgard.Update) => {
+    if (destroyed) return;
+    if (!update || update.docChanged) {
+      hardenLinks(editor.dom, options.notes);
+      syncImages();
+      hydrateAudioElements();
+    }
+    if (update?.selectionSet) revealTableCell();
+    if (!update || update.docChanged || update.selectionSet || update.focusChanged) {
+      refreshToolbar();
+      scheduleTableRuler();
+    }
+  };
   // Every change is validated, encoded and published to the field. A large
   // document publishes a burst of changes once: when typing pauses, at the
   // latest after a second, and before anything reads, replaces or closes it.
-  let unpublished=false,publishTimer:ReturnType<typeof setTimeout>|undefined,publishDeadline=0;
-  const cancelPublish=()=>{if(publishTimer!==undefined)clearTimeout(publishTimer);publishTimer=undefined;unpublished=false};
-  const publish=()=>{if(publishTimer!==undefined)clearTimeout(publishTimer);publishTimer=undefined;if(!unpublished||destroyed)return;unpublished=false;const inspection=inspectDocument(editor.state.doc),plain=editor.state.doc.textContent(),words=wordCount(plain),stored=encodeDocument(editor.state.doc,inspection.hasContent),fits=withinBytes(stored,options.maxBytes);if(words>options.maxWords||!fits||!inspection.valid){const message=words>options.maxWords?`Maximum ${options.maxWords.toLocaleString()} words.`:!fits?'This rich note is too large to save safely.':'This rich note is too structurally complex to save safely.';updateEditorStatus(message,'error');if(!reverting){reverting=true;queueMicrotask(()=>replaceDocument(editor,lastAccepted))}return}currentAssetIds=inspection.assetIds;lastAccepted=editor.state.doc;field.value=stored;const inputEvent=new Event('input',{bubbles:true});Object.defineProperty(inputEvent,VALIDATED_INPUT_META,{value:Object.freeze({format:'study-director.rich-validated-input',version:1,canonical:stored,plain}),enumerable:false});field.dispatchEvent(inputEvent);if(field.value!==stored){const newer=decodeDocument(field.value);if(newer){lastAccepted=newer;currentAssetIds=assetIdsFromDocument(newer);reverting=true;queueMicrotask(()=>replaceDocument(editor,newer));updateEditorStatus('Newer saved text kept','error');return}}if(options.onDerivedText){try{options.onDerivedText(stored,plain)}catch(error){console.warn('Rich-text derived-text hook failed:',error)}}settlePendingAssets(pendingAssets,options.assets,currentAssetIds);updateEditorStatus('','')};
-  const onTransactions=(transactions:readonly Transaction[])=>{if(destroyed)return;const docChanged=transactions.some(transaction=>transaction.docChanged);if(!docChanged)return;if(transactions.some(transaction=>transaction.annotation(Transaction.userEvent)===REVERT_EVENT)){reverting=false;cancelPublish();return}unpublished=true;if(field.value.length<GROUPED_PUBLISH_MIN_LENGTH){publish();return}const now=Date.now();if(publishTimer===undefined)publishDeadline=now+GROUPED_PUBLISH_MAX_DELAY_MS;else clearTimeout(publishTimer);publishTimer=setTimeout(publish,Math.max(0,Math.min(GROUPED_PUBLISH_DELAY_MS,publishDeadline-now)))};
-  const plainHtml=normalizePlainText(chosenInitial).split('\n').map(line=>`<p>${escapeHtml(line)}</p>`).join('')||'<p></p>';
+  let unpublished = false,
+    publishTimer: ReturnType<typeof setTimeout> | undefined,
+    publishDeadline = 0;
+  const cancelPublish = () => {
+    if (publishTimer !== undefined) clearTimeout(publishTimer);
+    publishTimer = undefined;
+    unpublished = false;
+  };
+  const publish = () => {
+    if (publishTimer !== undefined) clearTimeout(publishTimer);
+    publishTimer = undefined;
+    if (!unpublished || destroyed) return;
+    unpublished = false;
+    const inspection = inspectDocument(editor.state.doc),
+      plain = editor.state.doc.textContent(),
+      words = wordCount(plain),
+      stored = encodeDocument(editor.state.doc, inspection.hasContent),
+      fits = withinBytes(stored, options.maxBytes);
+    if (words > options.maxWords || !fits || !inspection.valid) {
+      const message =
+        words > options.maxWords
+          ? `Maximum ${options.maxWords.toLocaleString()} words.`
+          : !fits
+            ? 'This rich note is too large to save safely.'
+            : 'This rich note is too structurally complex to save safely.';
+      updateEditorStatus(message, 'error');
+      if (!reverting) {
+        reverting = true;
+        queueMicrotask(() => replaceDocument(editor, lastAccepted));
+      }
+      return;
+    }
+    currentAssetIds = inspection.assetIds;
+    lastAccepted = editor.state.doc;
+    field.value = stored;
+    const inputEvent = new Event('input', {bubbles: true});
+    Object.defineProperty(inputEvent, VALIDATED_INPUT_META, {
+      value: Object.freeze({format: 'study-director.rich-validated-input', version: 1, canonical: stored, plain}),
+      enumerable: false
+    });
+    field.dispatchEvent(inputEvent);
+    if (field.value !== stored) {
+      const newer = decodeDocument(field.value);
+      if (newer) {
+        lastAccepted = newer;
+        currentAssetIds = assetIdsFromDocument(newer);
+        reverting = true;
+        queueMicrotask(() => replaceDocument(editor, newer));
+        updateEditorStatus('Newer saved text kept', 'error');
+        return;
+      }
+    }
+    if (options.onDerivedText) {
+      try {
+        options.onDerivedText(stored, plain);
+      } catch (error) {
+        console.warn('Rich-text derived-text hook failed:', error);
+      }
+    }
+    settlePendingAssets(pendingAssets, options.assets, currentAssetIds);
+    updateEditorStatus('', '');
+  };
+  const onTransactions = (transactions: readonly Transaction[]) => {
+    if (destroyed) return;
+    const docChanged = transactions.some(transaction => transaction.docChanged);
+    if (!docChanged) return;
+    if (transactions.some(transaction => transaction.annotation(Transaction.userEvent) === REVERT_EVENT)) {
+      reverting = false;
+      cancelPublish();
+      return;
+    }
+    unpublished = true;
+    if (field.value.length < GROUPED_PUBLISH_MIN_LENGTH) {
+      publish();
+      return;
+    }
+    const now = Date.now();
+    if (publishTimer === undefined) publishDeadline = now + GROUPED_PUBLISH_MAX_DELAY_MS;
+    else clearTimeout(publishTimer);
+    publishTimer = setTimeout(publish, Math.max(0, Math.min(GROUPED_PUBLISH_DELAY_MS, publishDeadline - now)));
+  };
+  const plainHtml =
+    normalizePlainText(chosenInitial)
+      .split('\n')
+      .map(line => `<p>${escapeHtml(line)}</p>`)
+      .join('') || '<p></p>';
   // Paste: plain text that is clearly Markdown becomes formatted text, through
   // the Markdown file import's reader and cleaner. Shift-paste and text inside
   // code stay plain (Wordgard asks no parser then). Until anything else
   // changes, a pop-up offers it as plain text instead, in the pasted range.
-  let markdownPasteText='',markdownPasted:{text:string;from:number;to:number}|null=null,markdownNoticeTimer:ReturnType<typeof setTimeout>|undefined;
-  const markdownNotice=document.createElement('div'),markdownNoticeText=document.createElement('span'),markdownPlain=document.createElement('button');
-  markdownNotice.className='sd-rte-paste-notice';markdownNotice.hidden=true;markdownNotice.setAttribute('role','status');markdownNoticeText.textContent='Formatted from Markdown';
-  markdownPlain.type='button';markdownPlain.className='sd-rte-paste-plain';markdownPlain.textContent='Keep as plain text';markdownNotice.append(markdownNoticeText,markdownPlain);wrapper.append(markdownNotice);
-  const hideMarkdownNotice=()=>{if(markdownNoticeTimer!==undefined)clearTimeout(markdownNoticeTimer);markdownNoticeTimer=undefined;markdownNotice.hidden=true;markdownPasted=null};
-  const markdownPasteParser=Wordgard.clipboardTextParser.of((text,state)=>{if(readOnly||!looksLikeMarkdown(text))return null;try{const slice=parse.slice(state.schema,parseInertHTML(sanitizePastedHtml(markdownToHtml(text))),{collapseWhiteSpace:true});markdownPasteText=text;return slice}catch{return null}});
-  const watchMarkdownPaste=Wordgard.transactionListener.of(transactions=>{
-    const text=markdownPasteText,paste=text?transactions.find(transaction=>transaction.docChanged&&transaction.annotation(Transaction.userEvent)==='input.paste'):undefined;markdownPasteText='';
-    if(paste){let from=Infinity,to=-Infinity;paste.changes.iterChangedRanges((_fromA,_toA,fromB,toB)=>{from=Math.min(from,fromB);to=Math.max(to,toB)});
-      if(from<=to){hideMarkdownNotice();markdownPasted={text,from,to};markdownNotice.hidden=false;markdownNoticeTimer=setTimeout(hideMarkdownNotice,12000)}return}
-    if(!markdownNotice.hidden&&transactions.some(transaction=>transaction.docChanged))hideMarkdownNotice();
+  let markdownPasteText = '',
+    markdownPasted: {text: string; from: number; to: number} | null = null,
+    markdownNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+  const markdownNotice = document.createElement('div'),
+    markdownNoticeText = document.createElement('span'),
+    markdownPlain = document.createElement('button');
+  markdownNotice.className = 'sd-rte-paste-notice';
+  markdownNotice.hidden = true;
+  markdownNotice.setAttribute('role', 'status');
+  markdownNoticeText.textContent = 'Formatted from Markdown';
+  markdownPlain.type = 'button';
+  markdownPlain.className = 'sd-rte-paste-plain';
+  markdownPlain.textContent = 'Keep as plain text';
+  markdownNotice.append(markdownNoticeText, markdownPlain);
+  wrapper.append(markdownNotice);
+  const hideMarkdownNotice = () => {
+    if (markdownNoticeTimer !== undefined) clearTimeout(markdownNoticeTimer);
+    markdownNoticeTimer = undefined;
+    markdownNotice.hidden = true;
+    markdownPasted = null;
+  };
+  const markdownPasteParser = Wordgard.clipboardTextParser.of((text, state) => {
+    if (readOnly || !looksLikeMarkdown(text)) return null;
+    try {
+      const slice = parse.slice(state.schema, parseInertHTML(sanitizePastedHtml(markdownToHtml(text))), {collapseWhiteSpace: true});
+      markdownPasteText = text;
+      return slice;
+    } catch {
+      return null;
+    }
   });
-  markdownPlain.addEventListener('click',()=>{
-    const pasted=markdownPasted;hideMarkdownNotice();if(!pasted||destroyed||editor.state.readOnly)return;
+  const watchMarkdownPaste = Wordgard.transactionListener.of(transactions => {
+    const text = markdownPasteText,
+      paste = text
+        ? transactions.find(transaction => transaction.docChanged && transaction.annotation(Transaction.userEvent) === 'input.paste')
+        : undefined;
+    markdownPasteText = '';
+    if (paste) {
+      let from = Infinity,
+        to = -Infinity;
+      paste.changes.iterChangedRanges((_fromA, _toA, fromB, toB) => {
+        from = Math.min(from, fromB);
+        to = Math.max(to, toB);
+      });
+      if (from <= to) {
+        hideMarkdownNotice();
+        markdownPasted = {text, from, to};
+        markdownNotice.hidden = false;
+        markdownNoticeTimer = setTimeout(hideMarkdownNotice, 12000);
+      }
+      return;
+    }
+    if (!markdownNotice.hidden && transactions.some(transaction => transaction.docChanged)) hideMarkdownNotice();
+  });
+  markdownPlain.addEventListener('click', () => {
+    const pasted = markdownPasted;
+    hideMarkdownNotice();
+    if (!pasted || destroyed || editor.state.readOnly) return;
     // As a plain paste reads it: one paragraph per line.
-    const html=pasted.text.split(/(?:\r\n?|\n)+/).filter(line=>line.length).map(line=>`<p>${escapeHtml(line)}</p>`).join('');
-    const slice=parse.slice(editor.state.schema,parseInertHTML(html),{collapseWhiteSpace:false});
-    editor.dispatch({changes:{correct:{from:pasted.from,to:pasted.to,insert:slice,fit:true},local:true},userEvent:'input.paste.plain',scrollIntoView:true});editor.focus();
+    const html = pasted.text
+      .split(/(?:\r\n?|\n)+/)
+      .filter(line => line.length)
+      .map(line => `<p>${escapeHtml(line)}</p>`)
+      .join('');
+    const slice = parse.slice(editor.state.schema, parseInertHTML(html), {collapseWhiteSpace: false});
+    editor.dispatch({
+      changes: {correct: {from: pasted.from, to: pasted.to, insert: slice, fit: true}, local: true},
+      userEvent: 'input.paste.plain',
+      scrollIntoView: true
+    });
+    editor.focus();
   });
-  editor=Wordgard.create({parent:editorHost,doc:initialDoc||plainHtml,config:[documentSchemaExtensions(),editorBehaviorExtensions(interactions),Wordgard.editable.of(!readOnly),imageRendering(imageCache),audioRendering(audioCache),pendingImageSelection,resizeDecorations,tableLayoutDecorations,placeholder(String(field.getAttribute('placeholder')||'')),pendingLinkedAttachmentSelection,attachmentUploadDecorations,transientReconciliationRanges,searchMatches,searchMatchEscape,...(options.notes?[tagDecorations]:[]),Wordgard.updateListener.of(update=>{if(searchCleared&&!update.state.field(searchMatches)){const done=searchCleared;searchCleared=null;done()}}),Wordgard.pasteHandler.of(autoLinkPaste),Wordgard.clipboardInputHTMLFilter.of(sanitizePastedHtml),markdownPasteParser,watchMarkdownPaste,Wordgard.clipboardTextSerializer.of(markdownForCopy),Wordgard.transactionListener.of(onTransactions),Wordgard.updateListener.of(refreshEditor)]});
-  editor.dom.classList.add('sd-rte-wordgard');editor.contentDOM.classList.add('sd-rte-content','sd-rte-editor');editor.contentDOM.addEventListener('focusout',publish);editor.contentDOM.spellcheck=!readOnly;editor.contentDOM.setAttribute('role',readOnly?'document':'textbox');if(!readOnly)editor.contentDOM.setAttribute('aria-multiline','true');editor.contentDOM.setAttribute('aria-label',options.label);if(readOnly)wrapper.dataset.sdRichReadonly='true';lastAccepted=editor.state.doc;currentAssetIds=assetIdsFromDocument(editor.state.doc);hydrateAudioElements();
-  const tableRuler=document.createElement('div');tableRuler.className='sd-rte-table-ruler';tableRuler.hidden=true;tableRuler.setAttribute('aria-hidden','true');wrapper.appendChild(tableRuler);const tableRulerTargets=new WeakMap<HTMLElement,TableResizeTarget>(),tableRulerPool:HTMLElement[]=[];
+  editor = Wordgard.create({
+    parent: editorHost,
+    doc: initialDoc || plainHtml,
+    config: [
+      documentSchemaExtensions(),
+      editorBehaviorExtensions(interactions),
+      Wordgard.editable.of(!readOnly),
+      imageRendering(imageCache),
+      audioRendering(audioCache),
+      pendingImageSelection,
+      resizeDecorations,
+      tableLayoutDecorations,
+      placeholder(String(field.getAttribute('placeholder') || '')),
+      pendingLinkedAttachmentSelection,
+      attachmentUploadDecorations,
+      transientReconciliationRanges,
+      searchMatches,
+      searchMatchEscape,
+      ...(options.notes ? [tagDecorations] : []),
+      Wordgard.updateListener.of(update => {
+        if (searchCleared && !update.state.field(searchMatches)) {
+          const done = searchCleared;
+          searchCleared = null;
+          done();
+        }
+      }),
+      Wordgard.pasteHandler.of(autoLinkPaste),
+      Wordgard.clipboardInputHTMLFilter.of(sanitizePastedHtml),
+      markdownPasteParser,
+      watchMarkdownPaste,
+      Wordgard.clipboardTextSerializer.of(markdownForCopy),
+      Wordgard.transactionListener.of(onTransactions),
+      Wordgard.updateListener.of(refreshEditor)
+    ]
+  });
+  editor.dom.classList.add('sd-rte-wordgard');
+  editor.contentDOM.classList.add('sd-rte-content', 'sd-rte-editor');
+  editor.contentDOM.addEventListener('focusout', publish);
+  editor.contentDOM.spellcheck = !readOnly;
+  editor.contentDOM.setAttribute('role', readOnly ? 'document' : 'textbox');
+  if (!readOnly) editor.contentDOM.setAttribute('aria-multiline', 'true');
+  editor.contentDOM.setAttribute('aria-label', options.label);
+  if (readOnly) wrapper.dataset.sdRichReadonly = 'true';
+  lastAccepted = editor.state.doc;
+  currentAssetIds = assetIdsFromDocument(editor.state.doc);
+  hydrateAudioElements();
+  const tableRuler = document.createElement('div');
+  tableRuler.className = 'sd-rte-table-ruler';
+  tableRuler.hidden = true;
+  tableRuler.setAttribute('aria-hidden', 'true');
+  wrapper.appendChild(tableRuler);
+  const tableRulerTargets = new WeakMap<HTMLElement, TableResizeTarget>(),
+    tableRulerPool: HTMLElement[] = [];
 
-  const popupControllers:ReturnType<typeof createAnchoredPopover>[]=[];
-  const closePopups=()=>{for(const controller of popupControllers)controller.hide()};
-  const registerPopup=(popup:HTMLElement)=>{const controller=createAnchoredPopover(popup);popupControllers.push(controller);return controller};
-  const popupTrigger=(label:string,title:string,popup:HTMLElement,className='')=>{popup.hidden=true;popup.className='sd-rte-menu';popup.id=`sd-rte-popup-${Math.random().toString(36).slice(2)}`;popup.setAttribute('role','group');popup.setAttribute('aria-label',title);wrapper.appendChild(popup);const controller=registerPopup(popup);const controls=()=>[...popup.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled])')].filter(item=>!item.hidden),focusControl=(last=false)=>{const items=controls();(last?items.at(-1):items[0])?.focus()},trigger=createButton(label,title,()=>{const open=popup.hidden,keyboard=document.activeElement===trigger;closePopups();if(open){controller.show(trigger);if(keyboard)queueMicrotask(()=>focusControl())}},className);trigger.setAttribute('aria-expanded','false');trigger.setAttribute('aria-controls',popup.id);trigger.setAttribute('aria-haspopup','true');trigger.addEventListener('keydown',event=>{if((event.key==='ArrowDown'||event.key==='ArrowUp')&&popup.hidden){event.preventDefault();trigger.click();queueMicrotask(()=>focusControl(event.key==='ArrowUp'))}});popup.addEventListener('keydown',event=>{if(event.target instanceof HTMLInputElement||!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;const items=controls(),index=items.indexOf(event.target as HTMLElement);if(!items.length)return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?items.length-1:event.key==='ArrowDown'?(index+1+items.length)%items.length:(index-1+items.length)%items.length;items[next]?.focus()});return trigger};
-  const actionEnabled=(action:HeadlessAction)=>!action.enabled||action.enabled(editor.state);
-  const actionActive=(action:HeadlessAction)=>!!action.active?.(editor.state);
-  const runAction=(action:HeadlessAction,after?:()=>void)=>{if(!actionEnabled(action))return false;const handled=Command.dispatch(editor,action.run);after?.();editor.focus();return handled};
-  const setDisabled=(button:HTMLButtonElement,value:boolean)=>{if(button.disabled!==value)button.disabled=value},setPressed=(button:HTMLButtonElement,value:boolean)=>{const next=String(value);if(button.getAttribute('aria-pressed')!==next)button.setAttribute('aria-pressed',next)},setHidden=(element:HTMLElement,value:boolean)=>{if(element.hidden!==value)element.hidden=value};
-  const syncAction=(button:HTMLButtonElement,action:HeadlessAction,active:boolean=actionActive(action),enabled:boolean=actionEnabled(action))=>{setDisabled(button,!enabled);setPressed(button,active)};
-  const exclusiveScript=(action:HeadlessAction,opposite:HeadlessAction)=>{if(actionActive(opposite))Command.dispatch(editor,opposite.run);runAction(action)};
-  const toggleChecklist=()=>{const active=listPosition(editor),isChecklist=!!active&&active.node.type===BulletList.type&&!!Checklist.isInSet(active.node.marks);if(isChecklist){Command.dispatch(editor,toggleList,BulletList);editor.focus();return}if(!active||active.node.type!==BulletList.type)Command.dispatch(editor,toggleList,BulletList);const list=listPosition(editor);if(!list||list.node.type!==BulletList.type)return;const changes:any[]=[{from:list.before,add:Checklist}];editor.state.doc.iterate((node,pos,parent)=>{if(parent===list.node&&node.type===ListItem.type)changes.push({from:pos,add:ChecklistRole},{from:pos,add:ChecklistChecked.of(false)})});editor.dispatch({changes,userEvent:'sd.checklist'});editor.focus()};
+  const popupControllers: ReturnType<typeof createAnchoredPopover>[] = [];
+  const closePopups = () => {
+    for (const controller of popupControllers) controller.hide();
+  };
+  const registerPopup = (popup: HTMLElement) => {
+    const controller = createAnchoredPopover(popup);
+    popupControllers.push(controller);
+    return controller;
+  };
+  const popupTrigger = (label: string, title: string, popup: HTMLElement, className = '') => {
+    popup.hidden = true;
+    popup.className = 'sd-rte-menu';
+    popup.id = `sd-rte-popup-${Math.random().toString(36).slice(2)}`;
+    popup.setAttribute('role', 'group');
+    popup.setAttribute('aria-label', title);
+    wrapper.appendChild(popup);
+    const controller = registerPopup(popup);
+    const controls = () =>
+        [...popup.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled])')].filter(item => !item.hidden),
+      focusControl = (last = false) => {
+        const items = controls();
+        (last ? items.at(-1) : items[0])?.focus();
+      },
+      trigger = createButton(
+        label,
+        title,
+        () => {
+          const open = popup.hidden,
+            keyboard = document.activeElement === trigger;
+          closePopups();
+          if (open) {
+            controller.show(trigger);
+            if (keyboard) queueMicrotask(() => focusControl());
+          }
+        },
+        className
+      );
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-controls', popup.id);
+    trigger.setAttribute('aria-haspopup', 'true');
+    trigger.addEventListener('keydown', event => {
+      if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && popup.hidden) {
+        event.preventDefault();
+        trigger.click();
+        queueMicrotask(() => focusControl(event.key === 'ArrowUp'));
+      }
+    });
+    popup.addEventListener('keydown', event => {
+      if (event.target instanceof HTMLInputElement || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      const items = controls(),
+        index = items.indexOf(event.target as HTMLElement);
+      if (!items.length) return;
+      event.preventDefault();
+      const next =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? items.length - 1
+            : event.key === 'ArrowDown'
+              ? (index + 1 + items.length) % items.length
+              : (index - 1 + items.length) % items.length;
+      items[next]?.focus();
+    });
+    return trigger;
+  };
+  const actionEnabled = (action: HeadlessAction) => !action.enabled || action.enabled(editor.state);
+  const actionActive = (action: HeadlessAction) => !!action.active?.(editor.state);
+  const runAction = (action: HeadlessAction, after?: () => void) => {
+    if (!actionEnabled(action)) return false;
+    const handled = Command.dispatch(editor, action.run);
+    after?.();
+    editor.focus();
+    return handled;
+  };
+  const setDisabled = (button: HTMLButtonElement, value: boolean) => {
+      if (button.disabled !== value) button.disabled = value;
+    },
+    setPressed = (button: HTMLButtonElement, value: boolean) => {
+      const next = String(value);
+      if (button.getAttribute('aria-pressed') !== next) button.setAttribute('aria-pressed', next);
+    },
+    setHidden = (element: HTMLElement, value: boolean) => {
+      if (element.hidden !== value) element.hidden = value;
+    };
+  const syncAction = (
+    button: HTMLButtonElement,
+    action: HeadlessAction,
+    active: boolean = actionActive(action),
+    enabled: boolean = actionEnabled(action)
+  ) => {
+    setDisabled(button, !enabled);
+    setPressed(button, active);
+  };
+  const exclusiveScript = (action: HeadlessAction, opposite: HeadlessAction) => {
+    if (actionActive(opposite)) Command.dispatch(editor, opposite.run);
+    runAction(action);
+  };
+  const toggleChecklist = () => {
+    const active = listPosition(editor),
+      isChecklist = !!active && active.node.type === BulletList.type && !!Checklist.isInSet(active.node.marks);
+    if (isChecklist) {
+      Command.dispatch(editor, toggleList, BulletList);
+      editor.focus();
+      return;
+    }
+    if (!active || active.node.type !== BulletList.type) Command.dispatch(editor, toggleList, BulletList);
+    const list = listPosition(editor);
+    if (!list || list.node.type !== BulletList.type) return;
+    const changes: any[] = [{from: list.before, add: Checklist}];
+    editor.state.doc.iterate((node, pos, parent) => {
+      if (parent === list.node && node.type === ListItem.type)
+        changes.push({from: pos, add: ChecklistRole}, {from: pos, add: ChecklistChecked.of(false)});
+    });
+    editor.dispatch({changes, userEvent: 'sd.checklist'});
+    editor.focus();
+  };
 
-  const runTypography=<Param,>(command:Command<Param>,param:Param)=>{if(!(editor.state.selection instanceof GardSelection.Text))return false;return Command.dispatch(editor,command,param)};
-  const setImageAlignment=(alignment:ImageAlignment)=>{const selection=editor.state.selection;if(!(selection instanceof GardSelection.Node)||selection.node.type!==StudyImage)return false;const value=selection.node.param as StudyImageValue;if(normalizeImageAlignment(value.align)===alignment)return false;const next=StudyImage.of({...value,align:alignment});editor.dispatch({changes:{from:selection.from,to:selection.to,insert:[next]},selection:GardSelection.node(selection.from,next),userEvent:'align.image'});return true};
-  const applyAlignment=(alignment:'left'|'center'|'right'|'justify')=>{const selection=editor.state.selection;if(selection instanceof GardSelection.Node&&selection.node.type===StudyImage)return alignment==='justify'?false:setImageAlignment(alignment);return runTypography(setTypographyAlignment,alignment)};
-  const styleMenu=document.createElement('div'),presetRow=document.createElement('div'),sizeRow=document.createElement('div'),spacingRow=document.createElement('div'),alignRow=document.createElement('div');
-  presetRow.className='sd-rte-typography-row sd-rte-typography-presets';sizeRow.className='sd-rte-typography-row';spacingRow.className='sd-rte-typography-row';alignRow.className='sd-rte-typography-row sd-rte-typography-align';
-  const normalItem=createButton('N','Normal text',()=>{runTypography(setTypographyPreset,'N')},'sd-rte-typo-preset'),h1Item=createButton('H1','Heading 1',()=>{runTypography(setTypographyPreset,'H1')},'sd-rte-typo-preset'),headingItem=createButton('H2','Heading 2',()=>{runTypography(setTypographyPreset,'H2')},'sd-rte-typo-preset');presetRow.append(h1Item,headingItem,normalItem);
-  const typoLabel=(text:string)=>{const label=document.createElement('span');label.className='sd-rte-typography-label';label.textContent=text;return label};
-  const fontValue=document.createElement('input');fontValue.className='sd-rte-typography-value';fontValue.type='text';fontValue.inputMode='numeric';fontValue.tabIndex=0;fontValue.setAttribute('aria-label','Current font size');fontValue.setAttribute('aria-valuemin',String(FONT_SIZE_MIN));fontValue.setAttribute('aria-valuemax',String(FONT_SIZE_MAX));const currentFontSize=()=>typographyState(editor.state).fontSize,restoreFontValue=()=>{fontValue.value=String(currentFontSize())},commitFontValue=()=>{const text=fontValue.value.trim(),number=text===''?NaN:Number(text);if(!Number.isFinite(number)){restoreFontValue();return false}const value=Math.max(FONT_SIZE_MIN,Math.min(FONT_SIZE_MAX,Math.round(number)));fontValue.value=String(value);return runTypography(setFontSize,value)},nudgeFontSize=(direction:-1|1)=>{if(document.activeElement===fontValue)commitFontValue();runTypography(adjustFontSize,direction);restoreFontValue()};const fontMinus=createButton('−','Decrease font size',()=>{nudgeFontSize(-1)},'sd-rte-typo-control'),fontPlus=createButton('+','Increase font size',()=>{nudgeFontSize(1)},'sd-rte-typo-control');fontValue.addEventListener('change',commitFontValue);fontValue.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();commitFontValue();editor.focus()}else if(event.key==='Escape'){event.preventDefault();restoreFontValue();editor.focus()}});sizeRow.append(typoLabel('Size'),fontMinus,fontValue,fontPlus);
-  const spacingMinus=createButton('−','Decrease line spacing',()=>{runTypography(adjustLineHeight,-1)},'sd-rte-typo-control'),spacingReset=createButton('↕','Reset line spacing',()=>{if(editor.state.selection instanceof GardSelection.Text)Command.dispatch(editor,resetLineHeight)},'sd-rte-typo-control sd-rte-typography-spacing-reset'),spacingPlus=createButton('+','Increase line spacing',()=>{runTypography(adjustLineHeight,1)},'sd-rte-typo-control');spacingRow.append(typoLabel('Spacing'),spacingMinus,spacingReset,spacingPlus);
-  const alignButton=(alignment:'left'|'center'|'right'|'justify',title:string)=>{const button=createButton('',title,()=>{applyAlignment(alignment)},`sd-rte-typo-control sd-rte-align-${alignment}`),icon=document.createElement('span');icon.className=`sd-rte-align-icon sd-rte-align-${alignment}`;icon.setAttribute('aria-hidden','true');button.append(icon);return button},alignLeft=alignButton('left','Align left'),alignCenter=alignButton('center','Align center'),alignRight=alignButton('right','Align right'),alignJustify=alignButton('justify','Justify');alignRow.append(typoLabel('Align'),alignLeft,alignCenter,alignRight,alignJustify);
-  styleMenu.dataset.mode='text';styleMenu.append(presetRow,sizeRow,spacingRow,alignRow);
-  const moreMenu=document.createElement('div'),underlineButton=createButton('Underline','Underline',()=>{runAction(underlineAction,closePopups)}),strikethroughButton=createButton('Strikethrough','Strikethrough',()=>{runAction(strikethroughAction,closePopups)}),subscriptButton=createButton('Subscript','Subscript',()=>{exclusiveScript(subscriptAction,superscriptAction);closePopups()}),superscriptButton=createButton('Superscript','Superscript',()=>{exclusiveScript(superscriptAction,subscriptAction);closePopups()});moreMenu.append(underlineButton,strikethroughButton,subscriptButton,superscriptButton);
-  const selectionFitsDocument=(selection:GardSelection|null)=>!!selection&&selection.from>=0&&selection.to<=editor.state.doc.contentLength;
-  const restoreSelection=(selection:GardSelection|null)=>{if(selectionFitsDocument(selection))editor.dispatch({selection:selection!})};
-  let linkTrigger!:HTMLButtonElement;
-  const linkMenu=document.createElement('div');linkMenu.className='sd-rte-menu sd-rte-link-menu';linkMenu.setAttribute('role','group');linkMenu.setAttribute('aria-label','Link');
-  const linkEditor=document.createElement('div');linkEditor.className='sd-rte-link-editor';
-  const linkInput=document.createElement('input');linkInput.type='url';linkInput.inputMode='url';linkInput.placeholder='https://example.com';linkInput.setAttribute('aria-label','Link destination');
+  const runTypography = <Param>(command: Command<Param>, param: Param) => {
+    if (!(editor.state.selection instanceof GardSelection.Text)) return false;
+    return Command.dispatch(editor, command, param);
+  };
+  const setImageAlignment = (alignment: ImageAlignment) => {
+    const selection = editor.state.selection;
+    if (!(selection instanceof GardSelection.Node) || selection.node.type !== StudyImage) return false;
+    const value = selection.node.param as StudyImageValue;
+    if (normalizeImageAlignment(value.align) === alignment) return false;
+    const next = StudyImage.of({...value, align: alignment});
+    editor.dispatch({
+      changes: {from: selection.from, to: selection.to, insert: [next]},
+      selection: GardSelection.node(selection.from, next),
+      userEvent: 'align.image'
+    });
+    return true;
+  };
+  const applyAlignment = (alignment: 'left' | 'center' | 'right' | 'justify') => {
+    const selection = editor.state.selection;
+    if (selection instanceof GardSelection.Node && selection.node.type === StudyImage)
+      return alignment === 'justify' ? false : setImageAlignment(alignment);
+    return runTypography(setTypographyAlignment, alignment);
+  };
+  const styleMenu = document.createElement('div'),
+    presetRow = document.createElement('div'),
+    sizeRow = document.createElement('div'),
+    spacingRow = document.createElement('div'),
+    alignRow = document.createElement('div');
+  presetRow.className = 'sd-rte-typography-row sd-rte-typography-presets';
+  sizeRow.className = 'sd-rte-typography-row';
+  spacingRow.className = 'sd-rte-typography-row';
+  alignRow.className = 'sd-rte-typography-row sd-rte-typography-align';
+  const normalItem = createButton(
+      'N',
+      'Normal text',
+      () => {
+        runTypography(setTypographyPreset, 'N');
+      },
+      'sd-rte-typo-preset'
+    ),
+    h1Item = createButton(
+      'H1',
+      'Heading 1',
+      () => {
+        runTypography(setTypographyPreset, 'H1');
+      },
+      'sd-rte-typo-preset'
+    ),
+    headingItem = createButton(
+      'H2',
+      'Heading 2',
+      () => {
+        runTypography(setTypographyPreset, 'H2');
+      },
+      'sd-rte-typo-preset'
+    );
+  presetRow.append(h1Item, headingItem, normalItem);
+  const typoLabel = (text: string) => {
+    const label = document.createElement('span');
+    label.className = 'sd-rte-typography-label';
+    label.textContent = text;
+    return label;
+  };
+  const fontValue = document.createElement('input');
+  fontValue.className = 'sd-rte-typography-value';
+  fontValue.type = 'text';
+  fontValue.inputMode = 'numeric';
+  fontValue.tabIndex = 0;
+  fontValue.setAttribute('aria-label', 'Current font size');
+  fontValue.setAttribute('aria-valuemin', String(FONT_SIZE_MIN));
+  fontValue.setAttribute('aria-valuemax', String(FONT_SIZE_MAX));
+  const currentFontSize = () => typographyState(editor.state).fontSize,
+    restoreFontValue = () => {
+      fontValue.value = String(currentFontSize());
+    },
+    commitFontValue = () => {
+      const text = fontValue.value.trim(),
+        number = text === '' ? NaN : Number(text);
+      if (!Number.isFinite(number)) {
+        restoreFontValue();
+        return false;
+      }
+      const value = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(number)));
+      fontValue.value = String(value);
+      return runTypography(setFontSize, value);
+    },
+    nudgeFontSize = (direction: -1 | 1) => {
+      if (document.activeElement === fontValue) commitFontValue();
+      runTypography(adjustFontSize, direction);
+      restoreFontValue();
+    };
+  const fontMinus = createButton(
+      '−',
+      'Decrease font size',
+      () => {
+        nudgeFontSize(-1);
+      },
+      'sd-rte-typo-control'
+    ),
+    fontPlus = createButton(
+      '+',
+      'Increase font size',
+      () => {
+        nudgeFontSize(1);
+      },
+      'sd-rte-typo-control'
+    );
+  fontValue.addEventListener('change', commitFontValue);
+  fontValue.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitFontValue();
+      editor.focus();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      restoreFontValue();
+      editor.focus();
+    }
+  });
+  sizeRow.append(typoLabel('Size'), fontMinus, fontValue, fontPlus);
+  const spacingMinus = createButton(
+      '−',
+      'Decrease line spacing',
+      () => {
+        runTypography(adjustLineHeight, -1);
+      },
+      'sd-rte-typo-control'
+    ),
+    spacingReset = createButton(
+      '↕',
+      'Reset line spacing',
+      () => {
+        if (editor.state.selection instanceof GardSelection.Text) Command.dispatch(editor, resetLineHeight);
+      },
+      'sd-rte-typo-control sd-rte-typography-spacing-reset'
+    ),
+    spacingPlus = createButton(
+      '+',
+      'Increase line spacing',
+      () => {
+        runTypography(adjustLineHeight, 1);
+      },
+      'sd-rte-typo-control'
+    );
+  spacingRow.append(typoLabel('Spacing'), spacingMinus, spacingReset, spacingPlus);
+  const alignButton = (alignment: 'left' | 'center' | 'right' | 'justify', title: string) => {
+      const button = createButton(
+          '',
+          title,
+          () => {
+            applyAlignment(alignment);
+          },
+          `sd-rte-typo-control sd-rte-align-${alignment}`
+        ),
+        icon = document.createElement('span');
+      icon.className = `sd-rte-align-icon sd-rte-align-${alignment}`;
+      icon.setAttribute('aria-hidden', 'true');
+      button.append(icon);
+      return button;
+    },
+    alignLeft = alignButton('left', 'Align left'),
+    alignCenter = alignButton('center', 'Align center'),
+    alignRight = alignButton('right', 'Align right'),
+    alignJustify = alignButton('justify', 'Justify');
+  alignRow.append(typoLabel('Align'), alignLeft, alignCenter, alignRight, alignJustify);
+  styleMenu.dataset.mode = 'text';
+  styleMenu.append(presetRow, sizeRow, spacingRow, alignRow);
+  const moreMenu = document.createElement('div'),
+    underlineButton = createButton('Underline', 'Underline', () => {
+      runAction(underlineAction, closePopups);
+    }),
+    strikethroughButton = createButton('Strikethrough', 'Strikethrough', () => {
+      runAction(strikethroughAction, closePopups);
+    }),
+    subscriptButton = createButton('Subscript', 'Subscript', () => {
+      exclusiveScript(subscriptAction, superscriptAction);
+      closePopups();
+    }),
+    superscriptButton = createButton('Superscript', 'Superscript', () => {
+      exclusiveScript(superscriptAction, subscriptAction);
+      closePopups();
+    });
+  moreMenu.append(underlineButton, strikethroughButton, subscriptButton, superscriptButton);
+  const selectionFitsDocument = (selection: GardSelection | null) =>
+    !!selection && selection.from >= 0 && selection.to <= editor.state.doc.contentLength;
+  const restoreSelection = (selection: GardSelection | null) => {
+    if (selectionFitsDocument(selection)) editor.dispatch({selection: selection!});
+  };
+  let linkTrigger!: HTMLButtonElement;
+  const linkMenu = document.createElement('div');
+  linkMenu.className = 'sd-rte-menu sd-rte-link-menu';
+  linkMenu.setAttribute('role', 'group');
+  linkMenu.setAttribute('aria-label', 'Link');
+  const linkEditor = document.createElement('div');
+  linkEditor.className = 'sd-rte-link-editor';
+  const linkInput = document.createElement('input');
+  linkInput.type = 'url';
+  linkInput.inputMode = 'url';
+  linkInput.placeholder = 'https://example.com';
+  linkInput.setAttribute('aria-label', 'Link destination');
   wrapper.append(linkMenu);
-  const linkRangeFromDOM=(anchor:HTMLAnchorElement,wg:Wordgard)=>{const from=wg.posAtDOM(anchor,0),to=wg.posAtDOM(anchor,anchor.childNodes.length);return to>from?GardSelection.range(from,to):null};
-  const linkAnchorRect=()=>{if(linkContextElement?.isConnected)return linkContextElement.getBoundingClientRect();if(linkSelection&&selectionFitsDocument(linkSelection))return editor.coordsAtPos(linkSelection.head,linkSelection.headSide);return null};
-  const linkController=createAnchoredPopover(linkMenu,{anchorRect:linkAnchorRect,onClose:()=>{linkSelection=null;linkContextElement=null},onEscape:()=>{queueMicrotask(()=>editor.focus());return false}});popupControllers.push(linkController);
-  const applyLinkButton=createButton('Apply','Apply link',()=>{const raw=linkInput.value.trim(),normalized=normalizeLinkUrl(raw);if(normalized===null){updateEditorStatus('Use an http(s), mailto or tel link.','error');return}restoreSelection(linkSelection);const current=currentLink(editor),selection=editor.state.selection;if(!normalized){if(current)Command.dispatch(editor,toggleMark,current)}else if(selection instanceof GardSelection.Text&&selection.empty&&!current)insertLinkedText(editor,raw,normalized,'link.insert');else Command.dispatch(editor,toggleMark,Link.of(normalized));linkController.hide();editor.focus()});
-  const cancelLinkButton=createButton('×','Cancel link edit',()=>{linkController.hide();editor.focus()});
+  const linkRangeFromDOM = (anchor: HTMLAnchorElement, wg: Wordgard) => {
+    const from = wg.posAtDOM(anchor, 0),
+      to = wg.posAtDOM(anchor, anchor.childNodes.length);
+    return to > from ? GardSelection.range(from, to) : null;
+  };
+  const linkAnchorRect = () => {
+    if (linkContextElement?.isConnected) return linkContextElement.getBoundingClientRect();
+    if (linkSelection && selectionFitsDocument(linkSelection)) return editor.coordsAtPos(linkSelection.head, linkSelection.headSide);
+    return null;
+  };
+  const linkController = createAnchoredPopover(linkMenu, {
+    anchorRect: linkAnchorRect,
+    onClose: () => {
+      linkSelection = null;
+      linkContextElement = null;
+    },
+    onEscape: () => {
+      queueMicrotask(() => editor.focus());
+      return false;
+    }
+  });
+  popupControllers.push(linkController);
+  const applyLinkButton = createButton('Apply', 'Apply link', () => {
+    const raw = linkInput.value.trim(),
+      normalized = normalizeLinkUrl(raw);
+    if (normalized === null) {
+      updateEditorStatus('Use an http(s), mailto or tel link.', 'error');
+      return;
+    }
+    restoreSelection(linkSelection);
+    const current = currentLink(editor),
+      selection = editor.state.selection;
+    if (!normalized) {
+      if (current) Command.dispatch(editor, toggleMark, current);
+    } else if (selection instanceof GardSelection.Text && selection.empty && !current)
+      insertLinkedText(editor, raw, normalized, 'link.insert');
+    else Command.dispatch(editor, toggleMark, Link.of(normalized));
+    linkController.hide();
+    editor.focus();
+  });
+  const cancelLinkButton = createButton('×', 'Cancel link edit', () => {
+    linkController.hide();
+    editor.focus();
+  });
   // Links the selection, or inserts the note's title linked, to a note chosen in the picker.
-  const linkToNote=async(selection:GardSelection|null)=>{const notes=options.notes;if(!notes||readOnly)return;linkController.hide();const chosen=await notes.pick();if(destroyed)return;if(selection)restoreSelection(selection);editor.focus();if(!chosen)return;const href=`#note=${chosen.id}`,current=currentLink(editor),range=editor.state.selection;if(range instanceof GardSelection.Text&&range.empty&&!current)insertLinkedText(editor,String(chosen.label||'').split(/\s*>\s*/).filter(Boolean).at(-1)||'Note',href,'link.note');else Command.dispatch(editor,toggleMark,Link.of(href))};
-  const noteLinkButton=createButton('Note','Link to a note',()=>{void linkToNote(linkSelection)});
-  const linkFields=()=>[linkInput,applyLinkButton,...(options.notes?[noteLinkButton]:[]),cancelLinkButton];
-  const openSafeLink=(href:string)=>{if(validSerializedLinkUrl(href))window.open(href,'_blank','noopener,noreferrer')};
-  const openLinkButton=createButton('Open','Open link',()=>{const href=linkInput.value,noteId=noteLinkId(href);linkController.hide();if(noteId)options.notes?.open(noteId);else openSafeLink(href)});
-  const editLinkButton=createButton('Edit','Edit link',()=>{if(!linkSelection)return;if(noteLinkId(linkInput.value)&&options.notes){void linkToNote(linkSelection);return}linkMenu.classList.remove('sd-rte-link-actions-menu');linkEditor.replaceChildren(...linkFields());queueMicrotask(()=>{linkInput.focus();linkInput.select()})});
-  const removeLinkButton=createButton('Remove','Remove link',()=>{restoreSelection(linkSelection);const current=currentLink(editor);if(current)Command.dispatch(editor,toggleMark,current);linkController.hide();editor.focus()});
+  const linkToNote = async (selection: GardSelection | null) => {
+    const notes = options.notes;
+    if (!notes || readOnly) return;
+    linkController.hide();
+    const chosen = await notes.pick();
+    if (destroyed) return;
+    if (selection) restoreSelection(selection);
+    editor.focus();
+    if (!chosen) return;
+    const href = `#note=${chosen.id}`,
+      current = currentLink(editor),
+      range = editor.state.selection;
+    if (range instanceof GardSelection.Text && range.empty && !current)
+      insertLinkedText(
+        editor,
+        String(chosen.label || '')
+          .split(/\s*>\s*/)
+          .filter(Boolean)
+          .at(-1) || 'Note',
+        href,
+        'link.note'
+      );
+    else Command.dispatch(editor, toggleMark, Link.of(href));
+  };
+  const noteLinkButton = createButton('Note', 'Link to a note', () => {
+    void linkToNote(linkSelection);
+  });
+  const linkFields = () => [linkInput, applyLinkButton, ...(options.notes ? [noteLinkButton] : []), cancelLinkButton];
+  const openSafeLink = (href: string) => {
+    if (validSerializedLinkUrl(href)) window.open(href, '_blank', 'noopener,noreferrer');
+  };
+  const openLinkButton = createButton('Open', 'Open link', () => {
+    const href = linkInput.value,
+      noteId = noteLinkId(href);
+    linkController.hide();
+    if (noteId) options.notes?.open(noteId);
+    else openSafeLink(href);
+  });
+  const editLinkButton = createButton('Edit', 'Edit link', () => {
+    if (!linkSelection) return;
+    if (noteLinkId(linkInput.value) && options.notes) {
+      void linkToNote(linkSelection);
+      return;
+    }
+    linkMenu.classList.remove('sd-rte-link-actions-menu');
+    linkEditor.replaceChildren(...linkFields());
+    queueMicrotask(() => {
+      linkInput.focus();
+      linkInput.select();
+    });
+  });
+  const removeLinkButton = createButton('Remove', 'Remove link', () => {
+    restoreSelection(linkSelection);
+    const current = currentLink(editor);
+    if (current) Command.dispatch(editor, toggleMark, current);
+    linkController.hide();
+    editor.focus();
+  });
   linkMenu.append(linkEditor);
-  const showLinkPopover=(selection:GardSelection,href:string,actions:boolean,contextElement:HTMLAnchorElement|null=null)=>{closePopups();linkSelection=selection;linkContextElement=contextElement;linkInput.value=href||'https://';linkMenu.classList.toggle('sd-rte-link-actions-menu',actions);linkEditor.replaceChildren(...(actions?[openLinkButton,editLinkButton,removeLinkButton]:linkFields()));linkController.show(contextElement||linkTrigger);if(!actions)queueMicrotask(()=>{if(!linkMenu.hidden){linkInput.focus();linkInput.select()}});return true};
-  const showLinkForSelection=(selection:GardSelection)=>{restoreSelection(selection);const current=currentLink(editor);return showLinkPopover(selection,current?String(current.value):'',!!current)};
-  linkInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();event.stopPropagation();applyLinkButton.click()}});
-  const styleTrigger=popupTrigger('Aa','Typography',styleMenu,'sd-rte-style-trigger');styleMenu.classList.add('sd-rte-typography');const undoControl=createButton('↶','Undo',()=>runAction(undoAction)),redoControl=createButton('↷','Redo',()=>runAction(redoAction)),boldButton=createButton('B','Bold',()=>runAction(strongAction)),italicButton=createButton('I','Italic',()=>runAction(emphasisAction)),highlightButton=createButton('HL','Highlight',()=>runAction(highlightAction)),moreFormatTrigger=popupTrigger('⋮','More text formatting',moreMenu,'sd-rte-more-format'),quoteButton=createButton('❝','Block quote',()=>runAction(blockquoteAction)),bulletButton=createButton('•','Bulleted list',()=>runAction(bulletListAction)),numberButton=createButton('1.','Numbered list',()=>runAction(orderedListAction)),checkButton=createButton('☑','Checklist',toggleChecklist);linkTrigger=createButton('Link','Link',()=>{if(!linkMenu.hidden){linkController.hide();return}const selection=editor.state.selection;if(selection instanceof GardSelection.Text)showLinkForSelection(selection)});
-  linkTrigger.setAttribute('aria-haspopup','true');
-  annotateShortcut(undoControl,'Control+z Meta+z','Ctrl/Cmd+Z');annotateShortcut(redoControl,'Control+y Control+Shift+z Meta+Shift+z','Ctrl+Y / Ctrl/Cmd+Shift+Z');annotateShortcut(boldButton,'Control+b Meta+b','Ctrl/Cmd+B');annotateShortcut(italicButton,'Control+i Meta+i','Ctrl/Cmd+I');annotateShortcut(underlineButton,'Control+u Meta+u','Ctrl/Cmd+U');annotateShortcut(strikethroughButton,'Control+Shift+x Meta+Shift+x','Ctrl/Cmd+Shift+X');annotateShortcut(superscriptButton,'Control+. Meta+.','Ctrl/Cmd+.');annotateShortcut(subscriptButton,'Control+, Meta+,','Ctrl/Cmd+,');annotateShortcut(linkTrigger,'Control+k Meta+k','Ctrl/Cmd+K');annotateShortcut(numberButton,'Control+Shift+7 Meta+Shift+7','Ctrl/Cmd+Shift+7');annotateShortcut(bulletButton,'Control+Shift+8 Meta+Shift+8','Ctrl/Cmd+Shift+8');
-  interactions.openLink=wg=>{if(!(wg.state.selection instanceof GardSelection.Text))return true;showLinkForSelection(wg.state.selection);return true};
-  if(options.notes)interactions.noteLink=()=>{void linkToNote(null)};
+  const showLinkPopover = (selection: GardSelection, href: string, actions: boolean, contextElement: HTMLAnchorElement | null = null) => {
+    closePopups();
+    linkSelection = selection;
+    linkContextElement = contextElement;
+    linkInput.value = href || 'https://';
+    linkMenu.classList.toggle('sd-rte-link-actions-menu', actions);
+    linkEditor.replaceChildren(...(actions ? [openLinkButton, editLinkButton, removeLinkButton] : linkFields()));
+    linkController.show(contextElement || linkTrigger);
+    if (!actions)
+      queueMicrotask(() => {
+        if (!linkMenu.hidden) {
+          linkInput.focus();
+          linkInput.select();
+        }
+      });
+    return true;
+  };
+  const showLinkForSelection = (selection: GardSelection) => {
+    restoreSelection(selection);
+    const current = currentLink(editor);
+    return showLinkPopover(selection, current ? String(current.value) : '', !!current);
+  };
+  linkInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      applyLinkButton.click();
+    }
+  });
+  const styleTrigger = popupTrigger('Aa', 'Typography', styleMenu, 'sd-rte-style-trigger');
+  styleMenu.classList.add('sd-rte-typography');
+  const undoControl = createButton('↶', 'Undo', () => runAction(undoAction)),
+    redoControl = createButton('↷', 'Redo', () => runAction(redoAction)),
+    boldButton = createButton('B', 'Bold', () => runAction(strongAction)),
+    italicButton = createButton('I', 'Italic', () => runAction(emphasisAction)),
+    highlightButton = createButton('HL', 'Highlight', () => runAction(highlightAction)),
+    moreFormatTrigger = popupTrigger('⋮', 'More text formatting', moreMenu, 'sd-rte-more-format'),
+    quoteButton = createButton('❝', 'Block quote', () => runAction(blockquoteAction)),
+    bulletButton = createButton('•', 'Bulleted list', () => runAction(bulletListAction)),
+    numberButton = createButton('1.', 'Numbered list', () => runAction(orderedListAction)),
+    checkButton = createButton('☑', 'Checklist', toggleChecklist);
+  linkTrigger = createButton('Link', 'Link', () => {
+    if (!linkMenu.hidden) {
+      linkController.hide();
+      return;
+    }
+    const selection = editor.state.selection;
+    if (selection instanceof GardSelection.Text) showLinkForSelection(selection);
+  });
+  linkTrigger.setAttribute('aria-haspopup', 'true');
+  annotateShortcut(undoControl, 'Control+z Meta+z', 'Ctrl/Cmd+Z');
+  annotateShortcut(redoControl, 'Control+y Control+Shift+z Meta+Shift+z', 'Ctrl+Y / Ctrl/Cmd+Shift+Z');
+  annotateShortcut(boldButton, 'Control+b Meta+b', 'Ctrl/Cmd+B');
+  annotateShortcut(italicButton, 'Control+i Meta+i', 'Ctrl/Cmd+I');
+  annotateShortcut(underlineButton, 'Control+u Meta+u', 'Ctrl/Cmd+U');
+  annotateShortcut(strikethroughButton, 'Control+Shift+x Meta+Shift+x', 'Ctrl/Cmd+Shift+X');
+  annotateShortcut(superscriptButton, 'Control+. Meta+.', 'Ctrl/Cmd+.');
+  annotateShortcut(subscriptButton, 'Control+, Meta+,', 'Ctrl/Cmd+,');
+  annotateShortcut(linkTrigger, 'Control+k Meta+k', 'Ctrl/Cmd+K');
+  annotateShortcut(numberButton, 'Control+Shift+7 Meta+Shift+7', 'Ctrl/Cmd+Shift+7');
+  annotateShortcut(bulletButton, 'Control+Shift+8 Meta+Shift+8', 'Ctrl/Cmd+Shift+8');
+  interactions.openLink = wg => {
+    if (!(wg.state.selection instanceof GardSelection.Text)) return true;
+    showLinkForSelection(wg.state.selection);
+    return true;
+  };
+  if (options.notes)
+    interactions.noteLink = () => {
+      void linkToNote(null);
+    };
   // The # suggestions: the chosen or typed name replaces the letter typed,
   // provided the text there has not changed meanwhile.
-  const suggestTag=async(from:number,letter:string)=>{
-    const notes=options.notes;if(!notes?.pickTag||readOnly||destroyed)return;
-    let anchor:{left:number;top:number;bottom:number}|null=null;
-    try{const selection=window.getSelection(),rect=selection&&selection.rangeCount?selection.getRangeAt(0).getBoundingClientRect():null;if(rect&&(rect.width||rect.height))anchor={left:rect.left,top:rect.top,bottom:rect.bottom}}catch{}
-    const choice=await notes.pickTag({query:letter,anchor});if(destroyed)return;editor.focus();
-    if(!choice||(choice.text===letter&&!choice.end))return;
-    const state=editor.state;if(from<1||from+letter.length>state.doc.contentLength)return;
-    const block=state.doc.resolve(from).textblockParent;if(!block)return;
-    const map=state.textblockMap(block),index=map.toIndex(from);if(map.text.slice(index-1,index+letter.length)!==`#${letter}`)return;
-    const to=map.fromIndex(index+letter.length),text=choice.text+choice.end;
-    editor.dispatch({changes:{from,to,insert:text?[Leaf.text(text,state.sel.activeMarks)]:[],fit:true},selection:(context,changes)=>GardSelection.near(context,changes.mapPos(to,1),-1),userEvent:'input.tag',scrollIntoView:true});
+  const suggestTag = async (from: number, letter: string) => {
+    const notes = options.notes;
+    if (!notes?.pickTag || readOnly || destroyed) return;
+    let anchor: {left: number; top: number; bottom: number} | null = null;
+    try {
+      const selection = window.getSelection(),
+        rect = selection && selection.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
+      if (rect && (rect.width || rect.height)) anchor = {left: rect.left, top: rect.top, bottom: rect.bottom};
+    } catch {}
+    const choice = await notes.pickTag({query: letter, anchor});
+    if (destroyed) return;
+    editor.focus();
+    if (!choice || (choice.text === letter && !choice.end)) return;
+    const state = editor.state;
+    if (from < 1 || from + letter.length > state.doc.contentLength) return;
+    const block = state.doc.resolve(from).textblockParent;
+    if (!block) return;
+    const map = state.textblockMap(block),
+      index = map.toIndex(from);
+    if (map.text.slice(index - 1, index + letter.length) !== `#${letter}`) return;
+    const to = map.fromIndex(index + letter.length),
+      text = choice.text + choice.end;
+    editor.dispatch({
+      changes: {from, to, insert: text ? [Leaf.text(text, state.sel.activeMarks)] : [], fit: true},
+      selection: (context, changes) => GardSelection.near(context, changes.mapPos(to, 1), -1),
+      userEvent: 'input.tag',
+      scrollIntoView: true
+    });
   };
-  if(options.notes?.pickTag)interactions.tagSuggest=(from,letter)=>{void suggestTag(from,letter)};
+  if (options.notes?.pickTag)
+    interactions.tagSuggest = (from, letter) => {
+      void suggestTag(from, letter);
+    };
   // A tap on a tag shows the notes with it; while editing it also places the
   // caret, and Ctrl or Cmd makes it the only thing the tap does.
-  const tagClick=(event:MouseEvent)=>{const chip=event.target instanceof Element?event.target.closest<HTMLElement>('.sd-tag'):null,name=chip?.dataset.sdTag||'';if(!name||!options.notes?.tag)return false;const passive=!readOnly&&!(event.metaKey||event.ctrlKey);if(!passive)event.preventDefault();options.notes.tag(name,passive);return !passive};
+  const tagClick = (event: MouseEvent) => {
+    const chip = event.target instanceof Element ? event.target.closest<HTMLElement>('.sd-tag') : null,
+      name = chip?.dataset.sdTag || '';
+    if (!name || !options.notes?.tag) return false;
+    const passive = !readOnly && !(event.metaKey || event.ctrlKey);
+    if (!passive) event.preventDefault();
+    options.notes.tag(name, passive);
+    return !passive;
+  };
 
-  type ImageAltEdit={from:number;assetId:string;original:string;trigger:HTMLButtonElement;figure:HTMLElement};
-  let imageAltEdit:ImageAltEdit|null=null;
-  const imageAltPopup=document.createElement('div');imageAltPopup.className='sd-rte-menu sd-rte-image-alt-popover';imageAltPopup.setAttribute('role','group');imageAltPopup.setAttribute('aria-label','Image description');
-  const imageAltInput=document.createElement('input');imageAltInput.type='text';imageAltInput.className='sd-rte-image-alt-input';imageAltInput.maxLength=MAX_IMAGE_ALT_CHARS;imageAltInput.placeholder='Optional image description';imageAltInput.setAttribute('aria-label','Image description');imageAltPopup.appendChild(imageAltInput);wrapper.append(imageAltPopup);
-  const imageAltAnchorRect=()=>{const figure=imageAltEdit?.figure;if(!figure?.isConnected)return null;const media=figure.querySelector<HTMLElement>('.sd-rte-image-media')||figure,rect=media.getBoundingClientRect(),width=Math.min(300,Math.max(1,(window.visualViewport?.width||innerWidth)-16));return DOMRect.fromRect({x:rect.left+(rect.width-width)/2,y:rect.bottom,width,height:1})};
-  const commitImageAltEdit=(commit:boolean)=>{const active=imageAltEdit;if(!active)return false;imageAltEdit=null;const next=normalizeImageAlt(imageAltInput.value);if(commit){const node=editor.state.doc.nodeAt(active.from);if(node?.type===StudyImage){const value=node.param as StudyImageValue;if(value.assetId===active.assetId&&next!==value.alt)editor.dispatch({changes:{from:active.from,to:active.from+node.length,insert:[StudyImage.of({...value,alt:next})]},userEvent:'edit.image.alt'});}}return true};
-  const imageAltController=createAnchoredPopover(imageAltPopup,{align:'end',side:'bottom',anchorRect:imageAltAnchorRect,onClose:()=>commitImageAltEdit(true),onEscape:()=>finishImageAltEdit(false,true)});popupControllers.push(imageAltController);
-  const finishImageAltEdit=(commit:boolean,returnFocus=false)=>{const active=imageAltEdit;if(!active){imageAltController.hide();return false}commitImageAltEdit(commit);imageAltController.hide();if(returnFocus&&!destroyed)editor.focus();return true};
-  imageAltInput.addEventListener('keydown',inputEvent=>{if(inputEvent.key==='Enter'){inputEvent.preventDefault();inputEvent.stopPropagation();finishImageAltEdit(true,true)}else if(inputEvent.key==='Escape'){inputEvent.preventDefault();inputEvent.stopPropagation();finishImageAltEdit(false,true)}});
-  imageAltInput.addEventListener('blur',()=>{if(imageAltEdit)finishImageAltEdit(true,false)});
-  const imageInput=document.createElement('input');imageInput.type='file';imageInput.className='sd-rte-asset-input';imageInput.setAttribute('aria-label','Choose an image to attach');imageInput.accept='image/png,image/jpeg,image/webp,image/gif,image/avif';imageInput.tabIndex=-1;wrapper.appendChild(imageInput);
-  const linkedAttachmentInput=document.createElement('input');linkedAttachmentInput.type='file';linkedAttachmentInput.className='sd-rte-asset-input';linkedAttachmentInput.setAttribute('aria-label','Choose a file to attach');linkedAttachmentInput.tabIndex=-1;wrapper.appendChild(linkedAttachmentInput);
-  let attachmentBusy=false,attachmentAbortController:AbortController|null=null,pendingAttachmentKind:AttachmentKind|null=null;
-  const finishImagePicker=()=>{delete field.dataset.richAssetPicker;imageInput.value='';if(!destroyed)editor.dispatch({effects:setPendingImageSelection.of(null)})};
-  const finishLinkedAttachmentPicker=()=>{delete field.dataset.richAssetPicker;linkedAttachmentInput.value='';pendingAttachmentKind=null;if(!destroyed)editor.dispatch({effects:setPendingLinkedAttachmentSelection.of(null)})};
-  const attachAlive=(token:number)=>!destroyed&&token===lifecycle;
-  const discardUploadedAsset=async(assetId:string)=>{releaseImage(assetId);assetMeta.delete(assetId);if(pendingAssets.delete(assetId))await options.assets.remove(assetId).catch(error=>console.warn('Unused rich-text image could not be removed.',error))};
-  const uploadImageAsset=async(file:File,token:number)=>{updateEditorStatus('Checking selected image…','busy');const selection=editor.state.field(pendingImageSelection);if(!selection)throw new RangeError(IMAGE_POSITION_ERROR);if(selectionInsideTable(editor,selection))throw new RangeError(IMAGE_TABLE_ERROR);const mimeType=await resolvedImageMimeType(file);if(!attachAlive(token))return null;if(!mimeType)throw new RangeError(heicLikeImage(file)?'This browser cannot attach HEIC or HEIF photos. Export the photo as JPEG or PNG, then try again.':'Use a PNG, JPEG, WebP, GIF or AVIF image.');if(file.size<=0||file.size>MAX_IMAGE_BYTES)throw new RangeError('Image is too large (12 MiB maximum).');const ids=assetIdsFromDocument(editor.state.doc);if(ids.length>=MAX_IMAGES_PER_DOCUMENT)throw new RangeError(`A note can contain up to ${MAX_IMAGES_PER_DOCUMENT} images.`);updateEditorStatus('Preparing image…','busy');const prepared=await prepareImage(file,mimeType,imageAbort.signal,options.createImageWorker);if(!attachAlive(token))return null;const used=await documentImageBytes(ids);if(!attachAlive(token))return null;if(used+prepared.blob.size>MAX_IMAGE_BYTES_PER_DOCUMENT)throw new RangeError('Images in this note exceed the safe storage allowance.');updateEditorStatus('Attaching image…','busy');const assetId=randomAssetId();await options.assets.put(assetId,prepared.blob);if(!attachAlive(token)){await options.assets.remove(assetId).catch(error=>console.warn('Abandoned rich-text image could not be removed.',error));return null}assetMeta.set(assetId,prepared.blob.size);pendingAssets.add(assetId);return {image:StudyImage.of({assetId,alt:'',widthPct:initialImageWidthPct(prepared.width,editor)}),assetId,blob:prepared.blob}};
-  const attachImage=async(file:File|null)=>{if(!file||destroyed||imageBusy)return;const token=lifecycle;let uploaded:Awaited<ReturnType<typeof uploadImageAsset>>|null=null;try{imageBusy=true;options.onAssetBusy?.(true);imageMenuItem.disabled=true;imageMenuItem.setAttribute('aria-busy','true');uploaded=await uploadImageAsset(file,token);if(!uploaded)return;if(!attachAlive(token)){await discardUploadedAsset(uploaded.assetId);return}const selection=editor.state.field(pendingImageSelection);if(!selection)throw new RangeError(IMAGE_POSITION_ERROR);imageCache.set(uploaded.assetId,URL.createObjectURL(uploaded.blob));insertStructuralBlockAt(editor,uploaded.image,'insert.image',structuralInsertionRange(editor,selection));updateEditorStatus('Image attached.','success')}catch(error){if(uploaded)void discardUploadedAsset(uploaded.assetId);if(!attachAlive(token))return;console.error('Rich-text image attachment failed:',error);updateEditorStatus(error instanceof RangeError?error.message:imageStorageFailureMessage(error),'error')}finally{imageBusy=false;options.onAssetBusy?.(false);if(attachAlive(token)){imageMenuItem.disabled=false;imageMenuItem.removeAttribute('aria-busy');finishImagePicker();editor.focus()}}};
-  const startSelectedImage=(event:Event)=>{if(destroyed||imageBusy)return;const input=event.currentTarget as HTMLInputElement,file=input.files?.[0]||null;if(!file){finishImagePicker();return}void attachImage(file)};
-  const cancelSelectedImage=()=>{if(destroyed||imageBusy)return;finishImagePicker();updateEditorStatus('','');editor.focus()};
-  imageInput.addEventListener('change',startSelectedImage);imageInput.addEventListener('cancel',cancelSelectedImage);
-  const imageMenuItem=createButton('Image','Insert image',()=>{closePopups();if(cellPosition(editor)){updateEditorStatus(IMAGE_TABLE_ERROR,'error');return}editor.dispatch({effects:setPendingImageSelection.of(editor.state.selection)});field.dataset.richAssetPicker='active';updateEditorStatus('Choose a photo to attach…','busy');try{imageInput.click()}catch{finishImagePicker();updateEditorStatus('The image picker could not open. Retry, or choose a different image.','error')}});
-  const openAudioWorkspace=async(value:StudyAudioValue,source?:HTMLAudioElement|null)=>{try{const opened=await openAudioOverlay(value,options.assets,options.workspaceOverlay,source);if(!opened)updateEditorStatus(options.workspaceOverlay?'Audio is unavailable or unsupported.':'Expanded audio workspace is unavailable here.','error');return opened}catch(error){console.error('Rich-text audio workspace failed:',error);updateEditorStatus('The audio workspace could not open.','error');return false}};
-  const expandAudio=(event:MouseEvent,wg:Wordgard)=>{const button=event.target instanceof Element?event.target.closest<HTMLButtonElement>('.sd-rte-audio-expand'):null;if(!button)return false;const figure=button.closest<HTMLElement>('.sd-rte-audio'),found=figure?wg.nodeFromDOM(figure):null;if(!found||found.node.type!==StudyAudio)return false;event.preventDefault();event.stopPropagation();void openAudioWorkspace(found.node.param as StudyAudioValue,figure?.querySelector<HTMLAudioElement>('.sd-rte-audio-player'));return true};
-  const expandImage=(event:MouseEvent,wg:Wordgard)=>{const target=event.target instanceof Element?event.target:null,button=target?.closest('.sd-rte-image-expand'),figure=(button||(event.detail>=2?target?.closest('.sd-rte-image img'):null))?.closest<HTMLElement>('.sd-rte-image');if(!figure)return false;const found=wg.nodeFromDOM(figure);if(!found||found.node.type!==StudyImage)return false;event.preventDefault();event.stopPropagation();const value=found.node.param as StudyImageValue;void openImageOverlay(value.assetId,value.alt,options.assets,options.workspaceOverlay).then(opened=>{if(!opened&&!destroyed)updateEditorStatus(options.workspaceOverlay?'This image is unavailable.':'Full view is unavailable here.','error')});return true};
-  const selectAudioFromClick=(event:MouseEvent,wg:Wordgard)=>{const target=event.target instanceof Element?event.target:null;if(!target||target.closest('.sd-rte-audio-player,.sd-rte-audio-expand'))return false;const figure=target.closest<HTMLElement>('.sd-rte-audio');if(!figure)return false;const found=wg.nodeFromDOM(figure);if(!found||found.node.type!==StudyAudio)return false;event.preventDefault();event.stopPropagation();if(!(wg.state.selection instanceof GardSelection.Node)||wg.state.selection.from!==found.pos)wg.dispatch({selection:GardSelection.node(found.pos,found.node),userEvent:'select.audio'});return true};
-  let pdfMenuItem!:HTMLButtonElement,audioMenuItem!:HTMLButtonElement;
-  const anchorAttachmentProgress=(kind:AttachmentKind,file:File,controller:AbortController,selection:GardSelection)=>{const progressUI=createAttachmentProgressWidget(kind,file,controller),rawPos=kind==='audio'?structuralInsertionRange(editor,selection).from:selection.to,pos=Math.max(0,Math.min(rawPos,editor.state.doc.contentLength));editor.dispatch({effects:setAttachmentUploadDecoration.of({pos,widget:progressUI.widget})});return progressUI};
-  const insertLinkedAttachment=async(file:File)=>{const kind=pendingAttachmentKind,port=options.attachments;if(!kind||!port||attachmentBusy||destroyed)return;const token=lifecycle,controller=new AbortController(),initialSelection=editor.state.field(pendingLinkedAttachmentSelection);let uploaded:{id:string;name:string;type:string}|null=null;if(!initialSelection){updateEditorStatus('Place the caret in text and retry the attachment.','error');return}if(kind==='audio'&&selectionInsideTable(editor,initialSelection)){updateEditorStatus('Audio blocks cannot go inside tables.','error');return}const progressUI=anchorAttachmentProgress(kind,file,controller,initialSelection);try{attachmentBusy=true;options.onAssetBusy?.(true);attachmentAbortController=controller;pdfMenuItem.disabled=true;audioMenuItem.disabled=true;updateEditorStatus('','');progressUI.update({phase:'preparing',loaded:0,total:file.size});uploaded=await port.upload(file,{signal:controller.signal,onProgress:progress=>{if(attachAlive(token)&&attachmentAbortController===controller)progressUI.update(progress)}});if(!attachAlive(token))return;if(!uploaded||!validAssetId(uploaded.id)||typeof uploaded.name!=='string'||typeof uploaded.type!=='string')throw new Error('Attachment upload returned invalid metadata.');if(kind==='pdf'?uploaded.type!=='application/pdf':!AUDIO_MIME_TYPES.has(uploaded.type))throw new Error(`Choose a supported ${kind==='pdf'?'PDF':'audio'} file.`);const selection=editor.state.field(pendingLinkedAttachmentSelection);if(!selection)throw new Error('Place the caret in text and retry the attachment.');if(kind==='audio'){insertStructuralBlockAt(editor,StudyAudio.of({attachmentId:uploaded.id,name:normalizeAttachmentName(uploaded.name||file.name)}),'insert.attachment.audio',structuralInsertionRange(editor,selection));updateEditorStatus('Audio attached.','success')}else{restoreSelection(selection);if(!(editor.state.selection instanceof GardSelection.Text))editor.dispatch({selection:context=>GardSelection.near(context,Math.min(selection.to,context.doc.contentLength),1)});if(!(editor.state.selection instanceof GardSelection.Text))throw new Error('Place the caret in text and retry the attachment.');insertLinkedText(editor,normalizeAttachmentName(uploaded.name||file.name),`#attachment=${uploaded.id}`,'insert.attachment.link');updateEditorStatus('PDF linked.','success')}}catch(error){if(!attachAlive(token))return;if(error instanceof Error&&error.name==='AbortError'){updateEditorStatus('Attachment cancelled.','');return}console.error('Rich-text attachment failed:',error);const message=uploaded?`${uploaded.name||'Attachment'} was saved to Attachments, but its note reference could not be inserted.`:(error instanceof Error?error.message:'Attachment could not be added.');updateEditorStatus(message,'error')}finally{if(attachmentAbortController===controller)attachmentAbortController=null;attachmentBusy=false;options.onAssetBusy?.(false);if(attachAlive(token)){editor.dispatch({effects:setAttachmentUploadDecoration.of(null)});pdfMenuItem.disabled=!options.attachments;audioMenuItem.disabled=!options.attachments;finishLinkedAttachmentPicker();editor.focus()}}};
-  const startLinkedAttachment=(event:Event)=>{if(destroyed||attachmentBusy)return;const input=event.currentTarget as HTMLInputElement,file=input.files?.[0]||null;if(!file){finishLinkedAttachmentPicker();return}void insertLinkedAttachment(file)};
-  const cancelLinkedAttachment=()=>{if(destroyed||attachmentBusy)return;finishLinkedAttachmentPicker();updateEditorStatus('','');editor.focus()};
-  linkedAttachmentInput.addEventListener('change',startLinkedAttachment);linkedAttachmentInput.addEventListener('cancel',cancelLinkedAttachment);
-  const startLinkedAttachmentPicker=(kind:AttachmentKind)=>{closePopups();if(!options.attachments){updateEditorStatus('Attachment Library is unavailable here.','error');return}pendingAttachmentKind=kind;editor.dispatch({effects:setPendingLinkedAttachmentSelection.of(editor.state.selection)});linkedAttachmentInput.accept=kind==='pdf'?'application/pdf,.pdf':'audio/mpeg,audio/wav,audio/ogg,audio/flac,audio/mp4,audio/webm,.mp3,.wav,.ogg,.flac,.m4a,.mp4,.webm';linkedAttachmentInput.setAttribute('aria-label',kind==='pdf'?'Choose a PDF to attach':'Choose an audio file to attach');field.dataset.richAssetPicker='active';updateEditorStatus(`Choose ${kind==='pdf'?'a PDF':'an audio file'} to attach…`,'busy');try{linkedAttachmentInput.click()}catch{finishLinkedAttachmentPicker();updateEditorStatus('The attachment picker could not open. Retry, or choose a different file.','error')}};
-  pdfMenuItem=createButton('PDF','Attach PDF',()=>startLinkedAttachmentPicker('pdf'));audioMenuItem=createButton('Audio','Attach audio',()=>startLinkedAttachmentPicker('audio'));setDisabled(pdfMenuItem,!options.attachments);setDisabled(audioMenuItem,!options.attachments);
-  const attachmentMenu=document.createElement('div');attachmentMenu.append(imageMenuItem,pdfMenuItem,audioMenuItem);const attachmentTrigger=popupTrigger('', 'Attach', attachmentMenu,'sd-rte-attachment-trigger');const attachmentIcon=document.createElementNS('http://www.w3.org/2000/svg','svg');attachmentIcon.setAttribute('viewBox','0 0 24 24');attachmentIcon.setAttribute('aria-hidden','true');const attachmentPath=document.createElementNS('http://www.w3.org/2000/svg','path');attachmentPath.setAttribute('d','M8.5 12.5 15.8 5.2a3 3 0 0 1 4.2 4.2l-9 9a5 5 0 0 1-7.1-7.1l8.4-8.4');attachmentIcon.appendChild(attachmentPath);attachmentTrigger.appendChild(attachmentIcon);
-  const pasteImage=(event:InputEvent|ClipboardEvent,wg:Wordgard)=>{if(options.allowAssetInsert===false)return false;const file=('clipboardData' in event?event.clipboardData:event.dataTransfer)?.files[0];if(!file?.type.startsWith('image/'))return false;if(!imageBusy){wg.dispatch({effects:setPendingImageSelection.of(wg.state.selection)});void attachImage(file)}return true};
-  const tableButton=createButton('Table','Insert 2 × 2 table',()=>{if(tablePosition(editor)){updateEditorStatus('Nested tables are not supported.','error');return}insertStructuralBlock(editor,makeTable(2,2),'insert.table',true);editor.focus()}),ruleButton=createButton('―','Horizontal rule',()=>{if(cellPosition(editor)){updateEditorStatus('Horizontal rules cannot be inserted inside tables.','error');return}insertStructuralBlock(editor,HorizontalRule,'insert.horizontal-rule');editor.focus()});
-  const historyGroup=toolbarGroup('History',undoControl,redoControl),textGroup=toolbarGroup('Text formatting',styleTrigger,boldButton,italicButton,highlightButton,moreFormatTrigger),listGroup=toolbarGroup('Lists',bulletButton,numberButton,checkButton),quoteGroup=toolbarGroup('Block quote',quoteButton),insertGroup=toolbarGroup('Links and blocks',linkTrigger,tableButton,ruleButton),attachmentGroup=options.allowAssetInsert===false?null:toolbarGroup('Attachments',attachmentTrigger);historyGroup.classList.add('sd-rte-toolbar-group-history');
-  const listOutdentButton=createButton('←','Outdent list item',()=>listNesting(editor,true)),listIndentButton=createButton('→','Indent list item',()=>listNesting(editor,false));listTools.append(listToolsLabel,listOutdentButton,listIndentButton);
-  toolbarRail.append(historyGroup,textGroup,listGroup,listTools,quoteGroup,insertGroup,tableTools,...(attachmentGroup?[attachmentGroup]:[]));scheduleToolbarOverflow();
+  type ImageAltEdit = {from: number; assetId: string; original: string; trigger: HTMLButtonElement; figure: HTMLElement};
+  let imageAltEdit: ImageAltEdit | null = null;
+  const imageAltPopup = document.createElement('div');
+  imageAltPopup.className = 'sd-rte-menu sd-rte-image-alt-popover';
+  imageAltPopup.setAttribute('role', 'group');
+  imageAltPopup.setAttribute('aria-label', 'Image description');
+  const imageAltInput = document.createElement('input');
+  imageAltInput.type = 'text';
+  imageAltInput.className = 'sd-rte-image-alt-input';
+  imageAltInput.maxLength = MAX_IMAGE_ALT_CHARS;
+  imageAltInput.placeholder = 'Optional image description';
+  imageAltInput.setAttribute('aria-label', 'Image description');
+  imageAltPopup.appendChild(imageAltInput);
+  wrapper.append(imageAltPopup);
+  const imageAltAnchorRect = () => {
+    const figure = imageAltEdit?.figure;
+    if (!figure?.isConnected) return null;
+    const media = figure.querySelector<HTMLElement>('.sd-rte-image-media') || figure,
+      rect = media.getBoundingClientRect(),
+      width = Math.min(300, Math.max(1, (window.visualViewport?.width || innerWidth) - 16));
+    return DOMRect.fromRect({x: rect.left + (rect.width - width) / 2, y: rect.bottom, width, height: 1});
+  };
+  const commitImageAltEdit = (commit: boolean) => {
+    const active = imageAltEdit;
+    if (!active) return false;
+    imageAltEdit = null;
+    const next = normalizeImageAlt(imageAltInput.value);
+    if (commit) {
+      const node = editor.state.doc.nodeAt(active.from);
+      if (node?.type === StudyImage) {
+        const value = node.param as StudyImageValue;
+        if (value.assetId === active.assetId && next !== value.alt)
+          editor.dispatch({
+            changes: {from: active.from, to: active.from + node.length, insert: [StudyImage.of({...value, alt: next})]},
+            userEvent: 'edit.image.alt'
+          });
+      }
+    }
+    return true;
+  };
+  const imageAltController = createAnchoredPopover(imageAltPopup, {
+    align: 'end',
+    side: 'bottom',
+    anchorRect: imageAltAnchorRect,
+    onClose: () => commitImageAltEdit(true),
+    onEscape: () => finishImageAltEdit(false, true)
+  });
+  popupControllers.push(imageAltController);
+  const finishImageAltEdit = (commit: boolean, returnFocus = false) => {
+    const active = imageAltEdit;
+    if (!active) {
+      imageAltController.hide();
+      return false;
+    }
+    commitImageAltEdit(commit);
+    imageAltController.hide();
+    if (returnFocus && !destroyed) editor.focus();
+    return true;
+  };
+  imageAltInput.addEventListener('keydown', inputEvent => {
+    if (inputEvent.key === 'Enter') {
+      inputEvent.preventDefault();
+      inputEvent.stopPropagation();
+      finishImageAltEdit(true, true);
+    } else if (inputEvent.key === 'Escape') {
+      inputEvent.preventDefault();
+      inputEvent.stopPropagation();
+      finishImageAltEdit(false, true);
+    }
+  });
+  imageAltInput.addEventListener('blur', () => {
+    if (imageAltEdit) finishImageAltEdit(true, false);
+  });
+  const imageInput = document.createElement('input');
+  imageInput.type = 'file';
+  imageInput.className = 'sd-rte-asset-input';
+  imageInput.setAttribute('aria-label', 'Choose an image to attach');
+  imageInput.accept = 'image/png,image/jpeg,image/webp,image/gif,image/avif';
+  imageInput.tabIndex = -1;
+  wrapper.appendChild(imageInput);
+  const linkedAttachmentInput = document.createElement('input');
+  linkedAttachmentInput.type = 'file';
+  linkedAttachmentInput.className = 'sd-rte-asset-input';
+  linkedAttachmentInput.setAttribute('aria-label', 'Choose a file to attach');
+  linkedAttachmentInput.tabIndex = -1;
+  wrapper.appendChild(linkedAttachmentInput);
+  let attachmentBusy = false,
+    attachmentAbortController: AbortController | null = null,
+    pendingAttachmentKind: AttachmentKind | null = null;
+  const finishImagePicker = () => {
+    delete field.dataset.richAssetPicker;
+    imageInput.value = '';
+    if (!destroyed) editor.dispatch({effects: setPendingImageSelection.of(null)});
+  };
+  const finishLinkedAttachmentPicker = () => {
+    delete field.dataset.richAssetPicker;
+    linkedAttachmentInput.value = '';
+    pendingAttachmentKind = null;
+    if (!destroyed) editor.dispatch({effects: setPendingLinkedAttachmentSelection.of(null)});
+  };
+  const attachAlive = (token: number) => !destroyed && token === lifecycle;
+  const discardUploadedAsset = async (assetId: string) => {
+    releaseImage(assetId);
+    assetMeta.delete(assetId);
+    if (pendingAssets.delete(assetId))
+      await options.assets.remove(assetId).catch(error => console.warn('Unused rich-text image could not be removed.', error));
+  };
+  const uploadImageAsset = async (file: File, token: number) => {
+    updateEditorStatus('Checking selected image…', 'busy');
+    const selection = editor.state.field(pendingImageSelection);
+    if (!selection) throw new RangeError(IMAGE_POSITION_ERROR);
+    if (selectionInsideTable(editor, selection)) throw new RangeError(IMAGE_TABLE_ERROR);
+    const mimeType = await resolvedImageMimeType(file);
+    if (!attachAlive(token)) return null;
+    if (!mimeType)
+      throw new RangeError(
+        heicLikeImage(file)
+          ? 'This browser cannot attach HEIC or HEIF photos. Export the photo as JPEG or PNG, then try again.'
+          : 'Use a PNG, JPEG, WebP, GIF or AVIF image.'
+      );
+    if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) throw new RangeError('Image is too large (12 MiB maximum).');
+    const ids = assetIdsFromDocument(editor.state.doc);
+    if (ids.length >= MAX_IMAGES_PER_DOCUMENT) throw new RangeError(`A note can contain up to ${MAX_IMAGES_PER_DOCUMENT} images.`);
+    updateEditorStatus('Preparing image…', 'busy');
+    const prepared = await prepareImage(file, mimeType, imageAbort.signal, options.createImageWorker);
+    if (!attachAlive(token)) return null;
+    const used = await documentImageBytes(ids);
+    if (!attachAlive(token)) return null;
+    if (used + prepared.blob.size > MAX_IMAGE_BYTES_PER_DOCUMENT)
+      throw new RangeError('Images in this note exceed the safe storage allowance.');
+    updateEditorStatus('Attaching image…', 'busy');
+    const assetId = randomAssetId();
+    await options.assets.put(assetId, prepared.blob);
+    if (!attachAlive(token)) {
+      await options.assets.remove(assetId).catch(error => console.warn('Abandoned rich-text image could not be removed.', error));
+      return null;
+    }
+    assetMeta.set(assetId, prepared.blob.size);
+    pendingAssets.add(assetId);
+    return {image: StudyImage.of({assetId, alt: '', widthPct: initialImageWidthPct(prepared.width, editor)}), assetId, blob: prepared.blob};
+  };
+  const attachImage = async (file: File | null) => {
+    if (!file || destroyed || imageBusy) return;
+    const token = lifecycle;
+    let uploaded: Awaited<ReturnType<typeof uploadImageAsset>> | null = null;
+    try {
+      imageBusy = true;
+      options.onAssetBusy?.(true);
+      imageMenuItem.disabled = true;
+      imageMenuItem.setAttribute('aria-busy', 'true');
+      uploaded = await uploadImageAsset(file, token);
+      if (!uploaded) return;
+      if (!attachAlive(token)) {
+        await discardUploadedAsset(uploaded.assetId);
+        return;
+      }
+      const selection = editor.state.field(pendingImageSelection);
+      if (!selection) throw new RangeError(IMAGE_POSITION_ERROR);
+      imageCache.set(uploaded.assetId, URL.createObjectURL(uploaded.blob));
+      insertStructuralBlockAt(editor, uploaded.image, 'insert.image', structuralInsertionRange(editor, selection));
+      updateEditorStatus('Image attached.', 'success');
+    } catch (error) {
+      if (uploaded) void discardUploadedAsset(uploaded.assetId);
+      if (!attachAlive(token)) return;
+      console.error('Rich-text image attachment failed:', error);
+      updateEditorStatus(error instanceof RangeError ? error.message : imageStorageFailureMessage(error), 'error');
+    } finally {
+      imageBusy = false;
+      options.onAssetBusy?.(false);
+      if (attachAlive(token)) {
+        imageMenuItem.disabled = false;
+        imageMenuItem.removeAttribute('aria-busy');
+        finishImagePicker();
+        editor.focus();
+      }
+    }
+  };
+  const startSelectedImage = (event: Event) => {
+    if (destroyed || imageBusy) return;
+    const input = event.currentTarget as HTMLInputElement,
+      file = input.files?.[0] || null;
+    if (!file) {
+      finishImagePicker();
+      return;
+    }
+    void attachImage(file);
+  };
+  const cancelSelectedImage = () => {
+    if (destroyed || imageBusy) return;
+    finishImagePicker();
+    updateEditorStatus('', '');
+    editor.focus();
+  };
+  imageInput.addEventListener('change', startSelectedImage);
+  imageInput.addEventListener('cancel', cancelSelectedImage);
+  const imageMenuItem = createButton('Image', 'Insert image', () => {
+    closePopups();
+    if (cellPosition(editor)) {
+      updateEditorStatus(IMAGE_TABLE_ERROR, 'error');
+      return;
+    }
+    editor.dispatch({effects: setPendingImageSelection.of(editor.state.selection)});
+    field.dataset.richAssetPicker = 'active';
+    updateEditorStatus('Choose a photo to attach…', 'busy');
+    try {
+      imageInput.click();
+    } catch {
+      finishImagePicker();
+      updateEditorStatus('The image picker could not open. Retry, or choose a different image.', 'error');
+    }
+  });
+  const openAudioWorkspace = async (value: StudyAudioValue, source?: HTMLAudioElement | null) => {
+    try {
+      const opened = await openAudioOverlay(value, options.assets, options.workspaceOverlay, source);
+      if (!opened)
+        updateEditorStatus(
+          options.workspaceOverlay ? 'Audio is unavailable or unsupported.' : 'Expanded audio workspace is unavailable here.',
+          'error'
+        );
+      return opened;
+    } catch (error) {
+      console.error('Rich-text audio workspace failed:', error);
+      updateEditorStatus('The audio workspace could not open.', 'error');
+      return false;
+    }
+  };
+  const expandAudio = (event: MouseEvent, wg: Wordgard) => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.sd-rte-audio-expand') : null;
+    if (!button) return false;
+    const figure = button.closest<HTMLElement>('.sd-rte-audio'),
+      found = figure ? wg.nodeFromDOM(figure) : null;
+    if (!found || found.node.type !== StudyAudio) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    void openAudioWorkspace(found.node.param as StudyAudioValue, figure?.querySelector<HTMLAudioElement>('.sd-rte-audio-player'));
+    return true;
+  };
+  const expandImage = (event: MouseEvent, wg: Wordgard) => {
+    const target = event.target instanceof Element ? event.target : null,
+      button = target?.closest('.sd-rte-image-expand'),
+      figure = (button || (event.detail >= 2 ? target?.closest('.sd-rte-image img') : null))?.closest<HTMLElement>('.sd-rte-image');
+    if (!figure) return false;
+    const found = wg.nodeFromDOM(figure);
+    if (!found || found.node.type !== StudyImage) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const value = found.node.param as StudyImageValue;
+    void openImageOverlay(value.assetId, value.alt, options.assets, options.workspaceOverlay).then(opened => {
+      if (!opened && !destroyed)
+        updateEditorStatus(options.workspaceOverlay ? 'This image is unavailable.' : 'Full view is unavailable here.', 'error');
+    });
+    return true;
+  };
+  const selectAudioFromClick = (event: MouseEvent, wg: Wordgard) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target.closest('.sd-rte-audio-player,.sd-rte-audio-expand')) return false;
+    const figure = target.closest<HTMLElement>('.sd-rte-audio');
+    if (!figure) return false;
+    const found = wg.nodeFromDOM(figure);
+    if (!found || found.node.type !== StudyAudio) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!(wg.state.selection instanceof GardSelection.Node) || wg.state.selection.from !== found.pos)
+      wg.dispatch({selection: GardSelection.node(found.pos, found.node), userEvent: 'select.audio'});
+    return true;
+  };
+  let pdfMenuItem!: HTMLButtonElement, audioMenuItem!: HTMLButtonElement;
+  const anchorAttachmentProgress = (kind: AttachmentKind, file: File, controller: AbortController, selection: GardSelection) => {
+    const progressUI = createAttachmentProgressWidget(kind, file, controller),
+      rawPos = kind === 'audio' ? structuralInsertionRange(editor, selection).from : selection.to,
+      pos = Math.max(0, Math.min(rawPos, editor.state.doc.contentLength));
+    editor.dispatch({effects: setAttachmentUploadDecoration.of({pos, widget: progressUI.widget})});
+    return progressUI;
+  };
+  const insertLinkedAttachment = async (file: File) => {
+    const kind = pendingAttachmentKind,
+      port = options.attachments;
+    if (!kind || !port || attachmentBusy || destroyed) return;
+    const token = lifecycle,
+      controller = new AbortController(),
+      initialSelection = editor.state.field(pendingLinkedAttachmentSelection);
+    let uploaded: {id: string; name: string; type: string} | null = null;
+    if (!initialSelection) {
+      updateEditorStatus('Place the caret in text and retry the attachment.', 'error');
+      return;
+    }
+    if (kind === 'audio' && selectionInsideTable(editor, initialSelection)) {
+      updateEditorStatus('Audio blocks cannot go inside tables.', 'error');
+      return;
+    }
+    const progressUI = anchorAttachmentProgress(kind, file, controller, initialSelection);
+    try {
+      attachmentBusy = true;
+      options.onAssetBusy?.(true);
+      attachmentAbortController = controller;
+      pdfMenuItem.disabled = true;
+      audioMenuItem.disabled = true;
+      updateEditorStatus('', '');
+      progressUI.update({phase: 'preparing', loaded: 0, total: file.size});
+      uploaded = await port.upload(file, {
+        signal: controller.signal,
+        onProgress: progress => {
+          if (attachAlive(token) && attachmentAbortController === controller) progressUI.update(progress);
+        }
+      });
+      if (!attachAlive(token)) return;
+      if (!uploaded || !validAssetId(uploaded.id) || typeof uploaded.name !== 'string' || typeof uploaded.type !== 'string')
+        throw new Error('Attachment upload returned invalid metadata.');
+      if (kind === 'pdf' ? uploaded.type !== 'application/pdf' : !AUDIO_MIME_TYPES.has(uploaded.type))
+        throw new Error(`Choose a supported ${kind === 'pdf' ? 'PDF' : 'audio'} file.`);
+      const selection = editor.state.field(pendingLinkedAttachmentSelection);
+      if (!selection) throw new Error('Place the caret in text and retry the attachment.');
+      if (kind === 'audio') {
+        insertStructuralBlockAt(
+          editor,
+          StudyAudio.of({attachmentId: uploaded.id, name: normalizeAttachmentName(uploaded.name || file.name)}),
+          'insert.attachment.audio',
+          structuralInsertionRange(editor, selection)
+        );
+        updateEditorStatus('Audio attached.', 'success');
+      } else {
+        restoreSelection(selection);
+        if (!(editor.state.selection instanceof GardSelection.Text))
+          editor.dispatch({selection: context => GardSelection.near(context, Math.min(selection.to, context.doc.contentLength), 1)});
+        if (!(editor.state.selection instanceof GardSelection.Text)) throw new Error('Place the caret in text and retry the attachment.');
+        insertLinkedText(
+          editor,
+          normalizeAttachmentName(uploaded.name || file.name),
+          `#attachment=${uploaded.id}`,
+          'insert.attachment.link'
+        );
+        updateEditorStatus('PDF linked.', 'success');
+      }
+    } catch (error) {
+      if (!attachAlive(token)) return;
+      if (error instanceof Error && error.name === 'AbortError') {
+        updateEditorStatus('Attachment cancelled.', '');
+        return;
+      }
+      console.error('Rich-text attachment failed:', error);
+      const message = uploaded
+        ? `${uploaded.name || 'Attachment'} was saved to Attachments, but its note reference could not be inserted.`
+        : error instanceof Error
+          ? error.message
+          : 'Attachment could not be added.';
+      updateEditorStatus(message, 'error');
+    } finally {
+      if (attachmentAbortController === controller) attachmentAbortController = null;
+      attachmentBusy = false;
+      options.onAssetBusy?.(false);
+      if (attachAlive(token)) {
+        editor.dispatch({effects: setAttachmentUploadDecoration.of(null)});
+        pdfMenuItem.disabled = !options.attachments;
+        audioMenuItem.disabled = !options.attachments;
+        finishLinkedAttachmentPicker();
+        editor.focus();
+      }
+    }
+  };
+  const startLinkedAttachment = (event: Event) => {
+    if (destroyed || attachmentBusy) return;
+    const input = event.currentTarget as HTMLInputElement,
+      file = input.files?.[0] || null;
+    if (!file) {
+      finishLinkedAttachmentPicker();
+      return;
+    }
+    void insertLinkedAttachment(file);
+  };
+  const cancelLinkedAttachment = () => {
+    if (destroyed || attachmentBusy) return;
+    finishLinkedAttachmentPicker();
+    updateEditorStatus('', '');
+    editor.focus();
+  };
+  linkedAttachmentInput.addEventListener('change', startLinkedAttachment);
+  linkedAttachmentInput.addEventListener('cancel', cancelLinkedAttachment);
+  const startLinkedAttachmentPicker = (kind: AttachmentKind) => {
+    closePopups();
+    if (!options.attachments) {
+      updateEditorStatus('Attachment Library is unavailable here.', 'error');
+      return;
+    }
+    pendingAttachmentKind = kind;
+    editor.dispatch({effects: setPendingLinkedAttachmentSelection.of(editor.state.selection)});
+    linkedAttachmentInput.accept =
+      kind === 'pdf'
+        ? 'application/pdf,.pdf'
+        : 'audio/mpeg,audio/wav,audio/ogg,audio/flac,audio/mp4,audio/webm,.mp3,.wav,.ogg,.flac,.m4a,.mp4,.webm';
+    linkedAttachmentInput.setAttribute('aria-label', kind === 'pdf' ? 'Choose a PDF to attach' : 'Choose an audio file to attach');
+    field.dataset.richAssetPicker = 'active';
+    updateEditorStatus(`Choose ${kind === 'pdf' ? 'a PDF' : 'an audio file'} to attach…`, 'busy');
+    try {
+      linkedAttachmentInput.click();
+    } catch {
+      finishLinkedAttachmentPicker();
+      updateEditorStatus('The attachment picker could not open. Retry, or choose a different file.', 'error');
+    }
+  };
+  pdfMenuItem = createButton('PDF', 'Attach PDF', () => startLinkedAttachmentPicker('pdf'));
+  audioMenuItem = createButton('Audio', 'Attach audio', () => startLinkedAttachmentPicker('audio'));
+  setDisabled(pdfMenuItem, !options.attachments);
+  setDisabled(audioMenuItem, !options.attachments);
+  const attachmentMenu = document.createElement('div');
+  attachmentMenu.append(imageMenuItem, pdfMenuItem, audioMenuItem);
+  const attachmentTrigger = popupTrigger('', 'Attach', attachmentMenu, 'sd-rte-attachment-trigger');
+  const attachmentIcon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  attachmentIcon.setAttribute('viewBox', '0 0 24 24');
+  attachmentIcon.setAttribute('aria-hidden', 'true');
+  const attachmentPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  attachmentPath.setAttribute('d', 'M8.5 12.5 15.8 5.2a3 3 0 0 1 4.2 4.2l-9 9a5 5 0 0 1-7.1-7.1l8.4-8.4');
+  attachmentIcon.appendChild(attachmentPath);
+  attachmentTrigger.appendChild(attachmentIcon);
+  const pasteImage = (event: InputEvent | ClipboardEvent, wg: Wordgard) => {
+    if (options.allowAssetInsert === false) return false;
+    const file = ('clipboardData' in event ? event.clipboardData : event.dataTransfer)?.files[0];
+    if (!file?.type.startsWith('image/')) return false;
+    if (!imageBusy) {
+      wg.dispatch({effects: setPendingImageSelection.of(wg.state.selection)});
+      void attachImage(file);
+    }
+    return true;
+  };
+  const tableButton = createButton('Table', 'Insert 2 × 2 table', () => {
+      if (tablePosition(editor)) {
+        updateEditorStatus('Nested tables are not supported.', 'error');
+        return;
+      }
+      insertStructuralBlock(editor, makeTable(2, 2), 'insert.table', true);
+      editor.focus();
+    }),
+    ruleButton = createButton('―', 'Horizontal rule', () => {
+      if (cellPosition(editor)) {
+        updateEditorStatus('Horizontal rules cannot be inserted inside tables.', 'error');
+        return;
+      }
+      insertStructuralBlock(editor, HorizontalRule, 'insert.horizontal-rule');
+      editor.focus();
+    });
+  const historyGroup = toolbarGroup('History', undoControl, redoControl),
+    textGroup = toolbarGroup('Text formatting', styleTrigger, boldButton, italicButton, highlightButton, moreFormatTrigger),
+    listGroup = toolbarGroup('Lists', bulletButton, numberButton, checkButton),
+    quoteGroup = toolbarGroup('Block quote', quoteButton),
+    insertGroup = toolbarGroup('Links and blocks', linkTrigger, tableButton, ruleButton),
+    attachmentGroup = options.allowAssetInsert === false ? null : toolbarGroup('Attachments', attachmentTrigger);
+  historyGroup.classList.add('sd-rte-toolbar-group-history');
+  const listOutdentButton = createButton('←', 'Outdent list item', () => listNesting(editor, true)),
+    listIndentButton = createButton('→', 'Indent list item', () => listNesting(editor, false));
+  listTools.append(listToolsLabel, listOutdentButton, listIndentButton);
+  toolbarRail.append(
+    historyGroup,
+    textGroup,
+    listGroup,
+    listTools,
+    quoteGroup,
+    insertGroup,
+    tableTools,
+    ...(attachmentGroup ? [attachmentGroup] : [])
+  );
+  scheduleToolbarOverflow();
 
-  const selectedTablePosition=()=>{const selection=editor.state.selection;if(selection instanceof GardSelection.Node&&selection.node.type===Table.type)return {before:selection.from,after:selection.to,node:selection.node};return tablePosition(editor)};
-  const acquireTableRulerHandle=(index:number)=>{let handle=tableRulerPool[index];if(!handle){handle=document.createElement('span');handle.className='sd-rte-table-ruler-handle';handle.setAttribute('role','presentation');tableRuler.appendChild(handle);tableRulerPool.push(handle)}handle.hidden=false;return handle};
-  const renderTableRuler=()=>{if(destroyed)return;if(!coarsePointerAvailable()){tableRuler.hidden=true;for(const handle of tableRulerPool)handle.hidden=true;return}const selected=selectedTablePosition(),tableDOM=selected?editor.nodeDOM(selected.before) as HTMLTableElement|null:null,table=tableDOM?.matches('table')?tableDOM:tableDOM?.closest?.('table') as HTMLTableElement|null;if(!table||!table.isConnected){tableRuler.hidden=true;for(const handle of tableRulerPool)handle.hidden=true;return}const firstRow=table.rows[0],firstCells=firstRow?[...firstRow.cells]:[];if(firstCells.length<2){tableRuler.hidden=true;for(const handle of tableRulerPool)handle.hidden=true;return}const viewport=table.getBoundingClientRect(),handleSize=44,visual=window.visualViewport,viewTop=visual?.offsetTop||0,viewBottom=viewTop+(visual?.height||innerHeight),visibleTop=Math.max(viewport.top,viewTop+4),visibleBottom=Math.min(viewport.bottom,viewBottom-4),visibleHeight=visibleBottom-visibleTop;if(visibleHeight<handleSize){tableRuler.hidden=true;for(const handle of tableRulerPool)handle.hidden=true;return}tableRuler.hidden=false;tableRuler.style.left=`${viewport.left}px`;tableRuler.style.top=`${visibleTop}px`;tableRuler.style.width=`${Math.max(0,viewport.width)}px`;tableRuler.style.height=`${visibleHeight}px`;let used=0;for(let colIndex=0;colIndex<firstCells.length-1;colIndex++){const cell=firstCells[colIndex],x=cell.getBoundingClientRect().right;if(x<=viewport.left||x>=viewport.right)continue;const handle=acquireTableRulerHandle(used++);handle.style.left=`${x-viewport.left}px`;tableRulerTargets.set(handle,{cell,table,rowIndex:0,colIndex})}for(let i=used;i<tableRulerPool.length;i++)tableRulerPool[i].hidden=true};
-  scheduleTableRuler=()=>{if(tableRulerFrame||destroyed)return;tableRulerFrame=requestAnimationFrame(()=>{tableRulerFrame=0;renderTableRuler()})};
-  const headerToggle=createButton('Header','Toggle header row',()=>toggleTableHeader(editor)),rowRemove=createButton('Row −','Delete row',()=>editTable(editor,'row',-1)),rowAdd=createButton('Row +','Add row',()=>editTable(editor,'row',1)),colRemove=createButton('Col −','Delete column',()=>editTable(editor,'column',-1)),colAdd=createButton('Col +','Add column',()=>editTable(editor,'column',1)),removeTableItem=createButton('Delete','Delete table',()=>{const table=selectedTablePosition();if(!table)return;editor.dispatch({changes:{from:table.before,to:table.after,fit:true},selection:context=>GardSelection.near(context,table.before,-1),userEvent:'delete.table'});editor.focus()},'danger');tableTools.append(tableToolsLabel,headerToggle,rowRemove,rowAdd,colRemove,colAdd,removeTableItem);
-  const revealContextTools=(tools:HTMLElement)=>{if(tableRevealFrame)cancelAnimationFrame(tableRevealFrame);tableRevealFrame=requestAnimationFrame(()=>{tableRevealFrame=0;if(tools.hidden||!toolbar.isConnected)return;const target=Math.max(0,Math.min(tools.offsetLeft-6,toolbarRail.scrollWidth-toolbarRail.clientWidth));if(target>toolbarRail.scrollLeft+2)toolbarRail.scrollLeft=target;scheduleToolbarOverflow()})};
-  const refreshToolbar=()=>{if(!editor)return;const selection=editor.state.selection,resizeInteraction=!!activeImageResize||!!activeTableResize,imageSelection=selection instanceof GardSelection.Node&&selection.node.type===StudyImage&&!resizeInteraction?selection:null,textSelection=selection instanceof GardSelection.Text&&!resizeInteraction&&!atomicGapAtSelection(editor),typography=textSelection?typographyState(editor.state):null,rawTextSelection=selection instanceof GardSelection.Text,list=textSelection?listPosition(editor):null,textTable=rawTextSelection?tablePosition(editor):null,nodeTable=selection instanceof GardSelection.Node&&selection.node.type===Table.type?{before:selection.from,after:selection.to,node:selection.node}:null,table=textTable||nodeTable,rows=table&&table.node.isPlot?table.node.content.length:0,columns=table&&table.node.isPlot&&table.node.firstChild?.isPlot?table.node.firstChild.content.length:0,isHeading=textSelection&&actionActive(headingAction),isParagraph=textSelection&&actionActive(paragraphAction),isChecklist=!!list&&list.node.type===BulletList.type&&!!Checklist.isInSet(list.node.marks),header=!!table&&table.node.isPlot&&table.node.firstChild?.isPlot&&table.node.firstChild.content.every(cell=>cell.type===BlockHeaderCell.type),atomicSelection=selection instanceof GardSelection.Node&&atomicNode(selection.node),head=editor.state.sel.head,adjacentAtomic=atomicGapAtSelection(editor),showTableTools=!!table,suppressGap=String(atomicSelection||adjacentAtomic);if(editor.dom.dataset.sdSuppressGapCaret!==suppressGap)editor.dom.dataset.sdSuppressGapCaret=suppressGap;const imageMode=!!imageSelection;styleMenu.dataset.mode=imageMode?'image':'text';styleMenu.setAttribute('aria-label',imageMode?'Image alignment':'Typography');setButtonGlyph(styleTrigger,imageMode?'Img':'Aa');styleTrigger.title=imageMode?'Image position':'Typography';styleTrigger.setAttribute('aria-label',imageMode?'Image position':'Typography');setHidden(presetRow,imageMode);setHidden(sizeRow,imageMode);setHidden(spacingRow,imageMode);setHidden(alignJustify,imageMode);setDisabled(styleTrigger,!textSelection&&!imageMode);syncAction(normalItem,paragraphAction,!!typography&&typography.preset==='N',textSelection&&actionEnabled(paragraphAction));syncAction(h1Item,h1Action,!!typography&&typography.preset==='H1',textSelection&&actionEnabled(h1Action));syncAction(headingItem,h2Action,!!typography&&typography.preset==='H2',textSelection&&actionEnabled(h2Action));if(document.activeElement!==fontValue)fontValue.value=typography?String(typography.fontSize):'';fontValue.setAttribute('aria-valuenow',typography?String(typography.fontSize):'');setDisabled(fontMinus,!typography||typography.fontSize<=FONT_SIZE_MIN);setDisabled(fontPlus,!typography||typography.fontSize>=FONT_SIZE_MAX);setDisabled(spacingMinus,!typography||typography.lineHeight<=LINE_HEIGHT_STEPS[0]);setDisabled(spacingReset,!typography);setDisabled(spacingPlus,!typography||typography.lineHeight>=LINE_HEIGHT_STEPS[LINE_HEIGHT_STEPS.length-1]);const imageAlignment=imageSelection?normalizeImageAlignment((imageSelection.node.param as StudyImageValue).align):null;for(const [button,alignment] of [[alignLeft,'left'],[alignCenter,'center'],[alignRight,'right'],[alignJustify,'justify']] as const){const enabled=imageMode?alignment!=='justify':textSelection;setDisabled(button,!enabled);setPressed(button,imageMode?imageAlignment===alignment:!!typography&&typography.alignment===alignment)}syncAction(undoControl,undoAction,false);syncAction(redoControl,redoAction,false);const syncText=(button:HTMLButtonElement,action:HeadlessAction,active?:boolean)=>{const pressed=textSelection&&(active===undefined?actionActive(action):active);syncAction(button,action,pressed,textSelection&&actionEnabled(action))};syncText(boldButton,strongAction);syncText(italicButton,emphasisAction);syncText(highlightButton,highlightAction);syncText(underlineButton,underlineAction);syncText(subscriptButton,subscriptAction);syncText(superscriptButton,superscriptAction);syncText(quoteButton,blockquoteAction);setDisabled(moreFormatTrigger,!textSelection);setPressed(moreFormatTrigger,textSelection&&(actionActive(underlineAction)||actionActive(subscriptAction)||actionActive(superscriptAction)));setDisabled(linkTrigger,!textSelection);setPressed(linkTrigger,textSelection&&!!currentLink(editor));syncText(bulletButton,bulletListAction,textSelection&&actionActive(bulletListAction)&&!isChecklist);syncText(numberButton,orderedListAction,textSelection&&actionActive(orderedListAction));setDisabled(checkButton,!textSelection);setPressed(checkButton,textSelection&&isChecklist);const showListTools=!!list&&textSelection&&selection.empty;setHidden(listTools,!showListTools);setDisabled(listOutdentButton,!showListTools);setDisabled(listIndentButton,!showListTools||!canIndentListItem(editor));setHidden(tableTools,!showTableTools);setDisabled(tableButton,showTableTools);setDisabled(headerToggle,!textTable);setPressed(headerToggle,header);setDisabled(rowAdd,!textTable||rows>=MAX_TABLE_DIMENSION);setDisabled(rowRemove,!textTable||rows<=1);setDisabled(colAdd,!textTable||columns>=MAX_TABLE_DIMENSION);setDisabled(colRemove,!textTable||columns<=1);setDisabled(removeTableItem,!showTableTools);if(showListTools&&!listToolsWereVisible)revealContextTools(listTools);if(showTableTools&&!tableToolsWereVisible)revealContextTools(tableTools);listToolsWereVisible=showListTools;tableToolsWereVisible=showTableTools;scheduleTableRuler();scheduleToolbarOverflow()}
+  const selectedTablePosition = () => {
+    const selection = editor.state.selection;
+    if (selection instanceof GardSelection.Node && selection.node.type === Table.type)
+      return {before: selection.from, after: selection.to, node: selection.node};
+    return tablePosition(editor);
+  };
+  const acquireTableRulerHandle = (index: number) => {
+    let handle = tableRulerPool[index];
+    if (!handle) {
+      handle = document.createElement('span');
+      handle.className = 'sd-rte-table-ruler-handle';
+      handle.setAttribute('role', 'presentation');
+      tableRuler.appendChild(handle);
+      tableRulerPool.push(handle);
+    }
+    handle.hidden = false;
+    return handle;
+  };
+  const renderTableRuler = () => {
+    if (destroyed) return;
+    if (!coarsePointerAvailable()) {
+      tableRuler.hidden = true;
+      for (const handle of tableRulerPool) handle.hidden = true;
+      return;
+    }
+    const selected = selectedTablePosition(),
+      tableDOM = selected ? (editor.nodeDOM(selected.before) as HTMLTableElement | null) : null,
+      table = tableDOM?.matches('table') ? tableDOM : (tableDOM?.closest?.('table') as HTMLTableElement | null);
+    if (!table || !table.isConnected) {
+      tableRuler.hidden = true;
+      for (const handle of tableRulerPool) handle.hidden = true;
+      return;
+    }
+    const firstRow = table.rows[0],
+      firstCells = firstRow ? [...firstRow.cells] : [];
+    if (firstCells.length < 2) {
+      tableRuler.hidden = true;
+      for (const handle of tableRulerPool) handle.hidden = true;
+      return;
+    }
+    const viewport = table.getBoundingClientRect(),
+      handleSize = 44,
+      visual = window.visualViewport,
+      viewTop = visual?.offsetTop || 0,
+      viewBottom = viewTop + (visual?.height || innerHeight),
+      visibleTop = Math.max(viewport.top, viewTop + 4),
+      visibleBottom = Math.min(viewport.bottom, viewBottom - 4),
+      visibleHeight = visibleBottom - visibleTop;
+    if (visibleHeight < handleSize) {
+      tableRuler.hidden = true;
+      for (const handle of tableRulerPool) handle.hidden = true;
+      return;
+    }
+    tableRuler.hidden = false;
+    tableRuler.style.left = `${viewport.left}px`;
+    tableRuler.style.top = `${visibleTop}px`;
+    tableRuler.style.width = `${Math.max(0, viewport.width)}px`;
+    tableRuler.style.height = `${visibleHeight}px`;
+    let used = 0;
+    for (let colIndex = 0; colIndex < firstCells.length - 1; colIndex++) {
+      const cell = firstCells[colIndex],
+        x = cell.getBoundingClientRect().right;
+      if (x <= viewport.left || x >= viewport.right) continue;
+      const handle = acquireTableRulerHandle(used++);
+      handle.style.left = `${x - viewport.left}px`;
+      tableRulerTargets.set(handle, {cell, table, rowIndex: 0, colIndex});
+    }
+    for (let i = used; i < tableRulerPool.length; i++) tableRulerPool[i].hidden = true;
+  };
+  scheduleTableRuler = () => {
+    if (tableRulerFrame || destroyed) return;
+    tableRulerFrame = requestAnimationFrame(() => {
+      tableRulerFrame = 0;
+      renderTableRuler();
+    });
+  };
+  const headerToggle = createButton('Header', 'Toggle header row', () => toggleTableHeader(editor)),
+    rowRemove = createButton('Row −', 'Delete row', () => editTable(editor, 'row', -1)),
+    rowAdd = createButton('Row +', 'Add row', () => editTable(editor, 'row', 1)),
+    colRemove = createButton('Col −', 'Delete column', () => editTable(editor, 'column', -1)),
+    colAdd = createButton('Col +', 'Add column', () => editTable(editor, 'column', 1)),
+    removeTableItem = createButton(
+      'Delete',
+      'Delete table',
+      () => {
+        const table = selectedTablePosition();
+        if (!table) return;
+        editor.dispatch({
+          changes: {from: table.before, to: table.after, fit: true},
+          selection: context => GardSelection.near(context, table.before, -1),
+          userEvent: 'delete.table'
+        });
+        editor.focus();
+      },
+      'danger'
+    );
+  tableTools.append(tableToolsLabel, headerToggle, rowRemove, rowAdd, colRemove, colAdd, removeTableItem);
+  const revealContextTools = (tools: HTMLElement) => {
+    if (tableRevealFrame) cancelAnimationFrame(tableRevealFrame);
+    tableRevealFrame = requestAnimationFrame(() => {
+      tableRevealFrame = 0;
+      if (tools.hidden || !toolbar.isConnected) return;
+      const target = Math.max(0, Math.min(tools.offsetLeft - 6, toolbarRail.scrollWidth - toolbarRail.clientWidth));
+      if (target > toolbarRail.scrollLeft + 2) toolbarRail.scrollLeft = target;
+      scheduleToolbarOverflow();
+    });
+  };
+  const refreshToolbar = () => {
+    if (!editor) return;
+    const selection = editor.state.selection,
+      resizeInteraction = !!activeImageResize || !!activeTableResize,
+      imageSelection =
+        selection instanceof GardSelection.Node && selection.node.type === StudyImage && !resizeInteraction ? selection : null,
+      textSelection = selection instanceof GardSelection.Text && !resizeInteraction && !atomicGapAtSelection(editor),
+      typography = textSelection ? typographyState(editor.state) : null,
+      rawTextSelection = selection instanceof GardSelection.Text,
+      list = textSelection ? listPosition(editor) : null,
+      textTable = rawTextSelection ? tablePosition(editor) : null,
+      nodeTable =
+        selection instanceof GardSelection.Node && selection.node.type === Table.type
+          ? {before: selection.from, after: selection.to, node: selection.node}
+          : null,
+      table = textTable || nodeTable,
+      rows = table && table.node.isPlot ? table.node.content.length : 0,
+      columns = table && table.node.isPlot && table.node.firstChild?.isPlot ? table.node.firstChild.content.length : 0,
+      isHeading = textSelection && actionActive(headingAction),
+      isParagraph = textSelection && actionActive(paragraphAction),
+      isChecklist = !!list && list.node.type === BulletList.type && !!Checklist.isInSet(list.node.marks),
+      header =
+        !!table &&
+        table.node.isPlot &&
+        table.node.firstChild?.isPlot &&
+        table.node.firstChild.content.every(cell => cell.type === BlockHeaderCell.type),
+      atomicSelection = selection instanceof GardSelection.Node && atomicNode(selection.node),
+      head = editor.state.sel.head,
+      adjacentAtomic = atomicGapAtSelection(editor),
+      showTableTools = !!table,
+      suppressGap = String(atomicSelection || adjacentAtomic);
+    if (editor.dom.dataset.sdSuppressGapCaret !== suppressGap) editor.dom.dataset.sdSuppressGapCaret = suppressGap;
+    const imageMode = !!imageSelection;
+    styleMenu.dataset.mode = imageMode ? 'image' : 'text';
+    styleMenu.setAttribute('aria-label', imageMode ? 'Image alignment' : 'Typography');
+    setButtonGlyph(styleTrigger, imageMode ? 'Img' : 'Aa');
+    styleTrigger.title = imageMode ? 'Image position' : 'Typography';
+    styleTrigger.setAttribute('aria-label', imageMode ? 'Image position' : 'Typography');
+    setHidden(presetRow, imageMode);
+    setHidden(sizeRow, imageMode);
+    setHidden(spacingRow, imageMode);
+    setHidden(alignJustify, imageMode);
+    setDisabled(styleTrigger, !textSelection && !imageMode);
+    syncAction(normalItem, paragraphAction, !!typography && typography.preset === 'N', textSelection && actionEnabled(paragraphAction));
+    syncAction(h1Item, h1Action, !!typography && typography.preset === 'H1', textSelection && actionEnabled(h1Action));
+    syncAction(headingItem, h2Action, !!typography && typography.preset === 'H2', textSelection && actionEnabled(h2Action));
+    if (document.activeElement !== fontValue) fontValue.value = typography ? String(typography.fontSize) : '';
+    fontValue.setAttribute('aria-valuenow', typography ? String(typography.fontSize) : '');
+    setDisabled(fontMinus, !typography || typography.fontSize <= FONT_SIZE_MIN);
+    setDisabled(fontPlus, !typography || typography.fontSize >= FONT_SIZE_MAX);
+    setDisabled(spacingMinus, !typography || typography.lineHeight <= LINE_HEIGHT_STEPS[0]);
+    setDisabled(spacingReset, !typography);
+    setDisabled(spacingPlus, !typography || typography.lineHeight >= LINE_HEIGHT_STEPS[LINE_HEIGHT_STEPS.length - 1]);
+    const imageAlignment = imageSelection ? normalizeImageAlignment((imageSelection.node.param as StudyImageValue).align) : null;
+    for (const [button, alignment] of [
+      [alignLeft, 'left'],
+      [alignCenter, 'center'],
+      [alignRight, 'right'],
+      [alignJustify, 'justify']
+    ] as const) {
+      const enabled = imageMode ? alignment !== 'justify' : textSelection;
+      setDisabled(button, !enabled);
+      setPressed(button, imageMode ? imageAlignment === alignment : !!typography && typography.alignment === alignment);
+    }
+    syncAction(undoControl, undoAction, false);
+    syncAction(redoControl, redoAction, false);
+    const syncText = (button: HTMLButtonElement, action: HeadlessAction, active?: boolean) => {
+      const pressed = textSelection && (active === undefined ? actionActive(action) : active);
+      syncAction(button, action, pressed, textSelection && actionEnabled(action));
+    };
+    syncText(boldButton, strongAction);
+    syncText(italicButton, emphasisAction);
+    syncText(highlightButton, highlightAction);
+    syncText(underlineButton, underlineAction);
+    syncText(subscriptButton, subscriptAction);
+    syncText(superscriptButton, superscriptAction);
+    syncText(quoteButton, blockquoteAction);
+    setDisabled(moreFormatTrigger, !textSelection);
+    setPressed(
+      moreFormatTrigger,
+      textSelection && (actionActive(underlineAction) || actionActive(subscriptAction) || actionActive(superscriptAction))
+    );
+    setDisabled(linkTrigger, !textSelection);
+    setPressed(linkTrigger, textSelection && !!currentLink(editor));
+    syncText(bulletButton, bulletListAction, textSelection && actionActive(bulletListAction) && !isChecklist);
+    syncText(numberButton, orderedListAction, textSelection && actionActive(orderedListAction));
+    setDisabled(checkButton, !textSelection);
+    setPressed(checkButton, textSelection && isChecklist);
+    const showListTools = !!list && textSelection && selection.empty;
+    setHidden(listTools, !showListTools);
+    setDisabled(listOutdentButton, !showListTools);
+    setDisabled(listIndentButton, !showListTools || !canIndentListItem(editor));
+    setHidden(tableTools, !showTableTools);
+    setDisabled(tableButton, showTableTools);
+    setDisabled(headerToggle, !textTable);
+    setPressed(headerToggle, header);
+    setDisabled(rowAdd, !textTable || rows >= MAX_TABLE_DIMENSION);
+    setDisabled(rowRemove, !textTable || rows <= 1);
+    setDisabled(colAdd, !textTable || columns >= MAX_TABLE_DIMENSION);
+    setDisabled(colRemove, !textTable || columns <= 1);
+    setDisabled(removeTableItem, !showTableTools);
+    if (showListTools && !listToolsWereVisible) revealContextTools(listTools);
+    if (showTableTools && !tableToolsWereVisible) revealContextTools(tableTools);
+    listToolsWereVisible = showListTools;
+    tableToolsWereVisible = showTableTools;
+    scheduleTableRuler();
+    scheduleToolbarOverflow();
+  };
 
-
-  const imageControlPointerDown=(event:PointerEvent)=>{const target=event.target instanceof Element?event.target.closest<HTMLButtonElement>('.sd-rte-image-alt,.sd-rte-image-remove,.sd-rte-image-expand'):null;if(!target)return false;event.preventDefault();event.stopPropagation();return true};
-  const editImageAlt=(event:MouseEvent,wg:Wordgard)=>{const trigger=event.target instanceof Element?event.target.closest<HTMLButtonElement>('.sd-rte-image-alt'):null;if(!trigger)return false;event.preventDefault();event.stopPropagation();const figure=trigger.closest<HTMLElement>('.sd-rte-image'),found=figure?wg.nodeFromDOM(figure):null;if(!found||found.node.type!==StudyImage)return false;finishImageAltEdit(true,false);closePopups();const value=found.node.param as StudyImageValue;imageAltInput.value=value.alt;imageAltEdit={from:found.pos,assetId:value.assetId,original:value.alt,trigger,figure};imageAltController.show(trigger);queueMicrotask(()=>{if(imageAltEdit?.trigger===trigger){imageAltInput.focus();imageAltInput.select()}});return true};
-  const removeImage=(event:MouseEvent,wg:Wordgard)=>{const target=event.target instanceof Element?event.target.closest<HTMLButtonElement>('.sd-rte-image-remove'):null;if(!target)return false;event.preventDefault();event.stopPropagation();finishImageAltEdit(true,false);const figure=target.closest<HTMLElement>('.sd-rte-image'),found=figure?wg.nodeFromDOM(figure):null;if(!found||found.node.type!==StudyImage)return false;wg.dispatch({changes:{from:found.pos,to:found.pos+found.node.length,fit:true},selection:context=>GardSelection.near(context,found.pos,-1),userEvent:'delete.image'});wg.focus();return true};
-  const selectImageFromClick=(event:MouseEvent,wg:Wordgard)=>{const target=event.target instanceof Element?event.target:null;if(!target||target.closest('.sd-rte-image-alt,.sd-rte-image-remove,.sd-rte-image-resize,.sd-rte-image-expand'))return false;const figure=target.closest<HTMLElement>('.sd-rte-image');if(!figure)return false;const found=wg.nodeFromDOM(figure);if(!found||found.node.type!==StudyImage)return false;event.preventDefault();event.stopPropagation();if(!(wg.state.selection instanceof GardSelection.Node)||wg.state.selection.from!==found.pos)wg.dispatch({selection:GardSelection.node(found.pos,found.node),userEvent:'select.image'});return true};
-  const toggleChecklistItem=(event:MouseEvent,wg:Wordgard)=>{const target=event.target instanceof Element?event.target:null,item=target?.closest<HTMLElement>('ul[data-sd-checklist=true] li[role=checkbox]');if(!item||target?.closest('a,button'))return false;const rect=item.getBoundingClientRect(),hit=matchMedia('(pointer: coarse)').matches?44:26;if(event.clientX>rect.left+hit)return false;const found=wg.nodeFromDOM(item);if(!found||found.node.type!==ListItem.type)return false;const current=found.node.mark(ChecklistChecked)===true;wg.dispatch({changes:{from:found.pos,add:ChecklistChecked.of(!current)},userEvent:'sd.checklist.toggle'});wg.focus();return true};
-  const toggleChecklistFromKeyboard=(wg:Wordgard)=>{const item=listItemPosition(wg),list=item?.parent;if(!item||!list||list.node.type!==BulletList.type||!Checklist.isInSet(list.node.marks))return false;const current=item.node.mark(ChecklistChecked)===true;wg.dispatch({changes:{from:item.before,add:ChecklistChecked.of(!current)},userEvent:'sd.checklist.toggle.keyboard'});wg.focus();return true};
-  const clearResizeHint=()=>{if(hoverResizeCell)delete hoverResizeCell.dataset.sdResizeEdge;hoverResizeCell=null;delete editor.contentDOM.dataset.tableResize};
-  const finishDrag=()=>{dragCleanup?.();dragCleanup=null;if(activeTableResize){clearTableResizePreview();activeTableResize=null}clearResizeHint();if(!destroyed)refreshToolbar()};
-  const beginImageResize=(event:PointerEvent,target:HTMLButtonElement,wg:Wordgard)=>{const figure=target.closest<HTMLElement>('.sd-rte-image'),found=figure?wg.nodeFromDOM(figure):null;if(!figure||!found||found.node.type!==StudyImage)return false;event.preventDefault();event.stopPropagation();finishDrag();clearImageResizePreview(false);const startX=event.clientX,value=found.node.param as StudyImageValue,startPct=normalizeImageWidth(value.widthPct),base=Math.max(1,wg.contentDOM.getBoundingClientRect().width),pointerId=event.pointerId;activeImageResize={pos:found.pos,widthPct:startPct};if(!(wg.state.selection instanceof GardSelection.Node)||wg.state.selection.from!==found.pos)wg.dispatch({selection:GardSelection.node(found.pos,found.node),userEvent:'select.image.resize'});refreshToolbar();try{target.setPointerCapture(pointerId)}catch{}paintImageResize();dragCleanup=pointerDrag(pointerId,pointer=>{if(activeImageResize)activeImageResize.widthPct=normalizeImageWidth(startPct+(pointer.clientX-startX)/base*100)},paintImageResize,commit=>{try{if(target.hasPointerCapture(pointerId))target.releasePointerCapture(pointerId)}catch{}const preview=activeImageResize;delete editor.dom.dataset.sdImageResizing;if(commit&&!destroyed&&preview)wg.dispatch({effects:setResizeDecorations.of([]),changes:{from:preview.pos,to:preview.pos+found.node.length,insert:[StudyImage.of({...value,widthPct:preview.widthPct})]},userEvent:'resize.image'});else if(!destroyed)wg.dispatch({effects:setResizeDecorations.of([])});activeImageResize=null;dragCleanup=null;refreshToolbar()});return true};
-  const tableResizeTarget=(event:PointerEvent):TableResizeTarget|null=>{const target=event.target instanceof Element?event.target:null,cell=target?.closest<HTMLTableCellElement>('td,th'),table=cell?.closest<HTMLTableElement>('table');if(!cell||!table)return null;const row=cell.parentElement as HTMLTableRowElement|null;if(!row)return null;const rect=cell.getBoundingClientRect(),edgeHit=event.pointerType==='touch'?12:event.pointerType==='pen'?10:7,nearLeft=Math.abs(event.clientX-rect.left)<=edgeHit,nearRight=Math.abs(event.clientX-rect.right)<=edgeHit,colIndex=cell.cellIndex,rowIndex=row.rowIndex;if(colIndex<0||rowIndex<0||(!nearLeft&&!nearRight))return null;const xLeft=Math.abs(event.clientX-rect.left),xRight=Math.abs(event.clientX-rect.right);if(nearLeft&&colIndex>0&&xLeft<=xRight){const previous=row.cells[colIndex-1];if(previous)return {cell:previous,table,rowIndex,colIndex:colIndex-1}}if(nearRight&&colIndex<row.cells.length-1)return {cell,table,rowIndex,colIndex};return null};
-  const hoverTableResize=(event:PointerEvent,wg:Wordgard)=>{if(dragCleanup)return;const target=tableResizeTarget(event);if(hoverResizeCell&&hoverResizeCell!==target?.cell)delete hoverResizeCell.dataset.sdResizeEdge;hoverResizeCell=target?.cell||null;if(target){wg.contentDOM.dataset.tableResize='col';target.cell.dataset.sdResizeEdge='col'}else clearResizeHint()};
-  const beginTableResize=(event:PointerEvent,target:TableResizeTarget,wg:Wordgard)=>{event.preventDefault();event.stopPropagation();finishDrag();hoverResizeCell=target.cell;target.cell.dataset.sdResizeEdge='col';wg.contentDOM.dataset.tableResize='col';const {table,rowIndex,colIndex}=target,tableFound=wg.nodeFromDOM(table);if(!tableFound||tableFound.node.type!==Table.type)return false;const startX=event.clientX,rows=[...table.rows],tableWidth=Math.max(1,table.tBodies[0]?.getBoundingClientRect().width||table.scrollWidth||table.getBoundingClientRect().width),pointerId=event.pointerId,captureTarget=event.target instanceof Element&&'setPointerCapture' in event.target?event.target as HTMLElement:target.cell,left=rows[rowIndex]?.cells[colIndex],right=rows[rowIndex]?.cells[colIndex+1];if(!left||!right)return false;const startA=parseFloat((left as HTMLElement).style.width)||100/rows[rowIndex].cells.length,startB=parseFloat((right as HTMLElement).style.width)||100/rows[rowIndex].cells.length,leftPositions:number[]=[],rightPositions:number[]=[];for(const row of rows){const a=wg.nodeFromDOM(row.cells[colIndex]),b=wg.nodeFromDOM(row.cells[colIndex+1]);if(!a||!b)return false;leftPositions.push(a.pos);rightPositions.push(b.pos)}activeTableResize={tablePos:tableFound.pos,leftPositions,rightPositions,startA,startB,valueA:startA,valueB:startB};try{captureTarget.setPointerCapture(pointerId)}catch{}refreshToolbar();paintTableResize();dragCleanup=pointerDrag(pointerId,pointer=>{const preview=activeTableResize;if(!preview)return;const minShare=Math.max(MIN_TABLE_COLUMN_PCT,MIN_TABLE_CELL_PX/tableWidth*100),delta=Math.max(-(startA-minShare),Math.min(startB-minShare,(pointer.clientX-startX)/tableWidth*100));preview.valueA=normalizeCellWidth(startA+delta);preview.valueB=normalizeCellWidth(startB-delta)},paintTableResize,commit=>{try{if(captureTarget.hasPointerCapture(pointerId))captureTarget.releasePointerCapture(pointerId)}catch{}const preview=activeTableResize;delete editor.dom.dataset.sdTableResizing;if(commit&&preview){const changes:any[]=[];for(let i=0;i<preview.leftPositions.length;i++)changes.push({from:preview.leftPositions[i],add:CellWidth.of(preview.valueA)},{from:preview.rightPositions[i],add:CellWidth.of(preview.valueB)});wg.dispatch({effects:setResizeDecorations.of([]),changes,userEvent:'resize.table.column'})}else clearTableResizePreview();activeTableResize=null;dragCleanup=null;clearResizeHint();refreshToolbar()});return true};
-  tableRuler.addEventListener('pointerdown',event=>{const handle=event.target instanceof Element?event.target.closest<HTMLElement>('.sd-rte-table-ruler-handle'):null,target=handle?tableRulerTargets.get(handle):null;if(!handle||!target)return;try{handle.setPointerCapture(event.pointerId)}catch{}beginTableResize(event,target,editor)});
-  editor.contentDOM.addEventListener('scroll',scheduleTableRuler,{capture:true,passive:true,signal:tableRulerAbort.signal});window.addEventListener('scroll',scheduleTableRuler,{capture:true,passive:true,signal:tableRulerAbort.signal});window.addEventListener('resize',scheduleTableRuler,{passive:true,signal:tableRulerAbort.signal});window.visualViewport?.addEventListener('resize',scheduleTableRuler,{passive:true,signal:tableRulerAbort.signal});window.visualViewport?.addEventListener('scroll',scheduleTableRuler,{passive:true,signal:tableRulerAbort.signal});
-  const pointerDown=(event:PointerEvent,wg:Wordgard)=>{if(imageControlPointerDown(event))return true;const imageHandle=event.target instanceof Element?event.target.closest<HTMLButtonElement>('.sd-rte-image-resize'):null;if(imageHandle)return beginImageResize(event,imageHandle,wg);const tableTarget=tableResizeTarget(event);return tableTarget?beginTableResize(event,tableTarget,wg):false};
-  const imageResizeKeyboard=(wg:Wordgard,delta:number)=>{const active=wg.contentDOM.ownerDocument.activeElement,target=active instanceof Element?active.closest<HTMLButtonElement>('.sd-rte-image-resize'):null;if(!target)return false;const figure=target.closest<HTMLElement>('.sd-rte-image'),found=figure?wg.nodeFromDOM(figure):null;if(!found||found.node.type!==StudyImage)return false;const value=found.node.param as StudyImageValue,widthPct=normalizeImageWidth(value.widthPct+delta);wg.dispatch({changes:{from:found.pos,to:found.pos+found.node.length,insert:[StudyImage.of({...value,widthPct})]},userEvent:'resize.image.keyboard'});return true};
-  const contextualizeEditorLink=(event:MouseEvent,wg:Wordgard)=>{const anchor=event.target instanceof Element?event.target.closest<HTMLAnchorElement>('a[href]'):null,href=anchor?.getAttribute('href')||'';if(!anchor||!validSerializedLinkUrl(href))return false;if(event.metaKey||event.ctrlKey){event.preventDefault();linkController.hide();const noteId=noteLinkId(href);if(noteId)options.notes?.open(noteId);else openSafeLink(href);return true}event.preventDefault();const selection=linkRangeFromDOM(anchor,wg);if(!selection)return false;showLinkPopover(selection,href,true,anchor);return true};
-  const selectHorizontalRuleFromClick=(event:MouseEvent,wg:Wordgard)=>{const hr=event.target instanceof Element?event.target.closest<HTMLHRElement>('hr'):null;if(!hr)return false;const found=wg.nodeFromDOM(hr);if(!found||found.node.type!==HorizontalRule.type)return false;event.preventDefault();event.stopPropagation();if(!(wg.state.selection instanceof GardSelection.Node)||wg.state.selection.from!==found.pos)wg.dispatch({selection:GardSelection.node(found.pos,found.node),userEvent:'select.horizontal-rule'});return true};
-  const listNesting=(wg:Wordgard,shift:boolean)=>{const list=listPosition(wg);if(!list||!(wg.state.selection instanceof GardSelection.Text)||!wg.state.selection.empty)return false;if(shift)outdentListItem(wg)||Command.dispatch(wg,toggleList,list.node.tag);else indentListItem(wg);wg.focus();return true};
-  const atomicBackspace=(wg:Wordgard)=>{const selection=wg.state.selection;if(selection instanceof GardSelection.Node&&atomicNode(selection.node)){const insert=wg.state.doc.content.length===1?[Paragraph.create([])]:[];wg.dispatch({changes:{from:selection.from,to:selection.to,insert,fit:true},selection:context=>GardSelection.near(context,selection.from,-1),userEvent:'delete.atomic'});return true}const previous=atomicBeforeCursor(wg);if(!previous)return false;wg.dispatch({selection:GardSelection.node(previous.from,previous.node),userEvent:'select.atomic'});return true};
-  if(!readOnly){interactions.click=(event,wg)=>expandAudio(event,wg)||expandImage(event,wg)||editImageAlt(event,wg)||removeImage(event,wg)||toggleChecklistItem(event,wg)||contextualizeEditorLink(event,wg)||selectHorizontalRuleFromClick(event,wg)||selectAudioFromClick(event,wg)||selectImageFromClick(event,wg);interactions.toggleChecklist=toggleChecklistFromKeyboard;
-  interactions.paste=pasteImage;
-  // Dropped images, PDFs and audio files go where they land, as from the
-  // Attach menu, one after another in the order dropped (up to 10). Anything
-  // else is named and left out rather than opened by the browser.
-  const DROP_LIMIT=10;
-  const dropKind=(file:File):AttachmentKind|'image'|null=>{const type=String(file.type||'').toLowerCase();return type.startsWith('image/')?'image':type==='application/pdf'||/\.pdf$/i.test(file.name)?'pdf':AUDIO_MIME_TYPES.has(type)?'audio':null};
-  const attachDropped=async(file:File,kind:AttachmentKind|'image')=>{if(kind==='image'){if(cellPosition(editor)){updateEditorStatus(IMAGE_TABLE_ERROR,'error');return}editor.dispatch({effects:setPendingImageSelection.of(editor.state.selection)});await attachImage(file)}else{pendingAttachmentKind=kind;editor.dispatch({effects:setPendingLinkedAttachmentSelection.of(editor.state.selection)});await insertLinkedAttachment(file)}};
-  interactions.drop=(event,wg)=>{const files=[...(event.dataTransfer?.files||[])];if(!files.length)return false;if(options.allowAssetInsert===false)return true;if(imageBusy||attachmentBusy){updateEditorStatus('Wait for the current attachment to finish.','error');return true}const usable=files.map(file=>({file,kind:dropKind(file)})).filter((item):item is {file:File;kind:AttachmentKind|'image'}=>!!item.kind&&(item.kind==='image'||!!options.attachments)),left=files.length-usable.length,queued=usable.slice(0,DROP_LIMIT),over=usable.length-queued.length;if(!queued.length){updateEditorStatus(options.attachments?'Only images, PDFs and audio files can be dropped into a note.':'Only images can be dropped here.','error');return true}const at=wg.posAtCoords({x:event.clientX,y:event.clientY});if(at)wg.dispatch({selection:context=>GardSelection.near(context,Math.min(at.pos,context.doc.contentLength),1),userEvent:'select.drop'});wg.focus();const token=lifecycle;void(async()=>{for(const item of queued){if(!attachAlive(token))return;await attachDropped(item.file,item.kind)}if(!attachAlive(token)||!(left||over))return;updateEditorStatus([left?`${left} ${left===1?'file was':'files were'} not an image, PDF or audio file.`:'',over?`Only ${DROP_LIMIT} files are added at once.`:''].filter(Boolean).join(' '),'error')})();return true};interactions.beforeInput=(event,wg)=>{if(event.inputType!=='deleteContentBackward')return false;const selection=wg.state.selection;if(selection instanceof GardSelection.Node&&atomicNode(selection.node))return atomicBackspace(wg);wg.flush();return atomicBackspace(wg)};interactions.pointerDown=pointerDown;interactions.pointerMove=hoverTableResize;interactions.pointerLeave=()=>clearResizeHint();interactions.tab=listNesting;interactions.backspace=atomicBackspace;interactions.resizeImage=imageResizeKeyboard;}
-  const baseClick=interactions.click;interactions.click=(event,wg)=>baseClick(event,wg)||tagClick(event);
-  const focusMode=installFocusMode(options,field,wrapper,toolbar,editor,closePopups);refreshEditor();if(options.focusOnMount)queueMicrotask(()=>{if(!destroyed&&wrapper.isConnected)editor.focus()});
-  return {getValue(){publish();return field.value},flush(){publish()},setValue(value:string){if(destroyed)return false;publish();const decoded=decodeStoredValue(value);if(decoded.kind==='invalid-rich')return false;const doc=decoded.kind==='rich'?decoded.doc:DocumentSchema.docFromJSON({type:'Doc',content:normalizePlainText(decoded.text).split('\n').map(line=>({type:'Paragraph',content:line?[{type:'Text',param:line}]:[]}))});replaceDocument(editor,doc,'reconciliation.set-value');return true},setTransientRanges(ranges:readonly MergeRange[]){if(!destroyed)editor.dispatch({effects:setTransientReconciliationRanges.of(Array.isArray(ranges)?ranges:[])})},search(query:string,onClear?:()=>void){if(destroyed)return 0;searchCleared=null;const ranges=findTextMatches(editor.state.doc,query);if(!ranges.length){editor.dispatch({effects:setSearchMatches.of(null)});return 0}editor.dispatch({effects:[setSearchMatches.of(searchMatchState(ranges,0)),Wordgard.scrollIntoView(ranges[0]!.from,{y:'center'})]});searchCleared=typeof onClear==='function'?onClear:null;return ranges.length},stepSearch(direction:1|-1){const value=destroyed?null:editor.state.field(searchMatches);if(!value)return {index:-1,count:0};const count=value.ranges.length,index=((value.current+(direction<0?-1:1))%count+count)%count;editor.dispatch({effects:[setSearchMatches.of(searchMatchState(value.ranges,index)),Wordgard.scrollIntoView(value.ranges[index]!.from,{y:'center'})]});return {index,count}},clearSearch(){if(!destroyed&&editor.state.field(searchMatches))editor.dispatch({effects:setSearchMatches.of(null)})},focus(){if(!destroyed)editor.focus()},async destroy(){if(destroyed)return;publish();finishImageAltEdit(true,false);destroyed=true;lifecycle++;attachmentAbortController?.abort();attachmentAbortController=null;imageAbort.abort();if(imageRefreshFrame)cancelAnimationFrame(imageRefreshFrame);if(tableRevealFrame)cancelAnimationFrame(tableRevealFrame);if(tableRulerFrame)cancelAnimationFrame(tableRulerFrame);if(toolbarCueFrame)cancelAnimationFrame(toolbarCueFrame);imageRefreshFrame=0;tableRevealFrame=0;tableRulerFrame=0;toolbarCueFrame=0;toolbarResizeObserver?.disconnect();tableRulerAbort.abort();clearImageResizePreview();clearTableResizePreview(false);finishImagePicker();finishLinkedAttachmentPicker();linkSelection=null;delete field.dataset.richEditorStatus;delete field.dataset.richEditorStatusState;finishDrag();activeImageResize=null;closePopups();focusMode.destroy();settlePendingAssets(pendingAssets,options.assets,currentAssetIds);for(const controller of popupControllers)controller.destroy();for(const id of [...imageCache.keys()])releaseImage(id);for(const id of [...audioCache.keys()])releaseAudio(id);editor.dom.remove();wrapper.remove();field.style.display=originalDisplay;if(originalAriaHidden===null)field.removeAttribute('aria-hidden');else field.setAttribute('aria-hidden',originalAriaHidden);field.value=encodeDocument(lastAccepted,inspectDocument(lastAccepted).hasContent)}}
+  const imageControlPointerDown = (event: PointerEvent) => {
+    const target =
+      event.target instanceof Element
+        ? event.target.closest<HTMLButtonElement>('.sd-rte-image-alt,.sd-rte-image-remove,.sd-rte-image-expand')
+        : null;
+    if (!target) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  };
+  const editImageAlt = (event: MouseEvent, wg: Wordgard) => {
+    const trigger = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.sd-rte-image-alt') : null;
+    if (!trigger) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const figure = trigger.closest<HTMLElement>('.sd-rte-image'),
+      found = figure ? wg.nodeFromDOM(figure) : null;
+    if (!found || found.node.type !== StudyImage) return false;
+    finishImageAltEdit(true, false);
+    closePopups();
+    const value = found.node.param as StudyImageValue;
+    imageAltInput.value = value.alt;
+    imageAltEdit = {from: found.pos, assetId: value.assetId, original: value.alt, trigger, figure};
+    imageAltController.show(trigger);
+    queueMicrotask(() => {
+      if (imageAltEdit?.trigger === trigger) {
+        imageAltInput.focus();
+        imageAltInput.select();
+      }
+    });
+    return true;
+  };
+  const removeImage = (event: MouseEvent, wg: Wordgard) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.sd-rte-image-remove') : null;
+    if (!target) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    finishImageAltEdit(true, false);
+    const figure = target.closest<HTMLElement>('.sd-rte-image'),
+      found = figure ? wg.nodeFromDOM(figure) : null;
+    if (!found || found.node.type !== StudyImage) return false;
+    wg.dispatch({
+      changes: {from: found.pos, to: found.pos + found.node.length, fit: true},
+      selection: context => GardSelection.near(context, found.pos, -1),
+      userEvent: 'delete.image'
+    });
+    wg.focus();
+    return true;
+  };
+  const selectImageFromClick = (event: MouseEvent, wg: Wordgard) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target.closest('.sd-rte-image-alt,.sd-rte-image-remove,.sd-rte-image-resize,.sd-rte-image-expand')) return false;
+    const figure = target.closest<HTMLElement>('.sd-rte-image');
+    if (!figure) return false;
+    const found = wg.nodeFromDOM(figure);
+    if (!found || found.node.type !== StudyImage) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!(wg.state.selection instanceof GardSelection.Node) || wg.state.selection.from !== found.pos)
+      wg.dispatch({selection: GardSelection.node(found.pos, found.node), userEvent: 'select.image'});
+    return true;
+  };
+  const toggleChecklistItem = (event: MouseEvent, wg: Wordgard) => {
+    const target = event.target instanceof Element ? event.target : null,
+      item = target?.closest<HTMLElement>('ul[data-sd-checklist=true] li[role=checkbox]');
+    if (!item || target?.closest('a,button')) return false;
+    const rect = item.getBoundingClientRect(),
+      hit = matchMedia('(pointer: coarse)').matches ? 44 : 26;
+    if (event.clientX > rect.left + hit) return false;
+    const found = wg.nodeFromDOM(item);
+    if (!found || found.node.type !== ListItem.type) return false;
+    const current = found.node.mark(ChecklistChecked) === true;
+    wg.dispatch({changes: {from: found.pos, add: ChecklistChecked.of(!current)}, userEvent: 'sd.checklist.toggle'});
+    wg.focus();
+    return true;
+  };
+  const toggleChecklistFromKeyboard = (wg: Wordgard) => {
+    const item = listItemPosition(wg),
+      list = item?.parent;
+    if (!item || !list || list.node.type !== BulletList.type || !Checklist.isInSet(list.node.marks)) return false;
+    const current = item.node.mark(ChecklistChecked) === true;
+    wg.dispatch({changes: {from: item.before, add: ChecklistChecked.of(!current)}, userEvent: 'sd.checklist.toggle.keyboard'});
+    wg.focus();
+    return true;
+  };
+  const clearResizeHint = () => {
+    if (hoverResizeCell) delete hoverResizeCell.dataset.sdResizeEdge;
+    hoverResizeCell = null;
+    delete editor.contentDOM.dataset.tableResize;
+  };
+  const finishDrag = () => {
+    dragCleanup?.();
+    dragCleanup = null;
+    if (activeTableResize) {
+      clearTableResizePreview();
+      activeTableResize = null;
+    }
+    clearResizeHint();
+    if (!destroyed) refreshToolbar();
+  };
+  const beginImageResize = (event: PointerEvent, target: HTMLButtonElement, wg: Wordgard) => {
+    const figure = target.closest<HTMLElement>('.sd-rte-image'),
+      found = figure ? wg.nodeFromDOM(figure) : null;
+    if (!figure || !found || found.node.type !== StudyImage) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    finishDrag();
+    clearImageResizePreview(false);
+    const startX = event.clientX,
+      value = found.node.param as StudyImageValue,
+      startPct = normalizeImageWidth(value.widthPct),
+      base = Math.max(1, wg.contentDOM.getBoundingClientRect().width),
+      pointerId = event.pointerId;
+    activeImageResize = {pos: found.pos, widthPct: startPct};
+    if (!(wg.state.selection instanceof GardSelection.Node) || wg.state.selection.from !== found.pos)
+      wg.dispatch({selection: GardSelection.node(found.pos, found.node), userEvent: 'select.image.resize'});
+    refreshToolbar();
+    try {
+      target.setPointerCapture(pointerId);
+    } catch {}
+    paintImageResize();
+    dragCleanup = pointerDrag(
+      pointerId,
+      pointer => {
+        if (activeImageResize) activeImageResize.widthPct = normalizeImageWidth(startPct + ((pointer.clientX - startX) / base) * 100);
+      },
+      paintImageResize,
+      commit => {
+        try {
+          if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+        } catch {}
+        const preview = activeImageResize;
+        delete editor.dom.dataset.sdImageResizing;
+        if (commit && !destroyed && preview)
+          wg.dispatch({
+            effects: setResizeDecorations.of([]),
+            changes: {
+              from: preview.pos,
+              to: preview.pos + found.node.length,
+              insert: [StudyImage.of({...value, widthPct: preview.widthPct})]
+            },
+            userEvent: 'resize.image'
+          });
+        else if (!destroyed) wg.dispatch({effects: setResizeDecorations.of([])});
+        activeImageResize = null;
+        dragCleanup = null;
+        refreshToolbar();
+      }
+    );
+    return true;
+  };
+  const tableResizeTarget = (event: PointerEvent): TableResizeTarget | null => {
+    const target = event.target instanceof Element ? event.target : null,
+      cell = target?.closest<HTMLTableCellElement>('td,th'),
+      table = cell?.closest<HTMLTableElement>('table');
+    if (!cell || !table) return null;
+    const row = cell.parentElement as HTMLTableRowElement | null;
+    if (!row) return null;
+    const rect = cell.getBoundingClientRect(),
+      edgeHit = event.pointerType === 'touch' ? 12 : event.pointerType === 'pen' ? 10 : 7,
+      nearLeft = Math.abs(event.clientX - rect.left) <= edgeHit,
+      nearRight = Math.abs(event.clientX - rect.right) <= edgeHit,
+      colIndex = cell.cellIndex,
+      rowIndex = row.rowIndex;
+    if (colIndex < 0 || rowIndex < 0 || (!nearLeft && !nearRight)) return null;
+    const xLeft = Math.abs(event.clientX - rect.left),
+      xRight = Math.abs(event.clientX - rect.right);
+    if (nearLeft && colIndex > 0 && xLeft <= xRight) {
+      const previous = row.cells[colIndex - 1];
+      if (previous) return {cell: previous, table, rowIndex, colIndex: colIndex - 1};
+    }
+    if (nearRight && colIndex < row.cells.length - 1) return {cell, table, rowIndex, colIndex};
+    return null;
+  };
+  const hoverTableResize = (event: PointerEvent, wg: Wordgard) => {
+    if (dragCleanup) return;
+    const target = tableResizeTarget(event);
+    if (hoverResizeCell && hoverResizeCell !== target?.cell) delete hoverResizeCell.dataset.sdResizeEdge;
+    hoverResizeCell = target?.cell || null;
+    if (target) {
+      wg.contentDOM.dataset.tableResize = 'col';
+      target.cell.dataset.sdResizeEdge = 'col';
+    } else clearResizeHint();
+  };
+  const beginTableResize = (event: PointerEvent, target: TableResizeTarget, wg: Wordgard) => {
+    event.preventDefault();
+    event.stopPropagation();
+    finishDrag();
+    hoverResizeCell = target.cell;
+    target.cell.dataset.sdResizeEdge = 'col';
+    wg.contentDOM.dataset.tableResize = 'col';
+    const {table, rowIndex, colIndex} = target,
+      tableFound = wg.nodeFromDOM(table);
+    if (!tableFound || tableFound.node.type !== Table.type) return false;
+    const startX = event.clientX,
+      rows = [...table.rows],
+      tableWidth = Math.max(1, table.tBodies[0]?.getBoundingClientRect().width || table.scrollWidth || table.getBoundingClientRect().width),
+      pointerId = event.pointerId,
+      captureTarget = event.target instanceof Element && 'setPointerCapture' in event.target ? (event.target as HTMLElement) : target.cell,
+      left = rows[rowIndex]?.cells[colIndex],
+      right = rows[rowIndex]?.cells[colIndex + 1];
+    if (!left || !right) return false;
+    const startA = parseFloat((left as HTMLElement).style.width) || 100 / rows[rowIndex].cells.length,
+      startB = parseFloat((right as HTMLElement).style.width) || 100 / rows[rowIndex].cells.length,
+      leftPositions: number[] = [],
+      rightPositions: number[] = [];
+    for (const row of rows) {
+      const a = wg.nodeFromDOM(row.cells[colIndex]),
+        b = wg.nodeFromDOM(row.cells[colIndex + 1]);
+      if (!a || !b) return false;
+      leftPositions.push(a.pos);
+      rightPositions.push(b.pos);
+    }
+    activeTableResize = {tablePos: tableFound.pos, leftPositions, rightPositions, startA, startB, valueA: startA, valueB: startB};
+    try {
+      captureTarget.setPointerCapture(pointerId);
+    } catch {}
+    refreshToolbar();
+    paintTableResize();
+    dragCleanup = pointerDrag(
+      pointerId,
+      pointer => {
+        const preview = activeTableResize;
+        if (!preview) return;
+        const minShare = Math.max(MIN_TABLE_COLUMN_PCT, (MIN_TABLE_CELL_PX / tableWidth) * 100),
+          delta = Math.max(-(startA - minShare), Math.min(startB - minShare, ((pointer.clientX - startX) / tableWidth) * 100));
+        preview.valueA = normalizeCellWidth(startA + delta);
+        preview.valueB = normalizeCellWidth(startB - delta);
+      },
+      paintTableResize,
+      commit => {
+        try {
+          if (captureTarget.hasPointerCapture(pointerId)) captureTarget.releasePointerCapture(pointerId);
+        } catch {}
+        const preview = activeTableResize;
+        delete editor.dom.dataset.sdTableResizing;
+        if (commit && preview) {
+          const changes: any[] = [];
+          for (let i = 0; i < preview.leftPositions.length; i++)
+            changes.push(
+              {from: preview.leftPositions[i], add: CellWidth.of(preview.valueA)},
+              {from: preview.rightPositions[i], add: CellWidth.of(preview.valueB)}
+            );
+          wg.dispatch({effects: setResizeDecorations.of([]), changes, userEvent: 'resize.table.column'});
+        } else clearTableResizePreview();
+        activeTableResize = null;
+        dragCleanup = null;
+        clearResizeHint();
+        refreshToolbar();
+      }
+    );
+    return true;
+  };
+  tableRuler.addEventListener('pointerdown', event => {
+    const handle = event.target instanceof Element ? event.target.closest<HTMLElement>('.sd-rte-table-ruler-handle') : null,
+      target = handle ? tableRulerTargets.get(handle) : null;
+    if (!handle || !target) return;
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch {}
+    beginTableResize(event, target, editor);
+  });
+  editor.contentDOM.addEventListener('scroll', scheduleTableRuler, {capture: true, passive: true, signal: tableRulerAbort.signal});
+  window.addEventListener('scroll', scheduleTableRuler, {capture: true, passive: true, signal: tableRulerAbort.signal});
+  window.addEventListener('resize', scheduleTableRuler, {passive: true, signal: tableRulerAbort.signal});
+  window.visualViewport?.addEventListener('resize', scheduleTableRuler, {passive: true, signal: tableRulerAbort.signal});
+  window.visualViewport?.addEventListener('scroll', scheduleTableRuler, {passive: true, signal: tableRulerAbort.signal});
+  const pointerDown = (event: PointerEvent, wg: Wordgard) => {
+    if (imageControlPointerDown(event)) return true;
+    const imageHandle = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('.sd-rte-image-resize') : null;
+    if (imageHandle) return beginImageResize(event, imageHandle, wg);
+    const tableTarget = tableResizeTarget(event);
+    return tableTarget ? beginTableResize(event, tableTarget, wg) : false;
+  };
+  const imageResizeKeyboard = (wg: Wordgard, delta: number) => {
+    const active = wg.contentDOM.ownerDocument.activeElement,
+      target = active instanceof Element ? active.closest<HTMLButtonElement>('.sd-rte-image-resize') : null;
+    if (!target) return false;
+    const figure = target.closest<HTMLElement>('.sd-rte-image'),
+      found = figure ? wg.nodeFromDOM(figure) : null;
+    if (!found || found.node.type !== StudyImage) return false;
+    const value = found.node.param as StudyImageValue,
+      widthPct = normalizeImageWidth(value.widthPct + delta);
+    wg.dispatch({
+      changes: {from: found.pos, to: found.pos + found.node.length, insert: [StudyImage.of({...value, widthPct})]},
+      userEvent: 'resize.image.keyboard'
+    });
+    return true;
+  };
+  const contextualizeEditorLink = (event: MouseEvent, wg: Wordgard) => {
+    const anchor = event.target instanceof Element ? event.target.closest<HTMLAnchorElement>('a[href]') : null,
+      href = anchor?.getAttribute('href') || '';
+    if (!anchor || !validSerializedLinkUrl(href)) return false;
+    if (event.metaKey || event.ctrlKey) {
+      event.preventDefault();
+      linkController.hide();
+      const noteId = noteLinkId(href);
+      if (noteId) options.notes?.open(noteId);
+      else openSafeLink(href);
+      return true;
+    }
+    event.preventDefault();
+    const selection = linkRangeFromDOM(anchor, wg);
+    if (!selection) return false;
+    showLinkPopover(selection, href, true, anchor);
+    return true;
+  };
+  const selectHorizontalRuleFromClick = (event: MouseEvent, wg: Wordgard) => {
+    const hr = event.target instanceof Element ? event.target.closest<HTMLHRElement>('hr') : null;
+    if (!hr) return false;
+    const found = wg.nodeFromDOM(hr);
+    if (!found || found.node.type !== HorizontalRule.type) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!(wg.state.selection instanceof GardSelection.Node) || wg.state.selection.from !== found.pos)
+      wg.dispatch({selection: GardSelection.node(found.pos, found.node), userEvent: 'select.horizontal-rule'});
+    return true;
+  };
+  const listNesting = (wg: Wordgard, shift: boolean) => {
+    const list = listPosition(wg);
+    if (!list || !(wg.state.selection instanceof GardSelection.Text) || !wg.state.selection.empty) return false;
+    if (shift) outdentListItem(wg) || Command.dispatch(wg, toggleList, list.node.tag);
+    else indentListItem(wg);
+    wg.focus();
+    return true;
+  };
+  const atomicBackspace = (wg: Wordgard) => {
+    const selection = wg.state.selection;
+    if (selection instanceof GardSelection.Node && atomicNode(selection.node)) {
+      const insert = wg.state.doc.content.length === 1 ? [Paragraph.create([])] : [];
+      wg.dispatch({
+        changes: {from: selection.from, to: selection.to, insert, fit: true},
+        selection: context => GardSelection.near(context, selection.from, -1),
+        userEvent: 'delete.atomic'
+      });
+      return true;
+    }
+    const previous = atomicBeforeCursor(wg);
+    if (!previous) return false;
+    wg.dispatch({selection: GardSelection.node(previous.from, previous.node), userEvent: 'select.atomic'});
+    return true;
+  };
+  if (!readOnly) {
+    interactions.click = (event, wg) =>
+      expandAudio(event, wg) ||
+      expandImage(event, wg) ||
+      editImageAlt(event, wg) ||
+      removeImage(event, wg) ||
+      toggleChecklistItem(event, wg) ||
+      contextualizeEditorLink(event, wg) ||
+      selectHorizontalRuleFromClick(event, wg) ||
+      selectAudioFromClick(event, wg) ||
+      selectImageFromClick(event, wg);
+    interactions.toggleChecklist = toggleChecklistFromKeyboard;
+    interactions.paste = pasteImage;
+    // Dropped images, PDFs and audio files go where they land, as from the
+    // Attach menu, one after another in the order dropped (up to 10). Anything
+    // else is named and left out rather than opened by the browser.
+    const DROP_LIMIT = 10;
+    const dropKind = (file: File): AttachmentKind | 'image' | null => {
+      const type = String(file.type || '').toLowerCase();
+      return type.startsWith('image/')
+        ? 'image'
+        : type === 'application/pdf' || /\.pdf$/i.test(file.name)
+          ? 'pdf'
+          : AUDIO_MIME_TYPES.has(type)
+            ? 'audio'
+            : null;
+    };
+    const attachDropped = async (file: File, kind: AttachmentKind | 'image') => {
+      if (kind === 'image') {
+        if (cellPosition(editor)) {
+          updateEditorStatus(IMAGE_TABLE_ERROR, 'error');
+          return;
+        }
+        editor.dispatch({effects: setPendingImageSelection.of(editor.state.selection)});
+        await attachImage(file);
+      } else {
+        pendingAttachmentKind = kind;
+        editor.dispatch({effects: setPendingLinkedAttachmentSelection.of(editor.state.selection)});
+        await insertLinkedAttachment(file);
+      }
+    };
+    interactions.drop = (event, wg) => {
+      const files = [...(event.dataTransfer?.files || [])];
+      if (!files.length) return false;
+      if (options.allowAssetInsert === false) return true;
+      if (imageBusy || attachmentBusy) {
+        updateEditorStatus('Wait for the current attachment to finish.', 'error');
+        return true;
+      }
+      const usable = files
+          .map(file => ({file, kind: dropKind(file)}))
+          .filter(
+            (item): item is {file: File; kind: AttachmentKind | 'image'} => !!item.kind && (item.kind === 'image' || !!options.attachments)
+          ),
+        left = files.length - usable.length,
+        queued = usable.slice(0, DROP_LIMIT),
+        over = usable.length - queued.length;
+      if (!queued.length) {
+        updateEditorStatus(
+          options.attachments ? 'Only images, PDFs and audio files can be dropped into a note.' : 'Only images can be dropped here.',
+          'error'
+        );
+        return true;
+      }
+      const at = wg.posAtCoords({x: event.clientX, y: event.clientY});
+      if (at)
+        wg.dispatch({
+          selection: context => GardSelection.near(context, Math.min(at.pos, context.doc.contentLength), 1),
+          userEvent: 'select.drop'
+        });
+      wg.focus();
+      const token = lifecycle;
+      void (async () => {
+        for (const item of queued) {
+          if (!attachAlive(token)) return;
+          await attachDropped(item.file, item.kind);
+        }
+        if (!attachAlive(token) || !(left || over)) return;
+        updateEditorStatus(
+          [
+            left ? `${left} ${left === 1 ? 'file was' : 'files were'} not an image, PDF or audio file.` : '',
+            over ? `Only ${DROP_LIMIT} files are added at once.` : ''
+          ]
+            .filter(Boolean)
+            .join(' '),
+          'error'
+        );
+      })();
+      return true;
+    };
+    interactions.beforeInput = (event, wg) => {
+      if (event.inputType !== 'deleteContentBackward') return false;
+      const selection = wg.state.selection;
+      if (selection instanceof GardSelection.Node && atomicNode(selection.node)) return atomicBackspace(wg);
+      wg.flush();
+      return atomicBackspace(wg);
+    };
+    interactions.pointerDown = pointerDown;
+    interactions.pointerMove = hoverTableResize;
+    interactions.pointerLeave = () => clearResizeHint();
+    interactions.tab = listNesting;
+    interactions.backspace = atomicBackspace;
+    interactions.resizeImage = imageResizeKeyboard;
+  }
+  const baseClick = interactions.click;
+  interactions.click = (event, wg) => baseClick(event, wg) || tagClick(event);
+  const focusMode = installFocusMode(options, field, wrapper, toolbar, editor, closePopups);
+  refreshEditor();
+  if (options.focusOnMount)
+    queueMicrotask(() => {
+      if (!destroyed && wrapper.isConnected) editor.focus();
+    });
+  return {
+    getValue() {
+      publish();
+      return field.value;
+    },
+    flush() {
+      publish();
+    },
+    setValue(value: string) {
+      if (destroyed) return false;
+      publish();
+      const decoded = decodeStoredValue(value);
+      if (decoded.kind === 'invalid-rich') return false;
+      const doc =
+        decoded.kind === 'rich'
+          ? decoded.doc
+          : DocumentSchema.docFromJSON({
+              type: 'Doc',
+              content: normalizePlainText(decoded.text)
+                .split('\n')
+                .map(line => ({type: 'Paragraph', content: line ? [{type: 'Text', param: line}] : []}))
+            });
+      replaceDocument(editor, doc, 'reconciliation.set-value');
+      return true;
+    },
+    setTransientRanges(ranges: readonly MergeRange[]) {
+      if (!destroyed) editor.dispatch({effects: setTransientReconciliationRanges.of(Array.isArray(ranges) ? ranges : [])});
+    },
+    search(query: string, onClear?: () => void) {
+      if (destroyed) return 0;
+      searchCleared = null;
+      const ranges = findTextMatches(editor.state.doc, query);
+      if (!ranges.length) {
+        editor.dispatch({effects: setSearchMatches.of(null)});
+        return 0;
+      }
+      editor.dispatch({
+        effects: [setSearchMatches.of(searchMatchState(ranges, 0)), Wordgard.scrollIntoView(ranges[0]!.from, {y: 'center'})]
+      });
+      searchCleared = typeof onClear === 'function' ? onClear : null;
+      return ranges.length;
+    },
+    stepSearch(direction: 1 | -1) {
+      const value = destroyed ? null : editor.state.field(searchMatches);
+      if (!value) return {index: -1, count: 0};
+      const count = value.ranges.length,
+        index = (((value.current + (direction < 0 ? -1 : 1)) % count) + count) % count;
+      editor.dispatch({
+        effects: [
+          setSearchMatches.of(searchMatchState(value.ranges, index)),
+          Wordgard.scrollIntoView(value.ranges[index]!.from, {y: 'center'})
+        ]
+      });
+      return {index, count};
+    },
+    clearSearch() {
+      if (!destroyed && editor.state.field(searchMatches)) editor.dispatch({effects: setSearchMatches.of(null)});
+    },
+    focus() {
+      if (!destroyed) editor.focus();
+    },
+    async destroy() {
+      if (destroyed) return;
+      publish();
+      finishImageAltEdit(true, false);
+      destroyed = true;
+      lifecycle++;
+      attachmentAbortController?.abort();
+      attachmentAbortController = null;
+      imageAbort.abort();
+      if (imageRefreshFrame) cancelAnimationFrame(imageRefreshFrame);
+      if (tableRevealFrame) cancelAnimationFrame(tableRevealFrame);
+      if (tableRulerFrame) cancelAnimationFrame(tableRulerFrame);
+      if (toolbarCueFrame) cancelAnimationFrame(toolbarCueFrame);
+      imageRefreshFrame = 0;
+      tableRevealFrame = 0;
+      tableRulerFrame = 0;
+      toolbarCueFrame = 0;
+      toolbarResizeObserver?.disconnect();
+      tableRulerAbort.abort();
+      clearImageResizePreview();
+      clearTableResizePreview(false);
+      finishImagePicker();
+      finishLinkedAttachmentPicker();
+      linkSelection = null;
+      delete field.dataset.richEditorStatus;
+      delete field.dataset.richEditorStatusState;
+      finishDrag();
+      activeImageResize = null;
+      closePopups();
+      focusMode.destroy();
+      settlePendingAssets(pendingAssets, options.assets, currentAssetIds);
+      for (const controller of popupControllers) controller.destroy();
+      for (const id of [...imageCache.keys()]) releaseImage(id);
+      for (const id of [...audioCache.keys()]) releaseAudio(id);
+      editor.dom.remove();
+      wrapper.remove();
+      field.style.display = originalDisplay;
+      if (originalAriaHidden === null) field.removeAttribute('aria-hidden');
+      else field.setAttribute('aria-hidden', originalAriaHidden);
+      field.value = encodeDocument(lastAccepted, inspectDocument(lastAccepted).hasContent);
+    }
+  };
 }
 
 // Tags in a rendered note become chips; a tag split by formatting stays text.
-function markReadonlyTags(root:HTMLElement){
-  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),texts:Text[]=[];for(let node=walker.nextNode();node;node=walker.nextNode())texts.push(node as Text);
-  let block:Element|null=null,last='\n';
-  for(const node of texts){
-    const parent=node.parentElement,owner=parent?.closest('p,h1,h2,li,td,th,blockquote,figure')||null;
-    if(owner!==block||node.previousSibling?.nodeName==='BR'){block=owner;last='\n'}
-    const value=node.data,lead=/\s/.test(last)?' ':'x';if(value)last=value[value.length-1]!;
-    if(value.indexOf('#')<0||parent?.closest('a,.sd-tag,figure'))continue;
-    const matches=tagMatches(lead+value);if(!matches.length)continue;
-    const parts=document.createDocumentFragment();let at=0;
-    for(const match of matches){const from=match.from-1,to=match.to-1,chip=document.createElement('span');chip.className='sd-tag';chip.dataset.sdTag=match.tag;chip.textContent=value.slice(from,to);parts.append(value.slice(at,from),chip);at=to}
-    parts.append(value.slice(at));node.replaceWith(parts);
+function markReadonlyTags(root: HTMLElement) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT),
+    texts: Text[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node as Text);
+  let block: Element | null = null,
+    last = '\n';
+  for (const node of texts) {
+    const parent = node.parentElement,
+      owner = parent?.closest('p,h1,h2,li,td,th,blockquote,figure') || null;
+    if (owner !== block || node.previousSibling?.nodeName === 'BR') {
+      block = owner;
+      last = '\n';
+    }
+    const value = node.data,
+      lead = /\s/.test(last) ? ' ' : 'x';
+    if (value) last = value[value.length - 1]!;
+    if (value.indexOf('#') < 0 || parent?.closest('a,.sd-tag,figure')) continue;
+    const matches = tagMatches(lead + value);
+    if (!matches.length) continue;
+    const parts = document.createDocumentFragment();
+    let at = 0;
+    for (const match of matches) {
+      const from = match.from - 1,
+        to = match.to - 1,
+        chip = document.createElement('span');
+      chip.className = 'sd-tag';
+      chip.dataset.sdTag = match.tag;
+      chip.textContent = value.slice(from, to);
+      parts.append(value.slice(at, from), chip);
+      at = to;
+    }
+    parts.append(value.slice(at));
+    node.replaceWith(parts);
   }
 }
-function renderRichText(options:RenderOptions){if(!(options.container instanceof HTMLElement))throw new Error('Rich display target is unavailable.');if(!validAssetStore(options.assets))throw new Error('Rich-text attachment storage is unavailable.');ensureStyles();const value=String(options.value||''),doc=decodeDocument(value);if(!doc){options.container.textContent=normalizePlainText(value);return false}ensureReadonlyElement();const root=document.createElement(READONLY_TAG);root.className='sd-rte-content sd-rte-readonly';root.setAttribute('aria-label',options.label);root.setAttribute('role','document');root.appendChild(serialize(doc).toDOM());hardenLinks(root,options.notes);if(options.notes?.tag)markReadonlyTags(root);root.addEventListener('click',event=>{const chip=(event.target as Element|null)?.closest?.<HTMLElement>('.sd-tag');if(chip?.dataset.sdTag){event.preventDefault();options.notes?.tag?.(chip.dataset.sdTag,false);return}const anchor=(event.target as Element|null)?.closest?.('a.sd-note-link');if(!anchor)return;event.preventDefault();const id=noteLinkId(anchor.getAttribute('href'));if(id&&!anchor.classList.contains('sd-note-link-missing'))options.notes?.open(id)});syncReadonlyTableContentWidths(root);options.container.replaceChildren(root);const disposeImages=hydrateImages(root,options.assets,options.eager===true),disposeAudio=hydrateAudio(root,options.assets,options.workspaceOverlay),disposeViewer=imageViewerClicks(root,options.assets,options.workspaceOverlay);(root as any)[READONLY_DISPOSE]=()=>{disposeImages();disposeAudio();disposeViewer()};return true}
+function renderRichText(options: RenderOptions) {
+  if (!(options.container instanceof HTMLElement)) throw new Error('Rich display target is unavailable.');
+  if (!validAssetStore(options.assets)) throw new Error('Rich-text attachment storage is unavailable.');
+  ensureStyles();
+  const value = String(options.value || ''),
+    doc = decodeDocument(value);
+  if (!doc) {
+    options.container.textContent = normalizePlainText(value);
+    return false;
+  }
+  ensureReadonlyElement();
+  const root = document.createElement(READONLY_TAG);
+  root.className = 'sd-rte-content sd-rte-readonly';
+  root.setAttribute('aria-label', options.label);
+  root.setAttribute('role', 'document');
+  root.appendChild(serialize(doc).toDOM());
+  hardenLinks(root, options.notes);
+  if (options.notes?.tag) markReadonlyTags(root);
+  root.addEventListener('click', event => {
+    const chip = (event.target as Element | null)?.closest?.<HTMLElement>('.sd-tag');
+    if (chip?.dataset.sdTag) {
+      event.preventDefault();
+      options.notes?.tag?.(chip.dataset.sdTag, false);
+      return;
+    }
+    const anchor = (event.target as Element | null)?.closest?.('a.sd-note-link');
+    if (!anchor) return;
+    event.preventDefault();
+    const id = noteLinkId(anchor.getAttribute('href'));
+    if (id && !anchor.classList.contains('sd-note-link-missing')) options.notes?.open(id);
+  });
+  syncReadonlyTableContentWidths(root);
+  options.container.replaceChildren(root);
+  const disposeImages = hydrateImages(root, options.assets, options.eager === true),
+    disposeAudio = hydrateAudio(root, options.assets, options.workspaceOverlay),
+    disposeViewer = imageViewerClicks(root, options.assets, options.workspaceOverlay);
+  (root as any)[READONLY_DISPOSE] = () => {
+    disposeImages();
+    disposeAudio();
+    disposeViewer();
+  };
+  return true;
+}
 
-const StudyDirectorRichText=Object.freeze({engine:'wordgard',engineVersion:__SD_WORDGARD_VERSION__,storagePrefix:STORAGE_PREFIX,assetPolicy:RICH_ASSET_POLICY,isAssetId:validAssetId,isSupportedImageType:validImageMimeType,classifySerializedValue,isRichTextValue,toPlainText,toMarkdown,fromMarkdown,fromText,tagsIn,renameTag,normalizeTag,measure,assetIds,scanAssetReferences,scanAttachmentReferences,insertAttachmentReference,removeAttachmentReferences,exportDocument,createAnchoredPopover,compareRichText,mergeIncomingAdditions,appendIncomingAdditions,mergeThreeWay,mountRichTextEditor,renderRichText});
-(globalThis as any).StudyDirectorRichText=StudyDirectorRichText;
+const StudyDirectorRichText = Object.freeze({
+  engine: 'wordgard',
+  engineVersion: __SD_WORDGARD_VERSION__,
+  storagePrefix: STORAGE_PREFIX,
+  assetPolicy: RICH_ASSET_POLICY,
+  isAssetId: validAssetId,
+  isSupportedImageType: validImageMimeType,
+  classifySerializedValue,
+  isRichTextValue,
+  toPlainText,
+  toMarkdown,
+  fromMarkdown,
+  fromText,
+  tagsIn,
+  renameTag,
+  normalizeTag,
+  measure,
+  assetIds,
+  scanAssetReferences,
+  scanAttachmentReferences,
+  insertAttachmentReference,
+  removeAttachmentReferences,
+  exportDocument,
+  createAnchoredPopover,
+  compareRichText,
+  mergeIncomingAdditions,
+  appendIncomingAdditions,
+  mergeThreeWay,
+  mountRichTextEditor,
+  renderRichText
+});
+(globalThis as any).StudyDirectorRichText = StudyDirectorRichText;

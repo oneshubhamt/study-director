@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {richTextRuntimeSource} from '../../helpers/rich-text-runtime.mjs';
+import {readCompact} from '../../helpers/compact-source.mjs';
 
 // Current runtime boundary invariants: decision time, pacing, presentation, and bounded background/display work.
 
@@ -81,7 +82,7 @@ assert.match(app,/<html[^>]*data-presentation="glass"[^>]*data-typography="glass
 const core=fs.readFileSync('source/styles/core.css','utf8');
 const glass=fs.readFileSync('source/external/glass.js','utf8');
 const insights=fs.readFileSync('source/external/insights.js','utf8');
-const editorSource=fs.readFileSync('rich-text/editor.ts','utf8');
+const editorSource=readCompact('rich-text/editor.ts');
 const editorBundle=richTextRuntimeSource();
 
 for(const token of ['--sd-material-inset','--sd-material-canvas','--sd-depth-inset','--sd-depth-canvas']){
