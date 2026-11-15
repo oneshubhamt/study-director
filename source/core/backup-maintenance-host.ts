@@ -84,7 +84,7 @@ function createBackground(input:Readonly<BackgroundMaintenanceInput>):Readonly<B
     for(let waited=0;waited<limitMs&&owner.canMutate()&&mutation.foreignActive();waited+=250)await new Promise<void>(resolve=>environment.setTimeout(resolve,250));
     return !mutation.foreignActive();
   }
-  return freeze({format:'study-director.background-maintenance-host' as const,contractVersion:1 as const,job,backgroundBlocker,upkeepBlocker,foregroundBusy,foregroundChanged,wake,waitForClosedTabLease,schedule});
+  return freeze({format:'study-director.background-maintenance-host' as const,contractVersion:1 as const,job,backgroundBlocker,upkeepBlocker,foregroundBusy,watchingForeground:()=>foregroundWatch!==null,foregroundChanged,wake,waitForClosedTabLease,schedule});
 }
 
 const FORMAT='study-director.repository-maintenance-pending' as const,VERSION=4 as const,PROVIDER=/^[a-z][a-z0-9-]{0,40}$/u,REQUEST=/^[a-f0-9-]{36}$/u;

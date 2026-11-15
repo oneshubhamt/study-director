@@ -30,6 +30,7 @@ export interface BackgroundMaintenanceController{
   backgroundBlocker(options?:Readonly<{housekeeping?:boolean}>):string;
   upkeepBlocker(options?:Readonly<{housekeeping?:boolean}>):string;
   foregroundBusy():boolean;
+  watchingForeground():boolean;
   foregroundChanged():boolean;
   wake(trigger?:string):boolean;
   waitForClosedTabLease(owner:Readonly<{canMutate():boolean}>,mutation:Readonly<{foreignActive():boolean}>,limitMs?:number):Promise<boolean>;
