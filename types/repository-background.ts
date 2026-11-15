@@ -10,7 +10,7 @@ export type CleanupBoolean='gcPending'|'maintenanceBlocked'|'objectGcBlocked'|'g
 export type MaintenanceCleanup=Partial<Record<CleanupNumber,number>&Record<CleanupBoolean,boolean>>&{status?:string};
 export type MaintenancePlan=Readonly<{reason:string;retryMs:number;actionable:boolean;state:string}>;
 export type MaintenanceEvent={phase:string;cleanup?:MaintenanceCleanup;plan?:Partial<MaintenancePlan>;reason?:string;actionable?:boolean;nextEligibleAt?:string};
-export type IntegrityResult=JobResult&{complete?:boolean;checked?:number;attempted?:number;checkedBytes?:number;total?:number;corruption?:boolean;repaired?:boolean};
+export type IntegrityResult=JobResult&{complete?:boolean;checked?:number;attempted?:number;checkedBytes?:number;total?:number;done?:number;corruption?:boolean;repaired?:boolean;repositoryScope?:string;requestId?:string;scanId?:string;cursor?:string;recheckCursor?:string;partial?:IntegrityState|null;quarantined?:readonly string[];checkpointOnly?:boolean;recheckComplete?:boolean};
 export type RetentionManifest={version:number;exportedAt:string;retention:Pick<FolderManifest['retention'],'role'|'protectedUntil'|'notesFingerprint'>&{calendar:FolderManifest['retention']['calendar']|null};installationId?:string};
 export type RetentionCandidate={id:string;manifest:RetentionManifest};
 export type RepositoryObservation={unreadable?:readonly unknown[];invalid?:readonly unknown[];ignored?:number;overflow?:boolean;uncommitted?:readonly unknown[];orphanCommits?:readonly unknown[];valid?:readonly ObservationRow[];rows?:readonly ObservationRow[]};
@@ -45,7 +45,7 @@ export type DeferredRequest={generation:number;scope:string|null;reason:string;d
 export type PersistedIntent={ok:boolean;superseded?:boolean;retryMs?:number;nextEligibleAt?:string};
 export type SchedulerOptions={budgetCode:string;budgetMessage:string;budgetMs:number;preemptCode:string;preemptMessage:string;coordinator:CoordinatorCore;isAvailable():boolean|string};
 export type MaintenanceSchedulerInput=SchedulerOptions&{capture(stage:string,error:unknown):void;intent:MaintenanceIntent;execute(context:{signal:AbortSignal;workBudget:WorkBudget;pending:MaintenanceState;trigger:string}):Promise<MaintenanceCleanup>;isBusy():boolean;report(event:MaintenanceEvent&{requestedAt?:string;transition?:Readonly<Record<string,unknown>>;error?:unknown}):void};
-export type IntegrityTarget={partial?:IntegrityState|null;scanId?:string;cursor?:string;recheckCursor?:string;attempted?:number;cycleStartedAt?:string;failedAt?:string;completedAt?:string};
+export type IntegrityTarget={repositoryScope?:string;requestId?:string;partial?:IntegrityState|null;scanId?:string;cursor?:string;recheckCursor?:string;recheck?:boolean;quarantinedObjectIds?:readonly string[];attempted?:number;attemptedAt?:string;cycleStartedAt?:string;failedAt?:string;completedAt?:string;blockedReason?:string;lastOutcome?:string};
 export type IntegritySchedulerInput=SchedulerOptions&{capture(error:unknown):void;execute(context:{target:IntegrityTarget|null;trigger:string;nextEligibleAt:string;signal:AbortSignal;checkpoint(progress?:IntegrityTarget|null):void}):Promise<IntegrityResult>;isUnsafe():boolean;readTarget():Promise<IntegrityTarget|null>;writeResult(result:IntegrityResult):Promise<unknown>;yieldTask():Promise<unknown>};
 
 export type MaintenanceAttempt=JobResult&MaintenanceCleanup&{retryMs?:number|undefined;nextEligibleAt?:string|undefined;actionable?:boolean;error?:unknown};

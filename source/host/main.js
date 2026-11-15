@@ -74,6 +74,7 @@ const DeviceBackupModule=INTERNAL_MODULES.load('device-backup',1,'study-director
 const BackupActionsHostModule=INTERNAL_MODULES.load('backup-actions-host',1,'study-director.backup-actions-host-module',1);
 const BackupReadinessHostModule=INTERNAL_MODULES.load('backup-readiness-host',1,'study-director.backup-readiness-host-module',1);
 const BackupMaintenanceHostModule=INTERNAL_MODULES.load('backup-maintenance-host',1,'study-director.backup-maintenance-host-module',1);
+const BackupIntegrityHostModule=INTERNAL_MODULES.load('backup-integrity-host',1,'study-director.backup-integrity-host-module',1);
 const BackupRecoveryHostModule=INTERNAL_MODULES.load('backup-recovery-host',1,'study-director.backup-recovery-host-module',1);
 const PwaLifecycleModule=INTERNAL_MODULES.load('pwa-lifecycle',1,'study-director.pwa-lifecycle-module',1);
 const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'study-director.native-capabilities-module',1);
@@ -1117,7 +1118,7 @@ async function withRichTextAssetMaintenancePaused(operation){
   try{await RichTextAssetMaintenance.settled();return await operation();}
   finally{richTextAssetMaintenancePauseCount=Math.max(0,richTextAssetMaintenancePauseCount-1);if(richTextAssetMaintenancePauseCount===0)scheduleRichTextAssetMaintenance();}
 }
-let attachmentIntegrityIssues=new Map();
+let BackupIntegrity=null,AttachmentIntegrityJob=null;
 const RichTextAssetWriteLease=AssetStorageModule.createLease();
 function richAssetId(value){const id=String(value||'');if(!RichTextApi.isAssetId(id))throw new TypeError('Rich-text asset identity is invalid.');return id;}
 const AttachmentIngest=AttachmentIngestModule.create({
@@ -1139,7 +1140,7 @@ const AttachmentStorage=AssetStorageModule.create({
     }
     if(deletionState)AppData.deletionRecovery.stageAttachments(tx,deletionState);
     for(const [id,row] of rows)store.put(row,id);for(const id of remove)store.delete(id);tx.oncomplete=()=>finish(true);
-  },'attachment metadata commit aborted').then(result=>{writeStorageHealth({lastLocalSaveAt:AppData.mutationEpoch.nextChangeAt()});notifyBackupChange({reason:'attachment-metadata'});if(attachmentIntegrityIssues.size)scheduleAttachmentIntegrityAudit(5000);return result;})
+  },'attachment metadata commit aborted').then(result=>{writeStorageHealth({lastLocalSaveAt:AppData.mutationEpoch.nextChangeAt()});notifyBackupChange({reason:'attachment-metadata'});if(BackupIntegrity?.attachmentState()?.issues.length)scheduleAttachmentIntegrityAudit(5000);return result;})
 });
 const RichTextAssets=Object.freeze({
   retain:()=>AttachmentStorage.retain(),
@@ -3239,7 +3240,7 @@ AttachmentLibrary=AttachmentsModule.create({
   onWorkStart:()=>{pwaWorkRevision++;},
   store:AttachmentStorage,processing:Exports,document,interactions:Interactions,
   canMutate:()=>appCanMutate(),requireOwner:()=>{if(!appCanMutate())throw new Error('Use the primary tab to manage attachments.');},token:()=>AppOwnership.issueWriteToken('manage attachments'),
-  isActive:()=>document.getElementById('pane-library').classList.contains('on')&&!document.getElementById('library-data').hidden,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>attachmentIntegrityIssues.get(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');return goTab('library',{source:'attachment-library'});},
+  isActive:()=>document.getElementById('pane-library').classList.contains('on')&&!document.getElementById('library-data').hidden,cleanup:()=>scheduleRichTextAssetMaintenance(),renderReference:(container,source)=>renderRichTextContent(container,source.value,'',source.label),sources:options=>AttachmentReferences.sources(options),integrityIssue:id=>BackupIntegrity?.attachmentIssue(String(id||''))||null,destinations:()=>LibraryView.noteDestinations(),settle:settleAttachmentWriters,openLibrary:()=>{LibraryView.showSection('data');return goTab('library',{source:'attachment-library'});},
   openSource:async source=>{if(!await goTab('library',{source:'attachment-reference'}))return false;if(source.kind==='note')return LibraryView.revealNoteReference(source.key);if(source.kind==='day')return LibraryView.openDay(source.key);return false;},
   preparePdfOpen:()=>PdfDocuments.prepareNativeWindow(),
   openPdf:(row,file,reservedWindow,releaseReader)=>PdfDocuments.open(row,file,reservedWindow,releaseReader),
@@ -3252,180 +3253,16 @@ AttachmentLibrary=AttachmentsModule.create({
 const RichTextAttachmentPort=LibraryDocuments.richAttachmentPort;
 invalidateAttachmentLibrary=()=>AttachmentLibrary.invalidate();
 
-let attachmentIntegrityView=null,repositoryIntegrityView=null;const repositoryIntegrityBoundScopes=Object.create(null);
-// Verification, one location per row: a plain headline for what is happening
-// now or the last result, then when the last full check finished. A running
-// check reports its progress live (integrityLive); a Recheck answers at once.
-const integrityLive=Object.create(null),integrityRecheckAsked=Object.create(null),integrityRowError=Object.create(null);
-function integrityStatus(target,{shallow=false,running=false,live=null}={}){
-  const value=target||{},completed=value.completedAt||value.checkedAt||'',files=shallow?'attachments':'backup files';
-  const between=!!(value.partial||value.progress||value.cursor||value.cycleStartedAt),damaged=value.quarantinedObjectIds?.length||0;
-  const count=live&&Number.isFinite(live.total)&&live.total>0?` ${Math.min(live.done||0,live.total)} of ${live.total} ${files}`:'';
-  const head=running?`Checking…${count}`
-    :value.blockedReason==='locked'?'Paused until backup encryption is unlocked'
-    :value.blockedReason==='preempted'?'Paused while another backup task runs; continues by itself'
-    :value.lastOutcome==='unavailable'?(value.recheck?'Recheck could not run this time; it will try again':'Could not check this time; it will try again')
-    :value.recheck?(value.blockedReason==='corrupt'?`Recheck continuing; some ${files} are still damaged`:'Recheck requested; starts in a moment')
-    :damaged?`${damaged} damaged backup file${damaged===1?'':'s'}; the next backup writes fresh copies`
-    :between?`Checking in small steps${count?`;${count} so far`:''}; continues by itself`
-    :completed?(shallow?'All attachments present':`All ${files} intact`)
-    :'Not checked yet';
-  const parts=[completed?`Last full check: ${new Date(completed).toLocaleString()}`:'No full check yet'];
-  if(value.partial)parts.push(`${Math.floor(value.partial.stored.offset/1048576)} of ${Math.ceil(value.partial.storedBytes/1048576)} MB of a large file read${value.partial.phase==='plain'?'; checking its decrypted content':''}`);
-  else if(value.progress)parts.push(`${value.progress.cursor} of ${value.progress.total} records`);
-  if(damaged&&value.recheck)parts.push(`${damaged} damaged`);
-  if(shallow)parts.push('File contents are not checked.');
-  return Object.freeze({head,detail:parts.join(' · ')});
-}
-// Kept for diagnostics-style callers: the headline and its detail in one line.
-function integrityStatusText(target,options={}){const status=integrityStatus(target,options);return status.head+' · '+status.detail;}
-function renderIntegrityStatuses(){
-  let jobs=[];try{jobs=BackupProviderRuntime.backgroundStatus();}catch{jobs=[];}
-  for(const [id,label,location] of [['attachment-verification-status','Attachment presence and size',''],['device-verification-status','Device Folder','device-folder'],['drive-verification-status','Google Drive','google-drive']]){
-    const element=document.getElementById(id);if(!element)continue;
-    const value=location?repositoryIntegrityView?.locations?.[location]:attachmentIntegrityView,bound=!location||value?.repositoryScope&&repositoryIntegrityBoundScopes[location]===value.repositoryScope;
-    const running=!!location&&jobs.some(row=>row.job===location+' integrity'&&row.running===true);
-    if(location&&value?.recheck)integrityRecheckAsked[location]=false;
-    const status=bound?integrityStatus(value,{shallow:!location,running,live:location?integrityLive[location]:null}):Object.freeze({head:'Not connected',detail:'Connect it to check its backups.'});
-    const error=location?integrityRowError[location]||'':'';
-    const name=document.createElement('strong'),head=document.createElement('span'),detail=document.createElement('span');
-    name.textContent=label+': ';head.className='verification-head';head.textContent=error||status.head;
-    detail.className='verification-detail';detail.textContent=' '+status.detail;
-    element.classList.toggle('verification-error',!!error);element.replaceChildren(name,head,detail);
-    // Recheck is offered only for a location this device is connected to,
-    // and says it is working until the recheck finishes.
-    const recheck=location&&document.getElementById('recheck-'+location);
-    if(recheck){
-      const busy=bound&&(integrityRecheckAsked[location]===true||value?.recheck===true);
-      recheck.hidden=!bound;recheck.disabled=busy;recheck.setAttribute('aria-busy',busy?'true':'false');
-      const text=busy?'Rechecking…':`Recheck ${label}`;if(recheck.textContent!==text)recheck.textContent=text;
-    }
-  }
-}
-async function requestRepositoryIntegrityRecheck(target){
-  const label=target==='device-folder'?'Device Folder':'Google Drive';
-  integrityRowError[target]='';integrityRecheckAsked[target]=true;renderIntegrityStatuses();
-  try{
-    if(!appCanMutate())throw new Error('Use the primary tab to request backup verification.');
-    if(!BackupProviderRuntime.locationStatus(target)?.connected)throw new Error(`Connect ${label} before rechecking it.`);
-    const bound=await readRepositoryIntegrityTarget(target);
-    await mutateRepositoryIntegrityTarget(target,current=>{if(current.repositoryScope!==bound.repositoryScope)throw repositoryIntegrityChanged();return {...current,requestId:crypto.randomUUID(),recheck:true,recheckCursor:'',cursor:'',scanId:'',partial:null,cycleStartedAt:new Date().toISOString()};});
-    BackupProviderRuntime.requestIntegrity(target);
-    renderIntegrityStatuses();return true;
-  }catch(error){
-    integrityRecheckAsked[target]=false;integrityRowError[target]=`Recheck did not start: ${String(error?.message||error)}`;renderIntegrityStatuses();
-    AppDiagnostics.capture('backup.integrity-recheck',error,'warn');return false;
-  }
-}
-const ATTACHMENT_INTEGRITY_META_KEY=APP_META_KEYS.attachmentIntegrityAudit;
-const ATTACHMENT_INTEGRITY_INTERVAL_MS=24*60*60*1000;
-const ATTACHMENT_INTEGRITY_RETRY_MS=10*60*1000;
-const AttachmentIntegrityJob=OperationLifecycle.createJob({
-  environment:{now:()=>Date.now(),setTimeout,clearTimeout},minDelayMs:1000,retryMs:30*60*1000,
-  isAvailable:()=>upkeepBlocker()||(AttachmentStorage.supported()?true:'storage-unavailable'),
-  capture:error=>AppDiagnostics.capture('attachments.integrity-lifecycle',error,'warn'),execute:runAttachmentIntegrityAttempt
-});
-function normalizeAttachmentIntegrityIssue(value){
-  const kind=String(value?.kind||'');
-  if(!['missing-file','size-mismatch','metadata-invalid','missing-metadata'].includes(kind))return null;
-  const rawId=String(value?.id||''),id=AttachmentsModule.validId(rawId)?rawId:'';
-  return Object.freeze({id,kind,expectedSize:Number.isSafeInteger(value?.expectedSize)?value.expectedSize:null,actualSize:Number.isSafeInteger(value?.actualSize)?value.actualSize:null});
-}
-function normalizeAttachmentIntegrityState(value){
-  const issues=Array.isArray(value?.issues)?value.issues.map(normalizeAttachmentIntegrityIssue).filter(Boolean):[];
-  const checkedAt=typeof value?.checkedAt==='string'&&Number.isFinite(Date.parse(value.checkedAt))?new Date(value.checkedAt).toISOString():'';
-  const raw=value?.progress,progress=raw&&/^[a-f0-9]{64}$/u.test(raw.scanId)&&Number.isSafeInteger(raw.cursor)&&raw.cursor>=0&&Number.isSafeInteger(raw.checked)&&raw.checked>=0&&Number.isSafeInteger(raw.total)&&raw.total>=raw.cursor?Object.freeze({scanId:raw.scanId,cursor:raw.cursor,checked:raw.checked,total:raw.total,issues:Object.freeze((Array.isArray(raw.issues)?raw.issues:[]).map(normalizeAttachmentIntegrityIssue).filter(Boolean))}):null;
-  const attemptedAt=typeof value?.attemptedAt==='string'&&Number.isFinite(Date.parse(value.attemptedAt))?new Date(value.attemptedAt).toISOString():'';
-  const lastOutcome=['completed','yielded','unavailable','skipped'].includes(value?.lastOutcome)?value.lastOutcome:'';
-  return Object.freeze({version:2,checkedAt,attemptedAt,lastOutcome,progress,issues:Object.freeze(issues)});
-}
-function attachmentIntegrityIssueLabel(issue){
-  return issue?.kind==='missing-file'?'stored file is missing':issue?.kind==='size-mismatch'?'stored file size does not match':issue?.kind==='metadata-invalid'?'metadata is unreadable':issue?.kind==='missing-metadata'?'library record is missing':'storage issue';
-}
-function attachmentIntegrityWarning(state){
-  const issues=state?.issues||[];if(!issues.length)return '';
-  const first=issues[0];
-  if(issues.length===1){
-    const subject=first.id?`attachment ${first.id.slice(0,18)}…`:'an attachment';
-    return `Attachment storage needs attention · ${subject}: ${attachmentIntegrityIssueLabel(first)}. Open Library → Data → Files.`;
-  }
-  return `Attachment storage needs attention · ${issues.length} attachment issues detected. Open Library → Data → Files.`;
-}
-function applyAttachmentIntegrityState(state){
-  const normalized=normalizeAttachmentIntegrityState(state);
-  attachmentIntegrityView=normalized;renderIntegrityStatuses();
-  attachmentIntegrityIssues=new Map(normalized.issues.filter(issue=>issue.id).map(issue=>[issue.id,issue]));
-  const warning=attachmentIntegrityWarning(normalized);
-  if(warning)markStorageHealthError('attachmentIntegrity',warning,{level:'warn'});else markStorageHealthOk('attachmentIntegrity');
-  invalidateAttachmentLibrary();
-  return normalized;
-}
-function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){
-  return AttachmentIntegrityJob.schedule(delay,trigger,'earliest');
-}
-function attachmentIntegrityDeferredError(message='Attachment integrity audit deferred.',code='ATTACHMENT_INTEGRITY_DEFERRED'){const error=new Error(message);error.code=code;return error;}
-async function runAttachmentIntegrityAttempt({trigger,nextEligibleAt}){
-  let traceId='',priorState=null;return (async()=>{
-    const prior=normalizeAttachmentIntegrityState(await readHostAppMetaValue(ATTACHMENT_INTEGRITY_META_KEY));priorState=prior;
-    if(!AttachmentStorage.supported()){applyAttachmentIntegrityState(prior);return Object.freeze({status:'skipped',reason:'storage-unavailable'});}
-    const last=Date.parse(prior.checkedAt||''),now=Date.now();
-    if(!prior.progress&&Number.isFinite(last)&&now-last<ATTACHMENT_INTEGRITY_INTERVAL_MS){applyAttachmentIntegrityState(prior);scheduleAttachmentIntegrityAudit(ATTACHMENT_INTEGRITY_INTERVAL_MS-(now-last)+1000);return Object.freeze({status:'skipped',reason:'not-due'});}
-    if(!appCanMutate()){applyAttachmentIntegrityState(prior);return Object.freeze({status:'skipped',reason:'not-primary'});}
-    if(backgroundMaintenanceForegroundBusy())return Object.freeze({status:'skipped',reason:'foreground-busy'});
-    traceId=BackupOperationDiagnostics.start('attachment-integrity','Attachment storage',{background:true,trigger,nextEligibleAt,actionable:true});BackupOperationDiagnostics.mark('attachment-integrity-eligibility',{trigger,nextEligibleAt,actionable:true},traceId);
-    const check=()=>{if(!appCanMutate())throw attachmentIntegrityDeferredError('Attachment integrity audit is awaiting primary-tab control.','ATTACHMENT_INTEGRITY_NOT_PRIMARY');if(backgroundMaintenanceForegroundBusy())throw attachmentIntegrityDeferredError();};
-    await BackgroundTasks.yieldTask({priority:'background'});check();
-    const referenceRevision=richAssetReferenceRevision,dataset=await AppData.dailyRecords.datasetRevision();
-    const references=await AttachmentReferences.sources({includeLive:false,priority:'background',referencesOnly:true});
-    if(Object.prototype.toString.call(references)!=='[object Set]')throw new Error('Attachment reference inventory could not be verified.');
-    const audit=await AttachmentStorage.shallowAudit([...references].filter(AttachmentsModule.validId),{
-      progress:prior.progress,workMs:5000,maxEntries:128,shouldYield:BackgroundTasks.budget(),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),check
-    });
-    check();if(referenceRevision!==richAssetReferenceRevision||dataset!==await AppData.dailyRecords.datasetRevision())throw attachmentIntegrityDeferredError();
-    const complete=audit.complete!==false,state=normalizeAttachmentIntegrityState({...prior,checkedAt:complete?new Date().toISOString():prior.checkedAt,attemptedAt:new Date().toISOString(),lastOutcome:complete?'completed':'yielded',progress:complete?null:audit.progress,issues:complete?audit.issues:prior.issues});
-    await writeHostAppMetaValue(ATTACHMENT_INTEGRITY_META_KEY,state,{strict:true});
-    applyAttachmentIntegrityState(state);scheduleAttachmentIntegrityAudit(complete?ATTACHMENT_INTEGRITY_INTERVAL_MS:2000,complete?'interval':'continue');
-    BackupOperationDiagnostics.finish({status:complete?'completed':'yielded',checked:Number(audit.checked)||0,issues:state.issues.length},traceId);return Object.freeze({status:complete?'completed':'yielded',checked:audit.checked,issues:state.issues.length});
-  })().catch(async error=>{
-    if(error.attachmentAuditProgress&&priorState&&appCanMutate()){try{const state=normalizeAttachmentIntegrityState({...priorState,progress:error.attachmentAuditProgress,attemptedAt:new Date().toISOString(),lastOutcome:'yielded'});await writeHostAppMetaValue(ATTACHMENT_INTEGRITY_META_KEY,state,{strict:true});applyAttachmentIntegrityState(state);}catch(writeError){error=writeError;}}
-    if(error?.code==='ATTACHMENT_INTEGRITY_NOT_PRIMARY'){if(traceId)BackupOperationDiagnostics.finish({status:'skipped',reason:'not-primary'},traceId);return Object.freeze({status:'skipped',reason:'not-primary'});}
-    if(error?.code==='ATTACHMENT_INTEGRITY_DEFERRED'){if(traceId)BackupOperationDiagnostics.finish({status:'skipped',reason:'deferred'},traceId);scheduleAttachmentIntegrityAudit(backgroundMaintenanceForegroundBusy()?0:ATTACHMENT_INTEGRITY_RETRY_MS,'deferred');return Object.freeze({status:'skipped',reason:'deferred'});}
-    {attachmentIntegrityView=normalizeAttachmentIntegrityState({...priorState||attachmentIntegrityView||{},attemptedAt:new Date().toISOString(),lastOutcome:'unavailable'});renderIntegrityStatuses();}if(traceId)BackupOperationDiagnostics.fail(error,{background:true,status:'unavailable'},traceId);AppDiagnostics.capture('attachments.integrity-audit',error,'warn');markStorageHealthError('attachmentIntegrity','Attachment verification is unavailable. Previous findings are retained; Study Director will retry.',{level:'warn'});scheduleAttachmentIntegrityAudit(30*60*1000,'error');return Object.freeze({status:'unavailable',reason:error?.message||String(error)});
-  });
-}
-async function installAttachmentIntegrityAudit(){
-  let state;
-  try{state=normalizeAttachmentIntegrityState(await readHostAppMetaValue(ATTACHMENT_INTEGRITY_META_KEY));}
-  catch(error){AppDiagnostics.capture('attachments.integrity-state-read',error,'warn');markStorageHealthError('attachmentIntegrity','Attachment verification state is unavailable. Study Director will retry.',{level:'warn'});scheduleAttachmentIntegrityAudit(30*60*1000,'state-read-failed');return null;}
-  applyAttachmentIntegrityState(state);
-  if(!AttachmentStorage.supported())return state;
-  const last=Date.parse(state.checkedAt||''),age=Number.isFinite(last)?Math.max(0,Date.now()-last):ATTACHMENT_INTEGRITY_INTERVAL_MS;
-  scheduleAttachmentIntegrityAudit(state.progress||age>=ATTACHMENT_INTEGRITY_INTERVAL_MS?15000:ATTACHMENT_INTEGRITY_INTERVAL_MS-age+1000);
-  return state;
-}
+function normalizeAttachmentIntegrityState(value){return BackupIntegrityHostModule.normalizeAttachmentState(value,AttachmentsModule.validId);}
+function normalizeRepositoryIntegrityTarget(value){return BackupIntegrityHostModule.normalizeRepositoryTarget(value,IntegrityContinuationModule.normalize);}
+function normalizeRepositoryIntegrityState(value){return BackupIntegrityHostModule.normalizeRepositoryState(value,IntegrityContinuationModule.normalize);}
+function renderIntegrityStatuses(){return BackupIntegrity?.render()||false;}
+function requestRepositoryIntegrityRecheck(target){return BackupIntegrity?.requestRepositoryRecheck(target)||Promise.resolve(false);}
+function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){return BackupIntegrity?.scheduleAttachment(delay,trigger)||false;}
+function installAttachmentIntegrityAudit(){return BackupIntegrity?.installAttachment()||Promise.resolve(null);}
+function installRepositoryIntegrityScrub(){return BackupIntegrity?.installRepository()||Promise.resolve(null);}
 
-const REPOSITORY_INTEGRITY_BATCH_BYTES=256*1024*1024;
-const REPOSITORY_INTEGRITY_BATCH_OBJECTS=4;
-function normalizeRepositoryIntegrityTarget(value){
-  const iso=key=>typeof value?.[key]==='string'&&Number.isFinite(Date.parse(value[key]))?new Date(value[key]).toISOString():'';
-  const cursor=/^obj_[a-f0-9]{32}$/u.test(String(value?.cursor||''))?String(value.cursor):'';
-  const seen=new Set(),quarantinedObjectIds=[];for(const raw of Array.isArray(value?.quarantinedObjectIds)?value.quarantinedObjectIds:[]){const id=String(raw||'');if(!/^obj_[a-f0-9]{32}$/u.test(id)||seen.has(id))continue;seen.add(id);quarantinedObjectIds.push(id);}
-  const repositoryScope=typeof value?.repositoryScope==='string'&&value.repositoryScope.length<=320?value.repositoryScope:'';
-  const scanId=/^[a-f0-9]{64}$/u.test(String(value?.scanId||''))?String(value.scanId):'';
-  const partial=IntegrityContinuationModule.normalize(value?.partial),recheck=value?.recheck===true,requestId=/^[a-f0-9-]{36}$/u.test(value?.requestId||'')?value.requestId:'';
-  const recheckCursor=recheck&&/^obj_[a-f0-9]{32}$/u.test(String(value?.recheckCursor||''))?String(value.recheckCursor):'';
-  const lastOutcome=['completed','yielded','failed','unavailable','skipped'].includes(value?.lastOutcome)?value.lastOutcome:'',blockedReason=['locked','budget','preempted','unavailable','permission','corrupt'].includes(value?.blockedReason)?value.blockedReason:'';
-  const history=Object.freeze((Array.isArray(value?.history)?value.history:[]).slice(-8).filter(row=>row&&Number.isFinite(Date.parse(row.at))&&['completed','yielded','failed','unavailable','skipped'].includes(row.outcome)).map(row=>Object.freeze({at:new Date(row.at).toISOString(),outcome:row.outcome,complete:row.complete===true})));
-  return Object.freeze({repositoryScope,scanId,partial,recheck,recheckCursor,requestId,blockedReason,completedAt:iso('completedAt'),cycleStartedAt:iso('cycleStartedAt'),cursor,failedAt:iso('failedAt'),attemptedAt:iso('attemptedAt'),lastOutcome,history,quarantinedObjectIds:Object.freeze(quarantinedObjectIds)});
-}
-const INTEGRITY_LOCATION_ID=/^[a-z][a-z0-9-]{0,40}$/u;
-function normalizeRepositoryIntegrityState(value){
-  const locations={};
-  for(const [id,target] of Object.entries(value?.locations&&typeof value.locations==='object'?value.locations:{}).slice(0,8))if(INTEGRITY_LOCATION_ID.test(id))locations[id]=normalizeRepositoryIntegrityTarget(target);
-  return Object.freeze({version:7,locations:Object.freeze(locations)});
-}
-
-async function libraryClearSnapshot(){
+async function libraryClearSnapshot(){async function libraryClearSnapshot(){
   const [attachments,sources]=await Promise.all([AttachmentLibrary.inventory(),AttachmentReferences.sources({includeLive:false})]);
   return Object.freeze({attachments,sources});
 }
@@ -4309,84 +4146,35 @@ if(!Object.isFrozen(BackupRecoveryHost)||BackupRecoveryHost.format!=='study-dire
   throw new Error('Study Director backup-recovery host is unavailable or incompatible.');
 }
 
-let repositoryIntegrityWriteChain=Promise.resolve();
-async function readRepositoryIntegrityState(){
-  // An unavailable read is unknown state, never an empty-state permission to write.
-  return normalizeRepositoryIntegrityState(await BackupAppMeta.read('repositoryIntegrityScrub'));
-}
-function applyRepositoryIntegrityHealth(state){
-  repositoryIntegrityView=state;renderIntegrityStatuses();
-  const targets=Object.entries(state?.locations||{}).filter(([id,target])=>!!target?.repositoryScope&&repositoryIntegrityBoundScopes[id]===target.repositoryScope).map(([,target])=>target);
-  const quarantined=targets.some(target=>target.quarantinedObjectIds?.length);
-  const failed=targets.some(target=>{const failure=Date.parse(String(target.failedAt||'')),completed=Date.parse(String(target.completedAt||''));return Number.isFinite(failure)&&(!Number.isFinite(completed)||failure>=completed);});
-  if(quarantined)markStorageHealthError('repositoryIntegrity','Some backup objects failed integrity verification. Keep the local copy and use a healthy backup version.',{level:'warn'});
-  else if(failed)markStorageHealthError('repositoryIntegrity','Backup verification is incomplete or unavailable. Study Director will retry; keep the local copy until verification succeeds.',{level:'warn'});
-  else markStorageHealthOk('repositoryIntegrity');
-  return state;
-}
-function mutateRepositoryIntegrityTarget(target,change){
-  if(!INTEGRITY_LOCATION_ID.test(String(target||'')))return Promise.reject(new Error('Unknown backup location.'));
-  const task=repositoryIntegrityWriteChain.catch(()=>{}).then(()=>BackupAppMeta.transaction('readwrite',(view,tx,finish)=>{
-    const handle=view.get('repositoryIntegrityScrub');let updated;
-    handle.request.onerror=()=>finish(false,handle.request.error||new Error('Integrity metadata could not be read.'));
-    handle.request.onsuccess=()=>{
-      try{
-        if(!appCanMutate())throw new Error('Study control is required to save integrity state.');
-        const state=normalizeRepositoryIntegrityState(handle.value()),next=normalizeRepositoryIntegrityTarget(change(state.locations[target]||normalizeRepositoryIntegrityTarget(null)));
-        updated=Object.freeze({...state,locations:Object.freeze({...state.locations,[target]:next})});
-        const write=view.put('repositoryIntegrityScrub',updated);write.onerror=()=>finish(false,write.error||new Error('Integrity metadata could not be saved.'));
-      }catch(error){finish(false,error);}
-    };
-    tx.oncomplete=()=>finish(true,updated);
-  },{strict:true,abortMessage:'Integrity metadata transaction aborted'})).then(updated=>{applyRepositoryIntegrityHealth(updated);return updated.locations[target];}).catch(error=>{
-    if(!error.code)error.code='REPOSITORY_INTEGRITY_STATE_UNAVAILABLE';
-    markStorageHealthError('repositoryIntegrity','Backup verification state could not be saved or read. The previous state is preserved; verification will retry.',{level:'warn'});
-    AppDiagnostics.capture('backup.repository-integrity-state',error,'warn');throw error;
-  });
-  repositoryIntegrityWriteChain=task.catch(()=>{});return task;
-}
-function repositoryIntegrityChanged(){const error=new Error('The backup repository changed during integrity verification.');error.code='REPOSITORY_CHANGED';return error;}
-async function readRepositoryIntegrityTarget(target){
-  const actual=await BackupProviderRuntime.repositoryScope(target);
-  if(!actual)throw new Error('The backup repository identity is unavailable.');
-  const state=await readRepositoryIntegrityState(),prior=state.locations[target]||normalizeRepositoryIntegrityTarget(null);
-  const same=prior.repositoryScope===actual;
-  if(same&&prior.repositoryScope){repositoryIntegrityBoundScopes[target]=prior.repositoryScope;applyRepositoryIntegrityHealth(state);return prior;}
-  const repositoryScope=String(actual);
-  const bound=await mutateRepositoryIntegrityTarget(target,current=>{
-    if(current.repositoryScope!==prior.repositoryScope)throw repositoryIntegrityChanged();
-    return {...normalizeRepositoryIntegrityTarget(null),repositoryScope};
-  });
-  repositoryIntegrityBoundScopes[target]=bound.repositoryScope;applyRepositoryIntegrityHealth(await readRepositoryIntegrityState());return bound;
-}
-async function updateRepositoryIntegrityTarget(target,result){
-  if(!result?.repositoryScope)throw new Error('Integrity results require their repository identity.');
-  const bound=await readRepositoryIntegrityTarget(target);
-  if(bound.repositoryScope!==result.repositoryScope)throw repositoryIntegrityChanged();
-  return mutateRepositoryIntegrityTarget(target,current=>{
-    if(current.repositoryScope!==result.repositoryScope)throw repositoryIntegrityChanged();
-    const now=new Date().toISOString(),dailyHistory=current.history.at(-1)?.at.slice(0,10)===now.slice(0,10)?current.history.slice(0,-1):current.history;
-    // A check already running when Recheck was pressed belongs to the older
-    // request: its progress and findings do not settle the recheck, which
-    // stays pending as it is. A clean full pass is still recorded as the last
-    // full scan, so Verification shows it instead of the result vanishing.
-    if(current.requestId!==String(result.requestId||'')){
-      if(result.complete!==true||result.status!=='completed'||result.corruption||result.checkpointOnly)throw repositoryIntegrityChanged();
-      return {...current,attemptedAt:now,completedAt:now,lastOutcome:'completed',blockedReason:'',history:[...dailyHistory,{at:now,outcome:'completed',complete:true}].slice(-8)};
-    }
-    const quarantine=result.status==='unavailable'?[...new Set([...current.quarantinedObjectIds,...(result.quarantined||[])])]:result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
-    const hasProgress=Object.hasOwn(result,'cursor')&&Object.hasOwn(result,'scanId');
-    const progress=hasProgress?{cursor:result.cursor,scanId:result.scanId,...(Object.hasOwn(result,'recheckCursor')?{recheckCursor:result.recheckCursor}:{}),...(Object.hasOwn(result,'partial')?{partial:result.partial}:{} )}:{};
-    const blockedReason=['locked','budget','preempted','permission'].includes(result.reason)?result.reason:result.status==='unavailable'?'unavailable':result.corruption?'corrupt':'';
-    const outcome={attemptedAt:now,lastOutcome:result.status,blockedReason,history:result.checkpointOnly?current.history:[...dailyHistory,{at:now,outcome:result.status,complete:result.complete===true&&['completed','failed'].includes(result.status)}].slice(-8)};
-    const finishedRecheck=current.recheck&&result.recheckComplete===true&&result.status==='failed'&&result.corruption===true;
-    if(result.complete===true&&(result.status==='completed'||finishedRecheck))return {...current,...outcome,completedAt:now,cycleStartedAt:'',cursor:'',recheckCursor:'',scanId:'',partial:null,recheck:false,failedAt:finishedRecheck?now:'',quarantinedObjectIds:quarantine};
-    if(['completed','yielded','failed','unavailable','skipped'].includes(result.status))return {...current,...progress,...outcome,partial:progress.partial===undefined?result.corruption?null:current.partial:progress.partial,cycleStartedAt:hasProgress?current.cycleStartedAt||now:current.cycleStartedAt,failedAt:['failed','unavailable'].includes(result.status)?now:current.failedAt,quarantinedObjectIds:quarantine};
-    return current;
-  });
-}
 const RepositoryIntegrityContinuation=IntegrityContinuationModule.create({files:BackupFiles,processing:Exports,protection:BackupProtection,yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})});
-async function refreshDeviceBackgroundPermission(event){
+BackupIntegrity=BackupIntegrityHostModule.createController(Object.freeze({
+  lifecycle:OperationLifecycle,meta:BackupAppMeta,attachmentMetadataName:'attachmentIntegrityAudit',repositoryMetadataName:'repositoryIntegrityScrub',
+  storage:AttachmentStorage,references:AttachmentReferences,validAttachmentId:AttachmentsModule.validId,
+  data:Object.freeze({datasetRevision:()=>AppData.dailyRecords.datasetRevision()}),referenceRevision:()=>richAssetReferenceRevision,
+  authority:Object.freeze({canMutate:()=>appCanMutate()}),
+  background:Object.freeze({upkeepBlocker:()=>upkeepBlocker(),backgroundBlocker:()=>backgroundBlocker(),foregroundBusy:()=>backgroundMaintenanceForegroundBusy()}),
+  backgroundTasks:Object.freeze({budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options)}),
+  provider:BackupProviderRuntime,continuation:RepositoryIntegrityContinuation,normalizeContinuation:value=>IntegrityContinuationModule.normalize(value),
+  unsafe:Object.freeze({mutation:()=>!!AppMutationCoordinator.status()?.active,attachmentIngest:()=>!!AttachmentIngest.status()?.busy}),
+  storageHealth:Object.freeze({markError:(source,message,options)=>markStorageHealthError(source,message,options),markOk:source=>markStorageHealthOk(source)}),
+  invalidateAttachmentLibrary:()=>invalidateAttachmentLibrary(),
+  diagnostics:Object.freeze({
+    capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+    start:(kind,label,details)=>BackupOperationDiagnostics.start(kind,label,details),
+    mark:(kind,details,traceId)=>BackupOperationDiagnostics.mark(kind,details,traceId),
+    finish:(details,traceId)=>BackupOperationDiagnostics.finish(details,traceId),
+    fail:(error,details,traceId)=>BackupOperationDiagnostics.fail(error,details,traceId)
+  }),
+  document,environment:Object.freeze({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),uuid:()=>crypto.randomUUID(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)}),
+  limits:Object.freeze({attachmentIntervalMs:24*60*60*1000,attachmentRetryMs:10*60*1000,repositoryBatchObjects:4,repositoryBatchBytes:256*1024*1024})
+}));
+if(!Object.isFrozen(BackupIntegrity)||BackupIntegrity.format!=='study-director.backup-integrity-host'||BackupIntegrity.contractVersion!==1){
+  throw new Error('Study Director backup integrity host is unavailable or incompatible.');
+}
+AttachmentIntegrityJob=BackupIntegrity.attachmentJob;
+BackupProviderRuntime.configureIntegrityScrub(BackupIntegrity.repositoryHooks);
+
+async function refreshDeviceBackgroundPermission(event){async function refreshDeviceBackgroundPermission(event){
   if(![APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN].includes(event?.kind))return;
   // The controller reconnects its whole job owner after permission changes.
   await DeviceBackup.refreshPermission();
@@ -4907,8 +4695,7 @@ function currentBackupDiagnosticStates(){
   sample('Canonical maintenance',()=>({...DataMaintenanceJob.status(),busy:DataMaintenanceJob.status().busy||AppData.maintenance.status().busy}),value=>[{job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}]);
   for(const [job,owner] of [['Attachment cleanup',RichTextAssetMaintenance],['Backup scratch cleanup',BackupFiles],['Attachment processor',AttachmentIngest],['File processor',Exports]])sample(job,()=>owner.status(),value=>[{job,...(job.endsWith('processor')?OperationLifecycle.snapshot(value):value)}]);
   sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:pwaUpdateCheckDueAt>0,nextEligibleAt:pwaUpdateCheckDueAt?new Date(pwaUpdateCheckDueAt).toISOString():'',completedAt:pwaLastUpdateCheckAt()?new Date(pwaLastUpdateCheckAt()).toISOString():'',retryAttempt:pwaUpdateCheckFailureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
-  sample('Attachment verification',()=>AttachmentIntegrityJob.status(),value=>[{job:'Attachment verification',...value,completedAt:attachmentIntegrityView?.checkedAt||'',attemptedAt:attachmentIntegrityView?.attemptedAt||'',cursor:attachmentIntegrityView?.progress?.cursor||0,total:attachmentIntegrityView?.progress?.total||0,coverage:'presence-and-size'}]);
-  for(const [target,value] of Object.entries(repositoryIntegrityView?.locations||{})){const bound=!!value?.repositoryScope&&repositoryIntegrityBoundScopes[target]===value.repositoryScope;states.push({job:target+' verification',reason:bound?value?.blockedReason||'':'awaiting-connection',state:!bound?'unbound':value?.recheck?'recheck-pending':value?.partial||value?.cursor?'partial':value?.lastOutcome||'never',completedAt:bound?value?.completedAt||'':'',attemptedAt:bound?value?.attemptedAt||'':'',failedAt:bound?value?.failedAt||'':'',progressBytes:bound?value?.partial?.stored?.offset||0:0,quarantined:bound?value?.quarantinedObjectIds?.length||0:0,history:bound?(value?.history||[]).map(row=>row.at+':'+row.outcome+(row.complete?':full':'')).join(' | '):''});}
+  states.push(...(BackupIntegrity?.diagnosticRows()||[]));
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
   sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:KeptVersions.count()})));
