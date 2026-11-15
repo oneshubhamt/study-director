@@ -8,7 +8,7 @@ import type {BackupMaintenancePauseController,BackupRuntimeHostInput} from '../b
 import type {SessionCoordinator} from '../session-lifecycle.ts';
 import type {RepositoriesModule} from '../../source/core/repositories.ts';
 import type {RichTextApi} from '../../rich-text/editor.ts';
-import type {KeptVersionsInput,RecoveryHostInput} from '../backup-recovery-host.ts';
+import type {KeptVersionsInput,RecoveryHostInput,RecoveryQuiescenceInput} from '../backup-recovery-host.ts';
 import type {ReconciliationUiInput} from '../reconciliation-ui.ts';
 
 declare const uiModule:ReconciliationUiFactory;
@@ -94,3 +94,14 @@ declare const maintenancePause:BackupMaintenancePauseController;
 const runtimeHostRecoveryNotes=Object.freeze({lifecycle:sessionLifecycle,date:()=> '2026-11-15'}) satisfies BackupRuntimeHostInput<unknown>['recoveryNotes'];
 const runtimeHostMaintenancePause=maintenancePause satisfies BackupRuntimeHostInput<unknown>['noteReconciliation']['maintenancePause'];
 void runtimeHostRecoveryNotes;void runtimeHostMaintenancePause;
+
+const recoveryQuiescenceInput=Object.freeze({
+  cancelPendingLiveDraftSave:()=>{},
+  clock:Object.freeze({nowMs:()=>Date.now()}),
+  timer:Object.freeze({stopExecution:()=>{},resumeAfterPrimaryRestore:(_options:{frozenSinceMs:number|null})=>{}}),
+  richText:Object.freeze({quiesce:<T>(operation:()=>Promise<T>)=>operation()}),
+  mutation:Object.freeze({settled:async()=>{},active:()=>false}),
+  handoff:Object.freeze({frozen:()=>false}),
+  diagnostics:Object.freeze({capture:(_scope:string,_error:unknown,_level:'warn')=>{}})
+}) satisfies Readonly<RecoveryQuiescenceInput>;
+recoveryModule.createQuiescence(recoveryQuiescenceInput);

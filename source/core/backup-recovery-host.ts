@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome,StorageResetController,StorageResetInput,StorageResetRecoveryResult} from '../../types/backup-recovery-host.ts';
+import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome,StorageResetController,StorageResetInput,StorageResetRecoveryResult,RecoveryQuiescenceController,RecoveryQuiescenceInput} from '../../types/backup-recovery-host.ts';
 import type {RecoverySpec,ManagedRecoveryInput} from '../../types/managed-recovery.ts';
 import type {BackupMaintenancePauseController,BackupMaintenancePauseInput,BackupRevisionFenceController,BackupRevisionFenceInput,BackupRuntimeHostController,BackupRuntimeHostInput,Completion,ImportedAsset,Signal} from '../../types/backup-runtime-host.ts';
 import type {BackupRuntimeInput,Journal} from '../../types/backup.ts';
@@ -14,6 +14,37 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
 const {exactFrozenObject:exactObject,functionPort:functions}=registry.contracts;
 const createModule=()=>{
   const freeze=Object.freeze;
+  function activeSessionIssue(loaded:SessionResult|null|undefined){
+    if(!loaded)return 'Saved session state could not be verified.';
+    if(loaded.error)return `Saved session recovery could not be verified: ${loaded.error.message||loaded.error}`;
+    if(loaded.value&&loaded.storage?.idb!==true)return 'The stored recovery session has not yet been confirmed in canonical browser storage.';
+    return '';
+  }
+  function createQuiescence(input:Readonly<RecoveryQuiescenceInput>):Readonly<RecoveryQuiescenceController>{
+    exactObject(input,['cancelPendingLiveDraftSave','clock','timer','richText','mutation','handoff','diagnostics'],'Recovery quiescence input');
+    let depth=0,frozenSinceMs:number|null=null;
+    async function run<T>(operation:()=>Promise<T>):Promise<T>{
+      if(typeof operation!=='function')throw new TypeError('Managed recovery quiescence requires an operation.');
+      const outer=depth===0;depth+=1;
+      if(outer){
+        input.cancelPendingLiveDraftSave();
+        if(frozenSinceMs===null)frozenSinceMs=input.clock.nowMs();
+        input.timer.stopExecution();
+      }
+      try{return await input.richText.quiesce(operation);}
+      finally{
+        depth=Math.max(0,depth-1);
+        if(outer&&depth===0)void Promise.resolve(input.mutation.settled()).then(()=>{
+          if(depth>0||input.mutation.active())return;
+          const frozen=frozenSinceMs;frozenSinceMs=null;
+          if(input.handoff.frozen())return;
+          try{input.timer.resumeAfterPrimaryRestore({frozenSinceMs:frozen});}
+          catch(error){input.diagnostics.capture('managed-recovery.resume-timer',error,'warn');}
+        });
+      }
+    }
+    return freeze({format:'study-director.recovery-quiescence' as const,contractVersion:1 as const,active:()=>depth>0,run});
+  }
   const PENDING_FORMAT='study-director.managed-provider-backup-pending';
   const PROVIDER_ID=/^[a-z][a-z0-9-]{0,40}$/u;
   const TECHNICAL_RECOVERY_TERMS=/\b(?:repository|checkpoint|manifest|commit marker|reconciliation)\b/iu;
@@ -906,7 +937,7 @@ const createModule=()=>{
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }
-  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createMaintenancePause,createRevisionFence,createRuntime,createHost,createPendingStore,createKeptVersionsView,createKeptVersions,createRetainedBackupFiles,createStorageReset});
+  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,activeSessionIssue,createQuiescence,createMaintenancePause,createRevisionFence,createRuntime,createHost,createPendingStore,createKeptVersionsView,createKeptVersions,createRetainedBackupFiles,createStorageReset});
 };
 registry.define('backup-recovery-host',1,createModule);return createModule;
 })();

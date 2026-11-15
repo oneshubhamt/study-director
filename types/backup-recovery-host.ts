@@ -144,3 +144,18 @@ export interface KeptVersionsViewController{
   readonly format:'study-director.kept-versions-view';readonly contractVersion:1;
   render():void;
 }
+
+export interface RecoveryQuiescenceInput{
+  cancelPendingLiveDraftSave():unknown;
+  readonly clock:Readonly<{nowMs():number}>;
+  readonly timer:Readonly<{stopExecution():unknown;resumeAfterPrimaryRestore(options:Readonly<{frozenSinceMs:number|null}>):unknown}>;
+  readonly richText:Readonly<{quiesce<T>(operation:()=>Promise<T>):Promise<T>}>;
+  readonly mutation:Readonly<{settled():PromiseLike<unknown>;active():boolean}>;
+  readonly handoff:Readonly<{frozen():boolean}>;
+  readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level:'warn'):unknown}>;
+}
+export interface RecoveryQuiescenceController{
+  readonly format:'study-director.recovery-quiescence';readonly contractVersion:1;
+  active():boolean;
+  run<T>(operation:()=>Promise<T>):Promise<T>;
+}

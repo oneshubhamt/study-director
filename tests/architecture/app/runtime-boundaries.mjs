@@ -91,11 +91,12 @@ for(const stale of [
   'const VERIFIED_RECOVERY_META_KEY=','function recordBackupCopy(','function readVerifiedRecoveryState(','async function reconcileChangeClock(','async function maybePromptBackupNudge(','backupNudgeMessage','backupNudgeCheckedAt','backupNudgeNotifiedDate',
   'const STORAGE_RESET_RETRY_MS=','function beginStorageResetHold(','function restoreMissingAfterStorageReset(','function noteDatabaseRemovedWhileClosed(',
   'async function importBackupAttachments(','function currentBackupSourceRevision(','async function fullBackupSnapshotRevision(','async function backupSnapshotRevision(',
-  'const BackupRuntime=BackupModule.createRuntime(','function renderKeptVersions(','async function retainedBackupFileNames(','async function withRichTextAssetMaintenancePaused(','async function reconcileNotesThroughLifecycle(','async function restoreNotesSnapshotThroughLifecycle('
+  'const BackupRuntime=BackupModule.createRuntime(','async function quiesceManagedRecoveryRuntime(','managedRecoverySessionQuiescenceDepth','managedRecoveryTimerFrozenSinceMs','function pwaRecoveryReadBackIssue(','function renderKeptVersions(','async function retainedBackupFileNames(','async function withRichTextAssetMaintenancePaused(','async function reconcileNotesThroughLifecycle(','async function restoreNotesSnapshotThroughLifecycle('
 ])assert.equal(host.includes(stale),false,`main host must not regain substantive P5.7 ownership: ${stale}`);
 assert.match(host,/function canonicalLocalRecoveryEmpty\(\)\{return StorageResetRecovery\?StorageResetRecovery\.canonicalEmpty\(\):Promise\.resolve\(null\);\}/u,'remaining storage-reset helper is a thin deferred forwarder');
 assert.match(host,/function handleCanonicalCommit\(event\)\{return CanonicalCommitHost\.handle\(event\);\}/u,'canonical commit remains a thin checked forwarder');
 assert.match(host,/RecoveryAssetMaintenancePause=BackupRecoveryHostModule\.createMaintenancePause|const RecoveryAssetMaintenancePause=BackupRecoveryHostModule\.createMaintenancePause/u,'attachment-maintenance recovery coordination crosses the checked owner');
+assert.match(host,/ManagedRecoveryQuiescence=BackupRecoveryHostModule\.createQuiescence\(Object\.freeze\(\{/u,'timer/rich-text recovery quiescence crosses the checked owner');
 console.log(JSON.stringify({status:'PASS',boundary:'p5.7-parent-source-ownership',verifiedRecovery:true,storageReset:true,runtimeAdapters:true,scratchRetention:true,noSubstantiveHostRemainder:true},null,2));
 }
 

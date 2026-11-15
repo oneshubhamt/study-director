@@ -624,10 +624,10 @@ let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
 // storage health asks for a redraw during start-up.
 let driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},sessionMovingHere=null,driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
-let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
+let ManagedRecoveryQuiescence=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return !!ActiveSessionRuntime?.persistenceSuppressed();}
-function managedRecoverySessionQuiesced(){return managedRecoverySessionQuiescenceDepth>0;}
+function managedRecoverySessionQuiesced(){return ManagedRecoveryQuiescence?.active()||false;}
 async function withRestoreSessionPersistenceSuppressed(operation){
   if(!ActiveSessionRuntime)throw new Error('Active Session runtime is unavailable.');
   return ActiveSessionRuntime.withPersistenceSuppressed(operation);
@@ -2503,21 +2503,17 @@ if(!Object.isFrozen(RichTextRuntime)||RichTextRuntime.format!=='study-director.r
   throw new Error('Study Director rich-text host runtime is unavailable or incompatible.');
 }
 SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
-async function quiesceManagedRecoveryRuntime(operation){
-  if(typeof operation!=='function')throw new TypeError('Managed recovery quiescence requires an operation.');
-  const outer=managedRecoverySessionQuiescenceDepth===0;
-  managedRecoverySessionQuiescenceDepth+=1;
-  if(outer){cancelPendingLiveDraftSave();if(managedRecoveryTimerFrozenSinceMs===null)managedRecoveryTimerFrozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();}
-  try{return await RichTextRuntime.quiesce(operation);}
-  finally{
-    managedRecoverySessionQuiescenceDepth=Math.max(0,managedRecoverySessionQuiescenceDepth-1);
-    if(outer&&managedRecoverySessionQuiescenceDepth===0)void AppMutationCoordinator.settled().then(()=>{
-      if(managedRecoverySessionQuiesced()||AppMutationCoordinator.status().active)return;
-      const frozenSinceMs=managedRecoveryTimerFrozenSinceMs;managedRecoveryTimerFrozenSinceMs=null;
-      if(SessionHandoffRuntime?.frozen())return;
-       try{TimerEngine.resumeAfterPrimaryRestore({frozenSinceMs});}catch(error){AppDiagnostics.capture('managed-recovery.resume-timer',error,'warn');}
-    });
-  }
+ManagedRecoveryQuiescence=BackupRecoveryHostModule.createQuiescence(Object.freeze({
+  cancelPendingLiveDraftSave:()=>cancelPendingLiveDraftSave(),
+  clock:Object.freeze({nowMs:()=>DecisionClock.nowMs()}),
+  timer:Object.freeze({stopExecution:()=>TimerEngine.stopExecution(),resumeAfterPrimaryRestore:options=>TimerEngine.resumeAfterPrimaryRestore(options)}),
+  richText:Object.freeze({quiesce:operation=>RichTextRuntime.quiesce(operation)}),
+  mutation:Object.freeze({settled:()=>AppMutationCoordinator.settled(),active:()=>!!AppMutationCoordinator.status().active}),
+  handoff:Object.freeze({frozen:()=>!!SessionHandoffRuntime?.frozen()}),
+  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+}));
+if(!Object.isFrozen(ManagedRecoveryQuiescence)||ManagedRecoveryQuiescence.format!=='study-director.recovery-quiescence'||ManagedRecoveryQuiescence.contractVersion!==1){
+  throw new Error('Study Director recovery quiescence is unavailable or incompatible.');
 }
 richTextClose=()=>RichTextRuntime.close();
 richTextCloseField=field=>RichTextRuntime.closeField(field);
@@ -3629,10 +3625,10 @@ BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
   document,
   interactions:Object.freeze({choose:options=>Interactions.choose(options)}),
   lifecycle:Object.freeze({
-    activeSessionIssue:loaded=>pwaRecoveryReadBackIssue(loaded),activeSessionLoad:()=>AppData.activeSession.load(0,{strict:true}),activeSessionSettled:()=>AppData.activeSession.settled(),
+    activeSessionIssue:loaded=>BackupRecoveryHostModule.activeSessionIssue(loaded),activeSessionLoad:()=>AppData.activeSession.load(0,{strict:true}),activeSessionSettled:()=>AppData.activeSession.settled(),
     attachmentBusy:()=>imagePreparationCount>0||AttachmentIngest.status().busy,canonicalPlanDraft:async()=>(await AppData.planData.read()).draft,deletionRecoveryFlush:()=>AppData.deletionRecovery.flush(),
     flushNotes:()=>AppData.notes.flush({strict:true}),flushPlanDraft:()=>PlanDraftEditor.flush(),hasTasks:()=>TASKS.length>0,noteFailure:()=>AppData.notes.failure(),
-    planDraft:()=>PlanData.readDraft(),planInputValue:()=>PlanDraftEditor.authoredText(),quiesce:operation=>quiesceManagedRecoveryRuntime(operation),
+    planDraft:()=>PlanData.readDraft(),planInputValue:()=>PlanDraftEditor.authoredText(),quiesce:operation=>ManagedRecoveryQuiescence.run(operation),
     savePlanDraft:options=>PlanDraftEditor.save(options),settleAttachmentWriters:options=>settleAttachmentWriters(options),settlePlan:()=>PlanData.settled(),writeLiveDraft:()=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:true})
   }),
   managedRecovery:Object.freeze({createCoordinator:input=>ManagedRecoveryModule.createCoordinator(input)}),
@@ -3724,12 +3720,6 @@ function pwaAppliedPlanEnded(){
   const trackable=TASKS.map((task,index)=>({task,index})).filter(row=>isTrackableBlock(row.task));
   return trackable.length?trackable.every(row=>isTaskResolved(row.index)):TimerState.currentIndex>=TASKS.length;
 }
-function pwaRecoveryReadBackIssue(loaded){
-  if(!loaded)return 'Saved session state could not be verified.';
-  if(loaded.error)return `Saved session recovery could not be verified: ${loaded.error.message||loaded.error}`;
-  if(loaded.value&&loaded.storage?.idb!==true)return 'The stored recovery session has not yet been confirmed in canonical browser storage.';
-  return '';
-}
 function pwaUpdateBlockReason(options={}){
   const automatic=options&&options.automatic===true,ignoreActiveTimers=options&&options.ignoreActiveTimers===true;
   const ownReservation=pwaUpdateReservation?.requestId===options.requestId&&!!options.requestId;
@@ -3800,7 +3790,7 @@ function reserveApplicationUpdate(context){
         resolveReady();await held;
       };
       if(follower)await RichTextRuntime.quiesce(()=>run(null));
-      else await AppMutationCoordinator.runExclusive('pwa-update',authority=>quiesceManagedRecoveryRuntime(()=>run(authority)));
+      else await AppMutationCoordinator.runExclusive('pwa-update',authority=>ManagedRecoveryQuiescence.run(()=>run(authority)));
     }catch(error){rejectReady(error);}
     finally{
       providerHold?.release();
@@ -3856,7 +3846,7 @@ async function prepareApplicationUpdate(context={}){
     await AppData.activeSession.settled();
     const loaded=await AppData.activeSession.load();
     await AppData.activeSession.settled();
-    const recoveryIssue=pwaRecoveryReadBackIssue(loaded);
+    const recoveryIssue=BackupRecoveryHostModule.activeSessionIssue(loaded);
     if(recoveryIssue)return Object.freeze({ok:false,reason:recoveryIssue});
     if(TASKS.length){
       if(!liveResult||!liveResult.ok||!liveResult.value||liveResult.storage?.idb!==true)return Object.freeze({ok:false,reason:'The active session could not be confirmed in canonical browser storage.'});
