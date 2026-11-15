@@ -61,7 +61,7 @@ try{
       model:{ring:model.ring,badge:model.badge,count:model.count,label:model.label,items:model.items},
       rendered:['profile-tag','profile-badge'].map(id=>{const node=document.getElementById(id);return {id,badge:node?.dataset.badge||'',ring:node?.dataset.ring||'',aria:node?.getAttribute('aria-label')||''};})
     };})()`);
-    throw new Error(`${error.message}; state=${JSON.stringify(state)}`,{cause:error});
+    throw new Error(`${error.message}; state=${JSON.stringify(state)}; warnings=${JSON.stringify(b.warnings.slice(-20))}`,{cause:error});
   }
   assert.match(await b.evaluate(`document.getElementById('profile-badge').getAttribute('aria-label')`),/kept versions? to review/u,'the phone circle names what waits for review');
   // It pops up once when it first appears (phase 4), with Review.
