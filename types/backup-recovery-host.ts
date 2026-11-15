@@ -1,6 +1,7 @@
 import type {ManagedRecoveryModule} from '../source/core/managed-recovery.ts';
 import type {ManagedRecoveryInput,RecoverySpec} from './managed-recovery.ts';
 import type {SessionResult} from './repositories.ts';
+import type {PendingReview} from './record-models.ts';
 export type PendingEntry=Readonly<{providerId:string;requestedAt:string;sourceRevision:string}>;
 export type PendingRecord=Readonly<{format:'study-director.managed-provider-backup-pending';version:1;entries:readonly PendingEntry[]}>;
 export type PendingStoreInput={storage:{read():Promise<unknown>;write(value:PendingRecord):Promise<unknown>;remove():Promise<unknown>};diagnostics:{capture(scope:string,error:unknown,level:'error'|'warn'):void};sourceRevision():unknown};
@@ -38,3 +39,29 @@ export interface RecoveryHostInput extends PendingStoreInput{
  session:{hasBlocking():boolean};view:{deviceName(origin:string|undefined,others:(string|undefined)[]):string;invalidateAttachments():void;refreshCore():void;refreshNotes():void;refreshReview():void;renderLibrary():void;setStatus(message:string):void};
 }
 export type HistoryNotice=PresentationEvent&{sourceId:string;sourceLabel:string;active:boolean;ok:boolean;progress:(Progress&{message:string})|null};
+export type KeptReviewOutcome=Readonly<{cancelled?:boolean;reviewed?:number;changed?:number;left?:number}>;
+export type KeptNotification=Readonly<{
+  source:string;key:string;title:string;message:string;kind?:'warning'|'error';tier?:'news';
+  action?:Readonly<{label:string;opens:boolean;run():unknown}>;
+}>;
+export interface KeptVersionsInput{
+  readonly controller:Readonly<{
+    status():Readonly<{busy:boolean}>;
+    resolveConvergedKeptVersions():Promise<number>;
+    reviewKeptVersions(options:{ref:string}):Promise<KeptReviewOutcome>;
+  }>;
+  readonly reviews:Readonly<{list():Promise<readonly PendingReview[]>}>;
+  readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level:'warn'):void}>;
+  readonly environment:Readonly<{canMutate():boolean;now():number;connectCardOpen():boolean;sessionYieldedAt():number}>;
+  readonly notifications:Readonly<{notify(options:KeptNotification):unknown;resolveEvent(source:string,id:string):unknown}>;
+  readonly view:Readonly<{render():void;renderLocation():void;refreshNotes():void}>;
+}
+export interface KeptVersionsController{
+  readonly format:'study-director.kept-versions';
+  readonly contractVersion:1;
+  refresh():Promise<boolean>;
+  review(ref?:string):Promise<KeptReviewOutcome|null>;
+  count():number;
+  note(id:string):boolean;
+}
+

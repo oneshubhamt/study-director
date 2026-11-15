@@ -1,18 +1,21 @@
-(()=>{
+import type {ModuleRegistration} from '../../types/module-registration.ts';
+import type {ReconciliationAssetStore,ReconciliationComparison,ReconciliationConflict,ReconciliationEditor,ReconciliationPane,ReconciliationResult,ReconciliationResolveOptions,ReconciliationRichText,ReconciliationState,ReconciliationUiInput,ReconciliationUiModule} from '../../types/reconciliation-ui.ts';
+
+const sdReconciliationUiFactory=(()=>{
 'use strict';
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'reconciliation-ui','study-director.reconciliation-ui-module'>|undefined;
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1){
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
-registry.define('reconciliation-ui',1,()=>{
+const createModule=():ReconciliationUiModule=>{
   const freeze=Object.freeze;
   const FORMAT='study-director.note-reconciliation-result';
-  function exactObject(value,keys,label){
-    const actual=value&&typeof value==='object'?Object.keys(value).sort():[],expected=[...keys].sort();
-    if(!value||actual.join('|')!==expected.join('|'))throw new TypeError(label+' is incomplete or contains unexpected fields.');
+  function exactObject<T extends object>(value:T,keys:readonly (keyof T)[],label:string):T{
+    const actual=Object.keys(value).sort(),expected=[...keys].map(String).sort();
+    if(actual.join('|')!==expected.join('|'))throw new TypeError(label+' is incomplete or contains unexpected fields.');
     return value;
   }
-  function createController(input){
+  function createController(input:Readonly<ReconciliationUiInput>){
     exactObject(input,['ports'],'Reconciliation UI input');
     const ports=exactObject(input.ports,['assets','configuration','diagnostics','richText','view'],'Reconciliation UI ports');
     const assets=exactObject(ports.assets,['get'],'Reconciliation UI asset port');
@@ -23,28 +26,29 @@ registry.define('reconciliation-ui',1,()=>{
     if(typeof assets.get!=='function'||typeof diagnostics.capture!=='function'||typeof richText.mountRichTextEditor!=='function'||typeof richText.compareRichText!=='function'||typeof richText.mergeIncomingAdditions!=='function'||typeof richText.appendIncomingAdditions!=='function'||typeof richText.mergeThreeWay!=='function')throw new TypeError('Reconciliation UI ports are invalid.');
     const document=view.document;
     if(!document||typeof document.createElement!=='function')throw new TypeError('Reconciliation UI document is unavailable.');
-    let active=null;
-    function normalizedConflicts(raw){
+    let active:{cancel:()=>Promise<void>}|null=null;
+    function normalizedConflicts(raw:unknown):readonly ReconciliationConflict[]{
       if(!Array.isArray(raw))throw new TypeError('Note conflicts must be an array.');
-      const seen=new Set(),out=[];
+      const seen=new Set<string>(),out:ReconciliationConflict[]=[];
       for(const item of raw){
-        const key=String(item&&item.key||'').trim(),localCandidateId=String(item&&item.localCandidateId||''),incomingCandidateId=String(item&&item.incomingCandidateId||'');
+        const row=item&&typeof item==='object'?item as Record<string,unknown>:Object.create(null) as Record<string,unknown>;
+        const key=String(row['key']||'').trim(),localCandidateId=String(row['localCandidateId']||''),incomingCandidateId=String(row['incomingCandidateId']||'');
         if(!key||seen.has(key)||!localCandidateId||!incomingCandidateId)continue;
         seen.add(key);out.push(freeze({
-          key,label:String(item.label||key).trim().slice(0,160)||key,
+          key,label:String(row['label']||key).trim().slice(0,160)||key,
           localCandidateId,incomingCandidateId,
-          localValue:String(item.localValue||''),incomingValue:String(item.incomingValue||''),ancestorAvailable:item.ancestorAvailable===true,ancestorValue:String(item.ancestorValue||''),requireContent:item.requireContent===true,
-          incomingLabel:String(item.incomingLabel||'Backup copy').trim().slice(0,160)||'Backup copy'
+          localValue:String(row['localValue']||''),incomingValue:String(row['incomingValue']||''),ancestorAvailable:row['ancestorAvailable']===true,ancestorValue:String(row['ancestorValue']||''),requireContent:row['requireContent']===true,
+          incomingLabel:String(row['incomingLabel']||'Backup copy').trim().slice(0,160)||'Backup copy'
         }));
       }
       return freeze(out);
     }
-    function resultFrom(states){
-      const notes=Object.create(null);
+    function resultFrom(states:readonly ReconciliationState[]):ReconciliationResult{
+      const notes:Record<string,{text:string;localCandidateId:string;incomingCandidateId:string}>=Object.create(null);
       for(const state of states)notes[state.conflict.key]=freeze({text:String(state.result??state.working),localCandidateId:state.conflict.localCandidateId,incomingCandidateId:state.conflict.incomingCandidateId});
       return freeze({format:FORMAT,version:1,notes:freeze(notes)});
     }
-    async function resolve(options={}){
+    async function resolve(options:ReconciliationResolveOptions){
       if(active)throw new Error('Note reconciliation is already open.');
       // purpose 'version' is one note compared with an earlier backup of it;
       // 'kept' is a note with a version a sync kept for review.
@@ -52,23 +56,23 @@ registry.define('reconciliation-ui',1,()=>{
       // A shared earlier copy only shapes what Smart merge proposes.
       const conflicts=normalizedConflicts(options.conflicts),manualOnly=options.manualOnly===true,version=!manualOnly&&options.purpose==='version',kept=!manualOnly&&options.purpose==='kept';
       if(!conflicts.length)return freeze({format:FORMAT,version:1,notes:freeze(Object.create(null))});
-      const smartMerge=conflict=>{
+      const smartMerge=(conflict:ReconciliationConflict):string|null=>{
         if(manualOnly||!conflict.ancestorAvailable)return null;
         try{return richText.mergeThreeWay(conflict.ancestorValue,conflict.localValue,conflict.incomingValue).value;}
         catch(error){diagnostics.capture('reconciliation-ui.three-way-preflight',error,'warn');return null;}
       };
       const manual=conflicts.map(conflict=>({conflict,smartValue:smartMerge(conflict)}));
-      const checkpointAssets=new Map();
+      const checkpointAssets=new Map<string,Blob>();
       for(const item of Array.isArray(options.incomingAssets)?options.incomingAssets:[]){const id=String(item&&item.assetId||'');if(id&&item.blob instanceof Blob)checkpointAssets.set(id,item.blob);}
-      const readonlyAssetStore=(preferCheckpoint=false)=>freeze({
-        async get(id){
+      const readonlyAssetStore=(preferCheckpoint=false):Readonly<ReconciliationAssetStore>=>freeze({
+        async get(id:string){
           const key=String(id||''),checkpoint=checkpointAssets.get(key)||null;
           if(preferCheckpoint&&checkpoint instanceof Blob)return checkpoint;
           try{const local=await assets.get(key);if(local instanceof Blob)return local;}catch(error){diagnostics.capture('reconciliation-ui.asset-read',error,'warn');}
           return checkpoint;
         },
-        async put(){throw new Error('Attachments cannot be added while reconciling notes.');},
-        async remove(){throw new Error('Attachments cannot be removed from storage while reconciling notes.');}
+        async put(_id:string,_blob:Blob){throw new Error('Attachments cannot be added while reconciling notes.');},
+        async remove(_id:string){throw new Error('Attachments cannot be removed from storage while reconciling notes.');}
       });
       // Both stores are temporary read-only views. The imported editor prefers the
       // verified checkpoint bytes; the resolved/local editor prefers canonical bytes
@@ -76,7 +80,7 @@ registry.define('reconciliation-ui',1,()=>{
       const localScratchAssets=readonlyAssetStore(false),incomingScratchAssets=readonlyAssetStore(true);
       // Replace starts each note from the backup's copy; everything else from this device's.
       const startIncoming=options.startWith==='incoming';
-      const states=manual.map(item=>({conflict:item.conflict,working:startIncoming?item.conflict.incomingValue:item.conflict.localValue,incoming:item.conflict.incomingValue,smartValue:item.smartValue,result:null,applied:false}));
+      const states:ReconciliationState[]=manual.map(item=>({conflict:item.conflict,working:startIncoming?item.conflict.incomingValue:item.conflict.localValue,incoming:item.conflict.incomingValue,smartValue:item.smartValue,result:null,applied:false}));
       const restoreFocus=document.activeElement;
       const dialog=document.createElement('dialog');dialog.className='sd-note-reconcile-dialog';dialog.setAttribute('aria-label',manualOnly?'Review Diary differences':'Review note differences');
       const shell=document.createElement('div');shell.className='sd-note-reconcile-shell';
@@ -84,12 +88,12 @@ registry.define('reconciliation-ui',1,()=>{
       const headingWrap=document.createElement('div'),kicker=document.createElement('div'),title=document.createElement('h2'),progress=document.createElement('div');kicker.className='sd-note-reconcile-kicker';kicker.textContent=manualOnly?'DIARY DIFFERENCES':version?'EARLIER VERSION':kept?'NEEDS REVIEW':'NOTE DIFFERENCES';title.className='sd-note-reconcile-title';progress.className='sd-note-reconcile-progress';headingWrap.append(kicker,title,progress);
       const cancel=document.createElement('button');cancel.type='button';cancel.className='sd-note-reconcile-close';cancel.textContent='Cancel';cancel.setAttribute('aria-label',manualOnly?'Cancel Diary review':'Cancel note review');header.append(headingWrap,cancel);
       const editors=document.createElement('div');editors.className='sd-note-reconcile-editors';
-      const makePane=(side,label)=>{const pane=document.createElement('section'),head=document.createElement('div'),name=document.createElement('strong'),sub=document.createElement('span'),field=document.createElement('textarea');pane.className=`sd-note-reconcile-pane sd-note-reconcile-pane-${side}`;head.className='sd-note-reconcile-pane-head';name.textContent=label;sub.className='sd-note-reconcile-pane-sub';field.className='sd-note-reconcile-field';field.setAttribute('aria-label',label);field.spellcheck=true;head.append(name,sub);pane.append(head,field);return{pane,sub,field}};
+      const makePane=(side:string,label:string):ReconciliationPane=>{const pane=document.createElement('section'),head=document.createElement('div'),name=document.createElement('strong'),sub=document.createElement('span'),field=document.createElement('textarea');pane.className=`sd-note-reconcile-pane sd-note-reconcile-pane-${side}`;head.className='sd-note-reconcile-pane-head';name.textContent=label;sub.className='sd-note-reconcile-pane-sub';field.className='sd-note-reconcile-field';field.setAttribute('aria-label',label);field.spellcheck=true;head.append(name,sub);pane.append(head,field);return{pane,sub,field}};
       const localPane=makePane('local',manualOnly?'Resolved reflection':version||kept?'Current note':'Resolved note'),incomingPane=makePane('incoming',manualOnly?'Backup’s reflection':version?'Earlier version':kept?'Kept version':'Backup’s note');editors.append(localPane.pane,incomingPane.pane);
       const diffStatus=document.createElement('div');diffStatus.className='sd-note-reconcile-diff-status';diffStatus.setAttribute('aria-live','polite');
       const actions=document.createElement('div');actions.className='sd-note-reconcile-actions';
       const strategy=document.createElement('div');strategy.className='sd-note-reconcile-strategies';strategy.setAttribute('role','group');strategy.setAttribute('aria-label','Difference review actions');
-      const action=(label,kind)=>{const button=document.createElement('button');button.type='button';button.dataset.action=kind;button.textContent=label;strategy.append(button);return button};
+      const action=(label:string,kind:string):HTMLButtonElement=>{const button=document.createElement('button');button.type='button';button.dataset.action=kind;button.textContent=label;strategy.append(button);return button};
       const keepButton=action(version||kept?'Keep current':'Keep this device’s','keep'),mergeButton=action('Smart merge','merge'),appendButton=action(version?'Add what’s missing':'Append additions','append'),importButton=action(version?'Use this version':kept?'Use kept version':'Use the backup’s','import'),customButton=action('Custom','custom');if(manualOnly){mergeButton.hidden=true;appendButton.hidden=true;}else customButton.hidden=true;
       const navigation=document.createElement('div');navigation.className='sd-note-reconcile-navigation';
       const previous=document.createElement('button'),next=document.createElement('button');previous.type=next.type='button';previous.textContent='← Previous';next.textContent='Next →';const retry=document.createElement('button');retry.type='button';retry.textContent='Retry editors';retry.hidden=true;navigation.append(previous,next,retry);
@@ -97,17 +101,17 @@ registry.define('reconciliation-ui',1,()=>{
       // One choice for every note not yet applied, so a long list is one click.
       const bulk=document.createElement('div');bulk.className='sd-note-reconcile-bulk';bulk.setAttribute('role','group');bulk.setAttribute('aria-label','Choose for all remaining');bulk.hidden=states.length<2||version;
       const bulkLabel=document.createElement('span');bulkLabel.className='sd-note-reconcile-bulk-label';bulkLabel.textContent='All remaining:';bulk.append(bulkLabel);
-      const bulkAction=(label,pick)=>{const button=document.createElement('button');button.type='button';button.textContent=label;button.addEventListener('click',()=>settleRemaining(pick));bulk.append(button);return button;};
+      const bulkAction=(label:string,pick:(state:ReconciliationState)=>unknown):HTMLButtonElement=>{const button=document.createElement('button');button.type='button';button.textContent=label;button.addEventListener('click',()=>settleRemaining(pick));bulk.append(button);return button;};
       const bulkButtons=[bulkAction(kept?'Current':'This device’s',state=>state.conflict.localValue),bulkAction(kept?'Kept':'The backup’s',state=>state.incoming),...(manualOnly?[]:[bulkAction('Both',state=>richText.appendIncomingAdditions(state.conflict.localValue,state.incoming).value)])];
       actions.append(strategy,navigation,apply,bulk);shell.append(header,editors,diffStatus,actions);dialog.append(shell);document.body.append(dialog);
-      let index=0,leftHandle=null,rightHandle=null,frame=0,settled=false,generation=0,abortHandler=null,transitionBusy=false;
-      const ownedHandles=new Set(),destroyedHandles=new WeakSet();
+      let index=0,leftHandle:ReconciliationEditor|null=null,rightHandle:ReconciliationEditor|null=null,frame=0,settled=false,generation=0,abortHandler:(()=>void)|null=null,transitionBusy=false;
+      const ownedHandles=new Set<ReconciliationEditor>(),destroyedHandles=new WeakSet<ReconciliationEditor>();
       const transitionControls=[keepButton,mergeButton,appendButton,importButton,customButton,previous,next,apply,retry,...bulkButtons];
-      const setTransitionBusy=busy=>{transitionBusy=!!busy;for(const control of transitionControls)control.disabled=!!busy;};
-      const destroyHandles=async(handles,scope)=>{for(const handle of handles){if(!handle||destroyedHandles.has(handle))continue;destroyedHandles.add(handle);ownedHandles.delete(handle);try{await handle.destroy();}catch(error){diagnostics.capture(scope,error,'warn');}}};
-      let resolvePromise;
-      const promise=new Promise(resolve=>{resolvePromise=resolve});
-      const finish=async result=>{
+      const setTransitionBusy=(busy:boolean)=>{transitionBusy=!!busy;for(const control of transitionControls)control.disabled=!!busy;};
+      const destroyHandles=async(handles:readonly (ReconciliationEditor|null)[],scope:string)=>{for(const handle of handles){if(!handle||destroyedHandles.has(handle))continue;destroyedHandles.add(handle);ownedHandles.delete(handle);try{await handle.destroy();}catch(error){diagnostics.capture(scope,error,'warn');}}};
+      let resolvePromise!:(value:ReconciliationResult|null)=>void;
+      const promise=new Promise<ReconciliationResult|null>(resolve=>{resolvePromise=resolve});
+      const finish=async(result:ReconciliationResult|null):Promise<void>=>{
         if(settled)return;settled=true;generation++;setTransitionBusy(true);
         if(frame)view.cancelAnimationFrame(frame);frame=0;
         if(abortHandler&&options.signal)options.signal.removeEventListener?.('abort',abortHandler);abortHandler=null;localPane.field.oninput=null;
@@ -118,15 +122,15 @@ registry.define('reconciliation-ui',1,()=>{
         resolvePromise(result);
       };
       active={cancel:()=>finish(null)};
-      const comparisonSummary=comparison=>{const incomingOnly=comparison.incomingOnly.length,localOnly=comparison.localOnly.length,changed=comparison.correspondences.filter(item=>item.kind==='fuzzy'||!item.formatEqual).length;const parts=[];if(incomingOnly)parts.push(`${incomingOnly} imported addition${incomingOnly===1?'':'s'}`);if(localOnly)parts.push(`${localOnly} local-only part${localOnly===1?'':'s'}`);if(changed)parts.push(`${changed} changed match${changed===1?'':'es'}`);return parts.length?parts.join(' · '):'No remaining textual differences detected.';};
+      const comparisonSummary=(comparison:ReconciliationComparison)=>{const incomingOnly=comparison.incomingOnly.length,localOnly=comparison.localOnly.length,changed=comparison.correspondences.filter(item=>item.kind==='fuzzy'||!item.formatEqual).length;const parts=[];if(incomingOnly)parts.push(`${incomingOnly} imported addition${incomingOnly===1?'':'s'}`);if(localOnly)parts.push(`${localOnly} local-only part${localOnly===1?'':'s'}`);if(changed)parts.push(`${changed} changed match${changed===1?'':'es'}`);return parts.length?parts.join(' · '):'No remaining textual differences detected.';};
       const updateComparison=()=>{if(settled||!leftHandle||!rightHandle)return;try{const comparison=richText.compareRichText(leftHandle.getValue(),rightHandle.getValue());leftHandle.setTransientRanges(comparison.localRanges);rightHandle.setTransientRanges(comparison.incomingRanges);diffStatus.textContent=comparisonSummary(comparison);}catch(error){leftHandle.setTransientRanges([]);rightHandle.setTransientRanges([]);diffStatus.textContent='Differences could not be calculated for the current scratch edit.';diagnostics.capture('reconciliation-ui.compare',error,'warn');}};
       const scheduleComparison=()=>{if(frame)view.cancelAnimationFrame(frame);frame=view.requestAnimationFrame(()=>{frame=0;updateComparison()})};
       const saveScratch=()=>{const state=states[index];if(!state||!leftHandle)return;state.working=leftHandle.getValue();};
       const markEdited=()=>{const state=states[index];if(state)state.applied=false;scheduleComparison()};
-      async function mountCurrent(nextIndex){
+      async function mountCurrent(nextIndex:number){
         if(settled||transitionBusy)return;
         const token=++generation;setTransitionBusy(true);retry.hidden=true;
-        let mountedLeft=null,mountedRight=null;
+        let mountedLeft:ReconciliationEditor|null=null,mountedRight:ReconciliationEditor|null=null;
         try{
           saveScratch();localPane.field.oninput=null;
           const previousHandles=[leftHandle,rightHandle];leftHandle=rightHandle=null;
@@ -135,9 +139,9 @@ registry.define('reconciliation-ui',1,()=>{
           index=Math.max(0,Math.min(states.length-1,nextIndex));const state=states[index],conflict=state.conflict;
           title.textContent=conflict.label;progress.textContent=version?'':`Difference ${index+1} of ${states.length}`;localPane.sub.textContent='Editable working copy · this is what will be saved';incomingPane.sub.textContent=conflict.incomingLabel+' · read-only reference';
           localPane.field.value=state.working;incomingPane.field.value=state.incoming;apply.textContent=version?'Save note':manualOnly?(states.length===1?'Apply reflection':(state.applied?'Re-apply reflection':'Apply reflection')):(states.length===1?'Apply resolved note':(state.applied?'Re-apply resolved note':'Apply resolved note'));
-          const mountOptions=(field,label,value,assetStore,readOnly=false)=>freeze({field,label,initialValue:value,maxWords:configuration.maxWords,maxBytes:configuration.maxBytes,assets:assetStore,surface:'reconciliation',focusOnMount:false,allowAssetInsert:false,readOnly});
+          const mountOptions=(field:HTMLTextAreaElement,label:string,value:string,assetStore:ReconciliationAssetStore,readOnly=false)=>freeze({field,label,initialValue:value,maxWords:configuration.maxWords,maxBytes:configuration.maxBytes,assets:assetStore,surface:'reconciliation' as const,focusOnMount:false,allowAssetInsert:false,readOnly});
           // Keep ownership of a successful sibling even when its peer rejects.
-          const mount=options=>Promise.resolve().then(()=>richText.mountRichTextEditor(options)).then(async handle=>{
+          const mount=(options:Parameters<ReconciliationRichText['mountRichTextEditor']>[0])=>Promise.resolve().then(()=>richText.mountRichTextEditor(options)).then(async(handle):Promise<ReconciliationEditor|null>=>{
             ownedHandles.add(handle);
             if(settled||token!==generation){await destroyHandles([handle],'reconciliation-ui.stale-mount');return null;}
             return handle;
@@ -160,7 +164,7 @@ registry.define('reconciliation-ui',1,()=>{
           retry.focus?.({preventScroll:true});
         }
       }
-      const setLeft=value=>{if(leftHandle&&!leftHandle.setValue(String(value??'')))throw new Error('Resolved note could not be loaded into the scratch editor.');scheduleComparison();};
+      const setLeft=(value:unknown)=>{if(leftHandle&&!leftHandle.setValue(String(value??'')))throw new Error('Resolved note could not be loaded into the scratch editor.');scheduleComparison();};
       keepButton.addEventListener('click',()=>{setLeft(states[index].conflict.localValue)});
       mergeButton.addEventListener('click',()=>{try{const state=states[index],value=state.smartValue===null?richText.mergeIncomingAdditions(state.conflict.localValue,state.incoming).value:state.smartValue;setLeft(value)}catch(error){diagnostics.capture('reconciliation-ui.merge',error,'warn');diffStatus.textContent='Smart merge could not be prepared. You can still edit the resolved copy manually.';}});
       appendButton.addEventListener('click',()=>{try{setLeft(richText.appendIncomingAdditions(leftHandle.getValue(),rightHandle.getValue()).value)}catch(error){diagnostics.capture('reconciliation-ui.append',error,'warn');diffStatus.textContent='Imported additions could not be appended automatically. You can still edit the resolved copy manually.';}});
@@ -169,7 +173,7 @@ registry.define('reconciliation-ui',1,()=>{
       retry.addEventListener('click',()=>{void mountCurrent(index)});
       previous.addEventListener('click',()=>{void mountCurrent(index-1)});next.addEventListener('click',()=>{void mountCurrent(index+1)});
       apply.addEventListener('click',()=>{const state=states[index];saveScratch();if(manualOnly&&state.conflict.requireContent&&!String(state.working||'').trim()){state.applied=false;if(frame)view.cancelAnimationFrame(frame);frame=0;diffStatus.textContent='A diary-only entry cannot be empty. Keep one copy or enter custom text.';return;}state.result=state.working;state.applied=true;const nextUnresolved=states.findIndex((item,position)=>position>index&&!item.applied);if(nextUnresolved>=0){void mountCurrent(nextUnresolved);return}const anyUnresolved=states.findIndex(item=>!item.applied);if(anyUnresolved>=0){void mountCurrent(anyUnresolved);return}void finish(resultFrom(states));});
-      function settleRemaining(pick){
+      function settleRemaining(pick:(state:ReconciliationState)=>unknown){
         if(settled||transitionBusy)return;saveScratch();
         for(const state of states){if(state.applied)continue;let value;try{value=String(pick(state)??'');}catch(error){diagnostics.capture('reconciliation-ui.bulk',error,'warn');diffStatus.textContent='That choice could not be prepared for every note. Choose note by note instead.';return;}state.result=value;state.applied=true;}
         void finish(resultFrom(states));
@@ -181,8 +185,10 @@ registry.define('reconciliation-ui',1,()=>{
       try{dialog.showModal();void mountCurrent(0);}catch(error){diagnostics.capture('reconciliation-ui.open',error,'error');await finish(null);}
       return promise;
     }
-    return freeze({resolve,cancel:()=>active?.cancel()||false});
+    return freeze({format:'study-director.reconciliation-ui' as const,contractVersion:1 as const,resolve,cancel:()=>active?.cancel()||false});
   }
-  return freeze({format:'study-director.reconciliation-ui-module',contractVersion:1,createController});
-});
+  return freeze({format:'study-director.reconciliation-ui-module' as const,contractVersion:1 as const,createController});
+};
+registry.define('reconciliation-ui',1,createModule);return createModule;
 })();
+export type ReconciliationUiFactory=ReturnType<typeof sdReconciliationUiFactory>;

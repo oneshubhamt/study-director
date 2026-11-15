@@ -154,7 +154,7 @@ const {KeyedRecord,textEl,on,emptyMsg,setProgressSummary,setElementText,setEleme
 let StorageHealthController=null;
 let storageResetHold=null,storageResetHandling=null,storageResetSince=0,storageResetAcknowledged=0;
 let NativeCapabilities=null,CapabilityBadge=null;
-let DeviceBackup=null,BackupRecoveryHost=null;
+let DeviceBackup=null,BackupRecoveryHost=null,KeptVersions=null;
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
 const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
   onError:(operation,error)=>StorageHealthController?.observeLocalStorage(operation,error),
@@ -3731,60 +3731,9 @@ const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze
   failClosed:message=>AppMutationCoordinator.failClosed(message,'library-clear'),clearFault:()=>AppMutationCoordinator.clearFault(),
   journal:Object.freeze({prepare:value=>AppData.libraryClearJournal.prepare(value),read:()=>AppData.libraryClearJournal.read(),mark:(id,phase)=>AppData.libraryClearJournal.mark(id,phase),clear:id=>AppData.libraryClearJournal.clear(id)})
 }));
-// 5.2: versions a sync kept where two devices changed the same thing. Their
-// count shows in Library → Data and the sidebar; a note with one carries a
-// quiet "Needs review" mark. Reviewing never opens by itself.
-const KeptVersions=(()=>{
-  let count=0,notes=new Set(),generation=0,seen=null;
-  async function refresh(){
-    const token=++generation;let open;
-    try{
-      open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
-      if(open.length&&appCanMutate()&&!BackupController.status().busy){
-        // Resolve only verified, now-identical canonical alternatives. The
-        // Backup controller writes and reads back replicated tombstones;
-        // this view still reads the actual resulting count.
-        try{await BackupController.resolveConvergedKeptVersions();}
-        catch(error){AppDiagnostics.capture('kept-versions.convergence',error,'warn');}
-        open=(await AppData.pendingReviews.list()).filter(review=>!review.resolvedAt);
-      }
-    }catch(error){AppDiagnostics.capture('kept-versions.refresh',error,'warn');return false;}
-    if(token!==generation)return false;
-    const next=new Set(open.filter(review=>review.subject==='note').map(review=>review.ref)),notesChanged=[...next].sort().join('|')!==[...notes].sort().join('|');
-    // Kept versions pop up once, when they first appear; those already here
-    // at start-up do not.
-    const fresh=seen?open.filter(review=>!seen.has(review.id)):[];
-    seen=new Set([...(seen||[]),...open.map(review=>review.id)]);
-    count=open.length;notes=next;renderKeptVersions();renderDriveBackup();
-    if(notesChanged)LibraryView.refreshNotes();
-    if(!count)NoticeCoordinator.resolveEvent('sync','kept-new');
-    else if(fresh.length)announce(fresh);
-    return true;
-  }
-  function announce(fresh){
-    // The Connect card reports what its sync kept, and the pop-up for a
-    // session that moved to another device says this device's was kept.
-    if(driveConnectCard)return;
-    if(Date.now()-sessionYieldedAt<60000&&fresh.every(review=>review.subject==='session'))return;
-    Interactions.notify({source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',
-      message:`${count===1?'One alternative needs':`${count} alternatives need`} review because their differences could not be safely settled. Verified matching alternatives are cleared automatically; choose what to keep when ready.`,
-      action:{label:'Review',opens:true,run:()=>void review()}});
-  }
-  async function review(ref=''){
-    try{
-      const result=await BackupController.reviewKeptVersions({ref:String(ref||'')});
-      if(result.cancelled)return result;
-      const parts=[result.reviewed?`${result.reviewed} reviewed`:'',result.changed?`${result.changed} changed while you chose; review ${result.changed===1?'it':'them'} again`:'',result.left?`${result.left} still waiting${!result.reviewed&&!result.changed?' (a kept session waits until this session ends)':''}`:''].filter(Boolean);
-      Interactions.notify({source:'sync',key:'kept-review',title:'Kept versions',message:`${parts.join(' · ')||'Nothing to review'}.`});
-      return result;
-    }catch(error){
-      AppDiagnostics.capture('kept-versions.review',error,'warn');
-      Interactions.notify({source:'sync',key:'kept-review',kind:'error',title:'Review not saved',message:error&&error.message||'Nothing was changed. Try again.'});
-      return null;
-    }finally{void refresh();}
-  }
-  return Object.freeze({refresh,review,count:()=>count,note:id=>notes.has(String(id||''))});
-})();
+// P5.7B owns kept-version refresh/review state in the checked recovery host.
+// Library/profile callers keep this deferred reference because they are composed
+// before the Backup runtime and therefore before its kept-version controller.
 // Library → Data says what this device holds from a newer version.
 function renderUnsupportedData(){
   scheduleSyncStatus();
@@ -4180,6 +4129,26 @@ if(!Object.isFrozen(BackupRuntime)||BackupRuntime.format!=='study-director.backu
 const {
   controller:BackupController, checkpoint:CheckpointPipeline, repository:RepositoryCheckpointPipeline, providers:BackupProviderRuntime
 }=BackupRuntime;
+KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze({
+  controller:BackupController,
+  reviews:Object.freeze({list:()=>AppData.pendingReviews.list()}),
+  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+  environment:Object.freeze({
+    canMutate:()=>appCanMutate(),now:()=>Date.now(),
+    connectCardOpen:()=>!!driveConnectCard,sessionYieldedAt:()=>sessionYieldedAt
+  }),
+  notifications:Object.freeze({
+    notify:options=>Interactions.notify(options),
+    resolveEvent:(source,id)=>NoticeCoordinator.resolveEvent(source,id)
+  }),
+  view:Object.freeze({
+    render:()=>renderKeptVersions(),renderLocation:()=>renderDriveBackup(),
+    refreshNotes:()=>LibraryView.refreshNotes()
+  })
+}));
+if(!Object.isFrozen(KeptVersions)||KeptVersions.format!=='study-director.kept-versions'||KeptVersions.contractVersion!==1){
+  throw new Error('Study Director kept-version recovery controller is unavailable or incompatible.');
+}
 SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze({
   configuration:Object.freeze({
     providerId:'google-drive',claimWatchMs:SESSION_CLAIM_WATCH_MS,claimSyncRetryMs:SESSION_CLAIM_SYNC_RETRY_MS,

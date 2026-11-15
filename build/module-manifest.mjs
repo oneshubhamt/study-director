@@ -23,7 +23,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'backup-codec',source:'core/backup-codec.ts',stem:'sd.backup-codec'}),
   Object.freeze({id:'canonical',source:'core/canonical.ts',stem:'sd.canonical'}),
   Object.freeze({id:'reconciliation',source:'core/reconciliation.ts',stem:'sd.reconciliation'}),
-  Object.freeze({id:'reconciliation-ui',source:'core/reconciliation-ui.js',stem:'sd.reconciliation-ui'}),
+  Object.freeze({id:'reconciliation-ui',source:'core/reconciliation-ui.ts',stem:'sd.reconciliation-ui'}),
   Object.freeze({id:'session-lifecycle',source:'core/session-lifecycle.ts',stem:'sd.session-lifecycle'}),
   Object.freeze({id:'repository-journals',source:'core/repository-journals.ts',stem:'sd.repository-journals'}),
   Object.freeze({id:'save-lane',source:'core/save-lane.ts',stem:'sd.save-lane'}),

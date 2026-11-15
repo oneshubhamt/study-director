@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension} from '../../types/backup-recovery-host.ts';
+import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome} from '../../types/backup-recovery-host.ts';
 import type {RecoverySpec,ManagedRecoveryInput} from '../../types/managed-recovery.ts';
 const sdBackupRecoveryHostFactory=(()=>{
 'use strict';
@@ -63,6 +63,64 @@ const createModule=()=>{
     }
     return freeze({read:pending,mark:markPending,clear:clearPending});
   }
+  function createKeptVersions(input:Readonly<KeptVersionsInput>):Readonly<KeptVersionsController>{
+    exactObject(input,['controller','reviews','diagnostics','environment','notifications','view'],'Kept Versions input');
+    functions(input.controller,['status','resolveConvergedKeptVersions','reviewKeptVersions'],'Kept Versions controller port');
+    functions(input.reviews,['list'],'Kept Versions review store');
+    functions(input.diagnostics,['capture'],'Kept Versions diagnostics port');
+    functions(input.environment,['canMutate','now','connectCardOpen','sessionYieldedAt'],'Kept Versions environment port');
+    functions(input.notifications,['notify','resolveEvent'],'Kept Versions notification port');
+    functions(input.view,['render','renderLocation','refreshNotes'],'Kept Versions view port');
+    let count=0,generation=0,seen:Set<string>|null=null;
+    let notes=new Set<string>();
+    async function refresh(){
+      const token=++generation;let open;
+      try{
+        open=(await input.reviews.list()).filter(review=>!review.resolvedAt);
+        if(open.length&&input.environment.canMutate()&&!input.controller.status().busy){
+          try{await input.controller.resolveConvergedKeptVersions();}
+          catch(error){input.diagnostics.capture('kept-versions.convergence',error,'warn');}
+          open=(await input.reviews.list()).filter(review=>!review.resolvedAt);
+        }
+      }catch(error){input.diagnostics.capture('kept-versions.refresh',error,'warn');return false;}
+      if(token!==generation)return false;
+      const next=new Set(open.filter(review=>review.subject==='note').map(review=>review.ref));
+      const notesChanged=[...next].sort().join('|')!==[...notes].sort().join('|');
+      const fresh=seen?open.filter(review=>!seen!.has(review.id)):[];
+      seen=new Set([...(seen||[]),...open.map(review=>review.id)]);
+      count=open.length;notes=next;input.view.render();input.view.renderLocation();
+      if(notesChanged)input.view.refreshNotes();
+      if(!count)input.notifications.resolveEvent('sync','kept-new');
+      else if(fresh.length)announce(fresh);
+      return true;
+    }
+    function announce(fresh:readonly {subject:string}[]){
+      if(input.environment.connectCardOpen())return;
+      if(input.environment.now()-input.environment.sessionYieldedAt()<60000&&fresh.every(review=>review.subject==='session'))return;
+      input.notifications.notify({
+        source:'sync',key:'kept-new',kind:'warning',tier:'news',title:'Kept for review',
+        message:`${count===1?'One alternative needs':`${count} alternatives need`} review because their differences could not be safely settled. Verified matching alternatives are cleared automatically; choose what to keep when ready.`,
+        action:freeze({label:'Review',opens:true,run:()=>void review()})
+      });
+    }
+    async function review(ref:string=''):Promise<KeptReviewOutcome|null>{
+      try{
+        const result=await input.controller.reviewKeptVersions({ref:String(ref||'')});
+        if(result.cancelled)return result;
+        const reviewed=Number(result.reviewed)||0,changed=Number(result.changed)||0,left=Number(result.left)||0;
+        const parts=[reviewed?`${reviewed} reviewed`:'',changed?`${changed} changed while you chose; review ${changed===1?'it':'them'} again`:'',left?`${left} still waiting${!reviewed&&!changed?' (a kept session waits until this session ends)':''}`:''].filter(Boolean);
+        input.notifications.notify({source:'sync',key:'kept-review',title:'Kept versions',message:`${parts.join(' · ')||'Nothing to review'}.`});
+        return result;
+      }catch(error){
+        input.diagnostics.capture('kept-versions.review',error,'warn');
+        const message=error&&typeof error==='object'&&'message' in error?String((error as {message?:unknown}).message||''):'';
+        input.notifications.notify({source:'sync',key:'kept-review',kind:'error',title:'Review not saved',message:message||'Nothing was changed. Try again.'});
+        return null;
+      }finally{void refresh();}
+    }
+    return freeze({format:'study-director.kept-versions' as const,contractVersion:1 as const,refresh,review,count:()=>count,note:(id:string)=>notes.has(String(id||''))});
+  }
+
   function createHost(input:RecoveryHostInput){
     exactObject(input,['cancellation','diagnostics','document','interactions','lifecycle','managedRecovery','mutation','presentation','providers','session','sourceRevision','storage','view'],'Backup recovery host input');
     functions(input.cancellation,['cancelImport'],'Backup recovery host cancellation port');
@@ -449,7 +507,7 @@ const createModule=()=>{
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }
-  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost,createPendingStore});
+  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost,createPendingStore,createKeptVersions});
 };
 registry.define('backup-recovery-host',1,createModule);return createModule;
 })();
