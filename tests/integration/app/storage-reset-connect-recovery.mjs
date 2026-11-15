@@ -1,107 +1,154 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
-import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
+import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 
-// Connecting Google Drive or the Device Folder while a browser-data clear is
-// unresolved brings the library back. A device holding nothing (its database
-// was removed while the app was closed) takes it back in full: Drive by a
-// verified sync, the Device Folder by offering its newest version from before
-// the clear. A device holding what its open tab wrote back adds only what is
-// missing. Anything unverified, failed or declined leaves the notice, and
-// uploads stay paused.
-const source=readHostHtml();
-function productionFunction(signature){
-  const start=source.indexOf(signature),end=start<0?-1:source.indexOf('\n}',start);
-  assert.ok(start>=0&&end>start,`Production function missing: ${signature}`);
-  return source.slice(start,end+2);
-}
-const runtime=[productionFunction('async function recoverAfterStorageResetOnConnect(id){'),productionFunction('async function connectDeviceBackupWithRecovery(){'),productionFunction('function storageResetConnectionsChanged(){')].join('\n');
+for(const file of ['source/core/internal.ts','source/core/backup-recovery-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
+const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const BackupRecoveryHost=registry.require('backup-recovery-host',1);
+const freeze=Object.freeze;
+const clearedAt='2026-11-07T08:00:00.000Z';
+const now=Date.parse('2026-11-07T08:01:00.000Z');
+const checkpoint='cp_'+'a'.repeat(32);
 
-function harness({empty=true,sync=null,missing=false,offer=false,folderConnected=true}={}){
-  const calls={syncs:[],missing:0,offers:[],decisions:0,settled:0,notices:[],captures:[]};
-  const hold={clearedAt:'2026-11-07T08:00:00.000Z',reloaded:true};
-  const context=vm.createContext({
-    Date,
-    storageResetHold:hold,storageResetHandling:null,
-    appCanMutate:()=>true,
-    canonicalLocalRecoveryEmpty:async()=>empty,
-    restoreMissingAfterStorageReset:async(given,id)=>{assert.equal(given,hold);calls.missingFrom=id;calls.missing++;if(missing)context.storageResetHold=null;return missing;},
-    offerDeviceRecoveryIfLocalEmpty:async options=>{calls.offers.push(options);if(offer)context.storageResetHold=null;return offer;},
-    showStorageResetDecision:()=>{calls.decisions++;},
-    settleStorageReset:()=>{calls.settled++;context.storageResetHold=null;return true;},
-    AppDiagnostics:{capture:(scope)=>calls.captures.push(scope)},
-    NoticeCoordinator:{emit:event=>calls.notices.push(event)},
-    DeviceBackup:{connect:async()=>true,status:()=>({connected:folderConnected})},
-    BackupProviderRuntime:{
-      drive:{connected:true,engineBusy:false},locationStatus:id=>id==='google-drive'?context.BackupProviderRuntime.drive:null,
-      list:()=>[{id:'google-drive',label:'Google Drive',connected:true}],
-      syncRepositoryProvider:async id=>{calls.syncs.push(id);if(sync instanceof Error)throw sync;return sync;}
-    }
-  });
-  vm.runInContext(runtime+'\nglobalThis.recover=recoverAfterStorageResetOnConnect;globalThis.connectFolder=connectDeviceBackupWithRecovery;globalThis.changed=storageResetConnectionsChanged;',context);
-  return {context,calls,hold};
+async function drain(){
+  for(let index=0;index<12;index++)await Promise.resolve();
 }
+
+function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missing={cancelled:false,verified:true,added:1,assetsRestored:0,exportedAt:clearedAt},confirm=true,driveConnected=false,driveBusy=false,deviceConnected=false}={}){
+  const state={owner:true,driveConnected,driveBusy,deviceConnected,health:{lastStudyDataSaveAt:'2026-11-06T12:00:00.000Z',browserDataClearedAt:clearedAt},resets:1,startedFresh:false};
+  const calls={syncs:[],missing:[],history:0,restores:[],confirms:0,decisions:0,successes:0,captures:[],suspends:0,releases:0,wakes:[],remember:0,installs:0,refreshes:0};
+  let listener=()=>{},timerSequence=0;
+  const locations=()=>freeze([
+    freeze({id:'google-drive',label:'Google Drive',connected:state.driveConnected}),
+    freeze({id:'device-folder',label:'Device Folder',connected:state.deviceConnected})
+  ]);
+  const controller=BackupRecoveryHost.createStorageReset(freeze({
+    authority:freeze({canMutate:()=>state.owner}),
+    canonical:freeze({
+      dailyRecordsList:async()=>{if(empty===null)throw new Error('canonical unavailable');return empty?freeze([]):freeze([freeze({date:'2026-11-06'})]);},
+      notesReadFreshPayload:async()=>freeze({}),
+      activeSessionLoad:async()=>freeze({ok:true,value:null,error:null,storage:freeze({idb:true})}),
+      planDataRead:async()=>freeze({draft:'',savedPlans:freeze([])}),
+      attachmentsList:async()=>freeze([]),
+      pendingReviewsList:async()=>freeze([]),
+      savedDayDeletions:async()=>freeze([]),
+      noteDeletions:async()=>freeze([])
+    }),
+    writeback:freeze({
+      installationKeep:()=>true,notesRecover:()=>true,planRewrite:()=>true,settingsFlush:()=>true,hasTasks:()=>false,
+      writeLiveDraft:async()=>freeze({ok:true,value:null,error:null,storage:freeze({idb:true})})
+    }),
+    provider:freeze({
+      history:async(id,options)=>{
+        assert.equal(id,'device-folder');assert.equal(options.interactive,false);calls.history++;
+        return freeze({available:true,entries:freeze([freeze({exportedAt:clearedAt,location:freeze({tier:'latest',checkpointId:checkpoint,exportedAt:clearedAt})})])});
+      },
+      restoreRepositoryProviderVersion:async(id,options)=>{calls.restores.push([id,options]);return freeze({cancelled:false,verified:true});},
+      bringInRepositoryProvider:async(id,options)=>{calls.missing.push([id,options]);if(missing instanceof Error)throw missing;return missing;},
+      syncRepositoryProvider:async id=>{calls.syncs.push(id);if(sync instanceof Error)throw sync;return sync;},
+      list:locations,
+      locationStatus:id=>id==='google-drive'?freeze({connected:state.driveConnected,engineBusy:state.driveBusy}):id==='device-folder'?freeze({connected:state.deviceConnected}):null,
+      suspendBackground:reason=>{assert.equal(reason,'storage-reset');calls.suspends++;let released=false;return freeze({settled:Promise.resolve(),release:()=>{if(released)return false;released=true;calls.releases++;return true;}});},
+      connected:id=>id==='google-drive'?state.driveConnected:id==='device-folder'?state.deviceConnected:false
+    }),
+    device:freeze({
+      status:()=>freeze({connected:state.deviceConnected}),
+      connect:async()=>{state.deviceConnected=true;return true;},
+      install:async()=>{calls.installs++;return true;},
+      refreshPermission:async()=>{calls.refreshes++;return true;},
+      rememberAfterStorageReset:async()=>{calls.remember++;return true;}
+    }),
+    storage:freeze({
+      health:()=>freeze({...state.health}),
+      updateHealth:patch=>{state.health={...state.health,...patch};return true;},
+      storedHealth:()=>freeze({...state.health}),
+      indexedDbLifecycle:()=>freeze({resets:state.resets,startedFresh:state.startedFresh})
+    }),
+    presentation:freeze({
+      restoreChoices:()=>'your backups',
+      openRestore:async()=>true,
+      confirm:async()=>{calls.confirms++;return confirm;},
+      notify:()=>true,
+      emit:event=>{if(event.id==='detected')calls.decisions++;if(event.id==='restored')calls.successes++;return true;},
+      resolve:()=>true,
+      subscribe:next=>{listener=next;return ()=>{};}
+    }),
+    ownership:freeze({announceStorageReset:()=>true}),
+    mutation:freeze({settled:async()=>true}),
+    background:freeze({wake:reason=>{calls.wakes.push(reason);return true;}}),
+    session:freeze({hasBlocking:()=>false,suspend:async()=>true}),
+    view:freeze({refreshAfterWriteback:()=>true}),
+    readiness:freeze({reconcileStartupChangeClock:async()=>true}),
+    diagnostics:freeze({capture:(scope,error,level)=>{calls.captures.push([scope,String(error&&error.message||error),level]);return true;}}),
+    environment:freeze({
+      now:()=>now,nowIso:()=>new Date(now).toISOString(),
+      setTimeout:(_callback,_ms)=>++timerSequence,clearTimeout:()=>{}
+    })
+  }));
+  return {
+    controller,state,calls,
+    begin(){assert.equal(controller.resume(),true,'stored unresolved clear must resume through the checked owner');assert.equal(calls.suspends,1,'resumption must pause provider background work');},
+    connectDrive(){state.driveConnected=true;return controller.connectionsChanged();},
+    disconnectDrive(){state.driveConnected=false;return controller.connectionsChanged();},
+    verifyBackup(){listener({events:freeze([freeze({id:'backup-verified',lifecycle:'succeeded',completedAt:new Date(now+1).toISOString()})])});}
+  };
+}
+
 const cases=[];
 {
-  // A device holding nothing signs in to Drive: a verified sync brings the library back.
-  const t=harness({sync:{cancelled:false,verified:true}});
-  assert.equal(await t.context.recover('google-drive'),true);
-  assert.deepEqual(t.calls.syncs,['google-drive'],'one sync, in the foreground');
-  assert.equal(t.calls.missing,0,'not the missing-only restore, which brings no notes back');
-  assert.equal(t.calls.settled,1,'the pause lifts once the sync is verified');assert.equal(t.calls.decisions,0);
-  assert.match(t.calls.notices[0].message,/brought back from Google Drive/u);
+  const h=harness({empty:true,sync:freeze({cancelled:false,verified:true})});
+  h.begin();assert.equal(h.controller.unresolved(),true);assert.equal(h.connectDrive(),true);await drain();
+  assert.deepEqual(h.calls.syncs,['google-drive'],'an empty device must recover through a verified provider sync');
+  assert.equal(h.calls.missing.length,0,'empty-device recovery must not use missing-only import');
+  assert.equal(h.controller.unresolved(),false,'verified sync settles the clear');
+  assert.equal(h.calls.releases,1,'provider suspension releases only after verified recovery');
+  assert.deepEqual(h.calls.wakes,['storage-reset-settled']);assert.equal(h.calls.successes,1);
   cases.push('empty device: verified sync from Drive');
 }
-for(const [label,sync] of [['an unverified sync',{cancelled:false,verified:false}],['a sync needing a decision',{cancelled:true,reason:'needs-decision'}],['a failed sync',new Error('Drive unavailable')],['an empty Drive',{cancelled:true,reason:'no-source'}]]){
-  const t=harness({sync});
-  assert.equal(await t.context.recover('google-drive'),false,label);
-  assert.equal(t.calls.settled,0,`${label}: uploads stay paused`);assert.equal(t.calls.decisions,1,`${label}: the notice stays`);assert.equal(t.calls.notices.length,0);
-  cases.push('empty device: '+label+' keeps the notice');
+for(const [label,sync] of [
+  ['an unverified sync',freeze({cancelled:false,verified:false})],
+  ['a sync needing a decision',freeze({cancelled:true,reason:'needs-decision'})],
+  ['a failed sync',new Error('Drive unavailable')],
+  ['an empty Drive',freeze({cancelled:true,reason:'no-source'})]
+]){
+  const h=harness({empty:true,sync});h.begin();const decisions=h.calls.decisions;assert.equal(h.connectDrive(),true,label);await drain();
+  assert.equal(h.controller.unresolved(),true,label+' must keep the clear unresolved');
+  assert.equal(h.calls.releases,0,label+' must keep automatic uploads suspended');
+  assert.ok(h.calls.decisions>decisions,label+' must retain the recovery decision');
+  cases.push('empty device: '+label+' keeps the hold');
+}
+for(const [label,empty] of [['device with data',false],['unreadable local state',null]]){
+  const h=harness({empty,missing:freeze({cancelled:false,verified:true,added:1,assetsRestored:0,exportedAt:clearedAt})});
+  h.begin();assert.equal(h.connectDrive(),true);await drain();
+  assert.equal(h.calls.missing.length,1,label+' must add only missing content');
+  assert.equal(h.calls.missing[0][0],'google-drive');assert.equal(h.calls.missing[0][1].missingOnly,true);
+  assert.deepEqual(h.calls.syncs,[],'local data or an unreadable local state must never force a replacing sync');
+  assert.equal(h.controller.unresolved(),false);assert.equal(h.calls.releases,1);
+  cases.push(label+': missing-only recovery');
 }
 {
-  // A device holding what its open tab wrote back adds only what is missing.
-  const t=harness({empty:false,missing:true});
-  assert.equal(await t.context.recover('google-drive'),true);
-  assert.equal(t.calls.missing,1);assert.equal(t.calls.missingFrom,'google-drive','from the location that connected');assert.deepEqual(t.calls.syncs,[],'no sync is forced over data this device holds');assert.equal(t.calls.decisions,0);
-  const u=harness({empty:null,missing:false});
-  assert.equal(await u.context.recover('google-drive'),false);
-  assert.equal(u.calls.missing,1,'an unreadable local state is treated as holding data: only what is missing is added');assert.deepEqual(u.calls.syncs,[]);assert.equal(u.calls.decisions,1);
-  cases.push('device with data: missing-only, never a forced sync');
+  const h=harness({empty:true,deviceConnected:false,confirm:true});h.begin();
+  assert.equal(await h.controller.connectDevice(),true);assert.equal(h.calls.history,1);assert.equal(h.calls.confirms,1);assert.equal(h.calls.restores.length,1);
+  assert.equal(h.calls.restores[0][0],'device-folder');assert.equal(h.calls.restores[0][1].checkpointId,checkpoint);
+  assert.equal(h.controller.unresolved(),true,'the hold stays until verified backup completion is observed');
+  h.verifyBackup();await drain();assert.equal(h.controller.unresolved(),false);assert.equal(h.calls.releases,1);
+  cases.push('empty device: Device Folder recovery settles only after verification');
 }
 {
-  // The Device Folder reconnected on a device holding nothing: its newest
-  // version from before the clear is offered (the existing question), not a
-  // missing-only restore.
-  const t=harness({offer:true});
-  await t.context.connectFolder();
-  assert.equal(t.calls.offers.length,1);assert.equal(t.calls.offers[0].latestBefore,Date.parse(t.hold.clearedAt),'only a version from before the clear');
-  assert.equal(t.calls.missing,0);assert.equal(t.calls.decisions,0);
-  const declined=harness({offer:false});await declined.context.connectFolder();
-  assert.equal(declined.calls.decisions,1,'declining keeps the notice');
-  const notConnected=harness({folderConnected:false});await notConnected.context.connectFolder();
-  assert.equal(notConnected.calls.offers.length+notConnected.calls.missing+notConnected.calls.decisions,0,'a folder that did not connect changes nothing');
-  cases.push('empty device: Device Folder offers its newest version from before the clear');
+  const h=harness({empty:true,deviceConnected:false,confirm:false});h.begin();const decisions=h.calls.decisions;
+  await h.controller.connectDevice();assert.equal(h.calls.history,1);assert.equal(h.calls.restores.length,0);assert.equal(h.controller.unresolved(),true);
+  assert.ok(h.calls.decisions>decisions,'declining Device Folder recovery keeps the decision visible');
+  assert.equal(h.calls.releases,0);
+  cases.push('empty device: declined Device Folder recovery keeps the hold');
 }
 {
-  // No unresolved clear: nothing to recover.
-  const t=harness();t.context.storageResetHold=null;
-  assert.equal(await t.context.recover('google-drive'),false);assert.deepEqual(t.calls.syncs,[]);assert.equal(t.calls.decisions,0);
-  cases.push('no clear: nothing runs');
+  const h=harness({empty:true,sync:freeze({cancelled:true,reason:'needs-decision'})});h.begin();
+  h.state.driveConnected=true;h.state.driveBusy=true;assert.equal(h.controller.connectionsChanged(),false,'busy Drive must not start recovery');
+  h.state.driveBusy=false;assert.equal(h.controller.connectionsChanged(),true);await drain();assert.deepEqual(h.calls.syncs,['google-drive']);
+  assert.equal(h.controller.connectionsChanged(),false,'the same connection is tried once');
+  h.disconnectDrive();h.state.driveConnected=true;assert.equal(h.controller.connectionsChanged(),true,'a later reconnection may retry');await drain();
+  assert.equal(h.calls.syncs.length,2);h.controller.settle();assert.equal(h.controller.connectionsChanged(),false,'settled clears have no connection recovery');
+  cases.push('Drive connection recovery is once per connection and respects busy state');
 }
-{
-  // Drive connecting (a kept sign-in at start, or signing in) runs the
-  // recovery once per connection, never during the clear's own handling or
-  // while Drive is busy; signing in again tries again.
-  const tick=()=>new Promise(resolve=>setTimeout(resolve,0));
-  const t=harness({sync:{cancelled:true,reason:'needs-decision'}}),drive=t.context.BackupProviderRuntime.drive;
-  t.context.storageResetHandling=Promise.resolve();assert.equal(t.context.changed(),false,'not while the open tab handles the clear');t.context.storageResetHandling=null;
-  drive.engineBusy=true;assert.equal(t.context.changed(),false,'not while Drive is busy');drive.engineBusy=false;
-  assert.equal(t.context.changed(),true);await tick();assert.deepEqual(t.calls.syncs,['google-drive']);
-  assert.equal(t.context.changed(),false,'once per connection');
-  drive.connected=false;t.context.changed();drive.connected=true;assert.equal(t.context.changed(),true,'signing in again tries again');await tick();assert.equal(t.calls.syncs.length,2);
-  t.context.storageResetHold=null;assert.equal(t.context.changed(),false,'nothing once the clear is settled');
-  cases.push('Drive connecting triggers the recovery once per connection');
-}
-console.log(JSON.stringify({status:'PASS',suite:'storage-reset-connect-recovery',cases},null,2));
+
+console.log(JSON.stringify({status:'PASS',suite:'storage-reset-connect-recovery',productionOwner:'backup-recovery-host',cases},null,2));
