@@ -168,7 +168,7 @@ StorageHealthController=BackupReadinessHostModule.createStorageHealth(Object.fre
   refreshWarning:()=>refreshStorageFallbackWarning(),scheduleSyncStatus:()=>scheduleSyncStatus(),document,
   timeLabelFromIso:value=>timeLabelFromIso(value),
   renderCapabilities:()=>NativeCapabilities?renderNativeCapabilities(NativeCapabilities.status()):false
-}));StorageHealthController=createStorageHealthController(LocalStorageContract);
+}));
 const AppDiagnostics=(()=>{
   function capture(scope,error,level='warn'){
     // Contained faults remain observable to external QA without retaining a
@@ -3262,7 +3262,7 @@ function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){retur
 function installAttachmentIntegrityAudit(){return BackupIntegrity?.installAttachment()||Promise.resolve(null);}
 function installRepositoryIntegrityScrub(){return BackupIntegrity?.installRepository()||Promise.resolve(null);}
 
-async function libraryClearSnapshot(){async function libraryClearSnapshot(){
+async function libraryClearSnapshot(){
   const [attachments,sources]=await Promise.all([AttachmentLibrary.inventory(),AttachmentReferences.sources({includeLive:false})]);
   return Object.freeze({attachments,sources});
 }
@@ -3824,7 +3824,7 @@ const RepositoryMaintenanceHost=BackupMaintenanceHostModule.createRepositoryMain
 }));
 BackupProviderRuntime.configureRepositoryMaintenance(RepositoryMaintenanceHost.hooks);
 
-async function canonicalLocalRecoveryEmpty(){async function canonicalLocalRecoveryEmpty(){
+async function canonicalLocalRecoveryEmpty(){
   try{
     const [records,notePayload,active,plans,assets,reviews]=await Promise.all([
       AppData.dailyRecords.list({strict:true}),AppData.notes.readFreshPayload(),AppData.activeSession.load(0,{strict:true}),AppData.planData.read(),AttachmentStorage.list(),AppData.pendingReviews.list()
@@ -4176,7 +4176,7 @@ if(!Object.isFrozen(BackupIntegrity)||BackupIntegrity.format!=='study-director.b
 AttachmentIntegrityJob=BackupIntegrity.attachmentJob;
 BackupProviderRuntime.configureIntegrityScrub(BackupIntegrity.repositoryHooks);
 
-async function refreshDeviceBackgroundPermission(event){async function refreshDeviceBackgroundPermission(event){
+async function refreshDeviceBackgroundPermission(event){
   if(![APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN].includes(event?.kind))return;
   // The controller reconnects its whole job owner after permission changes.
   await DeviceBackup.refreshPermission();
@@ -4191,23 +4191,6 @@ BackupProviderRuntime.configureSessionOwnership(Object.freeze({
   today:()=>todayISO(),
   read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
 }));
-// Each location's integrity state is kept under its location id.
-BackupProviderRuntime.configureIntegrityScrub(Object.freeze({
-  readTarget:id=>readRepositoryIntegrityTarget(id),
-  // How far the cycle has got stays shown between its batches, until it finishes.
-  writeResult:async(id,result)=>{if(result?.complete===true||!Number(result?.total))delete integrityLive[id];else integrityLive[id]=Object.freeze({done:Number(result.done)||0,total:Number(result.total)});await updateRepositoryIntegrityTarget(id,result);},
-  prepare:async(id,target,{trigger,nextEligibleAt})=>Object.freeze({repositoryScope:target.repositoryScope,requestId:target.requestId,scanId:target.scanId,cursor:target.cursor,recheckCursor:target.recheckCursor,partial:target.partial,recheck:target.recheck,verifyIncremental:RepositoryIntegrityContinuation.verify,maxObjects:REPOSITORY_INTEGRITY_BATCH_OBJECTS,maxBytes:REPOSITORY_INTEGRITY_BATCH_BYTES,skipObjectIds:target.quarantinedObjectIds,trigger:String(trigger||'scheduled-integrity'),nextEligibleAt:String(nextEligibleAt||''),onProgress:progress=>{integrityLive[id]=Object.freeze({done:Number(progress?.done)||0,total:Number(progress?.total)||0});renderIntegrityStatuses();return updateRepositoryIntegrityTarget(id,{...progress,status:'yielded',checkpointOnly:true,repositoryScope:target.repositoryScope,requestId:target.requestId});}}),
-  isAvailable:()=>backgroundBlocker()||true,
-  isUnsafe:()=>!!AppMutationCoordinator?.status?.()?.active||!!AttachmentIngest?.status?.()?.busy,
-  yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'}),
-  quarantine:async id=>(await readRepositoryIntegrityTarget(id)).quarantinedObjectIds
-}));
-async function installRepositoryIntegrityScrub(){
-  let state=null;
-  try{state=applyRepositoryIntegrityHealth(await readRepositoryIntegrityState());}
-  catch(error){AppDiagnostics.capture('backup.repository-integrity-state-read',error,'warn');markStorageHealthError('repositoryIntegrity','Backup verification state is unavailable. Study Director will retry.',{level:'warn'});}
-  return state;
-}
 /* PWA SHELL AND SAFE UPDATE COORDINATION */
 const PWA_UPDATE_READY_DELAY_MS=650;
 const PWA_UPDATE_SAFETY_RETRY_MS=5*60*1000;
