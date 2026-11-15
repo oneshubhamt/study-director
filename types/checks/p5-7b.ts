@@ -45,16 +45,16 @@ const keptInput=Object.freeze({
 recoveryModule.createKeptVersions(keptInput);
 
 const providerPort=Object.freeze({
-  bringIn:(source:string,options?:Parameters<RecoveryHostInput['providers']['bringIn']>[1])=>backupRuntime.providers.bringIn(source,options),
-  cancelForeground:(reason?:string,source?:string)=>backupRuntime.providers.cancelForeground(reason,source),
-  connected:(source:string)=>backupRuntime.providers.connected(source),
-  forget:(source:string)=>backupRuntime.providers.forget(source),
-  histories:(options?:Parameters<RecoveryHostInput['providers']['histories']>[0])=>backupRuntime.providers.histories(options),
-  history:(source:string,options?:Parameters<RecoveryHostInput['providers']['history']>[1])=>backupRuntime.providers.history(source,options),
-  locationStatus:(source:string)=>backupRuntime.providers.locationStatus(source),
-  provider:(source:string)=>backupRuntime.providers.provider(source),
-  removeVersion:(source:string,checkpointId:string)=>backupRuntime.providers.removeVersion(source,checkpointId),
-  suspendBackground:(reason:string)=>backupRuntime.providers.suspendBackground(reason)
+  bringInRepositoryProvider:(id:string,options:Parameters<RecoveryHostInput['providers']['bringInRepositoryProvider']>[1])=>backupRuntime.providers.bringInRepositoryProvider(id,options),
+  restoreRepositoryProviderVersion:(id:string,options:Parameters<RecoveryHostInput['providers']['restoreRepositoryProviderVersion']>[1])=>backupRuntime.providers.restoreRepositoryProviderVersion(id,options),
+  removeRepositoryProviderVersion:(id:string,checkpointId:string)=>backupRuntime.providers.removeRepositoryProviderVersion(id,checkpointId),
+  cancelForeground:(reason:string,id:string)=>backupRuntime.providers.cancelForeground(reason,id),
+  configureManagedRecovery:(port:Parameters<RecoveryHostInput['providers']['configureManagedRecovery']>[0])=>backupRuntime.providers.configureManagedRecovery(port),
+  configurePendingBackupRetry:(port:Parameters<RecoveryHostInput['providers']['configurePendingBackupRetry']>[0])=>backupRuntime.providers.configurePendingBackupRetry(port),
+  history:(id:string,options:Parameters<RecoveryHostInput['providers']['history']>[1])=>backupRuntime.providers.history(id,options),
+  list:()=>backupRuntime.providers.list(),
+  noteVersions:(id:string,noteId:string,options:Parameters<RecoveryHostInput['providers']['noteVersions']>[2])=>backupRuntime.providers.noteVersions(id,noteId,options),
+  suspendBackground:(reason:string,options?:Parameters<RecoveryHostInput['providers']['suspendBackground']>[1])=>backupRuntime.providers.suspendBackground(reason,options)
 }) satisfies RecoveryHostInput['providers'];
 void providerPort;
 
