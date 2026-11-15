@@ -1,4 +1,4 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
+import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
@@ -11,38 +11,32 @@ async function test(name,run){await run();cases.push(name);}
 
 // Real host reset recovery must wait for the Device Folder's actual startup
 // installation and refreshed permission, or fall through after a bounded wait.
-await test('storage reset waits for real Device Folder readiness, handles denied access and times out safely',async()=>{
-  const source=readHostHtml(),start=source.indexOf('let deviceBackupInstallPromise=null;'),end=source.indexOf('const storageResetSteps=',start);
-  assert.ok(start>0&&end>start,'real reset readiness host functions are available');
-  function scenario({connected=false,stall=false}={}){
-    let allowInstall,timer=null,refreshes=0,installationCalls=0;
-    const gate=new Promise(resolve=>{allowInstall=resolve;});
-    const state={browserDataClearedAt:null};
-    const diagnostics=[];
-    const sandbox={
-      Date,Promise,Error,AppDiagnostics:{capture:(...parts)=>diagnostics.push(parts)},
-      setTimeout:callback=>{timer=callback;return 1;},clearTimeout:()=>{timer=null;},
-      reconcileStartupChangeClock:async()=>{},
-      DeviceBackup:{install:async()=>{installationCalls++;await gate;},refreshPermission:async()=>{refreshes++;return {};},status:()=>({connected})},
-      BackupProviderRuntime:{suspendBackground:()=>({release(){}})},
-      readStorageHealth:()=>state,writeStorageHealth:value=>Object.assign(state,value),
-      storageResetHold:null,storageResetSince:0
-    };
-    vm.createContext(sandbox);
-    vm.runInContext('let storageResetHold=null,storageResetSince=0;\n'+source.slice(start,end)+'\n globalThis.qaBeginStorageResetHold=beginStorageResetHold;',sandbox);
-    const hold=sandbox.qaBeginStorageResetHold('2026-10-31T02:00:00.000Z');
-    return {hold,release:allowInstall,expire:()=>timer?.(),refreshes:()=>refreshes,installationCalls:()=>installationCalls,diagnostics};
+await test('storage reset waits for checked Device Folder readiness, handles denied access and times out safely',async()=>{
+  const context=vm.createContext({Object,Symbol,Date,Promise,Error,TypeError,Map,Set,Array,Number,String,Blob,AbortController});
+  for(const file of ['internal','backup-recovery-host'])vm.runInContext(readCoreScript(file),context,{filename:file});
+  const Recovery=context[Symbol.for('studyDirector.internalModules.v1')].require('backup-recovery-host',1),freeze=Object.freeze;
+  function scenario({connected=false}={}){
+    let allowInstall,timer=null,refreshes=0,installationCalls=0;const gate=new Promise(resolve=>{allowInstall=resolve;}),diagnostics=[],state={lastStudyDataSaveAt:null,browserDataClearedAt:null};
+    const controller=Recovery.createStorageReset(freeze({
+      authority:freeze({canMutate:()=>true}),
+      canonical:freeze({dailyRecordsList:async()=>[],notesReadFreshPayload:async()=>({}),activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{idb:true,local:false}}),planDataRead:async()=>({draft:null,savedPlans:[]}),attachmentsList:async()=>[],pendingReviewsList:async()=>[],savedDayDeletions:async()=>[],noteDeletions:async()=>[]}),
+      writeback:freeze({installationKeep:()=>true,notesRecover:()=>true,planRewrite:()=>true,settingsFlush:()=>true,hasTasks:()=>false,writeLiveDraft:async()=>({ok:true,value:null,error:null,storage:{idb:true,local:false}})}),
+      provider:freeze({history:async()=>({available:false,entries:[]}),restoreRepositoryProviderVersion:async()=>null,bringInRepositoryProvider:async()=>null,syncRepositoryProvider:async()=>null,list:()=>[],locationStatus:()=>null,suspendBackground:()=>({settled:Promise.resolve(),release:()=>true}),connected:()=>false}),
+      device:freeze({status:()=>({connected}),connect:async()=>true,install:async()=>{installationCalls++;await gate;},refreshPermission:async()=>{refreshes++;return {};},rememberAfterStorageReset:async()=>true}),
+      storage:freeze({health:()=>({...state}),updateHealth:value=>Object.assign(state,value),storedHealth:()=>({...state}),indexedDbLifecycle:()=>({resets:0,startedFresh:false})}),
+      presentation:freeze({restoreChoices:()=> 'a backup',openRestore:()=>false,confirm:async()=>false,notify:()=>{},emit:()=>{},resolve:()=>{},subscribe:()=>()=>{}}),
+      ownership:freeze({announceStorageReset:()=>{}}),mutation:freeze({settled:async()=>{}}),background:freeze({wake:()=>{}}),session:freeze({hasBlocking:()=>false,suspend:async()=>{}}),view:freeze({refreshAfterWriteback:()=>{}}),
+      readiness:freeze({reconcileStartupChangeClock:async()=>true}),diagnostics:freeze({capture:(...parts)=>diagnostics.push(parts)}),
+      environment:freeze({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),setTimeout:callback=>{timer=callback;return 1;},clearTimeout:()=>{timer=null;}})
+    }));
+    let done=false;const handling=controller.handle({detectedAt:'2026-10-31T02:00:00.000Z'}).then(()=>{done=true;});
+    return {handling,done:()=>done,release:allowInstall,expire:()=>timer?.(),refreshes:()=>refreshes,installationCalls:()=>installationCalls,diagnostics};
   }
-  const delayed=scenario({connected:true});let done=false;delayed.hold.deviceReady.then(()=>{done=true;});
-  await Promise.resolve();await Promise.resolve();
-  assert.equal(done,false,'a pending installation cannot masquerade as Device Folder readiness');
-  delayed.release();assert.equal(await delayed.hold.deviceReady,true,'granted folder becomes eligible after installation and refresh');
-  assert.equal(delayed.installationCalls(),1);assert.equal(delayed.refreshes(),1);
-  const denied=scenario({connected:false});denied.release();assert.equal(await denied.hold.deviceReady,false,'denied or unchosen folder falls through without a permission prompt');
-  const stalled=scenario({connected:true,stall:true});stalled.expire();assert.equal(await stalled.hold.deviceReady,false,'stalled browser readiness is bounded');
-  assert.ok(stalled.diagnostics.some(row=>String(row[0]).includes('device-ready')),'timeout is diagnosed');
-  stalled.release();await Promise.resolve();await Promise.resolve();
-  assert.equal(await stalled.hold.deviceReady,false,'late permission result does not reverse a timed-out recovery decision');
+  const delayed=scenario({connected:true});await Promise.resolve();await Promise.resolve();assert.equal(delayed.done(),false,'a pending installation cannot masquerade as Device Folder readiness');
+  delayed.release();await delayed.handling;assert.equal(delayed.installationCalls(),1);assert.equal(delayed.refreshes(),1);
+  const denied=scenario({connected:false});denied.release();await denied.handling;assert.equal(denied.installationCalls(),1);assert.equal(denied.refreshes(),1,'denied or unchosen folder still completes the bounded permission read');
+  const stalled=scenario({connected:true});stalled.expire();await stalled.handling;assert.ok(stalled.diagnostics.some(row=>String(row[0]).includes('device-ready')),'stalled browser readiness is bounded and diagnosed');
+  stalled.release();await Promise.resolve();await Promise.resolve();assert.equal(stalled.done(),true,'late permission result does not reopen a timed-out recovery decision');
 });
 
 await test('critical Device Folder scans distrust same-size and same-time cached digests',async()=>{

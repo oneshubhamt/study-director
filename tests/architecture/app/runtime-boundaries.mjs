@@ -58,7 +58,8 @@ assert.match(recovery,/async function settleRecoveryState\(/u,'restore quiescenc
 assert.match(recovery,/await input\.lifecycle\.flushPlanDraft\(\)/u,'Plan draft is flushed before managed recovery');
 assert.match(recovery,/await input\.lifecycle\.canonicalPlanDraft\(\)/u,'visible Plan draft receives a canonical read-back fence before recovery');
 assert.match(recovery,/await input\.lifecycle\.settlePlan\(\)/u,'Plan persistence quiescence remains explicit before recovery');
-assert.match(host,/noteReconciliation:Object\.freeze\(\{resolve:options=>withRichTextAssetMaintenancePaused\(\(\)=>NoteReconciliationUI\.resolve\(options\)\)/u,'note reconciliation remains read-only with attachment maintenance paused until a canonical recovery mutation begins');
+assert.match(recovery,/input\.noteReconciliation\.withMaintenancePaused\(\(\)=>input\.noteReconciliation\.controller\.resolve\(options\)\)/u,'note reconciliation remains read-only with attachment maintenance paused inside the checked Backup runtime owner');
+assert.match(host,/withMaintenancePaused:operation=>withRichTextAssetMaintenancePaused\(operation\)/u,'host contributes only the existing attachment-maintenance adapter to the checked runtime owner');
 assert.doesNotMatch(reconciliationUi,/\bAppData\b|IndexedDb|localStorage|notes\.replace|dailyRecords/u,'scratch reconciliation cannot acquire a canonical persistence path');
 const restoreAttemptAt=backup.indexOf('async function restoreBackupAttemptWithOperation'),reconciliationAt=backup.indexOf('noteResult=await NoteReconciliation.resolve',restoreAttemptAt),mutationAt=backup.indexOf('return runRestoreMutation(',reconciliationAt);
 const safetyAt=backup.indexOf('captureLocalSafetyCopy(stored',mutationAt),journalAt=backup.indexOf('restoreJournal.prepare',safetyAt),verificationAt=backup.indexOf('verifyRestoreCommit(expectedCommit',journalAt),journalClearAt=backup.indexOf('restoreJournal.clear(restoreId)',verificationAt);
@@ -72,6 +73,25 @@ for(const action of ['refresh-version-history','close-version-history','cancel-v
   assert.match(host,new RegExp(`'${action}': [^\\n]*BackupRecoveryHost\\.history`,'u'),`${action} stays behind the checked history owner`);
 console.log(JSON.stringify({status:'PASS',boundary:'p5.7b-reconciliation-recovery',checkedReconciliation:true,checkedKeptVersions:true,independentPlanDraft:true,historyActions:true},null,2));
 }
+
+{ // p5.7-parent-source-ownership-closure
+const host=readHostHtml(),readiness=readScript('source/core/backup-readiness-host.ts'),recovery=readScript('source/core/backup-recovery-host.ts');
+assert.match(host,/BackupReadinessHostModule\.createVerifiedRecovery\(Object\.freeze\(\{/u,'verified backup readiness crosses the checked owner');
+assert.match(host,/BackupRecoveryHostModule\.createRuntime\(Object\.freeze\(\{/u,'the production Backup runtime adapters cross the checked owner');
+assert.match(host,/BackupRecoveryHostModule\.createStorageReset\(Object\.freeze\(\{/u,'browser-data-clear recovery crosses the checked owner');
+assert.match(host,/BackupRecoveryHostModule\.createRetainedBackupFiles\(Object\.freeze\(\{/u,'recovery scratch retention crosses the checked owner');
+assert.match(readiness,/function createVerifiedRecovery\(/u);assert.match(recovery,/function createRevisionFence\(/u);assert.match(recovery,/function createRuntime</u);assert.match(recovery,/function createStorageReset\(/u);assert.match(recovery,/function createRetainedBackupFiles\(/u);
+for(const stale of [
+  'const VERIFIED_RECOVERY_META_KEY=','function recordBackupCopy(','function readVerifiedRecoveryState(','async function reconcileChangeClock(',
+  'const STORAGE_RESET_RETRY_MS=','function beginStorageResetHold(','function restoreMissingAfterStorageReset(','function noteDatabaseRemovedWhileClosed(',
+  'async function importBackupAttachments(','function currentBackupSourceRevision(','async function fullBackupSnapshotRevision(','async function backupSnapshotRevision(',
+  'const BackupRuntime=BackupModule.createRuntime(','async function retainedBackupFileNames('
+])assert.equal(host.includes(stale),false,`main host must not regain substantive P5.7 ownership: ${stale}`);
+assert.match(host,/function canonicalLocalRecoveryEmpty\(\)\{return StorageResetRecovery\?StorageResetRecovery\.canonicalEmpty\(\):Promise\.resolve\(null\);\}/u,'remaining storage-reset helper is a thin deferred forwarder');
+assert.match(host,/function handleCanonicalCommit\(event\)\{return CanonicalCommitHost\.handle\(event\);\}/u,'canonical commit remains a thin checked forwarder');
+console.log(JSON.stringify({status:'PASS',boundary:'p5.7-parent-source-ownership',verifiedRecovery:true,storageReset:true,runtimeAdapters:true,scratchRetention:true,noSubstantiveHostRemainder:true},null,2));
+}
+
 
 // Current runtime boundary invariants: decision time, pacing, presentation, and bounded background/display work.
 

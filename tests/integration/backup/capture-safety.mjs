@@ -1,4 +1,3 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -79,14 +78,17 @@ const cases=['payload reads reject overlapping mutations','settle-time writes ar
 // Quantified completeness: for every preparation route and settlement failure,
 // a canonical checkpoint is forbidden. A later successful retry must include
 // the deletion ledger and retire the pending marker, not resurrect the record.
-const appSource=readHostHtml();
 for(const route of ['canonical','assumed-settled','rescue','incremental'])for(const fault of ['database-write','marker-read','throws','false','undefined']){
   const controls={dailyKeyEnumeration:true},h=createHarness(new Map(),null,controls),date='2026-09-16';
   await h.app.dailyRecords.save({version:1,date,savedAt:'2026-09-17T10:00:00.000Z',updatedAt:'2026-09-17T10:00:00.000Z',reflection:'Deliberately deleted study day'});
   controls.failNextDailyWrite=true;await h.app.dailyRecords.remove(date);
   assert.equal(h.stores.daily.has(date),true);assert.ok(h.sharedLocal.has('deletionRecovery'));assert.equal((await h.app.deletionRecovery.savedDays()).length,0);
-  const host={AppData:h.app,backupFastFenceReady:true,richAssetReferenceRevision:0,captureMutationGeneration:0,currentBackupSourceRevision:()=> '2026-09-17T10:00:00.000Z',PlanData:{exportData:async()=>({})},document:{getElementById:()=>null},AttachmentStorage:{list:async()=>[]},AppDiagnostics:{capture(){}}};vm.createContext(host);
-  vm.runInContext(appSource.slice(appSource.indexOf('async function fullBackupSnapshotRevision('),appSource.indexOf('const NoteReconciliationUI=')),host);
+  const revisionFence=recoveryHostModule.createRevisionFence(freeze({
+    local:freeze({getJson:()=>({lastLocalSaveAt:'2026-09-17T10:00:00.000Z'})}),storageHealthKey:'health',storageHealth:freeze({lastLocalSaveAt:()=> '2026-09-17T10:00:00.000Z'}),
+    mutationEpoch:freeze({eligible:()=>true,read:()=>h.app.mutationEpoch.read()}),dailyDatasetRevision:()=>h.app.dailyRecords.datasetRevision(),
+    savedDayDeletions:()=>h.app.deletionRecovery.savedDays(),noteDeletions:()=>h.app.deletionRecovery.notes(),attachmentDeletions:()=>h.app.deletionRecovery.attachments(),
+    personalExport:async()=>({}),planInputValue:()=>null,attachmentsList:async()=>[],referenceRevision:()=>0,mutationGeneration:()=>0,diagnostics:freeze({capture(){}})
+  }));revisionFence.setFastFenceReady(true);
   let failing=true;const settlements=[];
   const flush=async()=>{
     if(failing&&fault==='throws')throw new Error('Temporary deletion reconciliation failure');
@@ -96,7 +98,7 @@ for(const route of ['canonical','assumed-settled','rescue','incremental'])for(co
     if(failing&&fault==='marker-read')controls.failLocalGetKeys=new Set(['deletionRecovery']);
     const result=await h.app.deletionRecovery.flush();controls.failLocalGetKeys=new Set();settlements.push(result);return result;
   };
-  const {capture}=harness({data:freeze({activeSession:freeze({save:h.app.activeSession.save,settled:h.app.activeSession.settled,load:h.app.activeSession.load}),dailyRecords:freeze({backupDates:h.app.dailyRecords.backupDates,backupMonth:h.app.dailyRecords.backupMonth}),notes:freeze({flush:h.app.notes.flush,failure:h.app.notes.failure,readFreshPayload:h.app.notes.readFreshPayload,exportPayload:h.app.notes.exportPayload,readFreshItems:h.app.notes.readFreshItems}),deletionRecovery:freeze({flush,savedDays:h.app.deletionRecovery.savedDays,notes:h.app.deletionRecovery.notes,attachments:h.app.deletionRecovery.attachments}),mutationEpoch:freeze({read:h.app.mutationEpoch.read}),preparationUnits:h.app.preparationUnits,provenance:h.app.provenance,pendingReviews:freeze({list:h.app.pendingReviews.list,readItems:h.app.pendingReviews.readItems})}),persistence:freeze({storageGeneration:()=>0,sourceRevision:host.currentBackupSourceRevision,snapshotRevision:host.backupSnapshotRevision,dailyRecordDocuments:h.app.dailyRecords.documents})});
+  const {capture}=harness({data:freeze({activeSession:freeze({save:h.app.activeSession.save,settled:h.app.activeSession.settled,load:h.app.activeSession.load}),dailyRecords:freeze({backupDates:h.app.dailyRecords.backupDates,backupMonth:h.app.dailyRecords.backupMonth}),notes:freeze({flush:h.app.notes.flush,failure:h.app.notes.failure,readFreshPayload:h.app.notes.readFreshPayload,exportPayload:h.app.notes.exportPayload,readFreshItems:h.app.notes.readFreshItems}),deletionRecovery:freeze({flush,savedDays:h.app.deletionRecovery.savedDays,notes:h.app.deletionRecovery.notes,attachments:h.app.deletionRecovery.attachments}),mutationEpoch:freeze({read:h.app.mutationEpoch.read}),preparationUnits:h.app.preparationUnits,provenance:h.app.provenance,pendingReviews:freeze({list:h.app.pendingReviews.list,readItems:h.app.pendingReviews.readItems})}),persistence:freeze({storageGeneration:()=>0,sourceRevision:revisionFence.sourceRevision,snapshotRevision:revisionFence.snapshotRevision,dailyRecordDocuments:h.app.dailyRecords.documents})});
   const options={requireCanonicalComplete:route!=='rescue',assumeFlushed:route==='assumed-settled'};
   if(route==='rescue'){
     const partial=await capture.captureLogicalCheckpoint(undefined,options);assert.equal(partial.completeness.complete,false);assert.equal(partial.completeness.deletionState,'uncertain');assert.match(partial.warning,/deletion recovery/);
@@ -119,12 +121,13 @@ for(const proven of [true,false]){
 }
 // Execute the production host gateway against real session recovery, not a
 // fixture wrapper that accidentally drops strict-read options.
-const hostSessionLoad=appSource.match(/persistence:Object\.freeze\(\{\s*activeSessionLoad:([^\n]+),\n/u)[1];
+const recoveryOwner=readCoreScript('backup-recovery-host');
+assert.match(recoveryOwner,/activeSessionLoad:\(retry=0,options=\{\}\)=>input\.appData\.activeSession\.load\(retry,options\)/u,'checked Backup runtime adapter forwards strict Active Session read options unchanged');
 for(const rescued of [false,true]){
   const controls={},h=createHarness(new Map(),null,controls),session={id:'active',type:'activeSession',version:1,date:'2026-10-01',status:'suspended',scheduleText:'',suspendedAt:'2026-10-01T12:00:00.000Z',revision:20,updatedAt:'2026-10-01T12:20:00.000Z',snapshot:{review:{reflection:'Current canonical reflection'}}};
   if(rescued){controls.failSessionWrite=true;await h.app.activeSession.save({...session,revision:19,updatedAt:'2026-10-01T12:19:00.000Z',snapshot:{review:{reflection:'Older rescue'}}},{emergency:true});controls.failSessionWrite=false;}
   h.stores.session.set('active',session);controls.onSessionRead=async()=>{throw new Error('Temporary canonical session read failure');};
-  const load=vm.runInNewContext('('+hostSessionLoad+')',{AppData:h.app});
+  const load=(retry=0,options={})=>h.app.activeSession.load(retry,options);
   const interactive=await load();assert.equal(interactive.ok,rescued);assert.ok(interactive.error);assert.equal(interactive.value?.revision||null,rescued?19:null);
   await assert.rejects(()=>load(0,{strict:true}),/Temporary canonical session read failure/);
   controls.onSessionRead=null;const recovered=await load(0,{strict:true});assert.equal(recovered.ok,true);assert.equal(recovered.error,null);assert.equal(recovered.value.revision,20);
