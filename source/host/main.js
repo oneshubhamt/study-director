@@ -3697,7 +3697,11 @@ const {
   controller:BackupController, checkpoint:CheckpointPipeline, repository:RepositoryCheckpointPipeline, providers:BackupProviderRuntime
 }=BackupRuntime;
 KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze({
-  controller:BackupController,
+  controller:Object.freeze({
+    status:()=>BackupController.status(),
+    resolveConvergedKeptVersions:()=>BackupController.resolveConvergedKeptVersions(),
+    reviewKeptVersions:options=>BackupController.reviewKeptVersions(options)
+  }),
   reviews:Object.freeze({list:()=>AppData.pendingReviews.list()}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   environment:Object.freeze({

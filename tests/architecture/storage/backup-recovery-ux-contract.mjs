@@ -52,6 +52,7 @@ assert.doesNotMatch(provider,/backup-provider-import|importLabel/u,'provider ove
 assert.match(provider,/if\s*\(!checkpointId&&!missingOnly\s*\)throw new Error\s*\('Choose a version to restore\s*\. Nothing was changed\s*\.'\s*\);/u,'a restore without a chosen version stops before reading anything');
 assert.doesNotMatch(provider+device,/checkpoint-selection-start|repository\.choose|chooseCheckpoint/u);
 
+assert.match(app,/createKeptVersions\(Object\.freeze\(\{[\s\S]*controller:Object\.freeze\(\{[\s\S]*status:\(\)=>BackupController\.status\(\)[\s\S]*resolveConvergedKeptVersions:\(\)=>BackupController\.resolveConvergedKeptVersions\(\)[\s\S]*reviewKeptVersions:options=>BackupController\.reviewKeptVersions\(options\)/u,'Kept Versions must adapt the broad Backup controller to its exact checked port.');
 assert.match(host,/async function collectAll\(/u);
 assert.doesNotMatch(host,/input\.repository\.mergeHistory/u,'the host merges what the locations return; the repository is not asked to');
 assert.ok(host.includes('choices:[presentation.restoreChoices.missing,presentation.restoreChoices.combine,...(partialAttachments?[]:[presentation.restoreChoices.replace])]'),'partial attachment backups must never offer exact Replace');
