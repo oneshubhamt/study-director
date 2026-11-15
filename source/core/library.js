@@ -987,10 +987,10 @@ registry.define('library',1,()=>{
         },
         preview:value=>{
           const name=String(value||'').trim();if(!name)return place.key?`Goes inside ${placeName(place)}.`:'Goes at the top level.';
-          const identity=target(name);if(!identity)return 'Use > only to separate nested notes.';
+          const identity=target(name);if(!identity)return 'Use > only to separate nested notes.';if(identity.reserved)return '“Support Activities” is the shared note for support blocks. Choose another name.';
           return existingFor(name)?`“${identity.label.replace(/\s*>\s*/g,' › ')}” already exists. It will open.`:`Creates ${identity.label.replace(/\s*>\s*/g,' › ')}.`;
         },
-        validate:value=>target(value)?'':'Enter a name. Use > only to separate nested notes.',
+        validate:value=>{const identity=target(value);return !identity?'Enter a name. Use > only to separate nested notes.':identity.reserved?'“Support Activities” is the shared note for support blocks. Choose another name.':'';},
         confirmLabel:'Create',cancelLabel:'Cancel'
       });
       if(!result||!canMutate())return false;
@@ -1114,12 +1114,13 @@ registry.define('library',1,()=>{
         },
         preview:()=>{
           const target=destination();if(!target)return name.trim()?'Choose a place.':'Give it a name.';
+          if(target.reserved)return '“Support Activities” is the shared note for support blocks. Choose another name.';
           if(target.key===entry.key&&target.label===entry.label)return 'It is already here.';
           const found=clashes(),path=target.label.replace(/\s*>\s*/g,' › '),carried=nested?`, with ${nested} nested ${nested===1?'note':'notes'}`:'';
           if(found.length)return `“${found[0].label.replace(/\s*>\s*/g,' › ')}” already exists${found.length>1?`, with ${found.length-1} more of the same names inside`:''}. Moving adds this text to the end of it.`;
           return `Becomes ${path}${carried}.`;
         },
-        validate:()=>{const target=destination();return !name.trim()?'Give it a name.':!target?'Use > only to separate nested notes.':target.key===entry.key&&target.label===entry.label?'Nothing to change. Choose another place or name.':'';},
+        validate:()=>{const target=destination();return !name.trim()?'Give it a name.':!target?'Use > only to separate nested notes.':target.reserved?'“Support Activities” is the shared note for support blocks. Choose another name.':target.key===entry.key&&target.label===entry.label?'Nothing to change. Choose another place or name.':'';},
         checkbox:where&&state.kind!=='plan'&&!entry.ephemeral?{label:`Also rename it in ${where}`,description:'Unticked, those blocks keep the old name and start a new note under it.',defaultChecked:true}:null,
         confirmLabel:'Move',cancelLabel:'Cancel'
       });
@@ -1136,6 +1137,7 @@ registry.define('library',1,()=>{
     async function applyNoteRename(entry,value,{inPlans=true,mergeAgreed=false}={}){
       const identity=normalizeNoteArea(value);
       if(!identity||identity.label===entry.label||!canMutate())return false;
+      if(identity.reserved){setNotesStatus('“Support Activities” is the shared note for support blocks. Choose another name.',{error:true});return false;}
       // A new note lives only in this list: it takes the new name, or opens the
       // note that already has it.
       if(entry.ephemeral){

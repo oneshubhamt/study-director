@@ -41,14 +41,20 @@ try{
     out.newOpen={selected:document.querySelector('#library-notes-list .active')?.dataset.noteKey,meta:meta()};
     row('gs2').click();await wait(150);d.LibraryView.showSection('days');await wait(50);d.LibraryView.showSection('notes');await wait(150);
     out.newKept=keys().includes('physics > rights')||(row('physics')&&(row('physics').click(),await wait(150),keys().includes('physics > rights')));
+    // "Support Activities" belongs to the shared support note: New refuses it.
+    document.getElementById('library-note-add').click();box=await dialog();
+    box.querySelector('.note-place-change').click();(await until(()=>box.querySelector('.note-place-option[data-key=""]'))).click();
+    const reserved=box.querySelector('.interaction-input');reserved.value='support activities';reserved.dispatchEvent(new Event('input',{bubbles:true}));
+    out.reservedPreview=box.querySelector('.interaction-preview').textContent;box.querySelector('.interaction-actions .primary').click();await wait(100);
+    out.reservedError={open:box.open,error:box.querySelector('.interaction-error')?.textContent};box.querySelector('[data-interaction-cancel]').click();await until(()=>!box.open);
     // A new note renames and moves in memory, and Delete discards it.
     row('physics > rights').click();await wait(150);
     document.querySelector('button.library-notes-editor-title').click();const title=await until(()=>document.querySelector('.library-notes-title-input'));
     title.value='Laws';title.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));await wait(200);
     out.newRenamed={selected:document.querySelector('#library-notes-list .active')?.dataset.noteKey,stored:!!d.AppData.notes.get('physics > laws')};
     document.getElementById('library-note-actions').click();await wait(100);
-    const discard=document.getElementById('library-note-delete');out.discardLabel=discard.textContent;discard.click();await wait(300);
-    out.discarded=!keys().includes('physics > laws');
+    const discard=document.getElementById('library-note-delete');out.discardLabel=discard.textContent;discard.click();
+    out.discarded=!!(await until(()=>!keys().includes('physics > laws')).catch(()=>false));
     // Move: pick a place; a clash shows before anything happens.
     d.AppData.notes.update('physics > polity','Physics > Polity','other','');await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(100);
     row('gs2 > polity')?.click()||(row('gs2').click(),await wait(100),row('gs2 > polity').click());await wait(150);
@@ -87,6 +93,8 @@ try{
   assert.equal(result.newPicked,'Creates Physics › Rights.','Change picks another place');
   assert.deepEqual(result.newOpen,{selected:'physics > rights',meta:'Not written yet'});
   assert.equal(result.newKept,true,'a new note stays listed when another note or section is opened');
+  assert.equal(result.reservedPreview,'“Support Activities” is the shared note for support blocks. Choose another name.');
+  assert.deepEqual(result.reservedError,{open:true,error:'“Support Activities” is the shared note for support blocks. Choose another name.'},'no other note takes the shared note’s name');
   assert.deepEqual(result.newRenamed,{selected:'physics > laws',stored:false},'a new note renames in memory only');
   assert.equal(result.discardLabel.startsWith('Discard'),true);assert.equal(result.discarded,true,'Discard removes a new note');
   assert.deepEqual(result.moveStart,{name:'Polity',button:'Move',places:['','biology','geo','geo > rivers','gs2','physics','physics > polity']},'Move starts with the name and lists every place but the note itself and what is inside it');

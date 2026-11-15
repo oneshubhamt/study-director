@@ -6041,11 +6041,15 @@ function inheritedNoteEntries(areaKey){
     .map(entry=>({key:entry.key,label:entry.label||displayAreaName(entry.key),value:String(entry.text||''),text:plainTextContent(entry.text||'')}))
     .reverse();
 }
+// "Support Activities" names the one shared support note, so no other note
+// takes it, alone or as the start of a path ("Support Activities > res" made a
+// second, look-alike Area).
+function reservedNoteTitle(key){return String(key||'').split(' > ')[0]===normalizeAreaName(SUPPORT_NOTE.label);}
 function normalizeOngoingAreaInput(value){
   const raw=clampText(String(value||'').trim(),APP_LIMITS.maxAreaNameChars);
   const key=normalizeAreaName(raw);
   if(!key)return null;
-  return Object.freeze({key,label:clampText(displayAreaName(raw),APP_LIMITS.maxAreaNameChars)});
+  return Object.freeze({key,label:clampText(displayAreaName(raw),APP_LIMITS.maxAreaNameChars),reserved:reservedNoteTitle(key)});
 }
 function orderOngoingAreaEntries(source){
   const entries=new Map();
@@ -8591,7 +8595,7 @@ async function renameNoteTag(from,to){
 async function importNoteFiles(files,parent=''){
   if(!appCanMutate())throw new Error('Use the primary tab to import notes.');
   const list=[...(files||[])],made=[],skipped=[];
-  const titleFor=name=>{const base=clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;AppData.notes.get(title);count++)title=`${full} (${count})`;return title;};
+  const titleFor=name=>{const base=clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;AppData.notes.get(title)||reservedNoteTitle(normalizeAreaName(title));count++)title=`${full} (${count})`;return title;};
   return RichTextRuntime.quiesce(()=>AppMutationCoordinator.runExclusive('import-notes',async()=>{
     let full=false;
     for(const file of list){

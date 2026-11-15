@@ -30,6 +30,11 @@ try{
     await until(()=>document.querySelector('#library-notes-editor .sd-rte-image img'));
     const outside=new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer()});document.querySelector('.library-notes-nav').dispatchEvent(outside);
     out.outsideRefused=outside.defaultPrevented&&document.querySelectorAll('#library-notes-editor .sd-rte-image').length===1;
+    // Several files at once go in one after another; anything else is named.
+    const several=new DataTransfer();several.items.add(file);several.items.add(new File(['x'],'list.txt',{type:'text/plain'}));several.items.add(file);
+    content.dispatchEvent(new DragEvent('drop',{...at,dataTransfer:several}));
+    await until(()=>document.querySelectorAll('#library-notes-editor .sd-rte-image img').length===3);
+    out.several=document.querySelector('#library-notes-editor .sd-rte-status')?.textContent||'';
     document.querySelector('#library-notes-editor .sd-rte-image-expand').click();
     const viewer=await until(()=>document.querySelector('.workspace-image-viewer.ready'));
     const level=()=>document.querySelector('.workspace-image-level').textContent,img=viewer.querySelector('img'),box=viewer.getBoundingClientRect(),shown=()=>img.getBoundingClientRect();
@@ -49,6 +54,7 @@ try{
   })()`);
   assert.equal(result.dropTaken,true,'a dropped image is taken by the editor, not the browser');
   assert.equal(result.outsideRefused,true,'a file dropped outside the editor is ignored');
+  assert.equal(result.several,'1 file was not an image, PDF or audio file.','several dropped files are added in turn and the rest named');
   assert.equal(result.fits,true,'the full view opens fitted to the screen');
   assert.match(result.zoomIn,/^\d+%$/,'+ zooms in');
   assert.ok(parseInt(result.wheel)>parseInt(result.zoomIn),'the wheel zooms further');
@@ -56,5 +62,5 @@ try{
   assert.equal(result.refit,'Fit','0 fits it again');
   assert.equal(result.closed,true);
   assert.deepEqual(page.events,[],'no runtime errors');
-  console.log(JSON.stringify({status:'PASS',checks:['drop-attaches','outside-drop-refused','opens-fitted','zoom-buttons','wheel-zoom','drag-pan','keyboard-fit','close']},null,2));
+  console.log(JSON.stringify({status:'PASS',checks:['drop-attaches','outside-drop-refused','several-files','opens-fitted','zoom-buttons','wheel-zoom','drag-pan','keyboard-fit','close']},null,2));
 }finally{await browser.close?.();await server.close?.();}
