@@ -79,5 +79,6 @@ export interface BackupReadinessHostContract{
   readonly format:'study-director.backup-readiness-host-module';readonly contractVersion:1;
   createStorageHealth(input:Readonly<StorageHealthInput>):Readonly<StorageHealthController>;
   createCanonicalCommit(input:Readonly<CanonicalCommitInput>):Readonly<CanonicalCommitController>;
+  normalizeVerifiedRecoveryState(value:unknown):VerifiedRecoveryState;
   createVerifiedRecovery(input:Readonly<VerifiedRecoveryInput>):Readonly<VerifiedRecoveryController>;
 }

@@ -1103,7 +1103,7 @@ const {RepositoryAppMeta,JournalAppMeta,HostAppMeta,ExportsAppMeta,DeviceFolderA
     }),
     same:sameDataValue,
     normalizers:Object.freeze({
-      verifiedRecovery:normalizeVerifiedRecoveryState,attachmentIntegrity:normalizeAttachmentIntegrityState,
+      verifiedRecovery:value=>BackupReadinessHostModule.normalizeVerifiedRecoveryState(value),attachmentIntegrity:normalizeAttachmentIntegrityState,
       repositoryIntegrity:normalizeRepositoryIntegrityState,
       reconciliationBase:ReconciliationBaselineCodec.normalizeHeader,reconciliationBaseNote:ReconciliationBaselineCodec.normalizeNote,reconciliationBaseDays:ReconciliationBaselineCodec.normalizeDays
     })
@@ -4965,7 +4965,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
     restoreTheme:()=>applyTheme(PRESENTATION_KERNEL.readStoredTheme((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false}),restorePresentation:()=>applyPresentation(PRESENTATION_KERNEL.readStoredPresentation((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false}),restoreFontScale:()=>applyFontScale(readFontScale()),
     hydratePlan:()=>PlanData.hydrate(),readRestoreJournal:()=>AppData.restoreJournal.read(),waitForClosedTabLease,recoverRestore:()=>BackupController.recoverInterruptedRestore(),tickClock,updateHeader:updateHeaderInfo,setInterval:(fn,ms)=>setInterval(fn,ms),setTimeout:(fn,ms)=>setTimeout(fn,ms),
     hasTasks:()=>TASKS.length>0,showEmpty,canMutate:appCanMutate,restoreSession:attemptAutoRestoreActiveSession,refreshBadge:refreshPersistedSessionBadge,inspectStorage:inspectStorageCapability,offerInstallNotice:()=>CapabilityInstallation.offerInstallNotice(),topology:()=>IndexedDb.topology(),
-    setFastFenceReady:value=>{backupFastFenceReady=value;},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:reconcileStartupChangeClock,resumeStorageReset:resumeUnresolvedStorageReset,
+    setFastFenceReady:value=>{backupFastFenceReady=value;},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock(),resumeStorageReset:resumeUnresolvedStorageReset,
     installBackground:installBackgroundOwners,scheduleMaintenance:scheduleDataMaintenance,wakeBackground:reason=>wakeBackgroundOperations(reason),installSessionWatch,refreshKeptVersions:()=>KeptVersions.refresh(),announceUnsupported:()=>UnsupportedData.announce(),renderUnsupported:renderUnsupportedData,
     collectProfiles:()=>Profiles.collect(),askProfilePassword,collectFiles:()=>BackupFiles.collect(),preloadInsights:scheduleInsightsPreload,confirmBoot:()=>PwaLifecycle.confirmBoot(),offerDeviceRecovery:()=>offerDeviceRecoveryIfLocalEmpty({reason:'startup'}),
     reportUnsupported:()=>UnsupportedData.reportBlocked(),setPlanStatus,noticeCanCompact,getReviewDate,reconcileLifecycle:(...args)=>SessionLifecycle.reconcile(...args)

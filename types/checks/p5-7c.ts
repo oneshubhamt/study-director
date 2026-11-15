@@ -56,7 +56,7 @@ canonical.handle(canonicalEvent);
 
 const verifiedRecoveryInput=Object.freeze({
   metadata:Object.freeze({read:async()=>null,write:async(_value:Parameters<VerifiedRecoveryInput['metadata']['write']>[0])=>true}),
-  storageHealth:Object.freeze({snapshot:()=>({version:3,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null,issues:Object.freeze([]),hasIssues:false}),updateHistory:(_patch:Parameters<VerifiedRecoveryInput['storageHealth']['updateHistory']>[0])=>({version:3,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null,issues:Object.freeze([]),hasIssues:false})}),
+  storageHealth:Object.freeze({snapshot:()=>({version:3 as const,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null,issues:Object.freeze([]),hasIssues:false}),updateHistory:(_patch:Parameters<VerifiedRecoveryInput['storageHealth']['updateHistory']>[0])=>({version:3 as const,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null,issues:Object.freeze([]),hasIssues:false})}),
   mutationEpoch:Object.freeze({latestChangeAt:(recorded:string)=>appData.mutationEpoch.latestChangeAt(recorded)}),
   backupVersion:24,sourceRevision:()=>'',refreshProviders:()=>runtime.providers.refresh(),
   capture:(_scope:string,_error:unknown,_level:'warn'|'error')=>{},nowIso:()=>new Date().toISOString()
