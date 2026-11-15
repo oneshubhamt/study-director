@@ -13,7 +13,7 @@ if(process.env.SD_MINIFIED_TEST==='1'){
  const expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];
  html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'');
 }
-server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({mutateBackupProtection,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
+server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({BackupProtectionStorage,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 let page;
 try{
@@ -24,12 +24,12 @@ try{
  const searchWorkerName=html.match(/sd\.note-search\.[a-f0-9]+\.js/)[0];
  assert.deepEqual(await page.evaluate(`new Promise((resolve,reject)=>{const w=new Worker(__PWA6.trustedAssetURL(${JSON.stringify(searchWorkerName)}));w.onmessage=({data})=>{w.terminate();resolve(data.keys)};w.onerror=()=>{w.terminate();reject(Error('Search worker failed under Trusted Types'))};w.postMessage({type:'sync',documents:[{key:'qa',plain:'search boundary'}]});w.postMessage({type:'query',id:1,query:'boundary'})})`),['qa']);
  const policyWrites=await page.evaluate(`(async()=>{
-   const mutate=__PWA6.mutateBackupProtection,record={version:3,id:'qa-policy',verifier:new Blob(['proof']),key:null,setAt:new Date().toISOString()};
-   const writes=await Promise.allSettled([mutate(record,{expectedId:'',check(){}}),mutate({...record,id:'stale-policy'},{expectedId:'',check(){}})]);
+   const storage=__PWA6.BackupProtectionStorage,record={version:3,id:'qa-policy',verifier:new Blob(['proof']),key:null,setAt:new Date().toISOString()};
+   const writes=await Promise.allSettled([storage.write('backupProtection',record,{expectedId:'',check(){}}),storage.write('backupProtection',{...record,id:'stale-policy'},{expectedId:'',check(){}})]);
    const current=await __PWA6.ExportsAppMeta.read('backupProtection');
-   const refused=await mutate(null,{expectedId:current.id,check(){throw Error('ownership lost')}}).then(()=>false,()=>true);
+   const refused=await storage.remove('backupProtection',{expectedId:current.id,check(){throw Error('ownership lost')}}).then(()=>false,()=>true);
    const retained=(await __PWA6.ExportsAppMeta.read('backupProtection')).id===current.id;
-   await mutate(null,{expectedId:current.id,check(){}});
+   await storage.remove('backupProtection',{expectedId:current.id,check(){}});
    return {commits:writes.filter(x=>x.status==='fulfilled').length,refused,retained};
  })()`);
  assert.deepEqual(policyWrites,{commits:1,refused:true,retained:true});

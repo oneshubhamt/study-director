@@ -7,7 +7,7 @@ import {createHarness as repositoryHarness} from '../../helpers/repository-harne
 // Execute the canonical host functions. Browser rendering is covered separately;
 // these fixtures expose save failures, lock lifetime, and background drain races.
 const source=readHostHtml();
-const preparation=source.slice(source.indexOf('function pwaRecoveryReadBackIssue('),source.indexOf('function schedulePwaUpdateEvaluation('));
+const preparation=source.slice(source.indexOf('function pwaUpdateBlockReason('),source.indexOf('function schedulePwaUpdateEvaluation('));
 const updateScheduler=source.slice(source.indexOf('function schedulePwaUpdateEvaluation('),source.indexOf('async function evaluateAutomaticPwaUpdate('));
 const scheduler=source.slice(source.indexOf('function pwaLastUpdateCheckAt('),source.indexOf('const PwaLifecycle=PwaLifecycleModule'));
 const flush=async()=>{for(let i=0;i<40;i++)await Promise.resolve();};
@@ -37,7 +37,8 @@ function fixture(){
     DeviceBackup:{status:()=>({busy:false})},
     AttachmentIntegrityJob:{settled:()=>Promise.resolve()},RichTextAssetMaintenance:{settled:()=>state.maintenance},OwnershipUiProjection:{apply(){calls.push('project');}},
     RichTextRuntime:{quiesce:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}}},
-    quiesceManagedRecoveryRuntime:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}},
+    ManagedRecoveryQuiescence:{run:async run=>{state.quiesced++;try{return await run();}finally{state.quiesced--;}}},
+    BackupRecoveryHostModule:{activeSessionIssue:loaded=>!loaded?'Saved session state could not be verified.':loaded.error?`Saved session recovery could not be verified: ${loaded.error.message||loaded.error}`:loaded.value&&loaded.storage?.idb!==true?'The stored recovery session has not yet been confirmed in canonical browser storage.':''},
     PracticePacer:{status:()=>({running:state.pacer})},isLiveTrackableTimer:()=>state.timer,appCanMutate:()=>state.owner.state==='primary',pwaRecentEditableInput:()=>false,
     LibraryView:{settleDiary:async()=>{await state.diaryWait;calls.push('diary');return state.diary;}},
     PlanDraftEditor:{flush:async()=>{calls.push('plan-flush');return state.planFlush;},save:async()=>{calls.push('plan-save');return true;},authoredText:()=>state.draft},PlanData:{readDraft:()=>state.draft,settled:()=>record('plan-settled')},
