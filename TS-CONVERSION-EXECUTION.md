@@ -1,5 +1,12 @@
 # TypeScript conversion — execution record
 
+## Active correction — P5.7 source-ownership closure audit, 2026-11-15
+
+- **Baseline / reason:** reopened parent P5.7 at exact remote `ts-exp` head `b8eb641097b3aec654c095eed05e59bd7fe93bed` after a de novo source audit found that the behavioral invariants are strong but substantive P5.7-owned recovery/readiness/runtime-adapter behavior still lives in unchecked `source/host/main.js`. The prior closure statement that only thin composition remained is therefore withdrawn pending correction.
+- **Bounded outcome:** move verified-recovery/readiness state into the checked readiness owner; move browser-data-clear recovery/resumption into the checked recovery owner; put production Backup runtime/adapters behind a strict host boundary; move retained recovery/integrity scratch-file selection behind checked ownership; leave only deferred construction, event registration and thin forwards in `main.js`.
+- **Invariants:** preserve canonical formats/data, initialization order, safety-copy/journal ordering, independent Plan draft, Active Session recovery, reader/file retention, storage-reset upload suspension, foreground preemption and non-recursive backup capture. Drive auth/transport stays P5.8; PWA policy stays P5.12.
+- **Verification plan:** strict compiler + typed lint; production build/generated verification/syntax; targeted P5.7 unit/integration/architecture witnesses including capture safety, file lifetimes, repository restore, storage maintenance/integrity and runtime boundaries; affected P5.7 browser closure. No full/Promotion QA.
+
 ## Latest closure — P5.7C Maintenance, integrity and readiness — CLOSED — VERIFIED — TARGETED, 2026-11-15
 
 - **Scope / sequencing:** audit closure checkpoint was `db4587a`; implementation resumed from the then-latest remote `ts-exp` at `fbafca46492f486ec98cf3f8ea56bd4a0b2cc801`, preserving all post-audit work and subsequent compatible concurrent commits. The verified source/regression endpoint is `01f1692d2f7256593bca97fde358d379f9dbb1e6`; the commit containing this entry closes P5.7C only.
