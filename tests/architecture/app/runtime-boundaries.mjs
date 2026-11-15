@@ -80,7 +80,7 @@ assert.match(host,/BackupReadinessHostModule\.createVerifiedRecovery\(Object\.fr
 assert.match(host,/BackupRecoveryHostModule\.createRuntime\(Object\.freeze\(\{/u,'the production Backup runtime adapters cross the checked owner');
 assert.match(host,/BackupRecoveryHostModule\.createStorageReset\(Object\.freeze\(\{/u,'browser-data-clear recovery crosses the checked owner');
 assert.match(host,/BackupRecoveryHostModule\.createRetainedBackupFiles\(Object\.freeze\(\{/u,'recovery scratch retention crosses the checked owner');
-assert.match(readiness,/function createVerifiedRecovery\(/u);assert.match(recovery,/function createRevisionFence\(/u);assert.match(recovery,/function createRuntime</u);assert.match(recovery,/function createStorageReset\(/u);assert.match(recovery,/function createRetainedBackupFiles\(/u);
+assert.match(readiness,/function createVerifiedRecovery\(/u);assert.match(recovery,/function createRevisionFence\(/u);assert.match(recovery,/function createRuntime\(/u);assert.match(recovery,/function createStorageReset\(/u);assert.match(recovery,/function createRetainedBackupFiles\(/u);
 for(const stale of [
   'const VERIFIED_RECOVERY_META_KEY=','function recordBackupCopy(','function readVerifiedRecoveryState(','async function reconcileChangeClock(',
   'const STORAGE_RESET_RETRY_MS=','function beginStorageResetHold(','function restoreMissingAfterStorageReset(','function noteDatabaseRemovedWhileClosed(',
