@@ -157,7 +157,7 @@ const {KeyedRecord,textEl,on,emptyMsg,setProgressSummary,setElementText,setEleme
 let StorageHealthController=null;
 let storageResetHold=null,storageResetHandling=null,storageResetSince=0,storageResetAcknowledged=0;
 let NativeCapabilities=null,CapabilityBadge=null;
-let DeviceBackup=null,BackupRecoveryHost=null,KeptVersions=null;
+let DeviceBackup=null,BackupRecoveryHost=null,KeptVersions=null,BackupActions=null;
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
 const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
   onError:(operation,error)=>StorageHealthController?.observeLocalStorage(operation,error),
