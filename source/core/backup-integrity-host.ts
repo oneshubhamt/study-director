@@ -75,7 +75,7 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
     let jobs:readonly Record<string,unknown>[]=[];try{jobs=provider.backgroundStatus() as readonly Record<string,unknown>[];}catch{jobs=[];}
     for(const [id,label,location] of [['attachment-verification-status','Attachment presence and size',''],['device-verification-status','Device Folder','device-folder'],['drive-verification-status','Google Drive','google-drive']] as const){
       const element=input.document.getElementById(id);if(!element)continue;
-      const value=location?repositoryView?.locations[location]:attachmentView,bound=!location||!!value?.repositoryScope&&boundScopes[location]===value.repositoryScope;
+      const value=location?repositoryView?.locations[location]:attachmentView,scope=value&&'repositoryScope' in value?value.repositoryScope:'',bound=!location||!!scope&&boundScopes[location]===scope;
       const running=!!location&&jobs.some(row=>row['job']===location+' integrity'&&row['running']===true);
       if(location&&value&&'recheck' in value&&value.recheck)recheckAsked[location]=false;
       const shown=bound?status(value as unknown as Record<string,unknown>,{shallow:!location,running,liveProgress:location?live[location]||null:null}):freeze({head:'Not connected',detail:'Connect it to check its backups.'});
@@ -94,7 +94,8 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
   }
   function scheduleAttachment(delay:number=15000,trigger:string='scheduled'){return attachmentJob.schedule(delay,trigger,'earliest');}
   const deferred=(message='Attachment integrity audit deferred.',code='ATTACHMENT_INTEGRITY_DEFERRED')=>Object.assign(new Error(message),{code});
-  async function runAttachment({trigger,nextEligibleAt}:{trigger:string;nextEligibleAt:string}){
+  type AttachmentJobResult={status:string;reason?:string;checked?:number;issues?:number};
+  async function runAttachment({trigger,nextEligibleAt}:{trigger:string;nextEligibleAt:string}):Promise<AttachmentJobResult>{
     let traceId='',prior:ReturnType<typeof normalizeAttachmentState>|null=null;
     try{
       prior=normalizeAttachmentState(await meta.read(input.attachmentMetadataName),input.validAttachmentId);
@@ -120,7 +121,7 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
       attachmentView=normalizeAttachmentState({...prior||attachmentView||{},attemptedAt:environment.nowIso(),lastOutcome:'unavailable'},input.validAttachmentId);render();if(traceId)diagnostics.fail(error,freeze({background:true,status:'unavailable'}),traceId);diagnostics.capture('attachments.integrity-audit',error,'warn');input.storageHealth.markError('attachmentIntegrity','Attachment verification is unavailable. Previous findings are retained; Study Director will retry.',{level:'warn'});scheduleAttachment(30*60*1000,'error');return freeze({status:'unavailable',reason:error.message||String(error)});
     }
   }
-  const attachmentJob=lifecycle.createJob({environment:{now:environment.now,setTimeout:environment.setTimeout,clearTimeout:environment.clearTimeout},minDelayMs:1000,retryMs:30*60*1000,isAvailable:()=>input.background.upkeepBlocker()||(storage.supported()?true:'storage-unavailable'),capture:error=>diagnostics.capture('attachments.integrity-lifecycle',error,'warn'),execute:runAttachment});
+  const attachmentJob=lifecycle.createJob<AttachmentJobResult>({environment:{now:environment.now,setTimeout:environment.setTimeout,clearTimeout:environment.clearTimeout},minDelayMs:1000,retryMs:30*60*1000,isAvailable:()=>input.background.upkeepBlocker()||(storage.supported()?true:'storage-unavailable'),capture:error=>diagnostics.capture('attachments.integrity-lifecycle',error,'warn'),execute:runAttachment});
   async function installAttachment(){
     let state;try{state=normalizeAttachmentState(await meta.read(input.attachmentMetadataName),input.validAttachmentId);}
     catch(error){diagnostics.capture('attachments.integrity-state-read',error,'warn');input.storageHealth.markError('attachmentIntegrity','Attachment verification state is unavailable. Study Director will retry.',{level:'warn'});scheduleAttachment(30*60*1000,'state-read-failed');return null;}

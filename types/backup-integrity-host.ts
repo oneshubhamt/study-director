@@ -2,8 +2,8 @@ import type {MetaOwner} from './app-meta.ts';
 import type {AssetIssue,AuditProgress} from './asset-storage.ts';
 import type {IntegrityHooks} from './backup-provider.ts';
 import type {Job,LifecycleModule} from './lifecycle.ts';
-import type {IntegrityState} from './integrity-continuation.ts';
-import type {ScrubProgress,VerificationResult,ObjectEntry} from './managed-repository.ts';
+import type {IntegrityState,VerificationResult,VerificationInput} from './integrity-continuation.ts';
+import type {ObjectEntry} from './managed-repository.ts';
 import type {AttachmentsModule} from '../source/core/attachments.ts';
 import type {AssetStorageModule} from '../source/core/asset-storage.ts';
 import type {BackupModule} from '../source/core/backup.ts';
@@ -25,7 +25,7 @@ export type RepositoryIntegrityTarget=Readonly<{
 }>;
 export type RepositoryIntegrityState=Readonly<{version:7;locations:Readonly<Record<string,RepositoryIntegrityTarget>>}>;
 export interface IntegrityContinuationPort{
- verify(input:Omit<import('./integrity-continuation.ts').VerificationInput,'entry'|'signal'>&{entry:ObjectEntry;signal:AbortSignal|null}):Promise<VerificationResult>;
+ verify(input:Omit<VerificationInput,'entry'|'signal'>&{entry:ObjectEntry;signal:AbortSignal|null}):Promise<VerificationResult>;
 }
 export interface BackupIntegrityInput{
   readonly lifecycle:LifecycleModule;
