@@ -4,6 +4,7 @@ import type {RecoverySpec,ManagedRecoveryInput} from '../../types/managed-recove
 import type {BackupMaintenancePauseController,BackupMaintenancePauseInput,BackupRevisionFenceController,BackupRevisionFenceInput,BackupRuntimeHostController,BackupRuntimeHostInput,Completion,ImportedAsset,Signal} from '../../types/backup-runtime-host.ts';
 import type {BackupRuntimeInput,Journal} from '../../types/backup.ts';
 import type {AssetMetadata} from '../../types/asset-storage.ts';
+import type {SessionResult} from '../../types/repositories.ts';
 import type {AttachmentDeletion,NoteDeletion,SavedDayDeletion} from '../../types/backup-models.ts';
 const sdBackupRecoveryHostFactory=(()=>{
 'use strict';
