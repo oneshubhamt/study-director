@@ -19,9 +19,11 @@ const policy=readScript('source/core/repository-policy.ts');
 const mutation=readScript('source/core/mutation-coordinator.ts');
 const host=readScript('source/core/backup-recovery-host.ts');
 const backupActionsHost=readScript('source/core/backup-actions-host.ts');
+const maintenanceHost=readScript('source/core/backup-maintenance-host.ts');
+const integrityHost=readScript('source/core/backup-integrity-host.ts');
 const drive=fs.readFileSync('source/external/drive.js','utf8');
 
-assert.match(app,/nextEligibleAt[\s\S]*reason[\s\S]*repositoryScope[\s\S]*requestId/u,'durable maintenance intent must carry eligibility, reason and repository generation');
+assert.match(maintenanceHost,/providerId[\s\S]*requestedAt[\s\S]*nextEligibleAt[\s\S]*reason[\s\S]*repositoryScope[\s\S]*requestId/u,'durable maintenance intent must carry eligibility, reason and repository generation');
 assert.match(metadata,/Number\(value\.version\)!==4/u,'the ordinary runtime reads only the current maintenance intent');
 
 
@@ -43,7 +45,7 @@ assert.match(provider,/function automaticOpportunityUnspent\(selected\s*,eligibl
 assert.match(provider,/const attemptRevision=canonicalConvergenceRevision\(\),eligibleMs=Date\.parse\(String\(eligibleAt\|\|''\)\),preserveAutomatic=automaticOpportunityUnspent\(selected,Number\.isFinite\(eligibleMs\)\?eligibleMs:Date\.now\(\)\)[\s\S]*catchUpSharedProvider\(selected,ahead,attemptRevision,\{preserveAutomatic\}\)/u,'a convergence attempt must carry whether it became eligible before the pending automatic deadline into asynchronous catch-up');
 assert.match(provider,/function schedulePendingProviderBackup\(selected\s*,delay\s*=1000,\{backoff=false,attemptRevision='',preserveAutomatic=false,trigger='pending-retry'\}\s*=\{\}\)[\s\S]*const newer=backoff&&attemptRevision&&canonicalConvergenceRevision\(\)!==attemptRevision[\s\S]*preserve=automaticNeeded\(selected\)&&\(preserveAutomatic===true\|\|backoff&&automaticOpportunityUnspent\(selected\)\)[\s\S]*if\(newer\|\|preserve\)scheduleAutomaticBackup\(selected,\{urgent:Number\.isFinite\(automaticState\(selected\)\.urgentSince\)\}\)[\s\S]*backoff&&!newer&&!preserve\?'replace':'earliest'/u,'failure backoff must preserve newer canonical work and scheduler-owned unspent automatic opportunities; only spent same-revision work may back off');
 assert.doesNotMatch(provider,/schedulePendingProviderBackup\([^\n]*\),'managed-recovery'/u,'generic failure retries must not masquerade as managed recovery');
-assert.match(app,/function mutateRepositoryMaintenancePending[\s\S]*BackupAppMeta\.transaction\('readwrite'[\s\S]*handle\.request\.onerror[\s\S]*outcome='superseded'[\s\S]*strict:true/u,'maintenance mutation must compare requests inside a strict transaction and fail closed on unavailable state');
+assert.match(maintenanceHost,/function mutate\([\s\S]*input\.meta\.transaction[\s\S]*handle\.request\.onerror[\s\S]*outcome='superseded'[\s\S]*strict:true/u,'maintenance mutation must compare requests inside a strict transaction and fail closed on unavailable state');
 assert.doesNotMatch(device,/MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Device must not retain a private maintenance cadence table');
 assert.doesNotMatch(provider,/PROVIDER_MAINTENANCE_(?:CATCHUP|GRACE|BLOCKED|ERROR|CONTENTION)_RETRY_MS/u,'Drive must not retain a private maintenance cadence table');
 assert.doesNotMatch(device,/createMaintenanceScheduler|createIntegrityScheduler|registerJob|beginBackground|beginForeground|setTimeout\(\(\)=>[^,]*schedule/u,'the Device Folder runs no jobs of its own: maintenance, integrity and automatic backups are the engine\'s per-location jobs');
@@ -64,9 +66,10 @@ assert.match(provider,/if\(busy\|\|sync\?\.catching\)\{schedulePendingProviderBa
 assert.match(provider,/async function createProtectedSafety\(id\s*,purpose='before-clear-library',options\s*=\{\}\)[\s\S]*beginForeground\(selected[\s\S]*await foreground\.settled[\s\S]*saveRepositoryProvider/u,'Before Clear Library safety must reserve foreground ownership and settle background work before repository work');
 assert.match(provider,/background\.createIntegrityScheduler[\s\S]*budgetCode:'REPOSITORY_INTEGRITY_BUDGET'[\s\S]*execute:async\(\{target,trigger,nextEligibleAt,signal,checkpoint\}\)/u,'Drive integrity work must use the per-target shared recurrence and receive the shared cancellation signal');
 assert.doesNotMatch(app,/INTEGRITY_TARGETS/u,'no fixed device/drive slots remain in the integrity record');
-assert.match(app,/function backgroundBlocker\(\{housekeeping=true\}=\{\}\)\{\s*if\(!appCanMutate\(\)\)return 'awaiting-control';\s*if\(!StartupLifecycle\.status\(\)\.fullyInitialized\)return 'startup';[\s\S]*?housekeeping&&storageResetUnresolved\(\)\?'storage-reset'/u,'every background job shares one gate: write ownership (asked first, so a job configured during page load never reads start-up state early), start-up, and for housekeeping an unresolved browser-data clear');
-assert.equal((app.match(/isAvailable:\(\)=>backgroundBlocker\(/gu)||[]).length,1,'repository integrity uses the shared gate directly');
-assert.equal((app.match(/isAvailable:\(\)=>upkeepBlocker\(/gu)||[]).length,4,'canonical maintenance, attachment cleanup and verification, and scratch files use the upkeep gate');
+assert.match(maintenanceHost,/function backgroundBlocker[\s\S]*authority\.canMutate\(\)[\s\S]*authority\.fullyInitialized\(\)[\s\S]*storageResetUnresolved\(\)/u,'every background job shares one checked gate: write ownership, start-up, and unresolved browser-data clear');
+assert.match(maintenanceHost,/isAvailable:\(\)=>upkeepBlocker\(\{housekeeping:false\}\)\|\|true/u,'canonical maintenance consumes the shared checked gate');
+assert.match(integrityHost,/isAvailable:\(\)=>input\.background\.upkeepBlocker\(\)\|\|\(storage\.supported\(\)\?true:'storage-unavailable'\)/u,'attachment verification consumes the shared upkeep gate');
+assert.match(integrityHost,/isAvailable:\(_id:string\)=>input\.background\.backgroundBlocker\(\)\|\|true/u,'repository integrity consumes the shared background gate');
 assert.match(app,/NoticeCoordinator\.subscribe\(\(\)=>\{foregroundChanged\(\);\}\)/u,'notice changes check the watcher at once');
 assert.match(backup,/function beginImport\(\{backgroundPreemptible=false\}=\{\}\)[\s\S]*backgroundPreemptible:backgroundPreemptible===true[\s\S]*importHoldsBackground:!!activeImportOperation&&!activeImportOperation\.backgroundPreemptible/u,'standalone/manual imports hold all providers while an admitted automatic sync does not cancel itself via the file observer');
 assert.doesNotMatch(app,/schedule\w*\((?:15000|ATTACHMENT_INTEGRITY_RETRY_MS),'foreground-busy'\)/u,'no upkeep job polls for the foreground on its own');
@@ -78,13 +81,13 @@ assert.match(provider,/isAvailable:\s*\(\s*\)\s*=>\s*\{const local\s*=integrityS
 assert.doesNotMatch(app,/REPOSITORY_INTEGRITY_POLICY|repositoryIntegrityTargetDue|scheduleRepositoryIntegrityScrub|runDeviceRepositoryIntegrityScrub/u,'retired host integrity wrappers must be removed after coordinator consolidation');
 assert.match(backup,/const RepositoryBackgroundProviderPort\s*=freeze\s*\(\s*\{[\s\S]*format:RepositoryBackgroundModule\s*\.format[\s\S]*createCoordinator:RepositoryBackgroundModule\s*\.createCoordinator[\s\S]*maintenanceActionable:RepositoryBackgroundModule\s*\.maintenanceActionable[\s\S]*background:RepositoryBackgroundProviderPort/u,'Backup Provider must receive a narrow repository-background port instead of the whole internal module surface');
 
-assert.match(app,/backgroundMaintenanceStatusBusy\(owner,field='busy'\)[\s\S]*catch\(error\)[\s\S]*return true/u,'foreground-status probe failures must conservatively block unrelated local background maintenance');
-assert.match(app,/backgroundMaintenanceForegroundBusy\(\)[\s\S]*AppMutationCoordinator,'active'[\s\S]*BackupController[\s\S]*BackupProviderRuntime/u,'local background work must yield to foreground backup/recovery');
-assert.match(app,/BackupOperationDiagnostics\.start\('data-maintenance'/u);
+assert.match(maintenanceHost,/function ownerBusy[\s\S]*catch\(error\)[\s\S]*return true/u,'foreground-status probe failures must conservatively block unrelated local background maintenance');
+assert.match(maintenanceHost,/function foregroundBusy[\s\S]*foreground\.mutation[\s\S]*foreground\.backupController[\s\S]*foreground\.providers/u,'local background work must yield to foreground backup/recovery');
+assert.match(maintenanceHost,/diagnostics\.start\('data-maintenance'/u);
 assert.match(app,/DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=AppData\.maintenance\.intervalMs,DATA_MAINTENANCE_FAILURE_RETRY_MS=30\*60\*1000/u,'canonical data maintenance takes its interval from the repository that records it, with a bounded failure retry');
-assert.match(app,/status==='completed'\)\{[\s\S]{0,200}AppData\.notes\.purgeExpiredTrash\(\);[\s\S]{0,120}scheduleRichTextAssetMaintenance\(ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS\);/u,'daily upkeep empties expired Recently deleted notes, then sweeps unused attachments');
-assert.match(app,/status==='completed'[\s\S]*scheduleDataMaintenance\(DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS,'interval'\)[\s\S]*reason==='recent'[\s\S]*lastRun\+DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS[\s\S]*status==='failed'\|\|reason==='indexeddb-unavailable'[\s\S]*DATA_MAINTENANCE_FAILURE_RETRY_MS/u,'canonical data maintenance must remain live across long-running sessions and transient failures');
-assert.match(app,/BackupOperationDiagnostics\.start\('attachment-integrity'/u);
+assert.match(maintenanceHost,/status==='completed'[\s\S]*data\.notes\.purgeExpiredTrash\(\)[\s\S]*input\.scheduleAssetMaintenance\(intervals\.assetCleanupDelayMs\)[\s\S]*schedule\(intervals\.maintenanceMs,'interval'\)/u,'daily upkeep empties expired Recently deleted notes, then sweeps unused attachments');
+assert.match(maintenanceHost,/reason==='recent'[\s\S]*lastRun\+intervals\.maintenanceMs[\s\S]*status==='failed'\|\|reason==='indexeddb-unavailable'[\s\S]*intervals\.failureRetryMs/u,'canonical data maintenance remains live across long-running sessions and transient failures');
+assert.match(integrityHost,/diagnostics\.start\('attachment-integrity'/u);
 assert.match(provider,/OperationDiagnostics\s*\.start\s*\('provider-integrity'[\s\S]*nextEligibleAt/u);
 assert.match(provider,/OperationDiagnostics\s*\.start\s*\('provider-convergence'/u);
 assert.match(app,/configuration:Object\.freeze\(\{release:APP_VERSION,limit:20\}\)/u,'diagnostic history must be large enough to inspect a background/foreground cycle');
@@ -107,7 +110,7 @@ const lifecycle=readScript('source/core/operation-lifecycle.ts');
 assert.match(lifecycle,/function createJob[\s\S]*function reconcile[\s\S]*function wake[\s\S]*function complete/u);
 assert.match(background,/Lifecycle\.createJob/u);
 assert.match(provider,/background\.registerJob\('convergence'/u);
-assert.match(app,/OperationLifecycle\.createGroup/u);assert.match(startupOwner,/ports\.wakeBackground\('ownership'\)/u);assert.match(backupActionsHost,/input\.view\.wakeBackground\('encryption-unlocked'\)/u,'the checked protection owner wakes background work after unlock');assert.match(app,/wakeBackground:reason=>wakeBackgroundOperations\(reason\)/u,'the host supplies the canonical background wake callback');
+assert.match(maintenanceHost,/lifecycle\.createGroup/u);assert.match(startupOwner,/ports\.wakeBackground\('ownership'\)/u);assert.match(backupActionsHost,/input\.view\.wakeBackground\('encryption-unlocked'\)/u,'the checked protection owner wakes background work after unlock');assert.match(app,/wakeBackground:reason=>wakeBackgroundOperations\(reason\)/u,'the host supplies the canonical background wake callback');
 assert.match(provider,/budgetMs:background\.integrity\.workBudgetMs/u,'integrity policy must come from the bound coordinator');
 assert.doesNotMatch(provider,/Background\.integrity|PROVIDER_CONVERGENCE_BUDGET|backgroundAfter|convergenceAfter|resumePendingProviderBackup/u,'retired handoffs and transfer deadlines must be absent');
 assert.doesNotMatch(app,/dataMaintenanceTimer|attachmentIntegrityTimer|attachmentIntegrityRunning|attachmentIntegrityAwaitingControl|attachmentMaintenanceDailyTimer/u,'host timers must not duplicate lifecycle ownership');
@@ -212,9 +215,18 @@ assert.match(startupOwner,/void p\.collectFiles\(\)\.catch/u,'cold startup must 
 {
  const run=async({owner=true,foreignPolls=0}={})=>{
   let polls=0,waits=0;
-  const context=vm.createContext({AppOwnership:{canMutate:()=>owner},AppMutationCoordinator:{foreignActive:()=>polls++<foreignPolls},setTimeout:(fn)=>{waits++;fn();return waits;},Promise});
-  vm.runInContext(productionFunction('async function waitForClosedTabLease(limitMs=25000){')+'\nglobalThis.wait=waitForClosedTabLease;',context);
-  const ended=await context.wait();return {ended,waits};
+  const context=vm.createContext({Symbol,Object,Map,Set,Promise,Date,Error,TypeError});
+  for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/backup-maintenance-host.ts'])vm.runInContext(readScript(file),context,{filename:file});
+  const modules=context[Symbol.for('studyDirector.internalModules.v1')],lifecycle=modules.require('operation-lifecycle',1),module=modules.require('backup-maintenance-host',1),idle=Object.freeze({status:()=>Object.freeze({busy:false,active:false})});
+  const controller=module.createBackground(Object.freeze({
+   lifecycle,environment:Object.freeze({now:()=>0,setTimeout:fn=>{waits++;fn();return waits;},clearTimeout:()=>{}}),
+   authority:Object.freeze({canMutate:()=>true,fullyInitialized:()=>true,storageResetUnresolved:()=>false,unsupportedDataHeld:()=>false}),
+   foreground:Object.freeze({pwaReserved:()=>false,mutation:idle,attachmentIngest:idle,exports:idle,backupController:idle,providers:idle}),
+   data:Object.freeze({maintenance:Object.freeze({run:async()=>({status:'completed'}),status:()=>({})}),notes:Object.freeze({purgeExpiredTrash:()=>0})}),
+   diagnostics:Object.freeze({capture(){},start:()=>'',mark(){},finish(){},fail(){}}),backgroundOwners:()=>Object.freeze([]),scheduleAssetMaintenance:()=>true,
+   intervals:Object.freeze({maintenanceMs:86400000,failureRetryMs:300000,assetCleanupDelayMs:5000,foregroundRecheckMs:15000})
+  }));
+  const ended=await controller.waitForClosedTabLease(Object.freeze({canMutate:()=>owner}),Object.freeze({foreignActive:()=>polls++<foreignPolls}));return {ended,waits};
  };
  assert.deepEqual(await run({foreignPolls:3}),{ended:true,waits:3},'a closed page\'s lease: start-up waits until it ends, then recovers');
  assert.deepEqual(await run({foreignPolls:0}),{ended:true,waits:0},'no lease: no wait');
