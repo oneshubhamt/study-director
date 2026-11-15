@@ -141,7 +141,7 @@ const createModule=()=>{
     }
     async function snapshotRevision(options:Readonly<{full?:boolean}>={}){
       if(options.full===true||!fastFenceReady||!input.mutationEpoch.eligible())return fullSnapshotRevision();
-      try{const epoch=await input.mutationEpoch.read();if(!epoch)return fullSnapshotRevision();return `study-director.fast-capture-fence.v1|${epoch.token}|${input.mutationGeneration()}|${sourceRevision()}`;}
+      try{const raw=await input.mutationEpoch.read(),epoch=raw&&typeof raw==='object'?raw as Record<string,unknown>:null,token=String(epoch?.['token']||'');if(!token)return fullSnapshotRevision();return `study-director.fast-capture-fence.v1|${token}|${input.mutationGeneration()}|${sourceRevision()}`;}
       catch(error){input.diagnostics.capture('backup.fast-capture-fence',error,'warn');return fullSnapshotRevision();}
     }
     return freeze({format:'study-director.backup-revision-fence' as const,contractVersion:1 as const,sourceRevision,snapshotRevision,setFastFenceReady:(value:boolean)=>(fastFenceReady=value)});
@@ -155,7 +155,7 @@ const createModule=()=>{
       mutationEpoch:input.appData.mutationEpoch,dailyDatasetRevision:()=>input.appData.dailyRecords.datasetRevision(),
       savedDayDeletions:()=>input.appData.deletionRecovery.savedDays(),noteDeletions:()=>input.appData.deletionRecovery.notes(),attachmentDeletions:()=>input.appData.deletionRecovery.attachments(),
       personalExport:()=>input.personal.data.exportData({flush:false}),planInputValue:input.personal.inputValue,attachmentsList:()=>input.assets.list(),
-      referenceRevision:input.referenceRevision,mutationGeneration:input.mutationGeneration,diagnostics:freeze({capture:(scope,error,level)=>input.diagnostics.capture(scope,error,level)})
+      referenceRevision:input.referenceRevision,mutationGeneration:input.mutationGeneration,diagnostics:freeze({capture:(scope:string,error:unknown,level:'warn')=>input.diagnostics.capture(scope,error,level)})
     }));
     const sourceRevision=revisionFence.sourceRevision,snapshotRevision=revisionFence.snapshotRevision;
     async function importAttachments(items:readonly ImportedAsset[],options:Readonly<{signal?:Signal;replace?:boolean}>={}){
@@ -261,7 +261,7 @@ const createModule=()=>{
       exports:exportsPort,session:input.session,domain:input.domain,view:input.view,events,interactions:input.interactions,operations:input.operations,environment:input.environment,diagnostics:input.diagnostics
     })}));
     if(!Object.isFrozen(runtime)||runtime.format!=='study-director.backup-runtime'||runtime.contractVersion!==1)throw new Error('Study Director Backup runtime is unavailable or incompatible.');
-    return freeze({format:'study-director.backup-runtime-host' as const,contractVersion:1 as const,runtime,setFastFenceReady:value=>revisionFence.setFastFenceReady(value),sourceRevision,snapshotRevision});
+    return freeze({format:'study-director.backup-runtime-host' as const,contractVersion:1 as const,runtime,setFastFenceReady:(value:boolean)=>revisionFence.setFastFenceReady(value),sourceRevision,snapshotRevision});
   }
 
   function createRetainedBackupFiles(input:Readonly<import('../../types/backup-recovery-host.ts').RetainedBackupFilesInput>):Readonly<import('../../types/backup-recovery-host.ts').RetainedBackupFilesController>{
