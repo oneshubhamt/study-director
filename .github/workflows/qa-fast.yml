@@ -41,6 +41,7 @@ jobs:
           tests/integration/backup/capture-safety.mjs
           tests/unit/app/operation-lifecycle.mjs
           tests/unit/backup/repository-background.mjs
+          tests/unit/backup/backup-recovery-host.mjs
           tests/integration/storage/data-maintenance.mjs
           tests/integration/storage/deletion-recovery.mjs
           tests/integration/backup/device-backup.mjs
