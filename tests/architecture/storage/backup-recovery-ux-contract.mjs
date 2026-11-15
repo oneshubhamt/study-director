@@ -72,9 +72,11 @@ assert.ok(refreshStart>=0&&refreshEnd>refreshStart,'passive permission checking 
 assert.doesNotMatch(device.slice(refreshStart,refreshEnd),/requestPermission\(|showDirectoryPicker\(|await request\(/u,'passive checks never prompt without a user gesture');
 assert.doesNotMatch(device,/if\(handle\)\{[\s\S]{0,300}storage\.remove\(config\.metadataKey\)/u,'temporary Device Folder permission loss must never discard the configured directory handle.');
 assert.match(actions,/connect\.textContent=state\.mode==='permission'\?'Allow access':'Choose folder…'/u,'configured Device Folder permission renewal must be presented as Allow access rather than folder reselection.');
-assert.match(app,/AppActivation\.subscribe\(event=>\{[^\n]*void refreshDeviceBackgroundPermission\(event\)/u,'foreground return must delegate to the permission and integrity opportunity handler.');
-const deviceActivation=app.slice(app.indexOf('async function refreshDeviceBackgroundPermission('),app.indexOf('AppActivation.subscribe(',app.indexOf('async function refreshDeviceBackgroundPermission(')));
-assert.doesNotMatch(deviceActivation,/requestPermission|DeviceBackup\.connect\(/u,'activation opportunities must not prompt for folder access.');
+assert.match(app,/AppActivation\.subscribe\(event=>\{[\s\S]*void DeviceBackupActivation\.handle\(event\.kind\)/u,'foreground return must delegate Device Folder permission opportunity to the checked activation owner.');
+assert.match(actions,/function createDeviceActivation\([\s\S]*input\.refreshKinds\.has\(String\(kind\|\|''\)\)[\s\S]*await device\.refreshPermission\(\)/u,'the checked Device Folder activation owner filters activation kinds before permission refresh.');
+assert.match(app,/refreshKinds:new Set\(\[APP_ACTIVATION_KINDS\.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS\.ORDINARY_FOCUS,APP_ACTIVATION_KINDS\.VISIBILITY_RETURN\]\)/u,'Device Folder permission refresh covers takeover, ordinary focus and visibility return.');
+assert.doesNotMatch(app,/refreshKinds:new Set\([^\n]*DATE_ROLLOVER/u,'a date rollover must not prompt/reconnect a Device Folder permission flow.');
+assert.doesNotMatch(app,/async function refreshDeviceBackgroundPermission\(/u,'unchecked Device Folder activation policy must not return to the main host.');
 
 assert.doesNotMatch(backup,/id:'safetyCopy',label:'Optional extra backup copy'[\s\S]*choices:/u,'optional file safety copy must not render as another radio-choice conflict row');
 assert.match(backup,/exactCapable=captureAuthority==='canonical-complete'&&!!parsed&&!!parsed\.protectedCheckpointManifest/u,'standalone Replace must require current complete-capture authority rather than merely a protected manifest');
