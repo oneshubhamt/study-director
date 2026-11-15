@@ -16,6 +16,11 @@ const createModule=():ReconciliationUiModule=>{
     return value;
   }
   function createController(input:Readonly<ReconciliationUiInput>){
+    const emptyNotes=():Record<string,{text:string;localCandidateId:string;incomingCandidateId:string}>=>
+      Object.create(null) as unknown as Record<string,{text:string;localCandidateId:string;incomingCandidateId:string}>;
+    const focusable=(value:Element):value is Element&{focus(options?:FocusOptions):void}=>{
+      const candidate=value as Element&{focus?:unknown};return typeof candidate.focus==='function';
+    };
     exactObject(input,['ports'],'Reconciliation UI input');
     const ports=exactObject(input.ports,['assets','configuration','diagnostics','richText','view'],'Reconciliation UI ports');
     const assets=exactObject(ports.assets,['get'],'Reconciliation UI asset port');
@@ -44,7 +49,7 @@ const createModule=():ReconciliationUiModule=>{
       return freeze(out);
     }
     function resultFrom(states:readonly ReconciliationState[]):ReconciliationResult{
-      const notes:Record<string,{text:string;localCandidateId:string;incomingCandidateId:string}>=Object.create(null);
+      const notes=emptyNotes();
       for(const state of states)notes[state.conflict.key]=freeze({text:String(state.result??state.working),localCandidateId:state.conflict.localCandidateId,incomingCandidateId:state.conflict.incomingCandidateId});
       return freeze({format:FORMAT,version:1,notes:freeze(notes)});
     }
@@ -55,7 +60,7 @@ const createModule=():ReconciliationUiModule=>{
       // Every difference is reviewed; nothing is resolved without the person.
       // A shared earlier copy only shapes what Smart merge proposes.
       const conflicts=normalizedConflicts(options.conflicts),manualOnly=options.manualOnly===true,version=!manualOnly&&options.purpose==='version',kept=!manualOnly&&options.purpose==='kept';
-      if(!conflicts.length)return freeze({format:FORMAT,version:1,notes:freeze(Object.create(null))});
+      if(!conflicts.length)return freeze({format:FORMAT,version:1,notes:freeze(emptyNotes())});
       const smartMerge=(conflict:ReconciliationConflict):string|null=>{
         if(manualOnly||!conflict.ancestorAvailable)return null;
         try{return richText.mergeThreeWay(conflict.ancestorValue,conflict.localValue,conflict.incomingValue).value;}
@@ -63,7 +68,7 @@ const createModule=():ReconciliationUiModule=>{
       };
       const manual=conflicts.map(conflict=>({conflict,smartValue:smartMerge(conflict)}));
       const checkpointAssets=new Map<string,Blob>();
-      for(const item of Array.isArray(options.incomingAssets)?options.incomingAssets:[]){const id=String(item&&item.assetId||'');if(id&&item.blob instanceof Blob)checkpointAssets.set(id,item.blob);}
+      for(const item of options.incomingAssets||[]){const id=String(item.assetId||'');if(id&&item.blob instanceof Blob)checkpointAssets.set(id,item.blob);}
       const readonlyAssetStore=(preferCheckpoint=false):Readonly<ReconciliationAssetStore>=>freeze({
         async get(id:string){
           const key=String(id||''),checkpoint=checkpointAssets.get(key)||null;
@@ -118,7 +123,7 @@ const createModule=():ReconciliationUiModule=>{
         const closing=[...ownedHandles];leftHandle=rightHandle=null;
         await destroyHandles(closing,'reconciliation-ui.destroy');
         dialog.remove();active=null;
-        if(restoreFocus&&document.contains?.(restoreFocus)&&'focus' in restoreFocus&&typeof restoreFocus.focus==='function'){try{restoreFocus.focus({preventScroll:true});}catch(error){diagnostics.capture('reconciliation-ui.focus',error,'warn');}}
+        if(restoreFocus&&document.contains?.(restoreFocus)&&focusable(restoreFocus)){try{restoreFocus.focus({preventScroll:true});}catch(error){diagnostics.capture('reconciliation-ui.focus',error,'warn');}}
         resolvePromise(result);
       };
       active={cancel:()=>finish(null)};
