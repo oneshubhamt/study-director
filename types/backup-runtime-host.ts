@@ -76,7 +76,7 @@ export interface BackupRevisionFenceInput{
   readonly local:Readonly<{getJson(key:string,fallback:unknown):unknown}>;
   readonly storageHealthKey:string;
   readonly storageHealth:Readonly<{lastLocalSaveAt():string|null}>;
-  readonly mutationEpoch:Readonly<{eligible():boolean;read():Promise<Readonly<{token:string}>|null>}>;
+  readonly mutationEpoch:Readonly<{eligible():boolean;read():Promise<unknown>}>;
   readonly dailyDatasetRevision:()=>Promise<unknown>;
   readonly savedDayDeletions:()=>Promise<unknown>;readonly noteDeletions:()=>Promise<unknown>;readonly attachmentDeletions:()=>Promise<unknown>;
   readonly personalExport:()=>Promise<unknown>;readonly planInputValue:()=>string|null|undefined;readonly attachmentsList:()=>Promise<unknown>;
