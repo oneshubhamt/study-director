@@ -4,6 +4,7 @@ import type {RecoverySpec,ManagedRecoveryInput} from '../../types/managed-recove
 import type {BackupRuntimeHostController,BackupRuntimeHostInput,Completion,ImportedAsset,Signal} from '../../types/backup-runtime-host.ts';
 import type {BackupRuntimeInput,Journal} from '../../types/backup.ts';
 import type {AssetMetadata} from '../../types/asset-storage.ts';
+import type {AttachmentDeletion,NoteDeletion,SavedDayDeletion} from '../../types/backup-models.ts';
 const sdBackupRecoveryHostFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'backup-recovery-host','study-director.backup-recovery-host-module'>|undefined;
@@ -202,8 +203,11 @@ const createModule=()=>{
         }else{
           const value=payloadRow['blob'];if(!(value instanceof Blob))throw new Error('Restore rollback bytes are unavailable.');blob=value;
         }
-        const cleanDeletion=<K extends 'date'|'key'|'assetId'>(value:unknown,key:K)=>Array.isArray(value)?value.map(entry=>{const item=entry&&typeof entry==='object'?entry as Record<string,unknown>:Object.create(null) as Record<string,unknown>;return {[key]:String(item[key]||''),deletedAt:String(item['deletedAt']||'')} as Record<K|string,string>;}).filter(entry=>entry[key]&&entry.deletedAt):[];
-        return {state,payload:{blob,filename:String(payloadRow['filename']||''),savedDayDeletions:cleanDeletion(payloadRow['savedDayDeletions'],'date'),noteDeletions:cleanDeletion(payloadRow['noteDeletions'],'key'),attachmentDeletions:cleanDeletion(payloadRow['attachmentDeletions'],'assetId')}};
+        const rows=(value:unknown)=>Array.isArray(value)?value:[];
+        const savedDayDeletions:SavedDayDeletion[]=rows(payloadRow['savedDayDeletions']).flatMap(entry=>{const item=entry&&typeof entry==='object'?entry as Record<string,unknown>:null,date=String(item?.['date']||''),deletedAt=String(item?.['deletedAt']||'');return date&&deletedAt?[{date,deletedAt}]:[];});
+        const noteDeletions:NoteDeletion[]=rows(payloadRow['noteDeletions']).flatMap(entry=>{const item=entry&&typeof entry==='object'?entry as Record<string,unknown>:null,key=String(item?.['key']||''),deletedAt=String(item?.['deletedAt']||'');return key&&deletedAt?[{key,deletedAt}]:[];});
+        const attachmentDeletions:AttachmentDeletion[]=rows(payloadRow['attachmentDeletions']).flatMap(entry=>{const item=entry&&typeof entry==='object'?entry as Record<string,unknown>:null,assetId=String(item?.['assetId']||''),deletedAt=String(item?.['deletedAt']||'');return assetId&&deletedAt?[{assetId,deletedAt}]:[];});
+        return {state,payload:{blob,filename:String(payloadRow['filename']||''),savedDayDeletions,noteDeletions,attachmentDeletions}};
       },
       restoreJournalMark:async(id,phase)=>{const marked=await input.appData.restoreJournal.mark(id,phase);if(phase==='verified')input.events.settleStorageReset();return marked;},
       restoreJournalClear:async id=>{
