@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome} from '../../types/backup-recovery-host.ts';
+import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome,StorageResetController,StorageResetInput} from '../../types/backup-recovery-host.ts';
 import type {RecoverySpec,ManagedRecoveryInput} from '../../types/managed-recovery.ts';
 const sdBackupRecoveryHostFactory=(()=>{
 'use strict';
@@ -119,6 +119,210 @@ const createModule=()=>{
       }finally{void refresh();}
     }
     return freeze({format:'study-director.kept-versions' as const,contractVersion:1 as const,refresh,review,count:()=>count,note:(id:string)=>notes.has(String(id||''))});
+  }
+
+  function createStorageReset(input:Readonly<StorageResetInput>):Readonly<StorageResetController>{
+    exactObject(input,['authority','canonical','writeback','provider','device','storage','presentation','ownership','mutation','background','session','view','readiness','diagnostics','environment'],'Storage reset recovery input');
+    functions(input.authority,['canMutate'],'Storage reset authority');
+    functions(input.canonical,['dailyRecordsList','notesReadFreshPayload','activeSessionLoad','planDataRead','attachmentsList','pendingReviewsList','savedDayDeletions','noteDeletions'],'Storage reset canonical data');
+    functions(input.writeback,['installationKeep','notesRecover','planRewrite','settingsFlush','hasTasks','writeLiveDraft'],'Storage reset writeback');
+    functions(input.provider,['history','restoreRepositoryProviderVersion','bringInRepositoryProvider','syncRepositoryProvider','list','locationStatus','suspendBackground','connected'],'Storage reset provider');
+    functions(input.device,['status','connect','install','refreshPermission','rememberAfterStorageReset'],'Storage reset device backup');
+    functions(input.storage,['health','updateHealth','storedHealth','indexedDbLifecycle'],'Storage reset storage');
+    functions(input.presentation,['restoreChoices','openRestore','confirm','notify','emit','resolve','subscribe'],'Storage reset presentation');
+    functions(input.ownership,['announceStorageReset'],'Storage reset ownership');
+    functions(input.mutation,['settled'],'Storage reset mutation');
+    functions(input.background,['wake'],'Storage reset background');
+    functions(input.session,['hasBlocking','suspend'],'Storage reset session');
+    functions(input.view,['refreshAfterWriteback'],'Storage reset view');
+    functions(input.readiness,['reconcileStartupChangeClock'],'Storage reset readiness');
+    functions(input.diagnostics,['capture'],'Storage reset diagnostics');
+    functions(input.environment,['now','nowIso','setTimeout','clearTimeout'],'Storage reset environment');
+
+    const RETRY=freeze([3000,10000,30000]),PARTS=freeze({device:'this device’s ID',notes:'notes',plans:'plans',settings:'settings',session:'today’s session'});
+    type StepName=keyof typeof PARTS;
+    type Hold={provider:Suspension|null;deviceReady:Promise<boolean>|null;reloaded:boolean;clearedAt:string;tried?:Set<string>};
+    let hold:Hold|null=null,handling:Promise<void>|null=null,since=0,acknowledged=0;
+    let offerRunning=false,offerDismissed=false,hintNotified=false,deviceInstallPromise:Promise<unknown>|null=null;
+
+    function unresolved(){return !!hold||input.storage.indexedDbLifecycle().resets>acknowledged;}
+    async function canonicalEmpty(){
+      try{
+        const [records,notePayload,active,plans,assets,reviews]=await Promise.all([
+          input.canonical.dailyRecordsList(),input.canonical.notesReadFreshPayload(),input.canonical.activeSessionLoad(),input.canonical.planDataRead(),input.canonical.attachmentsList(),input.canonical.pendingReviewsList()
+        ]);
+        if(!active||active.ok!==true||active.error)throw active?.error||new Error('Active Session could not be read completely.');
+        if(!Array.isArray(reviews))throw new Error('Kept Versions could not be read completely.');
+        const hasPlan=!!(plans&&(String(plans.draft||'').trim()||(plans.savedPlans||[]).length));
+        return !(records||[]).length&&!Object.keys(notePayload||{}).length&&!active.value&&!hasPlan&&!(assets||[]).length&&!reviews.some(review=>!review.resolvedAt);
+      }catch(error){input.diagnostics.capture('backup.device-recovery-empty-check',error,'warn');return null;}
+    }
+    async function studyDataLostHere(){
+      const health=input.storage.health();if(!health.lastStudyDataSaveAt||unresolved())return false;
+      try{const deletions=await Promise.all([input.canonical.savedDayDeletions(),input.canonical.noteDeletions()]);return deletions.every(list=>!(list||[]).length);}
+      catch(error){input.diagnostics.capture('backup.device-recovery-deletions',error,'warn');return false;}
+    }
+    async function offerDeviceRecovery(options:Readonly<{reason?:string;latestBefore?:number}>={}){
+      if(offerRunning||offerDismissed||!input.authority.canMutate())return false;
+      if(!await canonicalEmpty())return false;
+      const state=input.device.status(),latestBefore=Number(options.latestBefore)||Number.POSITIVE_INFINITY;
+      if(!state.connected){
+        if(options.reason==='startup'&&!hintNotified&&await studyDataLostHere()){
+          hintNotified=true;input.presentation.notify({key:'device-recovery-empty-local',tier:'news',title:'No local study data found',message:`If browser data was cleared, restore from ${input.presentation.restoreChoices()}.`,action:{label:'Restore from backup',opens:true,run:()=>void input.presentation.openRestore()}});
+        }
+        return false;
+      }
+      offerRunning=true;
+      try{
+        const history=await input.provider.history('device-folder',{interactive:false});
+        const candidate=history?.available?(history.entries||[]).find(entry=>entry?.location?.tier==='latest'&&Date.parse(String(entry.exportedAt||entry.location?.exportedAt||''))<=latestBefore):null;
+        if(!candidate)return false;
+        const accepted=await input.presentation.confirm({
+          title:'Recover from Device Folder?',message:'This browser has no local study data, but an existing Device Folder backup is available.',
+          details:[`Latest backup: ${new Date(candidate.location.exportedAt).toLocaleString()}.`,'Study Director checks the backup before replacing this device’s data. Nothing is restored unless you choose Recover latest.'],
+          confirmLabel:'Recover latest',cancelLabel:'Not now'
+        });
+        offerDismissed=true;if(!accepted)return false;
+        try{const restored=await input.provider.restoreRepositoryProviderVersion('device-folder',{checkpointId:candidate.location.checkpointId,confirmed:true});return !!restored&&restored.cancelled!==true;}
+        catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
+      }finally{offerRunning=false;}
+    }
+    async function connectDevice(){
+      const startedAt=input.environment.now(),result=await input.device.connect();
+      if(input.device.status().connected){
+        if(hold)await recoverAfterConnect('device-folder');
+        else await offerDeviceRecovery({reason:'connect',latestBefore:startedAt-1});
+      }
+      return result;
+    }
+    function list(names:readonly StepName[]){const parts=names.map(name=>PARTS[name]||name);return parts.length<2?parts.join(''):`${parts.slice(0,-1).join(', ')} and ${parts.at(-1)}`;}
+    function showDecision({unsaved=[],retrying=false}:{unsaved?:readonly StepName[];retrying?:boolean}={}){
+      const active=hold,clearedAt=Date.parse(String(active?.clearedAt||'')),parts:string[]=[];
+      if(active?.reloaded)parts.push(`Browser data was cleared${Number.isFinite(clearedAt)?` on ${new Date(clearedAt).toLocaleString()}`:''}.`);
+      else if(unsaved.length)parts.push(`Not saved again${retrying?' yet':''}: ${list(unsaved)}. ${retrying?'Study Director is retrying. ':''}Until then that data exists only in this tab, so keep it open${retrying?'':' and export a backup file from Data & Backup'}.`);
+      else parts.push('Your open notes, plans, settings and today’s session were saved again.');
+      const backingUp=input.device.status().connected||input.provider.connected('google-drive');
+      parts.push(backingUp?'Past Saved Days and attachments need a restore from backup.':`Past Saved Days and attachments can be restored from ${input.presentation.restoreChoices()}.`);
+      if(backingUp)parts.push('Automatic backups are paused until you choose.');
+      input.presentation.emit({source:'storage-reset',id:'detected',severity:'warning',lifecycle:'succeeded',foreground:false,tier:'critical',surface:'toast',dismissible:false,
+        title:'Browser data was cleared',message:parts.join(' '),
+        action:{label:'Restore from backup',run:()=>void restore()},
+        secondaryAction:{label:'Continue with current data',run:()=>settle()}});
+    }
+    function ensureDeviceInstalled(){
+      if(!deviceInstallPromise)deviceInstallPromise=input.readiness.reconcileStartupChangeClock().then(()=>input.device.install()).catch(error=>{deviceInstallPromise=null;throw error;});
+      return deviceInstallPromise;
+    }
+    function beginHold(clearedAt:unknown){
+      if(hold)return hold;
+      const next:Hold={provider:null,deviceReady:null,reloaded:false,clearedAt:String(clearedAt||input.environment.nowIso())};hold=next;since=input.environment.now();
+      try{next.provider=input.provider.suspendBackground('storage-reset');}catch(error){input.diagnostics.capture('storage-reset.provider-suspend',error,'warn');}
+      next.deviceReady=new Promise<boolean>(resolve=>{
+        let finished=false;
+        const complete=(value:boolean)=>{if(finished)return;finished=true;input.environment.clearTimeout(timer);resolve(value);};
+        const timer=input.environment.setTimeout(()=>{input.diagnostics.capture('storage-reset.device-ready',new Error('Device Folder readiness did not finish in time.'),'warn');complete(false);},8000);
+        void ensureDeviceInstalled().then(()=>input.device.refreshPermission()).then(()=>complete(input.device.status().connected)).catch(error=>{input.diagnostics.capture('storage-reset.device-ready',error,'warn');complete(false);});
+      });
+      if(input.storage.health().browserDataClearedAt!==next.clearedAt)input.storage.updateHealth({browserDataClearedAt:next.clearedAt});
+      return next;
+    }
+    const steps:Readonly<Record<StepName,()=>boolean|PromiseLike<boolean>>>=freeze({
+      device:()=>input.writeback.installationKeep(),notes:()=>input.writeback.notesRecover(),plans:()=>input.writeback.planRewrite(),settings:()=>input.writeback.settingsFlush(),
+      session:async()=>{if(!input.writeback.hasTasks())return true;const result=await input.writeback.writeLiveDraft();return !!(result&&result.ok&&result.storage?.idb===true);}
+    });
+    async function writeBack(active:Hold){
+      let pending=Object.keys(steps) as StepName[];
+      for(let attempt=0;;attempt+=1){
+        const failed:StepName[]=[];
+        for(const name of pending){let saved=false;try{saved=await steps[name]()===true;}catch(error){input.diagnostics.capture(`storage-reset.${name}`,error,'error');}if(!saved)failed.push(name);}
+        if(!failed.length||attempt>=RETRY.length||hold!==active||!input.authority.canMutate())return failed;
+        pending=failed;showDecision({unsaved:failed,retrying:true});
+        await new Promise<void>(resolve=>input.environment.setTimeout(resolve,RETRY[attempt]!));
+      }
+    }
+    async function restoreMissing(active:Hold,id:string=''){
+      if(!input.authority.canMutate())return false;
+      const locations=input.provider.list(),location=id?locations.find(item=>item.id===id&&item.connected):locations.find(item=>item.id==='device-folder'&&item.connected)||locations.find(item=>item.connected);if(!location)return false;
+      (active.tried??=new Set()).add(location.id);
+      let outcome:{exportedAt?:string;result:StorageResetRecoveryResult;label:string}|null=null;
+      try{const restored=await input.provider.bringInRepositoryProvider(location.id,{missingOnly:true,quiet:true,before:active.clearedAt});if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:location.label};}
+      catch(error){input.diagnostics.capture('storage-reset.missing-restore',error,'warn');}
+      if(!outcome)return false;
+      settle();
+      const at=Date.parse(String(outcome.exportedAt||'')),days=Math.max(0,Number(outcome.result.added)||0),files=Math.max(0,Number(outcome.result.assetsRestored)||0);
+      const source=`your ${outcome.label} backup${Number.isFinite(at)?` of ${new Date(at).toLocaleString()}`:''}`,count=(value:number,word:string)=>`${value} ${word}${value===1?'':'s'}`;
+      input.presentation.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',title:'Browser data was cleared',
+        message:days||files?`Your open work was kept. Added ${count(days,'past Saved Day')} and ${count(files,'attachment')} from ${source}.`:`Your open work was kept. Nothing was missing compared with ${source}.`});
+      return true;
+    }
+    async function recoverAfterConnect(id:string){
+      const active=hold;if(!active||!input.authority.canMutate())return false;
+      (active.tried??=new Set()).add(id);const empty=await canonicalEmpty()===true;if(hold!==active)return false;
+      let recovered=false;
+      if(!empty)recovered=await restoreMissing(active,id);
+      else if(id==='device-folder')recovered=await offerDeviceRecovery({reason:'connect',latestBefore:Date.parse(active.clearedAt)});
+      else{
+        let synced:StorageResetRecoveryResult|null=null;
+        try{synced=await input.provider.syncRepositoryProvider(id);}catch(error){input.diagnostics.capture('storage-reset.sync-recovery',error,'warn');}
+        recovered=!!synced&&synced.cancelled===false&&synced.verified===true;
+        if(recovered){
+          if(hold===active)settle();
+          const label=input.provider.list().find(item=>item.id===id)?.label||'Google Drive';
+          input.presentation.emit({source:'storage-reset',id:'restored',severity:'success',lifecycle:'succeeded',foreground:false,tier:'news',surface:'toast',title:'Browser data was cleared',message:`Your library was brought back from ${label}.`});
+        }
+      }
+      if(!recovered&&hold===active)showDecision();return recovered;
+    }
+    function connectionsChanged(){
+      const active=hold;if(!active||handling)return false;
+      const tried=active.tried??=new Set(),drive=input.provider.locationStatus('google-drive');
+      if(!drive?.connected){tried.delete('google-drive');return false;}
+      if(tried.has('google-drive')||drive.engineBusy)return false;
+      void recoverAfterConnect('google-drive').catch(error=>input.diagnostics.capture('storage-reset.connect-recovery',error,'warn'));return true;
+    }
+    async function handle(event:Readonly<{detectedAt?:unknown;peer?:boolean}>={}){
+      if(handling)return handling;
+      handling=(async()=>{
+        if(!input.authority.canMutate()){
+          acknowledged=input.storage.indexedDbLifecycle().resets;void input.writeback.notesRecover();
+          if(!event.peer)input.ownership.announceStorageReset(event.detectedAt);return;
+        }
+        const active=beginHold(event.detectedAt),unsaved=await writeBack(active);
+        try{input.view.refreshAfterWriteback();}catch(error){input.diagnostics.capture('storage-reset.render',error,'warn');}
+        if(hold!==active)return;
+        if(unsaved.length){showDecision({unsaved});return;}
+        await active.deviceReady;
+        if(hold===active&&!(await restoreMissing(active))&&hold===active)showDecision();
+      })().finally(()=>{handling=null;});
+      return handling;
+    }
+    function noteDatabaseRemovedWhileClosed(){
+      if(input.storage.indexedDbLifecycle().startedFresh!==true||!input.authority.canMutate())return false;
+      const health=input.storage.health();if(!health.lastStudyDataSaveAt||health.browserDataClearedAt)return false;
+      input.diagnostics.capture('storage.idb-missing-at-start',new Error('The browser database was missing at start although study data had been saved here.'),'warn');
+      input.storage.updateHealth({browserDataClearedAt:input.environment.nowIso()});return true;
+    }
+    function resume(){
+      noteDatabaseRemovedWhileClosed();
+      const stored=input.storage.storedHealth(),row=stored&&typeof stored==='object'?stored as Record<string,unknown>:Object.create(null) as Record<string,unknown>;
+      const clearedAt=String(row['browserDataClearedAt']||input.storage.health().browserDataClearedAt||'');
+      if(!clearedAt||hold||!input.authority.canMutate())return false;
+      beginHold(clearedAt).reloaded=true;showDecision();connectionsChanged();return true;
+    }
+    function settle(){
+      const active=hold;hold=null;acknowledged=input.storage.indexedDbLifecycle().resets;input.presentation.resolve('storage-reset','detected');
+      if(input.storage.health().browserDataClearedAt)input.storage.updateHealth({browserDataClearedAt:null});
+      input.background.wake('storage-reset-settled');
+      if(!active)return false;
+      try{active.provider?.release();}catch(error){input.diagnostics.capture('storage-reset.provider-resume',error,'warn');}
+      void Promise.resolve(input.mutation.settled()).then(()=>input.device.rememberAfterStorageReset()).catch(error=>input.diagnostics.capture('storage-reset.remember-folder',error,'warn'));return true;
+    }
+    input.presentation.subscribe(state=>{
+      if(!hold)return;
+      if(state.events.some(event=>event.id==='backup-verified'&&event.lifecycle==='succeeded'&&Date.parse(String(event.completedAt||''))>=since))settle();
+    });
+    async function restore(){if(input.session.hasBlocking()){await input.session.suspend();if(input.session.hasBlocking())return false;}return await input.presentation.openRestore();}
+    return freeze({format:'study-director.storage-reset-recovery' as const,contractVersion:1 as const,canonicalEmpty,offerDeviceRecovery,connectDevice,ensureDeviceInstalled,unresolved,handle,resume,settle,restore,connectionsChanged});
   }
 
   function createHost(input:RecoveryHostInput){
@@ -508,7 +712,7 @@ const createModule=()=>{
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }
-  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost,createPendingStore,createKeptVersions});
+  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost,createPendingStore,createKeptVersions,createStorageReset});
 };
 registry.define('backup-recovery-host',1,createModule);return createModule;
 })();

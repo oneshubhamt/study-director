@@ -65,4 +65,64 @@ export interface KeptVersionsController{
   count():number;
   note(id:string):boolean;
 }
+export type StorageResetLocation=Readonly<{id:string;label:string;connected:boolean;engineBusy?:boolean}>;
+export type StorageResetHistoryEntry=Readonly<{exportedAt?:string;location:Readonly<{tier?:string;exportedAt:string;checkpointId:string}>}>;
+export type StorageResetRecoveryResult=Readonly<{cancelled?:boolean;verified?:boolean;exportedAt?:string;added?:number;assetsRestored?:number}>;
+export interface StorageResetInput{
+  readonly authority:Readonly<{canMutate():boolean}>;
+  readonly canonical:Readonly<{
+    dailyRecordsList():Promise<readonly unknown[]>;notesReadFreshPayload():Promise<Readonly<Record<string,unknown>>>;
+    activeSessionLoad():Promise<SessionResult>;planDataRead():Promise<Readonly<{draft?:unknown;savedPlans?:readonly unknown[]}>>;
+    attachmentsList():Promise<readonly unknown[]>;pendingReviewsList():Promise<readonly PendingReview[]>;
+    savedDayDeletions():Promise<readonly unknown[]>;noteDeletions():Promise<readonly unknown[]>;
+  }>;
+  readonly writeback:Readonly<{
+    installationKeep():boolean|PromiseLike<boolean>;notesRecover():boolean|PromiseLike<boolean>;planRewrite():boolean|PromiseLike<boolean>;
+    settingsFlush():boolean|PromiseLike<boolean>;hasTasks():boolean;writeLiveDraft():Promise<SessionResult>;
+  }>;
+  readonly provider:Readonly<{
+    history(id:string,options:{interactive:boolean}):Promise<{available?:boolean;entries?:readonly StorageResetHistoryEntry[]}|null>;
+    restoreRepositoryProviderVersion(id:string,options:{checkpointId:string;confirmed:boolean}):Promise<StorageResetRecoveryResult|null>;
+    bringInRepositoryProvider(id:string,options:{missingOnly:boolean;quiet:boolean;before:string}):Promise<StorageResetRecoveryResult|null>;
+    syncRepositoryProvider(id:string):Promise<StorageResetRecoveryResult|null>;
+    list():readonly StorageResetLocation[];locationStatus(id:string):Readonly<{connected:boolean;engineBusy?:boolean}>|null;
+    suspendBackground(reason:string):Suspension;connected(id:string):boolean;
+  }>;
+  readonly device:Readonly<{
+    status():Readonly<{connected:boolean}>;connect():unknown|PromiseLike<unknown>;install():unknown|PromiseLike<unknown>;
+    refreshPermission():unknown|PromiseLike<unknown>;rememberAfterStorageReset():unknown|PromiseLike<unknown>;
+  }>;
+  readonly storage:Readonly<{
+    health():Readonly<{lastStudyDataSaveAt:string|null;browserDataClearedAt:string|null}>;
+    updateHealth(patch:Readonly<{browserDataClearedAt:string|null}>):unknown;
+    storedHealth():unknown;indexedDbLifecycle():Readonly<{resets:number;startedFresh:boolean}>;
+  }>;
+  readonly presentation:Readonly<{
+    restoreChoices():string;openRestore():unknown|PromiseLike<unknown>;
+    confirm(options:Readonly<Record<string,unknown>>):Promise<boolean>;notify(options:Readonly<Record<string,unknown>>):unknown;
+    emit(event:Readonly<Record<string,unknown>>):unknown;resolve(source:string,id:string):unknown;
+    subscribe(listener:(state:{events:readonly Readonly<{id?:string;lifecycle?:string;completedAt?:string}>[]})=>void):unknown;
+  }>;
+  readonly ownership:Readonly<{announceStorageReset(detectedAt?:unknown):unknown}>;
+  readonly mutation:Readonly<{settled():PromiseLike<unknown>}>;
+  readonly background:Readonly<{wake(reason:string):unknown}>;
+  readonly session:Readonly<{hasBlocking():boolean;suspend():PromiseLike<unknown>}>;
+  readonly view:Readonly<{refreshAfterWriteback():unknown}>;
+  readonly readiness:Readonly<{reconcileStartupChangeClock():Promise<boolean>}>;
+  readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level:'warn'|'error'):unknown}>;
+  readonly environment:Readonly<{now():number;nowIso():string;setTimeout(callback:()=>void,ms:number):number;clearTimeout(handle:number):void}>;
+}
+export interface StorageResetController{
+  readonly format:'study-director.storage-reset-recovery';readonly contractVersion:1;
+  canonicalEmpty():Promise<boolean|null>;
+  offerDeviceRecovery(options?:Readonly<{reason?:string;latestBefore?:number}>):Promise<boolean>;
+  connectDevice():Promise<unknown>;
+  ensureDeviceInstalled():Promise<unknown>;
+  unresolved():boolean;
+  handle(event?:Readonly<{detectedAt?:unknown;peer?:boolean}>):Promise<void>;
+  resume():boolean;
+  settle():boolean;
+  restore():Promise<unknown>;
+  connectionsChanged():boolean;
+}
 

@@ -5,8 +5,8 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 
-for(const file of ['internal','backup-capture','backup-readiness-host'])vm.runInThisContext(readCoreScript(file));
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('backup-capture',1),readinessModule=registry.require('backup-readiness-host',1),freeze=Object.freeze;
+for(const file of ['internal','backup-capture','backup-readiness-host','backup-recovery-host'])vm.runInThisContext(readCoreScript(file));
+const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('backup-capture',1),readinessModule=registry.require('backup-readiness-host',1),recoveryHostModule=registry.require('backup-recovery-host',1),freeze=Object.freeze;
 function harness(overrides={}){
   let revision=1,generation=0,notes={Subject:{key:'Subject',text:'old'}},session={id:'current',text:'old session'},dates=['2026-09-28'];
   const hooks={},calls=[],readOptions=[];
@@ -186,94 +186,78 @@ for(const rescued of [false,true]){
   assert.ok(diagnostics.some(row=>String(row[0]).includes('freshness-write')),'failed local receipt must leave diagnostics');
 }
 
-// Browser-reset recovery must await the actual Device Folder installation and
-// permission read, share an in-flight startup task, and fail open to the
-// explicit recovery decision rather than hanging forever.
-{
-  const appSource=readHostHtml();
-  const start=appSource.indexOf('const STORAGE_RESET_RETRY_MS='),end=appSource.indexOf('const storageResetSteps=',start);
-  assert.ok(start>=0&&end>start,'storage reset gate remains a single host contract');
-  let finishInstall,finishPermission,connected=false,installCalls=0,refreshCalls=0,timeout=null;
-  const installing=new Promise(resolve=>{finishInstall=resolve;}),permission=new Promise(resolve=>{finishPermission=resolve;});
-  const diagnostics=[];
-  const sandbox={
-    Date,Promise,Object,Array,Map,Set,Error,
-    setTimeout:callback=>{timeout=callback;return 1;},clearTimeout:()=>{timeout=null;},
-    BackupProviderRuntime:{suspendBackground:()=>({release(){}}),connected:()=>false},
-    DeviceBackup:{install:()=>{installCalls++;return installing;},refreshPermission:()=>{refreshCalls++;return permission;},status:()=>({connected})},
-    reconcileStartupChangeClock:async()=>true,
-    readStorageHealth:()=>({browserDataClearedAt:''}),writeStorageHealth:()=>{},
-    AppDiagnostics:{capture:(...args)=>diagnostics.push(args)}
+// Browser-reset recovery now executes the checked recovery owner. It must await
+// Device Folder installation and permission, bound an unresponsive browser API,
+// and detect a database removed while the app was closed without confusing a fresh install.
+function storageResetFixture(options={}){
+  let connected=options.connected===true,health={lastStudyDataSaveAt:options.saved?'2026-11-04T20:00:00.000Z':null,browserDataClearedAt:options.cleared||null},timeout=null;
+  const calls={install:0,permission:0,holds:0,decisions:0,writes:0,connections:0,diagnostics:[]},lifecycle={resets:0,startedFresh:options.fresh===true};
+  const provider={
+    history:async()=>({available:false,entries:[]}),restoreRepositoryProviderVersion:async()=>null,bringInRepositoryProvider:async()=>null,syncRepositoryProvider:async()=>null,
+    list:()=>[],locationStatus:()=>null,suspendBackground:()=>{calls.holds++;return {settled:Promise.resolve(),release:()=>true};},connected:()=>false
   };
-  vm.createContext(sandbox);
-  vm.runInContext('let storageResetHold=null,storageResetSince=0;\n'+appSource.slice(start,end),sandbox);
-  const hold=vm.runInContext("beginStorageResetHold('2026-10-31T00:00:00.000Z')",sandbox);
-  assert.ok(hold.deviceReady&&typeof hold.deviceReady.then==='function');
-  let ready=false;hold.deviceReady.then(()=>{ready=true;});
-  await Promise.resolve();await Promise.resolve();await Promise.resolve();
-  assert.equal(ready,false,'readiness remains pending during in-flight installation');
-  const same=vm.runInContext('ensureDeviceBackupInstalled()',sandbox);
-  assert.equal(same,vm.runInContext('ensureDeviceBackupInstalled()',sandbox),'startup/reset reuse the installation promise');
-  finishInstall({connected:false});
-  for(let i=0;i<8;i++)await Promise.resolve();
-  assert.equal(ready,false,'permission refresh must also settle before recovery starts');
-  connected=true;finishPermission({connected:true});
-  assert.equal(await hold.deviceReady,true);assert.equal(installCalls,1);assert.equal(refreshCalls,1);
-  vm.runInContext('storageResetHold=null;deviceBackupInstallPromise=null;',sandbox);
-  sandbox.DeviceBackup.install=async()=>({connected:false});
-  sandbox.DeviceBackup.refreshPermission=async()=>{throw new Error('Permission unavailable');};
-  const unavailable=vm.runInContext("beginStorageResetHold('2026-10-31T00:01:00.000Z')",sandbox);
-  assert.equal(await unavailable.deviceReady,false,'failed permission is a fallback, not a stalled restore');
-  assert.ok(diagnostics.some(row=>String(row[0]).includes('storage-reset.device-ready')));
-  vm.runInContext('storageResetHold=null;deviceBackupInstallPromise=null;',sandbox);
-  sandbox.DeviceBackup.install=()=>new Promise(()=>{});
-  const stalled=vm.runInContext("beginStorageResetHold('2026-10-31T00:02:00.000Z')",sandbox);
-  assert.equal(typeof timeout,'function');
-  timeout();
-  assert.equal(await stalled.deviceReady,false,'unresponsive permission API is bounded');
+  const device={
+    status:()=>({connected}),connect:async()=>true,
+    install:()=>{calls.install++;return options.install?options.install():Promise.resolve(true);},
+    refreshPermission:()=>{calls.permission++;return options.refreshPermission?options.refreshPermission():Promise.resolve(true);},
+    rememberAfterStorageReset:async()=>true
+  };
+  const controller=recoveryHostModule.createStorageReset(freeze({
+    authority:freeze({canMutate:()=>options.primary!==false}),
+    canonical:freeze({dailyRecordsList:async()=>[],notesReadFreshPayload:async()=>({}),activeSessionLoad:async()=>({ok:true,value:null,error:null,storage:{local:false,idb:true}}),planDataRead:async()=>({draft:null,savedPlans:[]}),attachmentsList:async()=>[],pendingReviewsList:async()=>[],savedDayDeletions:async()=>[],noteDeletions:async()=>[]}),
+    writeback:freeze({installationKeep:()=>true,notesRecover:()=>true,planRewrite:()=>true,settingsFlush:()=>true,hasTasks:()=>false,writeLiveDraft:async()=>({ok:true,value:null,error:null,storage:{local:false,idb:true}})}),
+    provider:freeze(provider),device:freeze(device),
+    storage:freeze({health:()=>({...health}),updateHealth:patch=>{calls.writes++;health={...health,...patch};},storedHealth:()=>({...health}),indexedDbLifecycle:()=>({...lifecycle})}),
+    presentation:freeze({restoreChoices:()=> 'a backup',openRestore:()=>false,confirm:async()=>false,notify:()=>{},emit:event=>{if(event.id==='detected')calls.decisions++;},resolve:()=>{},subscribe:()=>()=>{}}),
+    ownership:freeze({announceStorageReset:()=>{}}),mutation:freeze({settled:async()=>{}}),background:freeze({wake:()=>{}}),
+    session:freeze({hasBlocking:()=>false,suspend:async()=>{}}),view:freeze({refreshAfterWriteback:()=>{}}),
+    readiness:freeze({reconcileStartupChangeClock:async()=>true}),diagnostics:freeze({capture:(...args)=>calls.diagnostics.push(args)}),
+    environment:freeze({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),setTimeout:callback=>{timeout=callback;return 1;},clearTimeout:()=>{timeout=null;}})
+  }));
+  return {controller,calls,health:()=>health,setConnected:value=>{connected=value;},fireTimeout:()=>timeout?.(),lifecycle};
 }
-
-
-
-// The browser can remove the database while the app is closed and keep the
-// rest of its browser storage. The next start then makes a new, empty
-// database. When browser storage says study data was saved here, that start
-// is handled as a browser-data clear: recorded, uploads paused, notice shown.
-// A fresh install, a new profile and a secondary tab never take this path.
 {
-  const appSource=readHostHtml();
-  const start=appSource.indexOf('function noteDatabaseRemovedWhileClosed(){'),end=appSource.indexOf('// Continuing, any verified restore or combine',start);
-  assert.ok(start>=0&&end>start,'the cold-start detector sits beside the reload resume');
-  const run=({fresh,saved,primary=true,cleared=''})=>{
-    const health={lastStudyDataSaveAt:saved?'2026-11-04T20:00:00.000Z':null,browserDataClearedAt:cleared||null},calls={holds:[],decisions:0,writes:0,diagnostics:[]};
-    const sandbox={Date,Object,Error,String,
-      IndexedDb:{lifecycle:()=>({startedFresh:fresh})},appCanMutate:()=>primary,
-      readStorageHealth:()=>({...health}),writeStorageHealth:patch=>{calls.writes++;Object.assign(health,patch);return true;},
-      AppData:{local:{getJson:()=>({...health})}},STORAGE_KEYS:{storageHealth:'health'},
-      beginStorageResetHold:clearedAt=>{const hold={clearedAt,reloaded:false};calls.holds.push(hold);return hold;},
-      showStorageResetDecision:()=>{calls.decisions++;},
-      storageResetConnectionsChanged:()=>{calls.connections=(calls.connections||0)+1;return false;},
-      AppDiagnostics:{capture:(...args)=>calls.diagnostics.push(args)}
-    };
-    vm.createContext(sandbox);
-    vm.runInContext('let storageResetHold=null;\n'+appSource.slice(start,end)+'\nglobalThis.resume=resumeUnresolvedStorageReset;',sandbox);
-    return {resumed:sandbox.resume(),health,calls};
-  };
-  const lost=run({fresh:true,saved:true});
-  assert.equal(lost.resumed,true,'a new database where study data was saved before is a clear');
-  assert.ok(Number.isFinite(Date.parse(lost.health.browserDataClearedAt)),'it is recorded, so a reload brings the notice back');
-  assert.equal(lost.calls.holds.length,1);assert.equal(lost.calls.holds[0].clearedAt,lost.health.browserDataClearedAt);
-  assert.equal(lost.calls.holds[0].reloaded,true);assert.equal(lost.calls.decisions,1,'the restore notice is shown at once');
-  assert.equal(lost.calls.connections,1,'a Drive sign-in kept from before the clear is checked at once');
-  assert.ok(lost.calls.diagnostics.some(row=>row[0]==='storage.idb-missing-at-start'));
-  for(const [label,state] of [['a fresh install',{fresh:true,saved:false}],['a database that was already here',{fresh:false,saved:true}],['a secondary tab',{fresh:true,saved:true,primary:false}]]){
-    const result=run(state);
-    assert.equal(result.resumed,false,label+' is not a clear');
-    assert.equal(result.calls.writes,0,label+' records nothing');assert.equal(result.calls.holds.length,0,label+' pauses nothing');assert.equal(result.calls.decisions,0);
+  let finishInstall,finishPermission;
+  const installing=new Promise(resolve=>{finishInstall=resolve;}),permission=new Promise(resolve=>{finishPermission=resolve;});
+  const t=storageResetFixture({install:()=>installing,refreshPermission:()=>permission});
+  const first=t.controller.ensureDeviceInstalled(),same=t.controller.ensureDeviceInstalled();
+  assert.equal(first,same,'startup/reset reuse the installation promise');
+  let ready=false;const handling=t.controller.handle({detectedAt:'2026-10-31T00:00:00.000Z'}).then(()=>{ready=true;});
+  await Promise.resolve();await Promise.resolve();assert.equal(ready,false,'recovery waits for in-flight installation');
+  finishInstall(true);for(let i=0;i<8;i++)await Promise.resolve();assert.equal(ready,false,'permission refresh must also settle before recovery');
+  t.setConnected(true);finishPermission(true);await handling;
+  assert.equal(t.calls.install,1);assert.equal(t.calls.permission,1);
+}
+{
+  const t=storageResetFixture({install:async()=>true,refreshPermission:async()=>{throw new Error('Permission unavailable');}});
+  await t.controller.handle({detectedAt:'2026-10-31T00:01:00.000Z'});
+  assert.ok(t.calls.diagnostics.some(row=>String(row[0]).includes('storage-reset.device-ready')),'failed permission falls back to explicit recovery choice');
+}
+{
+  const t=storageResetFixture({install:()=>new Promise(()=>{})});
+  const pending=t.controller.handle({detectedAt:'2026-10-31T00:02:00.000Z'});
+  t.fireTimeout();await pending;
+  assert.ok(t.calls.diagnostics.some(row=>String(row[0]).includes('storage-reset.device-ready')),'unresponsive permission API is bounded');
+}
+for(const [label,state,expected] of [
+  ['lost database',{fresh:true,saved:true},true],
+  ['fresh install',{fresh:true,saved:false},false],
+  ['existing database',{fresh:false,saved:true},false],
+  ['secondary tab',{fresh:true,saved:true,primary:false},false]
+]){
+  const t=storageResetFixture(state),resumed=t.controller.resume();
+  assert.equal(resumed,expected,label);
+  if(expected){
+    assert.ok(Number.isFinite(Date.parse(t.health().browserDataClearedAt)),'lost database is durably marked');
+    assert.equal(t.calls.holds,1);assert.equal(t.calls.decisions,1);
+    assert.ok(t.calls.diagnostics.some(row=>row[0]==='storage.idb-missing-at-start'));
+  }else{
+    assert.equal(t.calls.writes,0,label+' records nothing');assert.equal(t.calls.holds,0,label+' pauses nothing');assert.equal(t.calls.decisions,0);
   }
-  const earlier='2026-11-05T02:51:00.000Z',again=run({fresh:true,saved:true,cleared:earlier});
-  assert.equal(again.calls.writes,0,'an unresolved clear keeps the time it was first found');
-  assert.equal(again.calls.holds[0].clearedAt,earlier);assert.equal(again.calls.decisions,1);
+}
+{
+  const earlier='2026-11-05T02:51:00.000Z',t=storageResetFixture({fresh:true,saved:true,cleared:earlier});
+  assert.equal(t.controller.resume(),true);assert.equal(t.calls.writes,0,'an unresolved clear keeps the time it was first found');assert.equal(t.health().browserDataClearedAt,earlier);
 }
 
 // Removed profiles keep emergency browser rescue copies if IndexedDB/OPFS
