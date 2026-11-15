@@ -14,7 +14,7 @@ async function drain(){
   for(let index=0;index<12;index++)await Promise.resolve();
 }
 
-function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missing={cancelled:false,verified:true,added:1,assetsRestored:0,exportedAt:clearedAt},confirm=true,driveConnected=false,driveBusy=false,deviceConnected=false}={}){
+function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missing={cancelled:false,verified:true,added:1,assetsRestored:0,exportedAt:clearedAt},restore={cancelled:false,verified:true},confirm=true,driveConnected=false,driveBusy=false,deviceConnected=false}={}){
   const state={owner:true,driveConnected,driveBusy,deviceConnected,health:{lastStudyDataSaveAt:'2026-11-06T12:00:00.000Z',browserDataClearedAt:clearedAt},resets:1,startedFresh:false};
   const calls={syncs:[],missing:[],history:0,restores:[],confirms:0,decisions:0,successes:0,captures:[],suspends:0,releases:0,wakes:[],remember:0,installs:0,refreshes:0};
   let listener=()=>{},timerSequence=0;
@@ -43,7 +43,7 @@ function harness({empty=true,sync={cancelled:true,reason:'needs-decision'},missi
         assert.equal(id,'device-folder');assert.equal(options.interactive,false);calls.history++;
         return freeze({available:true,entries:freeze([freeze({exportedAt:clearedAt,location:freeze({tier:'latest',checkpointId:checkpoint,exportedAt:clearedAt})})])});
       },
-      restoreRepositoryProviderVersion:async(id,options)=>{calls.restores.push([id,options]);return freeze({cancelled:false,verified:true});},
+      restoreRepositoryProviderVersion:async(id,options)=>{calls.restores.push([id,options]);return restore;},
       bringInRepositoryProvider:async(id,options)=>{calls.missing.push([id,options]);if(missing instanceof Error)throw missing;return missing;},
       syncRepositoryProvider:async id=>{calls.syncs.push(id);if(sync instanceof Error)throw sync;return sync;},
       list:locations,
@@ -140,6 +140,15 @@ for(const [label,empty] of [['device with data',false],['unreadable local state'
   assert.ok(h.calls.decisions>decisions,'declining Device Folder recovery keeps the decision visible');
   assert.equal(h.calls.releases,0);
   cases.push('empty device: declined Device Folder recovery keeps the hold');
+}
+{
+  const h=harness({empty:true,deviceConnected:false,confirm:true,restore:freeze({cancelled:false,verified:false})});h.begin();const decisions=h.calls.decisions;
+  await h.controller.connectDevice();
+  assert.equal(h.calls.restores.length,1,'the Device Folder restore is attempted');
+  assert.equal(h.controller.unresolved(),true,'an unverified Device Folder outcome cannot settle the clear');
+  assert.equal(h.calls.releases,0,'automatic uploads stay suspended after an unverified Device Folder outcome');
+  assert.ok(h.calls.decisions>decisions,'an unverified Device Folder outcome keeps the recovery decision visible');
+  cases.push('empty device: unverified Device Folder restore keeps the hold');
 }
 {
   const h=harness({empty:true,sync:freeze({cancelled:true,reason:'needs-decision'})});h.begin();
