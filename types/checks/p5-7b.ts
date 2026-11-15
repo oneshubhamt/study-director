@@ -46,7 +46,8 @@ const keptInput=Object.freeze({
   notifications:Object.freeze({notify:(_options:Parameters<KeptVersionsInput['notifications']['notify']>[0])=>{},resolveEvent:(_source:string,_id:string)=>{}}),
   view:Object.freeze({render:()=>{},renderLocation:()=>{},scheduleStatus:()=>{},refreshNotes:()=>{}})
 }) satisfies Readonly<KeptVersionsInput>;
-recoveryModule.createKeptVersions(keptInput);
+const keptVersions=recoveryModule.createKeptVersions(keptInput);
+recoveryModule.createKeptVersionsView(Object.freeze({document,count:()=>keptVersions.count()}));
 
 const providerPort=Object.freeze({
   bringInRepositoryProvider:(id:string,options:Parameters<RecoveryHostInput['providers']['bringInRepositoryProvider']>[1])=>backupRuntime.providers.bringInRepositoryProvider(id,options),
