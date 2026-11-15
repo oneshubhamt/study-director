@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {privateModules} from '../../../build/module-manifest.mjs';
+import {privateModules,externalModules,styleModules} from '../../../build/module-manifest.mjs';
 
 const coreRoot='source/core';
 const internal=fs.readFileSync(path.join(coreRoot,'internal.js'),'utf8');
@@ -28,5 +28,10 @@ assert.deepEqual(localExact,['interactions.js','reconciliation-ui.js'],'only the
 assert.deepEqual(localFunctions,['interactions.js'],'only the diagnostic interaction function validator remains local');
 assert.deepEqual(localDeclared,[],'declared-function validation is fully centralized');
 assert.equal(coreFiles.filter(name=>sources.get(name).includes('registry.contracts')).length,45,'all modules using the ordinary shared validators consume the registry primitives');
+
+// Each shipped file has its own name stem, so no two files can be mistaken
+// for one another ("sd.note-search" was once both a module and a worker).
+const stems=[...privateModules,...externalModules,...styleModules].map(row=>row.stem).filter(Boolean);
+assert.deepEqual(stems.filter((stem,index)=>stems.indexOf(stem)!==index),[],'every shipped file stem is unique');
 
 console.log(JSON.stringify({status:'PASS',boundary:'internal-modules',validatedHostLoads:privateModules.length-1,sharedValidatorConsumers:38,localExactExceptions:localExact},null,2));

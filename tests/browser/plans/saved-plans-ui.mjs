@@ -3,8 +3,7 @@ import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumen
 
 const server=await startReleaseServer();
 const browser=await launchChromium({profilePrefix:'sd73k-plans-ui-'});
-let html=instrumentedHtml();
-html=html.replace('Object.freeze({StartupLifecycle,','Object.freeze({PlanData,PlanRuntime,StartupLifecycle,');
+let html=instrumentedHtml('deployment',{expose:['PlanData', 'PlanRuntime']});
 server.setOverride('deployment','plans-ui.html',html);
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');if(!localStorage.getItem('studyDirector.userDefaults.v1'))localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Plan UI QA'}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})))})();`;
 let page;

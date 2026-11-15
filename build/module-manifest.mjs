@@ -43,7 +43,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'note-links',source:'core/note-links.js',stem:'sd.note-links'}),
   Object.freeze({id:'profiles',source:'core/profiles.js',stem:'sd.profiles'}),
   Object.freeze({id:'note-catalogue',source:'core/note-catalogue.js',stem:'sd.note-catalogue'}),
-  Object.freeze({id:'note-search',source:'core/note-search.js',stem:'sd.note-search'}),
+  Object.freeze({id:'note-search',source:'core/note-search.js',stem:'sd.note-search-client'}),
   Object.freeze({id:'library-notes',source:'core/library-notes.js',stem:'sd.library-notes'}),
   Object.freeze({id:'library',source:'core/library.js',stem:'sd.library'}),
   Object.freeze({id:'managed-repository',source:'core/managed-repository.js',stem:'sd.managed-repository'}),

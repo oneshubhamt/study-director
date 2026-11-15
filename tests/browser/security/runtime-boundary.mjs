@@ -6,14 +6,14 @@ import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumen
 import {deploymentDirectoryName} from '../../../release.config.mjs';
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'qa-runtime-security-'});
 const policy="worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin";
-let html=instrumentedHtml();
+let html=instrumentedHtml('deployment',{expose:['mutateBackupProtection', 'ExportsAppMeta', 'trustedAssetURL', 'trustedTypeViolations']});
 if(process.env.SD_MINIFIED_TEST==='1'){
  const root=path.resolve('dist',deploymentDirectoryName,'public');
  for(const name of fs.readdirSync(root))if(fs.statSync(path.join(root,name)).isFile())server.setOverride('deployment',name,fs.readFileSync(path.join(root,name)));
  const expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];
  html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'');
 }
-server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({mutateBackupProtection,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
+server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">'));
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 let page;
 try{
