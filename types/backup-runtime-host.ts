@@ -11,6 +11,7 @@ import type {PlanDataController} from './plan-host.ts';
 import type {PlanDraftController} from './plan.ts';
 import type {ReconciliationUiController} from './reconciliation-ui.ts';
 import type {StorageHealthController,VerifiedRecoveryController} from './backup-readiness-host.ts';
+import type {SessionCoordinator} from './session-lifecycle.ts';
 
 export type BackupRuntime=ReturnType<BackupModule['createRuntime']>;
 export type ExportCoordinator=ReturnType<ExportsModule['createCoordinator']>;
@@ -30,8 +31,6 @@ export interface BackupRuntimeAssetPort<Token>{
 }
 export interface BackupRuntimeHostEvents{
   libraryChanged():unknown;
-  reconcileNotes:BackupRuntimeInput['ports']['events']['reconcileNotes'];
-  restoreNotesSnapshot:BackupRuntimeInput['ports']['events']['restoreNotesSnapshot'];
   restoreSessionState:BackupRuntimeInput['ports']['events']['restoreSessionState'];
   verifyActiveSessionRuntime:BackupRuntimeInput['ports']['events']['verifyActiveSessionRuntime'];
   notifyBackupChange(change:Readonly<{urgent:boolean;reason:string}>):unknown;
@@ -52,7 +51,8 @@ export interface BackupRuntimeHostInput<Token>{
   readonly baseline:ReconciliationBaseline;
   readonly codecs:BackupRuntimeInput['ports']['codecs'];
   readonly reconciliation:BackupRuntimeInput['ports']['reconciliation'];
-  readonly noteReconciliation:Readonly<{controller:ReconciliationUiController;withMaintenancePaused<T>(operation:()=>Promise<T>):Promise<T>;merge:BackupRuntimeInput['ports']['noteReconciliation']['merge']}>;
+  readonly noteReconciliation:Readonly<{controller:ReconciliationUiController;maintenancePause:Pick<BackupMaintenancePauseController,'run'>;merge:BackupRuntimeInput['ports']['noteReconciliation']['merge']}>;
+  readonly recoveryNotes:Readonly<{lifecycle:Pick<SessionCoordinator,'run'>;date():string}>;
   readonly session:BackupRuntimeInput['ports']['session'];
   readonly domain:BackupRuntimeInput['ports']['domain'];
   readonly view:BackupRuntimeInput['ports']['view'];
@@ -86,4 +86,13 @@ export interface BackupRevisionFenceInput{
 export interface BackupRevisionFenceController{
   readonly format:'study-director.backup-revision-fence';readonly contractVersion:1;
   sourceRevision():string;snapshotRevision(options?:Readonly<{full?:boolean}>):Promise<string>;setFastFenceReady(value:boolean):boolean;
+}
+
+export interface BackupMaintenancePauseInput{
+  maintenance():Readonly<{settled():Promise<unknown>;schedule(delay?:number):unknown}>;
+}
+export interface BackupMaintenancePauseController{
+  readonly format:'study-director.backup-maintenance-pause';readonly contractVersion:1;
+  active():boolean;
+  run<T>(operation:()=>Promise<T>):Promise<T>;
 }

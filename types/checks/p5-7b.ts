@@ -4,7 +4,8 @@ import type {BackupRecoveryHostModule} from '../../source/core/backup-recovery-h
 import type {ExportsModule} from '../../source/core/exports.ts';
 import type {PlanHostModule} from '../../source/core/plan-host.ts';
 import type {ReconciliationUiFactory} from '../../source/core/reconciliation-ui.ts';
-import type {BackupRuntimeHostInput} from '../backup-runtime-host.ts';
+import type {BackupMaintenancePauseController,BackupRuntimeHostInput} from '../backup-runtime-host.ts';
+import type {SessionCoordinator} from '../session-lifecycle.ts';
 import type {RepositoriesModule} from '../../source/core/repositories.ts';
 import type {RichTextApi} from '../../rich-text/editor.ts';
 import type {KeptVersionsInput,RecoveryHostInput} from '../backup-recovery-host.ts';
@@ -87,3 +88,9 @@ const runtimeHostProcessing=processing satisfies BackupRuntimeHostInput<unknown>
 const runtimeHostProtection=protection satisfies BackupRuntimeHostInput<unknown>['protection'];
 const runtimeHostReconciliation=reconciliationUi satisfies BackupRuntimeHostInput<unknown>['noteReconciliation']['controller'];
 void runtimeHostCoreProviders;void runtimeHostModule;void runtimeHostAppData;void runtimeHostPlanData;void runtimeHostPlanDraft;void runtimeHostProcessing;void runtimeHostProtection;void runtimeHostReconciliation;
+
+declare const sessionLifecycle:SessionCoordinator;
+declare const maintenancePause:BackupMaintenancePauseController;
+const runtimeHostRecoveryNotes=Object.freeze({lifecycle:sessionLifecycle,date:()=> '2026-11-15'}) satisfies BackupRuntimeHostInput<unknown>['recoveryNotes'];
+const runtimeHostMaintenancePause=maintenancePause satisfies BackupRuntimeHostInput<unknown>['noteReconciliation']['maintenancePause'];
+void runtimeHostRecoveryNotes;void runtimeHostMaintenancePause;

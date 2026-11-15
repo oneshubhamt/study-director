@@ -1083,17 +1083,14 @@ document.addEventListener('change',()=>{pwaWorkRevision++;},true);
 let invalidateAttachmentLibrary=()=>false;
 let scheduleRichTextAssetMaintenance=()=>false;
 let notifyRichTextAssetLeaseReleased=()=>false;
-let richTextAssetMaintenancePauseCount=0;
 const CanonicalCommitHost=BackupReadinessHostModule.createCanonicalCommit(Object.freeze({
   storage:StorageHealthController,scanAttachmentReferences:value=>RichTextApi.scanAttachmentReferences(value),incrementReferenceRevision:()=>{richAssetReferenceRevision++;},
   syncCapability:event=>CapabilityBadge?.syncFromCanonicalCommit(event),notifyBackupChange:change=>notifyBackupChange(change),scheduleAssetMaintenance:()=>scheduleRichTextAssetMaintenance(),invalidateAttachmentLibrary:()=>invalidateAttachmentLibrary(),
   fullyInitialized:()=>StartupLifecycle.status().fullyInitialized,refreshKeptVersions:()=>KeptVersions?.refresh()||false,reminderDate:()=>ReviewDayState.reminder.date,revalidateSaveReminder:()=>revalidateSaveReminderAfterCanonicalConvergence(),nowIso:()=>new Date().toISOString()
 }));
-async function withRichTextAssetMaintenancePaused(operation){
-  if(typeof operation!=='function')throw new TypeError('Attachment-maintenance pause operation is required.');
-  richTextAssetMaintenancePauseCount++;
-  try{await RichTextAssetMaintenance.settled();return await operation();}
-  finally{richTextAssetMaintenancePauseCount=Math.max(0,richTextAssetMaintenancePauseCount-1);if(richTextAssetMaintenancePauseCount===0)scheduleRichTextAssetMaintenance();}
+const RecoveryAssetMaintenancePause=BackupRecoveryHostModule.createMaintenancePause(Object.freeze({maintenance:()=>RichTextAssetMaintenance}));
+if(!Object.isFrozen(RecoveryAssetMaintenancePause)||RecoveryAssetMaintenancePause.format!=='study-director.backup-maintenance-pause'||RecoveryAssetMaintenancePause.contractVersion!==1){
+  throw new Error('Study Director recovery attachment-maintenance pause is unavailable or incompatible.');
 }
 let BackupIntegrity=null,AttachmentIntegrityJob=null;
 const RichTextAssetWriteLease=AssetStorageModule.createLease();
@@ -1131,7 +1128,7 @@ const RichTextAssets=Object.freeze({
 const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze({
   isAvailable:()=>upkeepBlocker()||(AttachmentStorage.supported()?true:'storage-unavailable'),
   canMutate:()=>appCanMutate(),
-  mutationActive:()=>richTextAssetMaintenancePauseCount>0||backgroundMaintenanceForegroundBusy()||storageResetUnresolved(),
+  mutationActive:()=>RecoveryAssetMaintenancePause.active()||backgroundMaintenanceForegroundBusy()||storageResetUnresolved(),
   collect:(operation,options)=>AttachmentStorage.collect(operation,options),
   readRestoreJournal:()=>AppData.restoreJournal.read(),
   readLibraryClearJournal:()=>AppData.libraryClearJournal.read(),
@@ -3369,16 +3366,6 @@ const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
 
 const RuntimeBackupCodec=Object.freeze({...BackupCodec,inspect:BackupCodec.inspectCurrent});
 
-async function reconcileNotesThroughLifecycle(importedNotes,deletions=[]){
-  return SessionLifecycle.run('reconciled-notes',{
-    date:getReviewDate(),allowDuringRecoveryQuiescence:true,
-  },()=>AppData.notes.reconcile(importedNotes,deletions));
-}
-async function restoreNotesSnapshotThroughLifecycle(snapshotNotes){
-  return SessionLifecycle.run('restored-notes-snapshot',{
-    date:getReviewDate(),allowDuringRecoveryQuiescence:true,
-  },()=>AppData.notes.replace(snapshotNotes));
-}
 function restoreSessionStateThroughLifecycle(...args){return SessionActions.restoreSessionStateThroughLifecycle(...args);}
 function verifyRestoredTimerRuntimeSemantics(...args){return SessionActions.verifyRestoredTimerRuntimeSemantics(...args);}
 function verifyRestoredSessionRuntime(...args){return SessionActions.verifyRestoredSessionRuntime(...args);}
@@ -3412,13 +3399,14 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze({
   referenceRevision:()=>richAssetReferenceRevision,mutationGeneration:()=>captureMutationGeneration,baseline:ReconciliationBaselineStore,
   codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}),
   reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),
-  noteReconciliation:Object.freeze({controller:NoteReconciliationUI,withMaintenancePaused:operation=>withRichTextAssetMaintenancePaused(operation),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
+  noteReconciliation:Object.freeze({controller:NoteReconciliationUI,maintenancePause:RecoveryAssetMaintenancePause,merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
+  recoveryNotes:Object.freeze({lifecycle:SessionLifecycle,date:()=>getReviewDate()}),
   session:Object.freeze({canMutate:()=>appCanMutate(),cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),captureSnapshot:captureSessionSnapshot,hasActiveSession:hasBlockingActiveSession,hasTasks:()=>TASKS.length>0,toActiveSession:activeSessionPayload,withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),yieldSession:options=>yieldSessionToOtherDevice(options)}),
   domain:Object.freeze({clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}),
   view:Object.freeze({presentation:BackupPresentation,refreshPnote,refreshReview:()=>ReviewView.refresh(),renderSchedule:renderSched,deviceName:(id,others)=>deviceName(id,others)}),
   events:Object.freeze({
     libraryChanged:()=>{LibraryView.render();if(ReviewDayState.reminder.date)void revalidateSaveReminderAfterCanonicalConvergence();},
-    reconcileNotes:reconcileNotesThroughLifecycle,restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,restoreSessionState:restoreSessionStateThroughLifecycle,verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
+    restoreSessionState:restoreSessionStateThroughLifecycle,verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
     notifyBackupChange:change=>notifyBackupChange(change),settleStorageReset:()=>settleStorageReset(),
     resetBackupNudge:()=>BackupNudge?.reset(),refreshStorageWarning:()=>refreshStorageFallbackWarning(),scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)
   }),
