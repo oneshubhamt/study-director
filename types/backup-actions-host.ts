@@ -47,13 +47,12 @@ export interface BackupControlsInput{
   readonly document:Document;
   readonly controller:BackupController;
   readonly processing:ExportCoordinator;
-  readonly protection:BackupProtection;
+  readonly protection:BackupProtectionHost;
   device():DeviceBackup|null;
   readonly providers:BackupProviders;
   readonly presentation:BackupPresentation;
   verifiedAt(source:'device-folder'|'google-drive'):string;
   timeLabel(value:string):string;
-  surfaceError(error:unknown):unknown;
   capture(scope:string,error:unknown):unknown;
   resolveFileOpen():unknown;
   foregroundChanged():unknown;

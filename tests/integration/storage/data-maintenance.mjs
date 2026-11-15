@@ -206,11 +206,34 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-recovery-progress',pr
 
 // A person-started file import/export holds every provider. An automatic
 // Drive catch-up shares the import controller but never suspends itself.
+// Execute the checked P5.7A owner so this remains behavioral evidence after extraction.
 {
  const status={importActive:false,importHoldsBackground:false,standaloneExportActive:false,busy:false},holds=[],listeners=[];let changes=0;
- const context={BackupController:{status:()=>({...status}),subscribeStatus:fn=>listeners.push(fn)},BackupProviderRuntime:{suspendBackground:reason=>{const hold={reason,released:0,settled:Promise.resolve(),release(){hold.released++;}};holds.push(hold);return hold;}},AppDiagnostics:{capture:error=>assert.fail(error)},foregroundChanged:()=>{changes++;}};
- vm.createContext(context);const start=hostSource.indexOf('let fileWorkHold=null;'),marker='BackupController.subscribeStatus(holdBackgroundForFileWork);';
- vm.runInContext(hostSource.slice(start,hostSource.indexOf(marker,start)+marker.length),context);assert.equal(listeners.length,1);const notify=()=>listeners[0]();
+ class TestElement{} class TestButton extends TestElement{}
+ const context={console,Symbol,Object,Promise,HTMLButtonElement:TestButton,HTMLElement:TestElement};
+ vm.createContext(context);
+ for(const file of ['internal','backup-actions-host'])vm.runInContext(readCoreScript(file),context);
+ const registry=context[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('backup-actions-host',1);
+ const freeze=Object.freeze;
+ const controller=freeze({
+   status:()=>({...status}),subscribeStatus:fn=>{listeners.push(fn);return()=>{};},
+   exportLocal:()=>false,importLocal:()=>false,cancelStandalone:()=>false
+ });
+ const processing=freeze({status:()=>({fileBusy:status.busy}),open:async()=>null});
+ const protection=freeze({withPassword:async open=>open(),manage:async()=>false});
+ const providers=freeze({
+   suspendBackground:reason=>{const hold={reason,released:0,settled:Promise.resolve(),release(){hold.released++;}};holds.push(hold);return hold;},
+   locationStatus:()=>null,connected:()=>false,backup:async()=>false,cancelForeground:()=>false,disconnect:async()=>false
+ });
+ const presentation=freeze({current:()=>null,summary:()=>'',subscribe:()=>()=>{},locationLabel:()=>'',condition:()=>false});
+ const controls=module.createControls(freeze({
+   document:{getElementById:()=>null},controller,processing,protection,device:()=>null,providers,presentation,
+   verifiedAt:()=>'',timeLabel:value=>value,capture:(_scope,error)=>assert.fail(error),resolveFileOpen:()=>{},
+   foregroundChanged:()=>{changes++;},scheduleSyncStatus:()=>{},renderProfile:()=>{},firstStartOpen:()=>false,renderFirstStart:()=>{},
+   scheduleUpdate:()=>{},connectDevice:()=>false,connectDrive:()=>false,openHistory:()=>false
+ }));
+ assert.equal(controls.install(),true);assert.equal(listeners.length,1);assert.equal(changes,0,'install does not invent a foreground transition');
+ const notify=()=>listeners[0]();
  status.busy=true;notify();assert.equal(holds.length,0,'an automatic backup does not hold itself');
  status.standaloneExportActive=true;notify();notify();assert.equal(holds.length,1,'one hold while the file backup runs');assert.equal(holds[0].reason,'file-backup');
  status.standaloneExportActive=false;status.importActive=true;status.importHoldsBackground=true;notify();assert.equal(holds.length,1,'a manual import that follows keeps the same hold');assert.equal(holds[0].released,0);
@@ -218,5 +241,5 @@ console.log(JSON.stringify({status:'PASS',suite:'canonical-recovery-progress',pr
  status.importActive=true;notify();assert.equal(holds.length,1,'an automatic provider sync must not acquire a fresh file-backup hold');
  status.importActive=false;notify();assert.equal(holds[0].released,1,'an automatic sync cannot release someone else\'s completed hold');
  assert.equal(changes,8,'each status change lets the upkeep watcher check at once');
- console.log(JSON.stringify({status:'PASS',suite:'file-work-hold',holdsOnlyPersonStartedWork:true,singleHold:true,releasesOnEnd:true}));
+ console.log(JSON.stringify({status:'PASS',suite:'file-work-hold',checkedOwner:true,holdsOnlyPersonStartedWork:true,singleHold:true,releasesOnEnd:true}));
 }

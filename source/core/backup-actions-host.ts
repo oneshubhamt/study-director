@@ -52,7 +52,7 @@ function createProtectionHost<Token>(input:Readonly<BackupProtectionHostInput<To
 }
 
 function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupControls>{
-  exactObject(input,['document','controller','processing','protection','device','providers','presentation','verifiedAt','timeLabel','surfaceError','capture','resolveFileOpen','foregroundChanged','scheduleSyncStatus','renderProfile','firstStartOpen','renderFirstStart','scheduleUpdate','connectDevice','connectDrive','openHistory'],'Backup controls input');
+  exactObject(input,['document','controller','processing','protection','device','providers','presentation','verifiedAt','timeLabel','capture','resolveFileOpen','foregroundChanged','scheduleSyncStatus','renderProfile','firstStartOpen','renderFirstStart','scheduleUpdate','connectDevice','connectDrive','openHistory'],'Backup controls input');
   if(!Object.isFrozen(input.controller)||!Object.isFrozen(input.processing)||!Object.isFrozen(input.protection)||!Object.isFrozen(input.providers)||!Object.isFrozen(input.presentation))throw new TypeError('Backup controls providers must be frozen.');
   const {document,controller,processing,protection,providers,presentation}=input;
   let installed=false,fileWorkHold:ReturnType<typeof providers.suspendBackground>|null=null;
@@ -144,14 +144,11 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
     if(installed)return false;installed=true;
     controller.subscribeStatus(()=>{renderFile();syncFileHold();});
     presentation.subscribe(renderPresentation);
-    renderFile();syncFileHold();return true;
+    renderFile();return true;
   }
-  async function withPassword<T>(open:()=>T|PromiseLike<T>):Promise<Awaited<T>>{
-    try{const state=protection.status();if(state.enabled&&!state.unlocked)await protection.ask();}catch(error){input.surfaceError(error);}
-    return await open();
-  }
+  function withPassword<T>(open:()=>T|PromiseLike<T>):Promise<Awaited<T>>{return protection.withPassword(open);}
   const openHistory=()=>withPassword(()=>input.openHistory());
-  async function manageProtection(){try{return await protection.manage();}catch(error){if(!(error&&typeof error==='object'&&(error as {name?:unknown}).name==='AbortError'))input.surfaceError(error);return false;}}
+  const manageProtection=()=>protection.manage();
   const exportLocal=()=>controller.exportLocal();
   function importLocal(event:Event){
     if(!(event.target instanceof HTMLInputElement))return false;

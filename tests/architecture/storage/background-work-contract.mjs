@@ -18,6 +18,7 @@ const managedRepository=readScript('source/core/managed-repository.ts');
 const policy=readScript('source/core/repository-policy.ts');
 const mutation=readScript('source/core/mutation-coordinator.ts');
 const host=readScript('source/core/backup-recovery-host.ts');
+const backupActionsHost=readScript('source/core/backup-actions-host.ts');
 const drive=fs.readFileSync('source/external/drive.js','utf8');
 
 assert.match(app,/nextEligibleAt[\s\S]*reason[\s\S]*repositoryScope[\s\S]*requestId/u,'durable maintenance intent must carry eligibility, reason and repository generation');
@@ -69,7 +70,8 @@ assert.equal((app.match(/isAvailable:\(\)=>upkeepBlocker\(/gu)||[]).length,4,'ca
 assert.match(app,/NoticeCoordinator\.subscribe\(\(\)=>\{foregroundChanged\(\);\}\)/u,'notice changes check the watcher at once');
 assert.match(backup,/function beginImport\(\{backgroundPreemptible=false\}=\{\}\)[\s\S]*backgroundPreemptible:backgroundPreemptible===true[\s\S]*importHoldsBackground:!!activeImportOperation&&!activeImportOperation\.backgroundPreemptible/u,'standalone/manual imports hold all providers while an admitted automatic sync does not cancel itself via the file observer');
 assert.doesNotMatch(app,/schedule\w*\((?:15000|ATTACHMENT_INTEGRITY_RETRY_MS),'foreground-busy'\)/u,'no upkeep job polls for the foreground on its own');
-assert.match(app,/function backupBackgroundAvailability\(\)\{return backgroundBlocker\(\)\|\|/u,'automatic backups and their upkeep use the shared gate');
+assert.match(app,/function backupBackgroundAvailability\(\)\{return BackupProtectionHost\?BackupProtectionHost\.backgroundAvailability\(\):backgroundBlocker\(\)\|\|'locked';\}/u,'automatic backups keep the shared host gate while protection ownership is delegated');
+assert.match(backupActionsHost,/function backgroundAvailability\(\)\{return input\.environment\.backgroundBlocker\(\)\|\|\(ready\?true:'locked'\);\}/u,'the checked protection host combines the shared gate with the encryption lock');
 assert.doesNotMatch(app,/isAvailable:\(\)=>(?:!StartupLifecycle|appCanMutate\(\))/u,'no background job keeps its own start-up or ownership check');
 assert.match(app,/function settleStorageReset\(\)\{[\s\S]*?wakeBackgroundOperations\('storage-reset-settled'\)/u,'housekeeping paused by a clear resumes as soon as the clear is settled');
 assert.match(provider,/isAvailable:\s*\(\s*\)\s*=>\s*\{const local\s*=integrityScrubHooks\s*\.isAvailable\s*\(id\s*\);return local\s*=\s*=\s*=true\?providerBackgroundAvailability\s*\(selected\s*\):String\s*\(local\|\|'awaiting-control'\s*\);\}/u,'provider integrity must preserve named event-driven unavailability instead of collapsing it to polling false');

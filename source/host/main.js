@@ -4234,10 +4234,9 @@ if(!Object.isFrozen(SessionHandoffRuntime)||SessionHandoffRuntime.format!=='stud
 // File/location controls, user entry points and foreground/background exclusion
 // are owned by the checked P5.7A host boundary.
 BackupActions=BackupActionsHostModule.createControls(Object.freeze({
-  document,controller:BackupController,processing:Exports,protection:BackupProtection,
+  document,controller:BackupController,processing:Exports,protection:BackupProtectionHost,
   device:()=>DeviceBackup,providers:BackupProviderRuntime,presentation:BackupPresentation,
   verifiedAt:source=>verifiedRecoveryState.providers[source]?.at||'',timeLabel:storageHealthTime,
-  surfaceError:setBackupProtectionSurfaceError,
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
   resolveFileOpen:()=>NoticeCoordinator.resolveEvent('file','file-open'),
   foregroundChanged,scheduleSyncStatus,renderProfile:()=>renderProfile(),
