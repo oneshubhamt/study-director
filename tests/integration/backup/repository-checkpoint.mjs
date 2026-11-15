@@ -1,4 +1,3 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import {performance} from 'node:perf_hooks';
 import {createBackupPresentation} from '../../helpers/backup-presentation.mjs';
@@ -11,9 +10,9 @@ import {createDriveHarness,pendingRepositoryDigests} from '../../helpers/drive-h
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../helpers/pending-review-codec.mjs';
 
-for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/canonical.ts','source/core/record-codecs.ts','source/core/reconciliation.ts','source/core/exports.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts','source/core/backup-recovery-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/canonical.ts','source/core/record-codecs.ts','source/core/reconciliation.ts','source/core/exports.ts','source/core/managed-repository.ts','source/core/repository-policy.ts','source/core/repository-background.ts','source/core/backup-provider.ts','source/core/backup-capture.ts','source/core/backup.ts','source/core/backup-recovery-host.ts','source/core/backup-integrity-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
-const freeze=Object.freeze,CanonicalModule=registry.require('canonical',1),ManagedRepositoryModule=registry.require('managed-repository',1),RepositoryPolicyModule=registry.require('repository-policy',1),RepositoryBackgroundModule=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupProviderModule=registry.require('backup-provider',1,freeze({repositoryPolicy:RepositoryPolicyModule})),BackupCaptureModule=registry.require('backup-capture',1),BackupModule=registry.require('backup',1,freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule})),ReconciliationModule=registry.require('reconciliation',1,freeze({canonical:CanonicalModule})),ExportsModule=registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)}));
+const freeze=Object.freeze,CanonicalModule=registry.require('canonical',1),ManagedRepositoryModule=registry.require('managed-repository',1),RepositoryPolicyModule=registry.require('repository-policy',1),RepositoryBackgroundModule=registry.require('repository-background',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupProviderModule=registry.require('backup-provider',1,freeze({repositoryPolicy:RepositoryPolicyModule})),BackupCaptureModule=registry.require('backup-capture',1),BackupModule=registry.require('backup',1,freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule})),ReconciliationModule=registry.require('reconciliation',1,freeze({canonical:CanonicalModule})),ExportsModule=registry.require('exports',1,Object.freeze({lifecycle:registry.require('operation-lifecycle',1)})),BackupIntegrityHostModule=registry.require('backup-integrity-host',1);
 const exclusive=ExportsModule.createCoordinator({createWorker:()=>{throw new Error('The fixture uses direct processing.');},window:{},document:{}});
 const engine=createProcessingEngine();
 // File processing (hashing, compression) finishes on background threads, not
@@ -936,7 +935,7 @@ for(const scenario of ['renews-while-uploading','stops-when-marker-removed','sho
 assert.deepEqual(heartbeatCases,['renews-while-uploading','stops-when-marker-removed','short-upload-no-renewal']);
 // The actual adapter's uncertainty count must reach the actual integrity owner
 // and host state projector, even when some usable history remains.
-const incompleteInventoryCases=[],hostSource=readHostHtml();
+const incompleteInventoryCases=[];
 for(const usableHistory of [false,true])for(const kind of ['checkpoint','commit'])for(const fault of ['renamed','undownloadable']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const id=`uncertain-${usableHistory}-${kind}-${fault}`,h=createDriveHarness({clock,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Integrity QA'}))});
@@ -947,9 +946,8 @@ for(const usableHistory of [false,true])for(const kind of ['checkpoint','commit'
   assert.equal((await h.provider.repository.list({kind})).ignored,1);
   const scope=await h.provider.repository.scope(),beforeFiles=[...h.state.files.keys()].sort(),completedAt='2026-10-01T00:00:00.000Z',cursor='obj_'+'d'.repeat(32),scanId='a'.repeat(64),quarantined=['obj_'+'c'.repeat(32)];
   let current={repositoryScope:scope,requestId:'inventory',history:[],quarantinedObjectIds:quarantined,failedAt:completedAt,completedAt,cycleStartedAt:completedAt,cursor,scanId,partial:null,recheck:false};const results=[];
-  const host={Date:clock.Date,Error,Object,readRepositoryIntegrityTarget:async()=>current,repositoryIntegrityChanged:()=>new Error('scope changed'),mutateRepositoryIntegrityTarget:async(_target,change)=>{current=change(current);return current;}};
-  vm.createContext(host);vm.runInContext(hostSource.slice(hostSource.indexOf('async function updateRepositoryIntegrityTarget('),hostSource.indexOf('const RepositoryIntegrityContinuation=')),host);
-  runtime.providers.configureIntegrityScrub(freeze({readTarget:async()=>current,writeResult:async(providerId,result)=>{assert.equal(providerId,id);results.push(result);await host.updateRepositoryIntegrityTarget('drive',result);},prepare:async(_id,target)=>({repositoryScope:scope,requestId:target.requestId,cursor:target.cursor,scanId:target.scanId,skipObjectIds:target.quarantinedObjectIds}),isAvailable:providerId=>providerId===id,isUnsafe:()=>false,yieldTask:async()=>{},quarantine:async()=>current.quarantinedObjectIds}));
+  const projectResult=result=>{current=BackupIntegrityHostModule.projectRepositoryResult(current,result,new clock.Date().toISOString());return current;};
+  runtime.providers.configureIntegrityScrub(freeze({readTarget:async()=>current,writeResult:async(providerId,result)=>{assert.equal(providerId,id);results.push(result);projectResult(result);},prepare:async(_id,target)=>({repositoryScope:scope,requestId:target.requestId,cursor:target.cursor,scanId:target.scanId,skipObjectIds:target.quarantinedObjectIds}),isAvailable:providerId=>providerId===id,isUnsafe:()=>false,yieldTask:async()=>{},quarantine:async()=>current.quarantinedObjectIds}));
   assert.equal(runtime.providers.requestIntegrity(id),true,'integrity-result propagation test must explicitly schedule the integrity owner instead of depending on configuration wake timing');
   for(let elapsed=0;elapsed<120000;elapsed+=1000){
     await clock.drainMicrotasks(220);await new Promise(resolve=>setImmediate(resolve));await realWorkSettled();await clock.drainMicrotasks(220);
