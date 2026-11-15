@@ -93,7 +93,7 @@ const createModule=():ReconciliationUiModule=>{
       const diffStatus=document.createElement('div');diffStatus.className='sd-note-reconcile-diff-status';diffStatus.setAttribute('aria-live','polite');
       const actions=document.createElement('div');actions.className='sd-note-reconcile-actions';
       const strategy=document.createElement('div');strategy.className='sd-note-reconcile-strategies';strategy.setAttribute('role','group');strategy.setAttribute('aria-label','Difference review actions');
-      const action=(label:string,kind:string):HTMLButtonElement=>{const button=document.createElement('button');button.type='button';button.dataset.action=kind;button.textContent=label;strategy.append(button);return button};
+      const action=(label:string,kind:string):HTMLButtonElement=>{const button=document.createElement('button');button.type='button';button.dataset['action']=kind;button.textContent=label;strategy.append(button);return button};
       const keepButton=action(version||kept?'Keep current':'Keep this device’s','keep'),mergeButton=action('Smart merge','merge'),appendButton=action(version?'Add what’s missing':'Append additions','append'),importButton=action(version?'Use this version':kept?'Use kept version':'Use the backup’s','import'),customButton=action('Custom','custom');if(manualOnly){mergeButton.hidden=true;appendButton.hidden=true;}else customButton.hidden=true;
       const navigation=document.createElement('div');navigation.className='sd-note-reconcile-navigation';
       const previous=document.createElement('button'),next=document.createElement('button');previous.type=next.type='button';previous.textContent='← Previous';next.textContent='Next →';const retry=document.createElement('button');retry.type='button';retry.textContent='Retry editors';retry.hidden=true;navigation.append(previous,next,retry);
@@ -118,7 +118,7 @@ const createModule=():ReconciliationUiModule=>{
         const closing=[...ownedHandles];leftHandle=rightHandle=null;
         await destroyHandles(closing,'reconciliation-ui.destroy');
         dialog.remove();active=null;
-        if(restoreFocus&&document.contains?.(restoreFocus)){try{restoreFocus.focus({preventScroll:true});}catch(error){diagnostics.capture('reconciliation-ui.focus',error,'warn');}}
+        if(restoreFocus&&document.contains?.(restoreFocus)&&'focus' in restoreFocus&&typeof restoreFocus.focus==='function'){try{restoreFocus.focus({preventScroll:true});}catch(error){diagnostics.capture('reconciliation-ui.focus',error,'warn');}}
         resolvePromise(result);
       };
       active={cancel:()=>finish(null)};
@@ -136,7 +136,7 @@ const createModule=():ReconciliationUiModule=>{
           const previousHandles=[leftHandle,rightHandle];leftHandle=rightHandle=null;
           await destroyHandles(previousHandles,'reconciliation-ui.transition-destroy');
           if(settled||token!==generation)return;
-          index=Math.max(0,Math.min(states.length-1,nextIndex));const state=states[index],conflict=state.conflict;
+          index=Math.max(0,Math.min(states.length-1,nextIndex));const state=states[index];if(!state)throw new Error('Reconciliation state is unavailable.');const conflict=state.conflict;
           title.textContent=conflict.label;progress.textContent=version?'':`Difference ${index+1} of ${states.length}`;localPane.sub.textContent='Editable working copy · this is what will be saved';incomingPane.sub.textContent=conflict.incomingLabel+' · read-only reference';
           localPane.field.value=state.working;incomingPane.field.value=state.incoming;apply.textContent=version?'Save note':manualOnly?(states.length===1?'Apply reflection':(state.applied?'Re-apply reflection':'Apply reflection')):(states.length===1?'Apply resolved note':(state.applied?'Re-apply resolved note':'Apply resolved note'));
           const mountOptions=(field:HTMLTextAreaElement,label:string,value:string,assetStore:ReconciliationAssetStore,readOnly=false)=>freeze({field,label,initialValue:value,maxWords:configuration.maxWords,maxBytes:configuration.maxBytes,assets:assetStore,surface:'reconciliation' as const,focusOnMount:false,allowAssetInsert:false,readOnly});
@@ -150,7 +150,7 @@ const createModule=():ReconciliationUiModule=>{
             mount(mountOptions(localPane.field,manualOnly?'Resolved Diary Reflection':'Resolved note',state.working,localScratchAssets,false)),
             mount(mountOptions(incomingPane.field,manualOnly?'Backup’s Diary Reflection':'Backup’s note',state.incoming,incomingScratchAssets,true))
           ]);
-          mountedLeft=results[0].status==='fulfilled'?results[0].value:null;mountedRight=results[1].status==='fulfilled'?results[1].value:null;
+          const leftResult=results[0],rightResult=results[1];if(!leftResult||!rightResult)throw new Error('Reconciliation editor results are incomplete.');mountedLeft=leftResult.status==='fulfilled'?leftResult.value:null;mountedRight=rightResult.status==='fulfilled'?rightResult.value:null;
           const failure=results.find(result=>result.status==='rejected');if(failure)throw failure.reason;
           if(settled||token!==generation){await destroyHandles([mountedLeft,mountedRight],'reconciliation-ui.stale-mount');return;}
           leftHandle=mountedLeft;rightHandle=mountedRight;localPane.field.oninput=markEdited;
@@ -165,14 +165,14 @@ const createModule=():ReconciliationUiModule=>{
         }
       }
       const setLeft=(value:unknown)=>{if(leftHandle&&!leftHandle.setValue(String(value??'')))throw new Error('Resolved note could not be loaded into the scratch editor.');scheduleComparison();};
-      keepButton.addEventListener('click',()=>{setLeft(states[index].conflict.localValue)});
-      mergeButton.addEventListener('click',()=>{try{const state=states[index],value=state.smartValue===null?richText.mergeIncomingAdditions(state.conflict.localValue,state.incoming).value:state.smartValue;setLeft(value)}catch(error){diagnostics.capture('reconciliation-ui.merge',error,'warn');diffStatus.textContent='Smart merge could not be prepared. You can still edit the resolved copy manually.';}});
-      appendButton.addEventListener('click',()=>{try{setLeft(richText.appendIncomingAdditions(leftHandle.getValue(),rightHandle.getValue()).value)}catch(error){diagnostics.capture('reconciliation-ui.append',error,'warn');diffStatus.textContent='Imported additions could not be appended automatically. You can still edit the resolved copy manually.';}});
-      importButton.addEventListener('click',()=>setLeft(states[index].incoming));
+      keepButton.addEventListener('click',()=>{const state=states[index];if(state)setLeft(state.conflict.localValue)});
+      mergeButton.addEventListener('click',()=>{try{const state=states[index];if(!state)return;const value=state.smartValue===null?richText.mergeIncomingAdditions(state.conflict.localValue,state.incoming).value:state.smartValue;setLeft(value)}catch(error){diagnostics.capture('reconciliation-ui.merge',error,'warn');diffStatus.textContent='Smart merge could not be prepared. You can still edit the resolved copy manually.';}});
+      appendButton.addEventListener('click',()=>{try{const left=leftHandle,right=rightHandle;if(!left||!right)return;setLeft(richText.appendIncomingAdditions(left.getValue(),right.getValue()).value)}catch(error){diagnostics.capture('reconciliation-ui.append',error,'warn');diffStatus.textContent='Imported additions could not be appended automatically. You can still edit the resolved copy manually.';}});
+      importButton.addEventListener('click',()=>{const state=states[index];if(state)setLeft(state.incoming)});
       customButton.addEventListener('click',()=>{if(leftHandle){leftHandle.focus?.();localPane.field.focus?.();}diffStatus.textContent='Edit the resolved reflection, then apply it.';});
       retry.addEventListener('click',()=>{void mountCurrent(index)});
       previous.addEventListener('click',()=>{void mountCurrent(index-1)});next.addEventListener('click',()=>{void mountCurrent(index+1)});
-      apply.addEventListener('click',()=>{const state=states[index];saveScratch();if(manualOnly&&state.conflict.requireContent&&!String(state.working||'').trim()){state.applied=false;if(frame)view.cancelAnimationFrame(frame);frame=0;diffStatus.textContent='A diary-only entry cannot be empty. Keep one copy or enter custom text.';return;}state.result=state.working;state.applied=true;const nextUnresolved=states.findIndex((item,position)=>position>index&&!item.applied);if(nextUnresolved>=0){void mountCurrent(nextUnresolved);return}const anyUnresolved=states.findIndex(item=>!item.applied);if(anyUnresolved>=0){void mountCurrent(anyUnresolved);return}void finish(resultFrom(states));});
+      apply.addEventListener('click',()=>{saveScratch();const state=states[index];if(!state)return;if(manualOnly&&state.conflict.requireContent&&!String(state.working||'').trim()){state.applied=false;if(frame)view.cancelAnimationFrame(frame);frame=0;diffStatus.textContent='A diary-only entry cannot be empty. Keep one copy or enter custom text.';return;}state.result=state.working;state.applied=true;const nextUnresolved=states.findIndex((item,position)=>position>index&&!item.applied);if(nextUnresolved>=0){void mountCurrent(nextUnresolved);return}const anyUnresolved=states.findIndex(item=>!item.applied);if(anyUnresolved>=0){void mountCurrent(anyUnresolved);return}void finish(resultFrom(states));});
       function settleRemaining(pick:(state:ReconciliationState)=>unknown){
         if(settled||transitionBusy)return;saveScratch();
         for(const state of states){if(state.applied)continue;let value;try{value=String(pick(state)??'');}catch(error){diagnostics.capture('reconciliation-ui.bulk',error,'warn');diffStatus.textContent='That choice could not be prepared for every note. Choose note by note instead.';return;}state.result=value;state.applied=true;}
