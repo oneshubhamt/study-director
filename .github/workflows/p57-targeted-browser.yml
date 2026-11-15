@@ -59,6 +59,7 @@ jobs:
         run: |
           for pass in 1 2 3 4 5; do
             echo "P5.7 changed browser witness pass $pass/5"
+            node tests/browser/backup/sync-kept-reviews.mjs
             node tests/browser/backup/complete-library.mjs
             node tests/browser/security/runtime-boundary.mjs
           done
