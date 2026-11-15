@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {BackupReadinessHostContract,CanonicalCommitController,CanonicalCommitEvent,CanonicalCommitInput,StorageHealthController,StorageHealthHistory,StorageHealthInput,StorageHealthPatch,StorageHealthState} from '../../types/backup-readiness-host.ts';
+import type {BackupReadinessHostContract,CanonicalCommitController,CanonicalCommitEvent,CanonicalCommitInput,StorageHealthController,StorageHealthHistory,StorageHealthInput,StorageHealthPatch,StorageHealthState,VerifiedBackupReceipt,VerifiedRecoveryController,VerifiedRecoveryCopy,VerifiedRecoveryInput,VerifiedRecoveryState} from '../../types/backup-readiness-host.ts';
 
 const sdBackupReadinessHostFactory=(()=>{
 'use strict';
@@ -146,7 +146,76 @@ function createCanonicalCommit(input:Readonly<CanonicalCommitInput>):Readonly<Ca
   return freeze({format:'study-director.canonical-commit-host' as const,contractVersion:1 as const,handle,changesAttachmentReferences});
 }
 
-const createModule=():BackupReadinessHostContract=>freeze({format:'study-director.backup-readiness-host-module',contractVersion:1,createStorageHealth,createCanonicalCommit});
+
+function createVerifiedRecovery(input:Readonly<VerifiedRecoveryInput>):Readonly<VerifiedRecoveryController>{
+  exactObject(input,['metadata','storageHealth','mutationEpoch','backupVersion','sourceRevision','refreshProviders','capture','nowIso'],'Verified recovery readiness input');
+  const SOURCE=/^[a-z][a-z0-9-]{0,40}$/u;
+  const backupTime=(value:unknown)=>typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():'';
+  function normalizeCopy(value:unknown):VerifiedRecoveryCopy|null{
+    const row=objectRecord(value),at=backupTime(row['at']),sourceRevision=backupTime(row['sourceRevision']);
+    if(!at||!sourceRevision)return null;
+    const format=Number.isSafeInteger(row['format'])?Number(row['format']):null;
+    return freeze({at,sourceRevision,format,...(row['verified']===true||row['verified']===false?{verified:row['verified']===true}:{})});
+  }
+  function normalize(value:unknown):VerifiedRecoveryState{
+    const row=objectRecord(value);
+    if(Number(row['version'])!==3)return freeze({version:3 as const,file:null,providers:freeze({})});
+    const providers:Record<string,VerifiedRecoveryCopy>=Object.create(null) as Record<string,VerifiedRecoveryCopy>;
+    const sourceProviders=objectRecord(row['providers']);
+    for(const [id,raw] of Object.entries(sourceProviders)){
+      const copy=SOURCE.test(id)?normalizeCopy(raw):null;if(copy)providers[id]=copy;
+    }
+    const file=normalizeCopy(row['file']);
+    return freeze({version:3 as const,file:file?freeze({...file,verified:objectRecord(row['file'])['verified']===true}):null,providers:freeze(providers)});
+  }
+  let current:VerifiedRecoveryState=normalize(null),writeChain:Promise<unknown>=Promise.resolve(),startupReady:Promise<boolean>|null=null;
+  const entries=(state:VerifiedRecoveryState=current)=>freeze([state.file,...Object.values(state.providers)].filter((entry):entry is VerifiedRecoveryCopy=>entry!==null));
+  const lastBackupTime=(state:VerifiedRecoveryState=current)=>Math.max(-Infinity,...entries(state).map(entry=>Date.parse(entry.at)).filter(Number.isFinite));
+  const verified=(source:string)=>source==='file'?current.file:current.providers[source]||null;
+  async function read(){return normalize(await input.metadata.read());}
+  function update(change:(state:VerifiedRecoveryState)=>VerifiedRecoveryState|Readonly<{version:3;file:VerifiedRecoveryCopy|null;providers:Readonly<Record<string,VerifiedRecoveryCopy>>}>){
+    const run=async()=>{
+      const next=normalize(change(await read()));
+      try{await input.metadata.write(next);}
+      catch(error){input.capture('backup.freshness-write',error,'warn');throw error;}
+      current=next;input.refreshProviders();return true;
+    };
+    const next=writeChain.catch(()=>undefined).then(run);writeChain=next;return next;
+  }
+  function record(copy:VerifiedBackupReceipt):Promise<boolean>{
+    const source=String(copy?.source||''),sourceRevision=backupTime(copy?.sourceRevision);
+    if(!sourceRevision||!SOURCE.test(source))return Promise.resolve(false);
+    const entry:VerifiedRecoveryCopy=freeze({at:input.nowIso(),sourceRevision,format:copy.attachmentsComplete===false?null:input.backupVersion});
+    return update(prior=>source==='file'
+      ?freeze({...prior,file:freeze({...entry,verified:copy.verified===true})})
+      :freeze({...prior,providers:freeze({...prior.providers,[source]:entry})}));
+  }
+  async function reconcileChangeClock(){
+    const recorded=String(input.storageHealth.snapshot().lastLocalSaveAt||''),latest=await input.mutationEpoch.latestChangeAt(recorded);
+    if(latest===recorded)return false;
+    input.storageHealth.updateHistory({lastLocalSaveAt:latest});return true;
+  }
+  function reconcileStartupChangeClock(){
+    if(!startupReady)startupReady=reconcileChangeClock().catch(error=>{startupReady=null;throw error;});
+    return startupReady;
+  }
+  async function install(){current=await read();input.refreshProviders();return current;}
+  async function verifyFreshCurrentBackup(){
+    const unknown=()=>freeze({ok:false,verifiedCopies:0,latestVerifiedAt:''});
+    let revision;
+    try{revision=await input.mutationEpoch.latestChangeAt(input.sourceRevision());}
+    catch(error){input.capture('backup.freshness-epoch-read',error,'warn');return unknown();}
+    const currentSave=Date.parse(String(revision||''));if(!Number.isFinite(currentSave))return unknown();
+    let state;
+    try{state=await read();}
+    catch(error){input.capture('backup.freshness-receipt-read',error,'warn');return unknown();}
+    const candidates=entries(state).filter(entry=>entry.verified!==false&&entry.format===input.backupVersion&&Date.parse(entry.sourceRevision)>=currentSave).sort((a,b)=>Date.parse(b.at)-Date.parse(a.at));
+    return freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates[0]?.at||''});
+  }
+  return freeze({format:'study-director.verified-recovery-readiness' as const,contractVersion:1 as const,state:()=>current,verified,entries,lastBackupTime,read,record,verifyFreshCurrentBackup,reconcileChangeClock,reconcileStartupChangeClock,install});
+}
+
+const createModule=():BackupReadinessHostContract=>freeze({format:'study-director.backup-readiness-host-module',contractVersion:1,createStorageHealth,createCanonicalCommit,createVerifiedRecovery});
 registry.define('backup-readiness-host',1,createModule);
 return createModule;
 })();

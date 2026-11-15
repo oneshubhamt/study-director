@@ -965,14 +965,14 @@ async function maybePromptBackupNudge(force=false){
   if(!force&&now-backupNudgeCheckedAt<BACKUP_NUDGE_CHECK_MS)return;
   backupNudgeCheckedAt=now;
   let backups;
-  try{backups=await readVerifiedRecoveryState();}
+  try{backups=await VerifiedRecovery.read();}
   catch(error){AppDiagnostics.capture('backup.nudge-receipt-read',error,'warn');return;}
-  const health=readStorageHealth(),entries=verifiedRecoveryEntries(backups);
+  const health=readStorageHealth(),entries=VerifiedRecovery.entries(backups);
   // One reminder for every kind of backup, counted from the latest backup
   // anywhere: a verified file, a download, the Device Folder or Drive. It stays away while an
   // automatic backup is able to run, and while a backup already holds the latest
   // changes, however old: automatic backups only run when something changed.
-  const last=lastBackupTime(backups);
+  const last=VerifiedRecovery.lastBackupTime(backups);
   const covered=Math.max(-Infinity,...entries.map(entry=>Date.parse(entry.sourceRevision)).filter(Number.isFinite));
   const changed=Date.parse(health.lastLocalSaveAt||''),unbacked=!Number.isFinite(covered)||!Number.isFinite(changed)||changed>covered;
   const automatic=BackupProviderRuntime.automaticActive();
@@ -1216,94 +1216,21 @@ async function readReconciliationBase(){return ReconciliationBaselineStore.readH
 async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
 async function readReconciliationBaseDayAncestry(dates,checkpointId){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
 async function writeReconciliationBase(checkpointId,spec){return ReconciliationBaselineStore.write(checkpointId,spec);}
-const VERIFIED_RECOVERY_META_KEY=APP_META_KEYS.verifiedRecoveryBackups;
-// The one record of past backups (version 3). Each entry is a copy: when it was
-// made (at), the change it holds (sourceRevision) and its backup format. file is
-// the last portable backup: read back through the save dialog (verified) or a
-// download, which cannot be read back but is still a backup the person made.
-// providers holds each location's last verified copy.
-let verifiedRecoveryState=Object.freeze({version:3,file:null,providers:Object.freeze({})}),verifiedRecoveryWriteChain=Promise.resolve();
-function backupTime(value){return typeof value==='string'&&Number.isFinite(Date.parse(value))?new Date(value).toISOString():'';}
-function normalizeBackupCopy(value){
-  const at=backupTime(value?.at),sourceRevision=backupTime(value?.sourceRevision);if(!at||!sourceRevision)return null;
-  return Object.freeze({at,sourceRevision,format:Number.isSafeInteger(value.format)?value.format:null});
-}
-function normalizeVerifiedRecoveryState(value){
-  if(Number(value?.version)!==3)return Object.freeze({version:3,file:null,providers:Object.freeze({})});
-  const providers={};
-  if(value.providers&&typeof value.providers==='object')for(const [id,row] of Object.entries(value.providers)){
-    const copy=/^[a-z][a-z0-9-]{0,40}$/u.test(id)?normalizeBackupCopy(row):null;if(copy)providers[id]=copy;
-  }
-  const file=normalizeBackupCopy(value.file);
-  return Object.freeze({version:3,file:file?Object.freeze({...file,verified:value.file.verified===true}):null,providers:Object.freeze(providers)});
-}
-function verifiedRecoveryEntries(state=verifiedRecoveryState){return [state.file,...Object.values(state.providers||{})].filter(Boolean);}
-// When data was last backed up anywhere: a file, a download, the Device Folder or Drive.
-function lastBackupTime(state=verifiedRecoveryState){return Math.max(-Infinity,...verifiedRecoveryEntries(state).map(entry=>Date.parse(entry.at)).filter(Number.isFinite));}
-// Decisions read the record fresh; a failed read falls back to the copy in memory.
-async function readVerifiedRecoveryState(){
-  return normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));
-}
-// A receipt becomes visible only after its durable metadata write commits.
-// A provider may have published successfully even when this local receipt fails;
-// keep its real external outcome, but never represent the receipt as durable.
-function updateVerifiedRecoveryState(change){
-  const run=async()=>{
-    const next=normalizeVerifiedRecoveryState(change(await readVerifiedRecoveryState()));
-    try{await writeHostAppMetaValue(VERIFIED_RECOVERY_META_KEY,next);}
-    catch(error){AppDiagnostics.capture('backup.freshness-write',error,'warn');throw error;}
-    verifiedRecoveryState=next;BackupProviderRuntime.refresh();
-    return true;
-  };
-  const next=verifiedRecoveryWriteChain.catch(()=>{}).then(run);verifiedRecoveryWriteChain=next;return next;
-}
-// Every completed backup lands here. source is 'file' or a location id.
-function recordBackupCopy(copy){
-  const source=String(copy?.source||''),sourceRevision=backupTime(copy?.sourceRevision);
-  if(!sourceRevision||!/^[a-z][a-z0-9-]{0,40}$/u.test(source))return Promise.resolve(false);
-  // Known missing attachment bytes may be archived, but cannot be used as
-  // proof of a fully recoverable, current-format external safety copy.
-  const entry={at:new Date().toISOString(),sourceRevision,format:copy.attachmentsComplete===false?null:DATA_CONTRACT.schemas.Backup.version};
-  return updateVerifiedRecoveryState(prior=>source==='file'?{...prior,file:{...entry,verified:copy.verified===true}}:{...prior,providers:{...prior.providers,[source]:entry}});
-}
-// Every save writes the change clock inside its own transaction (the
-// mutation epoch); the last-save time in storage health is a fast copy for
-// backup decisions. If a save committed but the copy was not written (the tab
-// closed in between), the epoch repairs it here, so that change is still
-// backed up. Seeding the clock also keeps later saves later after a reload.
-async function reconcileChangeClock(){
-  const recorded=String(readStorageHealth().lastLocalSaveAt||'');let latest=recorded;
-  try{latest=await AppData.mutationEpoch.latestChangeAt(recorded);}catch(error){AppDiagnostics.capture('backup.change-clock-read',error,'error');throw error;}
-  if(latest===recorded)return false;
-  writeStorageHealth({lastLocalSaveAt:latest});return true;
-}
-let startupChangeClockReady=null;
-function reconcileStartupChangeClock(){
-  // An unknown durable clock cannot authorize automatic provider work.
-  // Do not memoize a transient failure as a successful startup check.
-  if(!startupChangeClockReady)startupChangeClockReady=reconcileChangeClock().catch(error=>{startupChangeClockReady=null;throw error;});
-  return startupChangeClockReady;
-}
-async function installVerifiedRecoveryFreshness(){
-  verifiedRecoveryState=await readVerifiedRecoveryState();
-  BackupProviderRuntime.refresh();return verifiedRecoveryState;
-}
-async function verifyFreshCurrentBackup(){
-  const unknown=()=>Object.freeze({ok:false,verifiedCopies:0,latestVerifiedAt:''});
-  let currentRevision;
-  try{
-    // Canonical commits write the mutation epoch inside their transaction;
-    // the localStorage health clock alone is not proof of the latest change.
-    currentRevision=await AppData.mutationEpoch.latestChangeAt(currentBackupSourceRevision());
-  }catch(error){AppDiagnostics.capture('backup.freshness-epoch-read',error,'warn');return unknown();}
-  const currentSave=Date.parse(String(currentRevision||''));
-  if(!Number.isFinite(currentSave))return unknown();
-  let state;
-  try{state=normalizeVerifiedRecoveryState(await readHostAppMetaValue(VERIFIED_RECOVERY_META_KEY));}
-  catch(error){AppDiagnostics.capture('backup.freshness-receipt-read',error,'warn');return unknown();}
-  // A missing, invalid or untrusted clock cannot authorize destructive work.
-  const candidates=verifiedRecoveryEntries(state).filter(entry=>entry.verified!==false&&entry.format===DATA_CONTRACT.schemas.Backup.version&&Date.parse(entry.sourceRevision)>=currentSave);
-  return Object.freeze({ok:candidates.length>0,verifiedCopies:candidates.length,latestVerifiedAt:candidates.sort((a,b)=>Date.parse(b.at)-Date.parse(a.at))[0]?.at||''});
+const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.freeze({
+  metadata:Object.freeze({
+    read:()=>readHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups),
+    write:value=>writeHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups,value)
+  }),
+  storageHealth:Object.freeze({snapshot:()=>StorageHealthController.snapshot(),updateHistory:patch=>StorageHealthController.updateHistory(patch)}),
+  mutationEpoch:Object.freeze({latestChangeAt:recorded=>AppData.mutationEpoch.latestChangeAt(recorded)}),
+  backupVersion:DATA_CONTRACT.schemas.Backup.version,
+  sourceRevision:()=>currentBackupSourceRevision(),
+  refreshProviders:()=>BackupProviderRuntime.refresh(),
+  capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+  nowIso:()=>new Date().toISOString()
+}));
+if(!Object.isFrozen(VerifiedRecovery)||VerifiedRecovery.format!=='study-director.verified-recovery-readiness'||VerifiedRecovery.contractVersion!==1){
+  throw new Error('Study Director verified-recovery readiness is unavailable or incompatible.');
 }
 // Compare policy identity and ownership inside the same typed metadata transaction.
 function mutateBackupProtection(value,options){
@@ -1789,7 +1716,7 @@ const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze({
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
   getStudentName:()=>getStudentNameFromDisplay(),
   renderProfile:()=>renderProfile(),
-  verifiedSourceRevision:()=>verifiedRecoveryState.providers['google-drive']?.sourceRevision||'',
+  verifiedSourceRevision:()=>VerifiedRecovery.verified('google-drive')?.sourceRevision||'',
   currentBackupSourceRevision:()=>currentBackupSourceRevision()
 }));
 const deleteThisProfile=ProfileDeletion.deleteThisProfile;
@@ -3674,7 +3601,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
       backupNudgeCheckedAt=Date.now();
       backupNudgeNotifiedDate='';
       refreshStorageFallbackWarning();
-      if(context?.copy)void recordBackupCopy(context.copy).catch(error=>AppDiagnostics.capture('backup.freshness-receipt',error,'warn'));
+      if(context?.copy)void VerifiedRecovery.record(context.copy).catch(error=>AppDiagnostics.capture('backup.freshness-receipt',error,'warn'));
       schedulePwaUpdateEvaluation(250);
     }
   }),
@@ -3785,7 +3712,7 @@ if(!Object.isFrozen(SessionHandoffRuntime)||SessionHandoffRuntime.format!=='stud
 BackupActions=BackupActionsHostModule.createControls(Object.freeze({
   document,controller:BackupController,processing:Exports,protection:BackupProtectionHost,
   device:()=>DeviceBackup,providers:BackupProviderRuntime,presentation:BackupPresentation,
-  verifiedAt:source=>verifiedRecoveryState.providers[source]?.at||'',timeLabel:storageHealthTime,
+  verifiedAt:source=>VerifiedRecovery.verified(source)?.at||'',timeLabel:storageHealthTime,
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
   resolveFileOpen:()=>NoticeCoordinator.resolveEvent('file','file-open'),
   foregroundChanged,scheduleSyncStatus,renderProfile:()=>renderProfile(),
@@ -3974,7 +3901,7 @@ let deviceBackupInstallPromise=null;
 function ensureDeviceBackupInstalled(){
   // Startup and reset recovery share the same installation/permission read.
   // A second caller must not mistake an in-flight installation for readiness.
-  if(!deviceBackupInstallPromise)deviceBackupInstallPromise=reconcileStartupChangeClock().then(()=>DeviceBackup.install()).catch(error=>{deviceBackupInstallPromise=null;throw error;});
+  if(!deviceBackupInstallPromise)deviceBackupInstallPromise=VerifiedRecovery.reconcileStartupChangeClock().then(()=>DeviceBackup.install()).catch(error=>{deviceBackupInstallPromise=null;throw error;});
   return deviceBackupInstallPromise;
 }
 function beginStorageResetHold(clearedAt){
@@ -4114,7 +4041,7 @@ DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze({
       choices:[...rows.map(row=>({value:row.name,label:row.name,description:`${row.versions} version${row.versions===1?'':'s'}${row.newest?` · newest ${new Date(row.newest).toLocaleString()}`:''}`})),{value:'',label:'Start a new backup folder',description:backupFolderName({device:true}),kind:'primary'}]
     }),
     repositoryOwner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId(),name:backupFolderName({device:true})}),
-    render:renderDeviceBackup,sourceRevision:()=>currentBackupSourceRevision(),verifiedAt:()=>verifiedRecoveryState.providers['device-folder']?.at||''
+    render:renderDeviceBackup,sourceRevision:()=>currentBackupSourceRevision(),verifiedAt:()=>VerifiedRecovery.verified('device-folder')?.at||''
   }),
   presentation:BackupPresentation,
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
@@ -4204,7 +4131,7 @@ AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTI
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
-BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>verifiedRecoveryState.providers[id]?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>{const empty=await canonicalLocalRecoveryEmpty();return empty===null?null:!empty;}}));
+BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>VerifiedRecovery.verified(id)?.sourceRevision||'',current:()=>currentBackupSourceRevision(),ready:async()=>{const empty=await canonicalLocalRecoveryEmpty();return empty===null?null:!empty;}}));
 BackupProviderRuntime.configureSessionOwnership(Object.freeze({
   installationId:()=>InstallationIdentity.getId(),
   today:()=>todayISO(),
@@ -5164,7 +5091,7 @@ function installApplicationDomBindings(){
   NoteSyncPopover.install();
   AttachmentLibrary.install();
   void installAttachmentIntegrityAudit();
-  void installVerifiedRecoveryFreshness().catch(error=>AppDiagnostics.capture('backup.freshness-startup',error,'warn'));
+  void VerifiedRecovery.install().catch(error=>AppDiagnostics.capture('backup.freshness-startup',error,'warn'));
   OwnershipUiProjection.install();
   BlockedActionHint.install();
   RichTextRuntime.install();

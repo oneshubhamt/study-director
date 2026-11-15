@@ -49,8 +49,35 @@ export interface CanonicalCommitController{
   handle(event:CanonicalCommitEvent):void;
   changesAttachmentReferences(event:CanonicalCommitEvent):boolean;
 }
+export type VerifiedRecoveryCopy=Readonly<{at:string;sourceRevision:string;format:number|null;verified?:boolean}>;
+export type VerifiedRecoveryState=Readonly<{version:3;file:VerifiedRecoveryCopy|null;providers:Readonly<Record<string,VerifiedRecoveryCopy>>}>;
+export type VerifiedBackupReceipt=Readonly<{source:string;sourceRevision:string;verified?:boolean;attachmentsComplete?:boolean}>;
+export interface VerifiedRecoveryInput{
+  readonly metadata:Readonly<{read():Promise<unknown>;write(value:VerifiedRecoveryState):Promise<unknown>}>;
+  readonly storageHealth:Pick<StorageHealthController,'snapshot'|'updateHistory'>;
+  readonly mutationEpoch:Readonly<{latestChangeAt(recorded:string):Promise<string>}>;
+  readonly backupVersion:number;
+  sourceRevision():string;
+  refreshProviders():unknown;
+  capture(scope:string,error:unknown,level:'warn'|'error'):unknown;
+  nowIso():string;
+}
+export interface VerifiedRecoveryController{
+  readonly format:'study-director.verified-recovery-readiness';readonly contractVersion:1;
+  state():VerifiedRecoveryState;
+  verified(source:string):VerifiedRecoveryCopy|null;
+  entries(state?:VerifiedRecoveryState):readonly VerifiedRecoveryCopy[];
+  lastBackupTime(state?:VerifiedRecoveryState):number;
+  read():Promise<VerifiedRecoveryState>;
+  record(copy:VerifiedBackupReceipt):Promise<boolean>;
+  verifyFreshCurrentBackup():Promise<Readonly<{ok:boolean;verifiedCopies:number;latestVerifiedAt:string}>>;
+  reconcileChangeClock():Promise<boolean>;
+  reconcileStartupChangeClock():Promise<boolean>;
+  install():Promise<VerifiedRecoveryState>;
+}
 export interface BackupReadinessHostContract{
   readonly format:'study-director.backup-readiness-host-module';readonly contractVersion:1;
   createStorageHealth(input:Readonly<StorageHealthInput>):Readonly<StorageHealthController>;
   createCanonicalCommit(input:Readonly<CanonicalCommitInput>):Readonly<CanonicalCommitController>;
+  createVerifiedRecovery(input:Readonly<VerifiedRecoveryInput>):Readonly<VerifiedRecoveryController>;
 }
