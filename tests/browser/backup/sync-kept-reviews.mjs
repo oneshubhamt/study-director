@@ -84,6 +84,10 @@ try{
   const openOnA=(await reviews(a)).filter(review=>!review.resolvedAt).map(review=>review.id);
   const syncedBefore=(await sync(a)).syncedAt;
   await refocus(a);
+  await waitFor(async()=>{
+    const state=await sync(a),rows=await reviews(a),byId=new Map(rows.map(review=>[review.id,review]));
+    return state.behind===false&&state.catchingUp!==true&&state.syncedAt!==syncedBefore&&kept.every(review=>!!byId.get(review.id)?.resolvedAt);
+  },{label:'A receives B’s kept-version resolution',timeout:120000});
   const state=await sync(a);
   assert.equal(state.behind,false,'A is in step with Drive');
   assert.notEqual(state.syncedAt,syncedBefore,'A completes a sync after B resolves its kept versions');
