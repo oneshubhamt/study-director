@@ -117,6 +117,17 @@ The Notes list is a tree in name order, Support Activities first. A branch opens
 
 **Notes not yet written.** Four kinds of row have nothing written, each labelled plainly in the open note: a new note ("Not written yet"), kept in the list in memory only until it is written or discarded (Delete reads Discard); an Area of today's plan with no note ("In today’s plan · not written yet"), which renames the Area in the plans; a parent with no note of its own ("Holds 2 notes"), which moves the notes under it; and a saved note whose text was cleared ("Empty · edited …"). The first three can be renamed and moved like any note. A cleared note with nothing on its linked-notes bar is removed once it has stayed that way for 7 days, the same way Delete removes an empty note, at load, when Recently deleted opens and in the daily upkeep (owner, 2026-11-15). Parent notes appear as closed "From GS2" sections, drawn when opened and refreshed without disturbing the editor. Support Activities keeps its name and cannot be deleted, so it has no menu; it is one shared note, not a folder, so New offers no "Inside" for it. No other note takes its name, alone or at the start of a path: New, Move and Rename refuse it, and an imported file of that name becomes "Support Activities (2)" (`reservedNoteTitle`). It is stored with its reserved key as its label, which is its identity, so anything people read names it through `shownNote` (the picker, the linked-notes bar, "Linked from", note-link titles, exports) or `noteName` (save warnings, clash notices and the "(unsaved copy)" note, the kept-versions dialog, the Combine summary). Deleting moves a note to Recently deleted, at the bottom of the list and opening upward, with Undo; a deleted note opens read-only with Restore and Delete forever. On phones the list fills the panel and opening a note shows it full width with a back button.
 
+## Where the code lives
+
+| Part | File |
+|---|---|
+| The Notes section of the Library: list, open note, New, Move, menus, Recently deleted, export selection | `source/core/library-notes.js` (created by `library.js`, which keeps the section switch, Days, Diary and Data) |
+| Which notes are listed, in tree order; name rules, including the reserved "Support Activities" | `source/core/note-catalogue.js` |
+| Full-text search of the list (the worker client) | `source/core/note-search.js`, with `rich-text/search-worker.ts` |
+| Links, the linked-notes bar, tags | `source/core/note-links.js` |
+| Storage, saving, clashes, Recently deleted | `source/core/repositories-notes.js`, `source/core/save-lane.js` |
+| The editor | `rich-text/editor.ts` on vendored Wordgard |
+
 ## Limits and speed
 
 A note holds up to 20,000 words and a library up to 2,000 notes (one limit, `maxNotes`, everywhere). Measured at 2,000 notes holding 2.3 million words (18 MB): the app opens in about 2.5 s and never freezes for more than 0.1 s; typing costs the app under 2 ms a keystroke; search takes 0.25 s the first time and 0.03 s after; a full backup takes 3.0 s. `tests/browser/library/notes-at-limit.mjs` repeats the measurement and fails if it slows again. The tree shows 100 rows at a time, so no faster tree was needed.

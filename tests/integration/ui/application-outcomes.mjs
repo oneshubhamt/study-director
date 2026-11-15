@@ -62,7 +62,7 @@ const noop=()=>{};
 // Actual Library export completion policy, including selection retention on
 // cancellation/failure and honest download-versus-verification wording.
 {
-  const source=fs.readFileSync('source/core/library.js','utf8'),{coordinator,port}=createNotifications('library');
+  const source=fs.readFileSync('source/core/library-notes.js','utf8'),{coordinator,port}=createNotifications('library');
   let result={status:'cancelled'},failure=null;
   const context={notifications:port,noteExportBusy:false,noteSelection:new Set(['one']),noteSelectionMode:true,noteEntries:()=>[],updateNoteSelectionControls:noop,renderNotes:noop,console:{error:noop},exportKeys:async()=>{if(failure)throw failure;return result;}};
   vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    async function exportSelectedNotes('),source.indexOf('    function setNotesStatus(')),context);

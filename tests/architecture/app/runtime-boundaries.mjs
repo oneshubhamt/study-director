@@ -209,7 +209,7 @@ for(const token of ['--sd-motion-workspace-open-duration','--sd-motion-workspace
   assert.ok(app.includes(token),`presentation manifest exposes ${token}`);
   assert.ok(core.includes(token),`core presentation profile defines ${token}`);
 }
-for(const source of [insights,fs.readFileSync('source/core/navigation.js','utf8'),fs.readFileSync('source/core/library.js','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
+for(const source of [insights,fs.readFileSync('source/core/navigation.js','utf8'),fs.readFileSync('source/core/library.js','utf8'),fs.readFileSync('source/core/library-notes.js','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
   assert.doesNotMatch(source,/startViewTransition|viewTransitionName|view-transition-name/,
     'navigation and lazy feature surfaces must not start snapshot transitions');
 }
@@ -240,7 +240,7 @@ assert.doesNotMatch(fs.readFileSync('source/core/interactions.js','utf8'),/prese
   'interaction prompts have no dead snapshot-interruption dependency');
 assert.doesNotMatch(fs.readFileSync('source/external/guide.js','utf8'),/replaceGuidePanel|motion\.replace|appearance\.presentation\.motion/,
   'Guide structural replacements update the live DOM directly');
-assert.doesNotMatch(fs.readFileSync('source/core/library.js','utf8'),/transition\(\{oldElement|motion\.replace/,
+assert.doesNotMatch(fs.readFileSync('source/core/library.js','utf8')+fs.readFileSync('source/core/library-notes.js','utf8'),/transition\(\{oldElement|motion\.replace/,
   'Library saved-day replacement updates the live DOM directly');
 assert.doesNotMatch(app,/FloatingTimer|documentPictureInPicture|minimise-timer|sd-floating-timer/,
   'retired manual/fallback floating-timer and Document PiP UI cannot re-enter the application shell');
