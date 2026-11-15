@@ -1,6 +1,10 @@
 import type {AssetStorageModule} from '../../source/core/asset-storage.ts';
 import type {BackupModule} from '../../source/core/backup.ts';
 import type {BackupRecoveryHostModule} from '../../source/core/backup-recovery-host.ts';
+import type {ExportsModule} from '../../source/core/exports.ts';
+import type {PlanHostModule} from '../../source/core/plan-host.ts';
+import type {ReconciliationUiModule} from '../../source/core/reconciliation-ui.ts';
+import type {BackupRuntimeHostInput} from '../backup-runtime-host.ts';
 import type {ReconciliationUiFactory} from '../../source/core/reconciliation-ui.ts';
 import type {RepositoriesModule} from '../../source/core/repositories.ts';
 import type {RichTextApi} from '../../rich-text/editor.ts';
@@ -62,3 +66,25 @@ void providerPort;
 recoveryModule.createKeptVersions({...keptInput,reviews:Object.freeze({list:async()=>[{id:'bad'}]})});
 // @ts-expect-error -- reconciliation must use the actual rich-text editor contract.
 uiModule.createController({ports:{...uiInput.ports,richText:{...uiInput.ports.richText,mountRichTextEditor:async()=>({})}}});
+
+declare const exportsModule:ExportsModule;
+declare const planHost:PlanHostModule;
+declare const reconciliationUiModule:ReconciliationUiModule;
+declare const runtimeModule:BackupModule;
+declare const planData:ReturnType<PlanHostModule['createData']>;
+declare const planController:ReturnType<PlanHostModule['createController']>;
+declare const processing:ReturnType<ExportsModule['createCoordinator']>;
+declare const protection:ReturnType<ExportsModule['createProtection']>;
+declare const reconciliationUi:ReturnType<ReconciliationUiModule['createController']>;
+
+const runtimeHostCoreProviders=Object.freeze({
+  module:runtimeModule,appData,personal:Object.freeze({draft:planController.draft,data:planData})
+});
+const runtimeHostModule=runtimeModule satisfies BackupRuntimeHostInput<unknown>['module'];
+const runtimeHostAppData=appData satisfies BackupRuntimeHostInput<unknown>['appData'];
+const runtimeHostPlanData=planData satisfies BackupRuntimeHostInput<unknown>['personal']['data'];
+const runtimeHostPlanDraft=planController.draft satisfies BackupRuntimeHostInput<unknown>['personal']['draft'];
+const runtimeHostProcessing=processing satisfies BackupRuntimeHostInput<unknown>['processing'];
+const runtimeHostProtection=protection satisfies BackupRuntimeHostInput<unknown>['protection'];
+const runtimeHostReconciliation=reconciliationUi satisfies BackupRuntimeHostInput<unknown>['noteReconciliation']['controller'];
+void runtimeHostCoreProviders;void runtimeHostModule;void runtimeHostAppData;void runtimeHostPlanData;void runtimeHostPlanDraft;void runtimeHostProcessing;void runtimeHostProtection;void runtimeHostReconciliation;

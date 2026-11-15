@@ -1,6 +1,8 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome,StorageResetController,StorageResetInput,StorageResetRecoveryResult} from '../../types/backup-recovery-host.ts';
 import type {RecoverySpec,ManagedRecoveryInput} from '../../types/managed-recovery.ts';
+import type {BackupRuntimeHostController,BackupRuntimeHostInput,ImportedAsset,Signal} from '../../types/backup-runtime-host.ts';
+import type {BackupRuntimeInput} from '../../types/backup.ts';
 const sdBackupRecoveryHostFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'backup-recovery-host','study-director.backup-recovery-host-module'>|undefined;
@@ -119,6 +121,116 @@ const createModule=()=>{
       }finally{void refresh();}
     }
     return freeze({format:'study-director.kept-versions' as const,contractVersion:1 as const,refresh,review,count:()=>count,note:(id:string)=>notes.has(String(id||''))});
+  }
+
+  function createRuntime<Token>(input:Readonly<BackupRuntimeHostInput<Token>>):Readonly<BackupRuntimeHostController>{
+    exactObject(input,['module','configuration','appData','storageHealthKey','storageHealth','storageGeneration','personal','files','processing','protection','backgroundAvailable','assets','referenceRevision','mutationGeneration','baseline','codecs','reconciliation','noteReconciliation','session','domain','view','events','verifiedRecovery','interactions','operations','environment','diagnostics'],'Backup runtime host input');
+    if(!Object.isFrozen(input.module)||input.module.format!=='study-director.backup-module'||input.module.contractVersion!==1)throw new TypeError('Backup runtime module is unavailable or incompatible.');
+    let fastFenceReady=false;
+    function sourceRevision(){
+      const stored=input.appData.local.getJson(input.storageHealthKey,null),memory=input.storageHealth.snapshot();let latest='',latestAt=NaN;
+      const storedRow=stored&&typeof stored==='object'?stored as Record<string,unknown>:null;
+      for(const value of [storedRow?.['lastLocalSaveAt'],memory.lastLocalSaveAt]){
+        const revision=String(value||''),at=Date.parse(revision);
+        if(Number.isFinite(at)&&(!Number.isFinite(latestAt)||at>latestAt)){latest=revision;latestAt=at;}
+      }
+      return latest;
+    }
+    async function fullSnapshotRevision(){
+      return JSON.stringify([
+        await input.appData.dailyRecords.datasetRevision(),await input.appData.deletionRecovery.savedDays(),await input.appData.deletionRecovery.notes(),await input.appData.deletionRecovery.attachments(),
+        input.referenceRevision(),await input.personal.data.exportData({flush:false}),input.personal.inputValue(),await input.assets.list()
+      ]);
+    }
+    async function snapshotRevision(options:Readonly<{full?:boolean}>={}){
+      if(options.full===true||!fastFenceReady||!input.appData.mutationEpoch.eligible())return fullSnapshotRevision();
+      try{
+        const epoch=await input.appData.mutationEpoch.read();if(!epoch)return fullSnapshotRevision();
+        return `study-director.fast-capture-fence.v1|${epoch.token}|${input.mutationGeneration()}|${sourceRevision()}`;
+      }catch(error){input.diagnostics.capture('backup.fast-capture-fence',error,'warn');return fullSnapshotRevision();}
+    }
+    async function importAttachments(items:readonly ImportedAsset[],options:Readonly<{signal?:Signal;replace?:boolean}>={}){
+      return input.assets.during(async()=>{
+        const token=input.assets.issueToken('restore attachments'),staged:AssetMetadata[]=[],rows:[string,AssetMetadata][]=[],contents=new Map<string,AssetMetadata>();
+        const local=new Map((await input.assets.list()).map(row=>[row.hash+':'+row.size,row] as const));
+        const check=()=>{input.assets.assertToken(token,'restore attachments');if(options.signal?.aborted)throw Object.assign(new Error('Restore cancelled.'),{name:'AbortError'});};
+        try{
+          for(const item of items){
+            check();const group=item.checksum+':'+item.size;let content=contents.get(group)||local.get(group);
+            if(!content){
+              const blob=await input.assets.identify(item.blob);if(blob.type!==item.mimeType)throw new Error('Backup attachment type does not match its bytes.');
+              content=await input.assets.stage(item.assetId,blob,{token,...(options.signal?{signal:options.signal}:{}),check});staged.push(content);
+              if(content.hash!==item.checksum)throw new Error('Restored attachment failed stored-byte verification.');
+            }
+            contents.set(group,content);rows.push([item.assetId,{...content,type:item.mimeType,name:item.name,library:item.library}]);
+          }
+          check();await input.assets.publish(rows,token,check,{restoreLabels:true,replaceAll:options.replace===true});input.assets.invalidateLibrary();return rows.length;
+        }catch(error){await input.assets.discard(staged).catch(()=>{});throw error;}
+      });
+    }
+    const persistence:BackupRuntimeInput['ports']['persistence']=freeze({
+      activeSessionLoad:(retry=0,options={})=>input.appData.activeSession.load(retry,options),activeSessionSave:(value,options)=>input.appData.activeSession.save(value,options),
+      activeSessionClear:()=>input.appData.activeSession.clear(),activeSessionSettled:()=>input.appData.activeSession.settled(),
+      dailyRecordBackupDates:()=>input.appData.dailyRecords.backupDates(),dailyRecordBackupMonth:(month,options)=>input.appData.dailyRecords.backupMonth(month,options),
+      dailyRecordDocuments:(dates,options)=>input.appData.dailyRecords.documents(dates,options),dailyRecordImportBatches:(records,options)=>input.appData.dailyRecords.importBatches(records,options),
+      dailyRecordRemove:(date,options)=>input.appData.dailyRecords.remove(date,options),dailyRecordTimestamp:value=>input.appData.dailyRecords.timestamp(value),
+      notesExportPayload:()=>input.appData.notes.exportPayload(),notesReadFreshPayload:()=>input.appData.notes.readFreshPayload(),notesReadFreshItems:keys=>input.appData.notes.readFreshItems(keys),
+      notesFlush:options=>input.appData.notes.flush(options),notesNormalizePayload:value=>input.appData.notes.normalizePayload(value),notesAlignByTitle:(value,deletedIds)=>input.appData.notes.alignByTitle(value,deletedIds),
+      notesTrashKey:key=>input.codecs.dailyRecord.noteKeys.trash(key),notesFailure:()=>input.appData.notes.failure(),
+      restoreJournalPrepare:async value=>{
+        const backupFile=await input.processing.run('file.persist',{file:value.blob}),{blob,...metadata}=value;
+        try{return await input.appData.restoreJournal.prepare({...metadata,backupFile});}
+        catch(error){
+          try{const journal=await input.appData.restoreJournal.read();if(journal?.payload?.backupFile?.name!==backupFile.name)await input.files.release(backupFile.name);}
+          catch(probeError){input.diagnostics.capture('backup.restore-journal-orphan-check',probeError,'warn');}
+          throw error;
+        }
+      },
+      restoreJournalRead:async()=>{const journal=await input.appData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await input.processing.run('file.read',{ref})}}:journal;},
+      restoreJournalMark:async(id,phase)=>{const marked=await input.appData.restoreJournal.mark(id,phase);if(phase==='verified')input.events.settleStorageReset();return marked;},
+      restoreJournalClear:async id=>{
+        const journal=await input.appData.restoreJournal.read();await input.appData.restoreJournal.clear(id);
+        if(journal?.payload.backupFile)try{await input.files.release(journal.payload.backupFile.name);}catch(error){input.diagnostics.capture('backup.restore-journal-file-release',error,'warn');}
+      },
+      personalSettle:async options=>{const backupCapture=options?.backupCapture===true;if(input.personal.canMutate()&&await input.personal.draft.flush({backupCapture})===false)throw new Error('The current Plan draft could not be safely settled before backup.');await input.personal.data.settled({backupCapture});return true;},
+      personalExport:options=>input.personal.data.exportData(options),personalImport:value=>input.personal.data.importData(value),personalVerify:value=>input.personal.data.verify(value),
+      sourceRevision,snapshotRevision,storageGeneration:input.storageGeneration,canonicalMutationEpochRead:()=>input.appData.mutationEpoch.read(),canonicalPreparationRebase:()=>input.appData.mutationEpoch.rebasePreparation(),
+      preparationUnitStamps:()=>input.appData.preparationUnits.list(),preparationUnitReplace:units=>input.appData.preparationUnits.replace(units),installationId:()=>input.appData.provenance.installationId(),
+      deletionRecoveryFlush:()=>input.appData.deletionRecovery.flush(),deletionRecoverySavedDays:()=>input.appData.deletionRecovery.savedDays(),deletionRecoveryReplaceSavedDays:values=>input.appData.deletionRecovery.replaceSavedDays(values),
+      deletionRecoveryNotes:()=>input.appData.deletionRecovery.notes(),deletionRecoveryReplaceNotes:values=>input.appData.deletionRecovery.replaceNotes(values),deletionRecoveryAttachments:()=>input.appData.deletionRecovery.attachments(),
+      deletionRecoveryReplaceAttachments:values=>input.appData.deletionRecovery.replaceAttachments(values),deletionRecoveryClearAttachment:assetId=>input.appData.deletionRecovery.clearAttachment(assetId),
+      reconciliationBaseRead:()=>input.baseline.readHeader(),reconciliationBaseReadNotes:keys=>input.baseline.readNotes(keys),reconciliationBaseReadDayAncestry:(dates,checkpointId)=>input.baseline.readDayAncestry(dates,checkpointId),
+      reconciliationBaseWrite:(checkpointId,spec)=>input.baseline.write(checkpointId,spec),pendingReviewsList:()=>input.appData.pendingReviews.list(),pendingReviewsReadItems:ids=>input.appData.pendingReviews.readItems(ids),
+      pendingReviewsMerge:values=>input.appData.pendingReviews.merge(values),pendingReviewsReplace:values=>input.appData.pendingReviews.replace(values),pendingReviewsResolve:ids=>input.appData.pendingReviews.resolve(ids)
+    });
+    const assets:BackupRuntimeInput['ports']['assets']=freeze({
+      get:id=>input.assets.get(id),put:(id,blob)=>input.assets.put(id,blob),keys:()=>input.assets.keys(),list:()=>input.assets.list(),
+      importAll:(items,signal)=>importAttachments(items,{signal}),restoreAll:items=>importAttachments(items,{replace:true}),
+      removeMany:ids=>input.assets.removeMany(ids),removeMetadata:ids=>input.assets.removeMetadata(ids),scheduleMaintenance:delay=>input.assets.scheduleMaintenance(delay)
+    });
+    const exportsPort:BackupRuntimeInput['ports']['exports']=freeze({
+      backgroundAvailable:input.backgroundAvailable,cancel:reason=>input.processing.cancel(reason),protect:(file,options)=>input.protection.protect(file,options),unprotect:(file,options)=>input.protection.unprotect(file,options),
+      followProtection:(file,options)=>input.protection.follow(file,options),check:()=>input.processing.check(),scope:operation=>input.assets.during(()=>input.processing.scope(operation)),
+      job:(operation,options)=>input.assets.during(()=>input.processing.job(operation,options)),run:(...args)=>input.processing.run(...args),download:file=>input.processing.download(file),
+      chooseSave:file=>input.processing.chooseSave(file),save:(file,handle)=>input.processing.save(file,handle)
+    });
+    let runtime!:ReturnType<BackupRuntimeHostInput<Token>['module']['createRuntime']>;
+    const events:BackupRuntimeInput['ports']['events']=freeze({
+      libraryChanged:()=>input.events.libraryChanged(),reconcileNotes:input.events.reconcileNotes,restoreNotesSnapshot:input.events.restoreNotesSnapshot,
+      restoreSessionState:input.events.restoreSessionState,verifyActiveSessionRuntime:input.events.verifyActiveSessionRuntime,
+      restoredFromFile:()=>{input.events.notifyBackupChange({urgent:true,reason:'file-restore'});return runtime.providers.automaticActive();},
+      backupCompleted:(context)=>{
+        if(context?.userExport)input.events.settleStorageReset();input.storageHealth.markOk('backup');input.events.resetBackupNudge();input.events.refreshStorageWarning();
+        if(context?.copy)void input.verifiedRecovery.record(context.copy).catch(error=>input.diagnostics.capture('backup.freshness-receipt',error,'warn'));input.events.scheduleUpdate(250);
+      }
+    });
+    runtime=input.module.createRuntime(freeze({ports:freeze({
+      configuration:input.configuration,persistence,assets,codecs:input.codecs,reconciliation:input.reconciliation,
+      noteReconciliation:freeze({resolve:options=>input.noteReconciliation.withMaintenancePaused(()=>input.noteReconciliation.controller.resolve(options)),merge:input.noteReconciliation.merge}),
+      exports:exportsPort,session:input.session,domain:input.domain,view:input.view,events,interactions:input.interactions,operations:input.operations,environment:input.environment,diagnostics:input.diagnostics
+    })}));
+    if(!Object.isFrozen(runtime)||runtime.format!=='study-director.backup-runtime'||runtime.contractVersion!==1)throw new Error('Study Director Backup runtime is unavailable or incompatible.');
+    return freeze({format:'study-director.backup-runtime-host' as const,contractVersion:1 as const,runtime,setFastFenceReady:(value:boolean)=>(fastFenceReady=value),sourceRevision,snapshotRevision});
   }
 
   function createRetainedBackupFiles(input:Readonly<import('../../types/backup-recovery-host.ts').RetainedBackupFilesInput>):Readonly<import('../../types/backup-recovery-host.ts').RetainedBackupFilesController>{
@@ -738,7 +850,7 @@ const createModule=()=>{
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }
-  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost,createPendingStore,createKeptVersions,createRetainedBackupFiles,createStorageReset});
+  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createRuntime,createHost,createPendingStore,createKeptVersions,createRetainedBackupFiles,createStorageReset});
 };
 registry.define('backup-recovery-host',1,createModule);return createModule;
 })();

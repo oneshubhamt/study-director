@@ -1113,7 +1113,7 @@ const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Objec
   codec:ReconciliationBaselineCodec,meta:HostAppMeta,
   families:Object.freeze({header:'reconciliationBase',notes:'reconciliationBaseNotePrefix',days:'reconciliationBaseDayPrefix'})
 }));
-let richAssetReferenceRevision=0,captureMutationGeneration=0,backupFastFenceReady=false;
+let richAssetReferenceRevision=0,captureMutationGeneration=0;
 let imagePreparationCount=0,pwaWorkRevision=0;
 document.addEventListener('input',()=>{pwaWorkRevision++;},true);
 document.addEventListener('change',()=>{pwaWorkRevision++;},true);
@@ -3411,46 +3411,6 @@ function verifyRestoredSessionRuntime(...args){return SessionActions.verifyResto
 
 // Byte staging finishes before the single attachment metadata commit. Rollback
 // replaces the catalogue; physical reclamation still waits for all readers.
-async function importBackupAttachments(items,{signal,replace=false}={}){
-  return AttachmentStorage.during(async()=>{
-    const token=AppOwnership.issueWriteToken('restore attachments'),staged=[],rows=[],contents=new Map();
-    const local=new Map((await AttachmentStorage.list()).map(row=>[row.hash+':'+row.size,row]));
-    const check=()=>{AppOwnership.assertWriteToken(token,'restore attachments');if(signal?.aborted)throw Object.assign(new Error('Restore cancelled.'),{name:'AbortError'});};
-    try{
-      for(const item of items){
-        check();const group=item.checksum+':'+item.size;let content=contents.get(group)||local.get(group);
-        if(!content){
-          const blob=await AttachmentsModule.identify(item.blob);
-          if(blob.type!==item.mimeType)throw new Error('Backup attachment type does not match its bytes.');
-          content=await AttachmentStorage.put(item.assetId,blob,{stage:true,token,signal,check});staged.push(content);
-          if(content.hash!==item.checksum)throw new Error('Restored attachment failed stored-byte verification.');
-        }
-        contents.set(group,content);rows.push([item.assetId,{...content,type:item.mimeType,name:item.name,library:item.library}]);
-      }
-      check();await AttachmentStorage.publish(rows,token,check,{restoreLabels:true,replaceAll:replace});
-      invalidateAttachmentLibrary();return rows.length;
-    }catch(error){await AttachmentStorage.discard(staged).catch(()=>{});throw error;}
-  });
-}
-function currentBackupSourceRevision(){
-  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),memory=readStorageHealth();let latest='',latestAt=NaN;
-  for(const value of [stored&&stored.lastLocalSaveAt,memory.lastLocalSaveAt]){
-    const revision=String(value||''),at=Date.parse(revision);
-    if(Number.isFinite(at)&&(!Number.isFinite(latestAt)||at>latestAt)){latest=revision;latestAt=at;}
-  }
-  return latest;
-}
-async function fullBackupSnapshotRevision(){
-  return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.notes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
-}
-async function backupSnapshotRevision(options={}){
-  if(options&&options.full===true||!backupFastFenceReady||!AppData.mutationEpoch.eligible())return fullBackupSnapshotRevision();
-  try{
-    const epoch=await AppData.mutationEpoch.read();
-    if(!epoch)return fullBackupSnapshotRevision();
-    return `study-director.fast-capture-fence.v1|${epoch.token}|${captureMutationGeneration}|${currentBackupSourceRevision()}`;
-  }catch(error){AppDiagnostics.capture('backup.fast-capture-fence',error,'warn');return fullBackupSnapshotRevision();}
-}
 const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze({ports:Object.freeze({
   configuration:Object.freeze({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
   richText:Object.freeze({mountRichTextEditor:RichTextApi.mountRichTextEditor,compareRichText:RichTextApi.compareRichText,mergeIncomingAdditions:RichTextApi.mergeIncomingAdditions,appendIncomingAdditions:RichTextApi.appendIncomingAdditions,mergeThreeWay:RichTextApi.mergeThreeWay}),
@@ -3458,181 +3418,47 @@ const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   view:Object.freeze({document,requestAnimationFrame:callback=>requestAnimationFrame(callback),cancelAnimationFrame:id=>cancelAnimationFrame(id)})
 })}));
-const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freeze({
+const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze({
+  module:BackupModule,
   configuration:Object.freeze({
-    appVersion:APP_VERSION,
-    backupVersion:DATA_CONTRACT.schemas.Backup.version,
-    starterSchedule:FACTORY_DEFAULTS.scheduleText,
-    limits:Object.freeze({
-      backupChunkItems:APP_LIMITS.backupChunkItems,
-      backupMaxCompressedBytes:APP_LIMITS.backupMaxCompressedBytes,
-      backupMaxFileBytes:APP_LIMITS.backupMaxFileBytes,
-      backupMaxAssetDescriptors:APP_LIMITS.backupMaxAssetDescriptors,
-      maxImportRecords:APP_LIMITS.maxImportRecords,
-      maxNoteLinks:APP_LIMITS.maxNoteLinks,
-      maxNotes:APP_LIMITS.maxNotes,
-      maxPendingReviews:APP_LIMITS.maxPendingReviews
-    })
+    appVersion:APP_VERSION,backupVersion:DATA_CONTRACT.schemas.Backup.version,starterSchedule:FACTORY_DEFAULTS.scheduleText,
+    limits:Object.freeze({backupChunkItems:APP_LIMITS.backupChunkItems,backupMaxCompressedBytes:APP_LIMITS.backupMaxCompressedBytes,backupMaxFileBytes:APP_LIMITS.backupMaxFileBytes,backupMaxAssetDescriptors:APP_LIMITS.backupMaxAssetDescriptors,maxImportRecords:APP_LIMITS.maxImportRecords,maxNoteLinks:APP_LIMITS.maxNoteLinks,maxNotes:APP_LIMITS.maxNotes,maxPendingReviews:APP_LIMITS.maxPendingReviews})
   }),
-  persistence:Object.freeze({
-    activeSessionLoad:(retry=0,options={})=>AppData.activeSession.load(retry,options),
-    activeSessionSave:(value,options)=>AppData.activeSession.save(value,options),
-    activeSessionClear:()=>AppData.activeSession.clear(),
-    activeSessionSettled:()=>AppData.activeSession.settled(),
-    dailyRecordBackupDates:()=>AppData.dailyRecords.backupDates(),
-    dailyRecordBackupMonth:(month,options)=>AppData.dailyRecords.backupMonth(month,options),
-    dailyRecordDocuments:(dates,options)=>AppData.dailyRecords.documents(dates,options),
-    dailyRecordImportBatches:(records,options)=>AppData.dailyRecords.importBatches(records,options),
-    dailyRecordRemove:(date,options)=>AppData.dailyRecords.remove(date,options),
-    dailyRecordTimestamp:value=>AppData.dailyRecords.timestamp(value),
-    notesExportPayload:()=>AppData.notes.exportPayload(),
-    notesReadFreshPayload:()=>AppData.notes.readFreshPayload(),
-    notesReadFreshItems:keys=>AppData.notes.readFreshItems(keys),
-    notesFlush:options=>AppData.notes.flush(options),
-    notesNormalizePayload:value=>AppData.notes.normalizePayload(value),
-    notesAlignByTitle:(value,deletedIds)=>AppData.notes.alignByTitle(value,deletedIds),
-    notesTrashKey:key=>DailyRecordCodec.noteKeys.trash(key),
-    notesFailure:()=>AppData.notes.failure(),
-    restoreJournalPrepare:async value=>{
-      const backupFile=await Exports.run('file.persist',{file:value.blob}),{blob,...metadata}=value;
-      try{return await AppData.restoreJournal.prepare({...metadata,backupFile});}
-      catch(error){
-        // A failed/ambiguous commit must never discard the only rollback bytes.
-        // Release an unused producer only after a fresh journal read proves
-        // that no durable reference points to this file.
-        try{
-          const journal=await AppData.restoreJournal.read();
-          if(journal?.payload?.backupFile?.name!==backupFile.name)await BackupFiles.release(backupFile.name);
-        }catch(probeError){AppDiagnostics.capture('backup.restore-journal-orphan-check',probeError,'warn');}
-        throw error;
-      }
-    },
-    restoreJournalRead:async()=>{const journal=await AppData.restoreJournal.read();if(!journal)return null;const ref=journal.payload.backupFile;return ref?{...journal,payload:{...journal.payload,blob:await Exports.run('file.read',{ref})}}:journal;},
-    restoreJournalMark:async(id,phase)=>{const marked=await AppData.restoreJournal.mark(id,phase);if(phase==='verified')settleStorageReset();return marked;},
-    restoreJournalClear:async id=>{
-      const journal=await AppData.restoreJournal.read();
-      await AppData.restoreJournal.clear(id);
-      // Once the durable journal is retired, failed scratch disposal must not
-      // convert a verified restore into a failed restore/second rollback.
-      if(journal?.payload.backupFile)try{await BackupFiles.release(journal.payload.backupFile.name);}
-      catch(error){AppDiagnostics.capture('backup.restore-journal-file-release',error,'warn');}
-    },
-    personalSettle:async options=>{
-      const backupCapture=options&&options.backupCapture===true;
-      if(appCanMutate()&&await PlanDraftEditor.flush({backupCapture})===false)throw new Error('The current Plan draft could not be safely settled before backup.');
-      await PlanData.settled({backupCapture});
-      return true;
-    },
-    personalExport:options=>PlanData.exportData(options),
-    personalImport:value=>PlanData.importData(value),
-    personalVerify:value=>PlanData.verify(value),
-    sourceRevision:()=>currentBackupSourceRevision(),
-    snapshotRevision:options=>backupSnapshotRevision(options),
-    storageGeneration:()=>IndexedDb.lifecycle().resets,
-    canonicalMutationEpochRead:()=>AppData.mutationEpoch.read(),
-    canonicalPreparationRebase:()=>AppData.mutationEpoch.rebasePreparation(),
-    preparationUnitStamps:()=>AppData.preparationUnits.list(),
-    preparationUnitReplace:units=>AppData.preparationUnits.replace(units),
-    installationId:()=>AppData.provenance.installationId(),
-    deletionRecoveryFlush:()=>AppData.deletionRecovery.flush(),
-    deletionRecoverySavedDays:()=>AppData.deletionRecovery.savedDays(),
-    deletionRecoveryReplaceSavedDays:values=>AppData.deletionRecovery.replaceSavedDays(values),
-    deletionRecoveryNotes:()=>AppData.deletionRecovery.notes(),
-    deletionRecoveryReplaceNotes:values=>AppData.deletionRecovery.replaceNotes(values),
-    deletionRecoveryAttachments:()=>AppData.deletionRecovery.attachments(),
-    deletionRecoveryReplaceAttachments:values=>AppData.deletionRecovery.replaceAttachments(values),
-    deletionRecoveryClearAttachment:assetId=>AppData.deletionRecovery.clearAttachment(assetId),
-    reconciliationBaseRead:()=>readReconciliationBase(),
-    reconciliationBaseReadNotes:keys=>readReconciliationBaseNotes(keys),
-    reconciliationBaseReadDayAncestry:(dates,checkpointId)=>readReconciliationBaseDayAncestry(dates,checkpointId),
-    reconciliationBaseWrite:(checkpointId,spec)=>writeReconciliationBase(checkpointId,spec),
-    pendingReviewsList:()=>AppData.pendingReviews.list(),
-    pendingReviewsReadItems:ids=>AppData.pendingReviews.readItems(ids),
-    pendingReviewsMerge:values=>AppData.pendingReviews.merge(values),
-    pendingReviewsReplace:values=>AppData.pendingReviews.replace(values),
-    pendingReviewsResolve:ids=>AppData.pendingReviews.resolve(ids)
-  }),
+  appData:AppData,storageHealthKey:STORAGE_KEYS.storageHealth,storageHealth:Object.freeze({snapshot:()=>StorageHealthController.snapshot(),markOk:(source,key)=>StorageHealthController.markOk(source,key)}),
+  storageGeneration:()=>IndexedDb.lifecycle().resets,
+  personal:Object.freeze({draft:PlanDraftEditor,data:PlanData,inputValue:()=>document.getElementById('plan-input')?.value,canMutate:()=>appCanMutate()}),
+  files:BackupFiles,processing:Exports,protection:BackupProtection,backgroundAvailable:backupBackgroundAvailability,
   assets:Object.freeze({
-    get:assetId=>AttachmentStorage.get(assetId),
-    put:(assetId,blob)=>AttachmentStorage.put(assetId,blob),
-    keys:()=>AttachmentStorage.keys(),
-    list:()=>AttachmentStorage.list(),
-    importAll:(items,signal)=>importBackupAttachments(items,{signal}),
-    restoreAll:items=>importBackupAttachments(items,{replace:true}),
-    removeMany:assetIds=>RichTextAssets.removeMany(assetIds),
-    removeMetadata:assetIds=>AttachmentLibrary.removeMetadata(assetIds),
-    scheduleMaintenance:delay=>scheduleRichTextAssetMaintenance(delay)
+    during:operation=>AttachmentStorage.during(operation),get:id=>AttachmentStorage.get(id),put:(id,blob)=>AttachmentStorage.put(id,blob),keys:()=>AttachmentStorage.keys(),list:()=>AttachmentStorage.list(),
+    stage:(id,blob,options)=>AttachmentStorage.put(id,blob,{stage:true,token:options.token,...(options.signal?{signal:options.signal}:{}),check:options.check}),
+    publish:(rows,token,check,options)=>AttachmentStorage.publish(rows,token,check,options),discard:rows=>AttachmentStorage.discard(rows),
+    identify:blob=>AttachmentsModule.identify(blob),issueToken:reason=>AppOwnership.issueWriteToken(reason),assertToken:(token,reason)=>AppOwnership.assertWriteToken(token,reason),
+    removeMany:ids=>RichTextAssets.removeMany(ids),removeMetadata:ids=>AttachmentLibrary.removeMetadata(ids),invalidateLibrary:()=>invalidateAttachmentLibrary(),scheduleMaintenance:delay=>scheduleRichTextAssetMaintenance(delay)
   }),
+  referenceRevision:()=>richAssetReferenceRevision,mutationGeneration:()=>captureMutationGeneration,baseline:ReconciliationBaselineStore,
   codecs:Object.freeze({activeSession:ActiveSessionCodec,backup:RuntimeBackupCodec,dailyRecord:DailyRecordCodec,pendingReview:PendingReviewCodec}),
   reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),
-  noteReconciliation:Object.freeze({resolve:options=>withRichTextAssetMaintenancePaused(()=>NoteReconciliationUI.resolve(options)),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
-  exports:Object.freeze({backgroundAvailable:backupBackgroundAvailability,cancel:Exports.cancel,protect:BackupProtection.protect,unprotect:BackupProtection.unprotect,followProtection:BackupProtection.follow,check:Exports.check,scope:operation=>AttachmentStorage.during(()=>Exports.scope(operation)),job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,download:Exports.download,chooseSave:Exports.chooseSave,save:Exports.save}),
-  session:Object.freeze({
-    canMutate:()=>appCanMutate(),
-    cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),
-    captureSnapshot:captureSessionSnapshot,
-    hasActiveSession:hasBlockingActiveSession,
-    hasTasks:()=>TASKS.length>0,
-    toActiveSession:activeSessionPayload,
-    withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),
-    yieldSession:options=>yieldSessionToOtherDevice(options)
-  }),
-  domain:Object.freeze({
-    clampText,filenameSafeStudentName,
-    getStudentName:getStudentNameFromDisplay,
-    materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO
-  }),
-  view:Object.freeze({presentation:BackupPresentation,
-    refreshPnote,
-    refreshReview:()=>ReviewView.refresh(),
-    renderSchedule:renderSched,
-    deviceName:(id,others)=>deviceName(id,others)
-  }),
+  noteReconciliation:Object.freeze({controller:NoteReconciliationUI,withMaintenancePaused:operation=>withRichTextAssetMaintenancePaused(operation),merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
+  session:Object.freeze({canMutate:()=>appCanMutate(),cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),captureSnapshot:captureSessionSnapshot,hasActiveSession:hasBlockingActiveSession,hasTasks:()=>TASKS.length>0,toActiveSession:activeSessionPayload,withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),yieldSession:options=>yieldSessionToOtherDevice(options)}),
+  domain:Object.freeze({clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}),
+  view:Object.freeze({presentation:BackupPresentation,refreshPnote,refreshReview:()=>ReviewView.refresh(),renderSchedule:renderSched,deviceName:(id,others)=>deviceName(id,others)}),
   events:Object.freeze({
     libraryChanged:()=>{LibraryView.render();if(ReviewDayState.reminder.date)void revalidateSaveReminderAfterCanonicalConvergence();},
-    reconcileNotes:reconcileNotesThroughLifecycle,
-    restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,
-    restoreSessionState:restoreSessionStateThroughLifecycle,
-    verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
-    restoredFromFile:()=>{notifyBackupChange({urgent:true,reason:'file-restore'});return BackupProviderRuntime.automaticActive();},
-    backupCompleted:context=>{
-      if(context?.userExport)settleStorageReset();
-      markStorageHealthOk('backup');
-      backupNudgeMessage='';
-      backupNudgeCheckedAt=Date.now();
-      backupNudgeNotifiedDate='';
-      refreshStorageFallbackWarning();
-      if(context?.copy)void VerifiedRecovery.record(context.copy).catch(error=>AppDiagnostics.capture('backup.freshness-receipt',error,'warn'));
-      schedulePwaUpdateEvaluation(250);
-    }
+    reconcileNotes:reconcileNotesThroughLifecycle,restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,restoreSessionState:restoreSessionStateThroughLifecycle,verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
+    notifyBackupChange:change=>notifyBackupChange(change),settleStorageReset:()=>settleStorageReset(),
+    resetBackupNudge:()=>{backupNudgeMessage='';backupNudgeCheckedAt=Date.now();backupNudgeNotifiedDate='';},refreshStorageWarning:()=>refreshStorageFallbackWarning(),scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)
   }),
-  interactions:Object.freeze({
-    choose:options=>Interactions.choose(options),
-    configure:options=>Interactions.configure(options),
-    notify:options=>Interactions.notify(options)
-  }),
-  operations:Object.freeze({
-    assertAuthority:options=>AppMutationCoordinator.assertAuthority(options),
-    // A shared location (Drive) takes no upload while data this build cannot read is held.
-    canShare:()=>UnsupportedData.held()?'unsupported-data':true,
-    clearFault:()=>AppMutationCoordinator.clearFault(),
-    failClosed:message=>AppMutationCoordinator.failClosed(message),
-    runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation)
-  }),
-  environment:Object.freeze({
-    AbortController,
-    yieldTask:BackgroundTasks.yieldTask,
-    clearTimeout:timer=>clearTimeout(timer),
-    setTimeout:(callback,delay)=>setTimeout(callback,delay)
-  }),
+  verifiedRecovery:VerifiedRecovery,
+  interactions:Object.freeze({choose:options=>Interactions.choose(options),configure:options=>Interactions.configure(options),notify:options=>Interactions.notify(options)}),
+  operations:Object.freeze({assertAuthority:options=>AppMutationCoordinator.assertAuthority(options),canShare:()=>UnsupportedData.held()?'unsupported-data':true,clearFault:()=>AppMutationCoordinator.clearFault(),failClosed:message=>AppMutationCoordinator.failClosed(message),runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,operation)}),
+  environment:Object.freeze({AbortController,yieldTask:BackgroundTasks.yieldTask,clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay)}),
   diagnostics:Object.freeze({capture:AppDiagnostics.capture,start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail})
-})}));
-if(!Object.isFrozen(BackupRuntime)||BackupRuntime.format!=='study-director.backup-runtime'||BackupRuntime.contractVersion!==1){
-  throw new Error('Study Director Backup runtime is unavailable or incompatible.');
+}));
+if(!Object.isFrozen(BackupRuntimeHost)||BackupRuntimeHost.format!=='study-director.backup-runtime-host'||BackupRuntimeHost.contractVersion!==1){
+  throw new Error('Study Director Backup runtime host is unavailable or incompatible.');
 }
-const {
-  controller:BackupController, checkpoint:CheckpointPipeline, repository:RepositoryCheckpointPipeline, providers:BackupProviderRuntime
-}=BackupRuntime;
+const BackupRuntime=BackupRuntimeHost.runtime;
+const {controller:BackupController,checkpoint:CheckpointPipeline,repository:RepositoryCheckpointPipeline,providers:BackupProviderRuntime}=BackupRuntime;
 KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze({
   controller:Object.freeze({
     status:()=>BackupController.status(),
@@ -4977,7 +4803,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
     restoreTheme:()=>applyTheme(PRESENTATION_KERNEL.readStoredTheme((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false}),restorePresentation:()=>applyPresentation(PRESENTATION_KERNEL.readStoredPresentation((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false}),restoreFontScale:()=>applyFontScale(readFontScale()),
     hydratePlan:()=>PlanData.hydrate(),readRestoreJournal:()=>AppData.restoreJournal.read(),waitForClosedTabLease,recoverRestore:()=>BackupController.recoverInterruptedRestore(),tickClock,updateHeader:updateHeaderInfo,setInterval:(fn,ms)=>setInterval(fn,ms),setTimeout:(fn,ms)=>setTimeout(fn,ms),
     hasTasks:()=>TASKS.length>0,showEmpty,canMutate:appCanMutate,restoreSession:attemptAutoRestoreActiveSession,refreshBadge:refreshPersistedSessionBadge,inspectStorage:inspectStorageCapability,offerInstallNotice:()=>CapabilityInstallation.offerInstallNotice(),topology:()=>IndexedDb.topology(),
-    setFastFenceReady:value=>{backupFastFenceReady=value;},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock(),resumeStorageReset:resumeUnresolvedStorageReset,
+    setFastFenceReady:value=>{BackupRuntimeHost.setFastFenceReady(value);},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock(),resumeStorageReset:resumeUnresolvedStorageReset,
     installBackground:installBackgroundOwners,scheduleMaintenance:scheduleDataMaintenance,wakeBackground:reason=>wakeBackgroundOperations(reason),installSessionWatch,refreshKeptVersions:()=>KeptVersions.refresh(),announceUnsupported:()=>UnsupportedData.announce(),renderUnsupported:renderUnsupportedData,
     collectProfiles:()=>Profiles.collect(),askProfilePassword,collectFiles:()=>BackupFiles.collect(),preloadInsights:scheduleInsightsPreload,confirmBoot:()=>PwaLifecycle.confirmBoot(),offerDeviceRecovery:()=>offerDeviceRecoveryIfLocalEmpty({reason:'startup'}),
     reportUnsupported:()=>UnsupportedData.reportBlocked(),setPlanStatus,noticeCanCompact,getReviewDate,reconcileLifecycle:(...args)=>SessionLifecycle.reconcile(...args)
