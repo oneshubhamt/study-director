@@ -155,7 +155,7 @@ const STUDY_DIRECTOR_CAPABILITIES=Object.freeze({
 const {KeyedRecord,textEl,on,emptyMsg,setProgressSummary,setElementText,setElementValue,setElementClass,setElementHidden,setElementDisabled,setElementAttribute,setElementStyle,setTextSafe,cachedElements,clampText,clampArray,wipeObject,boundedInt,boundedNumber,safeBoolean,finiteNumber,optionalBoundedNumber,optionalText,sameDataValue}=FoundationHostModule.createPrimitives({document,APP_LIMITS,CompletionModel:{fromUnits:(done,total)=>CompletionModel.fromUnits(done,total)}});
 // Data access is instantiated after the codecs through the private repository module.
 let StorageHealthController=null;
-let StorageResetRecovery=null;
+let StorageResetRecovery=null,BackupNudge=null;
 let NativeCapabilities=null,CapabilityBadge=null;
 let DeviceBackup=null,BackupRecoveryHost=null,KeptVersions=null,BackupActions=null;
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
@@ -623,9 +623,7 @@ let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
 // storage health asks for a redraw during start-up.
-let backupNudgeMessage='',driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},sessionMovingHere=null,driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
-let backupNudgeCheckedAt=0;
-let backupNudgeNotifiedDate='';
+let driveConnecting=false,syncStatusTimer=null,syncStatusRing='',syncStatusSettle=null,sessionHandoff={step:'',error:''},sessionMovingHere=null,driveConnectCard=null,driveConnectCardHide=null,sessionYieldedAt=0;
 let managedRecoverySessionQuiescenceDepth=0,managedRecoveryTimerFrozenSinceMs=null;
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return !!ActiveSessionRuntime?.persistenceSuppressed();}
@@ -649,8 +647,6 @@ let realTimeAwarenessRenderKey='';
 let executePanelsRenderKey='';
 let executeProgressPanelRenderKey='';
 let scheduleEndPromptKey='';
-const BACKUP_NUDGE_MS=7*24*60*60*1000;
-const BACKUP_NUDGE_CHECK_MS=60*60*1000;
 /* APPLICATION ACTIVATION CONTRACT */
 const AppActivation=StartupHostModule.createActivation(Object.freeze({
   capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
@@ -838,7 +834,7 @@ function refreshStorageFallbackWarning(){
   for(const issue of localFailures)NoticeCoordinator.emit({source:'local-saving',id:issue.source,severity:'error',lifecycle:'failed',foreground:false,surface:'quiet',title:'Local saving failed',message:issue.message});
   const criticalMessage=localFailures.length?localFailures.map(issue=>issue.message).join('\n')+'\nKeep this tab open. Save in Review or export a backup before closing; retry after browser storage recovers.':'';
   NoticeCoordinator.publish('local-saving',{visible:!!criticalMessage,kind:'critical',title:'Local saving failed',message:criticalMessage||'Resolved.',compact:false});
-  const storageMessages=[backupNudgeMessage,...issues.filter(issue=>!failedSources.has(issue.source)).map(issue=>issue.message)].map(value=>String(value||'').trim()).filter(Boolean);
+  const storageMessages=[BackupNudge?.message()||'',...issues.filter(issue=>!failedSources.has(issue.source)).map(issue=>issue.message)].map(value=>String(value||'').trim()).filter(Boolean);
   const storageMessage=storageMessages.join('\n');
   NoticeCoordinator.publish('safety',{visible:!!safetyMessage,kind:'safety',title:'Unsaved work needs attention',message:safetyMessage||'Resolved.',compact:noticeCanCompact(safetyMessage)});
   NoticeCoordinator.publish('storage',{visible:!!storageMessage,kind:'storage',title:'Storage or recovery notice',message:storageMessage||'Resolved.',compact:noticeCanCompact(storageMessage)});
@@ -959,40 +955,7 @@ const PlanScheduleGateway=ExecutionHostModule.createScheduleGateway(Object.freez
   flushLiveDraft,scheduleFingerprint,writeLiveDraftNow,advanceTaskNoteScheduleRevision,markDayContentChanged,clearSessionSafetyMessage,
   SessionLifecycle:{run:(...args)=>SessionLifecycle.run(...args),reconcile:(...args)=>SessionLifecycle.reconcile(...args)}
 }));
-async function maybePromptBackupNudge(force=false){
-  if(!appCanMutate())return;
-  const now=Date.now();
-  if(!force&&now-backupNudgeCheckedAt<BACKUP_NUDGE_CHECK_MS)return;
-  backupNudgeCheckedAt=now;
-  let backups;
-  try{backups=await VerifiedRecovery.read();}
-  catch(error){AppDiagnostics.capture('backup.nudge-receipt-read',error,'warn');return;}
-  const health=readStorageHealth(),entries=VerifiedRecovery.entries(backups);
-  // One reminder for every kind of backup, counted from the latest backup
-  // anywhere: a verified file, a download, the Device Folder or Drive. It stays away while an
-  // automatic backup is able to run, and while a backup already holds the latest
-  // changes, however old: automatic backups only run when something changed.
-  const last=VerifiedRecovery.lastBackupTime(backups);
-  const covered=Math.max(-Infinity,...entries.map(entry=>Date.parse(entry.sourceRevision)).filter(Number.isFinite));
-  const changed=Date.parse(health.lastLocalSaveAt||''),unbacked=!Number.isFinite(covered)||!Number.isFinite(changed)||changed>covered;
-  const automatic=BackupProviderRuntime.automaticActive();
-  let due=!automatic&&unbacked&&Number.isFinite(last)&&(now-last>=BACKUP_NUDGE_MS);
-  if(!Number.isFinite(last)&&!automatic){
-    try{
-      const summaries=await AppData.dailyRecords.summaries();
-      due=Array.isArray(summaries)&&summaries.length>=7;
-    }catch(e){}
-  }
-  // Someone who backs up to Google Drive gets back to it by signing in again.
-  const drive=!!backups.providers?.['google-drive'];
-  backupNudgeMessage=due?(drive?'Backup reminder: your changes have not reached Google Drive for over a week. Sign in again in Library → Data.':'Backup reminder: the last backup is over a week old. Open Library → Data.'):'';
-  refreshStorageFallbackWarning();
-  const notifyDate=todayISO();
-  if(due&&backupNudgeNotifiedDate!==notifyDate){
-    backupNudgeNotifiedDate=notifyDate;
-    notifyUser(drive?'Sign in to Google Drive':'Back up Study Director',drive?'Your changes have not been backed up for at least seven days.':'It has been at least seven days since the last backup.',`sdm-backup-${notifyDate}`);
-  }
-}
+function maybePromptBackupNudge(force=false){return BackupNudge?BackupNudge.run(force):Promise.resolve(false);}
 /* LIVE DRAFT AND ACTIVE SESSION STORE */
 function captureSessionSnapshot(evidence=null){return ActiveSessionRuntime?.captureSnapshot(evidence)||null;}
 // Keep elapsed time and practice progress at the ownership boundary while
@@ -1231,6 +1194,17 @@ const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.f
 }));
 if(!Object.isFrozen(VerifiedRecovery)||VerifiedRecovery.format!=='study-director.verified-recovery-readiness'||VerifiedRecovery.contractVersion!==1){
   throw new Error('Study Director verified-recovery readiness is unavailable or incompatible.');
+}
+
+BackupNudge=BackupReadinessHostModule.createBackupNudge(Object.freeze({
+  verified:VerifiedRecovery,storageHealth:StorageHealthController,dueMs:7*24*60*60*1000,checkMs:60*60*1000,
+  canMutate:()=>appCanMutate(),now:()=>Date.now(),automaticActive:()=>BackupProviderRuntime.automaticActive(),
+  dailySummaryCount:async()=>{const summaries=await AppData.dailyRecords.summaries();return Array.isArray(summaries)?summaries.length:0;},
+  todayIso:()=>todayISO(),publishMessage:()=>refreshStorageFallbackWarning(),
+  notify:(title,message,tag)=>notifyUser(title,message,tag),capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
+}));
+if(!Object.isFrozen(BackupNudge)||BackupNudge.format!=='study-director.backup-nudge'||BackupNudge.contractVersion!==1){
+  throw new Error('Study Director backup reminder readiness is unavailable or incompatible.');
 }
 // Compare policy identity and ownership inside the same typed metadata transaction.
 function mutateBackupProtection(value,options){
@@ -1600,7 +1574,7 @@ function syncStatusInput(){
     newerData:UnsupportedData.held(),
     kept:KeptVersions.count(),
     storage:storage.map(issue=>({source:issue.source,label:issue.label,message:issue.message,level:issue.level})),
-    reminder:backupNudgeMessage,
+    reminder:BackupNudge?.message()||'',
     updateReady:!!(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying),
     sessionElsewhere:sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):'',
     sessionReady:sessionParkedHere()&&sessionFromElsewhere(sessionPanelSession)?sessionDevice(sessionPanelSession):'',
@@ -3446,7 +3420,7 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze({
     libraryChanged:()=>{LibraryView.render();if(ReviewDayState.reminder.date)void revalidateSaveReminderAfterCanonicalConvergence();},
     reconcileNotes:reconcileNotesThroughLifecycle,restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,restoreSessionState:restoreSessionStateThroughLifecycle,verifyActiveSessionRuntime:verifyRestoredSessionRuntime,
     notifyBackupChange:change=>notifyBackupChange(change),settleStorageReset:()=>settleStorageReset(),
-    resetBackupNudge:()=>{backupNudgeMessage='';backupNudgeCheckedAt=Date.now();backupNudgeNotifiedDate='';},refreshStorageWarning:()=>refreshStorageFallbackWarning(),scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)
+    resetBackupNudge:()=>BackupNudge?.reset(),refreshStorageWarning:()=>refreshStorageFallbackWarning(),scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay)
   }),
   verifiedRecovery:VerifiedRecovery,
   interactions:Object.freeze({choose:options=>Interactions.choose(options),configure:options=>Interactions.configure(options),notify:options=>Interactions.notify(options)}),

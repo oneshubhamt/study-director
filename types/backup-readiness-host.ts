@@ -75,10 +75,23 @@ export interface VerifiedRecoveryController{
   reconcileStartupChangeClock():Promise<boolean>;
   install():Promise<VerifiedRecoveryState>;
 }
+export interface BackupNudgeInput{
+  readonly verified:Pick<VerifiedRecoveryController,'read'|'entries'|'lastBackupTime'>;
+  readonly storageHealth:Pick<StorageHealthController,'snapshot'>;
+  readonly dueMs:number;readonly checkMs:number;
+  canMutate():boolean;now():number;automaticActive():boolean;dailySummaryCount():Promise<number>;todayIso():string;
+  publishMessage(message:string):unknown;notify(title:string,message:string,tag:string):unknown;
+  capture(scope:string,error:unknown,level:'warn'):unknown;
+}
+export interface BackupNudgeController{
+  readonly format:'study-director.backup-nudge';readonly contractVersion:1;
+  run(force?:boolean):Promise<boolean>;reset():boolean;message():string;checkedAt():number;
+}
 export interface BackupReadinessHostContract{
   readonly format:'study-director.backup-readiness-host-module';readonly contractVersion:1;
   createStorageHealth(input:Readonly<StorageHealthInput>):Readonly<StorageHealthController>;
   createCanonicalCommit(input:Readonly<CanonicalCommitInput>):Readonly<CanonicalCommitController>;
   normalizeVerifiedRecoveryState(value:unknown):VerifiedRecoveryState;
   createVerifiedRecovery(input:Readonly<VerifiedRecoveryInput>):Readonly<VerifiedRecoveryController>;
+  createBackupNudge(input:Readonly<BackupNudgeInput>):Readonly<BackupNudgeController>;
 }

@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {BackupReadinessHostContract,CanonicalCommitController,CanonicalCommitEvent,CanonicalCommitInput,StorageHealthController,StorageHealthHistory,StorageHealthInput,StorageHealthPatch,StorageHealthState,VerifiedBackupReceipt,VerifiedRecoveryController,VerifiedRecoveryCopy,VerifiedRecoveryInput,VerifiedRecoveryState} from '../../types/backup-readiness-host.ts';
+import type {BackupNudgeController,BackupNudgeInput,BackupReadinessHostContract,CanonicalCommitController,CanonicalCommitEvent,CanonicalCommitInput,StorageHealthController,StorageHealthHistory,StorageHealthInput,StorageHealthPatch,StorageHealthState,VerifiedBackupReceipt,VerifiedRecoveryController,VerifiedRecoveryCopy,VerifiedRecoveryInput,VerifiedRecoveryState} from '../../types/backup-readiness-host.ts';
 
 const sdBackupReadinessHostFactory=(()=>{
 'use strict';
@@ -215,7 +215,37 @@ function createVerifiedRecovery(input:Readonly<VerifiedRecoveryInput>):Readonly<
   return freeze({format:'study-director.verified-recovery-readiness' as const,contractVersion:1 as const,state:()=>current,verified,entries,lastBackupTime,read,record,verifyFreshCurrentBackup,reconcileChangeClock,reconcileStartupChangeClock,install});
 }
 
-const createModule=():BackupReadinessHostContract=>freeze({format:'study-director.backup-readiness-host-module',contractVersion:1,createStorageHealth,createCanonicalCommit,normalizeVerifiedRecoveryState,createVerifiedRecovery});
+function createBackupNudge(input:Readonly<BackupNudgeInput>):Readonly<BackupNudgeController>{
+  exactObject(input,['verified','storageHealth','dueMs','checkMs','canMutate','now','automaticActive','dailySummaryCount','todayIso','publishMessage','notify','capture'],'Backup nudge input');
+  let message='',checkedAt=0,notifiedDate='';
+  async function run(force:boolean=false){
+    if(!input.canMutate())return false;
+    const now=input.now();if(!force&&now-checkedAt<input.checkMs)return false;checkedAt=now;
+    let backups;
+    try{backups=await input.verified.read();}
+    catch(error){input.capture('backup.nudge-receipt-read',error,'warn');return false;}
+    const entries=input.verified.entries(backups),last=input.verified.lastBackupTime(backups);
+    const covered=Math.max(-Infinity,...entries.map(entry=>Date.parse(entry.sourceRevision)).filter(Number.isFinite));
+    const changed=Date.parse(input.storageHealth.snapshot().lastLocalSaveAt||''),unbacked=!Number.isFinite(covered)||!Number.isFinite(changed)||changed>covered;
+    const automatic=input.automaticActive();let due=!automatic&&unbacked&&Number.isFinite(last)&&now-last>=input.dueMs;
+    if(!Number.isFinite(last)&&!automatic){
+      try{due=(await input.dailySummaryCount())>=7;}catch{}
+    }
+    const drive=!!backups.providers['google-drive'];
+    message=due?(drive?'Backup reminder: your changes have not reached Google Drive for over a week. Sign in again in Library → Data.':'Backup reminder: the last backup is over a week old. Open Library → Data.'):'';
+    input.publishMessage(message);
+    const date=input.todayIso();
+    if(due&&notifiedDate!==date){
+      notifiedDate=date;
+      input.notify(drive?'Sign in to Google Drive':'Back up Study Director',drive?'Your changes have not been backed up for at least seven days.':'It has been at least seven days since the last backup.',`sdm-backup-${date}`);
+    }
+    return due;
+  }
+  function reset(){message='';checkedAt=input.now();notifiedDate='';input.publishMessage('');return true;}
+  return freeze({format:'study-director.backup-nudge' as const,contractVersion:1 as const,run,reset,message:()=>message,checkedAt:()=>checkedAt});
+}
+
+const createModule=():BackupReadinessHostContract=>freeze({format:'study-director.backup-readiness-host-module',contractVersion:1,createStorageHealth,createCanonicalCommit,normalizeVerifiedRecoveryState,createVerifiedRecovery,createBackupNudge});
 registry.define('backup-readiness-host',1,createModule);
 return createModule;
 })();

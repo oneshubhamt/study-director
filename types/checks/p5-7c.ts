@@ -11,7 +11,7 @@ import type {RepositoriesInput} from '../repositories.ts';
 import type {BackgroundMaintenanceInput,RepositoryMaintenanceController} from '../backup-maintenance-host.ts';
 import type {StorageResetInput} from '../backup-recovery-host.ts';
 import type {BackupIntegrityController,BackupIntegrityInput} from '../backup-integrity-host.ts';
-import type {CanonicalCommitController,VerifiedRecoveryInput} from '../backup-readiness-host.ts';
+import type {BackupNudgeInput,CanonicalCommitController,VerifiedRecoveryInput} from '../backup-readiness-host.ts';
 import type {MetadataOwners} from '../data-bootstrap-host.ts';
 
 type BackupRuntime=ReturnType<BackupModule['createRuntime']>;
@@ -93,3 +93,10 @@ recoveryModule.createStorageReset(Object.freeze({
   readiness:Object.freeze({reconcileStartupChangeClock:async()=>true}),diagnostics:Object.freeze({capture:()=>{}}),
   environment:Object.freeze({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),setTimeout:(callback:()=>void,ms:number)=>window.setTimeout(callback,ms),clearTimeout:(handle:number)=>window.clearTimeout(handle)})
 }));
+
+const backupNudgeInput=Object.freeze({
+  verified:readinessModule.createVerifiedRecovery(verifiedRecoveryInput),storageHealth:verifiedRecoveryInput.storageHealth,dueMs:7,checkMs:1,
+  canMutate:()=>true,now:()=>Date.now(),automaticActive:()=>runtime.providers.automaticActive(),dailySummaryCount:async()=>0,todayIso:()=> '2026-11-15',
+  publishMessage:(_message:string)=>{},notify:(_title:string,_message:string,_tag:string)=>{},capture:(_scope:string,_error:unknown,_level:'warn')=>{}
+}) satisfies Readonly<BackupNudgeInput>;
+readinessModule.createBackupNudge(backupNudgeInput);
