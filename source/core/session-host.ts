@@ -53,7 +53,8 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   });
   const persistenceSuppressed=()=>suppressionDepth>0;
   function blocked(options:Readonly<LiveDraftWriteOptions>={}){
-    return (persistenceSuppressed()||persistence.recoveryQuiesced())&&options.allowDuringRecoveryQuiescence!==true||!persistence.canMutate()||persistence.persistenceBlocked();
+    const recoveryCheckpoint=options.allowDuringRecoveryQuiescence===true&&persistence.recoveryWorkActive();
+    return (persistenceSuppressed()||persistence.recoveryQuiesced())&&options.allowDuringRecoveryQuiescence!==true||!persistence.canMutate()&&!recoveryCheckpoint||persistence.persistenceBlocked();
   }
   function captureSnapshot(evidence:RuntimeEvidence|null=null):SessionSnapshot|null{
     const tasks=snapshot.tasks();if(!tasks.length)return null;

@@ -3068,7 +3068,7 @@ ActiveSessionRuntime=SessionHostModule.createController(Object.freeze({
   persistence:Object.freeze({
     canMutate:appCanMutate,recoveryQuiesced:managedRecoverySessionQuiesced,
     persistenceBlocked:()=>ReviewSaveService.status().activeSessionPersistenceBlocked,
-    recoveryWorkActive:()=>AppMutationCoordinator?.status().active==='managed-recovery',
+    recoveryWorkActive:()=>AppOwnership.canMutate()&&AppMutationCoordinator?.status().active==='managed-recovery',
     timerSnapshotEligible:()=>!TimerState.paused&&!TimerState.inactiveGap&&!!TimerState.runtime&&TimerState.runtime.startMs!==null,
     markContentChanged:markDayContentChanged,
     snapshotForWrite:()=>SessionHandoffRuntime?.snapshotForWrite()||ActiveSessionRuntime.captureSnapshot(),

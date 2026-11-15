@@ -23,14 +23,14 @@ const repo={
  readLocal(){return repoValue?structuredClone(repoValue):null},nextRevision(seed=0){return ++revision+Number(seed)*0},settled(){return Promise.resolve()}
 };
 let appliedText='08:00 | 60 | A | work | X | pages | 10\n09:00 | 30 | B | support | Y | block | 1';
-let planDraft='independent draft';let studyDate='2026-11-10';let carry='carry';let practice={active:null,runs:[]};let review={reflection:'r',studyQuality:4};let resetCount=0,applyCount=0,marked=0,warnings=[],recovery=false,blocked=false,recoveryWork=false,timerEligible=true;
+let planDraft='independent draft';let studyDate='2026-11-10';let carry='carry';let practice={active:null,runs:[]};let review={reflection:'r',studyQuality:4};let resetCount=0,applyCount=0,marked=0,warnings=[],recovery=false,blocked=false,recoveryWork=false,canMutate=true,timerEligible=true;
 const input={
  configuration:{activeSessionId:'active',activeSessionVersion:6,sessionSnapshotVersion:6,maxCarryForwardChars:100,maxScheduleChars:5000,maxTasksPerDay:200,debounceMs:1000,timerSnapshotIntervalMs:60000,completionNone:'none',practicePauseCauses:{session:'session',gap:'gap',main:'main'}},
  codec:{sanitizeCurrent(v){return v&&v.id==='active'&&v.snapshot?structuredClone(v):null},sanitizeSessionSnapshot(v,date,fingerprint,rev){return v&&v.date===date&&v.fingerprint===fingerprint?structuredClone(v):null}},
  repository:repo,canonical:{same:(a,b)=>JSON.stringify(a)===JSON.stringify(b)},
  snapshot:{tasks:()=>tasks,ensureTaskIds(){},taskIdentity:{idAt:i=>tasks[i]?.id||null,indexMap:()=>new Map(tasks.map((t,i)=>[t.id,i])),indexForId:(id,map)=>map?.get(String(id))??null},taskState,timerState,captureEvidence:()=>({actualTime:{'0':42},actualRecords:{},taskEvidence:{}}),timerPayload:()=>null,reviewSnapshot:()=>review,practiceSnapshot:()=>practice,practiceRestore:v=>{practice=v||{active:null,runs:[]}},getReviewDate:()=>studyDate,scheduleFingerprint:()=>`fp:${appliedText}`,sessionFingerprint:s=>`fp:${s.scheduleText}`,appliedScheduleText:()=>appliedText,getCarryForward:()=>carry,setCarryForward:v=>{carry=v},clearProgress:()=>taskState.clear(),sanitizeAdjustedSchedule:v=>v,invalidateScheduleDerived(){},setCurrentTask:i=>{timerState.currentIndex=i},timerRestoreValid:()=>false},
  domain:{normalizeCompletionSource:v=>['manual','time','units','skipped'].includes(v)?v:'none',clampCompletion:v=>Math.max(0,Math.min(100,Number(v)||0)),cleanDayRevision:v=>Math.max(0,Math.round(Number(v)||0)),clampText:(v,max)=>String(v??'').slice(0,max),isCanonicalScheduleText:v=>String(v).trim().length>0,isValidIsoDate:v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v)),todayISO:()=>studyDate},
- persistence:{canMutate:()=>true,recoveryQuiesced:()=>recovery,persistenceBlocked:()=>blocked,recoveryWorkActive:()=>recoveryWork,timerSnapshotEligible:()=>timerEligible,markContentChanged:()=>{marked++},snapshotForWrite:()=>controller.captureSnapshot(),reportResult(){},warn:m=>warnings.push(m)},
+ persistence:{canMutate:()=>canMutate,recoveryQuiesced:()=>recovery,persistenceBlocked:()=>blocked,recoveryWorkActive:()=>recoveryWork,timerSnapshotEligible:()=>timerEligible,markContentChanged:()=>{marked++},snapshotForWrite:()=>controller.captureSnapshot(),reportResult(){},warn:m=>warnings.push(m)},
  lifecycle:{async run(_k,_o,op){return op()},runSync(_k,_o,op){return op()}},
  apply:{readPlanDraft:()=>planDraft,writePlanDraft:v=>{planDraft=v},previewPlanDraft(){},setStudyDate:d=>{studyDate=d},applySessionSchedule({snapshot,scheduleText}){applyCount++;appliedText=scheduleText;controller.applySnapshot(snapshot);return true}},
  reset:{stopTimerPresentation(){},invalidatePresentation(){},resetCountdown(){},setCurrentTask:i=>{timerState.currentIndex=i},resetBreak(){},setEmptyTimerMode(){},clearTimerSession(){timerState.contentRevision=0;timerState.savedRevision=0},hydrateReview(){review={reflection:'',studyQuality:null}},invalidateSchedule(){},resetPlanSession(){resetCount++},clearProgress:()=>taskState.clear(),clearCarryForward:()=>{carry=''},resetPractice:()=>{practice={active:null,runs:[]}},pausePracticeForSessionEnd(){if(practice?.active)practice={...practice,active:{...practice.active,pauseCause:'session'}}}},
@@ -50,9 +50,12 @@ controller.saveLiveDraft({strictDurability:true,markChanged:false});controller.s
 // is reserved for recovery-owned checkpoints that must settle canonical Review state.
 recovery=true;
 assert.equal(await controller.withPersistenceSuppressed(()=>controller.writeNow({markChanged:false})),null,'ordinary writes remain blocked under recovery suppression');
+recoveryWork=true;canMutate=false;
 const recoveryCheckpoint=await controller.withPersistenceSuppressed(()=>controller.writeNow({markChanged:false,allowDuringRecoveryQuiescence:true}));
-assert.equal(recoveryCheckpoint?.ok,true,'an explicitly recovery-owned checkpoint may pass through restore suppression');
-recovery=false;
+assert.equal(recoveryCheckpoint?.ok,true,'an explicitly recovery-owned checkpoint may pass through restore suppression and the exclusive mutation UI gate');
+recoveryWork=false;
+assert.equal(await controller.withPersistenceSuppressed(()=>controller.writeNow({markChanged:false,allowDuringRecoveryQuiescence:true})),null,'the same exception is unavailable outside managed recovery');
+canMutate=true;recovery=false;
 // Periodic checkpoints wait through managed recovery and run immediately after the interval is eligible.
 now+=60000;recoveryWork=true;assert.equal(controller.maybeSnapshotRunningTimer(),false);recoveryWork=false;assert.equal(controller.maybeSnapshotRunningTimer(),true);await Promise.resolve();
 // A local recovery envelope is not a canonical completion barrier.
