@@ -72,6 +72,7 @@ const ManagedRecoveryModule=INTERNAL_MODULES.load('managed-recovery',1,'study-di
 const DeviceFolderStorageModule=INTERNAL_MODULES.load('device-folder-storage',1,'study-director.device-folder-storage-module',1);
 const DeviceBackupModule=INTERNAL_MODULES.load('device-backup',1,'study-director.device-backup-module',1);
 const BackupActionsHostModule=INTERNAL_MODULES.load('backup-actions-host',1,'study-director.backup-actions-host-module',1);
+const BackupReadinessHostModule=INTERNAL_MODULES.load('backup-readiness-host',1,'study-director.backup-readiness-host-module',1);
 const BackupRecoveryHostModule=INTERNAL_MODULES.load('backup-recovery-host',1,'study-director.backup-recovery-host-module',1);
 const PwaLifecycleModule=INTERNAL_MODULES.load('pwa-lifecycle',1,'study-director.pwa-lifecycle-module',1);
 const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'study-director.native-capabilities-module',1);
@@ -160,93 +161,12 @@ const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
   onError:(operation,error)=>StorageHealthController?.observeLocalStorage(operation,error),
   onOk:operation=>StorageHealthController?.observeLocalStorage(operation,null)
 }));
-function createStorageHealthController(local){
-  const sourceLabels=Object.freeze({
-    'indexedDB':'Browser database','localStorage.read':'Browser storage read','localStorage.write':'Browser storage write',
-    'planDraft.write':'Plan draft','activeSession':'Live-session recovery','notes':'Notes',
-    'dailyRecords':'Library records','deletionRecovery':'Deletion recovery',
-    'maintenance':'Data maintenance','capacity':'Storage capacity','backup':'Backup','attachmentIntegrity':'Attachment storage','repositoryIntegrity':'Backup verification'
-  });
-  const issueMap=new Map();
-  let active=false,mirroring=false;
-  const stored=local.getJson(STORAGE_KEYS.storageHealth,null);
-  let history=Object.assign(emptyStorageHealth(),stored&&typeof stored==='object'?stored:{},{version:3});
-  const initialReadError=local.lastError;
-  if(initialReadError){
-    issueMap.set('localStorage.read',Object.freeze({
-      source:'localStorage.read',label:sourceLabels['localStorage.read'],
-      message:`Browser storage could not be read: ${initialReadError.message||initialReadError}. Changes may not restore after reload.`,
-      level:'error',at:new Date().toISOString()
-    }));
-  }
-  function notify(){if(active)refreshStorageFallbackWarning();}
-  function normalizeSource(value){return String(value||'storage').slice(0,80);}
-  function normalizeMessage(value){return clampText(String(value||'Storage is unavailable.'),APP_LIMITS.maxStatusMessageChars);}
-  function issue(source,message,options={}){
-    const key=normalizeSource(source),at=new Date().toISOString();
-    const entry=Object.freeze({
-      source:key,label:sourceLabels[key]||'Storage',message:normalizeMessage(message),
-      level:options&&options.level==='warn'?'warn':'error',at
-    });
-    // Issues are shown live and never stored: they describe this session.
-    issueMap.set(key,entry);
-    // When the database fails, browser storage is the safety net: rewriting
-    // this record shows at once whether it can still be written.
-    if(key==='indexedDB'&&(!options||options.mirror!==false))mirror();
-    notify();
-    return snapshot();
-  }
-  function recover(source,patch=null,options={}){
-    const key=normalizeSource(source);
-    const recovered=issueMap.delete(key);
-    const hasPatch=!!(patch&&typeof patch==='object'&&Object.keys(patch).length);
-    if(!recovered&&!hasPatch)return snapshot();
-    if(hasPatch){history=Object.assign({},history,patch,{version:3});if(!options||options.mirror!==false)mirror();}
-    notify();
-    return snapshot();
-  }
-  // Each tab mirrors its own copy of this record. An unresolved browser-data
-  // clear is kept as stored unless this tab set or resolved it itself.
-  let clearMarkerOwned=false;
-  function updateHistory(patch){
-    const marker=!!patch&&typeof patch==='object'&&Object.hasOwn(patch,'browserDataClearedAt');
-    history=Object.assign({},history,patch&&typeof patch==='object'?patch:{},{version:3});
-    mirror({marker});if(marker)clearMarkerOwned=!!history.browserDataClearedAt;
-    notify();return snapshot();
-  }
-  function observeLocalStorage(operation,error){
-    const kind=operation==='write'?'write':'read';
-    const source=`localStorage.${kind}`;
-    if(error){
-      const action=kind==='write'?'written':'read';
-      issue(source,`Browser storage could not be ${action}: ${error.message||error}. Changes may not survive a reload.`,{mirror:false});
-    }else if(issueMap.has(source))recover(source,null,{mirror:false});
-  }
-  // Save times only move forward: another tab may have stored a later one
-  // than this tab holds, and writing back an older copy would hide that save.
-  function laterTime(own,other){
-    const ownAt=Date.parse(String(own||'')),otherAt=Date.parse(String(other||''));
-    return Number.isFinite(otherAt)&&(!Number.isFinite(ownAt)||otherAt>ownAt)?other:own??null;
-  }
-  function mirror({marker=false}={}){
-    if(mirroring)return false;
-    mirroring=true;
-    try{
-      const stored=local.getJson(STORAGE_KEYS.storageHealth,null),known=stored&&typeof stored==='object'?stored:{};
-      history=Object.assign({},history,{lastLocalSaveAt:laterTime(history.lastLocalSaveAt,known.lastLocalSaveAt),lastStudyDataSaveAt:laterTime(history.lastStudyDataSaveAt,known.lastStudyDataSaveAt)});
-      if(!clearMarkerOwned&&!marker)history=Object.assign({},history,{browserDataClearedAt:known.browserDataClearedAt||null});
-      return local.setJson(STORAGE_KEYS.storageHealth,history);
-    }
-    finally{mirroring=false;}
-  }
-  function snapshot(){
-    const issues=Object.freeze([...issueMap.values()].sort((a,b)=>a.at.localeCompare(b.at)));
-    return Object.freeze({...history,issues,hasIssues:issues.length>0});
-  }
-  function activate(){active=true;notify();return snapshot();}
-  return Object.freeze({activate,issue,recover,updateHistory,observeLocalStorage,snapshot});
-}
-StorageHealthController=createStorageHealthController(LocalStorageContract);
+StorageHealthController=BackupReadinessHostModule.createStorageHealth(Object.freeze({
+  local:LocalStorageContract,key:STORAGE_KEYS.storageHealth,maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars,clampText,
+  refreshWarning:()=>refreshStorageFallbackWarning(),scheduleSyncStatus:()=>scheduleSyncStatus(),document,
+  timeLabelFromIso:value=>timeLabelFromIso(value),
+  renderCapabilities:()=>NativeCapabilities?renderNativeCapabilities(NativeCapabilities.status()):false
+}));StorageHealthController=createStorageHealthController(LocalStorageContract);
 const AppDiagnostics=(()=>{
   function capture(scope,error,level='warn'){
     // Contained faults remain observable to external QA without retaining a
@@ -859,78 +779,12 @@ function finishPracticePacer(...args){return ExecutionViews.finishPracticePacer(
 function handlePracticeStartKey(...args){return ExecutionViews.handlePracticeStartKey(...args);}
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
-function emptyStorageHealth(){
-  // lastLocalSaveAt: the change clock's fast copy for backup decisions.
-  // lastStudyDataSaveAt: when study data (notes, Saved Days, sessions, plans,
-  // kept versions; not settings alone) was last saved in this browser.
-  // browserDataClearedAt: a browser-data clear still being resolved.
-  return {version:3,lastLocalSaveAt:null,lastStudyDataSaveAt:null,browserDataClearedAt:null};
-}
-function readStorageHealth(){
-  return StorageHealthController.snapshot();
-}
-function writeStorageHealth(patch){
-  return StorageHealthController.updateHistory(patch);
-}
-function localISODate(dateLike){
-  const d=new Date(dateLike);
-  const y=d.getFullYear();
-  const m=String(d.getMonth()+1).padStart(2,'0');
-  const day=String(d.getDate()).padStart(2,'0');
-  return y+'-'+m+'-'+day;
-}
-function storageHealthTime(iso){
-  if(!iso)return 'never';
-  const d=new Date(iso);
-  if(isNaN(d.getTime()))return 'unknown';
-  const now=new Date();
-  const localIso=localISODate(d);
-  const today=localISODate(now);
-  if(localIso===today)return timeLabelFromIso(iso)||'today';
-  return d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
-}
-function storageHealthClass(health){
-  if(health.issues.some(issue=>issue.level==='error'))return 'err';
-  if(health.issues.some(issue=>issue.level==='warn'))return 'warn';
-  return 'ok';
-}
-function renderStorageHealth(health=readStorageHealth()){
-  scheduleSyncStatus();
-  const el=document.getElementById('storage-health');
-  const lastSaved=document.getElementById('last-local-save');
-  if(lastSaved){lastSaved.textContent=health.lastLocalSaveAt?storageHealthTime(health.lastLocalSaveAt):'Never';lastSaved.title=health.lastLocalSaveAt||'';}
-  if(el){
-    el.hidden=!health.issues.length;
-    el.textContent=health.issues.map(issue=>`${issue.label}: ${String(issue.message).slice(0,180)}`).join(' · ');
-    el.className='storage-health ui-surface ui-status '+storageHealthClass(health);
-  }
-  if(NativeCapabilities)renderNativeCapabilities(NativeCapabilities.status());
-}
-
-
-function publishSafetyNotice(message,title='Unsaved work needs attention',id='safety'){
-  const text=String(message||'').trim();
-  return NoticeCoordinator.publish(String(id||'safety'),{visible:!!text,kind:'safety',title,message:text||'Resolved.',compact:noticeCanCompact(text)});
-}
-// Native capability presentation is owned by the checked capabilities-host adapter.
-// P5.7A owns file/location presentation; these bridges stay because callers are
-// initialized on both sides of the checked host composition.
-let BackupActions=null;
-function renderFileBackup(){return BackupActions?.renderFile();}
-function toggleBackupSettings(kind){return BackupActions?.toggleSettings(kind)||false;}
-function renderDriveBackup(){return BackupActions?.renderDrive();}
-function renderBackupActions(){return BackupActions?.renderActions();}
-function renderDeviceBackup(state){return BackupActions?.renderDevice(state);}
-function markStorageHealthOk(source,key=''){
-  const patch=key?{[key]:new Date().toISOString()}:null;
-  return StorageHealthController.recover(source,patch);
-}
-function markStorageHealthTimestamp(key){
-  return writeStorageHealth({[key]:new Date().toISOString()});
-}
-function markStorageHealthError(source,reason,options={}){
-  return StorageHealthController.issue(source,reason||'Storage is unavailable.',options);
-}
+function readStorageHealth(){return StorageHealthController.snapshot();}
+function writeStorageHealth(patch){return StorageHealthController.updateHistory(patch);}
+function renderStorageHealth(health=readStorageHealth()){return StorageHealthController.render(health);}
+function markStorageHealthOk(source,key=''){return StorageHealthController.markOk(source,key);}
+function markStorageHealthTimestamp(key){return StorageHealthController.markTimestamp(key);}
+function markStorageHealthError(source,reason,options={}){return StorageHealthController.markError(source,reason,options);}
 function storageSizeLabel(bytes){
   const value=Math.max(0,Number(bytes)||0);
   if(value<1024*1024)return `${Math.round(value/1024)} KB`;
@@ -1251,7 +1105,11 @@ let invalidateAttachmentLibrary=()=>false;
 let scheduleRichTextAssetMaintenance=()=>false;
 let notifyRichTextAssetLeaseReleased=()=>false;
 let richTextAssetMaintenancePauseCount=0;
-const canonicalAttachmentReferenceSignatures=new Map();
+const CanonicalCommitHost=BackupReadinessHostModule.createCanonicalCommit(Object.freeze({
+  storage:StorageHealthController,scanAttachmentReferences:value=>RichTextApi.scanAttachmentReferences(value),incrementReferenceRevision:()=>{richAssetReferenceRevision++;},
+  syncCapability:event=>CapabilityBadge?.syncFromCanonicalCommit(event),notifyBackupChange:change=>notifyBackupChange(change),scheduleAssetMaintenance:()=>scheduleRichTextAssetMaintenance(),invalidateAttachmentLibrary:()=>invalidateAttachmentLibrary(),
+  fullyInitialized:()=>StartupLifecycle.status().fullyInitialized,refreshKeptVersions:()=>KeptVersions?.refresh()||false,reminderDate:()=>ReviewDayState.reminder.date,revalidateSaveReminder:()=>revalidateSaveReminderAfterCanonicalConvergence(),nowIso:()=>new Date().toISOString()
+}));
 async function withRichTextAssetMaintenancePaused(operation){
   if(typeof operation!=='function')throw new TypeError('Attachment-maintenance pause operation is required.');
   richTextAssetMaintenancePauseCount++;
@@ -1469,59 +1327,9 @@ function persistedActiveSessionUnfinished(session){
     return resolved!=='done'&&resolved!=='skipped';
   });
 }
-function canonicalAttachmentReferenceDescriptor(event){
-  const type=String(event&&event.entityType||''),operation=event&&event.operation==='delete'?'delete':'upsert',value=event&&event.value;
-  if(type==='dataset')return Object.freeze({key:'dataset:*',force:true,deleted:operation==='delete',text:''});
-  let identity='',text='';
-  if(type==='note'){identity=String(value&&value.key||'');text=String(value&&value.text||'');}
-  else if(type==='dailyRecord'){identity=String(value&&value.date||'');text=String(value&&value.reflection||'');}
-  else if(type==='activeSession'){identity=String(value&&value.id||ACTIVE_SESSION_ID);text=String(value&&value.snapshot&&value.snapshot.review&&value.snapshot.review.reflection||'');}
-  // A kept version may be the last to use an image: recheck them all.
-  else if(type==='pendingReview')return Object.freeze({key:'pendingReview:*',force:true,deleted:false,text:''});
-  else return null;
-  return Object.freeze({key:`${type}:${identity||'*'}`,force:false,deleted:operation==='delete',text});
-}
-function canonicalCommitChangesAttachmentReferences(event){
-  const descriptor=canonicalAttachmentReferenceDescriptor(event);if(!descriptor)return false;
-  if(descriptor.force){canonicalAttachmentReferenceSignatures.clear();return true;}
-  const prior=canonicalAttachmentReferenceSignatures.get(descriptor.key);
-  if(descriptor.deleted){canonicalAttachmentReferenceSignatures.delete(descriptor.key);return prior!==undefined||descriptor.key.startsWith('activeSession:');}
-  let signature='';
-  try{
-    const scan=RichTextApi.scanAttachmentReferences(descriptor.text);
-    if(!scan||scan.trusted!==true)return true;
-    signature=[...new Set(scan.assetIds||[])].sort().join('|');
-  }catch{return true;}
-  canonicalAttachmentReferenceSignatures.set(descriptor.key,signature);
-  return prior===undefined||prior!==signature;
-}
-const STUDY_DATA_COMMITS=Object.freeze(new Set(['note','dailyRecord','activeSession','planData','pendingReview']));
-function handleCanonicalCommit(event){
-  const referencesChanged=canonicalCommitChangesAttachmentReferences(event);
-  if(referencesChanged)richAssetReferenceRevision++;
-  const committedAt=event&&event.committedAt||new Date().toISOString();
-  // Study data was saved here: notes, Saved Days, sessions, plans, kept
-  // versions, whether made here or taken in by a sync: what the empty-device
-  // check counts. Settings alone (a name, a theme) and canonical hydration
-  // do not count as authored study data.
-  const studyData=!!event&&event.startup!==true&&event.settingsOnly!==true&&STUDY_DATA_COMMITS.has(event.entityType);
-  writeStorageHealth(studyData?{lastLocalSaveAt:committedAt,lastStudyDataSaveAt:committedAt}:{lastLocalSaveAt:committedAt});
-  renderStorageHealth();
-  CapabilityBadge?.syncFromCanonicalCommit(event);
-  if(event?.backupCapture!==true)notifyBackupChange({
-    urgent:event&&event.entityType==='dailyRecord',
-    reason:String(event&&event.entityType||'canonical-commit')
-  });
-  if(referencesChanged&&event?.backupCapture!==true){
-    scheduleRichTextAssetMaintenance();
-    invalidateAttachmentLibrary();
-  }
-  if(event&&event.entityType==='pendingReview'&&StartupLifecycle.status().fullyInitialized)void KeptVersions.refresh();
-  if(event?.entityType==='dailyRecord'&&ReviewDayState.reminder.date)
-    void revalidateSaveReminderAfterCanonicalConvergence();
-}
+function handleCanonicalCommit(event){return CanonicalCommitHost.handle(event);}
 
-async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
+async function refreshPersistedSessionBadge()async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
 const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryComposition(Object.freeze({
   repositoriesModule:RepositoryModule,
   journalsModule:RepositoryJournalModule,
