@@ -1,7 +1,7 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome,StorageResetController,StorageResetInput,StorageResetRecoveryResult} from '../../types/backup-recovery-host.ts';
 import type {RecoverySpec,ManagedRecoveryInput} from '../../types/managed-recovery.ts';
-import type {BackupRuntimeHostController,BackupRuntimeHostInput,Completion,ImportedAsset,Signal} from '../../types/backup-runtime-host.ts';
+import type {BackupRevisionFenceController,BackupRevisionFenceInput,BackupRuntimeHostController,BackupRuntimeHostInput,Completion,ImportedAsset,Signal} from '../../types/backup-runtime-host.ts';
 import type {BackupRuntimeInput,Journal} from '../../types/backup.ts';
 import type {AssetMetadata} from '../../types/asset-storage.ts';
 import type {AttachmentDeletion,NoteDeletion,SavedDayDeletion} from '../../types/backup-models.ts';
@@ -125,32 +125,39 @@ const createModule=()=>{
     return freeze({format:'study-director.kept-versions' as const,contractVersion:1 as const,refresh,review,count:()=>count,note:(id:string)=>notes.has(String(id||''))});
   }
 
-  function createRuntime<Token>(input:Readonly<BackupRuntimeHostInput<Token>>):Readonly<BackupRuntimeHostController>{
-    exactObject(input,['module','configuration','appData','storageHealthKey','storageHealth','storageGeneration','personal','files','processing','protection','backgroundAvailable','assets','referenceRevision','mutationGeneration','baseline','codecs','reconciliation','noteReconciliation','session','domain','view','events','verifiedRecovery','interactions','operations','environment','diagnostics'],'Backup runtime host input');
-    if(!Object.isFrozen(input.module)||input.module.format!=='study-director.backup-module'||input.module.contractVersion!==1)throw new TypeError('Backup runtime module is unavailable or incompatible.');
+  function createRevisionFence(input:Readonly<BackupRevisionFenceInput>):Readonly<BackupRevisionFenceController>{
+    exactObject(input,['local','storageHealthKey','storageHealth','mutationEpoch','dailyDatasetRevision','savedDayDeletions','noteDeletions','attachmentDeletions','personalExport','planInputValue','attachmentsList','referenceRevision','mutationGeneration','diagnostics'],'Backup revision fence input');
     let fastFenceReady=false;
     function sourceRevision(){
-      const stored=input.appData.local.getJson(input.storageHealthKey,null),memory=input.storageHealth.snapshot();let latest='',latestAt=NaN;
-      const storedRow=stored&&typeof stored==='object'?stored as Record<string,unknown>:null;
-      for(const value of [storedRow?.['lastLocalSaveAt'],memory.lastLocalSaveAt]){
+      const stored=input.local.getJson(input.storageHealthKey,null),storedRow=stored&&typeof stored==='object'?stored as Record<string,unknown>:null,memory=input.storageHealth.lastLocalSaveAt();let latest='',latestAt=NaN;
+      for(const value of [storedRow?.['lastLocalSaveAt'],memory]){
         const revision=String(value||''),at=Date.parse(revision);
         if(Number.isFinite(at)&&(!Number.isFinite(latestAt)||at>latestAt)){latest=revision;latestAt=at;}
       }
       return latest;
     }
     async function fullSnapshotRevision(){
-      return JSON.stringify([
-        await input.appData.dailyRecords.datasetRevision(),await input.appData.deletionRecovery.savedDays(),await input.appData.deletionRecovery.notes(),await input.appData.deletionRecovery.attachments(),
-        input.referenceRevision(),await input.personal.data.exportData({flush:false}),input.personal.inputValue(),await input.assets.list()
-      ]);
+      return JSON.stringify([await input.dailyDatasetRevision(),await input.savedDayDeletions(),await input.noteDeletions(),await input.attachmentDeletions(),input.referenceRevision(),await input.personalExport(),input.planInputValue(),await input.attachmentsList()]);
     }
     async function snapshotRevision(options:Readonly<{full?:boolean}>={}){
-      if(options.full===true||!fastFenceReady||!input.appData.mutationEpoch.eligible())return fullSnapshotRevision();
-      try{
-        const epoch=await input.appData.mutationEpoch.read();if(!epoch)return fullSnapshotRevision();
-        return `study-director.fast-capture-fence.v1|${epoch.token}|${input.mutationGeneration()}|${sourceRevision()}`;
-      }catch(error){input.diagnostics.capture('backup.fast-capture-fence',error,'warn');return fullSnapshotRevision();}
+      if(options.full===true||!fastFenceReady||!input.mutationEpoch.eligible())return fullSnapshotRevision();
+      try{const epoch=await input.mutationEpoch.read();if(!epoch)return fullSnapshotRevision();return `study-director.fast-capture-fence.v1|${epoch.token}|${input.mutationGeneration()}|${sourceRevision()}`;}
+      catch(error){input.diagnostics.capture('backup.fast-capture-fence',error,'warn');return fullSnapshotRevision();}
     }
+    return freeze({format:'study-director.backup-revision-fence' as const,contractVersion:1 as const,sourceRevision,snapshotRevision,setFastFenceReady:(value:boolean)=>(fastFenceReady=value)});
+  }
+
+  function createRuntime<Token>(input:Readonly<BackupRuntimeHostInput<Token>>):Readonly<BackupRuntimeHostController>{
+    exactObject(input,['module','configuration','appData','storageHealthKey','storageHealth','storageGeneration','personal','files','processing','protection','backgroundAvailable','assets','referenceRevision','mutationGeneration','baseline','codecs','reconciliation','noteReconciliation','session','domain','view','events','verifiedRecovery','interactions','operations','environment','diagnostics'],'Backup runtime host input');
+    if(!Object.isFrozen(input.module)||input.module.format!=='study-director.backup-module'||input.module.contractVersion!==1)throw new TypeError('Backup runtime module is unavailable or incompatible.');
+    const revisionFence=createRevisionFence(freeze({
+      local:input.appData.local,storageHealthKey:input.storageHealthKey,storageHealth:freeze({lastLocalSaveAt:()=>input.storageHealth.snapshot().lastLocalSaveAt}),
+      mutationEpoch:input.appData.mutationEpoch,dailyDatasetRevision:()=>input.appData.dailyRecords.datasetRevision(),
+      savedDayDeletions:()=>input.appData.deletionRecovery.savedDays(),noteDeletions:()=>input.appData.deletionRecovery.notes(),attachmentDeletions:()=>input.appData.deletionRecovery.attachments(),
+      personalExport:()=>input.personal.data.exportData({flush:false}),planInputValue:input.personal.inputValue,attachmentsList:()=>input.assets.list(),
+      referenceRevision:input.referenceRevision,mutationGeneration:input.mutationGeneration,diagnostics:freeze({capture:(scope,error,level)=>input.diagnostics.capture(scope,error,level)})
+    }));
+    const sourceRevision=revisionFence.sourceRevision,snapshotRevision=revisionFence.snapshotRevision;
     async function importAttachments(items:readonly ImportedAsset[],options:Readonly<{signal?:Signal;replace?:boolean}>={}){
       return input.assets.during(async()=>{
         const token=input.assets.issueToken('restore attachments'),staged:AssetMetadata[]=[],rows:[string,AssetMetadata][]=[],contents=new Map<string,AssetMetadata>();
@@ -254,7 +261,7 @@ const createModule=()=>{
       exports:exportsPort,session:input.session,domain:input.domain,view:input.view,events,interactions:input.interactions,operations:input.operations,environment:input.environment,diagnostics:input.diagnostics
     })}));
     if(!Object.isFrozen(runtime)||runtime.format!=='study-director.backup-runtime'||runtime.contractVersion!==1)throw new Error('Study Director Backup runtime is unavailable or incompatible.');
-    return freeze({format:'study-director.backup-runtime-host' as const,contractVersion:1 as const,runtime,setFastFenceReady:(value:boolean)=>(fastFenceReady=value),sourceRevision,snapshotRevision});
+    return freeze({format:'study-director.backup-runtime-host' as const,contractVersion:1 as const,runtime,setFastFenceReady:value=>revisionFence.setFastFenceReady(value),sourceRevision,snapshotRevision});
   }
 
   function createRetainedBackupFiles(input:Readonly<import('../../types/backup-recovery-host.ts').RetainedBackupFilesInput>):Readonly<import('../../types/backup-recovery-host.ts').RetainedBackupFilesController>{
@@ -874,7 +881,7 @@ const createModule=()=>{
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }
-  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createRuntime,createHost,createPendingStore,createKeptVersions,createRetainedBackupFiles,createStorageReset});
+  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createRevisionFence,createRuntime,createHost,createPendingStore,createKeptVersions,createRetainedBackupFiles,createStorageReset});
 };
 registry.define('backup-recovery-host',1,createModule);return createModule;
 })();

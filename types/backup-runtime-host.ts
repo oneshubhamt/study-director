@@ -71,3 +71,19 @@ export interface BackupRuntimeHostController{
   snapshotRevision(options?:Readonly<{full?:boolean}>):Promise<string>;
 }
 export type {Completion,ImportedAsset,Signal};
+
+export interface BackupRevisionFenceInput{
+  readonly local:Readonly<{getJson(key:string,fallback:unknown):unknown}>;
+  readonly storageHealthKey:string;
+  readonly storageHealth:Readonly<{lastLocalSaveAt():string|null}>;
+  readonly mutationEpoch:Readonly<{eligible():boolean;read():Promise<Readonly<{token:string}>|null>}>;
+  readonly dailyDatasetRevision:()=>Promise<unknown>;
+  readonly savedDayDeletions:()=>Promise<unknown>;readonly noteDeletions:()=>Promise<unknown>;readonly attachmentDeletions:()=>Promise<unknown>;
+  readonly personalExport:()=>Promise<unknown>;readonly planInputValue:()=>string|null|undefined;readonly attachmentsList:()=>Promise<unknown>;
+  readonly referenceRevision:()=>number;readonly mutationGeneration:()=>number;
+  readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level:'warn'):unknown}>;
+}
+export interface BackupRevisionFenceController{
+  readonly format:'study-director.backup-revision-fence';readonly contractVersion:1;
+  sourceRevision():string;snapshotRevision(options?:Readonly<{full?:boolean}>):Promise<string>;setFastFenceReady(value:boolean):boolean;
+}
