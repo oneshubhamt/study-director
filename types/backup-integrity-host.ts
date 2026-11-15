@@ -76,5 +76,6 @@ export interface BackupIntegrityHostContract{
   normalizeAttachmentState(value:unknown,validId:(value:unknown)=>boolean):AttachmentIntegrityState;
   normalizeRepositoryTarget(value:unknown,normalizeContinuation:(value:unknown)=>IntegrityState|null):RepositoryIntegrityTarget;
   normalizeRepositoryState(value:unknown,normalizeContinuation:(value:unknown)=>IntegrityState|null):RepositoryIntegrityState;
+  projectRepositoryResult(current:RepositoryIntegrityTarget,result:import('./repository-background.ts').IntegrityResult,now:string):unknown;
   createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupIntegrityController>;
 }

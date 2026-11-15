@@ -53,6 +53,23 @@ function normalizeRepositoryState(value:unknown,normalizeContinuation:(value:unk
   return freeze({version:7 as const,locations:freeze(locations)});
 }
 
+function repositoryChanged(){return Object.assign(new Error('The backup repository changed during integrity verification.'),{code:'REPOSITORY_CHANGED'});}
+function projectRepositoryResult(current:RepositoryIntegrityTarget,result:IntegrityResult,now:string){
+  if(!result.repositoryScope||current.repositoryScope!==result.repositoryScope)throw repositoryChanged();
+  const last=current.history.at(-1),daily=last?.at.slice(0,10)===now.slice(0,10)?current.history.slice(0,-1):current.history;
+  if(current.requestId!==String(result.requestId||'')){
+    if(result.complete!==true||result.status!=='completed'||result.corruption||result.checkpointOnly)throw repositoryChanged();
+    return {...current,attemptedAt:now,completedAt:now,lastOutcome:'completed',blockedReason:'',history:[...daily,{at:now,outcome:'completed',complete:true}].slice(-8)};
+  }
+  const quarantine=result.status==='unavailable'?[...new Set([...current.quarantinedObjectIds,...(result.quarantined||[])])]:result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
+  const hasProgress=Object.hasOwn(result,'cursor')&&Object.hasOwn(result,'scanId'),progress=hasProgress?{cursor:result.cursor||'',scanId:result.scanId||'',...(Object.hasOwn(result,'recheckCursor')?{recheckCursor:result.recheckCursor||''}:{}),...(Object.hasOwn(result,'partial')?{partial:result.partial??null}:{})}:{};
+  const blockedReason=['locked','budget','preempted','permission'].includes(String(result.reason||''))?String(result.reason):result.status==='unavailable'?'unavailable':result.corruption?'corrupt':'',outcome={attemptedAt:now,lastOutcome:result.status,blockedReason,history:result.checkpointOnly?current.history:[...daily,{at:now,outcome:result.status,complete:result.complete===true&&['completed','failed'].includes(result.status)}].slice(-8)};
+  const finished=current.recheck&&result.recheckComplete===true&&result.status==='failed'&&result.corruption===true;
+  if(result.complete===true&&(result.status==='completed'||finished))return {...current,...outcome,completedAt:now,cycleStartedAt:'',cursor:'',recheckCursor:'',scanId:'',partial:null,recheck:false,failedAt:finished?now:'',quarantinedObjectIds:quarantine};
+  if(['completed','yielded','failed','unavailable','skipped'].includes(result.status))return {...current,...progress,...outcome,partial:'partial' in progress?progress.partial:result.corruption?null:current.partial,cycleStartedAt:hasProgress?current.cycleStartedAt||now:current.cycleStartedAt,failedAt:['failed','unavailable'].includes(result.status)?now:current.failedAt,quarantinedObjectIds:quarantine};
+  return current;
+}
+
 function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupIntegrityController>{
   const {lifecycle,meta,storage,references,provider,backgroundTasks,diagnostics,environment,limits}=input;
   let attachmentView:ReturnType<typeof normalizeAttachmentState>|null=null,repositoryView:RepositoryIntegrityState|null=null,repositoryWriteChain=Promise.resolve();
@@ -128,7 +145,7 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
     applyAttachment(state);if(!storage.supported())return state;const last=Date.parse(state.checkedAt||''),age=Number.isFinite(last)?Math.max(0,environment.now()-last):limits.attachmentIntervalMs;scheduleAttachment(state.progress||age>=limits.attachmentIntervalMs?15000:limits.attachmentIntervalMs-age+1000);return state;
   }
 
-  const changed=()=>Object.assign(new Error('The backup repository changed during integrity verification.'),{code:'REPOSITORY_CHANGED'});
+  const changed=repositoryChanged;
   async function readRepositoryState(){return normalizeRepositoryState(await meta.read(input.repositoryMetadataName),input.normalizeContinuation);}
   function applyRepository(state:RepositoryIntegrityState){
     repositoryView=state;render();const targets=Object.entries(state.locations).filter(([id,target])=>!!target.repositoryScope&&boundScopes[id]===target.repositoryScope).map(([,target])=>target);
@@ -161,18 +178,7 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
   async function updateTarget(target:string,result:IntegrityResult){
     if(!result.repositoryScope)throw new Error('Integrity results require their repository identity.');
     const bound=await readTarget(target);if(bound.repositoryScope!==result.repositoryScope)throw changed();
-    return mutateTarget(target,current=>{
-      if(current.repositoryScope!==result.repositoryScope)throw changed();
-      const now=environment.nowIso(),last=current.history.at(-1),daily=last?.at.slice(0,10)===now.slice(0,10)?current.history.slice(0,-1):current.history;
-      if(current.requestId!==String(result.requestId||'')){if(result.complete!==true||result.status!=='completed'||result.corruption||result.checkpointOnly)throw changed();return {...current,attemptedAt:now,completedAt:now,lastOutcome:'completed',blockedReason:'',history:[...daily,{at:now,outcome:'completed',complete:true}].slice(-8)};}
-      const quarantine=result.status==='unavailable'?[...new Set([...current.quarantinedObjectIds,...(result.quarantined||[])])]:result.quarantined===undefined?current.quarantinedObjectIds:result.quarantined;
-      const hasProgress=Object.hasOwn(result,'cursor')&&Object.hasOwn(result,'scanId'),progress=hasProgress?{cursor:result.cursor||'',scanId:result.scanId||'',...(Object.hasOwn(result,'recheckCursor')?{recheckCursor:result.recheckCursor||''}:{}),...(Object.hasOwn(result,'partial')?{partial:result.partial??null}:{})}:{};
-      const blockedReason=['locked','budget','preempted','permission'].includes(String(result.reason||''))?String(result.reason):result.status==='unavailable'?'unavailable':result.corruption?'corrupt':'',outcome={attemptedAt:now,lastOutcome:result.status,blockedReason,history:result.checkpointOnly?current.history:[...daily,{at:now,outcome:result.status,complete:result.complete===true&&['completed','failed'].includes(result.status)}].slice(-8)};
-      const finished=current.recheck&&result.recheckComplete===true&&result.status==='failed'&&result.corruption===true;
-      if(result.complete===true&&(result.status==='completed'||finished))return {...current,...outcome,completedAt:now,cycleStartedAt:'',cursor:'',recheckCursor:'',scanId:'',partial:null,recheck:false,failedAt:finished?now:'',quarantinedObjectIds:quarantine};
-      if(['completed','yielded','failed','unavailable','skipped'].includes(result.status))return {...current,...progress,...outcome,partial:'partial' in progress?progress.partial:result.corruption?null:current.partial,cycleStartedAt:hasProgress?current.cycleStartedAt||now:current.cycleStartedAt,failedAt:['failed','unavailable'].includes(result.status)?now:current.failedAt,quarantinedObjectIds:quarantine};
-      return current;
-    });
+    return mutateTarget(target,current=>projectRepositoryResult(current,result,environment.nowIso()));
   }
   const repositoryHooks=freeze({
     readTarget:(id:string)=>readTarget(id),
@@ -203,7 +209,7 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
   }
   return freeze({format:'study-director.backup-integrity-host' as const,contractVersion:1 as const,attachmentJob,repositoryHooks,attachmentIssue:(id:string)=>attachmentIssues.get(String(id||''))||null,attachmentState:()=>attachmentView,repositoryState:()=>repositoryView,scheduleAttachment,installAttachment,installRepository,requestRepositoryRecheck,render,diagnosticRows});
 }
-const createModule=():BackupIntegrityHostContract=>freeze({format:'study-director.backup-integrity-host-module',contractVersion:1,normalizeAttachmentState,normalizeRepositoryTarget,normalizeRepositoryState,createController});
+const createModule=():BackupIntegrityHostContract=>freeze({format:'study-director.backup-integrity-host-module',contractVersion:1,normalizeAttachmentState,normalizeRepositoryTarget,normalizeRepositoryState,projectRepositoryResult,createController});
 registry.define('backup-integrity-host',1,createModule);return createModule;
 })();
 export type BackupIntegrityHostModule=ReturnType<typeof sdBackupIntegrityHostFactory>;
