@@ -152,7 +152,7 @@ const createModule=()=>{
           input.canonical.dailyRecordsList(),input.canonical.notesReadFreshPayload(),input.canonical.activeSessionLoad(),input.canonical.planDataRead(),input.canonical.attachmentsList(),input.canonical.pendingReviewsList()
         ]);
         if(!active||active.ok!==true||active.error)throw active?.error||new Error('Active Session could not be read completely.');
-        if(!Array.isArray(reviews))throw new Error('Kept Versions could not be read completely.');
+        if(!Array.isArray(reviews as unknown))throw new Error('Kept Versions could not be read completely.');
         const hasPlan=!!(plans&&(String(plans.draft||'').trim()||(plans.savedPlans||[]).length));
         return !(records||[]).length&&!Object.keys(notePayload||{}).length&&!active.value&&!hasPlan&&!(assets||[]).length&&!reviews.some(review=>!review.resolvedAt);
       }catch(error){input.diagnostics.capture('backup.device-recovery-empty-check',error,'warn');return null;}
