@@ -46,6 +46,13 @@ fields.clear();resolved.clear();carry='';repoValue=structuredClone(canonical);pl
 assert.equal(controller.restoreLocalRecovery(),true);assert.equal(fields.get('0:completion'),75);assert.equal(resolved.get(1),'skipped');assert.equal(carry,'carry');assert.equal(planDraft,'draft survives reload');
 // Queued strict durability is not discarded by a later ordinary save request.
 controller.saveLiveDraft({strictDurability:true,markChanged:false});controller.saveLiveDraft();await runTimers();assert.equal(lastSaveOptions.strictDurability,true);assert.ok(marked>0);
+// Recovery barriers block ordinary checkpoints. The explicit recovery authorization
+// is reserved for recovery-owned checkpoints that must settle canonical Review state.
+recovery=true;
+assert.equal(await controller.withPersistenceSuppressed(()=>controller.writeNow({markChanged:false})),null,'ordinary writes remain blocked under recovery suppression');
+const recoveryCheckpoint=await controller.withPersistenceSuppressed(()=>controller.writeNow({markChanged:false,allowDuringRecoveryQuiescence:true}));
+assert.equal(recoveryCheckpoint?.ok,true,'an explicitly recovery-owned checkpoint may pass through restore suppression');
+recovery=false;
 // Periodic checkpoints wait through managed recovery and run immediately after the interval is eligible.
 now+=60000;recoveryWork=true;assert.equal(controller.maybeSnapshotRunningTimer(),false);recoveryWork=false;assert.equal(controller.maybeSnapshotRunningTimer(),true);await Promise.resolve();
 // A local recovery envelope is not a canonical completion barrier.

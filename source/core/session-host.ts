@@ -53,7 +53,7 @@ function createController(input:Readonly<SessionHostInput>):Readonly<SessionHost
   });
   const persistenceSuppressed=()=>suppressionDepth>0;
   function blocked(options:Readonly<LiveDraftWriteOptions>={}){
-    return persistenceSuppressed()||persistence.recoveryQuiesced()&&options.allowDuringRecoveryQuiescence!==true||!persistence.canMutate()||persistence.persistenceBlocked();
+    return (persistenceSuppressed()||persistence.recoveryQuiesced())&&options.allowDuringRecoveryQuiescence!==true||!persistence.canMutate()||persistence.persistenceBlocked();
   }
   function captureSnapshot(evidence:RuntimeEvidence|null=null):SessionSnapshot|null{
     const tasks=snapshot.tasks();if(!tasks.length)return null;
