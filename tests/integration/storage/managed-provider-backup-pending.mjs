@@ -1,13 +1,11 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 import {APP_META_KEYS,APP_META_RUNTIME_REGISTRY} from '../../../contracts/data-architecture.mjs';
 
-for(const file of ['source/core/internal.ts','source/core/app-meta.ts','source/core/host-metadata.ts','source/core/operation-lifecycle.ts','source/core/repository-background.ts'])vm.runInThisContext(readScript(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/app-meta.ts','source/core/host-metadata.ts','source/core/operation-lifecycle.ts','source/core/repository-background.ts','source/core/backup-maintenance-host.ts'])vm.runInThisContext(readScript(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
-const AppMeta=registry.require('app-meta',1),HostMetadata=registry.require('host-metadata',1);
+const AppMeta=registry.require('app-meta',1),HostMetadata=registry.require('host-metadata',1),MaintenanceHost=registry.require('backup-maintenance-host',1);
 const rows=new Map();let strictWrites=0;
 function request(result){return {result,error:null,onsuccess:null,onerror:null,_result:result};}
 const transactionFaults={read:false,write:false,commit:false};let transactionChain=Promise.resolve();
@@ -66,10 +64,14 @@ assert.equal(strictWrites,4,'repository-maintenance intent removal must use stri
 
 console.log(JSON.stringify({status:'PASS',suite:'managed-provider-backup-pending',strictDurability:true,restartPersistence:true,clearable:true,maintenanceRestartPersistence:true,maintenanceStrictDurability:true,maintenanceEligibilityPersistence:true},null,2));
 
-const Background=registry.require('repository-background',1,freeze({lifecycle:registry.require('operation-lifecycle',1)})),hostSource=readHostHtml(),hostText=hostSource.slice(hostSource.indexOf('const REPOSITORY_MAINTENANCE_FORMAT='),hostSource.indexOf('async function canonicalLocalRecoveryEmpty('));
+const Background=registry.require('repository-background',1,freeze({lifecycle:registry.require('operation-lifecycle',1)}));
 function host(){
- const context={Object,Number,String,Date,Promise,Map,crypto:globalThis.crypto,AppDiagnostics:{capture(){}},BackupProviderRuntime:{configureRepositoryMaintenance(){}},BackupAppMeta:gateway().bind('backup')};vm.createContext(context);vm.runInContext(hostText,context);
- return {read:vm.runInContext('repositoryMaintenanceState',context),mark:vm.runInContext('markRepositoryMaintenancePending',context),clear:vm.runInContext('clearRepositoryMaintenancePending',context)};
+ const controller=MaintenanceHost.createRepositoryMaintenance(freeze({
+  meta:gateway().bind('backup'),metadataName:'repositoryMaintenancePending',
+  diagnostics:freeze({capture(){}}),
+  environment:freeze({nowIso:()=>new Date().toISOString(),uuid:()=>globalThis.crypto.randomUUID()})
+ }));
+ return {read:controller.hooks.read,mark:controller.hooks.mark,clear:controller.hooks.clear};
 }
 function clock(){let now=Date.now(),sequence=0;const timers=new Map();return {now:()=>now,setTimeout:(callback,delay)=>{const id=++sequence;timers.set(id,{callback,due:now+delay});return id;},clearTimeout:id=>timers.delete(id),advance:async ms=>{now+=ms;for(const [id,timer] of [...timers])if(timer.due<=now){timers.delete(id);timer.callback();await Promise.resolve();}},pending:()=>[...timers.values()].map(value=>value.due-now)};}
 function setup(h,execute){
