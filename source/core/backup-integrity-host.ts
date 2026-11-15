@@ -78,8 +78,8 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
   let attachmentIssues=new Map<string,AssetIssue>();
   const boundScopes:Record<string,string>=Object.create(null) as Record<string,string>,live:Record<string,{done:number;total:number}>=Object.create(null) as Record<string,{done:number;total:number}>,recheckAsked:Record<string,boolean>=Object.create(null) as Record<string,boolean>,rowError:Record<string,string>=Object.create(null) as Record<string,string>;
 
-  function status(target:Record<string,unknown>|null|undefined,{shallow=false,running=false,liveProgress=null as {done:number;total:number}|null}={}){
-    const value=target||{},completed=String(value['completedAt']||value['checkedAt']||''),files=shallow?'attachments':'backup files';
+  function status(target:unknown,{shallow=false,running=false,liveProgress=null as {done:number;total:number}|null}={}){
+    const value=fields(target),completed=String(value['completedAt']||value['checkedAt']||''),files=shallow?'attachments':'backup files';
     const between=!!(value['partial']||value['progress']||value['cursor']||value['cycleStartedAt']),damaged=Array.isArray(value['quarantinedObjectIds'])?value['quarantinedObjectIds'].length:0;
     const count=liveProgress&&Number.isFinite(liveProgress.total)&&liveProgress.total>0?` ${Math.min(liveProgress.done||0,liveProgress.total)} of ${liveProgress.total} ${files}`:'';
     const blocked=String(value['blockedReason']||''),outcome=String(value['lastOutcome']||''),recheck=value['recheck']===true;
@@ -97,7 +97,7 @@ function createController(input:Readonly<BackupIntegrityInput>):Readonly<BackupI
       const value=location?repositoryView?.locations[location]:attachmentView,scope=value&&'repositoryScope' in value?value.repositoryScope:'',bound=!location||!!scope&&boundScopes[location]===scope;
       const running=!!location&&jobs.some(row=>row['job']===location+' integrity'&&row['running']===true);
       if(location&&value&&'recheck' in value&&value.recheck)recheckAsked[location]=false;
-      const shown=bound?status(value as unknown as Record<string,unknown>,{shallow:!location,running,liveProgress:location?live[location]||null:null}):freeze({head:'Not connected',detail:'Connect it to check its backups.'});
+      const shown=bound?status(value,{shallow:!location,running,liveProgress:location?live[location]||null:null}):freeze({head:'Not connected',detail:'Connect it to check its backups.'});
       const error=location?rowError[location]||'':'',name=input.document.createElement('strong'),head=input.document.createElement('span'),detail=input.document.createElement('span');
       name.textContent=label+': ';head.className='verification-head';head.textContent=error||shown.head;detail.className='verification-detail';detail.textContent=' '+shown.detail;
       element.classList.toggle('verification-error',!!error);element.replaceChildren(name,head,detail);
