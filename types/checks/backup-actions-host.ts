@@ -35,15 +35,6 @@ const controlsInput=Object.freeze({
 }) satisfies Readonly<BackupControlsInput>;
 host.createControls(controlsInput);
 
-const deviceEngine=Object.freeze({
-  backup:(id:string)=>backupRuntime.providers.backup(id),
-  cancelForeground:(reason?:string,id?:string)=>backupRuntime.providers.cancelForeground(reason,id),
-  disconnect:(id:string)=>backupRuntime.providers.disconnect(id),
-  forget:(id:string)=>backupRuntime.providers.forget(id),
-  locationStatus:(id:string)=>backupRuntime.providers.locationStatus(id),
-  register:(location:Parameters<DeviceBackupInput['engine']['register']>[0])=>backupRuntime.providers.register(location),
-  subscribeStatus:(listener:()=>void)=>backupRuntime.providers.subscribeStatus(listener)
-}) satisfies DeviceBackupInput['engine'];
 const deviceEnvironment=Object.freeze({
   backgroundBlocker:()=>false,canMutate:()=>true,clearTimeout:(handle:number)=>window.clearTimeout(handle),
   setTimeout:(callback:()=>void,ms:number)=>window.setTimeout(callback,ms),showDirectoryPicker:undefined,
@@ -62,7 +53,7 @@ const deviceSettings=Object.freeze({
 const deviceComposition=Object.freeze({
   module:deviceModule,storageModule,
   configuration:Object.freeze({metadataKey:'deviceFolder',pickerId:'study-director-device-backup',settingsTimeoutMs:10_000}),
-  engine:deviceEngine,environment:deviceEnvironment,hooks:deviceHooks,presentation,settings:deviceSettings,
+  engine:backupRuntime.providers,environment:deviceEnvironment,hooks:deviceHooks,presentation,settings:deviceSettings,
   storage:Object.freeze({
     checksum:(file:Blob,options:Parameters<DeviceBackupCompositionInput['storage']['checksum']>[1])=>processing.run('checksum',{value:file},options),
     owner:()=>({profile:'profile',scope:'scope',device:'device'}),

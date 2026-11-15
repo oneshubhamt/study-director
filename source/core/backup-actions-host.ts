@@ -1,6 +1,8 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {BackupActionsHostContract,BackupControls,BackupControlsInput,BackupProtectionHost,BackupProtectionHostInput,DeviceBackupCompositionInput} from '../../types/backup-actions-host.ts';
-import type {DeviceBackupInput,DeviceStatus} from '../../types/device-backup.ts';
+import type {DeviceBackupInput,DeviceLocation,DeviceStatus} from '../../types/device-backup.ts';
+import type {Lease,ProviderConfig,RepositoryTransport,Upload} from '../../types/backup-provider.ts';
+import type {LockKind,LockLease} from '../../types/device-folder-storage.ts';
 
 const sdBackupActionsHostFactory=(()=>{
 'use strict';
@@ -170,14 +172,54 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
   return freeze({format:'study-director.backup-controls' as const,contractVersion:1 as const,install,renderFile,renderDrive,renderDevice,renderActions,toggleSettings,backUpEverywhere,withPassword,openHistory,manageProtection,exportLocal,importLocal,pickImportFile,cancelStandalone,connectDevice,cancelDevice,disconnectDevice,connectDrive,cancelDrive,disconnectDrive});
 }
 
+function folderLease(kind:LockKind,lease:Lease):LockLease{
+  if(lease.kind!==kind||typeof lease.name!=='string'||!lease.name)throw new TypeError(`Device Folder ${kind} lease is incompatible with the provider contract.`);
+  return freeze({kind,id:lease.id,name:lease.name,createdAt:lease.createdAt});
+}
+function providerRepository(repository:DeviceLocation['repository']):RepositoryTransport{
+  const adapt=(kind:LockKind,lease:Lease)=>folderLease(kind,lease);
+  return freeze({
+    ...repository,
+    upload:async(value:Upload)=>{
+      if(!(value.blob instanceof Blob))throw new TypeError('Device Folder repository upload requires materialized backup bytes.');
+      return repository.upload({...value,blob:value.blob});
+    },
+    beginOperation:options=>providerRepository(repository.beginOperation(options)),
+    assertPublication:(lease:Lease)=>repository.assertPublication(adapt('publication',lease)),
+    renewPublication:(lease:Lease)=>repository.renewPublication(adapt('publication',lease)),
+    endPublication:(lease:Lease)=>repository.endPublication(adapt('publication',lease)),
+    assertMaintenance:(lease:Lease)=>repository.assertMaintenance(adapt('maintenance',lease)),
+    renewMaintenance:(lease:Lease)=>repository.renewMaintenance(adapt('maintenance',lease)),
+    endMaintenance:(lease:Lease)=>repository.endMaintenance(adapt('maintenance',lease))
+  });
+}
+function providerLocation(location:DeviceLocation):ProviderConfig{
+  return freeze({
+    id:location.id,label:location.label,hosted:location.hosted,
+    connected:location.connected,backgroundAvailable:location.backgroundAvailable,
+    automaticBaseline:location.automaticBaseline,automaticConfigured:location.automaticConfigured,
+    subscribeConnection:location.subscribeConnection,
+    authorize:options=>location.authorize(options),disconnect:location.disconnect,
+    repository:providerRepository(location.repository)
+  });
+}
 function createDeviceBackup(input:Readonly<DeviceBackupCompositionInput>){
   exactObject(input,['module','storageModule','configuration','engine','environment','hooks','presentation','settings','storage'],'Device Backup host input');
   if(!Object.isFrozen(input.module)||input.module.format!=='study-director.device-backup-module'||input.module.contractVersion!==1)throw new TypeError('Device Backup module is unavailable or incompatible.');
   if(!Object.isFrozen(input.storageModule)||input.storageModule.format!=='study-director.device-folder-storage-module'||input.storageModule.contractVersion!==1)throw new TypeError('Device Folder storage module is unavailable or incompatible.');
   const storage=input.storage;
-  if(!Object.isFrozen(storage)||!Object.isFrozen(storage.identities)||!Object.isFrozen(storage.environment)||!Object.isFrozen(storage.limits))throw new TypeError('Device Folder storage providers must be frozen.');
+  if(!Object.isFrozen(input.engine)||!Object.isFrozen(storage)||!Object.isFrozen(storage.identities)||!Object.isFrozen(storage.environment)||!Object.isFrozen(storage.limits))throw new TypeError('Device Folder providers must be frozen.');
+  const engine:DeviceBackupInput['engine']=freeze({
+    backup:id=>input.engine.backup(id),
+    cancelForeground:(reason,id)=>input.engine.cancelForeground(reason,id),
+    disconnect:id=>input.engine.disconnect(id),
+    forget:id=>input.engine.forget(id),
+    locationStatus:id=>input.engine.locationStatus(id),
+    register:location=>input.engine.register(providerLocation(location)),
+    subscribeStatus:listener=>input.engine.subscribeStatus(listener)
+  });
   const controller=input.module.createController(freeze({
-    configuration:input.configuration,engine:input.engine,environment:input.environment,hooks:input.hooks,presentation:input.presentation,settings:input.settings,
+    configuration:input.configuration,engine,environment:input.environment,hooks:input.hooks,presentation:input.presentation,settings:input.settings,
     transport:(folder:Parameters<DeviceBackupInput['transport']>[0],repository:Parameters<DeviceBackupInput['transport']>[1])=>input.storageModule.createStorage(freeze({
       folder,identities:freeze({root:repository,...storage.identities}),owner:storage.owner,checksum:storage.checksum,inspectManifest:storage.inspectManifest,environment:storage.environment,limits:storage.limits
     }))

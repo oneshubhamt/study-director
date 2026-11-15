@@ -85,7 +85,7 @@ export interface DeviceBackupCompositionInput{
   readonly module:DeviceBackupModule;
   readonly storageModule:DeviceFolderStorageModule;
   readonly configuration:DeviceBackupInput['configuration'];
-  readonly engine:DeviceBackupInput['engine'];
+  readonly engine:BackupProviders;
   readonly environment:DeviceBackupInput['environment'];
   readonly hooks:DeviceBackupInput['hooks'];
   readonly presentation:DeviceBackupInput['presentation'];
