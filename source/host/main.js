@@ -1509,6 +1509,7 @@ let BackgroundMaintenance=null,DataMaintenanceJob=null;
 function backgroundBlocker(options={}){return BackgroundMaintenance?BackgroundMaintenance.backgroundBlocker(options):'startup';}
 function upkeepBlocker(options={}){return BackgroundMaintenance?BackgroundMaintenance.upkeepBlocker(options):'startup';}
 function foregroundChanged(){return BackgroundMaintenance?.foregroundChanged()||false;}
+function installBackgroundOwners(){return BackgroundMaintenance?.install()||false;}
 function wakeBackgroundOperations(trigger='eligibility'){return BackgroundMaintenance?.wake(trigger)||false;}
 function backgroundMaintenanceForegroundBusy(){return BackgroundMaintenance?BackgroundMaintenance.foregroundBusy():true;}
 function waitForClosedTabLease(limitMs=25000){return BackgroundMaintenance?BackgroundMaintenance.waitForClosedTabLease(AppOwnership,AppMutationCoordinator,limitMs):Promise.resolve(false);}
@@ -5235,7 +5236,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
     hydratePlan:()=>PlanData.hydrate(),readRestoreJournal:()=>AppData.restoreJournal.read(),waitForClosedTabLease,recoverRestore:()=>BackupController.recoverInterruptedRestore(),tickClock,updateHeader:updateHeaderInfo,setInterval:(fn,ms)=>setInterval(fn,ms),setTimeout:(fn,ms)=>setTimeout(fn,ms),
     hasTasks:()=>TASKS.length>0,showEmpty,canMutate:appCanMutate,restoreSession:attemptAutoRestoreActiveSession,refreshBadge:refreshPersistedSessionBadge,inspectStorage:inspectStorageCapability,offerInstallNotice:()=>CapabilityInstallation.offerInstallNotice(),topology:()=>IndexedDb.topology(),
     setFastFenceReady:value=>{backupFastFenceReady=value;},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:reconcileStartupChangeClock,resumeStorageReset:resumeUnresolvedStorageReset,
-    installBackground:installBackgroundOwners,scheduleMaintenance:scheduleDataMaintenance,wakeBackground:reason=>BackgroundOperations.wake(reason),installSessionWatch,refreshKeptVersions:()=>KeptVersions.refresh(),announceUnsupported:()=>UnsupportedData.announce(),renderUnsupported:renderUnsupportedData,
+    installBackground:installBackgroundOwners,scheduleMaintenance:scheduleDataMaintenance,wakeBackground:reason=>wakeBackgroundOperations(reason),installSessionWatch,refreshKeptVersions:()=>KeptVersions.refresh(),announceUnsupported:()=>UnsupportedData.announce(),renderUnsupported:renderUnsupportedData,
     collectProfiles:()=>Profiles.collect(),askProfilePassword,collectFiles:()=>BackupFiles.collect(),preloadInsights:scheduleInsightsPreload,confirmBoot:()=>PwaLifecycle.confirmBoot(),offerDeviceRecovery:()=>offerDeviceRecoveryIfLocalEmpty({reason:'startup'}),
     reportUnsupported:()=>UnsupportedData.reportBlocked(),setPlanStatus,noticeCanCompact,getReviewDate,reconcileLifecycle:(...args)=>SessionLifecycle.reconcile(...args)
   })

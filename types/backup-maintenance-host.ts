@@ -30,6 +30,7 @@ export interface BackgroundMaintenanceController{
   backgroundBlocker(options?:Readonly<{housekeeping?:boolean}>):string;
   upkeepBlocker(options?:Readonly<{housekeeping?:boolean}>):string;
   foregroundBusy():boolean;
+  install():boolean;
   watchingForeground():boolean;
   foregroundChanged():boolean;
   wake(trigger?:string):boolean;
