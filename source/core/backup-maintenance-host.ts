@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {BackupMaintenanceHostContract,BackgroundMaintenanceController,BackgroundMaintenanceInput,BusyOwner,RepositoryMaintenanceController,RepositoryMaintenanceInput,WakeOwner} from '../../types/backup-maintenance-host.ts';
+import type {BackupMaintenanceHostContract,BackgroundMaintenanceController,BackgroundMaintenanceInput,BusyOwner,RepositoryMaintenanceController,RepositoryMaintenanceEntry,RepositoryMaintenanceInput} from '../../types/backup-maintenance-host.ts';
 import type {MaintenanceState} from '../../types/repository-background.ts';
 
 const sdBackupMaintenanceHostFactory=(()=>{
@@ -62,7 +62,7 @@ function createBackground(input:Readonly<BackgroundMaintenanceInput>):Readonly<B
       const workBudget=lifecycle.createWorkBudget({now:environment.now,milliseconds:20000,check:foregroundCheck,yieldError:()=>Object.assign(new Error('Data maintenance yielded.'),{code:'DATA_MAINTENANCE_YIELDED',reason:'budget'})});
       try{
         const raw=await data.maintenance.run({check:foregroundCheck,workBudget}),status=String(raw.status||'failed'),reason='reason' in raw?String(raw.reason||''):'';
-        const result=freeze({...raw,status,...(reason?{reason}:{})});
+        const result=freeze({...raw,status,reason});
         diagnostics.finish(freeze({status,result:status,reason}),traceId);
         if(status==='yielded')schedule(15000,reason||'yielded');
         else if(status==='completed'){
@@ -94,7 +94,7 @@ function createRepositoryMaintenance(input:Readonly<RepositoryMaintenanceInput>)
   const reason=(value:unknown)=>{const text=String(value||'requested').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(text)?text:'requested';};
   const iso=(value:unknown,fallback:string='')=>{const text=String(value||'');return Number.isFinite(Date.parse(text))?new Date(text).toISOString():fallback;};
   function normalize(value:unknown){
-    const row=value&&typeof value==='object'?value as {format?:unknown;version?:unknown;entries?:unknown}:null,entries:MaintenanceState[]=[],seen=new Set<string>();
+    const row=value&&typeof value==='object'?value as {format?:unknown;version?:unknown;entries?:unknown}:null,entries:RepositoryMaintenanceEntry[]=[],seen=new Set<string>();
     const rows=row?.format===FORMAT&&Number(row.version)===VERSION&&Array.isArray(row.entries)?row.entries:[];
     for(const raw of rows){
       const item=raw&&typeof raw==='object'?raw as Record<string,unknown>:Object.create(null) as Record<string,unknown>;

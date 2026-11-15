@@ -35,6 +35,7 @@ export interface BackgroundMaintenanceController{
   waitForClosedTabLease(owner:Readonly<{canMutate():boolean}>,mutation:Readonly<{foreignActive():boolean}>,limitMs?:number):Promise<boolean>;
   schedule(delay?:number,trigger?:string):boolean;
 }
+export type RepositoryMaintenanceEntry=Readonly<import('./repository-background.ts').MaintenanceState&{providerId:string}>;
 export interface RepositoryMaintenanceInput{
   readonly meta:MetaOwner;
   readonly metadataName:string;
@@ -44,7 +45,7 @@ export interface RepositoryMaintenanceInput{
 export interface RepositoryMaintenanceController{
   readonly format:'study-director.repository-maintenance-host';readonly contractVersion:1;
   readonly hooks:Readonly<MaintenanceHooks>;
-  read(options?:Readonly<{throwOnError?:boolean}>):Promise<Readonly<{format:'study-director.repository-maintenance-pending';version:4;entries:readonly import('./repository-background.ts').MaintenanceState[]}> >;
+  read(options?:Readonly<{throwOnError?:boolean}>):Promise<Readonly<{format:'study-director.repository-maintenance-pending';version:4;entries:readonly RepositoryMaintenanceEntry[]}> >;
 }
 export interface BackupMaintenanceHostContract{
   readonly format:'study-director.backup-maintenance-host-module';readonly contractVersion:1;
