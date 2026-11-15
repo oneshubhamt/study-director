@@ -48,7 +48,7 @@ console.log(JSON.stringify({status:'PASS',boundary:'p5.7a-backup-actions-host',p
 
 
 { // p5.7b-reconciliation-and-recovery-owner
-const host=readHostHtml(),recovery=readScript('source/core/backup-recovery-host.ts'),reconciliationUi=readScript('source/core/reconciliation-ui.ts');
+const host=readHostHtml(),recovery=readScript('source/core/backup-recovery-host.ts'),reconciliationUi=readScript('source/core/reconciliation-ui.ts'),backup=readScript('source/core/backup.ts');
 assert.match(host,/const ReconciliationUIModule=INTERNAL_MODULES\.load\('reconciliation-ui',1,'study-director\.reconciliation-ui-module',1\)/u,'P5.7B reconciliation UI crosses the checked private-module boundary');
 assert.match(host,/KeptVersions=BackupRecoveryHostModule\.createKeptVersions\(Object\.freeze\(\{/u,'Kept Versions state is composed through the checked recovery owner');
 assert.doesNotMatch(host,/const KeptVersions=\(\(\)=>\{/u,'the untyped host Kept Versions owner is retired');
@@ -60,6 +60,14 @@ assert.match(recovery,/await input\.lifecycle\.canonicalPlanDraft\(\)/u,'visible
 assert.match(recovery,/await input\.lifecycle\.settlePlan\(\)/u,'Plan persistence quiescence remains explicit before recovery');
 assert.match(host,/noteReconciliation:Object\.freeze\(\{resolve:options=>withRichTextAssetMaintenancePaused\(\(\)=>NoteReconciliationUI\.resolve\(options\)\)/u,'note reconciliation remains read-only with attachment maintenance paused until a canonical recovery mutation begins');
 assert.doesNotMatch(reconciliationUi,/\bAppData\b|IndexedDb|localStorage|notes\.replace|dailyRecords/u,'scratch reconciliation cannot acquire a canonical persistence path');
+const reconciliationAt=backup.indexOf("noteResult=await NoteReconciliation.resolve"),mutationAt=backup.indexOf("return runRestoreMutation(stored!,'restore-backup'",reconciliationAt);
+const safetyAt=backup.indexOf('captureLocalSafetyCopy(stored',mutationAt),journalAt=backup.indexOf('restoreJournal.prepare',safetyAt),verificationAt=backup.indexOf('verifyRestoreCommit(expectedCommit',journalAt),journalClearAt=backup.indexOf('restoreJournal.clear(restoreId)',verificationAt);
+assert.ok(reconciliationAt>0&&mutationAt>reconciliationAt,'user reconciliation must finish before the managed canonical mutation boundary');
+assert.ok(safetyAt>mutationAt&&journalAt>safetyAt,'verified local safety capture must precede restore-journal preparation and canonical writes');
+assert.ok(verificationAt>journalAt&&journalClearAt>verificationAt,'restore journal cannot clear before canonical read-back verification succeeds');
+assert.match(backup,/rollbackImportedState\(rollbackJournal,rollbackDeletionState\)/u,'failed post-side-effect restore retains the verified rollback path');
+assert.match(backup,/resolvedAssetReferenceIds\(resolvedPlan,signal/u,'attachment publication is derived from the resolved reconciliation plan');
+assert.match(backup,/applyResolvedActiveSession\(resolvedPlan,\{clear:clearSession,keepRunning:sync&&session==='graft'\}\)/u,'Active Session reconciliation remains delegated to the checked restore path');
 for(const action of ['refresh-version-history','close-version-history','cancel-version-history-operation','recover-managed-version','compare-managed-note','remove-managed-version'])
   assert.match(host,new RegExp(`'${action}': [^\\n]*BackupRecoveryHost\\.history`,'u'),`${action} stays behind the checked history owner`);
 console.log(JSON.stringify({status:'PASS',boundary:'p5.7b-reconciliation-recovery',checkedReconciliation:true,checkedKeptVersions:true,independentPlanDraft:true,historyActions:true},null,2));
