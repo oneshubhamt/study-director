@@ -75,6 +75,14 @@ export interface VerifiedRecoveryController{
   reconcileStartupChangeClock():Promise<boolean>;
   install():Promise<VerifiedRecoveryState>;
 }
+export interface AutomaticBackupPolicyInput{
+  readonly verified:Pick<VerifiedRecoveryController,'verified'>;
+  currentRevision():string;
+  canonicalEmpty():Promise<boolean|null>;
+}
+export interface AutomaticBackupPolicy{
+  covered(id:string):string;current():string;ready():Promise<boolean|null>;
+}
 export interface BackupNudgeInput{
   readonly verified:Pick<VerifiedRecoveryController,'read'|'entries'|'lastBackupTime'>;
   readonly storageHealth:Pick<StorageHealthController,'snapshot'>;
@@ -93,5 +101,6 @@ export interface BackupReadinessHostContract{
   createCanonicalCommit(input:Readonly<CanonicalCommitInput>):Readonly<CanonicalCommitController>;
   normalizeVerifiedRecoveryState(value:unknown):VerifiedRecoveryState;
   createVerifiedRecovery(input:Readonly<VerifiedRecoveryInput>):Readonly<VerifiedRecoveryController>;
+  createAutomaticBackupPolicy(input:Readonly<AutomaticBackupPolicyInput>):Readonly<AutomaticBackupPolicy>;
   createBackupNudge(input:Readonly<BackupNudgeInput>):Readonly<BackupNudgeController>;
 }

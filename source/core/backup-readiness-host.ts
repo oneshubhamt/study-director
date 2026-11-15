@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {BackupNudgeController,BackupNudgeInput,BackupReadinessHostContract,CanonicalCommitController,CanonicalCommitEvent,CanonicalCommitInput,StorageHealthController,StorageHealthHistory,StorageHealthInput,StorageHealthPatch,StorageHealthState,VerifiedBackupReceipt,VerifiedRecoveryController,VerifiedRecoveryCopy,VerifiedRecoveryInput,VerifiedRecoveryState} from '../../types/backup-readiness-host.ts';
+import type {AutomaticBackupPolicy,AutomaticBackupPolicyInput,BackupNudgeController,BackupNudgeInput,BackupReadinessHostContract,CanonicalCommitController,CanonicalCommitEvent,CanonicalCommitInput,StorageHealthController,StorageHealthHistory,StorageHealthInput,StorageHealthPatch,StorageHealthState,VerifiedBackupReceipt,VerifiedRecoveryController,VerifiedRecoveryCopy,VerifiedRecoveryInput,VerifiedRecoveryState} from '../../types/backup-readiness-host.ts';
 
 const sdBackupReadinessHostFactory=(()=>{
 'use strict';
@@ -215,6 +215,15 @@ function createVerifiedRecovery(input:Readonly<VerifiedRecoveryInput>):Readonly<
   return freeze({format:'study-director.verified-recovery-readiness' as const,contractVersion:1 as const,state:()=>current,verified,entries,lastBackupTime,read,record,verifyFreshCurrentBackup,reconcileChangeClock,reconcileStartupChangeClock,install});
 }
 
+function createAutomaticBackupPolicy(input:Readonly<AutomaticBackupPolicyInput>):Readonly<AutomaticBackupPolicy>{
+  exactObject(input,['verified','currentRevision','canonicalEmpty'],'Automatic backup policy input');
+  return freeze({
+    covered:(id:string)=>input.verified.verified(String(id||''))?.sourceRevision||'',
+    current:()=>input.currentRevision(),
+    ready:async()=>{const empty=await input.canonicalEmpty();return empty===null?null:!empty;}
+  });
+}
+
 function createBackupNudge(input:Readonly<BackupNudgeInput>):Readonly<BackupNudgeController>{
   exactObject(input,['verified','storageHealth','dueMs','checkMs','canMutate','now','automaticActive','dailySummaryCount','todayIso','publishMessage','notify','capture'],'Backup nudge input');
   let message='',checkedAt=0,notifiedDate='';
@@ -245,7 +254,7 @@ function createBackupNudge(input:Readonly<BackupNudgeInput>):Readonly<BackupNudg
   return freeze({format:'study-director.backup-nudge' as const,contractVersion:1 as const,run,reset,message:()=>message,checkedAt:()=>checkedAt});
 }
 
-const createModule=():BackupReadinessHostContract=>freeze({format:'study-director.backup-readiness-host-module',contractVersion:1,createStorageHealth,createCanonicalCommit,normalizeVerifiedRecoveryState,createVerifiedRecovery,createBackupNudge});
+const createModule=():BackupReadinessHostContract=>freeze({format:'study-director.backup-readiness-host-module',contractVersion:1,createStorageHealth,createCanonicalCommit,normalizeVerifiedRecoveryState,createVerifiedRecovery,createAutomaticBackupPolicy,createBackupNudge});
 registry.define('backup-readiness-host',1,createModule);
 return createModule;
 })();

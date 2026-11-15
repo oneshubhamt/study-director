@@ -11,7 +11,7 @@ import type {RepositoriesInput} from '../repositories.ts';
 import type {BackgroundMaintenanceInput,RepositoryMaintenanceController} from '../backup-maintenance-host.ts';
 import type {StorageResetInput} from '../backup-recovery-host.ts';
 import type {BackupIntegrityController,BackupIntegrityInput} from '../backup-integrity-host.ts';
-import type {BackupNudgeInput,CanonicalCommitController,VerifiedRecoveryInput} from '../backup-readiness-host.ts';
+import type {AutomaticBackupPolicyInput,BackupNudgeInput,CanonicalCommitController,VerifiedRecoveryInput} from '../backup-readiness-host.ts';
 import type {MetadataOwners} from '../data-bootstrap-host.ts';
 
 type BackupRuntime=ReturnType<BackupModule['createRuntime']>;
@@ -100,3 +100,9 @@ const backupNudgeInput=Object.freeze({
   publishMessage:(_message:string)=>{},notify:(_title:string,_message:string,_tag:string)=>{},capture:(_scope:string,_error:unknown,_level:'warn')=>{}
 }) satisfies Readonly<BackupNudgeInput>;
 readinessModule.createBackupNudge(backupNudgeInput);
+
+const automaticBackupPolicyInput=Object.freeze({
+  verified:readinessModule.createVerifiedRecovery(verifiedRecoveryInput),currentRevision:()=>'',canonicalEmpty:async()=>false
+}) satisfies Readonly<AutomaticBackupPolicyInput>;
+const automaticBackupPolicy=readinessModule.createAutomaticBackupPolicy(automaticBackupPolicyInput);
+runtime.providers.configureAutomaticBackup(automaticBackupPolicy);

@@ -75,7 +75,7 @@ export type CleanupOptions={reuseObjectInventory?:boolean;maintenanceLease?:Leas
 export type ConvergenceResult={status:string;reason:string;checkpointId?:string;maintenancePending?:boolean};
 export type PendingHooks={read(id:string):Promise<PendingEntry|null>;mark(id:string):Promise<boolean>;clear(id:string,expected?:PendingEntry|null):Promise<boolean>};
 export type MaintenanceHooks={read(id:string):Promise<MaintenanceState|null>;mark(id:string,state:{reason:string;nextEligibleAt:string;repositoryScope:string;newRequest?:boolean},expected?:MaintenanceState|null):Promise<boolean|'superseded'>;clear(id:string,expected?:MaintenanceState|null):Promise<boolean|'superseded'>};
-export type AutomaticHooks={covered(id:string):unknown;current():unknown;ready?:(()=>boolean)|null};
+export type AutomaticHooks={covered(id:string):unknown;current():unknown;ready?:(()=>boolean|null|PromiseLike<boolean|null>)|null};
 export type PreparedScrub=ScrubOptions&{repositoryScope?:string;requestId?:string};
 export type IntegrityHooks={readTarget(id:string):Promise<IntegrityTarget|null>;writeResult(id:string,value:IntegrityResult):Promise<unknown>;prepare(id:string,target:IntegrityTarget|null,context:{trigger:string;nextEligibleAt:string}):Promise<PreparedScrub|null>;isAvailable(id:string):boolean|string;isUnsafe(id:string):boolean;yieldTask():Promise<unknown>;quarantine(id:string):Promise<readonly string[]>};
 export type AutomaticState={connected:boolean;noticeShown:boolean;waitingSince:number;urgentSince:number};

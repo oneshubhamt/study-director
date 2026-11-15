@@ -3704,7 +3704,8 @@ AppActivation.subscribe(event=>{
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
-BackupProviderRuntime.configureAutomaticBackup(Object.freeze({covered:id=>VerifiedRecovery.verified(id)?.sourceRevision||'',current:()=>BackupRuntimeHost.sourceRevision(),ready:async()=>{const empty=await canonicalLocalRecoveryEmpty();return empty===null?null:!empty;}}));
+const AutomaticBackupPolicy=BackupReadinessHostModule.createAutomaticBackupPolicy(Object.freeze({verified:VerifiedRecovery,currentRevision:()=>BackupRuntimeHost.sourceRevision(),canonicalEmpty:()=>StorageResetRecovery.canonicalEmpty()}));
+BackupProviderRuntime.configureAutomaticBackup(AutomaticBackupPolicy);
 BackupProviderRuntime.configureSessionOwnership(Object.freeze({
   installationId:()=>InstallationIdentity.getId(),
   today:()=>todayISO(),
