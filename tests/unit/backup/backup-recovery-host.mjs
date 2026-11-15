@@ -15,6 +15,7 @@ const events=[],statuses=[],diagnostics=[];
 let storedPending=null,storageReadError=null,providerBringInResult=freeze({ok:true}),chooseMode='replace',restoredCheckpoint='',restoredConfirmed=false,suspended=0,cancelImportCalls=0,deviceCancelCalls=0,providerCancelCalls=0,lastProviderCancelId='';
 let deletionResults=[];
 let attachmentsBusy=false,notesFailure=null,backgroundSettled=null;
+const attachmentSettlementOptions=[];
 let providerRestoreImpl=async()=>freeze({ok:true});
 let driveConnected=false,noteVersionsImpl=async()=>freeze({available:true,entries:freeze([])}),lastProviderBringIn=null;
 let deviceRestoreFailure=null;const removedVersions=[];
@@ -47,7 +48,7 @@ const host=BackupRecoveryHost.createHost(freeze({presentation:createBackupPresen
     flushNotes:async()=>{events.push('notes-flush');return true;},flushPlanDraft:async()=>{events.push('plan-flush');return true;},hasTasks:()=>session.tasks,noteFailure:()=>notesFailure,
     planDraft:()=>plan.cached,planInputValue:()=>plan.input,quiesce:async operation=>{events.push('quiesce-enter');try{return await operation();}finally{events.push('quiesce-exit');}},
     // Mirrors PlanData: the write is skipped when the page believes storage already holds it.
-    savePlanDraft:async(options={})=>{plan.saves.push(options.force===true);if(options.force===true||plan.persisted!==plan.input){if(plan.writable)plan.stored=plan.input;plan.persisted=plan.input;}plan.cached=plan.input;return true;},settleAttachmentWriters:async()=>{events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>{session.writes+=1;session.revision+=1;session.source=new Date(Date.parse('2026-09-20T12:00:00.000Z')+session.revision*1000).toISOString();return freeze({ok:true,value:freeze({revision:session.revision}),storage:freeze({idb:true})});}
+    savePlanDraft:async(options={})=>{plan.saves.push(options.force===true);if(options.force===true||plan.persisted!==plan.input){if(plan.writable)plan.stored=plan.input;plan.persisted=plan.input;}plan.cached=plan.input;return true;},settleAttachmentWriters:async options=>{attachmentSettlementOptions.push(options);events.push('attachments-settle');return true;},settlePlan:async()=>{events.push('plan-settle');return true;},writeLiveDraft:async()=>{session.writes+=1;session.revision+=1;session.source=new Date(Date.parse('2026-09-20T12:00:00.000Z')+session.revision*1000).toISOString();return freeze({ok:true,value:freeze({revision:session.revision}),storage:freeze({idb:true})});}
   }),
   managedRecovery:freeze({createCoordinator:input=>ManagedRecovery.createCoordinator(input)}),
   mutation:freeze({run:async(kind,operation)=>{events.push(`mutation:${kind}`);return operation();}}),
@@ -88,9 +89,10 @@ assert.equal(storedPending,preservedPending,'failed strict pending-marker mutati
 storageReadError=null;assert.equal(await providerHooks.pending.read('google-drive'),null,'a successfully read marker without this provider is confirmed absence');storedPending=null;diagnostics.length=0;
 
 const recoverySpec=freeze({kind:'restore-version',label:'Device Folder',createSafety:async()=>freeze({verified:true,checkpointId:CHECKPOINT('c'),sourceRevision:'2026-09-20T12:00:00.000Z'}),apply:async()=>{events.push('apply');return freeze({ok:true});},publishPresent:async()=>freeze({status:'completed',checkpointId:CHECKPOINT('e')})});
-const beforeRecovery=events.length;
+const beforeRecovery=events.length,settlementStart=attachmentSettlementOptions.length;
 const recovery=await host.managedRecovery(recoverySpec);
 assert.equal(recovery.managedRecovery.present.status,'completed');assert.equal(suspended,0);
+const recoverySettlements=attachmentSettlementOptions.slice(settlementStart);assert.ok(recoverySettlements.length>0);assert.ok(recoverySettlements.every(options=>options?.allowDuringRecoveryQuiescence===true),'managed recovery must explicitly authorize its writer-settlement Review checkpoint');
 // Before anything is replaced, every pending write is saved: attachments,
 // the Plan draft, notes, deletions and the active session, and automatic
 // backups are paused for the whole operation.

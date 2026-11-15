@@ -140,7 +140,7 @@ const createModule=()=>{
     const {mark:markPending,clear:clearPending,read:pending}=createPendingStore(freeze({storage:input.storage,diagnostics:input.diagnostics,sourceRevision:input.sourceRevision}));
     async function settleRecoveryState(options:{phase?:'final';keepsActiveSession?:boolean}={}){
       if(input.lifecycle.attachmentBusy())throw new Error('An attachment is still being prepared or saved. Finish that operation before recovery.');
-      await input.lifecycle.settleAttachmentWriters();
+      await input.lifecycle.settleAttachmentWriters({allowDuringRecoveryQuiescence:true});
       if(await input.lifecycle.flushPlanDraft()===false)throw new Error('The current Plan draft could not be saved before recovery.');
       const planInput=input.lifecycle.planInputValue();
       if(planInput!==null&&(input.lifecycle.planDraft()??'')!==planInput&&await input.lifecycle.savePlanDraft()===false)throw new Error('The current Plan draft could not be saved before recovery.');

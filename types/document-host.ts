@@ -49,11 +49,12 @@ export interface DocumentIntegrationInput{
   readonly content:Readonly<{withinLimits(value:unknown):boolean}>;
   readonly printer:NotePrinter;readonly exporter:NoteExporter;
 }
+export interface AttachmentWriterSettlementOptions{readonly allowDuringRecoveryQuiescence?:boolean}
 export interface DocumentIntegration{
   readonly format:'study-director.document-integration';readonly contractVersion:1;
   readonly exporter:Readonly<{exportKeys(keys:readonly unknown[]):ReturnType<NoteExporter['exportKeys']>;cancel():unknown}>;
   readonly richAttachmentPort:AttachmentPort;
-  settleAttachmentWriters():Promise<void>;validateAttachmentInsertion(value:string,row:AssetRow):Promise<boolean>;
+  settleAttachmentWriters(options?:Readonly<AttachmentWriterSettlementOptions>):Promise<void>;validateAttachmentInsertion(value:string,row:AssetRow):Promise<boolean>;
   insertAttachment(key:unknown,row:AssetRow):Promise<boolean>;
   quiesceAttachmentMutation<T>(work:()=>T|PromiseLike<T>,options?:AttachmentBatchOptions):Promise<T>;
   printNote(key:unknown,title:unknown):Promise<boolean>|false;
