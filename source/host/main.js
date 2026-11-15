@@ -169,6 +169,12 @@ StorageHealthController=BackupReadinessHostModule.createStorageHealth(Object.fre
   timeLabelFromIso:value=>timeLabelFromIso(value),
   renderCapabilities:()=>NativeCapabilities?renderNativeCapabilities(NativeCapabilities.status()):false
 }));
+function storageHealthTime(iso){
+  if(!iso)return 'never';
+  const date=new Date(iso);if(!Number.isFinite(date.getTime()))return 'unknown';
+  const localDate=value=>`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`;
+  return localDate(date)===localDate(new Date())?timeLabelFromIso(iso)||'today':date.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
+}
 const AppDiagnostics=(()=>{
   function capture(scope,error,level='warn'){
     // Contained faults remain observable to external QA without retaining a
