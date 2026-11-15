@@ -21,7 +21,6 @@ const host=readScript('source/core/backup-recovery-host.ts');
 const backupActionsHost=readScript('source/core/backup-actions-host.ts');
 const maintenanceHost=readScript('source/core/backup-maintenance-host.ts');
 const readinessHost=readScript('source/core/backup-readiness-host.ts');
-const maintenanceHost=readScript('source/core/backup-maintenance-host.ts');
 const integrityHost=readScript('source/core/backup-integrity-host.ts');
 const drive=fs.readFileSync('source/external/drive.js','utf8');
 
