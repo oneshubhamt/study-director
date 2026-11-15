@@ -10,7 +10,7 @@ const open=[
   {id:'pr_first',subject:'personal',ref:'personal',keptAt:'2026-11-05T01:00:00.000Z',resolvedAt:''},
   {id:'pr_second',subject:'savedDay',ref:'2026-11-04',keptAt:'2026-11-05T02:00:00.000Z',resolvedAt:''}
 ];
-let busy=false,canMutate=true,pruneCalls=0,renderCount=0,renderDrive=0,cleared=0,notifications=0,failPrune=false;
+let busy=false,canMutate=true,pruneCalls=0,renderCount=0,renderDrive=0,statusSchedules=0,cleared=0,notifications=0,failPrune=false;
 const diagnostics=[];
 
 const controller={
@@ -31,13 +31,14 @@ const kept=recoveryModule.createKeptVersions(freeze({
   diagnostics:freeze({capture:(...args)=>diagnostics.push(args)}),
   environment:freeze({canMutate:()=>canMutate,now:()=>Date.now(),connectCardOpen:()=>false,sessionYieldedAt:()=>0}),
   notifications:freeze({resolveEvent:()=>cleared++,notify:()=>notifications++}),
-  view:freeze({render:()=>renderCount++,renderLocation:()=>renderDrive++,refreshNotes:()=>{}})
+  view:freeze({render:()=>renderCount++,renderLocation:()=>renderDrive++,scheduleStatus:()=>statusSchedules++,refreshNotes:()=>{}})
 }));
 assert.equal(await kept.refresh(),true);
 assert.equal(kept.count(),1,'auto-resolved alternative is not counted after verified tombstone');
 assert.equal(pruneCalls,1);
 assert.equal(renderCount,1);
 assert.equal(renderDrive,1);
+assert.equal(statusSchedules,1,'kept-version count changes must invalidate the profile sync-status presentation');
 assert.equal(notifications,0,'existing alternatives do not produce a spurious first-appearance alert');
 busy=true;
 assert.equal(await kept.refresh(),true);
@@ -54,6 +55,7 @@ failPrune=false;
 open[1].resolvedAt='2026-11-05T03:30:00.000Z';
 assert.equal(await kept.refresh(),true);
 assert.equal(kept.count(),0);
+assert.equal(statusSchedules,5,'every accepted canonical refresh must invalidate the profile sync-status presentation, including clearing the badge');
 assert.ok(cleared>=1,'an empty canonical count clears the Kept Versions notice');
 console.log(JSON.stringify({status:'PASS',suite:'kept-versions-c6',checkedOwner:true,
   checks:['canonical count after pruning','sync busy gate','follower read only','failure retains count','empty state clears notice']}));

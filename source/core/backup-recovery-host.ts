@@ -70,7 +70,7 @@ const createModule=()=>{
     functions(input.diagnostics,['capture'],'Kept Versions diagnostics port');
     functions(input.environment,['canMutate','now','connectCardOpen','sessionYieldedAt'],'Kept Versions environment port');
     functions(input.notifications,['notify','resolveEvent'],'Kept Versions notification port');
-    functions(input.view,['render','renderLocation','refreshNotes'],'Kept Versions view port');
+    functions(input.view,['render','renderLocation','scheduleStatus','refreshNotes'],'Kept Versions view port');
     let count=0,generation=0,seen:Set<string>|null=null;
     let notes=new Set<string>();
     async function refresh(){
@@ -88,7 +88,7 @@ const createModule=()=>{
       const notesChanged=[...next].sort().join('|')!==[...notes].sort().join('|');
       const fresh=seen?open.filter(review=>!seen!.has(review.id)):[];
       seen=new Set([...(seen||[]),...open.map(review=>review.id)]);
-      count=open.length;notes=next;input.view.render();input.view.renderLocation();
+      count=open.length;notes=next;input.view.render();input.view.renderLocation();input.view.scheduleStatus();
       if(notesChanged)input.view.refreshNotes();
       if(!count)input.notifications.resolveEvent('sync','kept-new');
       else if(fresh.length)announce(fresh);

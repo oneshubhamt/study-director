@@ -3722,7 +3722,7 @@ KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze({
     resolveEvent:(source,id)=>NoticeCoordinator.resolveEvent(source,id)
   }),
   view:Object.freeze({
-    render:()=>renderKeptVersions(),renderLocation:()=>renderDriveBackup(),
+    render:()=>renderKeptVersions(),renderLocation:()=>renderDriveBackup(),scheduleStatus:()=>scheduleSyncStatus(),
     refreshNotes:()=>LibraryView.refreshNotes()
   })
 }));

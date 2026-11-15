@@ -55,7 +55,7 @@ export interface KeptVersionsInput{
   readonly diagnostics:Readonly<{capture(scope:string,error:unknown,level:'warn'):void}>;
   readonly environment:Readonly<{canMutate():boolean;now():number;connectCardOpen():boolean;sessionYieldedAt():number}>;
   readonly notifications:Readonly<{notify(options:KeptNotification):unknown;resolveEvent(source:string,id:string):unknown}>;
-  readonly view:Readonly<{render():void;renderLocation():void;refreshNotes():void}>;
+  readonly view:Readonly<{render():void;renderLocation():void;scheduleStatus():void;refreshNotes():void}>;
 }
 export interface KeptVersionsController{
   readonly format:'study-director.kept-versions';

@@ -64,6 +64,7 @@ jobs:
           tests/integration/app/session-claim-flush-safety.mjs
           tests/integration/app/previous-day-convergence.mjs
           tests/integration/ui/application-outcomes.mjs
+          tests/integration/ui/kept-versions-c6.mjs
           tests/integration/storage/save-lane.mjs
           tests/integration/storage/strict-durability-boundaries.mjs
           tests/architecture/app/runtime-boundaries.mjs
