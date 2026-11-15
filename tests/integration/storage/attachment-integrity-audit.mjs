@@ -93,29 +93,61 @@ const originalGet=dir.getFileHandle;
 dir.getFileHandle=async()=>{throw Object.assign(new Error('permission unavailable'),{name:'NotAllowedError'});};
 await assert.rejects(store.shallowAudit(['asset-good']),{name:'NotAllowedError'},'unavailable file access must not become a missing-file finding');dir.getFileHandle=originalGet;
 
-// Execute the host audit's commit boundary: old findings must survive both a
-// metadata read failure and failure to durably save a newly clean scan.
-const app=readHostHtml(),begin=app.indexOf('let attachmentIntegrityView='),end=app.indexOf('const REPOSITORY_INTEGRITY_BATCH_BYTES=',begin);
+// Execute the checked P5.7C attachment-integrity owner. Old findings must
+// survive both a metadata read failure and failure to durably save a newly
+// clean scan, and a newer near-term request must retain its earlier deadline.
+const integrityContext=vm.createContext({
+  console,Symbol,Object,Map,Set,Promise,Date,Error,TypeError,
+  HTMLButtonElement:class HTMLButtonElement{}
+});
+for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/backup-integrity-host.ts'])
+  vm.runInContext(readScript(file),integrityContext,{filename:file});
+const integrityModules=integrityContext[Symbol.for('studyDirector.internalModules.v1')],
+  integrityLifecycle=integrityModules.require('operation-lifecycle',1),
+  integrityHost=integrityModules.require('backup-integrity-host',1);
 for(const failure of ['read','write']){
-  const clock=createFakeClock();let cleared=0,writes=0;const retained=new Map([['asset-good',{kind:'size-mismatch'}]]);
-  const context=vm.createContext({console,Object,Map,Date:clock.Date,Promise,Symbol,TypeError,StartupLifecycle:{status:()=>({fullyInitialized:true})},APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:{validId:value=>/^asset-/.test(value)},attachmentIntegrityIssues:retained,
-    readHostAppMetaValue:async()=>{if(failure==='read')throw new Error('read unavailable');return {version:1,checkedAt:'',issues:[{id:'asset-good',kind:'size-mismatch'}]};},
-    writeHostAppMetaValue:async(_,__,options)=>{writes++;assert.equal(options.strict,true);throw new Error('write unavailable');},
-    AttachmentStorage:{supported:()=>true,shallowAudit:async()=>({checked:1,issues:[]})},AttachmentReferences:{sources:async options=>{assert.equal(options.referencesOnly,true);return new Set(['asset-good']);}},
-    AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},appCanMutate:()=>true,UnsupportedData:{held:()=>false},backgroundMaintenanceForegroundBusy:()=>false,
-    BackgroundTasks:{yieldTask:async()=>{},budget:()=>()=>false},markStorageHealthError(){},markStorageHealthOk(){cleared++;},invalidateAttachmentLibrary(){},
-    setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout
-  });
-  for(const file of ['internal','operation-lifecycle'])vm.runInContext(readCoreScript(file),context);context.OperationLifecycle=context[Symbol.for('studyDirector.internalModules.v1')].require('operation-lifecycle',1);context.document={getElementById:()=>null};context.richAssetReferenceRevision=0;context.AppData={dailyRecords:{datasetRevision:async()=>1}};context.storageResetUnresolved=()=>false;vm.runInContext(app.slice(app.indexOf('function backgroundBlocker('),app.indexOf('const BackgroundOperations=')),context);vm.runInContext(app.slice(begin,end),context);const running=vm.runInContext('AttachmentIntegrityJob.run()',context);
-  vm.runInContext("scheduleAttachmentIntegrityAudit(5000,'new-attachment')",context);
-  const result=await running;
-  assert.equal(result.status,'unavailable');assert.equal(context.attachmentIntegrityIssues,retained);assert.equal(cleared,0);assert.equal(writes,failure==='write'?1:0);assert.equal(clock.nextAt(),clock.now()+5000,'a running audit cannot replace a newer five-second request with its later error retry');
-  vm.runInContext("scheduleAttachmentIntegrityAudit(60000,'interval')",context);
+  const clock=createFakeClock();let cleared=0,writes=0,failRead=false,failWrite=false;
+  let persisted={version:2,checkedAt:'',attemptedAt:'',lastOutcome:'completed',progress:null,issues:[{id:'asset-good',kind:'size-mismatch'}]};
+  const meta={
+    read:async()=>{if(failRead)throw new Error('read unavailable');return persisted;},
+    write:async(_name,value,options)=>{writes++;assert.equal(options.strict,true);if(failWrite)throw new Error('write unavailable');persisted=value;return {family:'integrity',value,updatedAt:new clock.Date().toISOString()};},
+    transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}
+  };
+  const controller=integrityHost.createController(Object.freeze({
+    lifecycle:integrityLifecycle,meta,attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',
+    storage:Object.freeze({supported:()=>true,shallowAudit:async()=>({status:'completed',complete:true,checked:1,issues:[],progress:null})}),
+    references:Object.freeze({sources:async options=>{assert.equal(options.referencesOnly,true);return new Set(['asset-good']);}}),
+    validAttachmentId:value=>/^asset-/.test(String(value||'')),
+    data:Object.freeze({datasetRevision:async()=>1}),referenceRevision:()=>0,
+    authority:Object.freeze({canMutate:()=>true}),
+    background:Object.freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),
+    backgroundTasks:Object.freeze({yieldTask:async()=>{},budget:()=>()=>false}),
+    provider:Object.freeze({backgroundStatus:()=>[],locationStatus:()=>null,repositoryScope:async()=>'',requestIntegrity:()=>false}),
+    continuation:Object.freeze({verify:async()=>{throw new Error('repository continuation is not used by this attachment witness');}}),
+    normalizeContinuation:()=>null,
+    unsafe:Object.freeze({mutation:()=>false,attachmentIngest:()=>false}),
+    storageHealth:Object.freeze({markError(){},markOk(){cleared++;}}),
+    invalidateAttachmentLibrary(){},
+    diagnostics:Object.freeze({capture(){},start:()=>'',mark(){},finish(){},fail(){}}),
+    document:{getElementById:()=>null,createElement:()=>({})},
+    environment:Object.freeze({now:()=>clock.now(),nowIso:()=>new clock.Date().toISOString(),uuid:()=> '00000000-0000-0000-0000-000000000001',setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}),
+    limits:Object.freeze({attachmentIntervalMs:24*60*60*1000,attachmentRetryMs:10*60*1000,repositoryBatchObjects:4,repositoryBatchBytes:256*1024*1024})
+  }));
+  await controller.installAttachment();controller.attachmentJob.clear();
+  assert.equal(controller.attachmentIssue('asset-good')?.kind,'size-mismatch');
+  failRead=failure==='read';failWrite=failure==='write';
+  const running=controller.attachmentJob.run('test');
+  controller.scheduleAttachment(5000,'new-attachment');
+  const attempt=await running;
+  assert.equal(attempt.status,'unavailable');assert.equal(controller.attachmentIssue('asset-good')?.kind,'size-mismatch','failed verification retains prior findings');
+  assert.equal(cleared,0);assert.equal(writes,failure==='write'?1:0);
+  assert.equal(clock.nextAt(),clock.now()+5000,'a running audit cannot replace a newer five-second request with its later error retry');
+  controller.scheduleAttachment(60000,'interval');
   assert.equal(clock.nextAt(),clock.now()+5000,'a later recurrence cannot postpone pending work');
-  vm.runInContext("scheduleAttachmentIntegrityAudit(2000,'earlier-attachment')",context);
+  controller.scheduleAttachment(2000,'earlier-attachment');
   assert.equal(clock.nextAt(),clock.now()+2000,'a newly requested earlier deadline must pull verification forward');
+  controller.attachmentJob.dispose();
 }
-
 // The integrity path needs only attachment IDs. It must scan the same
 // complete, strict canonical sources as the interactive descriptor path.
 vm.runInContext(readCoreScript('attachments'),context,{filename:'source/core/attachments.js'});
