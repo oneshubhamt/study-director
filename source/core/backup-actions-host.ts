@@ -174,7 +174,7 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
 }
 
 type FolderRepository=DeviceLocation['repository'];
-type FolderRepositoryView=Omit<FolderRepository,'beginOperation'>;
+type FolderRepositoryView=ReturnType<FolderRepository['beginOperation']>;
 
 function folderKind(kind:RepositoryKind):StorageKind{
   if(kind==='session-claim')throw new TypeError('Device Folder session claims use the dedicated provider transport.');
@@ -189,8 +189,8 @@ function folderUpload(value:Upload):StorageUpload{
   if(!(value.blob instanceof Blob))throw new TypeError('Device Folder repository upload requires materialized backup bytes.');
   return freeze({
     kind:folderKind(value.kind),id:value.id,blob:value.blob,digest:value.digest,
-    ...(value.checkProtection?{checkProtection:value.checkProtection}:{}),
-    ...(value.checkSource?{checkSource:value.checkSource}:{})
+    ...(value.checkProtection?{checkProtection:async()=>{await value.checkProtection?.();}}:{}),
+    ...(value.checkSource?{checkSource:async()=>{await value.checkSource?.();}}:{})
   });
 }
 function folderLease(kind:LockKind,lease:Lease):LockLease{
@@ -228,7 +228,7 @@ function providerRepositoryView(repository:FolderRepositoryView):RepositoryTrans
   });
 }
 function providerRepository(repository:FolderRepository):RepositoryTransport{
-  return freeze({...providerRepositoryView(repository),beginOperation:options=>providerRepositoryView(repository.beginOperation(options))});
+  return freeze({...providerRepositoryView(repository),beginOperation:(options:Parameters<NonNullable<RepositoryTransport['beginOperation']>>[0])=>providerRepositoryView(repository.beginOperation(options))});
 }
 function providerLocation(location:DeviceLocation):ProviderConfig{
   return freeze({
