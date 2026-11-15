@@ -10,10 +10,11 @@ const provider=readScript('source/core/backup-provider.ts');
 const presentation=readRuntimeSource('source/core/backup-presentation.ts');
 const device=readScript('source/core/device-backup.ts');
 const host=readScript('source/core/backup-recovery-host.ts');
+const actions=readScript('source/core/backup-actions-host.ts');
 const guide=fs.readFileSync('source/external/guide.js','utf8');
 const styles=fs.readFileSync('source/styles/core.css','utf8');
 const reconciliation=readScript('source/core/reconciliation.ts');
-const reconciliationUi=fs.readFileSync('source/core/reconciliation-ui.js','utf8');
+const reconciliationUi=readScript('source/core/reconciliation-ui.ts');
 
 const dataStart=app.indexOf('class="backup-model-disclosure'),dataEnd=app.indexOf('class="library-danger"',dataStart),dataSurface=app.slice(dataStart,dataEnd);
 assert.ok(dataStart>=0&&dataEnd>dataStart);
@@ -40,7 +41,8 @@ assert.match(styles,/\.backup-advanced-disclosure>summary/u);assert.doesNotMatch
 
 // The host draws Google Drive's row from the engine's status, like the Device Folder row.
 assert.doesNotMatch(provider,/document\.createElement\('button'\)|backup-provider-actions/u,'the engine reports status; it never draws location controls');
-assert.match(app,/function renderDriveBackup\(\)\{[\s\S]*BackupProviderRuntime\.locationStatus\('google-drive'\)[\s\S]*BackupPresentation\.locationLabel\('google-drive',state\)/u,'Drive row must use the shared location presentation with connection history');
+assert.match(actions,/function renderDrive\(\)\{[\s\S]*providers\.locationStatus\('google-drive'\)[\s\S]*presentation\.locationLabel\('google-drive',state\)/u,'Drive row must use the shared location presentation with connection history');
+assert.match(app,/function renderDriveBackup\(\)\{return BackupActions\.renderDrive\(\);\}/u,'the host retains only the checked Drive render bridge');
 assert.match(app,/BackupProviderRuntime\.subscribeStatus\(renderDriveBackup\)/u);
 assert.match(provider,/normalized\.subscribeConnection\)normalized\.subscribeConnection\(\(\)=>\{[^\n]*notifyStatus\(\)/u,'provider UI must subscribe to live authorization changes instead of waiting for the next user action');
 assert.match(dataSurface,/id="connect-drive-backup"[\s\S]*id="cancel-drive-backup"[\s\S]*id="drive-backup-settings"[^>]*data-action="toggle-backup-settings"/u,'the Drive row has the same parts as the Device Folder row: connect, cancel and settings');
@@ -59,15 +61,16 @@ assert.match(styles,/\.managed-version-history\{position:fixed;inset:0;[\s\S]*ma
 assert.match(host,/function close\(\)\{const \{dialog\}=elements\(\);if\(dialog\?\.open\)dialog\.close\(\);return true;\}/u,'Close must only dismiss Version History and must not cancel the active recovery.');
 assert.doesNotMatch(provider,/document\s*\.|getElementById|classList|requestAnimationFrame/u,'the engine draws nothing: the host draws every location from its status and presentation events');
 assert.doesNotMatch(app,/backup-provider-overlay|BackupProviderRuntime\.open\(/u,'there is no separate Drive dialog');
-assert.match(app,/'cancel-drive-backup': \(\)=>BackupProviderRuntime\.cancelForeground\(undefined,'google-drive'\)/u,'Drive Cancel stays coupled to the live foreground operation');
+assert.match(app,/'cancel-drive-backup': \(\)=>BackupActions\.cancelDrive\(\)/u,'Drive Cancel routes through the checked controls owner');
+assert.match(actions,/const cancelDrive=\(reason\?:string\)=>providers\.cancelForeground\(reason,'google-drive'\)/u,'Drive Cancel stays coupled to the live foreground operation');
 assert.match(provider,/async function connectProvider\s*\(selected\s*\)[\s\S]*Promise\s*\.all\s*\(\[foreground\s*\.settled\s*,selected\s*\.prepare\?selected\s*\.prepare\s*\(\s*\):null\]\s*\)[\s\S]*statusText\s*\(''\s*\);return true;/u,'Connect prepares sign-in alongside background work giving way, and a success leaves no message: the row says On');
-assert.match(app,/function renderBackupActions\(\)\{[\s\S]*recovering=rows\.some\(row=>row\.busy===true&&\['history','restore-version','bring-in','remove-version'\]\.includes[\s\S]*versions\.disabled=busy&&!recovering/u,'Version History must remain available to reattach to an active recovery operation.');
+assert.match(actions,/function renderActions\(\)\{[\s\S]*recovering=rows\.some\(row=>row\.busy===true&&\['history','restore-version','bring-in','remove-version'\]\.includes[\s\S]*versions\.disabled=busy&&!recovering/u,'Version History must remain available to reattach to an active recovery operation.');
 assert.match(device,/async function refreshPermission\(\)[\s\S]*observed=await query\(target\)[\s\S]*revision!==permissionRevision[\s\S]*permission=observed[\s\S]*permissionNeeded\(\)/u,'Device Folder must re-check persisted directory permission without prompting automatically.');
 const refreshStart=device.indexOf('async function refreshPermission('),refreshEnd=device.indexOf('// The folder picker or permission prompt',refreshStart);
 assert.ok(refreshStart>=0&&refreshEnd>refreshStart,'passive permission checking must remain separate from user-gesture prompts');
 assert.doesNotMatch(device.slice(refreshStart,refreshEnd),/requestPermission\(|showDirectoryPicker\(|await request\(/u,'passive checks never prompt without a user gesture');
 assert.doesNotMatch(device,/if\(handle\)\{[\s\S]{0,300}storage\.remove\(config\.metadataKey\)/u,'temporary Device Folder permission loss must never discard the configured directory handle.');
-assert.match(app,/connect\.textContent=state\.mode==='permission'\?'Allow access':'Choose folder…'/u,'configured Device Folder permission renewal must be presented as Allow access rather than folder reselection.');
+assert.match(actions,/connect\.textContent=state\.mode==='permission'\?'Allow access':'Choose folder…'/u,'configured Device Folder permission renewal must be presented as Allow access rather than folder reselection.');
 assert.match(app,/AppActivation\.subscribe\(event=>\{[^\n]*void refreshDeviceBackgroundPermission\(event\)/u,'foreground return must delegate to the permission and integrity opportunity handler.');
 const deviceActivation=app.slice(app.indexOf('async function refreshDeviceBackgroundPermission('),app.indexOf('AppActivation.subscribe(',app.indexOf('async function refreshDeviceBackgroundPermission(')));
 assert.doesNotMatch(deviceActivation,/requestPermission|DeviceBackup\.connect\(/u,'activation opportunities must not prompt for folder access.');
@@ -79,8 +82,8 @@ assert.match(backup,/rescuePartial=captureAuthority==='rescue-partial'/u,'verifi
 
 assert.match(app,/BackupProviderRuntime\.createProtectedSafety\(location\.id,purpose\)/u,'Clear Library must require a verified protected safety version at the connected backup location');
 assert.match(app,/Clear Library stopped because the \$\{location\.label\} safety version could not be verified/u);
-assert.match(app,/'backup-now': \(\)=>backUpEverywhere\(\)/u);assert.match(app,/async function backUpEverywhere\(\)\{[\s\S]*DeviceBackup\.backupNow\(\)[\s\S]*BackupProviderRuntime\.backup\('google-drive'\)/u,'one Back up now: the Device Folder first, so Drive can take its version');
-assert.match(app,/'open-version-history': \(\)=>withBackupPassword\(\(\)=>BackupRecoveryHost\.history\.open\(\)\)/u);
+assert.match(app,/'backup-now': \(\)=>BackupActions\.backUpEverywhere\(\)/u);assert.match(actions,/async function backUpEverywhere\(\)\{[\s\S]*device\.backupNow\(\)[\s\S]*providers\.backup\('google-drive'\)/u,'one Back up now: the Device Folder first, so Drive can take its version');
+assert.match(app,/'open-version-history': \(\)=>BackupActions\.openHistory\(\)/u);assert.match(actions,/const openHistory=\(\)=>withPassword\(\(\)=>input\.openHistory\(\)\)/u);
 assert.match(app,/'recover-managed-version': ev=>BackupRecoveryHost\.history\.recover\(ev\)/u);
 assert.doesNotMatch(app,/'restore-latest-backup'|'recover-device-backup'|'recover-provider-backup'|'bring-in-managed-backup'|'restore-managed-version'/u);
 assert.match(app,/ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set\(\[[^\]]*'open-version-history'[^\]]*'recover-managed-version'/u);
