@@ -13,7 +13,7 @@ export interface BackupCaptureInput{
  session:{canMutate():boolean;cancelLiveDraftSave():void;captureSnapshot():SessionSnapshot|null;hasTasks():boolean;toActiveSession(snapshot:SessionSnapshot):ActiveSession|null};
  personal:{settle(options:{backupCapture:boolean}):Promise<unknown>;export(options:{flush:boolean;backupCapture?:boolean}):Promise<PersonalData|null>};
  assets:{get(id:string):Promise<Blob|null>;list():Promise<AssetRow[]>};exports:Pick<ExportProcessing,'run'|'check'>;
- persistence:{sourceRevision():Promise<string>;snapshotRevision(options:{full:boolean}):Promise<string>;dailyRecordDocuments(dates:readonly string[],options:{requireCanonical:boolean}):Promise<unknown>;storageGeneration():number};
+ persistence:{sourceRevision():string|Promise<string>;snapshotRevision(options:{full:boolean}):Promise<string>;dailyRecordDocuments(dates:readonly string[],options:{requireCanonical:boolean}):Promise<unknown>;storageGeneration():number};
  diagnostics:{capture(label:string,error:unknown,level:'warn'|'error'):void;mark(label:string,details?:Record<string,unknown>):void};
  domain:{getStudentName():string;currentDailyRecords(records:unknown,label:string):DailyRecord[]};environment:{yieldTask():Promise<unknown>};
 }

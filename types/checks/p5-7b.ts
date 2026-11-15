@@ -3,7 +3,7 @@ import type {BackupModule} from '../../source/core/backup.ts';
 import type {BackupRecoveryHostModule} from '../../source/core/backup-recovery-host.ts';
 import type {ExportsModule} from '../../source/core/exports.ts';
 import type {PlanHostModule} from '../../source/core/plan-host.ts';
-import type {ReconciliationUiModule} from '../../source/core/reconciliation-ui.ts';
+import type {ReconciliationUiFactory} from '../../source/core/reconciliation-ui.ts';
 import type {BackupRuntimeHostInput} from '../backup-runtime-host.ts';
 import type {ReconciliationUiFactory} from '../../source/core/reconciliation-ui.ts';
 import type {RepositoriesModule} from '../../source/core/repositories.ts';
@@ -69,13 +69,13 @@ uiModule.createController({ports:{...uiInput.ports,richText:{...uiInput.ports.ri
 
 declare const exportsModule:ExportsModule;
 declare const planHost:PlanHostModule;
-declare const reconciliationUiModule:ReconciliationUiModule;
+declare const reconciliationUiModule:ReconciliationUiFactory;
 declare const runtimeModule:BackupModule;
 declare const planData:ReturnType<PlanHostModule['createData']>;
 declare const planController:ReturnType<PlanHostModule['createController']>;
 declare const processing:ReturnType<ExportsModule['createCoordinator']>;
 declare const protection:ReturnType<ExportsModule['createProtection']>;
-declare const reconciliationUi:ReturnType<ReconciliationUiModule['createController']>;
+declare const reconciliationUi:ReturnType<ReconciliationUiFactory['createController']>;
 
 const runtimeHostCoreProviders=Object.freeze({
   module:runtimeModule,appData,personal:Object.freeze({draft:planController.draft,data:planData})

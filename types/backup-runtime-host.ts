@@ -19,7 +19,7 @@ export type ReconciliationBaseline=ReturnType<ReconciliationBaselineModule['crea
 
 export interface BackupRuntimeAssetPort<Token>{
   during<T>(operation:()=>Promise<T>):Promise<T>;
-  get(id:string):Promise<Blob|null>;put(id:string,blob:Blob):Promise<unknown>;keys():Promise<string[]>;list():Promise<readonly AssetRow[]>;
+  get(id:string):Promise<Blob|null>;put(id:string,blob:Blob):Promise<unknown>;keys():Promise<string[]>;list():Promise<AssetRow[]>;
   stage(id:string,blob:Blob,options:Readonly<{token:Token;signal?:AbortSignal;check():void}>):Promise<AssetMetadata>;
   publish(rows:readonly (readonly [string,AssetMetadata])[],token:Token,check:()=>void,options:Readonly<{restoreLabels:true;replaceAll:boolean}>):Promise<unknown>;
   discard(rows:readonly AssetMetadata[]):Promise<unknown>;
