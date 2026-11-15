@@ -34,7 +34,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   let current=new clock.Date(clock.now()-MINUTE).toISOString(),localEmpty=false,canMutate=true,pickerResult=null,pickerCalls=0,sequence=0,durablePending=null,registeredProvider=null;
   const context={Object,Symbol,TypeError,Error,Date:clock.Date,AbortController,Blob,File,Promise,Map,Set,WeakMap,TextEncoder,Uint8Array,JSON,Math,Number,String,Array,console,crypto:webcrypto,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,DOMException};
   context.globalThis=context;vm.createContext(context);
-  for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','managed-repository','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation','device-folder-storage','device-backup','host-metadata'])vm.runInContext(readCoreScript(name),context,{filename:coreScriptPath(name)});
+  for(const name of ['internal','operation-lifecycle','repository-policy','repository-background','managed-repository','backup-provider','backup-recovery-host','notice-coordinator','backup-presentation','device-folder-storage','device-backup','backup-actions-host','host-metadata'])vm.runInContext(readCoreScript(name),context,{filename:coreScriptPath(name)});
   const registry=context[Symbol.for('studyDirector.internalModules.v1')],lifecycle=registry.require('operation-lifecycle',1),background=registry.require('repository-background',1,freeze({lifecycle})),policy=registry.require('repository-policy',1);
   // Retention, classification and cleanup are the production repository rules.
   const unused=()=>{throw new Error('Unexpected repository I/O in the Device Folder test.');};
@@ -95,18 +95,23 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   }));
   const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'].map(name=>[name,name])));
   const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBase:identity,reconciliationBaseNote:identity,reconciliationBaseDays:identity})})).deviceFolder;
-  const showDirectoryPicker=supported?()=>{pickerCalls+=1;if(pickerResult instanceof Error)return Promise.reject(pickerResult);return Promise.resolve(pickerResult);}:null;
-  const controller=registry.require('device-backup',1).createController(freeze({
+  const showDirectoryPicker=supported?()=>{pickerCalls+=1;if(pickerResult instanceof Error)return Promise.reject(pickerResult);return Promise.resolve(pickerResult);}:undefined;
+  const controller=registry.require('backup-actions-host',1).createDeviceBackup(freeze({
+    module:registry.require('device-backup',1),storageModule:registry.require('device-folder-storage',1),
     configuration:freeze({metadataKey:'deviceFolder',pickerId:'study-director-device-backup',settingsTimeoutMs:10*1000}),
     engine:freeze({backup:id=>runtime.backup(id),cancelForeground:(reason,id)=>runtime.cancelForeground(reason,id),disconnect:id=>runtime.disconnect(id),forget:id=>runtime.forget(id),locationStatus:id=>runtime.locationStatus(id),register:config=>{registeredProvider=config;return runtime.register(config);},subscribeStatus:listener=>runtime.subscribeStatus(listener)}),
     environment:freeze({backgroundBlocker:()=>canMutate?'':'awaiting-control',canMutate:()=>canMutate,clearTimeout:clock.clearTimeout,setTimeout:clock.setTimeout,showDirectoryPicker,withLock:lock}),
     hooks:freeze({capture:(scope,error)=>captures.push(freeze({scope,message:String(error?.message||error)})),chooseRepository:async rows=>{repositoryChoices.push([...rows]);return repositoryChoice(rows);},render:state=>rendered.push(state),repositoryOwner:()=>owner,sourceRevision:()=>current,verifiedAt:()=>verified.get('device-folder')?.at||''}),
     presentation,
-    // Writes pass the app's own stored-record validator, as the real store does.
     settings:freeze({read:async key=>settingsStore.get(key)||null,write:async(key,value)=>{if(!settingsValid(value,{key}))throw new Error(`appMeta ${key} value is not canonical.`);settingsStore.set(key,value);return true;},remove:async key=>{settingsStore.delete(key);return true;}}),
-    transport:(folderPort,repositoryPort)=>storageFor(folderPort,repositoryPort)
+    storage:freeze({
+      identities:freeze({prefix:IDENTITIES.prefix,objects:IDENTITIES.objects,checkpoints:IDENTITIES.checkpoints,commits:IDENTITIES.commits}),
+      checksum:(blob)=>sha256(blob),inspectManifest,owner:()=>owner,
+      environment:freeze({canMutate:()=>canMutate,now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,yieldTask:async()=>{}}),
+      limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,publicationRenewMs:policy.protocol.publicationRenewMs,publicationStaleMs:policy.protocol.publicationStaleMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
+    })
   }));
-  // A browser directory handle with readwrite permission state.
+  // A browser directory handle with readwrite permission state.  // A browser directory handle with readwrite permission state.
   function directory({permission='granted',grant='granted'}={}){
     const faults={corruptReadOf:new Set()},handle=createMemoryDirectory({now:clockNow,faults});
     Object.assign(handle,{faults,permission,requests:0,queryPermission:async()=>handle.permission,requestPermission:async()=>{handle.requests+=1;handle.permission=grant;return grant;}});

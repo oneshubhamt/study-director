@@ -25,6 +25,26 @@ assert.doesNotMatch(documentHost,/WG1:|Wordgard|indexedDB|dailyRecords/,'documen
 assert.doesNotMatch(noteExport,/dailyRecords|pendingReviews|activeSession/,'note export remains read-only and cannot mutate Saved-Day evidence');
 }
 
+
+{ // p5.7a-backup-actions-host-boundary
+const host=readHostHtml(),owner=readScript('source/core/backup-actions-host.ts');
+assert.match(host,/const BackupActionsHostModule=INTERNAL_MODULES\.load\('backup-actions-host',1,'study-director\.backup-actions-host-module',1\)/u,'P5.7A host loads the checked backup-actions owner');
+assert.match(host,/BackupProtectionHost=BackupActionsHostModule\.createProtectionHost\(Object\.freeze\(\{/u,'backup protection crosses the checked P5.7A boundary');
+assert.match(host,/BackupActions=BackupActionsHostModule\.createControls\(Object\.freeze\(\{/u,'file and location controls cross the checked P5.7A boundary');
+assert.match(host,/DeviceBackup=BackupActionsHostModule\.createDeviceBackup\(Object\.freeze\(\{/u,'Device Folder composition crosses the checked P5.7A boundary');
+for(const stale of ['let fileBackupRowReady=false;','const BackupProtection=ExportsModule.createProtection(','DeviceBackup=DeviceBackupModule.createController(','async function backUpEverywhere(){']){
+  assert.equal(host.includes(stale),false,`main host must not retain extracted P5.7A owner: ${stale}`);
+}
+assert.match(owner,/controller\.subscribeStatus\(\(\)=>\{renderFile\(\);syncFileHold\(\);\}\)/u,'standalone file work keeps background-location exclusion behind the checked owner');
+assert.match(owner,/processing\.open\(inputNode\)/u,'native file-open entry remains synchronous at the checked host boundary');
+assert.match(owner,/protection\.ask\(\)/u,'locked backup flows retain password prompting');
+assert.match(owner,/showDirectoryPicker/u,'Device Folder browser capability is represented by the typed provider contract');
+assert.match(host,/showDirectoryPicker:typeof window\.showDirectoryPicker==='function'\?options=>window\.showDirectoryPicker\(options\):undefined/u,'unsupported folder picking uses the typed undefined capability rather than a null sentinel');
+assert.match(host,/'export-backup': \(\)=>BackupActions\.exportLocal\(\)/u,'file export caller uses the checked P5.7A entry point');
+assert.match(host,/'import-backup': ev=>BackupActions\.importLocal\(ev\)/u,'file import caller uses the checked P5.7A entry point');
+console.log(JSON.stringify({status:'PASS',boundary:'p5.7a-backup-actions-host',protection:true,fileEntries:true,deviceComposition:true,foregroundExclusion:true},null,2));
+}
+
 // Current runtime boundary invariants: decision time, pacing, presentation, and bounded background/display work.
 
 { // decision-clock-boundary

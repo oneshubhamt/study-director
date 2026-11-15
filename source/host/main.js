@@ -71,6 +71,7 @@ const BackupModule=INTERNAL_MODULES.load('backup',1,'study-director.backup-modul
 const ManagedRecoveryModule=INTERNAL_MODULES.load('managed-recovery',1,'study-director.managed-recovery-module',1);
 const DeviceFolderStorageModule=INTERNAL_MODULES.load('device-folder-storage',1,'study-director.device-folder-storage-module',1);
 const DeviceBackupModule=INTERNAL_MODULES.load('device-backup',1,'study-director.device-backup-module',1);
+const BackupActionsHostModule=INTERNAL_MODULES.load('backup-actions-host',1,'study-director.backup-actions-host-module',1);
 const BackupRecoveryHostModule=INTERNAL_MODULES.load('backup-recovery-host',1,'study-director.backup-recovery-host-module',1);
 const PwaLifecycleModule=INTERNAL_MODULES.load('pwa-lifecycle',1,'study-director.pwa-lifecycle-module',1);
 const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'study-director.native-capabilities-module',1);
@@ -912,110 +913,14 @@ function publishSafetyNotice(message,title='Unsaved work needs attention',id='sa
   return NoticeCoordinator.publish(String(id||'safety'),{visible:!!text,kind:'safety',title,message:text||'Resolved.',compact:noticeCanCompact(text)});
 }
 // Native capability presentation is owned by the checked capabilities-host adapter.
-// The portable-file row, drawn like the location rows: Export and Cancel from
-// the backup controller and file processor, the note from the 'file'
-// presentation. It draws once both exist; their status changes redraw it.
-let fileBackupRowReady=false;
-function renderFileBackup(){
-  if(!fileBackupRowReady)return;
-  const state=BackupController.status(),exporting=state.standaloneExportActive,node=id=>document.getElementById(id);
-  const button=node('download-backup'),cancel=node('cancel-standalone-import'),importCancel=node('cancel-backup-import'),note=node('backup-file-status');
-  if(button){button.disabled=exporting;button.setAttribute('aria-busy',exporting?'true':'false');button.textContent=exporting?'Preparing backup…':'Export backup…';}
-  if(cancel)cancel.hidden=!(exporting||Exports.status().fileBusy);
-  if(importCancel)importCancel.hidden=!state.importHoldsBackground;
-  if(note){const event=BackupPresentation.current('file'),message=BackupPresentation.summary(event);note.hidden=!message;if(note.textContent!==message)note.textContent=message;note.dataset.state=event?.severity==='error'?'error':'ok';}
-}
-// Each location row opens its settings in place: 'device' or 'drive'.
-function toggleBackupSettings(kind){
-  const panel=document.getElementById(`${kind}-backup-settings-panel`),button=document.getElementById(`${kind}-backup-settings`);
-  if(!panel||!button||button.hidden)return false;
-  panel.hidden=!panel.hidden;button.setAttribute('aria-expanded',panel.hidden?'false':'true');return !panel.hidden;
-}
-// Google Drive's row, drawn from the engine's status like the Device Folder row.
-// Before the Drive integration registers, the row keeps its static "Not connected".
-function renderDriveBackup(){
-  const state=BackupProviderRuntime.locationStatus('google-drive');if(!state)return;
-  const node=id=>document.getElementById(id),status=node('backup-provider-row-status-google-drive'),connect=node('connect-drive-backup'),cancel=node('cancel-drive-backup'),settings=node('drive-backup-settings'),panel=node('drive-backup-settings-panel'),last=node('drive-backup-settings-last'),disconnect=node('disconnect-drive-backup');
-  const connected=state.connected,working=state.busy||state.backingUp;
-  if(status){status.textContent=BackupPresentation.locationLabel('google-drive',state);status.classList.toggle('protected',connected&&!working);status.classList.toggle('standard',!connected||working);}
-  if(connect){const label=state.wasConnected?'Reconnect':'Connect';connect.hidden=connected;connect.textContent=label;connect.disabled=state.engineBusy;connect.setAttribute('aria-label',`${label} Google Drive`);}
-  if(cancel){cancel.hidden=!state.cancellable;cancel.disabled=!state.cancellable;}
-  if(settings){settings.hidden=!connected;settings.disabled=state.engineBusy;settings.setAttribute('aria-expanded',panel&&!panel.hidden?'true':'false');}
-  if(panel&&!connected)panel.hidden=true;
-  if(last){const at=verifiedRecoveryState.providers['google-drive']?.at;last.textContent=at?`Last backup ${storageHealthTime(at)}`:'No backup yet';}
-  if(disconnect)disconnect.disabled=state.engineBusy;
-  renderBackupActions();renderProfile();if(FirstStart.isOpen())FirstStart.render();
-}
-// One Back up now and one Version History for every location, shown while
-// any location is connected. Version History stays available during a
-// restore so it can be reopened.
-function renderBackupActions(){
-  const group=document.getElementById('backup-shared-actions'),backupNow=document.getElementById('backup-now'),versions=document.getElementById('open-version-history');if(!group)return;
-  const rows=['device-folder','google-drive'].map(id=>BackupProviderRuntime.locationStatus(id)).filter(Boolean),connected=rows.some(row=>row.connected===true),busy=rows.some(row=>row.busy===true||row.engineBusy===true),recovering=rows.some(row=>row.busy===true&&['history','restore-version','bring-in','remove-version'].includes(String(row.foregroundKind||'')));
-  // A sync greys both out for a moment; the tooltip says why.
-  const syncText=rows.some(row=>row.sync?.syncing===true)?'Syncing with Google Drive…':'';
-  group.hidden=!connected;
-  if(backupNow){backupNow.disabled=busy;backupNow.title=busy&&syncText?syncText:rows.some(row=>row.maintenanceBusy)?'Background backup maintenance will yield to Back up now.':'';}
-  if(versions){versions.disabled=busy&&!recovering;versions.title=recovering?'Reopen the active recovery operation.':busy&&syncText?syncText:'';}
-}
-// Back up each enabled destination independently. The sequential UI action
-// avoids overlapping foreground operations; neither destination consumes the other.
-async function backUpEverywhere(){
-  let done=false;
-  if(DeviceBackup.status().connected)done=await DeviceBackup.backupNow()!==false||done;
-  if(BackupProviderRuntime.connected('google-drive'))done=await BackupProviderRuntime.backup('google-drive')!==false||done;
-  return done;
-}
-function renderDeviceBackup(state){
-  if(!state)return;
-  scheduleSyncStatus();
-  const status=document.getElementById('device-backup-status');
-  const actions=document.getElementById('device-backup-actions');
-  const connect=document.getElementById('connect-device-backup');
-  const cancel=document.getElementById('cancel-device-backup');
-  const settings=document.getElementById('device-backup-settings');
-  const settingsPanel=document.getElementById('device-backup-settings-panel');
-  const settingsState=document.getElementById('device-backup-settings-state');
-  const folderName=document.getElementById('device-backup-folder-name');
-  const repositoryName=document.getElementById('device-backup-repository-name');
-  const settingsLast=document.getElementById('device-backup-settings-last');
-  const disconnect=document.getElementById('disconnect-device-backup');
-  const note=document.getElementById('device-backup-note');
-  const connected=state.connected===true,operationBusy=state.busy||state.maintenanceBusy===true,recoveryActive=state.busy===true&&['history','restore-version','bring-in'].includes(String(state.foregroundKind||''));
-  const last=state.lastBackupAt?storageHealthTime(state.lastBackupAt):'';
-  if(status){
-    status.textContent=BackupPresentation.locationLabel('device-folder',state);
-    status.classList.toggle('protected',connected&&!operationBusy);
-    status.classList.toggle('standard',!connected||operationBusy);
-    status.title=state.lastBackupAt||'';
-  }
-  if(actions)actions.hidden=!state.supported;
-  if(connect){
-    connect.hidden=connected;
-    connect.disabled=operationBusy;
-    connect.textContent=state.mode==='permission'?'Allow access':'Choose folder…';
-  }
-  if(cancel){cancel.hidden=state.cancellable!==true;cancel.disabled=state.cancellable!==true;}
-  if(settings){settings.hidden=!connected;settings.disabled=operationBusy;settings.setAttribute('aria-expanded',settingsPanel&&!settingsPanel.hidden?'true':'false');}
-  if(settingsPanel&&!connected)settingsPanel.hidden=true;
-  if(settingsState)settingsState.textContent=connected?'On':'Off';
-  if(folderName)folderName.textContent=state.folderName||'Connected folder';
-  // The folder inside it that holds this profile and device's versions.
-  if(repositoryName)repositoryName.textContent=state.repositoryName||'—';
-  if(settingsLast)settingsLast.textContent=last?`Last backup ${last}`:'No backup yet';
-  if(disconnect){disconnect.hidden=!connected;disconnect.disabled=operationBusy;}
-  if(note){
-    const fallback=state.mode==='unsupported'?'Automatic folder backup is unavailable in this browser. Portable and Google Drive backups still work.':
-      connected?(state.pending?'Changes wait for the next automatic backup.':'Your automatic backup is up to date.') : '';
-    // Messages and progress show in the row's inline note; this note only says how the folder is doing.
-    const message=state.hasNote?'':fallback;
-    note.hidden=!message||recoveryActive;
-    if(note.textContent!==message)note.textContent=message;
-  }
-
-  renderBackupActions();
-  if(state.installed&&!operationBusy)schedulePwaUpdateEvaluation(250);
-}
+// P5.7A owns file/location presentation; these bridges stay because callers are
+// initialized on both sides of the checked host composition.
+let BackupActions=null;
+function renderFileBackup(){return BackupActions?.renderFile();}
+function toggleBackupSettings(kind){return BackupActions?.toggleSettings(kind)||false;}
+function renderDriveBackup(){return BackupActions?.renderDrive();}
+function renderBackupActions(){return BackupActions?.renderActions();}
+function renderDeviceBackup(state){return BackupActions?.renderDevice(state);}
 function markStorageHealthOk(source,key=''){
   const patch=key?{[key]:new Date().toISOString()}:null;
   return StorageHealthController.recover(source,patch);
@@ -2281,10 +2186,7 @@ const askProfilePassword=ProfileLifecycle.askProfilePassword;
 // Version History reads each encrypted version for its date and counts, so a
 // password put off at start is asked for first. Not now still opens the list,
 // with those versions shown as locked.
-async function withBackupPassword(open){
-  try{const protection=BackupProtection.status();if(protection.enabled&&!protection.unlocked)await BackupProtection.ask();}catch(error){setBackupProtectionSurfaceError(error);}
-  return open();
-}
+function withBackupPassword(open){return BackupProtectionHost.withPassword(open);}
 function onQuoteChange(options={}){
   if(options.markChanged!==false)markDayContentChanged();
   const input=document.getElementById('quote-input');
@@ -3510,25 +3412,39 @@ const Exports=ExportsModule.createCoordinator({
   createWorker:()=>new Worker(trustedAssetURL('@@SD_EXPORT_WORKER_FILENAME@@'),{name:'study-director-exports'}),window,document,files:BackupFiles,
   onState:state=>{renderFileBackup();if(state.fileBusy){if(!fileProcessingNotice)fileProcessingNotice=NoticeCoordinator.presentation('file-processing').begin({id:'worker',surfaceId:'file-processing-status',foreground:false,announce:false,title:'File processing'});fileProcessingNotice.update({message:state.phase,progress:{stage:state.phase}});}else{fileProcessingNotice?.resolve();fileProcessingNotice=null;const status=document.getElementById('file-processing-status');if(status)status.textContent='';}}
 });
-let backupProtectionReady=false;
-function backupBackgroundAvailability(){return backgroundBlocker()||(backupProtectionReady?true:'locked');}
-function setBackupProtectionSurfaceError(error){
-  const hint=document.getElementById('backup-protection-hint');if(!hint)return;
-  hint.hidden=false;NoticeCoordinator.emit({source:'backup-protection',id:'settings',surfaceId:'backup-protection-hint',surface:'inline',severity:'error',lifecycle:'failed',cue:'none',message:clampText(String(error&&error.message||error||'Backup encryption could not be updated.'),APP_LIMITS.maxStatusMessageChars)});
+let BackupProtectionHost=null;
+function backupBackgroundAvailability(){return BackupProtectionHost?BackupProtectionHost.backgroundAvailability():backgroundBlocker()||'locked';}
+function setBackupProtectionSurfaceError(error){return BackupProtectionHost?.surfaceError(error)||false;}
+BackupProtectionHost=BackupActionsHostModule.createProtectionHost(Object.freeze({
+  module:ExportsModule,processing:Exports,
+  storage:Object.freeze({
+    read:key=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return ExportsAppMeta.read('backupProtection');},
+    write:(key,value,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(value,options);},
+    remove:(key,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(null,options);}
+  }),
+  interactions:Interactions,settingKey:APP_META_KEYS.backupProtection,
+  mutation:Object.freeze({
+    remember:()=>Profiles.list().length<2,canMutate:()=>appCanMutate(),
+    issueToken:()=>AppOwnership.issueWriteToken('change backup encryption'),
+    assertToken:token=>AppOwnership.assertWriteToken(token,'change backup encryption')
+  }),
+  environment:Object.freeze({window,backgroundBlocker:()=>backgroundBlocker()}),
+  view:Object.freeze({
+    document,clampText,maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars,
+    resolveSettingNotice:()=>NoticeCoordinator.resolveEvent('backup-protection','settings'),
+    publishSettingError:message=>NoticeCoordinator.emit({source:'backup-protection',id:'settings',surfaceId:'backup-protection-hint',surface:'inline',severity:'error',lifecycle:'failed',cue:'none',message}),
+    fullyInitialized:()=>StartupLifecycle.status().fullyInitialized,
+    wakeBackground:reason=>wakeBackgroundOperations(reason),
+    refreshProviders:()=>BackupProviderRuntime.refresh(),
+    renderProfile:()=>renderProfile()
+  })
+}));
+if(!Object.isFrozen(BackupProtectionHost)||BackupProtectionHost.format!=='study-director.backup-protection-host'||BackupProtectionHost.contractVersion!==1){
+  throw new Error('Study Director backup-protection host is unavailable or incompatible.');
 }
-const BackupProtection=ExportsModule.createProtection({processing:Exports,storage:{read:key=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return ExportsAppMeta.read('backupProtection');},write:(key,value,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(value,options);},remove:(key,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(null,options);}},interactions:Interactions,settingKey:APP_META_KEYS.backupProtection,remember:()=>Profiles.list().length<2,canMutate:()=>appCanMutate(),issueToken:()=>AppOwnership.issueWriteToken('change backup encryption'),assertToken:token=>AppOwnership.assertWriteToken(token,'change backup encryption'),onState:state=>{
-  NoticeCoordinator.resolveEvent('backup-protection','settings');
-  const ready=!state.enabled||state.unlocked,restored=ready&&!backupProtectionReady;backupProtectionReady=ready;
-  // Rows say when automatic backups wait for the password; redraw them on every change.
-  if(StartupLifecycle.status().fullyInitialized){if(restored)wakeBackgroundOperations('encryption-unlocked');BackupProviderRuntime.refresh();}
-  const label=document.getElementById('backup-protection-status');if(label)label.textContent=state.enabled?(state.unlocked?'On':'Not entered yet'):'Off';
-  const button=document.getElementById('manage-backup-protection');if(button)button.textContent=state.enabled?(state.unlocked?'Change or remove…':'Enter password…'):'Set password…';
-  const hint=document.getElementById('backup-protection-hint');if(hint){hint.className='backup-inline-note ui-helper';hint.textContent='Sync and encrypted backups wait until this profile’s backup password is entered.';hint.hidden=!state.enabled||state.unlocked;}
-  if(StartupLifecycle.status().fullyInitialized)renderProfile();
-}});
-window.addEventListener('pagehide',()=>BackupProtection.lock());
-window.addEventListener('pageshow',event=>{if(event.persisted)void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);});
-const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.freeze({
+const BackupProtection=BackupProtectionHost.protection;
+BackupProtectionHost.install();
+const NoteExporter=const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.freeze({
   assets:Object.freeze({get:id=>RichTextAssets.get(id)}),
   notes:Object.freeze({get:key=>AppData.notes.get(key)}),
   processing:Object.freeze({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
@@ -4315,32 +4231,26 @@ SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze({
 if(!Object.isFrozen(SessionHandoffRuntime)||SessionHandoffRuntime.format!=='study-director.session-handoff'||SessionHandoffRuntime.contractVersion!==1){
   throw new Error('Study Director session handoff runtime is unavailable or incompatible.');
 }
-// Each location row has one inline note, drawn from the presentation's current event.
-// The controller owns execution; the coordinator owns the immutable presentation event.
-fileBackupRowReady=true;BackupController.subscribeStatus(renderFileBackup);renderFileBackup();
-// A user-started file backup/import holds background locations until it ends.
-// An automatic Drive catch-up also uses the shared import controller but is
-// already suspension-aware; treating it as manual file work cancels itself.
-let fileWorkHold=null;
-function holdBackgroundForFileWork(){
-  const status=BackupController.status(),active=!!(status.importHoldsBackground||status.standaloneExportActive);
-  if(active&&!fileWorkHold){try{fileWorkHold=BackupProviderRuntime.suspendBackground('file-backup');void Promise.resolve(fileWorkHold.settled).catch(()=>{});}catch(error){fileWorkHold=null;AppDiagnostics.capture('backup.file-hold',error,'warn');}}
-  else if(!active&&fileWorkHold){const hold=fileWorkHold;fileWorkHold=null;try{hold.release();}catch(error){AppDiagnostics.capture('backup.file-hold-release',error,'warn');}}
-  foregroundChanged();
+// File/location controls, user entry points and foreground/background exclusion
+// are owned by the checked P5.7A host boundary.
+BackupActions=BackupActionsHostModule.createControls(Object.freeze({
+  document,controller:BackupController,processing:Exports,protection:BackupProtection,
+  device:()=>DeviceBackup,providers:BackupProviderRuntime,presentation:BackupPresentation,
+  verifiedAt:source=>verifiedRecoveryState.providers[source]?.at||'',timeLabel:storageHealthTime,
+  surfaceError:setBackupProtectionSurfaceError,
+  capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
+  resolveFileOpen:()=>NoticeCoordinator.resolveEvent('file','file-open'),
+  foregroundChanged,scheduleSyncStatus,renderProfile:()=>renderProfile(),
+  firstStartOpen:()=>FirstStart.isOpen(),renderFirstStart:()=>FirstStart.render(),
+  scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay),
+  connectDevice:()=>connectDeviceBackupWithRecovery(),connectDrive:()=>connectDriveForProfile(),
+  openHistory:()=>BackupRecoveryHost?.history.open()??false
+}));
+if(!Object.isFrozen(BackupActions)||BackupActions.format!=='study-director.backup-controls'||BackupActions.contractVersion!==1){
+  throw new Error('Study Director backup controls are unavailable or incompatible.');
 }
-BackupController.subscribeStatus(holdBackgroundForFileWork);
-BackupPresentation.subscribe(()=>{
-  renderFileBackup();
-  for(const source of ['device-folder','google-drive']){
-    const node=document.getElementById(`backup-operation-note-${source}`);if(!node)continue;
-    const event=BackupPresentation.current(source);
-    const message=BackupPresentation.summary(event);node.hidden=!message;
-    if(node.textContent!==message)node.textContent=message;
-    node.dataset.state=event?.severity==='error'?'error':'ok';
-    node.classList.toggle('ui-status',event?.severity==='error');node.classList.toggle('err',event?.severity==='error');
-  }
-});
-const REPOSITORY_MAINTENANCE_FORMAT='study-director.repository-maintenance-pending';
+BackupActions.install();
+const REPOSITORY_MAINTENANCE_FORMAT=const REPOSITORY_MAINTENANCE_FORMAT='study-director.repository-maintenance-pending';
 const REPOSITORY_MAINTENANCE_VERSION=4;
 let repositoryMaintenanceWriteChain=Promise.resolve();
 function maintenanceReason(value){const reason=String(value||'requested').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'requested';}
@@ -4632,20 +4542,19 @@ async function restoreAfterStorageReset(){
   if(hasBlockingActiveSession()){await suspendTodaySession();if(hasBlockingActiveSession())return false;}
   return openBackupRestore();
 }
-// The Device Folder is one backup location of the engine; this controller
-// keeps only the chosen folder, its permission and its status row.
-DeviceBackup=DeviceBackupModule.createController(Object.freeze({
+// The Device Folder is one backup location of the engine. P5.7A owns the
+// browser picker, provider callbacks and typed Device Folder storage composition.
+DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze({
+  module:DeviceBackupModule,storageModule:DeviceFolderStorageModule,
   configuration:Object.freeze({metadataKey:APP_META_KEYS.deviceFolder,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
   engine:Object.freeze({backup:id=>BackupProviderRuntime.backup(id),cancelForeground:(reason,id)=>BackupProviderRuntime.cancelForeground(reason,id),disconnect:id=>BackupProviderRuntime.disconnect(id),forget:id=>BackupProviderRuntime.forget(id),locationStatus:id=>BackupProviderRuntime.locationStatus(id),register:config=>BackupProviderRuntime.register(config),subscribeStatus:listener=>BackupProviderRuntime.subscribeStatus(listener)}),
   environment:Object.freeze({
     backgroundBlocker:()=>backgroundBlocker(),canMutate:()=>appCanMutate(),clearTimeout:timer=>clearTimeout(timer),setTimeout:(callback,delay)=>setTimeout(callback,delay),
-    showDirectoryPicker:typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):null,
+    showDirectoryPicker:typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):undefined,
     withLock:work=>navigator.locks?.request?navigator.locks.request(ProfileScope.scoped('study-director-device-folder-prepare'),{mode:'exclusive'},()=>work()):Promise.resolve().then(work)
   }),
   hooks:Object.freeze({
     capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
-    // Several repository folders in the chosen folder and none of this
-    // profile and device's: use one of them here, or start a new one.
     chooseRepository:rows=>Interactions.choose({
       title:'This folder already has Study Director backups',
       message:'Use one of them on this device, for example after clearing this browser, or start a new backup folder for this profile and device.',
@@ -4653,23 +4562,20 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
       choices:[...rows.map(row=>({value:row.name,label:row.name,description:`${row.versions} version${row.versions===1?'':'s'}${row.newest?` · newest ${new Date(row.newest).toLocaleString()}`:''}`})),{value:'',label:'Start a new backup folder',description:backupFolderName({device:true}),kind:'primary'}]
     }),
     repositoryOwner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId(),name:backupFolderName({device:true})}),
-    render:renderDeviceBackup,
-    sourceRevision:()=>currentBackupSourceRevision(),
-    verifiedAt:()=>verifiedRecoveryState.providers['device-folder']?.at||''
+    render:renderDeviceBackup,sourceRevision:()=>currentBackupSourceRevision(),verifiedAt:()=>verifiedRecoveryState.providers['device-folder']?.at||''
   }),
   presentation:BackupPresentation,
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
-  transport:(folder,repository)=>DeviceFolderStorageModule.createStorage(Object.freeze({
-    folder,
-    identities:Object.freeze({root:repository,prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+  storage:Object.freeze({
+    identities:Object.freeze({prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
     owner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId()}),
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
     limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
-  }))
+  })
 }));
-if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
+if(!Object.isFrozen(DeviceBackup)if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
   throw new Error('Study Director automatic device backup is unavailable or incompatible.');
 }
 BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
@@ -5374,15 +5280,15 @@ const CLICK_ACTIONS=Object.freeze({
   'check-unsupported-update': ()=>void checkUnsupportedUpdate(),
   'dismiss-install-notice': ()=>CapabilityInstallation.dismissInstallNotice(),
   'toggle-system-alerts': ()=>SystemNotifications.toggle(),
-  'connect-device-backup': ()=>connectDeviceBackupWithRecovery(),
-  'backup-now': ()=>backUpEverywhere(),
-  'cancel-device-backup': ()=>DeviceBackup.cancelForeground(),
-  'toggle-backup-settings': ev=>toggleBackupSettings(ev.target.closest('[data-backup-settings]')?.dataset.backupSettings),
-  'disconnect-device-backup': ()=>DeviceBackup.disconnect(),
-  'open-version-history': ()=>withBackupPassword(()=>BackupRecoveryHost.history.open()),
-  'connect-drive-backup': connectDriveForProfile,
-  'cancel-drive-backup': ()=>BackupProviderRuntime.cancelForeground(undefined,'google-drive'),
-  'disconnect-drive-backup': ()=>BackupProviderRuntime.disconnect('google-drive'),
+  'connect-device-backup': ()=>BackupActions.connectDevice(),
+  'backup-now': ()=>BackupActions.backUpEverywhere(),
+  'cancel-device-backup': ()=>BackupActions.cancelDevice(),
+  'toggle-backup-settings': ev=>BackupActions.toggleSettings(ev.target.closest('[data-backup-settings]')?.dataset.backupSettings),
+  'disconnect-device-backup': ()=>BackupActions.disconnectDevice(),
+  'open-version-history': ()=>BackupActions.openHistory(),
+  'connect-drive-backup': ()=>BackupActions.connectDrive(),
+  'cancel-drive-backup': ()=>BackupActions.cancelDrive(),
+  'disconnect-drive-backup': ()=>BackupActions.disconnectDrive(),
   'refresh-version-history': ()=>BackupRecoveryHost.history.refresh(),
   'close-version-history': ()=>BackupRecoveryHost.history.close(),
   'cancel-version-history-operation': ()=>BackupRecoveryHost.history.cancel(),
@@ -5417,17 +5323,13 @@ const CLICK_ACTIONS=Object.freeze({
   'reset-copy-report': resetCopyReportSelection,
   'render-library': LibraryView.render,
   'open-library-day': ev=>LibraryView.openDay(ev.target.closest('[data-library-date]')?.dataset.libraryDate),
-  'export-backup': BackupController.exportLocal,
+  'export-backup': ()=>BackupActions.exportLocal(),
   'clear-library': LibraryView.clearAll,
-  'backup-protection': async()=>{try{await BackupProtection.manage();}catch(error){if(error.name!=='AbortError')setBackupProtectionSurfaceError(error);}},
+  'backup-protection': ()=>BackupActions.manageProtection(),
   'copy-backup-diagnostics': ()=>copyBackupDiagnostics(),
-  'cancel-standalone-import': ()=>BackupController.cancelStandalone(),
-  'pick-import-file': async()=>{
-    const input=document.getElementById('import-file');
-    try{const file=await Exports.open(input);if(file){NoticeCoordinator.resolveEvent('file','file-open');await BackupController.importLocal({target:{files:[file],value:''}});}}
-    catch(error){if(error?.name==='AbortError')return;BackupPresentation.condition('file','file-open','Could not open backup: '+String(error&&error.message||error));}
-  },
-  'test-sound': ()=>NoticeCoordinator.testSound(),
+  'cancel-standalone-import': ()=>BackupActions.cancelStandalone(),
+  'pick-import-file': ()=>BackupActions.pickImportFile(),
+  'test-sound':  'test-sound': ()=>NoticeCoordinator.testSound(),
   'test-system-alert': ()=>SystemNotifications.test(),
   'toggle-pomodoro': Pomodoro.configuration.toggleNudges,
   'restore-session': SessionActions.restoreSessionAction,
@@ -5482,7 +5384,7 @@ const CLICK_ACTIONS=Object.freeze({
 });
 const CHANGE_ACTIONS=Object.freeze({
   'render-library': ()=>LibraryView.render(),
-  'import-backup': ev=>BackupController.importLocal(ev),
+  'import-backup': ev=>BackupActions.importLocal(ev),
   'change-reflection-date': ()=>requireReviewSavedDayRuntime().selectReviewDate(),
   'sound-mode': handleSoundModeChange,
   'keep-screen-awake': ev=>CapabilityInstallation.setKeepAwake(ev.target.checked)

@@ -2929,7 +2929,7 @@ async function restoreBackup(candidate:Candidate,options:RestoreOptions={}){
   try{return await restoreBackupWithOperation(candidate,operation,options);}
   finally{try{await candidate!.release();}catch(error){AppDiagnostics.capture('backup.candidate-release',error,'warn');}if(owned)finishImport(operation);}
 }
-async function importPortableBackup(ev:Event&{target:HTMLInputElement}){
+async function importPortableBackup(ev:{target:{files:ArrayLike<File>|null;value:string}}){
   if(activeImportOperation||localExportPromise||localExportRequest)return freeze({cancelled:true,reason:'busy'});
   if(!appCanMutate()){setLocalExportStatus('Study control is in another tab. Take control here before importing.',false);return;}
   const f=ev.target.files&&ev.target.files[0];if(!f)return;

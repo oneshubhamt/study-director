@@ -63,6 +63,7 @@
     "source/core/backup-codec.ts",
     "source/core/backup-operation-diagnostics.ts",
     "source/core/backup-provider.ts",
+    "source/core/backup-actions-host.ts",
     "source/core/backup-recovery-host.ts",
     "source/core/canonical.ts",
     "source/core/device-backup.ts",
@@ -112,6 +113,7 @@
     "types/backup-models.ts",
     "types/backup-operation-diagnostics.ts",
     "types/backup-provider.ts",
+    "types/backup-actions-host.ts",
     "types/backup-recovery-host.ts",
     "types/browser-registry.ts",
     "types/checks/browser.ts",
@@ -212,6 +214,7 @@
     "types/checks/library.ts",
     "types/checks/notes-host.ts",
     "types/checks/p5-6c.ts",
+    "types/checks/backup-actions-host.ts",
     "types/checks/review-persistence.ts",
     "types/checks/review-host.ts",
     "types/checks/plan.ts"
