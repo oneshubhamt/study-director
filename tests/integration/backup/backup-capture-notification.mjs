@@ -60,4 +60,35 @@ reminderDate='';
 handler.handle({entityType:'dailyRecord',operation:'upsert',value:{date:'2026-09-23',reflection:'plain text'},backupCapture:true});
 assert.equal(noticeRechecks,1,'no redundant coverage read after the reminder is settled');
 
+
+{
+  const DAY=24*60*60*1000,now=Date.parse('2026-11-15T12:00:00.000Z');
+  const state={version:3,file:null,providers:{}};
+  let automatic=false,summaryCount=0,health={lastLocalSaveAt:'2026-11-15T10:00:00.000Z'},message='',notices=[];
+  const verified=Object.freeze({
+    read:async()=>state,
+    entries:value=>[value.file,...Object.values(value.providers||{})].filter(Boolean),
+    lastBackupTime:value=>Math.max(-Infinity,...[value.file,...Object.values(value.providers||{})].filter(Boolean).map(entry=>Date.parse(entry.at)))
+  });
+  const nudge=module.createBackupNudge(Object.freeze({
+    verified,storageHealth:Object.freeze({snapshot:()=>health}),dueMs:7*DAY,checkMs:60*60*1000,
+    canMutate:()=>true,now:()=>now,automaticActive:()=>automatic,dailySummaryCount:async()=>summaryCount,todayIso:()=> '2026-11-15',
+    publishMessage:value=>{message=value;},notify:(title,body,tag)=>notices.push({title,body,tag}),capture:()=>{}
+  }));
+  assert.equal(await nudge.run(true),false,'a new profile with fewer than seven Saved Days is not nagged before its first backup');
+  summaryCount=7;assert.equal(await nudge.run(true),true,'seven Saved Days without any backup makes the first-backup reminder due');
+  assert.match(message,/last backup is over a week old/i);assert.equal(notices.length,1);
+  assert.equal(await nudge.run(true),true);assert.equal(notices.length,1,'forced re-evaluation does not notify twice on the same day');
+  nudge.reset();assert.equal(nudge.message(),'','a verified backup completion can clear the readiness reminder immediately');
+
+  state.providers['google-drive']={at:'2026-11-01T12:00:00.000Z',sourceRevision:'2026-11-01T11:59:00.000Z',format:24};
+  summaryCount=0;health={lastLocalSaveAt:'2026-11-15T10:00:00.000Z'};
+  assert.equal(await nudge.run(true),true,'an old Drive backup that does not cover newer canonical changes becomes due');
+  assert.match(nudge.message(),/Google Drive/);
+  automatic=true;assert.equal(await nudge.run(true),false,'an active automatic backup destination suppresses the manual backup nudge');
+  assert.equal(nudge.message(),'');
+  automatic=false;state.providers['google-drive']={at:'2026-11-01T12:00:00.000Z',sourceRevision:'2026-11-15T10:00:00.000Z',format:24};
+  assert.equal(await nudge.run(true),false,'an old but current backup is not nagged when it already covers the latest canonical revision');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'backup-capture-notification',checkedOwner:true,referenceAwareMaintenance:true,reminderRevalidation:true}));

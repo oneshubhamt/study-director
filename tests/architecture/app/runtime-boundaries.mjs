@@ -78,12 +78,13 @@ console.log(JSON.stringify({status:'PASS',boundary:'p5.7b-reconciliation-recover
 { // p5.7-parent-source-ownership-closure
 const host=readHostHtml(),readiness=readScript('source/core/backup-readiness-host.ts'),recovery=readScript('source/core/backup-recovery-host.ts');
 assert.match(host,/BackupReadinessHostModule\.createVerifiedRecovery\(Object\.freeze\(\{/u,'verified backup readiness crosses the checked owner');
+assert.match(host,/BackupReadinessHostModule\.createBackupNudge\(Object\.freeze\(\{/u,'backup readiness reminder policy crosses the checked owner');
 assert.match(host,/BackupRecoveryHostModule\.createRuntime\(Object\.freeze\(\{/u,'the production Backup runtime adapters cross the checked owner');
 assert.match(host,/BackupRecoveryHostModule\.createStorageReset\(Object\.freeze\(\{/u,'browser-data-clear recovery crosses the checked owner');
 assert.match(host,/BackupRecoveryHostModule\.createRetainedBackupFiles\(Object\.freeze\(\{/u,'recovery scratch retention crosses the checked owner');
-assert.match(readiness,/function createVerifiedRecovery\(/u);assert.match(recovery,/function createMaintenancePause\(/u);assert.match(recovery,/function createRevisionFence\(/u);assert.match(recovery,/function createRuntime\(/u);assert.match(recovery,/function createStorageReset\(/u);assert.match(recovery,/function createRetainedBackupFiles\(/u);
+assert.match(readiness,/function createVerifiedRecovery\(/u);assert.match(readiness,/function createBackupNudge\(/u);assert.match(recovery,/function createMaintenancePause\(/u);assert.match(recovery,/function createRevisionFence\(/u);assert.match(recovery,/function createRuntime\(/u);assert.match(recovery,/function createStorageReset\(/u);assert.match(recovery,/function createRetainedBackupFiles\(/u);
 for(const stale of [
-  'const VERIFIED_RECOVERY_META_KEY=','function recordBackupCopy(','function readVerifiedRecoveryState(','async function reconcileChangeClock(',
+  'const VERIFIED_RECOVERY_META_KEY=','function recordBackupCopy(','function readVerifiedRecoveryState(','async function reconcileChangeClock(','async function maybePromptBackupNudge(','backupNudgeMessage','backupNudgeCheckedAt','backupNudgeNotifiedDate',
   'const STORAGE_RESET_RETRY_MS=','function beginStorageResetHold(','function restoreMissingAfterStorageReset(','function noteDatabaseRemovedWhileClosed(',
   'async function importBackupAttachments(','function currentBackupSourceRevision(','async function fullBackupSnapshotRevision(','async function backupSnapshotRevision(',
   'const BackupRuntime=BackupModule.createRuntime(','async function retainedBackupFileNames(','async function withRichTextAssetMaintenancePaused(','async function reconcileNotesThroughLifecycle(','async function restoreNotesSnapshotThroughLifecycle('
