@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome,StorageResetController,StorageResetInput} from '../../types/backup-recovery-host.ts';
+import type {PendingStoreInput,PendingRecord,PendingEntry,RecoveryHostInput,PresentationScope,PresentationLifecycle,HistoryEntry,HistoryLocation,HistoryBatch,MergedHistory,NoteTarget,CoveredNotes,NoteVersion,Progress,HistoryNotice,RecoveryOptions,Suspension,KeptVersionsInput,KeptVersionsController,KeptReviewOutcome,StorageResetController,StorageResetInput,StorageResetRecoveryResult} from '../../types/backup-recovery-host.ts';
 import type {RecoverySpec,ManagedRecoveryInput} from '../../types/managed-recovery.ts';
 const sdBackupRecoveryHostFactory=(()=>{
 'use strict';
@@ -244,7 +244,7 @@ const createModule=()=>{
       if(!input.authority.canMutate())return false;
       const locations=input.provider.list(),location=id?locations.find(item=>item.id===id&&item.connected):locations.find(item=>item.id==='device-folder'&&item.connected)||locations.find(item=>item.connected);if(!location)return false;
       (active.tried??=new Set()).add(location.id);
-      let outcome:{exportedAt?:string;result:StorageResetRecoveryResult;label:string}|null=null;
+      let outcome:{exportedAt:string|undefined;result:StorageResetRecoveryResult;label:string}|null=null;
       try{const restored=await input.provider.bringInRepositoryProvider(location.id,{missingOnly:true,quiet:true,before:active.clearedAt});if(restored&&restored.cancelled===false&&restored.verified)outcome={exportedAt:restored.exportedAt,result:restored,label:location.label};}
       catch(error){input.diagnostics.capture('storage-reset.missing-restore',error,'warn');}
       if(!outcome)return false;
