@@ -5,6 +5,7 @@ import {launchChromium,CdpPage,waitFor} from '../../helpers/browser-harness.mjs'
 const internal=fs.readFileSync(new URL('../../../source/core/internal.js',import.meta.url),'utf8');
 const noticeSource=fs.readFileSync(new URL('../../../source/core/notice-coordinator.js',import.meta.url),'utf8');
 const librarySource=fs.readFileSync(new URL('../../../source/core/library.js',import.meta.url),'utf8');
+const noteSearchSource=fs.readFileSync(new URL('../../../source/core/note-search.js',import.meta.url),'utf8');
 const coreCss=fs.readFileSync(new URL('../../../source/styles/core.css',import.meta.url),'utf8');
 const browser=await launchChromium({profilePrefix:'study-director-library-selection-'});
 let page=null;
@@ -12,7 +13,7 @@ const result={status:'PASS',suite:'library-selection',checks:{}};
 try{
   const targets=await (await fetch(`http://127.0.0.1:${browser.port}/json/list`)).json(),target=targets.find(item=>item.type==='page')||targets[0];
   page=await CdpPage.connect(target.webSocketDebuggerUrl,target.id);await page.send('Runtime.enable');await page.send('Page.enable');
-  await page.evaluate(internal+'\n'+noticeSource+'\n'+librarySource,{returnByValue:false});
+  await page.evaluate(internal+'\n'+noticeSource+'\n'+noteSearchSource+'\n'+librarySource,{returnByValue:false});
   await page.evaluate(`(()=>{const style=document.createElement('style');style.textContent=${JSON.stringify(coreCss)};document.head.appendChild(style);})()`);
   await page.evaluate(`(()=>{
     document.body.innerHTML='<div class="pane on" id="pane-library"><section class="library-notes-section" id="library-notes"><span id="library-notes-summary-count"></span><input id="library-notes-search"><div class="library-notes-grid"><nav class="library-notes-nav" style="width:252px"><div class="library-notes-nav-head"><span class="library-notes-nav-title"><span class="ui-label">Areas</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span><span class="library-notes-nav-tools"><button class="library-note-action ui-btn" id="library-note-select">Export</button><button class="library-note-action ui-btn" id="library-note-select-all" hidden>All</button><button class="library-note-action ui-btn" id="library-note-selection-clear" hidden>Clear</button><span class="library-note-selection-actions"><button class="library-note-action ui-btn" id="library-note-export" hidden disabled>Export</button><button class="library-note-action ui-btn library-note-selection-cancel" id="library-note-select-cancel" hidden>×</button></span><button class="library-note-tool ui-btn" id="library-note-add">+</button><span class="library-notes-nav-count" id="library-notes-nav-count"></span></span></div><div id="library-notes-list"></div></nav><section class="library-notes-editor" id="library-notes-editor"></section></div><div id="notes-status"></div></section></div>';
@@ -47,7 +48,7 @@ try{
       overlays:freeze({createAnchoredPopover:(popup,options={})=>{popup.hidden=true;return freeze({show:()=>{popup.hidden=false;},hide:()=>{if(!popup.hidden){popup.hidden=true;options.onClose?.();}}});}}),
       session:freeze({hasActiveSession:()=>false})
     });
-    const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('library',1);window.__libraryView=module.createView(freeze({ports}));void window.__libraryView.activate().catch(()=>{});
+    const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('library',1,freeze({noteSearch:registry.require('note-search',1)}));window.__libraryView=module.createView(freeze({ports}));void window.__libraryView.activate().catch(()=>{});
   })()`);
   // The list is a tree: a branch holding neither today's Areas nor the open
   // note starts closed, and opens on its twisty or the Right arrow key.

@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+// The notes search client (core/note-search.js), driven through its own module.
+vm.runInThisContext(fs.readFileSync('source/core/internal.js','utf8'),{filename:'source/core/internal.js'});
+vm.runInThisContext(fs.readFileSync('source/core/note-search.js','utf8'),{filename:'source/core/note-search.js'});
+const NoteSearchModule=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('note-search',1);
 function fixture(){
   let now=0,next=0,query='planet',renders=0,failPost=false;const timers=new Map(),workers=[];
   const window={setTimeout(fn,ms){const id=++next;timers.set(id,{fn,at:now+ms});return id;},clearTimeout:id=>timers.delete(id)};
-  const source=fs.readFileSync('source/core/library.js','utf8'),context={window,notesSearch:()=>query,noteSearchDocuments:()=>[{key:'one',value:'a planet orbit'}],plainTextContent:value=>value,requestNotesRender:()=>renders++,createSearchWorker:()=>{const worker={messages:[],terminated:0,postMessage(value){if(failPost)throw new Error('clone');this.messages.push(value);},terminate(){this.terminated++;}};workers.push(worker);return worker;}};
-  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('    const NOTE_SEARCH_IDLE_MS='),source.indexOf('    function notesSection('))+';globalThis.api={filterNoteEntries,stopNoteSearch,resetNoteSearchFailure,requestNoteSearch};',context);
+  const createWorker=()=>{const worker={messages:[],terminated:0,postMessage(value){if(failPost)throw new Error('clone');this.messages.push(value);},terminate(){this.terminated++;}};workers.push(worker);return worker;};
+  const search=NoteSearchModule.createSearch(Object.freeze({ports:Object.freeze({
+    notes:Object.freeze({documents:()=>[{key:'one',value:'a planet orbit'}],plainText:value=>value}),
+    environment:Object.freeze({createWorker,setTimeout:window.setTimeout,clearTimeout:window.clearTimeout}),
+    view:Object.freeze({query:()=>query,changed:()=>renders++})
+  })}));
+  const context={api:{filterNoteEntries:search.filter,stopNoteSearch:search.restart,resetNoteSearchFailure:search.resume,requestNoteSearch:search.request}};
   return {api:context.api,workers,timers,setQuery:value=>query=value,failPost:()=>failPost=true,get renders(){return renders;},tick(ms){now+=ms;for(const [id,t] of [...timers])if(t.at<=now){timers.delete(id);t.fn();}}};
 }
 const entries=[{key:'one',label:'Physics'},{key:'two',label:'Biology'}],cases=[];

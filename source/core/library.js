@@ -5,8 +5,10 @@ if(!registry||registry.format!=='study-director.internal-module-registry'||regis
   throw new Error('Study Director internal module registry is unavailable or incompatible.');
 }
 const {exactFrozenObject:exactObject,declaredFunctions:requireFunctions}=registry.contracts;
-registry.define('library',1,()=>{
+registry.define('library',1,modules=>{
   const freeze=Object.freeze;
+  if(!modules||!Object.isFrozen(modules)||Object.keys(modules).join('|')!=='noteSearch'||modules.noteSearch?.format!=='study-director.note-search-module'||modules.noteSearch.contractVersion!==1)throw new TypeError('Library module dependencies are incomplete or incompatible.');
+  const NoteSearchModule=modules.noteSearch;
   const PORT_FIELDS=freeze({
     notifications:freeze(['begin','feedback']),
     records:freeze(['get','remove','sortedSummaries']),
@@ -66,6 +68,12 @@ registry.define('library',1,()=>{
     const {createAnchoredPopover}=ports.overlays;
     const {hasActiveSession}=ports.session;
 
+    // Full-text search of the notes list (core/note-search.js).
+    const noteSearch=NoteSearchModule.createSearch(freeze({ports:freeze({
+      notes:freeze({documents:()=>noteSearchDocuments(),plainText:value=>plainTextContent(value)}),
+      environment:freeze({createWorker:()=>createSearchWorker(),setTimeout:(callback,delay)=>window.setTimeout(callback,delay),clearTimeout:timer=>window.clearTimeout(timer)}),
+      view:freeze({query:()=>notesSearch(),changed:()=>requestNotesRender()})
+    })}));
     // The Library shows one section at a time and remembers it, with whether
     // the Diary panel was open. Only the shown section renders, and only while
     // the Library tab is active.
@@ -120,85 +128,6 @@ registry.define('library',1,()=>{
     let noteTrashOpen=false,selectedTrashKey='',noteFocusKey='';
     const LIBRARY_MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     let attachmentMutationHold=0,attachmentMutationNeedsNotes=false,attachmentMutationNeedsDiary=false,attachmentMutationNeedsLibrary=false,attachmentMutationRestoreViewport=false;
-    const NOTE_SEARCH_IDLE_MS=120000,NOTE_SEARCH_RESPONSE_MS=30000,NOTE_SEARCH_BATCH_CHARS=2*1024*1024;
-    let noteSearchDeadline=0,noteSearchWorker=null,noteSearchTimer=0,noteSearchBuildTimer=0,noteSearchBuildDocuments=null,noteSearchBuildIndex=0,noteSearchBuilding=false,noteSearchId=0,noteSearchQuery='',noteSearchReady=false,noteSearchMatches=new Set(),noteSearchFailed=false,noteSearchPendingUpdates=new Map(),noteSearchFallbackText=null;
-
-    function clearNoteSearchTimer(){if(noteSearchTimer){window.clearTimeout(noteSearchTimer);noteSearchTimer=0;}}
-    function clearNoteSearchBuildTimer(){if(noteSearchBuildTimer){window.clearTimeout(noteSearchBuildTimer);noteSearchBuildTimer=0;}}
-    function clearNoteSearchDeadline(){if(noteSearchDeadline){window.clearTimeout(noteSearchDeadline);noteSearchDeadline=0;}}
-    function resetNoteSearch(){clearNoteSearchDeadline();noteSearchId++;noteSearchQuery='';noteSearchReady=false;noteSearchMatches=new Set();}
-    function resetNoteSearchFailure(){if(noteSearchWorker)return false;noteSearchFailed=false;noteSearchFallbackText=null;resetNoteSearch();return true;}
-    function stopNoteSearch(failed=false){
-      clearNoteSearchTimer();clearNoteSearchBuildTimer();noteSearchId++;
-      if(noteSearchWorker){const stopped=noteSearchWorker;noteSearchWorker=null;stopped.onmessage=stopped.onerror=stopped.onmessageerror=null;try{stopped.terminate();}catch{}}
-      noteSearchBuildDocuments=null;noteSearchBuildIndex=0;noteSearchBuilding=false;noteSearchPendingUpdates.clear();
-      resetNoteSearch();noteSearchFailed=!!failed;if(!failed)noteSearchFallbackText=null;
-    }
-    function idleNoteSearch(){clearNoteSearchTimer();if(noteSearchWorker)noteSearchTimer=window.setTimeout(()=>{noteSearchTimer=0;stopNoteSearch();},NOTE_SEARCH_IDLE_MS);}
-    function failNoteSearch(){stopNoteSearch(true);requestNotesRender();}
-    function postSearch(message){try{noteSearchWorker.postMessage(message);return true;}catch{failNoteSearch();return false;}}
-    function watchNoteSearch(){
-      if(noteSearchDeadline)return;const current=noteSearchWorker;
-      noteSearchDeadline=window.setTimeout(()=>{noteSearchDeadline=0;if(noteSearchWorker===current)failNoteSearch();},NOTE_SEARCH_RESPONSE_MS);
-    }
-    function postNoteSearchUpdate(record){
-      if(!noteSearchWorker||!record)return false;const key=String(record.key||'').trim();if(!key)return false;
-      if(record.deleted===true)postSearch({type:'delete',key});
-      else{const document={key,revision:String(record.revision||'')};if(record.plain!==undefined)document.plain=String(record.plain||'');else document.value=String(record.value||'');postSearch({type:'upsert',document});}
-      return true;
-    }
-    function finishNoteSearchBuild(){
-      noteSearchBuilding=false;noteSearchBuildDocuments=null;noteSearchBuildIndex=0;
-      for(const record of noteSearchPendingUpdates.values())postNoteSearchUpdate(record);noteSearchPendingUpdates.clear();
-      const query=notesSearch();if(query)requestNoteSearch(query,true);else idleNoteSearch();
-    }
-    function feedNoteSearchBuild(){
-      noteSearchBuildTimer=0;if(!noteSearchWorker||!noteSearchBuilding||!noteSearchBuildDocuments)return;
-      const batch=[];let chars=0;
-      while(noteSearchBuildIndex<noteSearchBuildDocuments.length){
-        const record=noteSearchBuildDocuments[noteSearchBuildIndex],size=String(record?.value??record?.plain??'').length;
-        if(batch.length&&chars+size>NOTE_SEARCH_BATCH_CHARS)break;
-        batch.push(record);chars+=size;noteSearchBuildIndex++;
-      }
-      if(batch.length&&!postSearch({type:'batch',documents:batch}))return;
-      if(noteSearchBuildIndex<noteSearchBuildDocuments.length)noteSearchBuildTimer=window.setTimeout(feedNoteSearchBuild,0);else finishNoteSearchBuild();
-    }
-    function startNoteSearchBuild(worker){
-      noteSearchBuildDocuments=noteSearchDocuments();noteSearchBuildIndex=0;noteSearchBuilding=true;noteSearchPendingUpdates.clear();
-      watchNoteSearch();if(postSearch({type:'sync',documents:[]}))noteSearchBuildTimer=window.setTimeout(feedNoteSearchBuild,0);
-    }
-    function ensureNoteSearch(){
-      clearNoteSearchTimer();if(noteSearchWorker)return true;if(noteSearchFailed)return false;
-      try{
-        const worker=createSearchWorker();
-        worker.onmessage=event=>{if(noteSearchWorker!==worker)return;const message=event?.data||{};if(message.type==='error'){failNoteSearch();return;}if(message.type!=='result'||Number(message.id)!==noteSearchId||!noteSearchQuery)return;clearNoteSearchDeadline();noteSearchReady=true;noteSearchMatches=new Set(Array.isArray(message.keys)?message.keys.map(String):[]);requestNotesRender();};
-        worker.onerror=event=>{if(noteSearchWorker!==worker)return;event?.preventDefault?.();failNoteSearch();};worker.onmessageerror=()=>{if(noteSearchWorker===worker)failNoteSearch();};noteSearchWorker=worker;startNoteSearchBuild(worker);return noteSearchWorker===worker;
-      }catch{stopNoteSearch(true);return false;}
-    }
-    function requestNoteSearch(query,force=false){
-      const clean=String(query||'').trim().toLowerCase();if(!clean){resetNoteSearch();return false;}
-      if(!ensureNoteSearch())return false;if(!force&&noteSearchQuery===clean)return true;
-      noteSearchQuery=clean;noteSearchReady=false;watchNoteSearch();if(noteSearchBuilding)return true;
-      const id=++noteSearchId;return postSearch({type:'query',id,query:clean});
-    }
-    function updateNoteSearchDocument(record){
-      if(!record)return false;clearNoteSearchTimer();const key=String(record.key||'').trim();if(!key)return false;
-      if(noteSearchFallbackText){if(record.deleted===true)noteSearchFallbackText.delete(key);else noteSearchFallbackText.set(key,String(record.plain===undefined?plainTextContent(record.value||''):record.plain||'').toLowerCase());}
-      if(!noteSearchWorker)return !!noteSearchFallbackText;
-      if(noteSearchBuilding)noteSearchPendingUpdates.set(key,record);else postNoteSearchUpdate(record);
-      noteSearchQuery='';noteSearchReady=false;const query=notesSearch();if(query)requestNoteSearch(query,true);return true;
-    }
-    function fallbackNoteSearch(entries,query){
-      if(!noteSearchFallbackText){noteSearchFallbackText=new Map();for(const record of noteSearchDocuments())noteSearchFallbackText.set(String(record.key||''),plainTextContent(record.value||'').toLowerCase());}
-      return entries.filter(entry=>String(entry.label||'').toLowerCase().includes(query)||String(noteSearchFallbackText.get(entry.key)||'').includes(query));
-    }
-    function filterNoteEntries(entries,query){
-      if(!query)return {entries,pending:false};
-      if(noteSearchFailed)return {entries:fallbackNoteSearch(entries,query),pending:false};
-      requestNoteSearch(query);if(noteSearchFailed)return {entries:fallbackNoteSearch(entries,query),pending:false};
-      if(!noteSearchReady||noteSearchQuery!==query)return {entries,pending:true};
-      return {entries:entries.filter(entry=>String(entry.label||'').toLowerCase().includes(query)||noteSearchMatches.has(entry.key)),pending:false};
-    }
 
     function notesSection(){return document.getElementById('library-notes');}
     function notesEditorField(){return document.querySelector('#library-notes-editor .library-notes-textarea');}
@@ -765,8 +694,8 @@ registry.define('library',1,()=>{
       if(attachmentMutationHold){attachmentMutationNeedsNotes=true;return false;}
       if(!notesShown())return false;
       const entries=noteEntries();
-      clearNoteSearchTimer();
-      const query=notesSearch(),searchState=filterNoteEntries(entries,query),tagKeys=noteTagFilter.length?taggedNotes(noteTagFilter):null;
+      noteSearch.keep();
+      const query=notesSearch(),searchState=noteSearch.filter(entries,query),tagKeys=noteTagFilter.length?taggedNotes(noteTagFilter):null;
       const filtered=tagKeys?searchState.entries.filter(entry=>tagKeys.has(entry.key)):searchState.entries,filtering=!!query||!!tagKeys;
       updateNoteSelectionControls(entries);renderNoteTags();
       const trashed=selectedTrashKey&&!noteSelectionMode?noteTrashItems().find(item=>item.key===selectedTrashKey)||null:null;
@@ -833,7 +762,7 @@ registry.define('library',1,()=>{
       if(!match)return false;
       const search=document.getElementById('library-notes-search');
       if(search&&search.value)search.value='';
-      resetNoteSearch();
+      noteSearch.reset();
       if(noteTagFilter.length&&!taggedNotes(noteTagFilter).has(match.key))noteTagFilter=[];
       if(noteSelectionMode&&!noteExportBusy){noteSelectionMode=false;noteSelection.clear();}
       showSection('notes');
@@ -876,7 +805,7 @@ registry.define('library',1,()=>{
     // note the list changes behind it; from elsewhere the list is shown.
     function filterTag(tag,{show=false}={}){
       const name=normalizeTag(tag);if(!name)return false;
-      const search=document.getElementById('library-notes-search');if(search&&search.value){search.value='';resetNoteSearch();}
+      const search=document.getElementById('library-notes-search');if(search&&search.value){search.value='';noteSearch.reset();}
       showSection('notes');setNoteTagFilter([name]);if(show)closeNoteView();return true;
     }
     async function renameSelectedTag(){
@@ -1181,10 +1110,10 @@ registry.define('library',1,()=>{
     }
     function refreshNotes(){
       if(attachmentMutationHold){attachmentMutationNeedsNotes=true;return false;}
-      if(noteSearchWorker)stopNoteSearch();
+      noteSearch.restart();
       if(notesShown())return renderNotes();
       clearNotesEditorBinding();
-      idleNoteSearch();
+      noteSearch.idle();
       return false;
     }
     function installNotesWorkspace(){
@@ -1456,7 +1385,7 @@ registry.define('library',1,()=>{
     installNoteListResizer();
     function enterSection(){
       if(!libraryActive)return;
-      if(librarySection==='notes'){clearNoteSearchTimer();if(noteSearchFailed)resetNoteSearchFailure();renderNotes();}
+      if(librarySection==='notes'){noteSearch.resume();renderNotes();}
       else if(librarySection==='days'){if(diaryShown())void renderDiary();}
       else void refreshAttachments();
     }
@@ -1467,7 +1396,7 @@ registry.define('library',1,()=>{
         noteSelectionMode=false;noteSelection.clear();noteExportBusy=false;
         selectedTrashKey='';noteTrashOpen=false;noteVisibleLimit=NOTE_PAGE_SIZE;
         if(section)section.classList.remove('export-selecting','note-open');
-        clearNotesEditorBinding();idleNoteSearch();
+        clearNotesEditorBinding();noteSearch.idle();
       }else if(librarySection==='days'){if(diaryEditing)void finishDiaryEdit({render:false});}
       else closeAttachments();
     }
@@ -1640,7 +1569,7 @@ registry.define('library',1,()=>{
       return true;
     }
     async function activateLibrary(options={}){
-      libraryActive=true;clearNoteSearchTimer();if(noteSearchFailed)resetNoteSearchFailure();
+      libraryActive=true;noteSearch.resume();
       refreshNotes();requestDiarySummaryCountRefresh();if(diaryShown())void renderDiary();
       if(options&&options.restoreScroll&&options.immediateScroll===true)restoreLibraryScroll({immediate:true});
       if(libraryViewIsCurrent()){
@@ -1650,7 +1579,7 @@ registry.define('library',1,()=>{
       await renderLibrary({restoreScroll:!!(options&&options.restoreScroll)});
       return false;
     }
-    function deactivateLibrary(options={}){libraryActive=false;captureLibraryScroll();clearNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
+    function deactivateLibrary(options={}){libraryActive=false;captureLibraryScroll();clearNotesEditorBinding();noteSearch.idle();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
     function loadMoreLibrary(){
       libraryVisibleLimit+=LIBRARY_PAGE_SIZE;
       libraryPreserveLimitOnce=true;
@@ -1929,7 +1858,7 @@ registry.define('library',1,()=>{
       requestRender:requestLibraryRender,
       invalidate:invalidateLibrarySummaryCache,
       refreshNotes:refreshNotes,
-      updateSearchDocument:updateNoteSearchDocument,
+      updateSearchDocument:record=>noteSearch.update(record),
       openDay:date=>{showSection('days');return openLibraryDayDetail(date);},
       showSection,
       openNote:selectNote,
