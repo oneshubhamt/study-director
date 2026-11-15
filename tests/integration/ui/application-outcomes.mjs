@@ -356,4 +356,36 @@ const noop=()=>{};
   failure=null;result={status:'downloaded',kind:'markdown'};assert.equal(await context.exportSelectedNotes(),true);assert.equal(context.noteSelection.size,0);assert.match(coordinator.readEvent('library','note-export').message,/download started/);assert.equal(coordinator.eventStatus().toasts.length,1);
   context.noteSelection.add('two');result={status:'saved',kind:'zip',notes:2,assets:1,missing:1};assert.equal(await context.exportSelectedNotes(),true);assert.match(coordinator.readEvent('library','note-export').message,/saved and verified.*unavailable image/);assert.equal(coordinator.eventStatus().toasts.length,1);coordinator.clear();
 }
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','P5.6B stale Saved-Day read fence','P5.6B summary refresh failure containment','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes']}));
+
+// P5.7B Kept Versions is generation-fenced and failed automatic convergence
+// cannot make a still-open canonical alternative disappear from the UI count.
+{
+  const context={Object,Symbol,Set,Promise,Date,Number,String,Error,TypeError};
+  vm.createContext(context);
+  vm.runInContext(readCoreScript('internal'),context);
+  vm.runInContext(readCoreScript('backup-recovery-host'),context);
+  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('backup-recovery-host',1);
+  const first=deferred(),second=deferred();let listCall=0,canMutate=false,convergenceFails=false,captures=0,rendered=0,noteRefreshes=0;
+  const open=Object.freeze({id:'kept-note',subject:'note',ref:'n1',resolvedAt:''});
+  const kept=module.createKeptVersions(Object.freeze({
+    controller:Object.freeze({
+      status:()=>Object.freeze({busy:false}),
+      resolveConvergedKeptVersions:async()=>{if(convergenceFails)throw new Error('verified acknowledgement failed');return 0;},
+      reviewKeptVersions:async()=>Object.freeze({reviewed:0,changed:0,left:1})
+    }),
+    reviews:Object.freeze({list:async()=>{listCall+=1;if(listCall===1)return first.promise;if(listCall===2)return second.promise;return Object.freeze([open]);}}),
+    diagnostics:Object.freeze({capture:()=>{captures+=1;}}),
+    environment:Object.freeze({canMutate:()=>canMutate,now:()=>Date.now(),connectCardOpen:()=>false,sessionYieldedAt:()=>0}),
+    notifications:Object.freeze({notify:()=>{},resolveEvent:()=>{}}),
+    view:Object.freeze({render:()=>{rendered+=1;},renderLocation:()=>{},refreshNotes:()=>{noteRefreshes+=1;}})
+  }));
+  const stale=kept.refresh(),current=kept.refresh();
+  second.resolve(Object.freeze([open]));assert.equal(await current,true);assert.equal(kept.count(),1);assert.equal(kept.note('n1'),true);
+  first.resolve(Object.freeze([]));assert.equal(await stale,false,'a superseded refresh cannot erase the newer canonical kept-version count');
+  assert.equal(kept.count(),1);assert.equal(rendered,1);assert.equal(noteRefreshes,1);
+  canMutate=true;convergenceFails=true;
+  assert.equal(await kept.refresh(),true,'failed automatic convergence still renders the canonical unresolved review');
+  assert.equal(kept.count(),1);assert.equal(captures,1,'failed verified convergence is diagnosed rather than treated as resolution');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','P5.6B stale Saved-Day read fence','P5.6B summary refresh failure containment','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes','P5.7B kept-version generation/convergence fencing']}));

@@ -54,8 +54,9 @@ assert.match(host,/KeptVersions=BackupRecoveryHostModule\.createKeptVersions\(Ob
 assert.doesNotMatch(host,/const KeptVersions=\(\(\)=>\{/u,'the untyped host Kept Versions owner is retired');
 assert.match(recovery,/function createKeptVersions\(/u,'the recovery host owns kept-version refresh and review');
 assert.match(recovery,/resolveConvergedKeptVersions\(\)/u,'verified convergence remains the only automatic kept-version resolution');
-assert.match(recovery,/async function createSettler/u,'restore quiescence stays in the checked recovery owner');
-assert.match(recovery,/await input\.lifecycle\.settlePlanDraft\(\)/u,'Plan draft is settled before managed recovery');
+assert.match(recovery,/async function settleRecoveryState\(/u,'restore quiescence stays in the checked recovery owner');
+assert.match(recovery,/await input\.lifecycle\.flushPlanDraft\(\)/u,'Plan draft is flushed before managed recovery');
+assert.match(recovery,/await input\.lifecycle\.canonicalPlanDraft\(\)/u,'visible Plan draft receives a canonical read-back fence before recovery');
 assert.match(recovery,/await input\.lifecycle\.settlePlan\(\)/u,'Plan persistence quiescence remains explicit before recovery');
 assert.match(host,/noteReconciliation:Object\.freeze\(\{resolve:options=>withRichTextAssetMaintenancePaused\(\(\)=>NoteReconciliationUI\.resolve\(options\)\)/u,'note reconciliation remains read-only with attachment maintenance paused until a canonical recovery mutation begins');
 assert.doesNotMatch(reconciliationUi,/\bAppData\b|IndexedDb|localStorage|notes\.replace|dailyRecords/u,'scratch reconciliation cannot acquire a canonical persistence path');
