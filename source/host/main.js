@@ -3444,7 +3444,7 @@ if(!Object.isFrozen(BackupProtectionHost)||BackupProtectionHost.format!=='study-
 }
 const BackupProtection=BackupProtectionHost.protection;
 BackupProtectionHost.install();
-const NoteExporter=const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.freeze({
+const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.freeze({
   assets:Object.freeze({get:id=>RichTextAssets.get(id)}),
   notes:Object.freeze({get:key=>AppData.notes.get(key)}),
   processing:Object.freeze({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
@@ -4250,7 +4250,7 @@ if(!Object.isFrozen(BackupActions)||BackupActions.format!=='study-director.backu
   throw new Error('Study Director backup controls are unavailable or incompatible.');
 }
 BackupActions.install();
-const REPOSITORY_MAINTENANCE_FORMAT=const REPOSITORY_MAINTENANCE_FORMAT='study-director.repository-maintenance-pending';
+const REPOSITORY_MAINTENANCE_FORMAT='study-director.repository-maintenance-pending';
 const REPOSITORY_MAINTENANCE_VERSION=4;
 let repositoryMaintenanceWriteChain=Promise.resolve();
 function maintenanceReason(value){const reason=String(value||'requested').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'requested';}
@@ -4575,7 +4575,7 @@ DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze({
     limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   })
 }));
-if(!Object.isFrozen(DeviceBackup)if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
+if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
   throw new Error('Study Director automatic device backup is unavailable or incompatible.');
 }
 BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
