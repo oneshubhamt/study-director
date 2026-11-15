@@ -60,7 +60,7 @@ assert.match(recovery,/await input\.lifecycle\.canonicalPlanDraft\(\)/u,'visible
 assert.match(recovery,/await input\.lifecycle\.settlePlan\(\)/u,'Plan persistence quiescence remains explicit before recovery');
 assert.match(host,/noteReconciliation:Object\.freeze\(\{resolve:options=>withRichTextAssetMaintenancePaused\(\(\)=>NoteReconciliationUI\.resolve\(options\)\)/u,'note reconciliation remains read-only with attachment maintenance paused until a canonical recovery mutation begins');
 assert.doesNotMatch(reconciliationUi,/\bAppData\b|IndexedDb|localStorage|notes\.replace|dailyRecords/u,'scratch reconciliation cannot acquire a canonical persistence path');
-const reconciliationAt=backup.indexOf("noteResult=await NoteReconciliation.resolve"),mutationAt=backup.indexOf("return runRestoreMutation(stored!,'restore-backup'",reconciliationAt);
+const restoreAttemptAt=backup.indexOf('async function restoreBackupAttemptWithOperation'),reconciliationAt=backup.indexOf('noteResult=await NoteReconciliation.resolve',restoreAttemptAt),mutationAt=backup.indexOf("return runRestoreMutation(stored,'restore-backup'",reconciliationAt);
 const safetyAt=backup.indexOf('captureLocalSafetyCopy(stored',mutationAt),journalAt=backup.indexOf('restoreJournal.prepare',safetyAt),verificationAt=backup.indexOf('verifyRestoreCommit(expectedCommit',journalAt),journalClearAt=backup.indexOf('restoreJournal.clear(restoreId)',verificationAt);
 assert.ok(reconciliationAt>0&&mutationAt>reconciliationAt,'user reconciliation must finish before the managed canonical mutation boundary');
 assert.ok(safetyAt>mutationAt&&journalAt>safetyAt,'verified local safety capture must precede restore-journal preparation and canonical writes');
