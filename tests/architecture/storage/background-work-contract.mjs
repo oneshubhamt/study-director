@@ -107,7 +107,7 @@ const lifecycle=readScript('source/core/operation-lifecycle.ts');
 assert.match(lifecycle,/function createJob[\s\S]*function reconcile[\s\S]*function wake[\s\S]*function complete/u);
 assert.match(background,/Lifecycle\.createJob/u);
 assert.match(provider,/background\.registerJob\('convergence'/u);
-assert.match(app,/OperationLifecycle\.createGroup/u);assert.match(startupOwner,/ports\.wakeBackground\('ownership'\)/u);assert.match(app,/wakeBackgroundOperations\('encryption-unlocked'\)/u);
+assert.match(app,/OperationLifecycle\.createGroup/u);assert.match(startupOwner,/ports\.wakeBackground\('ownership'\)/u);assert.match(backupActionsHost,/input\.view\.wakeBackground\('encryption-unlocked'\)/u,'the checked protection owner wakes background work after unlock');assert.match(app,/wakeBackground:reason=>wakeBackgroundOperations\(reason\)/u,'the host supplies the canonical background wake callback');
 assert.match(provider,/budgetMs:background\.integrity\.workBudgetMs/u,'integrity policy must come from the bound coordinator');
 assert.doesNotMatch(provider,/Background\.integrity|PROVIDER_CONVERGENCE_BUDGET|backgroundAfter|convergenceAfter|resumePendingProviderBackup/u,'retired handoffs and transfer deadlines must be absent');
 assert.doesNotMatch(app,/dataMaintenanceTimer|attachmentIntegrityTimer|attachmentIntegrityRunning|attachmentIntegrityAwaitingControl|attachmentMaintenanceDailyTimer/u,'host timers must not duplicate lifecycle ownership');

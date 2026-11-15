@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-for(const name of ['internal','notice-coordinator','backup-presentation','interactions','foundation-host'])vm.runInThisContext(readCoreScript(name),{filename:coreScriptPath(name)});
+for(const name of ['internal','notice-coordinator','backup-presentation','backup-actions-host','interactions','foundation-host'])vm.runInThisContext(readCoreScript(name),{filename:coreScriptPath(name)});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],module=registry.require('notice-coordinator',1),freeze=Object.freeze;
 function clock(){
   let time=0,sequence=0;const pending=new Map();
@@ -66,6 +66,37 @@ class Element {
   dispatch(type,event={}){for(const handler of [...(this.listeners.get(type)||[])])handler({target:this,...event});}
   contains(target){return target===this||this.children.some(child=>child.contains(target));}
 }
+globalThis.HTMLElement=Element;
+globalThis.HTMLButtonElement=Element;
+const backupActions=registry.require('backup-actions-host',1);
+function createBackupControls({
+  nodes=new Map(),controllerStatus=()=>({standaloneExportActive:false,importHoldsBackground:false}),
+  processingStatus=()=>({fileBusy:false}),locations={},presentation=null,verifiedAt=()=>'',renderProfile=()=>{},
+  firstStartOpen=()=>false,renderFirstStart=()=>{},scheduleUpdate=()=>{},scheduleSyncStatus=()=>{}
+}={}){
+  const activePresentation=presentation||freeze({
+    current:()=>null,summary:()=>'',subscribe:()=>()=>{},locationLabel:(_id,state)=>state?.connected?'On':'Off',condition:()=>false
+  });
+  const controller=freeze({
+    status:controllerStatus,subscribeStatus:()=>()=>{},exportLocal:()=>false,importLocal:()=>false,cancelStandalone:()=>false
+  });
+  const processing=freeze({status:processingStatus,open:async()=>null});
+  const protection=freeze({
+    format:'study-director.backup-protection-host',contractVersion:1,protection:freeze({}),
+    backgroundAvailability:()=>true,surfaceError:()=>false,withPassword:async open=>open(),manage:async()=>false,refresh:async()=>true,install:()=>true
+  });
+  const providers=freeze({
+    locationStatus:id=>locations[id]||null,connected:id=>!!locations[id]?.connected,backup:async()=>false,
+    cancelForeground:()=>false,disconnect:async()=>false,
+    suspendBackground:()=>({settled:Promise.resolve(),release(){}})
+  });
+  return backupActions.createControls(freeze({
+    document:{getElementById:id=>nodes.get(id)||null},controller,processing,protection,device:()=>null,providers,presentation:activePresentation,
+    verifiedAt,timeLabel:()=> '09:30',capture:(_scope,error)=>assert.fail(error),resolveFileOpen:()=>{},
+    foregroundChanged:()=>{},scheduleSyncStatus,renderProfile,firstStartOpen,renderFirstStart,scheduleUpdate,
+    connectDevice:()=>false,connectDrive:()=>false,openHistory:()=>false
+  }));
+}
 {
   // Hover and focus hold one pop-up's time; a hidden page holds every one.
   // The renderer itself is checked in a real page (tests/browser/ui/notification-stack.mjs).
@@ -86,8 +117,7 @@ class Element {
 {
   const {notices:n}=coordinator(),nodes=new Map(['device-folder','google-drive'].map(source=>[`backup-operation-note-${source}`,new Element()]));
   const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
-  const html=readHostHtml(),a=html.indexOf('BackupPresentation.subscribe(()=>{'),b=html.indexOf('const REPOSITORY_MAINTENANCE_FORMAT',a);
-  new Function('BackupPresentation','document','renderFileBackup',html.slice(a,b))(presentation,{getElementById:id=>nodes.get(id)||null},()=>{});
+  const controls=createBackupControls({nodes,presentation});controls.install();
   for(const sourceId of ['device-folder','google-drive']){
     const handle=presentation.begin(sourceId,'restore-version',{label:sourceId,message:'Verifying safety copy'});
     handle.update({progress:{current:1,total:2}});const node=nodes.get(`backup-operation-note-${sourceId}`);assert.equal(node.hidden,false);assert.match(node.textContent,/Verifying safety copy · 1 of 2 complete/);
@@ -114,18 +144,20 @@ class Element {
 {
   const {notices:n}=coordinator();for(let i=0;i<200;i++)n.emit({source:'maintenance',id:`quiet-${i}`,foreground:false,lifecycle:'succeeded',message:'Done'});
   assert.ok(n.eventStatus().events.length<=64,'quiet background results also have bounded retention');n.clear();
-  const html=readHostHtml(),start=html.indexOf('function renderDeviceBackup(state){'),end=html.indexOf('\nfunction markStorageHealthOk',start),status=new Element(),note=new Element(),recover=new Element(),cleared=[];
-  let actionsDrawn=0;
-  new Function('document','storageHealthTime','schedulePwaUpdateEvaluation','NoticeCoordinator','BackupPresentation','renderBackupActions','scheduleSyncStatus',html.slice(start,end)+`;renderDeviceBackup({busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true});`)({getElementById:id=>({'device-backup-status':status,'device-backup-note':note}[id]||null)},()=>'',()=>{}, {resolveEvent:(...args)=>cleared.push(args)},registry.require('backup-presentation',1).createPresentation(freeze({notifications:n})),()=>{actionsDrawn+=1;},()=>{});
-  assert.equal(status.textContent,'Restoring…');assert.equal(note.hidden,true);assert.equal(cleared.length,0,'Device state cannot erase the coordinator summary during cancellation');assert.equal(actionsDrawn,1,'the shared actions follow the Device Folder row');
+  const status=new Element(),note=new Element(),group=new Element(),backupNow=new Element('button'),versions=new Element('button');
+  const nodes=new Map([['device-backup-status',status],['device-backup-note',note],['backup-shared-actions',group],['backup-now',backupNow],['open-version-history',versions]]);
+  const presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
+  const state={busy:true,foregroundKind:'restore-version',cancellable:false,connected:true,hasNote:true,maintenanceBusy:false,supported:true,installed:true,lastBackupAt:null};
+  const recovery=presentation.begin('device-folder','restore-version',{label:'Device Folder',message:'Restoring safely'}),before=recovery.read().message;
+  const controls=createBackupControls({nodes,presentation,locations:{'device-folder':state}});controls.renderDevice(state);
+  assert.equal(status.textContent,'Restoring…');assert.equal(note.hidden,true);assert.equal(presentation.read('device-folder').message,before,'Device state cannot erase the coordinator summary during cancellation');assert.equal(group.hidden,false,'the shared actions follow the Device Folder row');
 }
 {
   // One Back up now and one Version History for every location: shown while
   // any location is connected; a running restore can still be reopened.
-  const html=readHostHtml(),start=html.indexOf('function renderBackupActions(){'),end=html.indexOf('\n// Back up each enabled destination independently.',start);
   const draw=states=>{
     const nodes=new Map(['backup-shared-actions','backup-now','open-version-history'].map(id=>[id,new Element()]));for(const node of nodes.values())node.hidden=false;
-    new Function('document','BackupProviderRuntime',html.slice(start,end)+'\n;renderBackupActions();')({getElementById:id=>nodes.get(id)||null},{locationStatus:id=>states[id]||null});
+    createBackupControls({nodes,locations:states}).renderActions();
     return {group:nodes.get('backup-shared-actions').hidden,backupNow:nodes.get('backup-now').disabled,versions:nodes.get('open-version-history').disabled};
   };
   const off={connected:false},on={connected:true,busy:false};
@@ -135,15 +167,13 @@ class Element {
   assert.deepEqual(draw({'device-folder':{...on,busy:true,foregroundKind:'backup'},'google-drive':on}),{group:false,backupNow:true,versions:true});
 }
 {
-  // The portable-file row is drawn by the app too: Export and Cancel follow the
-  // backup controller and the file processor; Version History's Cancel follows an import.
-  const html=readHostHtml(),start=html.indexOf('let fileBackupRowReady=false;'),end=html.indexOf("// Each location row opens its settings in place",start);
+  // The portable-file row is drawn by the checked backup owner: Export and
+  // Cancel follow the backup controller and file processor; import keeps Version History cancellable.
   const ids=['download-backup','cancel-standalone-import','cancel-backup-import','backup-file-status'];
   const draw=({exporting=false,fileBusy=false,importing=false,event=null}={})=>{
     const nodes=new Map(ids.map(id=>[id,new Element()]));
-    new Function('document','BackupController','Exports','BackupPresentation',html.slice(start,end)+';fileBackupRowReady=true;renderFileBackup();')(
-      {getElementById:id=>nodes.get(id)||null},{status:()=>({standaloneExportActive:exporting,importActive:importing,importHoldsBackground:importing})},{status:()=>({fileBusy})},
-      {current:()=>event,summary:value=>value?.message||''});
+    const presentation=freeze({current:()=>event,summary:value=>value?.message||'',subscribe:()=>()=>{},locationLabel:()=>'',condition:()=>false});
+    createBackupControls({nodes,controllerStatus:()=>({standaloneExportActive:exporting,importActive:importing,importHoldsBackground:importing}),processingStatus:()=>({fileBusy}),presentation}).renderFile();
     return id=>nodes.get(id);
   };
   let row=draw();assert.equal(row('download-backup').textContent,'Export backup…');assert.equal(row('download-backup').disabled,false);assert.equal(row('cancel-standalone-import').hidden,true);assert.equal(row('backup-file-status').hidden,true);
@@ -152,15 +182,12 @@ class Element {
   row=draw({importing:true});assert.equal(row('cancel-backup-import').hidden,false,'an import can be cancelled from Version History');
 }
 {
-  // Google Drive's row is drawn by the app from engine status, with the same
-  // parts as the Device Folder row.
-  const html=readHostHtml(),start=html.indexOf('function renderDriveBackup(){'),end=html.indexOf('\nfunction renderDeviceBackup(',start);
+  // Google Drive's shared location row is owned by P5.7A; auth/transport stay outside it.
   const ids=['backup-provider-row-status-google-drive','connect-drive-backup','cancel-drive-backup','drive-backup-settings','drive-backup-settings-panel','drive-backup-settings-last','disconnect-drive-backup'];
-  const draw=(state,verifiedAt='')=>{
+  const draw=(state,verified='')=>{
     const nodes=new Map(ids.map(id=>[id,new Element()]));nodes.get('drive-backup-settings-panel').hidden=false;
-    new Function('document','BackupProviderRuntime','BackupPresentation','verifiedRecoveryState','storageHealthTime','renderProfile','FirstStart',html.slice(start,end)+';renderDriveBackup();')(
-      {getElementById:id=>nodes.get(id)||null},{locationStatus:()=>state},{locationLabel:(_id,value)=>value.connected?'On':value.wasConnected?'Signed out':'Off'},
-      {providers:verifiedAt?{'google-drive':{at:verifiedAt}}:{}},()=>'09:30',()=>{profileDraws++;},{isOpen:()=>false,render(){}});
+    const presentation=freeze({current:()=>null,summary:()=>'',subscribe:()=>()=>{},locationLabel:(_id,value)=>value.connected?'On':value.wasConnected?'Signed out':'Off',condition:()=>false});
+    createBackupControls({nodes,locations:{'google-drive':state},presentation,verifiedAt:()=>verified,renderProfile:()=>{profileDraws++;}}).renderDrive();
     const view=id=>nodes.get(id);return {shown:ids.slice(1,4).filter(id=>!view(id).hidden),view};
   };
   const base={connected:false,wasConnected:false,engineBusy:false,busy:false,backingUp:false,cancellable:false,foregroundKind:''};
