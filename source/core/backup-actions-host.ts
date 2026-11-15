@@ -1,8 +1,9 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {BackupActionsHostContract,BackupControls,BackupControlsInput,BackupProtectionHost,BackupProtectionHostInput,DeviceBackupCompositionInput} from '../../types/backup-actions-host.ts';
 import type {DeviceBackupInput,DeviceLocation,DeviceStatus} from '../../types/device-backup.ts';
-import type {Lease,ProviderConfig,RepositoryTransport,Upload} from '../../types/backup-provider.ts';
-import type {LockKind,LockLease} from '../../types/device-folder-storage.ts';
+import type {DownloadOptions as ProviderDownloadOptions,ItemRef,Lease,ProviderConfig,RepositoryKind,RepositoryTransport,Upload} from '../../types/backup-provider.ts';
+import type {LockKind,LockLease,StorageIdentity,StorageKind,StorageUpload} from '../../types/device-folder-storage.ts';
+import type {BlobLease} from '../../types/managed-repository.ts';
 
 const sdBackupActionsHostFactory=(()=>{
 'use strict';
@@ -172,26 +173,62 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
   return freeze({format:'study-director.backup-controls' as const,contractVersion:1 as const,install,renderFile,renderDrive,renderDevice,renderActions,toggleSettings,backUpEverywhere,withPassword,openHistory,manageProtection,exportLocal,importLocal,pickImportFile,cancelStandalone,connectDevice,cancelDevice,disconnectDevice,connectDrive,cancelDrive,disconnectDrive});
 }
 
-function folderLease(kind:LockKind,lease:Lease):LockLease{
-  if(lease.kind!==kind||typeof lease.name!=='string'||!lease.name)throw new TypeError(`Device Folder ${kind} lease is incompatible with the provider contract.`);
-  return freeze({kind,id:lease.id,name:lease.name,createdAt:lease.createdAt});
+type FolderRepository=DeviceLocation['repository'];
+type FolderRepositoryView=Omit<FolderRepository,'beginOperation'>;
+
+function folderKind(kind:RepositoryKind):StorageKind{
+  if(kind==='session-claim')throw new TypeError('Device Folder session claims use the dedicated provider transport.');
+  return kind;
 }
-function providerRepository(repository:DeviceLocation['repository']):RepositoryTransport{
-  const adapt=(kind:LockKind,lease:Lease)=>folderLease(kind,lease);
+function folderIdentity(item:ItemRef):StorageIdentity{
+  const remoteVersion=typeof item.remoteVersion==='string'&&item.remoteVersion?item.remoteVersion:'';
+  const digest=typeof item.digest==='string'&&item.digest?item.digest:'';
+  return freeze({kind:folderKind(item.kind),id:item.id,...(remoteVersion?{remoteVersion}:{}),...(digest?{digest}:{})});
+}
+function folderUpload(value:Upload):StorageUpload{
+  if(!(value.blob instanceof Blob))throw new TypeError('Device Folder repository upload requires materialized backup bytes.');
   return freeze({
-    ...repository,
-    upload:async(value:Upload)=>{
-      if(!(value.blob instanceof Blob))throw new TypeError('Device Folder repository upload requires materialized backup bytes.');
-      return repository.upload({...value,blob:value.blob});
-    },
-    beginOperation:options=>providerRepository(repository.beginOperation(options)),
+    kind:folderKind(value.kind),id:value.id,blob:value.blob,digest:value.digest,
+    ...(value.checkProtection?{checkProtection:value.checkProtection}:{}),
+    ...(value.checkSource?{checkSource:value.checkSource}:{})
+  });
+}
+function folderLease(kind:LockKind,lease:Lease):LockLease{
+  const leaseKind=lease['kind'],name=lease['name'];
+  if(leaseKind!==kind||typeof name!=='string'||!name)throw new TypeError(`Device Folder ${kind} lease is incompatible with the provider contract.`);
+  return freeze({kind,id:lease.id,name,createdAt:lease.createdAt});
+}
+function providerRepositoryView(repository:FolderRepositoryView):RepositoryTransport{
+  const adapt=(kind:LockKind,lease:Lease)=>folderLease(kind,lease);
+  const list:RepositoryTransport['list']=({kind,signal,freshDigests})=>repository.list({
+    kind:folderKind(kind),
+    ...(signal!==undefined?{signal}:{}),
+    ...(freshDigests!==undefined?{freshDigests}:{})
+  });
+  const upload:RepositoryTransport['upload']=(value:Upload)=>repository.upload(folderUpload(value));
+  const remove:RepositoryTransport['delete']=(item:ItemRef)=>repository.delete(folderIdentity(item));
+  function download(item:ItemRef,options:ProviderDownloadOptions&{offset:number;length:number}):Promise<{blob:Blob;totalBytes:number;version:string}|null>;
+  function download(item:ItemRef,options?:ProviderDownloadOptions&{offset?:never;length?:never}):Promise<Blob|BlobLease|null>;
+  function download(item:ItemRef,options:ProviderDownloadOptions&{offset?:number;length?:number}={}):Promise<Blob|BlobLease|{blob:Blob;totalBytes:number;version:string}|null>{
+    const identity=folderIdentity(item),signal=options.signal;
+    if(typeof options.offset==='number'&&typeof options.length==='number')return repository.download(identity,{offset:options.offset,length:options.length,...(signal!==undefined?{signal}:{})});
+    return repository.download(identity,signal!==undefined?{signal}:{});
+  }
+  return freeze({
+    list,upload,download,delete:remove,
+    scope:()=>repository.scope(),historyReadConcurrency:repository.historyReadConcurrency,
+    beginPublication:()=>repository.beginPublication(),listPublications:()=>repository.listPublications(),
     assertPublication:(lease:Lease)=>repository.assertPublication(adapt('publication',lease)),
     renewPublication:(lease:Lease)=>repository.renewPublication(adapt('publication',lease)),
     endPublication:(lease:Lease)=>repository.endPublication(adapt('publication',lease)),
+    beginMaintenance:()=>repository.beginMaintenance(),listMaintenances:()=>repository.listMaintenances(),
     assertMaintenance:(lease:Lease)=>repository.assertMaintenance(adapt('maintenance',lease)),
     renewMaintenance:(lease:Lease)=>repository.renewMaintenance(adapt('maintenance',lease)),
     endMaintenance:(lease:Lease)=>repository.endMaintenance(adapt('maintenance',lease))
   });
+}
+function providerRepository(repository:FolderRepository):RepositoryTransport{
+  return freeze({...providerRepositoryView(repository),beginOperation:options=>providerRepositoryView(repository.beginOperation(options))});
 }
 function providerLocation(location:DeviceLocation):ProviderConfig{
   return freeze({
