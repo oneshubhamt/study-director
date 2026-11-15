@@ -6,6 +6,7 @@ import type {ExportsModule} from '../source/core/exports.ts';
 import type {DeviceBackupInput,DeviceStatus} from './device-backup.ts';
 import type {FolderStorageInput} from './device-folder-storage.ts';
 import type {ProtectionInput} from './exports.ts';
+import type {MetaOwner} from './app-meta.ts';
 
 export type BackupRuntime=ReturnType<BackupModule['createRuntime']>;
 export type BackupController=BackupRuntime['controller'];
@@ -16,6 +17,25 @@ export type BackupProtection=ReturnType<ExportsModule['createProtection']>;
 export type DeviceBackup=ReturnType<DeviceBackupModule['createController']>;
 export type DeviceStorageInput=Omit<FolderStorageInput,'folder'|'identities'>&Readonly<{identities:Omit<FolderStorageInput['identities'],'root'>}>;
 
+export interface BackupProtectionStorageInput{
+  readonly meta:Pick<MetaOwner,'read'|'transaction'>;
+  readonly settingName:string;
+  readonly settingKey:string;
+}
+export interface DeviceBackupHooksInput{
+  readonly interactions:Readonly<{choose(options:Readonly<Record<string,unknown>>):Promise<string|null>}>;
+  capture(scope:string,error:unknown):unknown;
+  profileId():string;profileScope():string;installationId():string;backupFolderName():string;
+  render:DeviceBackupInput['hooks']['render'];sourceRevision():string;verifiedAt():string|null;
+}
+export interface DeviceBackupActivationInput{
+  device():Pick<DeviceBackup,'refreshPermission'>|null;
+  readonly refreshKinds:ReadonlySet<string>;
+}
+export interface DeviceBackupActivationController{
+  readonly format:'study-director.device-backup-activation';readonly contractVersion:1;
+  handle(kind:unknown):Promise<boolean>;
+}
 export interface BackupProtectionHostInput<Token>{
   readonly module:ExportsModule;
   readonly processing:ExportCoordinator;
@@ -95,7 +115,10 @@ export interface DeviceBackupCompositionInput{
 
 export interface BackupActionsHostContract{
   readonly format:'study-director.backup-actions-host-module';readonly contractVersion:1;
+  createProtectionStorage<Token>(input:Readonly<BackupProtectionStorageInput>):Readonly<ProtectionInput<Token>['storage']>;
   createProtectionHost<Token>(input:Readonly<BackupProtectionHostInput<Token>>):Readonly<BackupProtectionHost>;
   createControls(input:Readonly<BackupControlsInput>):Readonly<BackupControls>;
+  createDeviceHooks(input:Readonly<DeviceBackupHooksInput>):Readonly<DeviceBackupInput['hooks']>;
+  createDeviceActivation(input:Readonly<DeviceBackupActivationInput>):Readonly<DeviceBackupActivationController>;
   createDeviceBackup(input:Readonly<DeviceBackupCompositionInput>):Readonly<DeviceBackup>;
 }

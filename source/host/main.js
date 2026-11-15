@@ -1203,21 +1203,6 @@ BackupNudge=BackupReadinessHostModule.createBackupNudge(Object.freeze({
 if(!Object.isFrozen(BackupNudge)||BackupNudge.format!=='study-director.backup-nudge'||BackupNudge.contractVersion!==1){
   throw new Error('Study Director backup reminder readiness is unavailable or incompatible.');
 }
-// Compare policy identity and ownership inside the same typed metadata transaction.
-function mutateBackupProtection(value,options){
-  return ExportsAppMeta.transaction('readwrite',(meta,tx,finish)=>{
-    const handle=meta.get('backupProtection'),request=handle.request;
-    request.onerror=()=>finish(false,request.error);
-    request.onsuccess=()=>{try{
-      options.check();
-      const current=handle.value();
-      if((current?.id||'')!==options.expectedId)throw new Error('Backup encryption changed. Try again.');
-      const mutation=value?meta.put('backupProtection',value):meta.remove('backupProtection');
-      mutation.onerror=()=>finish(false,mutation.error);
-    }catch(error){try{tx.abort();}catch{}finish(false,error);}};
-    tx.oncomplete=()=>finish(true,true);
-  },{abortMessage:'backup encryption update aborted'});
-}
 /* APPDATA REPOSITORY FACADE */
 function handleRepositoryDailyRecordsChanged(change){
   richAssetReferenceRevision++;
@@ -3054,13 +3039,9 @@ const Exports=ExportsModule.createCoordinator({
 let BackupProtectionHost=null;
 function backupBackgroundAvailability(){return BackupProtectionHost?BackupProtectionHost.backgroundAvailability():backgroundBlocker()||'locked';}
 function setBackupProtectionSurfaceError(error){return BackupProtectionHost?.surfaceError(error)||false;}
+const BackupProtectionStorage=BackupActionsHostModule.createProtectionStorage(Object.freeze({meta:ExportsAppMeta,settingName:'backupProtection',settingKey:APP_META_KEYS.backupProtection}));
 BackupProtectionHost=BackupActionsHostModule.createProtectionHost(Object.freeze({
-  module:ExportsModule,processing:Exports,
-  storage:Object.freeze({
-    read:key=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return ExportsAppMeta.read('backupProtection');},
-    write:(key,value,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(value,options);},
-    remove:(key,options)=>{if(String(key)!==APP_META_KEYS.backupProtection)throw new TypeError('Backup protection metadata identity is invalid.');return mutateBackupProtection(null,options);}
-  }),
+  module:ExportsModule,processing:Exports,storage:BackupProtectionStorage,
   interactions:Interactions,settingKey:APP_META_KEYS.backupProtection,
   mutation:Object.freeze({
     remember:()=>Profiles.list().length<2,canMutate:()=>appCanMutate(),
@@ -3574,6 +3555,11 @@ function resumeUnresolvedStorageReset(){return StorageResetRecovery?.resume()||f
 function settleStorageReset(){return StorageResetRecovery?.settle()||false;}
 function restoreAfterStorageReset(){return requireStorageResetRecovery().restore();}
 
+const DeviceBackupHooks=BackupActionsHostModule.createDeviceHooks(Object.freeze({
+  interactions:Object.freeze({choose:options=>Interactions.choose(options)}),capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
+  profileId:()=>Profiles.current()?.id||'',profileScope:()=>ProfileScope.scope,installationId:()=>InstallationIdentity.getId(),backupFolderName:()=>backupFolderName({device:true}),
+  render:state=>renderDeviceBackup(state),sourceRevision:()=>BackupRuntimeHost.sourceRevision(),verifiedAt:()=>VerifiedRecovery.verified('device-folder')?.at||''
+}));
 // The Device Folder is one backup location of the engine. P5.7A owns the
 // browser picker, provider callbacks and typed Device Folder storage composition.
 DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze({
@@ -3585,17 +3571,7 @@ DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze({
     showDirectoryPicker:typeof window.showDirectoryPicker==='function'?options=>window.showDirectoryPicker(options):undefined,
     withLock:work=>navigator.locks?.request?navigator.locks.request(ProfileScope.scoped('study-director-device-folder-prepare'),{mode:'exclusive'},()=>work()):Promise.resolve().then(work)
   }),
-  hooks:Object.freeze({
-    capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
-    chooseRepository:rows=>Interactions.choose({
-      title:'This folder already has Study Director backups',
-      message:'Use one of them on this device, for example after clearing this browser, or start a new backup folder for this profile and device.',
-      cancelLabel:'Cancel',
-      choices:[...rows.map(row=>({value:row.name,label:row.name,description:`${row.versions} version${row.versions===1?'':'s'}${row.newest?` · newest ${new Date(row.newest).toLocaleString()}`:''}`})),{value:'',label:'Start a new backup folder',description:backupFolderName({device:true}),kind:'primary'}]
-    }),
-    repositoryOwner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId(),name:backupFolderName({device:true})}),
-    render:renderDeviceBackup,sourceRevision:()=>BackupRuntimeHost.sourceRevision(),verifiedAt:()=>VerifiedRecovery.verified('device-folder')?.at||''
-  }),
+  hooks:DeviceBackupHooks,
   presentation:BackupPresentation,
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
   storage:Object.freeze({
@@ -3717,12 +3693,14 @@ if(!Object.isFrozen(BackupIntegrity)||BackupIntegrity.format!=='study-director.b
 AttachmentIntegrityJob=BackupIntegrity.attachmentJob;
 BackupProviderRuntime.configureIntegrityScrub(BackupIntegrity.repositoryHooks);
 
-async function refreshDeviceBackgroundPermission(event){
-  if(![APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN].includes(event?.kind))return;
-  // The controller reconnects its whole job owner after permission changes.
-  await DeviceBackup.refreshPermission();
-}
-AppActivation.subscribe(event=>{if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind)&&wakeBackgroundOperations('activation')&&Date.now()-CapabilityStorage.lastCheckedAt()>=STORAGE_ESTIMATE_REFRESH_MS)void inspectStorageCapability().catch(error=>AppDiagnostics.capture('storage.estimate-refresh',error,'warn'));void refreshDeviceBackgroundPermission(event).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));});
+const DeviceBackupActivation=BackupActionsHostModule.createDeviceActivation(Object.freeze({
+  device:()=>DeviceBackup,
+  refreshKinds:new Set([APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN])
+}));
+AppActivation.subscribe(event=>{
+  if([APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN,APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.DATE_ROLLOVER].includes(event.kind)&&wakeBackgroundOperations('activation')&&Date.now()-CapabilityStorage.lastCheckedAt()>=STORAGE_ESTIMATE_REFRESH_MS)void inspectStorageCapability().catch(error=>AppDiagnostics.capture('storage.estimate-refresh',error,'warn'));
+  void DeviceBackupActivation.handle(event.kind).catch(error=>AppDiagnostics.capture('device-backup.permission-refresh',error,'warn'));
+});
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.

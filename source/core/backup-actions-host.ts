@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {BackupActionsHostContract,BackupControls,BackupControlsInput,BackupProtectionHost,BackupProtectionHostInput,DeviceBackupCompositionInput} from '../../types/backup-actions-host.ts';
+import type {BackupActionsHostContract,BackupControls,BackupControlsInput,BackupProtectionHost,BackupProtectionHostInput,BackupProtectionStorageInput,DeviceBackupActivationController,DeviceBackupActivationInput,DeviceBackupCompositionInput,DeviceBackupHooksInput} from '../../types/backup-actions-host.ts';
 import type {DeviceBackupInput,DeviceLocation,DeviceStatus} from '../../types/device-backup.ts';
 import type {DownloadOptions as ProviderDownloadOptions,ItemRef,Lease,ProviderConfig,RepositoryKind,RepositoryTransport,Upload} from '../../types/backup-provider.ts';
 import type {LockKind,LockLease,StorageIdentity,StorageKind,StorageUpload} from '../../types/device-folder-storage.ts';
@@ -10,6 +10,52 @@ const sdBackupActionsHostFactory=(()=>{
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'backup-actions-host','study-director.backup-actions-host-module'>|undefined;
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1)throw new Error('Study Director internal module registry is unavailable or incompatible.');
 const {exactFrozenObject:exactObject}=registry.contracts,freeze=Object.freeze;
+
+function createProtectionStorage<Token>(input:Readonly<BackupProtectionStorageInput>){
+  exactObject(input,['meta','settingName','settingKey'],'Backup protection storage input');
+  const expected=String(input.settingKey||''),name=String(input.settingName||'');if(!expected||!name)throw new TypeError('Backup protection metadata identity is invalid.');
+  const assertKey=(key:unknown)=>{if(String(key)!==expected)throw new TypeError('Backup protection metadata identity is invalid.');};
+  const mutate=(value:unknown,options:Readonly<{check():unknown;expectedId:string}>)=>input.meta.transaction<boolean>('readwrite',(meta,tx,finish)=>{
+    const handle=meta.get(name),request=handle.request;
+    request.onerror=()=>finish(false,request.error);
+    request.onsuccess=()=>{try{
+      options.check();const current=handle.value() as {id?:unknown}|null|undefined;
+      if(String(current?.id||'')!==String(options.expectedId||''))throw new Error('Backup encryption changed. Try again.');
+      const mutation=value?meta.put(name,value):meta.remove(name);mutation.onerror=()=>finish(false,mutation.error);
+    }catch(error){try{tx.abort();}catch{}finish(false,error);}};
+    tx.oncomplete=()=>finish(true,true);
+  },{abortMessage:'backup encryption update aborted'});
+  return freeze({
+    read:async(key:string)=>{assertKey(key);return input.meta.read(name);},
+    write:(key:string,value:unknown,options:Readonly<{check():unknown;expectedId:string}>)=>{assertKey(key);return mutate(value,options);},
+    remove:(key:string,options:Readonly<{check():unknown;expectedId:string}>)=>{assertKey(key);return mutate(null,options);}
+  });
+}
+
+function createDeviceHooks(input:Readonly<DeviceBackupHooksInput>):Readonly<DeviceBackupInput['hooks']>{
+  exactObject(input,['interactions','capture','profileId','profileScope','installationId','backupFolderName','render','sourceRevision','verifiedAt'],'Device Backup hooks input');
+  return freeze({
+    capture:(scope,error)=>{input.capture(scope,error);},
+    chooseRepository:rows=>input.interactions.choose({
+      title:'This folder already has Study Director backups',
+      message:'Use one of them on this device, for example after clearing this browser, or start a new backup folder for this profile and device.',
+      cancelLabel:'Cancel',
+      choices:[...rows.map(row=>({value:row.name,label:row.name,description:`${row.versions} version${row.versions===1?'':'s'}${row.newest?` · newest ${new Date(row.newest).toLocaleString()}`:''}`})),{value:'',label:'Start a new backup folder',description:input.backupFolderName(),kind:'primary'}]
+    }),
+    repositoryOwner:()=>freeze({profile:input.profileId(),scope:input.profileScope(),device:input.installationId(),name:input.backupFolderName()}),
+    render:input.render,sourceRevision:input.sourceRevision,verifiedAt:input.verifiedAt
+  });
+}
+
+function createDeviceActivation(input:Readonly<DeviceBackupActivationInput>):Readonly<DeviceBackupActivationController>{
+  exactObject(input,['device','refreshKinds'],'Device Backup activation input');
+  if(!(input.refreshKinds instanceof Set))throw new TypeError('Device Backup activation kinds are invalid.');
+  async function handle(kind:unknown){
+    if(!input.refreshKinds.has(String(kind||'')))return false;
+    const device=input.device();if(!device)return false;await device.refreshPermission();return true;
+  }
+  return freeze({format:'study-director.device-backup-activation' as const,contractVersion:1 as const,handle});
+}
 
 function createProtectionHost<Token>(input:Readonly<BackupProtectionHostInput<Token>>):Readonly<BackupProtectionHost>{
   exactObject(input,['module','processing','storage','interactions','settingKey','mutation','environment','view'],'Backup protection host input');
@@ -275,7 +321,7 @@ function createDeviceBackup(input:Readonly<DeviceBackupCompositionInput>){
   return controller;
 }
 
-const createModule=():BackupActionsHostContract=>freeze({format:'study-director.backup-actions-host-module',contractVersion:1,createProtectionHost,createControls,createDeviceBackup});
+const createModule=():BackupActionsHostContract=>freeze({format:'study-director.backup-actions-host-module',contractVersion:1,createProtectionStorage,createProtectionHost,createControls,createDeviceHooks,createDeviceActivation,createDeviceBackup});
 registry.define('backup-actions-host',1,createModule);
 return createModule;
 })();

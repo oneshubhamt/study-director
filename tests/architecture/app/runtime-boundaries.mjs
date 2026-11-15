@@ -17,7 +17,7 @@ assert.match(host,/DocumentHostModule\.createPdfController/,'PDF host compositio
 assert.match(host,/DocumentHostModule\.createPrinter/,'note print composition must use the checked document owner');
 assert.match(host,/DocumentHostModule\.createIntegration/,'attachment/export integration must use the checked document owner');
 assert.match(host,/RichTextHostModule\.createRuntime/,'rich editor lifetime must use the checked rich-text host owner');
-for(const stale of ['function openPdfWorkspace(','function openPdfFallback(','async function printNote(','async function insertAttachmentIntoNote(','const RichTextRuntime=(()=>'])assert.ok(!host.includes(stale),`host must not regain P5.6C implementation: ${stale}`);
+for(const stale of ['function mutateBackupProtection(','async function refreshDeviceBackgroundPermission(','function openPdfWorkspace(','function openPdfFallback(','async function printNote(','async function insertAttachmentIntoNote(','const RichTextRuntime=(()=>'])assert.ok(!host.includes(stale),`host must not regain P5.6C implementation: ${stale}`);
 assert.match(host,/richText:Object\.freeze\(\{assetIds:value=>RichTextApi\.assetIds\(value\),exportDocument:value=>RichTextApi\.exportDocument\(value\)\}\)/,'actual note-export host provider uses exportDocument');
 assert.match(documentHost,/function createPdfController/);assert.match(documentHost,/function createPrinter/);assert.match(documentHost,/function createIntegration/);
 assert.match(richHost,/function createRuntime/);assert.match(noteExport,/function createExporter/);
@@ -29,9 +29,12 @@ assert.doesNotMatch(noteExport,/dailyRecords|pendingReviews|activeSession/,'note
 { // p5.7a-backup-actions-host-boundary
 const host=readHostHtml(),owner=readScript('source/core/backup-actions-host.ts'),ownerTypes=fs.readFileSync('types/backup-actions-host.ts','utf8'),deviceTypes=fs.readFileSync('types/device-backup.ts','utf8');
 assert.match(host,/const BackupActionsHostModule=INTERNAL_MODULES\.load\('backup-actions-host',1,'study-director\.backup-actions-host-module',1\)/u,'P5.7A host loads the checked backup-actions owner');
+assert.match(host,/BackupProtectionStorage=BackupActionsHostModule\.createProtectionStorage\(Object\.freeze\(\{/u,'backup protection metadata mutation crosses the checked P5.7A boundary');
 assert.match(host,/BackupProtectionHost=BackupActionsHostModule\.createProtectionHost\(Object\.freeze\(\{/u,'backup protection crosses the checked P5.7A boundary');
 assert.match(host,/BackupActions=BackupActionsHostModule\.createControls\(Object\.freeze\(\{/u,'file and location controls cross the checked P5.7A boundary');
+assert.match(host,/DeviceBackupHooks=BackupActionsHostModule\.createDeviceHooks\(Object\.freeze\(\{/u,'Device Folder repository-choice and owner callbacks cross the checked P5.7A boundary');
 assert.match(host,/DeviceBackup=BackupActionsHostModule\.createDeviceBackup\(Object\.freeze\(\{/u,'Device Folder composition crosses the checked P5.7A boundary');
+assert.match(host,/DeviceBackupActivation=BackupActionsHostModule\.createDeviceActivation\(Object\.freeze\(\{/u,'Device Folder permission refresh policy crosses the checked P5.7A boundary');
 for(const stale of ['let fileBackupRowReady=false;','const BackupProtection=ExportsModule.createProtection(','DeviceBackup=DeviceBackupModule.createController(','async function backUpEverywhere(){']){
   assert.equal(host.includes(stale),false,`main host must not retain extracted P5.7A owner: ${stale}`);
 }

@@ -4,7 +4,8 @@ import type {BackupPresentationModule} from '../../source/core/backup-presentati
 import type {DeviceBackupModule} from '../../source/core/device-backup.ts';
 import type {DeviceFolderStorageModule} from '../../source/core/device-folder-storage.ts';
 import type {ExportsModule} from '../../source/core/exports.ts';
-import type {BackupControlsInput,BackupProtectionHostInput,DeviceBackupCompositionInput} from '../backup-actions-host.ts';
+import type {BackupControlsInput,BackupProtectionHostInput,BackupProtectionStorageInput,DeviceBackupCompositionInput,DeviceBackupHooksInput} from '../backup-actions-host.ts';
+import type {MetaOwner} from '../app-meta.ts';
 import type {DeviceBackupInput} from '../device-backup.ts';
 import type {ProtectionInput} from '../exports.ts';
 
@@ -20,9 +21,11 @@ declare const storageModule:DeviceFolderStorageModule;
 type Token=Readonly<{revision:number}>;
 declare const protectionStorage:ProtectionInput<Token>['storage'];
 declare const protectionInteractions:ProtectionInput<Token>['interactions'];
+declare const protectionMeta:MetaOwner;
 
+const checkedProtectionStorage=host.createProtectionStorage<Token>(Object.freeze({meta:protectionMeta,settingName:'backupProtection',settingKey:'backupProtection'} satisfies BackupProtectionStorageInput));
 const protectionInput=Object.freeze({
-  module:exportsModule,processing,storage:protectionStorage,interactions:protectionInteractions,settingKey:'backupProtection',
+  module:exportsModule,processing,storage:checkedProtectionStorage,interactions:protectionInteractions,settingKey:'backupProtection',
   mutation:Object.freeze({remember:()=>true,canMutate:()=>true,issueToken:()=>({revision:1}),assertToken:(_token:Token|null)=>{}}),
   environment:Object.freeze({window,backgroundBlocker:()=>false}),
   view:Object.freeze({document,maxStatusMessageChars:1000,clampText:(value:unknown)=>String(value),resolveSettingNotice:()=>{},publishSettingError:(_message:string)=>{},fullyInitialized:()=>true,wakeBackground:(_reason:string)=>{},refreshProviders:()=>{},renderProfile:()=>{}})
@@ -64,3 +67,11 @@ const deviceComposition=Object.freeze({
   })
 }) satisfies Readonly<DeviceBackupCompositionInput>;
 host.createDeviceBackup(deviceComposition);
+
+const checkedDeviceHooks=host.createDeviceHooks(Object.freeze({
+  interactions:Object.freeze({choose:async(_options:Readonly<Record<string,unknown>>)=>null}),capture:(_scope:string,_error:unknown)=>{},
+  profileId:()=>'',profileScope:()=>'',installationId:()=>'',backupFolderName:()=> 'Study Director',
+  render:deviceHooks.render,sourceRevision:deviceHooks.sourceRevision,verifiedAt:deviceHooks.verifiedAt
+}) satisfies Readonly<DeviceBackupHooksInput>);
+host.createDeviceActivation(Object.freeze({device:()=>device,refreshKinds:new Set<string>(['focus'])}));
+void checkedDeviceHooks;
