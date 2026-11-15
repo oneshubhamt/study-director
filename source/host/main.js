@@ -1329,7 +1329,7 @@ function persistedActiveSessionUnfinished(session){
 }
 function handleCanonicalCommit(event){return CanonicalCommitHost.handle(event);}
 
-async function refreshPersistedSessionBadge()async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
+async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
 const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryComposition(Object.freeze({
   repositoriesModule:RepositoryModule,
   journalsModule:RepositoryJournalModule,
