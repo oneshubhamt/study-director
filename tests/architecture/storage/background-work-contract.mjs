@@ -69,7 +69,7 @@ assert.doesNotMatch(app,/INTEGRITY_TARGETS/u,'no fixed device/drive slots remain
 assert.match(maintenanceHost,/function backgroundBlocker[\s\S]*authority\.canMutate\(\)[\s\S]*authority\.fullyInitialized\(\)[\s\S]*storageResetUnresolved\(\)/u,'every background job shares one checked gate: write ownership, start-up, and unresolved browser-data clear');
 assert.match(maintenanceHost,/isAvailable:\(\)=>upkeepBlocker\(\{housekeeping:false\}\)\|\|true/u,'canonical maintenance consumes the shared checked gate');
 assert.match(integrityHost,/isAvailable:\(\)=>input\.background\.upkeepBlocker\(\)\|\|\(storage\.supported\(\)\?true:'storage-unavailable'\)/u,'attachment verification consumes the shared upkeep gate');
-assert.match(integrityHost,/isAvailable:\(_id:string\)=>input\.background\.backgroundBlocker\(\)\|\|true/u,'repository integrity consumes the shared background gate');
+assert.match(integrityHost,/isAvailable:\([^)]*\)=>input\.background\.backgroundBlocker\(\)\|\|true/u,'repository integrity consumes the shared background gate');
 assert.match(app,/NoticeCoordinator\.subscribe\(\(\)=>\{foregroundChanged\(\);\}\)/u,'notice changes check the watcher at once');
 assert.match(backup,/function beginImport\(\{backgroundPreemptible=false\}=\{\}\)[\s\S]*backgroundPreemptible:backgroundPreemptible===true[\s\S]*importHoldsBackground:!!activeImportOperation&&!activeImportOperation\.backgroundPreemptible/u,'standalone/manual imports hold all providers while an admitted automatic sync does not cancel itself via the file observer');
 assert.doesNotMatch(app,/schedule\w*\((?:15000|ATTACHMENT_INTEGRITY_RETRY_MS),'foreground-busy'\)/u,'no upkeep job polls for the foreground on its own');

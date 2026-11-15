@@ -36,7 +36,7 @@ async function fixture(){
       write:async(_key,state,options)=>{assert.equal(options.strict,true);durable=state;writes++;return {family:'integrity',value:state,updatedAt:new clock.Date().toISOString()};},
       transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}
     }),
-    attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',storage,references,validAttachmentId:Attachments.validId,
+    attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',storage:store,references,validAttachmentId:Attachments.validId,
     data:Object.freeze({datasetRevision:()=>data.dailyRecords.datasetRevision()}),referenceRevision:()=>0,authority:Object.freeze({canMutate:()=>true}),
     background:Object.freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),backgroundTasks:background,
     provider:Object.freeze({backgroundStatus:()=>[],locationStatus:()=>null,repositoryScope:async()=>'',requestIntegrity:()=>false}),
