@@ -140,7 +140,8 @@ const createModule=()=>{
     const {mark:markPending,clear:clearPending,read:pending}=createPendingStore(freeze({storage:input.storage,diagnostics:input.diagnostics,sourceRevision:input.sourceRevision}));
     async function settleRecoveryState(options:{phase?:'final';keepsActiveSession?:boolean}={}){
       if(input.lifecycle.attachmentBusy())throw new Error('An attachment is still being prepared or saved. Finish that operation before recovery.');
-      await input.lifecycle.settleAttachmentWriters({allowDuringRecoveryQuiescence:true});
+      const keepsActiveSession=options.phase==='final'&&options.keepsActiveSession===true;
+      await input.lifecycle.settleAttachmentWriters({allowDuringRecoveryQuiescence:true,checkpointReview:!keepsActiveSession});
       if(await input.lifecycle.flushPlanDraft()===false)throw new Error('The current Plan draft could not be saved before recovery.');
       const planInput=input.lifecycle.planInputValue();
       if(planInput!==null&&(input.lifecycle.planDraft()??'')!==planInput&&await input.lifecycle.savePlanDraft()===false)throw new Error('The current Plan draft could not be saved before recovery.');
@@ -156,7 +157,7 @@ const createModule=()=>{
       // A recovery that never touches today's session keeps the copy confirmed
       // before its safety backup; writing it again would only move the source
       // revision past that backup.
-      const hasTasks=!(options.phase==='final'&&options.keepsActiveSession===true)&&input.lifecycle.hasTasks();
+      const hasTasks=!keepsActiveSession&&input.lifecycle.hasTasks();
       let liveResult=null;if(hasTasks)liveResult=await input.lifecycle.writeLiveDraft();
       await input.lifecycle.flushNotes();
       const noteFailure=input.lifecycle.noteFailure();if(noteFailure&&noteFailure.failed)throw new Error(noteFailure.message||'Notes are not safely stored yet.');

@@ -102,6 +102,13 @@ const recoverySettlements=attachmentSettlementOptions.slice(settlementStart);ass
   for(const step of ['attachments-settle','plan-flush','plan-settle','notes-flush','deletion-flush','active-settled'])assert.ok(steps.indexOf(step)>=0&&steps.indexOf(step)<applied,`${step} happens before the restore applies`);
   assert.ok(steps.lastIndexOf('resume')>applied,'automatic backups resume after it');
 }
+{
+  const start=attachmentSettlementOptions.length;
+  await host.managedRecovery(freeze({...recoverySpec,keepsActiveSession:true}));
+  const options=attachmentSettlementOptions.slice(start);
+  assert.deepEqual(options.map(value=>value?.checkpointReview),[true,false],'a keep-session recovery checkpoints Review before safety but final settlement must not rewrite the protected active-session revision');
+  assert.ok(options.every(value=>value?.allowDuringRecoveryQuiescence===true));
+}
 // Background work already running when a restore starts finishes first:
 // nothing is saved or replaced until it has.
 {

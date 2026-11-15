@@ -49,7 +49,7 @@ export interface DocumentIntegrationInput{
   readonly content:Readonly<{withinLimits(value:unknown):boolean}>;
   readonly printer:NotePrinter;readonly exporter:NoteExporter;
 }
-export interface AttachmentWriterSettlementOptions{readonly allowDuringRecoveryQuiescence?:boolean}
+export interface AttachmentWriterSettlementOptions{readonly allowDuringRecoveryQuiescence?:boolean;readonly checkpointReview?:boolean}
 export interface DocumentIntegration{
   readonly format:'study-director.document-integration';readonly contractVersion:1;
   readonly exporter:Readonly<{exportKeys(keys:readonly unknown[]):ReturnType<NoteExporter['exportKeys']>;cancel():unknown}>;

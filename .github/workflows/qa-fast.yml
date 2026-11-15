@@ -52,6 +52,7 @@ jobs:
           tests/integration/backup/backup-capture-notification.mjs
           tests/integration/storage/managed-provider-backup-pending.mjs
           tests/integration/attachments/attachment-library-lifecycle.mjs
+          tests/integration/attachments/document-host-lifecycle.mjs
           tests/integration/attachments/pdf-reader-lifetime.mjs
           tests/integration/storage/integrity-continuation.mjs
           tests/integration/exports/scratch-gc.mjs

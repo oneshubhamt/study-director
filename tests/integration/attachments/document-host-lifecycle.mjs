@@ -7,7 +7,7 @@ run('../../../source/core/internal.ts');run('../../../source/core/document-host.
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('document-host',1);
 
 function integrationHarness({concurrent=false,failInsertedFlush=false,attachmentLibrary=null}={}){
-  const calls=[];let flushCount=0;
+  const calls=[],reviewOptions=[];let flushCount=0;
   let note={id:'note-1',label:'Topic',text:'WG1:old',updatedAt:'r1'};
   const notes={
     get:()=>note,
@@ -33,7 +33,7 @@ function integrationHarness({concurrent=false,failInsertedFlush=false,attachment
     refreshNotes:()=>{calls.push('library.refresh');return true;},
     batchAttachmentMutation:async(work)=>{calls.push('library.batch');return await work();}
   };
-  const review={flushPending:async()=>{calls.push('review.flush');return true;},settled:async()=>{calls.push('review.settled');return true;}};
+  const review={flushPending:async options=>{reviewOptions.push(options);calls.push('review.flush');return true;},settled:async()=>{calls.push('review.settled');return true;}};
   const session={settled:async()=>{calls.push('session.settled');}};
   const ownership={
     issue:()=>({revision:1}),
@@ -51,7 +51,7 @@ function integrationHarness({concurrent=false,failInsertedFlush=false,attachment
     }),
     content:Object.freeze({withinLimits:()=>true}),printer,exporter
   }));
-  return {integration,calls,getNote:()=>note};
+  return {integration,calls,reviewOptions,getNote:()=>note};
 }
 
 {
@@ -76,6 +76,15 @@ function integrationHarness({concurrent=false,failInsertedFlush=false,attachment
   const h=integrationHarness();
   const result=await h.integration.quiesceAttachmentMutation(async()=>{h.calls.push('mutation');return 7;});
   assert.equal(result,7);assert.deepEqual(h.calls,['editor.quiesce','library.batch','mutation'],'attachment mutation must hold editor and Library reconciliation together');
+}
+{
+  const h=integrationHarness();
+  await h.integration.settleAttachmentWriters({allowDuringRecoveryQuiescence:true});
+  assert.deepEqual(h.reviewOptions,[{strict:true,allowDuringRecoveryQuiescence:true}],'recovery preflight must pass its explicit Review checkpoint authorization');
+  h.calls.length=0;h.reviewOptions.length=0;
+  await h.integration.settleAttachmentWriters({allowDuringRecoveryQuiescence:true,checkpointReview:false});
+  assert.deepEqual(h.reviewOptions,[],'final keep-session settlement must not rewrite the already protected Review/Active Session checkpoint');
+  assert.deepEqual(h.calls,['editor.close','diary.settle','notes.flush','review.settled','session.settled'],'final settlement still waits every writer even when Review is verification-only');
 }
 {
   const h=integrationHarness();
