@@ -3778,6 +3778,8 @@ BackupActions=BackupActionsHostModule.createControls(Object.freeze({
 if(!Object.isFrozen(BackupActions)||BackupActions.format!=='study-director.backup-controls'||BackupActions.contractVersion!==1){
   throw new Error('Study Director backup controls are unavailable or incompatible.');
 }
+function renderDriveBackup(){return BackupActions.renderDrive();}
+function renderDeviceBackup(state){return BackupActions.renderDevice(state);}
 BackupActions.install();
 BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze({
   lifecycle:OperationLifecycle,
