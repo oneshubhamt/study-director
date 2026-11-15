@@ -24,6 +24,24 @@ jobs:
       - name: Use pinned npm
         run: npm install --global npm@12.2.1
       - run: npm ci --ignore-scripts
+      - name: P5.7 non-browser closure witnesses
+        run: >-
+          node tests/helpers/run-category.mjs targeted
+          tests/architecture/app/backup-limits-wiring.mjs
+          tests/integration/app/storage-reset-connect-recovery.mjs
+          tests/integration/storage/repository-integrity-state.mjs
+          tests/integration/backup/backup-reminder.mjs
+          tests/integration/backup/no-backup-location.mjs
+          tests/integration/backup/file-lifetimes.mjs
+          tests/integration/backup/encryption.mjs
+          tests/integration/backup/folder-encryption.mjs
+          tests/integration/backup/device-folder-storage.mjs
+          tests/integration/rich-text/reconciliation-ui.mjs
+          tests/integration/rich-text/reconciliation-engine.mjs
+          tests/integration/backup/import-lifecycle.mjs
+          tests/integration/backup/repository-restore.mjs
+          tests/integration/backup/restore-assets.mjs
+          tests/integration/backup/current-canonical-roundtrip.mjs
       - run: npm run build
       - name: Locate Chromium
         shell: bash
