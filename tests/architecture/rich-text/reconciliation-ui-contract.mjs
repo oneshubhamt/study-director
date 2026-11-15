@@ -5,7 +5,7 @@ import fs from 'node:fs';
 
 const read=file=>fs.readFileSync(file,'utf8');
 const editor=read('rich-text/editor.ts');
-const ui=read('source/core/reconciliation-ui.js');
+const ui=read('source/core/reconciliation-ui.ts');
 const backup=readScript('source/core/backup.ts');
 const app=readHostHtml();
 const styles=read('source/styles/core.css');

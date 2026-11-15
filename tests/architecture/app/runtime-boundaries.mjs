@@ -46,6 +46,24 @@ assert.match(host,/'import-backup': ev=>BackupActions\.importLocal\(ev\)/u,'file
 console.log(JSON.stringify({status:'PASS',boundary:'p5.7a-backup-actions-host',protection:true,fileEntries:true,deviceComposition:true,foregroundExclusion:true},null,2));
 }
 
+
+{ // p5.7b-reconciliation-and-recovery-owner
+const host=readHostHtml(),recovery=readScript('source/core/backup-recovery-host.ts'),reconciliationUi=readScript('source/core/reconciliation-ui.ts');
+assert.match(host,/const ReconciliationUIModule=INTERNAL_MODULES\.load\('reconciliation-ui',1,'study-director\.reconciliation-ui-module',1\)/u,'P5.7B reconciliation UI crosses the checked private-module boundary');
+assert.match(host,/KeptVersions=BackupRecoveryHostModule\.createKeptVersions\(Object\.freeze\(\{/u,'Kept Versions state is composed through the checked recovery owner');
+assert.doesNotMatch(host,/const KeptVersions=\(\(\)=>\{/u,'the untyped host Kept Versions owner is retired');
+assert.match(recovery,/function createKeptVersions\(/u,'the recovery host owns kept-version refresh and review');
+assert.match(recovery,/resolveConvergedKeptVersions\(\)/u,'verified convergence remains the only automatic kept-version resolution');
+assert.match(recovery,/async function createSettler/u,'restore quiescence stays in the checked recovery owner');
+assert.match(recovery,/await input\.lifecycle\.settlePlanDraft\(\)/u,'Plan draft is settled before managed recovery');
+assert.match(recovery,/await input\.lifecycle\.settlePlan\(\)/u,'Plan persistence quiescence remains explicit before recovery');
+assert.match(host,/noteReconciliation:Object\.freeze\(\{resolve:options=>withRichTextAssetMaintenancePaused\(\(\)=>NoteReconciliationUI\.resolve\(options\)\)/u,'note reconciliation remains read-only with attachment maintenance paused until a canonical recovery mutation begins');
+assert.doesNotMatch(reconciliationUi,/\bAppData\b|IndexedDb|localStorage|notes\.replace|dailyRecords/u,'scratch reconciliation cannot acquire a canonical persistence path');
+for(const action of ['refresh-version-history','close-version-history','cancel-version-history-operation','recover-managed-version','compare-managed-note','remove-managed-version'])
+  assert.match(host,new RegExp(`'${action}': [^\\n]*BackupRecoveryHost\\.history`,'u'),`${action} stays behind the checked history owner`);
+console.log(JSON.stringify({status:'PASS',boundary:'p5.7b-reconciliation-recovery',checkedReconciliation:true,checkedKeptVersions:true,independentPlanDraft:true,historyActions:true},null,2));
+}
+
 // Current runtime boundary invariants: decision time, pacing, presentation, and bounded background/display work.
 
 { // decision-clock-boundary

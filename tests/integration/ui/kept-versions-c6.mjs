@@ -1,20 +1,18 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import vm from 'node:vm';
 
-const html=readHostHtml();
-const start=html.indexOf('const KeptVersions=(()=>{'),end=html.indexOf('\n// Library → Data says what this device holds from a newer version.',start);
-assert.ok(start>=0&&end>start,'production Kept Versions UI owner must be available');
-const source=html.slice(start,end);
+for(const file of ['source/core/internal.ts','source/core/backup-recovery-host.ts'])
+  vm.runInThisContext(readRuntimeSource(file),{filename:file});
+const recoveryModule=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('backup-recovery-host',1);
+const freeze=Object.freeze;
 const open=[
   {id:'pr_first',subject:'personal',ref:'personal',keptAt:'2026-11-05T01:00:00.000Z',resolvedAt:''},
   {id:'pr_second',subject:'savedDay',ref:'2026-11-04',keptAt:'2026-11-05T02:00:00.000Z',resolvedAt:''}
 ];
 let busy=false,canMutate=true,pruneCalls=0,renderCount=0,renderDrive=0,cleared=0,notifications=0,failPrune=false;
 const diagnostics=[];
-const factory=new Function('AppData','BackupController','appCanMutate','AppDiagnostics','renderKeptVersions','renderDriveBackup','LibraryView','NoticeCoordinator','Interactions','driveConnectCard','sessionYieldedAt',
-  source+'\nreturn KeptVersions;');
+
 const controller={
   status:()=>({busy}),
   resolveConvergedKeptVersions:async()=>{
@@ -27,9 +25,14 @@ const controller={
   },
   reviewKeptVersions:async()=>({reviewed:0,left:open.filter(x=>!x.resolvedAt).length,changed:0})
 };
-const kept=factory({pendingReviews:{list:async()=>open.map(item=>({...item}))}},controller,()=>canMutate,
-  {capture:(...args)=>diagnostics.push(args)},()=>renderCount++,()=>renderDrive++,
-  {refreshNotes:()=>{}},{resolveEvent:()=>cleared++},{notify:()=>notifications++},null,0);
+const kept=recoveryModule.createKeptVersions(freeze({
+  controller:freeze(controller),
+  reviews:freeze({list:async()=>open.map(item=>freeze({...item}))}),
+  diagnostics:freeze({capture:(...args)=>diagnostics.push(args)}),
+  environment:freeze({canMutate:()=>canMutate,now:()=>Date.now(),connectCardOpen:()=>false,sessionYieldedAt:()=>0}),
+  notifications:freeze({resolveEvent:()=>cleared++,notify:()=>notifications++}),
+  view:freeze({render:()=>renderCount++,renderLocation:()=>renderDrive++,refreshNotes:()=>{}})
+}));
 assert.equal(await kept.refresh(),true);
 assert.equal(kept.count(),1,'auto-resolved alternative is not counted after verified tombstone');
 assert.equal(pruneCalls,1);
@@ -52,5 +55,5 @@ open[1].resolvedAt='2026-11-05T03:30:00.000Z';
 assert.equal(await kept.refresh(),true);
 assert.equal(kept.count(),0);
 assert.ok(cleared>=1,'an empty canonical count clears the Kept Versions notice');
-console.log(JSON.stringify({status:'PASS',suite:'kept-versions-c6',sourceBacked:true,
+console.log(JSON.stringify({status:'PASS',suite:'kept-versions-c6',checkedOwner:true,
   checks:['canonical count after pruning','sync busy gate','follower read only','failure retains count','empty state clears notice']}));
