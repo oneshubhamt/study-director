@@ -1,5 +1,13 @@
 # TypeScript conversion — execution record
 
+## Active work — P5.7C Maintenance, integrity and readiness, 2026-11-15
+
+- **Baseline / sequencing:** latest remote `ts-exp` is `11d69068f91e28e0e6b852e44a160ae6c1a5b6b8`; P5.7A/B remain CLOSED — VERIFIED — TARGETED. P5.5 has no C group and is already closed, so the authoritative next unit is P5.7C.
+- **Audit boundary:** Phase 4 repository/background/asset engines are already strict, but `source/host/main.js` still substantively owns storage-health state/presentation, canonical-commit backup/integrity notification, shared background eligibility/foreground watcher and canonical maintenance scheduling, attachment-integrity state/job/presentation, durable repository-maintenance intent, and repository-integrity state/hook/presentation. Convert those owners and leave thin deferred composition where initialization order requires it.
+- **Required invariants:** no maintenance/publication while foreground work blocks it; suspension/preemption waits for real executor release and recovery wake-up re-arms work; canonical commits never recursively schedule backup capture; storage-health success never precedes durable verification; failed/unavailable integrity retains prior findings and retries; repository identity/request generation fences stale integrity/maintenance results; retained readers/recovery evidence are never cleaned while live.
+- **Scope exclusions:** reuse existing Phase 4 engines/canonical data; no Drive auth/transport (P5.8), PWA update policy (P5.12), migrations/history compatibility, schema redesign, main/TS-Conversion or vendored Wordgard changes.
+- **Targeted evidence:** `unit/backup/repository-background`, `integration/storage/attachment-integrity-audit`, `integration/storage/attachment-reference-recovery`, `integration/backup/backup-capture-notification`, `integration/storage/managed-provider-backup-pending`, `integration/storage/data-maintenance`, `architecture/storage/background-work-contract`, `architecture/storage/backup-recovery-ux-contract`, plus standing runtime/build/type checks. No full QA.
+
 ## Latest closure — P5.7B Reconciliation, kept versions and restore, 2026-11-15
 
 - **Scope / baseline:** started from remote `ts-exp` at P5.7A closure `8321d0e6ca57469609ff6edeef787f8f89e12ff2`. Source/regression endpoint is `ce17ab54f0c6367c283eb44f3926552d75f9e686`; the commit containing this entry closes P5.7B only. P5.7C maintenance/integrity/readiness, P5.8 Drive transport/auth, PWA policy, canonical formats and vendored Wordgard remain untouched.
