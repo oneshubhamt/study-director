@@ -174,7 +174,8 @@ function createControls(input:Readonly<BackupControlsInput>):Readonly<BackupCont
 }
 
 type FolderRepository=DeviceLocation['repository'];
-type FolderRepositoryView=ReturnType<FolderRepository['beginOperation']>;
+type FolderOperationRepository=ReturnType<FolderRepository['beginOperation']>;
+type FolderRepositoryView=FolderRepository|FolderOperationRepository;
 
 function folderKind(kind:RepositoryKind):StorageKind{
   if(kind==='session-claim')throw new TypeError('Device Folder session claims use the dedicated provider transport.');
@@ -228,7 +229,16 @@ function providerRepositoryView(repository:FolderRepositoryView):RepositoryTrans
   });
 }
 function providerRepository(repository:FolderRepository):RepositoryTransport{
-  return freeze({...providerRepositoryView(repository),beginOperation:(options:Parameters<NonNullable<RepositoryTransport['beginOperation']>>[0])=>providerRepositoryView(repository.beginOperation(options))});
+  return freeze({
+    ...providerRepositoryView(repository),
+    beginOperation:(options:Parameters<NonNullable<RepositoryTransport['beginOperation']>>[0])=>{
+      const signal=options.signal,checkProtection=options.checkProtection;
+      return providerRepositoryView(repository.beginOperation({
+        ...(signal!==undefined?{signal}:{}),
+        checkProtection:checkProtection?async()=>{await checkProtection();}:null
+      }));
+    }
+  });
 }
 function providerLocation(location:DeviceLocation):ProviderConfig{
   return freeze({
