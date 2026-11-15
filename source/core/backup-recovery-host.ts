@@ -67,6 +67,16 @@ const createModule=()=>{
     }
     return freeze({read:pending,mark:markPending,clear:clearPending});
   }
+  function createKeptVersionsView(input:Readonly<import('../../types/backup-recovery-host.ts').KeptVersionsViewInput>):Readonly<import('../../types/backup-recovery-host.ts').KeptVersionsViewController>{
+    exactObject(input,['document','count'],'Kept Versions view input');
+    function render(){
+      const row=input.document.getElementById('kept-versions'),text=input.document.getElementById('kept-versions-text'),count=Math.max(0,Number(input.count())||0);
+      if(row)row.hidden=!count;
+      if(text)text.textContent=`${count} retained alternative${count===1?' needs':'s need'} review. Only differences not proven safely equivalent are kept; open Kept Versions to choose the remaining values.`;
+    }
+    return freeze({format:'study-director.kept-versions-view' as const,contractVersion:1 as const,render});
+  }
+
   function createKeptVersions(input:Readonly<KeptVersionsInput>):Readonly<KeptVersionsController>{
     exactObject(input,['controller','reviews','diagnostics','environment','notifications','view'],'Kept Versions input');
     functions(input.controller,['status','resolveConvergedKeptVersions','reviewKeptVersions'],'Kept Versions controller port');
@@ -896,7 +906,7 @@ const createModule=()=>{
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }
-  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createMaintenancePause,createRevisionFence,createRuntime,createHost,createPendingStore,createKeptVersions,createRetainedBackupFiles,createStorageReset});
+  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createMaintenancePause,createRevisionFence,createRuntime,createHost,createPendingStore,createKeptVersionsView,createKeptVersions,createRetainedBackupFiles,createStorageReset});
 };
 registry.define('backup-recovery-host',1,createModule);return createModule;
 })();

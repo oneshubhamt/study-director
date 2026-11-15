@@ -51,6 +51,18 @@ export interface RepositoryMaintenanceController{
 }
 export interface BackupMaintenanceHostContract{
   readonly format:'study-director.backup-maintenance-host-module';readonly contractVersion:1;
+  createProviderBackgroundBridge(input:Readonly<BackupProviderBackgroundBridgeInput>):Readonly<BackupProviderBackgroundBridge>;
   createBackground(input:Readonly<BackgroundMaintenanceInput>):Readonly<BackgroundMaintenanceController>;
   createRepositoryMaintenance(input:Readonly<RepositoryMaintenanceInput>):Readonly<RepositoryMaintenanceController>;
+}
+
+export interface BackupProviderBackgroundBridgeInput{
+  provider():Readonly<{noteChange(change:Readonly<{urgent:boolean;reason:string}>):unknown;flushAutomatic(reason:string):Promise<unknown>|unknown;automaticWaiting():boolean}>;
+  capture(scope:string,error:unknown,level:'warn'):unknown;
+}
+export interface BackupProviderBackgroundBridge{
+  readonly format:'study-director.backup-provider-background-bridge';readonly contractVersion:1;
+  noteChange(change:Readonly<{urgent?:boolean;reason?:unknown}>):boolean;
+  flush(reason:string):Promise<PromiseSettledResult<unknown>[]>;
+  waiting():boolean;
 }

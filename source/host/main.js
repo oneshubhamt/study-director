@@ -748,17 +748,12 @@ function togglePause(...args){return ExecutionViews.togglePause(...args);}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
-function notifyBackupChange(change){
-  try{BackupProviderRuntime?.noteChange(Object.freeze({urgent:change?.urgent===true,reason:String(change?.reason||'change')}));return true;}
-  catch(error){AppDiagnostics.capture('backup.change-provider',error,'warn');return false;}
-}
-// Changes still waiting for an automatic backup go out at once when the app
-// goes to the background (a phone may close it there) and before an update.
-function flushAutomaticBackups(reason){
-  try{return Promise.allSettled([BackupProviderRuntime.flushAutomatic(reason)]);}
-  catch(error){AppDiagnostics.capture('backup.flush-provider',error,'warn');return Promise.resolve([]);}
-}
-function automaticBackupsWaiting(){try{return BackupProviderRuntime.automaticWaiting();}catch{return false;}}
+const BackupProviderBackground=BackupMaintenanceHostModule.createProviderBackgroundBridge(Object.freeze({
+  provider:()=>BackupProviderRuntime,capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
+}));
+function notifyBackupChange(change){return BackupProviderBackground.noteChange(change);}
+function flushAutomaticBackups(reason){return BackupProviderBackground.flush(reason);}
+function automaticBackupsWaiting(){return BackupProviderBackground.waiting();}
 // Hidden: back up waiting changes. Visible again: redraw the locations, since a
 // sign-in may have ended while timers were throttled.
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(appCanMutate())void flushAutomaticBackups('app-hidden');}else BackupProviderRuntime.refresh();});
@@ -3204,11 +3199,6 @@ async function checkUnsupportedUpdate(){
     if(!PwaLifecycle.status().updateReady)Interactions.notify({source:'unsupported-data',key:'no-update',title:'No newer version yet',message:'This device has the newest version it can get right now. The data stays safe and hidden until an update arrives.'});
   }catch(error){AppDiagnostics.capture('unsupported-data.update-check',error,'warn');}
 }
-function renderKeptVersions(){
-  const row=document.getElementById('kept-versions'),text=document.getElementById('kept-versions-text'),count=KeptVersions.count();
-  if(row)row.hidden=!count;
-  if(text)text.textContent=`${count} retained alternative${count===1?' needs':'s need'} review. Only differences not proven safely equivalent are kept; open Kept Versions to choose the remaining values.`;
-}
 const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
   notifications:NoticeCoordinator.presentation('library',Object.freeze({label:'Open Library',run:()=>goTab('library')})),
   records:Object.freeze({
@@ -3402,6 +3392,10 @@ if(!Object.isFrozen(BackupRuntimeHost)||BackupRuntimeHost.format!=='study-direct
 }
 const BackupRuntime=BackupRuntimeHost.runtime;
 const {controller:BackupController,checkpoint:CheckpointPipeline,repository:RepositoryCheckpointPipeline,providers:BackupProviderRuntime}=BackupRuntime;
+const KeptVersionsView=BackupRecoveryHostModule.createKeptVersionsView(Object.freeze({document,count:()=>KeptVersions?.count()||0}));
+if(!Object.isFrozen(KeptVersionsView)||KeptVersionsView.format!=='study-director.kept-versions-view'||KeptVersionsView.contractVersion!==1){
+  throw new Error('Study Director Kept Versions view is unavailable or incompatible.');
+}
 KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze({
   controller:Object.freeze({
     status:()=>BackupController.status(),
@@ -3419,7 +3413,7 @@ KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze({
     resolveEvent:(source,id)=>NoticeCoordinator.resolveEvent(source,id)
   }),
   view:Object.freeze({
-    render:()=>renderKeptVersions(),renderLocation:()=>renderDriveBackup(),scheduleStatus:()=>scheduleSyncStatus(),
+    render:()=>KeptVersionsView.render(),renderLocation:()=>renderDriveBackup(),scheduleStatus:()=>scheduleSyncStatus(),
     refreshNotes:()=>LibraryView.refreshNotes()
   })
 }));

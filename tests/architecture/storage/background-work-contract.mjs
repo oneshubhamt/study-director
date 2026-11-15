@@ -19,6 +19,7 @@ const policy=readScript('source/core/repository-policy.ts');
 const mutation=readScript('source/core/mutation-coordinator.ts');
 const host=readScript('source/core/backup-recovery-host.ts');
 const backupActionsHost=readScript('source/core/backup-actions-host.ts');
+const maintenanceHost=readScript('source/core/backup-maintenance-host.ts');
 const readinessHost=readScript('source/core/backup-readiness-host.ts');
 const maintenanceHost=readScript('source/core/backup-maintenance-host.ts');
 const integrityHost=readScript('source/core/backup-integrity-host.ts');
@@ -243,3 +244,8 @@ assert.match(startupOwner,/void p\.collectFiles\(\)\.catch/u,'cold startup must 
 assert.match(app,/window\.addEventListener\('online',\(\)=>\{try\{BackupProviderRuntime\.wakeBackground\('online'\);/u,'back online, background sync goes at once rather than at its next retry');
 
 console.log(JSON.stringify({status:'PASS',suite:'background-work-contract',sharedStateMachine:true,maintenanceEligibility:true,maintenanceClassification:true,blockedBackoff:true,foregroundPreemption:true,suspensionSettlement:true,opportunityDrivenIntegrity:true,leanProviderPort:true,clearLibrarySafetyForeground:true,backgroundDiagnostics:true,authoritativeRebase:true,persistenceHardening:true,sharedRepositoryPolicy:true},null,2));
+
+assert.match(maintenanceHost,/function createProviderBackgroundBridge\(/u,'provider change/flush/waiting policy lives in the checked maintenance owner');
+assert.match(app,/function notifyBackupChange\(change\)\{return BackupProviderBackground\.noteChange\(change\);\}/u,'canonical change notification host bridge is thin');
+assert.match(app,/function flushAutomaticBackups\(reason\)\{return BackupProviderBackground\.flush\(reason\);\}/u,'PWA backup flush bridge is thin');
+assert.doesNotMatch(app,/BackupProviderRuntime\?\.noteChange\(|Promise\.allSettled\(\[BackupProviderRuntime\.flushAutomatic/u,'main host must not regain provider background policy');

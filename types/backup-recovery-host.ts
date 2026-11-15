@@ -135,3 +135,12 @@ export interface RetainedBackupFilesController{
   readonly format:'study-director.retained-backup-files';readonly contractVersion:1;
   names():Promise<readonly string[]>;
 }
+
+export interface KeptVersionsViewInput{
+  readonly document:Pick<Document,'getElementById'>;
+  count():number;
+}
+export interface KeptVersionsViewController{
+  readonly format:'study-director.kept-versions-view';readonly contractVersion:1;
+  render():void;
+}

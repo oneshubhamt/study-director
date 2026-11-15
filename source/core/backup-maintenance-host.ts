@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {BackupMaintenanceHostContract,BackgroundMaintenanceController,BackgroundMaintenanceInput,BusyOwner,RepositoryMaintenanceController,RepositoryMaintenanceEntry,RepositoryMaintenanceInput} from '../../types/backup-maintenance-host.ts';
+import type {BackupMaintenanceHostContract,BackupProviderBackgroundBridge,BackupProviderBackgroundBridgeInput,BackgroundMaintenanceController,BackgroundMaintenanceInput,BusyOwner,RepositoryMaintenanceController,RepositoryMaintenanceEntry,RepositoryMaintenanceInput} from '../../types/backup-maintenance-host.ts';
 import type {MaintenanceState} from '../../types/repository-background.ts';
 
 const sdBackupMaintenanceHostFactory=(()=>{
@@ -7,6 +7,20 @@ const sdBackupMaintenanceHostFactory=(()=>{
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'backup-maintenance-host','study-director.backup-maintenance-host-module'>|undefined;
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1)throw new Error('Study Director internal module registry is unavailable or incompatible.');
 const {exactFrozenObject:exactObject}=registry.contracts,freeze=Object.freeze;
+
+function createProviderBackgroundBridge(input:Readonly<BackupProviderBackgroundBridgeInput>):Readonly<BackupProviderBackgroundBridge>{
+  exactObject(input,['provider','capture'],'Backup provider background bridge input');
+  function noteChange(change:Readonly<{urgent?:boolean;reason?:unknown}>){
+    try{input.provider().noteChange(freeze({urgent:change?.urgent===true,reason:String(change?.reason||'change')}));return true;}
+    catch(error){input.capture('backup.change-provider',error,'warn');return false;}
+  }
+  function flush(reason:string){
+    try{return Promise.allSettled([Promise.resolve(input.provider().flushAutomatic(String(reason||'background')))]);}
+    catch(error){input.capture('backup.flush-provider',error,'warn');return Promise.resolve([]);}
+  }
+  function waiting(){try{return input.provider().automaticWaiting();}catch{return false;}}
+  return freeze({format:'study-director.backup-provider-background-bridge' as const,contractVersion:1 as const,noteChange,flush,waiting});
+}
 
 function createBackground(input:Readonly<BackgroundMaintenanceInput>):Readonly<BackgroundMaintenanceController>{
   exactObject(input,['lifecycle','environment','authority','foreground','data','diagnostics','backgroundOwners','scheduleAssetMaintenance','intervals'],'Background maintenance input');
@@ -142,7 +156,7 @@ function createRepositoryMaintenance(input:Readonly<RepositoryMaintenanceInput>)
   });
   return freeze({format:'study-director.repository-maintenance-host' as const,contractVersion:1 as const,hooks,read});
 }
-const createModule=():BackupMaintenanceHostContract=>freeze({format:'study-director.backup-maintenance-host-module',contractVersion:1,createBackground,createRepositoryMaintenance});
+const createModule=():BackupMaintenanceHostContract=>freeze({format:'study-director.backup-maintenance-host-module',contractVersion:1,createProviderBackgroundBridge,createBackground,createRepositoryMaintenance});
 registry.define('backup-maintenance-host',1,createModule);return createModule;
 })();
 export type BackupMaintenanceHostModule=ReturnType<typeof sdBackupMaintenanceHostFactory>;

@@ -53,6 +53,7 @@ console.log(JSON.stringify({status:'PASS',boundary:'p5.7a-backup-actions-host',p
 { // p5.7b-reconciliation-and-recovery-owner
 const host=readHostHtml(),recovery=readScript('source/core/backup-recovery-host.ts'),reconciliationUi=readScript('source/core/reconciliation-ui.ts'),backup=readScript('source/core/backup.ts');
 assert.match(host,/const ReconciliationUIModule=INTERNAL_MODULES\.load\('reconciliation-ui',1,'study-director\.reconciliation-ui-module',1\)/u,'P5.7B reconciliation UI crosses the checked private-module boundary');
+assert.match(host,/KeptVersionsView=BackupRecoveryHostModule\.createKeptVersionsView\(Object\.freeze\(\{/u,'Kept Versions banner presentation crosses the checked recovery owner');
 assert.match(host,/KeptVersions=BackupRecoveryHostModule\.createKeptVersions\(Object\.freeze\(\{/u,'Kept Versions state is composed through the checked recovery owner');
 assert.doesNotMatch(host,/const KeptVersions=\(\(\)=>\{/u,'the untyped host Kept Versions owner is retired');
 assert.match(recovery,/function createKeptVersions\(/u,'the recovery host owns kept-version refresh and review');
@@ -90,7 +91,7 @@ for(const stale of [
   'const VERIFIED_RECOVERY_META_KEY=','function recordBackupCopy(','function readVerifiedRecoveryState(','async function reconcileChangeClock(','async function maybePromptBackupNudge(','backupNudgeMessage','backupNudgeCheckedAt','backupNudgeNotifiedDate',
   'const STORAGE_RESET_RETRY_MS=','function beginStorageResetHold(','function restoreMissingAfterStorageReset(','function noteDatabaseRemovedWhileClosed(',
   'async function importBackupAttachments(','function currentBackupSourceRevision(','async function fullBackupSnapshotRevision(','async function backupSnapshotRevision(',
-  'const BackupRuntime=BackupModule.createRuntime(','async function retainedBackupFileNames(','async function withRichTextAssetMaintenancePaused(','async function reconcileNotesThroughLifecycle(','async function restoreNotesSnapshotThroughLifecycle('
+  'const BackupRuntime=BackupModule.createRuntime(','function renderKeptVersions(','async function retainedBackupFileNames(','async function withRichTextAssetMaintenancePaused(','async function reconcileNotesThroughLifecycle(','async function restoreNotesSnapshotThroughLifecycle('
 ])assert.equal(host.includes(stale),false,`main host must not regain substantive P5.7 ownership: ${stale}`);
 assert.match(host,/function canonicalLocalRecoveryEmpty\(\)\{return StorageResetRecovery\?StorageResetRecovery\.canonicalEmpty\(\):Promise\.resolve\(null\);\}/u,'remaining storage-reset helper is a thin deferred forwarder');
 assert.match(host,/function handleCanonicalCommit\(event\)\{return CanonicalCommitHost\.handle\(event\);\}/u,'canonical commit remains a thin checked forwarder');
