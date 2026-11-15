@@ -1,18 +1,16 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 
-const app=readHostHtml(),repositories=readScript('source/core/repositories.ts');
+const repositories=readScript('source/core/repositories.ts');
 const id='att-'+'a'.repeat(32),otherId='att-'+'c'.repeat(32);
-function fixture(){
+async function fixture(){
   const clock=createFakeClock();
-  const context={crypto:webcrypto,TextEncoder,Uint8Array,console,Blob,Object,Set,Map,Math,Number,String,Promise,Date:clock.Date,TypeError,Symbol,structuredClone};context.globalThis=context;vm.createContext(context);
-  for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/asset-storage.ts','source/core/attachments.ts'])vm.runInContext(readScript(file),context,{filename:file});
-  const registry=context[Symbol.for('studyDirector.internalModules.v1')],Assets=registry.require('asset-storage',1),Attachments=registry.require('attachments',1);
+  const context={crypto:webcrypto,TextEncoder,Uint8Array,console,Blob,Object,Set,Map,Math,Number,String,Promise,Date:clock.Date,Error,TypeError,Symbol,structuredClone,HTMLButtonElement:class HTMLButtonElement{}};context.globalThis=context;vm.createContext(context);
+  for(const file of ['source/core/internal.ts','source/core/operation-lifecycle.ts','source/core/asset-storage.ts','source/core/attachments.ts','source/core/backup-integrity-host.ts'])vm.runInContext(readScript(file),context,{filename:file});
+  const registry=context[Symbol.for('studyDirector.internalModules.v1')],Assets=registry.require('asset-storage',1),Attachments=registry.require('attachments',1),IntegrityHost=registry.require('backup-integrity-host',1);
   const metadata={version:2,storage:'opfs',file:'attblob-'+'b'.repeat(32),hash:'a'.repeat(64),size:10,type:'application/pdf',name:'fixture.pdf',library:false};
   const dir={getFileHandle:async()=>{throw Object.assign(new Error('missing'),{name:'NotFoundError'});}},storageRoot={getDirectoryHandle:async()=>dir};
   const locks={request(_name,options,callback){if(typeof options==='function')callback=options;return Promise.resolve(callback({name:'lock'}));}};
@@ -31,36 +29,50 @@ function fixture(){
   const background={budget:()=>()=>false,yieldTask:async()=>{}};
   const references=Attachments.createReferenceCoordinator({data,scan:text=>({trusted:true,assetIds:text==='REFERENCE'?[id]:[],occurrences:[]}),rewriteReferences:async()=>{rewrites++;},withPersistenceSuppressed:work=>work(),review:{hydrate:async()=>{},invalidateBindings(){}},background,live:{fields:()=>[],reviewDate:()=>'',todayIso:()=>'',noteKey:value=>value}});
   let durable={version:2,checkedAt:'',attemptedAt:'',lastOutcome:'yielded',issues:[{id,kind:'missing-file'}],progress:null};const scheduled=[],warnings=[];
-  Object.assign(context,{OperationLifecycle:registry.require('operation-lifecycle',1),StartupLifecycle:{status:()=>({fullyInitialized:true})},APP_META_KEYS:{attachmentIntegrityAudit:'integrity'},AttachmentsModule:Attachments,AttachmentStorage:store,AttachmentReferences:references,attachmentIntegrityIssues:new Map([[id,{kind:'missing-file'}]]),AppData:data,richAssetReferenceRevision:0,
-    readHostAppMetaValue:async()=>durable,writeHostAppMetaValue:async(_key,state,options)=>{assert.equal(options.strict,true);durable=state;writes++;},AppDiagnostics:{capture(){}},BackupOperationDiagnostics:{start:()=>'',mark(){},finish(){},fail(){}},appCanMutate:()=>true,UnsupportedData:{held:()=>false},backgroundMaintenanceForegroundBusy:()=>false,BackgroundTasks:background,
-    markStorageHealthError:(_kind,message)=>warnings.push(message),markStorageHealthOk(){healthy++;},invalidateAttachmentLibrary(){},renderIntegrityStatuses(){},setTimeout:(_callback,ms)=>{scheduled.push(ms);return scheduled.length;},clearTimeout(){}});
-  // The shared background gate, as the app defines it.
-  context.storageResetUnresolved=()=>false;vm.runInContext(app.slice(app.indexOf('function backgroundBlocker('),app.indexOf('const BackgroundOperations=')),context);
-  vm.runInContext(app.slice(app.indexOf('const ATTACHMENT_INTEGRITY_META_KEY='),app.indexOf('const REPOSITORY_INTEGRITY_BATCH_BYTES=')),context);
-  return {context,data,references,store,scheduled,warnings,setFailure:value=>{failure=value;},empty:()=>{empty=true;},setProgress:value=>{durable={...durable,progress:value};},stats:()=>({durable,writes,healthy,rewrites})};
+  const controller=IntegrityHost.createController(Object.freeze({
+    lifecycle:registry.require('operation-lifecycle',1),
+    meta:Object.freeze({
+      read:async()=>durable,
+      write:async(_key,state,options)=>{assert.equal(options.strict,true);durable=state;writes++;return {family:'integrity',value:state,updatedAt:new clock.Date().toISOString()};},
+      transaction:async()=>{throw new Error('repository integrity path is not used by this attachment witness');}
+    }),
+    attachmentMetadataName:'integrity',repositoryMetadataName:'repository-integrity',storage,references,validAttachmentId:Attachments.validId,
+    data:Object.freeze({datasetRevision:()=>data.dailyRecords.datasetRevision()}),referenceRevision:()=>0,authority:Object.freeze({canMutate:()=>true}),
+    background:Object.freeze({upkeepBlocker:()=>'',backgroundBlocker:()=>'',foregroundBusy:()=>false}),backgroundTasks:background,
+    provider:Object.freeze({backgroundStatus:()=>[],locationStatus:()=>null,repositoryScope:async()=>'',requestIntegrity:()=>false}),
+    continuation:Object.freeze({verify:async()=>{throw new Error('repository continuation is unused');}}),normalizeContinuation:()=>null,
+    unsafe:Object.freeze({mutation:()=>false,attachmentIngest:()=>false}),
+    storageHealth:Object.freeze({markError:(_kind,message)=>warnings.push(message),markOk:()=>{healthy++;}}),invalidateAttachmentLibrary(){},
+    diagnostics:Object.freeze({capture(){},start:()=>'',mark(){},finish(){},fail(){}}),
+    document:{getElementById:()=>null,createElement:()=>({})},
+    environment:Object.freeze({now:()=>clock.now(),nowIso:()=>new clock.Date().toISOString(),uuid:()=> '00000000-0000-0000-0000-000000000001',setTimeout:(_callback,ms)=>{scheduled.push(ms);return scheduled.length;},clearTimeout(){}}),
+    limits:Object.freeze({attachmentIntervalMs:24*60*60*1000,attachmentRetryMs:10*60*1000,repositoryBatchObjects:4,repositoryBatchBytes:256*1024*1024})
+  }));
+  await controller.installAttachment();controller.attachmentJob.clear();scheduled.length=0;
+  return {context,data,references,store,controller,scheduled,warnings,setFailure:value=>{failure=value;},empty:()=>{empty=true;},setProgress:value=>{durable={...durable,progress:value};},stats:()=>({durable,writes,healthy,rewrites})};
 }
 const cases=[];
 for(const failure of ['active-session','session-rescue','saved-days'])for(const partial of [false,true]){
-  const t=fixture();if(partial){const audit=await t.store.shallowAudit([id],{maxEntries:1});assert.equal(audit.complete,false);t.setProgress(audit.progress);}
+  const t=await fixture();if(partial){const audit=await t.store.shallowAudit([id],{maxEntries:1});assert.equal(audit.complete,false);t.setProgress(audit.progress);}
   const before=JSON.stringify(t.stats().durable);t.setFailure(failure);
   if(failure==='saved-days')assert.equal((await t.data.dailyRecords.list()).length,0,'interactive Saved Days reading keeps its existing rescue fallback');
-  const result=await vm.runInContext('AttachmentIntegrityJob.run()',t.context);assert.equal(result.status,'unavailable');
+  const result=await t.controller.attachmentJob.run();assert.equal(result.status,'unavailable');
   assert.equal(JSON.stringify(t.stats().durable),before,'source unavailability must preserve completion date, progress and earlier warnings');
-  assert.equal(t.stats().writes,0);assert.equal(t.stats().healthy,0);assert.ok(t.context.attachmentIntegrityIssues.has(id));
+  assert.equal(t.stats().writes,0);assert.equal(t.stats().healthy,0);assert.equal(t.controller.attachmentIssue(id)?.kind,'missing-file');
   assert.equal(t.scheduled.at(-1),30*60*1000,'unavailable sources use recovery retry rather than daily completion');
   assert.match(t.warnings.at(-1),/Previous findings are retained/);
-  assert.equal(vm.runInContext('attachmentIntegrityView.lastOutcome',t.context),'unavailable','developer verification status must explain the incomplete scan');
+  assert.equal(t.controller.attachmentState()?.lastOutcome,'unavailable','developer verification status must explain the incomplete scan');
   await assert.rejects(()=>t.references.verifyAbsent(id));await assert.rejects(()=>t.references.removeEverywhere(id));assert.equal(t.stats().rewrites,0,'incomplete reference inventory cannot authorize reference surgery');
   t.setFailure(failure==='saved-days'?'saved-days-recovered':'');
-  const recovered=await vm.runInContext('AttachmentIntegrityJob.run()',t.context);assert.equal(recovered.status,'completed','source recovery must resume without a false not-due gate');
+  const recovered=await t.controller.attachmentJob.run();assert.equal(recovered.status,'completed','source recovery must resume without a false not-due gate');
   assert.equal(t.stats().writes,1);assert.equal(t.stats().durable.issues[0]?.kind,'missing-file');assert.equal(t.stats().durable.progress,null);assert.ok(t.stats().durable.checkedAt);
   cases.push(failure+(partial?' retains partial cursor':' retains findings'));
 }
 {
-  const t=fixture();t.setFailure('session-no-error');await assert.rejects(()=>t.references.sources(),/could not be read completely/);cases.push('failed session without error rejects');
+  const t=await fixture();t.setFailure('session-no-error');await assert.rejects(()=>t.references.sources(),/could not be read completely/);cases.push('failed session without error rejects');
 }
 {
-  const t=fixture();t.empty();const result=await vm.runInContext('AttachmentIntegrityJob.run()',t.context);
+  const t=await fixture();t.empty();const result=await t.controller.attachmentJob.run();
   assert.equal(result.status,'completed');assert.equal(result.checked,0);assert.equal(t.stats().durable.issues.length,0);assert.ok(t.stats().durable.checkedAt);assert.equal(t.stats().healthy,1);
   cases.push('valid empty reference sources can complete cleanly');
 }
