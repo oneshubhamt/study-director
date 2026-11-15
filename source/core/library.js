@@ -102,7 +102,9 @@ registry.define('library',1,()=>{
     let noteRenderFrame=0;
     let noteRevealFrame=0;
     let notesInstalled=false;
-    let pendingNote=null;
+    // Notes made with New and not yet written: kept in the list, in memory
+    // only, until they are written (stored) or discarded.
+    let pendingNotes=[];
     let noteSelectionMode=false;
     let noteSelection=new Set();
     let noteExportBusy=false;
@@ -204,9 +206,10 @@ registry.define('library',1,()=>{
     function notesSearch(){return String(document.getElementById('library-notes-search')?.value||'').trim().toLowerCase();}
     function noteEntries(){
       const entries=noteCatalogue();
-      if(!pendingNote)return entries;
-      if(entries.some(entry=>entry.key===pendingNote.key))pendingNote=null;
-      return pendingNote?orderNoteEntries([...entries,pendingNote]):entries;
+      if(!pendingNotes.length)return entries;
+      const stored=new Set(entries.map(entry=>entry.key));
+      pendingNotes=pendingNotes.filter(entry=>!stored.has(entry.key));
+      return pendingNotes.length?orderNoteEntries([...entries,...pendingNotes]):entries;
     }
     function noteDestinations(){
       return freeze(noteEntries().map(entry=>freeze({key:entry.key,label:entry.label,hasNote:!!entry.hasNote,pending:!!entry.ephemeral})));
@@ -324,11 +327,13 @@ registry.define('library',1,()=>{
     // When it last changed and whether today's plan uses it.
     function noteMeta(entry,stored){
       if(entry.support)return 'Shared by every support block';
-      if(entry.ephemeral)return 'New · saved when you write';
+      if(entry.ephemeral)return 'Not written yet';
+      if(!stored){const state=noteState(entry);return state.kind==='parent'?`${notesHeld(state.children)}${entry.current?' · in today’s plan':''}`:entry.current?'In today’s plan · not written yet':'Not written yet';}
       const edited=stored&&stored.updatedAt?editedLabel(stored.updatedAt):'',parts=[];
       if(edited)parts.push(`Edited ${/^\d/u.test(edited)?edited:edited.toLowerCase()}`);
+      if(!entry.hasNote)parts.unshift('Empty');
       if(entry.current)parts.push('In today’s plan');
-      return parts.join(' · ')||'Nothing written yet';
+      return parts.join(' · ')||'Empty';
     }
     // The title renames the note in place: Enter or leaving the field saves,
     // Escape keeps the old name.
@@ -340,8 +345,8 @@ registry.define('library',1,()=>{
       return title;
     }
     function renameNoteInPlace(entry,title=document.querySelector('#library-notes-editor button.library-notes-editor-title')){
-      if(!title||!title.isConnected||!canMutate())return false;
-      const leaf=noteLeaf(entry.label),input=document.createElement('input');
+      if(!entry||!title||!title.isConnected||!canMutate())return false;
+      const leaf=noteLeaf(entry.label),input=document.createElement('input'),opened=performance.now();
       input.type='text';input.className='library-notes-title-input ui-field';input.value=leaf;input.maxLength=160;input.setAttribute('aria-label','Note name');
       title.replaceWith(input);input.focus();input.select();
       let done=false;
@@ -355,7 +360,9 @@ registry.define('library',1,()=>{
         if(event.key==='Enter'){event.preventDefault();finish(true);}
         else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();finish(false);title.focus();}
       });
-      input.addEventListener('blur',()=>finish(true));
+      // Focus handed back late by a closing menu (some browsers do) must not
+      // end the rename the moment it starts.
+      input.addEventListener('blur',()=>{if(performance.now()-opened<400&&canMutate()){requestAnimationFrame(()=>{if(input.isConnected&&!done){input.focus();input.select();}});return;}finish(true);});
       return true;
     }
     async function printNoteEntry(entry){
@@ -386,32 +393,65 @@ registry.define('library',1,()=>{
       else if(result?.reason==='busy')setNotesStatus('Another backup task is running. Try again when it finishes.');
       return result?.opened===true;
     }
-    // The open note's own actions: rename or move, earlier versions, export
-    // and delete. Support Activities keeps its name and is never deleted, so
-    // it has none.
+    // A note's actions, for its ⋯ menu and the list's right-click menu. Each
+    // runs on the note it was opened for; one that cannot be used says why.
+    // Support Activities keeps its name and is never deleted, so it has none.
+    function noteActions(entry){
+      const state=noteState(entry),writable=canMutate(),stored=state.stored,unwritten=entry.ephemeral?'Nothing written yet':state.kind==='parent'?'It has nothing of its own':'Nothing written yet';
+      const open=run=>()=>{if(entry.key!==selectedNoteKey||selectedTrashKey)selectNote(entry.key);return run();};
+      const readOnly=writable?'':'Read-only in this tab';
+      return [
+        {id:'library-note-rename',label:'Rename',hint:'F2',reason:readOnly,run:open(()=>renameNoteInPlace(selectedNoteEntry()))},
+        {id:'library-note-move',label:'Move…',hint:'',reason:readOnly,run:open(()=>renameNoteEntry())},
+        {id:'library-note-new-inside',label:'New note inside…',hint:'',reason:readOnly||(canCreateNote()?'':'At the note limit'),run:open(()=>createNote())},
+        {id:'library-note-versions',label:'Earlier versions…',hint:'',reason:readOnly||(stored?'':unwritten),run:open(()=>showNoteVersions(entry))},
+        {id:'library-note-export-one',label:'Export this note',hint:'',reason:readOnly||(stored&&entry.hasNote?'':stored?'The note is empty':unwritten),run:open(()=>exportNoteEntry(entry))},
+        {id:'library-note-print',label:'Print…',hint:'',reason:stored&&entry.hasNote?'':stored?'The note is empty':unwritten,run:open(()=>printNoteEntry(entry))},
+        'separator',
+        {id:'library-note-delete',label:entry.ephemeral?'Discard':'Delete',hint:'Del',danger:true,reason:readOnly||(entry.ephemeral||stored?'':state.kind==='parent'?'Delete the notes inside it first':'It is an Area in today’s plan'),run:open(()=>deleteNote())}
+      ];
+    }
+    // Fills a menu with a note's actions as they stand now.
+    function fillNoteMenu(menu,entry,controller){
+      menu.replaceChildren(...noteActions(entry).map(action=>{
+        if(action==='separator'){const line=document.createElement('div');line.className='library-note-menu-separator';line.setAttribute('role','separator');return line;}
+        const button=document.createElement('button');button.type='button';button.id=action.id;button.className='library-note-menu-item'+(action.danger?' danger':'');button.setAttribute('role','menuitem');
+        button.disabled=!!action.reason;
+        button.append(textEl('span','',action.label),textEl('span','library-note-menu-hint'+(action.reason?'':' ui-mono'),action.reason||action.hint));
+        // The menu closes first, so focus handed back as it closes cannot end
+        // what the action opens (the rename field, a dialog).
+        button.addEventListener('click',()=>{controller.hide();requestAnimationFrame(()=>requestAnimationFrame(()=>{void action.run();}));});
+        return button;
+      }));
+    }
+    function focusFirstMenuItem(menu){requestAnimationFrame(()=>{const first=menu.querySelector('[role="menuitem"]:not(:disabled)');if(first)first.focus();});}
     function noteActionsMenu(entry){
       const trigger=textEl('button','library-note-tool ui-btn','⋯');trigger.type='button';trigger.id='library-note-actions';
       trigger.setAttribute('aria-label',`Actions for ${entry.label}`);trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');trigger.title='Rename, move or delete this note';
       const menu=document.createElement('div');menu.className='library-note-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label',`Actions for ${entry.label}`);
       const controller=createAnchoredPopover(menu,{align:'end',onClose:()=>trigger.setAttribute('aria-expanded','false')});
-      const item=(id,label,hint,run,danger=false)=>{
-        const button=document.createElement('button');button.type='button';button.id=id;button.className='library-note-menu-item'+(danger?' danger':'');button.setAttribute('role','menuitem');
-        button.append(textEl('span','',label),textEl('span','library-note-menu-hint ui-mono',hint));
-        button.addEventListener('click',()=>{controller.hide();void run();});return button;
-      };
-      const separator=document.createElement('div');separator.className='library-note-menu-separator';separator.setAttribute('role','separator');
-      const rename=item('library-note-rename','Rename','F2',()=>renameNoteInPlace(entry)),move=item('library-note-move','Move…','',renameNoteEntry),exportNote=item('library-note-export-one','Export this note','',()=>exportNoteEntry(entry)),print=item('library-note-print','Print…','',()=>printNoteEntry(entry)),versions=item('library-note-versions','Earlier versions…','',()=>showNoteVersions(entry)),remove=item('library-note-delete','Delete','Del',deleteNote,true);
-      menu.append(rename,move,versions,exportNote,print,separator,remove);
       trigger.addEventListener('click',event=>{
         event.preventDefault();
         if(!menu.hidden){controller.hide();return;}
-        // A note becomes renameable once something of it is saved.
-        const stored=!!getNote(entry.key,entry.label);rename.disabled=move.disabled=exportNote.disabled=remove.disabled=versions.disabled=!stored||!canMutate();print.disabled=!stored;
-        for(const button of [rename,move,exportNote,print,remove])if(!stored)button.title='Write something in this note first';else button.removeAttribute('title');
-        controller.show(trigger);trigger.setAttribute('aria-expanded','true');
-        requestAnimationFrame(()=>{const first=menu.querySelector('[role="menuitem"]:not(:disabled)');if(first)first.focus();});
+        fillNoteMenu(menu,entry,controller);controller.show(trigger);trigger.setAttribute('aria-expanded','true');focusFirstMenuItem(menu);
       });
       return [trigger,menu];
+    }
+    // Right-click (or a long press on a touch screen) on a row opens the same
+    // actions at the pointer.
+    let noteContextMenu=null;
+    function openNoteContextMenu(entry,row,x,y){
+      if(!entry||entry.support||noteSelectionMode)return false;
+      if(!noteContextMenu){
+        const menu=document.createElement('div');menu.className='library-note-menu library-note-context-menu';menu.setAttribute('role','menu');
+        let point={x:0,y:0};
+        const controller=createAnchoredPopover(menu,{anchorRect:()=>new DOMRect(point.x,point.y,0,0)});
+        document.body.append(menu);noteContextMenu={menu,controller,at:(px,py)=>{point={x:px,y:py};}};
+      }
+      const {menu,controller,at}=noteContextMenu;
+      if(!menu.hidden)controller.hide();
+      menu.setAttribute('aria-label',`Actions for ${entry.label}`);at(x,y);fillNoteMenu(menu,entry,controller);controller.show(row);focusFirstMenuItem(menu);
+      return true;
     }
     function chooseNote(entries,filtered){
       const visible=(filtered||[]).find(entry=>entry.key===selectedNoteKey);
@@ -483,7 +523,7 @@ registry.define('library',1,()=>{
       // The name starts with the row's visible text (name, TODAY, last edit), as
       // WCAG 2.5.3 asks, then adds what the row shows only by style.
       const edited=editedLabel(entry.updatedAt);
-      row.setAttribute('aria-label',`${leaf}${node.children?` ${node.children}`:''}${entry.current?' TODAY':''}${edited?` ${edited}`:''}${entry.hasNote?'':', empty'}${node.children?`, ${node.children} nested ${node.children===1?'note':'notes'}`:''}${entry.current?', in today’s plan':''}`);
+      row.setAttribute('aria-label',`${leaf}${node.children?` ${node.children}`:''}${entry.current?' TODAY':''}${edited?` ${edited}`:''}${entry.hasNote?'':entry.id?', empty':node.children?'':', not written yet'}${node.children?`, ${node.children} nested ${node.children===1?'note':'notes'}`:''}${entry.current?', in today’s plan':''}`);
       if(node.children)row.setAttribute('aria-expanded',node.expanded?'true':'false');
       row.tabIndex=-1;
       const twisty=textEl('span','library-note-twisty',node.children?(node.expanded?'▾':'▸'):'');twisty.setAttribute('aria-hidden','true');
@@ -513,10 +553,27 @@ registry.define('library',1,()=>{
       else if(event.key==='ArrowRight'){if(!node||!node.children)return;if(node.expanded)focusRow(rows[index+1]);else toggleNoteBranch(key,true);}
       else if(event.key==='ArrowLeft'){if(node&&node.children&&node.expanded)toggleNoteBranch(key,false);else if(node&&node.parent)focusRow(rows.find(item=>item.dataset.noteKey===node.parent.entry.key));else return;}
       else if(event.key==='Enter'||event.key===' '){noteFocusKey=key;selectNote(key);}
-      else if(event.key==='F2'){selectNote(key);const entry=selectedStoredNote();if(entry)renameNoteInPlace(entry);}
+      else if(event.key==='F2'){selectNote(key);const entry=selectedNoteEntry();if(entry)renameNoteInPlace(entry);}
+      else if(event.key==='ContextMenu'||(event.key==='F10'&&event.shiftKey)){const rect=row.getBoundingClientRect();openNoteContextMenu(noteEntries().find(entry=>entry.key===key),row,rect.left+24,rect.bottom);}
       else if(event.key==='Delete'){noteFocusKey=key;selectNote(key);void deleteNote();}
       else return;
       event.preventDefault();
+    }
+    // Right-click on a row, or a long press on a touch screen (iPadOS and iOS
+    // send no contextmenu for one), opens its actions at the pointer.
+    function installNoteContextMenu(list){
+      const rowEntry=target=>{const row=target&&target.closest?target.closest('[data-note-key]'):null;const entry=row?noteEntries().find(item=>item.key===row.dataset.noteKey):null;return entry?{row,entry}:null;};
+      let press=null,suppressClick=false;
+      const cancel=()=>{if(press){clearTimeout(press.timer);press=null;}};
+      list.addEventListener('contextmenu',event=>{const hit=rowEntry(event.target);if(!hit||hit.entry.support||noteSelectionMode)return;event.preventDefault();cancel();openNoteContextMenu(hit.entry,hit.row,event.clientX,event.clientY);});
+      list.addEventListener('pointerdown',event=>{
+        if(event.pointerType!=='touch')return;const hit=rowEntry(event.target);if(!hit||hit.entry.support||noteSelectionMode)return;
+        cancel();press={x:event.clientX,y:event.clientY,timer:setTimeout(()=>{press=null;suppressClick=true;openNoteContextMenu(hit.entry,hit.row,event.clientX,event.clientY);},500)};
+      });
+      list.addEventListener('pointermove',event=>{if(press&&Math.hypot(event.clientX-press.x,event.clientY-press.y)>8)cancel();});
+      for(const type of ['pointerup','pointercancel','scroll'])list.addEventListener(type,cancel,{passive:true});
+      // The click that ends a long press must not also open the note.
+      list.addEventListener('click',event=>{if(suppressClick){suppressClick=false;event.preventDefault();event.stopPropagation();}},true);
     }
     function noteTrashItems(){
       return [...noteTrash()].sort((a,b)=>String(a.label).localeCompare(String(b.label),undefined,{sensitivity:'base',numeric:true})||String(b.deletedAt).localeCompare(String(a.deletedAt)));
@@ -550,7 +607,6 @@ registry.define('library',1,()=>{
     }
     function selectTrashedNote(key){
       if(!noteTrashItems().some(item=>item.key===key))return false;
-      if(pendingNote){pendingNote=null;invalidateAttachments();}
       selectedTrashKey=key;renderNotes();openNoteView();return true;
     }
     function buildNoteNavItem(entry,selectionIndex){
@@ -627,7 +683,7 @@ registry.define('library',1,()=>{
         return false;
       }
       const head=document.createElement('div');head.className='library-notes-editor-head';
-      const renameable=writable&&!entry.support&&!!canonical,meta=textEl('span','library-notes-editor-meta ui-mono',noteMeta(entry,canonical));
+      const renameable=writable&&noteState(entry).kind!=='support'&&noteState(entry).kind!=='none',meta=textEl('span','library-notes-editor-meta ui-mono',noteMeta(entry,canonical));
       const copy=document.createElement('div');copy.className='library-notes-editor-identity';
       copy.append(noteBreadcrumb(entry),noteTitle(entry,renameable),meta);syncReviewMark(meta,writable?canonical:null);
       const headTools=document.createElement('div');headTools.className='library-notes-editor-tools';
@@ -733,7 +789,10 @@ registry.define('library',1,()=>{
         const focusable=list.querySelector('[role="treeitem"].active')||list.querySelector('[role="treeitem"]');if(focusable)focusable.tabIndex=0;
         if(noteFocusKey){const target=[...list.querySelectorAll('[role="treeitem"]')].find(row=>row.dataset.noteKey===noteFocusKey);noteFocusKey='';if(target){for(const row of list.querySelectorAll('[role="treeitem"]'))row.tabIndex=-1;target.tabIndex=0;target.focus();}}
       }
-      setTextSafe('library-notes-nav-count',filtering?(searchState.pending?`Searching… / ${entries.length}`:`${filtered.length} / ${entries.length}`):String(entries.length));
+      // The count is of notes that exist: not plan Areas or parents without a
+      // note of their own, nor new notes not yet written.
+      const real=list=>list.reduce((count,entry)=>count+(entry.id?1:0),0),total=real(entries);
+      setTextSafe('library-notes-nav-count',filtering?(searchState.pending?`Searching… / ${total}`:`${real(filtered)} / ${total}`):String(total));
       renderNoteTrash();
       if(noteSelectionMode){renderNoteEditor(selected,true);setNotesStatus('Selection is temporary. Export does not change or sync your saved notes.');}
       else if(trashed)renderTrashedNote(trashed);
@@ -762,7 +821,6 @@ registry.define('library',1,()=>{
     function selectNote(key){
       const match=noteEntries().find(entry=>entry.key===String(key||''));
       if(!match)return false;
-      if(pendingNote&&match.key!==pendingNote.key){pendingNote=null;invalidateAttachments();}
       selectedNoteKey=match.key;selectedTrashKey='';
       // Opening a note opens its branch too, so its nested notes show.
       if(noteTreeNodes.get(match.key)?.children)noteExpanded.set(match.key,true);
@@ -858,6 +916,43 @@ registry.define('library',1,()=>{
       notice.finish(made.length&&!skipped.length?'succeeded':'failed',parts.join(' ')||'Nothing was imported.');
       return made.length>0;
     }
+    // Where a note can go, for New and Move: Top level, then every note in the
+    // list's order (except Support Activities and anything excluded), searched
+    // by every word typed. Returns its element and the chosen place's title
+    // key and label ('' for Top level).
+    function notePlacePicker({exclude=()=>false,selected='',onChange=()=>{},label='Place'}={}){
+      const places=[{key:'',label:'',top:true},...noteEntries().filter(entry=>!entry.support&&!exclude(entry))];
+      let chosen=places.find(place=>place.key===selected)||places[0];
+      const root=document.createElement('div');root.className='note-place';
+      const search=document.createElement('input');search.type='search';search.className='note-place-search ui-field';search.placeholder='Find a place…';search.setAttribute('aria-label',`Search: ${label}`);search.autocomplete='off';
+      const list=document.createElement('div');list.className='note-place-list';list.setAttribute('role','listbox');list.setAttribute('aria-label',label);list.tabIndex=-1;
+      const option=place=>{
+        const row=document.createElement('button');row.type='button';row.className='note-place-option';row.setAttribute('role','option');row.dataset.key=place.key;
+        const depth=place.top?0:Math.min(6,Math.max(0,Number(place.depth)||0));row.style.setProperty('--note-indent',`${depth*14}px`);
+        row.append(textEl('span','note-place-name',place.top?'Top level':noteLeaf(place.label)));
+        const path=place.top?'Not inside another note':noteParentPath(place.label).replace(/\s*>\s*/g,' › ');if(path&&(search.value.trim()||place.top))row.append(textEl('span','note-place-path',path));
+        const selectedNow=place===chosen;row.setAttribute('aria-selected',selectedNow?'true':'false');row.classList.toggle('selected',selectedNow);row.tabIndex=selectedNow?0:-1;
+        row.addEventListener('click',()=>pick(place,true));
+        return row;
+      };
+      const matches=()=>{const words=search.value.toLowerCase().split(/\s+/).filter(Boolean);return words.length?places.filter(place=>!place.top&&words.every(word=>place.label.toLowerCase().includes(word))):places;};
+      const draw=()=>{const shown=matches().slice(0,200);list.replaceChildren(...(shown.length?shown.map(option):[textEl('div','note-place-empty ui-status','No note matches.')]));};
+      const pick=(place,focus=false)=>{chosen=place;draw();onChange(chosen);if(focus)list.querySelector('.note-place-option.selected')?.focus();};
+      search.addEventListener('input',()=>{const first=matches()[0];if(first&&!matches().includes(chosen))pick(first);else draw();});
+      search.addEventListener('keydown',event=>{if(event.key==='ArrowDown'){event.preventDefault();(list.querySelector('.note-place-option.selected')||list.querySelector('.note-place-option'))?.focus();}else if(event.key==='Enter'){event.preventDefault();const first=matches()[0];if(first)pick(first,true);}});
+      list.addEventListener('keydown',event=>{
+        const rows=[...list.querySelectorAll('.note-place-option')],index=rows.indexOf(document.activeElement);if(index<0)return;
+        const move=step=>{const next=rows[Math.max(0,Math.min(rows.length-1,index+step))];if(next)next.click();};
+        if(event.key==='ArrowDown')move(1);else if(event.key==='ArrowUp'){if(index===0)search.focus();else move(-1);}else if(event.key==='Home')move(-rows.length);else if(event.key==='End')move(rows.length);else return;
+        event.preventDefault();
+      });
+      root.append(search,list);draw();
+      requestAnimationFrame(()=>list.querySelector('.note-place-option.selected')?.scrollIntoView({block:'nearest'}));
+      return {element:root,chosen:()=>chosen,focus:()=>search.focus()};
+    }
+    // "GS2 › Polity", or "the top level".
+    function placeName(place){return place&&place.key?place.label.replace(/\s*>\s*/g,' › '):'the top level';}
+    function joinPath(place,name){return place&&place.key?`${place.label} > ${name}`:name;}
     async function createNote(){
       if(!canMutate())return false;
       if(!canCreateNote()){
@@ -867,39 +962,48 @@ registry.define('library',1,()=>{
       // Support Activities is one shared note, not a folder: new notes go
       // inside other notes only.
       const selected=noteEntries().find(entry=>entry.key===selectedNoteKey&&!entry.support)||null;
-      const options=selected?[
-        {value:'nested',label:`Inside ${noteLeaf(selected.label)}`,description:`Creates a child under ${selected.label}.`},
-        {value:'top',label:'At top level',description:'Creates an independent Area.'}
-      ]:[];
+      // The name first; the place starts as the open note and Change picks
+      // another from the same list Move uses.
+      let place=selected?{key:selected.key,label:selected.label}:{key:'',label:''},picker=null;
+      const target=name=>normalizeNoteArea(joinPath(place,String(name||'').trim()));
+      const existingFor=name=>{const identity=target(name);return identity?noteEntries().find(entry=>entry.key===identity.key)||null:null;};
       const result=await requestInput({
         title:'New note',
-        message:selected?'Choose where the new note belongs, then give its Area or topic a clear name.':'Give the new Area or topic a clear name.',
-        inputLabel:'Area or topic name',placeholder:'For example: Cardiology',maxLength:160,required:true,
-        requiredMessage:'Enter an Area or topic name.',
-        options,optionLabel:'Note location',defaultOption:selected?'nested':'top',
-        hint:'The note becomes saved after you write something in its editor. Matching Areas in Plan, Execute and Review will share it.',
-        preview:(value,scope)=>{
-          const name=String(value||'').trim();
-          if(!name)return selected&&scope==='nested'?`${selected.label} › …`:'New top-level Area';
-          return selected&&scope==='nested'?`${selected.label} › ${name.replace(/\s*>\s*/g,' › ')}`:name.replace(/\s*>\s*/g,' › ');
+        inputLabel:'Name',placeholder:'For example: Cardiology',maxLength:160,required:true,requiredMessage:'Give the note a name.',
+        content:api=>{
+          const row=document.createElement('div');row.className='note-place-row';
+          const where=textEl('span','note-place-where','');
+          const change=textEl('button','note-place-change ui-btn','Change');change.type='button';change.setAttribute('aria-expanded','false');
+          const sync=()=>{where.replaceChildren(textEl('span','note-place-label','In'),' ',textEl('strong','',place.key?placeName(place):'Top level'));};
+          sync();row.append(where,change);
+          const wrap=document.createElement('div');wrap.className='note-place-new';wrap.append(row);
+          change.addEventListener('click',()=>{
+            if(picker){picker.element.remove();picker=null;change.textContent='Change';change.setAttribute('aria-expanded','false');return;}
+            picker=notePlacePicker({label:'Location',selected:place.key,onChange:chosen=>{place=chosen.top?{key:'',label:''}:{key:chosen.key,label:chosen.label};sync();api.refresh();api.setConfirmLabel(existingFor(api.input?.value)?'Open':'Create');}});
+            wrap.append(picker.element);change.textContent='Done';change.setAttribute('aria-expanded','true');picker.focus();
+          });
+          api.input?.addEventListener('input',()=>api.setConfirmLabel(existingFor(api.input.value)?'Open':'Create'));
+          return wrap;
         },
-        validate:(value,scope)=>{
-          const rawValue=selected&&scope==='nested'?`${selected.label} > ${value}`:value;
-          return normalizeNoteArea(rawValue)?'':'Enter a valid Area or topic name.';
+        preview:value=>{
+          const name=String(value||'').trim();if(!name)return place.key?`Goes inside ${placeName(place)}.`:'Goes at the top level.';
+          const identity=target(name);if(!identity)return 'Use > only to separate nested notes.';
+          return existingFor(name)?`“${identity.label.replace(/\s*>\s*/g,' › ')}” already exists. It will open.`:`Creates ${identity.label.replace(/\s*>\s*/g,' › ')}.`;
         },
-        confirmLabel:'Create note',cancelLabel:'Cancel'
+        validate:value=>target(value)?'':'Enter a name. Use > only to separate nested notes.',
+        confirmLabel:'Create',cancelLabel:'Cancel'
       });
       if(!result||!canMutate())return false;
-      const raw=selected&&result.option==='nested'?`${selected.label} > ${result.value}`:result.value;
+      const raw=joinPath(place,result.value);
       const identity=normalizeNoteArea(raw);
       if(!identity){
         setNotesStatus('Enter a valid Area name. Use > only to separate nested Areas.',{error:true});
         return false;
       }
       const existing=noteCatalogue().find(entry=>entry.key===identity.key);
-      pendingNote=existing?null:Object.freeze({
+      if(!existing)pendingNotes=[...pendingNotes.filter(entry=>entry.key!==identity.key),Object.freeze({
         key:identity.key,label:identity.label,text:'',hasNote:false,current:false,updatedAt:'',ephemeral:true
-      });
+      })];
       selectedNoteKey=identity.key;selectedTrashKey='';
       invalidateAttachments();
       const search=document.getElementById('library-notes-search');
@@ -909,8 +1013,22 @@ registry.define('library',1,()=>{
       const editor=notesEditorField();
       if(editor)requestAnimationFrame(()=>requestAnimationFrame(()=>{if(document.contains(editor))focusEditor(editor);}));
       const notice=notifications.begin({id:'note-create',surfaceId:'notes-status',title:existing?'Existing note opened':'New note ready',announce:false});
-      notice.finish('succeeded',existing?`Opened the existing Area “${identity.label}”.`:`New Area “${identity.label}” is ready. It will be saved when you write a note.`);
+      notice.finish('succeeded',existing?`Opened “${identity.label}”, which already exists.`:`New note “${identity.label}”. It is saved once you write in it.`);
       return true;
+    }
+    // What a row is, for its label and what can be done with it: a written
+    // (stored) note, a new one not yet written, an Area of today's plan with
+    // no note, or a parent that holds notes but has none of its own.
+    function noteState(entry,entries=noteEntries()){
+      const stored=!!(entry&&!entry.ephemeral&&getNote(entry.key,entry.label)),prefix=`${entry?.key} > `,depth=Math.max(0,Number(entry?.depth)||0);
+      const children=entry?entries.filter(other=>other.key.startsWith(prefix)&&Math.max(0,Number(other.depth)||0)===depth+1).length:0;
+      const kind=!entry?'none':entry.support?'support':stored?'stored':entry.ephemeral?'new':children?'parent':entry.current?'plan':'none';
+      return {kind,stored,children,cleared:stored&&!entry.hasNote};
+    }
+    function notesHeld(count){return `Holds ${count} ${count===1?'note':'notes'}`;}
+    function selectedNoteEntry(){
+      const entry=noteEntries().find(candidate=>candidate.key===selectedNoteKey)||null;
+      return entry&&!selectedTrashKey&&!entry.support?entry:null;
     }
     function selectedStoredNote(){
       const entry=noteEntries().find(candidate=>candidate.key===selectedNoteKey)||null;
@@ -919,14 +1037,21 @@ registry.define('library',1,()=>{
     // Deleting moves a note to Recently deleted at once; Undo puts it back.
     async function deleteNote(){
       if(!canMutate())return false;
-      const entry=selectedStoredNote();
-      if(!entry){setNotesStatus('Select a saved note before deleting it.');return false;}
+      const entry=selectedNoteEntry();
+      if(!entry)return false;
+      // A new note was never stored: Delete discards it.
+      if(entry.ephemeral){
+        pendingNotes=pendingNotes.filter(item=>item.key!==entry.key);invalidateAttachments();
+        selectedNoteKey='';renderNotes();closeNoteView();
+        notifications.begin({id:'note-delete',surfaceId:'notes-status',title:'Delete note',announce:false}).finish('succeeded',`Discarded the new note “${entry.label}”.`);
+        return true;
+      }
+      if(!selectedStoredNote()){setNotesStatus(noteState(entry).kind==='parent'?'This note has nothing of its own. Delete or move the notes inside it.':'This note is not written yet, so there is nothing to delete.');return false;}
       const notice=notifications.begin({id:'note-delete',surfaceId:'notes-status',title:'Delete note',message:'Moving the note to Recently deleted…'});
       let trashKey;
       try{trashKey=await trashNote(entry.key);}
       catch(error){notice.finish('failed',error&&error.message||'The note could not be deleted because browser storage could not be updated. Keep this tab open and retry.');return false;}
       if(trashKey===null){notice.finish('cancelled','No note was deleted.');return false;}
-      if(pendingNote&&pendingNote.key===entry.key)pendingNote=null;
       renderNotes();closeNoteView();
       if(!trashKey){notice.finish('succeeded',`Removed the empty note “${entry.label}”.`);return true;}
       notice.finish('succeeded',`Moved “${entry.label}” to Recently deleted.`,{action:{label:'Undo',run:()=>{void restoreTrashedNote(trashKey);}}});
@@ -961,23 +1086,45 @@ registry.define('library',1,()=>{
     // Renames or moves a note with every note inside it. A name that already
     // holds a note is merged only after the person agrees.
     // Move… asks for the full name: "GS2 > Polity" places the note under GS2.
+    // Move: pick a place from the list; the name starts as it is (changing it
+    // here also offers to leave the plans alone, which the title cannot) and
+    // the notes inside go along. A name already used there with text is shown
+    // before anything happens, and the button then reads Merge.
     async function renameNoteEntry(){
       if(!canMutate())return false;
-      const entry=selectedStoredNote();
-      if(!entry){setNotesStatus('Select a saved note to move it.');return false;}
-      const nested=noteEntries().some(candidate=>candidate.key.startsWith(`${entry.key} > `)),use=planAreaUse(entry.key),where=planAreaPlaces(use);
+      const entry=selectedNoteEntry();if(!entry)return false;
+      const state=noteState(entry),leaf=noteLeaf(entry.label),prefix=`${entry.key} > `,entries=noteEntries();
+      const family=entries.filter(item=>item.key.startsWith(prefix)),nested=family.length,where=planAreaPlaces(planAreaUse(entry.key));
+      const parentKey=entry.key.split(' > ').slice(0,-1).join(' > ');
+      let place=null,name=leaf;
+      const destination=()=>place&&name.trim()?normalizeNoteArea(joinPath(place.top?null:place,name.trim())):null;
+      // Notes with text already at the names this one and its family would take.
+      const clashes=()=>{
+        const target=destination();if(!target||target.key===entry.key)return [];
+        return [entry,...family].map(item=>entries.find(other=>other.key===target.key+item.key.slice(entry.key.length))).filter(other=>other&&other.id&&other.hasNote&&!other.key.startsWith(prefix)&&other.key!==entry.key);
+      };
       const result=await requestInput({
-        title:'Move note',
-        message:'Type the full name, using > to place it inside another Area, for example “GS2 > Polity”.',
-        inputLabel:'Full name',defaultValue:entry.label,maxLength:160,required:true,requiredMessage:'Enter a name.',
-        hint:[nested?'Notes inside it move with it.':'','Finished days keep the name they were recorded with.'].filter(Boolean).join(' '),
-        checkbox:where?{label:`Also rename it in ${where}`,description:'Unticked, those blocks keep the old name and start a new note under it.',defaultChecked:true}:null,
-        preview:value=>String(value||'').trim().replace(/\s*>\s*/g,' › ')||'…',
-        validate:value=>normalizeNoteArea(value)?'':'Enter a valid name. Use > only to separate nested Areas.',
+        title:`Move or rename “${leaf}”`,inputLabel:'Name',defaultValue:leaf,maxLength:160,
+        content:api=>{
+          const label=()=>clashes().length?'Merge':place&&!place.top===!!parentKey&&(place.key||'')===parentKey?'Rename':'Move';
+          const picker=notePlacePicker({label:'Move to',selected:parentKey,exclude:item=>item.key===entry.key||item.key.startsWith(prefix),onChange:chosen=>{place=chosen;api.refresh();api.setConfirmLabel(label());}});
+          place=picker.chosen();api.input?.addEventListener('input',()=>{name=api.input.value;api.setConfirmLabel(label());});
+          requestAnimationFrame(()=>picker.focus());
+          const wrap=document.createElement('div');wrap.className='note-place-new';wrap.append(textEl('div','interaction-field ui-body','Place'),picker.element);return wrap;
+        },
+        preview:()=>{
+          const target=destination();if(!target)return name.trim()?'Choose a place.':'Give it a name.';
+          if(target.key===entry.key&&target.label===entry.label)return 'It is already here.';
+          const found=clashes(),path=target.label.replace(/\s*>\s*/g,' › '),carried=nested?`, with ${nested} nested ${nested===1?'note':'notes'}`:'';
+          if(found.length)return `“${found[0].label.replace(/\s*>\s*/g,' › ')}” already exists${found.length>1?`, with ${found.length-1} more of the same names inside`:''}. Moving adds this text to the end of it.`;
+          return `Becomes ${path}${carried}.`;
+        },
+        validate:()=>{const target=destination();return !name.trim()?'Give it a name.':!target?'Use > only to separate nested notes.':target.key===entry.key&&target.label===entry.label?'Nothing to change. Choose another place or name.':'';},
+        checkbox:where&&state.kind!=='plan'&&!entry.ephemeral?{label:`Also rename it in ${where}`,description:'Unticked, those blocks keep the old name and start a new note under it.',defaultChecked:true}:null,
         confirmLabel:'Move',cancelLabel:'Cancel'
       });
-      if(!result||!canMutate())return false;
-      return applyNoteRename(entry,result.value,{inPlans:!where||result.checked===true});
+      if(!result||!canMutate()||!place)return false;
+      return applyNoteRename(entry,joinPath(place.top?null:place,name.trim()),{inPlans:!where||state.kind==='plan'||result.checked===true,mergeAgreed:clashes().length>0});
     }
     // Where a note's Area is used: "today’s plan", "2 saved plans", or both.
     function planAreaPlaces(use){
@@ -986,16 +1133,28 @@ registry.define('library',1,()=>{
     }
     // Renames or moves the note; with inPlans (the default, and the rename
     // dialog's tick box) the Area in today's plan and saved plans follows it.
-    async function applyNoteRename(entry,value,{inPlans=true}={}){
+    async function applyNoteRename(entry,value,{inPlans=true,mergeAgreed=false}={}){
       const identity=normalizeNoteArea(value);
       if(!identity||identity.label===entry.label||!canMutate())return false;
-      const where=planAreaPlaces(planAreaUse(entry.key));
+      // A new note lives only in this list: it takes the new name, or opens the
+      // note that already has it.
+      if(entry.ephemeral){
+        const existing=noteCatalogue().find(item=>item.key===identity.key);
+        pendingNotes=pendingNotes.filter(item=>item.key!==entry.key);
+        if(!existing)pendingNotes=[...pendingNotes,Object.freeze({...entry,key:identity.key,label:identity.label})];
+        invalidateAttachments();selectedNoteKey=identity.key;noteTree(noteEntries());expandNoteAncestors(identity.key);renderNotes();
+        notifications.begin({id:'note-rename',surfaceId:'notes-status',title:'Rename note',announce:false}).finish('succeeded',existing?`“${identity.label}” already exists, so it is open now.`:`Renamed to “${identity.label}”.`);
+        return true;
+      }
+      const state=noteState(entry),where=planAreaPlaces(planAreaUse(entry.key));
+      // An Area of today's plan with no note is renamed in the plans.
+      if(state.kind==='plan'){inPlans=true;if(!where)return false;}
       const notice=notifications.begin({id:'note-rename',surfaceId:'notes-status',title:'Rename note',message:'Renaming the note…'});
       try{
-        let outcome=await renameNote(entry.key,identity.label,{merge:false});
+        let outcome=state.kind==='plan'?{status:'renamed',key:identity.key,moved:[{from:entry.key,to:identity.key}],merged:0}:await renameNote(entry.key,identity.label,{merge:false});
         if(outcome.status==='collision'){
           const into=outcome.labels[0]||identity.label,others=outcome.labels.length-1;
-          const accepted=await confirm({title:'Merge notes?',message:`Merge “${entry.label}” into “${into}”? Its text is added to the end of “${into}”.`,details:others>0?[`${others} more note${others===1?'':'s'} inside it ${others===1?'is':'are'} merged the same way.`]:[],confirmLabel:'Merge',cancelLabel:'Cancel'});
+          const accepted=mergeAgreed||await confirm({title:'Merge notes?',message:`Merge “${entry.label}” into “${into}”? Its text is added to the end of “${into}”.`,details:others>0?[`${others} more note${others===1?'':'s'} inside it ${others===1?'is':'are'} merged the same way.`]:[],confirmLabel:'Merge',cancelLabel:'Cancel'});
           if(!accepted||!canMutate()){notice.finish('cancelled','Nothing was renamed.');return false;}
           outcome=await renameNote(entry.key,identity.label,{merge:true});
         }
@@ -1007,8 +1166,9 @@ registry.define('library',1,()=>{
         if(where&&inPlans){await renameAreaInPlans(entry.key,identity.label);plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} now ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the new name.`;}
         else if(where)plans=` ${where.charAt(0).toUpperCase()+where.slice(1)} still ${where.includes(' and ')||/^\d/.test(where)?'use':'uses'} the old name.`;
         selectedNoteKey=outcome.key;noteTree(noteEntries());expandNoteAncestors(outcome.key);renderNotes();
-        const moved=outcome.moved.length-1;
-        notice.finish('succeeded',`${outcome.merged?'Merged into':'Renamed to'} “${identity.label}”${moved>0?`, with ${moved} note${moved===1?'':'s'} inside it`:''}.${plans}`);
+        const moved=outcome.moved.length-(state.kind==='parent'?0:1);
+        const moving=noteParentPath(entry.label).toLowerCase()!==noteParentPath(identity.label).toLowerCase();
+        notice.finish('succeeded',`${outcome.merged?'Merged into':moving?'Moved to':'Renamed to'} “${identity.label.replace(/\s*>\s*/g,' › ')}”${moved>0?`, with ${moved} note${moved===1?'':'s'} inside it`:''}.${plans}`);
         return true;
       }catch(error){notice.finish('failed',error&&error.message||'The note could not be renamed. Keep this tab open and retry.');return false;}
     }
@@ -1050,7 +1210,7 @@ registry.define('library',1,()=>{
       if(add)add.addEventListener('click',createNote);
       const importButton=document.getElementById('library-note-import'),importFile=document.getElementById('library-note-import-file');
       if(importButton&&importFile){importButton.addEventListener('click',()=>{importFile.value='';importFile.click();});importFile.addEventListener('change',()=>{const files=[...(importFile.files||[])];importFile.value='';void importNotes(files);});}
-      if(list)list.addEventListener('keydown',handleNoteTreeKey);
+      if(list){list.addEventListener('keydown',handleNoteTreeKey);installNoteContextMenu(list);}
       if(trashToggle)trashToggle.addEventListener('click',toggleNoteTrash);
       if(select)select.addEventListener('click',enterNoteSelection);
       if(selectAll)selectAll.addEventListener('click',selectAllNotes);
@@ -1303,7 +1463,7 @@ registry.define('library',1,()=>{
         const section=notesSection();
         if(noteRevealFrame){cancelAnimationFrame(noteRevealFrame);noteRevealFrame=0;}
         noteSelectionMode=false;noteSelection.clear();noteExportBusy=false;
-        pendingNote=null;selectedTrashKey='';noteTrashOpen=false;noteVisibleLimit=NOTE_PAGE_SIZE;
+        selectedTrashKey='';noteTrashOpen=false;noteVisibleLimit=NOTE_PAGE_SIZE;
         if(section)section.classList.remove('export-selecting','note-open');
         clearNotesEditorBinding();idleNoteSearch();
       }else if(librarySection==='days'){if(diaryEditing)void finishDiaryEdit({render:false});}
@@ -1488,7 +1648,7 @@ registry.define('library',1,()=>{
       await renderLibrary({restoreScroll:!!(options&&options.restoreScroll)});
       return false;
     }
-    function deactivateLibrary(options={}){libraryActive=false;captureLibraryScroll();pendingNote=null;clearNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
+    function deactivateLibrary(options={}){libraryActive=false;captureLibraryScroll();clearNotesEditorBinding();idleNoteSearch();if(diaryEditing){if(options.diarySettled===true)finalizeDiaryEdit();else void finishDiaryEdit({render:false});}}
     function loadMoreLibrary(){
       libraryVisibleLimit+=LIBRARY_PAGE_SIZE;
       libraryPreserveLimitOnce=true;
@@ -1747,7 +1907,7 @@ registry.define('library',1,()=>{
         try{
           const result=await batchAttachments(()=>batchAttachmentMutation(()=>executeClearLibrary({selection,signature:plan.signature,forceReferenced}),{sources:plan.attachments.protectedReferences,notes:selection.notes,days:selection.savedDays,finalReconcile:false}));cleared=true;
           if(selection.savedDays){setLibrarySelectedDate(null);renderLibraryEmptyDetail('Saved Dates / Reflections cleared. Import a backup, save a Study Day from Review, or create a new reflection.');invalidateLibrarySummaryCache();}
-          if(selection.notes){pendingNote=null;selectedNoteKey='';noteSelectionMode=false;noteSelection.clear();clearNotesEditorBinding();refreshNotes();}
+          if(selection.notes){pendingNotes=[];selectedNoteKey='';noteSelectionMode=false;noteSelection.clear();clearNotesEditorBinding();refreshNotes();}
           await reconcileAttachments();await renderLibrary();
           const message=clearLibraryResultMessage(result);notice.finish('succeeded',message);return;
         }catch(error){

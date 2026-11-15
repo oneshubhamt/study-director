@@ -51,7 +51,7 @@ const repository=(()=>{
   // ('~deleted <id>') for noteTrashDays. It keeps its label and text, and
   // its revision is the time it was deleted. Trash rows leave no deletion
   // record when they go.
-  const TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||''),TRASH_RETENTION_MS=Number(APP_LIMITS.noteTrashDays)*86400000;
+  const TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||''),TRASH_RETENTION_MS=Number(APP_LIMITS.noteTrashDays)*86400000,CLEARED_RETENTION_MS=7*86400000;
   if(!TRASH_PREFIX||!(TRASH_RETENTION_MS>0))throw new TypeError('Notes trash contract is invalid.');
   const isTrashKey=key=>String(key||'').startsWith(TRASH_PREFIX);
   // A label is normalised into its title once.
@@ -765,11 +765,14 @@ const repository=(()=>{
   // its id and takes the combined text, and the moved note is removed.
   async function rename(from,toLabel,options={}){
     if(!appCanMutate())return freeze({status:'rejected'});
-    const fromKey=keyFor(from),fromTitle=fromKey?titleKeyFor(fromKey):'';
+    const fromKey=keyFor(from),fromTitle=fromKey?titleKeyFor(fromKey):NoteKeys.isKey(String(from||''))?'':String(from||'');
     const source=normalizeAreaName(fromTitle),label=clampText(displayAreaName(toLabel),APP_LIMITS.maxAreaNameChars),target=normalizeAreaName(label);
-    if(!source||!target||NoteKeys.isKey(target)||!idForTitle(source))return freeze({status:'rejected'});
+    // A parent with no note of its own ("Geo" above "Geo > Rivers") moves
+    // the notes under it.
+    const holds=()=>!!idForTitle(source)||[...titles()].some(([title])=>title.startsWith(`${source} > `));
+    if(!source||!target||NoteKeys.isKey(target)||!holds())return freeze({status:'rejected'});
     if(target.startsWith(`${source} > `))return freeze({status:'inside-itself'});
-    await settle([idForTitle(source),idForTitle(target)].filter(Boolean));if(!idForTitle(source))return freeze({status:'rejected'});
+    await settle([idForTitle(source),idForTitle(target)].filter(Boolean));if(!holds())return freeze({status:'rejected'});
     const depth=source.split(' > ').length,labelParts=label.split(' > ');
     const moves=[...titles()].filter(([title])=>title===source||title.startsWith(`${source} > `)).map(([title,id])=>{
       const parts=displayAreaName(notes[id].label).split(' > ');
@@ -834,11 +837,16 @@ const repository=(()=>{
     const now=decisionNowMs();
     return freeze(Object.values(notes).filter(entry=>isTrashKey(entry.key)&&!trashExpired(entry,now)).map(entry=>freeze({key:entry.key,id:NoteKeys.id(entry.key),label:String(entry.label||''),deletedAt:String(entry.updatedAt||''),hasNote:hasContent(entry)})).sort((a,b)=>b.deletedAt.localeCompare(a.deletedAt)));
   }
-  // Deleted notes past their retention are removed on load, when the trash is
-  // shown and by the daily upkeep; saving follows the ordinary path.
+  // A saved note whose text was cleared, with nothing on its bar, is removed
+  // once it has stayed that way for a week, as Delete removes an empty note:
+  // there is nothing in it to keep.
+  function clearedExpired(key,now){const entry=notes[key],at=timestamp(entry);return !isTrashKey(key)&&!dirtyKeys.has(key)&&!hasContent(entry)&&!(entry.links||[]).length&&at>0&&at<=now-CLEARED_RETENTION_MS;}
+  // Deleted notes past their retention, and cleared notes past theirs, are
+  // removed on load, when the trash is shown and by the daily upkeep; saving
+  // follows the ordinary path.
   function purgeExpiredTrash(){
     if(!everLoaded||!appCanMutate())return 0;
-    const now=decisionNowMs(),expired=Object.keys(notes).filter(key=>isTrashKey(key)&&trashExpired(notes[key],now));
+    const now=decisionNowMs(),expired=Object.keys(notes).filter(key=>isTrashKey(key)?trashExpired(notes[key],now):clearedExpired(key,now));
     for(const key of expired){const current=notes[key];dropNote(key);markDirty(key,revision(current));}
     if(expired.length)touchSnapshot();
     return expired.length;

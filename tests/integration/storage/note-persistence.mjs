@@ -370,6 +370,38 @@ for(const failEpochRead of [false,true]){
   assert.deepEqual(app.notes.linkedFrom('pharm').map(note=>note.label),['cardio'],'the backlink survives the combine');
 }
 
+// A parent with no note of its own ("Geo" above "Geo > Rivers") moves the
+// notes under it, keeping their ids.
+{
+  const {app,stores}=await setup();
+  app.notes.update('geo > rivers','Geo > Rivers','nile','');app.notes.update('geo > hills','Geo > Hills','alps','');await app.notes.flush({strict:true});
+  const ids=['geo > rivers','geo > hills'].map(title=>app.notes.get(title).id);
+  assert.equal(app.notes.get('geo'),null,'the parent has no note');
+  const moved=await app.notes.rename('geo','Geography');
+  assert.equal(moved.status,'renamed');
+  assert.deepEqual(['geography > rivers','geography > hills'].map(title=>app.notes.get(title).id),ids,'the children keep their ids');
+  assert.equal(storedNote(stores.area,'geography > rivers').label,'Geography > Rivers');
+  assert.equal(app.notes.get('geography'),null,'no note is made for the parent');
+  assert.equal((await app.notes.rename('nowhere','Somewhere')).status,'rejected','a title with nothing under it is refused');
+}
+
+// A saved note whose text was cleared, with nothing on its bar, is removed
+// after a week untouched; a note with text, with links, or cleared recently stays.
+{
+  const {app,stores,clock}=await setup();
+  const write=async(key,label,text)=>{app.notes.update(key,label,text,app.notes.get(key)?.updatedAt||'');await app.notes.flush({strict:true});};
+  await write('old empty','Old empty','x');await write('old empty','Old empty','');
+  await write('linked empty','Linked empty','x');await write('target','Target','t');
+  app.notes.link('linked empty',app.notes.get('target').id);await app.notes.flush({strict:true});await write('linked empty','Linked empty','');
+  await write('written','Written','kept');
+  await clock.advance(6*86400000);await write('recent empty','Recent empty','x');await write('recent empty','Recent empty','');
+  assert.equal(app.notes.purgeExpiredTrash(),0,'nothing is removed before a week');
+  await clock.advance(1.5*86400000);
+  assert.equal(app.notes.purgeExpiredTrash(),1);await app.notes.flush({strict:true});
+  assert.equal(app.notes.get('old empty'),null,'the cleared note is gone');assert.equal(storedNote(stores.area,'old empty'),undefined);
+  for(const title of ['linked empty','recent empty','written'])assert.ok(app.notes.get(title),`${title} stays`);
+}
+
 // The shared support note keeps its reserved key as its stored label, which is
 // its identity. What people read uses its name: a clash names it and its kept
 // copy "Support Activities", and the copy is an ordinary note.
@@ -401,5 +433,7 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'Recently deleted gives way at the note limit; the rescue names notes it cannot hold',
   'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back',
   'a backup note that takes a local id keeps the bars and text links that point to it',
-  'the support note keeps its key; clash notices and its kept copy use its name'
+  'the support note keeps its key; clash notices and its kept copy use its name',
+  'a parent with no note moves the notes under it',
+  'a cleared note with nothing on its bar is removed after a week'
 ]},null,2));

@@ -160,7 +160,7 @@ registry.define('interactions',1,()=>{
       header.append(eyebrow,title);shell.appendChild(header);
       const body=document.createElement('div');body.className='interaction-body';appendCopy(body,options);shell.appendChild(body);
       const error=document.createElement('div');error.className='interaction-error ui-status';error.id='sd-interaction-error';error.setAttribute('role','alert');error.hidden=true;
-      let inputElement=null,inputCheckbox=null,confirmationElement=null,selectedOption=String(options.defaultOption||''),configuredValues=null;
+      let primary=null,inputElement=null,inputCheckbox=null,confirmationElement=null,selectedOption=String(options.defaultOption||''),configuredValues=null;
       // One tick-box row with its description, for input's tick box and configure's list.
       const checkboxRow=(checkbox,label,onChange=null)=>{
         const row=document.createElement('label');row.className='interaction-checkbox-row ui-body';
@@ -197,8 +197,16 @@ registry.define('interactions',1,()=>{
         inputElement=document.createElement('input');inputElement.className='interaction-input ui-field';inputElement.type=options.inputType==='password'?'password':options.inputType==='date'?'date':'text';inputElement.autocomplete='off';inputElement.spellcheck=options.spellcheck!==false;
         inputElement.value=String(options.defaultValue||'');inputElement.placeholder=cleanText(options.placeholder,160);
         if(options.inputType==='date'){inputElement.min=cleanText(options.min,32);inputElement.max=cleanText(options.max,32);}else inputElement.maxLength=Math.max(1,Math.min(10000,Number(options.maxLength)||500));
-        field.appendChild(inputElement);body.appendChild(field);
+        field.appendChild(inputElement);if(options.hideInput===true){inputElement=null;}else body.appendChild(field);
         if(options.inputType==='password'){inputElement.spellcheck=false;inputElement.autocomplete=options.confirmPassword?'new-password':'current-password';if(options.confirmPassword){const confirm=document.createElement('label');confirm.className='interaction-field ui-body';confirm.textContent='Confirm password';confirmationElement=inputElement.cloneNode();confirmationElement.value='';confirm.appendChild(confirmationElement);body.appendChild(confirm);}}
+        // Caller-built content (a list to pick from, say) under the field. It
+        // can redraw the preview, rename the confirm button and give the result
+        // a `content` value.
+        if(typeof options.content==='function'){
+          const refresh=()=>{const preview=body.querySelector('.interaction-preview');if(preview&&typeof options.preview==='function')preview.textContent=cleanText(options.preview(inputElement?inputElement.value:'',selectedOption),300);error.hidden=true;};
+          const made=options.content(freeze({input:inputElement,refresh,setConfirmLabel:label=>{if(primary)primary.textContent=cleanText(label,60);},confirm:()=>primary?.click()}));
+          if(made instanceof HTMLElement)body.appendChild(made);
+        }
         if(options.hint){const hint=document.createElement('div');hint.className='interaction-hint ui-helper';hint.textContent=cleanText(options.hint,500);body.appendChild(hint);}
         // One optional tick box; when shown, the result carries `checked`.
         if(options.checkbox&&options.checkbox.label){
@@ -206,9 +214,9 @@ registry.define('interactions',1,()=>{
           inputCheckbox=made.box;checks.appendChild(made.row);body.appendChild(checks);
         }
         if(typeof options.preview==='function'){
-          const preview=document.createElement('div');preview.className='interaction-preview ui-mono';preview.textContent=cleanText(options.preview(inputElement.value,selectedOption),300);body.appendChild(preview);
-          inputElement.addEventListener('input',()=>{preview.textContent=cleanText(options.preview(inputElement.value,selectedOption),300);error.hidden=true;});
-        }else inputElement.addEventListener('input',()=>{error.hidden=true;});
+          const preview=document.createElement('div');preview.className='interaction-preview ui-mono';preview.setAttribute('aria-live','polite');preview.textContent=cleanText(options.preview(inputElement?inputElement.value:'',selectedOption),300);body.appendChild(preview);
+          inputElement?.addEventListener('input',()=>{preview.textContent=cleanText(options.preview(inputElement.value,selectedOption),300);error.hidden=true;});
+        }else inputElement?.addEventListener('input',()=>{error.hidden=true;});
       }
       if(request.type==='choose'){
         const choices=document.createElement('div');choices.className='interaction-choices';
@@ -318,7 +326,6 @@ registry.define('interactions',1,()=>{
       const actions=document.createElement('div');actions.className='interaction-actions';
       const cancel=button(options.cancelLabel||'Cancel','ghost');cancel.dataset.interactionCancel='true';cancel.addEventListener('click',()=>settle(request.type==='confirm'?false:null));
       actions.appendChild(cancel);
-      let primary=null;
       if(request.type!=='choose'){
         primary=button(options.confirmLabel||(request.type==='input'?'Continue':'Confirm'),options.danger?'danger':options.caution?'caution':'primary');
         primary.addEventListener('click',()=>{
@@ -328,7 +335,7 @@ registry.define('interactions',1,()=>{
           if(confirmationElement&&confirmationElement.value!==value){error.textContent='Passwords do not match.';error.hidden=false;confirmationElement.focus();return;}
           const validation=typeof options.validate==='function'?cleanText(options.validate(value,selectedOption),300):(options.required&&!value?cleanText(options.requiredMessage||'Enter a value to continue.',300):'');
           if(validation){error.textContent=validation;error.hidden=false;inputElement?.focus();return;}
-          settle(freeze({value,option:selectedOption,...(inputCheckbox?{checked:inputCheckbox.checked}:{})}));
+          settle(freeze({value,option:selectedOption,...(inputCheckbox?{checked:inputCheckbox.checked}:{}),...(typeof options.contentValue==='function'?{content:options.contentValue()}:{})}));
         });
         actions.appendChild(primary);
       }
