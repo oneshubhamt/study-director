@@ -1601,6 +1601,7 @@ const NoteExportModule=INTERNAL_MODULES.load('note-export',2,'study-director.not
 const LibraryClearModule=INTERNAL_MODULES.load('library-clear',1,'study-director.library-clear-module',2);
 const NoteLinksModule=INTERNAL_MODULES.load('note-links',1,'study-director.note-links-module',1);
 const ProfilesModule=INTERNAL_MODULES.load('profiles',1,'study-director.profiles-module',1);
+const NoteCatalogueModule=INTERNAL_MODULES.load('note-catalogue',1,'study-director.note-catalogue-module',1);
 const LibraryModule=INTERNAL_MODULES.load('library',1,'study-director.library-module',1);
 const ManagedRepositoryModule=INTERNAL_MODULES.load('managed-repository',1,'study-director.managed-repository-module',1);
 const RepositoryPolicyModule=INTERNAL_MODULES.load('repository-policy',1,'study-director.repository-policy-module',1);
@@ -6041,92 +6042,13 @@ function inheritedNoteEntries(areaKey){
     .map(entry=>({key:entry.key,label:entry.label||displayAreaName(entry.key),value:String(entry.text||''),text:plainTextContent(entry.text||'')}))
     .reverse();
 }
-// "Support Activities" names the one shared support note, so no other note
-// takes it, alone or as the start of a path ("Support Activities > res" made a
-// second, look-alike Area).
-function reservedNoteTitle(key){return String(key||'').split(' > ')[0]===normalizeAreaName(SUPPORT_NOTE.label);}
-function normalizeOngoingAreaInput(value){
-  const raw=clampText(String(value||'').trim(),APP_LIMITS.maxAreaNameChars);
-  const key=normalizeAreaName(raw);
-  if(!key)return null;
-  return Object.freeze({key,label:clampText(displayAreaName(raw),APP_LIMITS.maxAreaNameChars),reserved:reservedNoteTitle(key)});
-}
-function orderOngoingAreaEntries(source){
-  const entries=new Map();
-  (source||[]).forEach(raw=>{
-    if(!raw||typeof raw!=='object')return;
-    const key=normalizeAreaName(raw.key||raw.label);
-    if(!key)return;
-    const existing=entries.get(key)||{
-      key,id:'',label:displayAreaName(raw.label||key),text:'',hasNote:false,current:false,updatedAt:'',ephemeral:false,support:false
-    };
-    if(raw.id)existing.id=String(raw.id);
-    if(raw.label)existing.label=displayAreaName(raw.label);
-    if(raw.text!==undefined)existing.text=String(raw.text||'');
-    existing.hasNote=existing.hasNote||!!raw.hasNote||!!existing.text.trim();
-    existing.current=existing.current||!!raw.current;
-    existing.ephemeral=existing.ephemeral||!!raw.ephemeral;
-    existing.support=existing.support||!!raw.support||key===SUPPORT_NOTE.key;
-    if(raw.updatedAt)existing.updatedAt=String(raw.updatedAt);
-    entries.set(key,existing);
-  });
-  const parentKey=key=>{
-    const parts=String(key||'').split(' > ');
-    return parts.length>1?parts.slice(0,-1).join(' > '):'';
-  };
-  const values=[...entries.values()];
-  const children=new Map();
-  values.forEach(entry=>{
-    const parent=parentKey(entry.key);
-    const group=children.get(parent)||[];
-    group.push(entry);children.set(parent,group);
-  });
-  // Support Activities first, then by name at every level.
-  const compare=(a,b)=>(Number(b.support)-Number(a.support))
-    ||a.label.localeCompare(b.label,undefined,{sensitivity:'base',numeric:true});
-  children.forEach(group=>group.sort(compare));
-  const ordered=[],seen=new Set();
-  const visit=entry=>{
-    if(!entry||seen.has(entry.key))return;
-    seen.add(entry.key);ordered.push(entry);
-    (children.get(entry.key)||[]).forEach(visit);
-  };
-  (children.get('')||[]).forEach(visit);
-  values.filter(entry=>!seen.has(entry.key)).sort(compare).forEach(visit);
-  return ordered.map(entry=>Object.freeze({
-    ...entry,depth:Math.max(0,entry.key.split(' > ').length-1)
-  }));
-}
-let noteCatalogueCache=null;
-function ongoingAreaTaskHierarchySignature(){return TASKS.filter(hasOngoingTaskNotes).map(task=>`${noteKeyForTask(task)}\u0000${noteLabelForTask(task)}`).join('\u0001');}
+// The notes the Library lists (core/note-catalogue.js).
+const NoteCatalogue=NoteCatalogueModule.createCatalogue(Object.freeze({ports:Object.freeze({
+  names:Object.freeze({normalize:value=>normalizeAreaName(value),display:value=>displayAreaName(value),clamp:value=>clampText(value,APP_LIMITS.maxAreaNameChars),parentKeys:key=>areaParentKeys(key)}),
+  sources:Object.freeze({notes:()=>AppData.notes.metadataSnapshot(),planAreas:()=>TASKS.filter(hasOngoingTaskNotes).map(task=>Object.freeze({key:noteKeyForTask(task),label:noteLabelForTask(task)}))}),
+  support:Object.freeze({key:SUPPORT_NOTE.key,label:SUPPORT_NOTE.label})
+})}));
 function noteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
-function noteCatalogue(){
-  const snapshot=AppData.notes.metadataSnapshot(),hierarchy=ongoingAreaTaskHierarchySignature();
-  if(noteCatalogueCache&&noteCatalogueCache.revision===snapshot.revision&&noteCatalogueCache.hierarchy===hierarchy)return noteCatalogueCache.entries;
-  const entries=new Map();
-  // Notes are listed by title key; a stored note also carries its permanent id.
-  const ensure=(key,label,{hasNote=false,current=false,updatedAt='',id=''}={})=>{
-    const safeKey=normalizeAreaName(key);
-    if(!safeKey)return;
-    const support=safeKey===SUPPORT_NOTE.key;
-    const existing=entries.get(safeKey)||{key:safeKey,id:'',label:support?SUPPORT_NOTE.label:displayAreaName(label||safeKey),hasNote:false,current:false,updatedAt:'',support};
-    if(id)existing.id=String(id);
-    if(label)existing.label=support?SUPPORT_NOTE.label:displayAreaName(label);
-    existing.hasNote=existing.hasNote||!!hasNote;
-    existing.current=existing.current||!!current;
-    if(updatedAt)existing.updatedAt=String(updatedAt);
-    entries.set(safeKey,existing);
-  };
-  snapshot.records.forEach(entry=>ensure(entry.key,entry.label,{hasNote:entry.hasNote,updatedAt:entry.updatedAt,id:entry.id}));
-  TASKS.filter(hasOngoingTaskNotes).forEach(task=>ensure(noteKeyForTask(task),noteLabelForTask(task),{current:true}));
-  [...entries.values()].forEach(entry=>{
-    const labelParts=displayAreaName(entry.label).split(' > ');
-    areaParentKeys(entry.key).forEach((key,index)=>ensure(key,labelParts.slice(0,index+1).join(' > ')));
-  });
-  const ordered=Object.freeze(orderOngoingAreaEntries([...entries.values()]));
-  noteCatalogueCache=Object.freeze({revision:snapshot.revision,hierarchy,entries:ordered});
-  return ordered;
-}
 let refreshLibraryNotes=()=>false;
 let updateNoteSearchDocument=()=>false;
 function updateNoteSearchText(key,plain){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
@@ -8595,7 +8517,7 @@ async function renameNoteTag(from,to){
 async function importNoteFiles(files,parent=''){
   if(!appCanMutate())throw new Error('Use the primary tab to import notes.');
   const list=[...(files||[])],made=[],skipped=[];
-  const titleFor=name=>{const base=clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;AppData.notes.get(title)||reservedNoteTitle(normalizeAreaName(title));count++)title=`${full} (${count})`;return title;};
+  const titleFor=name=>{const base=clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;AppData.notes.get(title)||NoteCatalogue.reserved(normalizeAreaName(title));count++)title=`${full} (${count})`;return title;};
   return RichTextRuntime.quiesce(()=>AppMutationCoordinator.runExclusive('import-notes',async()=>{
     let full=false;
     for(const file of list){
@@ -10150,7 +10072,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     focusEditor:field=>{void RichTextRuntime.activate(field,{focus:true}).catch(error=>AppDiagnostics.capture('library.note-focus',error,'warn'));},
     // Recently deleted gives way at the limit, so only live notes count here.
     canCreate:()=>AppData.notes.metadataSnapshot().records.length<APP_LIMITS.maxNotes,
-    catalogue:noteCatalogue,
+    catalogue:()=>NoteCatalogue.entries(),
     clearEditor:clearTaskNoteEditorBinding,
     clearFind:field=>RichTextRuntime.clearFind(field),
     commitEditor:commitTaskNoteEditor,
@@ -10159,9 +10081,9 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     get:(key,label)=>AppData.notes.get(key,label),
     importFiles:(files,parent)=>importNoteFiles(files,parent),
     linksBar:options=>NoteLinks.bar(options),
-    normalizeArea:normalizeOngoingAreaInput,
+    normalizeArea:value=>NoteCatalogue.normalizeName(value),
     normalizeTag:value=>RichTextApi.normalizeTag(value),
-    orderEntries:orderOngoingAreaEntries,
+    orderEntries:list=>NoteCatalogue.order(list),
     purgeTrash:()=>AppData.notes.purgeExpiredTrash(),
     remove:key=>AppData.notes.remove(key),
     renameAreaInPlans:(title,label)=>PlanRuntime.renameArea(title,label),
