@@ -50,7 +50,19 @@ try{
   await b.evaluate(`[...document.querySelectorAll('button')].find(button=>button.textContent==='Cancel'&&button.offsetParent!==null)?.click()`);
   await waitFor(async()=>!(await b.evaluate(keptLabel)),{label:'B closes the review',timeout:20000});
   // The profile indicator shows the review as a yellow badge on every screen size.
-  await waitFor(()=>b.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.badge==='review')`),{label:'B shows the review badge',timeout:20000});
+  try{
+    await waitFor(()=>b.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.badge==='review')`),{label:'B shows the review badge',timeout:20000});
+  }catch(error){
+    const state=await b.evaluate(`(async()=>{const d=__PWA6,input=d.syncStatusInput(),model=d.BackupPresentation.status(input);return {
+      keptCount:d.KeptVersions.count(),
+      canonicalReviews:(await d.AppData.pendingReviews.list()).map(review=>({id:review.id,subject:review.subject,resolvedAt:review.resolvedAt||'',keptText:review.kept?.text||''})),
+      notice:d.NoticeCoordinator.readEvent('sync','kept-new')||null,
+      input:{kept:input.kept,storage:input.storage,reminder:input.reminder,drive:input.drive},
+      model:{ring:model.ring,badge:model.badge,count:model.count,label:model.label,items:model.items},
+      rendered:['profile-tag','profile-badge'].map(id=>{const node=document.getElementById(id);return {id,badge:node?.dataset.badge||'',ring:node?.dataset.ring||'',aria:node?.getAttribute('aria-label')||''};})
+    };})()`);
+    throw new Error(`${error.message}; state=${JSON.stringify(state)}`,{cause:error});
+  }
   assert.match(await b.evaluate(`document.getElementById('profile-badge').getAttribute('aria-label')`),/kept versions? to review/u,'the phone circle names what waits for review');
   // It pops up once when it first appears (phase 4), with Review.
   const keptToast=`[...document.querySelectorAll('#sd-toast-region .interaction-toast')].filter(node=>node.textContent.includes('Kept for review')).map(node=>({text:node.textContent,review:[...node.querySelectorAll('button')].some(button=>button.textContent==='Review')}))`;
