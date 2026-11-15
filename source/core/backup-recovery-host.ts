@@ -121,6 +121,32 @@ const createModule=()=>{
     return freeze({format:'study-director.kept-versions' as const,contractVersion:1 as const,refresh,review,count:()=>count,note:(id:string)=>notes.has(String(id||''))});
   }
 
+  function createRetainedBackupFiles(input:Readonly<import('../../types/backup-recovery-host.ts').RetainedBackupFilesInput>):Readonly<import('../../types/backup-recovery-host.ts').RetainedBackupFilesController>{
+    exactObject(input,['restoreJournalPayload','repositoryIntegrityState'],'Retained backup files input');
+    if(typeof input.restoreJournalPayload!=='function'||typeof input.repositoryIntegrityState!=='function')throw new TypeError('Retained backup file readers are invalid.');
+    async function names(){
+      const payload=await input.restoreJournalPayload(),integrity=await input.repositoryIntegrityState(),retained:string[]=[];
+      const journal=payload&&typeof payload==='object'?payload as Record<string,unknown>:null;
+      const backupFile=journal?.['backupFile'];
+      if(backupFile&&typeof backupFile==='object'){
+        const name=String((backupFile as Record<string,unknown>)['name']||'');if(name)retained.push(name);
+      }
+      const root=integrity&&typeof integrity==='object'?integrity as Record<string,unknown>:null;
+      const locations=root?.['locations'];
+      if(locations&&typeof locations==='object')for(const target of Object.values(locations as Record<string,unknown>)){
+        if(!target||typeof target!=='object')continue;
+        const partial=(target as Record<string,unknown>)['partial'];if(!partial||typeof partial!=='object')continue;
+        const row=partial as Record<string,unknown>;
+        for(const part of [row['stored'],row['plain']]){
+          if(!part||typeof part!=='object')continue;
+          const name=String((part as Record<string,unknown>)['name']||'');if(name)retained.push(name);
+        }
+      }
+      return freeze([...new Set(retained)]);
+    }
+    return freeze({format:'study-director.retained-backup-files' as const,contractVersion:1 as const,names});
+  }
+
   function createStorageReset(input:Readonly<StorageResetInput>):Readonly<StorageResetController>{
     exactObject(input,['authority','canonical','writeback','provider','device','storage','presentation','ownership','mutation','background','session','view','readiness','diagnostics','environment'],'Storage reset recovery input');
     functions(input.authority,['canMutate'],'Storage reset authority');
@@ -712,7 +738,7 @@ const createModule=()=>{
       status:()=>freeze({managedRecovery:coordinator.status(),history:freeze({busy,entries:lastEntries,sourceId:activeSourceId,sourceLabel:activeSourceLabel,progress:progressValue(),status:statusValue()})})
     });
   }
-  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost,createPendingStore,createKeptVersions,createStorageReset});
+  return freeze({format:'study-director.backup-recovery-host-module',contractVersion:1,createHost,createPendingStore,createKeptVersions,createRetainedBackupFiles,createStorageReset});
 };
 registry.define('backup-recovery-host',1,createModule);return createModule;
 })();

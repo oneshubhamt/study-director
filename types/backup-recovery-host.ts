@@ -126,3 +126,12 @@ export interface StorageResetController{
   connectionsChanged():boolean;
 }
 
+
+export interface RetainedBackupFilesInput{
+  readonly restoreJournalPayload:()=>Promise<unknown>;
+  readonly repositoryIntegrityState:()=>Promise<unknown>;
+}
+export interface RetainedBackupFilesController{
+  readonly format:'study-director.retained-backup-files';readonly contractVersion:1;
+  names():Promise<readonly string[]>;
+}

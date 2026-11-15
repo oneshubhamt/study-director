@@ -3067,13 +3067,14 @@ ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze({
 function timerMetricElements(...args){return ExecutionViews.timerMetricElements(...args);}
 function updateTimerFocusMetrics(...args){return ExecutionViews.updateTimerFocusMetrics(...args);}
 /* PORTABLE ONGOING-NOTE EXPORT · READ-ONLY */
-async function retainedBackupFileNames(){
-  const payload=await JournalAppMeta.read('restoreJournalPayload');
-  const integrity=await BackupAppMeta.read('repositoryIntegrityScrub'),names=payload?.backupFile?.name?[payload.backupFile.name]:[];
-  for(const target of Object.values(integrity?.locations||{}))for(const part of [target?.partial?.stored,target?.partial?.plain])if(part?.name)names.push(part.name);
-  return names;
+const RetainedBackupFiles=BackupRecoveryHostModule.createRetainedBackupFiles(Object.freeze({
+  restoreJournalPayload:()=>JournalAppMeta.read('restoreJournalPayload'),
+  repositoryIntegrityState:()=>BackupAppMeta.read('repositoryIntegrityScrub')
+}));
+if(!Object.isFrozen(RetainedBackupFiles)||RetainedBackupFiles.format!=='study-director.retained-backup-files'||RetainedBackupFiles.contractVersion!==1){
+  throw new Error('Study Director retained backup-file policy is unavailable or incompatible.');
 }
-const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks:navigator.locks,root:ProfileScope.scoped('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'),retained:retainedBackupFileNames,isAvailable:()=>upkeepBlocker()||(navigator.storage?.getDirectory&&navigator.locks?.request?true:'storage-unavailable'),onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')});
+const BackupFiles=ExportsModule.createFileStore({storage:navigator.storage,locks:navigator.locks,root:ProfileScope.scoped('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@'),retained:()=>RetainedBackupFiles.names(),isAvailable:()=>upkeepBlocker()||(navigator.storage?.getDirectory&&navigator.locks?.request?true:'storage-unavailable'),onError:error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn')});
 let fileProcessingNotice=null;
 const Exports=ExportsModule.createCoordinator({
   createWorker:()=>new Worker(trustedAssetURL('@@SD_EXPORT_WORKER_FILENAME@@'),{name:'study-director-exports'}),window,document,files:BackupFiles,
