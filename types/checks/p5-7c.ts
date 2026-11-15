@@ -22,6 +22,7 @@ type References=ReturnType<AttachmentsModule['createReferenceCoordinator']>;
 declare const runtime:BackupRuntime;
 declare const appData:AppData;
 declare const repositoryMaintenance:RepositoryMaintenanceController;
+declare const maintenanceModule:BackupMaintenanceHostModule;
 declare const integrity:BackupIntegrityController;
 declare const storage:AssetStore;
 declare const references:References;
@@ -106,3 +107,9 @@ const automaticBackupPolicyInput=Object.freeze({
 }) satisfies Readonly<AutomaticBackupPolicyInput>;
 const automaticBackupPolicy=readinessModule.createAutomaticBackupPolicy(automaticBackupPolicyInput);
 runtime.providers.configureAutomaticBackup(automaticBackupPolicy);
+
+const providerBackgroundBridge=maintenanceModule.createProviderBackgroundBridge(Object.freeze({
+  provider:()=>runtime.providers,capture:(_scope:string,_error:unknown,_level:'warn')=>{}
+}));
+providerBackgroundBridge.noteChange(Object.freeze({urgent:true,reason:'canonical-commit'}));
+void providerBackgroundBridge.waiting();
