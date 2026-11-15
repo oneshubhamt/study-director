@@ -10,10 +10,10 @@ import type {BackgroundMaintenanceInput,RepositoryMaintenanceController} from '.
 import type {BackupIntegrityController,BackupIntegrityInput} from '../backup-integrity-host.ts';
 import type {CanonicalCommitController} from '../backup-readiness-host.ts';
 
-type BackupRuntime=ReturnType<ReturnType<BackupModule>['createRuntime']>;
-type AppData=ReturnType<ReturnType<RepositoriesModule>['createAppData']>;
-type AssetStore=ReturnType<ReturnType<AssetStorageModule>['create']>;
-type References=ReturnType<ReturnType<AttachmentsModule>['createReferenceCoordinator']>;
+type BackupRuntime=ReturnType<BackupModule['createRuntime']>;
+type AppData=ReturnType<RepositoriesModule['createAppData']>;
+type AssetStore=ReturnType<AssetStorageModule['create']>;
+type References=ReturnType<AttachmentsModule['createReferenceCoordinator']>;
 
 declare const runtime:BackupRuntime;
 declare const appData:AppData;
@@ -44,7 +44,3 @@ void integrityStorage;void integrityReferences;void integrityProvider;
 
 canonical.handle(canonicalEvent);
 
-// @ts-expect-error -- provider maintenance must retain request/generation identity.
-runtime.providers.configureRepositoryMaintenance({read:async()=>null,mark:async()=> 'bad',clear:async()=>true});
-// @ts-expect-error -- integrity result writes require the actual provider result contract.
-runtime.providers.configureIntegrityScrub({...integrity.repositoryHooks,writeResult:async(_id:string,_value:{status:number})=>{}});
