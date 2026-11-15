@@ -3833,7 +3833,18 @@ StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze({
     settingsFlush:()=>{protectedPreferencesDirty=true;return flushProtectedPreferences();},hasTasks:()=>TASKS.length>0,
     writeLiveDraft:()=>writeLiveDraftNow({markChanged:false})
   }),
-  provider:BackupProviderRuntime,device:DeviceBackup,
+  provider:Object.freeze({
+    history:(id,options)=>BackupProviderRuntime.history(id,options),
+    restoreRepositoryProviderVersion:(id,options)=>BackupProviderRuntime.restoreRepositoryProviderVersion(id,options),
+    bringInRepositoryProvider:(id,options)=>BackupProviderRuntime.bringInRepositoryProvider(id,options),
+    syncRepositoryProvider:id=>BackupProviderRuntime.syncRepositoryProvider(id),
+    list:()=>BackupProviderRuntime.list(),locationStatus:id=>BackupProviderRuntime.locationStatus(id),
+    suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason),connected:id=>BackupProviderRuntime.connected(id)
+  }),
+  device:Object.freeze({
+    status:()=>DeviceBackup.status(),connect:()=>DeviceBackup.connect(),install:()=>DeviceBackup.install(),refreshPermission:()=>DeviceBackup.refreshPermission(),
+    rememberAfterStorageReset:()=>DeviceBackup.rememberAfterStorageReset()
+  }),
   storage:Object.freeze({
     health:()=>readStorageHealth(),updateHealth:patch=>writeStorageHealth(patch),
     storedHealth:()=>AppData.local.getJson(STORAGE_KEYS.storageHealth,null),indexedDbLifecycle:()=>IndexedDb.lifecycle()
@@ -3845,7 +3856,7 @@ StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze({
   ownership:Object.freeze({announceStorageReset:detectedAt=>AppOwnership.announceStorageReset(detectedAt)}),
   mutation:Object.freeze({settled:()=>AppMutationCoordinator.settled()}),background:Object.freeze({wake:reason=>wakeBackgroundOperations(reason)}),
   session:Object.freeze({hasBlocking:()=>hasBlockingActiveSession(),suspend:()=>suspendTodaySession()}),
-  view:Object.freeze({refreshAfterWriteback:()=>{refreshNoteConsumers();renderSched();}}),readiness:VerifiedRecovery,
+  view:Object.freeze({refreshAfterWriteback:()=>{refreshNoteConsumers();renderSched();}}),readiness:Object.freeze({reconcileStartupChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock()}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   environment:Object.freeze({now:()=>Date.now(),nowIso:()=>new Date().toISOString(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)})
 }));
