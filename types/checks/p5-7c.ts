@@ -68,8 +68,18 @@ const storageResetCanonical=Object.freeze({
   planDataRead:()=>appData.planData.read(),attachmentsList:()=>storage.list(),pendingReviewsList:()=>appData.pendingReviews.list(),
   savedDayDeletions:()=>appData.deletionRecovery.savedDays(),noteDeletions:()=>appData.deletionRecovery.notes()
 }) satisfies StorageResetInput['canonical'];
-const storageResetProvider=runtime.providers satisfies StorageResetInput['provider'];
-const storageResetDevice=deviceBackup satisfies StorageResetInput['device'];
+const storageResetProvider=Object.freeze({
+  history:(id:string,options:Parameters<StorageResetInput['provider']['history']>[1])=>runtime.providers.history(id,options),
+  restoreRepositoryProviderVersion:(id:string,options:Parameters<StorageResetInput['provider']['restoreRepositoryProviderVersion']>[1])=>runtime.providers.restoreRepositoryProviderVersion(id,options),
+  bringInRepositoryProvider:(id:string,options:Parameters<StorageResetInput['provider']['bringInRepositoryProvider']>[1])=>runtime.providers.bringInRepositoryProvider(id,options),
+  syncRepositoryProvider:(id:string)=>runtime.providers.syncRepositoryProvider(id),
+  list:()=>runtime.providers.list(),locationStatus:(id:string)=>runtime.providers.locationStatus(id),
+  suspendBackground:(reason:string)=>runtime.providers.suspendBackground(reason),connected:(id:string)=>runtime.providers.connected(id)
+}) satisfies StorageResetInput['provider'];
+const storageResetDevice=Object.freeze({
+  status:()=>deviceBackup.status(),connect:()=>deviceBackup.connect(),install:()=>deviceBackup.install(),refreshPermission:()=>deviceBackup.refreshPermission(),
+  rememberAfterStorageReset:()=>deviceBackup.rememberAfterStorageReset()
+}) satisfies StorageResetInput['device'];
 void storageResetCanonical;void storageResetProvider;void storageResetDevice;
 
 recoveryModule.createStorageReset(Object.freeze({
