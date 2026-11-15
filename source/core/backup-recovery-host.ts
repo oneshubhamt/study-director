@@ -409,8 +409,10 @@ const createModule=()=>{
           confirmLabel:'Recover latest',cancelLabel:'Not now'
         });
         offerDismissed=true;if(!accepted)return false;
-        try{const restored=await input.provider.restoreRepositoryProviderVersion('device-folder',{checkpointId:candidate.location.checkpointId,confirmed:true});return !!restored&&restored.cancelled!==true;}
-        catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
+        try{
+          const restored=await input.provider.restoreRepositoryProviderVersion('device-folder',{checkpointId:candidate.location.checkpointId,confirmed:true});
+          return !!restored&&restored.cancelled!==true&&restored.verified===true;
+        }catch(error){input.diagnostics.capture('backup.device-recovery-offer',error,'warn');return false;}
       }finally{offerRunning=false;}
     }
     async function connectDevice(){
