@@ -73,6 +73,7 @@ const DeviceFolderStorageModule=INTERNAL_MODULES.load('device-folder-storage',1,
 const DeviceBackupModule=INTERNAL_MODULES.load('device-backup',1,'study-director.device-backup-module',1);
 const BackupActionsHostModule=INTERNAL_MODULES.load('backup-actions-host',1,'study-director.backup-actions-host-module',1);
 const BackupReadinessHostModule=INTERNAL_MODULES.load('backup-readiness-host',1,'study-director.backup-readiness-host-module',1);
+const BackupMaintenanceHostModule=INTERNAL_MODULES.load('backup-maintenance-host',1,'study-director.backup-maintenance-host-module',1);
 const BackupRecoveryHostModule=INTERNAL_MODULES.load('backup-recovery-host',1,'study-director.backup-recovery-host-module',1);
 const PwaLifecycleModule=INTERNAL_MODULES.load('pwa-lifecycle',1,'study-director.pwa-lifecycle-module',1);
 const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'study-director.native-capabilities-module',1);
@@ -1497,100 +1498,15 @@ const DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS=AppData.maintenance.intervalMs,DATA_
 // keeps running through a clear. Ownership is asked first: a job configured
 // while the page is still loading asks before start-up exists, and no tab owns
 // writes until start-up has begun.
-function backgroundBlocker({housekeeping=true}={}){
-  if(!appCanMutate())return 'awaiting-control';
-  if(!StartupLifecycle.status().fullyInitialized)return 'startup';
-  return housekeeping&&storageResetUnresolved()?'storage-reset':'';
-}
-// Local upkeep (canonical maintenance, attachment cleanup and checks, scratch
-// files) also gives way to anything the person is doing and to backups. It then
-// waits under the named reason 'foreground-busy', like backup jobs paused by a
-// foreground operation: one watcher, not each job, checks back while the work
-// lasts, and every job is woken the moment it ends. Notices and backup status
-// changes check at once; the watcher's own check is the fallback.
-const FOREGROUND_RECHECK_MS=15000;let foregroundWatch=null;
-function upkeepBlocker(options){
-  const blocker=backgroundBlocker(options);if(blocker)return blocker;
-  // Clean-up decides what nothing refers to; data this build cannot read may.
-  if(UnsupportedData.held())return 'unsupported-data';
-  if(!backgroundMaintenanceForegroundBusy())return '';
-  if(foregroundWatch===null)foregroundWatch=setTimeout(foregroundChanged,FOREGROUND_RECHECK_MS);
-  return 'foreground-busy';
-}
-function foregroundChanged(){
-  if(foregroundWatch===null)return false;
-  clearTimeout(foregroundWatch);foregroundWatch=null;
-  if(backgroundMaintenanceForegroundBusy()){foregroundWatch=setTimeout(foregroundChanged,FOREGROUND_RECHECK_MS);return false;}
-  return wakeBackgroundOperations('foreground-released');
-}
-const BackgroundOperations=OperationLifecycle.createGroup((id,error)=>AppDiagnostics.capture('background.owner.'+id,error,'warn'));
-let backgroundOwnersInstalled=false;
-function installBackgroundOwners(){
-  if(backgroundOwnersInstalled)return;
-  for(const [id,owner] of [
-    ['canonical',Object.freeze({wake:trigger=>DataMaintenanceJob.wake(trigger,true)})],
-    ['attachments',Object.freeze({wake:trigger=>RichTextAssetMaintenance.wake(trigger)})],
-    ['attachment-integrity',Object.freeze({wake:trigger=>AttachmentIntegrityJob.wake(trigger,true)})],
-    ['temporary-files',BackupFiles],
-    // The Device Folder's own folder is settled before its backups run.
-    ['device-folder',Object.freeze({wake:()=>DeviceBackup.wake()})],
-    ['backup-locations',Object.freeze({wake:BackupProviderRuntime.wakeBackground})]
-  ])BackgroundOperations.register(id,owner);
-  backgroundOwnersInstalled=true;
-}
-// A page closed in the middle of a change (a sync applying it, perhaps as
-// the phone put the app away) leaves its write lease until it runs out, at
-// most 20 s. This tab owns the app, so the lease is that closed page's:
-// start-up recovery waits for it to end rather than asking for a reload.
-async function waitForClosedTabLease(limitMs=25000){
-  for(let waited=0;waited<limitMs&&AppOwnership.canMutate()&&AppMutationCoordinator.foreignActive();waited+=250)await new Promise(resolve=>setTimeout(resolve,250));
-  return !AppMutationCoordinator.foreignActive();
-}
-function wakeBackgroundOperations(trigger='eligibility'){
-  if(!StartupLifecycle.status().fullyInitialized)return false;
-  installBackgroundOwners();BackgroundOperations.wake(trigger);return true;
-}
+let BackgroundMaintenance=null,DataMaintenanceJob=null;
+function backgroundBlocker(options={}){return BackgroundMaintenance?BackgroundMaintenance.backgroundBlocker(options):'startup';}
+function upkeepBlocker(options={}){return BackgroundMaintenance?BackgroundMaintenance.upkeepBlocker(options):'startup';}
+function foregroundChanged(){return BackgroundMaintenance?.foregroundChanged()||false;}
+function wakeBackgroundOperations(trigger='eligibility'){return BackgroundMaintenance?.wake(trigger)||false;}
+function backgroundMaintenanceForegroundBusy(){return BackgroundMaintenance?BackgroundMaintenance.foregroundBusy():true;}
+function waitForClosedTabLease(limitMs=25000){return BackgroundMaintenance?BackgroundMaintenance.waitForClosedTabLease(AppOwnership,AppMutationCoordinator,limitMs):Promise.resolve(false);}
+function scheduleDataMaintenance(delay=1200,trigger='scheduled'){return BackgroundMaintenance?.schedule(delay,trigger)||false;}
 NoticeCoordinator.subscribe(()=>{foregroundChanged();});
-function backgroundMaintenanceStatusBusy(owner,field='busy'){
-  try{return !!owner?.status?.()?.[field];}
-  catch(error){try{AppDiagnostics.capture('maintenance.foreground-status',error);}catch{}return true;}
-}
-function backgroundMaintenanceForegroundBusy(){
-  return !!pwaUpdateReservation||backgroundMaintenanceStatusBusy(AppMutationCoordinator,'active')||backgroundMaintenanceStatusBusy(AttachmentIngest)||backgroundMaintenanceStatusBusy(Exports)||backgroundMaintenanceStatusBusy(BackupController)||backgroundMaintenanceStatusBusy(BackupProviderRuntime);
-}
-const DataMaintenanceJob=OperationLifecycle.createJob({
-  environment:{now:()=>Date.now(),setTimeout,clearTimeout},
-  isAvailable:()=>upkeepBlocker({housekeeping:false})||true,
-  retryMs:DATA_MAINTENANCE_FAILURE_RETRY_MS,capture:error=>AppDiagnostics.capture('maintenance.schedule',error,'error'),
-  execute:async({trigger,nextEligibleAt})=>{
-    if(backgroundMaintenanceForegroundBusy())return Object.freeze({status:'skipped',reason:'foreground-busy'});
-    const traceId=BackupOperationDiagnostics.start('data-maintenance','Canonical storage',{background:true,trigger,nextEligibleAt,actionable:true});BackupOperationDiagnostics.mark('data-maintenance-eligibility',{trigger,nextEligibleAt,actionable:true},traceId);
-    const foregroundCheck=()=>{if(backgroundMaintenanceForegroundBusy())throw Object.assign(new Error('Data maintenance yielded.'),{code:'DATA_MAINTENANCE_YIELDED',reason:'foreground-busy'});};
-    const workBudget=OperationLifecycle.createWorkBudget({now:()=>Date.now(),milliseconds:20000,check:foregroundCheck,yieldError:()=>Object.assign(new Error('Data maintenance yielded.'),{code:'DATA_MAINTENANCE_YIELDED',reason:'budget'})});
-    try{
-      const result=await AppData.maintenance.run({check:foregroundCheck,workBudget});
-      const status=String(result&&result.status||'failed'),reason=String(result&&result.reason||'');
-      BackupOperationDiagnostics.finish({status,result:status,reason},traceId);
-      if(status==='yielded')scheduleDataMaintenance(15000,reason||'yielded');
-      else if(status==='completed'){
-        // The rest of the daily upkeep follows: notes past their 30 days in
-        // Recently deleted go, then attachment cleanup sweeps unused files.
-        try{AppData.notes.purgeExpiredTrash();}catch(error){AppDiagnostics.capture('maintenance.trash',error,'warn');}
-        scheduleRichTextAssetMaintenance(ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS);
-        scheduleDataMaintenance(DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS,'interval');
-      }
-      else if(status==='skipped'&&reason==='recent'){
-        const lastRun=Date.parse(String(result&&result.lastRun||'')),remaining=Number.isFinite(lastRun)?Math.max(1000,lastRun+DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS-Date.now()):DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS;
-        scheduleDataMaintenance(remaining,'interval');
-      }else if(status==='failed'||reason==='indexeddb-unavailable')DataMaintenanceJob.schedule(DATA_MAINTENANCE_FAILURE_RETRY_MS,'retry','replace');
-      return result;
-    }catch(error){BackupOperationDiagnostics.fail(error,{background:true},traceId);throw error;}
-  }
-});
-function scheduleDataMaintenance(delay=1200,trigger='scheduled'){
-  if(!StartupLifecycle.status().fullyInitialized)return false;
-  return DataMaintenanceJob.schedule(Math.max(0,Number(delay)||0),trigger);
-}
 
 /* ONGOING SUBJECT NOTES · P5.6A CHECKED OWNER */
 const NOTE_EDITOR_BINDING_VERSION=NotesHostModule.bindingVersion;
@@ -4026,48 +3942,50 @@ if(!Object.isFrozen(BackupActions)||BackupActions.format!=='study-director.backu
   throw new Error('Study Director backup controls are unavailable or incompatible.');
 }
 BackupActions.install();
-const REPOSITORY_MAINTENANCE_FORMAT='study-director.repository-maintenance-pending';
-const REPOSITORY_MAINTENANCE_VERSION=4;
-let repositoryMaintenanceWriteChain=Promise.resolve();
-function maintenanceReason(value){const reason=String(value||'requested').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'requested';}
-function maintenanceIso(value,fallback=''){const text=String(value||'');return Number.isFinite(Date.parse(text))?text:fallback;}
-function normalizeRepositoryMaintenancePending(value){
-  const entries=[],seen=new Set(),rows=value&&value.format===REPOSITORY_MAINTENANCE_FORMAT&&Number(value.version)===REPOSITORY_MAINTENANCE_VERSION&&Array.isArray(value.entries)?value.entries:[];
-  for(const raw of rows){
-    const providerId=String(raw&&raw.providerId||''),requestedAt=maintenanceIso(raw&&raw.requestedAt),nextEligibleAt=maintenanceIso(raw&&raw.nextEligibleAt,requestedAt),reason=maintenanceReason(raw&&raw.reason),repositoryScope=String(raw&&raw.repositoryScope||''),requestId=String(raw&&raw.requestId||'');
-    if(!/^[a-z][a-z0-9-]{0,40}$/u.test(providerId)||seen.has(providerId)||!requestedAt||!nextEligibleAt)continue;
-    if(repositoryScope.length>320||requestId&&!/^[a-f0-9-]{36}$/u.test(requestId))continue;seen.add(providerId);entries.push(Object.freeze({providerId,requestedAt,nextEligibleAt,reason,repositoryScope,requestId}));
-  }
-  return Object.freeze({format:REPOSITORY_MAINTENANCE_FORMAT,version:REPOSITORY_MAINTENANCE_VERSION,entries:Object.freeze(entries)});
+BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze({
+  lifecycle:OperationLifecycle,
+  environment:Object.freeze({now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)}),
+  authority:Object.freeze({
+    canMutate:()=>appCanMutate(),fullyInitialized:()=>StartupLifecycle.status().fullyInitialized,
+    storageResetUnresolved:()=>storageResetUnresolved(),unsupportedDataHeld:()=>UnsupportedData.held()
+  }),
+  foreground:Object.freeze({
+    pwaReserved:()=>!!pwaUpdateReservation,mutation:AppMutationCoordinator,attachmentIngest:AttachmentIngest,
+    exports:Exports,backupController:BackupController,providers:BackupProviderRuntime
+  }),
+  data:Object.freeze({maintenance:AppData.maintenance,notes:AppData.notes}),
+  diagnostics:Object.freeze({
+    capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+    start:(kind,label,details)=>BackupOperationDiagnostics.start(kind,label,details),
+    mark:(kind,details,traceId)=>BackupOperationDiagnostics.mark(kind,details,traceId),
+    finish:(details,traceId)=>BackupOperationDiagnostics.finish(details,traceId),
+    fail:(error,details,traceId)=>BackupOperationDiagnostics.fail(error,details,traceId)
+  }),
+  backgroundOwners:()=>Object.freeze([
+    Object.freeze(['attachments',Object.freeze({wake:trigger=>RichTextAssetMaintenance.wake(trigger)})]),
+    Object.freeze(['attachment-integrity',Object.freeze({wake:trigger=>AttachmentIntegrityJob.wake(trigger,true)})]),
+    Object.freeze(['temporary-files',BackupFiles]),
+    Object.freeze(['device-folder',Object.freeze({wake:()=>DeviceBackup.wake()})]),
+    Object.freeze(['backup-locations',Object.freeze({wake:trigger=>BackupProviderRuntime.wakeBackground(trigger)})])
+  ]),
+  scheduleAssetMaintenance:delay=>scheduleRichTextAssetMaintenance(delay),
+  intervals:Object.freeze({
+    maintenanceMs:DATA_MAINTENANCE_SCHEDULE_INTERVAL_MS,failureRetryMs:DATA_MAINTENANCE_FAILURE_RETRY_MS,
+    assetCleanupDelayMs:ATTACHMENT_CLEANUP_AFTER_UPKEEP_MS,foregroundRecheckMs:15000
+  })
+}));
+if(!Object.isFrozen(BackgroundMaintenance)||BackgroundMaintenance.format!=='study-director.background-maintenance-host'||BackgroundMaintenance.contractVersion!==1){
+  throw new Error('Study Director background maintenance host is unavailable or incompatible.');
 }
-async function readRepositoryMaintenancePending({throwOnError=false}={}){try{return normalizeRepositoryMaintenancePending(await BackupAppMeta.read('repositoryMaintenancePending'));}catch(error){AppDiagnostics.capture('backup.repository-maintenance-read',error,'warn');if(throwOnError)throw error;return normalizeRepositoryMaintenancePending(null);}}
-function mutateRepositoryMaintenancePending(providerId,mode,state={},expected=undefined){
-  const id=String(providerId||'');if(!/^[a-z][a-z0-9-]{0,40}$/u.test(id))return Promise.resolve(false);
-  const task=repositoryMaintenanceWriteChain.then(()=>BackupAppMeta.transaction('readwrite',(view,tx,finish)=>{
-    const handle=view.get('repositoryMaintenancePending');let outcome=true;
-    handle.request.onerror=()=>finish(false,handle.request.error||new Error('Maintenance intent could not be read.'));
-    handle.request.onsuccess=()=>{
-      try{
-        const current=normalizeRepositoryMaintenancePending(handle.value()),byId=new Map(current.entries.map(entry=>[entry.providerId,entry])),previous=byId.get(id)||null;
-        if(expected!==undefined&&(!previous!==!expected||expected&&['requestId','requestedAt','nextEligibleAt','reason','repositoryScope'].some(key=>String(previous?.[key]||'')!==String(expected[key]||'')))){outcome='superseded';return;}
-        if(mode==='mark'){
-          const now=new Date().toISOString(),requestedAt=previous?.requestedAt||now,nextEligibleAt=maintenanceIso(state&&state.nextEligibleAt,now),reason=maintenanceReason(state&&state.reason||previous?.reason||'catch-up'),repositoryScope=String((state&&state.repositoryScope)??previous?.repositoryScope??'').slice(0,320),requestId=state.newRequest!==true&&expected!==undefined&&previous?.requestId?previous.requestId:crypto.randomUUID();
-          byId.set(id,Object.freeze({providerId:id,requestedAt,nextEligibleAt,reason,repositoryScope,requestId}));
-        }else byId.delete(id);
-        const next=Object.freeze({format:REPOSITORY_MAINTENANCE_FORMAT,version:REPOSITORY_MAINTENANCE_VERSION,entries:Object.freeze([...byId.values()].sort((a,b)=>a.providerId.localeCompare(b.providerId)))});
-        const write=next.entries.length?view.put('repositoryMaintenancePending',next):view.remove('repositoryMaintenancePending');
-        write.onerror=()=>finish(false,write.error||new Error('Maintenance intent could not be saved.'));
-      }catch(error){finish(false,error);}
-    };
-    tx.oncomplete=()=>finish(true,outcome);
-  },{strict:true,abortMessage:'Maintenance intent transaction aborted'})).catch(error=>{AppDiagnostics.capture('backup.repository-maintenance-write',error,'warn');return false;});
-  repositoryMaintenanceWriteChain=task.then(()=>{});return task;
-}
-const repositoryMaintenanceState=async providerId=>(await readRepositoryMaintenancePending({throwOnError:true})).entries.find(entry=>entry.providerId===String(providerId||''))||null;
-const markRepositoryMaintenancePending=(providerId,state={},expected=undefined)=>mutateRepositoryMaintenancePending(providerId,'mark',state,expected);
-const clearRepositoryMaintenancePending=(providerId,expected=undefined)=>mutateRepositoryMaintenancePending(providerId,'clear',{},expected);
-BackupProviderRuntime.configureRepositoryMaintenance(Object.freeze({read:repositoryMaintenanceState,mark:markRepositoryMaintenancePending,clear:clearRepositoryMaintenancePending}));
-async function canonicalLocalRecoveryEmpty(){
+DataMaintenanceJob=BackgroundMaintenance.job;
+const RepositoryMaintenanceHost=BackupMaintenanceHostModule.createRepositoryMaintenance(Object.freeze({
+  meta:BackupAppMeta,metadataName:'repositoryMaintenancePending',
+  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+  environment:Object.freeze({nowIso:()=>new Date().toISOString(),uuid:()=>crypto.randomUUID()})
+}));
+BackupProviderRuntime.configureRepositoryMaintenance(RepositoryMaintenanceHost.hooks);
+
+async function canonicalLocalRecoveryEmpty(){async function canonicalLocalRecoveryEmpty(){
   try{
     const [records,notePayload,active,plans,assets,reviews]=await Promise.all([
       AppData.dailyRecords.list({strict:true}),AppData.notes.readFreshPayload(),AppData.activeSession.load(0,{strict:true}),AppData.planData.read(),AttachmentStorage.list(),AppData.pendingReviews.list()
