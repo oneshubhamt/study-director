@@ -16,7 +16,7 @@ export type ReconciliationResolveOptions=Readonly<{
   conflicts:readonly ReconciliationConflict[];
   incomingAssets?:readonly ReconciliationAsset[];
   purpose?:string;
-  signal?:AbortSignal|null;
+  signal?:AbortSignal|null|undefined;
   manualOnly?:boolean;
   startWith?:string;
 }>;
