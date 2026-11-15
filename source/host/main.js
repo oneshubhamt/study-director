@@ -5328,7 +5328,7 @@ const CLICK_ACTIONS=Object.freeze({
   'copy-backup-diagnostics': ()=>copyBackupDiagnostics(),
   'cancel-standalone-import': ()=>BackupActions.cancelStandalone(),
   'pick-import-file': ()=>BackupActions.pickImportFile(),
-  'test-sound':  'test-sound': ()=>NoticeCoordinator.testSound(),
+  'test-sound': ()=>NoticeCoordinator.testSound(),
   'test-system-alert': ()=>SystemNotifications.test(),
   'toggle-pomodoro': Pomodoro.configuration.toggleNudges,
   'restore-session': SessionActions.restoreSessionAction,
