@@ -203,7 +203,7 @@ const createModule=()=>{
         }else{
           const value=payloadRow['blob'];if(!(value instanceof Blob))throw new Error('Restore rollback bytes are unavailable.');blob=value;
         }
-        const rows=(value:unknown)=>Array.isArray(value)?value:[];
+        const rows=(value:unknown):readonly unknown[]=>Array.isArray(value)?Array.from(value,(entry:unknown)=>entry):[];
         const savedDayDeletions:SavedDayDeletion[]=rows(payloadRow['savedDayDeletions']).flatMap(entry=>{const item=entry&&typeof entry==='object'?entry as Record<string,unknown>:null,date=String(item?.['date']||''),deletedAt=String(item?.['deletedAt']||'');return date&&deletedAt?[{date,deletedAt}]:[];});
         const noteDeletions:NoteDeletion[]=rows(payloadRow['noteDeletions']).flatMap(entry=>{const item=entry&&typeof entry==='object'?entry as Record<string,unknown>:null,key=String(item?.['key']||''),deletedAt=String(item?.['deletedAt']||'');return key&&deletedAt?[{key,deletedAt}]:[];});
         const attachmentDeletions:AttachmentDeletion[]=rows(payloadRow['attachmentDeletions']).flatMap(entry=>{const item=entry&&typeof entry==='object'?entry as Record<string,unknown>:null,assetId=String(item?.['assetId']||''),deletedAt=String(item?.['deletedAt']||'');return assetId&&deletedAt?[{assetId,deletedAt}]:[];});
