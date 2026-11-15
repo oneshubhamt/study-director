@@ -82,7 +82,7 @@ assert.match(host,/BackupReadinessHostModule\.createBackupNudge\(Object\.freeze\
 assert.match(host,/BackupRecoveryHostModule\.createRuntime\(Object\.freeze\(\{/u,'the production Backup runtime adapters cross the checked owner');
 assert.match(host,/BackupRecoveryHostModule\.createStorageReset\(Object\.freeze\(\{/u,'browser-data-clear recovery crosses the checked owner');
 assert.match(host,/BackupRecoveryHostModule\.createRetainedBackupFiles\(Object\.freeze\(\{/u,'recovery scratch retention crosses the checked owner');
-assert.match(readiness,/function createVerifiedRecovery\(/u);assert.match(readiness,/function createBackupNudge\(/u);assert.match(recovery,/function createMaintenancePause\(/u);assert.match(recovery,/function createRevisionFence\(/u);assert.match(recovery,/function createRuntime\(/u);assert.match(recovery,/function createStorageReset\(/u);assert.match(recovery,/function createRetainedBackupFiles\(/u);
+assert.match(readiness,/function createVerifiedRecovery\(/u);assert.match(readiness,/function createBackupNudge\(/u);assert.match(recovery,/function createMaintenancePause\(/u);assert.match(recovery,/function createRevisionFence\(/u);assert.match(recovery,/function createRuntime\s*\(/u);assert.match(recovery,/function createStorageReset\(/u);assert.match(recovery,/function createRetainedBackupFiles\(/u);
 for(const stale of [
   'const VERIFIED_RECOVERY_META_KEY=','function recordBackupCopy(','function readVerifiedRecoveryState(','async function reconcileChangeClock(','async function maybePromptBackupNudge(','backupNudgeMessage','backupNudgeCheckedAt','backupNudgeNotifiedDate',
   'const STORAGE_RESET_RETRY_MS=','function beginStorageResetHold(','function restoreMissingAfterStorageReset(','function noteDatabaseRemovedWhileClosed(',

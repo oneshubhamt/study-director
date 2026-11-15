@@ -87,8 +87,9 @@ assert.match(app,/'backup-now': \(\)=>BackupActions\.backUpEverywhere\(\)/u);ass
 assert.match(app,/'open-version-history': \(\)=>BackupActions\.openHistory\(\)/u);assert.match(actions,/const openHistory=\(\)=>withPassword\(\(\)=>input\.openHistory\(\)\)/u);
 assert.match(app,/'recover-managed-version': ev=>BackupRecoveryHost\.history\.recover\(ev\)/u);
 assert.doesNotMatch(app,/'restore-latest-backup'|'recover-device-backup'|'recover-provider-backup'|'bring-in-managed-backup'|'restore-managed-version'/u);
-assert.match(app,/SessionLifecycle\.run\('reconciled-notes',[\s\S]*allowDuringRecoveryQuiescence:true/u,'note recovery must checkpoint Review state through managed-recovery quiescence before canonical note mutation.');
-assert.match(app,/SessionLifecycle\.run\('restored-notes-snapshot',[\s\S]*allowDuringRecoveryQuiescence:true/u,'note rollback must retain the same recovery-authorized lifecycle checkpoint path.');
+assert.match(host,/reconcileNotes:\(importedNotes,deletions=\[\]\)=>input\.recoveryNotes\.lifecycle\.run\('reconciled-notes',[\s\S]*allowDuringRecoveryQuiescence:true/u,'note recovery must checkpoint Review state through managed-recovery quiescence before canonical note mutation.');
+assert.match(host,/restoreNotesSnapshot:snapshotNotes=>input\.recoveryNotes\.lifecycle\.run\('restored-notes-snapshot',[\s\S]*allowDuringRecoveryQuiescence:true/u,'note rollback must retain the same recovery-authorized lifecycle checkpoint path.');
+assert.doesNotMatch(app,/SessionLifecycle\.run\('(?:reconciled-notes|restored-notes-snapshot)'/u,'recovery-specific note lifecycle policy must not return to the unchecked main host.');
 assert.match(app,/ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS=new Set\(\[[^\]]*'open-version-history'[^\]]*'recover-managed-version'/u);
 
 assert.doesNotMatch(guide,/\["Restore latest"|\["Backup history"|\["Merge from backup"/u);
