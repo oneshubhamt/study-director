@@ -5,8 +5,8 @@ import type {DeviceBackupModule} from '../../source/core/device-backup.ts';
 import type {DeviceFolderStorageModule} from '../../source/core/device-folder-storage.ts';
 import type {ExportsModule} from '../../source/core/exports.ts';
 import type {BackupControlsInput,BackupProtectionHostInput,BackupProtectionStorageInput,DeviceBackupCompositionInput,DeviceBackupHooksInput} from '../backup-actions-host.ts';
-import type {MetaOwner} from '../app-meta.ts';
 import type {DeviceBackupInput} from '../device-backup.ts';
+import type {MetadataOwners} from '../data-bootstrap-host.ts';
 import type {ProtectionInput} from '../exports.ts';
 
 declare const host:BackupActionsHostModule;
@@ -21,9 +21,9 @@ declare const storageModule:DeviceFolderStorageModule;
 type Token=Readonly<{revision:number}>;
 declare const protectionStorage:ProtectionInput<Token>['storage'];
 declare const protectionInteractions:ProtectionInput<Token>['interactions'];
-declare const protectionMeta:MetaOwner;
+declare const metadataOwners:MetadataOwners;
 
-const checkedProtectionStorage=host.createProtectionStorage<Token>(Object.freeze({meta:protectionMeta,settingName:'backupProtection',settingKey:'backupProtection'} satisfies BackupProtectionStorageInput));
+const checkedProtectionStorage=host.createProtectionStorage<Token>(Object.freeze({meta:metadataOwners.ExportsAppMeta,settingName:'backupProtection',settingKey:'backupProtection'} satisfies BackupProtectionStorageInput));
 const protectionInput=Object.freeze({
   module:exportsModule,processing,storage:checkedProtectionStorage,interactions:protectionInteractions,settingKey:'backupProtection',
   mutation:Object.freeze({remember:()=>true,canMutate:()=>true,issueToken:()=>({revision:1}),assertToken:(_token:Token|null)=>{}}),
