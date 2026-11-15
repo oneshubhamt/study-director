@@ -1,7 +1,6 @@
 import {readHostHtml} from '../../../build/host-source.mjs';
 import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
 
 // The Backup module is given a hand-picked set of limits. A limit it reads but
@@ -16,9 +15,11 @@ assert.ok(declared,'backup.js declares the limits it requires');
 const required=new Set([...declared[1].matchAll(/'([A-Za-z]+)'/gu)].map(match=>match[1]));
 for(const key of read)assert.ok(required.has(key),`backup.js reads APP_LIMITS.${key}, so it must be in REQUIRED_LIMITS`);
 
-const start=app.indexOf('const BackupRuntime=BackupModule.createRuntime(');
-assert.ok(start>=0,'the app creates the Backup runtime');
-const block=app.slice(start,app.indexOf('persistence:Object.freeze({',start)),wired=block.match(/limits:Object\.freeze\(\{([\s\S]*?)\}\)/u);
+const start=app.indexOf('const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(');
+assert.ok(start>=0,'the app creates the checked Backup runtime host');
+const end=app.indexOf('appData:AppData',start);
+assert.ok(end>start,'the checked Backup runtime host exposes its configuration before AppData composition');
+const block=app.slice(start,end),wired=block.match(/limits:Object\.freeze\(\{([\s\S]*?)\}\)/u);
 assert.ok(wired,'the Backup runtime receives a limits object');
 const entries=new Map([...wired[1].matchAll(/([A-Za-z]+):APP_LIMITS\.([A-Za-z]+)/gu)].map(match=>[match[1],match[2]]));
 for(const key of required){
