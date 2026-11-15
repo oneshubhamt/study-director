@@ -17,7 +17,7 @@ const createModule=():ReconciliationUiModule=>{
   }
   function createController(input:Readonly<ReconciliationUiInput>){
     const emptyNotes=():Record<string,{text:string;localCandidateId:string;incomingCandidateId:string}>=>
-      Object.create(null);
+      Object.create(null) as Record<string,{text:string;localCandidateId:string;incomingCandidateId:string}>;
     const focusable=(value:Element):value is Element&{focus(options?:FocusOptions):void}=>{
       const candidate=value as Element&{focus?:unknown};return typeof candidate.focus==='function';
     };
