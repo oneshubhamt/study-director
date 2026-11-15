@@ -1,5 +1,12 @@
 # TypeScript conversion — execution record
 
+## Active work — P5.7B Reconciliation, kept versions and restore, 2026-11-15
+
+- **Baseline / boundary:** latest remote `ts-exp` is `8321d0e6ca57469609ff6edeef787f8f89e12ff2`; P5.7A remains CLOSED — VERIFIED — TARGETED. This pass converts `reconciliation-ui.js`, completes kept-version/history/restore host ownership and callers, and adds actual-provider checks without changing Phase 4 recovery algorithms, canonical data, Drive transport/auth, P5.7C maintenance/integrity, PWA policy or vendored Wordgard.
+- **Audit finding / design:** strict `backup-recovery-host.ts` already owns Version History, provider-scoped restore/remove, recovery lifecycle quiescence and pending-backup retry. The remaining P5.7B owner is the host `KeptVersions` IIFE plus unchecked Reconciliation UI composition. Extend the existing recovery host rather than create a parallel recovery owner; convert Reconciliation UI to strict TypeScript with actual rich-text/assets providers.
+- **Required invariants:** imported/reconciled bytes remain validated by the existing backup/reconciliation engines; safety-copy and restore-journal ordering stay canonical; Plan draft is settled/read back before recovery and remains independent; active-session restoration continues through the checked P5.4/session path; note/Diary reconciliation is user-driven, cancellable and attachment-read-only; stale/concurrently changed kept alternatives remain pending instead of overwriting newer canonical data.
+- **Targeted evidence:** reconcile `integration/rich-text/reconciliation-ui`, `integration/rich-text/reconciliation-engine`, `integration/ui/kept-versions-c6`, `integration/backup/import-lifecycle`, `integration/backup/repository-restore`, `integration/backup/restore-assets`, `integration/backup/current-canonical-roundtrip`; strengthen standing targeted `application-outcomes` / `runtime-boundaries` where ownership or a discovered defect needs an executable witness. Required closure also includes strict types/lint and source/build/generated-syntax checks. No full QA.
+
 ## Latest closure — P5.7A Backup actions, files and protection, 2026-11-15
 
 - **Scope / baseline:** started from latest remote `ts-exp` at `95d77830971efdb338acd2cad87c4284f961b983`, preserving all 203 commits after audit checkpoint `db4587ae037f97f5ae7473f18e6c9c4d2e2aa946`. Source/regression endpoint is `2e350606c2b9692585ba43117d29aa553cae6218`; the commit containing this entry closes P5.7A only. P5.7B/C and P5.8 Drive auth/transport remain untouched.
