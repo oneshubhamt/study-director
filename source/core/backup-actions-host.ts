@@ -1,5 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {BackupActionsHostContract,BackupControls,BackupControlsInput,BackupProtectionHost,BackupProtectionHostInput,DeviceBackupCompositionInput} from '../../types/backup-actions-host.ts';
+import type {DeviceBackupInput,DeviceStatus} from '../../types/device-backup.ts';
 
 const sdBackupActionsHostFactory=(()=>{
 'use strict';
@@ -180,7 +181,7 @@ function createDeviceBackup(input:Readonly<DeviceBackupCompositionInput>){
   if(!Object.isFrozen(storage)||!Object.isFrozen(storage.identities)||!Object.isFrozen(storage.environment)||!Object.isFrozen(storage.limits))throw new TypeError('Device Folder storage providers must be frozen.');
   const controller=input.module.createController(freeze({
     configuration:input.configuration,engine:input.engine,environment:input.environment,hooks:input.hooks,presentation:input.presentation,settings:input.settings,
-    transport:(folder,repository)=>input.storageModule.createStorage(freeze({
+    transport:(folder:Parameters<DeviceBackupInput['transport']>[0],repository:Parameters<DeviceBackupInput['transport']>[1])=>input.storageModule.createStorage(freeze({
       folder,identities:freeze({root:repository,...storage.identities}),owner:storage.owner,checksum:storage.checksum,inspectManifest:storage.inspectManifest,environment:storage.environment,limits:storage.limits
     }))
   }));
