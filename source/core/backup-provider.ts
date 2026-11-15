@@ -574,7 +574,7 @@ const createModule=(input:ProviderModuleInput)=>{
       else{if(opaqueKept>=opaqueLimit)return null;opaqueKept+=1;tier=opaqueKept===1?'latest':'retained';}
       if(item.locked)return freeze({logicalId:'locked_'+item.id,logicalFingerprint:'',exportedAt,counts:null,origin:'',locked:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:true,verification:'on-restore',quarantineDeferred:quarantined.length>0})});
       return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',quarantineDeferred:quarantined.length>0,attachmentsMissing:Number(summary?.attachmentsMissing)||0})});
-    }).filter(Boolean));
+    }).filter((entry):entry is NonNullable<typeof entry>=>entry!==null));
   }
 
   async function repositoryObjectInventory(selected:Provider,{signal=null}:ExportOptions={}):Promise<ObjectInventory>{
