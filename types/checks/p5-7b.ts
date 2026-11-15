@@ -40,7 +40,7 @@ const keptInput=Object.freeze({
   diagnostics:Object.freeze({capture:(_scope:string,_error:unknown,_level:'warn')=>{}}),
   environment:Object.freeze({canMutate:()=>true,now:()=>Date.now(),connectCardOpen:()=>false,sessionYieldedAt:()=>0}),
   notifications:Object.freeze({notify:(_options:Parameters<KeptVersionsInput['notifications']['notify']>[0])=>{},resolveEvent:(_source:string,_id:string)=>{}}),
-  view:Object.freeze({render:()=>{},renderLocation:()=>{},refreshNotes:()=>{}})
+  view:Object.freeze({render:()=>{},renderLocation:()=>{},scheduleStatus:()=>{},refreshNotes:()=>{}})
 }) satisfies Readonly<KeptVersionsInput>;
 recoveryModule.createKeptVersions(keptInput);
 
