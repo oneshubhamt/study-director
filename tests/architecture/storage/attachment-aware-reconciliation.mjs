@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const backup=readScript('source/core/backup.ts');
+const host=readScript('source/core/backup-recovery-host.ts');
 const ui=fs.readFileSync('source/core/reconciliation-ui.ts','utf8');
 const app=readHostHtml();
 
@@ -20,8 +21,9 @@ assert.match(backup,/verified checkpoint does not contain its bytes/,'A selected
 assert.match(backup,/identity collision detected.*local bytes differ/,'Same-ID/different-byte collisions must remain hard failures.');
 assert.match(backup,/AssetData\s*\.scheduleMaintenance\s*\(0\s*\)/,'Post-commit attachment maintenance must still be scheduled.');
 
-assert.match(app,/let richTextAssetMaintenancePauseCount=0/,'Host must track reconciliation maintenance holds.');
-assert.match(app,/mutationActive:\(\)=>richTextAssetMaintenancePauseCount>0\|\|/,'GC must pause while note reconciliation is active.');
-assert.match(app,/withRichTextAssetMaintenancePaused\(\(\)=>NoteReconciliationUI\.resolve\(options\)\)/,'The reconciliation modal must execute inside the attachment-maintenance hold.');
+assert.match(host,/function createMaintenancePause\(/,'The checked recovery owner must own the attachment-maintenance hold lifecycle.');
+assert.match(app,/mutationActive:\(\)=>RecoveryAssetMaintenancePause\.active\(\)\|\|/,'GC must pause while checked recovery reconciliation owns the maintenance hold.');
+assert.match(host,/input\.noteReconciliation\.maintenancePause\.run\(\(\)=>input\.noteReconciliation\.controller\.resolve\(options\)\)/,'The reconciliation modal must execute inside the checked attachment-maintenance hold.');
+assert.doesNotMatch(app,/richTextAssetMaintenancePauseCount|withRichTextAssetMaintenancePaused/u,'The unchecked host must not regain the recovery maintenance state machine.');
 
 console.log(JSON.stringify({status:'PASS',suite:'attachment-aware-reconciliation-contract',checks:20,coverage:['checkpoint preview AssetStore','read-only preview','resolved reference scan','selective publication','missing-byte fail-closed','checksum collision','GC hold','post-commit maintenance']},null,2));
