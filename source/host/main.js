@@ -169,12 +169,20 @@ StorageHealthController=BackupReadinessHostModule.createStorageHealth(Object.fre
   timeLabelFromIso:value=>timeLabelFromIso(value),
   renderCapabilities:()=>NativeCapabilities?renderNativeCapabilities(NativeCapabilities.status()):false
 }));
+function localISODate(dateLike){
+  const d=new Date(dateLike);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 function storageHealthTime(iso){
   if(!iso)return 'never';
   const date=new Date(iso);if(!Number.isFinite(date.getTime()))return 'unknown';
-  const localDate=value=>`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`;
-  return localDate(date)===localDate(new Date())?timeLabelFromIso(iso)||'today':date.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
+  return localISODate(date)===localISODate(new Date())?timeLabelFromIso(iso)||'today':date.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
 }
+function publishSafetyNotice(message,title='Unsaved work needs attention',id='safety'){
+  const text=String(message||'').trim();
+  return NoticeCoordinator.publish(String(id||'safety'),{visible:!!text,kind:'safety',title,message:text||'Resolved.',compact:noticeCanCompact(text)});
+}
+function renderFileBackup(){return BackupActions?.renderFile();}
 const AppDiagnostics=(()=>{
   function capture(scope,error,level='warn'){
     // Contained faults remain observable to external QA without retaining a
