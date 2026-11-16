@@ -1879,8 +1879,8 @@ const BackupOperationDiagnostics=BackupOperationDiagnosticsModule.createRecorder
   configuration:Object.freeze({release:APP_VERSION,limit:20}),
   environment:Object.freeze({now:()=>Date.now()}),
   storage:Object.freeze({
-    read:()=>sessionStorage.getItem('study-director.backup-operation-diagnostics.v1')||'',
-    write:value=>{try{sessionStorage.setItem('study-director.backup-operation-diagnostics.v1',String(value||''));return true;}catch{return false;}}
+    read:()=>sessionStorage.getItem(SESSION_STORAGE_KEYS.backupOperationDiagnostics)||'',
+    write:value=>{try{sessionStorage.setItem(SESSION_STORAGE_KEYS.backupOperationDiagnostics,String(value||''));return true;}catch{return false;}}
   })
 }));
 if(!Object.isFrozen(BackupOperationDiagnostics)||BackupOperationDiagnostics.format!=='study-director.backup-operation-diagnostics'||BackupOperationDiagnostics.contractVersion!==1){
@@ -2766,6 +2766,8 @@ let ownershipBanner=null;
 let AppMutationCoordinator=null;
 let mutationUiOperationActive=false;
 let pwaUpdateReservation=null;
+// Whether this start still owes the profile password prompt (askProfilePassword).
+let profilePasswordDue=false;
 const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
   config:Object.freeze({
     storageKey:STORAGE_KEYS.appOwner,sessionTabKey:SESSION_STORAGE_KEYS.appTab,
@@ -2808,7 +2810,7 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
       await CompatibilityFacade.migrateLive();
       await hydrateSavedDrafts({forcePreferences:true,failClosed:true});
     },
-    resume:()=>resumeTimerLoopAfterPrimaryRestore(),
+    resume:()=>{resumeTimerLoopAfterPrimaryRestore();askProfilePassword();},
     refreshCore:()=>refreshCoreUi(),
     scheduleMaintenance:()=>scheduleDataMaintenance(),
     practiceRender:()=>PracticePacer.render(),
@@ -2846,7 +2848,7 @@ AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze
   },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay),
   // Another tab's lease ran out without being released (it was closed in the
   // middle of a change): background work that waited for it goes now.
-  foreignReleased:()=>wakeBackgroundOperations('mutation-lease-ended')})
+  foreignReleased:()=>{wakeBackgroundOperations('mutation-lease-ended');askProfilePassword();}})
 }));
 if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='study-director.mutation-coordinator'||AppMutationCoordinator.contractVersion!==1)throw new Error('Study Director mutation coordinator is unavailable or incompatible.');
 /* TIMER NUDGE AND SOUND CUES */
@@ -7130,8 +7132,16 @@ async function startProfile(){
 }
 // With several profiles on the device, each person enters their own backup
 // password when switching in; Not now keeps sync and encrypted backups paused.
-function askProfilePassword(){
-  if(Profiles.list().length<2||FirstStart.isOpen()||!appCanMutate())return;
+// Asked once per start. A page that cannot change data when start-up ends
+// (another tab has control, or a page closed mid-change left its lock for a
+// few seconds) asks as soon as it can, instead of never (profilePasswordDue
+// is declared before the ownership hooks that call this).
+function askProfilePassword({start=false}={}){
+  if(start)profilePasswordDue=true;
+  if(!profilePasswordDue)return;
+  if(Profiles.list().length<2||FirstStart.isOpen()){profilePasswordDue=false;return;}
+  if(!appCanMutate())return;
+  profilePasswordDue=false;
   void BackupProtection.ask().catch(setBackupProtectionSurfaceError);
 }
 // Version History reads each encrypted version for its date and counts, so a
@@ -12327,7 +12337,7 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       resumeUnresolvedStorageReset();
       {const life=IndexedDb.lifecycle();void DatabaseLifecycle.start({fresh:life.startedFresh===true,foundVersion:life.foundVersion??0,openedVersion:life.version??0}).catch(error=>AppDiagnostics.capture('storage.lifecycle-start',error,'warn'));}
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
-      void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
+      void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword({start:true});
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
       canonicalProof=proof;document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
       document.documentElement.dataset.studyDirectorRetirementData=proof.retirementDataReady?'ready':proof.canonical?'backup-required':'not-ready';

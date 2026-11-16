@@ -67,7 +67,10 @@ export const PROFILE_SCOPE_SEPARATOR='~';
 export const SESSION_STORAGE_KEYS=freeze({
   appTab:'studyDirector.appTab.v1',
   pwaReload:'studyDirector.pwaReload.v1',
-  notifications:'studyDirector.notifications.v1'
+  notifications:'studyDirector.notifications.v1',
+  // Its spelling predates the studyDirector.* names; kept so an update's
+  // reload does not drop the operations it interrupted.
+  backupOperationDiagnostics:'study-director.backup-operation-diagnostics.v1'
 });
 
 export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
@@ -227,7 +230,8 @@ export const DATA_ARCHITECTURE=freeze({
   sessionStorage:freeze({
     appTab:surface('coordination-identity','ownership','operational','tab-session lifetime'),
     pwaReload:surface('operational','pwa-lifecycle','operational','single update/reload handoff'),
-    notifications:surface('operational','notifications','protect-identifiers','this window, today only: the profile panel Recent list (pop-up and banner titles and messages, at most 20); tied to the profile; never uploaded, backed up or exported')
+    notifications:surface('operational','notifications','protect-identifiers','this window, today only: the profile panel Recent list (pop-up and banner titles and messages, at most 20); tied to the profile; never uploaded, backed up or exported'),
+    backupOperationDiagnostics:surface('operational','backup-operation-diagnostics','operational','this window only: the last 20 backup and sync operations for Copy diagnostics (phases, timings, outcome and reason codes; no user content); kept across a reload so an interrupted operation still shows')
   }),
   cacheStorage:freeze({
     applicationShell:surface('operational','service-worker','operational','release-scoped application assets only; no user data','',{identity:CACHE_STORAGE_IDENTITIES.shellPrefix,identityKind:'release-prefix'}),

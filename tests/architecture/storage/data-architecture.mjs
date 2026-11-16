@@ -55,8 +55,8 @@ assert.equal(OBSOLETE_LOCAL_STORAGE_KEYS.syncEmergency,'studyDirector.syncEmerge
 assert.equal(CHECKPOINT_METADATA.format,'study-director.checkpoint-metadata');
 assert.deepEqual(CHECKPOINT_METADATA.fields,Object.freeze(['format','version','checkpointId','createdAt','originInstallationId']));
 
-assert.deepEqual(SESSION_STORAGE_KEYS,Object.freeze({appTab:'studyDirector.appTab.v1',pwaReload:'studyDirector.pwaReload.v1',notifications:'studyDirector.notifications.v1'}));
-assert.equal(Object.keys(DATA_ARCHITECTURE.sessionStorage).length,3);
+assert.deepEqual(SESSION_STORAGE_KEYS,Object.freeze({appTab:'studyDirector.appTab.v1',pwaReload:'studyDirector.pwaReload.v1',notifications:'studyDirector.notifications.v1',backupOperationDiagnostics:'study-director.backup-operation-diagnostics.v1'}));
+assert.equal(Object.keys(DATA_ARCHITECTURE.sessionStorage).length,4);
 assert.deepEqual(Object.keys(DATA_ARCHITECTURE.sessionStorage).sort(),Object.keys(SESSION_STORAGE_KEYS).sort(),'every sessionStorage key has a registered surface');
 assert.equal(DATA_ARCHITECTURE.cacheStorage.applicationShell.lifecycle.includes('no user data'),true);
 assert.equal(DATA_ARCHITECTURE.memory.searchIndex.role,'derived');
@@ -97,6 +97,10 @@ assert.match(app,/reloadSessionKey:SESSION_STORAGE_KEYS\.pwaReload/u);
 // The Recent list reaches sessionStorage only through its registered key.
 assert.match(app,/sessionStorage\.(?:getItem|setItem|removeItem)\(SESSION_STORAGE_KEYS\.notifications/u);
 assert.doesNotMatch(app,/['"]studyDirector\.notifications\.v1['"]/u);
+// Backup diagnostics too; and no sessionStorage call names a key of its own.
+assert.match(app,/sessionStorage\.getItem\(SESSION_STORAGE_KEYS\.backupOperationDiagnostics\)/u);
+assert.match(app,/sessionStorage\.setItem\(SESSION_STORAGE_KEYS\.backupOperationDiagnostics,/u);
+assert.doesNotMatch(app,/sessionStorage\.(?:getItem|setItem|removeItem)\(\s*['"`]/u,'every sessionStorage key comes from SESSION_STORAGE_KEYS');
 for(const family of ['exact','prefixes','obsolete'])for(const [name,surface] of Object.entries(DATA_ARCHITECTURE.appMeta[family]))assert.ok(surface.schema,`appMeta ${family}.${name} must declare its canonical value schema`);
 const currentAppMetaFamilies=[...Object.keys(DATA_ARCHITECTURE.appMeta.exact),...Object.keys(DATA_ARCHITECTURE.appMeta.prefixes)].sort();
 const validationFamilies=Object.values(APP_META_VALIDATION_OWNERS).flat();
