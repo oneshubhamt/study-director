@@ -6,7 +6,7 @@ import vm from 'node:vm';
 // The profile indicator (ring and badge on the phone circle, the sidebar name
 // and the profile panel) replaces the sidebar's sync text and the phone dot.
 // Every case those covered, and each new one, is checked here row by row.
-for(const file of ['source/core/internal.ts','source/core/notice-coordinator.ts','source/core/backup-presentation.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
+for(const file of ['source/core/internal.ts','source/core/notice-coordinator.ts','source/core/backup-presentation.ts','source/core/sync-status-host.ts'])vm.runInThisContext(readRuntimeSource(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const notifications=registry.require('notice-coordinator',1).createCoordinator(Object.freeze({setTimeout:(fn,ms)=>{const timer=setTimeout(fn,ms);timer.unref();return timer;},clearTimeout}));
 const presentation=registry.require('backup-presentation',1).createPresentation(Object.freeze({notifications,timeLabel:at=>String(at).slice(11,16)}));
@@ -155,4 +155,51 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   assert.equal(presentation.reach(),'','no reach line when the host gives no sync state');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:21,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:21}));
+
+// P5.8B host lifecycle: late connection completions and stale hide timers are
+// fenced by both connect generation and profile identity.
+{
+  const host=registry.require('sync-status-host',1);
+  let profile='profile-a',now=1000,status=null,nextTimer=0;
+  const timers=new Map(),pending=[];
+  const environment=Object.freeze({
+    window:{addEventListener(){}},now:()=>now,online:()=>true,visible:()=>true,
+    setTimeout:(fn,ms)=>{const id=++nextTimer;timers.set(id,{fn,ms});return id;},
+    clearTimeout:id=>{if(id!==null)timers.delete(id);},
+    setInterval:()=>++nextTimer
+  });
+  const providers=Object.freeze({
+    locationStatus:()=>status,
+    connect:()=>new Promise(resolve=>pending.push(resolve)),
+    scheduleSharedSync:()=>true,unlockSync:async()=>true,reviewSync:async()=>true,wakeBackground:()=>true,subscribeStatus:()=>()=>{}
+  });
+  const fakeDocument={getElementById:()=>null,addEventListener(){}};
+  const controller=host.createController(Object.freeze({
+    document:fakeDocument,providers:()=>providers,presentation,device:()=>null,protection:()=>null,
+    keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
+    profileKey:()=>profile,profileEmail:()=>'',profileName:()=>profile,deviceName:id=>id,
+    markDriveRequested:()=>{},storageIssues:()=>[],unsupportedDataHeld:()=>false,backupReminder:()=>'',updateReady:()=>false,
+    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,
+    actions:Object.freeze({closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>true,applyUpdate:()=>true,connectDevice:()=>true,openExecute:()=>true,continueSession:()=>true,openData:()=>true}),
+    environment,capture:()=>{}
+  }));
+  const first=controller.connectDriveForProfile();
+  profile='profile-b';
+  const second=controller.connectDriveForProfile();
+  pending[0](true);await first;await Promise.resolve();
+  assert.match(controller.renderConnectCard().status,/^Signing in/u,'an old profile connection cannot settle the successor card');
+  pending[1](true);await second;await Promise.resolve();
+  status={connected:true,waiting:false,sync:{syncedAt:'1970-01-01T00:00:02.000Z'}};
+  const done=controller.renderConnectCard();
+  assert.equal(done.done,true,'the current profile connection can complete its card');
+  const staleHide=[...timers.values()].find(timer=>timer.ms===6000)?.fn;
+  assert.equal(typeof staleHide,'function','a completed card schedules its hide');
+  now=3000;status=null;
+  const third=controller.connectDriveForProfile();
+  staleHide();
+  assert.equal(controller.connectCardOpen(),true,'a stale hide timer cannot close a reopened card');
+  assert.match(controller.renderConnectCard().status,/^Signing in/u);
+  pending[2](false);await third;await Promise.resolve();
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:21,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:21,hostLifecycleCases:1}));
