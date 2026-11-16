@@ -194,7 +194,11 @@ interface NotePort {
   title(id: string): string | null;
   open(id: string): void;
   tag?(name: string, passive: boolean): void;
-  pickTag?(options: {query: string; anchor: {left: number; top: number; bottom: number} | null}): Promise<TagChoice | null>;
+  pickTag?(options: {
+    query: string;
+    anchor: {left: number; top: number; bottom: number} | null;
+    browse?: boolean;
+  }): Promise<TagChoice | null>;
 }
 interface MountOptions {
   notes?: NotePort;
@@ -231,6 +235,7 @@ interface MountedRichTextEditor {
   search(query: string, onClear?: () => void): number;
   stepSearch(direction: 1 | -1): {index: number; count: number};
   clearSearch(): void;
+  addTag(): Promise<boolean>;
   focus(): void;
   flush(): void;
   destroy(): Promise<void>;
@@ -3838,7 +3843,7 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
       );
     else Command.dispatch(editor, toggleMark, Link.of(href));
   };
-  const noteLinkButton = createButton('Note', 'Link to a note', () => {
+  const noteLinkButton = createButton('Another note', 'Link to a note', () => {
     void linkToNote(linkSelection);
   });
   const linkFields = () => [linkInput, applyLinkButton, ...(options.notes ? [noteLinkButton] : []), cancelLinkButton];
@@ -3923,6 +3928,9 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
     if (selection instanceof GardSelection.Text) showLinkForSelection(selection);
   });
   linkTrigger.setAttribute('aria-haspopup', 'true');
+  // The tooltips teach the shortcuts; the names stay short.
+  linkTrigger.title = 'Link to a web page or another note; type [[ to link a note';
+  noteLinkButton.title = 'Link to another note (or type [[ anywhere)';
   annotateShortcut(undoControl, 'Control+z Meta+z', 'Ctrl/Cmd+Z');
   annotateShortcut(redoControl, 'Control+y Control+Shift+z Meta+Shift+z', 'Ctrl+Y / Ctrl/Cmd+Shift+Z');
   annotateShortcut(boldButton, 'Control+b Meta+b', 'Ctrl/Cmd+B');
@@ -5175,6 +5183,29 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
         ]
       });
       return {index, count};
+    },
+    // The note's "# Tag" button: pick a tag in use or type a new one, and it
+    // is written at the cursor, with a space before it when needed.
+    async addTag() {
+      const notes = options.notes;
+      if (!notes?.pickTag || readOnly || destroyed) return false;
+      const choice = await notes.pickTag({query: '', anchor: null, browse: true});
+      if (destroyed || !choice || !choice.text) return false;
+      editor.focus();
+      const state = editor.state,
+        pos = state.selection.to,
+        block = state.doc.resolve(pos).textblockParent;
+      if (!block) return false;
+      const map = state.textblockMap(block),
+        previous = map.text[map.toIndex(pos) - 1],
+        text = `${previous && !/\s/.test(previous) ? ' ' : ''}#${choice.text}${choice.end || ' '}`;
+      editor.dispatch({
+        changes: {from: pos, to: pos, insert: [Leaf.text(text, state.sel.activeMarks)], fit: true},
+        selection: (context, changes) => GardSelection.near(context, changes.mapPos(pos, 1), 1),
+        userEvent: 'input.tag',
+        scrollIntoView: true
+      });
+      return true;
     },
     clearSearch() {
       if (!destroyed && editor.state.field(searchMatches)) editor.dispatch({effects: setSearchMatches.of(null)});

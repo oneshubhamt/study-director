@@ -8839,6 +8839,7 @@ const RichTextRuntime=(()=>{
   // scroll to the first; the editor clears them on any edit or Escape.
   async function find(field,query,onClear){if(!await activate(field))return 0;const record=mounted.get(field);return record?record.mounted.search(query,onClear):0;}
   function findStep(field,direction){const record=mounted.get(field);return record?record.mounted.stepSearch(direction):{index:-1,count:0};}
+  async function addTag(field){if(!await activate(field))return false;const record=mounted.get(field);return record?record.mounted.addTag():false;}
   function clearFind(field){mounted.get(field)?.mounted.clearSearch();}
   // Editors that group keystrokes publish them now.
   function flushEditors(){for(const record of mounted.values()){try{record.mounted.flush();}catch(error){capture('rich-text.flush',error);}}}
@@ -8880,7 +8881,7 @@ const RichTextRuntime=(()=>{
     queueMicrotask(()=>syncAll(document));return true;
   }
   function status(){return Object.freeze({installed,loaded:true,activeDocumentId:mounted.get(lastActiveField)?.documentId||'',activeDocumentIds:Object.freeze([...new Set([...mounted.values()].map(record=>record.documentId))]),mounted:mounted.size,pending:pending.size>0,quiesced:mutationActive(),backgroundDisposalPending:backgroundDisposeTimer!==null,backgroundIdleDisposeMs:BACKGROUND_IDLE_DISPOSE_MS,externalConflicts:[...mounted.values()].filter(record=>record.field.dataset.richExternalConflict==='1').length});}
-  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,find,findStep,clearFind,status,holdForLifecycle,releaseAfterLifecycle});
+  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,find,findStep,addTag,clearFind,status,holdForLifecycle,releaseAfterLifecycle});
 })();
 SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
 async function quiesceManagedRecoveryRuntime(operation){
@@ -9108,7 +9109,7 @@ function refreshPnote(options={}){
     else clearTaskNoteEditorBinding(pn);
     pn.hidden=!hasNotes;
     setElementDisabled(pn,!hasNotes);
-    setElementAttribute(pn,'placeholder',support?'Ongoing reminders, decisions, follow-ups, and routine notes shared across support activities…':'Ongoing reminders, doubts, tasks, mistakes, and points to revisit for this subject/area…');
+    setElementAttribute(pn,'placeholder',support?'Shared by every support block. Type # for a tag, [[ to link a note.':'Start writing. Type # for a tag, [[ to link a note.');
     setElementValue(pn,noteText);
   }
   const links=document.getElementById('pn-links');
@@ -10080,6 +10081,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     commitEditor:commitTaskNoteEditor,
     find:(field,query,onClear)=>RichTextRuntime.find(field,query,onClear),
     findStep:(field,direction)=>RichTextRuntime.findStep(field,direction),
+    addTag:field=>RichTextRuntime.addTag(field),
     get:(key,label)=>AppData.notes.get(key,label),
     importFiles:(files,parent)=>importNoteFiles(files,parent),
     linksBar:options=>NoteLinks.bar(options),

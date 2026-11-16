@@ -64,6 +64,10 @@ Each file becomes a new note named after the file, at the top level or inside th
 - **Copy.** When the selection has formatting, the clipboard's plain-text version is Markdown, so chat apps and Markdown editors keep headings, lists and bold; plain text copies as it is. The formatted version is unchanged, and this app reads it first, so copying and pasting inside the app gives back the same note.
 - **Blocks in Markdown** (copy and `.md` export) are separated by a blank line, so two paragraphs stay two and a paragraph after a list stays out of it.
 
+### Under each note
+
+One line under the text: the linked notes with "+ Link note" (or "+ Link" once there are some), then "Linked from" after a thin divider; on the right, "# Tag" and "Earlier versions". On a phone the two buttons take their own full-width line. An empty note's text area says "Start writing. Type # for a tag, [[ to link a note." The Link button's tooltip names [[ too, and its menu's note choice reads "Another note". The Guide's Library page has a Notes tab covering all of this.
+
 ### Linked notes bar
 
 Every note can carry a short list of other notes.
@@ -95,7 +99,9 @@ Tags are written as `#tag` in the text, the way Apple Notes, Bear and Obsidian w
 - **Suggestions:** typing `#` offers existing tags, so near-duplicates like `#revise` and `#revison` don't appear.
 - **Look:** tags show as small chips in the text, and clicking one filters the notes list to that tag. In the Library's open note a tap narrows the list beside it and still places the cursor; elsewhere a tap in read-only text, or Ctrl/Cmd-click while editing, opens the Library's notes with that tag.
 - **Suggestions in use:** they open by the text at the first letter after `#`, only when another tag starts with it. Enter or Tab takes the highlighted tag; a space, a stop or Esc keeps what was typed.
-- **Tag list:** the notes panel lists tags with a count each. Picking one or more filters the list; more than one means "has all of them". One tap clears the filter. Picked tags come first, then the twelve most used; "+N more" shows the rest.
+- **Tag list:** one row under the notes search, with a count on each tag; it scrolls sideways (a mouse wheel scrolls it too) and fades at an edge with more beyond it. Picking one or more filters the list; more than one means "has all of them". While tags are picked, × Clear and, with exactly one, Rename lead the row, then the picked tags, then the rest by use. Before the first tag the row says "Tags: type #name in any note".
+- **Tags in search:** a search starting with `#` looks tags up rather than text: "#rev" lists the notes with a tag starting "rev" and narrows the tag row to those tags; plain text narrows the row to tags containing it.
+- **Adding one:** the "# Tag" button under a note opens the tag picker with every tag in use, or a new name typed, and writes it at the cursor.
 - **Rename everywhere:** renaming a tag changes it in every note, which fixes typos or merges two tags. Rename shows when exactly one tag is picked. Only the text changes: links, attachments and formatting stay.
 - **Rules:** capital letters do not matter, and a tag starts with a letter after a space or at the start of a line. So `#1`, `C#` and a Markdown heading are not tags.
 - **Storage:** none. Tags are read from the notes' text, each note read again only when it changes, and exports keep them as plain `#tags`. (Built on the main thread rather than in the search worker, because the list and the suggestions need them at once. Step 5 measured it at about 80 ms, once per session, for 2,000 notes, so it stays there.)

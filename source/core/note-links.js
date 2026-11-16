@@ -138,9 +138,11 @@ registry.define('note-links',1,()=>{
     function pick({exclude=[],query=''}={}){const parts=pickerParts();parts.exclude=[...exclude];return open(NOTE_MODE,query);}
     // Offers the tags in use that hold what was typed; when none does, nothing
     // opens and the text stays as typed.
-    function pickTag({query='',anchor=null}={}){
+    // browse opens it with nothing typed (the note's "# Tag" button): every
+    // tag in use, or a new one typed there.
+    function pickTag({query='',anchor=null,browse=false}={}){
       const typed=String(query||'').toLowerCase();
-      if(!typed||!tags().some(row=>row.tag!==typed&&row.tag.startsWith(typed)))return Promise.resolve(null);
+      if(!browse&&(!typed||!tags().some(row=>row.tag!==typed&&row.tag.startsWith(typed))))return Promise.resolve(null);
       return open(TAG_MODE,query,anchor);
     }
 
@@ -162,14 +164,14 @@ registry.define('note-links',1,()=>{
           row.append(chip);
         }
         if(writable){
-          const add=button('note-links-add',linked.length?'+':'+ Link note',linked.length?'Link another note':'Link note');
+          const add=button('note-links-add',linked.length?'+ Link':'+ Link note',linked.length?'Link another note':'Link note');
           add.addEventListener('click',async()=>{const chosen=await pick({exclude:[id,...linked.map(other=>other.id)]});if(chosen&&notes.link(ref,chosen.id,{label}).status==='changed'){render();onChange();}});
           row.append(add);
         }
+        // "Linked from" follows in the same row, after a thin divider.
         const from=id?notes.linkedFrom(id):[];
-        const parts=[row];
-        if(from.length){const line=element('div','note-links-from');line.append(element('span','note-links-from-label','Linked from'));for(const other of from){const open=button('note-link-from',leaf(other.label));open.title=other.label;open.addEventListener('click',()=>onOpen(other.id));line.append(open);}parts.push(line);}
-        root.replaceChildren(...(row.childElementCount||from.length?parts:[]));root.hidden=!row.childElementCount&&!from.length;
+        if(from.length){const line=element('span','note-links-from');line.append(element('span','note-links-from-label','Linked from'));for(const other of from){const open=button('note-link-from',leaf(other.label));open.title=other.label;open.addEventListener('click',()=>onOpen(other.id));line.append(open);}row.append(line);}
+        root.replaceChildren(...(row.childElementCount?[row]:[]));root.hidden=!row.childElementCount;
       };
       render();root.refresh=render;
       return root;

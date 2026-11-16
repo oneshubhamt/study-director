@@ -86,6 +86,27 @@ try{
     target.dispatchEvent(new PointerEvent('pointerdown',at));await wait(650);target.dispatchEvent(new PointerEvent('pointerup',at));target.click();await wait(100);
     menu=document.querySelector('.library-note-context-menu');
     out.longPress={menu:!!menu&&!menu.hidden&&menu.getAttribute('aria-label'),selected:document.querySelector('#library-notes-list .active')?.dataset.noteKey};
+    // Tags: one row that scrolls sideways, Clear and the picked tags first;
+    // "#..." in search looks up tags; "# Tag" under a note adds one.
+    for(let index=0;index<12;index++)d.AppData.notes.update('tagged '+index,'Tagged '+index,'Note text #topic'+String.fromCharCode(97+index)+(index%2?' #odd':''),'');
+    await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(200);
+    const tagRow=document.getElementById('library-notes-tags'),oneLine=()=>tagRow.getBoundingClientRect().height<44;
+    out.tagRow={oneLine:oneLine(),scrolls:tagRow.scrollWidth>tagRow.clientWidth,fadeAfter:tagRow.classList.contains('more-after')};
+    [...tagRow.querySelectorAll('.library-tag-chip')].filter(chip=>/#topic[ab]/.test(chip.textContent)).forEach(chip=>chip.click());await wait(150);
+    out.tagRowPicked={oneLine:oneLine(),first:[...tagRow.children].slice(0,3).map(item=>(item.querySelector('.library-tag-name')||item).textContent),scrollLeft:tagRow.scrollLeft};
+    tagRow.dispatchEvent(new WheelEvent('wheel',{deltaY:100,bubbles:true,cancelable:true}));out.wheel=tagRow.scrollLeft>0;
+    tagRow.querySelector('.library-tag-tool').click();await wait(100);
+    const notesSearch=document.getElementById('library-notes-search');notesSearch.value='#od';notesSearch.dispatchEvent(new Event('input',{bubbles:true}));await wait(200);
+    out.tagSearch={notes:[...document.querySelectorAll('#library-notes-list [data-note-key]')].map(item=>item.dataset.noteKey).filter(key=>key.startsWith('tagged')).length,tags:[...tagRow.querySelectorAll('.library-tag-name')].map(item=>item.textContent)};
+    notesSearch.value='';notesSearch.dispatchEvent(new Event('input',{bubbles:true}));await wait(150);
+    row('physics').click();await wait(200);
+    const tagButton=[...document.querySelectorAll('.note-foot-button')].find(button=>button.textContent==='# Tag');out.footButtons=[...document.querySelectorAll('.note-foot-button')].map(button=>button.textContent);
+    tagButton.click();const pickerField=await until(()=>{const dialog=document.querySelector('dialog.note-picker');return dialog&&dialog.open?dialog.querySelector('.note-picker-field'):null;});
+    pickerField.value='formula';pickerField.dispatchEvent(new Event('input',{bubbles:true}));pickerField.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+    await d.AppData.notes.flush();out.tagAdded=await until(()=>/#formula/.test(d.AppData.notes.get('physics')?.text||''),3000).catch(()=>false);
+    // A new, empty note says how tags and links are made.
+    document.getElementById('library-note-add').click();box=await dialog();const hintName=box.querySelector('.interaction-input');hintName.value='Hinted';hintName.dispatchEvent(new Event('input',{bubbles:true}));box.querySelector('.interaction-actions .primary').click();await until(()=>!box.open);await wait(200);
+    out.hint=document.querySelector('#library-notes-editor .library-notes-textarea')?.getAttribute('placeholder');
     return out;
   })()`);
   assert.equal(result.count,'4','the count is of real notes: GS2, Polity, Physics, Rivers');
@@ -105,6 +126,13 @@ try{
   assert.equal(result.parentMeta,'Holds 1 note');assert.equal(result.parentRenamed,true,'renaming a parent with no note moves the notes under it');
   assert.equal(result.planMeta,'In today’s plan · not written yet');assert.equal(result.planRenamed,'Botany','renaming a plan Area with no note renames it in the plan');
   assert.deepEqual(result.longPress,{menu:'Actions for GS2',selected:'physics'},'a long press opens the menu without opening the note');
+  assert.deepEqual(result.tagRow,{oneLine:true,scrolls:true,fadeAfter:true},'tags sit in one row that scrolls, with a fade where there is more');
+  assert.deepEqual(result.tagRowPicked,{oneLine:true,first:['× Clear','#topica','#topicb'],scrollLeft:0},'picking keeps one row: Clear, then the picked tags');
+  assert.equal(result.wheel,true,'a mouse wheel scrolls the row sideways');
+  assert.deepEqual(result.tagSearch,{notes:6,tags:['#odd']},'"#od" lists the notes tagged #odd and narrows the tag row');
+  assert.deepEqual(result.footButtons,['# Tag','Earlier versions'],'under a written note: # Tag and Earlier versions');
+  assert.equal(result.tagAdded,true,'# Tag writes the chosen tag into the note');
+  assert.equal(result.hint,'Start writing. Type # for a tag, [[ to link a note.','an empty note says how to tag and link');
   assert.deepEqual(page.events,[],'no runtime errors');
   console.log(JSON.stringify({status:'PASS',checks:Object.keys(result)},null,2));
 }finally{await browser.close?.();await server.close?.();}

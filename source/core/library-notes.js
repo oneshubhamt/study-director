@@ -26,7 +26,7 @@ registry.define('library-notes',1,modules=>{
     const {createSearchWorker,requestAnimationFrame,cancelAnimationFrame}=ports.environment;
     const {exportKeys,cancel:cancelExport}=ports.exporter;
     const {
-      areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateNote,catalogue:noteCatalogue,clearEditor,clearFind,commitEditor,find:findInEditor,findStep,focusEditor,
+      addTag:addTagToNote,areaUse:planAreaUse,renameAreaInPlans,bindEditor,canCreate:canCreateNote,catalogue:noteCatalogue,clearEditor,clearFind,commitEditor,find:findInEditor,findStep,focusEditor,
       get:getNote,importFiles:importNoteFiles,linksBar,normalizeArea:normalizeNoteArea,normalizeTag,orderEntries:orderNoteEntries,print:printNote,
       purgeTrash:purgeExpiredNotes,remove:removeNote,rename:renameNote,renameTag:renameNoteTag,renderInherited,restore:restoreNote,reviewKept,keptVersion,searchDocuments:noteSearchDocuments,
       tagged:taggedNotes,tags:noteTags,trash:trashNote,trashSnapshot:noteTrash,versions:openNoteVersions
@@ -66,8 +66,7 @@ registry.define('library-notes',1,modules=>{
     const noteExpanded=new Map(),NOTE_PAGE_SIZE=100;
     let noteVisibleLimit=NOTE_PAGE_SIZE,noteTreeNodes=new Map();
     // Tags picked in the tag list: the list shows notes that have all of them.
-    let noteTagFilter=[],noteTagsRendered=null,noteTagsSignature='',noteTagsExpanded=false;
-    const NOTE_TAGS_SHOWN=12;
+    let noteTagFilter=[],noteTagsRendered=null,noteTagsSignature='';
     // Recently deleted: the open state of its list and the deleted note shown.
     let noteTrashOpen=false,selectedTrashKey='',noteFocusKey='';
 
@@ -574,15 +573,25 @@ registry.define('library-notes',1,modules=>{
       const editorShell=document.createElement('div');editorShell.className='library-notes-editor-shell';
       const editor=document.createElement('textarea');
       editor.className='library-notes-textarea ui-field task-note-field';
-      editor.placeholder=entry.support?'Ongoing reminders, decisions, follow-ups, and routine notes shared across support activities…':'Ongoing reminders, doubts, mistakes, ideas, and points to revisit for this subject/Area…';
+      editor.placeholder=entry.support?'Shared by every support block. Type # for a tag, [[ to link a note.':'Start writing. Type # for a tag, [[ to link a note.';
       editor.value=value;editorShell.appendChild(editor);
       bindEditor(editor,entry.key,entry.label,'library');
       const matches=document.createElement('div');matches.className='library-note-matches';matches.id='library-note-matches';matches.hidden=true;matches.setAttribute('role','status');
       const matchTool=(text,label,run)=>{const button=textEl('button','library-note-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
       matches.append(textEl('span','library-note-matches-count ui-mono',''),matchTool('↑','Previous match',()=>stepNoteMatch(-1)),matchTool('↓','Next match',()=>stepNoteMatch(1)),matchTool('×','Clear highlights',clearNoteMatches));
-      // Linked notes sit under the text, out of the way until used.
+      // Under the text: the notes linked to this one, then adding a tag and
+      // Earlier versions. One line on a computer; on a phone the two buttons
+      // take their own full-width line.
+      const foot=document.createElement('div');foot.className='note-foot';
       const links=linksBar({ref:canonical?.id||entry.key,label:entry.label,onOpen:revealNoteReference});
-      panel.replaceChildren(head,matches,editorShell,links,inherited);noteSearchLanded='';
+      const actions=document.createElement('div');actions.className='note-foot-actions';
+      if(writable){
+        const footButton=(text,label,run)=>{const button=textEl('button','note-foot-button ui-btn',text);button.type='button';button.title=label;button.setAttribute('aria-label',label);button.addEventListener('click',run);return button;};
+        actions.append(footButton('# Tag','Add a tag to this note',()=>{void addTagToNote(editor);}));
+        if(!entry.support&&canonical)actions.append(footButton('Earlier versions','Earlier versions of this note, from your backups',()=>{void showNoteVersions(entry);}));
+      }
+      foot.append(links);if(actions.childElementCount)foot.append(actions);
+      panel.replaceChildren(head,matches,editorShell,foot,inherited);noteSearchLanded='';
       setNotesStatus(writable?'':'Another tab has control. Browse freely, or take control before editing.',{readOnly:!writable});
       editor.addEventListener('input',event=>{
         const accepted=commitEditor(editor,editor.value,event);
@@ -637,7 +646,7 @@ registry.define('library-notes',1,modules=>{
       if(!notesShown())return false;
       const entries=noteEntries();
       noteSearch.keep();
-      const query=notesSearch(),searchState=noteSearch.filter(entries,query),tagKeys=noteTagFilter.length?taggedNotes(noteTagFilter):null;
+      const query=notesSearch(),tagQuery=tagSearch(query),searchState=tagQuery===null?noteSearch.filter(entries,query):{entries:tagQuery?entries.filter(entry=>notesTaggedLike(tagQuery).has(entry.key)):entries,pending:false},tagKeys=noteTagFilter.length?taggedNotes(noteTagFilter):null;
       const filtered=tagKeys?searchState.entries.filter(entry=>tagKeys.has(entry.key)):searchState.entries,filtering=!!query||!!tagKeys;
       updateNoteSelectionControls(entries);renderNoteTags();
       const trashed=selectedTrashKey&&!noteSelectionMode?noteTrashItems().find(item=>item.key===selectedTrashKey)||null:null;
@@ -721,24 +730,50 @@ registry.define('library-notes',1,modules=>{
     // The tag list: picked tags first, then the most used, with a count each;
     // More shows the rest. Picks narrow the list to notes with all of them;
     // Clear shows every note again.
+    // A search that starts with # looks up tags, not text: "#rev" lists the
+    // notes with a tag starting "rev". Returns the tag typed ('' for a bare #),
+    // or null for an ordinary search.
+    function tagSearch(query){if(!query.startsWith('#'))return null;return normalizeTag(query.slice(1))||'';}
+    function notesTaggedLike(prefix){const keys=new Set();for(const item of noteTags())if(item.tag.startsWith(prefix))for(const key of taggedNotes([item.tag]))keys.add(key);return keys;}
+    // The tag row is one line that scrolls sideways: Clear and Rename while
+    // tags are picked, the picked tags, then the rest by use. Typing in the
+    // search narrows it: "#ma" to tags starting "ma", plain text to tags
+    // containing it.
     function renderNoteTags(){
       const row=document.getElementById('library-notes-tags');if(!row)return;
-      const all=noteTags(),writable=canMutate(),signature=`${noteTagFilter.join('\u0000')}\u0001${writable?'1':'0'}\u0001${noteTagsExpanded?'1':'0'}`;
+      const all=noteTags(),writable=canMutate(),typed=notesSearch(),byTag=typed.startsWith('#'),query=typed.replace(/^#/,''),signature=`${noteTagFilter.join('\u0000')}\u0001${writable?'1':'0'}\u0001${typed}`;
       if(all===noteTagsRendered&&signature===noteTagsSignature)return;
+      const filterChanged=!noteTagsSignature.startsWith(`${noteTagFilter.join('\u0000')}\u0001`);
       noteTagsRendered=all;noteTagsSignature=signature;
       const counts=new Map(all.map(item=>[item.tag,item.count])),picked=new Set(noteTagFilter),chips=[];
       const tool=(text,label,run)=>{const button=textEl('button','library-tag-tool ui-btn',text);button.type='button';button.setAttribute('aria-label',label);button.title=label;button.addEventListener('click',run);return button;};
       if(picked.size)chips.push(tool('× Clear','Show all notes',clearNoteTags));
       if(picked.size===1&&writable)chips.push(tool('Rename',`Rename #${noteTagFilter[0]} in every note`,()=>{void renameSelectedTag();}));
-      const others=[...all].filter(item=>!picked.has(item.tag)).sort((a,b)=>b.count-a.count||a.tag.localeCompare(b.tag)).map(item=>item.tag);
-      const shown=noteTagsExpanded?others:others.slice(0,NOTE_TAGS_SHOWN),hidden=others.length-shown.length;
-      for(const tag of [...noteTagFilter,...shown]){
+      const others=[...all].filter(item=>!picked.has(item.tag)&&(!query||(byTag?item.tag.startsWith(query):item.tag.includes(query)))).sort((a,b)=>b.count-a.count||a.tag.localeCompare(b.tag)).map(item=>item.tag);
+      for(const tag of [...noteTagFilter,...others]){
         const on=picked.has(tag),chip=textEl('button',`library-tag-chip ui-btn${on?' active':''}`,'');chip.type='button';chip.setAttribute('aria-pressed',on?'true':'false');
         chip.append(textEl('span','library-tag-name',`#${tag}`),textEl('span','library-tag-count ui-mono',String(counts.get(tag)||0)));
         chip.addEventListener('click',()=>toggleNoteTag(tag));chips.push(chip);
       }
-      if(hidden>0||noteTagsExpanded&&others.length>NOTE_TAGS_SHOWN)chips.push(tool(hidden>0?`+${hidden} more`:'Fewer',hidden>0?'Show every tag':'Show the most used tags',()=>{noteTagsExpanded=!noteTagsExpanded;renderNoteTags();}));
-      row.replaceChildren(...chips);row.hidden=!chips.length;
+      // Before the first tag, one quiet line says how tags are made.
+      if(!all.length&&!picked.size)chips.push(textEl('span','library-tags-hint','Tags: type #name in any note'));
+      row.replaceChildren(...chips);row.hidden=!chips.length||(!!query&&!all.length);
+      // Picking or clearing a tag brings the start of the row into view.
+      if(filterChanged)row.scrollLeft=0;
+      updateTagRowEdges(row);
+    }
+    // Soft edges show there is more of the row to either side.
+    function updateTagRowEdges(row){
+      const more=row.scrollWidth-row.clientWidth>1;
+      row.classList.toggle('more-before',more&&row.scrollLeft>1);
+      row.classList.toggle('more-after',more&&row.scrollLeft<row.scrollWidth-row.clientWidth-1);
+    }
+    function installTagRow(){
+      const row=document.getElementById('library-notes-tags');if(!row||row.dataset.scrollReady)return;row.dataset.scrollReady='1';
+      row.addEventListener('scroll',()=>updateTagRowEdges(row),{passive:true});
+      // A mouse wheel scrolls the row sideways; a trackpad or finger already does.
+      row.addEventListener('wheel',event=>{if(Math.abs(event.deltaY)<=Math.abs(event.deltaX)||row.scrollWidth<=row.clientWidth)return;event.preventDefault();row.scrollLeft+=event.deltaY;},{passive:false});
+      if(typeof ResizeObserver==='function')new ResizeObserver(()=>updateTagRowEdges(row)).observe(row);
     }
     function setNoteTagFilter(tags){noteTagFilter=tags;noteVisibleLimit=NOTE_PAGE_SIZE;renderNotes();}
     function toggleNoteTag(tag){setNoteTagFilter(noteTagFilter.includes(tag)?noteTagFilter.filter(other=>other!==tag):[...noteTagFilter,tag]);}
@@ -1126,7 +1161,7 @@ registry.define('library-notes',1,modules=>{
       applyNoteListWidth();
     }
 
-    installNotesWorkspace();
+    installNotesWorkspace();installTagRow();
     // Leaving the Notes section: nothing chosen there outlives it except new
     // notes not yet written.
     function leave(){

@@ -19,7 +19,7 @@ registry.define('library',1,modules=>{
     environment:freeze(['cancelAnimationFrame','createOption','createSearchWorker','requestAnimationFrame']),
     exporter:freeze(['exportKeys','cancel']),
     diary:freeze(['bindEditor','captureEditor','clearEditor','deleteEntry','draft','flushEditor','scheduleEditor','settled']),
-    notes:freeze(['areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','importFiles','linksBar','normalizeArea','normalizeTag','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renameTag','renderInherited','restore','reviewKept','keptVersion','searchDocuments','size','tagged','tags','trash','trashSnapshot','versions']),
+    notes:freeze(['addTag','areaUse','bindEditor','canCreate','catalogue','clearEditor','clearFind','commitEditor','find','findStep','focusEditor','get','importFiles','linksBar','normalizeArea','normalizeTag','orderEntries','print','purgeTrash','remove','rename','renameAreaInPlans','renameTag','renderInherited','restore','reviewKept','keptVersion','searchDocuments','size','tagged','tags','trash','trashSnapshot','versions']),
     attachments:freeze(['batch','close','count','invalidate','reconcile','refresh']),
     preferences:freeze(['read','write']),
     clearLibrary:freeze(['preflight','execute']),

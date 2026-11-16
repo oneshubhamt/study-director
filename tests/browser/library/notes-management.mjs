@@ -413,14 +413,14 @@ try{
   await page.evaluate(`(()=>{const f=document.querySelector('.note-picker-field');f.value='links ecg';f.dispatchEvent(new Event('input',{bubbles:true}));f.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()`);await page.settle(6);
   const linked=await page.evaluate(`(async()=>{const n=__PWA6.AppData.notes;await n.flush();const heart=n.get('Links Heart'),anchor=document.querySelector('#library-notes-editor a.sd-note-link');
     return {links:[...heart.links],bar:document.querySelector('#library-notes-editor .note-links-row').innerText.replace(/\\s+/g,' ').trim(),anchor:anchor&&{text:anchor.textContent,href:anchor.getAttribute('href')},stored:heart.text.includes('#note=${linkIds.ecg}')&&!heart.text.includes('[[')};})()`);
-  assert.deepEqual(linked,{links:[linkIds.pharm],bar:'Links Pharm × +',anchor:{text:'Links ECG',href:`#note=${linkIds.ecg}`},stored:true});
+  assert.deepEqual(linked,{links:[linkIds.pharm],bar:'Links Pharm × + Link',anchor:{text:'Links ECG',href:`#note=${linkIds.ecg}`},stored:true});
   const linkedFrom=await page.evaluate(`(async()=>{__PWA6.LibraryView.revealNoteReference(${JSON.stringify(linkIds.ecg)});await new Promise(r=>setTimeout(r,300));return document.querySelector('#library-notes-editor .note-links-from')?.innerText.replace(/\\s+/g,' ').trim();})()`);
   assert.equal(linkedFrom,'Linked from Links Heart','a link in the text shows on the linked note');
   // A deleted note drops out of the bar and comes back when restored.
   const dropped=await page.evaluate(`(async()=>{const n=__PWA6.AppData.notes,trash=await n.trash('Links Pharm');__PWA6.LibraryView.revealNoteReference(${JSON.stringify(linkIds.heart)});await new Promise(r=>setTimeout(r,300));
     const hidden=document.querySelector('#library-notes-editor .note-links-row').innerText.replace(/\\s+/g,' ').trim();await n.restore(trash);__PWA6.LibraryView.revealNoteReference(${JSON.stringify(linkIds.heart)});await new Promise(r=>setTimeout(r,300));
     return {hidden,back:document.querySelector('#library-notes-editor .note-links-row').innerText.replace(/\\s+/g,' ').trim()};})()`);
-  assert.deepEqual(dropped,{hidden:'+ Link note',back:'Links Pharm × +'});
+  assert.deepEqual(dropped,{hidden:'+ Link note',back:'Links Pharm × + Link'});
   // Execute shows the block's own note first; a chip shows that note in the editor until the own chip is tapped.
   const executeLinks=await page.evaluate(`(async()=>{
     const d=__PWA6,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms)),now=new Date(),minute=now.getHours()*60+now.getMinutes()-1;
@@ -432,7 +432,7 @@ try{
     bar().querySelector('.note-link-open').click();await wait(100);const switched=[field.dataset.areaKey,document.getElementById('pn-area-share').textContent];
     bar().querySelector('.note-link-chip.own').click();await wait(100);
     const back=field.dataset.areaKey;d.goTab('library');return {before,switched,back};})()`);
-  assert.deepEqual(executeLinks,{before:'Links Heart Links Pharm × +',switched:['links pharm','Linked · Links Pharm'],back:'links heart'});
+  assert.deepEqual(executeLinks,{before:'Links Heart Links Pharm × + Link',switched:['links pharm','Linked · Links Pharm'],back:'links heart'});
   result.checks.linkedNotesBarTextLinksAndExecute=true;
   console.error('[qa-notes] linked notes bar, [[ links and Execute passed');
 
