@@ -19,6 +19,7 @@ const policy=readScript('source/core/repository-policy.ts');
 const mutation=readScript('source/core/mutation-coordinator.ts');
 const host=readScript('source/core/backup-recovery-host.ts');
 const backupActionsHost=readScript('source/core/backup-actions-host.ts');
+const syncStatusHost=readScript('source/core/sync-status-host.ts');
 const maintenanceHost=readScript('source/core/backup-maintenance-host.ts');
 const readinessHost=readScript('source/core/backup-readiness-host.ts');
 const integrityHost=readScript('source/core/backup-integrity-host.ts');
@@ -240,7 +241,8 @@ assert.match(startupOwner,/void p\.collectFiles\(\)\.catch/u,'cold startup must 
  assert.match(startupOwner,/recoverInterruptedRestore:async\(\)=>\{await p\.hydratePlan\(\);if\(await p\.readRestoreJournal\(\)\.catch\(\(\)=>null\)\)await p\.waitForClosedTabLease\(\);/u,'interrupted restore waits for its closed-tab lease');
 }
 // Background sync waits while offline; coming back online wakes it at once.
-assert.match(app,/window\.addEventListener\('online',\(\)=>\{try\{BackupProviderRuntime\.wakeBackground\('online'\);/u,'back online, background sync goes at once rather than at its next retry');
+assert.match(syncStatusHost,/environment\.window\.addEventListener\('online',[\s\S]*input\.providers\(\)\.wakeBackground\('online'\)/u,'back online, the checked sync/status owner wakes background sync at once rather than at its next retry');
+assert.match(app,/SyncStatusHost\.install\(\)/u,'startup installs the checked sync/status event owner');
 
 console.log(JSON.stringify({status:'PASS',suite:'background-work-contract',sharedStateMachine:true,maintenanceEligibility:true,maintenanceClassification:true,blockedBackoff:true,foregroundPreemption:true,suspensionSettlement:true,opportunityDrivenIntegrity:true,leanProviderPort:true,clearLibrarySafetyForeground:true,backgroundDiagnostics:true,authoritativeRebase:true,persistenceHardening:true,sharedRepositoryPolicy:true},null,2));
 
