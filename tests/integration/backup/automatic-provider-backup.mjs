@@ -271,6 +271,23 @@ const cases=[];
   cases.push('coming back to the app after a minute checks Drive at once');
 }
 {
+  // Typing: each note save posts a notice, and each notice wakes background
+  // work ('foreground-released') every few seconds. A wake a minute after the
+  // last check only looks at Drive: the waiting changes keep their 20-minute
+  // deadline, and later changes never move it. Before 2026-11-16 such a wake
+  // uploaded at once, every time: an upload never counted as a check.
+  const t=fixture({covered:'2026-10-06T08:00:00.000Z',shared:true});await tick(t,10*1000);
+  const start=t.clock.now();t.change();
+  for(let i=0;i<60;i++){await tick(t,5000);t.change();t.runtime.wakeBackground('foreground-released');}
+  assert.equal(t.publishedAt.length,0,'five minutes of typing and wake-ups upload nothing before the deadline');
+  assert.ok(Date.parse(t.runtime.diagnosticSync()[0].checkedAt)>start+MINUTE,'the wakes after a minute still looked at Drive');
+  await tick(t,20*MINUTE-(t.clock.now()-start)+5000);
+  assert.equal(t.publishedAt.length,1,'the waiting changes go up at their deadline');
+  t.change();await tick(t,10*1000);t.runtime.wakeBackground('foreground-released');await tick(t,5000);
+  assert.equal(t.publishedAt.length,1,'a change and a wake just after the upload wait for their own deadline');
+  cases.push('wake-ups while typing look at Drive at most once a minute and never upload early');
+}
+{
   // While this device holds data from a newer version, it uploads nothing to
   // Drive: a version without that data would read as its deletion elsewhere.
   let allowed=false;

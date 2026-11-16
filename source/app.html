@@ -8794,7 +8794,17 @@ const RichTextRuntime=(()=>{
     if(candidate&&!mounted.has(candidate)&&!pending.has(candidate))return activate(candidate);
     return false;
   }
-  async function dispose(field,options={}){
+  // An editor on its way out still owns its field until destroy has put the
+  // field back; a new editor waits for that, or the old one's restore would
+  // show the raw stored text over the new editor and take the cursor.
+  const disposing=new Map();
+  function dispose(field,options={}){
+    const leaving=!!field&&mounted.has(field),run=disposeEditor(field,options);
+    if(!leaving)return run;
+    const done=run.finally(()=>{if(disposing.get(field)===done)disposing.delete(field);});
+    disposing.set(field,done);return done;
+  }
+  async function disposeEditor(field,options={}){
     if(!field)return false;
     pending.delete(field);
     const record=mounted.get(field);if(!record){clearPreview(field);return false;}
@@ -8840,6 +8850,7 @@ const RichTextRuntime=(()=>{
     return existed;
   }
   async function activate(field,options={}){
+    const leaving=disposing.get(field);if(leaving)await leaving;
     if(mutationActive()){applyMutationField(field);if(!mounted.has(field))syncField(field);return false;}
     hidePreview(field);
     const descriptor=richTextDocumentFor(field);
@@ -8910,8 +8921,12 @@ const RichTextRuntime=(()=>{
       ));
       const removedEditor=records.some(record=>record.removedNodes.length>0);
       if(removedEditor)for(const field of mounted.keys())if(!field.isConnected)void dispose(field,{resync:false});
-      if(addedEditor)syncAll(document);
-    });observer.observe(document.body,{childList:true,subtree:true});
+      // A field enabled after its pane opened (today's reflection once it has
+      // loaded, with no study session) gets its editor then, not at the next
+      // pane switch.
+      const enabledEditor=records.some(record=>record.type==='attributes'&&eligible(record.target)&&!record.target.disabled&&!record.target.readOnly&&!mounted.has(record.target));
+      if(addedEditor||enabledEditor)syncAll(document);
+    });observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['disabled','readonly']});
     queueMicrotask(()=>syncAll(document));return true;
   }
   function status(){return Object.freeze({installed,loaded:true,activeDocumentId:mounted.get(lastActiveField)?.documentId||'',activeDocumentIds:Object.freeze([...new Set([...mounted.values()].map(record=>record.documentId))]),mounted:mounted.size,pending:pending.size>0,quiesced:mutationActive(),backgroundDisposalPending:backgroundDisposeTimer!==null,backgroundIdleDisposeMs:BACKGROUND_IDLE_DISPOSE_MS,externalConflicts:[...mounted.values()].filter(record=>record.field.dataset.richExternalConflict==='1').length});}
