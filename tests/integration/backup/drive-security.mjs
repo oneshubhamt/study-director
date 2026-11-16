@@ -298,7 +298,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   // Cleanup removed it as abandoned: the upload must stop, and leave nothing behind.
   state.files.delete(markerFile(third.id).id);
   await assert.rejects(()=>provider.repository.renewPublication(third),/disappeared before commit/u,'renewal fails once cleanup has removed the marker');
-  assert.equal(markers().length,0,'a failed renewal removes the fresh marker it made');console.error('P58A_LOC publication-missing-done');
+  assert.equal(markers().length,0,'a failed renewal removes the fresh marker it made')
   // Unrenewed too long: cleanup may be about to take it for abandoned.
   const late=await provider.repository.beginPublication();markerFile(late.id).createdTime=new Date(Date.now()-14*60*1000).toISOString();
   await assert.rejects(()=>provider.repository.renewPublication(late),/too long without renewal/u,'renewal refuses a marker close to looking abandoned');
@@ -306,7 +306,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   // A marker from an older build does not renew; cleanup gives it the full day.
   const legacy=markerFile(late.id);delete legacy.appProperties.sdPublicationRenews;delete legacy.appProperties.sdPublicationStartedAt;
   const listed=(await provider.repository.listPublications()).items.find(row=>row.id===late.id);
-  assert.equal(listed.renews,false,'an older build\'s marker does not renew');assert.equal(listed.startedAt,listed.createdAt,'an older build\'s marker began when it was made');console.error('P58A_LOC publication-renew-section-done');
+  assert.equal(listed.renews,false,'an older build\'s marker does not renew');assert.equal(listed.startedAt,listed.createdAt,'an older build\'s marker began when it was made')
 }
 {
   // This device's clock runs 20 minutes ahead of Drive's. The adapter learns
@@ -324,7 +324,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   await provider.repository.endPublication(second);
   const maintenance=await provider.repository.beginMaintenance();
   assert.equal((await provider.repository.assertMaintenance(maintenance)).id,maintenance.id,'nor is a fresh maintenance marker');
-  await provider.repository.endMaintenance(maintenance);console.error('P58A_LOC clock-skew-section-done');
+  await provider.repository.endMaintenance(maintenance)
 }
 
 {
@@ -346,7 +346,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   markerFile.appProperties.studyDirectorRepositoryVersion='2';markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
   const maintenanceReleaseStart=state.requests.length;state.networkFailCoordinationDeleteOnce=true;assert.equal(await operation.endMaintenance(marker),true);const maintenanceReleaseRequests=state.requests.slice(maintenanceReleaseStart).map(request=>({method:request.method,url:new URL(request.url)}));assert.equal(maintenanceReleaseRequests.some(request=>request.method==='GET'&&request.url.pathname===`/drive/v3/files/${marker.remoteId}`),false,'known verified maintenance release must DELETE directly instead of paying for a redundant metadata GET');active=await operation.listMaintenances();assert.equal(active.items.length,0,'ambiguous maintenance deletion must recheck exact identity and retry until the marker is confirmed absent');
   await assert.rejects(()=>operation.assertMaintenance(marker),/disappeared during cleanup/u,'maintenance whose provider-visible protection disappeared must fail closed before more deletion');
-  assert.equal([...state.files.values()].some(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance'),false,'maintenance markers must not leak into repository history after release');console.error('P58A_LOC maintenance-basic-done');
+  assert.equal([...state.files.values()].some(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance'),false,'maintenance markers must not leak into repository history after release')
 }
 
 // Renewal preserves exclusion across immutable-marker rotation, including
@@ -367,9 +367,9 @@ for(const failure of ['none','missing','expired','unreadable-age','foreign']){
   assert.equal([...h.state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,failure==='missing'?0:1,'failed renewal removes only its new candidate marker');
  }
  assert.equal(h.state.requests.some(request=>request.method==='PATCH'),false,'renewal retains immutable metadata and the existing endpoint policy');
- await h.provider.disconnect();assert.equal(clock.pending(),0);console.error('P58A_LOC maintenance-renew '+failure);
+ await h.provider.disconnect();assert.equal(clock.pending(),0)
 }
-console.error('P58A_LOC maintenance-renew-loop-done');
+
 
 // Cancellation releases only coordination artifacts, using the same verified
 // operation scope. Invalidating that scope still forces a fresh folder check.
@@ -383,7 +383,7 @@ for(const invalidate of [false,true]){
  else{assert.equal(metadataReads.length,0,'known marker release must not rediscover its already verified folder after cancellation');assert.equal(h.state.files.has(marker.remoteId),false);}
  await h.provider.disconnect();
 }
-console.error('P58A_LOC coordination-cancel-done');
+
 
 // Exercise actual response streams after headers, not only pending fetch calls.
 const bodyContractCases=[];
@@ -392,7 +392,7 @@ function bodyClock(){
  let now=0,next=0;const timers=new Map();
  return {now:()=>now,setTimeout:(fn,ms)=>{const id=++next;timers.set(id,{fn,at:now+Number(ms)});return id;},clearTimeout:id=>timers.delete(id),
   pending:()=>[...timers.values()].map(t=>t.at-now).sort((a,b)=>a-b),
-  advance:async ms=>{now+=ms;for(;;){const due=[...timers.entries()].filter(([,t])=>t.at<=now).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;timers.delete(due[0]);due[1].fn();await flushBodies();}}
+  advance:async ms=>{now+=ms;for(;){const due=[...timers.entries()].filter(([,t])=>t.at<=now).sort((a,b)=>a[1].at-b[1].at)[0];if(!due)break;timers.delete(due[0]);due[1].fn();await flushBodies();}}
  };
 }
 async function settleBody(task,clock){
@@ -442,7 +442,7 @@ for(const fault of [{mode:'interrupted'},{mode:'invalid'},{mode:'shape',payload:
  await h.provider.release();assert.deepEqual(h.clock.pending(),[]);bodyContractCases.push('401 invalidates authorization without waiting for unused body');
 }
 
-console.error('P58A_LOC body-contracts-done');
+
 const productiveTransferCases=[];
 async function settleTransfer(task,clock,state,limitMs=2000000){
  let outcome;task.then(value=>{outcome={ok:true,value};},error=>{outcome={ok:false,error};});
@@ -455,7 +455,7 @@ for(const chunkDelay of [9000,35000,90000]){
  const file=await makeRepositoryFile('object','obj_'+'c'.repeat(32),'x'.repeat(1048576)),ref=await h.provider.repository.upload(file);
  h.state.rangeChunkDelayMs=chunkDelay;const read=await settleTransfer(h.provider.repository.download(ref,{offset:0,length:1048576}),clock,h.state);
  assert.equal(read.ok,true,read.error?.message);assert.equal(await digest(read.value.blob),file.digest);assert.equal(h.state.rangeTransfers[0].loaded,file.size);
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('verified range completes with '+chunkDelay+'ms between chunks');console.error('P58A_XFER range '+chunkDelay);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('verified range completes with '+chunkDelay+'ms between chunks')
 }
 for(const mode of ['no-bytes','empty-progress']){
  const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
@@ -463,21 +463,21 @@ for(const mode of ['no-bytes','empty-progress']){
  h.state.rangeChunkDelayMs=mode==='no-bytes'?150000:30000;h.state.rangeMode=mode==='empty-progress'?mode:'valid';const started=clock.now();
  const read=await settleTransfer(h.provider.repository.download(ref,{offset:0,length:1048576}),clock,h.state);
  assert.equal(read.ok,false);assert.match(read.error.message,/timed out/u);assert.ok(clock.now()-started<=122000);assert.equal(h.state.rangeTransfers[0].loaded,0);assert.equal(h.state.rangeTransfers[0].cancelled,true);
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push(mode+' does not renew the stalled download watchdog');console.error('P58A_XFER stalled-range '+mode);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push(mode+' does not renew the stalled download watchdog')
 }
 for(const size of [4096,5*1048576+1]){
  const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
  h.state.uploadProgressSteps=4;h.state.uploadProgressStepMs=90000;const file=await makeRepositoryFile('object','obj_'+size.toString(16).padStart(32,'0'),'u'.repeat(size));
  const started=clock.now(),upload=await settleTransfer(h.provider.repository.upload(file),clock,h.state);
  assert.equal(upload.ok,true,upload.error?.message);assert.equal(upload.value.serverDigest,file.digest);assert.ok(clock.now()-started>=360000);assert.ok(h.state.uploadProgressStarted>0);assert.equal(h.state.uploadAborts||0,0);
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('byte-progress watchdog permits slow '+(size>5000000?'resumable':'multipart')+' upload');console.error('P58A_XFER slow-upload '+size);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('byte-progress watchdog permits slow '+(size>5000000?'resumable':'multipart')+' upload')
 }
 for(const repeated of [false,true]){
  const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
  h.state.uploadProgressSteps=10;h.state.uploadProgressStepMs=repeated?30000:150000;h.state.uploadRepeatProgress=repeated;
  const file=await makeRepositoryFile('object','obj_'+'e'.repeat(32),'x'.repeat(4096)),result=await settleTransfer(h.provider.repository.upload(file),clock,h.state);
  assert.equal(result.ok,false);assert.match(result.error.message,/timed out/u);assert.ok(h.state.uploadAborts>0);assert.equal(h.state.files.size,0,'stalled uploads cannot publish a verified immutable object');
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push((repeated?'repeated':'absent')+' upload progress remains bounded');console.error('P58A_XFER stalled-upload '+repeated);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push((repeated?'repeated':'absent')+' upload progress remains bounded')
 }
 for(const direction of ['upload','download']){
  const clock=createFakeClock(),h=createHarness({clock});h.clock=clock;await h.provider.prepare();await h.provider.authorize();
@@ -489,14 +489,14 @@ for(const direction of ['upload','download']){
  await waitFor(()=>direction==='upload'?h.state.uploadProgressStarted>0:h.state.rangeTransfers?.length>0,'transfer must start before foreground preemption');
  const foreground=bg.beginForeground();await rejected;await foreground.settled;assert.equal(bg.status().active.length,0);foreground.release();
  if(direction==='upload')assert.equal(h.state.files.size,0);else assert.equal(h.state.rangeTransfers[0].cancelled,true);
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('foreground cancels a slow '+direction+' and waits for actual release');console.error('P58A_XFER foreground '+direction);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('foreground cancels a slow '+direction+' and waits for actual release')
 }
 {
  const h=createHarness({uploadProgressTransport:false});await h.provider.prepare();await h.provider.authorize();
  const file=await makeRepositoryFile('object','obj_'+'b'.repeat(32),'fetch-only receipt proof');const uploaded=await h.provider.repository.upload(file);
- assert.equal(uploaded.serverDigest,file.digest);await h.provider.disconnect();productiveTransferCases.push('fetch-only capability fallback retains immutable server receipt validation');console.error('P58A_XFER fetch-only');
+ assert.equal(uploaded.serverDigest,file.digest);await h.provider.disconnect();productiveTransferCases.push('fetch-only capability fallback retains immutable server receipt validation')
 }
-console.error('P58A_LOC productive-transfer-done');
+
 // Retained upload progress is a server-acknowledged prefix, never a guessed
 // client byte count. Exercise the production adapter and lifecycle together.
 const resumableUploadCases=[];
@@ -556,7 +556,7 @@ for(const boundary of ['payload-change','repository-change','expired-session','r
  }
  await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push(boundary);
 }
-console.error('P58A_LOC resumable-boundaries-done');
+
 // A second browser page has no upload session memory. It must not create a
 // duplicate logical file if the prior page's response/receipt was lost.
 const restartCases=[];
@@ -602,5 +602,5 @@ const restartCases=[];
  assert.equal(second.state.uploads.size,2,'page-local upload URL is not falsely reconstructed from the remote orphan session');
  restartCases.push('interrupted large upload restarts from canonical bytes without false receipt');
 }
-console.error('P58A_LOC reached-final');
+
 console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',resumableUploadCases,restartCases,productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));

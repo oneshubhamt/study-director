@@ -708,13 +708,6 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     }
     throw lastError||new Error(label);
   }
-  async function discardCreatedCoordinationMarker(ref:Lease,parent:string,kind:string,idValid:(id:unknown)=>boolean,findMarker:FindMarker,context:DriveOperation,label:string):Promise<boolean>{
-    const id=String(ref&&ref.id||''),remoteId=String(ref&&ref['remoteId']||'');
-    if(ref?.['kind']!==kind||!idValid(id))return false;
-    const metadata=remoteId&&remoteId.length<=512?parseDriveFile({id:remoteId}):await findMarker(parent,id,context);
-    if(!metadata)return false;
-    return deleteCoordinationMarker(metadata,{parent,id,findMarker,context,label});
-  }
   async function findRepositoryPublication(parent:string,id:string,context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<DriveFile|null>{
     if(!publicationIdValid(id))throw noRetry(new Error('A Study Director publication marker has an invalid identity.'));
     const q=driveQuery([
@@ -800,9 +793,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       if(driveNow()-created>=PUBLICATION_STALE_MS-PUBLICATION_RENEW_MS)throw noRetry(new Error('The Google Drive backup publication marker went too long without renewal. Retry the backup.'));
       await endRepositoryPublication(ref,context);return next;
     }catch(error){
-      const cleanup=driveOperationContext({folderState:context.folderState});
-      await discardCreatedCoordinationMarker(next,parent,PUBLICATION_KIND,publicationIdValid,findRepositoryPublication,cleanup,'Could not clear a failed Study Director backup publication marker.').catch(()=>{});
-      throw error;
+      await endRepositoryPublication(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
     }
   }
 
@@ -889,9 +880,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       if(!Number.isFinite(expires)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||driveNow()>=expires)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
       await endRepositoryMaintenance(ref,context);return next;
     }catch(error){
-      const cleanup=driveOperationContext({folderState:context.folderState});
-      await discardCreatedCoordinationMarker(next,parent,MAINTENANCE_KIND,maintenanceIdValid,findRepositoryMaintenance,cleanup,'Could not clear a failed Study Director repository-maintenance marker.').catch(()=>{});
-      throw error;
+      await endRepositoryMaintenance(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
     }
   }
   async function listRepositoryFiles(kind:RepositoryKind,{limit=100000}:{limit?:number}={},context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<{items:readonly ProviderItem[];overflow:boolean;ignored:number}>{
@@ -1214,13 +1203,20 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   function bindRepositoryDownload(base:DriveOperation):RepositoryTransport['download']{
     return ((ref:ItemRef,options?:DriveDownloadOptions)=>repositoryDownload(ref,options||{},base)) as RepositoryTransport['download'];
   }
+  function rootRepositoryUpload(file:Upload,options:DriveOperationOptions={}):ReturnType<typeof repositoryUpload>{
+    return repositoryUpload(file,driveOperationContext(options));
+  }
+  function rootRepositoryDelete(ref:ItemRef,options:{signal?:AbortSignal|null|undefined}={}):ReturnType<typeof repositoryDelete>{
+    return repositoryDelete(ref,options,EMPTY_DRIVE_OPERATION);
+  }
   function repositoryTransport(base:DriveOperation=EMPTY_DRIVE_OPERATION):RepositoryTransport{
+    const root=base===EMPTY_DRIVE_OPERATION;
     const transport:RepositoryTransport={
       discardUploads:()=>repositoryUploads.clear(),
       list:opts=>repositoryList(opts,base),
-      upload:file=>repositoryUpload(file,base),
+      upload:root?rootRepositoryUpload:file=>repositoryUpload(file,base),
       download:bindRepositoryDownload(base),
-      delete:ref=>repositoryDelete(ref,{},base),
+      delete:root?rootRepositoryDelete:ref=>repositoryDelete(ref,{},base),
       beginPublication:()=>beginRepositoryPublication(base),
       listPublications:()=>listRepositoryPublications(base),
       assertPublication:ref=>assertRepositoryPublication(ref,base),
@@ -1233,9 +1229,9 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       endMaintenance:ref=>endRepositoryMaintenance(ref,base),
       now:driveNow,
       listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'}),base),
-      uploadSessionClaim:file=>repositoryUpload(file,base),
+      uploadSessionClaim:root?rootRepositoryUpload:file=>repositoryUpload(file,base),
       downloadSessionClaim:async(ref,options)=>{const progress=options?.onProgress;const downloadOptions:DriveDownloadOptions={signal:options?.signal??null,...progress?{onProgress:value=>progress({loaded:value.loaded??0,total:value.total??0,phase:'download'})}:{}};const result=await repositoryDownload(ref,downloadOptions,base);if('totalBytes' in result)throw new Error('Session claim download unexpectedly returned a byte range.');return result;},
-      deleteSessionClaim:ref=>repositoryDelete(ref,{},base),
+      deleteSessionClaim:root?rootRepositoryDelete:ref=>repositoryDelete(ref,{},base),
       scope:()=>repositoryScope(base),
       beginOperation:options=>beginRepositoryOperation(options),
       historyReadConcurrency:8
