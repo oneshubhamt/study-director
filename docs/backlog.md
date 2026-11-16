@@ -188,6 +188,13 @@ The notes audit's open findings. Done: A (the reserved "Support Activities" name
 - **D. Support Activities, done properly.** It is recognised by a reserved key stored as its label (`__study_director_support_activities__`), so every place that shows a name must translate it (`shownNote`, `noteName`); that is what caused the odd-name bugs. Give it a fixed identity and a normal label. It changes stored data, so it goes with removing the migration code (observation 9), once every device runs the current build.
 - **Real-device check of the notes work of 2026-11-13 to 16.** Not yet tried on Safari, the iPad or the phone: swiping the tag row, the line under each note and its "# Tag" picker, Rename from ⋯ (the fix for a menu handing focus back late), right-click and long press, New and Move, pinch zoom in the image view, dropping files. One pass per device.
 
+## Kept versions that keep coming back (owner, 2026-11-16)
+
+After resolving every review on the iPad and on the laptop, they came back again and again, and the status badge's yellow dot came and went (the iPad had last been opened over a week before). Diagnostics then held a session kept at a handoff and a Saved Day kept as `saved-day-deletion` (one device deleted it, the other kept a copy; changed 8 Nov, kept again today). Not yet explained from the code; two leads:
+- Each review's default is "keep this device's". Resolved that way on both devices while they hold different versions, the difference remains, and a later sync can find it and keep it again under a new review.
+- Each Continue Here may keep a session for review when the two copies' decisions differ (`yield`, `hand-over`); the trace marks `session-kept-for-review` with its reason.
+- *Next:* Copy diagnostics on the device where a review reappears, right after it does (the new "Status badge" line, the Kept version lines and `session-kept-for-review`), and which item it is. Workaround: on one device choose "Use kept", so both hold the same version.
+
 ## Decided, not yet scheduled
 
 - **Better Smart merge** (`mergeThreeWay`). The owner will come back to it; until then, do not audit it or suggest changes.

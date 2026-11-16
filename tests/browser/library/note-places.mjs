@@ -109,6 +109,32 @@ try{
     out.hint=document.querySelector('#library-notes-editor .library-notes-textarea')?.getAttribute('placeholder');
     return out;
   })()`);
+  // Real input, not a synthetic event: the browser closes a light-dismiss menu
+  // on the release of a press that began before it opened. macOS and Linux
+  // send contextmenu with the right button still down, and a long press fires
+  // under the finger, so the menu must still be open after the release.
+  const realMenu=async(press,release)=>{
+    const at=await page.evaluate(`(async()=>{const d=__PWA6;document.querySelector('.library-note-context-menu')?.hidePopover?.();await new Promise(r=>setTimeout(r,100));const row=document.querySelector('#library-notes-list [data-note-key="gs2"]');row.scrollIntoView({block:'center'});const rect=row.getBoundingClientRect();return {x:Math.round(rect.left+40),y:Math.round(rect.top+rect.height/2)};})()`);
+    await press(at);await new Promise(resolve=>setTimeout(resolve,650));await release(at);await new Promise(resolve=>setTimeout(resolve,400));
+    return page.evaluate(`(()=>{const menu=document.querySelector('.library-note-context-menu');return menu&&!menu.hidden&&menu.matches(':popover-open')?menu.getAttribute('aria-label'):null;})()`);
+  };
+  const mouse=(type,{x,y})=>page.send('Input.dispatchMouseEvent',{type,x,y,button:'right',buttons:type==='mousePressed'?2:0,clickCount:1});
+  const realRightClick=await realMenu(at=>mouse('mousePressed',at),at=>mouse('mouseReleased',at));
+  const touch=(type,{x,y})=>page.send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'?[]:[{x,y,id:1}]});
+  const realLongPress=await realMenu(at=>touch('touchStart',at),at=>touch('touchEnd',at));
+  // Deleting a tag while typing takes it out of the tag row by itself (no
+  // other redraw): Physics holds the only #formula.
+  await page.evaluate(`(async()=>{document.querySelector('.library-note-context-menu')?.hidePopover?.();document.querySelector('#library-notes-list [data-note-key="physics"]').click();await new Promise(r=>setTimeout(r,300));})()`);
+  const tagChips=()=>page.evaluate(`[...document.querySelectorAll('#library-notes-tags .library-tag-name')].map(item=>item.textContent)`);
+  const tagsBefore=await tagChips();
+  await page.click('#library-notes-editor .sd-rte-wordgard [contenteditable]');
+  await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'a',code:'KeyA',modifiers:2,commands:['selectAll']});await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'a',code:'KeyA',modifiers:2});
+  await page.send('Input.insertText',{text:'Plain text now'});await new Promise(resolve=>setTimeout(resolve,700));
+  const tagsAfter=await tagChips();
+  assert.equal(tagsBefore.includes('#formula'),true,'the tag row lists #formula while Physics holds it');
+  assert.equal(tagsAfter.includes('#formula'),false,'deleting the only #formula takes it out of the tag row as you type');
+  assert.equal(realRightClick,'Actions for GS2','a real right-click leaves the menu open after the button is released');
+  assert.equal(realLongPress,'Actions for GS2','a real long press leaves the menu open after the finger lifts');
   assert.equal(result.count,'4','the count is of real notes: GS2, Polity, Physics, Rivers');
   assert.equal(result.newDefault,'Creates GS2 › Rights.','New starts inside the open note');
   assert.equal(result.newPicked,'Creates Physics › Rights.','Change picks another place');

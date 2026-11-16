@@ -65,7 +65,7 @@ for(const [label,state,covered,expected] of [
 for(const status of ['active','suspended'])for(const owner of ['inst_here','inst_other']){
   const current=session(status,owner,day),events=[],handoff={step:'',error:''};
   const ctx=vm.createContext({
-    appCanMutate:()=>true,sessionHandoff:handoff,
+    appCanMutate:()=>true,sessionHandoff:handoff,sessionPanelMode:'none',sessionPanelSession:null,sessionClaimHold:null,
     setSessionHandoff:(step='',error='')=>{handoff.step=step;handoff.error=error;},
     NoticeCoordinator:{resolveEvent:()=>{}},
     AppData:{activeSession:{load:async()=>({ok:true,value:current,storage:{idb:true}})}},
@@ -86,6 +86,27 @@ for(const status of ['active','suspended'])for(const owner of ['inst_here','inst
   assert.equal(await ctx.continueOld(),false,status+' / '+owner+' must not continue a historical timer');
   assert.ok(events.includes('previous'),'historical session must remain visible for Review');
   assert.ok(!events.some(e=>['timer','restore','claim','elsewhere'].includes(e)),'no today-only execution');
+}
+
+// While another device's claimed copy is on its way (the session shown
+// running elsewhere is this device's held copy), Continue Here asks for that
+// copy and says so: it neither resumes the stopped copy here nor claims.
+{
+  const held=Object.freeze({...session('active','',today)}),events=[],handoff={step:'',error:''},syncs=[];
+  const ctx=vm.createContext({
+    appCanMutate:()=>true,sessionHandoff:handoff,sessionPanelMode:'elsewhere',sessionPanelSession:held,sessionClaimHold:held,
+    setSessionHandoff:(step='',error='')=>{handoff.step=step;handoff.error=error;},
+    NoticeCoordinator:{resolveEvent:()=>{}},
+    BackupProviderRuntime:{scheduleSharedSync:(provider,reason)=>syncs.push(`${provider}:${reason}`)},
+    AppData:{activeSession:{load:async()=>{events.push('load');return {ok:true,value:session('suspended','inst_here',today),storage:{idb:true}};}}},
+    restoreSuspendedTodaySession:async()=>{events.push('restore');return true;},attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},
+    transferSessionOwnershipHere:async()=>{events.push('claim');return {};}
+  });
+  vm.runInContext(continueHere+'\nglobalThis.continueHeld=continueSessionHere;',ctx);
+  assert.equal(await ctx.continueHeld(),false,'Continue Here waits for the other device\'s copy');
+  assert.deepEqual(events,[],'nothing is resumed, claimed or even read');
+  assert.deepEqual(syncs,['google-drive:session-claim-release'],'the copy is asked for at once');
+  assert.match(handoff.error,/still on its way/u,'and the person is told');
 }
 
 // Restore Session does the same, and keeps today's routing.

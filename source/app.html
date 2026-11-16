@@ -2689,6 +2689,9 @@ const LIVE_DRAFT_SAVE_DEBOUNCE_MS=1000;
 const TIMER_SNAPSHOT_INTERVAL_MS=60*1000;
 let lastTimerSnapshotMs=0;
 let sessionPanelMode='none',sessionPanelSession=null;
+// The session another device claimed while its first copy is on its way:
+// shown running elsewhere until that copy arrives (yieldSessionToOtherDevice).
+let sessionClaimHold=null;
 let sessionSafetyMessage='';
 // The profile indicator's state (renderSyncStatus); declared early because
 // storage health asks for a redraw during start-up.
@@ -3022,7 +3025,7 @@ async function checkSessionOwnershipClaim(){
     // here (and the stop that follows it) asks for its own sync below, once
     // the stopped session is saved here; a version left for it is reported
     // again by the next check.
-    if(watched?.newVersions&&!takeover&&!sessionClaimFreeze)BackupProviderRuntime.bringInSessionVersions('google-drive');
+    if(watched?.newVersions&&!takeover&&!(sessionClaimFreeze&&TASKS.length))BackupProviderRuntime.bringInSessionVersions('google-drive');
     if(takeover){
       const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
       if(!same){
@@ -5837,6 +5840,14 @@ async function continueSessionHere(){
   if(!appCanMutate()||sessionHandoff.step)return false;
   // The "Today’s session is ready" pop-up has done its job.
   NoticeCoordinator.resolveEvent('session','session-handoff');
+  // The other device claimed the session and its copy has not arrived: what
+  // is stored here is this device's stopped copy, which Continue Here must not
+  // simply resume. The copy is asked for now; Continue Here works once it lands.
+  if(sessionPanelMode==='elsewhere'&&sessionPanelSession&&sessionPanelSession===sessionClaimHold){
+    BackupProviderRuntime.scheduleSharedSync('google-drive','session-claim-release');
+    setSessionHandoff('','The other device’s copy of today’s session is still on its way. Continue Here is ready once it arrives, in a few seconds.');
+    return false;
+  }
   setSessionHandoff('Checking today’s session…');
   try{
     const loaded=await AppData.activeSession.load(),session=loaded&&loaded.value||null;
@@ -5908,7 +5919,11 @@ async function yieldSessionToOtherDevice(options={}){
       await requireCanonicalSessionWrite(saved,saved?.value,'yielding the Active Session during reconciliation');
     }
     resetRuntimeSessionState({lifecycleManaged:true,source:'session-yield',date:todayISO()});
-    setSessionPanelMode('suspended',session);
+    // Claimed by another device whose own copy is still on its way: shown as
+    // running there (the device is named once its copy arrives), with
+    // Continue Here, rather than as a session suspended on this device.
+    if(options&&options.claimedAway===true&&session){sessionClaimHold=Object.freeze({...session,status:'active',runningOn:''});setSessionPanelMode('elsewhere',sessionClaimHold);}
+    else setSessionPanelMode('suspended',session);
     refreshPlanAfterSessionReset();
     setTimerMode(TIMER_MODES.SUSPENDED,'session-yield');
     updateExecutePanels();
@@ -6742,11 +6757,20 @@ function drawStatusHost(host,model){
   const badge=host.querySelector('.status-badge'),text=model.badge==='review'&&model.count>1?many(model.count):model.badge==='info'&&model.unseen>1?many(model.unseen):['error','warning'].includes(model.badge)?'!':model.badge==='update'?'↑':'';
   if(badge&&badge.textContent!==text)badge.textContent=text;
 }
+// The badge's last changes, for Copy diagnostics: a badge that keeps coming
+// and going shows what flips (which badge, kept versions, Drive's review).
+const statusBadgeChanges=[];let statusBadgeLast='';
+function noteStatusBadge(model,input){
+  const review=Math.max(0,(Number(model.count)||0)-(Number(input.kept)||0))>0?1:0,kept=Math.min(9999,Math.max(0,Math.floor(Number(input.kept)||0))),key=`${model.badge||'none'}:${kept}:${review}`;
+  if(key===statusBadgeLast)return;statusBadgeLast=key;
+  statusBadgeChanges.push(`${new Date().toISOString()}:${key}`);if(statusBadgeChanges.length>12)statusBadgeChanges.shift();
+}
 function renderSyncStatus(){
   syncStatusTimer=null;
-  let model;
-  try{model=BackupPresentation.status(syncStatusInput());}
+  let model,input;
+  try{input=syncStatusInput();model=BackupPresentation.status(input);}
   catch(error){AppDiagnostics.capture('sync-status.render',error,'warn');return;}
+  noteStatusBadge(model,input);
   const hosts=['profile-tag','profile-badge','profile-avatar'].map(id=>document.getElementById(id));
   // Syncing settles into the green ring with a brief glow.
   if(syncStatusRing==='syncing'&&model.ring==='synced'){
@@ -11649,6 +11673,7 @@ function currentBackupDiagnosticStates(){
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
   sample('Drive sync',()=>BackupProviderRuntime.diagnosticSync(),values=>values.map(value=>({job:'Drive sync',state:!value.connected?'disconnected':value.catchingUp?'running':value.needsPassword?'locked':value.needsUpdate||UnsupportedData.held()?'blocked':value.needsReview?'attention':value.behind?'pending':value.syncedAt?'current':'unknown',completedAt:value.syncedAt,attemptedAt:value.checkedAt,nextEligibleAt:value.nextEligibleAt,signInEndsAt:value.signInEndsAt,needsReview:value.needsReview,needsUpdate:value.needsUpdate,needsPassword:value.needsPassword,behind:value.behind,catchingUp:value.catchingUp,turnWaits:value.turnWaits,...(value.waitingFor||value.waitingSince?{waitingFor:PersistenceModule.deviceName(value.waitingFor)||'another device',waitingSince:value.waitingSince,waitingRenewedAt:value.waitingRenewedAt}:{}),keptVersions:KeptVersions.count()})));
+  sample('Status badge',()=>[...statusBadgeChanges],value=>[{job:'Status badge',state:value.length?'observed':'none',badgeHistory:value.join(' | ')}]);
   sample('Profiles',()=>({count:Profiles.list().length,pending:Profiles.removalPending(),unsupported:Profiles.unsupported()}),value=>[{job:'Profiles',state:value.unsupported?'unsupported':value.pending?'pending':'observed',profiles:value.count,removalPending:value.pending>0}]);
   sample('Unsupported data',()=>UnsupportedData.summary(),value=>[{job:'Unsupported data',state:value.blocked?'blocked':value.protected?'held':value.held?'replaceable':'none',held:value.held,protectedCount:value.protected,savedDays:value.items.days,notes:value.items.notes,assets:value.items.attachments,sessions:value.items.sessions,settings:value.items.settings}]);
   sample('Provider background',()=>BackupProviderRuntime.backgroundStatus(),values=>values);return states;

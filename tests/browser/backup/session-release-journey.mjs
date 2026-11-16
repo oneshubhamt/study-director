@@ -38,15 +38,20 @@ try{
   await waitFor(()=>held.reached,{label:'the laptop tried to upload its copy',timeout:60000});
   // Long enough for the laptop's request to time out and be retried while
   // the first one is still on its way (a slow connection).
-  await sleep(Number(process.env.SD_RELEASE_HOLD_MS)||75000);held.release();
-  const released=Date.now();
-  await waitFor(async()=>(await view(phone)).panel==='Running on Another Device',{label:'the phone lets go by itself once the laptop\'s copy is on Drive',timeout:90000});
+  // Meanwhile the phone holds its stopped copy: it shows the session running
+  // on another device (the claim says so), never suspended on itself.
+  const panelsWhileHeld=new Set(),holdUntil=Date.now()+(Number(process.env.SD_RELEASE_HOLD_MS)||75000);
+  while(Date.now()<holdUntil){panelsWhileHeld.add((await view(phone)).panel);await sleep(2000);}
+  held.release();
+  const released=Date.now(),laptopId=(await view(laptop)).owner;
+  assert.equal(panelsWhileHeld.has('Today’s Session Suspended'),false,`the phone never shows its session suspended while the laptop's copy is on its way (${[...panelsWhileHeld].join(', ')})`);
+  await waitFor(async()=>{const shown=await view(phone);return shown.panel==='Running on Another Device'&&shown.owner===laptopId;},{label:'the phone lets go by itself once the laptop\'s copy is on Drive',timeout:90000});
   const releaseMs=Date.now()-released;
   assert.equal((await view(laptop)).mode,'running','the laptop keeps running the session');
   // A running timer saves its progress each minute: flush it, as a device going to the background would.
   await upload(laptop);await settled(laptop,'B');await settled(phone,'A');
   await noReviews([['A',phone],['B',laptop]],'after the handoff');
-  step('phone lets go by itself',{releaseMs});
+  step('phone lets go by itself',{releaseMs,panelsWhileHeld:[...panelsWhileHeld]});
   console.log(JSON.stringify({status:'PASS',suite:'session-release-journey',steps}));
 }catch(error){
   try{await explain([['A',phone],['B',laptop]]);}catch{}

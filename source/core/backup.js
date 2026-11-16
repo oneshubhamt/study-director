@@ -1276,7 +1276,10 @@ async function resolveSessionForReconciliation(base,parsed,{sync=false,review=fa
   };
   if(sync&&decision.kept&&!(await keepSession(decision.kept,'settlement')))return freeze({needsDecision:true});
   if(state==='yield-hold'){
-    await yieldSession({deferReview:true});state='hold';value=null;
+    // The claim says another device runs the session; its first copy has not
+    // reached Drive yet. This device stops and holds its own until it does,
+    // and shows the session running elsewhere meanwhile, not suspended here.
+    await yieldSession({deferReview:true,claimedAway:true});state='hold';value=null;
   }else if(state==='hand-over'&&sync){
     // The timer here stops first, so the copy handed over is final: what
     // only this device decided goes to the owner, under its control.
