@@ -19,6 +19,8 @@ and offers each action.
 
 ## Ring and badge
 
+Copy diagnostics has a "Status badge" line with the badge's last 12 changes: when, which badge, how many kept versions and whether Drive asked for a review (nothing else). A badge that keeps coming and going shows there what flips.
+
 The ring shows **sync health**. The badge shows the **most important thing
 that needs the person**. Both can show at once (for example Synced with a
 review waiting). Colour is never the only signal: each state also differs in

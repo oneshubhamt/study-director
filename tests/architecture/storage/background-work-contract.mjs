@@ -209,6 +209,9 @@ assert.match(app,/void BackupFiles\.collect\(\)\.catch/u,'cold startup must disc
  assert.deepEqual(await run({foreignPolls:0}),{ended:true,waits:0},'no lease: no wait');
  const stuck=await run({foreignPolls:1000});assert.equal(stuck.ended,false,'a lease that never ends is not waited for forever');assert.equal(stuck.waits,100,'at most 25 s');
  assert.equal((await run({owner:false,foreignPolls:3})).waits,0,'without control this tab does not wait: recovery reports it');
+ // The sync's hold of a session another device claimed yields as claimed
+ // away: shown running elsewhere, not suspended here (2026-11-16).
+ assert.match(backup,/if\(state==='yield-hold'\)\{[\s\S]{0,400}?await yieldSession\(\{deferReview:true,claimedAway:true\}\);state='hold'/u,'the hold of a claimed session yields as claimed away');
  assert.match(app,/recoverInterruptedRestore:async\(\)=>\{await PlanData\.hydrate\(\);if\(await AppData\.restoreJournal\.read\(\)\.catch\(\(\)=>null\)\)await waitForClosedTabLease\(\);/u,'start-up waits only when an interrupted step must be recovered');
 }
 // Background sync waits while offline; coming back online wakes it at once.

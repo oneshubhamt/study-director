@@ -666,6 +666,43 @@ for(const [label,shared,snapshot] of [
   }
 }
 
+// Another device claimed the session and its first copy has not reached
+// Drive (yield-hold): this device stores its stopped copy as suspended but
+// shows the session running elsewhere, not suspended here (owner's report,
+// 2026-11-16: the laptop showed "Session suspended" for 20-30 s after a
+// Continue Here on the iPad). An ordinary yield still shows it suspended.
+{
+  const src=[
+    productionFunction('async function requireCanonicalSessionWrite(saved,expected,operation='),
+    productionFunction('async function yieldSessionToOtherDevice(options={}){')
+  ].join('\n');
+  for(const claimedAway of [true,false]){
+    let stored=null;const panels=[];
+    const built={date:'2026-10-27',runningOn:'inst_local',revision:4,status:'active',suspendedAt:null,snapshot:{review:'built'}};
+    const app={
+      Object,Date,Promise,Error,
+      TASKS:[{}],sessionPanelMode:'active',sessionClaimHold:null,todayISO:()=> '2026-10-27',TIMER_MODES:{SUSPENDED:'suspended'},SessionLifecycle:{run:async(_action,_options,work)=>work()},
+      PracticePacer:{pauseForSessionEnd:()=>{}},
+      activeSessionPayload:(_snapshot,options={})=>({...structuredClone(built),status:options.status||built.status,suspendedAt:options.suspendedAt||null}),
+      AppData:{activeSession:{save:async value=>{stored={...structuredClone(value),stored:true};return {ok:true,value:stored,storage:{idb:true}};},load:async()=>({ok:true,value:stored,storage:{idb:true}})}},
+      ActiveSessionCodec:{sanitizeCurrent:value=>value&&value.stored===true?value:null},
+      CanonicalModule:{same:(left,right)=>JSON.stringify(left)===JSON.stringify(right)},
+      resetRuntimeSessionState:()=>{},setSessionPanelMode:(mode,session)=>{panels.push({mode,session});},refreshPlanAfterSessionReset:()=>{},
+      setTimerMode:()=>{},updateExecutePanels:()=>{},Interactions:{notify:()=>{}},sessionYieldedAt:0
+    };
+    const context=vm.createContext(app);
+    vm.runInContext(src+'\nglobalThis.yieldSession=yieldSessionToOtherDevice;globalThis.hold=()=>sessionClaimHold;',context);
+    assert.equal(await context.yieldSession({deferReview:true,...(claimedAway?{claimedAway:true}:{})}),true);
+    assert.equal(stored.status,'suspended','the stopped copy is stored suspended either way');
+    const shown=panels.at(-1);
+    if(claimedAway){
+      assert.equal(shown.mode,'elsewhere','a claimed session shows running elsewhere');
+      assert.deepEqual({status:shown.session.status,runningOn:shown.session.runningOn},{status:'active',runningOn:''},'on another device, named once its copy arrives');
+      assert.equal(shown.session,context.hold(),'and is marked as the hold, so Continue Here waits for that copy');
+    }else assert.deepEqual({mode:shown.mode,status:shown.session.status},{mode:'suspended',status:'suspended'},'an ordinary yield shows the session suspended');
+  }
+}
+
 // A session built for Suspend or for handing over takes its stored form only
 // when saved (the codec accepts stored forms alone), so both must check the
 // strict read-back against what was saved, not against the built copy. A

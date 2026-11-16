@@ -433,12 +433,22 @@ registry.define('library-notes',1,modules=>{
     // send no contextmenu for one), opens its actions at the pointer.
     function installNoteContextMenu(list){
       const rowEntry=target=>{const row=target&&target.closest?target.closest('[data-note-key]'):null;const entry=row?noteEntries().find(item=>item.key===row.dataset.noteKey):null;return entry?{row,entry}:null;};
-      let press=null,suppressClick=false;
+      let press=null,suppressClick=false,held=null;
       const cancel=()=>{if(press){clearTimeout(press.timer);press=null;}};
-      list.addEventListener('contextmenu',event=>{const hit=rowEntry(event.target);if(!hit||hit.entry.support||noteSelectionMode)return;event.preventDefault();cancel();openNoteContextMenu(hit.entry,hit.row,event.clientX,event.clientY);});
+      // The menu is a light-dismiss popover: a press that began before it
+      // opened and ends outside it closes it again. macOS and Linux send
+      // contextmenu while the right button is still down, and a long press
+      // fires under the finger, so the menu opens once that button or finger
+      // is released. (Windows sends contextmenu after the release: it opens
+      // at once.)
+      const openAfterRelease=(hit,x,y)=>{const open=()=>openNoteContextMenu(hit.entry,hit.row,x,y);if(held)held.open=open;else open();};
+      const release=event=>{if(!held||event.pointerId!==held.id)return;const open=held.open;held=null;if(open&&event.type==='pointerup')setTimeout(open,0);};
+      window.addEventListener('pointerup',release,true);window.addEventListener('pointercancel',release,true);
+      list.addEventListener('contextmenu',event=>{const hit=rowEntry(event.target);if(!hit||hit.entry.support||noteSelectionMode)return;event.preventDefault();cancel();openAfterRelease(hit,event.clientX,event.clientY);});
       list.addEventListener('pointerdown',event=>{
+        held=event.pointerType==='touch'||event.button===2?{id:event.pointerId,open:null}:null;
         if(event.pointerType!=='touch')return;const hit=rowEntry(event.target);if(!hit||hit.entry.support||noteSelectionMode)return;
-        cancel();press={x:event.clientX,y:event.clientY,timer:setTimeout(()=>{press=null;suppressClick=true;openNoteContextMenu(hit.entry,hit.row,event.clientX,event.clientY);},500)};
+        cancel();press={x:event.clientX,y:event.clientY,timer:setTimeout(()=>{press=null;suppressClick=true;openAfterRelease(hit,event.clientX,event.clientY);},500)};
       });
       list.addEventListener('pointermove',event=>{if(press&&Math.hypot(event.clientX-press.x,event.clientY-press.y)>8)cancel();});
       for(const type of ['pointerup','pointercancel','scroll'])list.addEventListener(type,cancel,{passive:true});
@@ -607,6 +617,7 @@ registry.define('library-notes',1,modules=>{
           const tag=row.querySelector('.library-note-tag.note');if(tag)tag.hidden=!hasNote;
         }
         updateNoteActions();
+        scheduleNoteLiveRefresh(entry,links);
       });
       return true;
     }
@@ -1080,7 +1091,22 @@ registry.define('library-notes',1,modules=>{
         return true;
       }catch(error){notice.finish('failed',error&&error.message||'The note could not be renamed. Keep this tab open and retry.');return false;}
     }
+    // While a note is typed in, what depends on its text follows shortly
+    // after, without redrawing the editor: the tag row (a tag added or
+    // deleted), the links bar with Linked from, and the row's edited time.
+    let noteLiveTimer=0;
+    function scheduleNoteLiveRefresh(entry,links){
+      clearTimeout(noteLiveTimer);
+      noteLiveTimer=setTimeout(()=>{
+        noteLiveTimer=0;if(!notesShown())return;
+        renderNoteTags();
+        if(links?.isConnected)links.refresh?.();
+        const row=[...document.querySelectorAll('#library-notes-list [data-note-key]')].find(candidate=>candidate.dataset.noteKey===entry.key),stored=getNote(entry.key,entry.label);
+        const edited=row?.querySelector('.library-note-nav-edited');if(edited&&stored?.updatedAt)edited.textContent=editedLabel(stored.updatedAt);
+      },300);
+    }
     function clearNotesEditorBinding(){
+      clearTimeout(noteLiveTimer);noteLiveTimer=0;
       noteEditorSignature='';noteParentSignature='';noteSearchLanded='';
       const field=notesEditorField();
       if(field)clearEditor(field);

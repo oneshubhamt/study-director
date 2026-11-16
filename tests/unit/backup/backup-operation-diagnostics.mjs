@@ -55,6 +55,11 @@ const memoryId=unavailable.start('memory-only');assert.equal(unavailable.finish(
 assert.match(unavailable.text([{job:'Device backup',state:'connected',permission:'granted',stalePermissionResponses:3,folderName:'PRIVATE DATA',token:'PRIVATE DATA'}]),/stalePermissionResponses=3/u);
 assert.doesNotMatch(unavailable.text([{job:'Device backup',state:'connected',permission:'granted',stalePermissionResponses:3,folderName:'PRIVATE DATA',token:'PRIVATE DATA'}]),/PRIVATE DATA/u);
 assert.doesNotMatch(unavailable.text([{job:'cleanup',state:'scheduled',pending:true,reason:'private note',folderName:'private folder',nextEligibleAt:'tomorrow'}]),/private note|private folder/u,'live diagnostics use a narrow field projection');
+// The status badge's recent changes: time, badge, kept count and a Drive
+// review flag only; anything else in that field is dropped whole.
+const badges='2026-11-16T07:16:38.000Z:review:1:0 | 2026-11-16T07:16:49.000Z:none:0:0';
+assert.match(unavailable.text([{job:'Status badge',state:'observed',badgeHistory:badges}]),new RegExp('Current Status badge: state=observed · badgeHistory='+badges.replace(/[.|]/gu,'\\$&'),'u'));
+assert.doesNotMatch(unavailable.text([{job:'Status badge',state:'observed',badgeHistory:'2026-11-16T07:16:38.000Z:review:1:0 | PRIVATE DATA'}]),/badgeHistory|PRIVATE DATA/u,'a badge history with anything else is dropped');
 console.log(JSON.stringify({status:'PASS',suite:'backup-operation-diagnostics',phaseTiming:true,reloadInterruption:true,boundedHistory:true,copyText:true},null,2));
 
 // Sanitize before persistence as well as before copying, including legacy records.
