@@ -87,6 +87,32 @@ try{
   result.checks.alphabeticalTreeAndMutedEmptyRows=true;
   console.error('[qa-notes] hierarchy and search passed');
 
+  // A task-note textarea is reused as Execute moves between blocks. If the
+  // previous mounted editor detects a newer canonical note, its asynchronous
+  // disposal must not restore that old note after the field has been rebound.
+  const conflictRebind=await page.evaluate(`(async()=>{
+    const d=__PWA6,n=d.AppData.notes,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+    const seed=n.get('alpha empty'),seeded=n.update('alpha empty','Alpha Empty','Alpha baseline',seed?.updatedAt||'');if(!['changed','unchanged'].includes(seeded.status))throw new Error('Alpha seed failed: '+seeded.status);await n.flush({strict:true});
+    await d.goTab('execute');d.setCurrentTask(0,{notifyPractice:false});d.refreshPnote({force:true});await wait(80);
+    const field=document.getElementById('pn-extra');if(!field)throw new Error('Execute note field is unavailable.');
+    await d.RichTextRuntime.activate(field);await wait(20);
+    const before=n.get('alpha empty');field.dataset.richSyncState='saving';
+    const changed=n.update('alpha empty','Alpha Empty','Alpha remote canonical',before?.updatedAt||'');if(changed.status!=='changed')throw new Error('Conflict seed failed: '+changed.status);await n.flush({strict:true});
+    const remote=n.get('alpha empty'),conflict=d.RichTextRuntime.reconcileExternal(field,remote.text,remote.updatedAt);
+    const marked={status:conflict.status,key:field.dataset.areaKey||'',conflict:field.dataset.richExternalConflict||''};
+    d.setCurrentTask(1,{notifyPractice:false});d.refreshPnote({force:true});await wait(180);
+    const rebound={key:field.dataset.areaKey||'',value:field.value,conflict:field.dataset.richExternalConflict||'',revision:field.dataset.noteRevision||''};
+    await d.goTab('library');d.LibraryView.showSection('notes');await wait(50);
+    return {marked,rebound,zeta:n.get('zeta filled')?.text||''};
+  })()`);
+  assert.equal(conflictRebind.marked.status,'conflict','the mounted Alpha editor must enter the external-conflict path before rebinding');
+  assert.equal(conflictRebind.marked.key,'alpha empty');assert.equal(conflictRebind.marked.conflict,'1');
+  assert.deepEqual(conflictRebind.rebound,{key:'zeta filled',value:'Durable Zeta note',conflict:'',revision:conflictRebind.rebound.revision},'old conflict disposal must not overwrite or poison the newly rebound Zeta editor');
+  assert.ok(conflictRebind.rebound.revision,'the rebound field carries the current Zeta note revision');
+  assert.equal(conflictRebind.zeta,'Durable Zeta note');
+  result.checks.conflictedEditorDisposalCannotOverwriteReboundTaskNote=true;
+  console.error('[qa-notes] conflicted editor rebind fence passed');
+
   const temporary=await page.evaluate(`(async()=>{
     const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));await __interactionQA.create('Standalone Only','top');await wait(30);
     await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));const before={
