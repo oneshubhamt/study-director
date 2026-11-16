@@ -298,7 +298,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   // Cleanup removed it as abandoned: the upload must stop, and leave nothing behind.
   state.files.delete(markerFile(third.id).id);
   await assert.rejects(()=>provider.repository.renewPublication(third),/disappeared before commit/u,'renewal fails once cleanup has removed the marker');
-  assert.equal(markers().length,0,'a failed renewal removes the fresh marker it made');
+  assert.equal(markers().length,0,'a failed renewal removes the fresh marker it made');console.error('P58A_LOC publication-missing-done');
   // Unrenewed too long: cleanup may be about to take it for abandoned.
   const late=await provider.repository.beginPublication();markerFile(late.id).createdTime=new Date(Date.now()-14*60*1000).toISOString();
   await assert.rejects(()=>provider.repository.renewPublication(late),/too long without renewal/u,'renewal refuses a marker close to looking abandoned');
@@ -306,7 +306,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   // A marker from an older build does not renew; cleanup gives it the full day.
   const legacy=markerFile(late.id);delete legacy.appProperties.sdPublicationRenews;delete legacy.appProperties.sdPublicationStartedAt;
   const listed=(await provider.repository.listPublications()).items.find(row=>row.id===late.id);
-  assert.equal(listed.renews,false,'an older build\'s marker does not renew');assert.equal(listed.startedAt,listed.createdAt,'an older build\'s marker began when it was made');
+  assert.equal(listed.renews,false,'an older build\'s marker does not renew');assert.equal(listed.startedAt,listed.createdAt,'an older build\'s marker began when it was made');console.error('P58A_LOC publication-renew-section-done');
 }
 {
   // This device's clock runs 20 minutes ahead of Drive's. The adapter learns
@@ -324,7 +324,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   await provider.repository.endPublication(second);
   const maintenance=await provider.repository.beginMaintenance();
   assert.equal((await provider.repository.assertMaintenance(maintenance)).id,maintenance.id,'nor is a fresh maintenance marker');
-  await provider.repository.endMaintenance(maintenance);
+  await provider.repository.endMaintenance(maintenance);console.error('P58A_LOC clock-skew-section-done');
 }
 
 {
@@ -346,7 +346,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   markerFile.appProperties.studyDirectorRepositoryVersion='2';markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
   const maintenanceReleaseStart=state.requests.length;state.networkFailCoordinationDeleteOnce=true;assert.equal(await operation.endMaintenance(marker),true);const maintenanceReleaseRequests=state.requests.slice(maintenanceReleaseStart).map(request=>({method:request.method,url:new URL(request.url)}));assert.equal(maintenanceReleaseRequests.some(request=>request.method==='GET'&&request.url.pathname===`/drive/v3/files/${marker.remoteId}`),false,'known verified maintenance release must DELETE directly instead of paying for a redundant metadata GET');active=await operation.listMaintenances();assert.equal(active.items.length,0,'ambiguous maintenance deletion must recheck exact identity and retry until the marker is confirmed absent');
   await assert.rejects(()=>operation.assertMaintenance(marker),/disappeared during cleanup/u,'maintenance whose provider-visible protection disappeared must fail closed before more deletion');
-  assert.equal([...state.files.values()].some(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance'),false,'maintenance markers must not leak into repository history after release');
+  assert.equal([...state.files.values()].some(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance'),false,'maintenance markers must not leak into repository history after release');console.error('P58A_LOC maintenance-basic-done');
 }
 
 // Renewal preserves exclusion across immutable-marker rotation, including
@@ -367,8 +367,9 @@ for(const failure of ['none','missing','expired','unreadable-age','foreign']){
   assert.equal([...h.state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,failure==='missing'?0:1,'failed renewal removes only its new candidate marker');
  }
  assert.equal(h.state.requests.some(request=>request.method==='PATCH'),false,'renewal retains immutable metadata and the existing endpoint policy');
- await h.provider.disconnect();assert.equal(clock.pending(),0);
+ await h.provider.disconnect();assert.equal(clock.pending(),0);console.error('P58A_LOC maintenance-renew '+failure);
 }
+console.error('P58A_LOC maintenance-renew-loop-done');
 
 // Cancellation releases only coordination artifacts, using the same verified
 // operation scope. Invalidating that scope still forces a fresh folder check.
@@ -382,6 +383,7 @@ for(const invalidate of [false,true]){
  else{assert.equal(metadataReads.length,0,'known marker release must not rediscover its already verified folder after cancellation');assert.equal(h.state.files.has(marker.remoteId),false);}
  await h.provider.disconnect();
 }
+console.error('P58A_LOC coordination-cancel-done');
 
 // Exercise actual response streams after headers, not only pending fetch calls.
 const bodyContractCases=[];
@@ -440,6 +442,7 @@ for(const fault of [{mode:'interrupted'},{mode:'invalid'},{mode:'shape',payload:
  await h.provider.release();assert.deepEqual(h.clock.pending(),[]);bodyContractCases.push('401 invalidates authorization without waiting for unused body');
 }
 
+console.error('P58A_LOC body-contracts-done');
 const productiveTransferCases=[];
 async function settleTransfer(task,clock,state,limitMs=2000000){
  let outcome;task.then(value=>{outcome={ok:true,value};},error=>{outcome={ok:false,error};});
@@ -493,6 +496,7 @@ for(const direction of ['upload','download']){
  const file=await makeRepositoryFile('object','obj_'+'b'.repeat(32),'fetch-only receipt proof');const uploaded=await h.provider.repository.upload(file);
  assert.equal(uploaded.serverDigest,file.digest);await h.provider.disconnect();productiveTransferCases.push('fetch-only capability fallback retains immutable server receipt validation');
 }
+console.error('P58A_LOC productive-transfer-done');
 // Retained upload progress is a server-acknowledged prefix, never a guessed
 // client byte count. Exercise the production adapter and lifecycle together.
 const resumableUploadCases=[];
@@ -552,6 +556,7 @@ for(const boundary of ['payload-change','repository-change','expired-session','r
  }
  await h.provider.disconnect();assert.equal(clock.pending(),0);resumableUploadCases.push(boundary);
 }
+console.error('P58A_LOC resumable-boundaries-done');
 // A second browser page has no upload session memory. It must not create a
 // duplicate logical file if the prior page's response/receipt was lost.
 const restartCases=[];
@@ -597,4 +602,5 @@ const restartCases=[];
  assert.equal(second.state.uploads.size,2,'page-local upload URL is not falsely reconstructed from the remote orphan session');
  restartCases.push('interrupted large upload restarts from canonical bytes without false receipt');
 }
+console.error('P58A_LOC reached-final');
 console.log(JSON.stringify({status:'PASS',suite:'drive-repository-security',resumableUploadCases,restartCases,productiveTransferCases,bodyContractCases,folderVerificationMeasurement,transportOnly:true,commitMarkerTransport:true,legacyWholeBlobRetired:true,driveFileScopeOnly:true,endpointConfined:true,tinyMultipartUpload:true,largeResumableUpload:true,opaqueMarkers:true,boundedStreamingDownload:true,coldFolderSingleFlight:true,coldFolderFailureRetry:true,folderAmbiguityRejected:true,policyBoundaryFailClosed:true,duplicateIdentityFailClosed:true,sourceFenceThroughUpload:true,parallelCancellationIsolated:true,parallelSourceFenceIsolated:true,parallelProtectionFenceIsolated:true,folderVerificationCoalesced:true,folderReceiptInvalidation:true,exactDeletion:true,temporaryDownloadRelease:true,publicationProtectionLifecycle:true,maintenanceProtectionLifecycle:true,externalRepositoryDeletionSelfHeals:true,trashedRepositorySelfHeals:true,boundedMaintenanceLease:true},null,2));
