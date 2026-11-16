@@ -184,15 +184,21 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
     actions:Object.freeze({closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>true,applyUpdate:()=>true,connectDevice:()=>true,openExecute:()=>true,continueSession:()=>true,openData:()=>true}),
     environment,capture:()=>{}
   }));
+  const abandoned=controller.connectDriveForProfile();
+  profile='profile-b';
+  pending[0](true);await abandoned;await Promise.resolve();
+  profile='profile-a';
+  assert.equal(controller.connectCardOpen(),false,'a completion abandoned on another profile cannot resurrect if the old profile returns');
+
   const first=controller.connectDriveForProfile();
   connectRoot.hidden=false;
   profile='profile-b';
   assert.equal(controller.connectCardOpen(),false,'a profile switch retires the previous profile card immediately');
   assert.equal(connectRoot.hidden,true,'a profile switch hides the previous profile card DOM');
   const second=controller.connectDriveForProfile();
-  pending[0](true);await first;await Promise.resolve();
+  pending[1](true);await first;await Promise.resolve();
   assert.match(controller.renderConnectCard().status,/^Signing in/u,'an old profile connection cannot settle the successor card');
-  pending[1](true);await second;await Promise.resolve();
+  pending[2](true);await second;await Promise.resolve();
   status={connected:true,waiting:false,sync:{syncedAt:'1970-01-01T00:00:02.000Z'}};
   const done=controller.renderConnectCard();
   assert.equal(done.done,true,'the current profile connection can complete its card');
@@ -203,7 +209,7 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   staleHide();
   assert.equal(controller.connectCardOpen(),true,'a stale hide timer cannot close a reopened card');
   assert.match(controller.renderConnectCard().status,/^Signing in/u);
-  pending[2](false);await third;await Promise.resolve();
+  pending[3](false);await third;await Promise.resolve();
 }
 
 
