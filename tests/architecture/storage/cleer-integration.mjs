@@ -129,7 +129,8 @@ const cleanupStages=[
   'repositoryProviderInventory(protectedSelection,{signal,freshDigests:true})',
   'repositoryCleanupInventoryMatches(state,currentInventory)',
   'cleanupRepositoryProviderState(protectedSelection,state,{workBudget,preparedObjectListing,checkMaintenance:()=>keepAlive(true),inventoryBeforeDelete:true',
-  'endRepositoryMaintenance(planning,maintenanceLease)'
+  // Released through the unscoped transport, so a pause cannot cancel it.
+  'endRepositoryMaintenance(owner,maintenanceLease)'
 ];
 let previousStage=-1;
 for(const stage of cleanupStages){const at=engineCleanup.indexOf(stage);assert.ok(at>previousStage,`Repository cleanup must plan without exclusion, acquire its lease only for destructive revalidation/deletion, then release it: ${stage}`);previousStage=at;}

@@ -127,6 +127,8 @@ assert.deepEqual([...freshTopology.legacyStores],[]);
 assert.equal(freshTopology.current,true);
 assert.equal(freshDb.lifecycle().startedFresh,true,'a first-ever database is a fresh start, not a reset');
 assert.equal(freshDb.lifecycle().resets,0);
+assert.equal(freshDb.lifecycle().foundVersion,0,'a new database is found at version 0');
+assert.equal(freshDb.lifecycle().version,9);
 
 // Clearing site data while the page stays open recreates the database on the
 // next open. That is reported once; an ordinary reconnection is not a reset.
@@ -136,6 +138,8 @@ await resetDb.open();
 assert.equal(resetDb.lifecycle().startedFresh,false,'an existing database is not a fresh start');
 resetBackend.closeConnection();await resetDb.open();await new Promise(resolve=>setTimeout(resolve,0));
 assert.deepEqual(resetEvents,[],'reopening an existing database after a closed connection is not a reset');
+assert.equal(resetDb.lifecycle().foundVersion,9,'an existing database is found at its version');
+assert.equal(resetDb.lifecycle().closes,1,'a close the app did not ask for is counted');
 resetBackend.clearSiteData();
 const recreated=await resetDb.open();await new Promise(resolve=>setTimeout(resolve,0));
 assert.equal(Number(recreated.version),9,'the recreated database receives the current topology');

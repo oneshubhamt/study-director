@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {readCompact} from '../../helpers/compact-source.mjs';
 
 // Current workspace composition invariants: attachment references, backup surfaces, diary records, and shared history ownership.
 
@@ -54,7 +55,7 @@ console.log(JSON.stringify({noteReadOnly:true,standaloneStatusLocal:true,library
 
 { // diary-record-contract
 const app=fs.readFileSync('source/app.html','utf8');
-const library=fs.readFileSync('source/core/library.js','utf8');
+const library=fs.readFileSync('source/core/library.js','utf8')+'\n'+fs.readFileSync('source/core/library-notes.js','utf8');
 const review=fs.readFileSync('source/core/review.js','utf8');
 const interactions=fs.readFileSync('source/core/interactions.js','utf8');
 const repositories=fs.readFileSync('source/core/repositories.js','utf8');
@@ -116,8 +117,8 @@ console.log(JSON.stringify({status:'PASS',suite:'workspace-history-ownership',ow
 
 { // library-sections-contract
 const app=fs.readFileSync('source/app.html','utf8');
-const library=fs.readFileSync('source/core/library.js','utf8');
-const editor=fs.readFileSync('rich-text/editor.ts','utf8');
+const library=fs.readFileSync('source/core/library.js','utf8')+'\n'+fs.readFileSync('source/core/library-notes.js','utf8');
+const editor=readCompact('rich-text/editor.ts');
 // Notes · Days · Data: one switch, one panel each, Notes first.
 const tabs=[...app.matchAll(/role="tab" id="library-tab-(\w+)" data-library-section="\1" aria-controls="library-\1"/gu)].map(match=>match[1]);
 assert.deepEqual(tabs,['notes','days','data'],'The Library switch names its three sections in order.');
@@ -129,8 +130,9 @@ assert.ok(app.indexOf('id="library-diary"')>app.indexOf('id="library-days"')&&ap
 assert.ok(app.indexOf('id="library-attachments"')>app.indexOf('id="library-data"'),'Files sit in Data.');
 assert.match(app,/openLibrary:\(\)=>\{LibraryView\.showSection\('data'\);/u,'An attachment link opens Data → Files.');
 // Only the shown section renders, and the view is remembered.
-assert.match(library,/function notesShown\(\)\{return libraryActive&&librarySection==='notes';\}/u);
-assert.match(library,/ports\.preferences\.write\(\{section:librarySection,diary:!!diaryDrawer\(\)\?\.open,sort:noteSort,\.\.\.\(noteListWidth\?\{listWidth:noteListWidth\}:\{\}\)\}\)/u);
+assert.match(library,/function notesShown\(\)\{return host\.shown\(\);\}/u);assert.match(library,/shown:\(\)=>libraryActive&&librarySection==='notes'/u);
+assert.match(library,/const view=notesView\.view\(\);ports\.preferences\.write\(\{section:librarySection,diary:!!diaryDrawer\(\)\?\.open,sort:view\.sort,\.\.\.\(view\.listWidth\?\{listWidth:view\.listWidth\}:\{\}\)\}\)/u);
+assert.match(library,/view:\(\)=>freeze\(\{sort:noteSort,listWidth:noteListWidth\}\)/u);
 assert.match(app,/class="library-notes-resizer" id="library-notes-resizer" role="separator" aria-orientation="vertical"/u,'The notes list has a keyboard-reachable resize handle.');
 // Search lands on matches through Wordgard's own decoration API; strikethrough is Wordgard's mark.
 assert.match(editor,/const searchMatches=GardState\.Field\.define<SearchMatches\|null>/u);

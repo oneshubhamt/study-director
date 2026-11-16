@@ -108,13 +108,18 @@ try{
   // as study; the phone resumes, and the laptop's Continue Here runs it.
   const pauseOn=page=>page.evaluate(`(async()=>{const d=__PWA6;d.goTab('execute');await new Promise(r=>setTimeout(r,80));d.togglePause();})()`);
   await pauseOn(a);assert.equal((await view(a)).mode,'paused','the laptop pauses');
-  await sleep(8000);await elsewhere(b,'B');
+  // No Sync now: the phone's session check (every 10 s) sees the laptop's
+  // new version and brings the pause in (backlog item 23).
+  const pausedAt=Date.now();
+  await waitFor(async()=>(await view(b)).timer.startsWith('paused'),{label:'the pause reaches the phone by itself',timeout:40000});
+  const pauseReachedMs=Date.now()-pausedAt;
+  await elsewhere(b,'B');
   const pausedMs=await continueHere(b,'B',{mode:'paused'});await stopsWithin(a,'A');
   await pauseOn(b);assert.equal((await view(b)).mode,'running','the phone resumes');
   await sleep(8000);await elsewhere(a,'A');
   const resumedMs=await continueHere(a,'A');await stopsWithin(b,'B');
   await bothSettled([['A',a],['B',b]],'pause');await noReviews([['A',a],['B',b]],'pause');
-  step('a pause and a resume reach the other device by themselves',{continueHereMs:[pausedMs,resumedMs]});
+  step('a pause and a resume reach the other device by themselves',{pauseReachedMs,continueHereMs:[pausedMs,resumedMs]});
 
   // A change made while an upload runs goes out with the next flush (the
   // app going to the background), not at the next 20-minute cadence.

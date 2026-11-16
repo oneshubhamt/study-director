@@ -166,7 +166,7 @@ registry.define('compatibility-codecs',1,()=>{
       const revision=boundedNumber(raw.revision||shell.revision,{min:1,max:Number.MAX_SAFE_INTEGER,fallback:0});if(!revision)return null;
       const snapshot=ActiveSessionCodec.sanitizeSessionSnapshot(migrateSessionSnapshot(raw.snapshot),shell.date,activeSessionScheduleFingerprint(shell),revision);if(!snapshot)return null;
       const updatedAt=normalizeTimestamp(raw.updatedAt||shell.updatedAt,new Date().toISOString());
-      const cleanShell={id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:shell.date,status:shell.status==='suspended'?'suspended':'active',runningOn:shell.runningOn||input.installationId(),scheduleText:shell.scheduleText,suspendedAt:shell.suspendedAt||null,updatedAt};
+      const cleanShell={id:DATA_CONTRACT.schemas.ActiveSession.key,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,revision,date:shell.date,status:['suspended','finished'].includes(shell.status)?shell.status:'active',runningOn:shell.runningOn||input.installationId(),scheduleText:shell.scheduleText,suspendedAt:shell.suspendedAt||null,updatedAt};
       return {version:DATA_CONTRACT.schemas.LocalRecoveryEnvelope.version,revision,shell:cleanShell,snapshot,updatedAt};
     }
     function protectedPreferences(value){

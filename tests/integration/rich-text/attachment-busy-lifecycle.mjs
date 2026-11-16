@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {stripTypeScriptTypes} from 'node:module';
+import {readCompact} from '../../helpers/compact-source.mjs';
 
 // Execute the production upload callback, with editor/IO ports controlled at the boundary.
-const source=fs.readFileSync('rich-text/editor.ts','utf8');
+const source=readCompact('rich-text/editor.ts');
 const start=source.indexOf('const insertLinkedAttachment=');
 const end=source.indexOf('const startLinkedAttachment=',start);
 assert.ok(start>=0&&end>start);

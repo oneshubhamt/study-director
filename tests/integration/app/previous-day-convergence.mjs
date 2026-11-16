@@ -30,9 +30,12 @@ const canonical=x=>x||null;
 
 // The actual startup router must reach previous-day handling BEFORE foreign
 // ownership or today's suspended-state handlers, and retire covered rows first.
+// Only the device that ran the day asks ('dialog'); a copy from another
+// device is kept quietly in the panel ('previous') until a sync shows the day
+// saved (owner's choice, 2026-11-12).
 for(const [label,state,covered,expected] of [
-  ['old local active',session('active'),false,'previous'],
-  ['old local suspended',session('suspended'),false,'previous'],
+  ['old local active',session('active'),false,'dialog'],
+  ['old local suspended',session('suspended'),false,'dialog'],
   ['old remote active',session('active','inst_other'),false,'previous'],
   ['old remote suspended',session('suspended','inst_other'),false,'previous'],
   ['covered old remote active',session('active','inst_other'),true,'retired'],
@@ -46,10 +49,10 @@ for(const [label,state,covered,expected] of [
     isCanonicalScheduleText:()=>true,activeSessionSnapshot:()=>state.snapshot,
     DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
     retireCoveredPreviousActiveSession:async()=>{if(covered)events.push('retired');return covered;},
-    sessionRunsElsewhere:x=>x.status!=='suspended'&&x.runningOn!=='inst_here',
-    handlePreviousActiveSession:async()=>{events.push('previous');return false;},
+    sessionRunsElsewhere:x=>x.status!=='suspended'&&x.runningOn!=='inst_here',sessionFromElsewhere:x=>x.runningOn!=='inst_here',
+    handlePreviousActiveSession:async()=>{events.push('dialog');return false;},
     setSessionPanelMode:mode=>events.push(mode),
-    isSuspendedActiveSession:()=>false,isRestorableActiveSession:()=>false,
+    isSuspendedActiveSession:()=>false,isFinishedActiveSession:()=>false,isRestorableActiveSession:()=>false,
     AppDiagnostics:{capture:()=>{}}
   });
   vm.runInContext(previous+'\n'+restore+'\nglobalThis.restore=attemptAutoRestoreActiveSession;',context);
@@ -99,7 +102,7 @@ for(const [label,stored,expected] of [
     AppData:{activeSession:{load:async()=>({ok:true,value:stored,storage:{idb:true}})}},
     isValidIsoDate:()=>true,todayISO:()=>today,isCanonicalScheduleText:()=>true,
     DATA_CONTRACT:{schemas:{ActiveSession:{version:10}}},ACTIVE_SESSION_ID:'current',
-    isSuspendedActiveSession:s=>s?.status==='suspended'&&s.date===today,
+    isSuspendedActiveSession:s=>s?.status==='suspended'&&s.date===today,isFinishedActiveSession:()=>false,
     sessionFromElsewhere:s=>s?.runningOn!=='inst_here',
     setSessionPanelMode:mode=>events.push(mode),setPlanStatus:()=>{},
     attemptAutoRestoreActiveSession:async()=>{events.push('timer');return true;},

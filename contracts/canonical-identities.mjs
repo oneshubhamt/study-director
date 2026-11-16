@@ -8,7 +8,7 @@ export const INDEXED_DB=freeze({
     dailyRecords:store('dailyRecords','date','DailyRecord.v16',16),
     dailySummaries:store('dailySummaries','date','DailySummary.v5',5),
     notes:store('notes','key','Note.v3',3),
-    activeSessions:store('activeSessions','id','ActiveSession.v10',10),
+    activeSessions:store('activeSessions','id','ActiveSession.v11',11),
     appMeta:store('appMeta','key','AppMeta.v1',1),
     assets:store('assets','assetId','Attachment.v2',2)
   })
@@ -19,7 +19,7 @@ export const CURRENT_SCHEMA_VERSIONS=freeze({
   DailySummary:5,
   SessionSnapshot:6,
   LocalRecoveryEnvelope:1,
-  ActiveSession:10,
+  ActiveSession:11,
   Note:3,
   PendingReview:2,
   AppMeta:1,
@@ -94,7 +94,7 @@ export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
 });
 
 export const EXTERNAL_FORMATS=freeze({
-  completeBackup:freeze({format:'study-director-backup',metadataVersion:24,containerMagic:'SDBK10\r\n'}),
+  completeBackup:freeze({format:'study-director-backup',metadataVersion:25,containerMagic:'SDBK10\r\n'}),
   protectedBackup:freeze({magic:'SDENC02\n',version:2}),
   attachmentArchive:freeze({format:'study-director.attachments',magic:'SDAT01\r\n',version:1})
 });

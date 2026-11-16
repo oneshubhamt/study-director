@@ -50,7 +50,9 @@ registry.define('managed-repository',1,()=>{
 // counts and the deletion list), and holds no versions kept for review. It is
 // verified under the names it was written with; its notes leave the reader
 // under the current name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=9,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8,9]));
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=10,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8,9,10]));
+// Manifest 10 holds an Active Session that may be finished (ActiveSession
+// v11); manifest 9 holds it in its v10 form, read as it is.
 const releasedRepositoryManifest=manifestVersion=>Number(manifestVersion)<=REPOSITORY_RELEASED_MANIFEST_VERSION;
 // Manifest 9 holds versions kept for review that name the device whose copy
 // held them (PendingReview v2); manifest 8 holds them in their v1 form.

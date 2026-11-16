@@ -87,4 +87,31 @@ assert.equal(codec.canonicalize(invalid),null,'current ActiveSession requires on
 const extra=structuredClone(session);extra.snapshot.review.revision=1;
 assert.equal(codec.canonicalize(extra),null,'retired ReflectionDraft lineage fields must not survive inside Review state');
 
+// ActiveSession v11: a day can be finished. A finished session survives as
+// it is; a v10 session (active or suspended) reads as v11 with nothing else
+// changed; a status outside the three is still refused.
+{
+  const contract11=Object.freeze({schemas:Object.freeze({...dataContract.schemas,ActiveSession:Object.freeze({version:11,key:'current'})})});
+  const codec11=RecordCodecs.createActiveSessionCodec(Object.freeze({
+    limits,dataContract:contract11,activeSessionId:'current',domain:Domain,keyedRecord,helpers,
+    timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp,normalizeImportedEpochMillis:(value,fallback=null)=>Number.isFinite(Number(value))?Number(value):fallback}),dailyRecordCodec
+  }));
+  const compatibility11=CompatibilityCodecs.create(Object.freeze({
+    limits,dataContract:contract11,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),pendingReviewCodec:Object.freeze({version:2,normalize:()=>null}),dailyRecordCodec,activeSessionCodec:codec11,
+    helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue:helpers.sameDataValue,sanitizePracticeRun:value=>value,activeSessionScheduleFingerprint:helpers.activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText:helpers.isCanonicalScheduleText}),
+    timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_review_device'
+  }));
+  const base={...session,version:11};
+  const finished=codec11.sanitizeCurrent({...base,status:'finished'});
+  assert.ok(finished,'a finished session is a current session');assert.equal(finished.status,'finished');
+  assert.deepEqual(codec11.sanitizeCurrent(JSON.parse(JSON.stringify(finished))),finished,'it survives a save and read back unchanged');
+  for(const status of ['active','suspended']){
+    const older=compatibility11.activeSession({...session,status,version:10});
+    assert.ok(older,`a v10 ${status} session reads as current`);
+    assert.equal(older.version,11);assert.equal(older.status,status,'its status is kept');
+    assert.deepEqual({...older,version:10},codec.sanitizeCurrent({...session,status}),'nothing but the version changes');
+  }
+  assert.equal(codec11.sanitizeCurrent({...base,status:'paused'}),null,'a status outside active, suspended and finished is refused');
+}
+
 console.log(JSON.stringify({status:'PASS',suite:'review-active-session-codec',reviewInActiveSession:true,legacyDraftMigrated:true,currentRequiresReview:true,retiredDraftLineageRejected:true},null,2));

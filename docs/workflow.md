@@ -17,6 +17,12 @@ Report exactly what was run, what failed and what was not run. When the app and 
 
 Run targeted tests for each affected surface; run the full suites only after substantial change or before a release.
 
+**Which tests to add (owner, 2026-11-11).** Tests follow how much is at stake.
+
+- *Sensitive areas:* sync and Drive, storage, backup and restore, data formats and codecs, the session lifecycle, timer, handoff and ownership, and anything else that keeps the owner's data. Every change or fix there, however small, comes with a test that covers it at the right layer, usually a journey or integration test of the flow it touches. A fix in these areas can break something downstream; on 2026-11-11 the Finish Today journey found two such bugs (a saved day written back, and devices rewriting a finished day on each sync).
+- *Everywhere else* (layout, wording, a control's state, a small UI bug): a fix needs no test of its own once it is fixed. Add one only when the change sets how an important feature behaves.
+- Prefer extending an existing test of that flow to adding a new file, and keep the addition short.
+
 | Change | Tests |
 |---|---|
 | Persistence or codecs | Repository, migration, recovery and import tests |
@@ -26,7 +32,7 @@ Run targeted tests for each affected surface; run the full suites only after sub
 | UI | Presentation architecture tests and the relevant browser tests, at laptop and phone widths |
 | Build or modules | Syntax, architecture, generated syntax, build verification and the deployment contract |
 
-A pull request titled as a bug fix (`fix: …`) must add or strengthen a regression test at the right layer; CI checks this. Test rules and layers: [tests/README.md](../tests/README.md).
+A pull request titled as a bug fix (`fix: …`) that changes a sensitive area must add or strengthen a test at the right layer; CI checks this for the sensitive modules listed in `tests/helpers/bug-regression-policy.mjs` (`app.html` mixes every area, so fixes there rely on review). Test rules and layers: [tests/README.md](../tests/README.md).
 
 **Testing rhythm (owner, 2026-10-10).** Make all the changes for a piece of work, build once and run the suites once. Fix what fails, then rerun only the failing tests.
 
@@ -50,6 +56,7 @@ A pull request titled as a bug fix (`fix: …`) must add or strengthen a regress
 - Browser tests need Chromium; in the cloud sandbox set `CHROMIUM_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`. On a fresh profile, call `skipFirstStart(page)` so the first-start form does not block clicks.
 - Never run a browser test marked `alone` (`tests/helpers/browser-tests.mjs`) at the same time as another browser test. Rerun a failure seen under concurrency on its own before treating it as a bug.
 - Rebuild the worker bundles after changing `portable/`: `node build/wordgard-bundle.mjs --write`.
+- `rich-text/editor.ts` is formatted with Prettier 3.3.3, settings in `.prettierrc.json` (`npx prettier@3.3.3 --config .prettierrc.json --write rich-text/editor.ts`; where the pinned npm refuses `npx` inside the repository, run it from another folder with absolute paths); other files keep their compact style. A reformat must leave `source/external/rich-text.js` unchanged after `node build/wordgard-bundle.mjs --write`. Tests that match the editor's source text read it through `tests/helpers/compact-source.mjs`, so line breaks do not matter to them.
 - Fake-clock tests that hash or encrypt must wait for real background work (`realWorkSettled` in `repository-checkpoint.mjs`).
 - Do not report a check as passed when the environment could not run it (no browser, no network).
 

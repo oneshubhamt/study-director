@@ -70,7 +70,9 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
       if(q.includes("mimeType='application/vnd.google-apps.folder'")){state.folderListStarted+=1;if(state.folderListGate)await state.folderListGate;return json({files:state.folders.filter(id=>!state.trashedFolders.has(id)).map(folderMetadata)});}
       let rows=[...state.files.values()].filter(file=>!file.trashed);
       const kindMatch=q.match(/key='studyDirectorRepositoryKind' and value='([^']+)'/u),idMatch=q.match(/key='studyDirectorRepositoryId' and value='([^']+)'/u);
-      if(kindMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryKind||'')===kindMatch[1]);
+      // One kind, or either of several ("(kind a or kind b)", the session check).
+      const kinds=new Set([...q.matchAll(/key='studyDirectorRepositoryKind' and value='([^']+)'/gu)].map(match=>match[1]));
+      if(kinds.size)rows=rows.filter(file=>kinds.has(String(file.appProperties?.studyDirectorRepositoryKind||'')));
       if(idMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryId||'')===idMatch[1]);
       const files=rows.map(fileMetadata).sort((a,b)=>String(b.createdTime).localeCompare(String(a.createdTime)));
       const offset=Number(url.searchParams.get('pageToken')||0),size=state.pageSizes?.[kindMatch?.[1]]||(state.pageSize&&kindMatch?.[1]==='object'?state.pageSize:Number(url.searchParams.get('pageSize'))||1000);

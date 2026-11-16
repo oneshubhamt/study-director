@@ -19,7 +19,7 @@ registry.define('repositories-notes',1,()=>{
     const codecs=exactObject(input.codecs,['sanitizeCurrentNote','noteKeys'],'Notes codec port');
     if(typeof codecs.sanitizeCurrentNote!=='function'||!Object.isFrozen(codecs.noteKeys))throw new TypeError('Notes codec port is invalid.');
     if(!Object.isFrozen(input.keyedRecord))throw new TypeError('Notes keyed-record capability must be frozen.');
-    const helpers=functions(input.helpers,['clampText','clampEditorContent','editorContentWithinLimits','wipeObject','normalizeAreaName','displayAreaName','normalizeTimestamp','sameDataValue','jsonByteLength','canonicalRuntimeError','isCanonicalRuntimeError','rescueRoom'],'Notes helper port');
+    const helpers=functions(input.helpers,['clampText','clampEditorContent','editorContentWithinLimits','wipeObject','normalizeAreaName','displayAreaName','normalizeTimestamp','sameDataValue','jsonByteLength','canonicalRuntimeError','isCanonicalRuntimeError','rescueRoom','noteName'],'Notes helper port');
     const hooks=functions(input.hooks,['canMutate','storageOk','reportCommit','onNotesChanged','onNoteSyncState','onNoteConflict','saveWarning','diagnosticsCapture'],'Notes hook port');
     const canonical=functions(input.canonical,['noteDeletionValue','notePreparationUnit','stageMutationEpoch','normalizeNoteDeletions'],'Notes canonical port');
     const clock=functions(input.clock,['nowMs'],'Notes clock');
@@ -27,7 +27,7 @@ registry.define('repositories-notes',1,()=>{
     const STORAGE_KEYS=freeze({noteRescue:keys.noteRescue});
     const LocalStorageContract=storage.local,Meta=storage.meta,idbGetAll=storage.idbGetAll,idbStoreTransaction=storage.idbStoreTransaction,idbStrictTransaction=storage.idbStrictTransaction,storageResets=storage.storageResets;
     const sanitizeCurrentNote=codecs.sanitizeCurrentNote,NoteKeys=codecs.noteKeys,KeyedRecord=input.keyedRecord;
-    const {clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom}=helpers;
+    const {clampText,clampEditorContent,editorContentWithinLimits,wipeObject,normalizeAreaName,displayAreaName,normalizeTimestamp,sameDataValue,jsonByteLength,canonicalRuntimeError,isCanonicalRuntimeError,rescueRoom,noteName}=helpers;
     const appCanMutate=hooks.canMutate,markStorageHealthOk=hooks.storageOk,reportCanonicalCommit=hooks.reportCommit,refreshNoteConsumers=hooks.onNotesChanged,setNoteSyncStateForKey=hooks.onNoteSyncState,reportNoteConflict=hooks.onNoteConflict,showSubjectNoteSaveWarning=hooks.saveWarning,AppDiagnostics=freeze({capture:hooks.diagnosticsCapture});
     const {noteDeletionValue,notePreparationUnit,stageMutationEpoch:stageCanonicalMutationEpoch,normalizeNoteDeletions}=canonical;
     const decisionNowMs=clock.nowMs;
@@ -51,7 +51,7 @@ const repository=(()=>{
   // ('~deleted <id>') for noteTrashDays. It keeps its label and text, and
   // its revision is the time it was deleted. Trash rows leave no deletion
   // record when they go.
-  const TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||''),TRASH_RETENTION_MS=Number(APP_LIMITS.noteTrashDays)*86400000;
+  const TRASH_PREFIX=String(DATA_CONTRACT.schemas.Note.trashKeyPrefix||''),TRASH_RETENTION_MS=Number(APP_LIMITS.noteTrashDays)*86400000,CLEARED_RETENTION_MS=7*86400000;
   if(!TRASH_PREFIX||!(TRASH_RETENTION_MS>0))throw new TypeError('Notes trash contract is invalid.');
   const isTrashKey=key=>String(key||'').startsWith(TRASH_PREFIX);
   // A label is normalised into its title once.
@@ -179,7 +179,7 @@ const repository=(()=>{
   function clearFailure(){saveFailed=false;saveMessage='';rescueShortfall=[];lastRescueShortfallNotice='';}
   function recordFailure(reason){
     saveFailed=true;
-    const labels=rescueShortfall.map(key=>displayAreaName(notes[key]&&notes[key].label||key)),named=labels.length>3?`${labels.slice(0,3).join(', ')} and ${labels.length-3} more`:labels.join(', ');
+    const labels=rescueShortfall.map(key=>noteName(notes[key]&&notes[key].label||key)),named=labels.length>3?`${labels.slice(0,3).join(', ')} and ${labels.length-3} more`:labels.join(', ');
     const detail=String(reason||'the note database failed').replace(/[.\s]+$/u,'')+(labels.length?`. The browser's emergency copy holds ${Math.round(APP_LIMITS.noteRescueBytes/104857.6)/10} MiB and could not keep ${named}, so closing this tab now would lose ${labels.length===1?'it':'them'}`:'');
     saveMessage=SaveLane.failureMessage('Notes',detail);
     showSubjectNoteSaveWarning(detail);
@@ -240,7 +240,7 @@ const repository=(()=>{
     if(risk!==lastRescueShortfallNotice){
       lastRescueShortfallNotice=risk;
       if(risk){
-        const labels=rescueShortfall.map(key=>displayAreaName(notes[key]?.label||key));
+        const labels=rescueShortfall.map(key=>noteName(notes[key]?.label||key));
         showSubjectNoteSaveWarning(freeze({kind:'rescue-capacity',message:`The browser's ${Math.round(APP_LIMITS.noteRescueBytes/104857.6)/10} MiB emergency copy could not hold unsaved ${labels.length===1?'Note':'Notes'}: ${labels.slice(0,3).join(', ')}${labels.length>3?` and ${labels.length-3} more`:''}. Keep this tab open until Notes finish saving; otherwise these edits may be lost.`}));
       }
     }
@@ -273,7 +273,7 @@ const repository=(()=>{
       if(keys.length<2)continue;
       keys.sort((a,b)=>timestamp(collection[b])-timestamp(collection[a])||a.localeCompare(b));
       for(const key of keys.slice(1)){
-        const base=clampText(displayAreaName(collection[key].label),Math.max(1,APP_LIMITS.maxAreaNameChars-8));let label='';
+        const base=clampText(noteName(collection[key].label),Math.max(1,APP_LIMITS.maxAreaNameChars-8));let label='';
         for(let index=2;!label;index+=1){const candidate=`${base} (${index})`;if(!taken.has(normalizeAreaName(candidate)))label=candidate;}
         taken.add(normalizeAreaName(label));moves.push({key,label});
       }
@@ -306,7 +306,7 @@ const repository=(()=>{
   // version replaces this tab's version only once the copy is stored. At the
   // note limit the oldest deleted notes make room; with none left nothing is
   // replaced and the note stays unsaved here and in the browser copy.
-  function copyLabelBase(entry,reserve){return clampText(displayAreaName(entry.label),Math.max(1,APP_LIMITS.maxAreaNameChars-reserve));}
+  function copyLabelBase(entry,reserve){return clampText(noteName(entry.label),Math.max(1,APP_LIMITS.maxAreaNameChars-reserve));}
   function copyLabel(entry,taken){
     const base=copyLabelBase(entry,20);
     for(let index=1;index<100;index+=1){const label=`${base} (unsaved copy${index>1?` ${index}`:''})`;if(!taken(normalizeAreaName(label)))return label;}
@@ -499,7 +499,7 @@ const repository=(()=>{
       }
       dirtyKeys.delete(key);dirtyBaseRevisions.delete(key);settledKeys.push(key);
       if(item.persisted)setNote(key,item.persisted);else dropNote(key);
-      reported.push(Object.freeze({key:title,label:String(item.persisted&&item.persisted.label||local&&local.label||''),copyLabel:item.copy?item.copy.label:''}));
+      reported.push(Object.freeze({key:title,label:noteName(item.persisted&&item.persisted.label||local&&local.label||''),copyLabel:item.copy?item.copy.label:''}));
     });
     if(!clearIndependentRescueKeys(settledKeys))AppDiagnostics.capture('notes.rescue-clear',LocalStorageContract.lastError||new Error('Note emergency rescue cleanup failed.'),'warn');
     if(movedEdits)protectUnsaved();
@@ -513,7 +513,7 @@ const repository=(()=>{
     return unresolved;
   }
   function clashWithoutRoom(keys){
-    const labels=keys.map(key=>displayAreaName(notes[key]&&notes[key].label)).join(', ');
+    const labels=keys.map(key=>noteName(notes[key]&&notes[key].label)).join(', ');
     return Object.assign(new Error(`${labels} changed in another tab, and notes are at the ${APP_LIMITS.maxNotes.toLocaleString()}-note limit, so this tab's version cannot be kept as a separate note. Delete a note to make room`),{code:'NOTE_CLASH_NO_ROOM'});
   }
   // The lane's write: every note changed since the last batch. A failed batch
@@ -543,7 +543,7 @@ const repository=(()=>{
     if(byKey&&!current)return {status:'rejected',revision:''};
     const currentRevision=revision(current);
     if(String(expectedRevision||'')!==currentRevision){
-      reportNoteConflict(Object.freeze({key:titleKeyFor(key)||title,label:current&&current.label||displayAreaName(label||title)}));
+      reportNoteConflict(Object.freeze({key:titleKeyFor(key)||title,label:noteName(current&&current.label||label||title)}));
       return {status:'conflict',revision:currentRevision};
     }
     const named=normalizeAreaName(current?current.label:title),given=clampText(displayAreaName(label||named),APP_LIMITS.maxAreaNameChars);
@@ -765,11 +765,14 @@ const repository=(()=>{
   // its id and takes the combined text, and the moved note is removed.
   async function rename(from,toLabel,options={}){
     if(!appCanMutate())return freeze({status:'rejected'});
-    const fromKey=keyFor(from),fromTitle=fromKey?titleKeyFor(fromKey):'';
+    const fromKey=keyFor(from),fromTitle=fromKey?titleKeyFor(fromKey):NoteKeys.isKey(String(from||''))?'':String(from||'');
     const source=normalizeAreaName(fromTitle),label=clampText(displayAreaName(toLabel),APP_LIMITS.maxAreaNameChars),target=normalizeAreaName(label);
-    if(!source||!target||NoteKeys.isKey(target)||!idForTitle(source))return freeze({status:'rejected'});
+    // A parent with no note of its own ("Geo" above "Geo > Rivers") moves
+    // the notes under it.
+    const holds=()=>!!idForTitle(source)||[...titles()].some(([title])=>title.startsWith(`${source} > `));
+    if(!source||!target||NoteKeys.isKey(target)||!holds())return freeze({status:'rejected'});
     if(target.startsWith(`${source} > `))return freeze({status:'inside-itself'});
-    await settle([idForTitle(source),idForTitle(target)].filter(Boolean));if(!idForTitle(source))return freeze({status:'rejected'});
+    await settle([idForTitle(source),idForTitle(target)].filter(Boolean));if(!holds())return freeze({status:'rejected'});
     const depth=source.split(' > ').length,labelParts=label.split(' > ');
     const moves=[...titles()].filter(([title])=>title===source||title.startsWith(`${source} > `)).map(([title,id])=>{
       const parts=displayAreaName(notes[id].label).split(' > ');
@@ -834,11 +837,16 @@ const repository=(()=>{
     const now=decisionNowMs();
     return freeze(Object.values(notes).filter(entry=>isTrashKey(entry.key)&&!trashExpired(entry,now)).map(entry=>freeze({key:entry.key,id:NoteKeys.id(entry.key),label:String(entry.label||''),deletedAt:String(entry.updatedAt||''),hasNote:hasContent(entry)})).sort((a,b)=>b.deletedAt.localeCompare(a.deletedAt)));
   }
-  // Deleted notes past their retention are removed on load, when the trash is
-  // shown and by the daily upkeep; saving follows the ordinary path.
+  // A saved note whose text was cleared, with nothing on its bar, is removed
+  // once it has stayed that way for a week, as Delete removes an empty note:
+  // there is nothing in it to keep.
+  function clearedExpired(key,now){const entry=notes[key],at=timestamp(entry);return !isTrashKey(key)&&!dirtyKeys.has(key)&&!hasContent(entry)&&!(entry.links||[]).length&&at>0&&at<=now-CLEARED_RETENTION_MS;}
+  // Deleted notes past their retention, and cleared notes past theirs, are
+  // removed on load, when the trash is shown and by the daily upkeep; saving
+  // follows the ordinary path.
   function purgeExpiredTrash(){
     if(!everLoaded||!appCanMutate())return 0;
-    const now=decisionNowMs(),expired=Object.keys(notes).filter(key=>isTrashKey(key)&&trashExpired(notes[key],now));
+    const now=decisionNowMs(),expired=Object.keys(notes).filter(key=>isTrashKey(key)?trashExpired(notes[key],now):clearedExpired(key,now));
     for(const key of expired){const current=notes[key];dropNote(key);markDirty(key,revision(current));}
     if(expired.length)touchSnapshot();
     return expired.length;

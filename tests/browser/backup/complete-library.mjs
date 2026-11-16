@@ -8,7 +8,7 @@ import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor,instrumen
 import {deploymentDirectoryName} from '../../../release.config.mjs';
 const fixtureMiB=Number(process.env.SD_LARGE_MIB||40);
 const server=await startReleaseServer(),browser=await launchChromium({executable:process.env.CHROMIUM_PATH,args:['--disable-gpu','--no-zygote'],profilePrefix:'sd74-complete-'});
-let html=instrumentedHtml().replace('void PwaLifecycle.install().then(()=>schedulePwaUpdateCheck(750));','/* PWA activation tested separately */').replace('Object.freeze({StartupLifecycle,','Object.freeze({Exports,BackupFiles,BackupProtection,AttachmentStorage,AttachmentLibrary,AttachmentIngest,RichTextApi,PlanData,prepareApplicationUpdate,pwaUpdateBlockReason,StartupLifecycle,').replace('configure:options=>Interactions.configure(options)',configureFixtureHook);
+let html=instrumentedHtml('deployment',{expose:['Exports', 'BackupFiles', 'BackupProtection', 'AttachmentStorage', 'AttachmentLibrary', 'AttachmentIngest', 'RichTextApi', 'PlanData', 'prepareApplicationUpdate', 'pwaUpdateBlockReason']}).replace('void PwaLifecycle.install().then(()=>schedulePwaUpdateCheck(750));','/* PWA activation tested separately */').replace('configure:options=>Interactions.configure(options)',configureFixtureHook);
 if(process.env.SD_MINIFIED_TEST==='1'){
  const root=path.resolve('dist',deploymentDirectoryName,'public');
  for(const name of fs.readdirSync(root))if(fs.statSync(path.join(root,name)).isFile())server.setOverride('deployment',name,fs.readFileSync(path.join(root,name)));

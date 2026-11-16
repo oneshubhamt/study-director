@@ -96,9 +96,17 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['source/core/compatibility-host.js','source/core/persistence.js','source/core/compatibility-codecs.js'])
     },
     {
+      id:'active-session-v10',owner:'record-codecs/repositories',kind:'live-canonicalization',
+      source:'ActiveSession.v10 rows, local recovery envelopes, portable backups v24 and backup-location manifests version 9, all written by released builds up to SDVB75F24',
+      target:'ActiveSession.v11 with the same fields and values: v10 knew only the statuses active and suspended, which v11 keeps; v11 adds finished',
+      proof:'a stored v10 row or envelope is rewritten as v11 and read back before canonical-store verification; a v24 file and a version-9 manifest read their session through the older-session reader; finished never appears in a v10 form',
+      retirement:'after every supported installation has crossed to ActiveSession.v11 and no supported backup older than portable v25 or manifest 10 remains',
+      sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js','source/core/backup-codec.js'])
+    },
+    {
       id:'active-session-v7-domain-separation',owner:'record-codecs/repositories',kind:'live-canonicalization',
       source:'historical IndexedDB ActiveSession rows including v8 snapshots with reflectionDraft, and v9 rows and backups without runningOn',
-      target:'strict current ActiveSession.v10 with snapshot.review {reflection, studyQuality}, runningOn (the installation running it; an older session belongs to this installation) and revision/updatedAt retained as local recovery ordering only',
+      target:'strict current ActiveSession.v11 (status active, suspended or finished) with snapshot.review {reflection, studyQuality}, runningOn (the installation running it; an older session belongs to this installation) and revision/updatedAt retained as local recovery ordering only',
       proof:'a retained interrupted session is converted and rewritten before canonical-store verification; malformed/newer sessions are rejected without mutating the source',
       retirement:'baseline verified on all supported installations',
       sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js'])

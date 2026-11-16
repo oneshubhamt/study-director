@@ -280,8 +280,15 @@
           ["Task Details","Lets you inspect each saved block: planned duration, actual focus, work completion, progress units, explicit skip or other outcome state, area, and saved pause evidence."],
           ["Reflection / Unfinished","Keeps the diary reflection and carry-forward note visible beside the measurable record."],
           ["Record Retrieval","Library lets you inspect saved Study Days while Diary and notes remain editable in their own Library sections."],
-          ["Tags","Write #tag anywhere in a note. Under the notes search, tap tags to show only notes that have all of them; × Clear shows every note again. With one tag picked, Rename changes it in every note, and a name already in use merges the two. Typing # and a letter offers the tags in use."],
+        ]},
+        {id:"notes",label:"Notes",heading:"Working with notes",kind:"pairs",items:[
+          ["New and Move","+ New asks for a name; the line under it says where the note goes, and Change picks another place. Move or rename picks a place from a list and keeps the name unless you change it. Right-click a note in the list, or press and hold on a touch screen, for all its actions."],
+          ["Tags","Write #tag anywhere in a note, or press # Tag under it. Tags sit in one row under the notes search; scroll it sideways. Tap tags to show only notes that have all of them; × Clear shows every note again. With one tag picked, Rename changes it in every note. Search for #name to find the notes with a tag starting with it."],
+          ["Links between notes","Type [[ in a note, or use Link → Another note, to link a word to another note. Under each note, + Link note keeps a short list of related notes; Linked from shows the notes that point here."],
+          ["Earlier versions","Under the note, or in its ⋯ menu: earlier texts of this note from your Device Folder and Google Drive backups, shown side by side before anything changes."],
+          ["Images, PDFs and audio","Attach from the toolbar, paste an image, or drag files into a note. The button at an image's corner, or a double click, opens it full size to zoom and pan."],
           ["Import","Import, beside + New, turns .txt and .md files into new notes named after them, inside the open note or at the top level. Images and links to other files stay as their Markdown text."],
+          ["Recently deleted","A deleted note waits 30 days at the bottom of the list and can be restored. A note whose text you cleared is removed by itself after a week."]
         ]},
         {id:"data-tools",label:"Data Tools",heading:"Backup and recovery",kind:"pairs",items:[
           ["Data model","Local-first: each device keeps all its data and works on its own. While a device is signed in to Google Drive, it syncs: it takes in what your other devices changed, then uploads its own changes. Where both sides changed the same thing, the newer shows and the other is kept for you, marked Needs review; edits to different paragraphs of a note are joined for you."],

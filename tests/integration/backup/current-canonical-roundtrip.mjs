@@ -37,7 +37,7 @@ for(const record of [dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]){
   assert.equal(dailyRecordCodec.storedDailyRecordFields(record),record,'a stored record is unchanged');
 }
 const note={version:3,key:noteId('ethics'),label:'Ethics',text,updatedAt:stamp};assert.ok(dailyRecordCodec.sanitizeCurrentNote(note));
-const active=activeSessionCodec.canonicalize({id:'current',type:'activeSession',version:10,revision:12,date:'2026-09-10',status:'suspended',runningOn:'inst_roundtrip_device',scheduleText:'07:00 | 60 | A | Study | Ethics | pages | 10',snapshot:{version:6,date:'2026-09-10',fingerprint:'fp',review:{reflection:'Unsaved Review',studyQuality:4},updatedAt:stamp},suspendedAt:stamp,updatedAt:stamp});assert.ok(active);assert.ok(activeSessionCodec.sanitizeCurrent(active));
+const active=activeSessionCodec.canonicalize({id:'current',type:'activeSession',version:11,revision:12,date:'2026-09-10',status:'suspended',runningOn:'inst_roundtrip_device',scheduleText:'07:00 | 60 | A | Study | Ethics | pages | 10',snapshot:{version:6,date:'2026-09-10',fingerprint:'fp',review:{reflection:'Unsaved Review',studyQuality:4},updatedAt:stamp},suspendedAt:stamp,updatedAt:stamp});assert.ok(active);assert.ok(activeSessionCodec.sanitizeCurrent(active));
 const personal={version:2,plans:{draft:'07:00 | 60 | A | Study | Ethics | pages | 10',savedPlans:[{id:'plan-current-qa',label:'Current plan',scheduleText:'08:00 | 60 | B | Study | Polity | pages | 10',createdAt:stamp,updatedAt:stamp}],defaultId:'plan-current-qa'},preferences:{studentName:'Current User',theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,soundMode:'minimal'}};
 const blobs=[new Blob(['image bytes'],{type:'image/png'}),new Blob(['%PDF-current bytes'],{type:'application/pdf'}),new Blob(['audio bytes'],{type:'audio/mpeg'})];
 const ids=[imageId,'att-1234567890abcdefghijklmn','att-2234567890abcdefghijklmn','att-3234567890abcdefghijklmn'];
@@ -49,7 +49,7 @@ const algorithm=codec.checksumAlgorithm(),manifest=codec.createManifest(plan,{co
 const groups=[['checkpointManifest',[codec.createProtectedManifest(plan,manifest.checkpoint)]],['personalData',[personal]],['dailyRecord',[study,diary]],['note',[note]],['activeSession',[active]]];
 async function assemble(values=groups,assets=descriptors){const chunks=[];for(let i=0;i<values.length;i++)chunks.push(await codec.encodeChunk(i,values[i][0],values[i][1],algorithm));const completion=await codec.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,assets);return codec.createV10Container(new Blob([JSON.stringify(manifest)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});}
 const file=await assemble(),parsed=await codec.inspectCurrent(file);
-assert.equal(parsed.formatVersion,24);assert.deepEqual(parsed.records,[dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]);assert.deepEqual(parsed.data.notes[note.key],note);assert.deepEqual(parsed.importedActiveSession,active);assert.deepEqual(parsed.importedPersonalData,personal);assert.deepEqual(parsed.assetDescriptors,descriptors);assert.equal(parsed.assetBytes,blobs.reduce((n,b)=>n+b.size,0));
+assert.equal(parsed.formatVersion,25);assert.deepEqual(parsed.records,[dailyRecordCodec.sanitizeCurrentDailyRecord(study),diary]);assert.deepEqual(parsed.data.notes[note.key],note);assert.deepEqual(parsed.importedActiveSession,active);assert.deepEqual(parsed.importedPersonalData,personal);assert.deepEqual(parsed.assetDescriptors,descriptors);assert.equal(parsed.assetBytes,blobs.reduce((n,b)=>n+b.size,0));
 for(let i=0;i<4;i++)assert.equal(await parsed.importedAssets[i].blob.text(),await blobs[i===3?1:i].text());
 for(const key of ['savedDayDeletions','noteDeletions','attachmentDeletions'])assert.deepEqual(parsed.protectedCheckpointManifest[key],plan[key]);
 const key=await passwordKey('Current format test passphrase'),sealed=[],opened=[];
@@ -115,12 +115,18 @@ assert.equal(v23Parsed.formatVersion,23);
 assert.deepEqual([...v23Parsed.pendingReviews],[{...reviewV1,version:2,keptFrom:'',keptChangedAt:''},{...resolvedV1,version:2,keptFrom:'',keptChangedAt:''}].sort((a,b)=>a.id.localeCompare(b.id)),'v1 reviews, open and resolved, read as v2 with everything kept and no device recorded');
 assert.deepEqual(v23Parsed.records,parsed.records,'everything else reads as current');
 await assert.rejects(reader.inspectLegacy(await writeWithReviews(23,[reviewV2])),/noncanonical pendingReview/u,'a v23 file holding a v2 review is refused');
-const v24Parsed=await codec.inspectCurrent(await writeWithReviews(24,[reviewV2]));
-assert.deepEqual([...v24Parsed.pendingReviews],[reviewV2],'a v24 file keeps the device and time');
-await assert.rejects(codec.inspectCurrent(await writeWithReviews(24,[reviewV1])),/noncanonical pendingReview/u,'a v1 review in a v24 file is refused');
-await assert.rejects(reader.inspectLegacy(await writeWithReviews(25,[reviewV2])),/newer Study Director version/u,'a newer file asks for an update');
+// v24 files (released up to SDVB75F24) are older now and read through the
+// compatibility reader; v25 is current.
+const v24File=await writeWithReviews(24,[reviewV2]);
+await assert.rejects(codec.inspectCurrent(v24File),/compatibility adapter/u,'a v24 file is not current');
+assert.deepEqual([...(await reader.inspectLegacy(v24File)).pendingReviews],[reviewV2],'a v24 file keeps the device and time');
+await assert.rejects(reader.inspectLegacy(await writeWithReviews(24,[reviewV1])),/noncanonical pendingReview/u,'a v1 review in a v24 file is refused');
+const v25Parsed=await codec.inspectCurrent(await writeWithReviews(25,[reviewV2]));
+assert.deepEqual([...v25Parsed.pendingReviews],[reviewV2],'a v25 file keeps the device and time');
+await assert.rejects(codec.inspectCurrent(await writeWithReviews(25,[reviewV1])),/noncanonical pendingReview/u,'a v1 review in a v25 file is refused');
+await assert.rejects(reader.inspectLegacy(await writeWithReviews(26,[reviewV2])),/newer Study Director version/u,'a newer file asks for an update');
 // A file that mixes the names fails closed: v20 with the current entity name.
 const mixed=await (async()=>{const writer=registry.require('backup-codec',1).createBackupCodec(freeze({...codecInput,dataContract:freeze({...dataContract,schemas:freeze({...dataContract.schemas,Backup:freeze({...dataContract.schemas.Backup,version:20})})})}));const created=writer.createManifest(plan,{compression:'none',algorithm});const chunks=[];for(let i=0;i<groups.length;i++)chunks.push(await writer.encodeChunk(i,groups[i][0],groups[i][1],algorithm));const completion=await writer.encodeCompletion(chunks.length,counts,chunks.map(c=>c.checksum),algorithm,descriptors);return writer.createV10Container(new Blob([JSON.stringify(created)+'\n',...chunks.map(c=>c.line+'\n'),JSON.stringify(completion)+'\n']),{compression:'none',assetBlobs:blobs});})();
 await assert.rejects(reader.inspectLegacy(mixed),'a v20 file written with current names is rejected');
 
-console.log(JSON.stringify({status:'PASS',suite:'current-canonical-roundtrip',backupVersion:24,unreleasedVersionsRefused:true,nameKeyedV20NotesConverted:true,v23ReviewsConverted:true,dailyRecordVersion:16,activeSessionVersion:10,logicalAttachments:4,uniquePayloads:3,encryptedRoundtrip:true,strictCurrentCodecs:true}));
+console.log(JSON.stringify({status:'PASS',suite:'current-canonical-roundtrip',backupVersion:25,unreleasedVersionsRefused:true,nameKeyedV20NotesConverted:true,v23ReviewsConverted:true,dailyRecordVersion:16,activeSessionVersion:11,logicalAttachments:4,uniquePayloads:3,encryptedRoundtrip:true,strictCurrentCodecs:true}));

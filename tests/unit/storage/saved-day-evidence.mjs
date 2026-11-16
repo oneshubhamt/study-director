@@ -111,4 +111,22 @@ assert.equal(covers({...record,practiceRuns:[cappedRun]},
   const timed={...started,snapshot:{...started.snapshot,taskState:{...started.snapshot.taskState,t2:{...started.snapshot.taskState.t2,actual:{...started.snapshot.taskState.t2.actual,seconds:30}}}}};
   assert.equal(covers(saved,timed,{allowAdvances:true}),false,'time on the block still needs the Saved Day to hold it');
 }
+// Save Today with a block running or paused: the Saved Day keeps no end for
+// it, while the session's copy marks it ended each time that copy is written
+// (startup asked about an "unsaved previous study day" every morning).
+{
+  const block=(seconds,end,start='2026-09-17T10:00:00.000Z')=>({progress:{total:1},actual:{seconds,clock:start?{startedAt:start}:{},
+    record:{...(start?{firstStartedAt:start}:{}),lastEndedAt:end,activeSeconds:seconds,sessionCount:1}}});
+  const withBlock=state=>({...session,snapshot:{...session.snapshot,taskState:{...session.snapshot.taskState,t2:state}}});
+  const paused=withBlock(block(600,'2026-09-17T10:12:00.000Z'));
+  const saved={...record,results:{...record.results,t2:{total:1,actualSeconds:600,actualStart:'2026-09-17T10:00:00.000Z',sessionCount:1}}};
+  assert.equal(covers(saved,paused,{allowAdvances:true}),true,'a block paused at Save Today is covered, though the session marks it ended later');
+  assert.equal(covers({...saved,results:{...saved.results,t2:{...saved.results.t2,actualEnd:'2026-09-17T10:10:00.000Z'}}},paused,{allowAdvances:true}),true,
+    'an end moved by a later pause, with no more focus, is covered');
+  assert.equal(covers(saved,paused),false,'exact evidence mode still needs the same end');
+  assert.equal(covers(saved,withBlock(block(660,'2026-09-17T10:12:00.000Z')),{allowAdvances:true}),false,'more focus after the save still needs a save');
+  assert.equal(covers(saved,withBlock(block(600,'2026-09-17T10:12:00.000Z',null)),{allowAdvances:true}),false,'an end with no start proves nothing');
+  const ended=withBlock({...block(600,'2026-09-17T10:12:00.000Z'),actual:{...block(600,'2026-09-17T10:12:00.000Z').actual,clock:{startedAt:'2026-09-17T10:00:00.000Z',endedAt:'2026-09-17T10:12:00.000Z'}}});
+  assert.equal(covers(saved,ended,{allowAdvances:true}),false,'a block that ended still needs its end in the Saved Day');
+}
 console.log(JSON.stringify({status:'PASS',suite:'saved-day-evidence',revisionsAreLocal:true,coveragePreservesActualWork:true}));

@@ -153,39 +153,41 @@ function claimHarness(){
  const context=vm.createContext({
   navigator:{get onLine(){return online;}},document,window,Date:{now:()=>now},
   StartupLifecycle:{status:()=>({fullyInitialized:ready})},TASKS:[{}],sessionPanelMode:'active',
-  BackupProviderRuntime:{connected:()=>connected,readSessionClaim:async()=>{remote++;return null;},syncing:()=>false,wakeBackground:()=>{}},
+  BackupProviderRuntime:{connected:()=>connected,watchSession:async()=>{remote++;return {claim:null,newVersions:false};},syncing:()=>false,wakeBackground:()=>{},scheduleSharedSync:()=>true},
   AppData:{activeSession:{load:async()=>{local++;return {ok:true,value:null,error:null,storage:{idb:true}};}}},
-  AppDiagnostics:{capture:()=>{}},SESSION_CLAIM_WATCH_MS:15000,SESSION_WATCH_MS:120000,
+  AppDiagnostics:{capture:()=>{}},SESSION_CLAIM_WATCH_MS:10000,
   setInterval:(fn,ms)=>{intervals.push({fn,ms});return intervals.length;},
   ActiveSessionCodec:{sanitizeCurrent:value=>value},InstallationIdentity:{getId:()=> 'local'}
  });
- vm.runInContext('let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0,sessionWatchTimer=null,sessionClaimWatchTimer=null;\n'+claimRuntime+'\nglobalThis.p5Start=installSessionWatch;globalThis.p5Wake=wakeSessionOwnershipClaim;globalThis.p5Check=checkSessionOwnershipClaim;',context);
+ vm.runInContext('let sessionClaimFreeze=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0,sessionClaimWatchTimer=null;\n'+claimRuntime+'\nglobalThis.p5Start=installSessionWatch;globalThis.p5Wake=wakeSessionOwnershipClaim;globalThis.p5Check=checkSessionOwnershipClaim;',context);
  const settle=async()=>{for(let k=0;k<8;k++)await Promise.resolve();};
  return {start:()=>context.p5Start(),wake:()=>context.p5Wake(),check:()=>context.p5Check(),get remote(){return remote;},get local(){return local;},intervals,
   shift:ms=>{now+=ms;},setOnline:v=>{online=v;},setVisible:v=>{document.visibilityState=v?'visible':'hidden';},
   setConnected:v=>{connected=v;},setReady:v=>{ready=v;},
-  event:async name=>{handlers.get(name)?.();await settle();},poll:async()=>{intervals.find(x=>x.ms===15000)?.fn();await settle();}
+  event:async name=>{handlers.get(name)?.();await settle();},poll:async()=>{intervals.find(x=>x.ms===10000)?.fn();await settle();}
  };
 }
 {
  const t=claimHarness();assert.equal(t.start(),true);assert.equal(t.start(),false,'one existing owner of intervals and wake handlers');
- assert.equal(t.intervals.length,2);
- for(let minute=0;minute<30;minute++)for(let quarter=0;quarter<4;quarter++){
-  t.shift(15000);await t.poll();
+ // One Drive check owns the cadence (backlog item 23): a takeover and new
+ // versions come from the same request, every 10 s.
+ assert.equal(t.intervals.length,1);
+ for(let minute=0;minute<30;minute++)for(let tick=0;tick<6;tick++){
+  t.shift(10000);await t.poll();
  }
- assert.equal(t.remote,120,'30 minutes of an eligible, visible online session has at most four remote claim reads per minute');
- assert.equal(t.local,120,'strict local session check remains paired with each remote claim read');
- await t.event('window:online');assert.equal(t.remote,120,'redundant online events cannot duplicate an immediate poll');
- t.setOnline(false);t.shift(15000);await t.poll();assert.equal(t.remote,120,'offline interval performs no remote request');
- t.shift(600000);t.setOnline(true);await t.event('window:online');assert.equal(t.remote,121,'connectivity return immediately checks an overdue ownership claim');
- await t.event('window:online');assert.equal(t.remote,121,'successive reconnect events remain coalesced');
- t.setVisible(false);t.shift(60000);await t.poll();assert.equal(t.remote,121);
- t.setVisible(true);await t.event('document:visibilitychange');assert.equal(t.remote,122,'foreground return checks immediately after missed interval');
- await t.poll();assert.equal(t.remote,122,'immediate scheduled tick does not double the foreground return poll');
- // The interval's tick lands a few milliseconds short of 15 s after the
- // check it started; it still checks, so the cadence is 15 s, not 30 s.
- t.shift(14990);await t.poll();assert.equal(t.remote,123,'a tick a few milliseconds early still checks');
- t.shift(14990);await t.poll();assert.equal(t.remote,124,'every tick, not every other one');
+ assert.equal(t.remote,180,'30 minutes of an eligible, visible online session has at most six Drive checks per minute');
+ assert.equal(t.local,180,'strict local session check remains paired with each Drive check');
+ await t.event('window:online');assert.equal(t.remote,180,'redundant online events cannot duplicate an immediate poll');
+ t.setOnline(false);t.shift(10000);await t.poll();assert.equal(t.remote,180,'offline interval performs no remote request');
+ t.shift(600000);t.setOnline(true);await t.event('window:online');assert.equal(t.remote,181,'connectivity return immediately checks an overdue session');
+ await t.event('window:online');assert.equal(t.remote,181,'successive reconnect events remain coalesced');
+ t.setVisible(false);t.shift(60000);await t.poll();assert.equal(t.remote,181);
+ t.setVisible(true);await t.event('document:visibilitychange');assert.equal(t.remote,182,'foreground return checks immediately after missed interval');
+ await t.poll();assert.equal(t.remote,182,'immediate scheduled tick does not double the foreground return poll');
+ // The interval's tick lands a few milliseconds short of 10 s after the
+ // check it started; it still checks, so the cadence is 10 s, not 20 s.
+ t.shift(9990);await t.poll();assert.equal(t.remote,183,'a tick a few milliseconds early still checks');
+ t.shift(9990);await t.poll();assert.equal(t.remote,184,'every tick, not every other one');
 }
 // BS11/17 retain safety-critical boundaries: read-only planning precedes the
 // destructive lease, and startup orphan collection is not replaced by a wake.

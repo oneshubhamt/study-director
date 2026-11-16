@@ -457,11 +457,20 @@ function savedDayCoversSessionEvidence(record,session,{allowAdvances=false}={}){
     const noTime=!(Number(state.actual?.seconds)>0)&&!(Number(actual.activeSeconds)>0)&&
       result.actualEnd===undefined&&!(Number(result.actualSeconds)>0);
     if(end&&result.actualEnd!==end&&!noTime){
-      // An end moving forward can be legitimate continued focus, but only
-      // with a stable start and strictly increased recorded focus duration.
-      // A missing/replaced start or a merely edited timestamp proves nothing.
       const previousSeconds=Number(state.actual?.seconds);
-      if(!allowAdvances||!start||!Number.isFinite(previousSeconds)||
+      if(!clock.endedAt){
+        // The block had not ended (it was running or paused at Save Today):
+        // the Saved Day keeps no end for it, and the session's copy marks it
+        // ended only as of each time that copy was written, so a pause or a
+        // later write moves the mark with no more focus. Its focus is
+        // compared above. Before 2026-11-12 every day saved with a block in
+        // progress asked about an "unsaved previous study day" next morning.
+        if(!allowAdvances||!start||!Number.isFinite(previousSeconds))return false;
+      }else if(!allowAdvances||!start||!Number.isFinite(previousSeconds)||
+          // A block that ended: a later end is legitimate continued focus,
+          // but only with a stable start and strictly increased recorded
+          // focus. A missing/replaced start or a merely edited timestamp
+          // proves nothing.
           !(Number(result.actualSeconds)>previousSeconds)||
           !Number.isFinite(Date.parse(end))||
           !(Date.parse(result.actualEnd)>Date.parse(end)))return false;
@@ -818,7 +827,7 @@ function materializeDailyRecordSummary(summary){
       version:DATA_CONTRACT.schemas.ActiveSession.version,
       revision,
       date:String(session.date||''),
-      status:session.status==='suspended'?'suspended':'active',
+      status:['suspended','finished'].includes(session.status)?session.status:'active',
       runningOn:String(session.runningOn||''),
       scheduleText,
       snapshot:null,
@@ -840,10 +849,13 @@ function materializeDailyRecordSummary(summary){
   // Study content is distinct from ownership/control metadata. Revisions and
   // timestamps establish persistence/order; runningOn/status establish control.
   // Neither may make two otherwise identical study sessions conflict.
+  // What the day holds, without where it runs. Finishing the day is part of
+  // it: the person decided the day is over. (Added only when finished, so an
+  // open day's content reads as it always did.)
   function contentValue(session){
     const clean=sanitizeCurrentActiveSession(session);if(!clean)return null;
     const {contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_snapshotUpdatedAt,...snapshot}=clean.snapshot;
-    return Object.freeze({date:clean.date,scheduleText:clean.scheduleText,snapshot:Object.freeze(snapshot)});
+    return Object.freeze({date:clean.date,scheduleText:clean.scheduleText,snapshot:Object.freeze(snapshot),...(clean.status==='finished'?{finished:true}:{})});
   }
   return Object.freeze({sanitizeSessionSnapshot,sanitizeCurrent:sanitizeCurrentActiveSession,normalize:normalizeCurrentActiveSession,canonicalize:normalizeCurrentActiveSession,contentValue});
   }
@@ -991,9 +1003,10 @@ function materializeDailyRecordSummary(summary){
       }
       if(subject==='session'){
         // Study-content equality may deduplicate redundant retained versions,
-        // but only a suspended, same-owner canonical session proves that a
-        // kept Active Session has actually been applied.
-        return current.status==='suspended'&&current.runningOn===kept.runningOn&&
+        // but only a suspended (or, for a finished day, finished) same-owner
+        // canonical session proves that a kept Active Session has actually
+        // been applied.
+        return current.status===(kept.status==='finished'?'finished':'suspended')&&current.runningOn===kept.runningOn&&
           sameMeaning(subject,current,kept);
       }
       return sameMeaning(subject,current,kept);

@@ -994,7 +994,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
         <div class="library-notes-grid ui-canvas">
           <nav class="library-notes-nav" aria-label="Notes">
             <div class="library-notes-nav-head">
-              <span class="library-notes-nav-title"><span class="ui-label">Notes</span><button class="library-notes-info" id="library-notes-info" type="button" aria-label="About notes" aria-haspopup="dialog" aria-expanded="false" aria-controls="library-notes-info-popover">i</button><span class="library-notes-info-popover" id="library-notes-info-popover" role="note" hidden>A note is shared by every plan block in the same Area; support blocks share one note.</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
+              <span class="library-notes-nav-title"><span class="ui-label">Notes</span><span class="library-notes-nav-count" id="library-notes-nav-count">0</span><button class="library-notes-info" id="library-notes-info" type="button" aria-label="About notes" aria-haspopup="dialog" aria-expanded="false" aria-controls="library-notes-info-popover">i</button><span class="library-notes-info-popover" id="library-notes-info-popover" role="note" hidden>A note is shared by every plan block in the same Area; support blocks share one note.</span><span class="library-note-selection-count" id="library-note-selection-count" hidden>0 selected</span></span>
               <span class="library-notes-nav-tools">
                 <button class="library-note-action ui-btn" id="library-note-select" type="button" aria-label="Choose notes to export">Export</button>
                 <button class="library-note-action ui-btn" id="library-note-select-all" type="button" hidden>All</button>
@@ -1006,7 +1006,6 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                 <button class="library-note-action ui-btn" id="library-note-import" type="button" data-owner-mutation="library-notes" aria-label="Import text or Markdown files as notes" title="Import .txt or .md files as notes">Import</button>
                 <input id="library-note-import-file" type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" multiple hidden>
                 <button class="library-note-action ui-btn" id="library-note-add" type="button" data-owner-mutation="library-notes" aria-label="New note" title="Create a note">+ New</button>
-                <span class="library-notes-nav-count" id="library-notes-nav-count">0</span>
               </span>
               <div class="library-notes-find">
                 <input class="library-notes-search ui-field ui-mono" id="library-notes-search" type="search" placeholder="Search notes…" aria-label="Search notes">
@@ -1602,12 +1601,34 @@ const NoteExportModule=INTERNAL_MODULES.load('note-export',2,'study-director.not
 const LibraryClearModule=INTERNAL_MODULES.load('library-clear',1,'study-director.library-clear-module',2);
 const NoteLinksModule=INTERNAL_MODULES.load('note-links',1,'study-director.note-links-module',1);
 const ProfilesModule=INTERNAL_MODULES.load('profiles',1,'study-director.profiles-module',1);
-const LibraryModule=INTERNAL_MODULES.load('library',1,'study-director.library-module',1);
+const NoteCatalogueModule=INTERNAL_MODULES.load('note-catalogue',1,'study-director.note-catalogue-module',1);
+const NoteSearchModule=INTERNAL_MODULES.load('note-search',1,'study-director.note-search-module',1);
+const LibraryNotesModule=INTERNAL_MODULES.load('library-notes',1,'study-director.library-notes-module',1,Object.freeze({noteSearch:NoteSearchModule}));
+const LibraryModule=INTERNAL_MODULES.load('library',1,'study-director.library-module',1,Object.freeze({libraryNotes:LibraryNotesModule}));
 const ManagedRepositoryModule=INTERNAL_MODULES.load('managed-repository',1,'study-director.managed-repository-module',1);
 const RepositoryPolicyModule=INTERNAL_MODULES.load('repository-policy',1,'study-director.repository-policy-module',1);
 const RepositoryBackgroundModule=INTERNAL_MODULES.load('repository-background',1,'study-director.repository-background-module',1,Object.freeze({lifecycle:OperationLifecycle}));
 const MutationCoordinatorModule=INTERNAL_MODULES.load('mutation-coordinator',1,'study-director.mutation-coordinator-module',1);
 const BackupOperationDiagnosticsModule=INTERNAL_MODULES.load('backup-operation-diagnostics',1,'study-director.backup-operation-diagnostics-module',1,Object.freeze({lifecycle:OperationLifecycle}));
+const StorageCensus=INTERNAL_MODULES.load('storage-census',1,'study-director.storage-census',1);
+// The database's life, kept in browser storage, which survived both database
+// losses on the phone: this start (new or existing database, the version
+// found, the store counts), the last committed write, storage faults by name
+// and closes the app did not ask for, and the start before the last loss, so
+// the next start after a loss shows what was there and what failed first.
+// Only the tab in control records it. Counts, times and error names only.
+const DatabaseLifecycle=StorageCensus.lifecycle.createRecorder(Object.freeze({
+  load:()=>AppData.local.getJson(STORAGE_KEYS.databaseLifecycle,null),
+  save:record=>AppData.local.setJson(STORAGE_KEYS.databaseLifecycle,record),
+  live:()=>{const value=IndexedDb.lifecycle();return {openedVersion:value.version??0,lastWriteAt:value.lastWriteAt,storageErrors:value.errors,lastError:value.lastError,lastErrorAt:value.lastErrorAt,unexpectedCloses:value.closes,versionChanges:value.versionChanges};},
+  countStore:name=>IndexedDb.storeTransaction(name,'readonly',(store,tx,finish)=>{const request=store.count();request.onsuccess=()=>finish(true,request.result);request.onerror=()=>finish(false,request.error);}),
+  stores:()=>Object.entries(DB_STORES).map(([id,name])=>Object.freeze({id,name})),
+  canWrite:()=>appCanMutate(),
+  now:()=>Date.now(),setTimer:(run,ms)=>setTimeout(run,ms),clearTimer:id=>clearTimeout(id),
+  capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
+}));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')DatabaseLifecycle.flush();});
+window.addEventListener('pagehide',()=>DatabaseLifecycle.flush());
 const BackupProviderModule=INTERNAL_MODULES.load('backup-provider',1,'study-director.backup-provider-module',1,Object.freeze({repositoryPolicy:RepositoryPolicyModule}));
 const BackupCaptureModule=INTERNAL_MODULES.load('backup-capture',1,'study-director.backup-capture-module',1);
 const BackupModule=INTERNAL_MODULES.load('backup',1,'study-director.backup-module',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule}));
@@ -1858,8 +1879,8 @@ const BackupOperationDiagnostics=BackupOperationDiagnosticsModule.createRecorder
   configuration:Object.freeze({release:APP_VERSION,limit:20}),
   environment:Object.freeze({now:()=>Date.now()}),
   storage:Object.freeze({
-    read:()=>sessionStorage.getItem('study-director.backup-operation-diagnostics.v1')||'',
-    write:value=>{try{sessionStorage.setItem('study-director.backup-operation-diagnostics.v1',String(value||''));return true;}catch{return false;}}
+    read:()=>sessionStorage.getItem(SESSION_STORAGE_KEYS.backupOperationDiagnostics)||'',
+    write:value=>{try{sessionStorage.setItem(SESSION_STORAGE_KEYS.backupOperationDiagnostics,String(value||''));return true;}catch{return false;}}
   })
 }));
 if(!Object.isFrozen(BackupOperationDiagnostics)||BackupOperationDiagnostics.format!=='study-director.backup-operation-diagnostics'||BackupOperationDiagnostics.contractVersion!==1){
@@ -2001,7 +2022,7 @@ function cachedElements(owner,spec){
 /* SHARED INTERACTION AND SYSTEM-ALERT SERVICES */
 let NavigationController=null;
 const WorkspaceRouteCoordinator=(()=>{
-  const handlers=new Map(),overlayKinds=new Set(['focus','pdf','audio']);
+  const handlers=new Map(),overlayKinds=new Set(['focus','pdf','audio','image']);
   const same=(a,b)=>{if(!a&&!b)return true;return !!a&&!!b&&a.kind===b.kind&&a.token===b.token&&(a.key||'')===(b.key||'');};
   const cleanKind=value=>String(value||'').trim().toLowerCase();
   function register(kind,handler){
@@ -2467,6 +2488,11 @@ const SUPPORT_NOTE=Object.freeze({
   key:'__study_director_support_activities__',
   label:'Support Activities'
 });
+// The shared support note is stored with its reserved key as its label, which
+// keeps it apart from any Area. Wherever a stored note is shown, it shows its name.
+function shownNote(note){return note&&note.key===SUPPORT_NOTE.key?Object.freeze({...note,label:SUPPORT_NOTE.label}):note;}
+// A stored label as people read it: the shared support note by its name.
+function noteName(label){return normalizeAreaName(label)===SUPPORT_NOTE.key?SUPPORT_NOTE.label:displayAreaName(label);}
 function noteKeyForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.key:taskAreaKey(task);}
 function noteLabelForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.label:taskAreaLabel(task);}
 const {
@@ -2505,6 +2531,7 @@ function sessionParkedHere(){return sessionPanelMode==='suspended'&&!TASKS.some(
 function executeSessionStatusModel(){
   const elsewhere=sessionShownElsewhere();
   if(sessionPanelMode==='previous')return {state:'suspended',label:'PREVIOUS DAY'};
+  if(sessionPanelMode==='finished')return {state:'complete',label:'FINISHED'};
   if(elsewhere)return {state:'elsewhere',label:`RUNNING ${sessionDevice(elsewhere).toUpperCase()}`};
   if(sessionParkedHere())return {state:'suspended',label:'SUSPENDED'};
   if(!TASKS.length)return {state:'empty',label:'NO SESSION'};
@@ -2554,10 +2581,14 @@ function buildLiveTimeline(){
 // wait; support and fixed blocks, a pause or the end let them show
 // (docs/areas/status-indicator.md, noise rules).
 function syncStudyQuiet(){try{NoticeCoordinator.setStudying(TimerState.mode===TIMER_MODES.RUNNING&&isWorkBlock(TASKS[TimerState.currentIndex]));}catch(error){AppDiagnostics.capture('notifications.study-hold',error,'warn');}}
+// The Practice Pacer can start only while a block's timer runs, so its
+// controls follow every change of the main timer (start, pause, resume,
+// stop). Set once the Pacer exists, below.
+let refreshPracticeControls=()=>{};
 const TimerState=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
+  effects:Object.freeze({modeChanged:()=>{updateExecutePanels();refreshPracticeControls();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
 }));
 const {
   session:SessionState, tasks:TASKS, modes:TIMER_MODES, taskIdentity:TaskIdentity, setMode:setTimerMode
@@ -2679,6 +2710,9 @@ async function withRestoreSessionPersistenceSuppressed(operation){
   finally{restoreSessionPersistenceSuppressionDepth=Math.max(0,restoreSessionPersistenceSuppressionDepth-1);}
 }
 function hasBlockingActiveSession(){
+  // A finished day runs no timer: like a suspended one, it never has to be
+  // suspended first.
+  if(sessionPanelMode==='finished')return false;
   const active=TASKS.some(isTrackableBlock);
   if(sessionPanelMode==='suspended'&&!active)return false;
   if(TimerState.mode===TIMER_MODES.SUSPENDED&&!active)return false;
@@ -2732,6 +2766,8 @@ let ownershipBanner=null;
 let AppMutationCoordinator=null;
 let mutationUiOperationActive=false;
 let pwaUpdateReservation=null;
+// Whether this start still owes the profile password prompt (askProfilePassword).
+let profilePasswordDue=false;
 const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
   config:Object.freeze({
     storageKey:STORAGE_KEYS.appOwner,sessionTabKey:SESSION_STORAGE_KEYS.appTab,
@@ -2774,7 +2810,7 @@ const AppOwnership=OwnershipModule.createOwnershipController(Object.freeze({
       await CompatibilityFacade.migrateLive();
       await hydrateSavedDrafts({forcePreferences:true,failClosed:true});
     },
-    resume:()=>resumeTimerLoopAfterPrimaryRestore(),
+    resume:()=>{resumeTimerLoopAfterPrimaryRestore();askProfilePassword();},
     refreshCore:()=>refreshCoreUi(),
     scheduleMaintenance:()=>scheduleDataMaintenance(),
     practiceRender:()=>PracticePacer.render(),
@@ -2812,7 +2848,7 @@ AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze
   },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay),
   // Another tab's lease ran out without being released (it was closed in the
   // middle of a change): background work that waited for it goes now.
-  foreignReleased:()=>wakeBackgroundOperations('mutation-lease-ended')})
+  foreignReleased:()=>{wakeBackgroundOperations('mutation-lease-ended');askProfilePassword();}})
 }));
 if(!Object.isFrozen(AppMutationCoordinator)||AppMutationCoordinator.format!=='study-director.mutation-coordinator'||AppMutationCoordinator.contractVersion!==1)throw new Error('Study Director mutation coordinator is unavailable or incompatible.');
 /* TIMER NUDGE AND SOUND CUES */
@@ -2880,6 +2916,7 @@ const {
   markDone:markDoneTimer, setPausedUI, setTimerIdentity, skipTask:skipTaskTimer, startCur, syncTimerAfterWake, toggleDone, togglePause:togglePauseTimer,
   updateBreakMeter, updateCD
 }=TimerEngine;
+refreshPracticeControls=()=>PracticePacer.render();
 // A pause, resume, finished or skipped block goes to the other devices
 // within seconds (an urgent change), not at the next quiet-period upload:
 // Continue Here elsewhere takes the timer from Drive's newest version, so a
@@ -2927,8 +2964,12 @@ function uploadSoonAfterPlanApply(result){
 // full checkpoint reconciliation keeps its ordinary cadence. A remote claim
 // stops only this runtime clock; canonical progress stays untouched until the
 // verified full checkpoint arrives and ordinary reconciliation preserves it.
-const SESSION_WATCH_MS=2*60*1000,SESSION_CLAIM_WATCH_MS=15*1000,SESSION_CLAIM_SYNC_RETRY_MS=30*1000;
-let sessionWatchTimer=null,sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
+// While stopped for a handover, every claim check (15 s) asks again for the
+// sync that lets go; a second short of the period allows the timer's slack.
+// One Drive check every 10 s while a session is open on screen: a takeover
+// and a version finished on another device (backlog item 23).
+const SESSION_CLAIM_WATCH_MS=10*1000,SESSION_CLAIM_SYNC_RETRY_MS=SESSION_CLAIM_WATCH_MS-1000;
+let sessionClaimWatchTimer=null,sessionClaimCheckActive=false,sessionClaimLastAttemptAt=0;
 const SESSION_CLAIM_SAVE_WARNING='The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.';
 async function verifyFrozenSessionClaim(){
   const frozen=sessionClaimFreeze;
@@ -2967,17 +3008,26 @@ function notifyNewerSessionClaim(){
 async function checkSessionOwnershipClaim(){
   if(sessionClaimCheckActive||document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return false;
   if(!TASKS.length&&!sessionClaimFreeze&&sessionPanelMode!=='elsewhere')return false;
+  // A finished day is never continued elsewhere: no claim to watch for.
+  if(sessionPanelMode==='finished'&&!sessionClaimFreeze)return false;
   if(!BackupProviderRuntime.connected('google-drive')||navigator.onLine===false)return false;
   sessionClaimLastAttemptAt=Date.now();sessionClaimCheckActive=true;
   try{
-    const [claim,loaded]=await Promise.all([BackupProviderRuntime.readSessionClaim('google-drive'),AppData.activeSession.load(0,{strict:true})]);
+    const [watched,loaded]=await Promise.all([BackupProviderRuntime.watchSession('google-drive'),AppData.activeSession.load(0,{strict:true})]),claim=watched?.claim||null;
     if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be checked safely.');
     const session=loaded.value?ActiveSessionCodec.sanitizeCurrent(loaded.value):null,me=InstallationIdentity.getId(),remote=!!(claim&&session&&claim.applies&&claim.state==='owned'&&!claim.ownedHere),mine=!!(session&&session.runningOn===me);
-    if(remote&&mine&&TASKS.length){
+    const takeover=remote&&mine&&TASKS.length>0;
+    // A version another device finished comes in now, also while the session
+    // is shown running on another device. A takeover of the session running
+    // here (and the stop that follows it) asks for its own sync below, once
+    // the stopped session is saved here; a version left for it is reported
+    // again by the next check.
+    if(watched?.newVersions&&!takeover&&!sessionClaimFreeze)BackupProviderRuntime.bringInSessionVersions('google-drive');
+    if(takeover){
       const now=DecisionClock.nowMs(),same=sessionClaimFreeze&&sessionClaimFreeze.epoch===claim.epoch;
       if(!same){
         // Stop duplicate execution before awaiting a potentially slow/failed disk write.
-        const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();
+        const frozenSinceMs=DecisionClock.nowMs();TimerEngine.stopExecution();TimerEngine.holdClockAt(frozenSinceMs);
         let snapshot=null,evidence=null;
         try{
           markDayContentChanged();
@@ -3006,7 +3056,7 @@ async function checkSessionOwnershipClaim(){
       return true;
     }
     if(sessionClaimFreeze){
-      if(!mine||!TASKS.length){sessionClaimFreeze=null;return false;}
+      if(!mine||!TASKS.length){sessionClaimFreeze=null;TimerEngine.releaseHeldClock();return false;}
       if(!sessionClaimFreeze.localVerified&&!await verifyFrozenSessionClaim())return true;
       if(claim?.state==='owned'&&claim.ownedHere&&claim.applies)return resumeAfterReleasedSessionClaim(session);
       const now=DecisionClock.nowMs(),current=sessionClaimFreeze;
@@ -3029,13 +3079,8 @@ function wakeSessionOwnershipClaim(slackMs=0){
   return checkSessionOwnershipClaim();
 }
 function installSessionWatch(){
-  if(sessionWatchTimer||sessionClaimWatchTimer)return false;
-  sessionWatchTimer=setInterval(()=>{
-    if(document.visibilityState!=='visible'||!StartupLifecycle.status().fullyInitialized)return;
-    if(!TASKS.length&&sessionPanelMode!=='elsewhere')return;
-    try{if(BackupProviderRuntime.syncing())BackupProviderRuntime.wakeBackground('session-watch');}
-    catch(error){AppDiagnostics.capture('backup-provider.session-watch',error,'warn');}
-  },SESSION_WATCH_MS);
+  if(sessionClaimWatchTimer)return false;
+  // The one session check: a takeover and new versions (watchSession).
   sessionClaimWatchTimer=setInterval(()=>{void wakeSessionOwnershipClaim(1000);},SESSION_CLAIM_WATCH_MS);
   // Existing interval owns the cadence. Foreground/online return only advances
   // an eligible missed attempt, never introducing a second polling timer.
@@ -3613,6 +3658,7 @@ async function hydratePrimaryStateFromStorage(options={}){
   // Historical sessions must never be offered today's Continue Here path,
   // including suspended copies and those last owned on another device.
   if(isPreviousActiveSessionRecord(session)&&!TASKS.length)return attemptAutoRestoreActiveSession();
+  if(isFinishedActiveSession(session))return openFinishedSession(session,{source:'ownership-takeover'});
   if(sessionRunsElsewhere(session)&&!TASKS.length){setSessionPanelMode('elsewhere',session);return false;}
   if(isRestorableActiveSession(session)){
     const snapshot=activeSessionSnapshot(session);
@@ -4080,7 +4126,10 @@ function applyRows(rows,options={}){
       currentIndex:TimerState.currentIndex,
       anchor:TimerState.scheduleAnchorMin,
       fingerprint:scheduleFingerprint(),
-      renderDirty:!!ScheduleDerivedState.renderDirty
+      renderDirty:!!ScheduleDerivedState.renderDirty,
+      // Finish Today: the plan stays loaded for Review, and the Plan board
+      // shows the draft, as after Reset Today.
+      finished:sessionPanelMode==='finished'
     });
   }
   function timeline(){return Object.freeze({rows:buildLiveTimeline(),realtime:getRealTimeState()});}
@@ -4412,11 +4461,21 @@ function activeSessionPayload(snapshot=null,options={}){
   snapshot=snapshot||captureSessionSnapshot();
   if(!snapshot)return null;
   const nowIso=new Date().toISOString();
-  return {
+  const built={
     id:ACTIVE_SESSION_ID,type:'activeSession',version:DATA_CONTRACT.schemas.ActiveSession.version,
-    revision,date:snapshot.date,status:options.status==='suspended'?'suspended':'active',runningOn:InstallationIdentity.getId(),
+    revision,date:snapshot.date,status:options.status==='suspended'?'suspended':sessionPanelMode==='finished'?'finished':'active',runningOn:InstallationIdentity.getId(),
     scheduleText,snapshot,suspendedAt:options.suspendedAt||null,updatedAt:nowIso
   };
+  // A finished day keeps one form until Review changes it. Every save of it
+  // (a redraw, a sync, a backup) on any device that has it open would
+  // otherwise make it that device's again, with a new revision, and send it
+  // back and forth. sessionPanelSession holds that form while finished.
+  if(sessionPanelMode==='finished'&&options.status!=='suspended'){
+    const held=sessionPanelSession?ActiveSessionCodec.sanitizeCurrent(sessionPanelSession):null;
+    if(held&&CanonicalModule.same(ActiveSessionCodec.contentValue(held),ActiveSessionCodec.contentValue(built)))return held;
+    sessionPanelSession=built;
+  }
+  return built;
 }
 
 
@@ -4466,6 +4525,17 @@ function writeActiveSessionNow(snapshot,options={}){
   if(!appCanMutate())return Promise.resolve(null);
   if(ReviewSaveService.status().activeSessionPersistenceBlocked)return Promise.resolve(null);
   const session=activeSessionPayload(snapshot);if(!session)return Promise.resolve(null);
+  // A finished day changes only when Review is edited. Redraws, tab changes
+  // and flushes that change nothing write nothing: each write would make the
+  // day this device's and send it to every device again.
+  if(sessionPanelMode==='finished')return AppData.activeSession.load().then(stored=>{
+    const current=stored?.value?ActiveSessionCodec.sanitizeCurrent(stored.value):null;
+    if(current&&CanonicalModule.same(current,ActiveSessionCodec.sanitizeCurrent(session))){const result={ok:true,value:current,storage:stored.storage,unchanged:true};handleActiveSessionRepositoryResult(result,'save');return result;}
+    return saveActiveSession(session,options);
+  });
+  return saveActiveSession(session,options);
+}
+function saveActiveSession(session,options){
   return AppData.activeSession.save(session,{emergency:options.emergency===true,backupCapture:options.backupCapture===true,strictDurability:options.strictDurability===true}).then(result=>{handleActiveSessionRepositoryResult(result,'save');return result;}).catch(error=>{handleActiveSessionRepositoryResult({ok:false,error},'save');return {ok:false,error};});
 }
 function writeLiveDraftNow(options={}){
@@ -4691,7 +4761,8 @@ function restoreTimerRuntimeIfAny(){
   return true;
 }
 // A session another device runs: this device shows it and never runs its timer.
-function sessionRunsElsewhere(session){return !!session&&typeof session==='object'&&session.status!=='suspended'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
+// A finished day runs nowhere.
+function sessionRunsElsewhere(session){return !!session&&typeof session==='object'&&!['suspended','finished'].includes(session.status)&&String(session.runningOn||'')!==InstallationIdentity.getId();}
 function sessionFromElsewhere(session){return !!session&&typeof session==='object'&&String(session.runningOn||'')!==InstallationIdentity.getId();}
 function isRestorableActiveSession(session){
   if(!session||typeof session!=='object'||sessionRunsElsewhere(session))return false;
@@ -4708,9 +4779,16 @@ function isSuspendedActiveSession(session){
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
 }
+function isFinishedActiveSession(session){
+  if(!session||typeof session!=='object')return false;
+  if(session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision)||session.status!=='finished')return false;
+  if(!isValidIsoDate(session.date)||session.date!==todayISO())return false;
+  if(!isCanonicalScheduleText(session.scheduleText))return false;
+  return !!activeSessionSnapshot(session);
+}
 function isPreviousActiveSessionRecord(session){
   if(!session||typeof session!=='object'||session.id!==ACTIVE_SESSION_ID||Number(session.version)!==DATA_CONTRACT.schemas.ActiveSession.version||!Number(session.revision))return false;
-  if(session.status&&!['active','suspended'].includes(session.status))return false;
+  if(session.status&&!['active','suspended','finished'].includes(session.status))return false;
   if(!isValidIsoDate(session.date)||session.date>=todayISO())return false;
   if(!isCanonicalScheduleText(session.scheduleText))return false;
   return !!activeSessionSnapshot(session);
@@ -4756,14 +4834,50 @@ async function retireCoveredPreviousActiveSession(session){
   notifyBackupChange({urgent:true,reason:'saved-session-retired'});
   return true;
 }
+// After a sync or restore brings data in, a previous day's session kept here
+// is cleared once a Saved Day covers it: another device may have saved the
+// day this copy came from. Before 2026-11-12 it waited for the next start.
+let previousSessionRecheck=null;
+function recheckStoredPreviousSession(){
+  if(previousSessionRecheck||sessionPanelMode!=='previous')return previousSessionRecheck;
+  previousSessionRecheck=(async()=>{
+    try{
+      await AppMutationCoordinator.settled();
+      if(!appCanMutate()||sessionPanelMode!=='previous')return false;
+      const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.ok&&!loaded.error?loaded.value:null;
+      return isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session);
+    }catch(error){AppDiagnostics.capture('session.previous-day-recheck',error,'warn');return false;}
+    finally{previousSessionRecheck=null;}
+  })();
+  return previousSessionRecheck;
+}
 function setSessionPanelMode(mode,session=null){
   sessionPanelMode=mode||'none';
-  sessionPanelSession=['suspended','elsewhere','previous'].includes(sessionPanelMode)?session:null;
+  sessionPanelSession=['suspended','elsewhere','previous','finished'].includes(sessionPanelMode)?session:null;
   if(!sessionPanelSession&&sessionHandoff.error)sessionHandoff={...sessionHandoff,error:''};
   // The Execute header names the device running the session, or stops doing
   // so. Before the panel's own controls, which the idle display disables.
   try{updateExecuteSessionStatus();refreshExecuteIdleDisplay(new Date(),{force:true});}catch(error){AppDiagnostics.capture('execute.session-elsewhere-header',error,'warn');}
   updateSessionControls();scheduleSyncStatus();
+}
+// Today, finished (Finish Today here or on another device): its blocks load
+// for Review only and its timer never restarts. Execute, the Pacer and the
+// Plan board show no session, as after Reset Today; Review stays editable.
+function openFinishedSession(session,{source='finished-session-review',lifecycleManaged=false}={}){
+  const snapshot=activeSessionSnapshot(session);if(!snapshot)return false;
+  const restored=applyStoredSessionSnapshot(session,{...snapshot,timerRuntime:null},{source,reviewOnly:true,lifecycleManaged});
+  if(restored===false)return false;
+  showFinishedDay(session);
+  return true;
+}
+function showFinishedDay(session=null){
+  TimerEngine.stopExecution();
+  TimerState.runtime=TimerState.emptyRuntime();
+  setTimerMode(TIMER_MODES.DONE,'finished-day');
+  setSessionPanelMode('finished',session);
+  renderSched();updateBadges();updateHeaderInfo();updateRealTimeAwareness();
+  refreshExecuteIdleDisplay(new Date(),{force:true});
+  refreshCoreUi({header:true});
 }
 async function recoverPreviousSessionForReview(session){
   const snapshot=activeSessionSnapshot(session);
@@ -4871,7 +4985,14 @@ async function attemptAutoRestoreActiveSession(){
     // itself. If the canonical Saved Day covers its latest content revision,
     // retire the redundant recovery copy before considering ownership/UI.
     if(isPreviousActiveSessionRecord(session)&&await retireCoveredPreviousActiveSession(session))return false;
+    // A previous day that ran on another device (owner's choice, 2026-11-12):
+    // that device asks if the day is not saved. This copy is kept, cleared
+    // once a sync shows the day saved, and Review Previous Day opens it. It
+    // asked every morning: its Drive sign-in had expired overnight, so it
+    // could not see the other device's save.
+    if(isPreviousActiveSessionRecord(session)&&sessionFromElsewhere(session)){setSessionPanelMode('previous',session);return false;}
     if(isPreviousActiveSessionRecord(session))return handlePreviousActiveSession(session);
+    if(isFinishedActiveSession(session))return openFinishedSession(session);
     if(sessionRunsElsewhere(session)){setSessionPanelMode('elsewhere',session);return false;}
     if(isSuspendedActiveSession(session)){setSessionPanelMode('suspended',session);return false;}
     if(!isRestorableActiveSession(session)){setSessionPanelMode('none');return false;}
@@ -4907,10 +5028,10 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
     apply:context=>CompatibilityModule.applyIndexedDbUpgrade(Object.freeze({...context,dailyRecordMigrationKey:APP_META_KEYS.dailyRecordMigration}))
   }),
   hooks:Object.freeze({
-    onError:message=>markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`),
+    onError:message=>{markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`);try{DatabaseLifecycle.fault();}catch{}},
     onOk:key=>markStorageHealthOk('indexedDB',key),
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
-    onReset:event=>{void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
+    onReset:event=>{try{DatabaseLifecycle.noteLoss();}catch{}void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
   })
 }));
 const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.noteKeys.isKey}));
@@ -5281,7 +5402,7 @@ function handleRepositoryDatasetRevisionChanged(){
   setTimeout(()=>{if(document.getElementById('pane-insights')?.classList.contains('on'))UiTabRegistry.renderTab('insights');},0);
 }
 function persistedActiveSessionUnfinished(session){
-  if(!session||session.deleted===true||!['active','suspended'].includes(session.status||'active'))return false;
+  if(!session||session.deleted===true||!['active','suspended','finished'].includes(session.status||'active'))return false;
   const snapshot=activeSessionSnapshot(session);
   const draft=parseScheduleDraftText(String(session.scheduleText||''));
   if(!snapshot||!draft.ok||!draft.parsed.length)return false;
@@ -5415,7 +5536,7 @@ const AppData=RepositoryModule.createAppData(Object.freeze({
   clock:Object.freeze({nowMs:DecisionClock.nowMs}),
   helpers:Object.freeze({
     boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
-    activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay,normalizeTimestamp,jsonByteLength
+    activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,noteName,isoDateDay,normalizeTimestamp,jsonByteLength
   }),
   hooks:Object.freeze({
     canMutate:appCanMutate,
@@ -5727,6 +5848,7 @@ async function continueSessionHere(){
       setPlanStatus('This session belongs to a previous study day. Review it without transferring or restarting its timer.',false);
       return false;
     }
+    if(isFinishedActiveSession(session)){openFinishedSession(session);return false;}
     if(!sessionFromElsewhere(session))return session.status==='suspended'?restoreSuspendedTodaySession():attemptAutoRestoreActiveSession();
     // Drive is read while the person confirms, so pressing Continue here
     // waits only on the claim when Drive has not moved on. Nothing is written.
@@ -5753,6 +5875,7 @@ async function continueSessionHere(){
       const loaded=await AppData.activeSession.load(),current=loaded&&loaded.value||null;
       if(!current)setSessionPanelMode('none');
       else if(isPreviousActiveSessionRecord(current))setSessionPanelMode('previous',current);
+      else if(isFinishedActiveSession(current))openFinishedSession(current);
       else if(sessionRunsElsewhere(current))setSessionPanelMode('elsewhere',current);
       else if(isSuspendedActiveSession(current))setSessionPanelMode('suspended',current);
       else setSessionPanelMode('active',current);
@@ -5773,7 +5896,9 @@ async function continueSessionOnExecute(source){
 // timer stops here and this device's progress stays as a suspended session,
 // so the review can offer both.
 async function yieldSessionToOtherDevice(options={}){
-  if(!TASKS.length)return false;
+  // A finished day runs no timer and is already stored as it is: nothing to
+  // stop, and it stays finished (not suspended) if it is kept for review.
+  if(!TASKS.length||sessionPanelMode==='finished')return false;
   const deferReview=options&&options.deferReview===true;
   await SessionLifecycle.run('session-yield',{scheduleIdentity:true,date:todayISO(),autoDate:true},async()=>{
     PracticePacer.pauseForSessionEnd({persist:false});
@@ -5805,6 +5930,7 @@ async function restoreSuspendedTodaySession(){
       setPlanStatus('This session belongs to a previous study day. Review it without restarting its timer.',false);
       return false;
     }
+    if(isFinishedActiveSession(session)){openFinishedSession(session);setPlanStatus('Today is finished. Review it and save it to Library when ready.');return false;}
     if(!isSuspendedActiveSession(session)){setPlanStatus('No suspended session is available to restore.',false);setSessionPanelMode('none');return false;}
     if(sessionFromElsewhere(session))return continueSessionHere();
     const snapshot=activeSessionSnapshot(session);
@@ -5826,8 +5952,8 @@ async function finishTodaySession(){
   if(!TASKS.some(isTrackableBlock)){setPlanStatus('No active study plan is available to finish.',false);return false;}
   const accepted=await Interactions.confirm({
     title:'Finish today and open Review?',
-    message:'The live timer will stop and your current progress will be kept for Review.',
-    details:['The current block is recorded as partial if it is still running.','Untouched future blocks remain unattempted; they are not marked skipped.','Nothing is added to Library until you choose Save Today to Library in Review.'],
+    message:'The timer stops and today’s session ends, here and on your other devices. Review opens next.',
+    details:['The current block is recorded as partial if it is still running, and so is an open Practice Pacer run.','Untouched future blocks remain unattempted; they are not marked skipped.','Nothing is added to Library until you choose Save Today to Library in Review.'],
     confirmLabel:'Finish today',cancelLabel:'Keep studying'
   });
   if(!accepted||!appCanMutate())return false;
@@ -5842,16 +5968,16 @@ async function finishTodaySession(){
         if(pct!==null)storeResolvedCompletion(TimerState.currentIndex,{pct,source:COMPLETION_SOURCES.TIME});
       }
     }
-    PracticePacer.pauseForSessionEnd({persist:false});
+    // The day is over, so an open Pacer run ends with it, as at day close.
+    PracticePacer.finalizeForDayClose();
     TimerEngine.stopExecution();
     completionNotice=NoticeCoordinator.begin({source:'timer',id:'execution',surface:'quiet',foreground:false});
-    TimerState.runtime=TimerState.emptyRuntime();
-    setTimerMode(TIMER_MODES.DONE,'manual-finish-day');
     resetBreakState();
-    refreshCoreUi();
+    // Finished before the write, so the stored session says so.
+    showFinishedDay();
     const saved=await writeLiveDraftNow({markChanged:true,emergency:true});
-    if(saved&&saved.ok===false)throw saved.error||new Error('live session save failed');
-    setPlanStatus('Today is finished for this plan. Review the day and save it to Library when ready.');
+    if(!saved||saved.ok===false)throw saved?.error||new Error('the finished day could not be stored');
+    setPlanStatus('Today is finished. Review the day and save it to Library when ready.');
     await goTab('review',{source:'finish-today'});
     ReviewView.refresh({force:true});
     completionNotice.update({lifecycle:'succeeded',cue:'day-complete',occurrence:completionNotice.operationId});
@@ -5859,6 +5985,8 @@ async function finishTodaySession(){
     return true;
   }catch(error){
     completionNotice?.update({lifecycle:'cancelled'});
+    // Not stored as finished: the day stays open, with its timer stopped.
+    if(sessionPanelMode==='finished'){setSessionPanelMode('active');renderSched();}
     setPlanStatus('Could not finish today safely: '+(error&&error.message?error.message:error),false);
     return false;
   }
@@ -5918,88 +6046,13 @@ function inheritedNoteEntries(areaKey){
     .map(entry=>({key:entry.key,label:entry.label||displayAreaName(entry.key),value:String(entry.text||''),text:plainTextContent(entry.text||'')}))
     .reverse();
 }
-function normalizeOngoingAreaInput(value){
-  const raw=clampText(String(value||'').trim(),APP_LIMITS.maxAreaNameChars);
-  const key=normalizeAreaName(raw);
-  if(!key)return null;
-  return Object.freeze({key,label:clampText(displayAreaName(raw),APP_LIMITS.maxAreaNameChars)});
-}
-function orderOngoingAreaEntries(source){
-  const entries=new Map();
-  (source||[]).forEach(raw=>{
-    if(!raw||typeof raw!=='object')return;
-    const key=normalizeAreaName(raw.key||raw.label);
-    if(!key)return;
-    const existing=entries.get(key)||{
-      key,id:'',label:displayAreaName(raw.label||key),text:'',hasNote:false,current:false,updatedAt:'',ephemeral:false,support:false
-    };
-    if(raw.id)existing.id=String(raw.id);
-    if(raw.label)existing.label=displayAreaName(raw.label);
-    if(raw.text!==undefined)existing.text=String(raw.text||'');
-    existing.hasNote=existing.hasNote||!!raw.hasNote||!!existing.text.trim();
-    existing.current=existing.current||!!raw.current;
-    existing.ephemeral=existing.ephemeral||!!raw.ephemeral;
-    existing.support=existing.support||!!raw.support||key===SUPPORT_NOTE.key;
-    if(raw.updatedAt)existing.updatedAt=String(raw.updatedAt);
-    entries.set(key,existing);
-  });
-  const parentKey=key=>{
-    const parts=String(key||'').split(' > ');
-    return parts.length>1?parts.slice(0,-1).join(' > '):'';
-  };
-  const values=[...entries.values()];
-  const children=new Map();
-  values.forEach(entry=>{
-    const parent=parentKey(entry.key);
-    const group=children.get(parent)||[];
-    group.push(entry);children.set(parent,group);
-  });
-  // Support Activities first, then by name at every level.
-  const compare=(a,b)=>(Number(b.support)-Number(a.support))
-    ||a.label.localeCompare(b.label,undefined,{sensitivity:'base',numeric:true});
-  children.forEach(group=>group.sort(compare));
-  const ordered=[],seen=new Set();
-  const visit=entry=>{
-    if(!entry||seen.has(entry.key))return;
-    seen.add(entry.key);ordered.push(entry);
-    (children.get(entry.key)||[]).forEach(visit);
-  };
-  (children.get('')||[]).forEach(visit);
-  values.filter(entry=>!seen.has(entry.key)).sort(compare).forEach(visit);
-  return ordered.map(entry=>Object.freeze({
-    ...entry,depth:Math.max(0,entry.key.split(' > ').length-1)
-  }));
-}
-let noteCatalogueCache=null;
-function ongoingAreaTaskHierarchySignature(){return TASKS.filter(hasOngoingTaskNotes).map(task=>`${noteKeyForTask(task)}\u0000${noteLabelForTask(task)}`).join('\u0001');}
+// The notes the Library lists (core/note-catalogue.js).
+const NoteCatalogue=NoteCatalogueModule.createCatalogue(Object.freeze({ports:Object.freeze({
+  names:Object.freeze({normalize:value=>normalizeAreaName(value),display:value=>displayAreaName(value),clamp:value=>clampText(value,APP_LIMITS.maxAreaNameChars),parentKeys:key=>areaParentKeys(key)}),
+  sources:Object.freeze({notes:()=>AppData.notes.metadataSnapshot(),planAreas:()=>TASKS.filter(hasOngoingTaskNotes).map(task=>Object.freeze({key:noteKeyForTask(task),label:noteLabelForTask(task)}))}),
+  support:Object.freeze({key:SUPPORT_NOTE.key,label:SUPPORT_NOTE.label})
+})}));
 function noteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
-function noteCatalogue(){
-  const snapshot=AppData.notes.metadataSnapshot(),hierarchy=ongoingAreaTaskHierarchySignature();
-  if(noteCatalogueCache&&noteCatalogueCache.revision===snapshot.revision&&noteCatalogueCache.hierarchy===hierarchy)return noteCatalogueCache.entries;
-  const entries=new Map();
-  // Notes are listed by title key; a stored note also carries its permanent id.
-  const ensure=(key,label,{hasNote=false,current=false,updatedAt='',id=''}={})=>{
-    const safeKey=normalizeAreaName(key);
-    if(!safeKey)return;
-    const support=safeKey===SUPPORT_NOTE.key;
-    const existing=entries.get(safeKey)||{key:safeKey,id:'',label:support?SUPPORT_NOTE.label:displayAreaName(label||safeKey),hasNote:false,current:false,updatedAt:'',support};
-    if(id)existing.id=String(id);
-    if(label)existing.label=support?SUPPORT_NOTE.label:displayAreaName(label);
-    existing.hasNote=existing.hasNote||!!hasNote;
-    existing.current=existing.current||!!current;
-    if(updatedAt)existing.updatedAt=String(updatedAt);
-    entries.set(safeKey,existing);
-  };
-  snapshot.records.forEach(entry=>ensure(entry.key,entry.label,{hasNote:entry.hasNote,updatedAt:entry.updatedAt,id:entry.id}));
-  TASKS.filter(hasOngoingTaskNotes).forEach(task=>ensure(noteKeyForTask(task),noteLabelForTask(task),{current:true}));
-  [...entries.values()].forEach(entry=>{
-    const labelParts=displayAreaName(entry.label).split(' > ');
-    areaParentKeys(entry.key).forEach((key,index)=>ensure(key,labelParts.slice(0,index+1).join(' > ')));
-  });
-  const ordered=Object.freeze(orderOngoingAreaEntries([...entries.values()]));
-  noteCatalogueCache=Object.freeze({revision:snapshot.revision,hierarchy,entries:ordered});
-  return ordered;
-}
 let refreshLibraryNotes=()=>false;
 let updateNoteSearchDocument=()=>false;
 function updateNoteSearchText(key,plain){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
@@ -6203,9 +6256,9 @@ function taskNoteEditorIdentity(idx){
     noteRevision:String(AppData.notes.get(areaKey)?.updatedAt||'')
   });
 }
-function clearTaskNoteEditorBinding(field){
+function clearTaskNoteEditorBinding(field,{keepEditor=false}={}){
   if(!field)return false;
-  richTextCloseField(field);
+  if(!keepEditor)richTextCloseField(field);
   ['noteIdx','areaKey','areaLabel','taskId','scheduleRevision','lifecycleRevision','noteRevision','noteBinding','noteBindingState','noteScope','richSyncState','richSyncStatus'].forEach(key=>delete field.dataset[key]);
   field.removeAttribute('aria-label');
   return true;
@@ -6230,7 +6283,9 @@ function bindTaskNoteEditor(field,idx,source='field'){
   field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
   field.setAttribute('aria-label',`Note for ${identity.areaLabel}`);
   field.maxLength=APP_LIMITS.maxNoteChars;
-  queueMicrotask(()=>richTextSyncField(field));
+  // The visible note gets its editor at once, as on a pane switch: after a
+  // block change only a read-only preview was left (backlog item 19).
+  queueMicrotask(()=>richTextSyncAll());
   return identity;
 }
 function bindNoteEditor(field,areaKey,areaLabel,source='library'){
@@ -6239,7 +6294,10 @@ function bindNoteEditor(field,areaKey,areaLabel,source='library'){
   if(!safeKey){clearTaskNoteEditorBinding(field);return null;}
   const entry=AppData.notes.get(safeKey,areaLabel||displayAreaName(safeKey));
   const label=entry&&entry.label?entry.label:displayAreaName(areaLabel||safeKey);
-  clearTaskNoteEditorBinding(field);
+  // Another note: its editor goes. The same note, or a field a lifecycle step
+  // unbound, keeps it; the sync below judges it against what is stored.
+  const previous=normalizeAreaName(field.dataset.areaKey);
+  clearTaskNoteEditorBinding(field,{keepEditor:!previous||previous===safeKey});
   field.dataset.areaKey=safeKey;
   field.dataset.areaLabel=label;
   field.dataset.lifecycleRevision=String(SessionLifecycle.revision);
@@ -6251,7 +6309,7 @@ function bindNoteEditor(field,areaKey,areaLabel,source='library'){
   field.dataset.richSyncState=appCanMutate()?'saved':'read-only';field.dataset.richSyncStatus=appCanMutate()?'Saved':'Read-only';
   field.setAttribute('aria-label',`Note for ${label}`);
   field.maxLength=APP_LIMITS.maxNoteChars;
-  queueMicrotask(()=>richTextSyncField(field));
+  queueMicrotask(()=>richTextSyncAll());
   return Object.freeze({idx:null,areaKey:safeKey,areaLabel:label,taskId:'',scheduleRevision:null,noteRevision:String(entry&&entry.updatedAt||'')});
 }
 function taskNoteEditorIsVisible(field){
@@ -7074,8 +7132,16 @@ async function startProfile(){
 }
 // With several profiles on the device, each person enters their own backup
 // password when switching in; Not now keeps sync and encrypted backups paused.
-function askProfilePassword(){
-  if(Profiles.list().length<2||FirstStart.isOpen()||!appCanMutate())return;
+// Asked once per start. A page that cannot change data when start-up ends
+// (another tab has control, or a page closed mid-change left its lock for a
+// few seconds) asks as soon as it can, instead of never (profilePasswordDue
+// is declared before the ownership hooks that call this).
+function askProfilePassword({start=false}={}){
+  if(start)profilePasswordDue=true;
+  if(!profilePasswordDue)return;
+  if(Profiles.list().length<2||FirstStart.isOpen()){profilePasswordDue=false;return;}
+  if(!appCanMutate())return;
+  profilePasswordDue=false;
   void BackupProtection.ask().catch(setBackupProtectionSurfaceError);
 }
 // Version History reads each encrypted version for its date and counts, so a
@@ -8293,7 +8359,10 @@ function commitTaskNoteEditor(field,value,event=null){
     setStatus('notes-status',message,false);setStatus('save-status',message,false);setPlanStatus(message,false);return false;
   }
   if(result.status==='rejected')return false;
-  if(result.status==='changed')saveLiveDraft();
+  // A note is kept in Notes and syncs on its own; the day holds none of its
+  // text, so a day saved before stays saved (before 2026-11-12 a block note
+  // written after Save Today asked about the day the next morning).
+  if(result.status==='changed')saveLiveDraft({markChanged:false});
   return true;
 }
 /* DAILY REFLECTION PERSISTENCE · shared by Review and Library */
@@ -8409,10 +8478,14 @@ function richTextDocumentFor(field,options={}){
 // Links between notes: the one note picker and the linked-notes bar.
 const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.freeze({
   view:Object.freeze({document}),
-  notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
+  notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>shownNote(AppData.notes.get(ref)),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref).map(shownNote),list:()=>AppData.notes.metadataSnapshot().records.map(shownNote)}),
   text:Object.freeze({tagsIn:value=>RichTextApi.tagsIn(value)}),
   ownership:Object.freeze({canMutate:()=>appCanMutate()})
 })}));
+// A file dropped anywhere that does not take it would open in a new tab or in
+// place of the app; the note editor takes its own drops before this runs.
+window.addEventListener('dragover',event=>{if(!event.defaultPrevented&&event.dataTransfer?.types.includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='none';}});
+window.addEventListener('drop',event=>{if(event.dataTransfer?.types.includes('Files'))event.preventDefault();});
 // A link to a note opens it in Execute's editor when clicked there, and in
 // the Library everywhere else.
 async function openLinkedNote(id,field=null){
@@ -8421,7 +8494,7 @@ async function openLinkedNote(id,field=null){
   if(!await goTab('library',{source:'note-link'}))return false;
   return LibraryView.revealNoteReference(id);
 }
-function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>AppData.notes.get(id)?.label??null,open:id=>void openLinkedNote(id,field),tag:(name,passive)=>void showNotesTagged(name,passive,field),pickTag:options=>NoteLinks.pickTag(options)});}
+function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>shownNote(AppData.notes.get(id))?.label??null,open:id=>void openLinkedNote(id,field),tag:(name,passive)=>void showNotesTagged(name,passive,field),pickTag:options=>NoteLinks.pickTag(options)});}
 // A tag tapped in the Library's open note narrows the list beside it; a tag
 // tapped anywhere else, or with Ctrl or Cmd, opens the Library's notes with it.
 async function showNotesTagged(name,passive,field){
@@ -8456,7 +8529,7 @@ async function renameNoteTag(from,to){
 async function importNoteFiles(files,parent=''){
   if(!appCanMutate())throw new Error('Use the primary tab to import notes.');
   const list=[...(files||[])],made=[],skipped=[];
-  const titleFor=name=>{const base=clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;AppData.notes.get(title);count++)title=`${full} (${count})`;return title;};
+  const titleFor=name=>{const base=clampText(String(name||'').replace(/\.[^.]*$/,'').replace(/\s*>\s*/g,' - ').replace(/[\u0000-\u001f\u007f]/g,'').trim(),120)||'Imported note',full=parent?`${parent} > ${base}`:base;let title=full;for(let count=2;AppData.notes.get(title)||NoteCatalogue.reserved(normalizeAreaName(title));count++)title=`${full} (${count})`;return title;};
   return RichTextRuntime.quiesce(()=>AppMutationCoordinator.runExclusive('import-notes',async()=>{
     let full=false;
     for(const file of list){
@@ -8479,7 +8552,7 @@ async function importNoteFiles(files,parent=''){
 }
 const RichTextRuntime=(()=>{
   const BACKGROUND_IDLE_DISPOSE_MS=90000;
-  let installed=false,sequence=0,observer=null,closingAll=false,mutationHold=0,mutationFocusState=null,lastActiveField=null,backgroundDisposeTimer=null;
+  let installed=false,sequence=0,observer=null,closingAll=false,mutationHold=0,mutationFocusState=null,lastActiveField=null,backgroundDisposeTimer=null,lifecycleHold=false;
   const mutationFields=new Map(),mutationSurfaces=new Map();
   const mounted=new Map(),pending=new Map();
   const previews=new WeakMap(),lastCanonical=new WeakMap(),mountErrors=new WeakMap();
@@ -8531,7 +8604,7 @@ const RichTextRuntime=(()=>{
     if(!(target instanceof HTMLElement)||target.disabled||target.inert)return false;
     target.focus({preventScroll:true});return document.activeElement===target;
   }
-  function mutationActive(){return mutationHold>0;}
+  function mutationActive(){return mutationHold>0||lifecycleHold;}
   function hidePreview(field){const preview=previews.get(field);if(preview){preview.shell.hidden=true;preview.body.replaceChildren();}}
   function clearPreview(field){hidePreview(field);if(field instanceof HTMLTextAreaElement)field.hidden=false;}
   function clearMountError(field){const known=mountErrors.get(field);if(known)known.remove();mountErrors.delete(field);if(field instanceof HTMLTextAreaElement)delete field.dataset.richMountFailed;}
@@ -8601,6 +8674,36 @@ const RichTextRuntime=(()=>{
     clearExternalConflict(field);
     return Object.freeze({status:'reload'});
   }
+  // A session lifecycle step (a sync bringing in the session or notes, a
+  // restore, a new day) may replace what an editor shows. Editors stay mounted
+  // through it and only refuse input, so the cursor stays; afterwards each one
+  // whose note and content are unchanged keeps going, and the others are
+  // rebuilt from what is stored. Closing every editor at each step made them
+  // vanish and show raw stored text while the person typed (backlog item 19).
+  // A flag, not a count: a superseded step never reaches its end.
+  function holdForLifecycle(){
+    flushEditors();cancelBackgroundDisposal();
+    sequence+=1;pending.clear();lifecycleHold=true;
+  }
+  function releaseAfterLifecycle(){
+    if(!lifecycleHold)return false;
+    lifecycleHold=false;
+    // A mount tried during the step marked fields read-only; undo it, as the
+    // end of quiesce does, unless a quiesce is still running.
+    if(mutationHold===0){restoreMutationFields();restoreMutationSurfaces();}
+    for(const [field,record] of [...mounted]){
+      // Identity and stored content only: the step's fields are still
+      // disabled here, and syncAll disposes an editor that cannot write.
+      const descriptor=field.isConnected?richTextDocumentFor(field,{requireVisible:false,editable:false}):null;
+      if(descriptor&&descriptor.documentId===record.documentId&&String(descriptor.initialValue||'')===record.localCanonical){
+        record.revision=fieldRichRevision(field);record.baselineCanonical=record.localCanonical;clearExternalConflict(field);clearPreview(field);
+      // The step already put the new content in the field; the old editor
+      // must not write its own back on its way out.
+      }else void dispose(field,{resync:false,keepValue:String(field.value||'')});
+    }
+    if(!mutationActive())queueMicrotask(()=>syncAll(document));
+    return true;
+  }
   function cancelBackgroundDisposal(){if(backgroundDisposeTimer){clearTimeout(backgroundDisposeTimer);backgroundDisposeTimer=null;}}
   function pickerLeaseActive(){return [...mounted.keys()].some(field=>field.dataset.richAssetPicker==='active');}
   async function disposeBackgroundIdleEditors(){
@@ -8624,7 +8727,9 @@ const RichTextRuntime=(()=>{
     if(event.kind===APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER||event.kind===APP_ACTIVATION_KINDS.DATE_ROLLOVER||event.kind===APP_ACTIVATION_KINDS.EXIT)cancelBackgroundDisposal();
   }
   function syncField(field){
-    if(!eligible(field))return false;
+    // During a lifecycle step nothing is rearranged: its release judges each
+    // editor against the new state, then syncs all.
+    if(lifecycleHold||!eligible(field))return false;
     const record=mounted.get(field);
     if(record){
       const descriptor=richTextDocumentFor(field,{requireVisible:false});
@@ -8633,7 +8738,10 @@ const RichTextRuntime=(()=>{
       if(currentRevision!==record.revision||canonical!==record.baselineCanonical){
         if(canonical===record.localCanonical){record.revision=currentRevision;record.baselineCanonical=canonical;clearExternalConflict(field);}
         else if(recordDirty(record)){markExternalConflict(field,record);clearPreview(field);return false;}
-        else{clearExternalConflict(field);void dispose(field,{resync:false}).then(()=>{if(field.isConnected&&!document.hidden)void activate(field);else syncField(field);});return true;}
+        // Changed elsewhere: rebuilt from what is stored. The old editor's
+        // text must not stay in the field on its way out, or the next save
+        // would store it over the newer text.
+        else{clearExternalConflict(field);void dispose(field,{resync:false,keepValue:canonical}).then(()=>{if(field.isConnected&&!document.hidden)void activate(field);else syncField(field);});return true;}
       }
       clearPreview(field);return false;
     }
@@ -8650,6 +8758,7 @@ const RichTextRuntime=(()=>{
     field.hidden=true;preview.shell.hidden=false;return true;
   }
   function syncAll(root=document){
+    if(lifecycleHold)return false;
     for(const [field,record] of mounted){const descriptor=richTextDocumentFor(field,{requireVisible:false}),visible=field.id==='daily-reflection'?!!field.closest('.pane.on'):taskNoteEditorIsVisible(field),pickerOpen=field.dataset.richAssetPicker==='active';if(!field.isConnected||!descriptor||descriptor.documentId!==record.documentId||(!document.hidden&&!visible&&!pickerOpen))void dispose(field,{resync:false});}
     const fields=[];
     if(root instanceof HTMLTextAreaElement&&eligible(root))fields.push(root);
@@ -8678,6 +8787,7 @@ const RichTextRuntime=(()=>{
           }catch(error){assetFlushFailed=true;capture('rich-text.reflection-flush',error);}
         }
         await record.mounted.destroy();
+        if(typeof options.keepValue==='string')record.field.value=options.keepValue;
       }catch(error){assetFlushFailed=true;capture('rich-text.destroy',error);}
       try{await AppData.notes.flush();await AppData.activeSession.settled();}catch(error){assetFlushFailed=true;capture('rich-text.asset-flush',error);}
     }finally{
@@ -8739,6 +8849,7 @@ const RichTextRuntime=(()=>{
   // scroll to the first; the editor clears them on any edit or Escape.
   async function find(field,query,onClear){if(!await activate(field))return 0;const record=mounted.get(field);return record?record.mounted.search(query,onClear):0;}
   function findStep(field,direction){const record=mounted.get(field);return record?record.mounted.stepSearch(direction):{index:-1,count:0};}
+  async function addTag(field){if(!await activate(field))return false;const record=mounted.get(field);return record?record.mounted.addTag():false;}
   function clearFind(field){mounted.get(field)?.mounted.clearSearch();}
   // Editors that group keystrokes publish them now.
   function flushEditors(){for(const record of mounted.values()){try{record.mounted.flush();}catch(error){capture('rich-text.flush',error);}}}
@@ -8780,7 +8891,7 @@ const RichTextRuntime=(()=>{
     queueMicrotask(()=>syncAll(document));return true;
   }
   function status(){return Object.freeze({installed,loaded:true,activeDocumentId:mounted.get(lastActiveField)?.documentId||'',activeDocumentIds:Object.freeze([...new Set([...mounted.values()].map(record=>record.documentId))]),mounted:mounted.size,pending:pending.size>0,quiesced:mutationActive(),backgroundDisposalPending:backgroundDisposeTimer!==null,backgroundIdleDisposeMs:BACKGROUND_IDLE_DISPOSE_MS,externalConflicts:[...mounted.values()].filter(record=>record.field.dataset.richExternalConflict==='1').length});}
-  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,find,findStep,clearFind,status});
+  return Object.freeze({install,activate,close,closeField,syncField,syncAll,reconcileExternal,quiesce,flushEditors,find,findStep,addTag,clearFind,status,holdForLifecycle,releaseAfterLifecycle});
 })();
 SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
 async function quiesceManagedRecoveryRuntime(operation){
@@ -9008,7 +9119,7 @@ function refreshPnote(options={}){
     else clearTaskNoteEditorBinding(pn);
     pn.hidden=!hasNotes;
     setElementDisabled(pn,!hasNotes);
-    setElementAttribute(pn,'placeholder',support?'Ongoing reminders, decisions, follow-ups, and routine notes shared across support activities…':'Ongoing reminders, doubts, tasks, mistakes, and points to revisit for this subject/area…');
+    setElementAttribute(pn,'placeholder',support?'Shared by every support block. Type # for a tag, [[ to link a note.':'Start writing. Type # for a tag, [[ to link a note.');
     setElementValue(pn,noteText);
   }
   const links=document.getElementById('pn-links');
@@ -9090,6 +9201,10 @@ function executeIdlePresentation(d=new Date(),options={}){
     return view;
   };
   const elsewhere=sessionShownElsewhere();
+  if(sessionPanelMode==='finished')return applyOverrides(executeIdleView('Today Finished','FINISHED','Today Finished',
+    'Today’s session is finished. Open Review to rate the day, reflect and Save Today to Library. Reset Today clears it to start over.','NEXT: REVIEW'));
+  if(sessionPanelMode==='previous'&&sessionFromElsewhere(sessionPanelSession))return applyOverrides(executeIdleView('Previous Day from Another Device','PREVIOUS DAY','Previous Day from Another Device',
+    `${prettyDate(sessionPanelSession.date)} ran ${sessionDevice(sessionPanelSession)}, which saves it. This copy clears once a sync shows it saved; Review Previous Day opens it here.`,'NEXT: SYNC'));
   if(sessionPanelMode==='previous')return applyOverrides(executeIdleView('Previous Day Needs Review','PREVIOUS DAY','Previous Day Needs Review',
     'This study day is stored for review. Its timer will not restart. Choose Review Previous Day to recover it safely.','NEXT: REVIEW'));
   if(sessionParkedHere()){
@@ -9144,7 +9259,7 @@ function refreshExecuteIdleDisplay(d=new Date(),options={}){
   setTextSafe('cd','00:00:00');
   const prog=document.getElementById('prog');if(prog)prog.style.width='0%';
   setTextSafe('prog-pct','0%');
-  setTextSafe('next-name',stripScheduleLead(nextTrackableWindowLabel(d))||'—');
+  setTextSafe('next-name',sessionPanelMode==='finished'?'—':stripScheduleLead(nextTrackableWindowLabel(d))||'—');
   setTextSafe('status-next',view.nextText||'NEXT: —');
   setPausedUI(false);
   setExecuteStateOverlay(view.overlayTitle,view.overlayMessage,view.kicker);
@@ -9225,25 +9340,32 @@ function updateSessionControls(){
   const panel=document.getElementById('session-panel'),planControls=document.getElementById('plan-board-session-actions'),cardAction=document.getElementById('execute-session-action');
   const active=TASKS.some(isTrackableBlock);
   const running=TimerState.runtime&&TimerState.runtime.startMs!==null&&TimerState.currentIndex<TASKS.length&&isTrackableBlock(TASKS[TimerState.currentIndex]);
-  const finished=active&&TimerState.mode===TIMER_MODES.DONE;
+  // finished: Finish Today closed the day. complete: every block is resolved,
+  // and the day stays open until Finish Today.
+  const finished=sessionPanelMode==='finished',complete=active&&!finished&&TimerState.mode===TIMER_MODES.DONE;
   const previous=sessionPanelMode==='previous',suspended=sessionPanelMode==='suspended'&&!active,elsewhere=sessionPanelMode==='elsewhere'&&!active,handedOff=suspended&&sessionFromElsewhere(sessionPanelSession);
   const visible=active||suspended||elsewhere||previous;
   if(panel){
     panel.hidden=!visible;
-    panel.classList.toggle('suspended',suspended||elsewhere||previous);
+    panel.classList.toggle('suspended',suspended||elsewhere||previous||finished);
     const title=document.getElementById('session-panel-title');
     const note=document.getElementById('session-panel-note');
-    if(title)title.textContent=previous?'Previous Day Needs Review':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':finished?'Today Finished':running?'Live Timer Active':'Applied Plan Available';
-    if(note)note.textContent=previous
+    const previousElsewhere=previous&&sessionFromElsewhere(sessionPanelSession);
+    if(title)title.textContent=previousElsewhere?'Previous Day from Another Device':previous?'Previous Day Needs Review':finished?'Today Finished':elsewhere?'Running on Another Device':suspended?'Today’s Session Suspended':complete?'Plan Complete':running?'Live Timer Active':'Applied Plan Available';
+    if(note)note.textContent=previousElsewhere
+      ? `${prettyDate(sessionPanelSession.date)} ran ${sessionDevice(sessionPanelSession)}, which saves it. This copy clears here once a sync shows it saved. Review Previous Day opens it here.`
+      : previous
       ? 'This historical session is preserved for Review. Its timer will not restart or transfer ownership. Open Review and Save Today to Library when ready.'
+      : finished
+      ? 'Today’s session is finished on every device. Open Review to rate the day, reflect and Save Today to Library. Reset Today clears it to start over; days already saved stay in Library.'
       : elsewhere
       ? `Today’s session is running ${sessionDevice(sessionPanelSession)} (last update ${sessionUpdateTime(sessionPanelSession)}). Everything else works here as usual. Continue Here moves the session to this device.`
       : handedOff
       ? `Today’s session was suspended ${sessionDevice(sessionPanelSession)}. Continue Here picks it up on this device.`
       : suspended
       ? 'Restore Session continues the parked session. Review → Save Today can save the suspended progress to Library without restarting its timer. Reset Today discards the parked session.'
-      : finished
-      ? 'Today is closed for this plan. Open Review and Save Today to Library when ready.'
+      : complete
+      ? 'Every block is resolved. Finish Today ends the session and opens Review.'
       : running
       ? 'The timer is actively tracking a block. Suspend or reset only if you intentionally want to stop this live session.'
       : 'A plan is loaded but no countdown is running. These controls affect today’s live session; saved Library records and notes are kept.';
@@ -9252,7 +9374,7 @@ function updateSessionControls(){
   if(progress){progress.hidden=!progressText;progress.classList.toggle('error',!continuing&&!!progressText);if(progress.textContent!==progressText)progress.textContent=progressText;}
   if(planControls){
     planControls.hidden=!visible;
-    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:previous?'Previous day needs review':elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':running?'Live session':'Today’s session';
+    const state=document.getElementById('plan-session-state'),label=continuing?sessionHandoff.step:previous?'Previous day needs review':elsewhere?`Running ${sessionDevice(sessionPanelSession)}`:handedOff?`Suspended ${sessionDevice(sessionPanelSession)}`:suspended?'Today’s session is suspended':finished?'Today finished':complete?'Plan complete':running?'Live session':'Today’s session';
     if(state&&state.textContent!==label)state.textContent=label;
   }
   // The same controls in Execute's status card, its session panel and Plan's
@@ -9260,9 +9382,9 @@ function updateSessionControls(){
   // running elsewhere offers only Continue Here.
   [panel,planControls,cardAction?.parentElement].filter(Boolean).forEach(container=>container.querySelectorAll('button[data-action]').forEach(btn=>{
     const action=btn.dataset.action;
-    if(action==='restore-session'){btn.hidden=!suspended&&!elsewhere&&!previous;btn.disabled=continuing||!suspended&&!elsewhere&&!previous;const label=continuing?'Continuing…':previous?(active?'Open Review':'Review Previous Day'):elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
-    else if(action==='suspend-session'){btn.hidden=previous||suspended||elsewhere;btn.disabled=!active||previous;}
-    else if(action==='finish-session'){btn.hidden=previous||elsewhere||suspended;btn.disabled=!active||finished||previous;}
+    if(action==='restore-session'){const shown=suspended||elsewhere||previous||finished;btn.hidden=!shown;btn.disabled=continuing||!shown;const label=continuing?'Continuing…':finished?'Open Review':previous?(active?'Open Review':'Review Previous Day'):elsewhere||handedOff?'Continue Here':'Restore Session';if(btn.textContent!==label)btn.textContent=label;btn.setAttribute('aria-busy',continuing?'true':'false');}
+    else if(action==='suspend-session'){btn.hidden=previous||suspended||elsewhere||finished;btn.disabled=!active||previous||finished;}
+    else if(action==='finish-session'){btn.hidden=previous||elsewhere||suspended||finished;btn.disabled=!active||finished||previous;}
     else if(action==='reset-session'){btn.hidden=previous||elsewhere;btn.disabled=!visible||elsewhere||previous;}
   }));
   updateExecutePanels();
@@ -9349,7 +9471,20 @@ const {
   clearFutureUntouched:clearFutureUntouchedProgress, setCompletionState, deletePracticeRun
 }=ReviewEditor;
 const {saveToday:saveDayRecordCore,isRolledOver:studyDayRolledOver}=ReviewSaveService;
+// Save Today stores what the person wrote. A background Drive sync must not
+// start part-way through it: the sync holds session writes, so the save's
+// last step was refused ("saved locally; follow-up did not complete"), and it
+// could then settle the just-saved day against Drive's older copy (backlog
+// item 20). Background work stops for the save and resumes after it, as for
+// Continue Here.
 async function saveDayRecord(){
+  let hold=null;
+  try{hold=BackupProviderRuntime.suspendBackground('save-day');await hold.settled;}
+  catch(error){AppDiagnostics.capture('review.save-day-hold',error,'warn');}
+  try{return await saveDayRecordNow();}
+  finally{hold?.release();}
+}
+async function saveDayRecordNow(){
   let suspendedSession=null;
   if(!TASKS.length||sessionPanelMode==='suspended'){
     const loaded=await AppData.activeSession.load(0,{strict:true}),session=loaded?.value||null;
@@ -9364,9 +9499,17 @@ async function saveDayRecord(){
       suspendedSession=session;
     }
   }
+  // A finished day closes once it is saved, as a suspended one does: Review
+  // empties and the next plan can be applied. A save before Finish Today
+  // leaves the session running.
+  if(!suspendedSession&&sessionPanelMode==='finished')return saveDayRecordCore({closeSession:true});
+  // Save Today pauses a running timer (owner's choice, 2026-11-12): time it
+  // added after the save (until a fixed Sleep block, say) left the Saved Day
+  // behind, and the next morning asked about the day. Resume carries on.
+  const timerPaused=!suspendedSession&&appCanMutate()&&beginTimerPause('manual')===true;
   // The Review save owner commits the Day and closes this suspended session
   // without creating an interim, incorrectly owned Active Session.
-  const saved=await saveDayRecordCore({closeSession:!!suspendedSession});
+  const saved=await saveDayRecordCore({closeSession:!!suspendedSession,timerPaused});
   if(!suspendedSession)return saved;
   if(!saved){
     try{
@@ -9376,9 +9519,6 @@ async function saveDayRecord(){
     }catch(error){AppDiagnostics.capture('review.suspended-session-status',error,'warn');}
     return false;
   }
-  setTimerMode(TIMER_MODES.DONE,'suspended-session-saved');
-  setSessionPanelMode('none');
-  updateSessionControls();
   return true;
 }
 
@@ -9419,16 +9559,18 @@ function setLifecycleEditorsBlocked(blocked){
   });
 }
 function invalidateLifecycleEditors(context){
-  void richTextClose();
+  RichTextRuntime.holdForLifecycle();
   cancelPendingLiveDraftSave();
   if(liveDraftSaveTimer){clearTimeout(liveDraftSaveTimer);liveDraftSaveTimer=null;}
   if(context.options.scheduleIdentity)advanceTaskNoteScheduleRevision();
   document.documentElement.dataset.studyDirectorLifecycle='transitioning';
   document.documentElement.dataset.studyDirectorLifecycleRevision=String(context.revision);
   setLifecycleEditorsBlocked(true);
-  document.querySelectorAll('.task-note-field').forEach(clearTaskNoteEditorBinding);
+  // Bindings go, so nothing an editor publishes now reaches the new state;
+  // the editors themselves stay for releaseAfterLifecycle to judge.
+  document.querySelectorAll('.task-note-field').forEach(field=>clearTaskNoteEditorBinding(field,{keepEditor:true}));
   const executeNote=document.getElementById('pn-extra');
-  if(executeNote){clearTaskNoteEditorBinding(executeNote);executeNote.value='';}
+  if(executeNote)clearTaskNoteEditorBinding(executeNote,{keepEditor:true});
   executeProgressPanelRenderKey='';
   ReviewEditor.invalidateBindings();
   ReviewView.invalidate();
@@ -9453,6 +9595,7 @@ function reconcileLifecycleEditors(context){
   return true;
 }
 function completeLifecycleTransition(context){
+  RichTextRuntime.releaseAfterLifecycle();
   const writable=!!context.reconciled&&appCanMutate();
   setLifecycleEditorsBlocked(!writable);
   ReviewView.syncMode();
@@ -9518,7 +9661,7 @@ window.addEventListener('pagehide',()=>BackupProtection.lock());
 window.addEventListener('pageshow',event=>{if(event.persisted)void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);});
 const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.freeze({
   assets:Object.freeze({get:id=>RichTextAssets.get(id)}),
-  notes:Object.freeze({get:key=>AppData.notes.get(key)}),
+  notes:Object.freeze({get:key=>shownNote(AppData.notes.get(key))}),
   processing:Object.freeze({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
   scheduling:Object.freeze({yieldTask:BackgroundTasks.yieldTask,budget:BackgroundTasks.budget}),
   output:Object.freeze({chooseSave:Exports.chooseSave,save:Exports.save}),
@@ -9942,18 +10085,19 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
     focusEditor:field=>{void RichTextRuntime.activate(field,{focus:true}).catch(error=>AppDiagnostics.capture('library.note-focus',error,'warn'));},
     // Recently deleted gives way at the limit, so only live notes count here.
     canCreate:()=>AppData.notes.metadataSnapshot().records.length<APP_LIMITS.maxNotes,
-    catalogue:noteCatalogue,
+    catalogue:()=>NoteCatalogue.entries(),
     clearEditor:clearTaskNoteEditorBinding,
     clearFind:field=>RichTextRuntime.clearFind(field),
     commitEditor:commitTaskNoteEditor,
     find:(field,query,onClear)=>RichTextRuntime.find(field,query,onClear),
     findStep:(field,direction)=>RichTextRuntime.findStep(field,direction),
+    addTag:field=>RichTextRuntime.addTag(field),
     get:(key,label)=>AppData.notes.get(key,label),
     importFiles:(files,parent)=>importNoteFiles(files,parent),
     linksBar:options=>NoteLinks.bar(options),
-    normalizeArea:normalizeOngoingAreaInput,
+    normalizeArea:value=>NoteCatalogue.normalizeName(value),
     normalizeTag:value=>RichTextApi.normalizeTag(value),
-    orderEntries:orderOngoingAreaEntries,
+    orderEntries:list=>NoteCatalogue.order(list),
     purgeTrash:()=>AppData.notes.purgeExpiredTrash(),
     remove:key=>AppData.notes.remove(key),
     renameAreaInPlans:(title,label)=>PlanRuntime.renameArea(title,label),
@@ -10204,6 +10348,8 @@ async function restoreSessionStateThroughLifecycle(importedSession,options={}){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date:todayISO()});
         PlanDraftEditor.preview({silent:true,enterDraft:false});
         setSessionPanelMode('previous',session);
+      }else if(session.status==='finished'){
+        if(!openFinishedSession(session,{source:'restore-journal-rollback',lifecycleManaged:true}))throw new Error('The finished day could not be loaded into Review.');
       }else if(session.status==='suspended'){
         resetRuntimeSessionState({lifecycleManaged:true,source:'restore-journal-rollback',date});
         PlanDraftEditor.preview({silent:true,enterDraft:false});setSessionPanelMode('suspended',session);
@@ -10258,7 +10404,9 @@ async function verifyRestoredSessionRuntime(expected,scheduleText=''){
     if(!TASKS.length||scheduleFingerprint()!==expectedFingerprint)throw new Error('Post-restore verification failed to apply the Active Session plan.');
     const expectedSnapshot=activeSessionSnapshot(session);
     if(!expectedSnapshot)throw new Error('Post-restore verification could not read the Active Session snapshot.');
-    verifyRestoredTimerRuntimeSemantics(expectedSnapshot.timerRuntime);
+    // A finished day's timer never restarts.
+    if(session.status==='finished'){if(TimerState.runtime&&TimerState.runtime.startMs!==null)throw new Error('Post-restore verification found a running timer on a finished day.');}
+    else verifyRestoredTimerRuntimeSemantics(expectedSnapshot.timerRuntime);
   }else{
     // The working draft is independently verified through portable Plan data.
     if(TASKS.length||TimerState.mode!==TIMER_MODES.EMPTY)throw new Error('Post-restore verification found an unexpected live timer.');
@@ -10439,7 +10587,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
   domain:Object.freeze({
     clampText,filenameSafeStudentName,
     getStudentName:getStudentNameFromDisplay,
-    materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO
+    materializeDailyRecordView,noteName,sanitizeCurrentDailyRecord,todayISO
   }),
   view:Object.freeze({presentation:BackupPresentation,
     refreshPnote,
@@ -10448,7 +10596,7 @@ const BackupRuntime=BackupModule.createRuntime(Object.freeze({ports:Object.freez
     deviceName:(id,others)=>deviceName(id,others)
   }),
   events:Object.freeze({
-    libraryChanged:()=>{LibraryView.render();if(saveReminderDate)void revalidateSaveReminderAfterCanonicalConvergence();},
+    libraryChanged:()=>{LibraryView.render();if(saveReminderDate)void revalidateSaveReminderAfterCanonicalConvergence();void recheckStoredPreviousSession();},
     reconcileNotes:reconcileNotesThroughLifecycle,
     restoreNotesSnapshot:restoreNotesSnapshotThroughLifecycle,
     restoreSessionState:restoreSessionStateThroughLifecycle,
@@ -10773,9 +10921,13 @@ async function restoreMissingAfterStorageReset(hold,id=''){
 // is handled as a clear seen while open: automatic uploads pause so the empty
 // copy cannot replace a backup, and the notice offers the restore. A fresh
 // install or a new profile has no such record, so it is never mistaken.
+// Each loss records when it was found, also when an earlier notice is still
+// unanswered: that time dates this loss in diagnostics, and a restore takes
+// the newest version saved before it (2026-11-11, the phone showed a
+// two-day-old time for a new loss).
 function noteDatabaseRemovedWhileClosed(){
   if(IndexedDb.lifecycle().startedFresh!==true||!appCanMutate())return false;
-  const health=readStorageHealth();if(!health.lastStudyDataSaveAt||health.browserDataClearedAt)return false;
+  const health=readStorageHealth();if(!health.lastStudyDataSaveAt)return false;
   AppDiagnostics.capture('storage.idb-missing-at-start',new Error('The browser database was missing at start although study data had been saved here.'),'warn');
   writeStorageHealth({browserDataClearedAt:new Date().toISOString()});
   return true;
@@ -11522,6 +11674,24 @@ async function readDataDiagnosticStates(){
       return {names,listed:!!Profiles.current(),listPresent:LocalStorageContract.getText(ProfileScope.registryKey,null)!==null,fresh:IndexedDb.lifecycle().startedFresh===true,clearedAt:String(readStorageHealth().browserDataClearedAt||'')};
     },project:value=>({job:'Profile storage',state:value.names?'observed':'partial',scoped:!!ProfileScope.scope,profileListPresent:value.listPresent,pageProfileListed:value.listed,startedFresh:value.fresh,...(value.clearedAt?{dataClearedAt:value.clearedAt}:{}),
       ...(value.names?{databases:value.names.length,otherDatabases:value.names.filter(name=>name!==DB_NAME).length}:{})})},
+    // What this site's storage holds, measured here: database records and
+    // sizes by store, file storage by folder at its root, cached app files, and
+    // the gap to the browser's own figure. Read-only; counts and sizes only.
+    {job:'Storage census',read:()=>StorageCensus.measure({now:()=>Date.now(),budgetMs:2400,
+      estimate:typeof navigator.storage?.estimate==='function'?()=>navigator.storage.estimate():null,
+      stores:Object.entries(DB_STORES).map(([id,name])=>Object.freeze({id,name})),
+      readStore:(name,visit)=>IndexedDb.storeTransaction(name,'readonly',(store,tx,finish)=>{
+        const request=store.openCursor();request.onerror=()=>finish(false,request.error);
+        request.onsuccess=()=>{const cursor=request.result;if(!cursor){finish(true,true);return;}if(visit(cursor.primaryKey,cursor.value)===false){finish(true,false);return;}cursor.continue();};
+      }),
+      fileRoot:typeof navigator.storage?.getDirectory==='function'?()=>navigator.storage.getDirectory():null,
+      classifyFolder:name=>{const is=base=>name===base||name.startsWith(base+ProfileScope.separator);return is('@@SD_ATTACHMENT_OPFS_DIRECTORY@@')?'attachment':is('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@')?'scratch':is('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@')?'oldFolder':'other';},
+      caches:typeof caches==='undefined'?null:caches
+    }),project:value=>[{...value.summary,job:'Storage census'},{...value.database,job:'Storage census database'},{...value.meta,job:'Storage census settings data'},{...value.files,job:'Storage census files'},{...value.caches,job:'Storage census caches'}]},
+    {job:'Database this start',read:()=>DatabaseLifecycle.snapshot(),project:value=>[
+      value.current?{...value.current,job:'Database this start',state:value.current.fresh?'fresh':'existing'}:{job:'Database this start',state:'absent'},
+      ...(value.beforeLoss?[{...value.beforeLoss,job:'Database before last loss',state:'recorded'}]:[])
+    ]},
     // Each version kept for review, newest first: what it is, why it was kept
     // and which device's copy it came from (type and browser), never its
     // content or which note or day it is.
@@ -11616,7 +11786,8 @@ const CLICK_ACTIONS=Object.freeze({
   'test-sound': ()=>NoticeCoordinator.testSound(),
   'test-system-alert': ()=>SystemNotifications.test(),
   'toggle-pomodoro': Pomodoro.configuration.toggleNudges,
-  'restore-session': ()=>sessionPanelMode==='previous'
+  'restore-session': ()=>sessionPanelMode==='finished'?goTab('review',{source:'finished-day-review'})
+    : sessionPanelMode==='previous'
     ? (TASKS.some(isTrackableBlock)?goTab('review',{source:'previous-day-review'}):revisitPreviousStoredSession())
     : sessionPanelMode==='elsewhere'?continueSessionHere():restoreSuspendedTodaySession(),
   'suspend-session': suspendTodaySession,
@@ -12116,7 +12287,11 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
   flushers:Object.freeze({
     planDraft:PlanDraftEditor.flush,
     preferences:()=>flushProtectedPreferences(),
-    activeSession:flushLiveDraft,
+    // Leaving or hiding the app writes what is pending as it is; it changes
+    // nothing studied, so a day saved before stays saved. Before 2026-11-12
+    // each flush counted as a change, and every day saved and then closed
+    // asked about an "unsaved previous study day" the next morning.
+    activeSession:()=>flushLiveDraft({markChanged:false}),
     notes:()=>AppData.notes.flush(),
     deletionRecovery:AppData.deletionRecovery.flush
   }),
@@ -12160,8 +12335,9 @@ const StartupLifecycle=StartupLifecycleModule.createCoordinator(Object.freeze({
       // startup gate opens any automatic provider work.
       await reconcileStartupChangeClock();
       resumeUnresolvedStorageReset();
+      {const life=IndexedDb.lifecycle();void DatabaseLifecycle.start({fresh:life.startedFresh===true,foundVersion:life.foundVersion??0,openedVersion:life.version??0}).catch(error=>AppDiagnostics.capture('storage.lifecycle-start',error,'warn'));}
       installBackgroundOwners();scheduleDataMaintenance();BackgroundOperations.wake('startup');installSessionWatch();void KeptVersions.refresh();UnsupportedData.announce();renderUnsupportedData();
-      void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword();
+      void Profiles.collect().then(result=>{if(result.error)AppDiagnostics.capture('profiles.collect',result.error,'warn');});askProfilePassword({start:true});
       void BackupFiles.collect().catch(error=>AppDiagnostics.capture('backup.file-cleanup',error,'warn'));
       canonicalProof=proof;document.documentElement.dataset.studyDirectorCanonicalBaseline=proof.canonical?'verified':'not-proven';
       document.documentElement.dataset.studyDirectorRetirementData=proof.retirementDataReady?'ready':proof.canonical?'backup-required':'not-ready';

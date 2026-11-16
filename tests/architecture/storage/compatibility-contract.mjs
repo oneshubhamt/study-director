@@ -41,7 +41,7 @@ assert.equal(MIGRATION_FACADE_CONTRACT.verification.backupCheck,'freshBackup');
 assert.equal(CANONICAL_BASELINE.policy.ordinaryRuntime,'current-canonical-only');
 
 const entries=allCompatibilityEntries();
-assert.equal(entries.length,28,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
+assert.equal(entries.length,29,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
 assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
 for(const entry of entries){
   for(const file of entry.sourceFiles)assert.ok(fs.existsSync(path.join(root,file)),`${entry.id} references missing source ${file}`);
@@ -52,6 +52,7 @@ const evidenceByCompatibilityId=Object.freeze({
   'plan-legacy-schedule':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/plans/saved-plans-logic.mjs'],
   'reflection-drafts-retirement':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/review/reflection-session-codec.mjs'],
   'active-session-v7-domain-separation':['tests/integration/review/reflection-session-codec.mjs'],
+  'active-session-v10':['tests/integration/review/reflection-session-codec.mjs'],
   'note-historical-rows':['tests/integration/rich-text/editor-persistence.mjs'],
   'note-recovery-v1':['tests/integration/rich-text/editor-persistence.mjs'],
   'daily-record-historical-shapes':['tests/integration/storage/canonical-baseline.mjs'],
@@ -157,12 +158,12 @@ assert.doesNotMatch(drive,/SDENC02|\.sdbackup/u,'Drive repository transport must
 assert.equal(CACHE_STORAGE_IDENTITIES.updateBridge,'study-director-update-bridge-v2');
 assert.match(sw,/CompatibilityFacade\.installBridgeRequired\(\)/u);
 
-assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,24);
+assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,25);
 assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.protectedBackup.version,2);
 assert.match(attachments,/m\.format!=='study-director\.attachments'\|\|m\.version!==1/u);
 
 for(const id of [
-  'plan-legacy-schedule','reflection-drafts-retirement','active-session-v7-domain-separation','note-historical-rows','note-recovery-v1','daily-record-historical-shapes','r10-sync-delete-state',
+  'plan-legacy-schedule','reflection-drafts-retirement','active-session-v7-domain-separation','active-session-v10','note-historical-rows','note-recovery-v1','daily-record-historical-shapes','r10-sync-delete-state',
   'legacy-device-identity','l7-host-metadata-normalization','r10-indexeddb-topology-retirement','indexeddb-pre-v3-migration-marker','legacy-localstorage-residue','legacy-attachment-storage',
   'obsolete-reflection-migration-meta','legacy-json-backups','complete-backup-v7-v19','legacy-service-worker-update-bridge'
 ])assert.ok(entries.some(entry=>entry.id===id),`Missing compatibility inventory entry ${id}`);

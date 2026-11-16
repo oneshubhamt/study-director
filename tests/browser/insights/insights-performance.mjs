@@ -17,7 +17,7 @@ const SAMPLES=3;
 const B=PERFORMANCE_BUDGETS;
 
 const server=await startReleaseServer();
-const exposed=instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({CompatibilityCodecs,StartupLifecycle,');
+const exposed=instrumentedHtml('deployment',{expose:['CompatibilityCodecs']});
 server.setOverride('deployment','instrumented.html',process.env.SD_SECURITY_TEST==='1'
   ?exposed.replace('<head>',"<head><meta http-equiv=\"Content-Security-Policy\" content=\"worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin\">")
   :exposed);

@@ -39,6 +39,7 @@ export const LOCAL_STORAGE_KEYS=freeze({
   appOwner:'studyDirector.appOwner.v1',
   mutationLock:'studyDirector.mutationLock.v1',
   storageHealth:'studyDirector.storageHealth.v2',
+  databaseLifecycle:'studyDirector.databaseLifecycle.v1',
   installationId:'studyDirector.installationId.v1',
   deletionRecovery:'studyDirector.deletionRecovery.v1',
   fallbackDailyRecords:'studyDirector.dailyRecordsFallback.v1',
@@ -66,7 +67,10 @@ export const PROFILE_SCOPE_SEPARATOR='~';
 export const SESSION_STORAGE_KEYS=freeze({
   appTab:'studyDirector.appTab.v1',
   pwaReload:'studyDirector.pwaReload.v1',
-  notifications:'studyDirector.notifications.v1'
+  notifications:'studyDirector.notifications.v1',
+  // Its spelling predates the studyDirector.* names; kept so an update's
+  // reload does not drop the operations it interrupted.
+  backupOperationDiagnostics:'study-director.backup-operation-diagnostics.v1'
 });
 
 export const OBSOLETE_LOCAL_STORAGE_KEYS=freeze({
@@ -206,6 +210,7 @@ export const DATA_ARCHITECTURE=freeze({
     appOwner:surface('coordination','ownership','operational','lease lifetime'),
     mutationLock:surface('coordination','host','operational','lease lifetime'),
     storageHealth:surface('operational','host','operational','bounded operational diagnostics; no user-content details'),
+    databaseLifecycle:surface('operational','host','operational','bounded operational diagnostics; no user-content details: counts, times and storage error names for this start and the start before a database loss'),
     installationId:surface('coordination-identity','persistence','protect-identifiers','retained'),
     deletionRecovery:surface('recovery','repositories','protect-identifiers','until the failed DailyRecord/ActiveSession delete is reconciled','',{protects:'DailyRecord/ActiveSession deletion intent',created:'when authoritative deletion cannot complete atomically',cleared:'after canonical deletion state is verified',supersededBy:'verified canonical record/deletion state'}),
     fallbackDailyRecords:surface('recovery','repositories','protect','until migrated to IndexedDB','',{protects:'indexedDb.dailyRecords',created:'when a DailyRecord cannot be persisted to IndexedDB',cleared:'after replay and verification in canonical IndexedDB',supersededBy:'verified canonical DailyRecord'}),
@@ -225,7 +230,8 @@ export const DATA_ARCHITECTURE=freeze({
   sessionStorage:freeze({
     appTab:surface('coordination-identity','ownership','operational','tab-session lifetime'),
     pwaReload:surface('operational','pwa-lifecycle','operational','single update/reload handoff'),
-    notifications:surface('operational','notifications','protect-identifiers','this window, today only: the profile panel Recent list (pop-up and banner titles and messages, at most 20); tied to the profile; never uploaded, backed up or exported')
+    notifications:surface('operational','notifications','protect-identifiers','this window, today only: the profile panel Recent list (pop-up and banner titles and messages, at most 20); tied to the profile; never uploaded, backed up or exported'),
+    backupOperationDiagnostics:surface('operational','backup-operation-diagnostics','operational','this window only: the last 20 backup and sync operations for Copy diagnostics (phases, timings, outcome and reason codes; no user content); kept across a reload so an interrupted operation still shows')
   }),
   cacheStorage:freeze({
     applicationShell:surface('operational','service-worker','operational','release-scoped application assets only; no user data','',{identity:CACHE_STORAGE_IDENTITIES.shellPrefix,identityKind:'release-prefix'}),

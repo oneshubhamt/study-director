@@ -32,7 +32,7 @@ Main modules by area:
 | [Data and storage](areas/data-and-storage.md) | `persistence.js`, `repositories.js`, `repositories-notes.js`, `record-codecs.js`, `canonical.js`, `app-meta.js`, `profiles.js`, `compatibility*.js`, `asset-storage.js`, `attachments.js` |
 | [Backup and sync](areas/backup-and-sync.md) | `backup-provider.js` (the engine), `managed-repository.js`, `backup.js`, `backup-capture.js`, `backup-codec.js`, `device-folder-storage.js`, `device-backup.js`, `external/drive.js`, `reconciliation*.js`, `managed-recovery.js`, `backup-recovery-host.js` |
 | [Study session](areas/study-session.md) | `session-lifecycle.js`, `timer-engine.js`, `timer-state.js`, `plan.js`, `pomodoro.js`, `practice-pacer.js` |
-| [Notes](areas/notes.md) | `repositories-notes.js`, `save-lane.js`, `note-links.js`, `note-export.js`, `library.js`, `external/rich-text.js`, `rich-text/` |
+| [Notes](areas/notes.md) | `repositories-notes.js`, `save-lane.js`, `note-links.js`, `note-export.js`, `note-catalogue.js`, `note-search.js`, `library-notes.js`, `external/rich-text.js`, `rich-text/` |
 | [Notifications and sounds](areas/notifications.md) | `notice-coordinator.js`, `interactions.js`, `audio-engine.js` |
 | [Status indicator](areas/status-indicator.md) | `backup-presentation.js` (status model), host rendering in `app.html` |
 | [Background jobs](areas/background-jobs.md) | `operation-lifecycle.js`, `repository-background.js`, `asset-maintenance.js`, `backup-operation-diagnostics.js`, `mutation-coordinator.js`, `ownership.js` |
