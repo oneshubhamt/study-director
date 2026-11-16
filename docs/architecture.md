@@ -49,7 +49,7 @@ The following invariants should be preserved by future changes:
 4. Foreground Backup/Restore must not be permanently blocked by abandoned background-maintenance state.
 5. External deletion/recreation of a provider repository must not poison future provider state.
 6. Provider-specific failure models remain provider-specific below the shared repository semantics.
-7. Compatibility retirement and historical backup readability are separate decisions.
+7. Compatibility retirement removes the readers of historical backups too (owner, 2026-11-16); it waits until "Format cleanup" reads ready on every device in use.
 8. Temporary UI locks must release into state derived from the current runtime, not a stale pre-operation DOM snapshot.
 9. Generated deployment output is derived from source and is never the canonical place to make changes.
 10. Data a build cannot read is never changed, deleted or uploaded over; the build works with everything else ([data-and-storage.md](areas/data-and-storage.md#data-this-version-cannot-read)).

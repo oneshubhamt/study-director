@@ -33,6 +33,7 @@ What it covers:
   - backups, earlier versions and restoring a single note;
   - the note an attachment sits in;
   - the linked-notes bar and links inside the text.
+- **Support Activities is one shared note** for every support block: titled "Support Activities" like any note, under the fixed id `n_f0929787c2c33fc9`, so copies made on different devices are the same note. It cannot be renamed, moved or deleted, and no other note can take its name. An Area named "Support Activities" opens it too. Builds up to F28 stored it under the reserved title `__study_director_support_activities__`; F29 converts every copy as it is read (registry `support-note-identity`), keeping its id, links and text, and moves a note already titled "Support Activities" aside to "Support Activities (2)".
 - **So a rename changes only the title.** History, links and attachments stay with the note, and the rename dialog's "Also rename it in today's plan and saved plans" decides whether the plan follows (below).
 
 ## Features

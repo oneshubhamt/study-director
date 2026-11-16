@@ -509,7 +509,14 @@ const noteKeys=freeze({
   isTrash:value=>String(value||'').startsWith(NOTE_TRASH_PREFIX)&&NOTE_ID_PATTERN.test(String(value).slice(NOTE_TRASH_PREFIX.length)),
   isKey:value=>noteKeys.isId(value)||noteKeys.isTrash(value),
   trash:id=>noteKeys.isId(id)?NOTE_TRASH_PREFIX+id:'',
-  id:key=>noteKeys.isTrash(key)?String(key).slice(NOTE_TRASH_PREFIX.length):noteKeys.isId(key)?String(key):''
+  id:key=>noteKeys.isTrash(key)?String(key).slice(NOTE_TRASH_PREFIX.length):noteKeys.isId(key)?String(key):'',
+  // The one note every support block shares: a fixed id, the same on every
+  // device, and its own name as its title.
+  support:freeze({id:'n_f0929787c2c33fc9',label:'Support Activities',title:'support activities'}),
+  // COMPATIBILITY: builds up to SDVB75F28 stored it under this reserved
+  // title instead; a note so titled is converted, never current (registry:
+  // support-note-identity).
+  retiredSupport:label=>normalizeAreaName(label)==='__study_director_support_activities__'
 });
 // links, when present, lists the other notes on the note's bar by id: never
 // empty, never the note itself, no repeats.
@@ -536,7 +543,7 @@ function sanitizeCurrentNote(value,keyHint=''){
   const expected=['version','key','label','text','updatedAt',...('links' in source?['links']:[])];
   if(Object.keys(source).sort().join('|')!==expected.sort().join('|'))return null;
   const key=String(source.key||keyHint||''),label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),text=noteText(key,source.text);
-  if(!noteKeys.isKey(key)||label===null||!normalizeAreaName(label)||text===null)return null;
+  if(!noteKeys.isKey(key)||label===null||!normalizeAreaName(label)||noteKeys.retiredSupport(label)||text===null)return null;
   const updatedAt=normalizeImportedTimestamp(source.updatedAt,null);if(!updatedAt)return null;
   const links='links' in source?noteLinks(source.links,key):undefined;if(links===null)return null;
   const clean={version:DATA_CONTRACT.schemas.Note.version,key,label,text,updatedAt,...(links?{links}:{})};
@@ -548,7 +555,7 @@ function sanitizeNoteFields(value){
   const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null,keys=source?Object.keys(source):[];
   if(!keys.length||keys.some(key=>key!=='label'&&key!=='text'))return null;
   const clean={};
-  if('label' in source){const label=optionalText(source.label,APP_LIMITS.maxAreaNameChars);if(label===null||label!==source.label||!normalizeAreaName(label))return null;clean.label=label;}
+  if('label' in source){const label=optionalText(source.label,APP_LIMITS.maxAreaNameChars);if(label===null||label!==source.label||!normalizeAreaName(label)||noteKeys.retiredSupport(label))return null;clean.label=label;}
   if('text' in source){const text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(text===null||text!==source.text)return null;clean.text=text;}
   return clean;
 }

@@ -30,7 +30,13 @@ export const SYNCED_FORMAT_LEDGER=freeze([
   // Today is final on every device. Every device must update at about the
   // same time: an older build keeps a version-10 Drive version as it is,
   // uploads nothing over it and asks for an update.
-  row({release:'current',backup:25,manifest:10,claim:4,personalData:2,
+  row({release:'SDVB75F28',backup:25,manifest:10,claim:4,personalData:2,
+    records:{DailyRecord:16,Note:3,ActiveSession:11,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}}),
+  // Support Activities is stored under its own name and a fixed id, no longer
+  // under a reserved title; notes keep Note 3. Every device must update at
+  // about the same time: an older build keeps a version-11 Drive version as
+  // it is, uploads nothing over it and asks for an update.
+  row({release:'current',backup:26,manifest:11,claim:4,personalData:2,
     records:{DailyRecord:16,Note:3,ActiveSession:11,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}})
 ]);
 export const CURRENT_SYNCED_FORMATS=freeze({backup:EXTERNAL_FORMATS.completeBackup.metadataVersion,records:freeze(Object.fromEntries(SYNCED_RECORDS.map(name=>[name,CURRENT_SCHEMA_VERSIONS[name]])))});

@@ -402,20 +402,22 @@ for(const failEpochRead of [false,true]){
   for(const title of ['linked empty','recent empty','written'])assert.ok(app.notes.get(title),`${title} stays`);
 }
 
-// The shared support note keeps its reserved key as its stored label, which is
-// its identity. What people read uses its name: a clash names it and its kept
-// copy "Support Activities", and the copy is an ordinary note.
+// The shared support note is stored under its own name and its fixed id,
+// the same on every device. A clash names it and its kept copy "Support
+// Activities", and the copy is an ordinary note.
 {
   const {app,stores,clock,reports}=await setup();
-  const SUPPORT='__study_director_support_activities__';
-  app.notes.update(SUPPORT,'Support Activities','shared start','');await app.notes.flush({strict:true});await clock.advance(2000);
-  assert.equal(app.notes.get(SUPPORT).label,SUPPORT,'the stored label stays the reserved key');
-  app.notes.update(SUPPORT,'Support Activities','local line',app.notes.get(SUPPORT).updatedAt);
-  const id=app.notes.get(SUPPORT).id;stores.area.set(id,{version:3,key:id,label:SUPPORT,text:'stored line',updatedAt:'2026-09-15T12:00:05.000Z'});
+  const SUPPORT='Support Activities',FIXED='n_f0929787c2c33fc9';
+  app.notes.update(SUPPORT,SUPPORT,'shared start','');await app.notes.flush({strict:true});await clock.advance(2000);
+  assert.equal(app.notes.get(SUPPORT).label,SUPPORT,'the stored label is its name');
+  assert.equal(app.notes.get(SUPPORT).id,FIXED,'and its id the fixed one');
+  app.notes.update(SUPPORT,SUPPORT,'local line',app.notes.get(SUPPORT).updatedAt);
+  stores.area.set(FIXED,{version:3,key:FIXED,label:SUPPORT,text:'stored line',updatedAt:'2026-09-15T12:00:05.000Z'});
   await app.notes.flush();await settle(clock);await app.notes.flush({strict:true});
-  assert.equal(storedNote(stores.area,SUPPORT).text,'stored line','the support note keeps its key and the stored text');
+  assert.equal(stores.area.get(FIXED).text,'stored line','the support note keeps its id and the stored text');
   assert.equal(storedNote(stores.area,'support activities (unsaved copy)')?.text,'local line','the kept copy is named for people');
-  assert.deepEqual(reports.map(report=>[report.label,report.copyLabel]),[['Support Activities','Support Activities (unsaved copy)']],'the notice names the note, not its key');
+  assert.notEqual(storedNote(stores.area,'support activities (unsaved copy)')?.key,FIXED,'and has an id of its own');
+  assert.deepEqual(reports.map(report=>[report.label,report.copyLabel]),[['Support Activities','Support Activities (unsaved copy)']],'the notice names the note');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
@@ -433,7 +435,7 @@ console.log(JSON.stringify({status:'PASS',suite:'note-persistence',contracts:[
   'Recently deleted gives way at the note limit; the rescue names notes it cannot hold',
   'a bar links notes by id; Linked from comes from bars and text; deletion keeps the bar and restore brings it back',
   'a backup note that takes a local id keeps the bars and text links that point to it',
-  'the support note keeps its key; clash notices and its kept copy use its name',
+  'the support note keeps its name and fixed id; clash notices and its kept copy use its name',
   'a parent with no note moves the notes under it',
   'a cleared note with nothing on its bar is removed after a week'
 ]},null,2));

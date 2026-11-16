@@ -182,4 +182,30 @@ await legacy.app.notes.load();assert.equal(legacy.app.notes.get('journaled').tex
 legacyStores.meta.set(...journalRow('residue',{version:2,key:'residue',label:'Residue',text:'left behind',updatedAt:'2026-09-04T05:00:00.000Z'},'2026-09-04T05:00:00.000Z'));
 assert.deepEqual([...(await legacy.app.compatibility.verifyNoteRecovery()).issues],['note-recovery-residue'],'verification reports journal rows that remain');
 
+// Support Activities, stored by SDVB75F28 and older under its reserved
+// title, takes its own name at start-up and keeps its id, links and text. A
+// note already titled Support Activities (an Area of that name) moves aside.
+// A support note made from now on takes the fixed id. (support-note-identity)
+{
+  const RETIRED='__study_director_support_activities__',oldId='n_1111111111111111',other=noteId('Ethics'),lookAlike=noteId('Support Activities');
+  const stores=emptyStores();
+  stores.area.set(oldId,{version:3,key:oldId,label:RETIRED,text:'support text',updatedAt:'2026-09-04T05:00:00.000Z',links:[other]});
+  stores.area.set(lookAlike,{version:3,key:lookAlike,label:'Support Activities',text:'an Area of that name',updatedAt:'2026-09-04T05:00:00.000Z'});
+  stores.area.set(other,{version:3,key:other,label:'Ethics',text:'ethics',updatedAt:'2026-09-04T05:00:00.000Z'});
+  const support=createHarness(new Map(),stores);
+  assert.equal((await support.app.compatibility.verifyNotes()).ok,false,'a note under the retired title is not current');
+  assert.equal((await support.app.compatibility.migrateNotes()).status,'migrated');
+  assert.deepEqual(stores.area.get(oldId),{version:3,key:oldId,label:'Support Activities',text:'support text',updatedAt:'2026-09-04T05:00:00.000Z',links:[other]},'it takes its own name; id, links, text and time are kept');
+  assert.equal(stores.area.get(lookAlike).label,'Support Activities (2)','the look-alike moves aside');
+  assert.equal(stores.area.get(lookAlike).text,'an Area of that name','and keeps its text');
+  assert.equal(stores.area.get(other).label,'Ethics','other notes are untouched');
+  assert.equal((await support.app.compatibility.verifyNotes()).ok,true,'every note is current');
+  assert.equal((await support.app.compatibility.migrateNotes()).status,'not-needed','a second start changes nothing');
+  await support.app.notes.load();assert.equal(support.app.notes.get('Support Activities').text,'support text','the support note is found by its name');
+  const fresh=createHarness(new Map(),emptyStores());await fresh.app.notes.load();
+  fresh.app.notes.update('Support Activities','Support Activities','first','');
+  assert.equal(fresh.app.notes.get('Support Activities').id,'n_f0929787c2c33fc9','a new support note takes the fixed id');
+  fresh.app.notes.update('Economics','Economics','econ','');assert.notEqual(fresh.app.notes.get('Economics').id,'n_f0929787c2c33fc9');
+}
+
 console.log(JSON.stringify({status:'PASS',rapidEdits:100,uniqueRapidRevisions:new Set(revisions).size,browserCopyWritesWhileSaving:first.localWrites.all,clockSkewSafe:true,closeRecovered:true,staleCopyDropped:true,emptyRecovered:true,explicitDelete:true,reloadKeepsEdit:true,failedWriteRecovered:true,conflictCopyKept:true,unsavedSetCopied:true,largeNoteSaved:Buffer.byteLength(largeText),legacyFolded:true,validatedRichFastPath:true,canonicalNoOpFastPath:true},null,2));

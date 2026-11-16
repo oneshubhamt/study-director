@@ -21,6 +21,7 @@ const migrationEvidence=Object.freeze({
   'reflection-drafts-retirement':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/review/reflection-session-codec.mjs'],
   'active-session-v7-domain-separation':['tests/integration/review/reflection-session-codec.mjs'],
   'active-session-v10':['tests/integration/review/reflection-session-codec.mjs'],
+  'support-note-identity':['tests/integration/storage/support-note-identity.mjs','tests/integration/rich-text/editor-persistence.mjs','tests/integration/backup/current-canonical-roundtrip.mjs'],
   'note-historical-rows':['tests/integration/storage/canonical-baseline.mjs','tests/integration/rich-text/editor-persistence.mjs'],
   'note-recovery-v1':['tests/integration/rich-text/editor-persistence.mjs'],
   'daily-record-historical-shapes':['tests/integration/storage/canonical-baseline.mjs'],

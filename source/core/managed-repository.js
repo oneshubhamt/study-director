@@ -50,7 +50,9 @@ registry.define('managed-repository',1,()=>{
 // counts and the deletion list), and holds no versions kept for review. It is
 // verified under the names it was written with; its notes leave the reader
 // under the current name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=10,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8,9,10]));
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=11,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8,9,10,11]));
+// Manifest 11 holds Support Activities under its own name; manifest 10 and
+// older under its retired reserved title, converted as it is read.
 // Manifest 10 holds an Active Session that may be finished (ActiveSession
 // v11); manifest 9 holds it in its v10 form, read as it is.
 const releasedRepositoryManifest=manifestVersion=>Number(manifestVersion)<=REPOSITORY_RELEASED_MANIFEST_VERSION;
@@ -1251,7 +1253,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
 }
 
     return freeze({
-      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,reviewOriginManifestVersion:REPOSITORY_REVIEW_ORIGIN_MANIFEST_VERSION,
+      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,manifestVersion:REPOSITORY_MANIFEST_VERSION,reviewOriginManifestVersion:REPOSITORY_REVIEW_ORIGIN_MANIFEST_VERSION,
       noteObject:repositoryNoteObject,readNote:readRepositoryNote,readSession:readRepositoryActiveSession,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase

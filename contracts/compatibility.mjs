@@ -120,6 +120,14 @@ export const COMPATIBILITY_REGISTRY=freeze({
       sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js','source/core/compatibility-host.js'])
     },
     {
+      id:'support-note-identity',owner:'record-codecs/repositories',kind:'live-canonicalization',
+      source:'Support Activities stored under the reserved title __study_director_support_activities__ by released builds up to SDVB75F28: the note row, its browser emergency copy, versions of it kept for review (kept and base titles), portable backups v25 and older and backup-location manifests version 10 and older',
+      target:'the same note, id, links and text under its own title Support Activities; a support note made from now on takes the fixed id n_f0929787c2c33fc9; a note already titled Support Activities (an Area of that name) moves aside to the first free Support Activities (n)',
+      proof:'the current note and review codecs refuse the retired title, so canonical-store and appMeta verification report any copy left; the start-up step rewrites every row and review and reads them back; older files and versions convert each note and review as it is read',
+      retirement:'after every supported installed build has crossed manifest 11 and portable v26 and no supported backup older than those remains (Copy diagnostics, Format cleanup, reads ready on every device in use)',
+      sourceFiles:freeze(['source/core/record-codecs.js','source/core/compatibility-codecs.js','source/core/repositories.js','source/core/backup-codec.js','source/core/backup.js'])
+    },
+    {
       id:'name-keyed-notes-in-backups',owner:'backup-codec/managed-repository',kind:'import-adapter',
       source:'released portable backups (v20 and older: entity areaNote, data.areaNotes, protected manifest version 2 with areaNoteDeletions) and backup-location manifests version 5 and older (kind areaNote, units areaNote:*, counts.areaNote), which key Notes and their deletion history by note name and hold no versions kept for review',
       target:'the current note entity, kind and deletion list names, notes and note deletion history keyed by the permanent id worked out from each name (the same id the live conversion gives that note), and no version kept for review; checksums and completion proofs are still checked against the names the file was written with',
@@ -286,9 +294,9 @@ export const COMPATIBILITY_REGISTRY=freeze({
     {
       id:'backup-repository-v1-v4',owner:'managed-repository',kind:'import-adapter',
       source:'Device Folder and Google Drive checkpoints in repository manifest versions 1 to 5, the ones released builds wrote (version 1 without retention or a commit marker; up to version 4 with Reflection Draft packs and older Active Session shapes; all without kept reviews), history entries without summaries, and older Drive maintenance markers',
-      target:'the current restore model; every new checkpoint is written as manifest version 8',
-      proof:'old checkpoints are only read, never rewritten; their contents pass through the compatibility codecs and current validation before restore. Once a location holds a version-8 checkpoint, older ones leave Version History and the next cleanup removes them (selectRepositoryRetention)',
-      retirement:'after every location of every device keeps only version-8 backup checkpoints (Copy diagnostics, Format cleanup, reads ready on every device in use)',
+      target:'the current restore model; every new checkpoint is written in the current manifest version',
+      proof:'old checkpoints are only read, never rewritten; their contents pass through the compatibility codecs and current validation before restore. Once a location holds a current-version checkpoint, older ones leave Version History and the next cleanup removes them (selectRepositoryRetention)',
+      retirement:'after every location of every device keeps only current-version backup checkpoints (Copy diagnostics, Format cleanup, reads ready on every device in use)',
       sourceFiles:freeze(['source/core/managed-repository.js','source/core/backup.js','source/core/backup-provider.js','source/external/drive.js'])
     },
     {

@@ -94,7 +94,7 @@ export const EXTERNAL_REPOSITORY_IDENTITIES=freeze({
 });
 
 export const EXTERNAL_FORMATS=freeze({
-  completeBackup:freeze({format:'study-director-backup',metadataVersion:25,containerMagic:'SDBK10\r\n'}),
+  completeBackup:freeze({format:'study-director-backup',metadataVersion:26,containerMagic:'SDBK10\r\n'}),
   protectedBackup:freeze({magic:'SDENC02\n',version:2}),
   attachmentArchive:freeze({format:'study-director.attachments',magic:'SDAT01\r\n',version:1})
 });

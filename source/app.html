@@ -2484,15 +2484,12 @@ const {
   measureValue:taskMeasureValue, targetValue:taskTargetValue, areaLabel:taskAreaLabel, areaKey:taskAreaKey,
   parentAreaKeys:areaParentKeys
 }=ScheduleModel;
-const SUPPORT_NOTE=Object.freeze({
-  key:'__study_director_support_activities__',
-  label:'Support Activities'
-});
-// The shared support note is stored with its reserved key as its label, which
-// keeps it apart from any Area. Wherever a stored note is shown, it shows its name.
-function shownNote(note){return note&&note.key===SUPPORT_NOTE.key?Object.freeze({...note,label:SUPPORT_NOTE.label}):note;}
-// A stored label as people read it: the shared support note by its name.
-function noteName(label){return normalizeAreaName(label)===SUPPORT_NOTE.key?SUPPORT_NOTE.label:displayAreaName(label);}
+// The one note every support block shares, named by its title like any
+// note and kept under a fixed id (DailyRecordCodec.noteKeys.support, which
+// a check at start-up holds this to).
+const SUPPORT_NOTE=Object.freeze({key:'support activities',label:'Support Activities'});
+// A stored label as people read it.
+function noteName(label){return displayAreaName(label);}
 function noteKeyForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.key:taskAreaKey(task);}
 function noteLabelForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.label:taskAreaLabel(task);}
 const {
@@ -3724,6 +3721,7 @@ const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze({
     defaultBreakSeconds:()=>Pomodoro.configuration.breakSeconds()
   })
 }));
+if(DailyRecordCodec.noteKeys.support.title!==SUPPORT_NOTE.key||DailyRecordCodec.noteKeys.support.label!==SUPPORT_NOTE.label)throw new Error('Support Activities identity drifted.');
 const PersonalDataCodec=RecordCodecsModule.createPersonalDataCodec(APP_LIMITS);
 /* ACTIVE SESSION CODEC */
 /* ACTIVE SESSION CODEC · IMPORTED */
@@ -8502,7 +8500,7 @@ function richTextDocumentFor(field,options={}){
 // Links between notes: the one note picker and the linked-notes bar.
 const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.freeze({
   view:Object.freeze({document}),
-  notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>shownNote(AppData.notes.get(ref)),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref).map(shownNote),list:()=>AppData.notes.metadataSnapshot().records.map(shownNote)}),
+  notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
   text:Object.freeze({tagsIn:value=>RichTextApi.tagsIn(value)}),
   ownership:Object.freeze({canMutate:()=>appCanMutate()})
 })}));
@@ -8518,7 +8516,7 @@ async function openLinkedNote(id,field=null){
   if(!await goTab('library',{source:'note-link'}))return false;
   return LibraryView.revealNoteReference(id);
 }
-function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>shownNote(AppData.notes.get(id))?.label??null,open:id=>void openLinkedNote(id,field),tag:(name,passive)=>void showNotesTagged(name,passive,field),pickTag:options=>NoteLinks.pickTag(options)});}
+function richTextNotes(field=null){return Object.freeze({pick:()=>NoteLinks.pick(),title:id=>AppData.notes.get(id)?.label??null,open:id=>void openLinkedNote(id,field),tag:(name,passive)=>void showNotesTagged(name,passive,field),pickTag:options=>NoteLinks.pickTag(options)});}
 // A tag tapped in the Library's open note narrows the list beside it; a tag
 // tapped anywhere else, or with Ctrl or Cmd, opens the Library's notes with it.
 async function showNotesTagged(name,passive,field){
@@ -9700,7 +9698,7 @@ window.addEventListener('pagehide',()=>BackupProtection.lock());
 window.addEventListener('pageshow',event=>{if(event.persisted)void BackupProtection.refresh().catch(setBackupProtectionSurfaceError);});
 const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.freeze({
   assets:Object.freeze({get:id=>RichTextAssets.get(id)}),
-  notes:Object.freeze({get:key=>shownNote(AppData.notes.get(key))}),
+  notes:Object.freeze({get:key=>AppData.notes.get(key)}),
   processing:Object.freeze({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
   scheduling:Object.freeze({yieldTask:BackgroundTasks.yieldTask,budget:BackgroundTasks.budget}),
   output:Object.freeze({chooseSave:Exports.chooseSave,save:Exports.save}),
@@ -11681,7 +11679,10 @@ function currentBackupDiagnosticStates(){
   // old backup folder is gone, and every connected location keeps versions in
   // the current format only (a version it cannot read may be in any format).
   sample('Format cleanup',()=>({local:canonicalProof,device:DeviceBackup.status(),locations:BackupProviderRuntime.diagnosticConnections().filter(row=>row.connected)}),value=>{
-    const rows=value.locations.map(row=>({job:`${row.id} formats`,state:!row.formats?'unknown':row.formats.older||row.formats.unreadable?'pending':'ready',currentVersions:row.formats?.current??0,olderVersions:row.formats?.older??0,unreadableVersions:row.formats?.unreadable??0,completedAt:row.formats?.checkedAt||''}));
+    // A newest Continue Here claim in an older form means a device on an
+    // older build last took the session there; the next claim from a current
+    // build replaces it.
+    const rows=value.locations.map(row=>({job:`${row.id} formats`,state:!row.formats?'unknown':row.formats.older||row.formats.unreadable||row.claimForm==='older'?'pending':'ready',currentVersions:row.formats?.current??0,olderVersions:row.formats?.older??0,unreadableVersions:row.formats?.unreadable??0,olderClaim:row.claimForm==='older',completedAt:row.formats?.checkedAt||''}));
     const ready=value.local?.retirementDataReady===true&&!value.device.oldFolder&&rows.every(row=>row.state==='ready');
     return [{job:'Format cleanup',state:ready?'ready':!value.local||rows.some(row=>row.state==='unknown')?'unknown':'pending',canonical:value.local?.canonical===true,retirementReady:value.local?.retirementDataReady===true,oldFolder:value.device.oldFolder===true,completedAt:value.local?.checkedAt||''},...rows];
   });
