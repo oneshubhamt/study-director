@@ -118,6 +118,7 @@ registry.define('session-lifecycle',1,()=>{
         const result=await operation(ctx);
         if(!isCurrent(ctx))return result;
         const reconciled=ctx.options.reconcile===false?false:(await hooks.reconcile(ctx,result),true);
+        if(!isCurrent(ctx))return result;
         finish(ctx,{reconciled});
         return result;
       }catch(error){

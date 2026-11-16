@@ -59,8 +59,14 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   let enteredResolve,releaseResolve,intercepted=false;
   const entered=new Promise(resolve=>{enteredResolve=resolve;});
   const release=new Promise(resolve=>{releaseResolve=resolve;});
-  const context=vm.createContext({console,Promise,Object,Symbol,Error,TypeError,String,Number,Math,Array,Set,Map,WeakMap,Date,setTimeout,clearTimeout,queueMicrotask,HTMLTextAreaElement:class{}});
+  class TextArea{
+    dataset={};isConnected=true;value='';
+    setAttribute(){}
+  }
+  let pausedSave=null;
+  const context=vm.createContext({console,Promise,Object,Symbol,Error,TypeError,String,Number,Math,Array,Set,Map,WeakMap,Date,setTimeout,clearTimeout,queueMicrotask,HTMLTextAreaElement:TextArea});
   vm.runInContext(readRuntimeSource('source/core/internal.ts'),context,{filename:'source/core/internal.ts'});
+  vm.runInContext(readRuntimeSource('source/core/save-lane.ts'),context,{filename:'source/core/save-lane.ts'});
   vm.runInContext(readRuntimeSource('source/core/review-persistence.ts'),context,{filename:'source/core/review-persistence.ts'});
   const module=context[Symbol.for('studyDirector.internalModules.v1')].require('review-persistence',1);
   const persistence=module.createPersistence(Object.freeze({
@@ -71,7 +77,10 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
         if(!intercepted&&options?.strict===true){intercepted=true;enteredResolve();await release;}
         return value;
       },
-      save:(...args)=>app.dailyRecords.save(...args),
+      save:async(...args)=>{
+        if(pausedSave){const pending=pausedSave;pending.enter();await pending.wait;if(pending.fail)throw new Error('old Diary write failed');}
+        return app.dailyRecords.save(...args);
+      },
       remove:(...args)=>app.dailyRecords.remove(...args),
       verifyCanonical:(...args)=>app.dailyRecords.verifyCanonical(...args),
       verifyCanonicalAbsent:(...args)=>app.dailyRecords.verifyCanonicalAbsent(...args),
@@ -82,7 +91,7 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
     text:Object.freeze({clampEditorContent:value=>String(value??''),editorContentWithinLimits:()=>true,plain:value=>String(value??''),isRich:()=>false}),
     richText:Object.freeze({closeField:()=>true,syncField:()=>true,validatedInput:()=>null}),
     dates:Object.freeze({isSupported:value=>/^\d{4}-\d{2}-\d{2}$/.test(value),insights:()=>Object.freeze({dayOfWeek:3,dayName:'Wednesday'})}),
-    saveLane:Object.freeze({}),environment:Object.freeze({nowIso:()=> '2026-09-16T08:02:00.000Z',queueMicrotask,setTimeout,clearTimeout})
+    saveLane:context[Symbol.for('studyDirector.internalModules.v1')].require('save-lane',1),environment:Object.freeze({nowIso:()=> '2026-09-16T08:02:00.000Z',queueMicrotask,setTimeout,clearTimeout})
   }));
   const stale=persistence.DailyReflectionPersistence.commit(date,'stale diary edit',{expectedCanonical:'baseline',backupCapture:false});
   await entered;
@@ -93,6 +102,29 @@ assert.equal(preserved.sourceRevision,richerDay.sourceRevision,'stale Diary dele
   const final=await app.dailyRecords.get(date,{strict:true});
   assert.equal(final.sourceRevision,5);
   assert.equal(final.evidence,'newer-study-evidence','interleaved Reflection write must preserve the concurrently saved Study Day');
+
+  // Rebinding cancels retries, but cannot cancel an in-flight canonical write.
+  // Neither its failure nor its stale completion may report into the new Diary.
+  for(const fail of [false,true]){
+    let enter,release;
+    const started=new Promise(resolve=>{enter=resolve;}),wait=new Promise(resolve=>{release=resolve;});
+    pausedSave={enter,wait,fail};
+    const field=new TextArea(),oldStates=[],newStates=[];
+    persistence.DiaryEditor.bind(field,date,await app.dailyRecords.get(date),{onState:state=>oldStates.push(state)});
+    persistence.DiaryEditor.schedule(field,'new reflection '+String(fail));
+    const flushing=persistence.DiaryEditor.flush(field);
+    const rejected=assert.rejects(flushing,/old Diary write failed|became stale/);
+    await started;
+    persistence.DiaryEditor.bind(field,'2026-09-17',{...base,date:'2026-09-17',reflection:'successor'}, {onState:state=>newStates.push(state)});
+    const successor={...field.dataset},previousStates=[...oldStates];
+    release();await rejected;
+    assert.deepEqual(field.dataset,successor,'old save feedback must not overwrite successor sync state');
+    assert.equal(field.value,'successor');
+    assert.deepEqual(oldStates,previousStates,'disposed Diary callbacks must stay silent');
+    assert.deepEqual(newStates,[]);
+    persistence.DiaryEditor.clear(field);
+  }
+  pausedSave=null;
 }
 
 const beforePlanDraftStrict=strictCount();

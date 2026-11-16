@@ -96,12 +96,19 @@ try{
     await d.goTab('execute');d.setCurrentTask(0,{notifyPractice:false});d.refreshPnote({force:true});await wait(80);
     const field=document.getElementById('pn-extra');if(!field)throw new Error('Execute note field is unavailable.');
     await d.RichTextRuntime.activate(field);await wait(20);
-    const before=n.get('alpha empty');field.dataset.richSyncState='saving';
+    const before=n.get('alpha empty');
     const changed=n.update('alpha empty','Alpha Empty','Alpha remote canonical',before?.updatedAt||'');if(changed.status!=='changed')throw new Error('Conflict seed failed: '+changed.status);await n.flush({strict:true});
+    // Repository flush publishes its own sync state. Set the simulated pending
+    // local edit only after that completes, immediately before reconciliation.
+    field.dataset.richSyncState='saving';
     const remote=n.get('alpha empty'),conflict=d.RichTextRuntime.reconcileExternal(field,remote.text,remote.updatedAt);
     const marked={status:conflict.status,key:field.dataset.areaKey||'',conflict:field.dataset.richExternalConflict||''};
     d.setCurrentTask(1,{notifyPractice:false});d.refreshPnote({force:true});await wait(180);
     const rebound={key:field.dataset.areaKey||'',value:field.value,conflict:field.dataset.richExternalConflict||'',revision:field.dataset.noteRevision||''};
+    // This probe changes the editor selection directly, not the running timer.
+    // Restore that selection and remove its seed before the remaining journey.
+    d.setCurrentTask(0,{notifyPractice:false});d.refreshPnote({force:true});
+    n.remove('alpha empty');await n.flush({strict:true});
     await d.goTab('library');d.LibraryView.showSection('notes');await wait(50);
     return {marked,rebound,zeta:n.get('zeta filled')?.text||''};
   })()`);

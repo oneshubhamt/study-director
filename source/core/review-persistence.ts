@@ -97,6 +97,7 @@ function createPersistence(input:Readonly<ReviewPersistenceInput>){
     field.dataset['diaryRevision']=String(state.revision);richText.syncField(field);state.onSaved?.(fresh);return fresh;
   }
   function laneState(field:HTMLTextAreaElement,state:EditorState,status:'saving'|'saved'|'error',error:unknown){
+    if(activeState(field)!==state)return;
     const message=status==='error'?saveLane.failureMessage('Diary reflection',error):status==='saving'?'Saving…':'Saved';
     field.dataset['richSyncState']=status;field.dataset['richSyncStatus']=message;state.onState?.(status,message);
   }

@@ -1,8 +1,6 @@
-import {readHostHtml} from '../../../build/host-source.mjs';
 import {readScript} from '../../../build/source-script.mts';
 import {readCoreScript,coreScriptPath} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 
 for(const name of ['internal','notice-coordinator','backup-presentation','backup-actions-host','interactions','foundation-host'])vm.runInThisContext(readCoreScript(name),{filename:coreScriptPath(name)});
@@ -68,19 +66,21 @@ class Element {
 }
 globalThis.HTMLElement=Element;
 globalThis.HTMLButtonElement=Element;
+globalThis.HTMLInputElement=Element;
 const backupActions=registry.require('backup-actions-host',1);
 function createBackupControls({
   nodes=new Map(),controllerStatus=()=>({standaloneExportActive:false,importHoldsBackground:false}),
   processingStatus=()=>({fileBusy:false}),locations={},presentation=null,verifiedAt=()=>'',renderProfile=()=>{},
-  firstStartOpen=()=>false,renderFirstStart=()=>{},scheduleUpdate=()=>{},scheduleSyncStatus=()=>{}
+  firstStartOpen=()=>false,renderFirstStart=()=>{},scheduleUpdate=()=>{},scheduleSyncStatus=()=>{},
+  open=async()=>null,importLocal=()=>false,resolveFileOpen=()=>{}
 }={}){
   const activePresentation=presentation||freeze({
     current:()=>null,summary:()=>'',subscribe:()=>()=>{},locationLabel:(_id,state)=>state?.connected?'On':'Off',condition:()=>false
   });
   const controller=freeze({
-    status:controllerStatus,subscribeStatus:()=>()=>{},exportLocal:()=>false,importLocal:()=>false,cancelStandalone:()=>false
+    status:controllerStatus,subscribeStatus:()=>()=>{},exportLocal:()=>false,importLocal,cancelStandalone:()=>false
   });
-  const processing=freeze({status:processingStatus,open:async()=>null});
+  const processing=freeze({status:processingStatus,open});
   const protection=freeze({
     format:'study-director.backup-protection-host',contractVersion:1,protection:freeze({}),
     backgroundAvailability:()=>true,surfaceError:()=>false,withPassword:async open=>open(),manage:async()=>false,refresh:async()=>true,install:()=>true
@@ -92,7 +92,7 @@ function createBackupControls({
   });
   return backupActions.createControls(freeze({
     document:{getElementById:id=>nodes.get(id)||null},controller,processing,protection,device:()=>null,providers,presentation:activePresentation,
-    verifiedAt,timeLabel:()=> '09:30',capture:(_scope,error)=>assert.fail(error),resolveFileOpen:()=>{},
+    verifiedAt,timeLabel:()=> '09:30',capture:(_scope,error)=>assert.fail(error),resolveFileOpen,
     foregroundChanged:()=>{},scheduleSyncStatus,renderProfile,firstStartOpen,renderFirstStart,scheduleUpdate,
     connectDevice:()=>false,connectDrive:()=>false,openHistory:()=>false
   }));
@@ -238,9 +238,14 @@ function createBackupControls({
 // Exercise the actual file picker handler: AbortError is neutral; recovery clears the condition.
 {
   const {notices:n}=coordinator(),presentation=registry.require('backup-presentation',1).createPresentation(freeze({notifications:n}));
-  const html=readHostHtml(),start=html.indexOf("  'pick-import-file': async()=>{"),end=html.indexOf("  'test-sound':",start);
   let failure=Object.assign(new Error('Cancelled'),{name:'AbortError'}),imports=0;
-  const handler=new Function('Exports','document','BackupController','NoticeCoordinator','BackupPresentation','return ({'+html.slice(start,end)+'})["pick-import-file"];')({open:async()=>{if(failure)throw failure;return new Blob(['backup']);}},{getElementById:()=>({})},{importLocal:async()=>imports++},n,presentation);
+  const field=new Element(),file=new Blob(['backup']);
+  const controls=createBackupControls({nodes:new Map([['import-file',field]]),presentation,
+    open:async input=>{assert.equal(input,field);if(failure)throw failure;return file;},
+    importLocal:async event=>{assert.deepEqual(event.target.files,[file]);imports++;},
+    resolveFileOpen:()=>n.resolveEvent('file','file-open')
+  });
+  const handler=controls.pickImportFile;
   await handler();assert.equal(n.eventStatus().events.length,0);
   failure=new Error('Access denied');await handler();assert.equal(n.readEvent('file','file-open').lifecycle,'failed');
   failure=null;await handler();assert.equal(imports,1);assert.equal(n.readEvent('file','file-open'),null);n.clear();

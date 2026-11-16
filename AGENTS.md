@@ -16,7 +16,7 @@ After P5.13, reconcile all Phase 5 objectives and leave a concise audit handoff 
 2. **Fix evident bugs and make justified local improvements** encountered in converted surfaces. Explain intentional behavior changes and preserve other behavior. Do not turn conversion into an unrelated redesign or bug hunt. Defects preventing the objective working correctly belong in the pass.
 3. **Strengthen relevant tests** where useful, especially for fixes. Necessary verification is part of completion; optional test expansion must not displace conversion.
 
-Use native DOM/event types and actual provider assignability checks. Preserve initialization order when extracting closures: providers declared later must remain deferred. A typed port calling unchecked feature behavior does not complete conversion; only thin composition belongs to P5.13. Test critical transitions with failed writes and committed writes whose verification fails, preserving newer successors.
+Use native DOM/event types and actual provider assignability checks. Preserve initialization order when extracting closures: providers declared later must remain deferred. A typed port calling unchecked feature behavior does not complete conversion; only thin composition belongs to P5.13. Test critical transitions with failed writes and committed writes whose verification fails, preserving newer successors. Recheck transition/editor identity after asynchronous work before publishing completion or UI feedback, including save-lane callbacks.
 
 Keep one current canonical topology with validation, integrity and recovery intact; no historical migration/compatibility code. `vendor/wordgard/**` is immutable; our editor/adapters may change.
 
@@ -26,7 +26,7 @@ Keep one current canonical topology with validation, integrity and recovery inta
 2. **Analyze:** choose the simplest sound design and coherent scope, including integration and failure paths. Tracked units are not mandatory separate sessions; combine related units when that reduces overhead without obscuring completion.
 3. **Implement:** finish the agreed scope end to end, including necessary fixes. Distinguish typing from intentional behavior changes. Continue through ordinary failures; do not stop because a useful subset works.
 4. **Verify objectives:** compare resulting source and consumers against every outcome. Repair missing wiring, unconverted behavior and unsafe shortcuts. Do not silently narrow objectives or defer required work to mark them complete.
-5. **Targeted QA:** run checks appropriate to changed surfaces, add meaningful regression protection and repair failures. Rerun only invalidated checks. Close only when all outcomes and required checks pass; otherwise identify the concrete blocker and remaining work. Full certification belongs to Phase 7.
+5. **Targeted QA:** run checks appropriate to changed surfaces, add meaningful regression protection and repair failures. Run new/changed witnesses against their real checked owner; browser probes must leave later scenarios' fixtures valid. Rerun only invalidated checks. Close only when all outcomes and required checks pass; otherwise identify the concrete blocker and remaining work. Full certification belongs to Phase 7.
 
 ## Lean working memory
 

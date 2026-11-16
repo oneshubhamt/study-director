@@ -130,6 +130,35 @@ assert.equal(coordinator.canWrite(),false,'a failed transition must not publish 
 assert.equal(events.includes('reconcile:failing-transition:null'),false,'failed transitions never reconcile target state');
 assert.ok(events.includes('complete:failing-transition:failed'));
 
+// Supersession can also occur while reconciliation is settling, after the
+// operation itself succeeded. Its late completion cannot reopen the old session
+// or replace the completion/readiness of a successor.
+for(const successor of ['invalidated','active','completed']){
+  let releaseReconcile,enteredReconcile,releaseSuccessor;
+  const gate=new Promise(resolve=>{releaseReconcile=resolve;});
+  const entered=new Promise(resolve=>{enteredReconcile=resolve;});
+  const successorGate=new Promise(resolve=>{releaseSuccessor=resolve;});
+  const completions=[];
+  const subject=LifecycleModule.createCoordinator(Object.freeze({hooks:Object.freeze({
+    canMutate:()=>true,flushPending:()=>{},prepare:()=>{},capture:()=>{},
+    reconcile:ctx=>{if(ctx.kind==='old'){enteredReconcile();return gate;}},
+    complete:ctx=>completions.push(ctx.kind)
+  })}));
+  const old=subject.run('old',{},()=> 'old result');await entered;
+  subject.invalidate('ownership-loss');
+  let next;
+  if(successor==='active'){
+    next=subject.run('successor',{},()=>successorGate);
+    await Promise.resolve();await Promise.resolve();
+    assert.equal(subject.status().active.kind,'successor');
+  }else if(successor==='completed')subject.reconcile('successor');
+  const expected=subject.status(),expectedCompletions=[...completions];
+  releaseReconcile();assert.equal(await old,'old result');
+  assert.deepEqual(subject.status(),expected,`late reconciliation must preserve ${successor} successor state`);
+  assert.deepEqual(completions,expectedCompletions,'superseded reconciliation must not publish completion');
+  if(next){releaseSuccessor();await next;assert.equal(subject.canWrite(),true);}
+}
+
 // Even a defensive failed completion that arrives with reconciled=true must
 // never re-enable lifecycle-owned editors or advertise target-date readiness.
 {
