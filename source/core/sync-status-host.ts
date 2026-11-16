@@ -67,7 +67,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     const deviceView:LocationView|null=device&&device.supported?{
       connected:device.connected,mode:device.mode,busy:device.busy,foregroundKind:device.foregroundKind,
       backingUp:device.backingUp,maintenanceBusy:device.maintenanceBusy,locked:device.locked,
-      waiting:device.pending,nextEligibleAt:device.nextEligibleAt,retryBackoffCapped:device.retryBackoffCapped,
+      nextEligibleAt:device.nextEligibleAt,retryBackoffCapped:device.retryBackoffCapped,
       ...(device.lastBackupAt?{lastBackupAt:device.lastBackupAt}:{})
     }:null;
     const storageView=storage.map(issue=>({
