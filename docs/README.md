@@ -9,6 +9,7 @@ Start here. Read the page for the area you are changing; the code is the final a
 | [backlog.md](backlog.md) | Open work, decisions to make, and what has not been checked yet |
 | [test-programme.md](test-programme.md) | The test suite programme: full plan, rules and status (deleted when it ends) |
 | [history.md](history.md) | A short record of past work and dropped ideas |
+| [sync-design.md](sync-design.md) | Design for the new sync engine (branch `Sync`, for review; not yet built) |
 
 **Areas**
 
