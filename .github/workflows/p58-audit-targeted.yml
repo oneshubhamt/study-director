@@ -60,3 +60,5 @@ jobs:
             echo "P5.8 Connect/status witness pass $pass/5"
             node tests/browser/backup/sync-and-profiles.mjs
           done
+      - name: P5.8 required sync-journeys anchor
+        run: node tests/browser/backup/sync-journeys.mjs
