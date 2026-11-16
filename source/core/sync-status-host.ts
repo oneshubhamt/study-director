@@ -37,7 +37,10 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
   function reconcileProfile(){
     const profile=currentProfile();
     if(connection&&connection.profile!==profile)connection=null;
-    if(card&&card.profile!==profile){clearHideTimer();card=null;}
+    if(card&&card.profile!==profile){
+      clearHideTimer();card=null;
+      const root=element('drive-connect-card');if(root)root.hidden=true;
+    }
     return profile;
   }
   function isConnecting(profile=currentProfile()){
@@ -62,8 +65,9 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     try{storage=input.storageIssues();}catch{/* Storage health is deferred during startup. */}
     const connecting=isConnecting(profile),email=input.profileEmail();
     const deviceView:LocationView|null=device&&device.supported?{
-      connected:device.connected,mode:device.mode,backingUp:device.backingUp,busy:device.busy,
-      maintenanceBusy:device.maintenanceBusy,retryBackoffCapped:device.retryBackoffCapped,
+      connected:device.connected,mode:device.mode,busy:device.busy,foregroundKind:device.foregroundKind,
+      backingUp:device.backingUp,maintenanceBusy:device.maintenanceBusy,locked:device.locked,
+      waiting:device.pending,nextEligibleAt:device.nextEligibleAt,retryBackoffCapped:device.retryBackoffCapped,
       ...(device.lastBackupAt?{lastBackupAt:device.lastBackupAt}:{})
     }:null;
     const storageView=storage.map(issue=>({
