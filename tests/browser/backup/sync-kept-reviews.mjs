@@ -53,12 +53,13 @@ try{
   try{
     await waitFor(()=>b.evaluate(`['profile-tag','profile-badge'].every(id=>document.getElementById(id).dataset.badge==='review')`),{label:'B shows the review badge',timeout:20000});
   }catch(error){
-    const state=await b.evaluate(`(async()=>{const d=__PWA6,input=d.syncStatusInput(),model=d.BackupPresentation.status(input);return {
+    const state=await b.evaluate(`(async()=>{const d=__PWA6;return {
       keptCount:d.KeptVersions.count(),
       canonicalReviews:(await d.AppData.pendingReviews.list()).map(review=>({id:review.id,subject:review.subject,resolvedAt:review.resolvedAt||'',keptText:review.kept?.text||''})),
       notice:d.NoticeCoordinator.readEvent('sync','kept-new')||null,
-      input:{kept:input.kept,storage:input.storage,reminder:input.reminder,drive:input.drive},
-      model:{ring:model.ring,badge:model.badge,count:model.count,label:model.label,items:model.items},
+      drive:d.BackupProviderRuntime.locationStatus('google-drive'),
+      device:d.DeviceBackup.status(),
+      storage:d.readStorageHealth(),
       rendered:['profile-tag','profile-badge'].map(id=>{const node=document.getElementById(id);return {id,badge:node?.dataset.badge||'',ring:node?.dataset.ring||'',aria:node?.getAttribute('aria-label')||''};})
     };})()`);
     throw new Error(`${error.message}; state=${JSON.stringify(state)}; warnings=${JSON.stringify(b.warnings.slice(-20))}`,{cause:error});
