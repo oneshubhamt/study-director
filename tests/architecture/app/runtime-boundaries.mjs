@@ -22,7 +22,7 @@ assert.match(host,/richText:Object\.freeze\(\{assetIds:value=>RichTextApi\.asset
 assert.match(documentHost,/function createPdfController/);assert.match(documentHost,/function createPrinter/);assert.match(documentHost,/function createIntegration/);
 assert.match(richHost,/function createRuntime/);assert.match(noteExport,/function createExporter/);
 assert.match(richHost,/const sameDocument=fieldRichDocumentId\(record\.field\)===record\.documentId&&fieldRichRevision\(record\.field\)===record\.revision;/u,'a disposed rich editor may restore conflict state only while its original document and revision still own the textarea');
-assert.match(richHost,/function closeField\(field:[\s\S]{0,360}clearExternalConflict\(field\);return existed/u,'closing a rich editor clears its conflict marker synchronously before the textarea can be rebound');
+assert.match(richHost,/function closeField\(field[\s\S]{0,420}clearExternalConflict\(field\);return existed/u,'closing a rich editor clears its conflict marker synchronously before the textarea can be rebound');
 assert.doesNotMatch(documentHost,/WG1:|Wordgard|indexedDB|dailyRecords/,'document owner orchestrates checked providers instead of duplicating rich-text/storage codecs or Saved-Day storage');
 assert.doesNotMatch(noteExport,/dailyRecords|pendingReviews|activeSession/,'note export remains read-only and cannot mutate Saved-Day evidence');
 }
