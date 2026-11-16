@@ -10,7 +10,9 @@ async function waitFor(predicate,message){
   assert.fail(message);
 }
 
-
+for(const [field,value] of [['controls',true],['deleted','not-a-callback']]){
+  assert.throws(()=>createHarness({profilePortPatch:{[field]:value}}),/Drive provider must register/u,'the unknown plugin host must reject a malformed optional profile '+field+' callback');
+}
 
 
 {

@@ -80,8 +80,9 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   function isPluginApi(value:unknown):value is PluginApi{
     if(!isRecord(value)||!isRecord(value['capabilities'])||!isRecord(value['backup']))return false;
     const backup=value['backup'];if(!isRecord(backup['repositoryPolicy'])||typeof backup['receiveStream']!=='function'||typeof backup['releaseFile']!=='function'||!isRecord(backup['limits'])||typeof backup['device']!=='function'||!isRecord(backup['profile'])||!isRecord(backup['providers']))return false;
-    const profile=backup['profile'],providers=backup['providers'];
-    return typeof profile['id']==='function'&&typeof profile['name']==='function'&&typeof profile['bind']==='function'&&typeof providers['register']==='function';
+    const profile=backup['profile'],providers=backup['providers'],deleted=profile['deleted'],controls=profile['controls'];
+    return typeof profile['id']==='function'&&typeof profile['name']==='function'&&typeof profile['bind']==='function'&&
+      (deleted===undefined||typeof deleted==='function')&&(controls===undefined||typeof controls==='function')&&typeof providers['register']==='function';
   }
   function parseRepositoryIdentities(raw:string):RepositoryIdentities{
     let value:unknown;try{value=JSON.parse(raw);}catch{throw new Error('Google Drive repository identities are unavailable.');}if(!isRecord(value))throw new Error('Google Drive repository identities are unavailable.');
