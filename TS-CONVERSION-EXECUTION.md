@@ -1,14 +1,13 @@
 # TypeScript conversion — execution record
 
-## Current handoff — P5.8A CLOSED — AUDITED — TARGETED, 2026-11-16
+## Current handoff — P5.8B OPEN — AUDITED, 2026-11-16
 
-- **Branch / baseline:** `ts-exp`, implementation baseline `652286876cfb8d52c17db6ce5390653d24aa7a10`; P5.8A only. P5.8B host connection/status presentation remains untouched and open.
-- **Outcome:** the complete authored Drive adapter is strict TypeScript at `source/external/drive.ts`; the real startup registration is assignable to `ProviderConfig` / `RepositoryTransport`; manifest, tsconfig, build erasure and harness/raw-source readers use that same authored module.
-- **Boundary/safety closure:** Google/OAuth data is narrowed before trusted use; OAuth callbacks are request/profile-generation bound; folder resolution/receipts, binding and deletion recheck profile identity across awaits; timeout/cancellation, bounded retries, resumable recovery and ambiguous mutation semantics remain covered.
-- **Conversion-exposed correction:** the typed root repository adapter now preserves the pre-conversion optional per-call operation context, so foreground cancellation reaches root upload/session-claim operations instead of being lost by the registration wrapper.
-- **Regression witnesses:** late OAuth response after profile switch and late folder-claim decision after profile switch are explicit; existing malformed-response, cancellation, pagination/scale, ambiguous mutation/recovery, lease, resumable and provider-publication cases remain green.
-- **Targeted evidence:** repository run `43893857035` at `496c4a75` passed strict types/lint, the 38-file targeted repository gate, source build, generated-build verification and generated syntax. Dedicated P5.8A run `43894082056` at `aa7d2c24` passed `drive-security`, `drive-profile-binding`, `drive-repository-scale`, `repository-background`, `repository-checkpoint`, strict types/lint and build/verification/syntax.
-- **Deferred/open:** full QA was not run. P5.8B remains the next P5.8 outcome; host connection/status presentation and later groups are not claimed here.
+- **Branch / baseline:** `ts-exp` at `b137fb779466acb48529ebd98a1544db4f842abe`; P5.8A remains closed. P5.8B only; later groups are out of scope.
+- **Outcome:** move Drive connection and shared sync-status host behavior behind one checked owner: `connectDriveForProfile`, Connect-card lifecycle, status aggregation, ring/panel/card rendering, scheduling/subscriptions and typed action delegation.
+- **Invariants:** user-gesture authorization stays synchronous at the call boundary; deferred startup remains intact; Device Folder, password, kept-version, ownership/session and PWA actions delegate to their real owners; provider/profile/recovery contracts are reused rather than copied.
+- **Audit finding / correction required:** current late Drive-connect completion is not request/profile fenced and can clear connecting state or mutate a successor card. Connect-card hide must also be profile/generation bound so an old completion/timer cannot overwrite a reopened card or new profile.
+- **Targeted evidence planned:** strict types/lint/build/generated verification; `sync-status.mjs`, `notification-lifecycle.mjs`, `storage-reset-connect-recovery.mjs`; isolated Chromium `cold-start-drive-recovery`, `sync-and-profiles`, `sync-journeys` when the available targeted runner permits.
+- **Open:** implementation, objective reconciliation and targeted QA remain in progress. Full QA is explicitly not part of this pass.
 
 ## Last verified application checkpoint
 
