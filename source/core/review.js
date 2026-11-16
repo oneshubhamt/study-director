@@ -248,17 +248,29 @@ function reflectionOnlyReady(date=getReviewDate()){return reflectionOnlyState.da
 async function hydrateReflectionOnlyState(date=getReviewDate()){
   const target=reviewDate(date),token=++reflectionOnlyHydration;
   if(reviewHasStudyDay())return false;
-  reflectionOnlyLoading=true;syncReviewSurfaceMode();setReflectionRichSync('busy','Loading reflection…');
+  // Already loaded (a pane switch, the end of a sync): look again without
+  // disabling the field, so an editor in use stays with its cursor. Only a
+  // change stored elsewhere is applied; a save of this reflection that lands
+  // during the read is newer than what was read.
+  const known=reflectionOnlyReady(target)&&!reflectionOnlyLoading?reflectionOnlyState:null;
+  if(!known){reflectionOnlyLoading=true;syncReviewSurfaceMode();setReflectionRichSync('busy','Loading reflection…');}
   try{
     const loaded=await DailyReflection.load(target);
     if(token!==reflectionOnlyHydration)return false;
-    if(reviewHasStudyDay()||reviewDate(getReviewDate())!==target){reflectionOnlyLoading=false;syncReviewSurfaceMode();return false;}
-    reflectionOnlyState=freeze({date:target,canonical:String(loaded.canonical||''),recordKind:loaded.recordKind||null});
+    if(reviewHasStudyDay()||reviewDate(getReviewDate())!==target){if(!known){reflectionOnlyLoading=false;syncReviewSurfaceMode();}return false;}
+    const canonical=String(loaded.canonical||'');
+    if(known&&(reflectionOnlyState!==known||canonical===known.canonical)){
+      // A sync bound the reflection while it could not write; it can now.
+      const field=document.getElementById('daily-reflection');
+      if(field?.dataset.richSyncState==='read-only'&&lifecycleCanWrite()&&!reflectionLane.pending()&&!reflectionLane.writing())setReflectionRichSync('saved','Saved');
+      return true;
+    }
+    reflectionOnlyState=freeze({date:target,canonical,recordKind:loaded.recordKind||null});
     reflectionOnlyLoading=false;
     applyReviewState({reflection:reflectionOnlyState.canonical,studyQuality:null},target);
     syncReviewSurfaceMode();return true;
   }catch(error){
-    if(token===reflectionOnlyHydration){reflectionOnlyLoading=false;setReflectionRichSync('error','Reflection could not be loaded');syncReviewSurfaceMode();}
+    if(token===reflectionOnlyHydration&&!known){reflectionOnlyLoading=false;setReflectionRichSync('error','Reflection could not be loaded');syncReviewSurfaceMode();}
     AppDiagnostics.capture('review.reflection-only-load',error,'warn');return false;
   }
 }

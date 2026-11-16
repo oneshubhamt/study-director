@@ -550,6 +550,11 @@ registry.define('library-notes',1,modules=>{
       // sections, never the editor.
       const parents=entry?parentNotesSignature(entry):'';
       if(signature===noteEditorSignature&&panel.childElementCount){
+        // A sync that brings in changes unbinds every editor while it applies
+        // them. The same note binds again here, so its editor stays mounted
+        // with the cursor where it was; left unbound, the editor was put away
+        // and its raw stored text stayed on screen, dead to clicks.
+        const field=notesEditorField();if(entry&&!readOnly&&field&&!field.dataset.noteBinding)bindEditor(field,entry.key,entry.label,'library');
         if(entry&&parents!==noteParentSignature){noteParentSignature=parents;const box=panel.querySelector('.subject-note-context');if(box)renderInherited(box,entry.key,false,{collapsible:true});}
         panel.querySelector('.note-links')?.refresh?.();
         const meta=panel.querySelector('.library-notes-editor-meta');if(entry&&meta){meta.textContent=noteMeta(entry,canonical);syncReviewMark(meta,writable?canonical:null);}
