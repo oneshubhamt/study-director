@@ -1082,7 +1082,7 @@ import type {DownloadOptions,ItemRef,Lease,ProviderConfig,ProviderItem,Repositor
         await delay(retryDelay(status,attempt+retry));
       }catch(error){
         lastError=error;
-        if(operationStopped(error)||(asDriveError(error).studyDirectorDriveNoRetry||/authorization|expired/i.test(asDriveError(error).message)))||retry===MAX_TRANSIENT_ATTEMPTS-1)throw error;
+        if(operationStopped(error)||asDriveError(error).studyDirectorDriveNoRetry||/authorization|expired/i.test(asDriveError(error).message)||retry===MAX_TRANSIENT_ATTEMPTS-1)throw error;
         await delay(retryDelay(null,attempt+retry));
       }
     }
