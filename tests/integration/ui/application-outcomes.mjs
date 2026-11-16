@@ -388,4 +388,54 @@ const noop=()=>{};
   assert.equal(kept.count(),1);assert.equal(captures,1,'failed verified convergence is diagnosed rather than treated as resolution');assert.equal(statusSchedules,2,'retained reviews still invalidate shared status after failed convergence');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','P5.6B stale Saved-Day read fence','P5.6B summary refresh failure containment','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes','P5.7B kept-version generation/convergence fencing']}));
+// P5.6A/C: closing a conflicted rich editor is asynchronous, but Execute can
+// synchronously reuse the same textarea for the next task. The old editor may
+// not leave its conflict marker or restore its canonical text into the new
+// binding after its destroy/flush awaits settle.
+{
+  const destroyGate=deferred(),syncStates=[];
+  class Element{
+    constructor(){this.dataset=Object.create(null);this.style={display:''};this.hidden=false;this.isConnected=true;this.parentElement=null;this.className='';this.attributes=new Map();this.inert=false;}
+    matches(selector){return selector.includes('.task-note-field')&&this.className.includes('task-note-field');}
+    closest(){return null;}querySelectorAll(){return [];}insertAdjacentElement(){}remove(){}
+    getAttribute(name){return this.attributes.has(name)?this.attributes.get(name):null;}setAttribute(name,value){this.attributes.set(name,String(value));}removeAttribute(name){this.attributes.delete(name);}
+  }
+  class HTMLElement extends Element{focus(){}blur(){}}
+  class HTMLTextAreaElement extends HTMLElement{constructor(){super();this.value='';this.id='';this.disabled=false;this.readOnly=false;}}
+  class HTMLDetailsElement extends HTMLElement{}
+  class MutationObserver{observe(){}disconnect(){}}
+  const body=new HTMLElement(),documentElement=new HTMLElement();
+  const document={body,documentElement,hidden:false,activeElement:body,addEventListener:noop,querySelectorAll:()=>[],getElementById:()=>null};
+  const window={setTimeout:()=>1,clearTimeout:noop,addEventListener:noop,removeEventListener:noop};
+  let alphaCanonical='WG1:alpha-local';
+  const context={Object,Symbol,Set,Map,WeakMap,Promise,Date,Number,String,Error,TypeError,Element,HTMLElement,HTMLTextAreaElement,HTMLDetailsElement,MutationObserver,document,window,queueMicrotask};
+  vm.createContext(context);vm.runInContext(readCoreScript('internal'),context);vm.runInContext(readCoreScript('rich-text-host'),context);
+  const module=context[Symbol.for('studyDirector.internalModules.v1')].require('rich-text-host',1),field=new HTMLTextAreaElement();field.className='task-note-field';field.dataset.areaKey='alpha';field.dataset.noteRevision='a1';field.value='Alpha visible';
+  const runtime=module.createRuntime(Object.freeze({
+    configuration:Object.freeze({maxRichTextBytes:100000}),document,window,
+    richText:Object.freeze({storagePrefix:'WG1:',isRichTextValue:value=>String(value||'').startsWith('WG1:'),mountRichTextEditor:async()=>Object.freeze({destroy:()=>destroyGate.promise,focus:noop,search:async()=>0,stepSearch:()=>({index:-1,count:0}),clearSearch:noop,flush:noop})}),
+    assets:Object.freeze({retain:async()=>noop}),
+    attachments:Object.freeze({port:()=>Object.freeze({upload:async()=>{throw new Error('unused');}}),createImageWorker:()=>({}),onBusy:noop}),
+    notes:Object.freeze({
+      repository:Object.freeze({flush:async()=>true,protectUnsaved:noop,get:key=>key==='zeta'?Object.freeze({updatedAt:'z2'}):Object.freeze({updatedAt:'a2'})}),
+      links:()=>Object.freeze({}),normalizeArea:value=>String(value||''),setSyncState:(key,state)=>syncStates.push([key,state]),updateSearchText:noop
+    }),
+    review:Object.freeze({date:()=> '2026-11-16',flushPending:async()=>true,settled:async()=>true}),session:Object.freeze({settled:async()=>true}),
+    view:Object.freeze({
+      documentFor:editor=>editor.dataset.areaKey==='alpha'?Object.freeze({documentId:'area:alpha',label:'Alpha',initialValue:alphaCanonical,maxWords:100,surface:'note'}):editor.dataset.areaKey==='zeta'?Object.freeze({documentId:'area:zeta',label:'Zeta',initialValue:'WG1:zeta',maxWords:100,surface:'note'}):null,
+      render:()=>true,plain:value=>String(value||'').replace(/^WG1:/u,''),visible:()=>true,validatedInput:()=>null,applyOwnership:noop
+    }),
+    activation:Object.freeze({kinds:Object.freeze({BACKGROUND:'background',ORDINARY_FOCUS:'focus',VISIBILITY_RETURN:'visible',OWNERSHIP_TAKEOVER:'ownership',DATE_ROLLOVER:'rollover',EXIT:'exit'}),subscribe:noop}),
+    diagnostics:Object.freeze({capture:noop})
+  }));
+  assert.equal(await runtime.activate(field),true);field.dataset.richSyncState='saving';alphaCanonical='WG1:alpha-remote';
+  assert.equal(runtime.reconcileExternal(field,alphaCanonical,'a2').status,'conflict');assert.equal(field.dataset.richExternalConflict,'1');
+  assert.equal(runtime.closeField(field),true);assert.equal(field.dataset.richExternalConflict,undefined,'closing an old rich document clears its conflict marker before synchronous rebinding');
+  field.dataset.areaKey='zeta';field.dataset.noteRevision='z2';field.dataset.richSyncState='synced';field.value='Zeta visible';field.hidden=false;
+  destroyGate.resolve();for(let i=0;i<8;i++)await Promise.resolve();
+  assert.equal(field.value,'Zeta visible','settled disposal of Alpha must not restore Alpha canonical text into the rebound Zeta field');
+  assert.equal(field.dataset.noteRevision,'z2','old disposal must not rewrite the new note revision');
+  assert.deepEqual(syncStates,[['alpha','conflict']],'old conflict settlement must not publish a synced state for the new note');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'application-outcomes',checks:['OS duplicate and recurrence','permission reversal and superseded delivery','committed save versus follow-up failure','verified final Active Session checkpoint ordering','awaited active-Review lifecycle flush','failed rollover stays on surviving session/date','validated rich-input Event reaches Review save options','date-stable reflection baseline','reflection commit versus Library refresh failure','note binding ownership/id fences and Plan partial failure','P5.6B stale Saved-Day read fence','P5.6B summary refresh failure containment','untouched Reflection writer settlement','failure resolution and recurrence','scoped cancellation and stale callbacks','local-save priority','export cancellation/failure/verification outcomes','P5.7B kept-version generation/convergence fencing','P5.6 rich-editor conflict rebind fencing']}));
