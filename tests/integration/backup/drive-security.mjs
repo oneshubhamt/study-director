@@ -27,13 +27,13 @@ async function waitFor(predicate,message){
 }
 
 {
-  let releaseAuthorization;const authorizationGate=new Promise(resolve=>{releaseAuthorization=resolve;});
-  let current=QA_PROFILE_ID;const {state,provider}=createHarness({profileId:()=>current});state.authorizationGate=authorizationGate;
-  await provider.prepare();const pending=provider.authorize();await new Promise(resolve=>setImmediate(resolve));
-  current='prof_qa_mve00000_abcdef02';releaseAuthorization();
+  let current=QA_PROFILE_ID;const {state,provider}=createHarness({profileId:()=>current});state.authorizationHold=true;
+  await provider.prepare();const pending=provider.authorize();
+  await waitFor(()=>typeof state.authorizationResponder==='function','the delayed OAuth callback must be captured before the profile switch');
+  current='prof_qa_mve00000_abcdef02';state.authorizationResponder();
   await assert.rejects(pending,/profile changed before Google authorization completed/u);
   assert.equal(provider.connected(),false,'a late OAuth response must not authorize a successor profile');
-  state.authorizationGate=null;await provider.authorize();assert.equal(provider.connected(),true,'the successor profile can authorize independently');
+  state.authorizationHold=false;await provider.authorize();assert.equal(provider.connected(),true,'the successor profile can authorize independently');
   await provider.disconnect();
 }
 
