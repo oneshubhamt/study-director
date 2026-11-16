@@ -2907,6 +2907,22 @@ async function recoverInterruptedRestore(){
     await releaseRestoreScratch(durable.payload.blob,'backup.recovery-file-release');OperationDiagnostics.finish({pending:true},traceId);return Object.freeze({recovered:false,pending:true});
   }
   requireBackupMutationControl('recovering an interrupted restore');
+  // "verified" is marked only after the committed data was checked against
+  // what the restore or sync meant to write: its change is complete, and only
+  // the upload-cache rebuild and the clearing of this journal were cut off.
+  // The result is kept and those two steps finish now. Every earlier phase
+  // rolls back to the safety copy. If finishing fails, the journal stays and
+  // the next start tries again.
+  if(durable.state.phase==='verified')return runExclusive('restore-recovery',()=>withPersistenceSuppressed(async()=>{
+    try{
+      await rebaseRepositoryPreparationAcceleration('verified-restore-kept',freeze({allowDurableProtected:true}));
+      await AppData.restoreJournal.clear(durable.state.id);clearFault();
+      OperationDiagnostics.finish({recovered:false,kept:true},traceId);return freeze({recovered:false,kept:true});
+    }catch(error){
+      failClosed(`The last restore was verified, but finishing it could not complete: ${error&&error.message||error}. Reload to try again.`);
+      OperationDiagnostics.fail(error,{},traceId);throw error;
+    }finally{await releaseRestoreScratch(durable.payload.blob,'backup.recovery-file-release');}
+  }));
   return runExclusive('restore-recovery',()=>withPersistenceSuppressed(async()=>{
     const recoveryNotice=presentation.begin('file','startup-recovery',{id:'startup-recovery',surfaceId:'library-status',foreground:false,label:'Local recovery',message:'Recovering an interrupted restore from the verified safety copy…'});
     try{

@@ -138,7 +138,7 @@ let corruptAfterImportOnce=false;
 let corruptPostCommitReadOnce=false;
 let cancelDuringBatchOnce=false;
 let restoreJournal=null;
-let failStartupRollbackOnce=false;
+let failStartupRollbackOnce=false,failJournalClearOnce=false,preparationRebases=0;
 let activeSessionBlocking=false;
 let selectIncomingSavedDay=false;
 let exportSaveStatus='downloaded',chooseSaveResult=()=>Promise.resolve(null);const chosenNames=[];
@@ -191,8 +191,8 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreJournalPrepare:async value=>{restoreJournal={state:{id:value.id},payload:value};return restoreJournal;},
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
-    restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);restoreJournal=null;return true;},
-    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>Object.freeze({epoch:null,stamps:Object.freeze([])}),preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],
+    restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);if(failJournalClearOnce){failJournalClearOnce=false;throw new Error('injected journal clear interruption');}restoreJournal=null;return true;},
+    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>{preparationRebases++;return Object.freeze({epoch:null,stamps:Object.freeze([])});},preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],
     installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),...keptReviews.ports,reconciliationBaseReadDayAncestry:async()=>freeze({}),reconciliationBaseWrite:async()=>true
   }),
   exports:freeze({...testProcessing,followProtection:async()=>false,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
@@ -388,9 +388,10 @@ currentNotes=notes;
 restoring=false;
 
 // A terminated standalone or managed restore can leave the durable journal at
-// any commit boundary. Startup must replay the same verified pre-restore state
-// for every phase, never infer success from a partially written phase marker.
-const crashPhases=["prepared","applying-assets","assets-committed","applying-saved-day-state","saved-day-state-committed","applying-notes","notes-committed","applying-pending-reviews","applying-active-session","active-session-committed","applying-personal-data","verifying","verified","startup-rolling-back"];
+// any commit boundary. Before "verified", startup must replay the same
+// verified pre-restore state, never infer success from a partial phase marker
+// (a rollback's own phases, such as "rollback-verified", roll back again).
+const crashPhases=["prepared","applying-assets","assets-committed","applying-saved-day-state","saved-day-state-committed","applying-notes","notes-committed","applying-pending-reviews","applying-active-session","active-session-committed","applying-personal-data","verifying","version-restore-verifying","rollback-verified","startup-rolling-back"];
 for(const [index,phase] of crashPhases.entries()){
   importedDailyRecords.splice(0,importedDailyRecords.length,freeze({version:16,recordKind:'study',date:'2026-08-04',reflection:'interrupted '+phase,savedAt:'2026-08-04T20:00:00.000Z'}));
   currentNotes=freeze({Corrupted:normalizeNote({key:'Corrupted',text:'interrupted '+phase},'Corrupted')});
@@ -404,6 +405,26 @@ for(const [index,phase] of crashPhases.entries()){
   assert.deepEqual(Object.keys(currentNotes).sort(),['Economics','Ethics'],phase+' restores the original note set');
   assert.equal(currentNotes.Ethics.text,notes.Ethics.text,phase+' restores the original note bytes');
   assert.equal(restoreJournal,null,phase+' clears the journal only after verified rollback');
+}
+// "verified" is marked only after the commit was checked: the restore or sync
+// had finished, and only its cache rebuild and journal clear were cut off.
+// Startup keeps the result, finishes those steps, and clears the journal; if
+// finishing fails, the journal stays and the next start tries again.
+{
+  const keptRecords=[freeze({version:16,recordKind:'study',date:'2026-08-05',reflection:'verified restore',savedAt:'2026-08-05T20:00:00.000Z'})];
+  importedDailyRecords.splice(0,importedDailyRecords.length,...keptRecords);
+  currentNotes=freeze({Kept:normalizeNote({key:'Kept',text:'verified restore'},'Kept')});
+  const keptNotes=currentNotes,journal=()=>({state:{id:'restore_crash_verified_00000001',phase:'verified'},payload:{id:'restore_crash_verified_00000001',blob:created.blob,filename:created.filename}});
+  restoreJournal=journal();failJournalClearOnce=true;const rebasesBefore=preparationRebases;
+  await assert.rejects(()=>runtime.controller.recoverInterruptedRestore(),/injected journal clear interruption/u);
+  assert.ok(restoreJournal,'a verified restore whose journal could not be cleared keeps its journal');
+  assert.deepEqual(importedDailyRecords,keptRecords,'a failed finish never rolls back the verified result');
+  const result=await runtime.controller.recoverInterruptedRestore();
+  assert.deepEqual({...result},{recovered:false,kept:true},'the next start keeps the verified result');
+  assert.equal(restoreJournal,null,'and clears its journal');
+  assert.deepEqual(importedDailyRecords,keptRecords,'the restored Saved Days stay');
+  assert.equal(currentNotes,keptNotes,'the restored notes stay');
+  assert.equal(preparationRebases-rebasesBefore,2,'the upload-cache rebuild runs on each attempt');
 }
 assert.equal(backupPresentation.read('file','startup-recovery').outcome,'local-recovery-completed');
 assert.equal(backupPresentation.read('file','startup-recovery').lifecycle,'succeeded');
