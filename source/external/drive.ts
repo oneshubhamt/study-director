@@ -1207,7 +1207,8 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     return repositoryUpload(file,driveOperationContext(options));
   }
   function rootRepositoryDelete(ref:ItemRef,options:{signal?:AbortSignal|null|undefined}={}):ReturnType<typeof repositoryDelete>{
-    return repositoryDelete(ref,options,EMPTY_DRIVE_OPERATION);
+    const normalized=options.signal===undefined?{}:{signal:options.signal};
+    return repositoryDelete(ref,normalized,EMPTY_DRIVE_OPERATION);
   }
   function repositoryTransport(base:DriveOperation=EMPTY_DRIVE_OPERATION):RepositoryTransport{
     const root=base===EMPTY_DRIVE_OPERATION;
