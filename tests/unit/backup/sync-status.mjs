@@ -206,4 +206,37 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   pending[2](false);await third;await Promise.resolve();
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:21,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:21,hostLifecycleCases:1}));
+
+{
+  const host=registry.require('sync-status-host',1);
+  let captured=null;
+  const statusPresentation=Object.freeze({
+    status:input=>{
+      captured=input;
+      return Object.freeze({ring:'off',badge:'',slow:false,count:0,unseen:0,label:'Only on this device',headline:'Only on this device',detail:'',action:null,items:Object.freeze([])});
+    },
+    read:()=>null,connectProgress:()=>{throw new Error('no connect card expected');},subscribe:()=>()=>{}
+  });
+  const providers=Object.freeze({locationStatus:()=>null,subscribeStatus:()=>()=>{},wakeBackground:()=>true});
+  const controller=host.createController(Object.freeze({
+    document:{getElementById:()=>null,addEventListener(){}},
+    providers:()=>providers,presentation:statusPresentation,
+    device:()=>Object.freeze({
+      supported:true,connected:true,mode:'connected',busy:true,foregroundKind:'connect',backingUp:false,
+      maintenanceBusy:false,locked:false,nextEligibleAt:'2026-11-16T10:00:00.000Z',retryBackoffCapped:false,
+      lastBackupAt:'2026-11-16T09:00:00.000Z'
+    }),
+    protection:()=>null,keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
+    profileKey:()=>'profile-a',profileEmail:()=>'',profileName:()=>'Student',deviceName:id=>id,
+    markDriveRequested:()=>{},storageIssues:()=>[],unsupportedDataHeld:()=>false,backupReminder:()=>'',updateReady:()=>false,
+    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,
+    actions:Object.freeze({closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>true,applyUpdate:()=>true,connectDevice:()=>true,openExecute:()=>true,continueSession:()=>true,openData:()=>true}),
+    environment:Object.freeze({window:{addEventListener(){}},now:()=>0,online:()=>true,visible:()=>true,setTimeout:()=>1,clearTimeout:()=>{},setInterval:()=>1}),
+    capture:()=>{}
+  }));
+  controller.render();
+  assert.equal(captured.device.foregroundKind,'connect','the checked host preserves Device Folder operation kind for status wording');
+  assert.equal(captured.device.lastBackupAt,'2026-11-16T09:00:00.000Z','the checked host preserves Device Folder backup time');
+}
+
+console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:21,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:21,hostLifecycleCases:1,hostProjectionCases:1}));
