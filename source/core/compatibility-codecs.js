@@ -195,10 +195,22 @@ registry.define('compatibility-codecs',1,()=>{
     // named their device): the same review, its device and time not recorded.
     // null unless it is an exact, sound v1 review; the current codec accepts
     // only what it reads back unchanged, so nothing else changes.
+    // A session kept for review holds the session in the format it had when
+    // kept: one kept by SDVB75F24 or older holds an ActiveSession older than
+    // 11. Version 10 reads as 11 with only its version changed (11 added the
+    // status finished); anything older goes through the older-session reader.
+    // Such a review, in either form, is otherwise unchanged.
     const PENDING_REVIEW_V1_KEYS=['base','id','kept','keptAt','ref','resolvedAt','subject','version'].join('|');
+    const olderKeptSession=value=>value.subject==='session'&&!!value.kept&&typeof value.kept==='object'&&!Array.isArray(value.kept)&&Number(value.kept.version)<DATA_CONTRACT.schemas.ActiveSession.version;
+    const currentKeptSession=kept=>Number(kept.version)===10?{...kept,version:DATA_CONTRACT.schemas.ActiveSession.version}:activeSession(kept);
     function pendingReview(value){
-      if(!value||typeof value!=='object'||Array.isArray(value)||value.version!==1||Object.keys(value).sort().join('|')!==PENDING_REVIEW_V1_KEYS)return null;
-      return PendingReviewCodec.normalize({...value,version:PendingReviewCodec.version,keptFrom:'',keptChangedAt:''});
+      if(!value||typeof value!=='object'||Array.isArray(value))return null;
+      let review;
+      if(value.version===1&&Object.keys(value).sort().join('|')===PENDING_REVIEW_V1_KEYS)review={...value,version:PendingReviewCodec.version,keptFrom:'',keptChangedAt:''};
+      else if(value.version===PendingReviewCodec.version&&olderKeptSession(value))review=value;
+      else return null;
+      if(olderKeptSession(review)){const kept=currentKeptSession(review.kept);if(!kept)return null;review={...review,kept};}
+      return PendingReviewCodec.normalize(review);
     }
     return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,note,noteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData,pendingReview});
   }

@@ -353,6 +353,11 @@ function validateBackupManifest(manifest,gzip,{binaryV10=false}={}){
 // in its note deletion history.
 // A session saved before it named its device (v9) comes in as this device's.
 function olderActiveSession(value){return Number(value&&value.version)<DATA_CONTRACT.schemas.ActiveSession.version;}
+// A version kept for review in the current form that holds a session in an
+// older ActiveSession format (kept by SDVB75F24 or older).
+function olderSessionReview(value){return !!value&&typeof value==='object'&&Number(value.version)===PendingReviewCodec.version&&value.subject==='session'&&!!value.kept&&typeof value.kept==='object'&&olderActiveSession(value.kept);}
+// Containers from before reviews named their device hold only the v1 form.
+function storedPendingReview(value,reviewV1){return reviewV1?Number(value?.version)===1?CompatibilityCodec.pendingReview(value):null:olderSessionReview(value)?CompatibilityCodec.pendingReview(value):PendingReviewCodec.normalize(value);}
 function legacyBackupItem(version,entityType){return entityType==='note'?Number(version)<=RELEASED_BACKUP_VERSION:Number(version)<RELEASED_BACKUP_VERSION;}
 function withNoteIdDeletions(manifest,nameKeyed){
   if(!manifest||!nameKeyed||!manifest.noteDeletions.length)return manifest;
@@ -367,7 +372,7 @@ function sanitizeChunkedBackupItem(entityType,item,{legacy=false,reviewV1=false}
   if(entityType==='activeSession')return legacy||olderActiveSession(item)?CompatibilityCodec.activeSession(item):ActiveSessionCodec.sanitizeCurrent(item);
   if(entityType===LEGACY_REFLECTION_DRAFT_TYPE){if(!legacy||!item||typeof item!=='object'||Array.isArray(item)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(String(item.date||'')))return null;return freeze({date:String(item.date)});}
   if(entityType==='checkpointManifest')return validateProtectedCheckpointManifest(item);
-  if(entityType===PENDING_REVIEW_TYPE)return reviewV1?CompatibilityCodec.pendingReview(item):PendingReviewCodec.normalize(item);
+  if(entityType===PENDING_REVIEW_TYPE)return storedPendingReview(item,reviewV1);
   return null;
 }
 async function parseChunkedBackupMetadata(file,options={},context={}){
@@ -631,8 +636,7 @@ return Object.freeze({
   currentProtectedManifestNames,
   normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy||olderActiveSession(value)?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),
-  normalizePendingReview:value=>{const clean=PendingReviewCodec.normalize(value);return clean?freeze(clean):null;},
-  legacyPendingReview:value=>{const clean=CompatibilityCodec.pendingReview(value);return clean?freeze(clean):null;},
+  storedPendingReview:(value,{reviewV1=false}={})=>{const clean=storedPendingReview(value,reviewV1);return clean?freeze(clean):null;},
   attachmentCoverage:backupAttachmentCoverage,
   missingAttachmentWarning:backupMissingAttachmentWarning,
   normalizeAssetDescriptors:backupSanitizeAssetDescriptors

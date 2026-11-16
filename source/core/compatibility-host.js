@@ -298,11 +298,14 @@ registry.define('compatibility-host',1,()=>{
       for(const row of rows){const key=String(row&&row.key||'');if(!key.startsWith(LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX))continue;const fileName=String(row?.value?.backupFile?.name||'');requireOwnership();await metadata.removeRow(key);removed++;if(fileName){try{await metadata.releaseBackupFile(fileName);}catch{ /* stale compatibility scratch files are non-authoritative */ }}}
       return freeze({status:migrated||removed?'migrated':'not-needed',migrated,removed});
     }
-    // Versions kept for review in their v1 form (before they named the device
-    // whose copy held them) take the current form, unchanged otherwise, each
-    // checked back after writing. One of unknown shape stops the step with it
-    // left as it was.
-    const pendingReviewRows=rows=>rows.filter(row=>String(row&&row.key||'').startsWith(appMeta.pendingReviewPrefix)&&Number(row?.value?.version)===1);
+    // Versions kept for review in an older form take the current form,
+    // unchanged otherwise, each checked back after writing: the v1 form
+    // (before they named the device whose copy held them), and a session kept
+    // in an older ActiveSession format (SDVB75F24 and older), which this
+    // build cannot read until converted. One of unknown shape stops the step
+    // with it left as it was.
+    const olderReview=value=>Number(value?.version)===1||!!metadata.legacyPendingReview(value);
+    const pendingReviewRows=rows=>rows.filter(row=>String(row&&row.key||'').startsWith(appMeta.pendingReviewPrefix)&&olderReview(row?.value));
     async function migratePendingReviews(requireOwnership){
       let migrated=0;
       for(const row of pendingReviewRows(await metadata.listRows())){
@@ -317,7 +320,7 @@ registry.define('compatibility-host',1,()=>{
     }
     async function verifyRetiredHostCompatibility(){
       const rows=await metadata.listRows(),present=[];
-      for(const row of pendingReviewRows(rows))present.push(`${String(row.key)}:v1`);
+      for(const row of pendingReviewRows(rows))present.push(`${String(row.key)}:${Number(row.value?.version)===1?'v1':'older-session'}`);
       for(const row of rows){const key=String(row&&row.key||'');if(key.startsWith(LEGACY_BACKUP_PROVIDER_OPERATION_PREFIX))present.push(key);}
       const device=rows.find(row=>String(row&&row.key||'')===appMeta.deviceFolder);
       if(device&&Number(device.value?.version)!==4)present.push(`${appMeta.deviceFolder}:v${Number(device.value?.version)||'?'}`);

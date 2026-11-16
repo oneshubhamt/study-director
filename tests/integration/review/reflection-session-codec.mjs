@@ -112,6 +112,32 @@ assert.equal(codec.canonicalize(extra),null,'retired ReflectionDraft lineage fie
     assert.deepEqual({...older,version:10},codec.sanitizeCurrent({...session,status}),'nothing but the version changes');
   }
   assert.equal(codec11.sanitizeCurrent({...base,status:'paused'}),null,'a status outside active, suspended and finished is refused');
+
+  // A session kept for review by SDVB75F24 holds it in format 10. Read as it
+  // is, the review failed the current codec, was held as if from a newer
+  // version and paused Drive sync. The compatibility conversion gives the
+  // kept session the current version and changes nothing else; it leaves a
+  // current review, and a review of anything else, to the current codec.
+  const contractReviews=Object.freeze({schemas:Object.freeze({...contract11.schemas,PendingReview:Object.freeze({version:2})})});
+  const reviews=RecordCodecs.createPendingReviewCodec(Object.freeze({dataContract:contractReviews,dailyRecordCodec,activeSessionCodec:codec11,personalDataCodec:Object.freeze({normalize:value=>value}),helpers:Object.freeze({sameDataValue:helpers.sameDataValue,randomBytes:size=>new Uint8Array(size)})}));
+  const convert=CompatibilityCodecs.create(Object.freeze({
+    limits,dataContract:contractReviews,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),pendingReviewCodec:Object.freeze({version:2,normalize:reviews.normalize}),dailyRecordCodec,activeSessionCodec:codec11,
+    helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue:helpers.sameDataValue,sanitizePracticeRun:value=>value,activeSessionScheduleFingerprint:helpers.activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText:helpers.isCanonicalScheduleText}),
+    timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_review_device'
+  }));
+  const keptV10={...codec.sanitizeCurrent({...session,status:'suspended'})};
+  const review=Object.freeze({version:2,id:'pr_'+'b'.repeat(32),subject:'session',ref:'session',keptAt:'2026-11-14T08:00:00.000Z',keptFrom:'inst_review_other_device',keptChangedAt:'2026-11-14T07:59:00.000Z',kept:keptV10,base:null,resolvedAt:''});
+  assert.equal(reviews.normalize(review),null,'the current codec cannot read a review holding a v10 session');
+  const converted=convert.pendingReview(review);
+  assert.ok(converted,'the conversion reads it');
+  assert.equal(converted.kept.version,11);
+  assert.deepEqual({...converted,kept:{...converted.kept,version:10}},review,'only the kept session\'s version changes');
+  assert.deepEqual(reviews.normalize(converted),converted,'and the result is a current review');
+  const reviewV1={version:1,id:'pr_'+'c'.repeat(32),subject:'session',ref:'session',keptAt:review.keptAt,kept:keptV10,base:null,resolvedAt:''};
+  assert.deepEqual(convert.pendingReview(reviewV1),{...reviewV1,version:2,keptFrom:'',keptChangedAt:'',kept:{...keptV10,version:11}},'a v1 review holding a v10 session takes both current forms');
+  assert.equal(convert.pendingReview(converted),null,'a current review is left to the current codec');
+  assert.equal(convert.pendingReview({...review,subject:'note',ref:'n_'+'d'.repeat(32),kept:{text:'x'}}),null,'so is a v2 review of anything but a session');
+  assert.equal(convert.pendingReview({...review,kept:{...keptV10,version:10,status:'paused'}}),null,'a kept session that is not sound is refused, not repaired');
 }
 
 console.log(JSON.stringify({status:'PASS',suite:'review-active-session-codec',reviewInActiveSession:true,legacyDraftMigrated:true,currentRequiresReview:true,retiredDraftLineageRejected:true},null,2));
