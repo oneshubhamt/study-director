@@ -107,7 +107,9 @@ try{
   })()`);
   assert.equal(conflictRebind.marked.status,'conflict','the mounted Alpha editor must enter the external-conflict path before rebinding');
   assert.equal(conflictRebind.marked.key,'alpha empty');assert.equal(conflictRebind.marked.conflict,'1');
-  assert.deepEqual(conflictRebind.rebound,{key:'zeta filled',value:'Durable Zeta note',conflict:'',revision:conflictRebind.rebound.revision},'old conflict disposal must not overwrite or poison the newly rebound Zeta editor');
+  assert.equal(conflictRebind.rebound.key,'zeta filled','the same Execute textarea must be rebound to Zeta');
+  assert.equal(conflictRebind.rebound.value,'Durable Zeta note','old conflict disposal must not overwrite the newly rebound Zeta text');
+  assert.equal(conflictRebind.rebound.conflict,'','old conflict state must not poison the newly rebound Zeta editor');
   assert.ok(conflictRebind.rebound.revision,'the rebound field carries the current Zeta note revision');
   assert.equal(conflictRebind.zeta,'Durable Zeta note');
   result.checks.conflictedEditorDisposalCannotOverwriteReboundTaskNote=true;
