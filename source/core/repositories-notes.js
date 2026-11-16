@@ -141,7 +141,8 @@ const repository=(()=>{
     const safeTitle=normalizeAreaName(title);
     if(!safeTitle||NoteKeys.isKey(safeTitle))return null;
     let id=idForTitle(safeTitle);
-    if(!id){id=newNoteId();setNote(id,{version:DATA_CONTRACT.schemas.Note.version,key:id,label:clampText(displayAreaName(label||safeTitle),APP_LIMITS.maxAreaNameChars),text:'',updatedAt:null});}
+    // Support Activities takes its fixed id, so every device's copy is one note.
+    if(!id){const support=NoteKeys.support;id=safeTitle===support.title&&!notes[support.id]&&!notes[NoteKeys.trash(support.id)]?support.id:newNoteId();setNote(id,{version:DATA_CONTRACT.schemas.Note.version,key:id,label:clampText(displayAreaName(label||safeTitle),APP_LIMITS.maxAreaNameChars),text:'',updatedAt:null});}
     return notes[id];
   }
   // What callers see of a note: its permanent id, and as `key` its title key

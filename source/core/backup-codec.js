@@ -357,22 +357,22 @@ function olderActiveSession(value){return Number(value&&value.version)<DATA_CONT
 // older ActiveSession format (kept by SDVB75F24 or older).
 function olderSessionReview(value){return !!value&&typeof value==='object'&&Number(value.version)===PendingReviewCodec.version&&value.subject==='session'&&!!value.kept&&typeof value.kept==='object'&&olderActiveSession(value.kept);}
 // Containers from before reviews named their device hold only the v1 form.
-function storedPendingReview(value,reviewV1){return reviewV1?Number(value?.version)===1?CompatibilityCodec.pendingReview(value):null:olderSessionReview(value)?CompatibilityCodec.pendingReview(value):PendingReviewCodec.normalize(value);}
+function storedPendingReview(value,reviewV1,older=false){return reviewV1?Number(value?.version)===1?CompatibilityCodec.pendingReview(value):null:olderSessionReview(value)||older&&CompatibilityCodec.olderReview(value)?CompatibilityCodec.pendingReview(value):PendingReviewCodec.normalize(value);}
 function legacyBackupItem(version,entityType){return entityType==='note'?Number(version)<=RELEASED_BACKUP_VERSION:Number(version)<RELEASED_BACKUP_VERSION;}
 function withNoteIdDeletions(manifest,nameKeyed){
   if(!manifest||!nameKeyed||!manifest.noteDeletions.length)return manifest;
   const noteDeletions=normalizeCheckpointNoteDeletions(manifest.noteDeletions.map(entry=>({key:CompatibilityCodec.noteKey(entry.key),deletedAt:entry.deletedAt})));
   return freeze({...manifest,noteDeletions});
 }
-function sanitizeChunkedBackupItem(entityType,item,{legacy=false,reviewV1=false}={}){
+function sanitizeChunkedBackupItem(entityType,item,{legacy=false,reviewV1=false,older=false}={}){
   if(jsonByteLength(item)>APP_LIMITS.backupMaxEntryBytes)throw new Error(`A ${entityType} entry exceeds the safe size limit.`);
   if(entityType==='personalData')return legacy?CompatibilityCodec.personalData(item):PersonalDataCodec.normalize(item);
   if(entityType==='dailyRecord'){assertSupportedSavedDate(item);return sanitizeImportedRecord(item,{legacy});}
-  if(entityType==='note')return legacy?CompatibilityCodec.note(item,item&&item.key):sanitizeCurrentNote(item,item&&item.key);
+  if(entityType==='note')return legacy||older&&CompatibilityCodec.olderNote(item)?CompatibilityCodec.note(item,item&&item.key):sanitizeCurrentNote(item,item&&item.key);
   if(entityType==='activeSession')return legacy||olderActiveSession(item)?CompatibilityCodec.activeSession(item):ActiveSessionCodec.sanitizeCurrent(item);
   if(entityType===LEGACY_REFLECTION_DRAFT_TYPE){if(!legacy||!item||typeof item!=='object'||Array.isArray(item)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(String(item.date||'')))return null;return freeze({date:String(item.date)});}
   if(entityType==='checkpointManifest')return validateProtectedCheckpointManifest(item);
-  if(entityType===PENDING_REVIEW_TYPE)return storedPendingReview(item,reviewV1);
+  if(entityType===PENDING_REVIEW_TYPE)return storedPendingReview(item,reviewV1,older);
   return null;
 }
 async function parseChunkedBackupMetadata(file,options={},context={}){
@@ -416,7 +416,9 @@ async function parseChunkedBackupMetadata(file,options={},context={}){
       actual[entityType]++;
       if(kind==='tombstone'){report.ignoredTombstones++;continue;}
       const legacyItem=legacyBackupItem(manifest.version,kind);
-      const clean=sanitizeChunkedBackupItem(kind,item,{legacy:legacyItem,reviewV1:Number(manifest.version)<REVIEW_ORIGIN_VERSION});
+      // A file older than this build's (v25 and before) can hold Support
+      // Activities under its retired title (registry: support-note-identity).
+      const clean=sanitizeChunkedBackupItem(kind,item,{legacy:legacyItem,reviewV1:Number(manifest.version)<REVIEW_ORIGIN_VERSION,older:Number(manifest.version)<DATA_CONTRACT.schemas.Backup.version});
       if(!clean){
         if(!legacyItem)throw new Error(`Current backup contains a noncanonical ${kind} entry.`);
         report.skipped++;
@@ -632,11 +634,14 @@ return Object.freeze({
   normalizeNote:sanitizeCurrentNote,
   // Backups made before notes had permanent ids keyed them by name.
   legacyNote:(value,key)=>CompatibilityCodec.note(value,key),
+  // A note an older build wrote under the retired Support Activities title.
+  olderNote:value=>CompatibilityCodec.olderNote(value),
+  olderReview:value=>CompatibilityCodec.olderReview(value),
   withNoteIdDeletions,
   currentProtectedManifestNames,
   normalizeImportedActiveSession:(value,{legacy=false}={})=>legacy||olderActiveSession(value)?CompatibilityCodec.activeSession(value):ActiveSessionCodec.sanitizeCurrent(value),
   normalizePersonalData:value=>PersonalDataCodec.normalize(value),
-  storedPendingReview:(value,{reviewV1=false}={})=>{const clean=storedPendingReview(value,reviewV1);return clean?freeze(clean):null;},
+  storedPendingReview:(value,{reviewV1=false,older=false}={})=>{const clean=storedPendingReview(value,reviewV1,older);return clean?freeze(clean):null;},
   attachmentCoverage:backupAttachmentCoverage,
   missingAttachmentWarning:backupMissingAttachmentWarning,
   normalizeAssetDescriptors:backupSanitizeAssetDescriptors

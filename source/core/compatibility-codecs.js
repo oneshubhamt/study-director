@@ -132,12 +132,16 @@ registry.define('compatibility-codecs',1,()=>{
       if(raw.startsWith(TRASH_PREFIX)){const old=raw.slice(TRASH_PREFIX.length).trim();return old?TRASH_PREFIX+derivedNoteId(TRASH_PREFIX+old):'';}
       const name=normalizeAreaName(raw);return name?derivedNoteId(name):'';
     }
+    // Support Activities was stored by builds up to SDVB75F28 under a
+    // reserved title; it takes its own name, keeping its id, links and text.
+    const supportLabel=label=>NoteKeys.retiredSupport(label)?NoteKeys.support.label:label;
     function note(value,keyHint=''){
-      const source=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!source||source.deleted===true)return null;
+      const given=value&&typeof value==='object'&&!Array.isArray(value)?value:null;if(!given||given.deleted===true)return null;
+      const source=typeof given.label==='string'?{...given,label:supportLabel(given.label)}:given;
       const current=DailyRecordCodec.sanitizeCurrentNote(source,keyHint);if(current)return current;
       const oldKey=String(source.key||keyHint||''),name=normalizeAreaName(oldKey.startsWith(TRASH_PREFIX)?'':oldKey),key=noteKey(oldKey),text=optionalEditorContent(source.text,APP_LIMITS.maxNoteChars);if(!key||text===null)return null;
       const label=optionalText(source.label,APP_LIMITS.maxAreaNameChars),updatedAt=normalizeImportedTimestamp(source.updatedAt,new Date().toISOString());if(!updatedAt)return null;
-      const title=label!==null&&normalizeAreaName(label)?label:name?clampText(displayAreaName(name),APP_LIMITS.maxAreaNameChars):null;if(!title)return null;
+      const title=label!==null&&normalizeAreaName(label)?label:name?supportLabel(clampText(displayAreaName(name),APP_LIMITS.maxAreaNameChars)):null;if(!title)return null;
       const candidate={version:DATA_CONTRACT.schemas.Note.version,key,label:title,text,updatedAt};
       return DailyRecordCodec.sanitizeCurrentNote(candidate,key);
     }
@@ -203,16 +207,22 @@ registry.define('compatibility-codecs',1,()=>{
     const PENDING_REVIEW_V1_KEYS=['base','id','kept','keptAt','ref','resolvedAt','subject','version'].join('|');
     const olderKeptSession=value=>value.subject==='session'&&!!value.kept&&typeof value.kept==='object'&&!Array.isArray(value.kept)&&Number(value.kept.version)<DATA_CONTRACT.schemas.ActiveSession.version;
     const currentKeptSession=kept=>Number(kept.version)===10?{...kept,version:DATA_CONTRACT.schemas.ActiveSession.version}:activeSession(kept);
+    // A kept version of Support Activities under its reserved title takes
+    // the note's own name, as the note does.
+    const retiredLabel=part=>!!part&&typeof part==='object'&&typeof part.label==='string'&&NoteKeys.retiredSupport(part.label);
+    const retiredSupportReview=value=>value.subject==='note'&&(retiredLabel(value.kept)||retiredLabel(value.base));
+    const relabelled=part=>retiredLabel(part)?{...part,label:NoteKeys.support.label}:part;
     function pendingReview(value){
       if(!value||typeof value!=='object'||Array.isArray(value))return null;
       let review;
       if(value.version===1&&Object.keys(value).sort().join('|')===PENDING_REVIEW_V1_KEYS)review={...value,version:PendingReviewCodec.version,keptFrom:'',keptChangedAt:''};
-      else if(value.version===PendingReviewCodec.version&&olderKeptSession(value))review=value;
+      else if(value.version===PendingReviewCodec.version&&(olderKeptSession(value)||retiredSupportReview(value)))review=value;
       else return null;
       if(olderKeptSession(review)){const kept=currentKeptSession(review.kept);if(!kept)return null;review={...review,kept};}
+      if(retiredSupportReview(review))review={...review,kept:relabelled(review.kept),base:relabelled(review.base)};
       return PendingReviewCodec.normalize(review);
     }
-    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,note,noteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData,pendingReview});
+    return freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord,note,noteKey,activeSession,localRecoveryEnvelope,protectedPreferences,personalData,pendingReview,olderNote:value=>retiredLabel(value),olderReview:value=>!!value&&typeof value==='object'&&retiredSupportReview(value)});
   }
   return freeze({format:'study-director.compatibility-codecs-module',contractVersion:1,create});
 });

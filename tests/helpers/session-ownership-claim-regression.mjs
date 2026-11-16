@@ -106,10 +106,14 @@ const lastStored=[...files.values()].sort((p,q)=>p.id.localeCompare(q.id)).at(-1
 const oldValue=JSON.parse(await lastStored.blob.text());
 const replaceLast=async value=>{const blob=new Blob([JSON.stringify(value)]);files.set(lastStored.id,freeze({...lastStored,blob,size:blob.size,digest:await sha256(blob)}));};
 const v2Value={...oldValue,version:2};delete v2Value.observedContentFingerprint;delete v2Value.handoffToken;
+const claimFormBefore=b.diagnosticConnections().find(row=>row.id==='google-drive')?.claimForm;
 await replaceLast(v2Value);
 const v2Projected=await b.readSessionClaim('google-drive');
+assert.equal(claimFormBefore,'current','a device that last read a current claim reports it current');
 assert.equal(v2Projected.state,oldValue.state);assert.equal(v2Projected.applies,true,'a v2 claim from an older device still applies to today');
 assert.equal(v2Projected.revision,oldValue.revision);assert.equal(v2Projected.observedContentFingerprint,'');assert.equal(v2Projected.handoffToken,'');
+const claimForm=runtime=>runtime.diagnosticConnections().find(row=>row.id==='google-drive')?.claimForm;
+assert.equal(claimForm(b),'older','Format cleanup learns the newest claim is in an older form');
 await replaceLast({format:'study-director.active-session-claim',version:1,date:DATE,epoch:oldValue.epoch,owner:A,observedRevision:50,claimedAt:'2026-10-27T09:00:00.000Z'});
 const plainProjected=await a.readSessionClaim('google-drive');
 assert.equal(plainProjected.applies,true);assert.equal(plainProjected.ownedHere,true,'a plain claim naming this device reads as owned here');

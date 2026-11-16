@@ -1916,7 +1916,7 @@ function convertNoteRescue(){
     const oldKey=String(rawEntry.key||rawKey),key=CompatibilityCodec.noteKey(oldKey);if(!key)throw new Error(`Note rescue ${oldKey||'?'} could not be converted safely. The browser copy was preserved.`);
     if(rawEntry.deleted){const updatedAt=normalizeTimestamp(rawEntry.updatedAt,null);if(updatedAt)out[key]={key,deleted:true,updatedAt};}
     else{const clean=CompatibilityCodec.note(rawEntry,oldKey);if(!clean)throw new Error(`Note rescue ${oldKey||'?'} could not be converted safely. The browser copy was preserved.`);out[clean.key]=clean;}
-    if(key!==oldKey)converted++;
+    if(key!==oldKey||!rawEntry.deleted&&!sameDataValue(out[key],rawEntry))converted++;
   }
   if(converted&&!LocalStorageContract.setJson(STORAGE_KEYS.noteRescue,{...raw,entries:out}))throw LocalStorageContract.lastError||new Error('Note rescue could not be converted.');
   return converted;
@@ -1935,12 +1935,28 @@ async function migrateNoteRows(){
     const notesStore=tx.objectStore(DB_NOTES_STORE),metaStore=tx.objectStore(DB_APP_META_STORE),meta=Meta.view(tx);
     const stage=()=>{if(!staged){stageCanonicalMutationEpoch(tx,['*']);staged=true;}};
     const writeFailed=(request,message)=>{request.onerror=()=>fail(request.error||new Error(message));};
+    // Support Activities, stored under its retired reserved title, takes its
+    // own name; a note already titled so (an Area of that name) moves aside
+    // to the first free "Support Activities (n)", so the two stay apart.
+    let aside=new Map();
+    const all=notesStore.getAll();
+    all.onerror=()=>fail(all.error||new Error('Note canonicalization read failed.'));
+    all.onsuccess=()=>{
+      const live=(all.result||[]).filter(row=>!NoteKeys.isTrash(row&&row.key)),titles=new Set(live.map(row=>normalizeAreaName(row&&row.label)));
+      if(!live.some(row=>NoteKeys.retiredSupport(row&&row.label)))return;
+      for(const row of live){
+        if(normalizeAreaName(row&&row.label)!==NoteKeys.support.title||!sanitizeCurrentNote(row,row.key))continue;
+        let n=2,label;do label=`${NoteKeys.support.label} (${n++})`;while(titles.has(normalizeAreaName(label)));
+        titles.add(normalizeAreaName(label));aside.set(String(row.key),label);
+      }
+    };
     const rows=notesStore.openCursor();
     rows.onerror=()=>fail(rows.error||new Error('Note canonicalization read failed.'));
     rows.onsuccess=event=>{
       if(!guard())return;
       const cursor=event.target.result;if(!cursor)return;
       const row=cursor.value;
+      if(aside.has(String(row&&row.key))){stage();writeFailed(cursor.update({...row,label:aside.get(String(row.key))}),'Note canonicalization write failed.');records++;cursor.continue();return;}
       if(sanitizeCurrentNote(row,row&&row.key)){cursor.continue();return;}
       const canonical=CompatibilityCodec.note(row,row&&row.key);
       if(!canonical){fail(new Error(`Note ${String(row&&row.key||'?')} could not be converted safely. The historical row was preserved.`));return;}

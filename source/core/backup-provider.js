@@ -51,6 +51,9 @@ registry.define('backup-provider',1,input=>{
   const MAINTENANCE_POLICY=Background.maintenance;
   // The formats of each location's kept versions, as its last cleanup left them.
   const formatsByProvider=new Map();
+  // Whether the newest Continue Here claim each location holds is in the
+  // current form or an older one (a device on an older build made it).
+  const claimFormByProvider=new Map();
   // The versions each location's last complete scan could not read (by id).
   const unreadableByProvider=new Map();
   const sessionWatchByProvider=new Map(),ownCommitIds=new Set();
@@ -168,7 +171,7 @@ registry.define('backup-provider',1,input=>{
     const previous=repositoryScopeByProvider.get(id)||'',pending=maintenanceHooks?await maintenanceHooks.read(id):null,persistedScope=String(pending&&pending.repositoryScope||'');repositoryScopeByProvider.set(id,scope);
     const changed=!!previous&&previous!==scope,stalePersisted=!!pending&&persistedScope!==scope;if(!changed&&!stalePersisted)return false;
     if(changed)await discardProviderPublication(selected);
-    recentHistoryByProvider.delete(id);verifiedHistoryByProvider.delete(id);formatsByProvider.delete(id);unreadableByProvider.delete(id);providerConvergenceRetryAttempts.delete(id);providerBackground(selected).clearAllScheduled();
+    recentHistoryByProvider.delete(id);verifiedHistoryByProvider.delete(id);formatsByProvider.delete(id);unreadableByProvider.delete(id);providerConvergenceRetryAttempts.delete(id);providerBackground(selected).clearAllScheduled();claimFormByProvider.delete(id);
     if(stalePersisted)await maintenanceHooks.clear(id,pending);
     OperationDiagnostics.mark('provider-repository-generation-reset',{provider:id,changed:true});return true;
   }
@@ -1282,6 +1285,7 @@ registry.define('backup-provider',1,input=>{
         throw newerSessionClaim(selected,latest);
       }
       const claim=await decodeSessionClaim(parsed,{signal});if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
+      claimFormByProvider.set(selected.id,normalizeSessionClaim(parsed)?'current':'older');
       if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim}));newerSessionClaimGone(selected);
       return freeze({claim,item:latest});
     }finally{
@@ -2385,7 +2389,7 @@ registry.define('backup-provider',1,input=>{
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   // Sync state of each shared location, for diagnostics: times and flags only.
   function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0),waitingFor:String(state.turnHolder?.device||''),waitingSince:String(state.turnHolder?.startedAt||''),waitingRenewedAt:String(state.turnHolder?.renewedAt||''),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
-  function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
+  function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,claimForm:claimFormByProvider.get(selected.id)||'',scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
   return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,syncRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,readSessionHandoffSource,claimSessionOwnership,releaseSessionClaim,readSessionClaim,watchSession,bringInSessionVersions,scheduleSharedSync,suspendBackground,repositoryScope});
 

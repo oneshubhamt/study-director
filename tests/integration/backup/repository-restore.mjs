@@ -38,7 +38,8 @@ const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec
 // The kept-version conversion records what it converted (the real one is in
 // tests/integration/backup/current-canonical-roundtrip.mjs).
 const convertedReviews=[];
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,pendingReview:item=>{if(item&&item.version===2&&item.subject==='session'&&Number(item.kept?.version)<11){convertedReviews.push(item.id);return {...item,kept:{...item.kept,version:11}};}if(!item||item.version!==1)return null;convertedReviews.push(item.id);return {...item,version:2,keptFrom:'',keptChangedAt:''};},dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,noteKey:legacyNoteKey,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+const retiredSupportReview=item=>item?.subject==='note'&&item.kept?.label==='__study_director_support_activities__';
+const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,olderNote:()=>false,olderReview:item=>retiredSupportReview(item),pendingReview:item=>{if(retiredSupportReview(item)){convertedReviews.push(item.id);return {...item,kept:{...item.kept,label:'Support Activities'}};}if(item&&item.version===2&&item.subject==='session'&&Number(item.kept?.version)<11){convertedReviews.push(item.id);return {...item,kept:{...item.kept,version:11}};}if(!item||item.version!==1)return null;convertedReviews.push(item.id);return {...item,version:2,keptFrom:'',keptChangedAt:''};},dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,noteKey:legacyNoteKey,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)}),entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?value:JSON.stringify(value)).byteLength;
@@ -202,6 +203,12 @@ assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manife
   const sessionReview=freeze({...reviewV2,id:'pr_'+'9'.repeat(32),subject:'session',ref:'session',kept:freeze({version:10})});
   assert.ok(await inspectWith(10,sessionReview),'a checkpoint holding a session kept by SDVB75F24 reads');assert.deepEqual(convertedReviews,[reviewV1.id,sessionReview.id],'its review goes through the conversion');
   await assert.rejects(inspectWith(8,reviewV2),/kept for review failed current-schema verification/u,'a v2 review in a version 8 checkpoint is refused');
+  // Support Activities kept under its reserved title (SDVB75F28 and older):
+  // a version 10 checkpoint converts it; a current one (11) is read by the
+  // current codec alone (registry: support-note-identity).
+  const supportReview=freeze({...reviewV2,id:'pr_'+'8'.repeat(32),kept:freeze({label:'__study_director_support_activities__',text:'their text'})});
+  assert.ok(await inspectWith(10,supportReview),'a version 10 checkpoint holding it reads');assert.equal(convertedReviews.at(-1),supportReview.id,'through the conversion');
+  const before=convertedReviews.length;await inspectWith(11,supportReview).catch(()=>null);assert.equal(convertedReviews.length,before,'a current checkpoint never converts it');
   // A version 5 manifest file keeps the logical-state fingerprint it was
   // written with: the same fields, in the same order, under the old names.
   const olderIdentity=value=>{
@@ -211,7 +218,7 @@ assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manife
     const p=value.protectedCheckpointManifest,deletions=(list,key)=>list.map(entry=>({[key]:entry[key],deletedAt:entry.deletedAt})).sort((a,b)=>a[key].localeCompare(b[key])||a.deletedAt.localeCompare(b.deletedAt));
     return {format:'study-director.managed-backup-logical-state',version:1,counts:value.counts,objects:rows,assets,deletions:{savedDays:deletions(p.savedDayDeletions,'date'),areaNotes:deletions(p.areaNoteDeletions,'key'),attachments:deletions(p.attachmentDeletions,'assetId')}};
   };
-  const publishedCurrent=JSON.parse(await plainText(publishedManifestBlob,false));assert.equal(publishedCurrent.version,10);
+  const publishedCurrent=JSON.parse(await plainText(publishedManifestBlob,false));assert.equal(publishedCurrent.version,11);
   const olderBase={...publishedCurrent,version:5,counts,protectedCheckpointManifest:protectedV2,objects:packedLayout},olderFingerprint=await sha256(JSON.stringify(olderIdentity(olderBase)));
   assert.notEqual(olderFingerprint,publishedCurrent.logicalFingerprint,'the old names give a different fingerprint');
   const olderManifest=await runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...olderBase,logicalFingerprint:olderFingerprint})])),{interactive:false});
@@ -230,7 +237,7 @@ const localAssetsBeforeLeaseCheck=new Map(assets);assets.clear();
 const managedPortableBefore=freeze({...portablePathMetrics}),candidate=await runtime.repository.inspect(manifest,leasedReadObject,{interactive:false,committed:true});
 assert.equal(portablePathMetrics.containers,managedPortableBefore.containers,'Managed repository inspection must not encode a temporary .sdbackup container.');
 assert.equal(portablePathMetrics.inspections,managedPortableBefore.inspections,'Managed repository inspection must not reopen/decode a temporary .sdbackup container.');
-assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,25);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
+assert.equal(candidate.kind,'study-director.backup-candidate');assert.equal(candidate.preview.formatVersion,26);assert.equal(candidate.preview.reconciliationCapable,true);assert.equal(candidate.preview.encrypted,true,'repository-source encryption state must survive the internal verified-snapshot boundary');assert.equal(candidate.preview.authenticated,true);assert.equal(candidate.preview.checkpoint.checkpointId,checkpointId);
 for(const objectId of attachmentObjectIds)assert.equal(leaseReleaseCounts.get(objectId)||0,0,'Managed candidate inspection must retain verified attachment leases until candidate restore/release.');
 const forgedCandidate=freeze({kind:'study-director.backup-candidate',verified:true,preview:candidate.preview,release:async()=>{}});
 await assert.rejects(()=>runtime.repository.bringIn(forgedCandidate),/current verified Study Director inspection/i,'A look-alike candidate must not cross the private verified-snapshot seal.');

@@ -41,7 +41,7 @@ assert.equal(MIGRATION_FACADE_CONTRACT.verification.backupCheck,'freshBackup');
 assert.equal(CANONICAL_BASELINE.policy.ordinaryRuntime,'current-canonical-only');
 
 const entries=allCompatibilityEntries();
-assert.equal(entries.length,29,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
+assert.equal(entries.length,30,'Every temporary compatibility path must remain explicitly inventoried until retirement.');
 assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
 for(const entry of entries){
   for(const file of entry.sourceFiles)assert.ok(fs.existsSync(path.join(root,file)),`${entry.id} references missing source ${file}`);
@@ -53,6 +53,7 @@ const evidenceByCompatibilityId=Object.freeze({
   'reflection-drafts-retirement':['tests/integration/storage/compatibility-retirement.mjs','tests/integration/review/reflection-session-codec.mjs'],
   'active-session-v7-domain-separation':['tests/integration/review/reflection-session-codec.mjs'],
   'active-session-v10':['tests/integration/review/reflection-session-codec.mjs'],
+  'support-note-identity':['tests/integration/storage/support-note-identity.mjs','tests/integration/rich-text/editor-persistence.mjs','tests/integration/backup/current-canonical-roundtrip.mjs'],
   'note-historical-rows':['tests/integration/rich-text/editor-persistence.mjs'],
   'note-recovery-v1':['tests/integration/rich-text/editor-persistence.mjs'],
   'daily-record-historical-shapes':['tests/integration/storage/canonical-baseline.mjs'],
@@ -158,7 +159,7 @@ assert.doesNotMatch(drive,/SDENC02|\.sdbackup/u,'Drive repository transport must
 assert.equal(CACHE_STORAGE_IDENTITIES.updateBridge,'study-director-update-bridge-v2');
 assert.match(sw,/CompatibilityFacade\.installBridgeRequired\(\)/u);
 
-assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,25);
+assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.completeBackup.version,26);
 assert.equal(CURRENT_FORMATS_OUTSIDE_MIGRATION.protectedBackup.version,2);
 assert.match(attachments,/m\.format!=='study-director\.attachments'\|\|m\.version!==1/u);
 

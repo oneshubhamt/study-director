@@ -35,7 +35,7 @@ const normalizeDrafts=value=>(Array.isArray(value)?value:[]).filter(x=>x&&isDate
 const dailyRecordCodec=freeze({sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate});
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,reflection:String(item.reflection||'')}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,olderNote:()=>false,olderReview:()=>false,dailyRecord:item=>dailyRecordCodec.sanitizeCurrentDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
@@ -75,7 +75,7 @@ const complete=await codec.encodeCompletion(3,counts,[checkpointChunk.checksum,p
 const metadata=new Blob([JSON.stringify(manifest)+'\n'+checkpointChunk.line+'\n'+personalChunk.line+'\n'+chunk.line+'\n'+JSON.stringify(complete)+'\n']);
 const portable=codec.createV10Container(metadata,{compression:'none',assetBlobs:[image]});
 const parsed=await codec.inspectCurrent(portable,{filename:'portable.sdbackup'});
-assert.equal(parsed.formatVersion,25);
+assert.equal(parsed.formatVersion,26);
 assert.equal(parsed.captureAuthority,'canonical-complete','Current standalone backups must persist canonical-complete authority inside the protected completion proof.');
 assert.equal(parsed.protectedCheckpointManifest.checkpointId,parsed.manifest.checkpoint.checkpointId);
 assert.equal(parsed.manifest.deviceId,undefined);

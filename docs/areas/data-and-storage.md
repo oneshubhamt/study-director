@@ -47,9 +47,9 @@ Temporary UI projections are not authoritative. After protected operations, cont
 | Device Folder settings | `deviceFolder`, format `study-director.device-folder-settings` | `automaticDeviceBackup`, format `study-director.device-backup-settings` |
 | Emergency copy of unsaved notes | `studyDirector.noteRescue.v1`, format `study-director.note-rescue` | `studyDirector.areaNoteRescue.v1`, format `study-director.area-note-rescue` |
 | Interrupted-restore journal | version 5, `noteDeletions` | version 4 and earlier, `areaNoteDeletions` |
-| Backup file | version 24, entity `note`, with `pendingReview` v2 | version 23 (kept versions in their v1 form); versions 20 and earlier, entity `areaNote` (21 and 22 came only from unreleased builds and are refused) |
+| Backup file | version 26, entity `note`, with `pendingReview` v2 | versions 24 and 25 (Support Activities under its reserved title; 24 also with ActiveSession v10); version 23 (kept versions in their v1 form); versions 20 and earlier, entity `areaNote` (21 and 22 came only from unreleased builds and are refused) |
 | Protected checkpoint manifest | version 3, `noteDeletions`, authority `notes` | version 2, `areaNoteDeletions`, authority `areaNotes` |
-| Repository checkpoint | version 9, kind `note`, with `pendingReview` v2 | version 8 (kept versions in their v1 form); versions 5 and earlier, kind `areaNote` (6 and 7 came only from unreleased builds and are refused) |
+| Repository checkpoint | version 11, kind `note`, with `pendingReview` v2 | versions 9 and 10 (Support Activities under its reserved title; 9 also with ActiveSession v10); version 8 (kept versions in their v1 form); versions 5 and earlier, kind `areaNote` (6 and 7 came only from unreleased builds and are refused) |
 | Version kept for review | `PendingReview` v2, with `keptFrom` and `keptChangedAt` | v1, which names no device: stored rows are rewritten at start (compatibility entry `pending-review-v1`) |
 
 The store is renamed in place inside the upgrade (rows are never copied): an older database opens at bridge version 8, which renames it, and the compatibility step then retires the bridge stores at version 9. The records and the emergency copy move in the first compatibility step, their value format renamed with them. Older backup files and checkpoints are read under the names they were written with: checksums, completion proofs, pack shards and the logical-state fingerprint are all checked against the written names, and what they hold is then read under the current ones. An older build refuses the version 9 database and the new backup versions until it is updated. Device Folder and Drive upload each note once more after the change, because the note objects are now written under the new kind.
@@ -104,6 +104,8 @@ What travels between devices is read inside a container whose version every buil
 3. Read the older form through the compatibility layer, with a registry entry (`contracts/compatibility.mjs`), never in the current codec.
 4. Add a row to the ledger, and say in the pull request that every device must update at about the same time.
 
+A change of value inside an unchanged record shape (F29: Support Activities' title) keeps the record's version and still raises the containers, so an older build waits for an update instead of misreading it; the current codec refuses the old value, which only the compatibility layer converts.
+
 A new kind of stored data is classed in the ledger as synced or local-only; a local-only form relies on its own version and the census above.
 
 ## Emergency copies
@@ -128,7 +130,7 @@ PDF attachments retain their OPFS reader while an in-app iframe or an external v
 
 Compatibility is deliberately isolated. Current canonical repositories/codecs do not depend on historical representations for ordinary operation.
 
-The compatibility layer covers live-install migration and historical external formats where still required. Live-install migration must not be removed until the explicit retirement-readiness contract is satisfied. Historical backup readers can remain even after installation migrations are retired.
+The compatibility layer covers live-install migration and historical external formats. None of it is removed until "Format cleanup" reads ready on every device in use; then all of it goes in one release (Release B).
 
 The layer is reached through a fixed set of entry points, pinned by `compatibility-isolation`: the facade's four call sites (start-up migration and proof, a tab taking over writing, opening a backup file), the IndexedDB upgrade bridge (its store rename and conversions), and `AppData.compatibility`, which only the facade uses. The repositories keep their migrations in one marked block (`/* COMPATIBILITY … END COMPATIBILITY */`); ordinary code never calls into it or reads the `dailyRecordMigration` marker. Retiring the layer deletes:
 
@@ -139,4 +141,4 @@ The layer is reached through a fixed set of entry points, pinned by `compatibili
 5. In the contracts: the compatibility registry, the obsolete and renamed identity lists and the `dailyRecordMigration` family.
 6. Their tests (`compatibility-*`, `retirement-readiness`) and legacy fixtures.
 
-Readers for old backup files (`backup-codec` versions 7 to 20) and for repository checkpoints version 5 and older, the ones released builds wrote, are a separate choice: keep them while old `.sdbackup` files and checkpoints should still open. Version 20 differs from today's in note names and ids and has no versions kept for review (registry: `name-keyed-notes-in-backups`). Backup file version 23 and checkpoint version 8 differ only in holding kept versions in their v1 form (registry: `pending-review-v1`, which also rewrites this device's stored v1 rows at start).
+Readers for old backup files and older repository checkpoints go too (owner, 2026-11-16: no old `.sdbackup` file needs to open again), so retirement leaves one current format everywhere. Version 20 differs from today's in note names and ids and has no versions kept for review (registry: `name-keyed-notes-in-backups`). Backup file version 23 and checkpoint version 8 differ only in holding kept versions in their v1 form (registry: `pending-review-v1`, which also rewrites this device's stored v1 rows at start).

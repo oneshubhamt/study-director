@@ -40,7 +40,7 @@ const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingRevi
   richText:freeze({assetIds:value=>rich.assetIds(value),assetIdValid:value=>rich.isAssetId(value),imageMimeTypeValid:value=>rich.isSupportedImageType(value)}),
   dailyRecordCodec:freeze({sanitizeHistoricalDailyRecord:value=>value,canonicalizeHistoricalDailyRecord:value=>value,sanitizeCurrentDailyRecord:value=>value,sanitizeImportedNote:value=>value,sanitizeCurrentNote:value=>value,isSupportedSavedDate:()=>true}),
   activeSessionCodec:freeze({sanitizeCurrent:value=>value}),
-  compatibilityCodec:freeze({format:'study-director.compatibility-codecs',contractVersion:1,dailyRecord:value=>value,note:value=>value,activeSession:value=>value,reflectionDraft:value=>value})
+  compatibilityCodec:freeze({format:'study-director.compatibility-codecs',contractVersion:1,olderNote:()=>false,olderReview:()=>false,dailyRecord:value=>value,note:value=>value,activeSession:value=>value,reflectionDraft:value=>value})
 }));
 
 const paragraph=param=>({type:'Paragraph',content:[{type:'Text',param}]});

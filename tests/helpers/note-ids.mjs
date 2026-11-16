@@ -8,7 +8,9 @@ const noteKeys=freeze({
   isTrash:value=>String(value||'').startsWith(TRASH_PREFIX)&&ID.test(String(value).slice(TRASH_PREFIX.length)),
   isKey:value=>noteKeys.isId(value)||noteKeys.isTrash(value),
   trash:id=>noteKeys.isId(id)?TRASH_PREFIX+id:'',
-  id:key=>noteKeys.isTrash(key)?String(key).slice(TRASH_PREFIX.length):noteKeys.isId(key)?String(key):''
+  id:key=>noteKeys.isTrash(key)?String(key).slice(TRASH_PREFIX.length):noteKeys.isId(key)?String(key):'',
+  support:freeze({id:'n_f0929787c2c33fc9',label:'Support Activities',title:'support activities'}),
+  retiredSupport:label=>titleKey(label)==='__study_director_support_activities__'
 });
 function derive(text){
   let hash=0xcbf29ce484222325n;
