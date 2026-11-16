@@ -173,7 +173,8 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
     connect:()=>new Promise(resolve=>pending.push(resolve)),
     scheduleSharedSync:()=>true,unlockSync:async()=>true,reviewSync:async()=>true,wakeBackground:()=>true,subscribeStatus:()=>()=>{}
   });
-  const fakeDocument={getElementById:()=>null,addEventListener(){}};
+  const connectRoot={hidden:true,dataset:{}};
+  const fakeDocument={getElementById:id=>id==='drive-connect-card'?connectRoot:null,addEventListener(){}};
   const controller=host.createController(Object.freeze({
     document:fakeDocument,providers:()=>providers,presentation,device:()=>null,protection:()=>null,
     keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
@@ -184,7 +185,10 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
     environment,capture:()=>{}
   }));
   const first=controller.connectDriveForProfile();
+  connectRoot.hidden=false;
   profile='profile-b';
+  assert.equal(controller.connectCardOpen(),false,'a profile switch retires the previous profile card immediately');
+  assert.equal(connectRoot.hidden,true,'a profile switch hides the previous profile card DOM');
   const second=controller.connectDriveForProfile();
   pending[0](true);await first;await Promise.resolve();
   assert.match(controller.renderConnectCard().status,/^Signing in/u,'an old profile connection cannot settle the successor card');
