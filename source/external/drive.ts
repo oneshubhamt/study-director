@@ -18,7 +18,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   type ProfileSnapshot=Readonly<{id:string;generation:number}>;
   type FolderReceipt=Readonly<{id:string;epoch:number;profile:ProfileSnapshot}>;
   type FolderState={receipt:FolderReceipt|null};
-  type DriveOperation=Readonly<{signal:AbortSignal|null;checkProtection:DriveCheck|null;checkSource:DriveCheck|null;folderState:FolderState}>;
+  type DriveOperation=Readonly<{signal:AbortSignal|null;checkProtection:DriveCheck|null;checkSource:DriveCheck|null;folderState:FolderState|null}>;
   type DriveOperationOptions={signal?:AbortSignal|null|undefined;checkProtection?:DriveCheck|null|undefined;checkSource?:DriveCheck|null|undefined;folderState?:FolderState|null|undefined};
   type DriveCapabilities={canAddChildren?:boolean;canDownload?:boolean};
   type DriveFile={id:string;name:string;size:string;version:string;modifiedTime:string;createdTime:string;mimeType:string;parents:readonly string[];ownedByMe?:boolean;shared?:boolean;trashed?:boolean;sha256Checksum:string;appProperties:Readonly<Record<string,string>>;capabilities:DriveCapabilities};
@@ -183,7 +183,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   const repositoryUploads=new Map<string,UploadSession>(),MAX_RETAINED_UPLOADS=16;
   let releaseFile:(file:Blob)=>unknown|PromiseLike<unknown>=async()=>{},receiveBackupStream:ReceiveStream|null=null;
 
-  const EMPTY_DRIVE_OPERATION:DriveOperation=Object.freeze({signal:null,checkProtection:null,checkSource:null,folderState:{receipt:null}});
+  const EMPTY_DRIVE_OPERATION:DriveOperation=Object.freeze({signal:null,checkProtection:null,checkSource:null,folderState:null});
   function driveOperationContext({signal=null,checkProtection=null,checkSource=null,folderState=null}:DriveOperationOptions={}):DriveOperation{
     return Object.freeze({
       signal:signal&&typeof signal.addEventListener==='function'?signal:null,
@@ -215,7 +215,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   async function assertDriveOperationCurrent(context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<void>{
     const operation=context||EMPTY_DRIVE_OPERATION;
     if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
-    const receipt=operation.folderState.receipt;if(receipt)assertProfileCurrent(receipt.profile);
+    const receipt=operation.folderState?.receipt;if(receipt)assertProfileCurrent(receipt.profile);
     await operation.checkProtection?.();
     await operation.checkSource?.();
     if(receipt)assertProfileCurrent(receipt.profile);
@@ -1203,7 +1203,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   function bindRepositoryDownload(base:DriveOperation):RepositoryTransport['download']{
     return ((ref:ItemRef,options?:DriveDownloadOptions)=>repositoryDownload(ref,options||{},base)) as RepositoryTransport['download'];
   }
-  function repositoryTransport(base:DriveOperation=driveOperationContext()):RepositoryTransport{
+  function repositoryTransport(base:DriveOperation=EMPTY_DRIVE_OPERATION):RepositoryTransport{
     const transport:RepositoryTransport={
       discardUploads:()=>repositoryUploads.clear(),
       list:opts=>repositoryList(opts,base),
