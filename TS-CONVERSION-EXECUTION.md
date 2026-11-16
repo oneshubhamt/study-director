@@ -1,13 +1,17 @@
 # TypeScript conversion — execution record
 
-## Current handoff — P5.8B OPEN — AUDITED, 2026-11-16
+## Current handoff — P5.8B IMPLEMENTED — AUDITED — TARGETED QA BLOCKED, 2026-11-16
 
-- **Branch / baseline:** `ts-exp` at `b137fb779466acb48529ebd98a1544db4f842abe`; P5.8A remains closed. P5.8B only; later groups are out of scope.
-- **Outcome:** move Drive connection and shared sync-status host behavior behind one checked owner: `connectDriveForProfile`, Connect-card lifecycle, status aggregation, ring/panel/card rendering, scheduling/subscriptions and typed action delegation.
-- **Invariants:** user-gesture authorization stays synchronous at the call boundary; deferred startup remains intact; Device Folder, password, kept-version, ownership/session and PWA actions delegate to their real owners; provider/profile/recovery contracts are reused rather than copied.
-- **Audit finding / correction required:** current late Drive-connect completion is not request/profile fenced and can clear connecting state or mutate a successor card. Connect-card hide must also be profile/generation bound so an old completion/timer cannot overwrite a reopened card or new profile.
-- **Targeted evidence planned:** strict types/lint/build/generated verification; `sync-status.mjs`, `notification-lifecycle.mjs`, `storage-reset-connect-recovery.mjs`; isolated Chromium `cold-start-drive-recovery`, `sync-and-profiles`, `sync-journeys` when the available targeted runner permits.
-- **Open:** implementation, objective reconciliation and targeted QA remain in progress. Full QA is explicitly not part of this pass.
+- **Branch / baseline:** `ts-exp`; P5.8B started from `b137fb779466acb48529ebd98a1544db4f842abe` (P5.8A closed). P5.9a has not started.
+- **Source outcome complete:** Drive connection and shared sync-status host behavior now has one checked owner, `source/core/sync-status-host.ts`, with real `BackupProviders`, `BackupPresentation`, Device Backup, protection, kept-version, profile/session, storage, PWA and action ports. `main.js` retains only deferred composition/wrappers; the old inline status/card state and rendering owner is gone.
+- **Preserved boundaries:** user-gesture Drive authorization remains synchronous at the provider call; deferred startup redraws are replayed after composition; baseline presentation subscription/network/visibility cadence is preserved; Device Folder status fields consumed by presentation are preserved; update policy remains delegated rather than re-owned here.
+- **Async/profile hardening:** Drive connects have request + profile generations; an abandoned completion retires only its own generation; profile switches retire/hide the stale card; completed-card hide timers are fenced by card identity + profile. A late completion/timer cannot mutate a successor request/profile.
+- **Readers/harnesses:** the background-work architecture witness follows the checked online-wake owner. The obsolete browser-only `syncStatusInput` exposure was removed; its sole failure-diagnostic consumer now reads canonical provider/device/storage/UI state instead of reopening a private host seam.
+- **Targeted green evidence:** repository checks `43902904815` at source checkpoint `c64227997ca6890ecaa138ac395966acf92dffbd` passed strict types/lint, targeted repository contracts, source build, generated verification and syntax. P5.8A regression lane `43902904401` passed. The changed-browser five-isolated-pass lane `43902904656` passed.
+- **P5.8B witnesses:** `sync-status.mjs`, `notification-lifecycle.mjs`, `storage-reset-connect-recovery.mjs`, build, `cold-start-drive-recovery.mjs` and `sync-and-profiles.mjs` pass in the P5.8B targeted lane. The required `sync-journeys.mjs` anchor remains **OPEN**.
+- **Open blocker is pre-existing, not P5.8B-owned:** differential run `43904994203` ran `sync-journeys.mjs` on the pinned P5.8A baseline and the P5.8B candidate in separate clean Chromium runners; both fail at the same `mid-upload: A settles` point with the same pending Review/session catch-up failure and convergence wait. P5.8B does not own that review/session/ownership path, so this pass did not weaken the witness or change unrelated engines.
+- **Closure status:** P5.8B implementation/reconciliation is complete, but parent P5.8 remains open until the required browser anchor is green or its baseline debt is explicitly dispositioned. The temporary P5.8B closure/differential workflows were removed after collecting evidence so `ts-exp` is not left with a permanently red lane.
+- **QA scope:** full QA was **not** run.
 
 ## Last verified application checkpoint
 
