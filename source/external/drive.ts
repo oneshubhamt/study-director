@@ -39,7 +39,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   type RepositoryListOptions={kind:RepositoryKind;signal?:AbortSignal|null;freshDigests?:boolean};
   type DriveDownloadOptions=DownloadOptions&{offset?:number;length?:number};
   type RangeDownload={blob:Blob;totalBytes:number;version:string};
-  type BlobDownload={blob:Blob;release:()=>unknown};
+  type BlobDownload={blob:Blob;release:()=>Promise<unknown>};
   type FindMarker=(parent:string,id:string,context?:DriveOperation)=>Promise<DriveFile|null>;
   type CoordinationDeleteOptions={parent:string;id:string;findMarker:FindMarker;context:DriveOperation;label:string};
   type UploadRecovery={complete:boolean;response:Response;offset:number};
@@ -679,7 +679,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     if(!validPublicationMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director publication metadata.'));
     const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),device=thisDevice();
     const writer=String(file.appProperties[PUBLICATION_DEVICE_MARKER]||'');
-    return Object.freeze({kind:PUBLICATION_KIND,id,device:DEVICE_PATTERN.test(writer)?writer:'',sameDevice:!!device&&writer===device,renews:file.appProperties[PUBLICATION_RENEWS_MARKER]==='1',startedAt:Number.isFinite(Date.parse(String(file.appProperties[PUBLICATION_STARTED_MARKER]||'')))?new Date(Date.parse(file.appProperties[PUBLICATION_STARTED_MARKER])).toISOString():createdAt,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
+    return Object.freeze({kind:PUBLICATION_KIND,id,device:DEVICE_PATTERN.test(writer)?writer:'',sameDevice:!!device&&writer===device,renews:file.appProperties[PUBLICATION_RENEWS_MARKER]==='1',startedAt:Number.isFinite(Date.parse(String(file.appProperties[PUBLICATION_STARTED_MARKER]||'')))?new Date(Date.parse(String(file.appProperties[PUBLICATION_STARTED_MARKER]||''))).toISOString():createdAt,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
   }
   function trustedCoordinationRemoteId(ref:Lease|ItemRef|null|undefined,parent:string,kind:string,idValid:(id:unknown)=>boolean):string{
     const id=String(ref&&ref.id||''),remoteId=String(ref&&ref['remoteId']||''),scope=String(ref&&ref['verificationScope']||'');
@@ -764,7 +764,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   }
   async function assertRepositoryPublication(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<CoordinationLease>{
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');let metadata:DriveFile|null=null;
-    if(ref&&ref['remoteId']){const candidate=await getFileMetadata(ref['remoteId'],context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validPublicationMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
+    if(ref&&ref['remoteId']){const candidate=await getFileMetadata(String(ref['remoteId']),context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validPublicationMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryPublication(parent,id,context);if(!metadata)throw noRetry(new Error('The Google Drive backup publication marker disappeared before commit. Retry the backup.'));
     const descriptor=publicationDescriptor(metadata,parent),created=Date.parse(descriptor.createdAt);if(!Number.isFinite(created)||driveNow()-created>=PUBLICATION_MAX_AGE_MS-PUBLICATION_ASSERTION_MARGIN_MS)throw noRetry(new Error('The Google Drive backup publication marker is too old to safely begin another commit step. Retry the backup.'));
     return descriptor;
@@ -772,7 +772,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   async function endRepositoryPublication(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<boolean>{
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');if(!publicationIdValid(id))return false;let metadata:DriveFile|null=null;
     const trustedRemoteId=trustedCoordinationRemoteId(ref,parent,PUBLICATION_KIND,publicationIdValid);if(trustedRemoteId)metadata=parseDriveFile({id:trustedRemoteId});
-    else if(ref&&ref['remoteId']){const candidate=await getFileMetadata(ref['remoteId'],context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validPublicationMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
+    else if(ref&&ref['remoteId']){const candidate=await getFileMetadata(String(ref['remoteId']),context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validPublicationMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryPublication(parent,id,context);if(!metadata)return false;
     return await deleteCoordinationMarker(metadata,{parent,id,findMarker:findRepositoryPublication,context,label:'Could not clear a completed Study Director backup publication marker.'});
   }
@@ -784,7 +784,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   async function renewRepositoryPublication(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<CoordinationLease>{
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');
     if(!publicationIdValid(id))throw noRetry(new Error('A Study Director publication marker has an invalid identity.'));
-    const next=await beginRepositoryPublication(context,ref&&ref['startedAt']);
+    const startedAt=typeof ref['startedAt']==='string'?ref['startedAt']:'';const next=await beginRepositoryPublication(context,startedAt);
     try{
       const remoteId=trustedCoordinationRemoteId(ref,parent,PUBLICATION_KIND,publicationIdValid);
       const previous=remoteId?await getFileMetadata(remoteId,context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;}):await findRepositoryPublication(parent,id,context);
@@ -854,15 +854,15 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   }
   async function assertRepositoryMaintenance(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<CoordinationLease>{
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');let metadata:DriveFile|null=null;
-    if(ref&&ref['remoteId']){const candidate=await getFileMetadata(ref['remoteId'],context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validMaintenanceMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
+    if(ref&&ref['remoteId']){const candidate=await getFileMetadata(String(ref['remoteId']),context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validMaintenanceMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryMaintenance(parent,id,context);if(!metadata)throw noRetry(new Error('The Google Drive repository-maintenance marker disappeared during cleanup. Maintenance stopped safely.'));
-    const descriptor=maintenanceDescriptor(metadata,parent),expires=Date.parse(descriptor.expiresAt),margin=MAINTENANCE_ASSERTION_MARGIN_MS;if(!Number.isFinite(expires)||driveNow()>=expires-margin)throw noRetry(new Error('The Google Drive repository-maintenance marker is too old to continue destructive cleanup safely.'));
+    const descriptor=maintenanceDescriptor(metadata,parent),expires=Date.parse(String(descriptor.expiresAt||'')),margin=MAINTENANCE_ASSERTION_MARGIN_MS;if(!Number.isFinite(expires)||driveNow()>=expires-margin)throw noRetry(new Error('The Google Drive repository-maintenance marker is too old to continue destructive cleanup safely.'));
     return descriptor;
   }
   async function endRepositoryMaintenance(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<boolean>{
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');if(!maintenanceIdValid(id))return false;let metadata:DriveFile|null=null;
     const trustedRemoteId=trustedCoordinationRemoteId(ref,parent,MAINTENANCE_KIND,maintenanceIdValid);if(trustedRemoteId)metadata=parseDriveFile({id:trustedRemoteId});
-    else if(ref&&ref['remoteId']){const candidate=await getFileMetadata(ref['remoteId'],context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validMaintenanceMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
+    else if(ref&&ref['remoteId']){const candidate=await getFileMetadata(String(ref['remoteId']),context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validMaintenanceMetadata(candidate,parent)&&candidate.appProperties[REPOSITORY_ID_MARKER]===id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryMaintenance(parent,id,context);if(!metadata)return false;
     return await deleteCoordinationMarker(metadata,{parent,id,findMarker:findRepositoryMaintenance,context,label:'Could not clear a completed Study Director repository-maintenance marker.'});
   }
@@ -875,7 +875,8 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     try{
       const remoteId=trustedCoordinationRemoteId(ref,parent,MAINTENANCE_KIND,maintenanceIdValid);
       const previous=remoteId?await getFileMetadata(remoteId,context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;}):await findRepositoryMaintenance(parent,id,context);
-      const expires=previous&&validMaintenanceMetadata(previous,parent)?Date.parse(maintenanceDescriptor(previous,parent).expiresAt):NaN;
+      if(!previous||!validMaintenanceMetadata(previous,parent))throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
+      const expires=Date.parse(String(maintenanceDescriptor(previous,parent).expiresAt||''));
       if(!Number.isFinite(expires)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||driveNow()>=expires)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
       await endRepositoryMaintenance(ref,context);return next;
     }catch(error){
@@ -918,8 +919,8 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     if(payload.nextPageToken||files.length>1)throw noRetry(new Error('Duplicate Study Director backup files were found. Nothing was changed.'));
     // A marked identity with unsafe metadata is *not* proof that the identity
     // is absent. Do not create a duplicate beside a malformed remote file.
-    if(files.length&&(!validRepositoryMetadata(files[0],parent,kind)||files[0].appProperties[REPOSITORY_ID_MARKER]!==id))throw noRetry(new Error('Google Drive found a backup identity with unsafe metadata. Nothing was uploaded.'));
-    return files[0]||null;
+    const found=files[0]||null;if(found&&(!validRepositoryMetadata(found,parent,kind)||found.appProperties[REPOSITORY_ID_MARKER]!==id))throw noRetry(new Error('Google Drive found a backup identity with unsafe metadata. Nothing was uploaded.'));
+    return found;
   }
   function repositoryUploadMetadata(file:Upload&{blob:Blob},parent:string):{name:string;parents:string[];mimeType:string;appProperties:Record<string,string>}{
     const properties:Record<string,string>={
@@ -979,11 +980,11 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       else{
         let recovered:UploadRecovery|null=null;
         if(session){
-          session.busy=true;
-          try{recovered=await recoverUploadPosition(session.url,upload.blob.size,0,context);}
+          const resumed=session;resumed.busy=true;
+          try{recovered=await recoverUploadPosition(resumed.url,upload.blob.size,0,context);}
           catch(error){if(asDriveError(error).code!=='DRIVE_UPLOAD_SESSION_EXPIRED')throw error;repositoryUploads.delete(uploadKey);session=null;}
-          if(recovered&&recovered.offset<session.offset){repositoryUploads.delete(uploadKey);throw noRetry(new Error('Google Drive reported a regressed upload position. Retry the backup.'));}
-          if(recovered)session.offset=recovered.offset;
+          if(session&&recovered&&recovered.offset<resumed.offset){repositoryUploads.delete(uploadKey);throw noRetry(new Error('Google Drive reported a regressed upload position. Retry the backup.'));}
+          if(session&&recovered)resumed.offset=recovered.offset;
         }
         if(!session){
           if(repositoryUploads.size>=MAX_RETAINED_UPLOADS){const old=[...repositoryUploads].find(([,row])=>!row.busy);if(!old)throw new Error('Google Drive upload continuation capacity is busy. Retry later.');repositoryUploads.delete(old[0]);}
@@ -1010,7 +1011,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     const parent=await ensureFolder(context),scope=repositoryVerificationScope(parent),trustedListedRef=!!(ref['remoteId']&&ref['verificationScope']===scope&&Number.isSafeInteger(Number(ref.size))&&Number(ref.size)>0&&/^[a-f0-9]{64}$/u.test(String(ref.digest||''))&&String(ref['remoteId']).length<=256);
     let metadata:DriveFile|null=null;
     if(trustedListedRef)metadata=parseDriveFile({id:String(ref['remoteId']),size:String(Number(ref.size))});
-    else if(ref['remoteId']){const candidate=await getFileMetadata(ref['remoteId'],context);if(validRepositoryMetadata(candidate,parent,ref['kind'])&&candidate.appProperties[REPOSITORY_ID_MARKER]===ref.id)metadata=candidate;}
+    else if(ref['remoteId']){const candidate=await getFileMetadata(String(ref['remoteId']),context);if(validRepositoryMetadata(candidate,parent,ref['kind'])&&candidate.appProperties[REPOSITORY_ID_MARKER]===ref.id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryFile(parent,ref['kind'],ref.id,context);
     if(!metadata){const error=asDriveError(new Error('A file required by this backup version is missing from Google Drive.'));error.code='REPOSITORY_OBJECT_MISSING';throw error;}
     if(!trustedListedRef){const descriptor=repositoryDescriptor(metadata,parent);if(ref.size&&descriptor.size!==Number(ref.size))throw noRetry(new Error('A Google Drive backup file changed size unexpectedly.'));if(ref.digest&&descriptor.digest!==String(ref.digest))throw noRetry(new Error('Google Drive backup verification metadata changed unexpectedly.'));}
@@ -1033,13 +1034,13 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       const latest=repositoryDescriptor(await getFileMetadata(metadata.id,context),parent);if(latest.remoteVersion!==descriptor.remoteVersion)throw new Error('The repository object changed while reading a range.');
       return Object.freeze({blob,totalBytes:total,version:descriptor.remoteVersion});
     }
-    const blob=await downloadBlob(metadata,context,typeof options.onProgress==='function'?options.onProgress:null);return Object.freeze({blob,release:()=>releaseFile(blob)});
+    const blob=await downloadBlob(metadata,context,typeof options.onProgress==='function'?options.onProgress:null);return Object.freeze({blob,release:async()=>releaseFile(blob)});
   }
   async function repositoryDelete(ref:ItemRef,options:{signal?:AbortSignal|null}={},baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<boolean>{
     if(!ref||!REPOSITORY_KINDS.has(ref['kind'])||!repositoryIdValid(ref['kind'],ref.id))throw new Error('A Study Director backup deletion request has an invalid identity.');
     const context=childDriveOperationContext(baseContext,{signal:options.signal??null});
     const parent=await ensureFolder(context);let metadata:DriveFile|null=null;
-    if(ref['remoteId']){const candidate=await getFileMetadata(ref['remoteId'],context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validRepositoryMetadata(candidate,parent,ref['kind'])&&candidate.appProperties[REPOSITORY_ID_MARKER]===ref.id)metadata=candidate;}
+    if(ref['remoteId']){const candidate=await getFileMetadata(String(ref['remoteId']),context).catch(error=>{if(Number(asDriveError(error).driveStatus)===404)return null;throw error;});if(candidate&&validRepositoryMetadata(candidate,parent,ref['kind'])&&candidate.appProperties[REPOSITORY_ID_MARKER]===ref.id)metadata=candidate;}
     if(!metadata)metadata=await findRepositoryFile(parent,ref['kind'],ref.id,context);if(!metadata)return false;
     const descriptor=repositoryDescriptor(metadata,parent);if(ref.remoteVersion&&descriptor.remoteVersion!==String(ref.remoteVersion))throw noRetry(new Error('A Study Director backup file changed version before deletion. Nothing was removed.'));if(ref.digest&&descriptor.digest!==String(ref.digest))throw noRetry(new Error('A Study Director backup file changed before deletion. Nothing was removed.'));
     const response=await authorizedFetch(`${DRIVE_API}/files/${encodeURIComponent(metadata.id)}`,{method:'DELETE'},API_TIMEOUT_MS,context);if(!response.ok&&response.status!==404)throw await apiError(response,'Could not remove an unused Study Director backup file from Google Drive.');return true;
@@ -1060,7 +1061,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     return Object.freeze(operationTransport);
   }
   function finiteSize(value:unknown):number|null{const size=Number(value);return Number.isFinite(size)&&size>=0?size:null;}
-  function exactParent(file:DriveFile|null|undefined,parent:string):boolean{return !!parent&&Array.isArray(file&&file.parents)&&file.parents.length===1&&file.parents[0]===parent;}
+  function exactParent(file:DriveFile|null|undefined,parent:string):boolean{return !!(file&&parent&&file.parents.length===1&&file.parents[0]===parent);}
   function receivedOffset(response:Response,totalBytes:number):number{
     const raw=String(response&&response.headers&&response.headers.get('Range')||'');
     const match=raw.match(/^bytes=0-(\d+)$/i);
@@ -1149,7 +1150,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     if(!response.ok)throw await apiError(response,'Could not verify the Google Drive backup.');
     return jsonResponse(response);
   }
-  async function readBoundedBlob(response:Response,expectedSize:number,context:DriveOperation=EMPTY_DRIVE_OPERATION,onProgress:((value:{loaded?:number;total?:number})=>void)|null=null):Promise<Blob>{
+  async function readBoundedBlob(response:Response,expectedSize:unknown,context:DriveOperation=EMPTY_DRIVE_OPERATION,onProgress:((value:{loaded?:number;total?:number})=>void)|null=null):Promise<Blob>{
     const expected=finiteSize(expectedSize);
     if(expected===null||expected<=0||expected>maxBackupBytes)throw noRetry(new Error('The selected Google Drive backup has invalid size metadata.'));
     const rawLength=response.headers.get('Content-Length');
@@ -1222,7 +1223,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       now:driveNow,
       listSessionClaims:opts=>repositoryList(Object.freeze({...opts,kind:'session-claim'}),base),
       uploadSessionClaim:file=>repositoryUpload(file,base),
-      downloadSessionClaim:async(ref,options)=>{const result=await repositoryDownload(ref,options||{},base);if('totalBytes' in result)throw new Error('Session claim download unexpectedly returned a byte range.');return result;},
+      downloadSessionClaim:async(ref,options)=>{const progress=options?.onProgress;const downloadOptions:DriveDownloadOptions={signal:options?.signal??null,...progress?{onProgress:value=>progress({loaded:value.loaded??0,total:value.total??0,phase:'download'})}:{}};const result=await repositoryDownload(ref,downloadOptions,base);if('totalBytes' in result)throw new Error('Session claim download unexpectedly returned a byte range.');return result;},
       deleteSessionClaim:ref=>repositoryDelete(ref,{},base),
       scope:()=>repositoryScope(base),
       beginOperation:options=>beginRepositoryOperation(options),
