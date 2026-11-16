@@ -139,8 +139,6 @@ The full plan, its rules and live status are in [test-programme.md](test-program
 
 ## Owner's requests (noted 2026-11-03)
 
-**Notes: interface review and redesign.** Tags, links and other note features may be buried: someone could use the app and never find them, or never get their full use. Review how each is discovered and used, and whether the rest of the app makes the most of them. Then propose a redesign. Not started; after the test programme.
-
 **Backup and sync review.** Questions to settle first, as a report, before any building. In this order:
 
 1. **Is the repository design right, from first principles?** The point of the repository is that unchanged large files are never uploaded or downloaded again, which makes transfers faster and safer. Does it upload and download only what changed, and does each upload and restore land whole or not at all? Is it well optimised overall? The owner thinks the repository principle is good; propose a better one only if there is one.
@@ -184,13 +182,10 @@ A redesign must fit each kind of data, not one rule for all. Likely a fusion: me
 
 ## Notes: what is left (agreed with the owner, 2026-11-15)
 
-The notes audit's open findings, grouped. Bundle A (the reserved "Support Activities" name, several dropped files) is done. Bugs come first, so B and C normally wait behind the order of work above.
+The notes audit's open findings. Done: A (the reserved "Support Activities" name, several dropped files), C (the code split into `note-catalogue.js`, `note-search.js` and `library-notes.js`; `editor.ts` formatted with Prettier) and B (easier to find: the empty-note hint, the line under each note, the Link tooltip, the tag row, the Guide's Notes tab), and the five browser tests that failed in setup.
 
-- **C. Clean up the notes code.** Partly done (2026-11-15): the catalogue moved out of `app.html` (`note-catalogue.js`), search out of `library.js` (`note-search.js`), and the Notes section out of `library.js` (`library-notes.js`, which keeps the list, the open note and the actions together, since they share their state). Still open: reflow `rich-text/editor.ts` (213 KB in about 850 lines, some over 2,000 characters) with a formatter, proving the compiled output unchanged. It needs Prettier (`npx prettier`), which this session's permissions did not allow; the owner decides.
-- **B. Make note features easier to find.** This is the "Notes: interface review and redesign" request above: tags, `[[` links, the linked-notes bar, Earlier versions (inside ⋯) and the image view are easy to miss. A short proposal first, then build.
 - **D. Support Activities, done properly.** It is recognised by a reserved key stored as its label (`__study_director_support_activities__`), so every place that shows a name must translate it (`shownNote`, `noteName`); that is what caused the odd-name bugs. Give it a fixed identity and a normal label. It changes stored data, so it goes with removing the migration code (observation 9), once every device runs the current build.
-- **Real-device check of the notes work of 2026-11-13 to 15.** Not yet tried on Safari, the iPad or the phone: Rename from ⋯ (the fix for a menu handing focus back late), right-click and long press, New and Move, pinch zoom in the image view, dropping files. One pass per device.
-- **Browser tests already failing on this branch, before the notes work of 2026-11-13 (checked at `5881bd1`):** `app/core-flow` (its first check gets `{}`), `exports/exports` (`nativeSave is not defined`), `plans/saved-plans-ui` (`savedPlans` of undefined) and `backup/complete-library` (`add` of undefined); `backup/encryption` (`manage` of undefined) was seen failing too but not checked at that commit. With test programme step 4a.
+- **Real-device check of the notes work of 2026-11-13 to 16.** Not yet tried on Safari, the iPad or the phone: swiping the tag row, the line under each note and its "# Tag" picker, Rename from ⋯ (the fix for a menu handing focus back late), right-click and long press, New and Move, pinch zoom in the image view, dropping files. One pass per device.
 
 ## Decided, not yet scheduled
 
