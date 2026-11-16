@@ -13,7 +13,7 @@ npm run test:release:types
 npm run test:targeted -- tests/unit/app/canonical.mts tests/integration/storage/save-lane.mjs
 ```
 
-Local development and both GitHub workflows use Node 26.12.1/npm 12.2.1. The lightweight workflow installs the lockfile and runs strict checking and typed lint; promotion retains its final certification gates. The dependency-free build/fast runner still works without npm installation.
+Local development and repository workflows use Node 26.12.1/npm 12.2.1. The lightweight workflow installs the lockfile and runs strict checking and typed lint; promotion retains its final certification gates. The dependency-free build/fast runner still works without npm installation.
 
 During each implementation pass, run targeted QA on the affected surfaces and add meaningful regression tests as needed. Full, thorough QA is reserved for Phase 7. For focused coverage, repeat `--test` and `--file` to name the executed tests and measured sources; both are required. Requested files must execute, their existing risk floors still apply, and the output is labelled `targeted-fast-production`.
 
@@ -29,7 +29,7 @@ Running coverage without selection flags retains the complete final-certificatio
 
 | Project | Admitted implementation boundary | Environment |
 | --- | --- | --- |
-| browser | prior domain/editor modules plus Phase 4 persistence, records/backup codecs, repositories, ownership, session/timer, attachment, export, backup/provider/recovery orchestration and contracts; P5.1 foundations; P5.2 profile/startup/capability hosts; P5.3 Plan; P5.4 execution, session actions/lifecycle and presentation owners | ES2022 + DOM |
+| browser | prior domain/editor modules plus Phase 4 persistence, records/backup codecs, repositories, ownership, session/timer, attachment, export, backup/provider/recovery orchestration and contracts; P5.1 foundations; P5.2 profile/startup/capability hosts; P5.3 Plan; P5.4 execution/session owners; P5.5 Review/Diary; P5.6 Library/notes/document owners; P5.7 backup controls/recovery/readiness/maintenance/integrity hosts | ES2022 + DOM |
 | portable | shared contracts, domain/time, WG1, Markdown, tags and reconciliation | ES2022 only |
 | worker | search/image/attachment/export workers, validated processing requests and portable file/codec modules | ES2022 + WebWorker |
 | service-worker | boundary assertions; implementation deferred | ES2022 + WebWorker, service-worker scope |
@@ -64,7 +64,7 @@ The upstream signatures retain upstream types; our code has no explicit or unsaf
 
 `portable/worker-contracts.ts` defines attachment/search/image requests, replies, progress and errors; incoming structured-clone values remain unknown and are checked before use. Editor asset, attachment, note, overlay and mounted-editor ports are exported, along with the inferred public API. WG1 records represent the current version only; envelope checks do not pretend to replace Wordgard schema validation. DOM-free image resizing uses a narrow canvas port, supplied separately by browser and worker adapters.
 
-Phase 3 removed all three portable `.d.ts` bridges after converting their implementations. `types/portable-processing.ts` maps each operation to its inputs and result; JSON results remain `unknown` until validated. `portable/request-decoder.ts` validates transport shapes before the typed dispatcher, and integrity requests validate checkpoint words/tails before restoration. Opaque CryptoKey and file-handle assertions follow capability checks; WebCrypto and file operations still enforce actual capabilities. Format, size, authentication and read-back checks remain in the operation implementations. Existing JavaScript hosts and registry remain Phase 5 work. Stored input remains unknown until runtime validation; the checked codecs do not establish whole-app type safety. Build-time `.mjs` contracts will be converted in Phase 6; the limits declaration exposes only the current readonly consumer API.
+Phase 3 removed all three portable `.d.ts` bridges after converting their implementations. `types/portable-processing.ts` maps each operation to its inputs and result; JSON results remain `unknown` until validated. `portable/request-decoder.ts` validates transport shapes before the typed dispatcher, and integrity requests validate checkpoint words/tails before restoration. Opaque CryptoKey and file-handle assertions follow capability checks; WebCrypto and file operations still enforce actual capabilities. Format, size, authentication and read-back checks remain in the operation implementations. Remaining JavaScript host composition and external features are Phase 5 work. Stored input remains unknown until runtime validation; the checked codecs do not establish whole-app type safety. Build-time `.mjs` contracts will be converted in Phase 6; the limits declaration exposes only the current readonly consumer API.
 
 
 ## Portable/domain implementations and test loading
@@ -73,7 +73,7 @@ The portable hashing/file-output/encryption/integrity/processing/ZIP implementat
 
 Classic build/VM loading still uses `compileScript`/`readScript`, which reject runtime module syntax. Coverage uses the shared offset-preserving `eraseTypes` primitive for both classic scripts and portable ESM; Node executes the portable `.ts` imports directly. Dynamic core-test loaders resolve source filenames from the production manifest. Type-only contracts live under `types/`, outside runtime coverage inventory. No coverage thresholds were reduced.
 
-Record/backup codecs are now checked together with their persistence/session dependencies. The JS host and registry implementation remain transitional boundaries owned by Phase 5; whole-application type safety is not yet established.
+Record/backup codecs are now checked together with their persistence/session dependencies. The registry implementation is checked; remaining JavaScript host composition and external features are Phase 5 boundaries. Whole-application type safety is not yet established.
 
 
 ## Phase 4 boundary and remaining runtime work

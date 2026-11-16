@@ -6,7 +6,7 @@ Read only what the task needs. Current source and executed checks establish beha
 | --- | --- |
 | Implementation discipline and constraints | [AGENTS](../AGENTS.md) |
 | Current work, unresolved obligations and resume action | [Execution record](../TS-CONVERSION-EXECUTION.md) |
-| Conversion scope / policy rationale / compiler boundaries | [Phase 5](typescript/PHASE-5.md), [decisions](typescript/DECISIONS.md), [TypeScript tooling](TYPESCRIPT.md) |
+| Conversion roadmap and next implementation outcomes / policy / compiler boundaries | [Phase 5](typescript/PHASE-5.md), [decisions](typescript/DECISIONS.md), [TypeScript tooling](TYPESCRIPT.md) |
 | Product purpose / architecture / data authority | [Product](PRODUCT.md), [architecture](ARCHITECTURE.md), [data contracts](DATA-CONTRACTS.md) and executable `contracts/` |
 | Feature contracts | [Notes](NOTES.md), [backup](BACKUP-ENGINE.md), [background operations](BACKGROUND-OPERATIONS.md), [notifications](NOTIFICATIONS.md) |
 | Focused product references | [Storage](areas/data-and-storage.md), [sessions](areas/study-session.md), [status indicator](areas/status-indicator.md), [updates](areas/app-updates.md), [UI](areas/ui.md) |
