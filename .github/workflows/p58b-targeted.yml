@@ -1,0 +1,47 @@
+name: P5.8B targeted sync status closure
+
+on:
+  push:
+    branches: [ts-exp]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p58b-targeted-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sync-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Strict TypeScript and typed lint
+        run: npm run check:types
+      - name: P5.8B host and recovery witnesses
+        run: >-
+          node tests/helpers/run-category.mjs targeted
+          tests/unit/backup/sync-status.mjs
+          tests/integration/ui/notification-lifecycle.mjs
+          tests/integration/app/storage-reset-connect-recovery.mjs
+      - name: Build browser source
+        run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: P5.8B Drive/status browser journeys — isolated
+        run: |
+          node tests/browser/backup/cold-start-drive-recovery.mjs
+          node tests/browser/backup/sync-and-profiles.mjs
+          node tests/browser/backup/sync-journeys.mjs
