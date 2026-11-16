@@ -89,6 +89,7 @@ function renderTokens(value,identity,sourceName){
     .replaceAll('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@',OPFS_IDENTITIES.backupFiles)
     .replaceAll('@@SD_CACHE_STORAGE_IDENTITIES@@',JSON.stringify(CACHE_STORAGE_IDENTITIES))
     .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES))
+    .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES)))
 
   invariant(!/@@SD_[A-Z_]+@@/.test(rendered),`Unresolved release token in ${sourceName}.`);
   return rendered;
@@ -97,6 +98,11 @@ function renderPlatformTokens(value,identity,sourceName,tokens={}){
   let rendered=value;
   Object.entries(tokens).forEach(([name,replacement])=>{rendered=rendered.replaceAll(`@@SD_${name}@@`,String(replacement));});
   return renderTokens(rendered,identity,sourceName);
+}
+function renderExternalModule(module,identity,tokens={}){
+  const sources=moduleSourceFiles(module),sourceName=sources.join('+');
+  const rendered=renderPlatformTokens(moduleSource(module),identity,sourceName,tokens);
+  return sources.some(source=>source.endsWith('.ts'))?compileScript(rendered,sourceName):rendered;
 }
 function assertCanonicalSource(){
   const expected=[
@@ -180,11 +186,11 @@ export function renderBuild(){
   const externalSources=Object.freeze({
     development:new Map(externalModules.map(module=>[
       module.id,
-      renderPlatformTokens(moduleSource(module),identity,moduleSourceFiles(module).join('+'),{GOOGLE_OAUTH_CLIENT_ID:module.id==='drive'?developmentClientId:productionClientId})
+      renderExternalModule(module,identity,{GOOGLE_OAUTH_CLIENT_ID:module.id==='drive'?developmentClientId:productionClientId})
     ])),
     deployment:new Map(externalModules.map(module=>[
       module.id,
-      renderPlatformTokens(moduleSource(module),identity,moduleSourceFiles(module).join('+'),{GOOGLE_OAUTH_CLIENT_ID:productionClientId})
+      renderExternalModule(module,identity,{GOOGLE_OAUTH_CLIENT_ID:productionClientId})
     ]))
   });
   const styleSources=new Map(styleModules.map(module=>[

@@ -1,14 +1,14 @@
 # TypeScript conversion — execution record
 
-## Current handoff — P5.8–P5.10 prepared, 2026-11-16
+## Current handoff — P5.8A implementation checkpoint, 2026-11-16
 
-- **Branch / baseline:** implement on `ts-exp`. Planning inspected source at `28c8c1d5a9b9850079a59acf1d11818d17e513ec`, matching both GitHub branch tips. Cached `origin/ts-exp` was stale; live refs/FETCH_HEAD confirmed the baseline. `TS-Conversion` retains the audited application checkpoint unless another promotion is requested.
-- **Assigned outcome:** GPT 5.6 Sol High implements strict first-party conversion, including owned host behavior and consumers, then evident local fixes and relevant regression protection. [AGENTS](AGENTS.md) owns procedure; [PHASE-5](docs/typescript/PHASE-5.md) is the sole scope/plan register.
-- **Plan:** seven bounded outcomes: P5.8A/B (Drive), existing P5.9a/b (model), P5.10A/B/C (compute/data boundary, rendering, Lab/retained integration). These are not fixed session counts or external audit gates. None has begun.
-- **Material source constraints:** Drive contains a raw build-token expression and substantive host connection/status behavior. Insights has a portable model plus a combined page/worker bundle with an early worker exit; splitting must preserve loading order, model purity and real provider contracts. Build/tests contain hardcoded filenames/raw readers; the Insights performance witness still references removed `CompatibilityCodecs` and needs canonical fixture repair in P5.10. Exact owners and targeted witnesses are in the plan.
-- **Discipline refinement:** keep whole behavioral outcomes, with explicit incomplete remainders at internal checkpoints. Prioritize real-provider checking, asynchronous successor protection (including late errors and rollback), and independent numerical expectations. Avoid repeated audits, file-count targets and extra reports.
-- **Documentation:** consolidated completed subpass detail and old inventories into pinned Git history; retained current roadmap, source map, active contracts and prior obligations. Corrected stale tooling-boundary descriptions. This preparation changes documentation only; document links/source/test anchors are checked, not runtime behavior re-certified.
-- **Next:** start P5.8A on current remote `ts-exp`, recording its implementation baseline and selected tests here. On continuation finish the open outcome. Replace this active entry as work advances; keep exploration/log indexes in a temporary pad outside the repository.
+- **Branch / baseline:** `ts-exp`, implementation baseline `652286876cfb8d52c17db6ce5390653d24aa7a10`; P5.8A only. P5.8B host connection/status presentation remains untouched.
+- **Outcome implemented:** complete authored Drive adapter moved to strict TypeScript, with actual `ProviderConfig` / `RepositoryTransport` registration, shared build erasure, tsconfig/manifest admission and harness/raw-reader migration.
+- **Boundary hardening:** Google/OAuth JSON is narrowed before use; OAuth callbacks are request/profile-bound; folder receipts and single-flight resolution are profile-generation-bound; binding, deletion and cleanup preserve operation/profile identity across awaits.
+- **Regression additions:** late OAuth response after profile switch; late folder-claim decision after profile switch. Existing Drive suites retain malformed-body, cancellation, pagination, ambiguous mutation/recovery and lease coverage.
+- **Selected targeted QA:** strict types/lint; Drive security/profile-binding/repository-scale; provider publication/background seams in repository-background/repository-checkpoint; source build + generated verification/syntax.
+- **OPEN:** this checkpoint is pushed to obtain the repository’s Node 26 targeted evidence. P5.8A is not closed until those selected witnesses are reconciled green. Full QA is explicitly deferred; P5.8 remains open for P5.8B.
+
 
 ## Last verified application checkpoint
 

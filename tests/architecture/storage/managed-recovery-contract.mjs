@@ -92,7 +92,7 @@ console.log(JSON.stringify({status:'PASS',suite:'managed-recovery-contract',shar
 assert.match(provider,/request\('repository-state',MAINTENANCE_POLICY\.busyMs/u,'post-publication maintenance must use a settling delay rather than waking immediately after foreground publication.');
 
 { // Production session/recovery boundaries retained across TS erasure.
-const drive=fs.readFileSync('source/external/drive.js','utf8');
+const drive=fs.readFileSync('source/external/drive.ts','utf8');
 const recoveryPeerQueue=provider.slice(provider.indexOf('async function queueOtherLocations('),provider.indexOf('async function queueResolvedProviderState('));
 assert.match(provider,/else\s*\{[\s\S]{0,500}clearPendingRetry\s*\(selected\s*\)[\s\S]{0,300}if\s*\(automaticNeeded\s*\(selected\s*\)\s*\)\s*\{[\s\S]{0,350}markPendingRetry\s*\(selected\s*\)[\s\S]{0,350}trigger:'managed-recovery-source-current'[\s\S]{0,500}status:retryQueued\?'pending':'failed'/u,'a restore whose source checkpoint is already present must durably queue the source when the resulting canonical local state differs from that checkpoint');
 assert.match(provider,/function automaticRecoveryDestination\s*\(selected\s*\)[\s\S]*selected\s*\.automaticConfigured\?\s*\.\s*\(\s*\)\s*=\s*=\s*=true[\s\S]*automaticEnabled\s*\(selected\s*\)\|\|connectedOnceByProvider\s*\.has\s*\(selected\s*\.id\s*\)/u,'managed recovery must distinguish a configured automatic destination from a transport that merely happens to be connected now');

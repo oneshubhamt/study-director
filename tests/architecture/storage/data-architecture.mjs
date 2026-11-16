@@ -153,7 +153,7 @@ assert.ok(read('source/core/backup-codec.ts').includes(`BACKUP_V10_MAGIC='${lite
 const attachmentsSource=read('source/core/attachments.ts');
 assert.ok(attachmentsSource.includes(`encode('${literal(EXTERNAL_FORMATS.attachmentArchive.magic)}')`),'attachment archive magic must mechanically match the canonical manifest');
 assert.ok(attachmentsSource.includes(`m.format!=='${literal(EXTERNAL_FORMATS.attachmentArchive.format)}'||m.version!==${EXTERNAL_FORMATS.attachmentArchive.version}`),'attachment archive manifest identity must mechanically match the canonical manifest');
-assert.doesNotMatch(read('source/external/drive.js'),/SDENC02|\.sdbackup/u,'Drive repository transport must remain opaque to portable/protected backup container formats');
+assert.doesNotMatch(read('source/external/drive.ts'),/SDENC02|\.sdbackup/u,'Drive repository transport must remain opaque to portable/protected backup container formats');
 assert.match(app,/appMetaRegistry:@@SD_APP_META_REGISTRY@@/u,'host must inject the typed appMeta registry into the bootstrap boundary');
 assert.match(dataBootstrap,/const APP_META_REGISTRY=freeze\(Object\.fromEntries\(Object\.entries\(input\.raw\.appMetaRegistry\)/u,'typed bootstrap must deep-freeze each appMeta registry definition before strict validation');
 assert.match(app,/function exactAppMetaFamily\(capability,key,label=/u,'typed exact-key adapters must enforce logical appMeta ownership');
@@ -207,7 +207,7 @@ assert.equal(OPFS_IDENTITIES.attachments,'study-director-assets-v2');
 for(const boundary of ['completeBackup','deviceBackup','driveBackup','attachmentArchive','markdownExport','zipExport'])assert.ok(DATA_ARCHITECTURE.external[boundary],`external boundary ${boundary} must be classified`);
 
 
-const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/device-backup.ts')+read('source/core/device-folder-storage.ts'),driveSource=read('source/external/drive.js');
+const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/device-backup.ts')+read('source/core/device-folder-storage.ts'),driveSource=read('source/external/drive.ts');
 assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u,'service worker cache identities must come from the canonical contract');
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');

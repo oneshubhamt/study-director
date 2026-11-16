@@ -189,6 +189,7 @@
     "types/checks/capabilities.ts",
     "source/core/profiles.ts",
     "source/core/profiles-host.ts",
+    "source/external/drive.ts",
     "source/host/profile-scope.ts",
     "types/profiles.ts",
     "types/profile-scope.ts",

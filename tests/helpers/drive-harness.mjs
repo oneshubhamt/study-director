@@ -4,11 +4,16 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
 import {EXTERNAL_REPOSITORY_IDENTITIES} from '../../contracts/canonical-identities.mjs';
-const source=fs.readFileSync(new URL('../../source/external/drive.js',import.meta.url),'utf8')
- .replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_RELEASE_ID@@','vb8')
- .replaceAll('@@SD_GOOGLE_OAUTH_CLIENT_ID@@','306494096916-p48tjuv0ni01c11a0dp4ini9gp3dafdi.apps.googleusercontent.com')
- .replaceAll('@@SD_DRIVE_SESSION_STORAGE_KEY@@','studyDirector.driveSession.v1')
- .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES));
+import {compileScript} from '../../build/source-script.mts';
+const source=compileScript(
+ fs.readFileSync(new URL('../../source/external/drive.ts',import.meta.url),'utf8')
+  .replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_RELEASE_ID@@','vb8')
+  .replaceAll('@@SD_GOOGLE_OAUTH_CLIENT_ID@@','306494096916-p48tjuv0ni01c11a0dp4ini9gp3dafdi.apps.googleusercontent.com')
+  .replaceAll('@@SD_DRIVE_SESSION_STORAGE_KEY@@','studyDirector.driveSession.v1')
+  .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES))
+  .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES))),
+ 'source/external/drive.ts'
+);
 const policyContext=vm.createContext({});
 for(const file of ['internal','repository-policy'])vm.runInContext(readCoreScript(file),policyContext);
 const repositoryPolicy=policyContext[Symbol.for('studyDirector.internalModules.v1')].require('repository-policy',1).protocol;
@@ -24,7 +29,7 @@ export const QA_PROFILE_ID='prof_qa_mve00000_abcdef01';
 // its own folder continues, an unmarked one is claimed.
 const defaultBind=async info=>info.mine?'continue':'claim';
 export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,remoteState=null,addEventListener=()=>{},profileId=()=>QA_PROFILE_ID,profileName=()=>'',bind=defaultBind,email='qa@example.com',device=()=>'inst_qa_harness_mve00000_abcdef01'}={}){
-  const state={email,folderProperties:new Map(),folderNames:new Map(),deletionMarkers:[],deletedSignals:[],libraryControl:null,binds:[],rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
+  const state={email,folderProperties:new Map(),folderNames:new Map(),deletionMarkers:[],deletedSignals:[],libraryControl:null,binds:[],rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0,authorizationGate:null,authorizationRequests:0};
   // state.offline: the browser says it is offline (navigator.onLine).
   // state.driveClockAheadMs: how far Drive's clock is ahead of this device's
   // (negative: behind) for the files it creates without content (markers).
@@ -164,7 +169,7 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
   }
   let provider=null;const scripts=[];
   const document={scripts,head:{appendChild(node){scripts.push(node);queueMicrotask(()=>node.onload&&node.onload());return node;}},body:{appendChild(){return null;}},createElement(tag){return {tagName:String(tag).toUpperCase(),remove(){},setAttribute(){},appendChild(){},style:{},src:'',async:false,defer:false,onload:null,onerror:null};},getElementById(){return null;}};
-  const oauth={hasGrantedAllScopes(response,scope){return String(response.scope||'').split(/\s+/).includes(scope);},initTokenClient(config){return {requestAccessToken(){queueMicrotask(()=>config.callback({access_token:`token-${state.requests.length+1}`,expires_in:state.expiresIn,token_type:'Bearer',scope:state.scope}));}};},revoke(token,callback){queueMicrotask(()=>callback({successful:true}));}};
+  const oauth={hasGrantedAllScopes(response,scope){return String(response.scope||'').split(/\s+/).includes(scope);},initTokenClient(config){return {requestAccessToken(){state.authorizationRequests+=1;const respond=()=>config.callback({access_token:`token-${state.authorizationRequests}`,expires_in:state.expiresIn,token_type:'Bearer',scope:state.scope});if(state.authorizationGate)void Promise.resolve(state.authorizationGate).then(()=>queueMicrotask(respond));else queueMicrotask(respond);}};},revoke(_token,callback){queueMicrotask(()=>callback({successful:true}));}};
   state.releasedDownloads=0;
   const api={capabilities:{pluginApi:1,backupController:1,backupProviders:1},backup:{repositoryPolicy,receiveStream:async(stream,size,options={})=>{if(options.signal?.aborted)throw new Error('cancelled');const blob=await new Response(stream).blob();assert.equal(blob.size,size);options.onProgress?.({phase:'downloading',loaded:blob.size,total:size});return blob;},releaseFile:async()=>{state.releasedDownloads+=1;},limits:{maxFileBytes:20*1024*1024},device:()=>device(),profile:{id:()=>profileId(),name:()=>profileName(),bind:async info=>{state.binds.push(info);return bind(info);},deleted:info=>{state.deletedSignals.push(info);},controls:control=>{state.libraryControl=control;}},providers:{register(config){provider=config;return registerProvider?registerProvider(config):true;}}}};
   const harnessSetTimeout=(fn,ms,...args)=>{if(clock)return clock.setTimeout(()=>fn(...args),ms);const timer=setTimeout(fn,ms,...args);if(Number(ms)>5000)timer.unref?.();return timer;};
@@ -193,5 +198,5 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     })();}
   }
   const context=vm.createContext({navigator:{get onLine(){return state.offline!==true;}},Error,TypeError,Date:clock?.Date||Date,console,setTimeout:harnessSetTimeout,clearTimeout:harnessClearTimeout,queueMicrotask,Blob,Headers,Response,XMLHttpRequest:uploadProgressTransport?MockXMLHttpRequest:undefined,ReadableStream,TextEncoder,URL,URLSearchParams,Uint8Array,AbortController,crypto:webcrypto,fetch:mockFetch,document,Event:class Event{constructor(type){this.type=type;}},CustomEvent:class CustomEvent{},localStorage,addEventListener,removeEventListener(){},dispatchEvent(){},google:{accounts:{oauth2:oauth}},StudyDirector:{registerPlugin(descriptor){return descriptor.setup(api);}}});
-  context.window=context;context.globalThis=context;context[Symbol.for('studyDirector.profileScope.v1')]=Object.freeze({scoped:name=>String(name)});vm.runInContext(source,context,{filename:'source/external/drive.js'});assert.ok(provider,'Drive provider must register');return {state,provider,context,fetch:mockFetch};
+  context.window=context;context.globalThis=context;context[Symbol.for('studyDirector.profileScope.v1')]=Object.freeze({scoped:name=>String(name)});vm.runInContext(source,context,{filename:'source/external/drive.ts'});assert.ok(provider,'Drive provider must register');return {state,provider,context,fetch:mockFetch};
 }

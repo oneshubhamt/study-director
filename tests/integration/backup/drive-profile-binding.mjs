@@ -84,6 +84,19 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   cases.push('a changed profile id settles the folder again');
 }
 {
+  let current=QA_PROFILE_ID,releaseBind;const bindGate=new Promise(resolve=>{releaseBind=resolve;});
+  const harness=createDriveHarness({profileId:()=>current,bind:async()=>{await bindGate;return 'claim';}});const {state,provider}=harness;
+  state.folders.push('folder-late');state.folderProperties.set('folder-late',{});
+  await provider.prepare();await provider.authorize();const listing=provider.repository.list({kind:'object'});
+  for(let turns=0;state.binds.length===0&&turns<50;turns++)await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(state.binds.length,1,'the profile choice must be in flight before switching');
+  current='prof_qa_mve00000_abcdef03';releaseBind();
+  await assert.rejects(listing,/profile changed while the Drive library choice was open/u);
+  assert.equal(state.folderProperties.get('folder-late')[MARKER],undefined,'a late claim decision cannot mark the predecessor folder for a successor profile');
+  assert.equal(patches(state),0,'no stale profile mutation is sent to Drive');
+  cases.push('late profile binding is fenced before mutation');
+}
+{
   // The library folder is named after its profile, and follows a rename once per sign-in.
   let name='Study Director – Ana';
   const {state,provider}=await connected({profileName:()=>name});

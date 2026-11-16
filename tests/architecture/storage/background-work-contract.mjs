@@ -22,7 +22,7 @@ const backupActionsHost=readScript('source/core/backup-actions-host.ts');
 const maintenanceHost=readScript('source/core/backup-maintenance-host.ts');
 const readinessHost=readScript('source/core/backup-readiness-host.ts');
 const integrityHost=readScript('source/core/backup-integrity-host.ts');
-const drive=fs.readFileSync('source/external/drive.js','utf8');
+const drive=fs.readFileSync('source/external/drive.ts','utf8');
 
 assert.match(maintenanceHost,/providerId[\s\S]*requestedAt[\s\S]*nextEligibleAt[\s\S]*reason[\s\S]*repositoryScope[\s\S]*requestId/u,'durable maintenance intent must carry eligibility, reason and repository generation');
 assert.match(metadata,/Number\(value\.version\)!==4/u,'the ordinary runtime reads only the current maintenance intent');

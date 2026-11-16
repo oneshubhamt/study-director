@@ -2,7 +2,7 @@ import {readCoreScript} from '../../helpers/core-script.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
-import {createDriveHarness as createHarness,repositoryDigest as digest} from '../../helpers/drive-harness.mjs';
+import {createDriveHarness as createHarness,repositoryDigest as digest,QA_PROFILE_ID} from '../../helpers/drive-harness.mjs';
 import {createFakeClock} from '../../helpers/fake-clock.mjs';
 let folderVerificationMeasurement=null;
 async function waitFor(predicate,message){
@@ -24,6 +24,17 @@ async function waitFor(predicate,message){
 {
   const {state,provider}=createHarness();await provider.prepare();state.expiresIn=1;let changes=0;provider.subscribeConnection(()=>{changes+=1;});await provider.authorize();assert.equal(provider.connected(),true);assert.equal(changes,1);
   await new Promise(resolve=>setTimeout(resolve,1100));assert.equal(provider.connected(),false,'Drive connected state must expire without requiring a user action');assert.equal(changes,2,'scheduled OAuth expiry must notify provider UI so stale Backup/Versions/Settings controls disappear');
+}
+
+{
+  let releaseAuthorization;const authorizationGate=new Promise(resolve=>{releaseAuthorization=resolve;});
+  let current=QA_PROFILE_ID;const {state,provider}=createHarness({profileId:()=>current});state.authorizationGate=authorizationGate;
+  await provider.prepare();const pending=provider.authorize();await new Promise(resolve=>setImmediate(resolve));
+  current='prof_qa_mve00000_abcdef02';releaseAuthorization();
+  await assert.rejects(pending,/profile changed before Google authorization completed/u);
+  assert.equal(provider.connected(),false,'a late OAuth response must not authorize a successor profile');
+  state.authorizationGate=null;await provider.authorize();assert.equal(provider.connected(),true,'the successor profile can authorize independently');
+  await provider.disconnect();
 }
 
 // The sign-in lasts across a reload until it expires: it is kept in this
