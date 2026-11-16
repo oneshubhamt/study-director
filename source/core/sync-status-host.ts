@@ -61,14 +61,25 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     try{protection=input.protection()?.status()||null;}catch{/* Backup protection is deferred during startup. */}
     try{storage=input.storageIssues();}catch{/* Storage health is deferred during startup. */}
     const connecting=isConnecting(profile),email=input.profileEmail();
+    const deviceView:LocationView|null=device&&device.supported?{
+      connected:device.connected,mode:device.mode,backingUp:device.backingUp,busy:device.busy,
+      maintenanceBusy:device.maintenanceBusy,retryBackoffCapped:device.retryBackoffCapped,
+      ...(device.lastBackupAt?{lastBackupAt:device.lastBackupAt}:{})
+    }:null;
+    const storageView=storage.map(issue=>({
+      ...(issue.source===undefined?{}:{source:issue.source}),
+      ...(issue.label===undefined?{}:{label:issue.label}),
+      ...(issue.message===undefined?{}:{message:issue.message}),
+      ...(issue.level===undefined?{}:{level:issue.level})
+    }));
     return {
       online:environment.online(),
       drive:drive?{...drive,setUp:drive.connected||drive.wasConnected||!!email,connecting}:connecting?{connecting:true}:null,
-      device:device&&device.supported?device:null,
+      device:deviceView,
       passwordNeeded:!!protection&&protection.enabled&&!protection.unlocked,
       newerData:input.unsupportedDataHeld(),
       kept:input.keptVersions()?.count()||0,
-      storage:storage.map(issue=>({source:issue.source,label:issue.label,message:issue.message,level:issue.level})),
+      storage:storageView,
       reminder:input.backupReminder(),
       updateReady:input.updateReady(),
       sessionElsewhere:input.sessionElsewhere(),
@@ -183,7 +194,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
         list.dataset['key']=key;
         list.replaceChildren(...model.steps.map(step=>{
           const item=document.createElement('li');item.dataset['state']=step.state;if(step.state==='active')item.setAttribute('aria-current','step');
-          const label=document.createElement('span');label.textContent=step.label;item.append(label);
+          const label=document.createElement('span');label.textContent=step.label||'';item.append(label);
           if(inline&&inline.step===step.id){const link=document.createElement('button');link.type='button';link.className='drive-connect-step-action';link.dataset['action']='sync-status-action';link.dataset['syncAction']=inline.action;link.textContent=inline.label;item.append(link);}
           return item;
         }));
