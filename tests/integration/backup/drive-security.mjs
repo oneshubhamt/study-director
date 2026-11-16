@@ -14,6 +14,12 @@ for(const [field,value] of [['controls',true],['deleted','not-a-callback']]){
   assert.throws(()=>createHarness({profilePortPatch:{[field]:value}}),/Drive provider must register/u,'the unknown plugin host must reject a malformed optional profile '+field+' callback');
 }
 
+{
+  const {context,provider}=createHarness();context.google.accounts.oauth2.initTokenClient=()=>({});
+  await provider.prepare();
+  await assert.rejects(()=>provider.authorize(),/Google sign-in is unavailable/u,'the external GIS token-client return must be shape-checked before use');
+}
+
 
 {
   const {state,provider}=createHarness();await provider.prepare();let changes=0;provider.subscribeConnection(()=>{changes+=1;});

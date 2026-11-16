@@ -25,7 +25,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   type DrivePayload=DriveFile&{files?:readonly DriveFile[];nextPageToken?:string;incompleteSearch?:boolean;error?:{message?:string;errors?:readonly {reason?:string}[]};user?:{emailAddress?:string};successful?:boolean};
   type RepositoryIdentities=Readonly<{driveAppVersionMarker:string;driveDeletedProfileMarker:string;driveExportedAtMarker:string;driveFileDigestMarker:string;driveFileSecurityMarker:string;driveFolder:string;driveFolderMarker:string;driveFolderProfileMarker:string;driveRepositoryIdMarker:string;driveRepositoryKindMarker:string;driveRepositoryMarker:string;driveRepositoryVersionMarker:string}>;
   type GoogleTokenClient={requestAccessToken(options:{include_granted_scopes:boolean;prompt:string}):void};
-  type GoogleOAuth2={initTokenClient(config:{client_id:string;scope:string;include_granted_scopes:boolean;prompt:string;callback:(response:unknown)=>void;error_callback:(detail:unknown)=>void}):GoogleTokenClient;hasGrantedAllScopes(response:unknown,...scopes:string[]):boolean;revoke(token:string,callback:(response:unknown)=>void):void};
+  type GoogleOAuth2={initTokenClient(config:{client_id:string;scope:string;include_granted_scopes:boolean;prompt:string;callback:(response:unknown)=>void;error_callback:(detail:unknown)=>void}):unknown;hasGrantedAllScopes(response:unknown,...scopes:string[]):boolean;revoke(token:string,callback:(response:unknown)=>void):void};
   type PendingAuthorization={promise:Promise<string>;resolve:(value:string)=>void;reject:(error:unknown)=>void;timer:ReturnType<typeof setTimeout>|null;profile:ProfileSnapshot};
   type FolderFlight={controller:AbortController;promise:Promise<string>;waiters:number;settled:boolean;profile:ProfileSnapshot};
   type UploadSession={parent:string;digest:string;size:number;url:string;offset:number;busy:boolean};
@@ -57,6 +57,10 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     const accounts=google['accounts'];if(!isRecord(accounts))return null;
     const oauth=accounts['oauth2'];if(!isRecord(oauth)||typeof oauth['initTokenClient']!=='function'||typeof oauth['hasGrantedAllScopes']!=='function'||typeof oauth['revoke']!=='function')return null;
     return oauth as unknown as GoogleOAuth2;
+  }
+  function googleTokenClient(value:unknown):GoogleTokenClient|null{
+    if(!isRecord(value)||typeof value['requestAccessToken']!=='function')return null;
+    const request=value['requestAccessToken'];return Object.freeze({requestAccessToken:(options:{include_granted_scopes:boolean;prompt:string})=>{Reflect.apply(request,value,[options]);}});
   }
   function trustedTypesFactory():TrustedTypesPort|null{const value=(globalThis as unknown as {trustedTypes?:unknown}).trustedTypes;return isRecord(value)&&typeof value['createPolicy']==='function'?value as unknown as TrustedTypesPort:null;}
   function stringField(source:Record<string,unknown>,key:string):string|undefined{if(!Object.hasOwn(source,key))return undefined;const value=source[key];if(typeof value!=='string'&&typeof value!=='number')throw noRetry(new Error('Google Drive returned malformed metadata.'));return String(value);}
@@ -320,7 +324,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     if(tokenValid())return Promise.resolve(accessToken);const oauth=oauthClient;if(!oauth)return Promise.reject(new Error('Google Drive is still preparing. Try again in a moment.'));if(pendingAuthorization)return pendingAuthorization.promise;
     let resolvePromise:(value:string)=>void=()=>{},rejectPromise:(error:unknown)=>void=()=>{};const promise=new Promise<string>((resolve,reject)=>{resolvePromise=resolve;rejectPromise=reject;});
     const request:PendingAuthorization={promise,resolve:resolvePromise,reject:rejectPromise,timer:null,profile:profileSnapshot()};pendingAuthorization=request;
-    try{const client=oauth.initTokenClient({client_id:configuredClientId(),scope:DRIVE_SCOPE,include_granted_scopes:false,prompt:'select_account',callback:(response:unknown)=>settleAuthorization(request,null,response),error_callback:(detail:unknown)=>{const type=isRecord(detail)?String(detail['type']||''):'';const message=type==='popup_failed_to_open'?'Google sign-in was blocked by the browser. Allow pop-ups and retry.':type==='popup_closed'?'Google authorization was cancelled.':'Google authorization could not be completed.';settleAuthorization(request,new Error(message));}});request.timer=setTimeout(()=>settleAuthorization(request,timeoutError('Google authorization')),AUTH_TIMEOUT_MS);client.requestAccessToken({include_granted_scopes:false,prompt:signedInBefore?'':'select_account'});}
+    try{const client=googleTokenClient(oauth.initTokenClient({client_id:configuredClientId(),scope:DRIVE_SCOPE,include_granted_scopes:false,prompt:'select_account',callback:(response:unknown)=>settleAuthorization(request,null,response),error_callback:(detail:unknown)=>{const type=isRecord(detail)?String(detail['type']||''):'';const message=type==='popup_failed_to_open'?'Google sign-in was blocked by the browser. Allow pop-ups and retry.':type==='popup_closed'?'Google authorization was cancelled.':'Google authorization could not be completed.';settleAuthorization(request,new Error(message));}}));if(!client)throw new Error('Google sign-in is unavailable.');request.timer=setTimeout(()=>settleAuthorization(request,timeoutError('Google authorization')),AUTH_TIMEOUT_MS);client.requestAccessToken({include_granted_scopes:false,prompt:signedInBefore?'':'select_account'});}
     catch(error){settleAuthorization(request,error instanceof Error?error:new Error(String(error)));}return promise;
   }
   function requireAccessToken():string{

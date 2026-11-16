@@ -622,8 +622,8 @@ wakeSessionOwnershipClaim:(...args)=>wakeSessionOwnershipClaim(...args)
 }));
 let sessionPanelMode='none',sessionPanelSession=null;
 let sessionSafetyMessage='';
-// The profile indicator's state (renderSyncStatus); declared early because
-// storage health asks for a redraw during start-up.
+// The checked sync/status host is declared early because storage health can
+// request a profile-indicator redraw during start-up.
 let SyncStatusHost=null,syncStatusPending=false,sessionHandoff={step:'',error:''},sessionMovingHere=null,sessionYieldedAt=0;
 let ManagedRecoveryQuiescence=null;
 let refreshSessionSafetyUi=()=>{};
