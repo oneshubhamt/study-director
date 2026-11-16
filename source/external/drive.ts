@@ -708,6 +708,13 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     }
     throw lastError||new Error(label);
   }
+  async function discardCreatedCoordinationMarker(ref:Lease,parent:string,kind:string,idValid:(id:unknown)=>boolean,findMarker:FindMarker,context:DriveOperation,label:string):Promise<boolean>{
+    const id=String(ref&&ref.id||''),remoteId=String(ref&&ref['remoteId']||'');
+    if(ref?.['kind']!==kind||!idValid(id))return false;
+    const metadata=remoteId&&remoteId.length<=512?parseDriveFile({id:remoteId}):await findMarker(parent,id,context);
+    if(!metadata)return false;
+    return deleteCoordinationMarker(metadata,{parent,id,findMarker,context,label});
+  }
   async function findRepositoryPublication(parent:string,id:string,context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<DriveFile|null>{
     if(!publicationIdValid(id))throw noRetry(new Error('A Study Director publication marker has an invalid identity.'));
     const q=driveQuery([
@@ -793,7 +800,9 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       if(driveNow()-created>=PUBLICATION_STALE_MS-PUBLICATION_RENEW_MS)throw noRetry(new Error('The Google Drive backup publication marker went too long without renewal. Retry the backup.'));
       await endRepositoryPublication(ref,context);return next;
     }catch(error){
-      await endRepositoryPublication(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
+      const cleanup=driveOperationContext({folderState:context.folderState});
+      await discardCreatedCoordinationMarker(next,parent,PUBLICATION_KIND,publicationIdValid,findRepositoryPublication,cleanup,'Could not clear a failed Study Director backup publication marker.').catch(()=>{});
+      throw error;
     }
   }
 
@@ -880,7 +889,9 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       if(!Number.isFinite(expires)||previous.appProperties[REPOSITORY_ID_MARKER]!==id||driveNow()>=expires)throw noRetry(new Error('Repository maintenance protection was interrupted. A fresh inventory is required.'));
       await endRepositoryMaintenance(ref,context);return next;
     }catch(error){
-      await endRepositoryMaintenance(next,driveOperationContext({folderState:context.folderState})).catch(()=>{});throw error;
+      const cleanup=driveOperationContext({folderState:context.folderState});
+      await discardCreatedCoordinationMarker(next,parent,MAINTENANCE_KIND,maintenanceIdValid,findRepositoryMaintenance,cleanup,'Could not clear a failed Study Director repository-maintenance marker.').catch(()=>{});
+      throw error;
     }
   }
   async function listRepositoryFiles(kind:RepositoryKind,{limit=100000}:{limit?:number}={},context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<{items:readonly ProviderItem[];overflow:boolean;ignored:number}>{
