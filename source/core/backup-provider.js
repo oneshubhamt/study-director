@@ -1395,11 +1395,14 @@ registry.define('backup-provider',1,input=>{
 
   // Take in Drive's newest version quietly. What it cannot settle on its own
   // waits for the person; their Combine of that version resumes the sync.
-  function catchUpSharedProvider(selected,head,attemptRevision=canonicalConvergenceRevision(),{preserveAutomatic=false}={}){
+  // flush: the run that found Drive ahead was a flush (Sync now, the app
+  // going to the background, Continue Here); its upload follows the catch-up
+  // at once rather than at the waiting changes' deadline.
+  function catchUpSharedProvider(selected,head,attemptRevision=canonicalConvergenceRevision(),{preserveAutomatic=false,flush=false}={}){
     const state=syncState(selected);if(state.catching)return false;state.catching=true;notifyStatus();
     setTimeout(async()=>{
       const summary=presentation.begin(selected.id,'sync',{id:'external-sync',label:selected.label,foreground:false,message:`Syncing with ${selected.label}…`});
-      try{settleCatchUp(selected,head.item.id,await syncRepositoryProvider(selected.id,{checkpointId:head.item.id,presentation:summary,respectBackgroundSuspension:true}),summary,attemptRevision,{preserveAutomatic});}
+      try{settleCatchUp(selected,head.item.id,await syncRepositoryProvider(selected.id,{checkpointId:head.item.id,presentation:summary,respectBackgroundSuspension:true}),summary,attemptRevision,{preserveAutomatic,flush});}
       catch(error){
         // Another device set or changed the backup password: sync waits for it.
         if(['BACKUP_LOCKED','BACKUP_AUTH_FAILED'].includes(String(error?.code||''))){state.password=head.item.id;summary.finish({message:`${selected.label} needs this profile’s backup password.`,outcome:'sync-password'});presentation.notice(selected.id,'sync-password',`Your backup password was set or changed on another device. Enter it to keep syncing with ${selected.label}.`);}
@@ -1417,7 +1420,7 @@ registry.define('backup-provider',1,input=>{
     },0);
     return true;
   }
-  function settleCatchUp(selected,headId,result,summary,attemptRevision='',{preserveAutomatic=false}={}){
+  function settleCatchUp(selected,headId,result,summary,attemptRevision='',{preserveAutomatic=false,flush=false}={}){
     const state=syncState(selected);
     if(result&&result.cancelled&&result.reason==='needs-decision'){state.review=headId;summary?.finish({message:`${selected.label} has changes that need your review.`,outcome:'sync-review'});presentation.notice(selected.id,'sync-review',`${selected.label} has changes from another device that need your review.`,{tier:'news'});}
     else if(result&&result.cancelled){state.behind=true;summary?.finish({message:`Syncing with ${selected.label} will retry.`,lifecycle:'cancelled'});schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{attemptRevision,preserveAutomatic,trigger:'catch-up-cancelled'});}
@@ -1431,7 +1434,7 @@ registry.define('backup-provider',1,input=>{
       sessionWatchSeen(selected.id,headId);
       resetConvergenceRetry(selected);presentation.resolve(selected.id,'sync-review');presentation.resolve(selected.id,'sync-password');
       summary?.finish({message:`Synced with ${selected.label}.`,outcome:'sync-complete'});
-      if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:'catch-up-complete'});
+      if(automaticWaiting(selected))schedulePendingProviderBackup(selected,1000,{trigger:flush?'flush:catch-up-complete':'catch-up-complete'});
     }
   }
   // The person enters the password the newest version needs; the sync then
@@ -1501,6 +1504,10 @@ registry.define('backup-provider',1,input=>{
         // Any other wake-up before the waiting changes are due keeps their
         // deadline; Drive asking the Device Folder to go first does not.
         const due=automaticDueAt(selected),now=String(trigger||'').startsWith('flush:');
+        // A check that comes before the waiting changes are due (a return to
+        // the app, another device's new version) only looks at Drive: the
+        // changes keep their deadline, so typing is not uploaded every minute.
+        const uploadDue=owed||now||!(due>Date.now()+50);
         if(!owed&&!syncDue&&!now&&due>Date.now()+50){job.schedule(due-Date.now(),'automatic','earliest');return freeze({status:'idle',reason:'not-due'});}
         if(busy||sync?.catching){schedulePendingProviderBackup(selected,PROVIDER_CONVERGENCE_BUSY_RETRY_MS,{trigger:'provider-busy'});return freeze({status:'deferred',reason:'busy'});}
         // A change a person's action made urgent, or a flush (the app going to
@@ -1516,7 +1523,7 @@ registry.define('backup-provider',1,input=>{
         // for a check with nothing to back up, after Drive moved on, or
         // while a review waits. An untouched empty device must still inspect
         // Drive: its automatic upload has nothing to publish.
-        const nothingToUpload=!owed&&(!automaticNeeded(selected)||!changeNoted&&!!automaticHooks?.ready&&await automaticHooks.ready()===false);
+        const nothingToUpload=!owed&&(!automaticNeeded(selected)||!uploadDue||!changeNoted&&!!automaticHooks?.ready&&await automaticHooks.ready()===false);
         if(sync&&(sync.behind||sync.review||nothingToUpload)){
           sync.behind=false;
           const inventory=await repositoryProviderInventory(repositoryOperationSelected(selected,{signal:scope.signal}),{signal:scope.signal});rememberRecentHistory(selected,inventory);sync.checkedAt=Date.now();
@@ -1525,13 +1532,17 @@ registry.define('backup-provider',1,input=>{
           newerVersionGone(selected);
           const held=sync.rolledBack;
           if(ahead&&sync.review!==ahead.item.id&&held&&held.head===ahead.item.id&&!now&&Date.now()+50<held.retryAt){sync.behind=true;job.schedule(held.retryAt-Date.now(),'catch-up-failed','earliest');return finish('deferred','catch-up-failed');}
-          if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead,attemptRevision,{preserveAutomatic});return finish('deferred','catching-up');}
+          if(ahead&&sync.review!==ahead.item.id){scope.release();scope=null;catchUpSharedProvider(selected,ahead,attemptRevision,{preserveAutomatic,flush:now});return finish('deferred','catching-up');}
           if(ahead)return finish('idle','needs-review');
           if(sync.review){sync.review='';presentation.resolve(selected.id,'sync-review');}
           if(!sync.ancestryPending){sync.failed=false;sync.rolledBack=null;sync.syncedAt=new Date().toISOString();notifyStatus();}
-          if(nothingToUpload&&!sync.ancestryPending){resetConvergenceRetry(selected);return finish('completed','in-sync');}
+          if(nothingToUpload&&!sync.ancestryPending){resetConvergenceRetry(selected);scheduleAutomaticBackup(selected);return finish('completed','in-sync');}
         }
         OperationDiagnostics.mark('convergence-publication-start',{provider:selected.id},traceId);const result=await retryPendingProviderBackup(selected,{signal:scope.signal});{const state=syncState(selected);state.turnWaits=result.reason==='turn'?state.turnWaits+1:0;if(result.reason!=='turn')state.turnHolder=null;}OperationDiagnostics.mark('convergence-publication-complete',{provider:selected.id,status:String(result.status||''),maintenancePending:result.maintenancePending===true},traceId);OperationDiagnostics.mark('background-transition',background.transition('convergence','running',result.status==='completed'?'completed':'deferred',{reason:String(result.reason||''),actionable:false}),traceId);OperationDiagnostics.finish({status:String(result.status||'pending'),reason:String(result.reason||''),maintenancePending:result.maintenancePending===true},traceId);
+        // An upload looks at Drive's newest version first: it is a check too,
+        // so the next wake within a minute does not look again (and, before
+        // this, every wake uploaded the changes waiting since).
+        if(result.status==='completed'&&sync)sync.checkedAt=Date.now();
         if(result.status==='completed'){handoffDeliverySince.delete(safeId(selected.id));resetConvergenceRetry(selected);background.wake('publication');scheduleAutomaticBackup(selected);}
         else if(['none','local-empty'].includes(result.reason))resetConvergenceRetry(selected);
         // Waiting for an app update is not a failure: no retry ladder, and the
