@@ -221,11 +221,11 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   const controller=host.createController(Object.freeze({
     document:{getElementById:()=>null,addEventListener(){}},
     providers:()=>providers,presentation:statusPresentation,
-    device:()=>Object.freeze({
+    device:()=>Object.freeze({status:()=>Object.freeze({
       supported:true,connected:true,mode:'connected',busy:true,foregroundKind:'connect',backingUp:false,
       maintenanceBusy:false,locked:false,nextEligibleAt:'2026-11-16T10:00:00.000Z',retryBackoffCapped:false,
       lastBackupAt:'2026-11-16T09:00:00.000Z'
-    }),
+    })}),
     protection:()=>null,keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
     profileKey:()=>'profile-a',profileEmail:()=>'',profileName:()=>'Student',deviceName:id=>id,
     markDriveRequested:()=>{},storageIssues:()=>[],unsupportedDataHeld:()=>false,backupReminder:()=>'',updateReady:()=>false,
