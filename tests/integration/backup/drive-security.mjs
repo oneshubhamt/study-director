@@ -177,6 +177,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
 }
 
 {
+  console.error('P58A_DSEC 180');
   const {state,provider}=createHarness();await provider.prepare();state.scope='https://www.googleapis.com/auth/drive.file';await provider.authorize();state.folderCreateDenied=true;
   const failed=await Promise.allSettled([provider.repository.list({kind:'checkpoint'}),provider.repository.list({kind:'commit'})]);
   assert.ok(failed.every(result=>result.status==='rejected'),'all callers sharing a failed cold-folder resolution must observe the same failure');
@@ -225,6 +226,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   let releaseUploads;state.uploadPutGate=new Promise(resolve=>{releaseUploads=resolve;});let failSourceA=false,sourceA=0,sourceB=0;
   const fileA=await makeRepositoryFile('object','obj_'+'5'.repeat(32),'parallel-source-A',async()=>{},async()=>{sourceA+=1;if(failSourceA)throw Object.assign(new Error('source A changed'),{name:'AbortError',code:'BACKUP_SOURCE_CHANGED'});});
   const fileB=await makeRepositoryFile('object','obj_'+'6'.repeat(32),'parallel-source-B',async()=>{},async()=>{sourceB+=1;});
+  console.error('P58A_DSEC 240');
   const uploadA=provider.repository.upload(fileA),uploadB=provider.repository.upload(fileB);
   await waitFor(()=>state.uploadPutStarted>=2,'parallel source-context uploads must both reach their independent PUT requests');failSourceA=true;releaseUploads();state.uploadPutGate=null;
   const [resultA,resultB]=await Promise.allSettled([uploadA,uploadB]);
@@ -297,6 +299,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   const operation=provider.repository.beginOperation(),third=await operation.renewPublication(second);assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[third.id],'an operation view renews the same way');
   // Cleanup removed it as abandoned: the upload must stop, and leave nothing behind.
   state.files.delete(markerFile(third.id).id);
+  console.error('P58A_DSEC 300');
   await assert.rejects(()=>provider.repository.renewPublication(third),/disappeared before commit/u,'renewal fails once cleanup has removed the marker');
   assert.equal(markers().length,0,'a failed renewal removes the fresh marker it made');
   // Unrenewed too long: cleanup may be about to take it for abandoned.
