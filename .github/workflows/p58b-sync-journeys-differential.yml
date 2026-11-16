@@ -1,0 +1,55 @@
+name: P5.8B sync-journeys differential
+
+on:
+  push:
+    branches: [ts-exp]
+    paths:
+      - '.github/workflows/p58b-sync-journeys-differential.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: Baseline P5.8A sync-journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: b137fb779466acb48529ebd98a1544db4f842abe
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - run: node tests/browser/backup/sync-journeys.mjs
+
+  current:
+    name: P5.8B candidate sync-journeys
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - run: node tests/browser/backup/sync-journeys.mjs
