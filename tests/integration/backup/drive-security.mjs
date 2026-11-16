@@ -455,7 +455,7 @@ for(const chunkDelay of [9000,35000,90000]){
  const file=await makeRepositoryFile('object','obj_'+'c'.repeat(32),'x'.repeat(1048576)),ref=await h.provider.repository.upload(file);
  h.state.rangeChunkDelayMs=chunkDelay;const read=await settleTransfer(h.provider.repository.download(ref,{offset:0,length:1048576}),clock,h.state);
  assert.equal(read.ok,true,read.error?.message);assert.equal(await digest(read.value.blob),file.digest);assert.equal(h.state.rangeTransfers[0].loaded,file.size);
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('verified range completes with '+chunkDelay+'ms between chunks');
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('verified range completes with '+chunkDelay+'ms between chunks');console.error('P58A_XFER range '+chunkDelay);
 }
 for(const mode of ['no-bytes','empty-progress']){
  const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
@@ -463,21 +463,21 @@ for(const mode of ['no-bytes','empty-progress']){
  h.state.rangeChunkDelayMs=mode==='no-bytes'?150000:30000;h.state.rangeMode=mode==='empty-progress'?mode:'valid';const started=clock.now();
  const read=await settleTransfer(h.provider.repository.download(ref,{offset:0,length:1048576}),clock,h.state);
  assert.equal(read.ok,false);assert.match(read.error.message,/timed out/u);assert.ok(clock.now()-started<=122000);assert.equal(h.state.rangeTransfers[0].loaded,0);assert.equal(h.state.rangeTransfers[0].cancelled,true);
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push(mode+' does not renew the stalled download watchdog');
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push(mode+' does not renew the stalled download watchdog');console.error('P58A_XFER stalled-range '+mode);
 }
 for(const size of [4096,5*1048576+1]){
  const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
  h.state.uploadProgressSteps=4;h.state.uploadProgressStepMs=90000;const file=await makeRepositoryFile('object','obj_'+size.toString(16).padStart(32,'0'),'u'.repeat(size));
  const started=clock.now(),upload=await settleTransfer(h.provider.repository.upload(file),clock,h.state);
  assert.equal(upload.ok,true,upload.error?.message);assert.equal(upload.value.serverDigest,file.digest);assert.ok(clock.now()-started>=360000);assert.ok(h.state.uploadProgressStarted>0);assert.equal(h.state.uploadAborts||0,0);
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('byte-progress watchdog permits slow '+(size>5000000?'resumable':'multipart')+' upload');
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('byte-progress watchdog permits slow '+(size>5000000?'resumable':'multipart')+' upload');console.error('P58A_XFER slow-upload '+size);
 }
 for(const repeated of [false,true]){
  const clock=createFakeClock(),h=createHarness({clock});await h.provider.prepare();await h.provider.authorize();
  h.state.uploadProgressSteps=10;h.state.uploadProgressStepMs=repeated?30000:150000;h.state.uploadRepeatProgress=repeated;
  const file=await makeRepositoryFile('object','obj_'+'e'.repeat(32),'x'.repeat(4096)),result=await settleTransfer(h.provider.repository.upload(file),clock,h.state);
  assert.equal(result.ok,false);assert.match(result.error.message,/timed out/u);assert.ok(h.state.uploadAborts>0);assert.equal(h.state.files.size,0,'stalled uploads cannot publish a verified immutable object');
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push((repeated?'repeated':'absent')+' upload progress remains bounded');
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push((repeated?'repeated':'absent')+' upload progress remains bounded');console.error('P58A_XFER stalled-upload '+repeated);
 }
 for(const direction of ['upload','download']){
  const clock=createFakeClock(),h=createHarness({clock});h.clock=clock;await h.provider.prepare();await h.provider.authorize();
@@ -489,12 +489,12 @@ for(const direction of ['upload','download']){
  await waitFor(()=>direction==='upload'?h.state.uploadProgressStarted>0:h.state.rangeTransfers?.length>0,'transfer must start before foreground preemption');
  const foreground=bg.beginForeground();await rejected;await foreground.settled;assert.equal(bg.status().active.length,0);foreground.release();
  if(direction==='upload')assert.equal(h.state.files.size,0);else assert.equal(h.state.rangeTransfers[0].cancelled,true);
- await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('foreground cancels a slow '+direction+' and waits for actual release');
+ await h.provider.disconnect();assert.equal(clock.pending(),0);productiveTransferCases.push('foreground cancels a slow '+direction+' and waits for actual release');console.error('P58A_XFER foreground '+direction);
 }
 {
  const h=createHarness({uploadProgressTransport:false});await h.provider.prepare();await h.provider.authorize();
  const file=await makeRepositoryFile('object','obj_'+'b'.repeat(32),'fetch-only receipt proof');const uploaded=await h.provider.repository.upload(file);
- assert.equal(uploaded.serverDigest,file.digest);await h.provider.disconnect();productiveTransferCases.push('fetch-only capability fallback retains immutable server receipt validation');
+ assert.equal(uploaded.serverDigest,file.digest);await h.provider.disconnect();productiveTransferCases.push('fetch-only capability fallback retains immutable server receipt validation');console.error('P58A_XFER fetch-only');
 }
 console.error('P58A_LOC productive-transfer-done');
 // Retained upload progress is a server-acknowledged prefix, never a guessed
