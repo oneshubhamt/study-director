@@ -102,11 +102,11 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     if(badge&&badge.textContent!==text)badge.textContent=text;
   }
   function renderPanel(model:ReturnType<typeof presentation.status>){
-    const dialog=document.getElementById('profile-dialog');if(!(dialog instanceof HTMLDialogElement)||!dialog.open)return;
+    const dialog=document.getElementById('profile-dialog') as HTMLDialogElement|null;if(!dialog?.open)return;
     const headline=element('profile-status-headline');if(headline&&headline.textContent!==model.headline)headline.textContent=model.headline;
     const detail=element('profile-status-detail');if(detail)detail.textContent=model.detail;
-    const primary=document.getElementById('profile-status-primary');
-    if(primary instanceof HTMLButtonElement){
+    const primary=element('profile-status-primary');
+    if(primary){
       primary.hidden=!model.action;
       if(model.action){primary.textContent=model.action.label;primary.dataset['syncAction']=model.action.action;primary.classList.toggle('profile-act-quiet',model.action.action==='sync-now');}
     }
@@ -206,11 +206,11 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
       const bar=element('drive-connect-bar'),showBar=model.tone==='working'&&state.phase!=='signing-in'&&!model.steps.some(step=>step.state==='waiting');
       if(bar){
         bar.hidden=!showBar;bar.dataset['mode']=model.fraction===null?'indeterminate':'determinate';
-        if(bar.firstElementChild instanceof HTMLElement)bar.firstElementChild.style.width=model.fraction===null?'':`${Math.round(model.fraction*100)}%`;
+        const fill=bar.firstElementChild as HTMLElement|null;if(fill)fill.style.width=model.fraction===null?'':`${Math.round(model.fraction*100)}%`;
       }
       const detail=element('drive-connect-detail');if(detail){detail.hidden=!model.detail;if(detail.textContent!==model.detail)detail.textContent=model.detail;}
-      const action=document.getElementById('drive-connect-action');
-      if(action instanceof HTMLButtonElement){action.hidden=!model.action||!!inline;if(model.action&&!inline){action.dataset['syncAction']=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
+      const action=element('drive-connect-action');
+      if(action){action.hidden=!model.action||!!inline;if(model.action&&!inline){action.dataset['syncAction']=model.action.action;if(action.textContent!==model.action.label)action.textContent=model.action.label;}}
     }
     if(model.done&&hideTimer===null){
       const expected=state;
@@ -223,7 +223,8 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
   }
   function connectCardOpen(){reconcileProfile();return card!==null;}
   async function action(event:Event){
-    const target=event.target instanceof Element?event.target.closest<HTMLElement>('[data-sync-action]'):null;
+    const source=event.target as Element|null;
+    const target=source&&typeof source.closest==='function'?source.closest<HTMLElement>('[data-sync-action]'):null;
     const kind=String(target?.dataset['syncAction']||'');
     if(!['sync-now','retry','sign-in'].includes(kind))input.actions.closeProfilePanel();
     try{
