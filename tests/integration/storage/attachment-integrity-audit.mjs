@@ -156,7 +156,7 @@ for(const failure of ['read','write']){
 }
 // The integrity path needs only attachment IDs. It must scan the same
 // complete, strict canonical sources as the interactive descriptor path.
-vm.runInContext(readCoreScript('attachments'),context,{filename:'source/core/attachments.js'});
+vm.runInContext(readCoreScript('attachments'),context,{filename:'source/core/attachments.ts'});
 const Attachments=context[Symbol.for('studyDirector.internalModules.v1')].require('attachments',1);
 {
  const refs=Array.from({length:13},(_,i)=>'att-'+String(i).padStart(32,'a'));
