@@ -725,13 +725,14 @@ const repository=(()=>{
   function reconcile(payload:unknown,deletions:unknown=[]){return commitCollection(payload,{merge:true,deletions});}
   // Removes a note for good. A deletion record keeps a live note from coming
   // back through Combine; a trash row needs none.
-  async function removeKey(key:string){
+  async function removeKey(key:string,options:Readonly<{expectedRevision?:string}>={}){
     if(!appCanMutate()||!key||!notes[key])return false;
     await settle([key]);const current=notes[key];if(!current)return false;
+    if(options.expectedRevision!==undefined&&revision(current)!==options.expectedRevision)throw new Error('The note changed before deletion; its successor was preserved.');
     dropNote(key);touchSnapshot();markDirty(key,revision(current));
     await settle([key]);return !notes[key];
   }
-  function remove(ref:unknown){return removeKey(keyFor(ref));}
+  function remove(ref:unknown,options:Readonly<{expectedRevision?:string}>={}){return removeKey(keyFor(ref),options);}
   // Moves a note to Recently deleted under its own id, in one transaction with
   // its deletion record. An empty note is simply removed. Returns the trash
   // key, '' for an empty note, or null when nothing changed.

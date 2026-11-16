@@ -85,8 +85,23 @@ function createIntegration(input:Readonly<DocumentIntegrationInput>):Readonly<Do
     const type=String(row.type||''),mode=type.startsWith('image/')?'inline-image':type.startsWith('audio/')?'inline-audio':'link',transformed=richText.insertAttachmentReference(String(note.text||''),{id:row.id,name:row.name||'Attachment',mode}),value=transformed.value;
     await validateAttachmentInsertion(value,row);ownership.assert(token,'insert attachment in note');
     const result=notes.updateValidatedRich(destination.key,note.label||destination.label,value,note.updatedAt||'');if(!['changed','unchanged'].includes(result.status))throw new Error('The note changed. Reopen it and try again.');
-    try{await notes.flush({strict:true});const verified=(await notes.readFreshPayload()||{})[storedId()];if(verified?.text!==value||notes.failure().failed)throw new Error('The attachment insertion could not be verified.')}
-    catch(error){try{const current=notes.get(destination.key),rollback=notes.updateValidatedRich(destination.key,note.label||destination.label,String(note.text||''),current?.updatedAt||result.revision||'');if(!['changed','unchanged'].includes(rollback.status))throw new Error('The note changed before rollback.');await notes.flush({strict:true});if(!hadNote){if(notes.get(destination.key)&&!await notes.remove(destination.key))throw new Error('The newly materialized note could not be removed.')}else if((await notes.readFreshPayload())?.[id]?.text!==String(note.text||''))throw new Error('The prior note state did not restore.')}catch(rollbackError){throw new Error(errorMessage(error)+' Automatic note rollback also failed: '+errorMessage(rollbackError))}throw error}
+    const insertedId=storedId();
+    try{await notes.flush({strict:true});const verified=(await notes.readFreshPayload()||{})[insertedId];if(verified?.text!==value||notes.failure().failed)throw new Error('The attachment insertion could not be verified.')}
+    catch(error){
+      try{
+        ownership.assert(token,'roll back attachment insertion');
+        const current=notes.get(destination.key);
+        if(!current||current.id!==insertedId||current.updatedAt!==result.revision||current.text!==value)throw new Error('The note changed after insertion; its successor was preserved.');
+        const rollback=notes.updateValidatedRich(destination.key,note.label||destination.label,String(note.text||''),result.revision);
+        if(!['changed','unchanged'].includes(rollback.status))throw new Error('The note changed before rollback.');
+        await notes.flush({strict:true});
+        ownership.assert(token,'finish attachment insertion rollback');
+        if(!hadNote){
+          if(!await notes.remove(insertedId,{expectedRevision:rollback.revision}))throw new Error('The newly materialized note could not be removed.');
+        }else if((await notes.readFreshPayload())?.[id]?.text!==String(note.text||''))throw new Error('The prior note state did not restore.');
+      }catch(rollbackError){throw new Error(errorMessage(error)+' Automatic note rollback also failed: '+errorMessage(rollbackError));}
+      throw error;
+    }
     library().refreshNotes();return true;
   }
   async function quiesceAttachmentMutation<T>(work:()=>T|PromiseLike<T>,options:AttachmentBatchOptions={}){return editor.quiesce(()=>library().batchAttachmentMutation(work,options))}

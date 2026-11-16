@@ -59,6 +59,16 @@ let noteWrite=h.app.notes.update('obsolete-note','Obsolete Note','temporary text
 assert.equal(noteWrite.status,'changed');
 await h.app.notes.flush({strict:true});
 const obsoleteId=h.app.notes.get('obsolete-note').id;
+// Conditional cleanup must recheck after settling pending note writes. A newer
+// edit while removal is waiting cannot be authorized by the earlier revision.
+const obsoleteRevision=h.app.notes.get(obsoleteId).updatedAt;
+const conditionalRemoval=h.app.notes.remove(obsoleteId,{expectedRevision:obsoleteRevision});
+assert.equal(h.app.notes.update(obsoleteId,'Obsolete Note','successor text',obsoleteRevision).status,'changed');
+await assert.rejects(conditionalRemoval,/current notes are not safely stored|note changed before deletion/i);
+await h.app.notes.flush({strict:true});
+await assert.rejects(h.app.notes.remove(obsoleteId,{expectedRevision:obsoleteRevision}),/note changed before deletion/i,'even a settled successor cannot be removed with the stale revision');
+assert.equal(h.app.notes.get(obsoleteId).text,'successor text');
+assert.equal((await h.app.notes.readFreshPayload())[obsoleteId].text,'successor text');
 assert.equal(await h.app.notes.remove('obsolete-note'),true);
 let noteLedger=await h.app.deletionRecovery.notes();
 assert.equal(noteLedger.some(row=>row.key===obsoleteId),true,'Note deletion must create durable canonical deletion history.');

@@ -6,21 +6,24 @@ const run=file=>vm.runInThisContext(readRuntimeSource(new URL(file,import.meta.u
 run('../../../source/core/internal.ts');run('../../../source/core/document-host.ts');
 const module=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('document-host',1);
 
-function integrationHarness({concurrent=false,failInsertedFlush=false,attachmentLibrary=null}={}){
+function integrationHarness({concurrent=false,failInsertedFlush=false,successorOnFlush=false,successorOnReadback=false,initiallyEmpty=false,successorDuringRollback=false,attachmentLibrary=null}={}){
   const calls=[],reviewOptions=[];let flushCount=0;
-  let note={id:'note-1',label:'Topic',text:'WG1:old',updatedAt:'r1'};
+  let note=initiallyEmpty?null:{id:'note-1',label:'Topic',text:'WG1:old',updatedAt:'r1'};
   const notes={
     get:()=>note,
-    readFreshPayload:async()=>({[note.id]:{...note}}),
+    readFreshPayload:async()=>{
+      if(successorOnReadback&&flushCount===2)note={...note,text:'WG1:successor',updatedAt:'r99'};
+      return note?{[note.id]:{...note}}:{};
+    },
     failure:()=>({failed:false}),
-    flush:async()=>{calls.push('notes.flush');flushCount++;if(failInsertedFlush&&flushCount===2)throw new Error('storage unavailable');},
+    flush:async()=>{calls.push('notes.flush');flushCount++;if(flushCount===2&&successorOnFlush||flushCount===3&&successorDuringRollback)note={...note,text:'WG1:successor',updatedAt:'r99'};if(failInsertedFlush&&flushCount===2)throw new Error('storage unavailable');},
     updateValidatedRich:(_key,label,text,expected)=>{
       calls.push(`update:${expected}->${text}`);
-      if(expected!==note.updatedAt)return {status:'conflict',revision:note.updatedAt};
-      note={...note,label,text,updatedAt:'r'+(Number(note.updatedAt.replace(/\D/g,''))||1)+1};
+      if(expected!==(note?.updatedAt||''))return {status:'conflict',revision:note?.updatedAt||''};
+      note={...note,id:note?.id||'note-1',label,text,updatedAt:'r'+((Number(note?.updatedAt.replace(/\D/g,''))||1)+1)};
       return {status:'changed',revision:note.updatedAt};
     },
-    remove:async()=>true
+    remove:async(id,options)=>{assert.equal(id,note.id);if(options?.expectedRevision!==note.updatedAt)throw new Error('note changed before deletion');note=null;return true;}
   };
   const editor={
     close:async()=>{calls.push('editor.close');return true;},
@@ -71,6 +74,18 @@ function integrationHarness({concurrent=false,failInsertedFlush=false,attachment
   await assert.rejects(()=>h.integration.insertAttachment('topic',{id:'att-'+ 'b'.repeat(20),name:'Doc.pdf',type:'application/pdf'}),/storage unavailable/i);
   assert.equal(h.getNote().text,'WG1:old','failed post-write verification must restore prior note content');
   assert.ok(h.calls.filter(value=>value==='notes.flush').length>=3,'rollback must itself be durably flushed');
+}
+for(const options of [{successorOnFlush:true,failInsertedFlush:true},{successorOnReadback:true}]){
+  const h=integrationHarness(options);
+  await assert.rejects(()=>h.integration.insertAttachment('topic',{id:'att-'+ 'd'.repeat(20),name:'Doc.pdf',type:'application/pdf'}));
+  assert.equal(h.getNote().text,'WG1:successor','rollback must preserve a successor after a failed write or failed readback');
+  assert.equal(h.calls.filter(value=>value.startsWith('update:')).length,1,'rollback cannot adopt the successor revision as authorization');
+}
+for(const successorDuringRollback of [false,true]){
+  const h=integrationHarness({initiallyEmpty:true,failInsertedFlush:true,successorDuringRollback});
+  await assert.rejects(()=>h.integration.insertAttachment('topic',{id:'att-'+ 'e'.repeat(20),name:'Doc.pdf',type:'application/pdf'}),/storage unavailable/);
+  if(successorDuringRollback)assert.equal(h.getNote().text,'WG1:successor','cleanup of a newly created note must preserve a later edit');
+  else assert.equal(h.getNote(),null,'failed insertion into an empty Area restores absence');
 }
 {
   const h=integrationHarness();
