@@ -28,13 +28,13 @@ async function waitFor(predicate,message){
 
 {
   let current=QA_PROFILE_ID;const {state,provider}=createHarness({profileId:()=>current});state.authorizationHold=true;
-  await provider.prepare();const pending=provider.authorize();
-  await waitFor(()=>typeof state.authorizationResponder==='function','the delayed OAuth callback must be captured before the profile switch');
-  current='prof_qa_mve00000_abcdef02';state.authorizationResponder();
-  await assert.rejects(pending,/profile changed before Google authorization completed/u);
+  await provider.prepare();console.error('P58A_AUTH prepare');const pending=provider.authorize();
+  await waitFor(()=>typeof state.authorizationResponder==='function','the delayed OAuth callback must be captured before the profile switch');console.error('P58A_AUTH captured');
+  current='prof_qa_mve00000_abcdef02';state.authorizationResponder();console.error('P58A_AUTH fired');
+  await assert.rejects(pending,/profile changed before Google authorization completed/u);console.error('P58A_AUTH stale-rejected');
   assert.equal(provider.connected(),false,'a late OAuth response must not authorize a successor profile');
-  state.authorizationHold=false;await provider.authorize();assert.equal(provider.connected(),true,'the successor profile can authorize independently');
-  await provider.disconnect();
+  state.authorizationHold=false;await provider.authorize();console.error('P58A_AUTH successor-authorized');assert.equal(provider.connected(),true,'the successor profile can authorize independently');
+  await provider.disconnect();console.error('P58A_AUTH disconnected');
 }
 
 // The sign-in lasts across a reload until it expires: it is kept in this
