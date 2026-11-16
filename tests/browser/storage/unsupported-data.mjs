@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {startReleaseServer,launchChromium,waitForStudyDirector,waitFor} from '../../helpers/browser-harness.mjs';
 import {INDEXED_DB} from '../../../contracts/canonical-identities.mjs';
 import {APP_META_KEYS,LOCAL_STORAGE_KEYS} from '../../../contracts/data-architecture.mjs';
+import {runSession} from '../../helpers/sync-journey-world.mjs';
 
 // Data this build cannot read stays exactly as it is, and the app works with
 // everything else. Each case writes a library with this build, rewrites part
@@ -17,7 +18,25 @@ const idb=`const req=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r
   const dump=async()=>{const db=await open(),out={version:db.version,stores:{}};for(const store of [...db.objectStoreNames].sort()){const tx=db.transaction(store,'readonly'),os=tx.objectStore(store);out.stores[store]={keys:await req(os.getAllKeys()),values:await req(os.getAll())};}db.close();return out;};`;
 const raw=`(async()=>{${idb}return dump();})()`;
 const prefsKey=APP_META_KEYS.personalPreferences;
+const REVIEW_ID='pr_'+'a1'.repeat(16),REVIEW_KEY=APP_META_KEYS.pendingReviewPrefix+REVIEW_ID;
 const cases=[
+  // SDVB75F24 kept a session for review in ActiveSession format 10. F25 reads
+  // sessions as 11, so the review was held as if from a newer version and
+  // Drive sync paused for good. Start-up converts it in place (only the kept
+  // session's version changes), so nothing is held and the review stays.
+  {name:'session kept for review by SDVB75F24',converted:true,
+    prepare:`(async()=>{await ${runSession('Kept')};return (await __PWA6.AppData.activeSession.load()).value;})()`,
+    seed:session=>`(async()=>{${idb}const db=await open(),tx=db.transaction('appMeta','readwrite');tx.objectStore('appMeta').put({key:${JSON.stringify(REVIEW_KEY)},version:1,updatedAt:'2026-11-14T08:00:00.000Z',
+      value:{version:2,id:${JSON.stringify(REVIEW_ID)},subject:'session',ref:'session',keptAt:'2026-11-14T08:00:00.000Z',keptFrom:'',keptChangedAt:'',kept:{...${JSON.stringify(session)},version:10},base:null,resolvedAt:''}});await done(tx);db.close();return ${JSON.stringify(REVIEW_KEY)};})()`,
+    inPage:async page=>{
+      assert.equal(await page.evaluate(`__PWA6.UnsupportedData.held()`),false,'nothing is held, so Drive sync is not paused');
+      assert.deepEqual(await page.evaluate(`(async()=>(await __PWA6.AppData.pendingReviews.list()).filter(row=>!row.resolvedAt).map(row=>row.id))()`),[REVIEW_ID],'the review is still waiting');
+    },
+    stored:({before,after})=>{
+      const was=before.stores.appMeta.values.find(row=>row.key===REVIEW_KEY),now=after.stores.appMeta.values.find(row=>row.key===REVIEW_KEY);
+      assert.equal(now.value.kept.version,11,'the kept session is in the current format');
+      assert.deepEqual({...now.value,kept:{...now.value.kept,version:10}},was.value,'only the kept session\'s version changed');
+    }},
   {name:'newer database with a store this build does not know',
     seed:`(async()=>{${idb}const db=await open(),v=db.version;db.close();(await open(v+1,created=>created.createObjectStore('futureThings',{keyPath:'id'}))).close();return v+1;})()`,
     check:async({page,before,after})=>{
@@ -55,9 +74,10 @@ try{
       await waitForStudyDirector(page,{instrumented:true});
       await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'ownership'});
       await page.evaluate(`(async()=>{const d=__PWA6;d.AppData.notes.update('ethics','Ethics','Kept text','');await d.AppData.notes.flush({strict:true});})()`);
+      const prepared=testCase.prepare?await page.evaluate(testCase.prepare):null;
       await browser.closePage(page);await new Promise(resolve=>setTimeout(resolve,600));
       const seedPage=await browser.createPage(server.url('deployment','seed.html'));
-      const key=await seedPage.evaluate(testCase.seed);
+      const key=await seedPage.evaluate(typeof testCase.seed==='function'?testCase.seed(prepared):testCase.seed);
       const before=await seedPage.evaluate(raw),profilesBefore=await seedPage.evaluate(`localStorage.getItem(${JSON.stringify(PROFILE_KEY)})`);
       await browser.closePage(seedPage);await new Promise(resolve=>setTimeout(resolve,600));
 
@@ -84,6 +104,7 @@ try{
         // once overrode the hidden attribute and showed an empty row).
         assert.equal(await page.evaluate(`(()=>{const row=document.getElementById('unsupported-data');return row.hidden&&getComputedStyle(row).display==='none';})()`),true,'Library → Data shows no newer-version row when nothing is held');
       }
+      if(testCase.inPage)await testCase.inPage(page);
       if(testCase.write){
         const refused=await page.evaluate(`(async()=>{try{await __PWA6.IndexedDb.strictStoreTransaction(${JSON.stringify(testCase.write.store)},'readwrite',(store,tx,finish)=>{store.put((${testCase.write.value.toString()})(${JSON.stringify(key)}));tx.oncomplete=()=>finish(true,true);});return 'written';}catch(error){return String(error&&error.code||error&&error.message||error);}})()`);
         assert.equal(refused,'STUDY_DIRECTOR_UNSUPPORTED_DATA','a write over held data is refused');
@@ -114,6 +135,7 @@ try{
       }
       if(testCase.name==='setting this build does not know')assert.deepEqual(after.stores.appMeta.values.find(row=>row.key==='futureFeature'),before.stores.appMeta.values.find(row=>row.key==='futureFeature'));
       if(testCase.blocked){assert.equal(after.version,before.version);assert.deepEqual(Object.keys(after.stores),Object.keys(before.stores));assert.deepEqual(after.stores.notes,before.stores.notes,'nothing in a database this build cannot open is touched');}
+      if(testCase.stored)testCase.stored({before,after});
       if(testCase.check)await testCase.check({page:await browser.createPage(server.url('deployment','instrumented.html'),{preload}).then(async next=>{await waitForStudyDirector(next,{instrumented:true,timeout:20000});return next;}),before,after});
       results.push(testCase.name);
     }finally{await browser.close();}

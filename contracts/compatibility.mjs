@@ -97,11 +97,11 @@ export const COMPATIBILITY_REGISTRY=freeze({
     },
     {
       id:'active-session-v10',owner:'record-codecs/repositories',kind:'live-canonicalization',
-      source:'ActiveSession.v10 rows, local recovery envelopes, portable backups v24 and backup-location manifests version 9, all written by released builds up to SDVB75F24',
+      source:'ActiveSession.v10 rows, local recovery envelopes, sessions kept for review (PendingReview kept) on the device and in backups and versions, portable backups v24 and backup-location manifests version 9, all written by released builds up to SDVB75F24',
       target:'ActiveSession.v11 with the same fields and values: v10 knew only the statuses active and suspended, which v11 keeps; v11 adds finished',
-      proof:'a stored v10 row or envelope is rewritten as v11 and read back before canonical-store verification; a v24 file and a version-9 manifest read their session through the older-session reader; finished never appears in a v10 form',
-      retirement:'after every supported installation has crossed to ActiveSession.v11 and no supported backup older than portable v25 or manifest 10 remains',
-      sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/repositories.js','source/core/backup-codec.js'])
+      proof:'a stored v10 row or envelope is rewritten as v11 and read back before canonical-store verification; a stored review holding a v10 session is rewritten with only that version changed and read back at start-up, before held data is settled; a v24 file and a version-9 manifest read their session, and any version its kept sessions, through the older-session reader; finished never appears in a v10 form',
+      retirement:'after every supported installation has crossed to ActiveSession.v11, no review on any device holds a v10 session, and no supported backup older than portable v25 or manifest 10 (or holding a review with a v10 session) remains',
+      sourceFiles:freeze(['source/core/compatibility-codecs.js','source/core/compatibility-host.js','source/core/repositories.js','source/core/backup-codec.js','source/core/backup.js'])
     },
     {
       id:'active-session-v7-domain-separation',owner:'record-codecs/repositories',kind:'live-canonicalization',
