@@ -87,6 +87,8 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
 - **14. Drive requests are slow on the phone:** 1–4 s each, about six in a row per upload, so a 10 KB upload takes 15–20 s; the catch-up after a bring-in downloaded the same 8 files again. Part of the Drive speed work below.
 - **16. The app feels slow overall** (owner, 2026-11-05). Measure on the phone and iPad first (start-up, tab switches, Library, Plan, Execute, typing, dialogs, sync in the background), then fix the worst. Last among the bugs; includes row 7 of the observations table.
 - **15. Background work on phones** (decided for now): a backgrounded mobile page is frozen and no service worker can help (Drive sign-in lasts an hour without a server). No background service; any device that completes Drive cleanup tidies it for all.
+- **25. Attachments seen downloading on a cold open** (owner, 2026-11-16: laptop, phone and iPad, at a cold open and its first sync; perhaps uploading too). Not reproduced: in two-device tests, with and without a backup password, through cold opens, catch-ups and uploads after a cold open, each attachment moved once per device and never again (Drive objects are reused by fingerprint). The constant uploads fixed in F28 (item 27) may be what was seen. Next time: Copy diagnostics right after that first sync; its `provider-object-download-start` and `provider-object-upload-start` lines give each object's size, so attachment-sized ones show whether attachments really moved.
+- **26. Editor mount and unmount lifecycle** (owner, 2026-11-16: wanted, later). One clear owner of when an editor mounts, stays and goes, in place of the runtime, the lifecycle step and each view each deciding part of it; F28 closed the gaps that showed (item 28).
 
 ### Fixed, to confirm on real devices
 
@@ -106,6 +108,8 @@ Open work, decisions still to make, and what has not been checked yet. Nothing h
 | 21 | Finish Today ends the day for good ([study-session.md](areas/study-session.md)) | |
 | 23 | One Drive check every 10 s (6 requests a minute) for handoff and new versions | handoff speed with real Google Drive |
 | 24 | No "Previous study day needs review" after a saved day: Save Today pauses a running timer, only the device that ran the day asks, notes after the save leave it saved ([study-session.md](areas/study-session.md)) | a few mornings |
+| 27 | Typing no longer uploads to Drive every few seconds: one upload 20 minutes after the first change, within seconds of a key moment, at once on going to the background (F28, [backup-and-sync.md](areas/backup-and-sync.md)) | Drive activity while typing; Continue Here still quick |
+| 28 | A sync while typing keeps the editor and the cursor (Library note, reflection, Execute note); no raw `WG1:` text; today's reflection takes a click at once with no session (F28, [notes.md](areas/notes.md#which-editors-are-live)) | type while another device syncs; reopen after the app sat in the background |
 
 **Which build:** the reports above were seen on F18; F25 (PR 21) carries the fixes and a format change, so update every device at about the same time.
 
