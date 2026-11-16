@@ -256,7 +256,6 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     environment.window.addEventListener('online',()=>{try{input.providers().wakeBackground('online');}catch(error){input.capture('backup-provider.online-wake',error);}});
     document.addEventListener('visibilitychange',()=>{if(environment.visible())schedule();});
     environment.setInterval(()=>{if(environment.visible())schedule();},30*1000);
-    input.providers().subscribeStatus(schedule);
     presentation.subscribe(schedule);
     schedule();return true;
   }
