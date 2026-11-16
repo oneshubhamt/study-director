@@ -157,7 +157,12 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     return had;
   }
   function settleConnection(token:number,profile:string,ok:boolean){
-    if(!connection||connection.token!==token||connection.profile!==profile||currentProfile()!==profile)return false;
+    if(!connection||connection.token!==token||connection.profile!==profile)return false;
+    if(currentProfile()!==profile){
+      connection=null;
+      if(card&&card.token===token&&card.profile===profile)endConnectCard();
+      return false;
+    }
     connection=null;
     if(card&&card.token===token&&card.profile===profile&&card.phase==='signing-in'){
       if(ok)card.phase='signed-in';
