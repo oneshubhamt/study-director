@@ -202,8 +202,15 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   status={connected:true,waiting:false,sync:{syncedAt:'1970-01-01T00:00:02.000Z'}};
   const done=controller.renderConnectCard();
   assert.equal(done.done,true,'the current profile connection can complete its card');
+  assert.ok([...timers.values()].some(timer=>timer.ms===6000),'a completed card schedules its hide');
+  status={connected:true,waiting:true,sync:{syncedAt:'1970-01-01T00:00:02.000Z'}};
+  const resumed=controller.renderConnectCard();
+  assert.equal(resumed.done,false,'the same card can resume work after a transient terminal-looking status');
+  assert.equal([...timers.values()].some(timer=>timer.ms===6000),false,'resumed work cancels the terminal auto-hide timer');
+  status={connected:true,waiting:false,sync:{syncedAt:'1970-01-01T00:00:02.000Z'}};
+  controller.renderConnectCard();
   const staleHide=[...timers.values()].find(timer=>timer.ms===6000)?.fn;
-  assert.equal(typeof staleHide,'function','a completed card schedules its hide');
+  assert.equal(typeof staleHide,'function','a terminal card re-arms its hide after work settles again');
   now=3000;status=null;
   const third=controller.connectDriveForProfile();
   staleHide();

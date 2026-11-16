@@ -22,7 +22,7 @@ Automatic backups to the Device Folder and Google Drive, Version History and res
   - The lock files, with the same names and formats as today, so devices on different app versions still coordinate.
   - Connection state, permission and authorization.
   - Device Folder: a local directory handle (`device-folder-storage.ts`). A thin controller (`device-backup.ts`) keeps the chosen folder, its permission, remembering it across launches and its status row.
-  - Drive: the Drive API (`drive.js`).
+  - Drive: the checked Drive API adapter (`source/external/drive.ts`).
 
 **Ownership.** The backup provider is the sole owner of checkpoint/commit history-list normalization, the comparison of planned versus current cleanup identities, and the publication read-back lease/checksum lifecycle. Both ordinary Version History discovery and destructive cleanup use the same identity parsing; only cleanup requests fresh content digests. Immediately before deletion, the engine repeats the manifest/commit digest check under its exclusive maintenance lease, treating any changed or unreadable identity as a reason to defer rather than delete. Manifest and commit **provenance** validation remains separate after the shared byte verification; format validation, object retention and canonical capture still belong to `managed-repository.ts`. Storage adapters produce physical listing, transport and checksum evidence but do not decide which backup version is safe to retain or remove.
 

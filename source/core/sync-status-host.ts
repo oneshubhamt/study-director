@@ -192,7 +192,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
       if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
       if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
       model=presentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:environment.online(),drive,operation,seen:state.seen,keptNew:Math.max(0,(input.keptVersions()?.count()||0)-state.kept)});
-    }catch(error){input.capture('drive-connect-card.render',error);const root=element('drive-connect-card');if(root)root.hidden=true;return false;}
+    }catch(error){clearHideTimer();input.capture('drive-connect-card.render',error);const root=element('drive-connect-card');if(root)root.hidden=true;return false;}
     const root=element('drive-connect-card');
     if(root){
       root.hidden=false;root.dataset['tone']=model.tone;
@@ -223,7 +223,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
         hideTimer=null;
         if(card===expected&&currentProfile()===expected.profile)endConnectCard();
       },6000);
-    }
+    }else if(!model.done)clearHideTimer();
     return model;
   }
   function connectCardOpen(){reconcileProfile();return card!==null;}
