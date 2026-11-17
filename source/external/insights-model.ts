@@ -3367,7 +3367,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const calibrationError=evaluated.length?sum(bins.map(bin=>bin.count?bin.count/evaluated.length*Math.abs(num(bin.predicted)-num(bin.observed)):0)):null;
     const strongReady=!!calibrator.ready&&crossFitReady&&Number.isFinite(brier)&&Number.isFinite(baselineBrier)&&num(brier)<=num(baselineBrier)+FORECAST_BRIER_BASELINE_TOLERANCE&&Number.isFinite(calibrationError)&&num(calibrationError)*100<=FORECAST_MAX_CALIBRATION_ERROR_POINTS;
     const brierRounded=roundNullable(brier,3),baselineRounded=roundNullable(baselineBrier,3),completionRounded=roundNullable(completionMae===null?null:completionMae*100,1),naiveRounded=roundNullable(naiveMae===null?null:naiveMae*100,1),naiveGainRounded=roundNullable(naiveGain===null?null:naiveGain*100,1),calibrationRounded=roundNullable(calibrationError===null?null:calibrationError*100,1);
-    const strongReason=!calibrator.ready?calibrator.reason
+    const strongReason:string|null=!calibrator.ready?(calibrator.reason??'Strong-day probability could not be estimated.')
       : !crossFitReady?'Cross-fitted strong-day calibration could not be estimated across all folds.'
       : !strongReady?`Strong-day checks remain guarded: Brier ${numberLabel(brierRounded,3)} versus ${numberLabel(baselineRounded,3)} baseline, calibration gap ${percentLabel(calibrationRounded,1)}.`:null;
     const ready=completionReady||strongReady;
@@ -3424,7 +3424,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       confidence:descriptiveEvidenceConfidence(rows.length,sum(rows.map(row=>row.completed))),reason:surface.reason
     };
     const calibration=forecastCalibration(rows);
-    const minimum=Math.min(...plannedValues),maximum=Math.max(...plannedValues),latestState=rows.length?(.78*rows[rows.length-1].priorState+.22*rows[rows.length-1].completion):50;
+    const minimum=Math.min(...plannedValues),maximum=Math.max(...plannedValues),latestState=rows.length?(.78*rows[rows.length-1]!.priorState+.22*rows[rows.length-1]!.completion):50;
     const baselineCalibrator=calibration.selectedModel==='baseline'&&calibration.strongReady?calibration.calibrator:null;
     const supportRadius=Math.max(45,surface.loadSd*WORKLOAD_LOCAL_SUPPORT_RADIUS_SD);
     const curve=Array.from({length:WORKLOAD_CURVE_POINTS},(_,index)=>{
@@ -3482,7 +3482,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const scenarioPrediction=forecastPrediction(scenarioPlanned)!;
     const forecastCurve=Array.from({length:WORKLOAD_CURVE_POINTS},(_,index)=>{
       const planned=minimum+(maximum-minimum)*(index/(WORKLOAD_CURVE_POINTS-1)),prediction=forecastPrediction(planned)!;
-      return {index,planned:Math.round(planned),completionMean:round(prediction.completionMean*100,1),completionLow:round(prediction.completionLow*100,1),completionHigh:round(prediction.completionHigh*100,1),strongProbability:Number.isFinite(prediction.strongProbability)?round(prediction.strongProbability*100,1):null,strongLow:Number.isFinite(prediction.strongLow)?round(prediction.strongLow*100,1):null,strongHigh:Number.isFinite(prediction.strongHigh)?round(prediction.strongHigh*100,1):null,expectedCompleted:round(prediction.expectedCompleted,1)};
+      return {index,planned:Math.round(planned),completionMean:round(prediction.completionMean*100,1),completionLow:round(prediction.completionLow*100,1),completionHigh:round(prediction.completionHigh*100,1),strongProbability:isFiniteNumber(prediction.strongProbability)?round(prediction.strongProbability*100,1):null,strongLow:isFiniteNumber(prediction.strongLow)?round(prediction.strongLow*100,1):null,strongHigh:isFiniteNumber(prediction.strongHigh)?round(prediction.strongHigh*100,1):null,expectedCompleted:round(prediction.expectedCompleted,1)};
     });
     const publicCalibration=detail?calibration:compactForecastCalibration(calibration);
     const scenarioSupport=rows.filter(row=>Math.abs(row.planned-scenarioPlanned)<=supportRadius).length;
@@ -3492,7 +3492,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const forecast={
       ready:(calibration.ready&&scenarioSupported),completionReady:forecastCompletionReady,strongReady:forecastStrongReady,completionReason:supportReason||calibration.completionReason,strongReason:supportReason||calibration.strongReason,scenarioPlanned,scenarioSource:'recent eligible-plan median',scenarioSupport,state:round(latestState,1),
       modelKey:useStateAware?'state-aware':'baseline',modelLabel:useStateAware?'State-aware forecast':'Baseline workload forecast',selectionReason:calibration.selectionReason,statePredictors:useStateAware?{...currentFitness}:null,statePredictorsCausal:useStateAware?true:null,
-      completionMean:round(scenarioPrediction.completionMean*100,1),completionLow:round(scenarioPrediction.completionLow*100,1),completionHigh:round(scenarioPrediction.completionHigh*100,1),completionRangeMethod:scenarioPrediction.completionRangeMethod,rangeReady:!!calibration.intervalReady,rangeLabel:calibration.intervalReady?'Backtest-checked 80% range':'Estimated model range',rangeCoverage:calibration.completionRange&&calibration.completionRange.coverage,rangeBacktests:calibration.completionRange&&calibration.completionRange.coverageTests,rangeReason:calibration.intervalReason,strongProbability:Number.isFinite(scenarioPrediction.strongProbability)?round(scenarioPrediction.strongProbability*100,1):null,strongLow:Number.isFinite(scenarioPrediction.strongLow)?round(scenarioPrediction.strongLow*100,1):null,strongHigh:Number.isFinite(scenarioPrediction.strongHigh)?round(scenarioPrediction.strongHigh*100,1):null,expectedCompleted:round(scenarioPrediction.expectedCompleted,1),calibration:publicCalibration
+      completionMean:round(scenarioPrediction.completionMean*100,1),completionLow:round(scenarioPrediction.completionLow*100,1),completionHigh:round(scenarioPrediction.completionHigh*100,1),completionRangeMethod:scenarioPrediction.completionRangeMethod,rangeReady:!!calibration.intervalReady,rangeLabel:calibration.intervalReady?'Backtest-checked 80% range':'Estimated model range',rangeCoverage:calibration.completionRange&&calibration.completionRange.coverage,rangeBacktests:calibration.completionRange&&calibration.completionRange.coverageTests,rangeReason:calibration.intervalReason,strongProbability:isFiniteNumber(scenarioPrediction.strongProbability)?round(scenarioPrediction.strongProbability*100,1):null,strongLow:isFiniteNumber(scenarioPrediction.strongLow)?round(scenarioPrediction.strongLow*100,1):null,strongHigh:isFiniteNumber(scenarioPrediction.strongHigh)?round(scenarioPrediction.strongHigh*100,1):null,expectedCompleted:round(scenarioPrediction.expectedCompleted,1),calibration:publicCalibration
     };
     return {
       ready:true,completionReady:true,strongReady:surface.strongReady,days:rows.length,span,minimumDays:MIN_WORKLOAD_FRONTIER_DAYS,minimumSpan:MIN_WORKLOAD_FRONTIER_SPAN,method:'regularised-probabilistic-response-surface',curve,forecastCurve,
@@ -3648,7 +3648,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
   }
   function computeRestrainedInteractions(evidence:EvidenceIndex,daily:readonly DailySeriesRow[],detail=true){
     const tests=[...computeAreaTimeInteractions(evidence),computePositionWorkloadInteraction(evidence,daily),computePreviousSupportInteraction(evidence)];
-    const ranked=tests.filter(test=>test.meaningful).sort((a,b)=>Math.abs(b.effect)-Math.abs(a.effect)),candidates=deduplicateInteractionCandidates(ranked),shown=selectDiverseInteractions(candidates,2);
+    const ranked=tests.filter(test=>test.meaningful).sort((a,b)=>Math.abs(num(b.effect))-Math.abs(num(a.effect))),candidates=deduplicateInteractionCandidates(ranked),shown=selectDiverseInteractions(candidates,2);
     const observations=sum(tests.map(test=>sum(Object.values(test.cells||{}).map(cell=>num(cell&&cell.rows)))));
     return {ready:candidates.length>0,tests:detail?tests:[],candidates:detail?candidates:[],shown,...(detail?{}:{observations}),minimumCellRows:MIN_INTERACTION_CELL_ROWS,minimumCellDays:MIN_INTERACTION_CELL_DAYS,minimumEffect:MIN_INTERACTION_EFFECT_POINTS,minimumStabilityEffect:MIN_INTERACTION_STABILITY_EFFECT_POINTS,reason:candidates.length?'Only distinct interactions clearing four-cell evidence, effect-size, and repeated-period stability gates are retained; mirrored descriptions are collapsed before ranking.':'No tested combination was both sufficiently large and stable across the early and late evidence halves.'};
   }
@@ -3718,7 +3718,7 @@ type CoachModelInput=Readonly<{
   guardrails:CoachGuardrails;
   practice:PracticePacerResult;
   fitness:ReturnType<(typeof InsightsStudyFitness)['compactFitnessResult']>;
-  dynamics:CoachDynamics;
+  dynamics:ReturnType<(typeof InsightsDynamics)['computeStudyDynamics']>;
 }>;
 type CoachAreaShare=Readonly<{label:string;gap:number}>;
 type CoachAreaGap=Readonly<{under:CoachAreaShare;over:CoachAreaShare;effect:number;confidence:Confidence}>;
@@ -3790,7 +3790,7 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
       _kind:kind,
       _priority:Math.max(0,num(meta.priority)),
       _confidence:confidence,
-      _confidenceRank:confidence?num(COACH_CONFIDENCE_RANK[confidence.key],0):0,
+      _confidenceRank:confidence?confidence.key==='strong'?3:confidence.key==='reliable'?2:confidence.key==='emerging'?1:0:0,
       _compact:meta.compact!==false,
       _order:list.length
     });
@@ -3865,8 +3865,9 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
   }
   function coachSurfaceFallback(model:CoachModelInput,surface:CoachSurface):CoachSurfaceTakeaway{
     const guardrail=model&&model.guardrails&&model.guardrails.sample||{label:'Low sample',tone:'low'};
+    const kind:CoachKind='context';
     const base={
-      tag:'No clear signal',tone:'quiet',kind:'context',surfaceKey:surface.key,surfaceLabel:surface.label,targetId:surface.targetId,
+      tag:'No clear signal',tone:'quiet',kind,surfaceKey:surface.key,surfaceLabel:surface.label,targetId:surface.targetId,
       confidenceLabel:'No qualifying signal',confidenceTone:'low'
     };
     if(surface.key==='fitness')return {...base,confidenceLabel:'No usable state evidence',text:'No usable Output state or component-state estimate is available from the all-history evidence.'};
@@ -3933,7 +3934,7 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     const trajectory=performance.trajectory||{};
     const confidence=fitness.readiness||performance.confidence;
     const recentEnough=!isFiniteNumber(performance.daysSinceLastEvidence)||performance.daysSinceLastEvidence<=FITNESS_LOW_STATE_MAX_STALENESS_DAYS;
-    const reliablyLow=recentEnough&&confidenceAtLeast(confidence,'reliable')&&num(state.estimate)>=0&&state.estimate<FITNESS_LOW_STATE_THRESHOLD&&isFiniteNumber(state.high)&&state.high<FITNESS_LOW_STATE_UPPER_BOUND;
+    const reliablyLow=recentEnough&&confidenceAtLeast(confidence,'reliable')&&isFiniteNumber(state.estimate)&&state.estimate>=0&&state.estimate<FITNESS_LOW_STATE_THRESHOLD&&isFiniteNumber(state.high)&&state.high<FITNESS_LOW_STATE_UPPER_BOUND;
     const falling=trajectory.key==='falling';
     const positive=['rising','recovering'].includes(trajectory.key);
     const stateText=fitness.summary&&fitness.summary.stateText||percentLabel(state.estimate,1);
@@ -4085,10 +4086,10 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
         domain:'areas',surface:'areas',topic:'allocation-gap',kind:'concern',priority:88+Math.min(12,areaAllocation.effect/2),confidence:areaAllocation.confidence
       });
     }
-    if(lateDelay&&lateDelay.completion<70&&bestDelay&&num(bestDelay.completion)-num(lateDelay.completion)>=MIN_MEANINGFUL_DIFFERENCE_POINTS){
+    if(lateDelay&&num(lateDelay.completion)<70&&bestDelay&&num(bestDelay.completion)-num(lateDelay.completion)>=MIN_MEANINGFUL_DIFFERENCE_POINTS){
       const tone=lateDelay.blocks<5?'quiet':'watch';
       pushSignal(signals,`${lateDelay.label} starts are linked with weaker work completion in the saved sample${lateDelay.blocks<5?', but the sample is still small. Treat it as volatile, not bad.':'.'}`,'Start delay',tone,{domain:'start',topic:'start-rhythm',kind:'concern',priority:58+Math.min(16,delayDifference*.5)+(lateDelay.blocks>=5?5:0),confidence:model.guardrails.sample});
-    }else if(weakDelay&&weakDelay.id!==bestDelay?.id&&weakDelay.completion<70&&delayDifference>=MIN_MEANINGFUL_DIFFERENCE_POINTS){
+    }else if(weakDelay&&weakDelay.id!==bestDelay?.id&&num(weakDelay.completion)<70&&delayDifference>=MIN_MEANINGFUL_DIFFERENCE_POINTS){
       const tone=weakDelay.blocks<5?'quiet':'watch';
       pushSignal(signals,`${weakDelay.label} starts are the weakest start-rhythm bucket in the saved sample${weakDelay.blocks<5?', but the sample is still small. Treat it as volatile, not bad.':'.'}`,'Start rhythm',tone,{domain:'start',topic:'start-rhythm',kind:'concern',priority:56+Math.min(16,delayDifference*.5)+(weakDelay.blocks>=5?5:0),confidence:model.guardrails.sample});
     }
@@ -4137,8 +4138,10 @@ type InsightsBuildOptions=Readonly<{
 type HistoryContextOptions=Readonly<{currentStudyDate:string;subjectReferenceSummaries?:readonly InsightSummary[]}>;
 type PreparedInsights=Readonly<{records:readonly InsightRecord[];revision:string}>;
 type HistoryOverview=Readonly<{planned:number;completed:number;actual:number;completion:number|null;averageQuality:number|null}>;
-type HistoryDynamicsModel=Omit<DynamicsModelInput,'overview'>&Readonly<{
+type HistoryDynamicsModel=Omit<DynamicsModelInput,'overview'|'advanced'>&Readonly<{
   overview:HistoryOverview;
+  advanced:ReturnType<(typeof InsightsAnalytics)['computeAdvanced']>;
+  windowLabel:string;
   interruption:ReturnType<(typeof InsightsAnalytics)['computeInterruption']>;
   sampleAudit:ReturnType<(typeof InsightsAnalytics)['computeSampleAudit']>;
   schedule:ScheduleSummary;
@@ -4327,7 +4330,7 @@ type HistoryCacheEntry={
     };
     const prepare=(recordsInput:readonly InsightRecord[]|null|undefined,revisionHint:unknown=null):PreparedInsights=>{
       const external=trustedRevision(revisionHint);
-      if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
+      if(external){const cached=preparedRevisions.get(external);if(cached)return remember(preparedRevisions,external,cached,PREPARED_REVISION_CACHE_LIMIT);}
       return finishPrepared(normalizeRecords(recordsInput),external);
     };
     const prepareAsync=async(recordsInput:readonly InsightRecord[]|null|undefined,revisionHint:unknown=null,yieldTask:(()=>unknown|PromiseLike<unknown>)|null=null):Promise<PreparedInsights>=>{
@@ -4347,7 +4350,7 @@ type HistoryCacheEntry={
     const historyEntry=(prepared:PreparedInsights,options:InsightsBuildOptions={}):HistoryCacheEntry=>{
       const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
       const key=`${prepared.revision}|${currentStudyDate}|${options.subjectReferenceRevision||summariesRevisionKey(options.subjectReferenceSummaries)}`;
-      if(historyCache.has(key))return remember(historyCache,key,historyCache.get(key),HISTORY_CACHE_LIMIT);
+      const cached=historyCache.get(key);if(cached)return remember(historyCache,key,cached,HISTORY_CACHE_LIMIT);
       const contextOptions:HistoryContextOptions=Object.freeze({currentStudyDate,...(options.subjectReferenceSummaries?{subjectReferenceSummaries:options.subjectReferenceSummaries}:{})});
       const context=createAllHistoryContext(prepared.records,contextOptions,classifyTaskOutcome);
       return remember(historyCache,key,{prepared,contextOptions,compact:buildAllHistoryInsights(context,false),reusable:context,audit:null},HISTORY_CACHE_LIMIT);
