@@ -17,7 +17,7 @@ const SAMPLES=3;
 const B=PERFORMANCE_BUDGETS;
 
 const server=await startReleaseServer();
-const exposed=instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({CompatibilityCodecs,StartupLifecycle,');
+const exposed=instrumentedHtml().replace('Object.freeze({StartupLifecycle,','Object.freeze({dailyRecordVersion:DATA_CONTRACT.schemas.DailyRecord.version,sanitizeCurrentDailyRecord,FirstStart,StartupLifecycle,');
 server.setOverride('deployment','instrumented.html',process.env.SD_SECURITY_TEST==='1'
   ?exposed.replace('<head>',"<head><meta http-equiv=\"Content-Security-Policy\" content=\"worker-src 'self'; require-trusted-types-for 'script'; trusted-types sd-inert-html sd-assets sd-legal-html sd-insights-worker sd-google-signin\">")
   :exposed);
@@ -29,22 +29,27 @@ const url=server.url('deployment','instrumented.html');
 // day without changing how many there are.
 const records=(quality=null)=>`(()=>{
   const total=${B.referenceInsightsDays},now=new Date(),end=Math.floor(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())/86400000),records=[];
-  const iso=day=>new Date(day*86400000).toISOString().slice(0,10),dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const iso=day=>new Date(day*86400000).toISOString().slice(0,10);
+  const savedAt=date=>new Date(Math.min(Date.parse(date+'T18:00:00.000Z'),Date.now())).toISOString();
   for(let index=0;index<total;index+=1){
     const date=iso(end-total+1+index),pace=125-index*.06,targetMs=60000,actualMs=Math.max(1000,Math.round(targetMs*pace/100));
-    const a='a-'+index,b='b-'+index,completionA=Math.max(5,Math.min(100,45+index*.05)),completionB=Math.max(0,100-completionA/2),dayOfWeek=new Date(date+'T00:00:00Z').getUTCDay();
-    records.push({version:13,date,dayOfWeek,dayName:dayNames[dayOfWeek],savedAt:date+'T18:00:00.000Z',sourceRevision:1,studyQuality:index===total-1&&${JSON.stringify(quality)}!==null?${JSON.stringify(quality)}:index%5+1,
+    const a='a-'+index,b='b-'+index,completionA=Math.max(5,Math.min(100,45+index*.05)),completionB=Math.max(0,100-completionA/2);
+    records.push({version:__PWA6.dailyRecordVersion,recordKind:'study',date,savedAt:savedAt(date),updatedAt:savedAt(date),sourceRevision:1,
+      quote:'',reflection:'',carryForwardDraft:'',studyQuality:index===total-1&&${JSON.stringify(quality)}!==null?${JSON.stringify(quality)}:index%5+1,realTimeSnapshot:null,
       schedule:[{id:a,start:'08:00',duration:30,name:'Practice set',kind:'work',area:'Practice',measure:'questions',target:4},{id:b,start:'08:30',duration:30,name:'Review set',kind:'work',area:'Review',measure:'items',target:10}],
       results:{[a]:{completion:completionA,completionSource:'manual',actualSeconds:Math.round(completionA*18)},[b]:{completion:completionB,completionSource:'manual',actualSeconds:1200}},
       practiceRuns:[{taskId:a,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
   }
   return records;
 })()`;
-const seed=`(async()=>{const records=${records()};await __PWA6.AppData.dailyRecords.saveBatch(records.map(record=>__PWA6.CompatibilityCodecs.dailyRecord(record)));localStorage.setItem('studyDirector.insights.window.v1','all');return records.length;})()`;
-const changeLatestDay=quality=>`(async()=>{const records=${records(quality)};await __PWA6.AppData.dailyRecords.saveBatch(records.slice(-1).map(record=>__PWA6.CompatibilityCodecs.dailyRecord(record)));return true;})()`;
+const canonicalize=`records.map((record,index)=>{const current=__PWA6.sanitizeCurrentDailyRecord(record);if(!current)throw new Error('Invalid canonical Insights performance fixture at '+index);return current;})`;
+const seed=`(async()=>{const records=${records()},canonical=${canonicalize};await __PWA6.AppData.dailyRecords.saveBatch(canonical);window.StudyDirector.data.deviceState.writeInsightsWindow('all');return records.length;})()`;
+const changeLatestDay=quality=>`(async()=>{const records=${records(quality)},canonical=${canonicalize};await __PWA6.AppData.dailyRecords.saveBatch(canonical.slice(-1));return true;})()`;
 
 async function open(preload=''){
-  const page=await browser.createPage(url,{preload});pages.push(page);await waitForStudyDirector(page,{instrumented:true});return page;
+  const page=await browser.createPage(url,{preload});pages.push(page);await waitForStudyDirector(page,{instrumented:true});
+  await page.evaluate(`__PWA6.FirstStart.isOpen()?__PWA6.FirstStart.skip():true`);
+  return page;
 }
 async function close(page){pages.splice(pages.indexOf(page),1);await browser.closePage(page);}
 const median=values=>{const sorted=[...values].sort((a,b)=>a-b);return sorted[Math.floor(sorted.length/2)];};
@@ -115,7 +120,7 @@ try{
   await waitFor(()=>coldPage.evaluate(`window.__StudyDirectorInsightsLastProfile?.mode==='worker'&&document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&window.__StudyDirectorInsightsLastProfile.records!==${B.referenceInsightsDays}`),{timeout:30000,label:'window change'});
   const switched=await coldPage.evaluate('window.__StudyDirectorInsightsLastProfile');
   assert.equal(switched.sentRecords,0,`a window change must not resend the history: ${JSON.stringify(reported(switched))}`);
-  await coldPage.evaluate(`localStorage.setItem('studyDirector.insights.window.v1','all')`);
+  await coldPage.evaluate(`window.StudyDirector.data.deviceState.writeInsightsWindow('all')`);
   await close(coldPage);
 
   // Settled: three fresh pages, each opened once its pre-computation is ready.
@@ -156,7 +161,7 @@ try{
 
   // A worker that cannot start is reported, and Retry recovers.
   const brokenPage=await open(`window.__NativeWorker=window.Worker;Object.defineProperty(window,'Worker',{configurable:true,writable:true,value:class{constructor(){throw new Error('QA_FIXTURE injected Worker failure');}}});`);
-  await brokenPage.evaluate(`localStorage.setItem('studyDirector.insights.window.v1','all');__PWA6.goTab('insights')`);
+  await brokenPage.evaluate(`window.StudyDirector.data.deviceState.writeInsightsWindow('all');__PWA6.goTab('insights')`);
   await waitFor(()=>brokenPage.evaluate(`document.getElementById('pane-insights')?.textContent.includes('Insights processing failed')`),{timeout:30000,label:'visible worker failure'});
   await brokenPage.evaluate(`window.Worker=window.__NativeWorker`);await brokenPage.click('#pane-insights .insights-retry');
   await waitFor(()=>brokenPage.evaluate(`window.__StudyDirectorInsightsLastProfile?.mode==='worker'`),{timeout:30000,label:'worker retry succeeds'});
