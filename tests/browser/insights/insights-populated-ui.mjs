@@ -25,7 +25,7 @@ async function waitFor(fn,{timeout=45000,interval=100,label='condition'}={}){
 
 let main=fs.readFileSync(path.join(deployment,manifest.main),'utf8');
 const marker='/* PUBLIC PLUGIN API */';
-const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,AppData,goTab,dailyRecordVersion:DATA_CONTRACT.schemas.DailyRecord.version,sanitizeCurrentDailyRecord});\n';
+const exposure='window.__InsightsUiDebug=Object.freeze({StartupLifecycle,FirstStart,AppData,goTab,dailyRecordVersion:DATA_CONTRACT.schemas.DailyRecord.version,sanitizeCurrentDailyRecord});\n';
 if(!main.includes(marker))throw new Error('Insights UI browser harness hook is unavailable.');
 main=main.replace(marker,exposure+marker);
 main=withoutPwaChecks(main);
@@ -59,6 +59,8 @@ try{
   await page.send('Emulation.setTimezoneOverride',{timezoneId:studyTimezone()});
   await page.send('Emulation.setDeviceMetricsOverride',{width:1365,height:900,deviceScaleFactor:1,mobile:false});
   await waitFor(()=>page.evaluate(`!!(window.__InsightsUiDebug&&__InsightsUiDebug.StartupLifecycle.status().fullyInitialized)`),{label:'Study Director startup'});
+  await page.evaluate(`__InsightsUiDebug.FirstStart.isOpen()?__InsightsUiDebug.FirstStart.skip():true`);
+  await waitFor(()=>page.evaluate(`!document.getElementById('first-start-dialog')?.open`),{label:'first-start fixture dismissal'});
   await page.evaluate(`__InsightsUiDebug.goTab('insights')`);
   await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-empty')`),{label:'empty Insights renderer'});
   const empty=await page.evaluate(`(()=>({copy:document.querySelector('#pane-insights .insights-empty')?.textContent||'',sample:document.querySelector('#pane-insights .insights-empty-actions button')?.textContent||''}))()`);
@@ -144,7 +146,7 @@ try{
   assert.doesNotMatch(desktop.practiceCopy,/block-jackknife|time-stratified slope/i);
   assert.equal(desktop.calculationClosed,true);
   await page.send('Page.bringToFront');
-  const practiceFocusState=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));tab?.scrollIntoView({block:'center'});tab?.click();tab?.focus();const style=tab?getComputedStyle(tab):null;const ancestors=[];for(let node=tab?.parentElement;node&&ancestors.length<8;node=node.parentElement){const computed=getComputedStyle(node);ancestors.push({tag:node.tagName,className:node.className,hidden:node.hidden,inert:!!node.inert,ariaHidden:node.getAttribute('aria-hidden'),display:computed.display,visibility:computed.visibility,contentVisibility:computed.contentVisibility,skipped:typeof node.checkVisibility==='function'?!node.checkVisibility({contentVisibilityAuto:true}):null});}return {exists:!!tab,focused:!!tab&&document.activeElement===tab,selected:tab?.getAttribute('aria-selected')==='true',documentFocused:document.hasFocus(),disabled:!!tab?.disabled,tabIndex:tab?.tabIndex??null,display:style?.display||'',visibility:style?.visibility||'',pointerEvents:style?.pointerEvents||'',skipped:tab&&typeof tab.checkVisibility==='function'?!tab.checkVisibility({contentVisibilityAuto:true}):null,active:document.activeElement?{tag:document.activeElement.tagName,id:document.activeElement.id,className:document.activeElement.className}:null,rect:tab?{top:tab.getBoundingClientRect().top,bottom:tab.getBoundingClientRect().bottom}:null,ancestors};})()`);
+  const practiceFocusState=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));tab?.scrollIntoView({block:'center'});tab?.click();tab?.focus();return {exists:!!tab,focused:!!tab&&document.activeElement===tab,selected:tab?.getAttribute('aria-selected')==='true'};})()`);
   assert.equal(practiceFocusState.exists,true,'Practice Pacing tab must exist in the populated renderer');
   assert.equal(practiceFocusState.selected,true,'Practice Pacing tab must be selected before keyboard navigation');
   assert.equal(practiceFocusState.focused,true,`Practice Pacing tab must accept keyboard focus: ${JSON.stringify(practiceFocusState)}`);
