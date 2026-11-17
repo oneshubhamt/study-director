@@ -16,7 +16,7 @@ type InsightRecord=Readonly<{
   date:string;dayName?:string;savedAt?:string;updatedAt?:string;createdAt?:string;studyQuality?:number|null;degraded?:boolean;
   originalPlannedStudyMinutes?:number|null;completedEquivalentMinutes?:number|null;actualFocusMinutes?:number|null;
   shiftedStudyBlocks?:number|null;totalScheduleShiftMinutes?:number|null;netScheduleShiftMinutes?:number|null;
-  tasks?:readonly InsightTask[];originalSchedule?:readonly InsightTask[];practiceRuns?:readonly PracticeRun[];
+  tasks?:readonly InsightTask[];originalSchedule?:readonly InsightTask[];practiceRuns?:readonly PracticeRun[];__sdPracticeSummary?:PracticeRunInsightSummary;
 }>;
 type InsightSummary=Readonly<{date:string;completedMinutes?:number|null;actualTrackedMinutes?:number|null;outcomeCounts?:Partial<Record<TaskOutcome,number>>;areaSummary?:AreaSummary}>;
 type OutcomeClassifier=(task:InsightTask)=>TaskOutcome;
@@ -49,6 +49,33 @@ type BlockOrderAccumulator={key:string;label:string;sort:number;blocks:number;pl
 type InterruptionSubjectAccumulator={label:string;blocks:number;affected:number;frictionSeconds:number;frictionCount:number;actual:number};
 type InterruptionPairAccumulator={label:string;bandLabel:string;blocks:number;affected:number;frictionSeconds:number;frictionCount:number};
 type ResourceAccumulator={label:string;blocks:number;planned:number;completed:number;actual:number};
+type PracticeEvidenceUnitSource=Readonly<{actualMs:number;targetMs:number;marks:number|null;segmentLabel:string}>;
+type PracticeEvidenceSegmentSource=Readonly<{index:number;label:string;units:number;plannedUnits:number;actualMs:number;targetMs:number;plannedTargetMs:number;completion:number|null;complete:boolean;varianceMs:number}>;
+type PracticeRunEvidenceSource=Readonly<{run:PracticeRun;plannedUnits:number;unitRows:readonly PracticeEvidenceUnitSource[];segmentRows:readonly PracticeEvidenceSegmentSource[]}>;
+type PracticeRunInsightSummary=Readonly<{runSummaries:readonly PracticeRunEvidenceSource[];audit?:Readonly<{rejectedRawIndexes?:readonly number[]}>}>;
+type PracticeRunSummarizer=(runs:readonly PracticeRun[])=>PracticeRunInsightSummary;
+type DirectionalBasis=Readonly<{key:string;label:string;horizonDays:number;fromDay:number|null;toDay:number|null;from:string|null;to:string|null;capped:boolean;recordCount?:number;selectedRecordCount?:number}>;
+type PracticeMode=Readonly<{key:'paper-marks'|'paper-time'|'simple-planned'|'simple-open';label:string}>;
+type PracticeMaturity=Readonly<{key:'early'|'established'|'reliable';label:string;tone:string;rank:0|1|2;confidence:Confidence}>;
+type PracticeTrendBlock=Readonly<{index:number;start:number;end:number;slope:number}>;
+type PracticeTrendResult=Readonly<{slopePerWeek:number|null;lowPerWeek:number|null;highPerWeek:number|null;stability:number;stable:boolean;endpointStable:boolean;method:string;eligibleDays:number;sampledDays:number;pairCount:number;blockCount:number;exact:boolean}>;
+type PracticeFindingKind='concern'|'positive'|'context';
+type PracticeFindingMeta=Readonly<{kind?:PracticeFindingKind;topic?:string;score?:number;confidence?:Confidence}>;
+type PracticeFinding=Readonly<{tag:string;tone:string;text:string;kind:PracticeFindingKind;topic:string;score:number;confidence:Confidence}>;
+type PracticeReadings=Readonly<{primary:PracticeFinding;supporting:PracticeFinding|null;coach:PracticeFinding;candidates:readonly PracticeFinding[]}>;
+type PracticeUnitRow=Readonly<{date:string;runId:string;runIndex:number;unitIndex:number;area:string;block:string;modeKey:string;modeLabel:string;actualMs:number;targetMs:number;paceRatio:number;withinTarget:boolean;controlled:boolean;segmentLabel:string;marks:number|null}>;
+type PracticeRunRow=Readonly<{id:string;date:string;index:number;area:string;block:string;modeKey:string;modeLabel:string;units:number;plannedUnits:number;plannedCompletion:number|null;actualMs:number;targetMs:number;runPace:number|null;medianUnitPace:number;unitRows:readonly PracticeUnitRow[];controlled:boolean;withinBudget:boolean;completePlanned:boolean;finishingMarginMs:number|null;paceQ1:number;paceQ3:number;paceSpread:number;atOrBelowTarget:number;controlledUnits:number}>;
+type PracticeSegmentRow=Readonly<{runId:string;date:string;area:string;block:string;modeKey:string;modeLabel:string;planSignature:string;label:string;units:number;plannedUnits:number;completion:number|null;complete:boolean;actualMs:number;targetMs:number;plannedTargetMs:number;paceRatio:number|null;restPace:number|null;relativeDelta:number|null}>;
+type PracticeDailyRow=Readonly<{date:string;units:number;runs:number;medianPace:number|null;medianRunPace:number|null;typicalUnitPace:number|null;paceQ1:number|null;paceQ3:number|null;paceSpread:number|null;spreadReady:boolean;controlledRate:number;atOrBelowRate:number}>;
+type PracticePositionRow=Readonly<{key:string;label:string;index:number;runs:number;days:number;medianPace:number|null;medianDeltaFromOpening:number|null;ready:boolean}>;
+type PracticePosition=Readonly<{eligibleRuns:number;profile:readonly PracticePositionRow[];onset:PracticePositionRow|null}>;
+type RepeatedPracticeSegment=Readonly<{key:string;label:string;area:string;modeLabel:string;planSignature:string;units:number;plannedUnits:number;evidenceUnits:number;runs:number;days:number;maturity:PracticeMaturity;medianPace:number|null;medianRelativeDelta:number|null;medianCompletion:number|null;completedSegments:number;completedSegmentRate:number|null;withinBudgetRuns:number}>;
+type PracticeSizeGroup=Readonly<{key:string;label:string;family:string;units:number;runs:number;days:number;maturity:PracticeMaturity;medianPace:number|null;controlledRuns:number;controlledRunRate:number;overBudgetRuns:number;overBudgetRunRate:number;belowBandRuns:number;belowBandRunRate:number}>;
+type PracticeSizeDifference=Readonly<{family:string;low:PracticeSizeGroup;high:PracticeSizeGroup;gap:number}>;
+type PracticeGroupRow=Readonly<{key:string;label:string;units:number;runs:number;days:number;maturity:PracticeMaturity;medianRunPace:number|null;typicalUnitPace:number|null;controlledRuns:number;controlledRunRate:number;withinBudgetRuns:number;withinBudgetRate:number}>;
+type PracticeAudit=Readonly<{savedRuns:number;acceptedRuns:number;excludedRuns:number;encounteredUnits:number;acceptedUnits:number;excludedUnits:number;reasonRows:readonly Readonly<{reason:string;count:number}>[]}>;
+type PracticePacerBase=Readonly<{practiceDays:number;runs:number;units:number;totalActualMs:number;medianPace:number|null;medianRunPace:number|null;typicalUnitPace:number|null;atOrBelowTarget:number;atOrBelowRate:number|null;controlledRuns:number;controlledRunRate:number|null;withinBudgetRuns:number;withinBudgetRate:number|null;plannedRuns:number;plannedUnits:number;completedPlannedUnits:number;plannedRunCompletionMedian:number|null;completedPlannedRuns:number;completedPlannedRunRate:number|null;plannedUnitCompletionRate:number|null;medianCompletedRunTimeUsed:number|null;medianFinishingMarginMs:number|null;completedWithinTimeRuns:number;completedWithinTimeRate:number|null;medianWithinRunSpread:number|null;spreadComparableRuns:number;paceSlopePerWeek:number|null;trend:PracticeTrendResult;trendBasis:Readonly<{key:string;label:string;from:string|null;to:string|null;horizonDays:number|null;capped:boolean;practiceDays:number;selectedPracticeDays:number;units:number}>;maturity:PracticeMaturity;overallConfidence:Confidence;summaryReady:boolean;patternReady:boolean;trendReady:boolean;daily:readonly PracticeDailyRow[];runRows:readonly PracticeRunRow[];unitRows:readonly PracticeUnitRow[];segmentRows:readonly PracticeSegmentRow[];position:PracticePosition;repeatedSegments:readonly RepeatedPracticeSegment[];unitSizeGroups:Readonly<{marks:readonly PracticeSizeGroup[];durations:readonly PracticeSizeGroup[];all:readonly PracticeSizeGroup[]}>;unitSizeDifference:PracticeSizeDifference|null;audit:PracticeAudit;distribution:readonly Readonly<{key:string;label:string;count:number;share:number}>[];areas:readonly PracticeGroupRow[];modes:readonly PracticeGroupRow[]}>;
+type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;reading:PracticeFinding;supportingReading:PracticeFinding|null;coachReading:PracticeFinding}>;
 
 (function(global:typeof globalThis){
   'use strict';
@@ -1669,14 +1696,14 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       canonical,dateDay,finiteOrNull,isIsoDate,median,millisecondsLabel,num,numberLabel,pct,pct0,percentLabel,
       percentile,round,roundNullable,signedMillisecondsLabel,subjectLabel
     }=Primitives;
-  function practiceMode(run){
+  function practiceMode(run:PracticeRun):PracticeMode{
     const mode=canonical(run&&run.unitPlan&&run.unitPlan.mode);
     if(mode==='marks')return {key:'paper-marks',label:'Paper · marks'};
     if(mode==='time')return {key:'paper-time',label:'Paper · time'};
     if(num(run&&run.totalUnits)>0)return {key:'simple-planned',label:'Simple · planned'};
     return {key:'simple-open',label:'Simple · open'};
   }
-  function practiceEvidenceMaturity(units,runs,days){
+  function practiceEvidenceMaturity(units:number,runs:number,days:number):PracticeMaturity{
     const u=Math.max(0,num(units)),r=Math.max(0,num(runs)),d=Math.max(0,num(days));
     if(u>=MIN_PRACTICE_PATTERN_UNITS&&r>=MIN_PRACTICE_RELIABLE_RUNS&&d>=MIN_PRACTICE_RELIABLE_DAYS){
       return {key:'reliable',label:'Reliable',tone:'good',rank:2,confidence:{key:'reliable',label:'Reliable pace evidence',tone:'good'}};
@@ -1686,15 +1713,15 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     }
     return {key:'early',label:'Early',tone:'low',rank:0,confidence:{key:'weak',label:'Early pace evidence',tone:'low'}};
   }
-  function practiceSortedQuantile(sorted,fraction){
+  function practiceSortedQuantile(sorted:readonly number[],fraction:number){
     if(!sorted.length)return null;
     const position=(sorted.length-1)*Math.max(0,Math.min(1,num(fraction)));
     const lower=Math.floor(position),upper=Math.ceil(position),weight=position-lower;
     return lower===upper?sorted[lower]:sorted[lower]*(1-weight)+sorted[upper]*weight;
   }
-  function practicePairwiseSlope(points){
-    const rows=(Array.isArray(points)?points:[]).filter(point=>Number.isFinite(point&&point.x)&&Number.isFinite(point&&point.y));
-    const slopes=[];
+  function practicePairwiseSlope(points:readonly Point[]){
+    const rows=points.filter(point=>isFiniteNumber(point.x)&&isFiniteNumber(point.y));
+    const slopes:number[]=[];
     for(let i=0;i<rows.length;i+=1){
       for(let j=i+1;j<rows.length;j+=1){
         const dx=rows[j].x-rows[i].x;
@@ -1710,19 +1737,19 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       count:slopes.length
     };
   }
-  function practiceEvenSample(points,count){
-    const rows=Array.isArray(points)?points:[];
+  function practiceEvenSample(points:readonly Point[],count:number){
+    const rows=points;
     const limit=Math.max(0,Math.floor(num(count)));
     if(!limit||!rows.length)return [];
     if(rows.length<=limit)return rows.slice();
     if(limit===1)return [rows[0]];
-    const sampled=[];
+    const sampled:Point[]=[];
     for(let index=0;index<limit;index+=1){
       sampled.push(rows[Math.round(index*(rows.length-1)/(limit-1))]);
     }
     return sampled;
   }
-  function practiceTrendSample(points){
+  function practiceTrendSample(points:readonly Point[]){
     const rows=Array.isArray(points)?points:[];
     if(rows.length<=MAX_PRACTICE_TREND_EXACT_DAYS)return {points:rows.slice(),exact:true};
     const recentCount=Math.min(PRACTICE_TREND_RECENT_OBSERVATIONS,MAX_PRACTICE_TREND_EXACT_DAYS-2);
@@ -1730,7 +1757,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     const sampled=[...practiceEvenSample(older,MAX_PRACTICE_TREND_EXACT_DAYS-recentCount),...recent];
     return {points:sampled,exact:false};
   }
-  function practiceTrendBlocks(points){
+  function practiceTrendBlocks(points:readonly Point[]):PracticeTrendBlock[]{
     const rows=Array.isArray(points)?points:[];
     const blockCount=Math.min(PRACTICE_TREND_JACKKNIFE_BLOCKS,rows.length);
     if(rows.length<4||blockCount<2)return [];
@@ -1740,11 +1767,11 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       return {index,start,end,slope};
     }).filter(block=>Number.isFinite(block.slope));
   }
-  function practiceTrendSummary(daily){
-    const rows=(Array.isArray(daily)?daily:[]).filter(row=>isIsoDate(row&&row.date)&&Number.isFinite(row&&row.medianPace));
+  function practiceTrendSummary(daily:readonly PracticeDailyRow[]):PracticeTrendResult{
+    const rows=daily.filter(row=>isIsoDate(row.date)&&isFiniteNumber(row.medianPace));
     const empty={slopePerWeek:null,lowPerWeek:null,highPerWeek:null,stability:0,stable:false,endpointStable:false,method:'bounded-theil-sen-block-jackknife',eligibleDays:rows.length,sampledDays:rows.length,pairCount:0,blockCount:0,exact:rows.length<=MAX_PRACTICE_TREND_EXACT_DAYS};
     if(rows.length<2)return empty;
-    const origin=dateDay(rows[0].date);
+    const origin=dateDay(rows[0]!.date)!;
     const points=rows.map((row,index)=>({x:(dateDay(row.date)??origin+index)-origin,y:row.medianPace}));
     const sample=practiceTrendSample(points),full=practicePairwiseSlope(sample.points);
     if(!Number.isFinite(full.slope))return {...empty,sampledDays:sample.points.length,exact:sample.exact};
@@ -1752,7 +1779,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     const blocks=practiceTrendBlocks(sample.points);
     const stableDirections=sign&&blocks.length?blocks.filter(block=>Math.sign(block.slope)===sign).length:0;
     const stability=blocks.length?stableDirections/blocks.length:0;
-    const endpointSlopes=blocks.length?[blocks[0].slope,blocks[blocks.length-1].slope].filter(Number.isFinite):[];
+    const endpointSlopes=blocks.length?[blocks[0]!.slope,blocks[blocks.length-1]!.slope]:[];
     const endpointStable=endpointSlopes.length===2&&endpointSlopes.every(value=>Math.sign(value)===sign&&Math.abs(value)>=Math.abs(full.slope)*.35&&Math.abs(value)<=Math.abs(full.slope)*3);
     const low=Number.isFinite(full.low)?full.low*7:null,high=Number.isFinite(full.high)?full.high*7:null,slope=full.slope*7;
     const intervalDirection=sign>0?num(low)>0:sign<0?num(high)<0:false;
@@ -1767,7 +1794,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       pairCount:full.count,blockCount:blocks.length,exact:sample.exact
     };
   }
-  function practiceFinding(tag,tone,text,meta={}){
+  function practiceFinding(tag:string,tone:string,text:string,meta:PracticeFindingMeta={}):PracticeFinding{
     return {
       tag:String(tag||'Pace reading'),
       tone:String(tone||'quiet'),
@@ -1778,43 +1805,43 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       confidence:meta.confidence&&typeof meta.confidence==='object'?meta.confidence:{key:'weak',label:'Early pace evidence',tone:'low'}
     };
   }
-  function rankPracticeFindings(findings){
+  function rankPracticeFindings(findings:readonly PracticeFinding[]){
     const kindRank={concern:3,positive:2,context:1};
-    return (Array.isArray(findings)?findings:[]).slice().sort((a,b)=>
+    return findings.slice().sort((a,b)=>
       num(kindRank[b.kind])-num(kindRank[a.kind])||
       num(b.score)-num(a.score)||
       num(COACH_CONFIDENCE_RANK[b.confidence&&b.confidence.key])-num(COACH_CONFIDENCE_RANK[a.confidence&&a.confidence.key])||
       String(a.tag).localeCompare(String(b.tag))
     );
   }
-  function practiceRawRunAuditReason(value){
+  function practiceRawRunAuditReason(value:unknown){
     if(!value||typeof value!=='object')return 'Malformed saved run';
-    const rawUnits=Array.isArray(value.unitMs)?value.unitMs.filter(item=>Number.isFinite(Number(item))&&Number(item)>0):[];
+    const raw=value as Partial<PracticeRun>;const rawUnits=Array.isArray(raw.unitMs)?raw.unitMs.filter(item=>Number.isFinite(Number(item))&&Number(item)>0):[];
     if(!rawUnits.length)return 'No completed units';
-    if(!Number.isFinite(Number(value.targetMs))||Number(value.targetMs)<=0)return 'Invalid or missing target';
-    const plan=value.unitPlan&&typeof value.unitPlan==='object'?value.unitPlan:null;
-    if(plan&&canonical(plan.mode)==='marks'&&(!Number.isFinite(Number(value.sessionTargetMs))||Number(value.sessionTargetMs)<=0))return 'Marks plan missing total time';
+    if(!Number.isFinite(Number(raw.targetMs))||Number(raw.targetMs)<=0)return 'Invalid or missing target';
+    const plan=raw.unitPlan&&typeof raw.unitPlan==='object'?raw.unitPlan:null;
+    if(plan&&canonical(plan.mode)==='marks'&&(!Number.isFinite(Number(raw.sessionTargetMs))||Number(value.sessionTargetMs)<=0))return 'Marks plan missing total time';
     return null;
   }
-  function practicePositionBandIndex(index,total){
+  function practicePositionBandIndex(index:number,total:number){
     if(total<=0)return 0;
     return Math.max(0,Math.min(PRACTICE_POSITION_BANDS.length-1,Math.floor(((index+.5)/total)*PRACTICE_POSITION_BANDS.length)));
   }
-  function computePracticePositionProfile(runRows){
-    const eligible=(Array.isArray(runRows)?runRows:[]).filter(run=>Array.isArray(run.unitRows)&&run.unitRows.length>=MIN_PRACTICE_POSITION_UNITS);
+  function computePracticePositionProfile(runRows:readonly PracticeRunRow[]):PracticePosition{
+    const eligible=runRows.filter(run=>run.unitRows.length>=MIN_PRACTICE_POSITION_UNITS);
     const rows=PRACTICE_POSITION_BANDS.map((band,index)=>({
-      key:band.key,label:band.label,index,runPaces:[],relativeDeltas:[],runIds:new Set(),days:new Set()
+      key:band.key,label:band.label,index,runPaces:Array<number>(),relativeDeltas:Array<number>(),runIds:new Set<string>(),days:new Set<string>()
     }));
     eligible.forEach(run=>{
-      const byBand=PRACTICE_POSITION_BANDS.map(()=>[]);
-      run.unitRows.forEach((unit,index)=>byBand[practicePositionBandIndex(index,run.unitRows.length)].push(unit.paceRatio));
+      const byBand=PRACTICE_POSITION_BANDS.map(()=>Array<number>());
+      run.unitRows.forEach((unit,index)=>byBand[practicePositionBandIndex(index,run.unitRows.length)]!.push(unit.paceRatio));
       const bandPaces=byBand.map(values=>values.length?median(values):null);
-      const openingValues=bandPaces.slice(0,2).filter(Number.isFinite);
+      const openingValues=bandPaces.slice(0,2).filter(isFiniteNumber);
       const baseline=openingValues.length?median(openingValues):null;
       bandPaces.forEach((pace,index)=>{
-        if(!Number.isFinite(pace))return;
-        const row=rows[index];row.runPaces.push(pace);row.runIds.add(run.id);row.days.add(run.date);
-        if(Number.isFinite(baseline))row.relativeDeltas.push(pace-baseline);
+        if(!isFiniteNumber(pace))return;
+        const row=rows[index]!;row.runPaces.push(pace);row.runIds.add(run.id);row.days.add(run.date);
+        if(isFiniteNumber(baseline))row.relativeDeltas.push(pace-baseline);
       });
     });
     const profile=rows.map(row=>({
@@ -1825,7 +1852,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     }));
     let onset=null;
     for(let index=1;index<profile.length;index+=1){
-      const row=profile[index];
+      const row=profile[index]!;
       if(!row.ready||!Number.isFinite(row.medianPace)||!Number.isFinite(row.medianDeltaFromOpening))continue;
       const subsequent=profile.slice(index).filter(item=>item.ready&&Number.isFinite(item.medianDeltaFromOpening));
       const sustained=subsequent.length===1||subsequent.slice(1).some(item=>num(item.medianDeltaFromOpening)>=MIN_PRACTICE_POSITION_SLIP_POINTS*.5||num(item.medianPace)>PRACTICE_CONTROLLED_MAX);
@@ -1833,10 +1860,10 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     }
     return {eligibleRuns:eligible.length,profile,onset};
   }
-  function canonicalPracticeSegmentLabel(value){
+  function canonicalPracticeSegmentLabel(value:unknown){
     return canonical(String(value||'').replace(/[–—]/g,'-').replace(/\s*[-:]\s*/g,' ').replace(/[^a-z0-9 ]+/gi,' '));
   }
-  function practiceSegmentPlanSignature(run){
+  function practiceSegmentPlanSignature(run:PracticeRun){
     const plan=run&&run.unitPlan&&typeof run.unitPlan==='object'?run.unitPlan:null;
     if(!plan||!Array.isArray(plan.segments)||!plan.segments.length)return '';
     let start=0;
@@ -1844,41 +1871,41 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     const groupCounts=(Array.isArray(plan.groups)?plan.groups:[]).map(row=>Math.max(0,Math.floor(num(row&&row[0]))));
     return [canonical(plan.mode),`u${start}`,`s${segmentLengths.join('.')}`,`g${groupCounts.join('.')}`].join('|');
   }
-  function computeRepeatedPracticeSegments(segmentRows){
-    const map=new Map();
-    (Array.isArray(segmentRows)?segmentRows:[]).forEach(segment=>{
+  function computeRepeatedPracticeSegments(segmentRows:readonly PracticeSegmentRow[]):RepeatedPracticeSegment[]{
+    const map=new Map<string,{key:string;label:string;area:string;modeLabel:string;planSignature:string;rows:PracticeSegmentRow[];runIds:Set<string>;days:Set<string>}>();
+    segmentRows.forEach(segment=>{
       const labelKey=canonicalPracticeSegmentLabel(segment.label);
       if(!labelKey)return;
       const key=[canonical(segment.area),canonical(segment.modeKey),canonical(segment.planSignature),labelKey].join('|');
       if(!map.has(key))map.set(key,{key,label:segment.label,area:segment.area,modeLabel:segment.modeLabel,planSignature:segment.planSignature,rows:[],runIds:new Set(),days:new Set()});
-      const row=map.get(key);row.rows.push(segment);row.runIds.add(segment.runId);row.days.add(segment.date);
+      const row=map.get(key)!;row.rows.push(segment);row.runIds.add(segment.runId);row.days.add(segment.date);
     });
     return [...map.values()].map(group=>{
       const units=group.rows.reduce((sum,row)=>sum+num(row.units),0),plannedUnits=group.rows.reduce((sum,row)=>sum+num(row.plannedUnits),0),runs=group.runIds.size,days=group.days.size;
       const evidenceUnits=Math.max(units,plannedUnits),maturity=practiceEvidenceMaturity(evidenceUnits,runs,days);
       const completionRates=group.rows.filter(row=>num(row.plannedUnits)>0).map(row=>Math.min(100,num(row.units)/num(row.plannedUnits)*100));
       const completedRows=group.rows.filter(row=>num(row.plannedUnits)>0&&num(row.units)>=num(row.plannedUnits));
-      const paceRows=group.rows.filter(row=>Number.isFinite(row.paceRatio));
+      const paceRows=group.rows.filter(row=>isFiniteNumber(row.paceRatio));
       return {
         key:group.key,label:group.label,area:group.area,modeLabel:group.modeLabel,planSignature:group.planSignature,units,plannedUnits,evidenceUnits,runs,days,maturity,
-        medianPace:roundNullable(median(paceRows.map(row=>row.paceRatio)),1),
-        medianRelativeDelta:roundNullable(median(paceRows.map(row=>row.relativeDelta).filter(Number.isFinite)),1),
+        medianPace:roundNullable(median(paceRows.map(row=>row.paceRatio!)),1),
+        medianRelativeDelta:roundNullable(median(paceRows.map(row=>row.relativeDelta).filter(isFiniteNumber)),1),
         medianCompletion:roundNullable(median(completionRates),1),completedSegments:completedRows.length,completedSegmentRate:completionRates.length?round(pct0(completedRows.length,completionRates.length),1):null,
         withinBudgetRuns:paceRows.filter(row=>num(row.paceRatio)<=PRACTICE_CONTROLLED_MAX).length
       };
     }).filter(row=>row.evidenceUnits>=MIN_PRACTICE_SEGMENT_UNITS&&row.runs>=MIN_PRACTICE_SEGMENT_RUNS&&row.days>=MIN_PRACTICE_SEGMENT_DAYS)
       .sort((a,b)=>Math.max(0,100-num(b.medianCompletion),100-num(b.completedSegmentRate),Math.abs(num(b.medianRelativeDelta)))-Math.max(0,100-num(a.medianCompletion),100-num(a.completedSegmentRate),Math.abs(num(a.medianRelativeDelta)))||b.runs-a.runs||b.days-a.days||a.label.localeCompare(b.label));
   }
-  function summarizePracticeUnitGroups(unitRows,groupFor){
-    const map=new Map();
-    (Array.isArray(unitRows)?unitRows:[]).forEach(unit=>{
+  function summarizePracticeUnitGroups(unitRows:readonly PracticeUnitRow[],groupFor:(unit:PracticeUnitRow)=>Readonly<{family:string;key:string;label:string}>):PracticeSizeGroup[]{
+    const map=new Map<string,{key:string;label:string;family:string;units:PracticeUnitRow[];runIds:Set<string>;days:Set<string>;byRun:Map<string,number[]>}>();
+    unitRows.forEach(unit=>{
       const group=groupFor(unit);if(!group)return;
       if(!map.has(group.key))map.set(group.key,{key:group.key,label:group.label,family:group.family,units:[],runIds:new Set(),days:new Set(),byRun:new Map()});
-      const row=map.get(group.key);row.units.push(unit);row.runIds.add(unit.runId);row.days.add(unit.date);
-      if(!row.byRun.has(unit.runId))row.byRun.set(unit.runId,[]);row.byRun.get(unit.runId).push(unit.paceRatio);
+      const row=map.get(group.key)!;row.units.push(unit);row.runIds.add(unit.runId);row.days.add(unit.date);
+      if(!row.byRun.has(unit.runId))row.byRun.set(unit.runId,[]);row.byRun.get(unit.runId)!.push(unit.paceRatio);
     });
     return [...map.values()].map(row=>{
-      const runPaces=[...row.byRun.values()].map(values=>median(values));
+      const runPaces=[...row.byRun.values()].map(values=>median(values)!).filter(isFiniteNumber);
       const units=row.units.length,runs=row.runIds.size,days=row.days.size,maturity=practiceEvidenceMaturity(units,runs,days);
       const controlledRuns=runPaces.filter(value=>value>=PRACTICE_CONTROLLED_MIN&&value<=PRACTICE_CONTROLLED_MAX).length;
       const overBudgetRuns=runPaces.filter(value=>value>PRACTICE_CONTROLLED_MAX).length,belowBandRuns=runPaces.filter(value=>value<PRACTICE_CONTROLLED_MIN).length;
@@ -1890,16 +1917,16 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     }).filter(row=>row.units>=MIN_PRACTICE_SIZE_GROUP_UNITS&&row.runs>=MIN_PRACTICE_SIZE_GROUP_RUNS&&row.days>=MIN_PRACTICE_SIZE_GROUP_DAYS)
       .sort((a,b)=>String(a.family).localeCompare(String(b.family))||num(a.medianPace)-num(b.medianPace)||a.label.localeCompare(b.label));
   }
-  function computePracticeUnitSizeGroups(unitRows){
-    const rows=Array.isArray(unitRows)?unitRows:[];
+  function computePracticeUnitSizeGroups(unitRows:readonly PracticeUnitRow[]){
+    const rows=unitRows;
     const marksRows=rows.filter(row=>Number.isFinite(row.marks)&&row.marks>0);
-    let marks=[];
+    let marks:PracticeSizeGroup[]=[];
     if(marksRows.length){
       const values=[...new Set(marksRows.map(row=>round(row.marks,3)))].sort((a,b)=>a-b);
       if(values.length<=6){
         marks=summarizePracticeUnitGroups(marksRows,unit=>({family:'marks',key:`marks:${round(unit.marks,3)}`,label:`${numberLabel(unit.marks,3)} marks`}));
       }else{
-        const q1=percentile(marksRows.map(row=>row.marks),1/3),q2=percentile(marksRows.map(row=>row.marks),2/3);
+        const q1=percentile(marksRows.map(row=>row.marks!).filter(isFiniteNumber),1/3)!,q2=percentile(marksRows.map(row=>row.marks!).filter(isFiniteNumber),2/3)!;
         marks=summarizePracticeUnitGroups(marksRows,unit=>unit.marks<=q1
           ?{family:'marks',key:'marks:low',label:`Lower marks (≤${numberLabel(q1,1)})`}
           :unit.marks<=q2?{family:'marks',key:'marks:mid',label:`Middle marks (${numberLabel(q1,1)}–${numberLabel(q2,1)})`}
@@ -1907,11 +1934,11 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       }
     }
     const durationRows=rows.filter(row=>!Number.isFinite(row.marks)&&Number.isFinite(row.targetMs)&&row.targetMs>0);
-    let durations=[];
+    let durations:PracticeSizeGroup[]=[];
     if(durationRows.length){
       const targets=durationRows.map(row=>row.targetMs),min=Math.min(...targets),max=Math.max(...targets);
       if(max-min>=MIN_PRACTICE_TARGET_SPAN_MS||max>=min*1.25){
-        const q1=percentile(targets,1/3),q2=percentile(targets,2/3);
+        const q1=percentile(targets,1/3)!,q2=percentile(targets,2/3)!;
         if(q2>q1){
           durations=summarizePracticeUnitGroups(durationRows,unit=>unit.targetMs<=q1
             ?{family:'duration',key:'duration:short',label:`Short target (≤${millisecondsLabel(q1)})`}
@@ -1922,23 +1949,23 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     }
     return {marks,durations,all:[...marks,...durations]};
   }
-  function strongestPracticeGroupDifference(groups){
-    const byFamily=new Map();
-    (Array.isArray(groups)?groups:[]).filter(row=>row.maturity&&row.maturity.rank>=1&&Number.isFinite(row.medianPace)).forEach(row=>{
-      if(!byFamily.has(row.family))byFamily.set(row.family,[]);byFamily.get(row.family).push(row);
+  function strongestPracticeGroupDifference(groups:readonly PracticeSizeGroup[]):PracticeSizeDifference|null{
+    const byFamily=new Map<string,PracticeSizeGroup[]>();
+    groups.filter(row=>row.maturity.rank>=1&&isFiniteNumber(row.medianPace)).forEach(row=>{
+      if(!byFamily.has(row.family))byFamily.set(row.family,[]);byFamily.get(row.family)!.push(row);
     });
-    let best=null;
+    let best:PracticeSizeDifference|null=null;
     byFamily.forEach(rows=>{
       if(rows.length<2)return;
       const sorted=rows.slice().sort((a,b)=>num(a.medianPace)-num(b.medianPace));
-      const low=sorted[0],high=sorted[sorted.length-1],gap=num(high.medianPace)-num(low.medianPace);
+      const low=sorted[0]!,high=sorted[sorted.length-1]!,gap=num(high.medianPace)-num(low.medianPace);
       if(gap<MIN_PRACTICE_SIZE_EFFECT_POINTS)return;
       const candidate={family:high.family,low,high,gap};
       if(!best||candidate.gap>best.gap)best=candidate;
     });
     return best;
   }
-  function practicePacerReadings(practice){
+  function practicePacerReadings(practice:PracticePacerBase):PracticeReadings{
     if(!practice||!practice.units){
       const primary=practiceFinding('No evidence','quiet','No completed Practice Pacer runs are saved in this window.');
       return {primary,supporting:null,coach:primary,candidates:[primary]};
@@ -1953,8 +1980,8 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       const primary=practiceFinding('Building evidence','quiet',`Pace evidence spans ${practice.units} units across ${practice.runs} runs and ${practice.practiceDays} practice day${practice.practiceDays===1?'':'s'}. Pattern reads begin at ${MIN_PRACTICE_PATTERN_UNITS} units across ${MIN_PRACTICE_PATTERN_DAYS} days.`,{confidence:overallConfidence});
       return {primary,supporting:null,coach:primary,candidates:[primary]};
     }
-    const findings=[];
-    const add=(tag,tone,text,meta)=>findings.push(practiceFinding(tag,tone,text,{confidence:overallConfidence,...meta}));
+    const findings:PracticeFinding[]=[];
+    const add=(tag:string,tone:string,text:string,meta:PracticeFindingMeta)=>findings.push(practiceFinding(tag,tone,text,{confidence:overallConfidence,...meta}));
     const finishingRuns=num(practice.completedPlannedRuns);
     if(finishingRuns){
       const timeUsed=num(practice.medianCompletedRunTimeUsed),withinRate=num(practice.completedWithinTimeRate),margin=num(practice.medianFinishingMarginMs);
@@ -2028,15 +2055,15 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     const coach=ordered.find(item=>item.kind==='concern')||primary;
     return {primary,supporting,coach,candidates:ordered};
   }
-  function practicePacerReading(practice){
+  function practicePacerReading(practice:PracticePacerBase):PracticeFinding{
     return practicePacerReadings(practice).primary;
   }
-  function groupPracticeRuns(runRows,keyFor,labelFor){
-    const map=new Map();
-    (Array.isArray(runRows)?runRows:[]).forEach(run=>{
+  function groupPracticeRuns(runRows:readonly PracticeRunRow[],keyFor:(run:PracticeRunRow)=>string,labelFor:(run:PracticeRunRow)=>string):PracticeGroupRow[]{
+    const map=new Map<string,{key:string;label:string;runRows:PracticeRunRow[];days:Set<string>}>();
+    runRows.forEach(run=>{
       const key=keyFor(run);
       if(!map.has(key))map.set(key,{key,label:labelFor(run),runRows:[],days:new Set()});
-      const row=map.get(key);row.runRows.push(run);row.days.add(run.date);
+      const row=map.get(key)!;row.runRows.push(run);row.days.add(run.date);
     });
     return [...map.values()].map(row=>{
       const runs=row.runRows.length,units=row.runRows.reduce((sum,run)=>sum+num(run.units),0),days=row.days.size;
@@ -2052,64 +2079,64 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       };
     }).sort((a,b)=>b.runs-a.runs||b.days-a.days||b.units-a.units||num(b.medianRunPace)-num(a.medianRunPace)||a.label.localeCompare(b.label));
   }
-  function computePracticePacer(records,summarizePracticeRuns,trendBasis={}){
-    const runRows=[],unitRows=[],segmentRows=[];
-    const audit={savedRuns:0,acceptedRuns:0,excludedRuns:0,encounteredUnits:0,acceptedUnits:0,excludedUnits:0,reasons:new Map()};
-    const addAuditReason=(reason,count=1)=>audit.reasons.set(reason,num(audit.reasons.get(reason))+count);
-    (Array.isArray(records)?records:[]).forEach(record=>{
-      const rawRuns=Array.isArray(record&&record.practiceRuns)?record.practiceRuns:[];
+  function computePracticePacer(records:readonly InsightRecord[],summarizePracticeRuns:PracticeRunSummarizer,trendBasis:Partial<DirectionalBasis>={}):PracticePacerResult{
+    const runRows:PracticeRunRow[]=[],unitRows:PracticeUnitRow[]=[],segmentRows:PracticeSegmentRow[]=[];
+    const audit={savedRuns:0,acceptedRuns:0,excludedRuns:0,encounteredUnits:0,acceptedUnits:0,excludedUnits:0,reasons:new Map<string,number>()};
+    const addAuditReason=(reason:string,count=1)=>audit.reasons.set(reason,num(audit.reasons.get(reason))+count);
+    records.forEach(record=>{
+      const rawRuns=record.practiceRuns??[];
       audit.savedRuns+=rawRuns.length;
-      rawRuns.forEach(run=>{audit.encounteredUnits+=Array.isArray(run&&run.unitMs)?run.unitMs.length:0;});
+      rawRuns.forEach(run=>{audit.encounteredUnits+=run.unitMs.length;});
       let summary=null;
-      try{summary=record&&record.__sdPracticeSummary||summarizePracticeRuns(rawRuns);}catch(e){summary=null;}
+      try{summary=record.__sdPracticeSummary||summarizePracticeRuns(rawRuns);}catch{summary=null;}
       if(!summary||!Array.isArray(summary.runSummaries)){if(rawRuns.length)addAuditReason('Summary unavailable',rawRuns.length);return;}
       audit.acceptedRuns+=summary.runSummaries.length;
-      const rejectedIndexes=summary.audit&&Array.isArray(summary.audit.rejectedRawIndexes)?summary.audit.rejectedRawIndexes:null;
+      const rejectedIndexes=summary.audit?.rejectedRawIndexes??null;
       if(rejectedIndexes)rejectedIndexes.forEach(index=>addAuditReason(practiceRawRunAuditReason(rawRuns[index])||'Malformed or unsupported saved run'));
       else{
         const rejectedCount=Math.max(0,rawRuns.length-summary.runSummaries.length);
         if(rejectedCount)addAuditReason('Malformed or unsupported saved run',rejectedCount);
       }
-      const tasks=new Map((Array.isArray(record.tasks)?record.tasks:[]).map(task=>[String(task.id||''),task]));
+      const tasks=new Map<string,InsightTask>((record.tasks??[]).map(task=>[String(task.id||''),task]));
       summary.runSummaries.forEach((source,runIndex)=>{
-        const run=source&&source.run||{},task=tasks.get(String(run.taskId||''))||null;
+        const run=source.run,task=tasks.get(String(run.taskId||''))||null;
         const area=task?subjectLabel(task):'Unlinked',block=task&&task.name?String(task.name):'Unlinked practice',mode=practiceMode(run),runId=`${record.date}:${runIndex}`;
-        const normalizedUnits=(Array.isArray(source.unitRows)?source.unitRows:[]).map((unit,unitIndex)=>{
-          const actualMs=Math.max(0,num(unit&&unit.actualMs)),targetMs=Math.max(0,num(unit&&unit.targetMs));
+        const normalizedUnits=source.unitRows.map((unit,unitIndex):PracticeUnitRow|null=>{
+          const actualMs=Math.max(0,num(unit.actualMs)),targetMs=Math.max(0,num(unit.targetMs));
           if(!actualMs||!targetMs)return null;
           return {
             date:record.date,runId,runIndex,unitIndex,area,block,modeKey:mode.key,modeLabel:mode.label,
             actualMs,targetMs,paceRatio:round(actualMs/targetMs*100,4),withinTarget:actualMs<=targetMs,
             controlled:actualMs/targetMs*100>=PRACTICE_CONTROLLED_MIN&&actualMs/targetMs*100<=PRACTICE_CONTROLLED_MAX,
-            segmentLabel:String(unit&&unit.segmentLabel||''),marks:finiteOrNull(unit&&unit.marks)
+            segmentLabel:String(unit.segmentLabel||''),marks:finiteOrNull(unit.marks)
           };
-        }).filter(Boolean);
+        }).filter((unit):unit is PracticeUnitRow=>unit!==null);
         if(!normalizedUnits.length)return;
         audit.acceptedUnits+=normalizedUnits.length;
-        const paceQ1=percentile(normalizedUnits.map(unit=>unit.paceRatio),.25),paceQ3=percentile(normalizedUnits.map(unit=>unit.paceRatio),.75);
+        const paceQ1=percentile(normalizedUnits.map(unit=>unit.paceRatio),.25)!,paceQ3=percentile(normalizedUnits.map(unit=>unit.paceRatio),.75)!;
         const plannedUnits=Math.max(0,num(source.plannedUnits)),actualMs=normalizedUnits.reduce((sum,unit)=>sum+unit.actualMs,0),targetMs=normalizedUnits.reduce((sum,unit)=>sum+unit.targetMs,0),runPace=targetMs?round(actualMs/targetMs*100,1):null;
         const completePlanned=plannedUnits>0&&normalizedUnits.length>=plannedUnits;
         const row={
           id:runId,date:record.date,index:runIndex,area,block,modeKey:mode.key,modeLabel:mode.label,
           units:normalizedUnits.length,plannedUnits,plannedCompletion:plannedUnits?pct(Math.min(normalizedUnits.length,plannedUnits),plannedUnits):null,
-          actualMs,targetMs,runPace,medianUnitPace:round(median(normalizedUnits.map(unit=>unit.paceRatio)),1),unitRows:normalizedUnits,
-          controlled:Number.isFinite(runPace)&&runPace>=PRACTICE_CONTROLLED_MIN&&runPace<=PRACTICE_CONTROLLED_MAX,
-          withinBudget:Number.isFinite(runPace)&&runPace<=PRACTICE_CONTROLLED_MAX,
+          actualMs,targetMs,runPace,medianUnitPace:round(median(normalizedUnits.map(unit=>unit.paceRatio))!,1),unitRows:normalizedUnits,
+          controlled:isFiniteNumber(runPace)&&runPace>=PRACTICE_CONTROLLED_MIN&&runPace<=PRACTICE_CONTROLLED_MAX,
+          withinBudget:isFiniteNumber(runPace)&&runPace<=PRACTICE_CONTROLLED_MAX,
           completePlanned,finishingMarginMs:completePlanned?targetMs-actualMs:null,
           paceQ1:round(paceQ1,1),paceQ3:round(paceQ3,1),paceSpread:round(paceQ3-paceQ1,1),
           atOrBelowTarget:normalizedUnits.filter(unit=>unit.withinTarget).length,controlledUnits:normalizedUnits.filter(unit=>unit.controlled).length
         };
         runRows.push(row);unitRows.push(...normalizedUnits);
         const planSignature=practiceSegmentPlanSignature(run);
-        (Array.isArray(source.segmentRows)?source.segmentRows:[]).forEach(segment=>{
-          const segmentActualMs=Math.max(0,num(segment&&segment.actualMs)),segmentTargetMs=Math.max(0,num(segment&&segment.targetMs));
-          const segmentUnits=Math.max(0,num(segment&&segment.units)),segmentPlannedUnits=Math.max(0,num(segment&&segment.plannedUnits));
+        source.segmentRows.forEach(segment=>{
+          const segmentActualMs=Math.max(0,num(segment.actualMs)),segmentTargetMs=Math.max(0,num(segment.targetMs));
+          const segmentUnits=Math.max(0,num(segment.units)),segmentPlannedUnits=Math.max(0,num(segment.plannedUnits));
           if(!segmentPlannedUnits&&!segmentUnits)return;
           const restActualMs=Math.max(0,actualMs-segmentActualMs),restTargetMs=Math.max(0,targetMs-segmentTargetMs),restPace=restTargetMs?restActualMs/restTargetMs*100:null,paceRatio=segmentActualMs&&segmentTargetMs?segmentActualMs/segmentTargetMs*100:null;
           segmentRows.push({
-            runId,date:record.date,area,block,modeKey:mode.key,modeLabel:mode.label,planSignature,label:String(segment&&segment.label||`Segment ${num(segment&&segment.index)+1}`),
+            runId,date:record.date,area,block,modeKey:mode.key,modeLabel:mode.label,planSignature,label:String(segment.label||`Segment ${num(segment.index)+1}`),
             units:segmentUnits,plannedUnits:segmentPlannedUnits,completion:segmentPlannedUnits?round(Math.min(100,segmentUnits/segmentPlannedUnits*100),1):null,complete:segmentPlannedUnits>0&&segmentUnits>=segmentPlannedUnits,
-            actualMs:segmentActualMs,targetMs:segmentTargetMs,plannedTargetMs:Math.max(segmentTargetMs,num(segment&&segment.plannedTargetMs)),paceRatio:roundNullable(paceRatio,1),restPace:roundNullable(restPace,1),relativeDelta:Number.isFinite(paceRatio)&&Number.isFinite(restPace)?round(paceRatio-restPace,1):null
+            actualMs:segmentActualMs,targetMs:segmentTargetMs,plannedTargetMs:Math.max(segmentTargetMs,num(segment.plannedTargetMs)),paceRatio:roundNullable(paceRatio,1),restPace:roundNullable(restPace,1),relativeDelta:isFiniteNumber(paceRatio)&&isFiniteNumber(restPace)?round(paceRatio-restPace,1):null
           });
         });
       });
@@ -2122,13 +2149,12 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       audit.reasons.clear();
       if(audit.excludedRuns)addAuditReason('Malformed or unsupported saved run',audit.excludedRuns);
     }
-    audit.reasonRows=[...audit.reasons.entries()].map(([reason,count])=>({reason,count})).filter(row=>row.count>0).sort((a,b)=>b.count-a.count||a.reason.localeCompare(b.reason));
-    delete audit.reasons;
-    const dailyMap=new Map();
-    runRows.forEach(run=>{if(!dailyMap.has(run.date))dailyMap.set(run.date,{date:run.date,runs:[]});dailyMap.get(run.date).runs.push(run);});
+    const auditResult:PracticeAudit={savedRuns:audit.savedRuns,acceptedRuns:audit.acceptedRuns,excludedRuns:audit.excludedRuns,encounteredUnits:audit.encounteredUnits,acceptedUnits:audit.acceptedUnits,excludedUnits:audit.excludedUnits,reasonRows:[...audit.reasons.entries()].map(([reason,count])=>({reason,count})).filter(row=>row.count>0).sort((a,b)=>b.count-a.count||a.reason.localeCompare(b.reason))};
+    const dailyMap=new Map<string,{date:string;runs:PracticeRunRow[]}>();
+    runRows.forEach(run=>{if(!dailyMap.has(run.date))dailyMap.set(run.date,{date:run.date,runs:[]});dailyMap.get(run.date)!.runs.push(run);});
     const daily=[...dailyMap.values()].sort((a,b)=>a.date.localeCompare(b.date)).map(row=>{
-      const runPaces=row.runs.map(run=>run.runPace).filter(Number.isFinite),paceQ1=percentile(runPaces,.25),paceQ3=percentile(runPaces,.75),units=row.runs.reduce((sum,run)=>sum+run.units,0),controlledRuns=row.runs.filter(run=>run.controlled).length;
-      return {date:row.date,units,runs:row.runs.length,medianPace:roundNullable(median(runPaces),1),medianRunPace:roundNullable(median(runPaces),1),typicalUnitPace:roundNullable(median(row.runs.map(run=>run.medianUnitPace)),1),paceQ1:roundNullable(paceQ1,1),paceQ3:roundNullable(paceQ3,1),paceSpread:roundNullable(paceQ3-paceQ1,1),spreadReady:row.runs.length>=MIN_PRACTICE_ESTABLISHED_RUNS,controlledRate:round(pct0(controlledRuns,row.runs.length),1),atOrBelowRate:round(pct0(row.runs.filter(run=>run.withinBudget).length,row.runs.length),1)};
+      const runPaces=row.runs.map(run=>run.runPace).filter(isFiniteNumber),paceQ1=percentile(runPaces,.25),paceQ3=percentile(runPaces,.75),units=row.runs.reduce((sum,run)=>sum+run.units,0),controlledRuns=row.runs.filter(run=>run.controlled).length;
+      return {date:row.date,units,runs:row.runs.length,medianPace:roundNullable(median(runPaces),1),medianRunPace:roundNullable(median(runPaces),1),typicalUnitPace:roundNullable(median(row.runs.map(run=>run.medianUnitPace)),1),paceQ1:roundNullable(paceQ1,1),paceQ3:roundNullable(paceQ3,1),paceSpread:roundNullable(isFiniteNumber(paceQ3)&&isFiniteNumber(paceQ1)?paceQ3-paceQ1:null,1),spreadReady:row.runs.length>=MIN_PRACTICE_ESTABLISHED_RUNS,controlledRate:round(pct0(controlledRuns,row.runs.length),1),atOrBelowRate:round(pct0(row.runs.filter(run=>run.withinBudget).length,row.runs.length),1)};
     });
     const plannedRuns=runRows.filter(run=>run.plannedUnits>0),plannedUnits=plannedRuns.reduce((sum,run)=>sum+run.plannedUnits,0),completedPlannedUnits=plannedRuns.reduce((sum,run)=>sum+Math.min(run.units,run.plannedUnits),0),plannedRunCompletionMedian=plannedRuns.length?round(median(plannedRuns.map(run=>run.plannedCompletion)),1):null,completedPlannedRows=plannedRuns.filter(run=>run.completePlanned),completedPlannedRuns=completedPlannedRows.length,completedPlannedRunRate=plannedRuns.length?round(pct0(completedPlannedRuns,plannedRuns.length),1):null,plannedUnitCompletionRate=plannedUnits?round(pct0(completedPlannedUnits,plannedUnits),1):null;
     const completedWithinTimeRows=completedPlannedRows.filter(run=>num(run.runPace)<=PRACTICE_CONTROLLED_MAX),medianCompletedRunTimeUsed=completedPlannedRows.length?roundNullable(median(completedPlannedRows.map(run=>run.runPace)),1):null,medianFinishingMarginMs=completedPlannedRows.length?roundNullable(median(completedPlannedRows.map(run=>run.finishingMarginMs)),0):null,completedWithinTimeRuns=completedWithinTimeRows.length,completedWithinTimeRate=completedPlannedRows.length?round(pct0(completedWithinTimeRuns,completedPlannedRows.length),1):null;
@@ -2140,30 +2166,30 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
       {key:'near-over',label:'Up to 10% over',count:runRows.filter(run=>num(run.runPace)>PRACTICE_CONTROLLED_MAX&&num(run.runPace)<=110).length},
       {key:'over',label:'More than 10% over',count:runRows.filter(run=>num(run.runPace)>110).length}
     ].map(row=>({...row,share:pct0(row.count,runRows.length)}));
-    const trendFromDay=Number.isFinite(trendBasis&&trendBasis.fromDay)?trendBasis.fromDay:-Infinity;
-    const trendToDay=Number.isFinite(trendBasis&&trendBasis.toDay)?trendBasis.toDay:Infinity;
-    const inTrendRange=row=>{const day=dateDay(row&&row.date);return Number.isFinite(day)&&day>=trendFromDay&&day<=trendToDay;};
+    const trendFromDay=isFiniteNumber(trendBasis.fromDay)?trendBasis.fromDay:-Infinity;
+    const trendToDay=isFiniteNumber(trendBasis.toDay)?trendBasis.toDay:Infinity;
+    const inTrendRange=(row:{date:string})=>{const day=dateDay(row.date);return isFiniteNumber(day)&&day>=trendFromDay&&day<=trendToDay;};
     const trendDaily=daily.filter(inTrendRange),trendUnitRows=unitRows.filter(inTrendRange);
     const trend=practiceTrendSummary(trendDaily),maturity=practiceEvidenceMaturity(unitRows.length,runRows.length,daily.length),patternReady=unitRows.length>=MIN_PRACTICE_PATTERN_UNITS&&daily.length>=MIN_PRACTICE_PATTERN_DAYS,trendReady=trendUnitRows.length>=MIN_PRACTICE_PATTERN_UNITS&&trendDaily.length>=MIN_PRACTICE_TREND_DAYS,overallConfidence=patternReady?trendReady?{key:'reliable',label:'Reliable pace sample',tone:'good'}:{key:'emerging',label:'Emerging pace pattern',tone:'watch'}:{key:'weak',label:'Early pace evidence',tone:'low'};
     const resolvedTrendBasis={
-      key:String(trendBasis&&trendBasis.key||'selected-window'),label:String(trendBasis&&trendBasis.label||'Selected window'),
-      from:trendBasis&&trendBasis.from||trendDaily[0]?.date||null,to:trendBasis&&trendBasis.to||trendDaily[trendDaily.length-1]?.date||null,
-      horizonDays:Number.isFinite(trendBasis&&trendBasis.horizonDays)?trendBasis.horizonDays:null,capped:!!(trendBasis&&trendBasis.capped),
+      key:String(trendBasis.key||'selected-window'),label:String(trendBasis.label||'Selected window'),
+      from:trendBasis.from||trendDaily[0]?.date||null,to:trendBasis.to||trendDaily[trendDaily.length-1]?.date||null,
+      horizonDays:isFiniteNumber(trendBasis.horizonDays)?trendBasis.horizonDays:null,capped:!!trendBasis.capped,
       practiceDays:trendDaily.length,selectedPracticeDays:daily.length,units:trendUnitRows.length
     };
     const position=computePracticePositionProfile(runRows),repeatedSegments=computeRepeatedPracticeSegments(segmentRows),unitSizeGroups=computePracticeUnitSizeGroups(unitRows),unitSizeDifference=strongestPracticeGroupDifference(unitSizeGroups.all);
-    const practice={
+    const practice:PracticePacerBase={
       practiceDays:daily.length,runs:runRows.length,units:unitRows.length,totalActualMs:unitRows.reduce((sum,unit)=>sum+unit.actualMs,0),medianPace:medianRunPace,medianRunPace,typicalUnitPace,
       atOrBelowTarget,atOrBelowRate:unitRows.length?round(pct0(atOrBelowTarget,unitRows.length),1):null,controlledRuns,controlledRunRate:runRows.length?round(pct0(controlledRuns,runRows.length),1):null,withinBudgetRuns,withinBudgetRate:runRows.length?round(pct0(withinBudgetRuns,runRows.length),1):null,
       plannedRuns:plannedRuns.length,plannedUnits,completedPlannedUnits,plannedRunCompletionMedian,completedPlannedRuns,completedPlannedRunRate,plannedUnitCompletionRate,
       medianCompletedRunTimeUsed,medianFinishingMarginMs,completedWithinTimeRuns,completedWithinTimeRate,
       medianWithinRunSpread:roundNullable(median(spreadComparableRows.map(run=>run.paceSpread)),1),spreadComparableRuns:spreadComparableRows.length,
       paceSlopePerWeek:trend.slopePerWeek,trend,trendBasis:resolvedTrendBasis,maturity,overallConfidence,summaryReady:unitRows.length>=MIN_PRACTICE_SUMMARY_UNITS,patternReady,trendReady,
-      daily,runRows,unitRows,segmentRows,position,repeatedSegments,unitSizeGroups,unitSizeDifference,audit,distribution,
+      daily,runRows,unitRows,segmentRows,position,repeatedSegments,unitSizeGroups,unitSizeDifference,audit:auditResult,distribution,
       areas:groupPracticeRuns(runRows,run=>canonical(run.area),run=>run.area),modes:groupPracticeRuns(runRows,run=>run.modeKey,run=>run.modeLabel)
     };
-    practice.readings=practicePacerReadings(practice);practice.reading=practice.readings.primary;practice.supportingReading=practice.readings.supporting;practice.coachReading=practice.readings.coach;
-    return practice;
+    const readings=practicePacerReadings(practice);
+    return {...practice,readings,reading:readings.primary,supportingReading:readings.supporting,coachReading:readings.coach};
   }
     return Object.freeze({
       computePracticePacer,practicePacerReading
