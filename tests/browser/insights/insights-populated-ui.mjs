@@ -114,14 +114,7 @@ try{
   const desktop=await page.evaluate(`(()=>{
     const pane=document.getElementById('pane-insights');
     const evidence=[...pane.querySelectorAll('.insights-evidence-item')].map(item=>({label:item.querySelector('.l')?.textContent||'',value:item.querySelector('.v')?.textContent||'',note:item.querySelector('.n')?.textContent||''}));
-    const executionTabs=[...pane.querySelectorAll('.insights-execution-tab')];
-    const dailyTab=executionTabs.find(button=>/Daily Execution/i.test(button.textContent));
-    const practiceTab=executionTabs.find(button=>/Practice Pacing/i.test(button.textContent));
-    practiceTab?.click();practiceTab?.focus();
-    practiceTab?.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
-    const keyboardDaily=!!dailyTab&&dailyTab.getAttribute('aria-selected')==='true'&&document.activeElement===dailyTab;
-    dailyTab?.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
-    const keyboardPractice=!!practiceTab&&practiceTab.getAttribute('aria-selected')==='true'&&document.activeElement===practiceTab;
+    const practiceTab=[...pane.querySelectorAll('.insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));practiceTab?.click();
     const practiceDetails=pane.querySelector('.insights-practice');if(practiceDetails&&practiceDetails.tagName==='DETAILS')practiceDetails.open=true;
     const calculation=practiceDetails?.querySelector('.insights-calculation-disclosure')||null;
     // Sections below the first screen are laid out only near the viewport, so
@@ -132,7 +125,7 @@ try{
       elapsed:performance.now()-${dense.started},window:pane.querySelector('.insights-window-note')?.textContent||'',
       workTrend:evidence.find(item=>item.label==='Work trend')||null,
       practiceSummary:pane.querySelector('.insights-practice-summary-meta')?.textContent||'',
-      calculationClosed,keyboardDaily,keyboardPractice,
+      calculationClosed,
       documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
       profile:window.__StudyDirectorInsightsLastProfile||null
     };
@@ -150,8 +143,16 @@ try{
   assert.match(desktop.practiceSummary,/590 practice days/i);
   assert.doesNotMatch(desktop.practiceCopy,/block-jackknife|time-stratified slope/i);
   assert.equal(desktop.calculationClosed,true);
-  assert.equal(desktop.keyboardDaily,true,'ArrowLeft must move focus and selection from Practice to Daily Execution');
-  assert.equal(desktop.keyboardPractice,true,'ArrowRight must move focus and selection back to Practice Pacing');
+  const practiceFocused=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));tab?.focus();return !!tab&&document.activeElement===tab&&tab.getAttribute('aria-selected')==='true';})()`);
+  assert.equal(practiceFocused,true,'Practice Pacing tab must accept keyboard focus while selected');
+  await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowLeft',code:'ArrowLeft'});
+  await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowLeft',code:'ArrowLeft'});
+  const keyboardDaily=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Daily Execution/i.test(button.textContent));return !!tab&&document.activeElement===tab&&tab.getAttribute('aria-selected')==='true';})()`);
+  assert.equal(keyboardDaily,true,'ArrowLeft must move focus and selection from Practice to Daily Execution');
+  await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowRight',code:'ArrowRight'});
+  await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowRight',code:'ArrowRight'});
+  const keyboardPractice=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));return !!tab&&document.activeElement===tab&&tab.getAttribute('aria-selected')==='true';})()`);
+  assert.equal(keyboardPractice,true,'ArrowRight must move focus and selection back to Practice Pacing');
   assert.match(desktop.calculationCopy,/block-jackknife/i);
   assert.match(desktop.calculationCopy,/time-stratified slope/i);
   assert.match(desktop.practiceCopy,/All records/i);
