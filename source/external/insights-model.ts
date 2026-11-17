@@ -3988,11 +3988,11 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     const workload=dynamics.workload;
     if(workload?.ready&&workload.tradeoff&&confidenceAtLeast(workload.confidence,'emerging')){
       const trade=workload.tradeoff;
-      const strongPart=Number.isFinite(trade.reliabilityDrop)?` and ${trade.reliabilityDrop} strong-day points`:'';
+      const strongPart=isFiniteNumber(trade.reliabilityDrop)?` and ${trade.reliabilityDrop} strong-day points`:'';
       pushSignal(signals,`At ${minutesLabel(trade.high.planned)} planned work, the workload curve is ${trade.completionDrop} completion points${strongPart} below the lower-load comparison. Treat this as a workload warning, not causal proof.`,'Workload trade-off','watch',{
         domain:'dynamics',surface:'dynamics',topic:'workload',kind:'concern',priority:108,confidence:workload.confidence
       });
-    }else if(workload?.forecast&&workload.forecast.completionReady&&confidenceAtLeast(workload.confidence,'emerging')){
+    }else if(workload?.forecast&&workload.forecast.completionReady&&'scenarioPlanned' in workload.forecast&&confidenceAtLeast(workload.confidence,'emerging')){
       const forecast=workload.forecast;
       const strongPart=forecast.strongReady?` and a ${percentLabel(forecast.strongProbability,1)} chance of an 80%+ day`:'';
       pushSignal(signals,`The ${minutesLabel(forecast.scenarioPlanned)} next-plan scenario estimates ${percentLabel(forecast.completionMean,1)} completion (${percentLabel(forecast.completionLow,0)}–${percentLabel(forecast.completionHigh,0)} ${forecast.rangeReady?'backtest-checked 80% range':'estimated model range'})${strongPart}.`,'Next-plan forecast','quiet',{
@@ -4015,8 +4015,8 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
       });
     }
     const allocation=dynamics.allocation;
-    if(allocation?.ready&&num(allocation.divergence)>.02&&confidenceAtLeast(allocation.confidence,'emerging')){
-      const shifts=[];
+    if(allocation?.ready&&'topOver' in allocation&&num(allocation.divergence)>.02&&confidenceAtLeast(allocation.confidence,'emerging')){
+      const shifts:string[]=[];
       if(allocation.topOver)shifts.push(`${allocation.topOver.label} ${allocation.topOver.gap>0?'+':''}${allocation.topOver.gap} share pts`);
       if(allocation.topUnder)shifts.push(`${allocation.topUnder.label} ${allocation.topUnder.gap} share pts`);
       const concern=num(allocation.divergence)>.08;
@@ -4335,7 +4335,7 @@ type HistoryCacheEntry={
     };
     const prepareAsync=async(recordsInput:readonly InsightRecord[]|null|undefined,revisionHint:unknown=null,yieldTask:(()=>unknown|PromiseLike<unknown>)|null=null):Promise<PreparedInsights>=>{
       const external=trustedRevision(revisionHint);
-      if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
+      if(external){const cached=preparedRevisions.get(external);if(cached)return remember(preparedRevisions,external,cached,PREPARED_REVISION_CACHE_LIMIT);}
       return finishPrepared(await normalizeRecordsAsync(recordsInput,yieldTask),external);
     };
     // A worker receives records already normalized by this same engine on the
