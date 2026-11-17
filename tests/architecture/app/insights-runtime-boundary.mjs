@@ -18,6 +18,8 @@ assert.match(app,/deviceState:InsightsDeviceState/u,'public API must expose the 
 assert.match(runtime,/const register=window\.StudyDirector&&window\.StudyDirector\.registerPlugin;[\s\S]{0,260}register\(PLUGIN_DESCRIPTOR\)===true/u,'checked Insights runtime must retain public plugin registration');
 assert.match(app,/const PluginRuntime=\(\(\)=>\{/u,'shared generic plugin-loader mechanics must remain host-owned for P5.13');
 assert.doesNotMatch(runtime,/AppData\.|localStorage|indexedDB/u,'Insights retained runtime must not reach host persistence directly');
+assert.doesNotMatch(runtime,/\beval\s*\(|new Function\s*\(/u,'Insights runtime must not use string-to-code execution');
+assert.doesNotMatch(runtime,/querySelector(?:All)?\(`[^`]*\$\{/u,'Insights runtime values must not be interpolated into CSS selectors');
 assert.match(manifest,/external\/insights-rendering\.ts','external\/insights-runtime\.ts','external\/insights\.js'/u,'one generated Insights asset must keep renderer then checked retained runtime then inert tracked shell');
 assert.doesNotMatch(legacy,/\b(?:const|let|var|function)\b|=>|\(\)\s*\{/u,'legacy Insights shell must remain non-executable until separately authorized deletion');
 
@@ -27,5 +29,5 @@ assert.ok(workerExit>=0&&renderer>workerExit,'worker context must exit before re
 
 console.log(JSON.stringify({
   status:'PASS',suite:'insights-runtime-boundary',
-  checkedHostPorts:true,genericLoaderDeferred:true,workerExitBeforeDom:true,inertLegacyShell:true
+  checkedHostPorts:true,genericLoaderDeferred:true,workerExitBeforeDom:true,inertLegacyShell:true,staticSelectors:true,noStringCode:true
 }));
