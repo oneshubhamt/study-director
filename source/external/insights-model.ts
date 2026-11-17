@@ -79,18 +79,21 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
 type FitnessKey='capacity'|'execution'|'recovery';
 type ScheduleSummary=Readonly<{maxDailyShiftMinutes:number;shiftedDays:number;shiftedBlocks:number;averageDailyPeakShiftOnShiftedDays:number;typicalNetShiftMinutes:number|null}>;
 type FitnessComponentObservation=Readonly<{value:number|null;measurementSd:number|null;evidenceCount:number}>;
+type DailySeriesWithDay=DailySeriesRow&Readonly<{day:number}>;
 type FitnessObservation=Readonly<{date:string;day:number;completion:number|null;planned:number;completed:number;blocks:number;evidenceWeight:number;effectiveBlocks:number;measurementSd:number|null;hasObservation:boolean;components:Record<FitnessKey,FitnessComponentObservation>;plannedByGroup:Record<CompletionEvidenceGroup,number>}>;
 type FitnessParameters=Readonly<{keys:readonly FitnessKey[];centers:readonly number[];transition:Matrix;empiricalPersistence:readonly number[];processSd:readonly number[];measurementSd:readonly number[];completePairs:number;learnedDays:number}>;
 type FitnessStateValue=Readonly<{estimate:number;low:number;high:number;observed:number|null;observationUsed:boolean;gain:number|null}>;
 type FitnessStateMap=Record<FitnessKey,FitnessStateValue>;
 type FitnessHistoryRow=Readonly<{date:string;day:number;observed:number|null;observationUsed:boolean;evidenceWeight:number|null;measurementSd:number|null;gain:number|null;variance:number;states:FitnessStateMap;estimate:number|null;low:number|null;high:number|null}>;
+type FitnessCurrentHistory=FitnessHistoryRow&Readonly<{estimate:number;low:number;high:number}>;
 type FitnessTrajectory=Readonly<{key:'uncertain'|'recovering'|'rising'|'falling'|'stable';label:string;tone:string;delta?:number|null;lookbackDays?:number;recentEvidence?:number;troughDate?:string}>;
 type FitnessDimension=Readonly<{key:FitnessKey;label:string;current:FitnessStateValue|null;observedDays:number;confidence:Confidence;center:number;persistence:number;lastEvidenceDate:string|null;daysSinceLastEvidence:number|null}>;
 type FitnessPerformanceState=Readonly<{ready:boolean;history:readonly FitnessHistoryRow[];observations:readonly FitnessObservation[];current:FitnessHistoryRow|null;confidence:Confidence;trajectory:FitnessTrajectory;effectiveDays:number;observedDays:number;lastEvidenceDate:string|null;daysSinceLastEvidence:number|null;basis?:Readonly<{start:string|null;end:string;mode:string;historicalMode?:string}>;dimensions?:Record<FitnessKey,FitnessDimension>;parameters?:FitnessParameters;multivariateReady?:boolean;forecastCausal?:boolean;parameterUpdateCadence?:number;parameterWindowObservations?:number;intervalWidth?:number}>;
 type WorkloadRecommendation=Readonly<{minPlanned:number;maxPlanned:number;typicalPlanned:number}>;
 type WorkloadRead=Readonly<{ready:boolean;recommendation?:WorkloadRecommendation|null;reason?:string|null}>;
 type FitnessModelInput=Readonly<{daily:readonly DailySeriesRow[];currentStudyDate?:string|null;calendarRange?:Readonly<{start?:string|null;end?:string|null}>;dynamics?:Readonly<{workload?:WorkloadRead}>;advanced?:Readonly<{qualityPairCount?:number}>;overview?:Readonly<{averageQuality?:number|null}>;recordCount?:number}>;
-type FitnessLoadMatch=Readonly<{ready:boolean;key:string;label:string;tone:string;recentPlanned:number|null;recentCompletion:number|null;recentDays:number;range:WorkloadRecommendation|null;reason?:string|null}>;
+type FitnessLoadRange=Readonly<{min:number;max:number;typical:number}>;
+type FitnessLoadMatch=Readonly<{ready:boolean;key:string;label:string;tone:string;recentPlanned:number|null;recentCompletion:number|null;recentDays:number;range:FitnessLoadRange|null;reason?:string|null}>;
 type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;loadMatch:FitnessLoadMatch;quality:Readonly<{ratedDays:number;average:number|null;totalSavedDays:number;ready:boolean}>;readiness:Confidence;summary:Readonly<{text:string;stateText:string;trajectory:string}>;parameters:Readonly<{learned:FitnessParameters|null;sourceWeights:Record<CompletionEvidenceGroup,number>}>}>;
 
 (function(global:typeof globalThis){
@@ -1796,8 +1799,10 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     const stableDirections=sign&&blocks.length?blocks.filter(block=>Math.sign(block.slope)===sign).length:0;
     const stability=blocks.length?stableDirections/blocks.length:0;
     const endpointSlopes=blocks.length?[blocks[0]!.slope,blocks[blocks.length-1]!.slope]:[];
-    const endpointStable=endpointSlopes.length===2&&endpointSlopes.every(value=>Math.sign(value)===sign&&Math.abs(value)>=Math.abs(full.slope)*.35&&Math.abs(value)<=Math.abs(full.slope)*3);
-    const low=isFiniteNumber(full.low)?full.low*7:null,high=isFiniteNumber(full.high)?full.high*7:null,slope=full.slope*7;
+    const fullSlope=full.slope;
+    if(!isFiniteNumber(fullSlope))return {...empty,sampledDays:sample.points.length,exact:sample.exact};
+    const endpointStable=endpointSlopes.length===2&&endpointSlopes.every(value=>Math.sign(value)===sign&&Math.abs(value)>=Math.abs(fullSlope)*.35&&Math.abs(value)<=Math.abs(fullSlope)*3);
+    const low=isFiniteNumber(full.low)?full.low*7:null,high=isFiniteNumber(full.high)?full.high*7:null,slope=fullSlope*7;
     const intervalDirection=sign>0?num(low)>0:sign<0?num(high)<0:false;
     return {
       slopePerWeek:round(slope,1),
@@ -1943,9 +1948,9 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
         marks=summarizePracticeUnitGroups(marksRows,unit=>({family:'marks',key:`marks:${round(unit.marks,3)}`,label:`${numberLabel(unit.marks,3)} marks`}));
       }else{
         const q1=percentile(marksRows.map(row=>row.marks!).filter(isFiniteNumber),1/3)!,q2=percentile(marksRows.map(row=>row.marks!).filter(isFiniteNumber),2/3)!;
-        marks=summarizePracticeUnitGroups(marksRows,unit=>unit.marks<=q1
+        marks=summarizePracticeUnitGroups(marksRows,unit=>num(unit.marks)<=q1
           ?{family:'marks',key:'marks:low',label:`Lower marks (≤${numberLabel(q1,1)})`}
-          :unit.marks<=q2?{family:'marks',key:'marks:mid',label:`Middle marks (${numberLabel(q1,1)}–${numberLabel(q2,1)})`}
+          :num(unit.marks)<=q2?{family:'marks',key:'marks:mid',label:`Middle marks (${numberLabel(q1,1)}–${numberLabel(q2,1)})`}
           :{family:'marks',key:'marks:high',label:`Higher marks (>${numberLabel(q2,1)})`});
       }
     }
@@ -2103,9 +2108,9 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       const rawRuns=record.practiceRuns??[];
       audit.savedRuns+=rawRuns.length;
       rawRuns.forEach(run=>{audit.encounteredUnits+=run.unitMs.length;});
-      let summary=null;
+      let summary:PracticeRunInsightSummary|null=null;
       try{summary=record.__sdPracticeSummary||summarizePracticeRuns(rawRuns);}catch{summary=null;}
-      if(!summary||!Array.isArray(summary.runSummaries)){if(rawRuns.length)addAuditReason('Summary unavailable',rawRuns.length);return;}
+      if(!summary){if(rawRuns.length)addAuditReason('Summary unavailable',rawRuns.length);return;}
       audit.acceptedRuns+=summary.runSummaries.length;
       const rejectedIndexes=summary.audit?.rejectedRawIndexes??null;
       if(rejectedIndexes)rejectedIndexes.forEach(index=>addAuditReason(practiceRawRunAuditReason(rawRuns[index])||'Malformed or unsupported saved run'));
@@ -2246,7 +2251,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       typicalNetShiftMinutes:weightedNetShift===null?null:Math.round(weightedNetShift)
     };
   }
-  function fitnessObservationForDay(dailyRow:DailySeriesRow,evidence:EvidenceIndex,recordByDate:ReadonlyMap<string,InsightRecord>):FitnessObservation{
+  function fitnessObservationForDay(dailyRow:DailySeriesWithDay,evidence:EvidenceIndex,recordByDate:ReadonlyMap<string,InsightRecord>):FitnessObservation{
     const record=recordByDate.get(dailyRow.date);
     const work=record?recordRows(evidence,record,'work').filter(row=>row.planned>0):[];
     const planned=Math.max(0,num(dailyRow.planned));
@@ -2299,8 +2304,8 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       plannedByGroup:Object.fromEntries(Object.entries(plannedByGroup).map(([key,value])=>[key,round(value,1)])) as Record<CompletionEvidenceGroup,number>
     };
   }
-  function fitnessTrajectory(history:readonly FitnessHistoryRow[],current:FitnessHistoryRow|null,confidence:Confidence,lastEvidenceDay:number|null,endDay:number):FitnessTrajectory{
-    const rows=history.filter(row=>isFiniteNumber(row.estimate));
+  function fitnessTrajectory(history:readonly FitnessHistoryRow[],current:FitnessCurrentHistory|null,confidence:Confidence,lastEvidenceDay:number|null,endDay:number):FitnessTrajectory{
+    const rows=history.filter((row):row is FitnessCurrentHistory=>isFiniteNumber(row.estimate)&&isFiniteNumber(row.low)&&isFiniteNumber(row.high));
     const recentEvidence=rows.filter(row=>row.day>endDay-FITNESS_TRAJECTORY_LOOKBACK_DAYS&&isFiniteNumber(row.observed)).length;
     const uncertain=!current||confidence.key==='weak'||recentEvidence<3||!isFiniteNumber(lastEvidenceDay);
     if(uncertain)return {key:'uncertain',label:'Uncertain',tone:'low',delta:null,lookbackDays:FITNESS_TRAJECTORY_LOOKBACK_DAYS,recentEvidence};
@@ -2338,7 +2343,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     persistence.forEach((value,index)=>{transition[index]![index]=value;});
     const completePairs:{x:number[];y:number[]}[]=[];
     for(let index=1;index<observations.length;index+=1){
-      const before=observations[index-1],after=observations[index];
+      const before=observations[index-1]!,after=observations[index]!;
       if(after.day-before.day!==1)continue;
       const beforeValues=keys.map(key=>before.components[key].value),afterValues=keys.map(key=>after.components[key].value);
       if(beforeValues.every(isFiniteNumber)&&afterValues.every(isFiniteNumber))completePairs.push({
@@ -2364,16 +2369,16 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
         const before=observations[index-1],after=observations[index];
         if(after.day-before.day>3)continue;
         const beforeValue=before.components[key].value,afterValue=after.components[key].value;
-        if(Number.isFinite(beforeValue)&&Number.isFinite(afterValue))residuals.push(afterValue-(centers[keyIndex]!+persistence[keyIndex]!*(beforeValue-centers[keyIndex]!)));
+        if(isFiniteNumber(beforeValue)&&isFiniteNumber(afterValue))residuals.push(afterValue-(centers[keyIndex]!+persistence[keyIndex]!*(beforeValue-centers[keyIndex]!)));
       }
       const learned=robustScale(residuals);
-      return clamp(Number.isFinite(learned)?(residuals.length*learned+6*6)/(residuals.length+6):6,3,12);
+      return clamp(isFiniteNumber(learned)?(residuals.length*learned+6*6)/(residuals.length+6):6,3,12);
     });
     const measurementSd=keys.map(key=>{
       const reported=observations.map(row=>row.components[key].measurementSd).filter(isFiniteNumber);
       const differences:number[]=[];
       for(let index=1;index<observations.length;index+=1){
-        const before=observations[index-1],after=observations[index],gap=after.day-before.day;
+        const before=observations[index-1]!,after=observations[index]!,gap=after.day-before.day;
         const left=before.components[key].value,right=after.components[key].value;
         if(gap<=3&&isFiniteNumber(left)&&isFiniteNumber(right))differences.push((right-left)/Math.sqrt(Math.max(1,gap)));
       }
@@ -2390,8 +2395,8 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
   function computeFitnessPerformanceState(model:FitnessModelInput,evidence:EvidenceIndex):FitnessPerformanceState{
     const recordByDate=new Map<string,InsightRecord>(evidence.records.map(record=>[record.date,record]));
     const allObservations=model.daily
-      .filter(row=>isFiniteNumber(row.day))
-      .sort((a,b)=>num(a.day)-num(b.day))
+      .filter((row):row is DailySeriesWithDay=>isFiniteNumber(row.day))
+      .sort((a,b)=>a.day-b.day)
       .map(row=>fitnessObservationForDay(row,evidence,recordByDate));
     const lastSavedDay=allObservations.length?allObservations[allObservations.length-1]!.day:null;
     const currentDay=isIsoDate(model.currentStudyDate)?dateDay(model.currentStudyDate):null;
@@ -2421,14 +2426,14 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       const observation=byDay.get(day)||null;
       const observedComponents=keys.map(key=>!!observation&&isFiniteNumber(observation.components[key].value));
       const hasStateObservation=observedComponents.some(Boolean);
-      if(hasStateObservation)parameterObservations.push(observation);
+      if(observation&&hasStateObservation)parameterObservations.push(observation);
       if(day===firstObserved.day||(hasStateObservation&&parameterObservations.length%FITNESS_PARAMETER_UPDATE_CADENCE===0)){
         parameters=learnFitnessStateParameters(parameterObservations.slice(-FITNESS_PARAMETER_WINDOW_OBSERVATIONS),keys);
       }
       const previousState=state.slice();
       const previousCovariance=covariance.map(row=>row.slice());
-      const centered=state.map((value,index)=>value-parameters.centers[index]);
-      state=multiplyMatrixVector(parameters.transition,centered).map((value,index)=>clamp(value+parameters.centers[index],0,100));
+      const centered=state.map((value,index)=>value-parameters.centers[index]!);
+      state=multiplyMatrixVector(parameters.transition,centered).map((value,index)=>clamp(value+parameters.centers[index]!,0,100));
       const process=zeroMatrix(keys.length);parameters.processSd.forEach((value,index)=>{process[index]![index]=value*value;});
       covariance=addMatrices(multiplyMatrices(multiplyMatrices(parameters.transition,covariance),transposeMatrix(parameters.transition)),process);
       state=state.map((value,index)=>observedComponents[index]?value:previousState[index]!);
@@ -2449,15 +2454,16 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
           gains[key]=round(gain[index]!,3);lastEvidenceDays[key]=day;
         });
       }
-      state=state.map((value,index)=>observedComponents[index]?value:previousState[index]);
+      state=state.map((value,index)=>observedComponents[index]?value:previousState[index]!);
       observedComponents.forEach((observed,index)=>{
         if(!observed)covariance[index]![index]=Math.max(previousCovariance[index]![index]!,covariance[index]![index]!);
       });
-      const states=Object.fromEntries(keys.map((key,index)=>[key,{
+      const stateFor=(key:FitnessKey,index:number):FitnessStateValue=>({
         ...componentInterval(state[index]!,covariance[index]![index]!),
         observed:observation&&isFiniteNumber(observation.components[key].value)?observation.components[key].value:null,
         observationUsed:!!(observation&&isFiniteNumber(observation.components[key].value)),gain:gains[key]??null
-      }]));
+      });
+      const states:FitnessStateMap={capacity:stateFor('capacity',0),execution:stateFor('execution',1),recovery:stateFor('recovery',2)};
       const interval=isFiniteNumber(lastEvidenceDays.capacity)?states.capacity:{estimate:null,low:null,high:null};
       history.push({
         date:dateFromDay(day),day,
@@ -2471,7 +2477,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     }
     const latest=history[history.length-1]||null;
     const reportedParameters=learnFitnessStateParameters(parameterObservations.slice(-FITNESS_PARAMETER_WINDOW_OBSERVATIONS),keys);
-    const current=isFiniteNumber(lastEvidenceDays.capacity)?latest:null;
+    const current=isFiniteNumber(lastEvidenceDays.capacity)&&latest&&isFiniteNumber(latest.estimate)&&isFiniteNumber(latest.low)&&isFiniteNumber(latest.high)?latest as FitnessCurrentHistory:null;
     const effectiveDays=round(sum(observations.filter(row=>row.hasObservation).map(row=>row.evidenceWeight)),1);
     const observedDays=observations.filter(row=>row.hasObservation).length;
     const intervalWidth=current?round(current.high-current.low,1):100;
@@ -2507,13 +2513,13 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       ready:false,key:'unknown',label:'Response not established',tone:'low',recentPlanned:roundNullable(recentPlanned,1),recentCompletion:roundNullable(recentCompletion,1),
       recentDays:eligible.length,range:null,reason:workload?.reason||'Need more varied planned-work days.'
     };
-    const range={min:recommendation.minPlanned,max:recommendation.maxPlanned,typical:recommendation.typicalPlanned};
+    const range:FitnessLoadRange={min:recommendation.minPlanned,max:recommendation.maxPlanned,typical:recommendation.typicalPlanned};
     const margin=Math.max(20,Math.round(num(range.typical)*.05));
     let key='within',label='Within estimated region',tone='good';
-    if(recentPlanned<range.min-margin){key='below';label='Below estimated region';tone='quiet';}
-    else if(recentPlanned>range.max+margin){key='above';label='Above estimated region';tone='watch';}
+    if(isFiniteNumber(recentPlanned)&&recentPlanned<range.min-margin){key='below';label='Below estimated region';tone='quiet';}
+    else if(isFiniteNumber(recentPlanned)&&recentPlanned>range.max+margin){key='above';label='Above estimated region';tone='watch';}
     return {
-      ready:true,key,label,tone,recentPlanned:round(recentPlanned,1),recentCompletion:roundNullable(recentCompletion,1),recentDays:eligible.length,range
+      ready:true,key,label,tone,recentPlanned:round(recentPlanned!,1),recentCompletion:roundNullable(recentCompletion,1),recentDays:eligible.length,range
     };
   }
   function computeStudyFitness(model:FitnessModelInput,evidence:EvidenceIndex,options:Readonly<{performanceState?:FitnessPerformanceState}>={}):FitnessResult{
@@ -2524,7 +2530,8 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     const current=performanceState.current;
     const stateText=current?`${percentLabel(current.estimate,1)} (${percentLabel(current.low,0)}–${percentLabel(current.high,0)} model range)`:'No state estimate';
     const trajectoryText=performanceState.trajectory&&performanceState.trajectory.label||'Uncertain';
-    const dimensionCopy=performanceState.dimensions?['execution','recovery'].map(key=>performanceState.dimensions[key]).filter(dimension=>dimension&&dimension.current).map(dimension=>`${dimension.label} ${percentLabel(dimension.current.estimate,0)}`).join(' · '):'';
+    const dimensionKeys:readonly FitnessKey[]=['execution','recovery'];
+    const dimensionCopy=performanceState.dimensions?dimensionKeys.map(key=>performanceState.dimensions![key]).filter(dimension=>dimension.current).map(dimension=>`${dimension.label} ${percentLabel(dimension.current.estimate,0)}`).join(' · '):'';
     const stalenessDays=performanceState.daysSinceLastEvidence;
     const stalenessText=isFiniteNumber(stalenessDays)&&stalenessDays>0
       ? ` Last usable completion evidence was ${stalenessDays===1?'1 day':`${stalenessDays} days`} ago; the point estimate is held while uncertainty widens.`
