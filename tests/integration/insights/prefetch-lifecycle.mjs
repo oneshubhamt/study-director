@@ -47,7 +47,7 @@ function prefetchHarness({rejectBuild=false}={}){
     readDatasetRevision:async source=>source.getDatasetRevision(),sourceIdentity:source=>[
       source?.type||'real',source?.mode||'',source?.target||'',source?.label||'',source?.revision||''
     ].map(String).join('|'),
-    state,
+    state,prefetchGeneration:0,
     loadSession:async()=>session,
     planModel:()=>({
       windowInfo:{key:'all',records:prepared.records},
