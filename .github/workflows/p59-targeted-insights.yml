@@ -1,4 +1,4 @@
-name: P5.10B targeted Insights renderer closure
+name: P5.10C targeted Insights feature closure
 
 on:
   push:
@@ -8,13 +8,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: p510b-targeted-insights-${{ github.ref }}
+  group: p510c-targeted-insights-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   insights:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -26,12 +26,19 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Strict TypeScript and typed lint
         run: npm run check:types
-      - name: P5.9 direct model witnesses
+      - name: P5.10C direct lifecycle and source witnesses
         run: |
           node tests/integration/insights/insights-scaling.mjs
+          node tests/integration/insights/guide-preview-canonical.mjs
           node tests/integration/insights/insights-memory-retention.mjs
-      - name: P5.10B renderer lifecycle witness
-        run: node tests/integration/insights/render-lifecycle.mjs
+          node tests/integration/insights/insights-transport-lifecycle.mjs
+          node tests/integration/insights/render-lifecycle.mjs
+          node tests/integration/insights/prefetch-lifecycle.mjs
+      - name: P5.10C affected architecture
+        run: |
+          node tests/architecture/app/runtime-boundaries.mjs
+          node tests/architecture/storage/data-architecture.mjs
+          node tests/architecture/security/security-policy.mjs
       - name: Fresh source build
         run: npm run build
       - name: Verify generated build
@@ -44,5 +51,37 @@ jobs:
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: P5.10B populated/empty/insufficient renderer journey
-        run: node tests/browser/insights/insights-populated-ui.mjs
+      - name: P5.10C populated/lazy-Lab/retained browser journey x5
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "Insights populated pass $pass/5"
+            node tests/browser/insights/insights-populated-ui.mjs
+          done
+
+  performance:
+    needs: insights
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Fresh source build for isolated performance
+        run: npm run build
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: P5.10C performance journey x5 isolated
+        run: |
+          for pass in 1 2 3 4 5; do
+            echo "Insights performance pass $pass/5"
+            node tests/browser/insights/insights-performance.mjs
+          done
