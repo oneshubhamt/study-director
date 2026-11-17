@@ -921,7 +921,7 @@ function createInsightsRendering(
     if(typeof useSample==='function'){
       const preview=el('button','mini-btn ui-btn primary',`Preview with ${PREVIEW_SAMPLE_DAYS}-day sample`);
       preview.type='button';
-      preview.addEventListener('click',async()=>{
+      preview.addEventListener('click',()=>{void (async()=>{
         preview.disabled=true;
         preview.textContent='Preparing sample…';
         const result=await useSample({label:`Sample ${PREVIEW_SAMPLE_DAYS} days`,target:'insights',today:currentStudyDate});
@@ -933,7 +933,7 @@ function createInsightsRendering(
         if(!box.querySelector('.insights-preview-unavailable')){
           box.appendChild(el('div','insights-preview-unavailable insights-note ui-mono','The sample provider did not load. Real saved-data insights remain available.'));
         }
-      });
+      })();});
       actions.appendChild(preview);
     }else{
       const goTab=api.ui?.goTab;
@@ -1062,7 +1062,7 @@ function createInsightsRendering(
     bar.append(copy,group);
     return bar;
   }
-  const executionActivators=new WeakMap();
+  const executionActivators=new WeakMap<HTMLElement,(key:string|null)=>boolean>();
   async function openAndScrollToInsightsTarget(targetId:string){
     const target=document.getElementById(targetId);
     if(!target)return false;
@@ -1117,7 +1117,7 @@ function createInsightsRendering(
   }
   function lineChart(rows:readonly TrendDailyRow[],options:LineChartOptions={}){
     const compact=isCompact();
-    const allRows=Array.isArray(rows)?rows:[];
+    const allRows=rows;
     const limit=compact?MAX_COMPLETION_CHART_DAYS_COMPACT:MAX_COMPLETION_CHART_DAYS_DESKTOP;
     rows=allRows.slice(-limit);
     const width=compact?360:640,height=compact?210:190,pad=compact?36:34;
@@ -1415,7 +1415,7 @@ function createInsightsRendering(
     const grid=el('div','insights-heatmap');
     grid.setAttribute('role','group');
     grid.setAttribute('aria-label','Calendar work-completion heatmap');
-    const byDate=new Map((Array.isArray(rows)?rows:[]).filter(row=>isIsoDate(row.date)).map(row=>[row.date,row]));
+    const byDate=new Map(rows.filter(row=>isIsoDate(row.date)).map(row=>[row.date,row]));
     const lastRecord=rows[rows.length-1];
     const lastSavedDay=lastRecord?dateDay(lastRecord.date):null;
     const rangeStart=isIsoDate(range.start)?dateDay(range.start):null;
@@ -1499,7 +1499,7 @@ function createInsightsRendering(
   }
   function buildCoverageRiskPoints(subjects:readonly Subject[],geometry:CoverageGeometry):CoveragePoint[]{
     const {plotBottom,plotLeft,plotW,plotH}=geometry;
-    const rows=(Array.isArray(subjects)?subjects:[])
+    const rows=subjects
       .filter(subject=>subject.coverageWatchEligible)
       .slice()
       .sort((a,b)=>num(b.coverageWatchScore)-num(a.coverageWatchScore)||num(b.blocks)-num(a.blocks))
@@ -1689,7 +1689,7 @@ function createInsightsRendering(
   function coverageRiskMap(subjects:readonly Subject[]){
     const wrap=el('div','insights-risk-widget');
     const compact=isCompact();
-    const pointCount=(Array.isArray(subjects)?subjects:[]).filter(subject=>subject.coverageWatchEligible).slice(0,12).length;
+    const pointCount=subjects.filter(subject=>subject.coverageWatchEligible).slice(0,12).length;
     const width=compact?360:860;
     const height=compact?(pointCount>=10?650:pointCount>=7?550:470):(pointCount>=10?390:pointCount>=7?350:300);
     const pad=compact?42:48,rightPad=compact?20:24,bottomPad=compact?190:104;
@@ -1729,7 +1729,7 @@ function createInsightsRendering(
   }
   function resourceMixBar(resources:readonly ResourceRow[],days=1){
     const wrap=el('div','insights-mixbar-wrap');
-    const rows=(Array.isArray(resources)?resources:[]).filter(row=>num(row.planned)>0);
+    const rows=resources.filter(row=>num(row.planned)>0);
     const total=rows.reduce((sum,row)=>sum+num(row.planned),0);
     if(!total){
       wrap.appendChild(evidenceNote('No support or fixed blocks detected yet.'));
@@ -1757,7 +1757,7 @@ function createInsightsRendering(
     return wrap;
   }
   function resourceMixSummary(resources:readonly ResourceRow[],days=1){
-    const planned=(Array.isArray(resources)?resources:[]).reduce((sum,row)=>sum+num(row.planned),0);
+    const planned=resources.reduce((sum,row)=>sum+num(row.planned),0);
     const wrap=el('div','insights-resource-totals ui-mono');
     const plannedItem=el('span',null,'Average planned day ');
     plannedItem.appendChild(el('b',null,minutesLabel(planned/Math.max(1,days))));
@@ -2023,7 +2023,7 @@ function createInsightsRendering(
   }
   function practiceTrendChart(practice:Practice){
     const compact=isCompact();
-    const allRows=Array.isArray(practice&&practice.daily)?practice.daily:[];
+    const allRows=practice.daily;
     const limit=compact?20:60;
     const rows=allRows.slice(-limit);
     const width=compact?360:700,height=compact?225:215,pad=40,rightPad=compact?18:22;
@@ -2136,7 +2136,7 @@ function createInsightsRendering(
     return 0;
   }
   function practiceComparisonDifference(rows:readonly PracticeComparisonRow[],family:string){
-    const eligible=(Array.isArray(rows)?rows:[]).filter(row=>row&&row.maturity&&row.maturity.rank>=1&&Number.isFinite(row.medianRunPace));
+    const eligible=rows.filter(row=>row.maturity.rank>=1&&finiteNumber(row.medianRunPace));
     if(eligible.length<2)return null;
     const sorted=eligible.slice().sort((a,b)=>num(a.medianRunPace)-num(b.medianRunPace));
     const low=sorted[0],high=sorted[sorted.length-1],gap=num(high.medianRunPace)-num(low.medianRunPace);
@@ -2152,7 +2152,7 @@ function createInsightsRendering(
     };
   }
   function practiceEarlyComparisonRow(rows:readonly PracticeComparisonRow[],family:string){
-    const eligible=(Array.isArray(rows)?rows:[]).filter(row=>row&&Number.isFinite(row.medianRunPace)&&num(row.units)>=MIN_PRACTICE_EARLY_VIEW_UNITS&&num(row.runs)>=1&&num(row.days)>=1);
+    const eligible=rows.filter(row=>finiteNumber(row.medianRunPace)&&num(row.units)>=MIN_PRACTICE_EARLY_VIEW_UNITS&&num(row.runs)>=1&&num(row.days)>=1);
     if(eligible.length<2)return null;
     const sorted=eligible.slice().sort((a,b)=>num(a.medianRunPace)-num(b.medianRunPace));
     const low=sorted[0],high=sorted[sorted.length-1],gap=num(high.medianRunPace)-num(low.medianRunPace);
@@ -2296,7 +2296,7 @@ function createInsightsRendering(
     practicePanel.id='insights-practice';practicePanel.dataset['executionPanel']='practice';practicePanel.setAttribute('role','tabpanel');practicePanel.hidden=true;
     dailyPanel.appendChild(renderExecutionQuality(model));
     practicePanel.appendChild(renderPracticePacer(model,{embedded:true}));
-    const activate=(key:string)=>{
+    const activate=(key:string|null)=>{
       const daily=key==='daily';
       if((daily&&!dailyPanel.hidden)||(!daily&&!practicePanel.hidden))return true;
       dailyButton.classList.toggle('active',daily);practiceButton.classList.toggle('active',!daily);
@@ -2338,7 +2338,7 @@ function createInsightsRendering(
     return section;
   }
   function plannedOutputRows(subjects:readonly Subject[]){
-    const rows=(Array.isArray(subjects)?subjects:[])
+    const rows=subjects
       .filter(row=>num(row.planned)>0||num(row.completed)>0)
       .slice()
       .sort((a,b)=>Math.max(num(b.plannedShare),num(b.share))-Math.max(num(a.plannedShare),num(a.share))||num(b.planned)-num(a.planned)||labelCompare(a,b));
@@ -2475,7 +2475,7 @@ function createInsightsRendering(
     return item;
   }
   function conversionDisplayRows(subjects:readonly Subject[]){
-    return (Array.isArray(subjects)?subjects:[])
+    return subjects
       .filter(row=>num(row.pairedBlocks)>=2&&num(row.pairedPlanned)>=60&&num(row.pairedActual)>=60&&num(row.pairedTimerCoverage)>=MIN_TIMER_COVERAGE_FOR_PLAN_READ)
       .map(row=>({...row,conversion:pct(row.pairedCompleted,row.pairedActual)}))
       .filter(row=>Number.isFinite(num(row.conversion,null)))
@@ -2533,7 +2533,7 @@ function createInsightsRendering(
   }
   function fitnessStateChart(model:Model){
     const state=model&&model.fitness&&model.fitness.performanceState||{};
-    const allRows=(Array.isArray(state.history)?state.history:[]).filter(row=>Number.isFinite(row.estimate));
+    const allRows=(state.history??[]).filter(row=>finiteNumber(row.estimate));
     const showAll=model&&model.windowKey==='all';
     const displayStart=!showAll&&isIsoDate(model&&model.calendarRange&&model.calendarRange.start)?dateDay(model.calendarRange.start):null;
     const displayEnd=!showAll&&isIsoDate(model&&model.calendarRange&&model.calendarRange.end)?dateDay(model.calendarRange.end):null;
@@ -2681,7 +2681,7 @@ function createInsightsRendering(
     return item;
   }
   function dynamicsSupportingList(rows:readonly {priority:number;label:string;value:string}[]){
-    const clean=(Array.isArray(rows)?rows:[]).filter(row=>row&&row.value)
+    const clean=rows.filter(row=>row.value)
       .sort((a,b)=>num(b.priority)-num(a.priority)||String(a.label||'').localeCompare(String(b.label||'')))
       .slice(0,MAX_DYNAMICS_SUPPORTING_READS);
     if(!clean.length)return null;
@@ -2700,7 +2700,7 @@ function createInsightsRendering(
     return layout;
   }
   function strongestPatternReads(bayesian:RenderBayesian):PatternRead[]{
-    return (bayesian&&Array.isArray(bayesian.dimensions)?bayesian.dimensions:[])
+    return (bayesian.dimensions??[])
       .map(dimension=>({dimension,row:(dimension.rows||[]).filter(row=>row.meaningful&&row.estimate&&confidenceAtLeast(row.estimate.confidence,'emerging')).sort((a,b)=>Math.abs(b.effect)-Math.abs(a.effect)||b.estimate.nEff-a.estimate.nEff)[0]}))
       .filter((item):item is PatternRead=>!!item.row)
       .sort((a,b)=>Math.abs(b.row.effect)-Math.abs(a.row.effect))
@@ -2710,7 +2710,7 @@ function createInsightsRendering(
     return estimate?`${percentLabel(estimate.low,0)}–${percentLabel(estimate.high,0)}`:'No interval';
   }
   function persistentPatternChart(patterns:readonly PatternRead[],bayesian:RenderBayesian){
-    const rows=(Array.isArray(patterns)?patterns:[]).filter(item=>item&&item.row&&item.row.estimate);
+    const rows=patterns.filter(item=>item.row.estimate);
     if(!rows.length)return evidenceNote('Repeated completion-pattern chart needs a stable pattern.');
     const compact=isCompact(),width=compact?360:680,height=52+rows.length*42,left=compact?120:158,right=18,top=28,bottom=24,plotWidth=width-left-right;
     const svg=svgEl('svg',{class:'insights-chart insights-persistent-pattern-chart',viewBox:`0 0 ${width} ${height}`,role:'group'});
@@ -2739,7 +2739,7 @@ function createInsightsRendering(
     return inspectedChart(svg,items,'Ranges show the clearest repeated completion patterns; the dashed marker is your overall work average.');
   }
   function allocationComparisonChart(allocation:RenderAllocation){
-    const rows=allocation&&Array.isArray(allocation.displayRows)?allocation.displayRows:[];
+    const rows=allocation.displayRows??[];
     if(!allocation.ready||!rows.length)return evidenceNote('Allocation comparison needs stable area evidence.');
     const compact=isCompact(),width=compact?360:680,height=48+rows.length*38,left=compact?94:152,right=18,top=33,plotWidth=width-left-right;
     const svg=svgEl('svg',{class:'insights-chart insights-allocation-compare-chart',viewBox:`0 0 ${width} ${height}`,role:'group'});
@@ -2808,7 +2808,7 @@ function createInsightsRendering(
   }
   function dynamicsChangeRows(model:Model,{excludeInitialization=false}:{excludeInitialization?:boolean}={}){
     const regime:RenderChangePoint=model.dynamics.changePoint;
-    const displayedCompletion=new Map((Array.isArray(model.daily)?model.daily:[]).filter(row=>isIsoDate(row.date)&&finiteNumber(row.completion)).map(row=>[row.date,row.completion]));
+    const displayedCompletion=new Map(model.daily.filter(row=>isIsoDate(row.date)&&finiteNumber(row.completion)).map(row=>[row.date,row.completion]));
     const all=(regime.history||[]).filter(row=>finiteNumber(row.day)&&finiteNumber(row.recentChangeProbability))
       .map(row=>({...row,completion:finiteNumber(row.completion)?row.completion:displayedCompletion.get(row.date)}));
     const eligible=excludeInitialization?all.slice(Math.min(MIN_CHANGE_POINT_SEGMENT_DAYS,all.length)):all;
@@ -2918,7 +2918,7 @@ function createInsightsRendering(
   }
   function workloadPointAt(workload:RenderWorkload,planned:number):WorkloadPoint|null{
     const forecast:RenderForecast=workload.forecast??Object.freeze({});
-    const source=forecast.completionReady&&Array.isArray(workload.forecastCurve)&&workload.forecastCurve.length?workload.forecastCurve:workload.curve||[];
+    const source:readonly WorkloadCurveRow[]=forecast.completionReady&&workload.forecastCurve?.length?workload.forecastCurve:workload.curve??[];
     const curve=source.slice().sort((a,b)=>a.planned-b.planned);
     const first=curve[0],last=curve[curve.length-1];
     if(!first||!last)return null;
@@ -2958,13 +2958,13 @@ function createInsightsRendering(
     return (!finiteNumber(from)||day>=from)&&(!finiteNumber(to)||day<=to);
   }
   function evenlySampleRows<T>(rows:readonly T[],limit:number):T[]{
-    const source=Array.isArray(rows)?rows:[];
+    const source=rows;
     if(source.length<=limit)return source.slice();
     if(limit<=1){const last=source[source.length-1];return last===undefined?[]:[last];}
     return [...new Set(Array.from({length:limit},(_,index)=>Math.round(index*(source.length-1)/(limit-1))))].flatMap(index=>{const row=source[index];return row===undefined?[]:[row];});
   }
   function prioritizedChartPoints<T extends {day?:number|null;date?:string}>(rows:readonly T[],limit:number,isSelected:(row:T)=>boolean){
-    const source=Array.isArray(rows)?rows:[],points=source.map(row=>{const selected=!!isSelected(row),day=finiteNumber(row.day)?row.day:dateDay(row.date);return Object.freeze({row,selected,day:num(day)});});
+    const source=rows,points=source.map(row=>{const selected=!!isSelected(row),day=finiteNumber(row.day)?row.day:dateDay(row.date);return Object.freeze({row,selected,day:num(day)});});
     const selected=points.filter(point=>point.selected),older=points.filter(point=>!point.selected);
     const shownSelected=selected.length<=limit?selected.slice():evenlySampleRows(selected,limit);
     const remaining=Math.max(0,limit-shownSelected.length),shownOlder=remaining?evenlySampleRows(older,remaining):[];
@@ -2972,7 +2972,7 @@ function createInsightsRendering(
     return {points:shown,shown:shown.length,total:points.length};
   }
   function workloadChartObservations(workload:RenderWorkload,model:Model,compact:boolean){
-    const all:readonly NonNullable<RenderWorkload['observations']>[number][]=Array.isArray(workload.observations)?workload.observations:[];
+    const all:readonly NonNullable<RenderWorkload['observations']>[number][]=workload.observations??[];
     const limit=compact?MAX_WORKLOAD_HISTORY_POINTS_COMPACT:MAX_WORKLOAD_HISTORY_POINTS_DESKTOP;
     return prioritizedChartPoints(all,limit,row=>workloadObservationInDisplayWindow(row,model));
   }
