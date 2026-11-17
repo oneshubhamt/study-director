@@ -4346,7 +4346,13 @@ type HistoryCacheEntry={
       beforeCommit:(()=>unknown|PromiseLike<unknown>)|null=null
     ):Promise<PreparedInsights>=>{
       const external=trustedRevision(revisionHint);
-      if(external){const cached=preparedRevisions.get(external);if(cached)return remember(preparedRevisions,external,cached,PREPARED_REVISION_CACHE_LIMIT);}
+      if(external){
+        const cached=preparedRevisions.get(external);
+        if(cached){
+          if(beforeCommit)await beforeCommit();
+          return remember(preparedRevisions,external,cached,PREPARED_REVISION_CACHE_LIMIT);
+        }
+      }
       const normalized=await normalizeRecordsAsync(recordsInput,yieldTask);
       if(beforeCommit)await beforeCommit();
       return finishPrepared(normalized,external);

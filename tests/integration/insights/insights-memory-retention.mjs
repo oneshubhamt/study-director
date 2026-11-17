@@ -33,6 +33,15 @@ assert.equal(guardedBeforeCommitCalls,1,'fresh asynchronous preparation must val
 const guardedReplacement=[{...records[0],tasks:[{...records[0].tasks[0],name:'Guarded replacement'}]}];
 const guardedPrepared=guardedEngine.prepare(guardedReplacement,'guarded-revision');
 assert.equal(guardedPrepared.records[0].tasks[0].name,'Guarded replacement','a rejected asynchronous preparation must never populate the prepared-revision cache');
+let guardedCacheHitChecks=0;
+await assert.rejects(
+  guardedEngine.prepareAsync(guardedReplacement,'guarded-revision',null,()=>{
+    guardedCacheHitChecks+=1;
+    const error=new Error('cached source superseded');error.name='AbortError';throw error;
+  }),
+  error=>error?.name==='AbortError'
+);
+assert.equal(guardedCacheHitChecks,1,'cached asynchronous preparation must validate before reuse or LRU promotion');
 
 const internalEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
 const variant=label=>[{...records[0],tasks:[{...records[0].tasks[0],name:label}]}];
@@ -80,6 +89,6 @@ assert.deepEqual(JSON.parse(JSON.stringify(rebuiltAudit)),JSON.parse(JSON.string
 assert.equal(JSON.stringify(prepared.records),preparedBeforeBuild,'model/Lab consumers must not mutate shared prepared input');
 
 
-console.log(JSON.stringify({status:'PASS',preparedCache:'current + previous LRU',guardedAsyncPreparation:'pre-commit validated',historyCache:'current + previous LRU',labEvidence:'released and parity-rebuilt',historyContext:'date + summary keyed; not retained',preparedInput:'immutable across model/Lab consumers'},null,2));
+console.log(JSON.stringify({status:'PASS',preparedCache:'current + previous LRU',guardedAsyncPreparation:'fresh + cached pre-return validated',historyCache:'current + previous LRU',labEvidence:'released and parity-rebuilt',historyContext:'date + summary keyed; not retained',preparedInput:'immutable across model/Lab consumers'},null,2));
 await import('./guide-preview-canonical.mjs');
 await import('./insights-transport-lifecycle.mjs');
