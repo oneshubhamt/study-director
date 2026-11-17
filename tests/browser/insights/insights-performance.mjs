@@ -159,12 +159,18 @@ try{
   const fallbackTiming=checkTiming([fallback],'Worker-unavailable fallback',{completeMs:B.insightsComputedOpenMs,shellMs:B.insightsComputedOpenMs,mainThread:false});
   assert.notEqual((await fallbackPage.evaluate('window.__StudyDirectorInsightsPrefetch'))?.state,'ready','no idle pre-computation without a worker');
 
-  // A worker that cannot start is reported, and Retry recovers.
-  const brokenPage=await open(`window.__NativeWorker=window.Worker;Object.defineProperty(window,'Worker',{configurable:true,writable:true,value:class{constructor(){throw new Error('QA_FIXTURE injected Worker failure');}}});`);
-  await brokenPage.evaluate(`window.StudyDirector.data.deviceState.writeInsightsWindow('all');__PWA6.goTab('insights')`);
-  await waitFor(()=>brokenPage.evaluate(`document.getElementById('pane-insights')?.textContent.includes('Insights processing failed')`),{timeout:30000,label:'visible worker failure'});
-  await brokenPage.evaluate(`window.Worker=window.__NativeWorker`);await brokenPage.click('#pane-insights .insights-retry');
-  await waitFor(()=>brokenPage.evaluate(`window.__StudyDirectorInsightsLastProfile?.mode==='worker'`),{timeout:30000,label:'worker retry succeeds'});
+  // A worker that cannot start falls back to the same model engine for this
+  // page/session; a fresh page can use the worker again.
+  const brokenPage=await open(`Object.defineProperty(window,'Worker',{configurable:true,writable:true,value:class{constructor(){throw new Error('QA_FIXTURE injected Worker failure');}}});`);
+  const constructorFallback=await render(brokenPage);
+  checkStructure(constructorFallback,'Worker-constructor fallback',{mode:'main-thread-worker-failure',source:'computed'});
+  assert.equal(constructorFallback.profile.modelSignature,cold.profile.modelSignature,'Constructor-failure fallback must preserve model parity.');
+  assert.equal(await brokenPage.evaluate(`document.getElementById('pane-insights')?.textContent.includes('Insights processing failed')`),false,'recoverable worker startup failure must not replace the report with a fatal error');
+  await close(brokenPage);
+  const recoveredPage=await open();
+  const recovered=await render(recoveredPage);
+  checkStructure(recovered,'Fresh-session worker recovery',{mode:'worker',source:'computed'});
+  assert.equal(recovered.profile.modelSignature,cold.profile.modelSignature,'Fresh-session worker recovery must preserve model parity.');
 
   const unexpected=pages.flatMap(item=>item.events).filter(event=>!/favicon|ResizeObserver loop/.test(event.text||''));
   assert.deepEqual(unexpected,[]);
@@ -174,7 +180,7 @@ try{
     medians:{settled:settledTiming,rebuild:rebuildTiming,cold:coldTiming,fallback:fallbackTiming},
     prefetch:prefetchStatus,
     samples:{settled:settled.map(s=>reported(s.profile)),rebuild:rebuilt.map(s=>reported(s.profile)),cold:reported(cold.profile),fallback:reported(fallback.profile),windowChange:reported(switched)},
-    checks:{prefetchedEqualsComputed:true,workerFallbackParity:true,windowChangeSendsNoRecords:true,constructorFailureReported:true,noPrefetchWithoutWorker:true}
+    checks:{prefetchedEqualsComputed:true,workerFallbackParity:true,windowChangeSendsNoRecords:true,constructorFailureFallsBack:true,freshSessionWorkerRecovery:true,noPrefetchWithoutWorker:true}
   },null,2));
 }finally{
   for(const item of [...pages])try{await browser.closePage(item);}catch{}
