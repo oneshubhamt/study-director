@@ -95,7 +95,13 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
       const current=active;
       if(!current||current.worker!==created)return;
       const decoded=Protocol.decodeWorkerResponse(event.data);
-      if(!decoded.ok){failWorker(created,new Error(decoded.message));return;}
+      if(!decoded.ok){
+        // The retained worker can deliver a late, malformed reply for a
+        // completed request. Only a reply attributable to the active request
+        // (or one without an identifiable owner) can invalidate its worker.
+        if(decoded.id!==null&&(decoded.id!==current.id||(decoded.revision&&decoded.revision!==current.revision)))return;
+        failWorker(created,new Error(decoded.message));return;
+      }
       const message=decoded.message;
       if(message.id!==current.id||message.revision!==current.revision)return;
       if(message.type==='SD_INSIGHTS_ERROR')current.reject(new Error(message.message||'Insights worker failed.'));

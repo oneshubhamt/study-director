@@ -136,7 +136,10 @@ function protocolContext(extra={}){
     constructor(){this.messages=[];this.terminated=false;workers.push(this);}
     postMessage(message){
       this.messages.push(message);
-      if(message.type==='SD_INSIGHTS_BUILD')queueMicrotask(()=>this.onmessage?.({data:{type:'SD_INSIGHTS_RESULT',id:message.id,revision:message.revision,model:{count:message.window.all?320:message.window.indices.length},computeMs:2}}));
+      if(message.type==='SD_INSIGHTS_BUILD'){
+        if(message.id>1)queueMicrotask(()=>this.onmessage?.({data:{type:'SD_INSIGHTS_RESULT',id:message.id-1,revision:message.revision,model:null,computeMs:2}}));
+        queueMicrotask(()=>this.onmessage?.({data:{type:'SD_INSIGHTS_RESULT',id:message.id,revision:message.revision,model:{count:message.window.all?320:message.window.indices.length},computeMs:2}}));
+      }
     }
     terminate(){this.terminated=true;}
   }
@@ -161,8 +164,10 @@ function protocolContext(extra={}){
   const firstParts=retained.messages.filter(message=>message.type==='SD_INSIGHTS_RECORDS');
   assert.deepEqual(firstParts.map(message=>message.records.length),[150,150,20]);
   const second=await computation.build(records.slice(-7),prepared,{});
+  assert.equal(second.mode,'worker','a malformed reply from a completed request must not disable the current worker');
   assert.equal(second.sentRecords,0,'same revision window change must reuse worker-held records');
   assert.equal(workers.length,1,'same revision builds must reuse the retained worker');
+  assert.equal(retained.terminated,false,'stale malformed worker reply must not terminate its active successor');
   assert.equal(retained.messages.filter(message=>message.type==='SD_INSIGHTS_RECORDS').length,3,'same revision must not resend records');
   assert.equal(computation.release(),true);
   const retire=[...timers.values()].find(timer=>timer.ms===120000);

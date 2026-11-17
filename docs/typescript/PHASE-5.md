@@ -1,6 +1,6 @@
 # Phase 5 — scope, status and implementation handoff
 
-**Current planning baseline:** `28c8c1d5a9b9850079a59acf1d11818d17e513ec`, 2026-11-16, verified against GitHub `ts-exp` and `TS-Conversion`. P5.0–P5.7 are closed; P5.5–P5.7 received independent targeted audit/corrections. **P5.8–P5.10 are planned, not implemented.** Work on `ts-exp` with GPT 5.6 Sol High. [Execution record](../../TS-CONVERSION-EXECUTION.md) owns current progress; [AGENTS](../../AGENTS.md) owns procedure.
+**Scope reference baseline:** `28c8c1d5a9b9850079a59acf1d11818d17e513ec`, 2026-11-16, verified against GitHub `ts-exp` and `TS-Conversion`. P5.0–P5.10 have since reached targeted implementation closure; P5.5–P5.7 and P5.10 received owner-requested interim audits/corrections. The source map and implementation objectives below preserve the pre-conversion scope for reconciliation, not the present file topology. Work on `ts-exp`; [execution record](../../TS-CONVERSION-EXECUTION.md) owns live evidence and remaining checks, and [AGENTS](../../AGENTS.md) owns procedure.
 
 ## Roadmap and ownership
 
@@ -16,10 +16,10 @@ The programme retains 14 top-level steps, P5.0–P5.13. Child IDs identify coher
 | P5.5 | CLOSED — AUDITED — TARGETED | Review/Diary, saved-day presentation/completion, editor and lifecycle wiring |
 | P5.6 | CLOSED — AUDITED — TARGETED | Library/notes/link/export behavior, editor/document/attachment lifetimes |
 | P5.7 | CLOSED — AUDITED — TARGETED | Backup controls, reconciliation/recovery/history, maintenance/integrity/readiness |
-| P5.8 | READY — NOT STARTED | Drive adapter plus connection, sync-status and profile-facing host behavior; A/B below |
-| P5.9a | NOT STARTED | Insights model foundations, records/windows and core analytics |
-| P5.9b | NOT STARTED | Practice, study state/dynamics, coach and complete model engine |
-| P5.10 | NOT STARTED | Insights compute boundary, presentation and retained UI/host integration; A/B/C below |
+| P5.8 | CLOSED — TARGETED | Drive adapter plus connection, sync-status and profile-facing host behavior; A/B below |
+| P5.9a | CLOSED — TARGETED | Insights model foundations, records/windows and core analytics |
+| P5.9b | CLOSED — TARGETED | Practice, study state/dynamics, coach and complete model engine |
+| P5.10 | CLOSED — TARGETED; INTERIM AUDIT CORRECTED, HOSTED RECHECK OPEN | Insights compute boundary, presentation and retained UI/host integration; A/B/C below |
 | P5.11a | NOT STARTED | Guide content/runtime, preview producer and owned navigation/accessibility behavior |
 | P5.11b | NOT STARTED | Glass, early presentation kernel/metadata, theme/preferences and first-paint contracts |
 | P5.11c | NOT STARTED | Aurora runtime/registration and saved-skin switching |

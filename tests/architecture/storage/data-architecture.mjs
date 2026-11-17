@@ -165,7 +165,9 @@ assert.match(appMeta,/view:\(tx\s*\)=>createView\(cleanOwner,tx\)/u,'appMeta gat
 assert.match(appMeta,/function canonicalEnvelope\(row\s*,key\s*\)/u,'appMeta gateway must centrally validate canonical envelopes');
 assert.match(appMeta,/validateValue\(definition,row\.value,key,suffix\)/u,'appMeta gateway must centrally apply family value validation');
 
-assert.match(app,/return ExportsAppMeta\.transaction\('readwrite'/u,'backup-protection policy mutation must use the exports-owned metadata capability');
+const backupActionsHost=read('source/core/backup-actions-host.ts');
+assert.match(app,/createProtectionStorage\(Object\.freeze\(\{meta:ExportsAppMeta,settingName:'backupProtection'/u,'host must inject the exports-owned metadata capability into backup-protection storage');
+assert.match(backupActionsHost,/input\.meta\.transaction\s*\('readwrite'/u,'checked backup-protection storage must mutate through its injected metadata transaction');
 assert.match(app,/settings:exactAppMetaStorage\(DeviceFolderAppMeta,'deviceFolder'/u,'Device Backup settings must use the device-backup-owned metadata capability');
 assert.match(app,/BackupAppMeta\.read\('repositoryIntegrityScrub'\)/u,'repository scrub state must use the backup-owned metadata capability');
 

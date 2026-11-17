@@ -815,7 +815,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       if(typeof options.isCurrent==='function'&&!options.isCurrent())return false;
       appendChunk(callback);return true;
     };
-    Layout.purge(pane);Layout.mark();
+    Layout.mark();
     pane.replaceChildren();
     injectStyles();
     const wrap=el('div','insights-wrap');
@@ -1174,7 +1174,9 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         const sourceKey=sourceIdentity(source);
         const sourceRevision=datasetRevision||String(source&&source.revision||'');
         const baseKey=`${sourceKey}|${currentStudyDate}|${sourceRevision||'fallback'}`;
-        if(state.rendered&&sourceRevision&&state.renderedBaseKey===baseKey&&state.renderedWindowKey===windowKey){
+        // A coarse source label alone cannot prove that Saved Days are still
+        // unchanged when the repository revision probe is unavailable.
+        if(state.rendered&&datasetRevision&&state.renderedBaseKey===baseKey&&state.renderedWindowKey===windowKey){
           clearInsightsUpdateStatus(pane);
           void restoreScroll();
           publishProfile(profile);
@@ -1186,9 +1188,12 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
           await new Promise(resolve=>{requestAnimationFrame(resolve);});
           if(!InsightsRenderCoordinator.isCurrent(token))return;
         }
-        let session=sourceRevision&&state.session&&state.session.baseKey===baseKey?state.session:null;
+        let session=datasetRevision&&state.session&&state.session.baseKey===baseKey?state.session:null;
         if(!session)session=await loadSession({dataSource,source,sourceKey,currentStudyDate,datasetRevision,isCurrent:()=>InsightsRenderCoordinator.isCurrent(token),profile});
-        if(!session||!InsightsRenderCoordinator.isCurrent(token))return;
+        if(!InsightsRenderCoordinator.isCurrent(token))return;
+        // Three consecutive source/revision mismatches are a failed read,
+        // not a successful render. Keep the old view and expose Retry.
+        if(!session)throw new Error('Insights source changed during the record read.');
         const {windowInfo,fullKey,modelOptions}=planModel(session,windowKey,currentStudyDate);
         const effectiveBaseKey=session.baseKey;
         if(state.rendered&&state.renderedKey===fullKey){
@@ -1204,16 +1209,28 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         const model=modelResult.model;profile.mode=modelResult.mode;profile.modelComputeMs=modelResult.computeMs;profile.workerRoundTripMs=modelResult.roundTripMs;profile.records=windowInfo.records.length;
         if(!InsightsRenderCoordinator.isCurrent(token))return;
         const previousScroll=state.rendered;
-        const renderMetrics=await renderModel(pane,model,{
-          source:session.source,
-          api,
-          currentStudyDate,
-          isCurrent:()=>InsightsRenderCoordinator.isCurrent(token),
-          onShell:value=>{profile.shellMs=profile.shellMs||value;},
-          onWindowChange:key=>{writeInsightWindowKey(key);void render(context);},
-          reload:()=>{void render(context);}
-        });
+        const updateStatus=pane.querySelector('.insights-update-status');
+        const priorNodes=state.rendered?[...pane.childNodes].filter(node=>node!==updateStatus):null;
+        let renderMetrics:Awaited<ReturnType<typeof renderModel>>;
+        try{
+          renderMetrics=await renderModel(pane,model,{
+            source:session.source,
+            api,
+            currentStudyDate,
+            isCurrent:()=>InsightsRenderCoordinator.isCurrent(token),
+            onShell:value=>{profile.shellMs=profile.shellMs||value;},
+            onWindowChange:key=>{writeInsightWindowKey(key);void render(context);},
+            reload:()=>{void render(context);}
+          });
+        }catch(error){
+          if(InsightsRenderCoordinator.isCurrent(token)&&priorNodes){
+            pane.replaceChildren(...priorNodes);
+            Layout.purge();
+          }
+          throw error;
+        }
         if(renderMetrics.cancelled||!InsightsRenderCoordinator.isCurrent(token))return;
+        Layout.purge();
         profile.domMs=renderMetrics.domMs;profile.maxDomChunkMs=renderMetrics.maxChunkMs;profile.domChunks=renderMetrics.chunks;
         state.rendered=true;
         state.renderedKey=fullKey;
@@ -1231,6 +1248,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         }
         const paintStarted=performance.now();
         await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        if(!InsightsRenderCoordinator.isCurrent(token))return;
         profile.layoutPaintMs=performance.now()-paintStarted;
         publishProfile(profile,model);
       }catch(error){

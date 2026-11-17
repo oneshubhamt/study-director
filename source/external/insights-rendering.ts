@@ -138,16 +138,27 @@ function createInsightsRendering(
   function lazyDisclosure(className:string,summary:string|Node,build:()=>Node|null|undefined,busy=false):HTMLDetailsElement{
     const details=el('details',className);
     details.appendChild(typeof summary==='string'?el('summary',null,summary):summary);
-    let rendered=false,builder:(()=>Node|null|undefined)|null=build;
+    let rendered=false,failureNode:HTMLElement|null=null;
     details.addEventListener('toggle',()=>{
       if(!details.open||rendered)return;
-      rendered=true;
       if(busy)details.setAttribute('aria-busy','true');
-      const factory=builder;builder=null;
-      if(!factory)return;
-      const body=factory();
-      if(body)details.appendChild(body);
-      if(busy)details.removeAttribute('aria-busy');
+      try{
+        const body=build();
+        if(body)details.appendChild(body);
+        failureNode?.remove();failureNode=null;
+        rendered=true;
+      }catch{
+        // Lazy Lab/Study Dynamics evidence can fail without invalidating the
+        // visible report. Keep the builder for a later open rather than
+        // freezing a blank, permanently busy disclosure.
+        if(!failureNode){
+          failureNode=el('div','insights-note ui-mono','This section could not be prepared. Close and reopen it to retry.');
+          failureNode.setAttribute('role','alert');
+          details.appendChild(failureNode);
+        }
+      }finally{
+        if(busy)details.removeAttribute('aria-busy');
+      }
     });
     return details;
   }
@@ -161,7 +172,10 @@ function createInsightsRendering(
   }
   const Layout=(()=>{
     const charts=new Set<ChartItem>();let compact=isCompact(),timer:number|null=null;
-    const purge=(pane:HTMLElement)=>charts.forEach(item=>{if(!item.node.isConnected||pane.contains(item.node))charts.delete(item);});
+    // Purge only detached charts after a render commits (or rolls back).
+    // The prior view must retain its registered redraw handlers if a new
+    // render fails while building its DOM.
+    const purge=()=>charts.forEach(item=>{if(!item.node.isConnected)charts.delete(item);});
     const chart=(draw:()=>ChartNode,after?:()=>void)=>{const item:ChartItem={draw,after,node:draw()};charts.add(item);return item.node;};
     const redraw=(pane:HTMLElement)=>charts.forEach(item=>{if(!item.node.isConnected){charts.delete(item);return;}if(pane.contains(item.node)){const next=item.draw();item.node.replaceWith(next);item.node=next;if(item.after)item.after();}});
     const mark=()=>{compact=isCompact();};
@@ -924,15 +938,21 @@ function createInsightsRendering(
       preview.addEventListener('click',()=>{void (async()=>{
         preview.disabled=true;
         preview.textContent='Preparing sample…';
-        const result=await useSample({label:`Sample ${PREVIEW_SAMPLE_DAYS} days`,target:'insights',today:currentStudyDate});
-        if(result&&result.ok){
-          if(typeof reload==='function')reload();
-          return;
+        try{
+          const result=await useSample({label:`Sample ${PREVIEW_SAMPLE_DAYS} days`,target:'insights',today:currentStudyDate});
+          if(result&&result.ok){
+            if(typeof reload==='function')reload();
+            return;
+          }
+        }catch{
+          // Optional Guide loading can fail; a subsequent click may succeed.
+        }finally{
+          if(preview.isConnected){
+            preview.disabled=false;
+            preview.textContent=`Preview with ${PREVIEW_SAMPLE_DAYS}-day sample`;
+          }
         }
-        preview.textContent='Sample preview unavailable';
-        if(!box.querySelector('.insights-preview-unavailable')){
-          box.appendChild(el('div','insights-preview-unavailable insights-note ui-mono','The sample provider did not load. Real saved-data insights remain available.'));
-        }
+        if(!box.querySelector('.insights-preview-unavailable'))box.appendChild(el('div','insights-preview-unavailable insights-note ui-mono','The sample provider did not load. You can try again; saved data is unaffected.'));
       })();});
       actions.appendChild(preview);
     }else{

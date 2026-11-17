@@ -5,10 +5,11 @@ import fs from 'node:fs';
 import {renderBuild,validateBuild} from '../../../build/build.mjs';
 import {externalModules,trustedExternalModuleIds} from '../../../build/module-manifest.mjs';
 import {readInsightsRuntimeSource} from '../../helpers/insights-model-runtime.mjs';
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 
 const read=file=>fs.readFileSync(new URL(`../../../${file}`,import.meta.url),'utf8');
 const app=readHostHtml();
-const drive=read('source/external/drive.js');
+const drive=readRuntimeSource(new URL('../../../source/external/drive.ts',import.meta.url));
 const review=read('source/core/review.ts');
 const plan=read('source/core/plan.ts');
 const timer=read('source/core/timer-engine.ts');
