@@ -841,8 +841,8 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       evidence:evidenceMetadata(evidence)
     });
   }
-  function withEvidenceMetadata(result:Readonly<Record<string,unknown>>|null|undefined,evidence:EvidenceMetadataInput={}){
-    return {...(result&&typeof result==='object'?result:{}),evidence:evidenceMetadata(evidence)};
+  function withEvidenceMetadata<T extends object>(result:T,evidence:EvidenceMetadataInput={}):T&Readonly<{evidence:ReturnType<typeof evidenceMetadata>}>{
+    return {...result,evidence:evidenceMetadata(evidence)};
   }
   function bayesianRateEstimate(rate:unknown,nEff:unknown,priorRate:unknown,priorStrength=EVIDENCE_PRIOR_EFFECTIVE_BLOCKS){
     const observed=Math.max(0,Math.min(1,num(rate)/100));
@@ -1863,7 +1863,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     };
   }
   function rankPracticeFindings(findings:readonly PracticeFinding[]){
-    const kindRank={concern:3,positive:2,context:1};
+    const kindRank:Record<CoachKind,number>={concern:3,positive:2,context:1};
     return findings.slice().sort((a,b)=>
       num(kindRank[b.kind])-num(kindRank[a.kind])||
       num(b.score)-num(a.score)||
@@ -3671,8 +3671,8 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       }),
       bayesian:withEvidenceMetadata(bayesian,{observations:evidence.work.length,days:completionDays,method:'hierarchical-completion-patterns',limitations:bayesian.readyDimensions?[]:['No dimension has cleared the hierarchy evidence gate.']}),
       changePoint:withEvidenceMetadata(changePoint,{confidence:changePoint.confidence,observations:changePoint.days,days:changePoint.days,method:'bayesian-online-change-point',limitations:changePoint.reason?[changePoint.reason]:[]}),
-      allocation:withEvidenceMetadata({...allocation,dynamic:dynamicAllocation},{confidence:allocation.confidence,observations:allocation.areas,days:completionDays,method:'jensen-shannon-plus-weekly-drift',limitations:allocation.reason?[allocation.reason]:[]}),
-      cascade:withEvidenceMetadata(cascade,{confidence:cascade.confidence,observations:cascade.transitions,days:cascade.daysWithWork,method:'regularised-sequence-and-hazard',limitations:cascade.reason?[cascade.reason]:[]}),
+      allocation:withEvidenceMetadata({...allocation,dynamic:dynamicAllocation},{confidence:allocation.confidence,observations:allocation.areas,days:completionDays,method:'jensen-shannon-plus-weekly-drift',limitations:'reason' in allocation&&allocation.reason?[allocation.reason]:[]}),
+      cascade:withEvidenceMetadata(cascade,{confidence:cascade.confidence,observations:cascade.transitions,days:cascade.daysWithWork,method:'regularised-sequence-and-hazard',limitations:[]}),
       interactions:withEvidenceMetadata(interactions,{observations:interactionObservations,days:completionDays,method:'gated-four-cell-interactions',limitations:interactions.ready?[]:[interactions.reason]}),
       workload:withEvidenceMetadata(workload,{confidence:workload.confidence,observations:workload.days,days:workload.days,method:workload.method||'regularised-workload-response',limitations:[workload.reason,workload.strongReason].filter(Boolean)})
     };
@@ -3681,6 +3681,45 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       computeStudyDynamics
     });
   })(InsightsConfig,InsightsPrimitives,InsightsAnalytics);
+
+  type CoachKind='concern'|'positive'|'context';
+type CoachSurface=(typeof InsightsConfig.COACH_SURFACES)[number];
+type CoachSignalMeta=Readonly<{kind?:CoachKind;domain?:string;surface?:string;surfaceLabel?:string;targetId?:string;topic?:string;theme?:string;priority?:number;confidence?:Confidence|null;compact?:boolean}>;
+type InternalCoachSignal={text:string;tag:string;tone:string;_domain:string;_surface:string;_surfaceLabel:string;_targetId:string;_topic:string;_theme:string;_kind:CoachKind;_priority:number;_confidence:Confidence|null;_confidenceRank:number;_compact:boolean;_order:number};
+type PublicCoachSignal=Readonly<{text:string;tag:string;tone:string;kind:CoachKind;domain:string;topic:string;theme:string;surfaceKey:string;surfaceLabel:string;targetId:string;confidenceLabel:string|null;confidenceTone:string}>;
+type CoachOverview=Readonly<{planned:number;completed:number;actual:number;completion:number|null;actualVsPlanned:number;strongDays:number;averageQuality:number|null}>;
+type CoachGuardrails=Readonly<{
+  sample:ReturnType<(typeof InsightsAnalytics)['sampleStrength']>;
+  trend:ReturnType<(typeof InsightsAnalytics)['trendStrength']>;
+  variability:ReturnType<(typeof InsightsAnalytics)['variabilityLabel']>;
+  progress:ReturnType<(typeof InsightsAnalytics)['progressEvidenceStrength']>;
+}>;
+type CoachChangePoint=Readonly<{detected?:boolean;confidence?:Confidence;delta?:number|null;date?:string|null;beforeMean?:number|null;afterMean?:number|null}>;
+type CoachWorkloadCurvePoint=Readonly<{planned:number;strongProbability?:number|null}>;
+type CoachWorkloadTradeoff=Readonly<{low:CoachWorkloadCurvePoint;high:CoachWorkloadCurvePoint;completionDrop:number;reliabilityDrop:number|null}>;
+type CoachWorkloadForecast=Readonly<{completionReady:boolean;strongReady:boolean;strongProbability?:number|null;scenarioPlanned:number;completionMean:number;completionLow:number;completionHigh:number;rangeReady:boolean}>;
+type CoachWorkload=Readonly<{ready:boolean;tradeoff?:CoachWorkloadTradeoff|null;forecast?:CoachWorkloadForecast|null;recommendation?:WorkloadRecommendation|null;confidence?:Confidence}>;
+type CoachCascade=Readonly<{ready:boolean;primary?:Readonly<{text:string;effect:number;confidence:Confidence}>|null}>;
+type CoachAllocation=Readonly<{ready:boolean;divergence?:number|null;label?:string;topOver?:Readonly<{label:string;gap:number}>|null;topUnder?:Readonly<{label:string;gap:number}>|null;confidence?:Confidence}>;
+type CoachBayesian=Readonly<{clearest?:Readonly<{label:string;dimension?:string;meaningful:boolean;effect:number;estimate:PatternEstimate}>|null}>;
+type CoachDynamics=Readonly<{changePoint?:CoachChangePoint;workload?:CoachWorkload;cascade?:CoachCascade;allocation?:CoachAllocation;bayesian?:CoachBayesian}>;
+type CoachModelInput=Readonly<{
+  recordCount:number;windowLabel:string;trendBasis:DirectionalBasis;overview:CoachOverview;
+  streak:ReturnType<(typeof InsightsAnalytics)['computeStreak']>;
+  sampleAudit:ReturnType<(typeof InsightsAnalytics)['computeSampleAudit']>;
+  advanced:ReturnType<(typeof InsightsAnalytics)['computeAdvanced']>;
+  subjects:readonly SubjectInsight[];
+  startDelays:ReturnType<(typeof InsightsAnalytics)['computeStartDelayBuckets']>;
+  schedule:ScheduleSummary;
+  interruption:ReturnType<(typeof InsightsAnalytics)['computeInterruption']>;
+  guardrails:CoachGuardrails;
+  practice:PracticePacerResult;
+  fitness:ReturnType<(typeof InsightsStudyFitness)['compactFitnessResult']>;
+  dynamics:CoachDynamics;
+}>;
+type CoachAreaShare=Readonly<{label:string;gap:number}>;
+type CoachAreaGap=Readonly<{under:CoachAreaShare;over:CoachAreaShare;effect:number;confidence:Confidence}>;
+type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['computeStartDelayBuckets']>[number]|undefined;weakDelay:ReturnType<(typeof InsightsAnalytics)['computeStartDelayBuckets']>[number]|null;bestSubject:SubjectInsight|undefined;weakSubject:SubjectInsight|undefined;coach:readonly PublicCoachSignal[];surfaces:readonly PublicCoachSignal[];candidateCount:number}>;
 
   // M8.8 COACH COMPONENT
   const InsightsCoach=((Config:typeof InsightsConfig,Primitives:typeof InsightsPrimitives,PacerEvidence:typeof InsightsPacerEvidence)=>{
@@ -3699,7 +3738,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const {
       practicePacerReading
     }=PacerEvidence;
-  function computeMilestones(modelBase){
+  function computeMilestones(modelBase:CoachModelInput){
     const days=Math.max(1,modelBase.recordCount||0);
     const completionDays=Math.max(0,num(modelBase.advanced&&modelBase.advanced.completionDayCount));
     const actualAvg=modelBase.recordCount?modelBase.overview.actual/days:0;
@@ -3712,7 +3751,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       {label:'Plan gap / day',value:signedMinutesLabel(planGapAvg),note:`Tracked focus minus planned work; read with ${percentLabel(modelBase.sampleAudit&&modelBase.sampleAudit.timerPlannedCoverage)} Timer coverage. Total gap: ${signedMinutesLabel(totalGap)}.`}
     ];
   }
-  function coachSurfaceForDomain(domain){
+  function coachSurfaceForDomain(domain:unknown):string{
     const key=String(domain||'performance');
     if(['output','planning'].includes(key))return 'output';
     if(['start','schedule','friction','execution','pacer'].includes(key))return 'execution';
@@ -3721,7 +3760,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     if(key==='dynamics')return 'dynamics';
     return 'performance';
   }
-  function coachThemeFor(domain,topic){
+  function coachThemeFor(domain:unknown,topic:unknown):string{
     const d=String(domain||'performance'),t=String(topic||d);
     if(d==='pacer')return 'timed-practice-pacing';
     if(['coverage','areas'].includes(d)||['coverage','area-completion','allocation','allocation-gap'].includes(t))return 'area-coverage-and-allocation';
@@ -3731,12 +3770,12 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     if(t==='evidence')return 'evidence-quality';
     return 'output-direction';
   }
-  function pushSignal(list,text,tag='Insight',tone='quiet',meta={}){
-    const kind=['concern','positive','context'].includes(meta.kind)?meta.kind:'context';
+  function pushSignal(list:InternalCoachSignal[],text:string,tag='Insight',tone='quiet',meta:CoachSignalMeta={}){
+    const kind:CoachKind=meta.kind==='concern'||meta.kind==='positive'||meta.kind==='context'?meta.kind:'context';
     const domain=String(meta.domain||'performance');
     const topic=String(meta.topic||domain);
     const surface=String(meta.surface||coachSurfaceForDomain(domain));
-    const confidence=meta.confidence&&typeof meta.confidence==='object'?meta.confidence:null;
+    const confidence=meta.confidence??null;
     list.push({
       text,tag,tone,
       _domain:domain,
@@ -3753,30 +3792,30 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       _order:list.length
     });
   }
-  function coachSignalOrder(left,right){
+  function coachSignalOrder(left:InternalCoachSignal,right:InternalCoachSignal){
     const kindRank={concern:3,positive:2,context:1};
     return num(kindRank[right._kind])-num(kindRank[left._kind])||
       num(right._priority)-num(left._priority)||
       num(right._confidenceRank)-num(left._confidenceRank)||
       num(left._order)-num(right._order);
   }
-  function publicCoachSignal(signal){
-    const surface=COACH_SURFACES.find(item=>item.key===signal._surface)||COACH_SURFACES[1],confidence=signal._confidence;
+  function publicCoachSignal(signal:InternalCoachSignal):PublicCoachSignal{
+    const surface=COACH_SURFACES.find(item=>item.key===signal._surface)??COACH_SURFACES[1]!,confidence=signal._confidence;
     return {
       text:signal.text||'',tag:signal.tag||'Insight',tone:signal.tone||'quiet',kind:signal._kind||'context',domain:signal._domain||'performance',topic:signal._topic||'insight',theme:signal._theme||'output-direction',
       surfaceKey:surface.key,surfaceLabel:signal._surfaceLabel||surface.label,targetId:signal._targetId||surface.targetId,confidenceLabel:confidence&&confidence.label||null,confidenceTone:confidence&&confidence.tone||'quiet'
     };
   }
-  function coachDiversityKey(signal){return signal._domain==='pacer'?'execution:pacer':String(signal._surface||'performance');}
-  function coachThemeRepresentatives(signals){
-    const groups=new Map();
-    (Array.isArray(signals)?signals:[]).forEach(signal=>{
+  function coachDiversityKey(signal:InternalCoachSignal):string{return signal._domain==='pacer'?'execution:pacer':String(signal._surface||'performance');}
+  function coachThemeRepresentatives(signals:readonly InternalCoachSignal[]):InternalCoachSignal[]{
+    const groups=new Map<string,InternalCoachSignal[]>();
+    signals.forEach(signal=>{
       const key=String(signal._theme||'output-direction');
       if(!groups.has(key))groups.set(key,[]);
-      groups.get(key).push(signal);
+      groups.get(key)!.push(signal);
     });
     return [...groups.values()].map(group=>{
-      const ordered=group.slice().sort(coachSignalOrder),dominant=ordered[0];
+      const ordered=group.slice().sort(coachSignalOrder),dominant=ordered[0]!;
       const opposing=ordered.find(signal=>
         signal!==dominant&&
         signal._confidenceRank>=COACH_CONFIDENCE_RANK.emerging&&
@@ -3796,12 +3835,12 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       };
     });
   }
-  function rankCoachSignals(signals,limit=COACH_SIGNAL_LIMIT){
-    const eligible=(Array.isArray(signals)?signals:[]).filter(signal=>signal._compact!==false&&signal._confidenceRank>=COACH_CONFIDENCE_RANK.emerging);
+  function rankCoachSignals(signals:readonly InternalCoachSignal[],limit=COACH_SIGNAL_LIMIT):PublicCoachSignal[]{
+    const eligible=signals.filter(signal=>signal._compact!==false&&signal._confidenceRank>=COACH_CONFIDENCE_RANK.emerging);
     const ordered=coachThemeRepresentatives(eligible).sort(coachSignalOrder);
     const primary=ordered.find(signal=>signal._kind==='concern')||ordered[0];
     if(!primary)return [];
-    const chosen=[primary],diversityKeys=new Set([coachDiversityKey(primary)]),topics=new Set([primary._topic]);
+    const chosen:InternalCoachSignal[]=[primary],diversityKeys=new Set<string>([coachDiversityKey(primary)]),topics=new Set<string>([primary._topic]);
     for(const signal of ordered){
       if(chosen.length>=limit)break;
       const diversityKey=coachDiversityKey(signal);
@@ -3817,11 +3856,11 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     if(pacer&&!chosen.includes(pacer)){
       const replaceable=chosen.map((signal,index)=>({signal,index})).filter(row=>row.index>0&&row.signal._kind!=='concern').sort((a,b)=>coachSignalOrder(b.signal,a.signal));
       if(chosen.length<limit)chosen.push(pacer);
-      else if(replaceable.length)chosen[replaceable[0].index]=pacer;
+      else if(replaceable.length)chosen[replaceable[0]!.index]=pacer;
     }
     return chosen.slice(0,limit).map(publicCoachSignal);
   }
-  function coachSurfaceFallback(model,surface){
+  function coachSurfaceFallback(model:CoachModelInput,surface:CoachSurface):PublicCoachSignal{
     const guardrail=model&&model.guardrails&&model.guardrails.sample||{label:'Low sample',tone:'low'};
     const base={
       tag:'No clear signal',tone:'quiet',kind:'context',surfaceKey:surface.key,surfaceLabel:surface.label,targetId:surface.targetId,
@@ -3847,11 +3886,11 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     if(surface.key==='areas')return {...base,confidenceLabel:'No qualifying area signal',text:'No top-level area currently produces an evidence-qualified Coverage Watch, allocation, or completion takeaway.'};
     return {...base,confidenceLabel:'No qualifying model signal',text:'No uncertainty-aware Study Dynamics pattern cleared the effect-size and evidence gates.'};
   }
-  function coachSurfaceTakeaways(model,signals,coachSignals=[]){
-    const source=Array.isArray(signals)?signals:[];
-    const represented=new Set((Array.isArray(coachSignals)?coachSignals:[]).map(signal=>signal&&signal.surfaceKey).filter(Boolean));
-    const usedTopics=new Set((Array.isArray(coachSignals)?coachSignals:[]).map(signal=>signal&&signal.topic).filter(Boolean));
-    const usedThemes=new Set((Array.isArray(coachSignals)?coachSignals:[]).map(signal=>signal&&signal.theme).filter(Boolean));
+  function coachSurfaceTakeaways(model:CoachModelInput,signals:readonly InternalCoachSignal[],coachSignals:readonly PublicCoachSignal[]=[]):PublicCoachSignal[]{
+    const source=signals;
+    const represented=new Set<string>(coachSignals.map(signal=>signal.surfaceKey));
+    const usedTopics=new Set<string>(coachSignals.map(signal=>signal.topic));
+    const usedThemes=new Set<string>(coachSignals.map(signal=>signal.theme));
     const rows=COACH_SURFACES.filter(surface=>!represented.has(surface.key)).map((surface,index)=>{
       const candidates=source.filter(signal=>signal._surface===surface.key&&!usedTopics.has(signal._topic)&&!usedThemes.has(signal._theme)).slice().sort(coachSignalOrder);
       const selected=candidates[0]||null;
@@ -3866,32 +3905,32 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     });
     return rows.slice(0,COACH_SYNTHESIS_LIMIT).map(row=>row.public);
   }
-  function hasBestSubjectEvidence(subject){
+  function hasBestSubjectEvidence(subject:SubjectInsight|null|undefined){
     return !!subject&&num(subject.blocks)>=3&&(num(subject.planned)>=90||num(subject.actual)>=60);
   }
-  function coachAreaAllocationGap(model){
-    const rows=(model&&Array.isArray(model.subjects)?model.subjects:[]).filter(row=>num(row.planned)>0||num(row.completed)>0);
+  function coachAreaAllocationGap(model:CoachModelInput):CoachAreaGap|null{
+    const rows=model.subjects.filter(row=>num(row.planned)>0||num(row.completed)>0);
     const totalPlanned=sum(rows.map(row=>row.planned)),totalCompleted=sum(rows.map(row=>row.completed));
     if(rows.length<2||totalPlanned<MIN_ALLOCATION_EVIDENCE_PLANNED||totalCompleted<MIN_ALLOCATION_EVIDENCE_COMPLETED)return null;
     const shares=rows.map(row=>({
       label:row.label,
       gap:round((num(row.completed)/totalCompleted-num(row.planned)/totalPlanned)*100,1)
     }));
-    const under=shares.slice().sort((a,b)=>a.gap-b.gap||String(a.label).localeCompare(String(b.label)))[0];
-    const over=shares.slice().sort((a,b)=>b.gap-a.gap||String(a.label).localeCompare(String(b.label)))[0];
-    const effect=Math.max(Math.abs(num(under&&under.gap)),Math.abs(num(over&&over.gap)));
+    const under=shares.slice().sort((a,b)=>a.gap-b.gap||String(a.label).localeCompare(String(b.label)))[0]!;
+    const over=shares.slice().sort((a,b)=>b.gap-a.gap||String(a.label).localeCompare(String(b.label)))[0]!;
+    const effect=Math.max(Math.abs(under.gap),Math.abs(over.gap));
     if(effect<MIN_DYNAMIC_ALIGNMENT_GAP_POINTS)return null;
     return {under,over,effect,confidence:descriptiveEvidenceConfidence(model.advanced.completionDayCount,totalCompleted)};
   }
-  function pushFitnessCoachSignal(signals,model){
-    const fitness=model.fitness||{};
-    const performance=fitness.performanceState||{};
+  function pushFitnessCoachSignal(signals:InternalCoachSignal[],model:CoachModelInput){
+    const fitness=model.fitness;
+    const performance=fitness.performanceState;
     const state=performance.current;
     if(!state)return;
     const trajectory=performance.trajectory||{};
     const confidence=fitness.readiness||performance.confidence;
-    const recentEnough=!Number.isFinite(performance.daysSinceLastEvidence)||performance.daysSinceLastEvidence<=FITNESS_LOW_STATE_MAX_STALENESS_DAYS;
-    const reliablyLow=recentEnough&&confidenceAtLeast(confidence,'reliable')&&num(state.estimate)>=0&&state.estimate<FITNESS_LOW_STATE_THRESHOLD&&Number.isFinite(state.high)&&state.high<FITNESS_LOW_STATE_UPPER_BOUND;
+    const recentEnough=!isFiniteNumber(performance.daysSinceLastEvidence)||performance.daysSinceLastEvidence<=FITNESS_LOW_STATE_MAX_STALENESS_DAYS;
+    const reliablyLow=recentEnough&&confidenceAtLeast(confidence,'reliable')&&num(state.estimate)>=0&&state.estimate<FITNESS_LOW_STATE_THRESHOLD&&isFiniteNumber(state.high)&&state.high<FITNESS_LOW_STATE_UPPER_BOUND;
     const falling=trajectory.key==='falling';
     const positive=['rising','recovering'].includes(trajectory.key);
     const stateText=fitness.summary&&fitness.summary.stateText||percentLabel(state.estimate,1);
@@ -3917,8 +3956,8 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       domain:'fitness',surface:'fitness',topic:'fitness-state',kind:'context',priority:34,confidence,compact:false
     });
   }
-  function pushPacerCoachSignal(signals,model){
-    const practice=model&&model.practice||{};
+  function pushPacerCoachSignal(signals:InternalCoachSignal[],model:CoachModelInput){
+    const practice=model.practice;
     if(!num(practice.units))return;
     const reading=practice.coachReading||practice.reading||practicePacerReading(practice);
     const concern=reading.kind==='concern'||reading.tone==='watch';
@@ -3933,36 +3972,36 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       compact:practice.patternReady&&kind!=='context'
     });
   }
-  function pushDynamicsCoachSignals(signals,model){
-    const dynamics=model&&model.dynamics||{};
-    const change=dynamics.changePoint||{};
-    if(change.detected&&confidenceAtLeast(change.confidence,'emerging')){
+  function pushDynamicsCoachSignals(signals:InternalCoachSignal[],model:CoachModelInput){
+    const dynamics=model.dynamics;
+    const change=dynamics.changePoint;
+    if(change?.detected&&confidenceAtLeast(change.confidence,'emerging')){
       const improving=num(change.delta)>0;
       pushSignal(signals,`From ${shortDate(change.date)} onward, daily work completion shifted ${improving?'up':'down'} from ${percentLabel(change.beforeMean,1)} to ${percentLabel(change.afterMean,1)}. This identifies a change in the recorded performance phase, not its cause.`,'Regime change',improving?'good':'watch',{
         domain:'dynamics',surface:'dynamics',topic:'trajectory',kind:improving?'positive':'concern',priority:improving?70:104,confidence:change.confidence
       });
     }
-    const workload=dynamics.workload||{};
-    if(workload.ready&&workload.tradeoff&&confidenceAtLeast(workload.confidence,'emerging')){
+    const workload=dynamics.workload;
+    if(workload?.ready&&workload.tradeoff&&confidenceAtLeast(workload.confidence,'emerging')){
       const trade=workload.tradeoff;
       const strongPart=Number.isFinite(trade.reliabilityDrop)?` and ${trade.reliabilityDrop} strong-day points`:'';
       pushSignal(signals,`At ${minutesLabel(trade.high.planned)} planned work, the workload curve is ${trade.completionDrop} completion points${strongPart} below the lower-load comparison. Treat this as a workload warning, not causal proof.`,'Workload trade-off','watch',{
         domain:'dynamics',surface:'dynamics',topic:'workload',kind:'concern',priority:108,confidence:workload.confidence
       });
-    }else if(workload.forecast&&workload.forecast.completionReady&&confidenceAtLeast(workload.confidence,'emerging')){
+    }else if(workload?.forecast&&workload.forecast.completionReady&&confidenceAtLeast(workload.confidence,'emerging')){
       const forecast=workload.forecast;
       const strongPart=forecast.strongReady?` and a ${percentLabel(forecast.strongProbability,1)} chance of an 80%+ day`:'';
       pushSignal(signals,`The ${minutesLabel(forecast.scenarioPlanned)} next-plan scenario estimates ${percentLabel(forecast.completionMean,1)} completion (${percentLabel(forecast.completionLow,0)}–${percentLabel(forecast.completionHigh,0)} ${forecast.rangeReady?'backtest-checked 80% range':'estimated model range'})${strongPart}.`,'Next-plan forecast','quiet',{
         domain:'dynamics',surface:'dynamics',topic:'workload',kind:'context',priority:56,confidence:workload.confidence,compact:false
       });
-    }else if(workload.ready&&workload.recommendation&&confidenceAtLeast(workload.confidence,'emerging')){
+    }else if(workload?.ready&&workload.recommendation&&confidenceAtLeast(workload.confidence,'emerging')){
       const recommendation=workload.recommendation;
       pushSignal(signals,`The workload curve's realistic region is ${minutesLabel(recommendation.minPlanned)}–${minutesLabel(recommendation.maxPlanned)}. Past-day forecast checks are still pending, so this remains historical workload evidence rather than next-day guidance.`,'Planning range','quiet',{
         domain:'dynamics',surface:'dynamics',topic:'workload',kind:'context',priority:50,confidence:workload.confidence,compact:false
       });
     }
-    const cascade=dynamics.cascade||{};
-    if(cascade.ready&&cascade.primary&&confidenceAtLeast(cascade.primary.confidence,'emerging')){
+    const cascade=dynamics.cascade;
+    if(cascade?.ready&&cascade.primary&&confidenceAtLeast(cascade.primary.confidence,'emerging')){
       const terminal=String(cascade.primary.text||'').toLowerCase().includes('terminal-collapse');
       const negative=terminal||num(cascade.primary.effect)<-MIN_EVIDENCE_EFFECT_POINTS;
       const positive=!negative&&num(cascade.primary.effect)>=MIN_EVIDENCE_EFFECT_POINTS;
@@ -3971,8 +4010,8 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
         compact:negative||positive
       });
     }
-    const allocation=dynamics.allocation||{};
-    if(allocation.ready&&num(allocation.divergence)>.02&&confidenceAtLeast(allocation.confidence,'emerging')){
+    const allocation=dynamics.allocation;
+    if(allocation?.ready&&num(allocation.divergence)>.02&&confidenceAtLeast(allocation.confidence,'emerging')){
       const shifts=[];
       if(allocation.topOver)shifts.push(`${allocation.topOver.label} ${allocation.topOver.gap>0?'+':''}${allocation.topOver.gap} share pts`);
       if(allocation.topUnder)shifts.push(`${allocation.topUnder.label} ${allocation.topUnder.gap} share pts`);
@@ -3981,8 +4020,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
         domain:'dynamics',surface:'dynamics',topic:'allocation',kind:concern?'concern':'context',priority:concern?82:38,confidence:allocation.confidence,compact:concern
       });
     }
-    const bayesian=dynamics.bayesian||{};
-    const clearest=bayesian.clearest;
+    const clearest=dynamics.bayesian?.clearest;
     if(clearest&&clearest.meaningful&&confidenceAtLeast(clearest.estimate&&clearest.estimate.confidence,'emerging')){
       const positive=num(clearest.effect)>0;
       pushSignal(signals,`${clearest.label} is the clearest hierarchically pooled ${String(clearest.dimension||'completion pattern').toLowerCase()}: ${Math.abs(num(clearest.effect))} points ${positive?'above':'below'} its learned population mean.`,'Completion pattern',positive?'good':'watch',{
@@ -3990,8 +4028,8 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       });
     }
   }
-  function selectSignals(model){
-    const signals=[];
+  function selectSignals(model:CoachModelInput):CoachSelection{
+    const signals:InternalCoachSignal[]=[];
     const delaySignalRows=(model.startDelays||[]).filter(b=>b.blocks>=MIN_BLOCKS_FOR_SIGNAL&&Number.isFinite(num(b.completion,null)));
     const bestDelay=delaySignalRows.slice().sort((a,b)=>num(b.completion)-num(a.completion)||b.blocks-a.blocks||String(a.id).localeCompare(String(b.id)))[0];
     const weakDelay=delaySignalRows.length>=2?delaySignalRows.slice().sort((a,b)=>num(a.completion)-num(b.completion)||b.blocks-a.blocks||String(a.id).localeCompare(String(b.id)))[0]:null;
@@ -4000,7 +4038,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const weakSubject=model.subjects.filter(s=>(s.blocks>=2||s.windowAbsent)&&num(s.coverageWatchScore)>=35).sort((a,b)=>num(b.coverageWatchScore)-num(a.coverageWatchScore)||num(b.allocationScore)-num(a.allocationScore)||num(a.coverageCompletion)-num(b.coverageCompletion)||labelCompare(a,b))[0];
     const areaAllocation=coachAreaAllocationGap(model);
     const actualPlanRatio=model.overview.planned>0?model.overview.actual/model.overview.planned:null;
-    const rawTimerCoverage=model.sampleAudit&&model.sampleAudit.timerPlannedCoverage;
+    const rawTimerCoverage=model.sampleAudit.timerPlannedCoverage;
     const timerCoverage=rawTimerCoverage===null||rawTimerCoverage===undefined?null:Number(rawTimerCoverage);
     const delayDifference=bestDelay&&weakDelay?Math.round(num(bestDelay.completion)-num(weakDelay.completion)):0;
     if(model.advanced.trendCompletionDayCount>=MIN_RECORDS_FOR_COACH_TREND&&model.advanced.completionSlopePerWeek!==null&&Math.abs(model.advanced.completionSlopePerWeek)>=3){
@@ -4023,11 +4061,11 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
         domain:'output',topic:'stability',kind:'positive',priority:42,confidence:model.guardrails.sample
       });
     }
-    if(model.recordCount>=MIN_RECORDS_FOR_COACH_TREND&&timerCoverage>=MIN_TIMER_COVERAGE_FOR_PLAN_READ&&model.advanced.plannedSlopePerWeek!==null&&model.advanced.actualSlopePerWeek!==null&&model.advanced.plannedSlopePerWeek>45&&model.advanced.actualSlopePerWeek<15){
+    if(model.recordCount>=MIN_RECORDS_FOR_COACH_TREND&&isFiniteNumber(timerCoverage)&&timerCoverage>=MIN_TIMER_COVERAGE_FOR_PLAN_READ&&model.advanced.plannedSlopePerWeek!==null&&model.advanced.actualSlopePerWeek!==null&&model.advanced.plannedSlopePerWeek>45&&model.advanced.actualSlopePerWeek<15){
       pushSignal(signals,`Your planned study load is rising faster than actual focus. Keep the next few days realistic before increasing load.`,'Planning load','watch',{domain:'planning',topic:'workload',kind:'concern',priority:92,confidence:model.guardrails.sample});
-    }else if(model.recordCount>=MIN_RECORDS_FOR_COACH_TREND&&model.advanced.trendCompletionDayCount>=MIN_RECORDS_FOR_COACH_TREND&&timerCoverage>=MIN_TIMER_COVERAGE_FOR_PLAN_READ&&model.advanced.actualSlopePerWeek!==null&&model.advanced.completionSlopePerWeek!==null&&model.advanced.actualSlopePerWeek>30&&model.advanced.completionSlopePerWeek<0){
+    }else if(model.recordCount>=MIN_RECORDS_FOR_COACH_TREND&&model.advanced.trendCompletionDayCount>=MIN_RECORDS_FOR_COACH_TREND&&isFiniteNumber(timerCoverage)&&timerCoverage>=MIN_TIMER_COVERAGE_FOR_PLAN_READ&&model.advanced.actualSlopePerWeek!==null&&model.advanced.completionSlopePerWeek!==null&&model.advanced.actualSlopePerWeek>30&&model.advanced.completionSlopePerWeek<0){
       pushSignal(signals,`Actual study time is rising, but work-completion reliability is falling. More time may be adding friction instead of clarity.`,'Trade-off','watch',{domain:'output',topic:'workload',kind:'concern',priority:110,confidence:model.guardrails.trend});
-    }else if(actualPlanRatio!==null&&actualPlanRatio<0.75&&model.recordCount>=3&&timerCoverage>=MIN_TIMER_COVERAGE_FOR_PLAN_READ&&num(model.overview.completion)<80){
+    }else if(actualPlanRatio!==null&&actualPlanRatio<0.75&&model.recordCount>=3&&isFiniteNumber(timerCoverage)&&timerCoverage>=MIN_TIMER_COVERAGE_FOR_PLAN_READ&&num(model.overview.completion)<80){
       pushSignal(signals,`You are tracking less actual focus than the plan assumes. A smaller plan may produce a cleaner win-rate.`,'Planning load','watch',{domain:'planning',topic:'workload',kind:'concern',priority:76+Math.min(14,Math.max(0,.75-actualPlanRatio)*60),confidence:model.guardrails.sample});
     }
     if(delaySignalRows.length>=2&&bestDelay&&delayDifference>=MIN_MEANINGFUL_DIFFERENCE_POINTS)pushSignal(signals,`${bestDelay.label} starts have the clearest start-time pattern right now: ${percentLabel(bestDelay.completion)} work completion across ${bestDelay.blocks} blocks, ${Math.round(delayDifference)} points above the weakest sampled bucket.`,'Start timing','good',{domain:'start',topic:'start-rhythm',kind:'positive',priority:34+Math.min(12,delayDifference/2),confidence:model.guardrails.sample});
@@ -4056,12 +4094,12 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     if(model.recordCount>=3&&shiftedDays>=2&&(shiftedRate>=15||averageShift>=30))pushSignal(signals,`Schedule movement appears on ${model.schedule.shiftedDays}/${model.recordCount} saved days; average largest movement on shifted days is ${minutesLabel(model.schedule.averageDailyPeakShiftOnShiftedDays)}.`,'Schedule','watch',{domain:'schedule',topic:'schedule',kind:'concern',priority:48+Math.min(20,shiftedRate*.4)+Math.min(10,averageShift/10),confidence:model.guardrails.sample});
     if(model.interruption.hasTimerEvidence&&num(model.interruption.interruptionRate)>=25)pushSignal(signals,`Focus friction is visible in ${percentLabel(model.interruption.interruptionRate)} of ${model.interruption.blockCount} Timer-backed work blocks after excluding accepted Pomodoro recovery. Worst affected: ${model.interruption.worstAffected||'not clear yet'}.`,'Focus friction','watch',{domain:'friction',topic:'friction',kind:'concern',priority:72+Math.min(22,num(model.interruption.interruptionRate)*.4),confidence:model.guardrails.sample});
     const eligibleDays=num(model.advanced&&model.advanced.completionDayCount),strongDays=num(model.overview&&model.overview.strongDays),strongRate=eligibleDays?pct(strongDays,eligibleDays):null;
-    if(eligibleDays>=5&&Number.isFinite(strongRate)){
+    if(eligibleDays>=5&&isFiniteNumber(strongRate)){
       if(strongRate<=25&&num(model.overview.completion)<70)pushSignal(signals,`${strongDays}/${eligibleDays} completion-eligible days reached the descriptive 80% strong-day threshold; aggregate work completion is ${percentLabel(model.overview.completion,1)}.`,'Training record','watch',{domain:'performance',topic:'training-record',kind:'concern',priority:64+Math.min(12,Math.max(0,25-strongRate)*.4),confidence:model.guardrails.sample});
       else if(strongRate>=60&&num(model.overview.completion)>=80)pushSignal(signals,`${strongDays}/${eligibleDays} completion-eligible days reached 80%+ work completion, with ${percentLabel(model.overview.completion,1)} aggregate completion.`,'Training record','good',{domain:'performance',topic:'training-record',kind:'positive',priority:40,confidence:model.guardrails.sample});
     }
     const qualityPairs=num(model.advanced&&model.advanced.qualityPairCount),qualityCorrelation=num(model.advanced&&model.advanced.qualityCompletionCorrelation,null);
-    if(qualityPairs>=6&&Number.isFinite(qualityCorrelation)&&Math.abs(qualityCorrelation)>=.35){
+    if(qualityPairs>=6&&isFiniteNumber(qualityCorrelation)&&Math.abs(qualityCorrelation)>=.35){
       const positive=qualityCorrelation>0;
       pushSignal(signals,positive
         ? `Across ${qualityPairs} rated completion days, higher self-rated study quality has moved with higher work completion. Treat the link as descriptive, not causal.`
