@@ -11,8 +11,10 @@ vm.runInContext(source,context,{filename:sourcePath});
 const retryContext=vm.createContext({console});
 vm.runInContext(source,retryContext,{filename:sourcePath});
 const firstRetryModel=retryContext.StudyDirectorInsightsModel;
+assert.equal(retryContext.createInsightsModelRuntime,undefined,'type-only runtime factory must not remain callable after model assembly');
 vm.runInContext(source,retryContext,{filename:sourcePath});
 assert.notEqual(retryContext.StudyDirectorInsightsModel,firstRetryModel,'classic Insights model source must remain re-evaluable for the optional-plugin retry path');
+assert.equal(retryContext.createInsightsModelRuntime,undefined,'retry evaluation must also retire the type-only runtime factory');
 const {Config,PacerEvidence:Pacer,ModelEngine}=context.StudyDirectorInsightsModel;
 const {classifyTaskOutcome,summarizePracticeRuns,practice:practiceProvider}=realInsightsProviders();
 
