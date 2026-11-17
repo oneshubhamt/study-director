@@ -26,7 +26,7 @@ const boundaryRecords=Records.normalizeRecords([
   {date:'2026-08-10',tasks:[{id:'end',kind:'work',dur:40,completion:0,completionSource:'manual',actualSeconds:0}]}
 ]);
 const boundaryWindow=Records.filterCanonicalRecordsForInsightWindow(boundaryRecords,'30','2026-08-10');
-assert.deepEqual(boundaryWindow.records.map(record=>record.date),['2026-07-12','2026-08-10'],'30-day window must include both exact calendar boundaries');
+assert.deepEqual(Array.from(boundaryWindow.records,record=>record.date),['2026-07-12','2026-08-10'],'30-day window must include both exact calendar boundaries');
 const boundaryEvidence=Analytics.createEvidenceIndex(boundaryWindow.records,classifyFoundationOutcome);
 const boundaryDaily=Analytics.computeDailySeries(boundaryEvidence);
 assert.equal(boundaryDaily.reduce((sum,row)=>sum+row.planned,0),100);
