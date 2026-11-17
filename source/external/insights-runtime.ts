@@ -1112,7 +1112,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       else if(context&&context.restoreScroll===false){state.scrollWindow=0;state.scrollMain=0;restoreScroll({immediate:true});}
       if(state.errorTimer){clearTimeout(state.errorTimer);state.errorTimer=null;}
       const token=InsightsRenderCoordinator.begin();
-      const notice=api.insights.notifications.begin({id:'report',foreground:false,announce:false,title:'Insights',message:'Preparing your saved study history…',action:{label:'Retry',run:()=>render(context)}});
+      const notice=api.insights.notifications.begin({id:'report',foreground:false,announce:false,title:'Insights',message:'Preparing your saved study history…',action:{label:'Retry',run:()=>{void render(context);}}});
       // Join only work that is already reading data; a pre-computation still
       // waiting for idle time sees the open tab and stands down by itself.
       const joining=state.prefetchWorking?state.prefetching:null;
@@ -1154,7 +1154,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         const baseKey=`${sourceKey}|${currentStudyDate}|${sourceRevision||'fallback'}`;
         if(state.rendered&&sourceRevision&&state.renderedBaseKey===baseKey&&state.renderedWindowKey===windowKey){
           clearInsightsUpdateStatus(pane);
-          restoreScroll();
+          void restoreScroll();
           publishProfile(profile);
           return;
         }
@@ -1172,7 +1172,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         if(state.rendered&&state.renderedKey===fullKey){
           state.session=session;
           clearInsightsUpdateStatus(pane);
-          restoreScroll();
+          void restoreScroll();
           return;
         }
         const prefetched=state.prefetched&&state.prefetched.fullKey===fullKey?state.prefetched:null;
@@ -1188,8 +1188,8 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
           currentStudyDate,
           isCurrent:()=>InsightsRenderCoordinator.isCurrent(token),
           onShell:value=>{profile.shellMs=profile.shellMs||value;},
-          onWindowChange:key=>{writeInsightWindowKey(key);render(context);},
-          reload:()=>render(context)
+          onWindowChange:key=>{writeInsightWindowKey(key);void render(context);},
+          reload:()=>{void render(context);}
         });
         if(renderMetrics.cancelled||!InsightsRenderCoordinator.isCurrent(token))return;
         profile.domMs=renderMetrics.domMs;profile.maxDomChunkMs=renderMetrics.maxChunkMs;profile.domChunks=renderMetrics.chunks;
@@ -1199,7 +1199,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         state.renderedWindowKey=windowInfo.key;
         state.session=session;
         clearInsightsUpdateStatus(pane);
-        if(previousScroll)restoreScroll();
+        if(previousScroll)void restoreScroll();
         else{
           state.scrollWindow=0;state.scrollMain=0;
           requestAnimationFrame(()=>{
@@ -1216,10 +1216,10 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         if(errorName(error)==='AbortError'){notice.finish('cancelled','',{announce:false});pane.setAttribute('aria-busy','false');return;}
         const message=errorCode(error)==='INSIGHTS_PROCESSING_FAILED'?'Insights processing failed. Retry the report.':'Could not read saved daily records for insights.';
         notice.finish('failed',message+(state.rendered?' The previous view is still available.':''),{announce:false,cue:'none'});
-        const retry=el('button','btn ui-btn insights-retry','Retry');retry.type='button';retry.addEventListener('click',()=>render(context),{once:true});
+        const retry=el('button','btn ui-btn insights-retry','Retry');retry.type='button';retry.addEventListener('click',()=>{void render(context);},{once:true});
         if(state.rendered){
           const status=showInsightsUpdateStatus(pane,notice.read()?.message||message,true);
-          status.appendChild(retry);restoreScroll();
+          status.appendChild(retry);void restoreScroll();
         }else{
           state.suppressScroll=false;
           const status=el('div','insights-empty ui-card ui-mono',notice.read()?.message||message);status.setAttribute('role','status');status.appendChild(retry);pane.replaceChildren(status);
@@ -1230,7 +1230,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         longTaskObserver?.disconnect();
       }
     };
-    return Object.freeze({render,prefetch,ready:async()=>{await state.navigationReady;await restoreScroll();return true;},profile:()=>state.lastProfile});
+    return Object.freeze({render,prefetch,ready:async()=>{await state.navigationReady;await void restoreScroll();return true;},profile:()=>state.lastProfile});
   }
     return Object.freeze({
       createInsightsView,supportsCapabilities
@@ -1265,8 +1265,8 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
     if(registered){
       // Prepare a long history while the app is idle, and again when the page
       // returns to view (the dataset may have changed meanwhile).
-      view.prefetch();
-      document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')view.prefetch();});
+      void view.prefetch();
+      document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void view.prefetch();});
     }
     if(registered&&document.documentElement.dataset['insightsResizeBound']!=='1'){
       document.documentElement.dataset['insightsResizeBound']='1';
@@ -1285,7 +1285,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
     if(typeof register!=='function'||registrationAttempts>=MAX_REGISTRATION_ATTEMPTS)return false;
     registrationAttempts+=1;
     try{registrationComplete=register(PLUGIN_DESCRIPTOR)===true;}catch(error){}
-    if(!registrationComplete&&registrationAttempts<MAX_REGISTRATION_ATTEMPTS)Promise.resolve().then(connectPlugin);
+    if(!registrationComplete&&registrationAttempts<MAX_REGISTRATION_ATTEMPTS)void Promise.resolve().then(connectPlugin);
     return registrationComplete;
   }
   function boot(){
