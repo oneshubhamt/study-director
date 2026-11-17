@@ -1,6 +1,6 @@
 # Phase 5 — scope, status and implementation handoff
 
-**Scope reference baseline:** `28c8c1d5a9b9850079a59acf1d11818d17e513ec`, 2026-11-16, verified against GitHub `ts-exp` and `TS-Conversion`. P5.0–P5.10 have since reached targeted implementation closure; P5.5–P5.7 and P5.10 received owner-requested interim audits/corrections. The source map and implementation objectives below preserve the pre-conversion scope for reconciliation, not the present file topology. Work on `ts-exp`; [execution record](../../TS-CONVERSION-EXECUTION.md) owns live evidence and remaining checks, and [AGENTS](../../AGENTS.md) owns procedure.
+**Scope reference baseline:** `28c8c1d5a9b9850079a59acf1d11818d17e513ec`, 2026-11-16, verified against GitHub `ts-exp` and `TS-Conversion`. P5.0–P5.10 have since reached targeted implementation closure; P5.5–P5.7 and P5.10 received owner-requested source audits/corrections, with P5.10 re-audited de novo through `0d908b4f` on 2026-11-18. The source map and implementation objectives below preserve the pre-conversion scope for reconciliation, not the present file topology. Work on `ts-exp`; [execution record](../../TS-CONVERSION-EXECUTION.md) owns live evidence and remaining checks, and [AGENTS](../../AGENTS.md) owns procedure.
 
 ## Roadmap and ownership
 
@@ -19,7 +19,7 @@ The programme retains 14 top-level steps, P5.0–P5.13. Child IDs identify coher
 | P5.8 | CLOSED — TARGETED | Drive adapter plus connection, sync-status and profile-facing host behavior; A/B below |
 | P5.9a | CLOSED — TARGETED | Insights model foundations, records/windows and core analytics |
 | P5.9b | CLOSED — TARGETED | Practice, study state/dynamics, coach and complete model engine |
-| P5.10 | CLOSED — TARGETED; INTERIM AUDIT CORRECTED, HOSTED RECHECK OPEN | Insights compute boundary, presentation and retained UI/host integration; A/B/C below |
+| P5.10 | CLOSED — AUDITED — TARGETED | Insights compute boundary, presentation and retained UI/host integration; A/B/C below |
 | P5.11a | NOT STARTED | Guide content/runtime, preview producer and owned navigation/accessibility behavior |
 | P5.11b | NOT STARTED | Glass, early presentation kernel/metadata, theme/preferences and first-paint contracts |
 | P5.11c | NOT STARTED | Aurora runtime/registration and saved-skin switching |
