@@ -35,8 +35,9 @@ type ActiveRequest={
 (()=>{
 'use strict';
 if(!Reflect.has(globalThis,'document'))return;
-const Protocol=Reflect.get(globalThis,'StudyDirectorInsightsProtocol') as InsightsProtocolRuntime|undefined;
-if(!Protocol||Protocol.format!=='study-director.insights-worker-protocol'||Protocol.version!==1)throw new Error('Study Director Insights worker protocol is unavailable.');
+const protocolCandidate=Reflect.get(globalThis,'StudyDirectorInsightsProtocol') as InsightsProtocolRuntime|undefined;
+if(!protocolCandidate||protocolCandidate.format!=='study-director.insights-worker-protocol'||protocolCandidate.version!==1)throw new Error('Study Director Insights worker protocol is unavailable.');
+const Protocol:InsightsProtocolRuntime=protocolCandidate;
 Reflect.deleteProperty(globalThis,'StudyDirectorInsightsProtocol');
 const MIN_RECORDS=120,WORKER_TIMEOUT_MS=30000,IDLE_RETIRE_MS=120000;
 const runtimeUrl=document.currentScript instanceof HTMLScriptElement?document.currentScript.src:'';
@@ -173,7 +174,7 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
         for(let part=0;part<parts;part+=1){
           if(part>0){
             await yieldTask();
-            if(worker!==currentWorker||!active||active.id!==id||active.worker!==currentWorker)return await response;
+            if(worker!==currentWorker||!active||active.id!==id||active.worker!==currentWorker){await response;throw abortError();}
           }
           const slice=all.slice(part*Protocol.recordsPerMessage,(part+1)*Protocol.recordsPerMessage);
           currentWorker.postMessage({type:'SD_INSIGHTS_RECORDS',requestId:id,revision,part,parts,records:slice});sentRecords+=slice.length;
@@ -199,4 +200,4 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
 const InsightsComputeBridge=Object.freeze({format:'study-director.insights-compute-bridge',version:1,create,minimumRecords:MIN_RECORDS});
 Object.defineProperty(globalThis,'StudyDirectorInsightsComputeBridge',{value:InsightsComputeBridge,writable:false,configurable:true});
 })();
-export type InsightsComputeBridgeRuntime=Readonly<{format:'study-director.insights-compute-bridge';version:1;create:typeof create;minimumRecords:120}>;
+export type InsightsComputeBridgeRuntime=Readonly<{format:'study-director.insights-compute-bridge';version:1;create:(api:InsightsComputeApi,engine:InsightsEngine,options?:{yieldTask?:()=>Promise<unknown>})=>Readonly<InsightsComputation>;minimumRecords:number}>;

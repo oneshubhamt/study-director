@@ -41,10 +41,10 @@ function optionalFinite(value:unknown):value is number|null|undefined{
   return value===undefined||value===null||finite(value);
 }
 function insightRecord(value:unknown):value is InsightRecord{
-  return object(value)&&typeof value.date==='string';
+  return object(value)&&typeof value['date']==='string';
 }
 function insightSummary(value:unknown):value is InsightSummary{
-  return object(value)&&typeof value.date==='string';
+  return object(value)&&typeof value['date']==='string';
 }
 function summaries(value:unknown):value is readonly InsightSummary[]|undefined{
   return value===undefined||(Array.isArray(value)&&value.every(insightSummary));
@@ -54,40 +54,40 @@ function records(value:unknown):value is readonly InsightRecord[]|undefined{
 }
 function buildOptions(value:unknown):value is InsightsBuildOptions{
   if(!object(value))return false;
-  return nullableString(value.currentStudyDate)&&summaries(value.subjectReferenceSummaries)&&nullableString(value.subjectReferenceRevision)
-    &&summaries(value.streakSummaries)&&nullableString(value.windowKey)&&optionalFinite(value.windowDays)&&nullableString(value.windowTo)
-    &&nullableString(value.windowLabel)&&optionalFinite(value.allRecordCount)&&records(value.modelRecords);
+  return nullableString(value['currentStudyDate'])&&summaries(value['subjectReferenceSummaries'])&&nullableString(value['subjectReferenceRevision'])
+    &&summaries(value['streakSummaries'])&&nullableString(value['windowKey'])&&optionalFinite(value['windowDays'])&&nullableString(value['windowTo'])
+    &&nullableString(value['windowLabel'])&&optionalFinite(value['allRecordCount'])&&records(value['modelRecords']);
 }
 function windowRequest(value:unknown):value is InsightsWindowRequest{
   if(!object(value))return false;
-  if(value.all===true)return Object.keys(value).every(key=>key==='all');
-  if(!Array.isArray(value.indices)||value.indices.length>INSIGHTS_MAX_RETAINED_RECORDS)return false;
-  return Object.keys(value).every(key=>key==='indices')&&value.indices.every(index=>Number.isSafeInteger(index)&&Number(index)>=0);
+  if(value['all']===true)return Object.keys(value).every(key=>key==='all');
+  if(!Array.isArray(value['indices'])||value['indices'].length>INSIGHTS_MAX_RETAINED_RECORDS)return false;
+  return Object.keys(value).every(key=>key==='indices')&&value['indices'].every(index=>Number.isSafeInteger(index)&&Number(index)>=0);
 }
 function failure(value:unknown,message:string):InsightsDecode<never>{
   const row=object(value)?value:{};
   return Object.freeze({
     ok:false,
-    id:requestId(row.id)?row.id:requestId(row.requestId)?row.requestId:null,
-    revision:revision(row.revision)?row.revision:'',
+    id:requestId(row['id'])?row['id']:requestId(row['requestId'])?row['requestId']:null,
+    revision:revision(row['revision'])?row['revision']:'',
     message
   });
 }
 function decodeWorkerRequest(value:unknown):InsightsDecode<InsightsWorkerRequest>{
   if(!object(value))return failure(value,'Insights worker request must be an object.');
-  if(value.type==='SD_INSIGHTS_RECORDS'){
-    if(!requestId(value.requestId)||!revision(value.revision))return failure(value,'Insights record-transfer identity is invalid.');
-    if(!Number.isSafeInteger(value.parts)||Number(value.parts)<1||Number(value.parts)>INSIGHTS_MAX_PARTS)return failure(value,'Insights record-transfer part count is invalid.');
-    if(!Number.isSafeInteger(value.part)||Number(value.part)<0||Number(value.part)>=Number(value.parts))return failure(value,'Insights record-transfer part index is invalid.');
-    if(!Array.isArray(value.records)||value.records.length>INSIGHTS_RECORDS_PER_MESSAGE||!value.records.every(insightRecord))return failure(value,'Insights record-transfer payload is invalid.');
+  if(value['type']==='SD_INSIGHTS_RECORDS'){
+    if(!requestId(value['requestId'])||!revision(value['revision']))return failure(value,'Insights record-transfer identity is invalid.');
+    if(!Number.isSafeInteger(value['parts'])||Number(value['parts'])<1||Number(value['parts'])>INSIGHTS_MAX_PARTS)return failure(value,'Insights record-transfer part count is invalid.');
+    if(!Number.isSafeInteger(value['part'])||Number(value['part'])<0||Number(value['part'])>=Number(value['parts']))return failure(value,'Insights record-transfer part index is invalid.');
+    if(!Array.isArray(value['records'])||value['records'].length>INSIGHTS_RECORDS_PER_MESSAGE||!value['records'].every(insightRecord))return failure(value,'Insights record-transfer payload is invalid.');
     return Object.freeze({ok:true,message:Object.freeze({
-      type:'SD_INSIGHTS_RECORDS',requestId:value.requestId,revision:value.revision,part:Number(value.part),parts:Number(value.parts),records:value.records
+      type:'SD_INSIGHTS_RECORDS',requestId:value['requestId'],revision:value['revision'],part:Number(value['part']),parts:Number(value['parts']),records:value['records']
     })});
   }
-  if(value.type==='SD_INSIGHTS_BUILD'){
-    if(!requestId(value.id)||!revision(value.revision)||!windowRequest(value.window)||!buildOptions(value.options))return failure(value,'Insights build request is invalid.');
+  if(value['type']==='SD_INSIGHTS_BUILD'){
+    if(!requestId(value['id'])||!revision(value['revision'])||!windowRequest(value['window'])||!buildOptions(value['options']))return failure(value,'Insights build request is invalid.');
     return Object.freeze({ok:true,message:Object.freeze({
-      type:'SD_INSIGHTS_BUILD',id:value.id,revision:value.revision,window:value.window,options:value.options
+      type:'SD_INSIGHTS_BUILD',id:value['id'],revision:value['revision'],window:value['window'],options:value['options']
     })});
   }
   return failure(value,'Unsupported Insights worker request.');
@@ -97,16 +97,16 @@ function wireModel(value:unknown):value is InsightsWireModel{
 }
 function decodeWorkerResponse(value:unknown):InsightsDecode<InsightsWorkerResponse>{
   if(!object(value))return failure(value,'Insights worker response must be an object.');
-  if(value.type==='SD_INSIGHTS_RESULT'){
-    if(!requestId(value.id)||!revision(value.revision)||!wireModel(value.model)||!finite(value.computeMs)||value.computeMs<0)return failure(value,'Insights result response is invalid.');
+  if(value['type']==='SD_INSIGHTS_RESULT'){
+    if(!requestId(value['id'])||!revision(value['revision'])||!wireModel(value['model'])||!finite(value['computeMs'])||value['computeMs']<0)return failure(value,'Insights result response is invalid.');
     return Object.freeze({ok:true,message:Object.freeze({
-      type:'SD_INSIGHTS_RESULT',id:value.id,revision:value.revision,model:value.model,computeMs:value.computeMs
+      type:'SD_INSIGHTS_RESULT',id:value['id'],revision:value['revision'],model:value['model'],computeMs:value['computeMs']
     })});
   }
-  if(value.type==='SD_INSIGHTS_ERROR'){
-    if(!requestId(value.id)||!revision(value.revision)||typeof value.message!=='string'||!value.message)return failure(value,'Insights error response is invalid.');
+  if(value['type']==='SD_INSIGHTS_ERROR'){
+    if(!requestId(value['id'])||!revision(value['revision'])||typeof value['message']!=='string'||!value['message'])return failure(value,'Insights error response is invalid.');
     return Object.freeze({ok:true,message:Object.freeze({
-      type:'SD_INSIGHTS_ERROR',id:value.id,revision:value.revision,message:value.message.slice(0,1000)
+      type:'SD_INSIGHTS_ERROR',id:value['id'],revision:value['revision'],message:value['message'].slice(0,1000)
     })});
   }
   return failure(value,'Unsupported Insights worker response.');

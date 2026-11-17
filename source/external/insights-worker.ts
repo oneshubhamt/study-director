@@ -5,10 +5,11 @@ import type {TaskOutcome} from '../../types/domain.ts';
 (()=>{
 'use strict';
 if(Reflect.has(globalThis,'document'))return;
-const Protocol=Reflect.get(globalThis,'StudyDirectorInsightsProtocol') as InsightsProtocolRuntime|undefined;
-const Model=Reflect.get(globalThis,'StudyDirectorInsightsModel') as InsightsModelRuntime|undefined;
-if(!Protocol||Protocol.format!=='study-director.insights-worker-protocol'||Protocol.version!==1)throw new Error('Study Director Insights worker protocol is unavailable.');
-if(!Model)throw new Error('Study Director Insights model is unavailable.');
+const protocolCandidate=Reflect.get(globalThis,'StudyDirectorInsightsProtocol') as InsightsProtocolRuntime|undefined;
+const modelCandidate=Reflect.get(globalThis,'StudyDirectorInsightsModel') as InsightsModelRuntime|undefined;
+if(!protocolCandidate||protocolCandidate.format!=='study-director.insights-worker-protocol'||protocolCandidate.version!==1)throw new Error('Study Director Insights worker protocol is unavailable.');
+if(!modelCandidate)throw new Error('Study Director Insights model is unavailable.');
+const Protocol:InsightsProtocolRuntime=protocolCandidate,Model:InsightsModelRuntime=modelCandidate;
 Reflect.deleteProperty(globalThis,'StudyDirectorInsightsProtocol');
 const scope=globalThis as unknown as DedicatedWorkerGlobalScope;
 const classifyTaskOutcome=(task:NonNullable<InsightRecord['tasks']>[number]):TaskOutcome=>typeof task.__sdOutcome==='string'?task.__sdOutcome:'untouched';
