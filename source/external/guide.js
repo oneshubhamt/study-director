@@ -662,7 +662,7 @@
         if(shiftAmount)result.adjustedStart=adjustedStart;
         if(done!==null)result.done=done;
         if(total!==null)result.total=total;
-        if(pauseEvents!==undefined)result.pauseEvents=pauseEvents;
+        if(pauseEvents&&pauseEvents.length)result.pauseEvents=pauseEvents;
         results[id]=result;
         return scheduleEntry;
       });
