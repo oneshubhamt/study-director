@@ -1,4 +1,4 @@
-name: P5.9 targeted Insights closure
+name: P5.10B targeted Insights renderer closure
 
 on:
   push:
@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: p59-targeted-insights-${{ github.ref }}
+  group: p510b-targeted-insights-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -30,6 +30,8 @@ jobs:
         run: |
           node tests/integration/insights/insights-scaling.mjs
           node tests/integration/insights/insights-memory-retention.mjs
+      - name: P5.10B renderer lifecycle witness
+        run: node tests/integration/insights/render-lifecycle.mjs
       - name: Fresh source build
         run: npm run build
       - name: Verify generated build
@@ -42,5 +44,5 @@ jobs:
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
           test -n "$CHROME"
           echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
-      - name: P5.9 populated Insights journey
+      - name: P5.10B populated/empty/insufficient renderer journey
         run: node tests/browser/insights/insights-populated-ui.mjs

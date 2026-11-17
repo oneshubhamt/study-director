@@ -59,6 +59,12 @@ try{
   await page.send('Emulation.setTimezoneOverride',{timezoneId:studyTimezone()});
   await page.send('Emulation.setDeviceMetricsOverride',{width:1365,height:900,deviceScaleFactor:1,mobile:false});
   await waitFor(()=>page.evaluate(`!!(window.__InsightsUiDebug&&__InsightsUiDebug.StartupLifecycle.status().fullyInitialized)`),{label:'Study Director startup'});
+  await page.evaluate(`__InsightsUiDebug.goTab('insights')`);
+  await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-empty')`),{label:'empty Insights renderer'});
+  const empty=await page.evaluate(`(()=>({copy:document.querySelector('#pane-insights .insights-empty')?.textContent||'',sample:document.querySelector('#pane-insights .insights-empty-actions button')?.textContent||''}))()`);
+  assert.match(empty.copy,/No saved daily records yet/i);
+  assert.match(empty.sample,/Preview with 28-day sample/i);
+  await page.evaluate(`__InsightsUiDebug.goTab('plan');window.__StudyDirectorInsightsLastProfile=null`);
   const seeded=await page.evaluate(`(async()=>{
     const total=590,now=new Date(),end=Math.floor(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())/86400000),records=[];
     const iso=day=>new Date(day*86400000).toISOString().slice(0,10);
@@ -82,17 +88,40 @@ try{
         },
         practiceRuns:[{taskId:taskA,targetMs,totalUnits:4,unitMs:[actualMs,actualMs,actualMs,actualMs]}]});
     }
-    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.map((record,index)=>{const current=__InsightsUiDebug.sanitizeCurrentDailyRecord(record);if(!current)throw new Error('Invalid Saved Day fixture at '+index+': '+JSON.stringify(record));return current;}));
+    const canonical=records.map((record,index)=>{const current=__InsightsUiDebug.sanitizeCurrentDailyRecord(record);if(!current)throw new Error('Invalid Saved Day fixture at '+index+': '+JSON.stringify(record));return current;});
+    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(canonical.slice(0,1));
+    window.__InsightsDenseRecords=canonical;
     localStorage.setItem('studyDirector.insights.window.v1','all');
-    const started=performance.now();__InsightsUiDebug.goTab('insights');
-    return {saved,started,total};
+    window.__StudyDirectorInsightsLastProfile=null;__InsightsUiDebug.goTab('insights');
+    return {saved,total};
   })()`);
   assert.equal(seeded.total,590);
-  await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-wrap')&&!!window.__StudyDirectorInsightsLastProfile`),{timeout:15000,label:'dense Insights render'});
+  await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-wrap')&&!!window.__StudyDirectorInsightsLastProfile`),{timeout:15000,label:'one-day Insights renderer'});
+  const insufficient=await page.evaluate(`(()=>({text:document.querySelector('#pane-insights .insights-wrap')?.innerText||'',profile:window.__StudyDirectorInsightsLastProfile||null}))()`);
+  assert.equal(insufficient.profile?.records,1,'one saved day must render as one-day evidence, not zero or stale dense data');
+  assert.match(insufficient.text,/need|early|weak|more history|not established/i,'one-day Insights must visibly preserve insufficient-evidence states');
+  const dense=await page.evaluate(`(async()=>{
+    __InsightsUiDebug.goTab('plan');
+    const records=window.__InsightsDenseRecords||[];
+    const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(records.slice(1));
+    delete window.__InsightsDenseRecords;
+    window.__StudyDirectorInsightsLastProfile=null;
+    const started=performance.now();__InsightsUiDebug.goTab('insights');
+    return {saved,started,total:records.length};
+  })()`);
+  assert.equal(dense.total,590);
+  await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-wrap')&&window.__StudyDirectorInsightsLastProfile?.records===590`),{timeout:15000,label:'dense Insights render'});
   const desktop=await page.evaluate(`(()=>{
     const pane=document.getElementById('pane-insights');
     const evidence=[...pane.querySelectorAll('.insights-evidence-item')].map(item=>({label:item.querySelector('.l')?.textContent||'',value:item.querySelector('.v')?.textContent||'',note:item.querySelector('.n')?.textContent||''}));
-    const practiceTab=[...pane.querySelectorAll('.insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));practiceTab?.click();
+    const executionTabs=[...pane.querySelectorAll('.insights-execution-tab')];
+    const dailyTab=executionTabs.find(button=>/Daily Execution/i.test(button.textContent));
+    const practiceTab=executionTabs.find(button=>/Practice Pacing/i.test(button.textContent));
+    practiceTab?.click();practiceTab?.focus();
+    practiceTab?.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
+    const keyboardDaily=!!dailyTab&&dailyTab.getAttribute('aria-selected')==='true'&&document.activeElement===dailyTab;
+    dailyTab?.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+    const keyboardPractice=!!practiceTab&&practiceTab.getAttribute('aria-selected')==='true'&&document.activeElement===practiceTab;
     const practiceDetails=pane.querySelector('.insights-practice');if(practiceDetails&&practiceDetails.tagName==='DETAILS')practiceDetails.open=true;
     const calculation=practiceDetails?.querySelector('.insights-calculation-disclosure')||null;
     // Sections below the first screen are laid out only near the viewport, so
@@ -100,10 +129,10 @@ try{
     (practiceDetails||pane.querySelector('.insights-practice-trend-card'))?.scrollIntoView({block:'start'});
     const calculationClosed=calculation?!calculation.open:false;
     return {
-      elapsed:performance.now()-${seeded.started},window:pane.querySelector('.insights-window-note')?.textContent||'',
+      elapsed:performance.now()-${dense.started},window:pane.querySelector('.insights-window-note')?.textContent||'',
       workTrend:evidence.find(item=>item.label==='Work trend')||null,
       practiceSummary:pane.querySelector('.insights-practice-summary-meta')?.textContent||'',
-      calculationClosed,
+      calculationClosed,keyboardDaily,keyboardPractice,
       documentOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
       profile:window.__StudyDirectorInsightsLastProfile||null
     };
@@ -121,6 +150,8 @@ try{
   assert.match(desktop.practiceSummary,/590 practice days/i);
   assert.doesNotMatch(desktop.practiceCopy,/block-jackknife|time-stratified slope/i);
   assert.equal(desktop.calculationClosed,true);
+  assert.equal(desktop.keyboardDaily,true,'ArrowLeft must move focus and selection from Practice to Daily Execution');
+  assert.equal(desktop.keyboardPractice,true,'ArrowRight must move focus and selection back to Practice Pacing');
   assert.match(desktop.calculationCopy,/block-jackknife/i);
   assert.match(desktop.calculationCopy,/time-stratified slope/i);
   assert.match(desktop.practiceCopy,/All records/i);
@@ -146,7 +177,7 @@ try{
     return {entered,kept:!!pane.querySelector('.insights-wrap'),loading:!!pane.querySelector('.plugin-loading-panel')};})()`);
   assert.deepEqual(reopened,{entered:true,kept:true,loading:false},'reopened Insights animates its kept view');
 
-  const evidence={status:'PASS',release:manifest.release,denseHistoryDays:590,desktop:{renderMilliseconds:Number(desktop.elapsed.toFixed(2)),window:desktop.window,workTrend:desktop.workTrend,practiceSummary:desktop.practiceSummary,overflow:desktop.documentOverflow,profile:desktop.profile},phone};
+  const evidence={status:'PASS',release:manifest.release,states:{empty:true,insufficientDays:1,populatedDays:590},denseHistoryDays:590,desktop:{renderMilliseconds:Number(desktop.elapsed.toFixed(2)),window:desktop.window,workTrend:desktop.workTrend,practiceSummary:desktop.practiceSummary,overflow:desktop.documentOverflow,profile:desktop.profile},phone};
   writeArtifact('insights-ui.json',`${JSON.stringify(evidence,null,2)}\n`);
   console.log(JSON.stringify(evidence,null,2));
 }finally{
