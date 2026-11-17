@@ -13,7 +13,7 @@ function harness({failSource=false,supersede=false,retained=false,staleFailure=f
   const pane=element(),previous={id:'previous-view'};if(retained)pane.children.push(previous);
   const state={rendered:retained,errorTimer:null,renderedBaseKey:'source|2026-09-28|revision',renderedWindowKey:'all'};
   const values={
-    observePane:()=>{},state,restoreScroll:()=>{},clearTimeout,performance:{now:()=>0},
+    observePane:()=>{},state,prefetchGeneration:0,restoreScroll:()=>{},clearTimeout,performance:{now:()=>0},
     errorName:error=>error?.name||'',errorCode:error=>error?.code||'',
     InsightsRenderCoordinator:{begin:()=>++generation,isCurrent:token=>token===generation},computation:{cancel:()=>{},warm:()=>true},
     PerformanceObserver:class{static supportedEntryTypes=['longtask'];constructor(){observers++;}observe(){}disconnect(){disconnects++;}},
