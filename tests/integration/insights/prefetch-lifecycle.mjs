@@ -135,33 +135,35 @@ for(const rejectBuild of [false,true]){
   const loadStart=source.indexOf('    const loadSession=async(');
   const loadEnd=source.indexOf('    // One description of the model',loadStart);
   assert.ok(loadStart>0&&loadEnd>loadStart,'checked session preparation owner must be extractable');
-  let current=true,preparedCommitted=false;
   const records=[{date:'2026-11-17',tasks:[]}];
-  const dataSource={
-    getDailySnapshot:async()=>({summaries:records,records}),
-    getRecordSource:()=>({type:'real',revision:'saved:1'}),
-    getDatasetRevision:async()=> 'r1'
-  };
-  const values={
-    performance:{now:()=>0},globalThis:{},
-    computation:{enrichRecords:value=>value},
-    normalizeSummaries:value=>value,
-    readDatasetRevision:source=>source.getDatasetRevision(),
-    sourceIdentity:source=>[source?.type||'real',source?.mode||'',source?.target||'',source?.label||'',source?.revision||''].map(String).join('|'),
-    engine:{prepareAsync:async(value,revision,yieldTask)=>{await yieldTask();preparedCommitted=true;return {records:value,revision};}},
-    summariesRevisionKey:()=> 'summary-r1',
-    supersededError:()=>{const error=new Error('superseded');error.name='AbortError';return error;},
-    setTimeout:callback=>{current=false;callback();return 1;}
-  };
-  const loadSession=new Function(...Object.keys(values),`${source.slice(loadStart,loadEnd)};return loadSession;`)(...Object.values(values));
-  await assert.rejects(
-    loadSession({dataSource,source:dataSource.getRecordSource(),sourceKey:'real||||saved:1',currentStudyDate:'2026-11-17',datasetRevision:'r1',isCurrent:()=>current,profile:{recordLoadMs:0,evidencePreparationMs:0}}),
-    error=>error?.name==='AbortError'
-  );
-  assert.equal(preparedCommitted,false,'superseded preparation must stop before it can publish into the model preparation cache');
+  for(const invalidation of ['generation','revision']){
+    let current=true,revision='r1',preparedCommitted=false;
+    const dataSource={
+      getDailySnapshot:async()=>({summaries:records,records}),
+      getRecordSource:()=>({type:'real',revision:'saved:1'}),
+      getDatasetRevision:async()=>revision
+    };
+    const values={
+      performance:{now:()=>0},globalThis:{},
+      computation:{enrichRecords:value=>value},
+      normalizeSummaries:value=>value,
+      readDatasetRevision:source=>source.getDatasetRevision(),
+      sourceIdentity:source=>[source?.type||'real',source?.mode||'',source?.target||'',source?.label||'',source?.revision||''].map(String).join('|'),
+      engine:{prepareAsync:async(value,revisionKey,yieldTask)=>{await yieldTask();preparedCommitted=true;return {records:value,revision:revisionKey};}},
+      summariesRevisionKey:()=> 'summary-r1',
+      supersededError:()=>{const error=new Error('superseded');error.name='AbortError';return error;},
+      setTimeout:callback=>{if(invalidation==='generation')current=false;else revision='r2';callback();return 1;}
+    };
+    const loadSession=new Function(...Object.keys(values),`${source.slice(loadStart,loadEnd)};return loadSession;`)(...Object.values(values));
+    await assert.rejects(
+      loadSession({dataSource,source:dataSource.getRecordSource(),sourceKey:'real||||saved:1',currentStudyDate:'2026-11-17',datasetRevision:'r1',isCurrent:()=>current,profile:{recordLoadMs:0,evidencePreparationMs:0}}),
+      error=>error?.name==='AbortError'
+    );
+    assert.equal(preparedCommitted,false,`superseded ${invalidation} preparation must stop before it can publish into the model preparation cache`);
+  }
 }
 
 console.log(JSON.stringify({
   status:'PASS',suite:'insights-prefetch-lifecycle',
-  staleResultFenced:true,staleErrorFenced:true,inactivityRelease:true,inactivityInvalidation:true,preparationCancellation:true,retainedFocusRollback:true
+  staleResultFenced:true,staleErrorFenced:true,inactivityRelease:true,inactivityInvalidation:true,preparationCancellation:true,sourceRevisionPreparationCancellation:true,retainedFocusRollback:true
 }));

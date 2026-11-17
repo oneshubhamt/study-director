@@ -1023,14 +1023,21 @@ const supersededError=()=>{
       const evidenceStarted=performance.now();
       records=computation.enrichRecords(records);
       const scheduler=Reflect.get(globalThis,'scheduler') as IdleScheduler|undefined;
+      const preparationCurrent=async()=>{
+        if(!isCurrent())return false;
+        const liveSource=typeof dataSource.getRecordSource==='function'?dataSource.getRecordSource():source;
+        if(sourceIdentity(liveSource)!==sourceKey)return false;
+        const liveRevision=await readDatasetRevision(dataSource);
+        return isCurrent()&&liveRevision===datasetRevision;
+      };
       const yieldPreparation=async()=>{
         if(!isCurrent())throw supersededError();
         if(scheduler&&typeof scheduler.yield==='function')await globalThis.scheduler.yield();
         else await new Promise(resolve=>setTimeout(resolve,0));
-        if(!isCurrent())throw supersededError();
+        if(!await preparationCurrent())throw supersededError();
       };
       const prepared=await engine.prepareAsync(records,datasetRevision,yieldPreparation);
-      if(!isCurrent())return null;
+      if(!await preparationCurrent())return null;
       profile.evidencePreparationMs+=performance.now()-evidenceStarted;
       const summaryRevision=summariesRevisionKey(summaries);
       const finalSourceRevision=datasetRevision||String(source&&source.revision||'');
