@@ -117,7 +117,7 @@ try{
   assert.deepEqual(labBefore,{exists:true,open:false,built:false},'Analytics Lab must remain unbuilt until its disclosure is opened');
   await page.evaluate(`(()=>{const details=document.querySelector('details#insights-lab.insights-dynamics-lab');details?.scrollIntoView({block:'center'});details?.querySelector('summary')?.click();})()`);
   await waitFor(()=>page.evaluate(`!!document.querySelector('details#insights-lab.insights-dynamics-lab .insights-dynamics-lab-body')&&!document.querySelector('details#insights-lab.insights-dynamics-lab')?.hasAttribute('aria-busy')`),{timeout:15000,label:'lazy Analytics Lab evidence'});
-  const lab=await page.evaluate(`(()=>{const details=document.querySelector('details#insights-lab.insights-dynamics-lab');const body=details?.querySelector('.insights-dynamics-lab-body');return {open:!!details?.open,built:!!body,text:body?.innerText||'',tables:body?.querySelectorAll('.insights-lab-table').length||0};})()`);
+  const lab=await page.evaluate(`(()=>{const details=document.querySelector('details#insights-lab.insights-dynamics-lab');const body=details?.querySelector('.insights-dynamics-lab-body');return {open:!!details?.open,built:!!body,text:body?.textContent||'',tables:body?.querySelectorAll('.insights-lab-table').length||0};})()`);
   assert.equal(lab.open,true);
   assert.equal(lab.built,true);
   assert.match(lab.text,/1\. Sample & reliability/i);
