@@ -2540,7 +2540,8 @@ function createInsightsRendering(
     const windowRows=allRows.filter(row=>(!finiteNumber(displayStart)||row.day>=displayStart)&&(!finiteNumber(displayEnd)||row.day<=displayEnd));
     const compact=isCompact();
     const visibleCalendarDays=compact?30:90;
-    const latestDay=windowRows.length?windowRows[windowRows.length-1].day:null;
+    const latestWindowRow=windowRows[windowRows.length-1];
+    const latestDay=latestWindowRow?latestWindowRow.day:null;
     const rows=finiteNumber(latestDay)?windowRows.filter(row=>row.day>=latestDay-visibleCalendarDays+1):[];
     const chartWidth=compact?360:920,chartHeight=compact?230:252,chartPad=compact?34:42,chartRightPad=compact?10:20;
     const {svg,plotRight,plotBottom,plotWidth,plotHeight}=chartFrame(chartWidth,chartHeight,chartPad,chartRightPad);
@@ -2589,7 +2590,7 @@ function createInsightsRendering(
     });
     const widget=inspectedChart(svg,items,currentCopy);
     const basis=state.basis;
-    appendChartNote(widget,`Chart shows up to ${Math.min(visibleCalendarDays,Math.max(1,endDay-startDay+1))} calendar days from the selected display window; the displayed endpoint comes from the canonical all-history run spanning ${basis.start?shortDate(basis.start):'the first eligible day'} to ${basis.end?shortDate(basis.end):shortDate(current.date)}. Raw dots use canonical work completion; muted dots have no usable progress-source weight and do not update the state.`);
+    appendChartNote(widget,`Chart shows up to ${Math.min(visibleCalendarDays,Math.max(1,endDay-startDay+1))} calendar days from the selected display window; the displayed endpoint comes from the canonical all-history run spanning ${basis?.start?shortDate(basis.start):'the first eligible day'} to ${basis?.end?shortDate(basis.end):shortDate(current.date)}. Raw dots use canonical work completion; muted dots have no usable progress-source weight and do not update the state.`);
     return widget;
   }
   function fitnessStateRow(dimension:FitnessDimension,{trajectory=null,note=''}:{trajectory?:Fitness['performanceState']['trajectory']|null;note?:string}={}){
@@ -2864,7 +2865,7 @@ function createInsightsRendering(
     cardNode.appendChild(sectionTitle('2. What changed recently?','Compares recent completion with the preceding performance phase and withholds a conclusion when the shift is unclear.'));
     const detected=!!(change.detected&&finiteNumber(change.delta)&&isIsoDate(change.date));
     const copy=detected
-      ? `A likely ${change.delta>=0?'upward':'downward'} completion phase began near ${shortDate(change.date)}: ${percentLabel(change.beforeMean,1)} before versus ${percentLabel(change.afterMean,1)} after. The estimated likelihood of a real shift reached ${percentLabel(change.probability,1)}.`
+      ? `A likely ${num(change.delta)>=0?'upward':'downward'} completion phase began near ${shortDate(change.date)}: ${percentLabel(change.beforeMean,1)} before versus ${percentLabel(change.afterMean,1)} after. The estimated likelihood of a real shift reached ${percentLabel(change.probability,1)}.`
       : change.reason||'No clear performance-phase change is present.';
     const left=[dynamicsRead(change.confidence??{key:'weak',label:'Needs more history',tone:'low'},copy,detected?`${num(change.delta)>0?'+':''}${num(change.delta)} pts`:`Latest ${percentLabel(change.latestProbability,1)}`)];
     const supporting=[];
@@ -2885,7 +2886,7 @@ function createInsightsRendering(
     const {svg,plotRight,plotBottom}=chartFrame(width,height,pad,right);svg.classList.add('insights-hazard-chart');
     labelGraphic(svg,'Breakdown risk by planned block position','Estimated risk that each planned position begins a missed end-of-day tail, after accounting for the other recorded factors.');
     if(!curve.length||!curve.some(row=>Number.isFinite(row.estimate.mean)))return chartEmpty(svg,'Breakdown risk needs more comparable days',width/2,height/2,'middle');
-    const yFor=(value:number)=>valueToY(value,0,Math.max(25,...curve.map(row=>num(row.estimate.high))),height,pad),step=(plotRight-pad)/Math.max(1,curve.length);
+    const yFor=(value:number|null|undefined)=>valueToY(num(value),0,Math.max(25,...curve.map(row=>num(row.estimate.high))),height,pad),step=(plotRight-pad)/Math.max(1,curve.length);
     const items:ChartHit[]=[];
     curve.forEach((row,index)=>{
       const x=pad+step*(index+.5),barWidth=Math.max(12,step*.48),y=yFor(row.estimate.mean),bottom=plotBottom;
