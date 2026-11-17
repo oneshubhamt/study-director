@@ -149,7 +149,7 @@ for(const rejectBuild of [false,true]){
       normalizeSummaries:value=>value,
       readDatasetRevision:source=>source.getDatasetRevision(),
       sourceIdentity:source=>[source?.type||'real',source?.mode||'',source?.target||'',source?.label||'',source?.revision||''].map(String).join('|'),
-      engine:{prepareAsync:async(value,revisionKey,yieldTask)=>{await yieldTask();preparedCommitted=true;return {records:value,revision:revisionKey};}},
+      engine:{prepareAsync:async(value,revisionKey,yieldTask,beforeCommit)=>{await yieldTask();await beforeCommit?.();preparedCommitted=true;return {records:value,revision:revisionKey};}},
       summariesRevisionKey:()=> 'summary-r1',
       supersededError:()=>{const error=new Error('superseded');error.name='AbortError';return error;},
       setTimeout:callback=>{if(invalidation==='generation')current=false;else revision='r2';callback();return 1;}

@@ -4339,10 +4339,17 @@ type HistoryCacheEntry={
       if(external){const cached=preparedRevisions.get(external);if(cached)return remember(preparedRevisions,external,cached,PREPARED_REVISION_CACHE_LIMIT);}
       return finishPrepared(normalizeRecords(recordsInput),external);
     };
-    const prepareAsync=async(recordsInput:readonly InsightRecord[]|null|undefined,revisionHint:unknown=null,yieldTask:(()=>unknown|PromiseLike<unknown>)|null=null):Promise<PreparedInsights>=>{
+    const prepareAsync=async(
+      recordsInput:readonly InsightRecord[]|null|undefined,
+      revisionHint:unknown=null,
+      yieldTask:(()=>unknown|PromiseLike<unknown>)|null=null,
+      beforeCommit:(()=>unknown|PromiseLike<unknown>)|null=null
+    ):Promise<PreparedInsights>=>{
       const external=trustedRevision(revisionHint);
       if(external){const cached=preparedRevisions.get(external);if(cached)return remember(preparedRevisions,external,cached,PREPARED_REVISION_CACHE_LIMIT);}
-      return finishPrepared(await normalizeRecordsAsync(recordsInput,yieldTask),external);
+      const normalized=await normalizeRecordsAsync(recordsInput,yieldTask);
+      if(beforeCommit)await beforeCommit();
+      return finishPrepared(normalized,external);
     };
     // A worker receives records already normalized by this same engine on the
     // host. Re-walking and copying the full history there buys no additional

@@ -1034,10 +1034,11 @@ const supersededError=()=>{
         if(!isCurrent())throw supersededError();
         if(scheduler&&typeof scheduler.yield==='function')await globalThis.scheduler.yield();
         else await new Promise(resolve=>setTimeout(resolve,0));
-        if(!await preparationCurrent())throw supersededError();
+        if(!isCurrent())throw supersededError();
       };
-      const prepared=await engine.prepareAsync(records,datasetRevision,yieldPreparation);
-      if(!await preparationCurrent())return null;
+      const validatePreparation=async()=>{if(!await preparationCurrent())throw supersededError();};
+      const prepared=await engine.prepareAsync(records,datasetRevision,yieldPreparation,validatePreparation);
+      if(!isCurrent())return null;
       profile.evidencePreparationMs+=performance.now()-evidenceStarted;
       const summaryRevision=summariesRevisionKey(summaries);
       const finalSourceRevision=datasetRevision||String(source&&source.revision||'');

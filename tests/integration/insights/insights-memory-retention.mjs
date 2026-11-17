@@ -19,6 +19,21 @@ assert.strictEqual(engine.prepare(records,'revision-b'),second,'Previous prepare
 assert.strictEqual(engine.prepare(records,'revision-c'),third,'Current prepared revision should remain cached');
 assert.notStrictEqual(engine.prepare(records,'revision-a'),first,'Third-old prepared revision should be evicted');
 
+const guardedEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+let guardedBeforeCommitCalls=0;
+const guardedStale=[{...records[0],tasks:[{...records[0].tasks[0],name:'Guarded stale'}]}];
+await assert.rejects(
+  guardedEngine.prepareAsync(guardedStale,'guarded-revision',()=>Promise.resolve(),()=>{
+    guardedBeforeCommitCalls+=1;
+    const error=new Error('prepared source superseded');error.name='AbortError';throw error;
+  }),
+  error=>error?.name==='AbortError'
+);
+assert.equal(guardedBeforeCommitCalls,1,'fresh asynchronous preparation must validate exactly once immediately before cache commit');
+const guardedReplacement=[{...records[0],tasks:[{...records[0].tasks[0],name:'Guarded replacement'}]}];
+const guardedPrepared=guardedEngine.prepare(guardedReplacement,'guarded-revision');
+assert.equal(guardedPrepared.records[0].tasks[0].name,'Guarded replacement','a rejected asynchronous preparation must never populate the prepared-revision cache');
+
 const internalEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
 const variant=label=>[{...records[0],tasks:[{...records[0].tasks[0],name:label}]}];
 const internalA=internalEngine.prepare(variant('Internal A'));
@@ -65,6 +80,6 @@ assert.deepEqual(JSON.parse(JSON.stringify(rebuiltAudit)),JSON.parse(JSON.string
 assert.equal(JSON.stringify(prepared.records),preparedBeforeBuild,'model/Lab consumers must not mutate shared prepared input');
 
 
-console.log(JSON.stringify({status:'PASS',preparedCache:'current + previous LRU',historyCache:'current + previous LRU',labEvidence:'released and parity-rebuilt',historyContext:'date + summary keyed; not retained',preparedInput:'immutable across model/Lab consumers'},null,2));
+console.log(JSON.stringify({status:'PASS',preparedCache:'current + previous LRU',guardedAsyncPreparation:'pre-commit validated',historyCache:'current + previous LRU',labEvidence:'released and parity-rebuilt',historyContext:'date + summary keyed; not retained',preparedInput:'immutable across model/Lab consumers'},null,2));
 await import('./guide-preview-canonical.mjs');
 await import('./insights-transport-lifecycle.mjs');
