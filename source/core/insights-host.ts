@@ -61,7 +61,7 @@ function createDeviceState(input:Readonly<InsightsDeviceStateInput>){
 }
 function createPreloadScheduler(input:Readonly<InsightsPreloadInput>){
   exactFrozenObject(input,['document','setTimer','scheduleIdle','requestTab'],'Insights preload input');
-  functionPort(input,['setTimer','requestTab'],'Insights preload adapters');
+  if(typeof input.setTimer!=='function'||typeof input.requestTab!=='function')throw new TypeError('Insights preload adapters must be functions.');
   if(input.scheduleIdle!==null&&typeof input.scheduleIdle!=='function')throw new TypeError('Insights idle scheduler must be a function or null.');
   const schedule=()=>input.setTimer(()=>{
     const load=()=>{
