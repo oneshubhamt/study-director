@@ -84,7 +84,7 @@ for(const rejectBuild of [false,true]){
 
 {
   let observer=null,releaseCount=0,transientReleaseCount=0;
-  const observeStart=source.indexOf('    const observePane=(pane)=>{');
+  const observeStart=source.indexOf('    const observePane=');
   const observeEnd=source.indexOf('    const captureScroll=',observeStart);
   assert.ok(observeStart>0&&observeEnd>observeStart,'checked inactivity owner must be extractable');
   class FakeMutationObserver{
