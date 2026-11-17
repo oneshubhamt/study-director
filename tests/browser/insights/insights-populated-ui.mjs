@@ -73,7 +73,12 @@ try{
   await waitFor(()=>page.evaluate(`(()=>{const demo=!!document.querySelector('#pane-insights .demo-data-banner');const unavailable=!!document.querySelector('#pane-insights .insights-preview-unavailable');const button=document.querySelector('#pane-insights .insights-empty-actions button');return demo||unavailable||(button&&button.textContent!=='Preparing sample…'&&button.disabled);})()`),{timeout:30000,label:'Insights sample preview terminal state'});
   const sampleState=await page.evaluate(`(()=>({demo:!!document.querySelector('#pane-insights .demo-data-banner'),unavailable:document.querySelector('#pane-insights .insights-preview-unavailable')?.textContent||'',button:document.querySelector('#pane-insights .insights-empty-actions button')?.textContent||'',busy:document.getElementById('pane-insights')?.getAttribute('aria-busy')||'',records:window.__StudyDirectorInsightsLastProfile?.records??null,plugins:window.StudyDirector?.plugins?.status?.()||null,pane:document.getElementById('pane-insights')?.innerText.slice(0,900)||''}))()`);
   assert.equal(sampleState.demo,true,`sample preview must activate demo mode: ${JSON.stringify(sampleState)}`);
-  await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&window.__StudyDirectorInsightsLastProfile?.records===28`),{timeout:15000,label:'Insights sample preview render'});
+  try{
+    await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&window.__StudyDirectorInsightsLastProfile?.records===28`),{timeout:15000,label:'Insights sample preview render'});
+  }catch(error){
+    const state=await page.evaluate(`(()=>({busy:document.getElementById('pane-insights')?.getAttribute('aria-busy')||'',profile:window.__StudyDirectorInsightsLastProfile||null,prefetch:window.__StudyDirectorInsightsPrefetch||null,update:document.querySelector('#pane-insights .insights-update-status')?.textContent||'',banner:document.querySelector('#pane-insights .demo-data-banner')?.innerText||'',pane:document.getElementById('pane-insights')?.innerText.slice(0,1200)||''}))()`);
+    assert.fail(`Insights sample preview did not settle: ${JSON.stringify(state)}; ${error.message}`);
+  }
   const demo=await page.evaluate(`(()=>({title:document.querySelector('#pane-insights .demo-data-banner-title')?.textContent||'',note:document.querySelector('#pane-insights .demo-data-banner-note')?.textContent||'',records:window.__StudyDirectorInsightsLastProfile?.records||0,button:document.querySelector('#pane-insights .demo-data-banner button')?.textContent||''}))()`);
   assert.match(demo.title,/Sample Data Mode/i);
   assert.match(demo.note,/28-day sample/i);
