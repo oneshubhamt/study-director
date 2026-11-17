@@ -58,7 +58,7 @@ scope.addEventListener('message',(event:MessageEvent<unknown>)=>{
   try{
     if(!held||held.revision!==message.revision)throw new Error('Insights worker is missing this revision\'s records.');
     const prepared=engine.reusePrepared(held.records,held.revision);
-    const records=message.window.all===true?prepared.records:message.window.indices.map(index=>{
+    const records='all' in message.window?prepared.records:message.window.indices.map((index:number)=>{
       const record=prepared.records[index];
       if(!record)throw new Error('Insights window names a record the worker does not hold.');
       return record;
