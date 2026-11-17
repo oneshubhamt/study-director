@@ -41,6 +41,14 @@ type EvidenceGroups=Readonly<{all:readonly EvidenceRow[];work:readonly EvidenceR
 type EvidenceIndex=Readonly<{records:readonly InsightRecord[];all:readonly EvidenceRow[];work:readonly EvidenceRow[];support:readonly EvidenceRow[];fixed:readonly EvidenceRow[];byRecord:Map<InsightRecord,EvidenceGroups>}>;
 type DailySeriesRow=Readonly<{date:string;day:number|null;dayName:string;planned:number;completed:number;actual:number;workBlocks:number;timerBackedBlocks:number;timerBackedPlanned:number;timerCoverage:number|null;completion:number|null;quality:number|null}>;
 type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBlocks:number;unverifiedBlocks:number;missingBlocks:number;skippedBlocks:number;explicitRate:number|null}>;
+type SubjectReferenceAccumulator={label:string;days:Set<string>;activityDays:Set<string>;planned:number;completed:number;actual:number;activityBlocks:number;lastDate:string|null};
+type SubjectReferenceRow=SubjectReferenceAccumulator&{key:string;dayCount:number;activityDayCount:number};
+type SubjectAccumulator={label:string;blocks:number;days:Set<string>;planned:number;completed:number;actual:number;lastDate:string|null;pairedBlocks:number;pairedPlanned:number;pairedCompleted:number;pairedActual:number;pairedSources:Record<string,number>;watchBlocks:number;watchDays:Set<string>;watchPlanned:number;watchCompleted:number;watchActual:number;watchSkipped:number;watchUntouched:number;watchLastDate:string|null};
+type CompletionSourceAccumulator={key:string;label:string;group:CompletionEvidenceGroup;blocks:number;planned:number;completed:number;actual:number};
+type BlockOrderAccumulator={key:string;label:string;sort:number;blocks:number;planned:number;completed:number;actual:number;timerBackedBlocks:number;timerBackedActual:number;skipped:number;outcomeCounts:OutcomeCounts};
+type InterruptionSubjectAccumulator={label:string;blocks:number;affected:number;frictionSeconds:number;frictionCount:number;actual:number};
+type InterruptionPairAccumulator={label:string;bandLabel:string;blocks:number;affected:number;frictionSeconds:number;frictionCount:number};
+type ResourceAccumulator={label:string;blocks:number;planned:number;completed:number;actual:number};
 
 (function(global:typeof globalThis){
   'use strict';
@@ -539,7 +547,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return Math.sqrt(clean.reduce((sum,v)=>sum+Math.pow(v-m,2),0)/(clean.length-1));
   }
   function robustScale(values:readonly number[]){
-    const clean=(Array.isArray(values)?values:[]).filter(isFiniteNumber);
+    const clean=values.filter(isFiniteNumber);
     if(clean.length<2)return null;
     const centre=median(clean)!;
     return 1.4826*num(median(clean.map(value=>Math.abs(value-centre))));
@@ -574,7 +582,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return den?nume/den:null;
   }
   function sum(values:readonly unknown[]){
-    return (Array.isArray(values)?values:[]).reduce((total,value)=>total+num(value),0);
+    return values.reduce((total,value)=>total+num(value),0);
   }
   function clamp(value:unknown,low:number,high:number){return Math.max(low,Math.min(high,num(value)));}
   function sigmoid(value:unknown){
@@ -607,14 +615,14 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return values.map(value=>isFiniteNumber(value)&&isFiniteNumber(normalizer)?Math.exp(value-normalizer):0);
   }
   function weightedQuantile(points:readonly WeightedPoint[],target:number){
-    const sorted=(Array.isArray(points)?points:[]).filter(point=>isFiniteNumber(point.value)&&point.weight>0).sort((a,b)=>a.value-b.value);
+    const sorted=points.filter(point=>isFiniteNumber(point.value)&&point.weight>0).sort((a,b)=>a.value-b.value);
     const total=sum(sorted.map(point=>point.weight));
     if(!total)return null;
     let running=0;
     for(const point of sorted){running+=point.weight;if(running/total>=target)return point.value;}
     return sorted[sorted.length-1]!.value;
   }
-  function zeroMatrix(rows:number,columns=rows){return Array.from({length:rows},()=>Array(columns).fill(0));}
+  function zeroMatrix(rows:number,columns=rows){return Array.from({length:rows},()=>Array.from({length:columns},()=>0));}
   function transposeMatrix(matrix:readonly (readonly number[])[]){return matrix[0]!.map((_,column)=>matrix.map(row=>row[column]!));}
   function multiplyMatrices(left:readonly (readonly number[])[],right:readonly (readonly number[])[]){
     const columns=right[0]!.length,shared=right.length;
@@ -629,7 +637,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function solveLinearSystem(matrix:readonly (readonly number[])[],vector:readonly number[]){
     const size=matrix.length;
     if(!size||vector.length!==size)return null;
-    const augmented=matrix.map((row,index)=>row.map(num).concat([num(vector[index])]));
+    const augmented=matrix.map((row,index)=>row.map(value=>num(value)).concat([num(vector[index])]));
     for(let column=0;column<size;column+=1){
       let pivot=column;
       for(let row=column+1;row<size;row+=1)if(Math.abs(augmented[row]![column]!)>Math.abs(augmented[pivot]![column]!))pivot=row;
@@ -649,7 +657,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const size=matrix.length;
     const columns:number[][]=[];
     for(let column=0;column<size;column+=1){
-      const basis=Array(size).fill(0);basis[column]=1;
+      const basis=Array.from({length:size},()=>0);basis[column]=1;
       const solved=solveLinearSystem(matrix,basis);
       if(!solved)return null;
       columns.push(solved);
@@ -661,18 +669,18 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return sum(vector.map((value,index)=>num(value)*num(projected[index])));
   }
   function fitRegularizedLogistic(examples:readonly LogisticExample[],{lambda=2,minimumRows=8}:Readonly<{lambda?:number;minimumRows?:number}>={}){
-    const rows=(Array.isArray(examples)?examples:[]).filter(row=>Array.isArray(row.x)&&isFiniteNumber(row.y)&&row.y>=0&&row.y<=1);
+    const rows=examples.filter(row=>isFiniteNumber(row.y)&&row.y>=0&&row.y<=1);
     if(rows.length<minimumRows)return {ready:false,rows:rows.length,reason:`Need ${Math.max(0,minimumRows-rows.length)} more eligible observations.`};
     const dimension=rows[0]!.x.length+1;
     // The design vector and observation weight are invariant across Newton
     // iterations. Materialize them once, then accumulate only one triangle of
     // the symmetric Hessian before mirroring it.
-    const design=rows.map(row=>({x:[1,...row.x.map(num)],y:row.y,weight:Math.max(.05,num(row.weight,1))}));
-    let coefficients=Array(dimension).fill(0);
+    const design=rows.map(row=>({x:[1,...row.x.map(value=>num(value))],y:row.y,weight:Math.max(.05,num(row.weight,1))}));
+    let coefficients=Array.from({length:dimension},()=>0);
     coefficients[0]=logit(clamp(mean(rows.map(row=>row.y)),.02,.98));
-    let hessian=null;
+    let hessian:Matrix|null=null;
     for(let iteration=0;iteration<10;iteration+=1){
-      hessian=zeroMatrix(dimension);const gradient=Array(dimension).fill(0);
+      hessian=zeroMatrix(dimension);const gradient=Array.from({length:dimension},()=>0);
       for(const row of design){
         const {x,weight}=row;let eta=0;
         for(let index=0;index<dimension;index+=1)eta+=x[index]!*coefficients[index]!;
@@ -706,7 +714,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return {mean:sigmoid(eta),low,high,width:high-low,eta,standardError};
   }
   function effectiveSampleSize(weights:readonly number[]){
-    const clean=(Array.isArray(weights)?weights:[]).map(value=>Math.max(0,num(value))).filter(value=>value>0);
+    const clean=weights.map(value=>Math.max(0,num(value))).filter(value=>value>0);
     const total=sum(clean),squares=clean.reduce((acc,value)=>acc+value*value,0);
     return total&&squares?total*total/squares:0;
   }
@@ -850,9 +858,9 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
         shiftedStudyBlocks:record.shiftedStudyBlocks,
         totalScheduleShiftMinutes:record.totalScheduleShiftMinutes,
         netScheduleShiftMinutes:record.netScheduleShiftMinutes,
-        tasks:Array.isArray(record.tasks)?record.tasks:[],
-        originalSchedule:Array.isArray(record.originalSchedule)?record.originalSchedule:[],
-        practiceRuns:Array.isArray(record.practiceRuns)?record.practiceRuns:[]
+        tasks:record.tasks??[],
+        originalSchedule:record.originalSchedule??[],
+        practiceRuns:record.practiceRuns??[]
       }));
     }catch(e){return String(record.date||'');}
   }
@@ -868,7 +876,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const byDate=new Map<string,InsightRecord>();
     (records??[])
       .filter(r=>r&&typeof r==='object'&&isIsoDate(r.date))
-      .map(r=>({...r,tasks:Array.isArray(r.tasks)?r.tasks.filter(t=>t&&typeof t==='object'&&taskPlanned(t)>0):[]}))
+      .map(r=>({...r,tasks:(r.tasks??[]).filter(t=>taskPlanned(t)>0)}))
       .forEach(record=>byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record)));
     return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
   }
@@ -879,7 +887,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       for(let index=start;index<end;index+=1){
         const row=source[index];
         if(!row||typeof row!=='object'||!isIsoDate(row.date))continue;
-        const record={...row,tasks:Array.isArray(row.tasks)?row.tasks.filter(task=>task&&typeof task==='object'&&taskPlanned(task)>0):[]};
+        const record={...row,tasks:(row.tasks??[]).filter(task=>taskPlanned(task)>0)};
         byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record));
       }
       if(end<source.length&&typeof yieldTask==='function')await yieldTask();
@@ -1022,7 +1030,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       }));
     });
     return Object.freeze({
-      records:Object.freeze([...(Array.isArray(records)?records:[])]),
+      records:Object.freeze([...records]),
       all:Object.freeze(all),
       work:Object.freeze(work),
       support:Object.freeze(support),
@@ -1122,8 +1130,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       .filter(isFiniteNumber),currentStudyDate);
   }
   function computeSubjectReference(summaries:readonly InsightSummary[],evidence:EvidenceIndex,referenceStartDay:number|null,referenceDay:number|null){
-    const map=new Map();
-    const savedDates=new Set();
+    const map=new Map<string,SubjectReferenceAccumulator>();
+    const savedDates=new Set<string>();
     const inReferenceRange=(date:unknown)=>{
       const day=dateDay(date);
       return isFiniteNumber(day)&&(!isFiniteNumber(referenceStartDay)||day>=referenceStartDay)&&(!isFiniteNumber(referenceDay)||day<=referenceDay);
@@ -1155,18 +1163,18 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
         add(summary.date,rawLabel,planned,completed,actual,activityBlocks);
       });
     });
-    if(!savedDates.size&&evidence&&Array.isArray(evidence.work)){
+    if(!savedDates.size){
       evidence.work.forEach(row=>add(row.date,row.subject,row.planned,row.completed,row.actual,evidenceRowShowsStudyActivity(row)?1:0));
     }
-    const rows=[...map.entries()].map(([key,row])=>({key,...row,dayCount:row.days.size,activityDayCount:row.activityDays.size}));
+    const rows:SubjectReferenceRow[]=[...map.entries()].map(([key,row])=>({key,...row,dayCount:row.days.size,activityDayCount:row.activityDays.size}));
     return {rows,totalDays:savedDates.size,totalPlanned:rows.reduce((sum,row)=>sum+row.planned,0)};
   }
   function computeSubjects(evidence:EvidenceIndex,currentStudyDate:unknown=null,subjectReferenceSummaries:readonly InsightSummary[]=[]){
-    const map=new Map();
-    const emptySubject=(label:string)=>({
-      label,blocks:0,days:new Set(),planned:0,completed:0,actual:0,lastDate:null,
+    const map=new Map<string,SubjectAccumulator>();
+    const emptySubject=(label:string):SubjectAccumulator=>({
+      label,blocks:0,days:new Set<string>(),planned:0,completed:0,actual:0,lastDate:null,
       pairedBlocks:0,pairedPlanned:0,pairedCompleted:0,pairedActual:0,pairedSources:{},
-      watchBlocks:0,watchDays:new Set(),watchPlanned:0,watchCompleted:0,watchActual:0,watchSkipped:0,watchUntouched:0,watchLastDate:null
+      watchBlocks:0,watchDays:new Set<string>(),watchPlanned:0,watchCompleted:0,watchActual:0,watchSkipped:0,watchUntouched:0,watchLastDate:null
     });
     const records=evidence.records;
     const savedDays=Math.max(1,records.length);
@@ -1212,7 +1220,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     reference.rows.forEach(ref=>{
       if(!map.has(ref.key))map.set(ref.key,emptySubject(ref.label));
     });
-    const referenceByKey=new Map(reference.rows.map(row=>[row.key,row]));
+    const referenceByKey=new Map<string,SubjectReferenceRow>(reference.rows.map(row=>[row.key,row]));
     const windowSpan=firstDay!==null&&referenceDay!==null?Math.max(1,referenceDay-firstDay+1):savedDays;
     const totalPlanned=[...map.values()].reduce((sum,row)=>sum+row.planned,0);
     const totalCompleted=[...map.values()].reduce((sum,row)=>sum+row.completed,0);
@@ -1269,7 +1277,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     }).sort((a,b)=>Number(a.windowAbsent)-Number(b.windowAbsent)||b.completed-a.completed||b.historicalPlanned-a.historicalPlanned||a.label.localeCompare(b.label));
   }
   function computeCompletionSources(evidence:EvidenceIndex){
-    const map=new Map();
+    const map=new Map<string,CompletionSourceAccumulator>();
     evidence.work.forEach(evidenceRow=>{
       const key=evidenceRow.source;
       if(!map.has(key))map.set(key,{key,label:completionSourceLabel(key),group:evidenceRow.evidenceGroup,blocks:0,planned:0,completed:0,actual:0});
@@ -1350,7 +1358,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return value>MAX_EXPLICIT_BLOCK_ORDER?`${MAX_EXPLICIT_BLOCK_ORDER+1}+`:String(value);
   }
   function computeBlockOrder(evidence:EvidenceIndex){
-    const map=new Map();
+    const map=new Map<string,BlockOrderAccumulator>();
     evidence.records.forEach(record=>{
       recordRows(evidence,record,'work').forEach((evidenceRow,index)=>{
         const {task}=evidenceRow;
@@ -1389,8 +1397,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const tasks=allTasks.filter(row=>row.timerBacked);
     let affectedBlocks=0,frictionSeconds=0,frictionCount=0;
     let pomodoroBreakCount=0,pomodoroRecoverySeconds=0,pomodoroOverrunSeconds=0,pomodoroOnTime=0;
-    const bySubject=new Map();
-    const byPair=new Map();
+    const bySubject=new Map<string,InterruptionSubjectAccumulator>();
+    const byPair=new Map<string,InterruptionPairAccumulator>();
     tasks.forEach(evidenceRow=>{
       const {task}=evidenceRow;
       const events=evidenceRow.pauseEvents;
@@ -1420,8 +1428,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       const pairKey=`${key}|${canonical(bandLabel)}`;
       if(!bySubject.has(key))bySubject.set(key,{label,blocks:0,affected:0,frictionSeconds:0,frictionCount:0,actual:0});
       if(!byPair.has(pairKey))byPair.set(pairKey,{label,bandLabel,blocks:0,affected:0,frictionSeconds:0,frictionCount:0});
-      const row=bySubject.get(key);
-      const pair=byPair.get(pairKey);
+      const row=bySubject.get(key)!;
+      const pair=byPair.get(pairKey)!;
       row.blocks+=1;pair.blocks+=1;
       row.actual+=evidenceRow.actual;
       if(taskAffected){row.affected+=1;pair.affected+=1;}
@@ -1515,12 +1523,12 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     };
   }
   function computeKindSummary(rows:readonly EvidenceRow[]){
-    const byResource=new Map();
+    const byResource=new Map<string,ResourceAccumulator>();
     rows.forEach(evidenceRow=>{
       const label=evidenceRow.subject;
       const key=canonical(label);
       if(!byResource.has(key))byResource.set(key,{label,blocks:0,planned:0,completed:0,actual:0});
-      const row=byResource.get(key);
+      const row=byResource.get(key)!;
       row.blocks+=1;
       row.planned+=evidenceRow.planned;
       row.completed+=evidenceRow.completed;
@@ -1583,7 +1591,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function computeAdvanced(daily:readonly DailySeriesRow[],trendDaily:readonly DailySeriesRow[]=daily){
     const completionValues=daily.map(d=>d.completion).filter(isFiniteNumber);
     const qualityPairs=daily.filter(d=>isFiniteNumber(d.quality)&&isFiniteNumber(d.completion));
-    const directionalRows=Array.isArray(trendDaily)?trendDaily:daily;
+    const directionalRows=trendDaily;
     const trendCompletionValues=directionalRows.map(d=>d.completion).filter(isFiniteNumber);
     const completionSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.completion)).map(d=>({x:d.day,y:d.completion})));
     const actualSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.actual)).map(d=>({x:d.day,y:d.actual})));
