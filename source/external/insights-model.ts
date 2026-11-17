@@ -134,7 +134,14 @@ type InteractionMeta=Readonly<{dedupeKey?:string;stability?:InteractionStability
 export type InteractionCandidate=Readonly<{key:string;label:string;cells:InteractionCells;ready:boolean;effect:number|null;meaningful:boolean;confidence:Confidence;text:string;dedupeKey?:string;stability:InteractionStability}>;
 type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:number;start?:string|null;end?:string|null;modelRecords?:number;modelStart?:string|null;modelEnd?:string|null;horizonDays?:number;fitness?:Readonly<{performanceState:FitnessPerformanceState}>|null}>;
 type AllocationHistoryAccumulator={label:string;periods:number;under:number;over:number;gaps:number[]};
-export export export 
+export type InsightsBuildOptions=Readonly<{
+  currentStudyDate?:string|null;subjectReferenceSummaries?:readonly InsightSummary[];subjectReferenceRevision?:string|null;
+  streakSummaries?:readonly InsightSummary[];windowKey?:string|null;windowDays?:number|null;windowTo?:string|null;
+  windowLabel?:string|null;allRecordCount?:number|null;modelRecords?:readonly InsightRecord[];
+}>;
+export type PreparedInsights=Readonly<{records:readonly InsightRecord[];revision:string}>;
+export type InsightsEngineDependencies=Readonly<{classifyTaskOutcome:OutcomeClassifier;summarizePracticeRuns:PracticeRunSummarizer}>;
+
 (function(global:typeof globalThis){
   'use strict';
   const isRecordObject=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
