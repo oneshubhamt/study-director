@@ -4311,6 +4311,7 @@ type HistoryCacheEntry={
     const interpretation=Object.freeze({signals:selectSignals(coachModel)});
     return {...modelBase,milestones,interpretation};
   }
+  type InsightsBuiltModel=ReturnType<typeof buildInsightsFromCanonical>&Readonly<{getLabEvidence():DetailedAllHistoryInsights}>;
   function createInsightsEngine(dependencies:InsightsEngineDependencies){
     const {classifyTaskOutcome,summarizePracticeRuns}=dependencies;
     if(typeof classifyTaskOutcome!=='function')throw new Error('Study Director outcome classifier is unavailable.');
@@ -4376,7 +4377,7 @@ type HistoryCacheEntry={
       finally{entry.reusable=null;}
       const getLabEvidence=()=>labEvidence(entry);
       Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:getLabEvidence});
-      return model as ReturnType<typeof buildInsightsFromCanonical>&Readonly<{getLabEvidence:typeof getLabEvidence}>;
+      return model as InsightsBuiltModel;
     };
     return Object.freeze({
       build:(recordsInput:readonly InsightRecord[]|null|undefined,options:InsightsBuildOptions={})=>{
