@@ -8,7 +8,7 @@ for(const name of ['internal','device-folder-storage'])vm.runInThisContext(fs.re
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')],freeze=Object.freeze;
 const sha256=async blob=>Buffer.from(await webcrypto.subtle.digest('SHA-256',await blob.arrayBuffer())).toString('hex');
 let now=Date.parse('2026-10-06T08:00:00.000Z'),folder=null,canMutate=true;
-const faults={corruptReadOf:new Set()},identities=freeze({root:'Study Director - QA - Test Device',legacyRoot:'Study-Director-Automatic-Backup-Repository',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
+const faults={corruptReadOf:new Set()},identities=freeze({root:'Study Director - QA - Test Device',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'});
 const manifestFor=id=>freeze({checkpoint:freeze({checkpointId:id}),logicalFingerprint:'a'.repeat(64),exportedAt:new Date(now).toISOString(),counts:freeze({dailyRecord:3,note:2}),encrypted:false,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({localDate:'2026-10-06',weekStart:'2026-10-05',month:'2026-10',utcOffsetMinutes:0})}),assets:freeze([freeze({assetId:'asset-present',objectId:'obj_present'}),freeze({assetId:'asset-gone',missing:true})])});
 const storage=registry.require('device-folder-storage',1).createStorage(freeze({
   folder:()=>folder,identities,owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),
@@ -143,11 +143,11 @@ assert.equal(renewedPublication.id,publication.id);assert.equal(renewedPublicati
 assert.equal((await storage.listPublications()).items[0].renews,true,'a renewed lock still says it renews');
 now+=13*60000;await assert.rejects(()=>storage.assertPublication(renewedPublication),/too old/u,'a renewing lock unrenewed this long may already look abandoned');
 await assert.rejects(()=>storage.renewPublication(renewedPublication),/too old/u,'nor can it be renewed');
-// A lock from an older build does not renew and keeps the full day.
+// A publication without the current renewal field cannot authorize writes.
 const objectsFolder=await root.getDirectoryHandle('objects'),legacyHandle=await objectsFolder.getFileHandle(publication.name),legacyWriter=await legacyHandle.createWritable();await legacyWriter.write(JSON.stringify({format:'study-director.repository-publication',version:1,id:publication.id,startedAt:new Date(now).toISOString()}));await legacyWriter.close();
-assert.equal((await storage.listPublications()).items[0].renews,false,'an older build\'s lock does not renew');
-now+=60*60000;assert.equal(await storage.assertPublication(publication),true,'an older build\'s lock keeps the full day');
-now+=24*3600000;await assert.rejects(()=>storage.assertPublication(publication),/too old/u);
+assert.equal((await storage.listPublications()).items.length,0);assert.equal((await storage.listPublications()).ignored,1);
+await assert.rejects(storage.assertPublication(publication),/could not be verified/u);
+await assert.rejects(storage.renewPublication(publication),/could not be verified/u);
 assert.equal(await storage.endPublication(publication),true);assert.equal((await storage.listPublications()).items.length,0);
 const maintenance=await storage.beginMaintenance();now+=40000;
 await assert.rejects(()=>storage.assertMaintenance(maintenance),/too old/u,'maintenance must renew before its window closes');

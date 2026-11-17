@@ -106,10 +106,6 @@
     'dark':freeze({id:'dark',label:'Dark'}),
     'light':freeze({id:'light',label:'Light'})
   });
-  // Earlier releases stored Director-prefixed theme IDs. Stored
-  // preferences, startup mirrors and backups keep them verbatim; every read
-  // resolves them here, and the next deliberate change writes the new ID.
-  const legacyThemes=freeze({'director-dark':'dark','director-light':'light'});
   const breakpoints=freeze({
     core:freeze({
       widePlan:1100,
@@ -384,7 +380,6 @@
     version:1,
     defaults:freeze({theme:'dark',preferredPresentation:'glass',fallbackPresentation:'director-current'}),
     themes,
-    legacyThemes,
     presentations,
     breakpoints,
     tokens:freeze({
@@ -422,7 +417,7 @@
   const safePresentationId=value=>String(value||'').trim().toLowerCase().match(presentationIdPattern)?.[0]||'';
   const normalizeThemeId=value=>{
     const raw=String(value||'').trim();
-    const candidate=owns(manifest.legacyThemes,raw)?manifest.legacyThemes[raw]:raw;
+    const candidate=raw;
     return owns(manifest.themes,candidate)?candidate:manifest.defaults.theme;
   };
   const normalizePresentationId=value=>{
@@ -10307,16 +10302,16 @@ function currentBackupSourceRevision(){
   }
   return latest;
 }
-async function legacyBackupSnapshotRevision(){
+async function contentBackupSnapshotRevision(){
   return JSON.stringify([await AppData.dailyRecords.datasetRevision(),await AppData.deletionRecovery.savedDays(),await AppData.deletionRecovery.notes(),await AppData.deletionRecovery.attachments(),richAssetReferenceRevision,await PlanData.exportData({flush:false}),document.getElementById('plan-input')?.value,await AttachmentStorage.list()]);
 }
 async function backupSnapshotRevision(options={}){
-  if(options&&options.legacy===true||!backupFastFenceReady||!AppData.mutationEpoch.eligible())return legacyBackupSnapshotRevision();
+  if(options&&options.full===true||!backupFastFenceReady||!AppData.mutationEpoch.eligible())return contentBackupSnapshotRevision();
   try{
     const epoch=await AppData.mutationEpoch.read();
-    if(!epoch)return legacyBackupSnapshotRevision();
+    if(!epoch)return contentBackupSnapshotRevision();
     return `study-director.fast-capture-fence.v1|${epoch.token}|${captureMutationGeneration}|${currentBackupSourceRevision()}`;
-  }catch(error){AppDiagnostics.capture('backup.fast-capture-fence',error,'warn');return legacyBackupSnapshotRevision();}
+  }catch(error){AppDiagnostics.capture('backup.fast-capture-fence',error,'warn');return contentBackupSnapshotRevision();}
 }
 const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze({ports:Object.freeze({
   configuration:Object.freeze({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
@@ -10852,7 +10847,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
   settings:exactAppMetaStorage(DeviceFolderAppMeta,'deviceFolder',APP_META_KEYS.deviceFolder,'Device Backup'),
   transport:(folder,repository)=>DeviceFolderStorageModule.createStorage(Object.freeze({
     folder,
-    identities:Object.freeze({root:repository,legacyRoot:ProfileScope.scoped(EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderLegacyRoot),prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
+    identities:Object.freeze({root:repository,prefix:EXTERNAL_REPOSITORY_IDENTITIES.backupFolderPrefix,objects:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderObjects,checkpoints:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCheckpoints,commits:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderCommits}),
     owner:()=>Object.freeze({profile:Profiles.current()?.id||'',scope:ProfileScope.scope,device:InstallationIdentity.getId()}),
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),

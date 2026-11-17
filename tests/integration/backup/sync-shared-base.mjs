@@ -43,8 +43,6 @@ const normalizeTimestamp=value=>Number.isFinite(Date.parse(String(value||'')))?n
 const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({version:2,key:String(key||item.key),...(item.label?{label:String(item.label)}:{}),text:String(item.text||''),updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z',...(item.links?{links:[...item.links]}:{})}):null;
 const normalizeDrafts=value=>(Array.isArray(value)?value:[]).filter(item=>item&&isDate(item.date)).map(item=>freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'})).sort((a,b)=>a.date.localeCompare(b.date));
 const dailyRecordCodec=freeze({
-  sanitizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,
-  canonicalizeHistoricalDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:15}):null,
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item,version:16,recordKind:'study',date:String(item.date)}):null,
   savedDayCoversSessionEvidence:(day,local)=>day?.recordKind==='study'&&day.date===local?.date&&/saved on B|saved after BF1 handoff|saved on B before the new day/i.test(String(day.reflection||''))&&
     (local.snapshot?.taskState?.focus?.actual?.seconds===undefined||
@@ -56,7 +54,7 @@ const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item,vers
 const activeSessionCodec=freeze({sanitizeCurrent:sanitizeActiveSession,contentValue:item=>{const clean=sanitizeActiveSession(item);if(!clean)return null;const snapshot=clean.snapshot&&typeof clean.snapshot==='object'?clean.snapshot:{},{contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_updatedAt,...contentSnapshot}=snapshot;return freeze({date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot:freeze(contentSnapshot)});}});
 const sessionContentFingerprint=async item=>processing.run('checksum',{value:CanonicalModule.signature(activeSessionCodec.contentValue(item)),algorithm:'sha256'});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,version:1,date:String(item.date),reflection:String(item.reflection||''),revision:Number(item.revision)||0,sessionRevision:Number(item.sessionRevision)||0,updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-01T00:00:00.000Z'}):null});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,olderNote:()=>false,olderReview:()=>false,dailyRecord:item=>dailyRecordCodec.canonicalizeHistoricalDailyRecord(item),note:normalizeArea,activeSession:item=>activeSessionCodec.sanitizeCurrent(item),reflectionDraft:item=>reflectionDraftCodec.sanitizeCurrent(item),personalData:item=>{if(!item||typeof item!=='object'||![1,2].includes(Number(item.version)))throw new Error('Unsupported legacy personal-data version.');const p=item.preferences||{};return {version:2,plans:item.plans,preferences:{studentName:p.studentName??null,theme:p.theme??null,presentation:p.presentation??null,quote:p.quote??null,practiceCueMode:p.practiceCueMode??null,fontScale:p.fontScale??null,practiceTargetMs:p.practiceTargetMs??null,nudge:p.nudge??null}};}});
+
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>defs[type]||null,entityIdentity=(type,item)=>String(item?.[defs[type]?.idField]||'');
 const boundedInt=(value,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(value);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
@@ -64,12 +62,12 @@ const jsonByteLength=value=>new TextEncoder().encode(typeof value==='string'?val
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
 const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec,activeSessionCodec});
 const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing,
-  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord,
+  appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,entityTypes:freeze(Object.keys(defs)),keyedRecord,
   entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
   richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),
-  dailyRecordCodec,activeSessionCodec,compatibilityCodec
+  dailyRecordCodec,activeSessionCodec
 }));
-const runtimeCodec=freeze({...codec,inspect:codec.inspectCurrent});
+const runtimeCodec=freeze({...codec,inspect:codec.inspect});
 const STARTER_SCHEDULE='06:00 | 60 | Starter Block | work | Core | block | 1';
 // A device's start-up state: no settings chosen and the starter plan.
 const startup=(draft=STARTER_SCHEDULE)=>freeze({version:2,plans:freeze({draft,savedPlans:freeze([]),defaultId:null}),preferences:freeze({studentName:null,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null})});
@@ -379,7 +377,7 @@ for(const {domain,decisions} of verificationCases){
 
 
 // Format/protection boundary: public provenance is separate from integrity-covered authority/deletion metadata.
-const parsed=await codec.inspectCurrent(blob,{filename:'checkpoint.sdbackup'});
+const parsed=await codec.inspect(blob,{filename:'checkpoint.sdbackup'});
 assert.equal(parsed.formatVersion,26);
 assert.equal(parsed.manifest.protectedManifest.entityType,'checkpointManifest');
 assert.equal(Object.hasOwn(parsed.manifest,'authority'),false,'Checkpoint authority must not leak into the public provenance manifest.');
@@ -389,14 +387,14 @@ assert.equal(Object.hasOwn(parsed.manifest,'schemaVersion'),false,'Current check
 assert.equal(parsed.protectedCheckpointManifest.checkpointId,parsed.manifest.checkpoint.checkpointId);
 assert.equal(parsed.protectedCheckpointManifest.authority.savedDays,'pairwise-explicit-deletions');
 assert.deepEqual(parsed.protectedCheckpointManifest.savedDayDeletions,checkpointDeletions);
-const validated=await codec.inspectCurrent(blob,{filename:'checkpoint.sdbackup',validateOnly:true});
+const validated=await codec.inspect(blob,{filename:'checkpoint.sdbackup',validateOnly:true});
 assert.equal(validated.protectedCheckpointManifest.checkpointId,parsed.manifest.checkpoint.checkpointId,'validate-only must validate the protected checkpoint payload, not skip it');
 
 // Unified reconciliation: local-only and divergent local data survive by default; explicit deletion conflicts require a choice.
 const importState=createState();
 const importHarness=createHarness(importState);
 const importCandidate=await importHarness.runtime.controller.inspect(blob,{filename:'checkpoint.sdbackup'});
-assert.equal(importCandidate.preview.reconciliationCapable,true);
+
 const importResult=await importHarness.runtime.controller.restore(importCandidate);
 assert.equal(importResult.mode,'reconcile');
 const savedDayPrompt=importHarness.prompts.find(prompt=>prompt.groups?.some(group=>group.id==='savedDaysBulk'));

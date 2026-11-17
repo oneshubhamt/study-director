@@ -77,7 +77,6 @@ assert.match(repositories,/getDailyRecordsForWindow[\s\S]*recordKind==='study'/u
 assert.match(app,/getDailySummaries\(\)[\s\S]*recordKind==='study'/u,'Insights summaries must exclude diary-only records.');
 assert.match(backup,/manualOnly:true/u,'Diary reflection conflicts must use explicit manual reconciliation.');
 assert.match(backup,/requireContent:kinds\.every\(kind=>kind==='diary'\)/u,'Diary-only reflection conflicts must reject an empty custom canonical result.');
-assert.match(backupCodec,/version<DATA_CONTRACT\.schemas\.DailyRecord\.version\?CompatibilityCodec\.dailyRecord\(record\):null/u,'Managed repository records from the prior DailyRecord schema must use compatibility conversion.');
 assert.match(library,/title:'New Reflection'[\s\S]*min:earliestSupportedSavedDate\(\),max:todayISO\(\)/u,'New Reflection must constrain the native date picker to the supported retrospective range.');
 assert.match(interactions,/options\.inputType==='date'\)[\s\S]*inputElement\.min=cleanText\(options\.min,32\);inputElement\.max=cleanText\(options\.max,32\)/u,'Native date inputs must receive min/max constraints.');
 assert.match(app,/data-tab="execute"[^>]*>[\s\S]*Execute<\/button>/u,'Execute must be the canonical execution surface identity.');

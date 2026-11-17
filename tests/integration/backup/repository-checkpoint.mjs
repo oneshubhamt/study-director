@@ -501,7 +501,7 @@ runtime.providers.configurePendingBackupRetry(freeze({read:async id=>pendingProv
     assert.equal(await turnFor(freeze({id:'pub_'+'2'.repeat(32),startedAt:minutes(8),createdAt:minutes(6),renews:true,device:writer})),'saved','an upload that stopped renewing no longer holds the turn');
     assert.equal(runtime.providers.diagnosticSync().find(row=>row.id==='turn-drive').waitingFor,'','nothing is waited for once it saves');
     snapshotRevision='turn-4';sourceRevision='2026-09-19T03:30:00.000Z';notes={N4:stableSecondaryNote,Subject:freeze({version:2,key:'Subject',text:'turn four',updatedAt:sourceRevision})};
-    assert.equal(await turnFor(freeze({id:'pub_'+'3'.repeat(32),createdAt:minutes(8)})),'waits','an older build\'s marker, which never renews, keeps the full window');
+    assert.equal(await turnFor(freeze({id:'pub_'+'3'.repeat(32),createdAt:minutes(8)})),'saved','a stale marker no longer holds the turn');
     assert.equal(await turnFor(freeze({id:'pub_'+'4'.repeat(32),createdAt:minutes(16)})),'saved','and stops holding the turn after it');
     // A person's Sync now goes ahead once without waiting for a running
     // upload; the next automatic upload waits again.
@@ -787,7 +787,7 @@ watched='presentation-cancel';assert.equal(await runtime.providers.backup('prese
 // Production Drive transport + production provider/classifier/retention +
 // owned scheduler. Only HTTP, storage and the clock are simulated.
 const assembledDriveCases=[],assembledDriveWallMs=[];
-for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease','own-leftover-lease','duplicate-copy','abandoned-publication','live-publication','legacy-publication']){
+for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inventory','foreground-preemption','slow-deletion-1000','slow-deletion-3000','slow-deletion-6000','slow-deletion-11000','slow-deletion-16000','slow-deletion-31000','slow-deletion-44000','slow-deletion-all-44000','foreground-deletion','foreground-deletion-44000','history-change-before-delete','lost-protection','remote-lease','own-leftover-lease','duplicate-copy','abandoned-publication','live-publication']){
  const realDate=globalThis.Date,clock=createFakeClock('2026-10-03T12:00:00.000Z');backgroundClock=clock;globalThis.Date=clock.Date;backgroundReady=true;dailyRecords=[];notes={};assetDescriptor=null;
  const scenarioStarted=performance.now(),maintenance=new Map(),progress=[],id='drive-'+scenario,h=createDriveHarness({clock,expiresIn:86400,registerProvider:config=>runtime.providers.register(freeze({...config,id,label:'Drive Background QA'}))});
  // Four slow deletions may require four protected passes plus a final inventory.
@@ -837,8 +837,7 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
   if(scenario.endsWith('-publication')){
    const made=await h.provider.repository.beginPublication();foreignMarker=[...h.state.files.values()].find(file=>file.appProperties.studyDirectorRepositoryId===made.id);
    foreignMarker.appProperties.sdPublicationDevice='inst_qa_phone_mve00000_bbbbbbbb';
-   if(scenario==='legacy-publication'){delete foreignMarker.appProperties.sdPublicationRenews;delete foreignMarker.appProperties.sdPublicationStartedAt;}
-   foreignMarker.createdTime=new Date(clock.now()-(scenario==='abandoned-publication'?16*60000:scenario==='legacy-publication'?60*60000:0)).toISOString();
+   foreignMarker.createdTime=new Date(clock.now()-(scenario==='abandoned-publication'?16*60000:0)).toISOString();
   }
   if(scenario.endsWith('unavailable'))h.state.failMediaKinds=new Set([scenario.startsWith('checkpoint')?'checkpoint':'commit']);
   else if(!scenario.includes('deletion')&&scenario!=='lost-protection'&&!foreignMarker){h.state.pageSize=1;h.state.pageDelayMs=10000;}
@@ -869,11 +868,11 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,'history that changes between planning and the destructive lease must invalidate the plan before any deletion');
    assert.equal([...h.state.files.values()].filter(file=>kind(file)==='maintenance').length,0,'an invalidated destructive unit must release its maintenance lease before retrying');
    h.state.requestDelayMs=null;await clock.advance(Math.max(0,Date.parse(maintenance.get(coldId).nextEligibleAt)-clock.now()-100));
-  }else if(scenario==='live-publication'||scenario==='legacy-publication'){
+  }else if(scenario==='live-publication'){
    await settle(()=>maintenance.get(coldId)?.reason==='publication-contention'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);
    assert.equal(h.state.deletions.filter(remoteId=>allFiles.includes(remoteId)).length,0,`a live upload holds cleanup back (${scenario})`);
    assert.ok(h.state.files.has(foreignMarker.id),`cleanup leaves a live upload's marker in place (${scenario})`);
-   const retryAt=Date.parse(maintenance.get(coldId).nextEligibleAt),expected=Date.parse(foreignMarker.createdTime)+(scenario==='live-publication'?15*60000:24*3600000);
+   const retryAt=Date.parse(maintenance.get(coldId).nextEligibleAt),expected=Date.parse(foreignMarker.createdTime)+15*60000;
    assert.ok(retryAt>=expected&&retryAt<=expected+5000,`cleanup retries when the marker could lapse, not sooner (${scenario}: ${new Date(retryAt).toISOString()})`);
    // This device's own upload ending must not pull cleanup forward while
    // another device's upload is still live (it used to retry every upload).
@@ -883,7 +882,6 @@ for(const scenario of ['checkpoint-unavailable','commit-unavailable','slow-inven
     assert.equal(Date.parse(maintenance.get(coldId)?.nextEligibleAt),retryAt,'cleanup keeps its retry time while another device\'s upload is live');
    }
    // The live marker is never renewed, so by then it was abandoned; the older build's upload finishes meanwhile.
-   if(scenario==='legacy-publication')h.state.files.delete(foreignMarker.id);
    await clock.advance(Math.max(0,retryAt-clock.now()-100));
   }else if(scenario==='lost-protection'){
    await settle(()=>protectionLost&&maintenance.get(coldId)?.reason==='error'&&!runtime.providers.backgroundStatus().find(row=>row.job===coldId+' maintenance').busy);

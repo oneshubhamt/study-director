@@ -314,10 +314,11 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   const late=await provider.repository.beginPublication();markerFile(late.id).createdTime=new Date(Date.now()-14*60*1000).toISOString();
   await assert.rejects(()=>provider.repository.renewPublication(late),/too long without renewal/u,'renewal refuses a marker close to looking abandoned');
   assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[late.id],'a refused renewal leaves only the old marker, for cleanup to judge');
-  // A marker from an older build does not renew; cleanup gives it the full day.
+  // Older marker shapes cannot authorize publication or be treated as a valid lease.
   const legacy=markerFile(late.id);delete legacy.appProperties.sdPublicationRenews;delete legacy.appProperties.sdPublicationStartedAt;
-  const listed=(await provider.repository.listPublications()).items.find(row=>row.id===late.id);
-  assert.equal(listed.renews,false,'an older build\'s marker does not renew');assert.equal(listed.startedAt,listed.createdAt,'an older build\'s marker began when it was made');
+  const listed=await provider.repository.listPublications();assert.equal(listed.items.some(row=>row.id===late.id),false);assert.equal(listed.ignored,1);
+  await assert.rejects(provider.repository.assertPublication(late),/disappeared|unsafe|verified/u);
+
 }
 {
   // This device's clock runs 20 minutes ahead of Drive's. The adapter learns
@@ -347,8 +348,8 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   const maxAge=Date.parse(marker.expiresAt)-Date.parse(marker.createdAt);assert.equal(maxAge,300000);
   markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();await operation.assertMaintenance(marker);
   markerFile.createdTime=new Date(Date.now()-(maxAge-75000)).toISOString();await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'network protection must retain room for a bounded request and release');
-  markerFile.appProperties.studyDirectorRepositoryVersion='1';markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'legacy markers retain their original assertion and expiry semantics');
-  markerFile.createdTime=marker.createdAt;assert.equal(Date.parse((await operation.listMaintenances()).items[0].expiresAt)-Date.parse(marker.createdAt),60000);
+  markerFile.appProperties.studyDirectorRepositoryVersion='1';markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();await assert.rejects(()=>operation.assertMaintenance(marker),/disappeared during cleanup/u,'an older maintenance format cannot authorize cleanup');
+  markerFile.createdTime=marker.createdAt;assert.equal((await operation.listMaintenances()).ignored,1,'older markers are uncertainty, not an accepted lease');
   markerFile.appProperties.studyDirectorRepositoryVersion='3';const unknown=await operation.listMaintenances();assert.equal(unknown.items.length,0);assert.equal(unknown.ignored,1,'unrecognized marker protocols remain uncertainty, which blocks coordinated writers and cleanup');
   markerFile.appProperties.studyDirectorRepositoryVersion='2';markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
   const maintenanceReleaseStart=state.requests.length;state.networkFailCoordinationDeleteOnce=true;assert.equal(await operation.endMaintenance(marker),true);const maintenanceReleaseRequests=state.requests.slice(maintenanceReleaseStart).map(request=>({method:request.method,url:new URL(request.url)}));assert.equal(maintenanceReleaseRequests.some(request=>request.method==='GET'&&request.url.pathname===`/drive/v3/files/${marker.remoteId}`),false,'known verified maintenance release must DELETE directly instead of paying for a redundant metadata GET');active=await operation.listMaintenances();assert.equal(active.items.length,0,'ambiguous maintenance deletion must recheck exact identity and retry until the marker is confirmed absent');
@@ -366,8 +367,8 @@ for(const failure of ['none','legacy','missing','expired','unreadable-age','fore
  if(failure==='legacy')h.state.files.get(marker.remoteId).appProperties.studyDirectorRepositoryVersion='1';
  if(failure==='unreadable-age')h.state.files.get(marker.remoteId).createdTime='unreadable';
  if(failure==='foreign')h.state.files.get(marker.remoteId).parents=['foreign-folder'];
- if(failure==='none'||failure==='legacy'){
-  await clock.advance(failure==='legacy'?10000:40000);h.state.networkFailCoordinationPostOnce=true;h.state.networkFailCoordinationDeleteOnce=true;
+ if(failure==='none'){
+  await clock.advance(40000);h.state.networkFailCoordinationPostOnce=true;h.state.networkFailCoordinationDeleteOnce=true;
   const next=await operation.renewMaintenance(marker);assert.notEqual(next.id,marker.id);assert.equal(h.state.files.has(marker.remoteId),false);
   assert.equal((await operation.listMaintenances()).items.length,1);assert.equal(h.state.files.get(next.remoteId).appProperties.studyDirectorRepositoryVersion,'2');await operation.assertMaintenance(next);await operation.endMaintenance(next);
  }else{

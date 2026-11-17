@@ -150,8 +150,8 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   }
   if(!assumeFlushed)await backupPreparationStep('BACKUP_PLAN_SETTLE_FAILED','checkpoint-plan-settle',()=>personalSettle({backupCapture:true}));
   const noteFailure=AppData.notes.failure();
-  const forceLegacySnapshotFence=!!(options.legacyRescueFence||noteFailure&&noteFailure.failed||recoveryWarning||settledSession&&settledSession.canonical===false);
-  const snapshotRevision=await ports.persistence.snapshotRevision(Object.freeze({legacy:forceLegacySnapshotFence}));
+  const forceContentSnapshotFence=!!(options.contentRescueFence||noteFailure&&noteFailure.failed||recoveryWarning||settledSession&&settledSession.canonical===false);
+  const snapshotRevision=await ports.persistence.snapshotRevision(Object.freeze({full:forceContentSnapshotFence}));
   // Reuse the capture fence: a read-only export cannot settle pending deletions.
   if(!ownsControl&&!fastCaptureEpochToken(snapshotRevision))recoveryWarning='Pending deletion recovery could not be confirmed without write control; deletion coverage is uncertain.';
   const sourceRevision=String(await ports.persistence.sourceRevision()||exportedAt);
@@ -159,7 +159,7 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   const recordSource=await getBackupDailyRecordDates(),recordDates=recordSource.dates;
   // Only rescue export restarts with the broader fence. Normal canonical capture
   // enumerates dates once, inside its fence, and managed capture rejects rescue data.
-  if(recordSource.canonical===false&&!forceLegacySnapshotFence&&options.requireCanonicalComplete!==true)return captureLogicalCheckpoint(exportedAt,{...options,legacyRescueFence:true});
+  if(recordSource.canonical===false&&!forceContentSnapshotFence&&options.requireCanonicalComplete!==true)return captureLogicalCheckpoint(exportedAt,{...options,contentRescueFence:true});
   let notePayload,noteRecoveryWarning='',noteCoverage='canonical';
   if(ownsControl&&!assumeFlushed){
     if(noteFailure&&noteFailure.failed){
@@ -217,7 +217,7 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
     if(!(cached instanceof Blob))contentBlobs.set(contentKey,blob);
     assetItems.push(freeze({descriptor,blob}));
   }
-  if(snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({legacy:forceLegacySnapshotFence})))throw new Error('Stored data changed while capturing the backup. Retry the backup.');
+  if(snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({full:forceContentSnapshotFence})))throw new Error('Stored data changed while capturing the backup. Retry the backup.');
   const finalSourceRevision=String(await ports.persistence.sourceRevision()||sourceRevision);
   if(finalSourceRevision!==sourceRevision)throw new Error('Stored data changed while capturing the backup. Retry the backup.');
   assertStorageGeneration(generation);
@@ -235,7 +235,7 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
   };
   const protectedCheckpointManifest=BackupCodec.createProtectedManifest(captureBase,checkpointMetadata);
   const capture=freeze({...captureBase,protectedCheckpointManifest});
-  logicalCheckpointGuards.set(capture,freeze({snapshotRevision,sourceRevision,forceLegacySnapshotFence,generation}));
+  logicalCheckpointGuards.set(capture,freeze({snapshotRevision,sourceRevision,forceContentSnapshotFence,generation}));
   return capture;
 }
 async function assertLogicalCheckpointCurrent(capture){
@@ -243,7 +243,7 @@ async function assertLogicalCheckpointCurrent(capture){
   const guard=logicalCheckpointGuards.get(capture);
   if(!guard)throw new Error('Logical checkpoint lifetime expired. Retry the backup.');
   assertStorageGeneration(guard.generation);
-  if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({legacy:guard.forceLegacySnapshotFence===true})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while the backup was being prepared. Retry the backup.');
+  if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({full:guard.forceContentSnapshotFence===true})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while the backup was being prepared. Retry the backup.');
   const currentSourceRevision=String(await ports.persistence.sourceRevision()||guard.sourceRevision);
   if(currentSourceRevision!==guard.sourceRevision)throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while the backup was being prepared. Retry the backup.');
   return true;
@@ -278,10 +278,10 @@ async function beginManagedPreparationCaptureAt(exportedAt){
   try{await backupPreparationStep('BACKUP_DELETION_SETTLE_FAILED','checkpoint-deletion-settle',()=>settleDeletionRecovery());}catch(error){AppDiagnostics.capture('backup.incremental-deletion-recovery',error,'warn');OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'deletion-settle'});return null;}
   OperationDiagnostics.mark('checkpoint-fast-fence-start');
   let snapshotRevision='';
-  try{snapshotRevision=await ports.persistence.snapshotRevision(freeze({legacy:false}));}
+  try{snapshotRevision=await ports.persistence.snapshotRevision(freeze({full:false}));}
   catch(error){AppDiagnostics.capture('backup.incremental-fast-fence',error,'warn');OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'fast-fence-read'});return null;}
   const epochToken=fastCaptureEpochToken(snapshotRevision);
-  if(!epochToken){OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'legacy-fence'});return null;}
+  if(!epochToken){OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'content-fence'});return null;}
   const sourceRevision=String(await ports.persistence.sourceRevision()||exportedAt);
   if(!Number.isFinite(Date.parse(sourceRevision)))throw backupPreparationError('BACKUP_SOURCE_REVISION_INVALID','checkpoint-source-fence','Backup source revision is invalid. Retry the backup.');
   OperationDiagnostics.mark('checkpoint-fast-fence-complete');
@@ -289,7 +289,7 @@ async function beginManagedPreparationCaptureAt(exportedAt){
   if(!capturedSession.canonical){OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'session-read-not-canonical'});return null;}
 
   // Mutation epoch + unit stamps are an acceleration index, not authoritative
-  // backup data. If that metadata is stale/corrupt after restore or migration,
+  // backup data. If that metadata is stale/corrupt after restore or recovery,
   // abandon the incremental path and rebuild from a full canonical capture.
   let epoch=null,stamps=[];
   OperationDiagnostics.mark('checkpoint-preparation-index-read-start');
@@ -310,7 +310,7 @@ async function beginManagedPreparationCaptureAt(exportedAt){
   ]);}catch(error){throw backupPreparationError('BACKUP_CAPTURE_STATE_READ_FAILED','checkpoint-canonical-state-read','Canonical deletion or attachment state could not be read for backup.',error);}
   OperationDiagnostics.mark('checkpoint-canonical-state-read-complete',{assets:Array.isArray(assetCatalogue)?assetCatalogue.length:0});
 
-  const finalSnapshot=await ports.persistence.snapshotRevision(freeze({legacy:false}));
+  const finalSnapshot=await ports.persistence.snapshotRevision(freeze({full:false}));
   const finalSourceRevision=String(await ports.persistence.sourceRevision()||sourceRevision);
   if(finalSnapshot!==snapshotRevision||finalSourceRevision!==sourceRevision){OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'source-changed'});return null;}
   try{
@@ -339,7 +339,7 @@ async function readManagedPreparationUnits(preparation,units){
   }
   if(reviewIds.length){const rows=await AppData.pendingReviews.readItems(reviewIds);reviewUnits.forEach((unit,index)=>{const payload=rows[index]||null;results.set(unit,freeze({unit,present:!!payload,payload}));});}
   if(noteKeys.length){const rows=await AppData.notes.readFreshItems(noteKeys);for(let index=0;index<noteKeys.length;index++){const unit=noteUnits[index],payload=rows[index]||null;results.set(unit,freeze({unit,present:!!payload,payload}));}}
-  if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(freeze({legacy:false})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while reading incremental backup units. Retry the backup.');
+  if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(freeze({full:false})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while reading incremental backup units. Retry the backup.');
   const currentSourceRevision=String(await ports.persistence.sourceRevision()||guard.sourceRevision);if(currentSourceRevision!==guard.sourceRevision)throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while reading incremental backup units. Retry the backup.');
   return freeze(requested.map(unit=>results.get(unit)));
 }
@@ -355,7 +355,7 @@ async function finalizeManagedPreparationCapture(preparation,inventory){
   const value=inventory&&typeof inventory==='object'?inventory:{},recordDates=freeze([...(value.recordDates||[])].map(String).sort()),noteKeys=freeze([...(value.noteKeys||[])].map(String).sort()),pendingReviewIds=freeze([...(value.pendingReviewIds||[])].map(String).sort()),assetIds=freeze([...(value.assetIds||[])].map(String).sort()),counts=BackupCodec.countShape(value.counts||{});
   const canonicalRecordDates=freeze([...(dailyRecordCoverage&&dailyRecordCoverage.dates||[])].map(String).sort());
   if(canonicalRecordDates.length!==recordDates.length||canonicalRecordDates.some((date,index)=>date!==recordDates[index]))throw backupPreparationError('BACKUP_PREPARATION_INDEX_INVALID','checkpoint-canonical-completeness','Managed backup publication stopped because the incremental Saved-Day inventory did not match canonical IndexedDB storage. A full canonical checkpoint will be required.');
-  if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(freeze({legacy:false})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while finalizing the incremental backup capture. Retry the backup.');
+  if(guard.snapshotRevision!==await ports.persistence.snapshotRevision(freeze({full:false})))throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while finalizing the incremental backup capture. Retry the backup.');
   const currentSourceRevision=String(await ports.persistence.sourceRevision()||guard.sourceRevision);if(currentSourceRevision!==guard.sourceRevision)throw backupPreparationError('BACKUP_SOURCE_FENCE_CHANGED','checkpoint-source-fence','Stored data changed while finalizing the incremental backup capture. Retry the backup.');
   const noteItems=freeze(noteKeys.map(key=>freeze({key}))),pendingReviewItems=freeze(pendingReviewIds.map(id=>freeze({id}))),assetItems=freeze(assetIds.map(assetId=>freeze({descriptor:freeze({assetId}),blob:null})));
   const captureBase=freeze({
@@ -364,10 +364,10 @@ async function finalizeManagedPreparationCapture(preparation,inventory){
   });
   const protectedCheckpointManifest=BackupCodec.createProtectedManifest(captureBase,preparation.checkpoint),capture=freeze({...captureBase,protectedCheckpointManifest});
   const generation=preparationGenerations.get(preparation);assertStorageGeneration(generation);
-  logicalCheckpointGuards.set(capture,freeze({snapshotRevision:guard.snapshotRevision,sourceRevision:guard.sourceRevision,forceLegacySnapshotFence:false,generation}));return capture;
+  logicalCheckpointGuards.set(capture,freeze({snapshotRevision:guard.snapshotRevision,sourceRevision:guard.sourceRevision,forceContentSnapshotFence:false,generation}));return capture;
 }
 async function establishManagedPreparationBaseline(capture,units){
-  requireLogicalCheckpointCapture(capture);const guard=logicalCheckpointGuards.get(capture);if(!guard||guard.forceLegacySnapshotFence===true||!fastCaptureEpochToken(guard.snapshotRevision))return null;
+  requireLogicalCheckpointCapture(capture);const guard=logicalCheckpointGuards.get(capture);if(!guard||guard.forceContentSnapshotFence===true||!fastCaptureEpochToken(guard.snapshotRevision))return null;
   await assertLogicalCheckpointCurrent(capture);let stamps;
   try{stamps=await AppData.preparationUnits.replace([...new Set((units||[]).map(String).filter(Boolean))]);}
   catch(error){AppDiagnostics.capture('backup.preparation-baseline',error,'warn');return null;}

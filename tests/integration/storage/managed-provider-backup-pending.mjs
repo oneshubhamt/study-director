@@ -97,7 +97,7 @@ for(const fault of ['read','write','commit']){
 {
  const h=host();await h.mark('device-folder',{reason:'device-work',nextEligibleAt:new Date().toISOString()});const device=await h.read('device-folder');await h.mark('google-drive',{reason:'drive-work',nextEligibleAt:new Date().toISOString()});await h.clear('google-drive',await h.read('google-drive'));assert.deepEqual(await h.read('device-folder'),device);await h.clear('device-folder',device);intentCases.push('independent providers');
 }
-// Older payload versions are converted once by the compatibility host; the ordinary runtime rejects them.
+// Older payload versions are rejected without conversion.
 for(const version of [1,2,3]){
  const at=new Date().toISOString(),entry={providerId:'google-drive',requestedAt:at};if(version>=2)Object.assign(entry,{nextEligibleAt:at,reason:'legacy-work'});if(version>=3)entry.repositoryScope='actual-repository';
  await assert.rejects(gateway().bind('backup').write('repositoryMaintenancePending',{format:'study-director.repository-maintenance-pending',version,entries:[entry]},{strict:true}),/not canonical/u);intentCases.push('older payload '+version+' rejected');

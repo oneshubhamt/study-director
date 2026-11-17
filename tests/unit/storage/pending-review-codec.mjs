@@ -21,7 +21,7 @@ assert.deepEqual([codec.create({subject:'note',ref:id,kept:{text:'x'}}).keptFrom
 assert.equal(codec.normalize({...note,keptFrom:'ipad'}),null,'a device is an installation ID');
 assert.equal(codec.normalize({...note,keptChangedAt:'17 Oct'}),null,'a change time is canonical');
 const {keptFrom:_from,keptChangedAt:_changed,...v1}=note;
-assert.equal(codec.normalize({...v1,version:1}),null,'the current codec reads only v2; v1 goes through the compatibility layer');
+assert.equal(codec.normalize({...v1,version:1}),null,'the current codec reads only v2; v1 is refused');
 assert.deepEqual(codec.normalize(note),note,'a stored review reads back unchanged');
 assert.ok(codec.create({subject:'note',ref:id,kept:null}),'a note deleted on the other side keeps null');
 assert.throws(()=>codec.create({subject:'note',ref:'Ethics',kept:{text:'x'}}),/invalid/u,'notes are named by id');

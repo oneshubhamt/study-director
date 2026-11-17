@@ -14,7 +14,7 @@ import {testPendingReviewCodec,memoryPendingReviews,paragraphMerge} from '../../
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
-for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/compatibility.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js']){
+for(const file of ['source/core/internal.js','source/core/operation-lifecycle.js','source/core/persistence.js','source/core/record-codecs.js','source/core/backup-codec.js','source/core/canonical.js','source/core/reconciliation.js','source/core/managed-repository.js','source/core/repository-policy.js','source/core/repository-background.js','source/core/backup-provider.js','source/core/backup-capture.js','source/core/backup.js']){
   vm.runInThisContext(read(file),{filename:file});
 }
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
@@ -29,7 +29,7 @@ const BackupProviderModule=registry.require('backup-provider',1,Object.freeze({r
 const BackupCaptureModule=registry.require('backup-capture',1);
 const BackupModule=registry.require('backup',1,Object.freeze({backupCapture:BackupCaptureModule,backupProvider:BackupProviderModule,canonical:CanonicalModule,managedRepository:ManagedRepositoryModule,repositoryBackground:RepositoryBackgroundModule}));
 const ReconciliationModule=registry.require('reconciliation',1,Object.freeze({canonical:CanonicalModule}));
-const CompatibilityModule=registry.require('compatibility',1);
+
 const freeze=Object.freeze;
 
 const limits=freeze({
@@ -77,13 +77,7 @@ const dailyRecordCodec=freeze({
 });
 const sanitizeActiveSession=item=>item&&item.id==='current'?freeze({...item}):null;
 const activeSessionCodec=freeze({sanitizeCurrent:sanitizeActiveSession,contentValue:item=>{const clean=sanitizeActiveSession(item);if(!clean)return null;const snapshot=clean.snapshot&&typeof clean.snapshot==='object'?clean.snapshot:{},{contentRevision:_contentRevision,savedRevision:_savedRevision,updatedAt:_updatedAt,...contentSnapshot}=snapshot;return freeze({date:String(clean.date||''),scheduleText:String(clean.scheduleText||''),snapshot:freeze(contentSnapshot)});}});
-const compatibilityCodec=freeze({
-  format:'study-director.compatibility-codecs',contractVersion:1,
-  olderNote:()=>false,olderReview:()=>false,dailyRecord:item=>item&&isDate(item.date)?freeze({...item,date:item.date,version:15}):null,
-  note:normalizeNote,activeSession:item=>item&&item.id==='current'?freeze({...item}):null,
-  localRecoveryEnvelope:()=>null,reflectionDraft:item=>normalizeDrafts([item])[0]||null,
-  personalData:item=>personalDataCodec.normalize(item)
-});
+
 const keyedRecord=freeze({create:()=>Object.create(null)});
 const entityDefinition=type=>entityDefinitions[type]||null;
 const entityIdentity=(type,item)=>String(item?.[entityDefinition(type)?.idField]||'');
@@ -95,26 +89,14 @@ const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
 const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec}),keptReviews=memoryPendingReviews(pendingReviewCodec);
 const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,
   appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,
-  legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(entityDefinitions)),keyedRecord,
+  entityTypes:freeze(Object.keys(entityDefinitions)),keyedRecord,
   entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),
-  richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),dailyRecordCodec,activeSessionCodec,compatibilityCodec
+  richText:freeze({assetIds:()=>freeze([]),assetIdValid:value=>/^img-[A-Za-z0-9_-]{16,128}$/.test(String(value||'')),imageMimeTypeValid:value=>['image/png','image/jpeg','image/webp','image/gif','image/avif'].includes(String(value||''))}),dailyRecordCodec,activeSessionCodec
 }));
-const compatibilityNoop=async()=>freeze({status:'not-needed'});
-const compatibilityFacade=CompatibilityModule.createFacade(freeze({
-  baselineId:'QA_FIXTURE',
-  live:freeze({
-    renameIdentities:compatibilityNoop,cleanupLegacyStorage:compatibilityNoop,migratePlan:compatibilityNoop,migrateReflections:compatibilityNoop,migrateHostMetadata:compatibilityNoop,migrateActiveSession:compatibilityNoop,migrateNotes:compatibilityNoop,
-    migrateNoteRecovery:compatibilityNoop,migrateDailyRecords:compatibilityNoop,migrateDeletionState:compatibilityNoop,migrateInsightsRevisionEnvelope:compatibilityNoop,cleanupLegacyAttachments:compatibilityNoop,cleanupObsoleteMetadata:compatibilityNoop,settleUnsupported:compatibilityNoop,retireTopology:compatibilityNoop,retireLegacyIdentity:compatibilityNoop
-  }),
-  backups:freeze({inspectCurrent:codec.inspectCurrent,inspectLegacy:codec.inspectLegacy}),
-  verification:freeze({
-    planLegacy:async()=>freeze({ok:true}),reflectionLegacy:async()=>freeze({ok:true}),activeSession:async()=>freeze({ok:true}),notes:async()=>freeze({ok:true}),noteRecovery:async()=>freeze({ok:true}),
-    dailyRecords:async()=>freeze({ok:true}),deletionState:async()=>freeze({ok:true}),insightsRevisionEnvelope:async()=>freeze({ok:true}),canonicalStores:async()=>freeze({ok:true}),legacyStorage:async()=>freeze({ok:true}),
-    legacyAttachments:async()=>freeze({ok:true}),obsoleteMetadata:async()=>freeze({ok:true}),topology:async()=>freeze({ok:true}),retiredIdentity:async()=>freeze({ok:true}),retiredHostCompatibility:async()=>freeze({ok:true}),freshBackup:async()=>freeze({ok:true})
-  })
-}));
+
+
 let backupCodecInspectCalls=0;
-const runtimeCodec=freeze(Object.fromEntries([...Object.entries(codec).filter(([key])=>!['inspectCurrent','inspectLegacy'].includes(key)),['inspect',(file,options)=>{backupCodecInspectCalls+=1;return compatibilityFacade.inspectBackup(file,options);}]]));
+const runtimeCodec=freeze({...codec,inspect:(file,options)=>{backupCodecInspectCalls+=1;return codec.inspect(file,options);}});
 
 const notes=freeze({
   Ethics:freeze({version:2,key:'Ethics',label:'Ethics',text:'shared text',updatedAt:'2026-08-05T01:00:00.000Z'}),
@@ -192,7 +174,7 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
     restoreJournalRead:async()=>restoreJournal,
     restoreJournalMark:async(id,phase)=>{assert.equal(id,restoreJournal.state.id);restoreJournal.state.phase=phase;return restoreJournal.state;},
     restoreJournalClear:async id=>{if(id)assert.equal(id,restoreJournal.state.id);if(failJournalClearOnce){failJournalClearOnce=false;throw new Error('injected journal clear interruption');}restoreJournal=null;return true;},
-    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.legacy===true?'legacy-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>{preparationRebases++;return Object.freeze({epoch:null,stamps:Object.freeze([])});},preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],
+    personalSettle:async()=>true,personalExport:async()=>personalDataFixture,personalImport:async()=>true,personalVerify:async()=>true,storageGeneration:()=>0,sourceRevision:async()=>sourceRevision,snapshotRevision:async options=>{snapshotFenceOptions.push(Object.freeze({...options}));return options?.full===true?'content-stable':'fast-stable';},canonicalMutationEpochRead:async()=>null,canonicalPreparationRebase:async()=>{preparationRebases++;return Object.freeze({epoch:null,stamps:Object.freeze([])});},preparationUnitStamps:async()=>[],preparationUnitReplace:async()=>[],
     installationId:()=> 'inst_device_a',deletionRecoveryFlush:async()=>true,deletionRecoverySavedDays:async()=>[],deletionRecoveryReplaceSavedDays:async()=>true,deletionRecoveryNotes:async()=>[],deletionRecoveryReplaceNotes:async()=>true,deletionRecoveryAttachments:async()=>[],deletionRecoveryReplaceAttachments:async()=>true,deletionRecoveryClearAttachment:async()=>true,reconciliationBaseRead:async()=>null,reconciliationBaseReadNotes:async()=>freeze({}),...keptReviews.ports,reconciliationBaseReadDayAncestry:async()=>freeze({}),reconciliationBaseWrite:async()=>true
   }),
   exports:freeze({...testProcessing,followProtection:async()=>false,backgroundAvailable:()=>true,protect:async file=>typeof file==='function'?await file():file,unprotect:async blob=>({blob,encrypted:false}),check:()=>{},job:exclusiveFileJob,download:()=>({status:'downloaded'}),chooseSave:(filename,accept,options)=>{chosenNames.push(filename);assert.equal(options?.id,'study-director-backups');return chooseSaveResult();},save:async(file,handle,options)=>{assert.ok(file.blob.size>0,'A backup file must never receive an empty backup.');assert.equal(typeof options?.onProgress,'function');return handle?{status:'saved',filename:handle.name}:{status:exportSaveStatus};}}),
@@ -245,10 +227,10 @@ runtime=BackupModule.createRuntime(freeze({ports:freeze({
 snapshotFenceOptions.length=0;
 const created=await runtime.controller.createCheckpoint();
 assert.ok(snapshotFenceOptions.length>=2,'A checkpoint must fence both capture and prepared publication.');
-assert.ok(snapshotFenceOptions.every(options=>options.legacy!==true),'Healthy canonical capture must use the fast snapshot fence.');
+assert.ok(snapshotFenceOptions.every(options=>options.full!==true),'Healthy canonical capture must use the fast snapshot fence.');
 assert.equal(created.counts.dailyRecord,1);
 assert.equal(created.counts.note,2);
-const parsed=await codec.inspectCurrent(created.blob,{filename:created.filename});
+const parsed=await codec.inspect(created.blob,{filename:created.filename});
 assert.equal(parsed.records[0].reflection,'saved historical reflection');
 assert.equal(parsed.records[0].studyQuality,5);
 assert.equal(parsed.manifest.deviceId,undefined,'Current backups must not recreate legacy device identity metadata.');
@@ -261,7 +243,7 @@ assetRows=freeze([
   freeze({id:'img-duplicate-content-0001',file:'attblob-shared-duplicate-0001',type:'image/png',size:duplicateAssetBlob.size,hash:duplicateAssetHash,name:'first.png',library:true}),
   freeze({id:'img-duplicate-content-0002',file:'attblob-shared-duplicate-0001',type:'image/png',size:duplicateAssetBlob.size,hash:duplicateAssetHash,name:'second.png',library:true})
 ]);assetGetCalls=0;
-const duplicateAssetCheckpoint=await runtime.controller.createCheckpoint(),duplicateAssetParsed=await codec.inspectCurrent(duplicateAssetCheckpoint.blob,{filename:duplicateAssetCheckpoint.filename});
+const duplicateAssetCheckpoint=await runtime.controller.createCheckpoint(),duplicateAssetParsed=await codec.inspect(duplicateAssetCheckpoint.blob,{filename:duplicateAssetCheckpoint.filename});
 assert.equal(assetGetCalls,1,'Standalone capture should open one body when logical attachment aliases share the same physical file, checksum and size.');
 assert.equal(duplicateAssetParsed.assetDescriptors.length,2,'Standalone deduplication must preserve both logical attachment descriptors.');
 assert.equal(duplicateAssetParsed.importedAssets.length,2,'Standalone restore must reconstruct both logical attachment identities from the one stored body.');
@@ -270,7 +252,7 @@ assetRows=freeze([
   freeze({id:'img-duplicate-content-0001',file:'attblob-divergent-physical-0001',type:'image/png',size:duplicateAssetBlob.size,hash:duplicateAssetHash,name:'first.png',library:true}),
   freeze({id:'img-duplicate-content-0002',file:'attblob-divergent-physical-0002',type:'image/png',size:duplicateAssetBlob.size,hash:duplicateAssetHash,name:'second.png',library:true})
 ]);assetBlobOverrides=new Map();assetGetCalls=0;
-const divergentPhysicalCheckpoint=await runtime.controller.createCheckpoint(),divergentPhysicalParsed=await codec.inspectCurrent(divergentPhysicalCheckpoint.blob,{filename:divergentPhysicalCheckpoint.filename});
+const divergentPhysicalCheckpoint=await runtime.controller.createCheckpoint(),divergentPhysicalParsed=await codec.inspect(divergentPhysicalCheckpoint.blob,{filename:divergentPhysicalCheckpoint.filename});
 assert.equal(assetGetCalls,4,'Distinct physical files that claim one content identity must each be authenticated before portable content deduplication, then captured independently.');
 assert.equal(divergentPhysicalParsed.assetBytes,duplicateAssetBlob.size,'Portable encoding may still deduplicate independently verified identical content bodies.');
 const corruptedAliasBlob=new Blob([new Uint8Array([137,80,78,71,13,10,26,10,9,8,7,5])],{type:'image/png'});
@@ -348,9 +330,9 @@ assert.equal(events.includes('import-active-session'),false);
 assert.equal(currentNotes.Economics.version,2,'reconciled restore state must remain lean AreaNote.v2');
 assert.equal(currentNotes.Ethics.version,2);
 
-// Highly compressible input is stopped at the expanded-byte boundary before parsing or mutation.
+// A historical whole-file gzip wrapper is refused before parsing or mutation.
 const gzipBomb=new Blob([gzipSync('\n'.repeat(limits.backupMaxUncompressedBytes+1024))],{type:'application/gzip'});
-await assert.rejects(()=>compatibilityFacade.inspectBackup(gzipBomb,{filename:'gzip-bomb.sdbackup.gz'}),/expands beyond the 8 MB safe uncompressed limit/u);
+await assert.rejects(()=>codec.inspect(gzipBomb,{filename:'gzip-bomb.sdbackup.gz'}),/not a Study Director backup/u);
 
 // The canonical commit receipt detects a corrupted write immediately and restores the safety snapshot.
 // Make the local Saved Day genuinely divergent so the v15 conflict contract performs an explicit replacement rather than treating it as identical.
@@ -450,7 +432,7 @@ noteFailure={failed:true,message:'IndexedDB note flush failed'};
 snapshotFenceOptions.length=0;
 const rescuedCheckpoint=await runtime.controller.createCheckpoint();
 assert.ok(snapshotFenceOptions.length>=2,'Recovery capture must remain fenced through publication.');
-assert.ok(snapshotFenceOptions.every(options=>options.legacy===true),'Degraded/recovery capture must explicitly force the legacy heavyweight fence.');
+assert.ok(snapshotFenceOptions.every(options=>options.full===true),'Degraded/recovery capture must explicitly force the full-content fence.');
 assert.match(rescuedCheckpoint.warning,/durable recovery state/i);
 await rescuedCheckpoint.release();
 noteFailure={failed:false};

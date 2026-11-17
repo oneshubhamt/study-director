@@ -162,18 +162,6 @@ assert.equal(await h.app.deletionRecovery.flush(),true);
 assert.equal(h.sharedLocal.has('recovery'),false,'recovery flush must physically retire stale Active Session recovery before clearing its marker');
 assert.equal(h.sharedLocal.has('deletionRecovery'),false);
 
-const legacyLocal=new Map([['syncEmergency',{version:1,entries:[{key:'dailyRecord:2026-09-10',entityType:'dailyRecord',entityId:'2026-09-10',op:'delete',updatedAt:'2026-09-17T06:00:00.000Z'},{key:'areaNote:ethics',entityType:'areaNote',entityId:'ethics',op:'upsert',updatedAt:'2026-09-17T06:00:00.000Z'}]}]]);
-const legacyStores={area:new Map(),sync:new Map([['dailyRecord:2026-09-11',{key:'dailyRecord:2026-09-11',entityType:'dailyRecord',entityId:'2026-09-11',op:'delete',updatedAt:'2026-09-17T07:00:00.000Z'}]]),tombstones:new Map([['dailyRecord:2026-09-12',{key:'dailyRecord:2026-09-12',entityType:'dailyRecord',entityId:'2026-09-12',deletedAt:'2026-09-17T07:30:00.000Z',updatedAt:'2026-09-17T07:30:00.000Z'}]]),reflection:new Map(),daily:new Map([['2026-09-10',day('2026-09-10','2026-09-16T06:00:00.000Z')],['2026-09-11',day('2026-09-11','2026-09-16T06:00:00.000Z')],['2026-09-12',day('2026-09-12','2026-09-16T06:00:00.000Z')]]),summary:new Map(),session:new Map(),meta:new Map()};
-const legacy=createHarness(legacyLocal,legacyStores);
-const migration=await legacy.app.compatibility.migrateDeletionState();
-assert.equal(migration.status,'migrated');
-assert.equal(legacyStores.sync.size,0);assert.equal(legacyStores.tombstones.size,0,'legacy distributed-sync stores become inert after verified conversion');
-assert.equal(legacyLocal.has('syncEmergency'),false,'legacy syncEmergency is retired only after conversion');
-for(const date of ['2026-09-10','2026-09-11','2026-09-12'])assert.equal(legacyStores.daily.has(date),false,`legacy pending delete must not resurrect ${date}`);
-const legacyLedger=await legacy.app.deletionRecovery.savedDays();
-assert.deepEqual(Array.from(legacyLedger,row=>String(row.date)),['2026-09-10','2026-09-11','2026-09-12']);
-assert.equal((await legacy.app.compatibility.verifyDeletionState()).ok,true);
-
 // Deletion ledgers stay bounded: past the limit only the oldest records go.
 // Listing applies the rule, so a full ledger never stops a backup, and data
 // maintenance removes the same records from storage.
@@ -186,7 +174,6 @@ assert.equal((await legacy.app.compatibility.verifyDeletionState()).ok,true);
   const listed=await bounded.app.deletionRecovery.notes();
   assert.equal(listed.length,1000,'a full ledger lists its newest records');
   assert.deepEqual([0,1,2].map(index=>listed.some(entry=>entry.key===nth(index))),[false,false,false],'the oldest records are the ones left out');
-  assert.equal((await bounded.app.compatibility.verifyDeletionState()).ok,true,'a full ledger is not an integrity failure');
   assert.equal((await bounded.app.maintenance.run({force:true})).status,'completed');
   const stored=[...bounded.stores.meta.keys()].filter(key=>key.startsWith('noteDeletion:'));
   assert.equal(stored.length,1000,'maintenance removes the records listing leaves out');assert.equal(bounded.stores.meta.has(`noteDeletion:${nth(2)}`),false);

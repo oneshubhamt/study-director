@@ -136,8 +136,8 @@ registry.define('ownership',1,()=>{
     async function completePrimaryHydration(){
       const owner=readOwner();
       if(state!==OWNERSHIP_STATES.HYDRATING||!isSelf(owner)||owner.claimId!==claimId||!fenceValid())return;
-      // Keep ordinary mutation disabled while deferred compatibility work finishes.
-      // Compatibility writers use explicit allowHydrating write tokens, so an
+      // Keep ordinary mutation disabled while canonical hydration finishes.
+      // Hydration writes use explicit allowHydrating write tokens, so an
       // unrelated UI/editor write cannot slip into this takeover window.
       await hooks.finalizeHydration();
       const verified=readOwner();

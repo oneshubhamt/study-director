@@ -7,12 +7,11 @@ import {fileURLToPath} from 'node:url';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const ROOT=path.resolve(HERE,'../../..');
 const read=relative=>fs.readFileSync(path.join(ROOT,relative),'utf8');
-for(const file of ['source/core/internal.js','source/core/domain.js','source/core/timer-state.js','source/core/record-codecs.js','source/core/compatibility-codecs.js'])vm.runInThisContext(read(file),{filename:file});
+for(const file of ['source/core/internal.js','source/core/domain.js','source/core/timer-state.js','source/core/record-codecs.js'])vm.runInThisContext(read(file),{filename:file});
 const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
 const Domain=registry.require('domain',1,Object.freeze({maxAreaNameChars:200,maxDurationMinutes:1440,maxScheduleChars:50000,maxScheduleRows:200,maxTaskNameChars:300,maxTasksPerDay:100,maxUnitChars:80}));
 const TimerStateModule=registry.require('timer-state',1);
 const RecordCodecs=registry.require('record-codecs',1);
-const CompatibilityCodecs=registry.require('compatibility-codecs',1);
 
 const timer=TimerStateModule.createStateController(Object.freeze({
   helpers:Object.freeze({makeTaskId:(task,index)=>String(task.id||`task-${index+1}`)}),
@@ -45,7 +44,7 @@ const limits=Object.freeze({
   maxTaskNameChars:300,maxAreaNameChars:200,maxUnitChars:80,maxPracticeRunsPerDay:100,maxPracticeUnitsPerDay:1000,maxPracticeUnitsPerRun:100,minPracticeTargetMs:1000,maxPracticeTargetMs:86400000,maxStudentNameChars:100,maxQuoteChars:1000
 });
 const dataContract=Object.freeze({schemas:Object.freeze({
-  SessionSnapshot:Object.freeze({version:6}),ActiveSession:Object.freeze({version:10,key:'current'}),DailyRecord:Object.freeze({version:15}),Note:Object.freeze({version:2}),LocalRecoveryEnvelope:Object.freeze({version:1})
+  SessionSnapshot:Object.freeze({version:6}),ActiveSession:Object.freeze({version:11,key:'current'}),DailyRecord:Object.freeze({version:15}),Note:Object.freeze({version:2}),LocalRecoveryEnvelope:Object.freeze({version:1})
 })});
 const keyedRecord=Object.freeze({create:()=>Object.create(null)});
 const dailyRecordCodec=Object.freeze({
@@ -56,16 +55,8 @@ const codec=RecordCodecs.createActiveSessionCodec(Object.freeze({
   limits,dataContract,activeSessionId:'current',domain:Domain,keyedRecord,helpers,
   timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp,normalizeImportedEpochMillis:(value,fallback=null)=>Number.isFinite(Number(value))?Number(value):fallback}),dailyRecordCodec
 }));
-const optionalText=(value,max)=>typeof value==='string'&&value.length<=max?value:null;
-const optionalBoundedNumber=(value,options={})=>{const n=boundedNumber(value,{...options,fallback:null});return options.integer&&n!==null&&!Number.isInteger(n)?null:n;};
-const compatibility=CompatibilityCodecs.create(Object.freeze({
-  limits,dataContract,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),pendingReviewCodec:Object.freeze({version:2,normalize:()=>null}),dailyRecordCodec,activeSessionCodec:codec,
-  helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue:helpers.sameDataValue,sanitizePracticeRun:value=>value,activeSessionScheduleFingerprint:helpers.activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText:helpers.isCanonicalScheduleText}),
-  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_review_device'
-}));
-
 const session={
-  id:'current',type:'activeSession',version:10,revision:12,date:'2026-08-05',status:'active',runningOn:'inst_review_other_device',
+  id:'current',type:'activeSession',version:11,revision:12,date:'2026-08-05',status:'active',runningOn:'inst_review_other_device',
   scheduleText:'07:00 | 60 | A | Study | Area | pages | 10',snapshot,suspendedAt:null,updatedAt:'2026-08-05T08:01:00.000Z'
 };
 const canonical=codec.canonicalize(session);
@@ -75,69 +66,15 @@ const legacySnapshot=structuredClone(snapshot);legacySnapshot.version=5;delete l
 legacySnapshot.reflectionDraft={version:1,date:'2026-08-05',reflection:'Legacy diary',studyQuality:3,revision:6,sessionRevision:12,updatedAt:'2026-08-05T08:00:00.000Z'};
 const {runningOn:_runner,...sessionWithoutRunner}=session,legacyV8={...structuredClone(sessionWithoutRunner),version:8,snapshot:legacySnapshot,entityType:'activeSession',entityId:'current',schemaVersion:1,deviceId:'dev_r10',createdAt:'2026-08-05T07:00:00.000Z',deleted:false,syncStatus:'pending'};
 assert.equal(codec.sanitizeCurrent(legacyV8),null,'ordinary codec must reject the retired ActiveSession schema');
-const migrated=compatibility.activeSession(legacyV8);
-assert.ok(migrated,'compatibility codec must migrate historical ActiveSession review state');
-assert.equal(migrated.version,10);assert.equal(migrated.runningOn,'inst_review_device','an older session belongs to the device converting it');assert.equal(compatibility.activeSession(session).runningOn,'inst_review_other_device','a current session keeps the device running it');assert.equal(migrated.snapshot.version,6);
-assert.deepEqual(migrated.snapshot.review,{reflection:'Legacy diary',studyQuality:3});
-assert.equal(Object.hasOwn(migrated.snapshot,'reflectionDraft'),false);
-for(const key of ['entityType','entityId','schemaVersion','deviceId','createdAt','deleted','syncStatus'])assert.equal(Object.hasOwn(migrated,key),false,`retired sync field ${key} must not enter ActiveSession.v9`);
-
 const invalid=structuredClone(session);delete invalid.snapshot.review;
 assert.equal(codec.canonicalize(invalid),null,'current ActiveSession requires one canonical Review snapshot');
 const extra=structuredClone(session);extra.snapshot.review.revision=1;
 assert.equal(codec.canonicalize(extra),null,'retired ReflectionDraft lineage fields must not survive inside Review state');
 
-// ActiveSession v11: a day can be finished. A finished session survives as
-// it is; a v10 session (active or suspended) reads as v11 with nothing else
-// changed; a status outside the three is still refused.
-{
-  const contract11=Object.freeze({schemas:Object.freeze({...dataContract.schemas,ActiveSession:Object.freeze({version:11,key:'current'})})});
-  const codec11=RecordCodecs.createActiveSessionCodec(Object.freeze({
-    limits,dataContract:contract11,activeSessionId:'current',domain:Domain,keyedRecord,helpers,
-    timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp,normalizeImportedEpochMillis:(value,fallback=null)=>Number.isFinite(Number(value))?Number(value):fallback}),dailyRecordCodec
-  }));
-  const compatibility11=CompatibilityCodecs.create(Object.freeze({
-    limits,dataContract:contract11,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),pendingReviewCodec:Object.freeze({version:2,normalize:()=>null}),dailyRecordCodec,activeSessionCodec:codec11,
-    helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue:helpers.sameDataValue,sanitizePracticeRun:value=>value,activeSessionScheduleFingerprint:helpers.activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText:helpers.isCanonicalScheduleText}),
-    timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_review_device'
-  }));
-  const base={...session,version:11};
-  const finished=codec11.sanitizeCurrent({...base,status:'finished'});
-  assert.ok(finished,'a finished session is a current session');assert.equal(finished.status,'finished');
-  assert.deepEqual(codec11.sanitizeCurrent(JSON.parse(JSON.stringify(finished))),finished,'it survives a save and read back unchanged');
-  for(const status of ['active','suspended']){
-    const older=compatibility11.activeSession({...session,status,version:10});
-    assert.ok(older,`a v10 ${status} session reads as current`);
-    assert.equal(older.version,11);assert.equal(older.status,status,'its status is kept');
-    assert.deepEqual({...older,version:10},codec.sanitizeCurrent({...session,status}),'nothing but the version changes');
-  }
-  assert.equal(codec11.sanitizeCurrent({...base,status:'paused'}),null,'a status outside active, suspended and finished is refused');
-
-  // A session kept for review by SDVB75F24 holds it in format 10. Read as it
-  // is, the review failed the current codec, was held as if from a newer
-  // version and paused Drive sync. The compatibility conversion gives the
-  // kept session the current version and changes nothing else; it leaves a
-  // current review, and a review of anything else, to the current codec.
-  const contractReviews=Object.freeze({schemas:Object.freeze({...contract11.schemas,PendingReview:Object.freeze({version:2})})});
-  const reviews=RecordCodecs.createPendingReviewCodec(Object.freeze({dataContract:contractReviews,dailyRecordCodec,activeSessionCodec:codec11,personalDataCodec:Object.freeze({normalize:value=>value}),helpers:Object.freeze({sameDataValue:helpers.sameDataValue,randomBytes:size=>new Uint8Array(size)})}));
-  const convert=CompatibilityCodecs.create(Object.freeze({
-    limits,dataContract:contractReviews,keyedRecord,personalDataCodec:Object.freeze({normalize:value=>value}),pendingReviewCodec:Object.freeze({version:2,normalize:reviews.normalize}),dailyRecordCodec,activeSessionCodec:codec11,
-    helpers:Object.freeze({boundedInt,boundedNumber,optionalBoundedNumber,optionalText,clampText,clampEditorContent:clampText,editorContentWithinLimits:()=>true,sameDataValue:helpers.sameDataValue,sanitizePracticeRun:value=>value,activeSessionScheduleFingerprint:helpers.activeSessionScheduleFingerprint,isValidIsoDate,isCanonicalScheduleText:helpers.isCanonicalScheduleText}),
-    timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp}),domain:Domain,installationId:()=>'inst_review_device'
-  }));
-  const keptV10={...codec.sanitizeCurrent({...session,status:'suspended'})};
-  const review=Object.freeze({version:2,id:'pr_'+'b'.repeat(32),subject:'session',ref:'session',keptAt:'2026-11-14T08:00:00.000Z',keptFrom:'inst_review_other_device',keptChangedAt:'2026-11-14T07:59:00.000Z',kept:keptV10,base:null,resolvedAt:''});
-  assert.equal(reviews.normalize(review),null,'the current codec cannot read a review holding a v10 session');
-  const converted=convert.pendingReview(review);
-  assert.ok(converted,'the conversion reads it');
-  assert.equal(converted.kept.version,11);
-  assert.deepEqual({...converted,kept:{...converted.kept,version:10}},review,'only the kept session\'s version changes');
-  assert.deepEqual(reviews.normalize(converted),converted,'and the result is a current review');
-  const reviewV1={version:1,id:'pr_'+'c'.repeat(32),subject:'session',ref:'session',keptAt:review.keptAt,kept:keptV10,base:null,resolvedAt:''};
-  assert.deepEqual(convert.pendingReview(reviewV1),{...reviewV1,version:2,keptFrom:'',keptChangedAt:'',kept:{...keptV10,version:11}},'a v1 review holding a v10 session takes both current forms');
-  assert.equal(convert.pendingReview(converted),null,'a current review is left to the current codec');
-  assert.equal(convert.pendingReview({...review,subject:'note',ref:'n_'+'d'.repeat(32),kept:{text:'x'}}),null,'so is a v2 review of anything but a session');
-  assert.equal(convert.pendingReview({...review,kept:{...keptV10,version:10,status:'paused'}}),null,'a kept session that is not sound is refused, not repaired');
+for(const status of ['active','suspended','finished']){
+  const stored=codec.sanitizeCurrent({...session,status});assert.ok(stored);
+  assert.deepEqual(codec.sanitizeCurrent(JSON.parse(JSON.stringify(stored))),stored);
 }
-
-console.log(JSON.stringify({status:'PASS',suite:'review-active-session-codec',reviewInActiveSession:true,legacyDraftMigrated:true,currentRequiresReview:true,retiredDraftLineageRejected:true},null,2));
+assert.equal(codec.sanitizeCurrent({...session,version:10}),null,'older sessions are refused without conversion');
+assert.equal(codec.sanitizeCurrent({...session,status:'paused'}),null);
+console.log(JSON.stringify({status:'PASS',suite:'review-active-session-codec',reviewInActiveSession:true,olderSessionRefused:true,currentRequiresReview:true,retiredDraftLineageRejected:true}));

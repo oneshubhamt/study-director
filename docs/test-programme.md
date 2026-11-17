@@ -60,7 +60,7 @@ These hold for every step.
 **Scope.** 17 architecture files held about 1,100 checks that search source text (about 1,300 counting every architecture file).
 
 - **`app/`:** `runtime-boundaries`, `workspace-contracts`, `presentation-contracts`, `protected-mutation-ui-contract`.
-- **`storage/`:** `background-work-contract`, `backup-recovery-ux-contract`, `cleer-integration`, `compatibility-contract`, `managed-recovery-contract`, `managed-version-history-contract`, `persistence-boundary`, `runtime-authority-contract`, `attachment-aware-reconciliation`, `data-architecture`.
+- **`storage/`:** `background-work-contract`, `backup-recovery-ux-contract`, `cleer-integration`, `managed-recovery-contract`, `managed-version-history-contract`, `persistence-boundary`, `runtime-authority-contract`, `attachment-aware-reconciliation`, `data-architecture`.
 - **Others:** `reconciliation-ui-contract`, `pwa-updater-contract`, `export-hash-boundary`.
 
 **Method, for each check.** Write down what it claims, from its own failure message, then sort it:
@@ -78,7 +78,7 @@ These hold for every step.
 
 - **`build/`:** all 9 files.
 - **Security and boundaries:** `security-policy`, `internal-module-boundary`, `wordgard-adapter-boundary`, `wordgard-upstream-integrity`.
-- **Small wiring checks:** `image-policy`, `diagnostics-labels`, `compatibility-isolation`, `backup-limits-wiring`, `host-export-port`, `file-worker-bundle`.
+- **Small wiring checks:** `image-policy`, `diagnostics-labels`, `backup-limits-wiring`, `host-export-port`, `file-worker-bundle`.
 
 **Also in B.** Integration tests that cut functions out of `app.html` by text markers load the module file instead, wherever the code lives in a module. Code that lives only in `app.html` keeps the current approach unless moving it is a clear improvement (rule 5).
 
@@ -124,16 +124,9 @@ One file per behaviour area, each holding a table of scenarios.
 
 The two monoliths are split by subject: `repository-checkpoint` (201 KB) into 3–4 files, `sync-shared-base` (94 KB) into 2.
 
-### C3. Migration tests in one place
+### C3. Historical-format test retirement — completed in F30
 
-A new `tests/migration/` folder (the runner and browser manifest pick it up) holds the 11 files that exist only for old formats:
-
-- `compatibility-host`, `compatibility-retirement`, `indexeddb-topology-retirement`;
-- `active-session-recovery-migration`, `legacy-attachment-cleanup`, `reconciliation-baseline-v2`, `current-canonical-roundtrip`;
-- `compatibility-contract`, `compatibility-isolation`, `retirement-readiness`;
-- the browser test `upgrade-renamed-names`.
-
-When the migration code is removed, the folder goes in the same pull request.
+Tests devoted solely to conversion and old storage names were removed with that machinery. Mixed suites (`current-canonical-roundtrip`, repository restore, reconciliation baseline, recovery and editor persistence) retain their current-format, integrity and failure-path coverage. Backup, repository and unsupported-data tests now assert that older forms are refused or held unchanged. No separate migration test folder is needed.
 
 ### C4. Names by subject, not history
 

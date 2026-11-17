@@ -21,7 +21,6 @@ const persistence=read('source/core/persistence.js');
 const hostMetadata=read('source/core/host-metadata.js');
 const backupRecoveryHost=read('source/core/backup-recovery-host.js');
 const canonical=read('contracts/canonical-identities.mjs');
-const compatibility=read('contracts/compatibility.mjs');
 const build=read('build/build.mjs');
 const currentSource=[app,backup,managedRepository,backupProvider,device,repositories,startup,persistence].join('\n');
 
@@ -57,7 +56,7 @@ for(const repositoryOwned of [/REPOSITORY_MANIFEST_FORMAT/u,/function selectRepo
 for(const providerOwned of ['repositoryProviderState','saveRepositoryProvider','syncRepositoryProvider','bringInRepositoryProvider','restoreRepositoryProviderVersion'])assert.equal(backup.includes(providerOwned),false,`managed-provider concern must stay out of backup.js: ${providerOwned}`);
 for(const retired of ['isInspected','prepareRepositoryCheckpoint:','materializeRepositoryCheckpoint:','commitRepositoryCheckpoint:','establishRepositoryReconciliationBase:','releaseRepositoryCheckpoint:','mergeManagedRepositoryHistory','logicalRepositoryFingerprint'])assert.equal(backup.includes(retired),false,`dead public repository API must stay absent: ${retired}`);
 assert.doesNotMatch(managedRepository,/PortableCheckpointMaterializer|materializeRepositoryCheckpoint|inspectBackup\(portable\.blob/u,'managed repository restore must not recreate and reopen a temporary portable container');
-assert.doesNotMatch(backup,/function managedParsedSnapshot\([\s\S]{0,1200}currentDailyRecords\(/u,'managed repository validation must not require historical Saved Days to already match the current DailyRecord schema');
+assert.match(backup,/currentDailyRecords/u,'managed restore validates current Saved Days');
 assert.match(backup,/function managedSnapshotStage\([\s\S]*managed-checkpoint-\$\{label\}-failed[\s\S]*errorCode/u,'managed checkpoint portable validation failures must expose safe stage-coded diagnostics');
 for(const code of ['MANAGED_CHECKPOINT_DAILY_RECORDS_FAILED','MANAGED_CHECKPOINT_NOTES_FAILED','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED','MANAGED_CHECKPOINT_COUNTS_FAILED','MANAGED_CHECKPOINT_ATTACHMENTS_FAILED','MANAGED_CHECKPOINT_PROTECTED_MANIFEST_FAILED'])assert.match(backup,new RegExp(code),'managed checkpoint validation must retain '+code);
 assert.doesNotMatch(backup,/function (?:resolve|merge|reconcile)Repository(?:Conflict|Handoff)/u,'repository restore must not introduce a parallel conflict engine');
@@ -113,7 +112,7 @@ const sessionTransfer=app.slice(app.indexOf('async function transferSessionOwner
 assert.ok(sessionTransfer.indexOf("claimSessionOwnership('google-drive'")>=0&&sessionTransfer.indexOf("claimSessionOwnership('google-drive'")<sessionTransfer.indexOf('AppData.activeSession.save(next,{strictDurability:true'),'Drive ownership must become durable before the new local owner is saved or allowed to run');
 assert.match(app,/'apply-schedule': async\(\)=>\{[\s\S]{0,700}transferSessionOwnershipHere\(sessionPanelSession\)/u,'Start a new plan here must use the same durable ownership transfer as Continue Here');
 
-assert.match(backupProvider,/async function synchronizeRepositoryScope\(selected\)[\s\S]*recentHistoryByProvider\.delete\(id\);verifiedHistoryByProvider\.delete\(id\);formatsByProvider\.delete\(id\);unreadableByProvider\.delete\(id\);providerConvergenceRetryAttempts\.delete\(id\);providerBackground\(selected\)\.clearAllScheduled\(\);[\s\S]*maintenanceHooks\.clear\(id,pending\)/u,'a changed physical repository generation must discard provider-session history, verification, convergence and the matching durable maintenance intent from the deleted repository');
+assert.match(backupProvider,/async function synchronizeRepositoryScope\(selected\)[\s\S]*recentHistoryByProvider\.delete\(id\);verifiedHistoryByProvider\.delete\(id\);unreadableByProvider\.delete\(id\);providerConvergenceRetryAttempts\.delete\(id\);providerBackground\(selected\)\.clearAllScheduled\(\);[\s\S]*maintenanceHooks\.clear\(id,pending\)/u,'a changed physical repository generation must discard provider-session history, verification, convergence and the matching durable maintenance intent from the deleted repository');
 assert.match(backupProvider,/async function loadRepositoryProvider\(selected,operation,[\s\S]*?await synchronizeRepositoryScope\(selected\);[\s\S]*?recentHistory\(providerSelected,checkpointId\)/u,'restore must validate repository generation before consulting recent Version History cache');
 assert.doesNotMatch(backupProvider,/deferPublicationRelease/u,'Drive publication-marker release must not be detached from the foreground operation');
 assert.match(backupProvider,/finally\{[\s\S]{0,180}if\(publicationLease\)\{[\s\S]*provider-publication-release-start[\s\S]*await endRepositoryPublication[\s\S]*provider-publication-release-complete[\s\S]*publication-contention[\s\S]*request\('repository-state',MAINTENANCE_POLICY\.busyMs,\{mode:'replace'\}\)/u,'Drive must await publication-marker release, then pull any contention-blocked maintenance forward once after successful release');
@@ -142,14 +141,10 @@ assert.doesNotMatch(app,/backupOperationJournal|backupProviderOperation/u,'host 
 
 assert.match(hostMetadata,/value\.format!=='study-director\.device-folder-settings'\|\|Number\(value\.version\)!==4/u,'isolated host metadata boundary must validate DeviceFolderSettings.v4');
 
-assert.match(codec,/const LEGACY_TOMBSTONE_TYPE='tombstone',LEGACY_REFLECTION_DRAFT_TYPE='reflectionDraft'/u,'historical backup adapter must retain explicit tombstone and retired Reflection Draft vocabulary only inside compatibility parsing');
-assert.match(codec,/Historical completion proofs depend on the original entity order/u,'historical completion-proof ordering must be documented and isolated');
 assert.equal(currentEntities.includes('LEGACY_TOMBSTONE_TYPE'),false,'historical backup vocabulary must not leak into current domain entities');
 
 // Current checkpoint purity: the contract no longer writes or owns the retired distributed-sync schema version.
 assert.equal(canonical.includes('LEGACY_SYNC_SCHEMA_VERSION'),false,'legacy sync schema naming must be absent from the current identity contract');
-assert.match(compatibility,/export const LEGACY_BACKUP_SCHEMA_VERSION=1;/u,'historical backup schema ceiling must live in compatibility, not the current data contract');
-assert.match(app,/const LEGACY_BACKUP_SCHEMA_VERSION=@@SD_LEGACY_BACKUP_SCHEMA_VERSION@@;/u,'host must receive the historical backup ceiling through explicit compatibility injection');
 
 
 console.log(JSON.stringify({
@@ -159,6 +154,6 @@ console.log(JSON.stringify({
   startupSyncFlushRemoved:true,
   checkpointTransports:['file'],
   repositoryTransports:['device-folder-tiered-15-plus-1','google-drive-tiered-15-plus-1','restore-adapter'],
-  historicalBackupCompatibilityIsolated:true,
+  currentFormatOnly:true,
   currentCheckpointSyncSchemaBaggage:false
 },null,2));

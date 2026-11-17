@@ -21,13 +21,13 @@ const defs=freeze({dailyRecord:freeze({idField:'date',backupLimit:limits.maxImpo
 const keyedRecord=freeze({create:()=>Object.create(null)}),entityDefinition=t=>defs[t]||null,entityIdentity=(t,x)=>String(x?.[defs[t]?.idField]||'');
 const boundedInt=(v,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={})=>{const n=Number(v);return Number.isInteger(n)&&n>=min&&n<=max?n:fallback;};
 const jsonByteLength=v=>new TextEncoder().encode(typeof v==='string'?v:JSON.stringify(v)).byteLength,isDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(String(v||''));
-const dailyRecordCodec=freeze({sanitizeHistoricalDailyRecord:x=>x&&isDate(x.date)?freeze({...x}):null,canonicalizeHistoricalDailyRecord:x=>x&&isDate(x.date)?freeze({...x,version:14}):null,sanitizeCurrentDailyRecord:x=>x&&isDate(x.date)?freeze({...x}):null,sanitizeImportedNote:(x,k)=>x?freeze({key:String(k||x.key),text:String(x.text||''),updatedAt:String(x.updatedAt||'2026-09-01T00:00:00.000Z')}):null,sanitizeCurrentNote:(x,k)=>x?freeze({key:String(k||x.key),text:String(x.text||''),updatedAt:String(x.updatedAt||'2026-09-01T00:00:00.000Z')}):null,isSupportedSavedDate:isDate});
+const dailyRecordCodec=freeze({sanitizeCurrentDailyRecord:x=>x&&isDate(x.date)?freeze({...x}):null,sanitizeImportedNote:(x,k)=>x?freeze({key:String(k||x.key),text:String(x.text||''),updatedAt:String(x.updatedAt||'2026-09-01T00:00:00.000Z')}):null,sanitizeCurrentNote:(x,k)=>x?freeze({key:String(k||x.key),text:String(x.text||''),updatedAt:String(x.updatedAt||'2026-09-01T00:00:00.000Z')}):null,isSupportedSavedDate:isDate});
 const activeSessionCodec=freeze({sanitizeCurrent:()=>null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:()=>null});
 const personalDataCodec=RecordCodecs.createPersonalDataCodec(limits);
 const pendingReviewCodec=testPendingReviewCodec(RecordCodecs,{personalDataCodec});
-const compatibilityCodec=freeze({format:'study-director.compatibility-codecs',contractVersion:1,olderNote:()=>false,olderReview:()=>false,dailyRecord:x=>dailyRecordCodec.sanitizeCurrentDailyRecord(x),note:(x,k)=>dailyRecordCodec.sanitizeCurrentNote(x,k),activeSession:()=>null,localRecoveryEnvelope:()=>null,reflectionDraft:()=>null,personalData:x=>personalDataCodec.normalize(x)});
-const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,legacy:freeze({schemaVersion:3,tombstoneLimit:limits.maxLegacyImportTombstones}),entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),richText:freeze({assetIds:value=>richApi.assetIds(value),assetIdValid:value=>richApi.isAssetId(value),imageMimeTypeValid:value=>richApi.isSupportedImageType(value)}),dailyRecordCodec,activeSessionCodec,compatibilityCodec}));
+
+const codec=BackupCodecs.createBackupCodec(freeze({personalDataCodec,pendingReviewCodec,processing:testProcessing,appConfig:freeze({appName:'Study Director',attribution:'Study Director'}),limits,dataContract,entityTypes:freeze(Object.keys(defs)),keyedRecord,entities:freeze({entityDefinition,entityIdentity}),helpers:freeze({boundedInt,jsonByteLength}),richText:freeze({assetIds:value=>richApi.assetIds(value),assetIdValid:value=>richApi.isAssetId(value),imageMimeTypeValid:value=>richApi.isSupportedImageType(value)}),dailyRecordCodec,activeSessionCodec}));
 
 const uniqueAssetCount=8,logicalAssetCount=uniqueAssetCount+1;
 const assetIds=Array.from({length:logicalAssetCount},(_,i)=>`img-capacity-${String(i+1).padStart(20,'0')}`);
@@ -60,7 +60,7 @@ const checkpointChunk=await codec.encodeChunk(0,'checkpointManifest',[codec.crea
 const metadata=new Blob([JSON.stringify(manifest)+'\n'+checkpointChunk.line+'\n'+personalChunk.line+'\n'+chunk.line+'\n'+JSON.stringify(complete)+'\n']);
 const portable=codec.createV10Container(metadata,{compression:'none',assetBlobs:physicalBlobs});
 assert.ok(portable.size>64*MiB&&portable.size<128*MiB,'Fixture must exercise a backup with 64 MiB of unique attachment bytes.');
-const parsed=await codec.inspectCurrent(portable,{filename:'capacity.sdbackup'});
+const parsed=await codec.inspect(portable,{filename:'capacity.sdbackup'});
 assert.equal(parsed.importedAssets.length,logicalAssetCount);assert.equal(parsed.assetDescriptors.length,logicalAssetCount);
 for(let i=0;i<logicalAssetCount;i++){assert.equal(parsed.importedAssets[i].assetId,assetIds[i]);assert.equal(parsed.importedAssets[i].blob.size,8*MiB);}
 assert.equal(parsed.assetBytes,64*MiB,'Reader must count each checksum:size payload once.');

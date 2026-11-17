@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import {APP_META_RUNTIME_REGISTRY} from '../../contracts/data-architecture.mjs';
 import {PRODUCTION_LIMITS} from '../../contracts/production-limits.mjs';
-import {noteKeys,legacyNoteKey} from './note-ids.mjs';
+import {noteKeys} from './note-ids.mjs';
 import {testPendingReviewCodec} from './pending-review-codec.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../contracts/canonical-identities.mjs';
 const freeze=Object.freeze;
@@ -73,7 +73,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const dailyRecordCodec=controls.dailyRecordCodec||freeze({
     buildDailyRecordSummary:v=>v,
     sanitizeCurrentDailyRecord:v=>v&&typeof v==='object'&&Number(v.version)===1?v:null,
-    sanitizeCurrentNote:(source,key)=>{if(!source||typeof source!=='object'||Number(source.version)!==3)return null;const clean={version:3,key:String(source.key||key||''),label:String(source.label??''),text:String(source.text??''),updatedAt:String(source.updatedAt??'')},linked='links' in source,links=linked?source.links:null;if(linked&&(!Array.isArray(links)||!links.length||new Set(links).size!==links.length||links.some(id=>!noteKeys.isId(id)||id===noteKeys.id(clean.key))))return null;if(linked)clean.links=[...links];return noteKeys.isKey(clean.key)&&clean.label.trim()&&!noteKeys.retiredSupport(clean.label)&&Object.keys(source).length===(linked?6:5)?clean:null;},
+    sanitizeCurrentNote:(source,key)=>{if(!source||typeof source!=='object'||Number(source.version)!==3)return null;const clean={version:3,key:String(source.key||key||''),label:String(source.label??''),text:String(source.text??''),updatedAt:String(source.updatedAt??'')},linked='links' in source,links=linked?source.links:null;if(linked&&(!Array.isArray(links)||!links.length||new Set(links).size!==links.length||links.some(id=>!noteKeys.isId(id)||id===noteKeys.id(clean.key))))return null;if(linked)clean.links=[...links];return noteKeys.isKey(clean.key)&&clean.label.trim()&&Object.keys(source).length===(linked?6:5)?clean:null;},
     noteKeys:noteKeys,
     materializeDailyRecordView:v=>v,storedDailyRecordFields:v=>v,
     sanitizeDailyRecordSummary:v=>v,
@@ -88,17 +88,6 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
     currentPortablePreferences:value=>{if(!value||typeof value!=='object'||Number(value.version)!==2)return null;const expected=['version','studentName','theme','presentation','quote','practiceCueMode','fontScale','practiceTargetMs','nudge','updatedAt'];return Object.keys(value).sort().join('|')===expected.sort().join('|')?structuredClone(value):null;}
   });
   const activeSessionCodec=freeze({canonicalize:v=>structuredClone(v),normalize:v=>structuredClone(v),sanitizeCurrent:v=>v?structuredClone(v):null,sanitizeSessionSnapshot:v=>v});
-  const compatibilityCodec=freeze({
-    format:'study-director.compatibility-codecs',contractVersion:1,
-    olderNote:()=>false,olderReview:()=>false,dailyRecord:v=>v&&typeof v==='object'?{...structuredClone(v),version:1}:null,
-    // As compatibility-codecs: Support Activities under its retired title takes its own name, all else kept.
-    note:(source,key)=>{if(source&&typeof source==='object'&&Number(source.version)===3&&noteKeys.retiredSupport(source.label))return {...structuredClone(source),label:noteKeys.support.label};if(!source||typeof source!=='object'||source.deleted===true)return null;const oldKey=String(source.key||key||''),stored=legacyNoteKey(oldKey);if(!stored)return null;const label=String(source.label||(oldKey.startsWith('~deleted ')?'':oldKey)).trim();return label?{version:3,key:stored,label,text:String(source.text??''),updatedAt:String(source.updatedAt||'2026-09-01T00:00:00.000Z')}:null;},
-    noteKey:legacyNoteKey,
-    activeSession:v=>v?{id:'active',type:'activeSession',version:1,revision:Number(v.revision)||1,date:String(v.date||''),status:v.status==='suspended'?'suspended':'active',runningOn:String(v.runningOn||'inst_test'),scheduleText:String(v.scheduleText||''),snapshot:structuredClone(v.snapshot),suspendedAt:v.suspendedAt??null,updatedAt:String(v.updatedAt||'2026-09-17T10:00:00.000Z')}:null,
-    localRecoveryEnvelope:v=>v&&v.shell?{version:1,revision:Number(v.revision||v.shell.revision)||1,shell:{id:'active',type:'activeSession',version:1,revision:Number(v.revision||v.shell.revision)||1,date:String(v.shell.date||''),status:v.shell.status==='suspended'?'suspended':'active',runningOn:String(v.shell.runningOn||'inst_test'),scheduleText:String(v.shell.scheduleText||''),suspendedAt:v.shell.suspendedAt??null,updatedAt:String(v.updatedAt||v.shell.updatedAt||'2026-09-17T10:00:00.000Z')},snapshot:structuredClone(v.snapshot),updatedAt:String(v.updatedAt||v.shell.updatedAt||'2026-09-17T10:00:00.000Z')}:null,
-    protectedPreferences:v=>v&&typeof v==='object'&&Number(v.version)===1?structuredClone(v):null,
-    personalData:v=>v&&typeof v==='object'?{...structuredClone(v),version:2}:null
-  });
   const helpers=freeze({
     boundedInt:(v,{fallback=0}={})=>Number.isFinite(+v)?Math.floor(+v):fallback,boundedNumber:(v,{fallback=0}={})=>Number.isFinite(+v)?+v:fallback,
     clampText:(v,max=1e6)=>String(v??'').slice(0,max),clampEditorContent:(v,max=1e6)=>{validationCalls.clamp++;return String(v??'').slice(0,max)},editorContentWithinLimits:()=>{validationCalls.within++;return true},
@@ -116,13 +105,12 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const appMetaModule=registry.require('app-meta',1),journalModule=registry.require('repository-journals',1),notesModule=registry.require('repositories-notes',1),saveLaneModule=registry.require('save-lane',1),module=registry.require('repositories',1);
   const decisionClock=freeze({nowMs:()=>new ClockDate().getTime()});
   const pendingReviewCodec=controls.pendingReviewCodec||testPendingReviewCodec(registry.require('record-codecs',1),{dataContract:RUNTIME_DATA_CONTRACT,personalDataCodec:freeze({...personalDataCodec,normalize:value=>structuredClone(value)}),dailyRecordCodec,activeSessionCodec});
-  const metaKeys=freeze({dailyRecordMigration:'dailyRecordMigration',planDraft:'planDraft',planLibrary:'planLibrary',personalPreferences:'personalPreferences',canonicalMutationEpoch:'canonicalMutationEpoch',backupPreparationUnitPrefix:'backupPreparationUnit:',insightsDatasetRevision:'insightsDatasetRevision',dataMaintenance:'dataMaintenance',savedDayDeletionPrefix:'savedDayDeletion:',noteDeletionPrefix:'noteDeletion:',attachmentDeletionPrefix:'attachmentDeletion:',pendingReviewPrefix:'pendingReview:'});
-  const obsoleteMetaKeys=freeze(['reflectionDraftMigration.v1','repositoryMaintenancePending.v1']);
+  const metaKeys=freeze({planDraft:'planDraft',planLibrary:'planLibrary',personalPreferences:'personalPreferences',canonicalMutationEpoch:'canonicalMutationEpoch',backupPreparationUnitPrefix:'backupPreparationUnit:',insightsDatasetRevision:'insightsDatasetRevision',dataMaintenance:'dataMaintenance',savedDayDeletionPrefix:'savedDayDeletion:',noteDeletionPrefix:'noteDeletion:',attachmentDeletionPrefix:'attachmentDeletion:',pendingReviewPrefix:'pendingReview:'});
   const gateway=appMetaModule.create(freeze({indexedDb:freeze({transaction:indexedDb.transaction,strictTransaction:indexedDb.strictTransaction,get:indexedDb.get,getAll:indexedDb.getAll}),store:'meta',registry:APP_META_RUNTIME_REGISTRY}));
   gateway.registerValidators('repositories',module.createAppMetaValidators(freeze({limits,dataContract,personalDataCodec,pendingReviewCodec,helpers:freeze({isValidIsoDate:helpers.isValidIsoDate,isNoteId:noteKeys.isId,isNoteKey:noteKeys.isKey,normalizeTimestamp:helpers.normalizeTimestamp,sameDataValue:helpers.sameDataValue})})));
   gateway.registerValidators('journals',journalModule.createAppMetaValidators(freeze({limits})));
-  const repositoryMeta=gateway.bind('repositories'),compatibilityMeta=gateway.bind('compatibility'),journalMeta=gateway.bind('repository-journals');
+  const repositoryMeta=gateway.bind('repositories'),journalMeta=gateway.bind('repository-journals');
   const journals=journalModule.create(freeze({appMeta:journalMeta,limits,helpers:freeze({clampText:helpers.clampText}),clock:decisionClock}));
-  const app=module.createAppData(freeze({local,indexedDb,appMeta:repositoryMeta,compatibilityAppMeta:compatibilityMeta,installationIdentity,dailyRecordCodec,activeSessionCodec,compatibilityCodec,personalDataCodec,pendingReviewCodec,keyedRecord:KeyedRecord,journals,notesRepositoryModule:notesModule,saveLaneModule,clock:decisionClock,limits,dataContract,stores:freeze({dailyRecords:'daily',dailySummaries:'summary',notes:'area',activeSessions:'session',appMeta:'meta'}),legacyStores:freeze({syncQueue:'sync',tombstones:'tombstones'}),keys:freeze({recovery:'recovery',fallbackDailyRecords:'fallback',noteRescue:'noteRescue',deletionRecovery:'deletionRecovery',legacySyncEmergency:'syncEmergency'}),legacyKeys:freeze({notesPending:'pending',noteRecoveryPrefix:'areaNoteRecovery.v1:'}),metaKeys,obsoleteMetaKeys,activeSessionId:'active',helpers,hooks}));
-  return {app,appMetaGateway:gateway,repositoryMeta,compatibilityMeta,journalMeta,indexedDb,localWrites,idbWrites,idbReads,idbDurability,validationCalls,sharedLocal,stores};
+  const app=module.createAppData(freeze({local,indexedDb,appMeta:repositoryMeta,installationIdentity,dailyRecordCodec,activeSessionCodec,personalDataCodec,pendingReviewCodec,keyedRecord:KeyedRecord,journals,notesRepositoryModule:notesModule,saveLaneModule,clock:decisionClock,limits,dataContract,stores:freeze({dailyRecords:'daily',dailySummaries:'summary',notes:'area',activeSessions:'session',appMeta:'meta'}),keys:freeze({recovery:'recovery',fallbackDailyRecords:'fallback',noteRescue:'noteRescue',deletionRecovery:'deletionRecovery'}),metaKeys,activeSessionId:'active',helpers,hooks}));
+  return {app,appMetaGateway:gateway,repositoryMeta,journalMeta,indexedDb,localWrites,idbWrites,idbReads,idbDurability,validationCalls,sharedLocal,stores};
 }

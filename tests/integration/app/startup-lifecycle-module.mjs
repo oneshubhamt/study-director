@@ -39,7 +39,7 @@ const coordinator=Startup.createCoordinator(Object.freeze({
     notes:fn('flush-notes'),deletionRecovery:fn('flush-deletion-recovery')
   }),
   startup:Object.freeze({
-    migrateCompatibility:asyncFn('compatibility-migration',1),restoreAppearance:fn('appearance'),bindDom:fn('bind-dom'),
+    censusData:asyncFn('data-census',1),restoreAppearance:fn('appearance'),bindDom:fn('bind-dom'),
     recoverInterruptedLibraryClear:asyncFn('library-clear-recovery',2),
     recoverInterruptedRestore:asyncFn('restore-recovery',2),
     loadNotes:asyncFn('notes-load',4),hydrateDrafts:fn('drafts'),previewPlan:fn('preview'),
@@ -47,7 +47,7 @@ const coordinator=Startup.createCoordinator(Object.freeze({
     renderRecovery:fn('recovery'),checkBackup:fn('backup-check'),showEmptyIfNeeded:fn('empty'),
     openInitialTab:fn('initial-tab'),restoreActiveSession:asyncFn('session-restore',2),
     showNameSetup:fn('name'),inspectStorage:asyncFn('storage-inspect',1),
-    reconcileLifecycle:fn('lifecycle-reconcile'),applyLaunchRoute:fn('launch-route'),verifyReady:asyncFn('canonical-verification',1),markReady:fn('startup-ready'),
+    reconcileLifecycle:fn('lifecycle-reconcile'),applyLaunchRoute:fn('launch-route'),markReady:fn('startup-ready'),
     reportFailure:fn('startup-failure'),clearFailure:fn('startup-failure-clear')
   })
 }));
@@ -61,16 +61,16 @@ assert.equal(status.failed,false);
 assert.equal(status.failedStage,'');
 assert.equal(status.lastFailure,null);
 const index=name=>sequence.indexOf(name);
-assert.ok(index('ownership-evaluate:end')<index('compatibility-migration:begin'));
-assert.ok(index('compatibility-migration:end')<index('library-clear-recovery:begin'));
+assert.ok(index('ownership-evaluate:end')<index('data-census:begin'));
+assert.ok(index('data-census:end')<index('library-clear-recovery:begin'));
 assert.ok(index('library-clear-recovery:end')<index('restore-recovery:begin'));
 assert.ok(index('restore-recovery:end')<index('notes-load:begin'));
 assert.ok(index('notes-load:end')<index('session-restore:begin'));
 assert.ok(index('session-restore:end')<index('lifecycle-reconcile'));
 assert.ok(index('lifecycle-reconcile')<index('launch-route'));
 assert.ok(index('launch-route')<index('name'));
-assert.deepEqual(status.completedStages.slice(-7),['active-session-restore','lifecycle-reconcile','launch-route','name-setup','storage-inspection','canonical-verification','startup-ready']);
-assert.ok(index('canonical-verification:end')<index('startup-ready'));
+assert.deepEqual(status.completedStages.slice(-6),['active-session-restore','lifecycle-reconcile','launch-route','name-setup','storage-inspection','startup-ready']);
+assert.ok(index('storage-inspect:end')<index('startup-ready'));
 
 coordinator.flush();
 assert.ok(index('flush-plan')<index('flush-preferences'));
@@ -113,12 +113,11 @@ const failureCoordinator=Startup.createCoordinator(Object.freeze({
   timer:Object.freeze({stopPresentation:()=>true,syncAfterWake:()=>true}),
   flushers:Object.freeze({planDraft:()=>true,preferences:()=>true,activeSession:()=>true,notes:()=>true,deletionRecovery:()=>true}),
   startup:Object.freeze({
-    migrateCompatibility:async()=>true,restoreAppearance:()=>true,bindDom:()=>true,recoverInterruptedLibraryClear:async()=>true,recoverInterruptedRestore:async()=>true,
+    censusData:async()=>true,restoreAppearance:()=>true,bindDom:()=>true,recoverInterruptedLibraryClear:async()=>true,recoverInterruptedRestore:async()=>true,
     loadNotes:async()=>true,hydrateDrafts:()=>true,previewPlan:()=>true,startClock:()=>true,startHeaderClock:()=>true,refreshCoreUi:()=>true,renderRecovery:()=>true,
     checkBackup:()=>true,showEmptyIfNeeded:()=>true,openInitialTab:()=>true,restoreActiveSession:async()=>true,showNameSetup:()=>true,inspectStorage:async()=>true,
     reconcileLifecycle:()=>true,applyLaunchRoute:()=>true,
-    verifyReady:async()=>{if(failVerification)throw new Error('canonical proof failed');return Object.freeze({canonical:true});},
-    markReady:()=>{failureSequence.push('ready');return true;},reportFailure:failure=>{failureSequence.push(`failure:${failure.stage}`);return true;},
+    markReady:()=>{if(failVerification)throw new Error('ready failed');failureSequence.push('ready');return true;},reportFailure:failure=>{failureSequence.push(`failure:${failure.stage}`);return true;},
     clearFailure:()=>{failureSequence.push('clear');return true;}
   })
 }));
@@ -127,13 +126,13 @@ let failureStatus=failureCoordinator.status();
 assert.equal(failureStatus.fullyInitialized,false);
 assert.equal(failureStatus.state,'failed');
 assert.equal(failureStatus.failed,true);
-assert.equal(failureStatus.failedStage,'canonical-verification');
+assert.equal(failureStatus.failedStage,'startup-ready');
 assert.equal(failureStatus.lastFailure.code,'STARTUP_INITIALIZATION_FAILED');
 assert.equal(primary2,false,'fatal startup failure must relinquish mutation ownership');
 const evaluationsAtFailure=failureEvaluations;failureWinListeners.get('focus')?.();await drain();
 assert.equal(failureEvaluations,evaluationsAtFailure,'focus/visibility wake reconciliation must not reacquire ownership while startup is failed');
 assert.equal(primary2,false);
-assert.ok(failureSequence.includes('failure:canonical-verification'));
+assert.ok(failureSequence.includes('failure:startup-ready'));
 assert.equal(failureSequence.includes('ready'),false);
 failVerification=false;
 failureCoordinator.start();await drain(96);

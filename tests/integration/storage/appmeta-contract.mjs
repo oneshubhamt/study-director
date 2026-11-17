@@ -26,7 +26,7 @@ proof=await app.metadata.verifyCurrent();
 assert.equal(proof.ok,true,'current maintenance metadata must validate exactly');
 stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{...maintenance,version:5},updatedAt:maintenance.completedAt});
 proof=await app.metadata.verifyCurrent();
-assert.equal(proof.ok,false,'an older maintenance version is not current; the compatibility host retires it');
+assert.equal(proof.ok,false,'an older maintenance version is not current; it cannot prove completed maintenance');
 
 stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{...maintenance,staleField:true},updatedAt:maintenance.completedAt});
 proof=await app.metadata.verifyCurrent();
@@ -83,38 +83,6 @@ assert.equal(proof.ok,false);
 assert.ok(proof.issues.some(issue=>issue==='unclassified:unclassified'));
 
 console.log(JSON.stringify({status:'PASS',suite:'appmeta-gateway',ownerRestrictions:true,boundedPrefixReads:true,transactionView:true,failClosed:true},null,2));
-}
-
-{ // appmeta-insights-envelope
-const key='insightsDatasetRevision';
-const updatedAt='2026-09-16T10:00:00.000Z';
-const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map([
-  [key,{key,format:'study-director.insights-dataset-revision',version:1,counter:7,updatedAt}]
-])};
-const {app}=createHarness(new Map(),stores);
-
-const before=await app.compatibility.verifyInsightsRevisionEnvelope();
-assert.equal(before.ok,false,'legacy direct appMeta revision row must not count as canonical');
-assert.equal(before.legacy,true);
-
-const migrated=await app.compatibility.migrateInsightsRevisionEnvelope();
-assert.equal(migrated.status,'migrated');
-const row=stores.meta.get(key);
-assert.deepEqual(Object.keys(row).sort(),['key','updatedAt','value','version']);
-assert.equal(row.key,key);
-assert.equal(row.version,1);
-assert.equal(row.updatedAt,updatedAt);
-assert.deepEqual(Object.keys(row.value).sort(),['counter','format','updatedAt','version']);
-assert.equal(row.value.format,'study-director.insights-dataset-revision');
-assert.equal(row.value.version,2);
-assert.equal(row.value.counter,7);
-assert.equal(row.value.updatedAt,updatedAt);
-
-const after=await app.compatibility.verifyInsightsRevisionEnvelope();
-assert.equal(after.ok,true);
-assert.equal(after.legacy,false);
-
-console.log(JSON.stringify({status:'PASS',suite:'appmeta-insights-envelope',migrated,after},null,2));
 }
 
 { // personal-preferences-resilience

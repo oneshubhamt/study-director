@@ -205,9 +205,10 @@ registry.define('device-folder-storage',1,()=>{
     // An upload lock says it renews: its upload rewrites it while it runs, so
     // one left unrewritten too long was abandoned (see publicationStaleMs).
     const lockBody=(kind,id)=>{const spec=LOCKS[kind];return new Blob([JSON.stringify({format:spec.format,version:1,id,startedAt:iso(nowMs()),...(kind==='publication'?{renews:true}:{})})],{type:'application/json'});};
-    async function lockRenews(kind,file){
-      if(kind!=='publication')return false;
-      try{const parsed=JSON.parse(await bounded(file.text(),'Device Folder lock contents'));return parsed&&parsed.renews===true;}catch{return false;}
+    async function readLock(kind,file,id){
+      const value=JSON.parse(await bounded(file.text(),'Device Folder lock contents'));
+      if(!value||value.format!==LOCKS[kind].format||value.version!==1||value.id!==id||!Number.isFinite(Date.parse(String(value.startedAt||'')))||(kind==='publication'&&value.renews!==true))throw new Error('Device Folder lock could not be verified. Retry the backup.');
+      return value;
     }
     async function beginLock(kind){
       const spec=LOCKS[kind],id=spec.prefix+globalThis.crypto.randomUUID().replace(/-/gu,''),name=id+spec.suffix,{objects}=await directories();
@@ -220,7 +221,7 @@ registry.define('device-folder-storage',1,()=>{
       for(const [name,handle] of await entries(objects,'Device Folder lock folder',null)){
         const match=spec.pattern.exec(String(name));if(!match)continue;
         if(!handle||handle.kind!=='file'){ignored+=1;continue;}
-        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true,renews:await lockRenews(kind,file)}));}catch{ignored+=1;}
+        try{const file=await bounded(handle.getFile(),`Device Folder lock ${name}`);await readLock(kind,file,match[1]);items.push(freeze({kind,id:match[1],name:String(name),createdAt:iso(file.lastModified),sameDevice:true,renews:kind==='publication'}));}catch{ignored+=1;}
       }
       return freeze({items:freeze(items),overflow:false,ignored});
     }
@@ -228,10 +229,9 @@ registry.define('device-folder-storage',1,()=>{
       const spec=LOCKS[kind],id=String(lease&&lease.id||''),name=String(lease&&lease.name||'');
       if(!spec.pattern.test(name)||name!==id+spec.suffix)throw new Error('Device Folder lock is invalid.');
       const {objects}=await directories(),file=await fileOrNull(objects,name);if(!file)throw new Error('Device Folder lock disappeared. Retry the backup.');
-      let parsed=null;try{parsed=JSON.parse(await file.text());}catch{}
-      if(!parsed||parsed.format!==spec.format||Number(parsed.version)!==1||parsed.id!==id)throw new Error('Device Folder lock could not be verified. Retry the backup.');
+      await readLock(kind,file,id);
       // A renewing upload lock must be renewed well before cleanup could take it for abandoned.
-      const age=nowMs()-Number(file.lastModified||0),window=kind==='publication'?(parsed.renews===true?limits.publicationStaleMs-limits.publicationRenewMs:limits.publicationMaxAgeMs-limits.publicationAssertionMarginMs):limits.maintenanceMaxAgeMs-limits.maintenanceAssertionMarginMs;
+      const age=nowMs()-Number(file.lastModified||0),window=kind==='publication'?(limits.publicationStaleMs-limits.publicationRenewMs):limits.maintenanceMaxAgeMs-limits.maintenanceAssertionMarginMs;
       if(!Number.isFinite(age)||age<0||age>=window)throw new Error('Device Folder lock is too old to continue safely. Retry the backup.');
       return true;
     }

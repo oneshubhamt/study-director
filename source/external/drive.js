@@ -642,13 +642,13 @@
   function validPublicationMetadata(file,parent){
     const properties=file&&file.appProperties||{},id=String(properties[REPOSITORY_ID_MARKER]||'');
     return !!(file&&file.id&&publicationIdValid(id)&&file.name===publicationFilename(id)&&file.ownedByMe===true&&file.shared===false&&file.trashed===false&&exactParent(file,parent)&&
-      properties[REPOSITORY_MARKER.key]===REPOSITORY_MARKER.value&&properties[REPOSITORY_VERSION_MARKER]===REPOSITORY_VERSION&&properties[REPOSITORY_KIND_MARKER]===PUBLICATION_KIND);
+      properties[REPOSITORY_MARKER.key]===REPOSITORY_MARKER.value&&properties[REPOSITORY_VERSION_MARKER]===REPOSITORY_VERSION&&properties[REPOSITORY_KIND_MARKER]===PUBLICATION_KIND&&properties[PUBLICATION_RENEWS_MARKER]==='1');
   }
   function publicationDescriptor(file,parent){
     if(!validPublicationMetadata(file,parent))throw noRetry(new Error('Google Drive returned unsafe Study Director publication metadata.'));
     const id=String(file.appProperties[REPOSITORY_ID_MARKER]),createdAt=String(file.createdTime||''),device=thisDevice();
     const writer=String(file.appProperties[PUBLICATION_DEVICE_MARKER]||'');
-    return Object.freeze({kind:PUBLICATION_KIND,id,device:DEVICE_PATTERN.test(writer)?writer:'',sameDevice:!!device&&writer===device,renews:file.appProperties[PUBLICATION_RENEWS_MARKER]==='1',startedAt:Number.isFinite(Date.parse(String(file.appProperties[PUBLICATION_STARTED_MARKER]||'')))?new Date(Date.parse(file.appProperties[PUBLICATION_STARTED_MARKER])).toISOString():createdAt,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
+    return Object.freeze({kind:PUBLICATION_KIND,id,device:DEVICE_PATTERN.test(writer)?writer:'',sameDevice:!!device&&writer===device,renews:true,startedAt:Number.isFinite(Date.parse(String(file.appProperties[PUBLICATION_STARTED_MARKER]||'')))?new Date(Date.parse(file.appProperties[PUBLICATION_STARTED_MARKER])).toISOString():createdAt,remoteId:String(file.id),verificationScope:coordinationVerificationScope(parent),name:String(file.name),createdAt,modifiedAt:String(file.modifiedTime||''),expiresAt:Number.isFinite(Date.parse(createdAt))?new Date(Date.parse(createdAt)+PUBLICATION_MAX_AGE_MS).toISOString():''});
   }
   function trustedCoordinationRemoteId(ref,parent,kind,idValid){
     const id=String(ref&&ref.id||''),remoteId=String(ref&&ref.remoteId||''),scope=String(ref&&ref.verificationScope||'');

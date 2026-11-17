@@ -14,7 +14,7 @@ Start here. Read the page for the area you are changing; the code is the final a
 
 | Page | What it covers |
 |---|---|
-| [Data and storage](areas/data-and-storage.md) | IndexedDB, OPFS and browser storage; profiles and devices; record names; data a build cannot read; emergency copies; browser data clearing; compatibility and migration |
+| [Data and storage](areas/data-and-storage.md) | IndexedDB, OPFS and browser storage; profiles and devices; record names; data a build cannot read; emergency copies; browser data clearing; canonical-only formats and unsupported-data protection |
 | [Backup and sync](areas/backup-and-sync.md) | The backup engine, Device Folder and Google Drive, Version History, restore and Combine, retention, sync between devices and its decisions, standalone backup files, integrity |
 | [Study session](areas/study-session.md) | The Active Session and timer, which device runs it, Continue Here and hand-off |
 | [Notes](areas/notes.md) | What notes do and why, saving, identity, links, tags, Recently deleted, clashes, the editor (Wordgard) |
