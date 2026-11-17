@@ -1885,11 +1885,11 @@ export type InsightsEngineDependencies=Readonly<{classifyTaskOutcome:OutcomeClas
   }
   function practiceRawRunAuditReason(value:unknown){
     if(!isRecordObject(value))return 'Malformed saved run';
-    const raw=value,rawUnits=Array.isArray(raw.unitMs)?raw.unitMs.filter(item=>Number.isFinite(Number(item))&&Number(item)>0):[];
+    const raw=value,rawUnits=Array.isArray(raw['unitMs'])?raw['unitMs'].filter(item=>Number.isFinite(Number(item))&&Number(item)>0):[];
     if(!rawUnits.length)return 'No completed units';
-    if(!Number.isFinite(Number(raw.targetMs))||Number(raw.targetMs)<=0)return 'Invalid or missing target';
-    const plan=isRecordObject(raw.unitPlan)?raw.unitPlan:null;
-    if(plan&&canonical(plan.mode)==='marks'&&(!Number.isFinite(Number(raw.sessionTargetMs))||Number(raw.sessionTargetMs)<=0))return 'Marks plan missing total time';
+    if(!Number.isFinite(Number(raw['targetMs']))||Number(raw.targetMs)<=0)return 'Invalid or missing target';
+    const plan=isRecordObject(raw['unitPlan'])?raw['unitPlan']:null;
+    if(plan&&canonical(plan['mode'])==='marks'&&(!Number.isFinite(Number(raw['sessionTargetMs']))||Number(raw.sessionTargetMs)<=0))return 'Marks plan missing total time';
     return null;
   }
   function practicePositionBandIndex(index:number,total:number){
