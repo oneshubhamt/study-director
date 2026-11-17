@@ -729,7 +729,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   }
   function evidenceMetadata(meta:EvidenceMetadataInput={}){
     const confidence=meta&&meta.confidence&&typeof meta.confidence==='object'?meta.confidence:null;
-    const limitations=(Array.isArray(meta&&meta.limitations)?meta.limitations:[])
+    const limitationSource=meta.limitations;
+    const limitations=(Array.isArray(limitationSource)?limitationSource:[])
       .map(value=>String(value||'').trim()).filter(Boolean);
     return Object.freeze({
       level:confidence&&confidence.key||null,
@@ -1090,7 +1091,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       .sort((a,b)=>a-b);
     let longest=0,latest=0,current=0;
     days.forEach((day,index)=>{
-      current=(index===0||day===days[index-1]+1)?current+1:1;
+      current=(index===0||day===days[index-1]!+1)?current+1:1;
       longest=Math.max(longest,current);
       latest=current;
     });
@@ -1103,8 +1104,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       latest,
       longest,
       dayCount:days.length,
-      first:days.length?dateFromDay(days[0]):null,
-      last:days.length?dateFromDay(days[days.length-1]):null,
+      first:days.length?dateFromDay(days[0]!):null,
+      last:days.length?dateFromDay(days[days.length-1]!):null,
       daysSinceLast,
       isCurrent
     };
@@ -1242,7 +1243,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       const historicalEvidence=Math.min(1,(Math.min(historicalPlanned,300)/300)*.55+(Math.min(historicalDays,5)/5)*.45);
       const evidenceStrength=Math.max(currentEvidence,historicalEvidence);
       const staleScale=Math.max(7,Math.min(21,windowSpan*.45));
-      const recencyPressure=neverStudied?100:Math.min(100,(daysSinceLast/staleScale)*100);
+      const recencyPressure=neverStudied?100:Math.min(100,(num(daysSinceLast)/staleScale)*100);
       const watchOutputShare=pct0(row.watchCompleted,totalWatchCompleted);
       const watchActualShare=pct0(row.watchActual,totalWatchActual);
       const watchCompletion=pct(row.watchCompleted,row.watchPlanned);
@@ -1589,7 +1590,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const plannedSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.planned)).map(d=>({x:d.day,y:d.planned})));
     const completionSd=stdev(completionValues);
     const completionSdRounded=completionSd===null?null:round(completionSd,1);
-    const qualityCorrelation=correlation(qualityPairs.map(d=>d.quality),qualityPairs.map(d=>d.completion));
+    const qualityCorrelation=correlation(qualityPairs.map(d=>d.quality!),qualityPairs.map(d=>d.completion!));
     return {
       completionSlopePerWeek:completionSlope===null?null:round(completionSlope*7,1),
       actualSlopePerWeek:actualSlope===null?null:Math.round(actualSlope*7),
