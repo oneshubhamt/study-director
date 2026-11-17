@@ -130,7 +130,7 @@ type InteractionCells=Readonly<{a:InteractionCell;b:InteractionCell;c:Interactio
 type InteractionStability=Readonly<{ready:boolean;split?:string;earlyEffect:number|null;lateEffect:number|null;reason:string|null}>;
 type InteractionMeta=Readonly<{dedupeKey?:string;stability?:InteractionStability}>;
 type InteractionCandidate=Readonly<{key:string;label:string;cells:InteractionCells;ready:boolean;effect:number|null;meaningful:boolean;confidence:Confidence;text:string;dedupeKey?:string;stability:InteractionStability}>;
-type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:number;start?:string|null;end?:string|null;modelRecords?:number;modelStart?:string|null;modelEnd?:string|null;horizonDays?:number;fitness?:FitnessResult|null}>;
+type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:number;start?:string|null;end?:string|null;modelRecords?:number;modelStart?:string|null;modelEnd?:string|null;horizonDays?:number;fitness?:Readonly<{performanceState:FitnessPerformanceState}>|null}>;
 
 (function(global:typeof globalThis){
   'use strict';
@@ -4128,6 +4128,38 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     });
   })(InsightsConfig,InsightsPrimitives,InsightsPacerEvidence);
 
+  type InsightWindowLabelInput=Readonly<{summary?:string;label?:string}>;
+type InsightsBuildOptions=Readonly<{
+  currentStudyDate?:string|null;subjectReferenceSummaries?:readonly InsightSummary[];subjectReferenceRevision?:string|null;
+  streakSummaries?:readonly InsightSummary[];windowKey?:string|null;windowDays?:number|null;windowTo?:string|null;
+  windowLabel?:string|null;allRecordCount?:number|null;modelRecords?:readonly InsightRecord[];
+}>;
+type HistoryContextOptions=Readonly<{currentStudyDate:string;subjectReferenceSummaries?:readonly InsightSummary[]}>;
+type PreparedInsights=Readonly<{records:readonly InsightRecord[];revision:string}>;
+type HistoryOverview=Readonly<{planned:number;completed:number;actual:number;completion:number|null;averageQuality:number|null}>;
+type HistoryDynamicsModel=Omit<DynamicsModelInput,'overview'>&Readonly<{
+  overview:HistoryOverview;
+  interruption:ReturnType<(typeof InsightsAnalytics)['computeInterruption']>;
+  sampleAudit:ReturnType<(typeof InsightsAnalytics)['computeSampleAudit']>;
+  schedule:ScheduleSummary;
+}>;
+type AllHistoryContext=Readonly<{modelEvidence:EvidenceIndex;dynamicsModel:HistoryDynamicsModel;performanceState:FitnessPerformanceState;historyMeta:DynamicsHistoryMeta}>;
+type DetailedAllHistoryInsights=Readonly<{dynamics:ReturnType<(typeof InsightsDynamics)['computeStudyDynamics']>;fitness:FitnessResult}>;
+type CompactFitnessResult=ReturnType<(typeof InsightsStudyFitness)['compactFitnessResult']>;
+type CompactAllHistoryInsights=Readonly<{dynamics:ReturnType<(typeof InsightsDynamics)['computeStudyDynamics']>;fitness:CompactFitnessResult}>;
+type ReusableInsights=Readonly<{
+  evidence:EvidenceIndex;daily:readonly DailySeriesRow[];overview:HistoryOverview;subjects:readonly SubjectInsight[];
+  advanced:ReturnType<(typeof InsightsAnalytics)['computeAdvanced']>;
+  interruption:ReturnType<(typeof InsightsAnalytics)['computeInterruption']>;
+  sampleAudit:ReturnType<(typeof InsightsAnalytics)['computeSampleAudit']>;
+  schedule:ScheduleSummary;
+}>;
+type InsightsEngineDependencies=Readonly<{classifyTaskOutcome:OutcomeClassifier;summarizePracticeRuns:PracticeRunSummarizer}>;
+type HistoryCacheEntry={
+  prepared:PreparedInsights;contextOptions:HistoryContextOptions;compact:CompactAllHistoryInsights;
+  reusable:AllHistoryContext|null;audit:DetailedAllHistoryInsights|null;
+};
+
   // M8.11 MODEL ENGINE COMPONENT
   const InsightsModelEngine=((Config:typeof InsightsConfig,Primitives:typeof InsightsPrimitives,Records:typeof InsightsRecords,Analytics:typeof InsightsAnalytics,PacerEvidence:typeof InsightsPacerEvidence,StudyFitness:typeof InsightsStudyFitness,Dynamics:typeof InsightsDynamics,Coach:typeof InsightsCoach)=>{
     const {
@@ -4159,45 +4191,45 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     const {
       computeMilestones,selectSignals
     }=Coach;
-  function createDirectionalBasis(records,currentStudyDate,windowOption={}){
-    const rows=Array.isArray(records)?records:[];
+  function createDirectionalBasis(records:readonly InsightRecord[],currentStudyDate:string|null|undefined,windowOption:InsightWindowLabelInput={}):DirectionalBasis{
+    const rows=records;
     const currentDay=isIsoDate(currentStudyDate)?dateDay(currentStudyDate):null;
-    const latestRecordDay=rows.length?dateDay(rows[rows.length-1].date):null;
-    const toDay=Number.isFinite(currentDay)&&Number.isFinite(latestRecordDay)
+    const latestRecordDay=rows.length?dateDay(rows[rows.length-1]!.date):null;
+    const toDay=isFiniteNumber(currentDay)&&isFiniteNumber(latestRecordDay)
       ?Math.max(currentDay,latestRecordDay)
-      :Number.isFinite(currentDay)?currentDay:latestRecordDay;
-    const fromDay=Number.isFinite(toDay)?toDay-DIRECTIONAL_TREND_HORIZON_DAYS+1:null;
-    const recordCount=Number.isFinite(fromDay)?rows.filter(record=>{const day=dateDay(record.date);return Number.isFinite(day)&&day>=fromDay&&day<=toDay;}).length:rows.length;
+      :isFiniteNumber(currentDay)?currentDay:latestRecordDay;
+    const fromDay=isFiniteNumber(toDay)?toDay-DIRECTIONAL_TREND_HORIZON_DAYS+1:null;
+    const recordCount=isFiniteNumber(fromDay)&&isFiniteNumber(toDay)?rows.filter(record=>{const day=dateDay(record.date);return isFiniteNumber(day)&&day>=fromDay&&day<=toDay;}).length:rows.length;
     const capped=recordCount<rows.length;
     return Object.freeze({
       key:capped?'latest-two-years':'selected-window',
       label:capped?'Latest 2 years':String(windowOption.summary||windowOption.label||'Selected window'),
       horizonDays:DIRECTIONAL_TREND_HORIZON_DAYS,fromDay,toDay,
-      from:Number.isFinite(fromDay)?dateFromDay(fromDay):null,to:Number.isFinite(toDay)?dateFromDay(toDay):null,
+      from:isFiniteNumber(fromDay)?dateFromDay(fromDay):null,to:isFiniteNumber(toDay)?dateFromDay(toDay):null,
       capped,recordCount,selectedRecordCount:rows.length
     });
   }
-  function filterDailyForDirectionalBasis(daily,basis){
-    if(!basis||!Number.isFinite(basis.fromDay)||!Number.isFinite(basis.toDay))return Array.isArray(daily)?daily:[];
-    return (Array.isArray(daily)?daily:[]).filter(row=>Number.isFinite(row&&row.day)&&row.day>=basis.fromDay&&row.day<=basis.toDay);
+  function filterDailyForDirectionalBasis(daily:readonly DailySeriesRow[],basis:DirectionalBasis):DailySeriesRow[]{
+    if(!isFiniteNumber(basis.fromDay)||!isFiniteNumber(basis.toDay))return [...daily];
+    return daily.filter(row=>isFiniteNumber(row.day)&&row.day>=basis.fromDay!&&row.day<=basis.toDay!);
   }
-  function createAllHistoryContext(modelRecords,options,classifyTaskOutcome){
+  function createAllHistoryContext(modelRecords:readonly InsightRecord[],options:HistoryContextOptions,classifyTaskOutcome:OutcomeClassifier):AllHistoryContext{
     const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
     const trendBasis=createDirectionalBasis(modelRecords,currentStudyDate,{summary:EVIDENCE_BASIS.history});
-    const boundedRecords=Number.isFinite(trendBasis.fromDay)&&Number.isFinite(trendBasis.toDay)
-      ?modelRecords.filter(record=>{const day=dateDay(record.date);return Number.isFinite(day)&&day>=trendBasis.fromDay&&day<=trendBasis.toDay;})
+    const boundedRecords=isFiniteNumber(trendBasis.fromDay)&&isFiniteNumber(trendBasis.toDay)
+      ?modelRecords.filter(record=>{const day=dateDay(record.date);return isFiniteNumber(day)&&day>=trendBasis.fromDay!&&day<=trendBasis.toDay!;})
       :[];
     const modelEvidence=createEvidenceIndex(boundedRecords,classifyTaskOutcome);
     const modelDaily=computeDailySeries(modelEvidence);
     const modelTrendDaily=filterDailyForDirectionalBasis(modelDaily,trendBasis);
     const modelSubjects=computeSubjects(modelEvidence,currentStudyDate,options.subjectReferenceSummaries);
-    const modelQuality=boundedRecords.map(record=>Number(record.studyQuality)).filter(value=>Number.isFinite(value)&&value>0);
-    const dynamicsModel={
+    const modelQuality=boundedRecords.map(record=>Number(record.studyQuality)).filter(value=>isFiniteNumber(value)&&value>0);
+    const dynamicsModel:HistoryDynamicsModel={
       windowLabel:'Latest 2 years',recordCount:boundedRecords.length,currentStudyDate,trendBasis,
       calendarRange:{start:boundedRecords[0]?.date||null,end:boundedRecords[boundedRecords.length-1]?.date||null},daily:modelDaily,
       overview:{
         planned:rowsPlanned(modelEvidence.work),completed:rowsCompleted(modelEvidence.work),actual:rowsActual(modelEvidence.work),
-        completion:pct(rowsCompleted(modelEvidence.work),rowsPlanned(modelEvidence.work)),averageQuality:modelQuality.length?round(mean(modelQuality)):null
+        completion:pct(rowsCompleted(modelEvidence.work),rowsPlanned(modelEvidence.work)),averageQuality:modelQuality.length?round(mean(modelQuality)!):null
       },
       subjects:modelSubjects,advanced:computeAdvanced(modelDaily,modelTrendDaily),interruption:computeInterruption(modelEvidence),
       sampleAudit:computeSampleAudit(modelEvidence),schedule:computeScheduleSummary(boundedRecords)
@@ -4205,7 +4237,7 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     const performanceState=computeFitnessPerformanceState(dynamicsModel,modelEvidence);
     const historyMeta={
       records:modelRecords.length,
-      workBlocks:modelRecords.reduce((total,record)=>total+(Array.isArray(record&&record.tasks)?record.tasks.filter(task=>task&&task.kind==='work').length:0),0),
+      workBlocks:modelRecords.reduce((total,record)=>total+(record.tasks??[]).filter(task=>task.kind==='work').length,0),
       start:modelRecords[0]?.date||null,end:modelRecords[modelRecords.length-1]?.date||null,
       modelRecords:boundedRecords.length,modelStart:boundedRecords[0]?.date||null,modelEnd:boundedRecords[boundedRecords.length-1]?.date||null,
       horizonDays:DIRECTIONAL_TREND_HORIZON_DAYS,capped:boundedRecords.length<modelRecords.length,
@@ -4213,82 +4245,92 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     };
     return Object.freeze({modelEvidence,dynamicsModel,performanceState,historyMeta});
   }
-  function buildAllHistoryInsights(context,detail=false){
+  function buildAllHistoryInsights(context:AllHistoryContext,detail:false):CompactAllHistoryInsights;
+  function buildAllHistoryInsights(context:AllHistoryContext,detail:true):DetailedAllHistoryInsights;
+  function buildAllHistoryInsights(context:AllHistoryContext,detail:boolean):CompactAllHistoryInsights|DetailedAllHistoryInsights{
     const {modelEvidence,dynamicsModel,performanceState,historyMeta}=context;
     const dynamics=computeStudyDynamics(dynamicsModel,modelEvidence,historyMeta,detail);
     const fitness=computeStudyFitness({...dynamicsModel,dynamics},modelEvidence,{performanceState});
-    return Object.freeze({dynamics,fitness:detail?fitness:compactFitnessResult(fitness)});
+    return detail?Object.freeze({dynamics,fitness}):Object.freeze({dynamics,fitness:compactFitnessResult(fitness)});
   }
-  function buildInsightsFromCanonical(records,options,allHistory,classifyTaskOutcome,summarizePracticeRuns,reusable=null){
-    const evidence=reusable&&reusable.evidence||createEvidenceIndex(records,classifyTaskOutcome);
+  function buildInsightsFromCanonical(records:readonly InsightRecord[],options:InsightsBuildOptions,allHistory:CompactAllHistoryInsights,classifyTaskOutcome:OutcomeClassifier,summarizePracticeRuns:PracticeRunSummarizer,reusable:ReusableInsights|null=null){
+    const evidence=reusable?.evidence??createEvidenceIndex(records,classifyTaskOutcome);
     const work=evidence.work;
     const planned=reusable?.overview?.planned??rowsPlanned(work),completed=reusable?.overview?.completed??rowsCompleted(work),actual=reusable?.overview?.actual??rowsActual(work);
-    const quality=reusable?.overview?null:records.map(r=>Number(r.studyQuality)).filter(v=>Number.isFinite(v)&&v>0);
+    const quality:number[]=reusable?.overview?[]:records.map(r=>Number(r.studyQuality)).filter(v=>isFiniteNumber(v)&&v>0);
     const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
     const windowEndDay=isIsoDate(options.windowTo)?dateDay(options.windowTo):null;
     const currentStudyDay=dateDay(currentStudyDate);
-    const subjectReferenceDate=Number.isFinite(windowEndDay)&&Number.isFinite(currentStudyDay)
+    const subjectReferenceDate=isFiniteNumber(windowEndDay)&&isFiniteNumber(currentStudyDay)
       ? dateFromDay(Math.max(windowEndDay,currentStudyDay))
-      : Number.isFinite(windowEndDay)?dateFromDay(windowEndDay):currentStudyDate;
+      : isFiniteNumber(windowEndDay)?dateFromDay(windowEndDay):currentStudyDate;
     const streakSummaries=normalizeSummaries(options.streakSummaries);
-    const windowOption=insightWindowByKey(options.windowKey||(Number.isFinite(num(options.windowDays,null))?String(num(options.windowDays)):DEFAULT_INSIGHT_WINDOW_KEY));
+    const cleanWindowDays=num(options.windowDays,null);
+    const windowOption=insightWindowByKey(options.windowKey||(isFiniteNumber(cleanWindowDays)?String(cleanWindowDays):DEFAULT_INSIGHT_WINDOW_KEY));
     const trendBasis=createDirectionalBasis(records,currentStudyDate,windowOption);
     const analyticalRecords=trendBasis.capped
-      ?records.filter(record=>{const day=dateDay(record.date);return Number.isFinite(day)&&day>=trendBasis.fromDay&&day<=trendBasis.toDay;})
+      ?records.filter(record=>{const day=dateDay(record.date);return isFiniteNumber(day)&&isFiniteNumber(trendBasis.fromDay)&&isFiniteNumber(trendBasis.toDay)&&day>=trendBasis.fromDay&&day<=trendBasis.toDay;})
       :records;
     const analyticalEvidence=analyticalRecords===records?evidence:createEvidenceIndex(analyticalRecords,classifyTaskOutcome);
     const daily=reusable&&analyticalEvidence===evidence&&reusable.daily?reusable.daily:computeDailySeries(analyticalEvidence);
-    const trendDaily=reusable&&reusable.advanced?null:filterDailyForDirectionalBasis(daily,trendBasis);
-    const strongDays=records.reduce((count,record)=>{
+    const trendDaily=reusable?.advanced?daily:filterDailyForDirectionalBasis(daily,trendBasis);
+    const strongDays=records.reduce<number>((count,record)=>{
       const rows=recordRows(evidence,record,'work'),completion=pct(rowsCompleted(rows),rowsPlanned(rows));
-      return count+(Number.isFinite(completion)&&Math.round(completion)>=80?1:0);
+      return count+(isFiniteNumber(completion)&&Math.round(completion)>=80?1:0);
     },0);
-    const allRecordCount=Number.isFinite(num(options.allRecordCount,null))?num(options.allRecordCount):records.length;
-    const model={
-      version:PLUGIN_VERSION,windowDays:Number.isFinite(num(options.windowDays,null))?num(options.windowDays):(windowOption.days||null),
+    const cleanAllRecordCount=num(options.allRecordCount,null),allRecordCount=isFiniteNumber(cleanAllRecordCount)?cleanAllRecordCount:records.length;
+    const overview:CoachOverview={planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:reusable?.overview?reusable.overview.averageQuality:(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)};
+    const subjects=reusable?.subjects??computeSubjects(evidence,subjectReferenceDate,options.subjectReferenceSummaries);
+    const interruption=reusable?.interruption??computeInterruption(evidence);
+    const sampleAudit=reusable?.sampleAudit??computeSampleAudit(evidence);
+    const schedule=reusable?.schedule??computeScheduleSummary(records);
+    const progressEvidence=computeProgressEvidence(evidence);
+    const advanced=reusable?.advanced??computeAdvanced(daily,trendDaily);
+    const guardrails:CoachGuardrails={sample:sampleStrength(records.length,work.length),trend:trendStrength(advanced.completionSlopePerWeek,advanced.trendCompletionDayCount),variability:advanced.outputStability,progress:progressEvidenceStrength(progressEvidence)};
+    const coachModel:CoachModelInput={recordCount:records.length,windowLabel:options.windowLabel||windowOption.summary,trendBasis,overview,streak:streakSummaries.length?computeSummaryStreak(streakSummaries,currentStudyDate):computeStreak(evidence,currentStudyDate),sampleAudit,advanced,subjects,startDelays:computeStartDelayBuckets(evidence),schedule,interruption,guardrails,practice:computePracticePacer(records,summarizePracticeRuns,trendBasis),fitness:allHistory.fitness,dynamics:allHistory.dynamics};
+    const modelBase={
+      version:PLUGIN_VERSION,windowDays:isFiniteNumber(cleanWindowDays)?cleanWindowDays:(windowOption.days||null),
       windowKey:windowOption.key,windowLabel:options.windowLabel||windowOption.summary,allRecordCount,recordCount:records.length,taskCount:work.length,currentStudyDate,trendBasis,
       dateRange:{start:records[0]?.date||null,end:records[records.length-1]?.date||null},
       calendarRange:{start:analyticalRecords[0]?.date||null,end:analyticalRecords[analyticalRecords.length-1]?.date||null},
       daily,
-      overview:{planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:reusable?.overview?reusable.overview.averageQuality:(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)},
-      streak:streakSummaries.length?computeSummaryStreak(streakSummaries,currentStudyDate):computeStreak(evidence,currentStudyDate),
-      subjects:reusable?.subjects||computeSubjects(evidence,subjectReferenceDate,options.subjectReferenceSummaries),startDelays:computeStartDelayBuckets(evidence),blockOrder:computeBlockOrder(evidence),
-      interruption:reusable?.interruption||computeInterruption(evidence),frictionSources:computeFocusFrictionSources(evidence),completionSources:computeCompletionSources(evidence),progressEvidence:computeProgressEvidence(evidence),
-      outcomes:computeOutcomes(evidence),qualityEvidence:computeQualityEvidence(daily),sampleAudit:reusable?.sampleAudit||computeSampleAudit(evidence),support:computeKindSummary(evidence.support),fixed:computeKindSummary(evidence.fixed),
-      resourceMix:computeResourceMix(evidence),practice:computePracticePacer(records,summarizePracticeRuns,trendBasis),schedule:reusable?.schedule||computeScheduleSummary(records)
+      overview,
+      streak:coachModel.streak,subjects,startDelays:coachModel.startDelays,blockOrder:computeBlockOrder(evidence),
+      interruption,frictionSources:computeFocusFrictionSources(evidence),completionSources:computeCompletionSources(evidence),progressEvidence,
+      outcomes:computeOutcomes(evidence),qualityEvidence:computeQualityEvidence(daily),sampleAudit,support:computeKindSummary(evidence.support),fixed:computeKindSummary(evidence.fixed),
+      resourceMix:computeResourceMix(evidence),practice:coachModel.practice,schedule,advanced,dynamics:allHistory.dynamics,fitness:allHistory.fitness,guardrails
     };
-    model.advanced=reusable?.advanced||computeAdvanced(daily,trendDaily);
-    model.dynamics=allHistory.dynamics;
-    model.fitness=allHistory.fitness;
-    model.guardrails={sample:sampleStrength(records.length,work.length),trend:trendStrength(model.advanced.completionSlopePerWeek,model.advanced.trendCompletionDayCount),variability:model.advanced.outputStability,progress:progressEvidenceStrength(model.progressEvidence)};
-    model.milestones=computeMilestones(model);
-    model.interpretation=Object.freeze({signals:selectSignals(model)});
-    return model;
+    const milestones=computeMilestones(coachModel);
+    const interpretation=Object.freeze({signals:selectSignals(coachModel)});
+    return {...modelBase,milestones,interpretation};
   }
-  function createInsightsEngine(dependencies={}){
-    const classifyTaskOutcome=dependencies.classifyTaskOutcome;
-    const summarizePracticeRuns=dependencies.summarizePracticeRuns;
+  function createInsightsEngine(dependencies:InsightsEngineDependencies){
+    const {classifyTaskOutcome,summarizePracticeRuns}=dependencies;
     if(typeof classifyTaskOutcome!=='function')throw new Error('Study Director outcome classifier is unavailable.');
     if(typeof summarizePracticeRuns!=='function')throw new Error('Study Director Practice Pacer evidence is unavailable.');
     const PREPARED_REVISION_CACHE_LIMIT=2,HISTORY_CACHE_LIMIT=2;
-    const preparedRevisions=new Map(),historyCache=new Map();
-    const remember=(cache,key,value,limit)=>{cache.delete(key);cache.set(key,value);while(cache.size>limit)cache.delete(cache.keys().next().value);return value;};
-    const trustedRevision=value=>{
+    const preparedRevisions=new Map<string,PreparedInsights>(),historyCache=new Map<string,HistoryCacheEntry>();
+    const remember=<T>(cache:Map<string,T>,key:string,value:T,limit:number):T=>{
+      cache.delete(key);cache.set(key,value);
+      while(cache.size>limit){const oldest=cache.keys().next().value;if(oldest!==undefined)cache.delete(oldest);}
+      return value;
+    };
+    const trustedRevision=(value:unknown)=>{
       const clean=String(value||'').trim();
       return clean&&clean.length<=160?`dataset:${clean}`:'';
     };
-    const finishPrepared=(records,external='')=>{
+    const finishPrepared=(records:readonly InsightRecord[],external=''):PreparedInsights=>{
       const revision=external||recordsRevisionKey(records),cached=preparedRevisions.get(revision);
       return cached
         ?remember(preparedRevisions,revision,cached,PREPARED_REVISION_CACHE_LIMIT)
         :remember(preparedRevisions,revision,Object.freeze({records:Object.freeze(records),revision}),PREPARED_REVISION_CACHE_LIMIT);
     };
-    const prepare=(recordsInput,revisionHint=null)=>{
+    const prepare=(recordsInput:readonly InsightRecord[]|null|undefined,revisionHint:unknown=null):PreparedInsights=>{
       const external=trustedRevision(revisionHint);
       if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
       return finishPrepared(normalizeRecords(recordsInput),external);
     };
-    const prepareAsync=async(recordsInput,revisionHint=null,yieldTask=null)=>{
+    const prepareAsync=async(recordsInput:readonly InsightRecord[]|null|undefined,revisionHint:unknown=null,yieldTask:(()=>unknown|PromiseLike<unknown>)|null=null):Promise<PreparedInsights>=>{
       const external=trustedRevision(revisionHint);
       if(external&&preparedRevisions.has(external))return remember(preparedRevisions,external,preparedRevisions.get(external),PREPARED_REVISION_CACHE_LIMIT);
       return finishPrepared(await normalizeRecordsAsync(recordsInput,yieldTask),external);
@@ -4296,25 +4338,25 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     // A worker receives records already normalized by this same engine on the
     // host. Re-walking and copying the full history there buys no additional
     // canonicalization, so preserve that prepared representation directly.
-    const reusePrepared=(recordsInput,revision)=>{
+    const reusePrepared=(recordsInput:readonly InsightRecord[],revision:unknown):PreparedInsights=>{
       if(!Array.isArray(recordsInput))throw new TypeError('Prepared Insights records are invalid.');
       const key=String(revision||'').trim();
       if(!key||key.length>200)throw new TypeError('Prepared Insights revision is invalid.');
       return Object.freeze({records:Object.freeze(recordsInput),revision:key});
     };
-    const historyEntry=(prepared,options={})=>{
+    const historyEntry=(prepared:PreparedInsights,options:InsightsBuildOptions={}):HistoryCacheEntry=>{
       const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
       const key=`${prepared.revision}|${currentStudyDate}|${options.subjectReferenceRevision||summariesRevisionKey(options.subjectReferenceSummaries)}`;
       if(historyCache.has(key))return remember(historyCache,key,historyCache.get(key),HISTORY_CACHE_LIMIT);
-      const contextOptions=Object.freeze({currentStudyDate,subjectReferenceSummaries:options.subjectReferenceSummaries});
+      const contextOptions:HistoryContextOptions=Object.freeze({currentStudyDate,...(options.subjectReferenceSummaries?{subjectReferenceSummaries:options.subjectReferenceSummaries}:{})});
       const context=createAllHistoryContext(prepared.records,contextOptions,classifyTaskOutcome);
       return remember(historyCache,key,{prepared,contextOptions,compact:buildAllHistoryInsights(context,false),reusable:context,audit:null},HISTORY_CACHE_LIMIT);
     };
-    const labEvidence=entry=>entry.audit||(entry.audit=buildAllHistoryInsights(createAllHistoryContext(entry.prepared.records,entry.contextOptions,classifyTaskOutcome),true));
+    const labEvidence=(entry:HistoryCacheEntry):DetailedAllHistoryInsights=>entry.audit||(entry.audit=buildAllHistoryInsights(createAllHistoryContext(entry.prepared.records,entry.contextOptions,classifyTaskOutcome),true));
     const releaseTransient=()=>{historyCache.forEach(entry=>{entry.audit=null;});};
-    const buildPrepared=(records,prepared,options={})=>{
+    const buildPrepared=(records:readonly InsightRecord[],prepared:PreparedInsights,options:InsightsBuildOptions={})=>{
       const entry=historyEntry(prepared,options),context=entry.reusable;
-      const reusable=context&&records===prepared.records&&context.historyMeta.capped===false
+      const reusable:ReusableInsights|null=context&&records===prepared.records&&context.historyMeta.capped===false
         ?{
           evidence:context.modelEvidence,daily:context.dynamicsModel.daily,
           overview:context.dynamicsModel.overview,subjects:context.dynamicsModel.subjects,
@@ -4322,16 +4364,16 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
           sampleAudit:context.dynamicsModel.sampleAudit,schedule:context.dynamicsModel.schedule
         }
         :null;
-      let model;
+      let model:ReturnType<typeof buildInsightsFromCanonical>;
       try{model=buildInsightsFromCanonical(records,options,entry.compact,classifyTaskOutcome,summarizePracticeRuns,reusable);}
       finally{entry.reusable=null;}
       Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:()=>labEvidence(entry)});
       return model;
     };
     return Object.freeze({
-      build:(recordsInput,options={})=>{
+      build:(recordsInput:readonly InsightRecord[]|null|undefined,options:InsightsBuildOptions={})=>{
         const records=prepare(recordsInput).records;
-        const prepared=Array.isArray(options.modelRecords)?prepare(options.modelRecords):prepare(recordsInput);
+        const prepared=options.modelRecords?prepare(options.modelRecords):prepare(recordsInput);
         return buildPrepared(records,prepared,options);
       },
       prepare,
@@ -4339,8 +4381,8 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
       reusePrepared,
       buildPrepared,
       releaseTransient,
-      getLabEvidence:(prepared,options)=>labEvidence(historyEntry(prepared,options)),
-      filterPreparedWindow:(prepared,key,currentStudyDate=null)=>filterCanonicalRecordsForInsightWindow(prepared.records,key,currentStudyDate)
+      getLabEvidence:(prepared:PreparedInsights,options:InsightsBuildOptions={})=>labEvidence(historyEntry(prepared,options)),
+      filterPreparedWindow:(prepared:PreparedInsights,key:unknown,currentStudyDate:string|null=null)=>filterCanonicalRecordsForInsightWindow(prepared.records,key,currentStudyDate)
     });
   }
     return Object.freeze({
