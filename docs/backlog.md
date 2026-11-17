@@ -57,6 +57,8 @@ An offline-first app must never lose local data by itself: deep audit first, bef
 
 ### Open
 
+- **28. Drive sign-in gets stuck after the hour expires** (owner, 2026-11-17, iPad and Mac, F29). The app had been in the background. The sign-in requested after the hour runs out does not finish; Disconnect and then signing in again works. The 05:57 UTC diagnostics were copied after the workaround, so they show only the new sign-in (`signInEndsAt` 06:53:48, so signed in at about 05:53:48) and normal syncs; Drive work at 05:50–05:51 still succeeded. **The sign-in flow itself is not traced:** no start, pop-up, token or timeout lines. *Next:* trace the renewal (requested, pop-up opened or blocked, token received, gave up, and the step it stopped at); check renewal after the page was hidden (a pop-up opened without a fresh tap, a stale pending request, or a background tab's timers); fix with a test.
+
 - **11. The storage figure** (about 4 GB on the phone, 21.9 MB on the laptop): see the data-loss investigation above. Once the census says what the figure is made of, show the app's own measured size, and the browser's estimate only as a labelled extra.
 - **12. Drive cleanup on a busy phone.** A busy device finishes cleanup (tested: 200 versions, 3 s per read, a version every 2 minutes). Still open: verified summaries live in memory, so a page the phone reloads reads them again; keep them across reloads only if the phone's diagnostics show reloads cutting cleanup off. Confirm the Drive version count falls back to about 30.
 - **14. Drive requests are slow on the phone:** 1–4 s each, about six in a row per upload, so a 10 KB upload takes 15–20 s; the catch-up after a bring-in downloaded the same 8 files again. Part of the Drive speed work below.
