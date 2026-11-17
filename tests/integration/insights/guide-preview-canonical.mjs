@@ -1,6 +1,40 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {readScript} from '../../../build/source-script.mts';
+import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
+import {RUNTIME_DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
+
+for(const file of ['source/core/internal.ts','source/core/domain.ts','source/core/foundation-host.ts','source/core/practice-pacer.ts','source/core/record-codecs.ts']){
+  vm.runInThisContext(readScript(file),{filename:file});
+}
+const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const limits=PRODUCTION_LIMITS,freeze=Object.freeze;
+const Domain=registry.require('domain',1,freeze({
+  maxAreaNameChars:limits.maxAreaNameChars,maxDurationMinutes:limits.maxDurationMinutes,maxScheduleChars:limits.maxScheduleChars,
+  maxScheduleRows:limits.maxScheduleRows,maxTaskNameChars:limits.maxTaskNameChars,maxTasksPerDay:limits.maxTasksPerDay,maxUnitChars:limits.maxUnitChars
+}));
+const Foundation=registry.require('foundation-host',1);
+const primitives=Foundation.createPrimitives({document:{createElement(){throw new Error('DOM creation is not used by this codec witness.');}},APP_LIMITS:limits,CompletionModel:Domain.CompletionModel});
+const PracticePacer=registry.require('practice-pacer',1);
+const practice=PracticePacer.createModel({ports:freeze({
+  configuration:freeze({APP_LIMITS:limits}),
+  domain:freeze({boundedInt:primitives.boundedInt,boundedNumber:primitives.boundedNumber,clampArray:primitives.clampArray,clampText:primitives.clampText,fmtS:value=>String(value??'')})
+})});
+const normalizeTimestamp=(value,fallback=null)=>{const parsed=Date.parse(String(value||''));return Number.isFinite(parsed)?new Date(parsed).toISOString():fallback;};
+const normalizeStudyQuality=value=>value===null?null:(Number.isInteger(Number(value))&&Number(value)>=1&&Number(value)<=5?Number(value):null);
+const dailyRecordCodec=registry.require('record-codecs',1).createDailyRecordCodec(freeze({
+  limits,dataContract:RUNTIME_DATA_CONTRACT,domain:Domain,keyedRecord:primitives.KeyedRecord,
+  helpers:freeze({
+    boundedInt:primitives.boundedInt,boundedNumber:primitives.boundedNumber,clampText:primitives.clampText,clampEditorContent:primitives.clampText,
+    editorContentWithinLimits:()=>true,optionalBoundedNumber:primitives.optionalBoundedNumber,optionalText:primitives.optionalText,safeBoolean:primitives.safeBoolean,
+    sameDataValue:primitives.sameDataValue,normalizeStudyQuality,todayISO:()=> '2026-09-16',
+    dateInsightsMeta:iso=>{const date=new Date(String(iso)+'T00:00:00Z'),dayOfWeek=date.getUTCDay();return freeze({dayOfWeek,dayName:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dayOfWeek]});},
+    sanitizePracticeRun:practice.sanitizePracticeRun
+  }),
+  timestamps:freeze({normalizeTimestamp,normalizeImportedTimestamp:normalizeTimestamp,normalizeImportedEpochMillis:(value,fallback=null)=>Number.isFinite(Number(value))?Number(value):fallback}),
+  timer:freeze({modes:freeze({PAUSED:'paused',RUNNING:'running'}),defaultBreakSeconds:()=>300})
+}));
 
 let descriptor=null;
 const context=vm.createContext({
@@ -50,5 +84,16 @@ for(const record of records){
     }
   }
   for(const run of record.practiceRuns)assert.notEqual(run.partial,false,'canonical Practice runs omit a false partial flag');
+  const canonical=dailyRecordCodec.sanitizeCurrentDailyRecord(record);
+  if(!canonical){
+    const ids=new Set(record.schedule.map(row=>row.id));
+    const badResults=Object.entries(record.results).filter(([id,result])=>{
+      const clean=dailyRecordCodec.normalizeDailyResultEntry(result,record.schedule.find(row=>row.id===id));
+      return !clean||!primitives.sameDataValue(result,clean);
+    }).map(([id])=>id);
+    const badRuns=record.practiceRuns.map((run,index)=>({index,clean:practice.sanitizePracticeRun(run,{allowedTaskIds:ids}),run}))
+      .filter(row=>!row.clean||!primitives.sameDataValue(row.run,row.clean)).map(row=>row.index);
+    assert.fail(`Guide sample ${record.date} is rejected by the current DailyRecord codec; badResults=${badResults.join(',')||'none'} badRuns=${badRuns.join(',')||'none'}`);
+  }
 }
-console.log(JSON.stringify({status:'PASS',suite:'guide-preview-canonical',records:records.length,schema:16,nestedCanonical:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'guide-preview-canonical',records:records.length,schema:16,nestedCanonical:true,productionCodec:true},null,2));
