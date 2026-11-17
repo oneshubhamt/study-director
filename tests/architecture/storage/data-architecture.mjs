@@ -24,7 +24,7 @@ const journals=read('source/core/repository-journals.ts');
 const appMeta=read('source/core/app-meta.ts');
 const persistence=read('source/core/persistence.ts');
 const dataBootstrap=read('source/core/data-bootstrap-host.ts');
-const insights=read('source/external/insights.js');
+const insights=read('source/external/insights-runtime.ts');
 const sourceFiles=[];
 const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())walk(full);else if(/\.(?:js|ts|html)$/u.test(entry.name))sourceFiles.push(full);}};
 walk(path.join(root,'source'));

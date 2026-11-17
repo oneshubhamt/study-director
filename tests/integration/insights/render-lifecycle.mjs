@@ -3,7 +3,7 @@ import {createNotifications} from '../../helpers/notifications.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const source=readRuntimeSource('source/external/insights.js');
+const source=readRuntimeSource('source/external/insights-runtime.ts');
 const start=source.indexOf('    const render=async context=>{'),end=source.indexOf('    return Object.freeze({render,prefetch,ready:',start);
 assert.ok(start>0&&end>start);
 function harness({failSource=false,supersede=false,retained=false}={}){

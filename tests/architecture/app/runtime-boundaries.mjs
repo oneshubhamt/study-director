@@ -364,7 +364,7 @@ const app=readHostHtml();
 assert.match(app,/<html[^>]*data-presentation="glass"[^>]*data-typography="glass"[^>]*data-shape="glass"[^>]*data-material="glass"[^>]*data-depth="glass"/u,'Glass must be the pre-hydration presentation before bootstrap JavaScript runs.');
 const core=fs.readFileSync('source/styles/core.css','utf8');
 const glass=fs.readFileSync('source/external/glass.js','utf8');
-const insights=fs.readFileSync('source/external/insights.js','utf8');
+const insights=readRuntimeSource('source/external/insights-rendering.ts')+'\n'+readRuntimeSource('source/external/insights-runtime.ts');
 const editorSource=fs.readFileSync('rich-text/editor.ts','utf8');
 const editorBundle=richTextRuntimeSource();
 

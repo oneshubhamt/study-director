@@ -60,7 +60,7 @@ const NON_FAST_COVERAGE_OWNERS=Object.freeze([
   Object.freeze({file:'source/external/insights-compute.ts',owner:'integration/insights + browser',reason:'Insights worker bridge lifecycle, fallback and cancellation are exercised directly by the transport lifecycle witness and populated browser journey.'}),
   Object.freeze({file:'source/external/insights-rendering.ts',owner:'integration/insights + browser',reason:'Checked M8.9 dashboard DOM/SVG renderer is exercised by render-lifecycle and the populated/narrow Insights browser journey.'}),
   Object.freeze({file:'source/external/wordgard.js',owner:'browser/release',reason:'Generated Wordgard runtime bundle; authored rich-text sources are covered by bundle integrity/build contracts and browser/release editor certification.'}),
-  Object.freeze({file:'source/external/insights.js',owner:'browser/release',reason:'Insights presentation, retained-view orchestration and interaction layer; checked compute transport is owned by the extracted TypeScript sources.'})
+  Object.freeze({file:'source/external/insights-runtime.ts',owner:'integration/insights + browser/release',reason:'Checked Analytics Lab, retained-view orchestration, prefetch/refresh lifecycle and plugin registration are exercised by lifecycle, populated and performance Insights witnesses.'})
 ]);
 
 export function nonFastCoverageOwner(file){
