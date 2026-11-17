@@ -5,10 +5,11 @@ import {readScript} from '../../../build/source-script.mts';
 import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
 import {RUNTIME_DATA_CONTRACT} from '../../../contracts/canonical-identities.mjs';
 
+const codecContext=vm.createContext({console});
 for(const file of ['source/core/internal.ts','source/core/domain.ts','source/core/foundation-host.ts','source/core/practice-pacer.ts','source/core/record-codecs.ts']){
-  vm.runInThisContext(readScript(file),{filename:file});
+  vm.runInContext(readScript(file),codecContext,{filename:file});
 }
-const registry=globalThis[Symbol.for('studyDirector.internalModules.v1')];
+const registry=vm.runInContext("globalThis[Symbol.for('studyDirector.internalModules.v1')]",codecContext);
 const limits=PRODUCTION_LIMITS,freeze=Object.freeze;
 const Domain=registry.require('domain',1,freeze({
   maxAreaNameChars:limits.maxAreaNameChars,maxDurationMinutes:limits.maxDurationMinutes,maxScheduleChars:limits.maxScheduleChars,
