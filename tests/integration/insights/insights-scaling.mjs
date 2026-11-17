@@ -39,6 +39,29 @@ assert.equal(boundaryDaily.reduce((sum,row)=>sum+row.completed,0),30);
 assert.equal(boundaryDaily[1].completion,0,'explicit zero completion must survive analytical preparation');
 assert.equal(boundaryDaily[1].actual,0,'explicit zero actual time must survive analytical preparation');
 
+// Canonical preparation rejects invalid dates, removes non-positive planned
+// tasks, chooses the newest same-day record, sorts deterministically, and
+// leaves its caller-owned input untouched.
+const dirtyCanonicalInput=[
+  null,
+  {date:'not-a-date',tasks:[]},
+  {date:'2026-08-09',updatedAt:'2026-08-09T08:00:00.000Z',tasks:[
+    {id:'old',kind:'work',dur:30,completion:100,completionSource:'manual',actualSeconds:1800},
+    {id:'drop-zero-plan',kind:'work',dur:0,completion:100,completionSource:'manual',actualSeconds:60}
+  ]},
+  {date:'2026-08-08',updatedAt:'2026-08-08T12:00:00.000Z',tasks:[
+    {id:'earlier',kind:'work',dur:20,completion:50,completionSource:'manual',actualSeconds:600}
+  ]},
+  {date:'2026-08-09',updatedAt:'2026-08-09T09:00:00.000Z',tasks:[
+    {id:'new',kind:'work',dur:40,completion:75,completionSource:'manual',actualSeconds:1800}
+  ]}
+];
+const dirtyCanonicalBefore=JSON.stringify(dirtyCanonicalInput);
+const normalizedDirty=Records.normalizeRecords(dirtyCanonicalInput);
+assert.equal(JSON.stringify(dirtyCanonicalInput),dirtyCanonicalBefore,'canonical preparation must not mutate caller-owned input');
+assert.deepEqual(Array.from(normalizedDirty,record=>record.date),['2026-08-08','2026-08-09']);
+assert.deepEqual(Array.from(normalizedDirty[1].tasks,task=>task.id),['new'],'newest same-day evidence must win without retaining zero-plan tasks from an older duplicate');
+
 // Formatter reuse must preserve calendar labels across local year boundaries,
 // leap days, daylight-saving changes and both extremes of time-zone offsets.
 const originalTimezone=process.env.TZ;
@@ -289,7 +312,8 @@ const evidence={
   horizon:{selectedDays:model.recordCount,trendDays:model.advanced.trendCompletionDayCount,label:model.trendBasis.label,descriptivePracticeDays:model.practice.practiceDays,trendPracticeDays:model.practice.trendBasis.practiceDays},
   fullModel:{days:historyDays},
   uncappedAllHistoryReuse:{days:reuseRecords.length,parity:true},
-  providerAndThresholdWitnesses:{realProviders:true,productionPacerLimits:true,controlledBoundary:[79.9,80],changePointDays:[11,12],workloadFrontier:{days:36,span:150,recommendation:true}}
+  providerAndThresholdWitnesses:{realProviders:true,productionPacerLimits:true,controlledBoundary:[79.9,80],changePointDays:[11,12],workloadFrontier:{days:36,span:150,recommendation:true}},
+  canonicalPreparation:{invalidDateRejected:true,duplicateResolution:'newest',nonPositivePlanRejected:true,callerInputImmutable:true}
 };
 writeArtifact('insights-scaling.json',`${JSON.stringify(evidence,null,2)}\n`);
 console.log(JSON.stringify(evidence,null,2));
