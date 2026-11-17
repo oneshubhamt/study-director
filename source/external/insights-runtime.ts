@@ -74,7 +74,7 @@ interface ViewState {
   pane:HTMLElement|null;rendered:boolean;renderedKey:string;renderedBaseKey:string;renderedWindowKey:string;session:Session|null;
   scrollWindow:number;scrollMain:number;errorTimer:number|null;suppressScroll:boolean;paneObserver:MutationObserver|null;lastProfile:InsightsProfile|null;
   navigationReady:Promise<boolean>;prefetching:Promise<PrefetchStatus>|null;prefetchWorking:boolean;prefetched:Prefetched|null;
-  renderRollback:Readonly<{pane:HTMLElement;token:number;nodes:readonly Node[]}>|null;
+  renderRollback:Readonly<{pane:HTMLElement;token:number;nodes:readonly Node[];focus:HTMLElement|null}>|null;
 }
 type IdleScheduler={yield?:()=>Promise<void>};
 declare function createInsightsRendering(
@@ -949,6 +949,7 @@ const supersededError=()=>{
       state.renderRollback=null;
       rollback.pane.replaceChildren(...rollback.nodes);
       Layout.purge();
+      if(rollback.focus?.isConnected)rollback.focus.focus({preventScroll:true});
       return true;
     };
     const observePane=(pane:HTMLElement)=>{
@@ -1235,7 +1236,9 @@ const supersededError=()=>{
         const previousScroll=state.rendered;
         const updateStatus=pane.querySelector('.insights-update-status');
         const priorNodes=state.rendered?[...pane.childNodes].filter(node=>node!==updateStatus):null;
-        if(priorNodes)state.renderRollback=Object.freeze({pane,token,nodes:Object.freeze(priorNodes)});
+        const activeElement=document.activeElement;
+        const priorFocus=activeElement instanceof HTMLElement&&pane.contains(activeElement)?activeElement:null;
+        if(priorNodes)state.renderRollback=Object.freeze({pane,token,nodes:Object.freeze(priorNodes),focus:priorFocus});
         let renderMetrics:Awaited<ReturnType<typeof renderModel>>;
         try{
           renderMetrics=await renderModel(pane,model,{

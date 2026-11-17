@@ -82,6 +82,25 @@ for(const rejectBuild of [false,true]){
   assert.notEqual(h.runtimeWindow.__StudyDirectorInsightsPrefetch?.state,'failed','a stale prefetch error must not publish failure over newer source state');
 }
 
+
+{
+  const restoreStart=source.indexOf('    const restoreInterruptedRender=');
+  const restoreEnd=source.indexOf('    const observePane=',restoreStart);
+  assert.ok(restoreStart>0&&restoreEnd>restoreStart,'checked retained rollback owner must be extractable');
+  let focusedWith=null,purges=0;
+  const focus={isConnected:true,focus:options=>{focusedWith=options;}};
+  const prior={id:'complete-view'};
+  const pane={children:[{id:'partial-view'}],replaceChildren(...nodes){this.children=nodes;}};
+  const state={renderRollback:{pane,token:7,nodes:[prior],focus}};
+  const Layout={purge:()=>{purges+=1;}};
+  const restoreInterruptedRender=new Function('state','Layout',`${source.slice(restoreStart,restoreEnd)};return restoreInterruptedRender;`)(state,Layout);
+  assert.equal(restoreInterruptedRender(),true);
+  assert.deepEqual(pane.children,[prior],'rollback must restore the last complete retained DOM');
+  assert.deepEqual(focusedWith,{preventScroll:true},'rollback must restore the retained keyboard focus without moving the viewport');
+  assert.equal(purges,1,'rollback must purge only detached chart registrations after restoring retained nodes');
+  assert.equal(state.renderRollback,null,'rollback ownership must be cleared after restoration');
+}
+
 {
   let observer=null,releaseCount=0,transientReleaseCount=0,invalidations=0,restores=0;
   const observeStart=source.indexOf('    const observePane=');
@@ -144,5 +163,5 @@ for(const rejectBuild of [false,true]){
 
 console.log(JSON.stringify({
   status:'PASS',suite:'insights-prefetch-lifecycle',
-  staleResultFenced:true,staleErrorFenced:true,inactivityRelease:true,inactivityInvalidation:true,preparationCancellation:true
+  staleResultFenced:true,staleErrorFenced:true,inactivityRelease:true,inactivityInvalidation:true,preparationCancellation:true,retainedFocusRollback:true
 }));

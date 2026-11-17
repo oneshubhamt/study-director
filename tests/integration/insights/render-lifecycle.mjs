@@ -14,6 +14,7 @@ function harness({failSource=false,supersede=false,retained=false,staleFailure=f
   const state={rendered:retained,errorTimer:null,renderedBaseKey:unstableSource||failRender||staleRender?'previous-revision':`source|2026-09-28|${missingRevision?'saved:0':'revision'}`,renderedWindowKey:'all',renderRollback:null};
   const values={
     observePane:()=>{},state,prefetchGeneration:0,restoreScroll:()=>{},restoreInterruptedRender:()=>{const rollback=state.renderRollback;if(!rollback)return false;state.renderRollback=null;rollback.pane.replaceChildren(...rollback.nodes);return true;},clearTimeout,performance:{now:()=>0},
+    document:{activeElement:null},HTMLElement:class{},
     errorName:error=>error?.name||'',errorCode:error=>error?.code||'',
     InsightsRenderCoordinator:{begin:()=>++generation,isCurrent:token=>token===generation},computation:{cancel:()=>{},warm:()=>true,build:async()=>({model:{},mode:'main-thread-small',computeMs:0,roundTripMs:0})},
     PerformanceObserver:class{static supportedEntryTypes=['longtask'];constructor(){observers++;}observe(){}disconnect(){disconnects++;}},
