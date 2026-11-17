@@ -76,6 +76,22 @@ type PracticeGroupRow=Readonly<{key:string;label:string;units:number;runs:number
 type PracticeAudit=Readonly<{savedRuns:number;acceptedRuns:number;excludedRuns:number;encounteredUnits:number;acceptedUnits:number;excludedUnits:number;reasonRows:readonly Readonly<{reason:string;count:number}>[]}>;
 type PracticePacerBase=Readonly<{practiceDays:number;runs:number;units:number;totalActualMs:number;medianPace:number|null;medianRunPace:number|null;typicalUnitPace:number|null;atOrBelowTarget:number;atOrBelowRate:number|null;controlledRuns:number;controlledRunRate:number|null;withinBudgetRuns:number;withinBudgetRate:number|null;plannedRuns:number;plannedUnits:number;completedPlannedUnits:number;plannedRunCompletionMedian:number|null;completedPlannedRuns:number;completedPlannedRunRate:number|null;plannedUnitCompletionRate:number|null;medianCompletedRunTimeUsed:number|null;medianFinishingMarginMs:number|null;completedWithinTimeRuns:number;completedWithinTimeRate:number|null;medianWithinRunSpread:number|null;spreadComparableRuns:number;paceSlopePerWeek:number|null;trend:PracticeTrendResult;trendBasis:Readonly<{key:string;label:string;from:string|null;to:string|null;horizonDays:number|null;capped:boolean;practiceDays:number;selectedPracticeDays:number;units:number}>;maturity:PracticeMaturity;overallConfidence:Confidence;summaryReady:boolean;patternReady:boolean;trendReady:boolean;daily:readonly PracticeDailyRow[];runRows:readonly PracticeRunRow[];unitRows:readonly PracticeUnitRow[];segmentRows:readonly PracticeSegmentRow[];position:PracticePosition;repeatedSegments:readonly RepeatedPracticeSegment[];unitSizeGroups:Readonly<{marks:readonly PracticeSizeGroup[];durations:readonly PracticeSizeGroup[];all:readonly PracticeSizeGroup[]}>;unitSizeDifference:PracticeSizeDifference|null;audit:PracticeAudit;distribution:readonly Readonly<{key:string;label:string;count:number;share:number}>[];areas:readonly PracticeGroupRow[];modes:readonly PracticeGroupRow[]}>;
 type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;reading:PracticeFinding;supportingReading:PracticeFinding|null;coachReading:PracticeFinding}>;
+type FitnessKey='capacity'|'execution'|'recovery';
+type ScheduleSummary=Readonly<{maxDailyShiftMinutes:number;shiftedDays:number;shiftedBlocks:number;averageDailyPeakShiftOnShiftedDays:number;typicalNetShiftMinutes:number|null}>;
+type FitnessComponentObservation=Readonly<{value:number|null;measurementSd:number|null;evidenceCount:number}>;
+type FitnessObservation=Readonly<{date:string;day:number;completion:number|null;planned:number;completed:number;blocks:number;evidenceWeight:number;effectiveBlocks:number;measurementSd:number|null;hasObservation:boolean;components:Record<FitnessKey,FitnessComponentObservation>;plannedByGroup:Record<CompletionEvidenceGroup,number>}>;
+type FitnessParameters=Readonly<{keys:readonly FitnessKey[];centers:readonly number[];transition:Matrix;empiricalPersistence:readonly number[];processSd:readonly number[];measurementSd:readonly number[];completePairs:number;learnedDays:number}>;
+type FitnessStateValue=Readonly<{estimate:number;low:number;high:number;observed:number|null;observationUsed:boolean;gain:number|null}>;
+type FitnessStateMap=Record<FitnessKey,FitnessStateValue>;
+type FitnessHistoryRow=Readonly<{date:string;day:number;observed:number|null;observationUsed:boolean;evidenceWeight:number|null;measurementSd:number|null;gain:number|null;variance:number;states:FitnessStateMap;estimate:number|null;low:number|null;high:number|null}>;
+type FitnessTrajectory=Readonly<{key:'uncertain'|'recovering'|'rising'|'falling'|'stable';label:string;tone:string;delta?:number|null;lookbackDays?:number;recentEvidence?:number;troughDate?:string}>;
+type FitnessDimension=Readonly<{key:FitnessKey;label:string;current:FitnessStateValue|null;observedDays:number;confidence:Confidence;center:number;persistence:number;lastEvidenceDate:string|null;daysSinceLastEvidence:number|null}>;
+type FitnessPerformanceState=Readonly<{ready:boolean;history:readonly FitnessHistoryRow[];observations:readonly FitnessObservation[];current:FitnessHistoryRow|null;confidence:Confidence;trajectory:FitnessTrajectory;effectiveDays:number;observedDays:number;lastEvidenceDate:string|null;daysSinceLastEvidence:number|null;basis?:Readonly<{start:string|null;end:string;mode:string;historicalMode?:string}>;dimensions?:Record<FitnessKey,FitnessDimension>;parameters?:FitnessParameters;multivariateReady?:boolean;forecastCausal?:boolean;parameterUpdateCadence?:number;parameterWindowObservations?:number;intervalWidth?:number}>;
+type WorkloadRecommendation=Readonly<{minPlanned:number;maxPlanned:number;typicalPlanned:number}>;
+type WorkloadRead=Readonly<{ready:boolean;recommendation?:WorkloadRecommendation|null;reason?:string|null}>;
+type FitnessModelInput=Readonly<{daily:readonly DailySeriesRow[];currentStudyDate?:string|null;calendarRange?:Readonly<{start?:string|null;end?:string|null}>;dynamics?:Readonly<{workload?:WorkloadRead}>;advanced?:Readonly<{qualityPairCount?:number}>;overview?:Readonly<{averageQuality?:number|null}>;recordCount?:number}>;
+type FitnessLoadMatch=Readonly<{ready:boolean;key:string;label:string;tone:string;recentPlanned:number|null;recentCompletion:number|null;recentDays:number;range:WorkloadRecommendation|null;reason?:string|null}>;
+type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;loadMatch:FitnessLoadMatch;quality:Readonly<{ratedDays:number;average:number|null;totalSavedDays:number;ready:boolean}>;readiness:Confidence;summary:Readonly<{text:string;stateText:string;trajectory:string}>;parameters:Readonly<{learned:FitnessParameters|null;sourceWeights:Record<CompletionEvidenceGroup,number>}>}>;
 
 (function(global:typeof globalThis){
   'use strict';
@@ -2212,15 +2228,15 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
     const {
       recordRows,rowsActual
     }=Analytics;
-  function computeScheduleSummary(recordsInput){
-    const records=Array.isArray(recordsInput)?recordsInput:[];
-    const dailyPeakShiftTotal=records.reduce((total,record)=>total+Math.max(0,num(record&&record.totalScheduleShiftMinutes)),0);
+  function computeScheduleSummary(recordsInput:readonly InsightRecord[]):ScheduleSummary{
+    const records=recordsInput;
+    const dailyPeakShiftTotal=records.reduce((total,record)=>total+Math.max(0,num(record.totalScheduleShiftMinutes)),0);
     const maxDailyShift=records.reduce((maximum,record)=>Math.max(maximum,Math.max(0,num(record&&record.totalScheduleShiftMinutes))),0);
-    const shiftedRecords=records.filter(record=>num(record&&record.shiftedStudyBlocks)>0);
+    const shiftedRecords=records.filter(record=>num(record.shiftedStudyBlocks)>0);
     const shiftedDays=shiftedRecords.length;
     const shiftedBlocks=shiftedRecords.reduce((total,record)=>total+Math.max(0,num(record&&record.shiftedStudyBlocks)),0);
     const weightedNetShift=shiftedBlocks
-      ? shiftedRecords.reduce((total,record)=>total+num(record&&record.netScheduleShiftMinutes)*Math.max(0,num(record&&record.shiftedStudyBlocks)),0)/shiftedBlocks
+      ? shiftedRecords.reduce((total,record)=>total+num(record.netScheduleShiftMinutes)*Math.max(0,num(record&&record.shiftedStudyBlocks)),0)/shiftedBlocks
       : null;
     return {
       maxDailyShiftMinutes:Math.round(maxDailyShift),
@@ -2230,13 +2246,13 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
       typicalNetShiftMinutes:weightedNetShift===null?null:Math.round(weightedNetShift)
     };
   }
-  function fitnessObservationForDay(dailyRow,evidence,recordByDate){
+  function fitnessObservationForDay(dailyRow:DailySeriesRow,evidence:EvidenceIndex,recordByDate:ReadonlyMap<string,InsightRecord>):FitnessObservation{
     const record=recordByDate.get(dailyRow.date);
-    const work=recordRows(evidence,record,'work').filter(row=>row.planned>0);
-    const planned=Math.max(0,num(dailyRow&&dailyRow.planned));
-    const plannedByGroup={explicit:0,'time-derived':0,unverified:0,skipped:0,missing:0};
+    const work=record?recordRows(evidence,record,'work'):.filter(row=>row.planned>0):[];
+    const planned=Math.max(0,num(dailyRow.planned));
+    const plannedByGroup:Record<CompletionEvidenceGroup,number>={explicit:0,'time-derived':0,unverified:0,skipped:0,missing:0};
     work.forEach(row=>{
-      const group=Object.prototype.hasOwnProperty.call(plannedByGroup,row.evidenceGroup)?row.evidenceGroup:'missing';
+      const group:CompletionEvidenceGroup=row.evidenceGroup;
       plannedByGroup[group]+=row.planned;
     });
     const weightedPlanned=Object.entries(plannedByGroup).reduce((total,[group,value])=>total+value*num(FITNESS_SOURCE_WEIGHTS[group]),0);
@@ -2249,11 +2265,11 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
     const measurementSd=evidenceWeight>0
       ? Math.max(FITNESS_MIN_MEASUREMENT_SD,Math.min(FITNESS_MAX_MEASUREMENT_SD,24/Math.sqrt(Math.max(.25,information))))
       : null;
-    const delayValues=work.map(row=>startDelayMinutes(row.task)).filter(Number.isFinite);
-    const startScore=delayValues.length?clamp(100-1.2*mean(delayValues.map(value=>Math.max(0,value))),0,100):null;
+    const delayValues=work.map(row=>startDelayMinutes(row.task)).filter(isFiniteNumber);
+    const startScore=delayValues.length?clamp(100-1.2*mean(delayValues.map(value=>Math.max(0,value)))!,0,100):null;
     const hasMovementEvidence=work.length>0&&!!record&&['shiftedStudyBlocks','totalScheduleShiftMinutes','netScheduleShiftMinutes'].some(key=>Object.prototype.hasOwnProperty.call(record,key));
     const movementScore=hasMovementEvidence?clamp(100-Math.max(0,num(record.totalScheduleShiftMinutes))*.8,0,100):null;
-    const executionValues=[startScore,movementScore].filter(Number.isFinite);
+    const executionValues=[startScore,movementScore].filter(isFiniteNumber);
     const execution=executionValues.length?mean(executionValues):null;
     const timerRows=work.filter(row=>row.timerBacked);
     const actualSeconds=rowsActual(timerRows)*60;
@@ -2261,32 +2277,32 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
     const focusControl=actualSeconds>0?clamp(100-300*frictionSeconds/actualSeconds,0,100):null;
     const pomodoroEvents=timerRows.flatMap(row=>row.pauseEvents||[]).filter(event=>event.type==='pomodoro'&&num(event.plannedSeconds)>0);
     const returnScore=pomodoroEvents.length?pct(pomodoroEvents.filter(event=>num(event.seconds)<=num(event.plannedSeconds)).length,pomodoroEvents.length):null;
-    const recoveryValues=[focusControl,returnScore].filter(Number.isFinite);
+    const recoveryValues=[focusControl,returnScore].filter(isFiniteNumber);
     const recovery=recoveryValues.length?mean(recoveryValues):null;
     const components={
-      capacity:{value:Number.isFinite(dailyRow.completion)&&evidenceWeight>0?round(dailyRow.completion,1):null,measurementSd:measurementSd===null?null:round(measurementSd,2),evidenceCount:effectiveBlocks},
+      capacity:{value:isFiniteNumber(dailyRow.completion)&&evidenceWeight>0?round(dailyRow.completion,1):null,measurementSd:measurementSd===null?null:round(measurementSd,2),evidenceCount:effectiveBlocks},
       execution:{value:roundNullable(execution,1),measurementSd:executionValues.length?round(clamp(22/Math.sqrt(executionValues.length+delayValues.length/3),9,30),2):null,evidenceCount:executionValues.length+delayValues.length},
       recovery:{value:roundNullable(recovery,1),measurementSd:recoveryValues.length?round(clamp(25/Math.sqrt(recoveryValues.length+pomodoroEvents.length/4),10,32),2):null,evidenceCount:recoveryValues.length+pomodoroEvents.length}
     };
     return {
       date:dailyRow.date,
       day:dailyRow.day,
-      completion:Number.isFinite(dailyRow.completion)?round(dailyRow.completion,1):null,
+      completion:isFiniteNumber(dailyRow.completion)?round(dailyRow.completion,1):null,
       planned,
       completed:Math.max(0,num(dailyRow.completed)),
       blocks:work.length,
       evidenceWeight:round(evidenceWeight,3),
       effectiveBlocks:round(effectiveBlocks,2),
       measurementSd:measurementSd===null?null:round(measurementSd,2),
-      hasObservation:Number.isFinite(dailyRow.completion)&&evidenceWeight>0,
+      hasObservation:isFiniteNumber(dailyRow.completion)&&evidenceWeight>0,
       components,
-      plannedByGroup:Object.fromEntries(Object.entries(plannedByGroup).map(([key,value])=>[key,round(value,1)]))
+      plannedByGroup:Object.fromEntries(Object.entries(plannedByGroup).map(([key,value])=>[key,round(value,1)])) as Record<CompletionEvidenceGroup,number>
     };
   }
-  function fitnessTrajectory(history,current,confidence,lastEvidenceDay,endDay){
-    const rows=(Array.isArray(history)?history:[]).filter(row=>Number.isFinite(row.estimate));
-    const recentEvidence=rows.filter(row=>row.day>endDay-FITNESS_TRAJECTORY_LOOKBACK_DAYS&&Number.isFinite(row.observed)).length;
-    const uncertain=!current||confidence.key==='weak'||recentEvidence<3||!Number.isFinite(lastEvidenceDay);
+  function fitnessTrajectory(history:readonly FitnessHistoryRow[],current:FitnessHistoryRow|null,confidence:Confidence,lastEvidenceDay:number|null,endDay:number):FitnessTrajectory{
+    const rows=history.filter(row=>isFiniteNumber(row.estimate));
+    const recentEvidence=rows.filter(row=>row.day>endDay-FITNESS_TRAJECTORY_LOOKBACK_DAYS&&isFiniteNumber(row.observed)).length;
+    const uncertain=!current||confidence.key==='weak'||recentEvidence<3||!isFiniteNumber(lastEvidenceDay);
     if(uncertain)return {key:'uncertain',label:'Uncertain',tone:'low',delta:null,lookbackDays:FITNESS_TRAJECTORY_LOOKBACK_DAYS,recentEvidence};
     const target=endDay-FITNESS_TRAJECTORY_LOOKBACK_DAYS;
     const baseline=[...rows].reverse().find(row=>row.day<=target)||rows[0];
@@ -2304,106 +2320,106 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
     if(delta<=-FITNESS_TRAJECTORY_DELTA_POINTS)return {key:'falling',label:'Falling',tone:'watch',delta,lookbackDays:endDay-baseline.day,recentEvidence};
     return {key:'stable',label:'Stable',tone:'quiet',delta,lookbackDays:endDay-baseline.day,recentEvidence};
   }
-  function learnFitnessStateParameters(observations,keys){
-    const centers=keys.map(key=>mean(observations.map(row=>row.components[key].value).filter(Number.isFinite))??50);
+  function learnFitnessStateParameters(observations:readonly FitnessObservation[],keys:readonly FitnessKey[]):FitnessParameters{
+    const centers=keys.map(key=>mean(observations.map(row=>row.components[key].value).filter(isFiniteNumber))??50);
     const persistence=keys.map((key,index)=>{
-      const pairs=[];
+      const pairs:Point[]=[];
       for(let rowIndex=1;rowIndex<observations.length;rowIndex+=1){
-        const before=observations[rowIndex-1],after=observations[rowIndex];
+        const before=observations[rowIndex-1]!,after=observations[rowIndex]!;
         if(after.day-before.day>3)continue;
         const x=before.components[key].value,y=after.components[key].value;
-        if(Number.isFinite(x)&&Number.isFinite(y))pairs.push({x:x-centers[index],y:y-centers[index]});
+        if(isFiniteNumber(x)&&isFiniteNumber(y))pairs.push({x:x-centers[index]!,y:y-centers[index]!});
       }
       const denominator=sum(pairs.map(pair=>pair.x*pair.x));
       const raw=denominator?sum(pairs.map(pair=>pair.x*pair.y))/denominator:.85;
       return clamp((pairs.length*raw+8*.85)/(pairs.length+8),.35,.98);
     });
     const transition=zeroMatrix(keys.length);
-    persistence.forEach((value,index)=>{transition[index][index]=value;});
-    const completePairs=[];
+    persistence.forEach((value,index)=>{transition[index]![index]=value;});
+    const completePairs:{x:number[];y:number[]}[]=[];
     for(let index=1;index<observations.length;index+=1){
       const before=observations[index-1],after=observations[index];
       if(after.day-before.day!==1)continue;
       const beforeValues=keys.map(key=>before.components[key].value),afterValues=keys.map(key=>after.components[key].value);
-      if(beforeValues.every(Number.isFinite)&&afterValues.every(Number.isFinite))completePairs.push({
-        x:beforeValues.map((value,keyIndex)=>value-centers[keyIndex]),
-        y:afterValues.map((value,keyIndex)=>value-centers[keyIndex])
+      if(beforeValues.every(isFiniteNumber)&&afterValues.every(isFiniteNumber))completePairs.push({
+        x:beforeValues.map((value,keyIndex)=>num(value)-centers[keyIndex]!),
+        y:afterValues.map((value,keyIndex)=>num(value)-centers[keyIndex]!)
       });
     }
     if(completePairs.length>=10){
       const xtx=zeroMatrix(keys.length),shrink=completePairs.length/(completePairs.length+18);
-      completePairs.forEach(pair=>pair.x.forEach((left,leftIndex)=>pair.x.forEach((right,rightIndex)=>{xtx[leftIndex][rightIndex]+=left*right;})));
-      for(let index=0;index<keys.length;index+=1)xtx[index][index]+=120;
+      completePairs.forEach(pair=>pair.x.forEach((left,leftIndex)=>pair.x.forEach((right,rightIndex)=>{xtx[leftIndex]![rightIndex]=xtx[leftIndex]![rightIndex]!+left*right;})));
+      for(let index=0;index<keys.length;index+=1)xtx[index]![index]=xtx[index]![index]!+120;
       keys.forEach((key,target)=>{
-        const xty=Array(keys.length).fill(0);
-        completePairs.forEach(pair=>pair.x.forEach((value,index)=>{xty[index]+=value*pair.y[target];}));
+        const xty=Array.from({length:keys.length},()=>0);
+        completePairs.forEach(pair=>pair.x.forEach((value,index)=>{xty[index]=xty[index]!+value*pair.y[target]!;}));
         const fitted=solveLinearSystem(xtx,xty);
         if(!fitted)return;
-        transition[target]=transition[target].map((fallback,index)=>index===target?fallback:shrink*clamp(fitted[index],-.08,.08));
+        transition[target]=transition[target]!.map((fallback,index)=>index===target?fallback:shrink*clamp(fitted[index],-.08,.08));
       });
     }
     const processSd=keys.map((key,keyIndex)=>{
-      const residuals=[];
+      const residuals:number[]=[];
       for(let index=1;index<observations.length;index+=1){
         const before=observations[index-1],after=observations[index];
         if(after.day-before.day>3)continue;
         const beforeValue=before.components[key].value,afterValue=after.components[key].value;
-        if(Number.isFinite(beforeValue)&&Number.isFinite(afterValue))residuals.push(afterValue-(centers[keyIndex]+persistence[keyIndex]*(beforeValue-centers[keyIndex])));
+        if(Number.isFinite(beforeValue)&&Number.isFinite(afterValue))residuals.push(afterValue-(centers[keyIndex]!+persistence[keyIndex]!*(beforeValue-centers[keyIndex]!)));
       }
       const learned=robustScale(residuals);
       return clamp(Number.isFinite(learned)?(residuals.length*learned+6*6)/(residuals.length+6):6,3,12);
     });
     const measurementSd=keys.map(key=>{
-      const reported=observations.map(row=>row.components[key].measurementSd).filter(Number.isFinite);
-      const differences=[];
+      const reported=observations.map(row=>row.components[key].measurementSd).filter(isFiniteNumber);
+      const differences:number[]=[];
       for(let index=1;index<observations.length;index+=1){
         const before=observations[index-1],after=observations[index],gap=after.day-before.day;
         const left=before.components[key].value,right=after.components[key].value;
-        if(gap<=3&&Number.isFinite(left)&&Number.isFinite(right))differences.push((right-left)/Math.sqrt(Math.max(1,gap)));
+        if(gap<=3&&isFiniteNumber(left)&&isFiniteNumber(right))differences.push((right-left)/Math.sqrt(Math.max(1,gap)));
       }
       const designBased=median(reported)??20,empirical=robustScale(differences);
-      const blended=Number.isFinite(empirical)?(differences.length*(empirical/Math.sqrt(2))+8*designBased)/(differences.length+8):designBased;
+      const blended=isFiniteNumber(empirical)?(differences.length*(empirical/Math.sqrt(2))+8*designBased)/(differences.length+8):designBased;
       return clamp(blended,8,28);
     });
     return {keys,centers,transition,empiricalPersistence:persistence,processSd,measurementSd,completePairs:completePairs.length,learnedDays:observations.length};
   }
-  function componentInterval(estimate,variance){
+  function componentInterval(estimate:number,variance:number){
     const radius=1.96*Math.sqrt(Math.max(0,num(variance)));
     return {estimate:round(clamp(estimate,0,100),1),low:round(clamp(estimate-radius,0,100),1),high:round(clamp(estimate+radius,0,100),1)};
   }
-  function computeFitnessPerformanceState(model,evidence){
-    const recordByDate=new Map((evidence&&Array.isArray(evidence.records)?evidence.records:[]).map(record=>[record.date,record]));
-    const allObservations=(Array.isArray(model&&model.daily)?model.daily:[])
-      .filter(row=>Number.isFinite(row&&row.day))
-      .sort((a,b)=>a.day-b.day)
+  function computeFitnessPerformanceState(model:FitnessModelInput,evidence:EvidenceIndex):FitnessPerformanceState{
+    const recordByDate=new Map<string,InsightRecord>(evidence.records.map(record=>[record.date,record]));
+    const allObservations=model.daily
+      .filter(row=>isFiniteNumber(row.day))
+      .sort((a,b)=>num(a.day)-num(b.day))
       .map(row=>fitnessObservationForDay(row,evidence,recordByDate));
-    const lastSavedDay=allObservations.length?allObservations[allObservations.length-1].day:null;
-    const currentDay=isIsoDate(model&&model.currentStudyDate)?dateDay(model.currentStudyDate):null;
-    const calendarEndDay=isIsoDate(model&&model.calendarRange&&model.calendarRange.end)?dateDay(model.calendarRange.end):null;
-    const endDay=[lastSavedDay,currentDay,calendarEndDay].filter(Number.isFinite).sort((a,b)=>b-a)[0];
-    if(!Number.isFinite(endDay))return {
+    const lastSavedDay=allObservations.length?allObservations[allObservations.length-1]!.day:null;
+    const currentDay=isIsoDate(model.currentStudyDate)?dateDay(model.currentStudyDate):null;
+    const calendarEndDay=isIsoDate(model.calendarRange?.end)?dateDay(model.calendarRange.end):null;
+    const endDay=[lastSavedDay,currentDay,calendarEndDay].filter(isFiniteNumber).sort((a,b)=>b-a)[0];
+    if(!isFiniteNumber(endDay))return {
       ready:false,history:[],observations:allObservations,current:null,confidence:CONFIDENCE.weak,
       trajectory:{key:'uncertain',label:'Uncertain',tone:'low'},effectiveDays:0,observedDays:0,lastEvidenceDate:null,daysSinceLastEvidence:null
     };
-    const firstHistoryDay=allObservations.length?allObservations[0].day:endDay;
+    const firstHistoryDay=allObservations.length?allObservations[0]!.day:endDay;
     const observations=allObservations.filter(row=>row.day>=firstHistoryDay&&row.day<=endDay);
     const byDay=new Map(observations.map(row=>[row.day,row]));
-    const keys=['capacity','execution','recovery'];
-    const firstObserved=observations.find(row=>keys.some(key=>Number.isFinite(row.components[key].value)));
+    const keys:readonly FitnessKey[]=['capacity','execution','recovery'];
+    const firstObserved=observations.find(row=>keys.some(key=>isFiniteNumber(row.components[key].value)));
     if(!firstObserved)return {
       ready:false,history:[],observations,current:null,confidence:CONFIDENCE.weak,
       trajectory:{key:'uncertain',label:'Uncertain',tone:'low'},effectiveDays:0,observedDays:0,lastEvidenceDate:null,daysSinceLastEvidence:null,
-      basis:{start:observations[0]&&observations[0].date||null,end:dateFromDay(endDay),mode:'bounded-two-year-model'}
+      basis:{start:observations[0]?.date||null,end:dateFromDay(endDay),mode:'bounded-two-year-model'}
     };
     let parameters=learnFitnessStateParameters(observations.filter(row=>row.day<=firstObserved.day).slice(-FITNESS_PARAMETER_WINDOW_OBSERVATIONS),keys);
-    let state=keys.map((key,index)=>Number.isFinite(firstObserved.components[key].value)?firstObserved.components[key].value:parameters.centers[index]),covariance=zeroMatrix(keys.length);
-    keys.forEach((key,index)=>{covariance[index][index]=Math.pow(parameters.measurementSd[index],2);});
-    const lastEvidenceDays=Object.fromEntries(keys.map(key=>[key,null]));
-    const parameterObservations=[];
-    const history=[];
+    let state=keys.map((key,index)=>isFiniteNumber(firstObserved.components[key].value)?firstObserved.components[key].value!:parameters.centers[index]!!),covariance=zeroMatrix(keys.length);
+    keys.forEach((_key,index)=>{covariance[index]![index]=Math.pow(parameters.measurementSd[index]!,2);});
+    const lastEvidenceDays:Record<FitnessKey,number|null>={capacity:null,execution:null,recovery:null};
+    const parameterObservations:FitnessObservation[]=[];
+    const history:FitnessHistoryRow[]=[];
     for(let day=firstObserved.day;day<=endDay;day+=1){
       const observation=byDay.get(day)||null;
-      const observedComponents=keys.map(key=>!!observation&&Number.isFinite(observation.components[key].value));
+      const observedComponents=keys.map(key=>!!observation&&isFiniteNumber(observation.components[key].value));
       const hasStateObservation=observedComponents.some(Boolean);
       if(hasStateObservation)parameterObservations.push(observation);
       if(day===firstObserved.day||(hasStateObservation&&parameterObservations.length%FITNESS_PARAMETER_UPDATE_CADENCE===0)){
@@ -2413,59 +2429,59 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
       const previousCovariance=covariance.map(row=>row.slice());
       const centered=state.map((value,index)=>value-parameters.centers[index]);
       state=multiplyMatrixVector(parameters.transition,centered).map((value,index)=>clamp(value+parameters.centers[index],0,100));
-      const process=zeroMatrix(keys.length);parameters.processSd.forEach((value,index)=>{process[index][index]=value*value;});
+      const process=zeroMatrix(keys.length);parameters.processSd.forEach((value,index)=>{process[index]![index]=value*value;});
       covariance=addMatrices(multiplyMatrices(multiplyMatrices(parameters.transition,covariance),transposeMatrix(parameters.transition)),process);
-      state=state.map((value,index)=>observedComponents[index]?value:previousState[index]);
-      const gains={};
+      state=state.map((value,index)=>observedComponents[index]?value:previousState[index]!);
+      const gains:Partial<Record<FitnessKey,number>>={};
       if(observation){
         keys.forEach((key,index)=>{
           const component=observation.components[key];
-          if(!Number.isFinite(component.value))return;
-          const learnedSd=parameters.measurementSd[index],designSd=num(component.measurementSd,learnedSd);
+          if(!isFiniteNumber(component.value))return;
+          const learnedSd=parameters.measurementSd[index]!,designSd=num(component.measurementSd,learnedSd);
           const measurementSd=Math.max(learnedSd*.65,Math.sqrt(Math.max(1,designSd*learnedSd)));
-          const denominator=covariance[index][index]+measurementSd*measurementSd;
+          const denominator=covariance[index]![index]!+measurementSd*measurementSd;
           if(!(denominator>0))return;
-          const gain=covariance.map(row=>row[index]/denominator),innovation=component.value-state[index];
-          state=state.map((value,stateIndex)=>clamp(value+gain[stateIndex]*innovation,0,100));
-          const pivotRow=covariance[index].slice();
-          covariance=covariance.map((row,rowIndex)=>row.map((value,column)=>value-gain[rowIndex]*pivotRow[column]));
-          for(let row=0;row<keys.length;row+=1)for(let column=row+1;column<keys.length;column+=1){const symmetric=(covariance[row][column]+covariance[column][row])/2;covariance[row][column]=symmetric;covariance[column][row]=symmetric;}
-          gains[key]=round(gain[index],3);lastEvidenceDays[key]=day;
+          const gain=covariance.map(row=>row[index]!/denominator),innovation=component.value-state[index]!;
+          state=state.map((value,stateIndex)=>clamp(value+gain[stateIndex]!*innovation,0,100));
+          const pivotRow=covariance[index]!.slice();
+          covariance=covariance.map((row,rowIndex)=>row.map((value,column)=>value-gain[rowIndex]!*pivotRow[column]!));
+          for(let row=0;row<keys.length;row+=1)for(let column=row+1;column<keys.length;column+=1){const symmetric=(covariance[row]![column]!+covariance[column]![row]!)/2;covariance[row]![column]=symmetric;covariance[column]![row]=symmetric;}
+          gains[key]=round(gain[index]!,3);lastEvidenceDays[key]=day;
         });
       }
       state=state.map((value,index)=>observedComponents[index]?value:previousState[index]);
       observedComponents.forEach((observed,index)=>{
-        if(!observed)covariance[index][index]=Math.max(previousCovariance[index][index],covariance[index][index]);
+        if(!observed)covariance[index]![index]=Math.max(previousCovariance[index]![index]!,covariance[index]![index]!);
       });
       const states=Object.fromEntries(keys.map((key,index)=>[key,{
-        ...componentInterval(state[index],covariance[index][index]),
-        observed:observation&&Number.isFinite(observation.components[key].value)?observation.components[key].value:null,
-        observationUsed:!!(observation&&Number.isFinite(observation.components[key].value)),gain:gains[key]??null
+        ...componentInterval(state[index]!,covariance[index]![index]!),
+        observed:observation&&isFiniteNumber(observation.components[key].value)?observation.components[key].value:null,
+        observationUsed:!!(observation&&isFiniteNumber(observation.components[key].value)),gain:gains[key]??null
       }]));
-      const interval=Number.isFinite(lastEvidenceDays.capacity)?states.capacity:{estimate:null,low:null,high:null};
+      const interval=isFiniteNumber(lastEvidenceDays.capacity)?states.capacity:{estimate:null,low:null,high:null};
       history.push({
         date:dateFromDay(day),day,
-        observed:observation&&Number.isFinite(observation.completion)?observation.completion:null,
+        observed:observation&&isFiniteNumber(observation.completion)?observation.completion:null,
         observationUsed:!!(observation&&observation.hasObservation),
         evidenceWeight:observation?observation.evidenceWeight:null,
         measurementSd:observation?observation.measurementSd:null,
-        gain:gains.capacity??null,variance:round(covariance[0][0],2),states,
+        gain:gains.capacity??null,variance:round(covariance[0]![0]!,2),states,
         ...interval
       });
     }
     const latest=history[history.length-1]||null;
     const reportedParameters=learnFitnessStateParameters(parameterObservations.slice(-FITNESS_PARAMETER_WINDOW_OBSERVATIONS),keys);
-    const current=Number.isFinite(lastEvidenceDays.capacity)?latest:null;
+    const current=isFiniteNumber(lastEvidenceDays.capacity)?latest:null;
     const effectiveDays=round(sum(observations.filter(row=>row.hasObservation).map(row=>row.evidenceWeight)),1);
     const observedDays=observations.filter(row=>row.hasObservation).length;
     const intervalWidth=current?round(current.high-current.low,1):100;
     const confidence=evidenceConfidence(effectiveDays,intervalWidth);
     const trajectory=fitnessTrajectory(history,current,confidence,lastEvidenceDays.capacity,endDay);
     const dimensions=Object.fromEntries(keys.map((key,index)=>{
-      const currentState=Number.isFinite(lastEvidenceDays[key])&&latest&&latest.states?latest.states[key]:null;
-      const observed=observations.filter(row=>Number.isFinite(row.components[key].value)).length;
-      return [key,{key,label:key==='capacity'?'Output state':key==='execution'?'Schedule control':'Focus control',current:currentState,observedDays:observed,confidence:evidenceConfidence(observed,currentState?currentState.high-currentState.low:100),center:round(reportedParameters.centers[index],1),persistence:round(reportedParameters.empiricalPersistence[index],3),lastEvidenceDate:Number.isFinite(lastEvidenceDays[key])?dateFromDay(lastEvidenceDays[key]):null,daysSinceLastEvidence:Number.isFinite(lastEvidenceDays[key])?Math.max(0,endDay-lastEvidenceDays[key]):null}];
-    }));
+      const currentState=isFiniteNumber(lastEvidenceDays[key])&&latest?latest.states[key]:null;
+      const observed=observations.filter(row=>isFiniteNumber(row.components[key].value)).length;
+      return [key,{key,label:key==='capacity'?'Output state':key==='execution'?'Schedule control':'Focus control',current:currentState,observedDays:observed,confidence:evidenceConfidence(observed,currentState?currentState.high-currentState.low:100),center:round(reportedParameters.centers[index]!,1),persistence:round(reportedParameters.empiricalPersistence[index]!,3),lastEvidenceDate:isFiniteNumber(lastEvidenceDays[key])?dateFromDay(lastEvidenceDays[key]!):null,daysSinceLastEvidence:isFiniteNumber(lastEvidenceDays[key])?Math.max(0,endDay-lastEvidenceDays[key]!):null}];
+    })) as Record<FitnessKey,FitnessDimension>;
     return {
       ready:Object.values(dimensions).some(dimension=>!!dimension.current),
       history,observations,current,confidence,trajectory,effectiveDays,observedDays,dimensions,parameters:reportedParameters,
@@ -2473,23 +2489,23 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
       forecastCausal:true,
       parameterUpdateCadence:FITNESS_PARAMETER_UPDATE_CADENCE,
       parameterWindowObservations:FITNESS_PARAMETER_WINDOW_OBSERVATIONS,
-      lastEvidenceDate:Number.isFinite(lastEvidenceDays.capacity)?dateFromDay(lastEvidenceDays.capacity):null,
-      daysSinceLastEvidence:Number.isFinite(lastEvidenceDays.capacity)?Math.max(0,endDay-lastEvidenceDays.capacity):null,
+      lastEvidenceDate:isFiniteNumber(lastEvidenceDays.capacity)?dateFromDay(lastEvidenceDays.capacity):null,
+      daysSinceLastEvidence:isFiniteNumber(lastEvidenceDays.capacity)?Math.max(0,endDay-lastEvidenceDays.capacity):null,
       basis:{start:history[0]&&history[0].date||null,end:dateFromDay(endDay),mode:'bounded-two-year-model',historicalMode:'origin-causal'},
       intervalWidth
     };
   }
-  function computeFitnessLoadMatch(model){
-    const eligible=(Array.isArray(model&&model.daily)?model.daily:[])
+  function computeFitnessLoadMatch(model:FitnessModelInput):FitnessLoadMatch{
+    const eligible=model.daily
       .filter(row=>row&&row.planned>0&&Number.isFinite(row.completion))
       .slice(-FITNESS_RECENT_LOAD_DAYS);
     const recentPlanned=mean(eligible.map(row=>row.planned));
     const recentCompletion=mean(eligible.map(row=>row.completion));
-    const workload=model&&model.dynamics&&model.dynamics.workload||{};
-    const recommendation=workload&&workload.recommendation;
-    if(!workload.ready||!recommendation||!Number.isFinite(recentPlanned))return {
+    const workload=model.dynamics?.workload;
+    const recommendation=workload?.recommendation;
+    if(!workload?.ready||!recommendation||!Number.isFinite(recentPlanned))return {
       ready:false,key:'unknown',label:'Response not established',tone:'low',recentPlanned:roundNullable(recentPlanned,1),recentCompletion:roundNullable(recentCompletion,1),
-      recentDays:eligible.length,range:null,reason:workload.reason||'Need more varied planned-work days.'
+      recentDays:eligible.length,range:null,reason:workload?.reason||'Need more varied planned-work days.'
     };
     const range={min:recommendation.minPlanned,max:recommendation.maxPlanned,typical:recommendation.typicalPlanned};
     const margin=Math.max(20,Math.round(num(range.typical)*.05));
@@ -2500,17 +2516,17 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
       ready:true,key,label,tone,recentPlanned:round(recentPlanned,1),recentCompletion:roundNullable(recentCompletion,1),recentDays:eligible.length,range
     };
   }
-  function computeStudyFitness(model,evidence,options={}){
-    const performanceState=options&&options.performanceState||computeFitnessPerformanceState(model,evidence);
+  function computeStudyFitness(model:FitnessModelInput,evidence:EvidenceIndex,options:Readonly<{performanceState?:FitnessPerformanceState}>={}):FitnessResult{
+    const performanceState=options.performanceState||computeFitnessPerformanceState(model,evidence);
     const loadMatch=computeFitnessLoadMatch(model);
-    const ratedDays=num(model&&model.advanced&&model.advanced.qualityPairCount);
-    const quality={ratedDays,average:model&&model.overview?model.overview.averageQuality:null,totalSavedDays:num(model&&model.recordCount),ready:ratedDays>=3};
+    const ratedDays=num(model.advanced?.qualityPairCount);
+    const quality={ratedDays,average:model.overview?.averageQuality??null,totalSavedDays:num(model.recordCount),ready:ratedDays>=3};
     const current=performanceState.current;
     const stateText=current?`${percentLabel(current.estimate,1)} (${percentLabel(current.low,0)}–${percentLabel(current.high,0)} model range)`:'No state estimate';
     const trajectoryText=performanceState.trajectory&&performanceState.trajectory.label||'Uncertain';
     const dimensionCopy=performanceState.dimensions?['execution','recovery'].map(key=>performanceState.dimensions[key]).filter(dimension=>dimension&&dimension.current).map(dimension=>`${dimension.label} ${percentLabel(dimension.current.estimate,0)}`).join(' · '):'';
     const stalenessDays=performanceState.daysSinceLastEvidence;
-    const stalenessText=Number.isFinite(stalenessDays)&&stalenessDays>0
+    const stalenessText=isFiniteNumber(stalenessDays)&&stalenessDays>0
       ? ` Last usable completion evidence was ${stalenessDays===1?'1 day':`${stalenessDays} days`} ago; the point estimate is held while uncertainty widens.`
       : '';
     const summary=current
@@ -2524,7 +2540,7 @@ type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;r
     };
   }
 
-  function compactFitnessResult(fitness){
+  function compactFitnessResult(fitness:FitnessResult){
     const state=fitness.performanceState,history=state.history.map(({date,day,observed,observationUsed,evidenceWeight,estimate,low,high})=>({date,day,observed,observationUsed,evidenceWeight,estimate,low,high}));
     return {...fitness,performanceState:{...state,history,observations:undefined,parameters:undefined},parameters:{sourceWeights:{...FITNESS_SOURCE_WEIGHTS}}};
   }
