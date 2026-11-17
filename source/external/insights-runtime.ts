@@ -74,6 +74,7 @@ interface ViewState {
   pane:HTMLElement|null;rendered:boolean;renderedKey:string;renderedBaseKey:string;renderedWindowKey:string;session:Session|null;
   scrollWindow:number;scrollMain:number;errorTimer:number|null;suppressScroll:boolean;paneObserver:MutationObserver|null;lastProfile:InsightsProfile|null;
   navigationReady:Promise<boolean>;prefetching:Promise<PrefetchStatus>|null;prefetchWorking:boolean;prefetched:Prefetched|null;
+  renderRollback:Readonly<{pane:HTMLElement;token:number;nodes:readonly Node[]}>|null;
 }
 type IdleScheduler={yield?:()=>Promise<void>};
 declare function createInsightsRendering(
@@ -85,6 +86,9 @@ function bootInsightsRuntime(){
 const finiteNumber=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
 const errorName=(error:unknown)=>error instanceof Error?error.name:'';
 const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error?String((error as {code?:unknown}).code||''):'';
+const supersededError=()=>{
+  const error=new Error('Insights work was superseded.');error.name='AbortError';return error;
+};
   const window=(globalThis.window||globalThis) as RuntimeWindow;
   const TAB_ID='insights';
   const REQUIRED_CAPABILITIES:Capabilities=Object.freeze({
@@ -934,16 +938,32 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       navigationReady:Promise.resolve(true),
       prefetching:null,
       prefetchWorking:false,
-      prefetched:null
+      prefetched:null,
+      renderRollback:null
     };
     const main=document.querySelector<HTMLElement>('.main');
+    let prefetchGeneration=0;
+    const restoreInterruptedRender=()=>{
+      const rollback=state.renderRollback;
+      if(!rollback)return false;
+      state.renderRollback=null;
+      rollback.pane.replaceChildren(...rollback.nodes);
+      Layout.purge();
+      return true;
+    };
     const observePane=(pane:HTMLElement)=>{
       if(state.pane===pane&&state.paneObserver)return;
       if(state.paneObserver)state.paneObserver.disconnect();
       state.pane=pane;
       if(typeof MutationObserver!=='function')return;
       state.paneObserver=new MutationObserver(()=>{
-        if(pane.hidden||!pane.classList.contains('on')){computation.release();engine.releaseTransient();}
+        if(pane.hidden||!pane.classList.contains('on')){
+          InsightsRenderCoordinator.begin();
+          prefetchGeneration+=1;
+          computation.release();
+          engine.releaseTransient();
+          restoreInterruptedRender();
+        }
       });
       state.paneObserver.observe(pane,{attributes:true,attributeFilter:['class','hidden']});
     };
@@ -1002,10 +1022,14 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       const evidenceStarted=performance.now();
       records=computation.enrichRecords(records);
       const scheduler=Reflect.get(globalThis,'scheduler') as IdleScheduler|undefined;
-      const yieldPreparation=()=>scheduler&&typeof scheduler.yield==='function'
-        ?globalThis.scheduler.yield()
-        :new Promise(resolve=>setTimeout(resolve,0));
+      const yieldPreparation=async()=>{
+        if(!isCurrent())throw supersededError();
+        if(scheduler&&typeof scheduler.yield==='function')await globalThis.scheduler.yield();
+        else await new Promise(resolve=>setTimeout(resolve,0));
+        if(!isCurrent())throw supersededError();
+      };
       const prepared=await engine.prepareAsync(records,datasetRevision,yieldPreparation);
+      if(!isCurrent())return null;
       profile.evidencePreparationMs+=performance.now()-evidenceStarted;
       const summaryRevision=summariesRevisionKey(summaries);
       const finalSourceRevision=datasetRevision||String(source&&source.revision||'');
@@ -1039,7 +1063,6 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
     // only with a worker, a trusted dataset revision and a visible page, and its
     // result is used only when every key part still matches.
     const PREFETCH_IDLE_TIMEOUT_MS=10000;
-    let prefetchGeneration=0;
     const publishPrefetch=(status:Readonly<Record<string,unknown>>,token:number):PrefetchStatus=>{
       const result=Object.freeze({...status,at:Number(performance.now().toFixed(2))});
       if(token===prefetchGeneration)window.__StudyDirectorInsightsPrefetch=result;
@@ -1128,12 +1151,13 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
     const render=async(context:InsightsRenderContext)=>{
       const pane=context&&context.pane;
       if(!pane)return;
+      const token=InsightsRenderCoordinator.begin();
+      restoreInterruptedRender();
       observePane(pane);
       state.suppressScroll=true;
       if(context&&context.restoreScroll!==false)void restoreScroll({immediate:true});
       else if(context&&context.restoreScroll===false){state.scrollWindow=0;state.scrollMain=0;void restoreScroll({immediate:true});}
       if(state.errorTimer){clearTimeout(state.errorTimer);state.errorTimer=null;}
-      const token=InsightsRenderCoordinator.begin();
       const notice=api.insights.notifications.begin({id:'report',foreground:false,announce:false,title:'Insights',message:'Preparing your saved study history…',action:{label:'Retry',run:()=>{void render(context);}}});
       // Join only work that is already reading data; a pre-computation still
       // waiting for idle time sees the open tab and stands down by itself.
@@ -1211,6 +1235,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         const previousScroll=state.rendered;
         const updateStatus=pane.querySelector('.insights-update-status');
         const priorNodes=state.rendered?[...pane.childNodes].filter(node=>node!==updateStatus):null;
+        if(priorNodes)state.renderRollback=Object.freeze({pane,token,nodes:Object.freeze(priorNodes)});
         let renderMetrics:Awaited<ReturnType<typeof renderModel>>;
         try{
           renderMetrics=await renderModel(pane,model,{
@@ -1223,13 +1248,14 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
             reload:()=>{void render(context);}
           });
         }catch(error){
-          if(InsightsRenderCoordinator.isCurrent(token)&&priorNodes){
-            pane.replaceChildren(...priorNodes);
-            Layout.purge();
-          }
+          if(InsightsRenderCoordinator.isCurrent(token)&&state.renderRollback?.token===token)restoreInterruptedRender();
           throw error;
         }
-        if(renderMetrics.cancelled||!InsightsRenderCoordinator.isCurrent(token))return;
+        if(renderMetrics.cancelled||!InsightsRenderCoordinator.isCurrent(token)){
+          if(state.renderRollback?.token===token)restoreInterruptedRender();
+          return;
+        }
+        if(state.renderRollback?.token===token)state.renderRollback=null;
         Layout.purge();
         profile.domMs=renderMetrics.domMs;profile.maxDomChunkMs=renderMetrics.maxChunkMs;profile.domChunks=renderMetrics.chunks;
         state.rendered=true;
@@ -1270,7 +1296,18 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         longTaskObserver?.disconnect();
       }
     };
-    return Object.freeze({render,prefetch,ready:async()=>{await state.navigationReady;await void restoreScroll();return true;},profile:()=>state.lastProfile});
+    const dispose=()=>{
+      InsightsRenderCoordinator.begin();
+      prefetchGeneration+=1;
+      restoreInterruptedRender();
+      state.paneObserver?.disconnect();
+      state.paneObserver=null;state.pane=null;
+      window.removeEventListener('scroll',captureScroll);
+      if(main)main.removeEventListener('scroll',captureScroll);
+      computation.dispose();engine.releaseTransient();
+      return true;
+    };
+    return Object.freeze({render,prefetch,ready:async()=>{await state.navigationReady;await restoreScroll();return true;},profile:()=>state.lastProfile,dispose});
   }
     return Object.freeze({
       createInsightsView,supportsCapabilities
@@ -1278,7 +1315,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
   })(InsightsPrimitives,InsightsRecords,InsightsRendering,InsightsAnalyticsLab);
 
   // M8.13 PLUGIN RUNTIME COMPONENT
-  ((Config:ModelRuntime['Config'],Rendering:Rendering,ModelEngine:ModelRuntime['ModelEngine'],RetainedView:Readonly<{createInsightsView(api:InsightsPluginApi,engine:InsightsEngine):Readonly<{render:(context:InsightsRenderContext)=>Promise<void>;prefetch:()=>Promise<PrefetchStatus>;ready:()=>Promise<boolean>;profile:()=>InsightsProfile|null}>;supportsCapabilities(api:InsightsPluginApi|null|undefined,requirements:Capabilities):boolean}>)=>{
+  ((Config:ModelRuntime['Config'],Rendering:Rendering,ModelEngine:ModelRuntime['ModelEngine'],RetainedView:Readonly<{createInsightsView(api:InsightsPluginApi,engine:InsightsEngine):Readonly<{render:(context:InsightsRenderContext)=>Promise<void>;prefetch:()=>Promise<PrefetchStatus>;ready:()=>Promise<boolean>;profile:()=>InsightsProfile|null;dispose:()=>boolean}>;supportsCapabilities(api:InsightsPluginApi|null|undefined,requirements:Capabilities):boolean}>)=>{
     const {
       PLUGIN_VERSION
     }=Config;
@@ -1302,17 +1339,16 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       render:view.render,
       ready:view.ready
     });
-    if(registered){
-      // Prepare a long history while the app is idle, and again when the page
-      // returns to view (the dataset may have changed meanwhile).
-      void view.prefetch();
-      document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void view.prefetch();});
-    }
-    if(registered&&document.documentElement.dataset['insightsResizeBound']!=='1'){
+    if(!registered){view.dispose();return false;}
+    // Prepare a long history while the app is idle, and again when the page
+    // returns to view (the dataset may have changed meanwhile).
+    void view.prefetch();
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void view.prefetch();});
+    if(document.documentElement.dataset['insightsResizeBound']!=='1'){
       document.documentElement.dataset['insightsResizeBound']='1';
       window.addEventListener('resize',()=>Layout.resize(()=>document.getElementById('pane-insights')));
     }
-    return registered;
+    return true;
   }
   const PLUGIN_READY_EVENT='studydirector:ready';
   const PLUGIN_DESCRIPTOR:InsightsPluginDescriptor=Object.freeze({name:'SD-insights',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,setup});

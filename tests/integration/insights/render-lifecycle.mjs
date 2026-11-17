@@ -6,14 +6,14 @@ import fs from 'node:fs';
 const source=readRuntimeSource('source/external/insights-runtime.ts');
 const start=source.indexOf('    const render=async('),end=source.indexOf('    return Object.freeze({render,prefetch,ready:',start);
 assert.ok(start>0&&end>start);
-function harness({failSource=false,supersede=false,retained=false,staleFailure=false,unstableSource=false,stalePaint=false,missingRevision=false,failRender=false}={}){
+function harness({failSource=false,supersede=false,retained=false,staleFailure=false,unstableSource=false,stalePaint=false,missingRevision=false,failRender=false,staleRender=false}={}){
   let generation=0,disconnects=0,observers=0,published=0,frames=0,loads=0;
   const {coordinator,port}=createNotifications('insights');
   const element=()=>({children:[],textContent:'',attributes:{},classList:{contains:()=>true},setAttribute(key,value){this.attributes[key]=value;},appendChild(node){this.children.push(node);},replaceChildren(...nodes){this.children=nodes;},addEventListener(){},get childNodes(){return this.children;},querySelector(selector){return selector==='.insights-update-status'?this.children.find(node=>node.className==='insights-update-status')||null:null;}});
   const pane=element(),previous={id:'previous-view'};if(retained)pane.children.push(previous);
-  const state={rendered:retained,errorTimer:null,renderedBaseKey:unstableSource||failRender?'previous-revision':`source|2026-09-28|${missingRevision?'saved:0':'revision'}`,renderedWindowKey:'all'};
+  const state={rendered:retained,errorTimer:null,renderedBaseKey:unstableSource||failRender||staleRender?'previous-revision':`source|2026-09-28|${missingRevision?'saved:0':'revision'}`,renderedWindowKey:'all',renderRollback:null};
   const values={
-    observePane:()=>{},state,prefetchGeneration:0,restoreScroll:()=>{},clearTimeout,performance:{now:()=>0},
+    observePane:()=>{},state,prefetchGeneration:0,restoreScroll:()=>{},restoreInterruptedRender:()=>{const rollback=state.renderRollback;if(!rollback)return false;state.renderRollback=null;rollback.pane.replaceChildren(...rollback.nodes);return true;},clearTimeout,performance:{now:()=>0},
     errorName:error=>error?.name||'',errorCode:error=>error?.code||'',
     InsightsRenderCoordinator:{begin:()=>++generation,isCurrent:token=>token===generation},computation:{cancel:()=>{},warm:()=>true,build:async()=>({model:{},mode:'main-thread-small',computeMs:0,roundTripMs:0})},
     PerformanceObserver:class{static supportedEntryTypes=['longtask'];constructor(){observers++;}observe(){}disconnect(){disconnects++;}},
@@ -24,7 +24,11 @@ function harness({failSource=false,supersede=false,retained=false,staleFailure=f
     clearInsightsUpdateStatus:()=>{},publishProfile:()=>{published++;},showInsightsUpdateStatus:()=>{const node=element();node.className='insights-update-status';pane.appendChild(node);return node;},
     loadSession:async()=>{loads++;return unstableSource?null:{baseKey:`source|2026-09-28|${missingRevision?'saved:0':'revision'}`,prepared:{records:[]}};},
     planModel:()=>({windowInfo:{key:'all',records:[]},fullKey:'model-key',modelOptions:{}}),
-    renderModel:async()=>{if(failRender){pane.replaceChildren({id:'partial-dashboard'});throw new Error('A dashboard section failed to construct');}return {domMs:1,maxChunkMs:1,chunks:1};},
+    renderModel:async()=>{
+      if(failRender){pane.replaceChildren({id:'partial-dashboard'});throw new Error('A dashboard section failed to construct');}
+      if(staleRender){pane.replaceChildren({id:'partial-dashboard'});generation++;return {cancelled:true,domMs:1,maxChunkMs:1,chunks:1};}
+      return {domMs:1,maxChunkMs:1,chunks:1};
+    },
     Layout:{purge:()=>{}},
     main:null,window:{scrollTo(){}},
     el:(_tag,_class,text)=>Object.assign(element(),{textContent:text})
@@ -32,18 +36,19 @@ function harness({failSource=false,supersede=false,retained=false,staleFailure=f
   const render=new Function(...Object.keys(values),`${source.slice(start,end)};return render;`)(...Object.values(values));
   return {coordinator,run:()=>render({pane}),pane,previous,state,counts:()=>({observers,disconnects}),published:()=>published,loads:()=>loads};
 }
-for(const options of [{},{supersede:true},{retained:true},{failSource:true},{retained:true,failSource:true},{retained:true,staleFailure:true},{unstableSource:true},{retained:true,unstableSource:true},{stalePaint:true},{retained:true,missingRevision:true},{retained:true,failRender:true}]){
+for(const options of [{},{supersede:true},{retained:true},{failSource:true},{retained:true,failSource:true},{retained:true,staleFailure:true},{unstableSource:true},{retained:true,unstableSource:true},{stalePaint:true},{retained:true,missingRevision:true},{retained:true,failRender:true},{retained:true,staleRender:true}]){
   const h=harness(options);await h.run();
   assert.deepEqual(h.counts(),{observers:1,disconnects:1},'every successful, superseded or failed render must disconnect its own observer exactly once');
   const failed=options.failSource||options.unstableSource||options.failRender;
   if(failed&&!options.retained){assert.equal(h.pane.attributes['aria-busy'],'false');assert.equal(h.pane.children[0].children[0].textContent,'Retry','failed source or inconsistent snapshots must offer retry instead of leaving a loading shell');}
   if(failed&&options.retained){assert.equal(h.pane.children[0],h.previous,'failed refresh must retain the previous usable report');assert.equal(h.pane.children.at(-1).children[0].textContent,'Retry','retained refresh failure must expose an in-place retry');}
   if(options.staleFailure){assert.deepEqual(h.pane.children,[h.previous],'stale failure must not alter the successor/retained DOM');}
-  assert.equal(h.coordinator.readEvent('insights','report').lifecycle,options.staleFailure||options.supersede||options.stalePaint?'cancelled':failed?'failed':'succeeded');
+  if(options.staleRender){assert.deepEqual(h.pane.children,[h.previous],'a superseded progressive refresh must roll back to the last complete retained view');}
+  assert.equal(h.coordinator.readEvent('insights','report').lifecycle,options.staleFailure||options.supersede||options.stalePaint||options.staleRender?'cancelled':failed?'failed':'succeeded');
   assert.equal(h.coordinator.eventStatus().toasts.length,0,'report status stays inside Insights without navigation jingles or duplicate toasts');
   if(options.supersede)assert.equal(h.pane.children.length,0,'a superseded render must not replace the newer view');
   if(options.missingRevision)assert.equal(h.loads(),1,'unknown repository revision must not reuse an allegedly current saved-data view');
-  const shouldPublish=!failed&&!options.staleFailure&&!options.supersede&&!options.stalePaint;
+  const shouldPublish=!failed&&!options.staleFailure&&!options.supersede&&!options.stalePaint&&!options.staleRender;
   assert.equal(h.published(),Number(shouldPublish),'only a current, completed render may publish a profile');
 }
 
@@ -106,4 +111,4 @@ for(const options of [{},{supersede:true},{retained:true},{failSource:true},{ret
   assert.ok(details.children.some(row=>row.className==='lab-evidence'),'successful retry must show the evidence');
   details.handlers.toggle();assert.equal(attempts,2,'successful lazy evidence must not rebuild on every toggle');
 }
-console.log(JSON.stringify({status:'PASS',suite:'insights-render-lifecycle',earlyFailureRetry:true,inconsistentSnapshotRetry:true,missingRevisionReload:true,retainedFailurePreservesView:true,renderExceptionRollback:true,staleFailureFenced:true,stalePaintProfileFenced:true,sampleRetry:true,lazyLabRetry:true,supersededCleanup:true,retainedCleanup:true}));
+console.log(JSON.stringify({status:'PASS',suite:'insights-render-lifecycle',earlyFailureRetry:true,inconsistentSnapshotRetry:true,missingRevisionReload:true,retainedFailurePreservesView:true,renderExceptionRollback:true,staleRenderRollback:true,staleFailureFenced:true,stalePaintProfileFenced:true,sampleRetry:true,lazyLabRetry:true,supersededCleanup:true,retainedCleanup:true}));

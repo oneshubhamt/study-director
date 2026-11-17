@@ -2310,14 +2310,16 @@ function createInsightsRendering(
     const dailyButton=el('button','insights-execution-tab ui-btn active ui-label','Daily Execution');
     const practiceButton=el('button','insights-execution-tab ui-btn ui-label','Practice Pacing');
     dailyButton.type=practiceButton.type='button';
+    dailyButton.id='insights-execution-daily-tab';practiceButton.id='insights-practice-tab';
     dailyButton.dataset['executionTab']='daily';practiceButton.dataset['executionTab']='practice';
     dailyButton.setAttribute('role','tab');practiceButton.setAttribute('role','tab');
     dailyButton.setAttribute('aria-selected','true');practiceButton.setAttribute('aria-selected','false');
     dailyButton.setAttribute('aria-controls','insights-execution-daily');practiceButton.setAttribute('aria-controls','insights-practice');
+    dailyButton.tabIndex=0;practiceButton.tabIndex=-1;
     const dailyPanel=el('div','insights-execution-tab-panel');
-    dailyPanel.id='insights-execution-daily';dailyPanel.dataset['executionPanel']='daily';dailyPanel.setAttribute('role','tabpanel');
+    dailyPanel.id='insights-execution-daily';dailyPanel.dataset['executionPanel']='daily';dailyPanel.setAttribute('role','tabpanel');dailyPanel.setAttribute('aria-labelledby',dailyButton.id);
     const practicePanel=el('div','insights-execution-tab-panel');
-    practicePanel.id='insights-practice';practicePanel.dataset['executionPanel']='practice';practicePanel.setAttribute('role','tabpanel');practicePanel.hidden=true;
+    practicePanel.id='insights-practice';practicePanel.dataset['executionPanel']='practice';practicePanel.setAttribute('role','tabpanel');practicePanel.setAttribute('aria-labelledby',practiceButton.id);practicePanel.hidden=true;
     dailyPanel.appendChild(renderExecutionQuality(model));
     practicePanel.appendChild(renderPracticePacer(model,{embedded:true}));
     const activate=(key:string|null)=>{
@@ -2325,6 +2327,7 @@ function createInsightsRendering(
       if((daily&&!dailyPanel.hidden)||(!daily&&!practicePanel.hidden))return true;
       dailyButton.classList.toggle('active',daily);practiceButton.classList.toggle('active',!daily);
       dailyButton.setAttribute('aria-selected',daily?'true':'false');practiceButton.setAttribute('aria-selected',daily?'false':'true');
+      dailyButton.tabIndex=daily?0:-1;practiceButton.tabIndex=daily?-1:0;
       dailyPanel.hidden=!daily;practicePanel.hidden=daily;
       return true;
     };
@@ -2332,9 +2335,9 @@ function createInsightsRendering(
     dailyButton.addEventListener('click',()=>{void activate('daily');});
     practiceButton.addEventListener('click',()=>{void activate('practice');});
     [dailyButton,practiceButton].forEach((button,index)=>button.addEventListener('keydown',event=>{
-      if(event.key!=='ArrowLeft'&&event.key!=='ArrowRight')return;
+      if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
       event.preventDefault();
-      const next=index===0?practiceButton:dailyButton;
+      const next=event.key==='Home'?dailyButton:event.key==='End'?practiceButton:index===0?practiceButton:dailyButton;
       next.focus();next.click();
     }));
     tabs.append(dailyButton,practiceButton);surface.append(tabs,dailyPanel,practicePanel);return surface;

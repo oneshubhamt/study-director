@@ -83,7 +83,7 @@ for(const rejectBuild of [false,true]){
 }
 
 {
-  let observer=null,releaseCount=0,transientReleaseCount=0;
+  let observer=null,releaseCount=0,transientReleaseCount=0,invalidations=0,restores=0;
   const observeStart=source.indexOf('    const observePane=');
   const observeEnd=source.indexOf('    const captureScroll=',observeStart);
   assert.ok(observeStart>0&&observeEnd>observeStart,'checked inactivity owner must be extractable');
@@ -96,7 +96,9 @@ for(const rejectBuild of [false,true]){
   const pane={hidden:false,classList:{contains:()=>on}};
   const state={pane:null,paneObserver:null};
   const values={
-    state,MutationObserver:FakeMutationObserver,
+    state,MutationObserver:FakeMutationObserver,prefetchGeneration:0,
+    InsightsRenderCoordinator:{begin:()=>{invalidations+=1;return invalidations;}},
+    restoreInterruptedRender:()=>{restores+=1;return false;},
     computation:{release:()=>{releaseCount+=1;return true;}},
     engine:{releaseTransient:()=>{transientReleaseCount+=1;}}
   };
@@ -104,11 +106,43 @@ for(const rejectBuild of [false,true]){
   observePane(pane);
   on=false;
   observer.callback();
+  assert.equal(invalidations,1,'leaving Insights must invalidate an in-flight retained render');
   assert.equal(releaseCount,1,'leaving Insights must release the retained worker for idle retirement');
   assert.equal(transientReleaseCount,1,'leaving Insights must release lazy/transient model evidence');
+  assert.equal(restores,1,'leaving Insights must restore any interrupted progressive refresh');
+}
+
+{
+  const loadStart=source.indexOf('    const loadSession=async(');
+  const loadEnd=source.indexOf('    // One description of the model',loadStart);
+  assert.ok(loadStart>0&&loadEnd>loadStart,'checked session preparation owner must be extractable');
+  let current=true,preparedCommitted=false;
+  const records=[{date:'2026-11-17',tasks:[]}];
+  const dataSource={
+    getDailySnapshot:async()=>({summaries:records,records}),
+    getRecordSource:()=>({type:'real',revision:'saved:1'}),
+    getDatasetRevision:async()=> 'r1'
+  };
+  const values={
+    performance:{now:()=>0},globalThis:{},
+    computation:{enrichRecords:value=>value},
+    normalizeSummaries:value=>value,
+    readDatasetRevision:source=>source.getDatasetRevision(),
+    sourceIdentity:source=>[source?.type||'real',source?.mode||'',source?.target||'',source?.label||'',source?.revision||''].map(String).join('|'),
+    engine:{prepareAsync:async(value,revision,yieldTask)=>{await yieldTask();preparedCommitted=true;return {records:value,revision};}},
+    summariesRevisionKey:()=> 'summary-r1',
+    supersededError:()=>{const error=new Error('superseded');error.name='AbortError';return error;},
+    setTimeout:callback=>{current=false;callback();return 1;}
+  };
+  const loadSession=new Function(...Object.keys(values),`${source.slice(loadStart,loadEnd)};return loadSession;`)(...Object.values(values));
+  await assert.rejects(
+    loadSession({dataSource,source:dataSource.getRecordSource(),sourceKey:'real||||saved:1',currentStudyDate:'2026-11-17',datasetRevision:'r1',isCurrent:()=>current,profile:{recordLoadMs:0,evidencePreparationMs:0}}),
+    error=>error?.name==='AbortError'
+  );
+  assert.equal(preparedCommitted,false,'superseded preparation must stop before it can publish into the model preparation cache');
 }
 
 console.log(JSON.stringify({
   status:'PASS',suite:'insights-prefetch-lifecycle',
-  staleResultFenced:true,staleErrorFenced:true,inactivityRelease:true
+  staleResultFenced:true,staleErrorFenced:true,inactivityRelease:true,inactivityInvalidation:true,preparationCancellation:true
 }));
