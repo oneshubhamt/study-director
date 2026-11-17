@@ -24,8 +24,9 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
   exactObject(input,['document','providers','presentation','device','protection','keptVersions','profileKey','profileEmail','profileName','deviceName','markDriveRequested','storageIssues','unsupportedDataHeld','backupReminder','updateReady','sessionElsewhere','sessionReady','unseen','actions','environment','capture'],'Sync status host input');
   if(!Object.isFrozen(input.presentation)||!Object.isFrozen(input.actions)||!Object.isFrozen(input.environment))throw new TypeError('Sync status host providers must be frozen.');
   const {document,presentation,environment}=input;
+  const STATUS_HOST_IDS=Object.freeze(['profile-tag','profile-badge','profile-avatar'] as const);
   let sequence=0,connection:ConnectionState|null=null,card:ConnectCardState|null=null;
-  let renderTimer:number|null=null,settleTimer:number|null=null,hideTimer:number|null=null,lastRing='',installed=false;
+  let renderTimer:number|null=null,settleTimer:number|null=null,hideTimer:number|null=null,lastRing='',statusProfile='',installed=false;
 
   const element=(id:string)=>document.getElementById(id) as HTMLElement|null;
   const currentProfile=()=>String(input.profileKey()||'');
@@ -36,6 +37,12 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
   }
   function reconcileProfile(){
     const profile=currentProfile();
+    if(statusProfile!==profile){
+      statusProfile=profile;lastRing='';
+      if(settleTimer!==null)environment.clearTimeout(settleTimer);
+      settleTimer=null;
+      for(const id of STATUS_HOST_IDS)element(id)?.classList.remove('status-settle');
+    }
     if(connection&&connection.profile!==profile)connection=null;
     if(card&&card.profile!==profile){
       clearHideTimer();card=null;
@@ -133,7 +140,7 @@ function createController(input:Readonly<SyncStatusHostInput>):Readonly<SyncStat
     try{model=presentation.status(statusInput());}
     catch(error){input.capture('sync-status.render',error);return false;}
     const hosts:HTMLElement[]=[];
-    for(const id of ['profile-tag','profile-badge','profile-avatar']){const host=element(id);if(host)hosts.push(host);}
+    for(const id of STATUS_HOST_IDS){const host=element(id);if(host)hosts.push(host);}
     if(lastRing==='syncing'&&model.ring==='synced'){
       if(settleTimer!==null)environment.clearTimeout(settleTimer);
       for(const host of hosts)host.classList.add('status-settle');

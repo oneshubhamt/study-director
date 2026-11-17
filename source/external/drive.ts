@@ -643,7 +643,11 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     const verified=verifiedFolderReceipt(operation);if(verified){await assertDriveOperationCurrent(operation);return verified;}
     const current=profileSnapshot();if(folderResolutionFlight&&(folderResolutionFlight.profile.id!==current.id||folderResolutionFlight.profile.generation!==current.generation))cancelFolderResolution();
     const flight=folderResolutionFlight||startFolderResolution(current);
-    const resolved=await awaitFolderResolution(flight,operation);
+    const resolved=await awaitFolderResolution(flight,operation),current=profileSnapshot();
+    if(boundFolder!==resolved+'\n'+current.id){
+      invalidateFolderIdentity();
+      throw noRetry(new Error('The active Study Director profile changed while Google Drive was settling its library. Retry the Drive action.'));
+    }
     return rememberVerifiedFolder(operation,resolved);
   }
   async function repositoryScope(context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<string>{return repositoryVerificationScope(await ensureFolder(context));}

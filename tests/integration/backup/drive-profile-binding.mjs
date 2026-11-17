@@ -97,6 +97,35 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   cases.push('late profile binding is fenced before mutation');
 }
 {
+  // Adoption may legitimately change this page from one profile id to the
+  // Drive library's id. A second profile switch while the final folder-name
+  // PATCH is in flight must not let that old folder become the successor
+  // profile's verified repository.
+  let current=QA_PROFILE_ID;
+  const successor='prof_qa_mve00000_abcdef04';
+  const harness=createDriveHarness({
+    profileId:()=>current,
+    profileName:()=>'Study Director – Adopted',
+    bind:async info=>{
+      if(info.found!==OTHER)return 'refuse';
+      current=OTHER;
+      setTimeout(()=>{current=successor;},0);
+      return 'adopt';
+    }
+  });
+  const {state,provider}=harness;
+  state.folders.push('folder-adopt-race');state.folderProperties.set('folder-adopt-race',{[MARKER]:OTHER});
+  state.requestDelayMs=({url,method})=>method==='PATCH'&&new URL(url).pathname==='/drive/v3/files/folder-adopt-race'?25:0;
+  await provider.prepare();await provider.authorize();
+  await assert.rejects(
+    provider.repository.list({kind:'object'}),
+    /profile changed while Google Drive was settling its library/u,
+    'a folder resolved for an adopted profile cannot be attributed to a later successor profile'
+  );
+  assert.equal(current,successor,'the successor profile must be active when the stale folder completion is rejected');
+  cases.push('post-adoption profile switch cannot inherit the predecessor Drive folder');
+}
+{
   // The library folder is named after its profile, and follows a rename once per sign-in.
   let name='Study Director – Ana';
   const {state,provider}=await connected({profileName:()=>name});

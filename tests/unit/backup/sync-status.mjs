@@ -219,6 +219,43 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   pending[3](false);await third;await Promise.resolve();
 }
 
+{
+  const host=registry.require('sync-status-host',1);
+  let profile='profile-a',ring='syncing',nextTimer=0;
+  const timers=new Map(),hosts=new Map();
+  const makeHost=()=>{const classes=new Set();return {
+    dataset:{},title:'',classes,
+    classList:{add:value=>classes.add(value),remove:value=>classes.delete(value)},
+    toggleAttribute(){},querySelector(){return null;},setAttribute(){}
+  };};
+  for(const id of ['profile-tag','profile-badge','profile-avatar'])hosts.set(id,makeHost());
+  const statusPresentation=Object.freeze({
+    status:()=>Object.freeze({ring,badge:'',slow:false,count:0,unseen:0,label:'Status',headline:'Status',detail:'',action:null,items:Object.freeze([])}),
+    read:()=>null,connectProgress:()=>{throw new Error('no connect card expected');},subscribe:()=>()=>{}
+  });
+  const providers=Object.freeze({locationStatus:()=>null,subscribeStatus:()=>()=>{},wakeBackground:()=>true});
+  const controller=host.createController(Object.freeze({
+    document:{getElementById:id=>hosts.get(id)||null,addEventListener(){}},
+    providers:()=>providers,presentation:statusPresentation,device:()=>null,protection:()=>null,
+    keptVersions:()=>Object.freeze({count:()=>0,review:()=>true}),
+    profileKey:()=>profile,profileEmail:()=>'',profileName:()=>profile,deviceName:id=>id,
+    markDriveRequested:()=>{},storageIssues:()=>[],unsupportedDataHeld:()=>false,backupReminder:()=>'',updateReady:()=>false,
+    sessionElsewhere:()=>'',sessionReady:()=>'',unseen:()=>0,
+    actions:Object.freeze({closeProfilePanel:()=>{},enterPassword:()=>true,checkUpdate:()=>true,applyUpdate:()=>true,connectDevice:()=>true,openExecute:()=>true,continueSession:()=>true,openData:()=>true}),
+    environment:Object.freeze({
+      window:{addEventListener(){}},now:()=>0,online:()=>true,visible:()=>true,
+      setTimeout:(fn,ms)=>{const id=++nextTimer;timers.set(id,{fn,ms});return id;},
+      clearTimeout:id=>{if(id!==null)timers.delete(id);},
+      setInterval:()=>++nextTimer
+    }),
+    capture:()=>{}
+  }));
+  controller.render();
+  profile='profile-b';ring='synced';controller.render();
+  assert.equal([...hosts.values()].some(node=>node.classes.has('status-settle')),false,'a successor profile must not inherit the predecessor profile sync-settle glow');
+  assert.equal([...timers.values()].some(timer=>timer.ms===1400),false,'a profile switch must reset the predecessor ring transition before scheduling settle animation');
+}
+
 
 {
   const host=registry.require('sync-status-host',1);
@@ -252,4 +289,4 @@ checkCard('Signed out during the first sync',{phase:'signed-in',drive:linked({co
   assert.equal(captured.device.lastBackupAt,'2026-11-16T09:00:00.000Z','the checked host preserves Device Folder backup time');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:21,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:21,hostLifecycleCases:1,hostProjectionCases:1}));
+console.log(JSON.stringify({status:'PASS',suite:'sync-status',oldTextCases:12,newCases:21,priorityCases:3,phase4Cases:5,unseenCases:4,connectCardCases:21,hostLifecycleCases:1,hostProfileIsolationCases:1,hostProjectionCases:1}));
