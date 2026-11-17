@@ -1,14 +1,37 @@
-import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
+import {insightsModelSources,readInsightsModelRuntimeSource} from '../../helpers/insights-model-runtime.mjs';
 import assert from 'node:assert/strict';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
-const sourcePath='source/external/insights-model.js';
-const source=readRuntimeSource(sourcePath);
+const sourcePath=insightsModelSources.join('+');
+const source=readInsightsModelRuntimeSource();
 const context=vm.createContext({console});
 vm.runInContext(source,context,{filename:sourcePath});
 const {Config,PacerEvidence:Pacer,ModelEngine}=context.StudyDirectorInsightsModel;
+
+
+const {Analytics,Primitives,Records}=context.StudyDirectorInsightsModel;
+const classifyFoundationOutcome=task=>task.completion>=100?'full':task.completion>0?'partial':task.skipped?'skipped':'untouched';
+// Hand-computable foundation witnesses: unavailable evidence is not zero,
+// calendar windows include exact boundaries, and core aggregates conserve input.
+const emptyEvidence=Analytics.createEvidenceIndex([],classifyFoundationOutcome);
+assert.deepEqual(JSON.parse(JSON.stringify(Analytics.computeDailySeries(emptyEvidence))),[]);
+assert.equal(Primitives.pct(0,0),null,'missing denominator must remain unavailable, not measured zero');
+assert.equal(Primitives.pct(0,10),0,'measured zero with a known denominator must remain zero');
+const boundaryRecords=Records.normalizeRecords([
+  {date:'2026-07-11',tasks:[{id:'before',kind:'work',dur:30,completion:100,completionSource:'manual',actualSeconds:1800}]},
+  {date:'2026-07-12',tasks:[{id:'start',kind:'work',dur:60,completion:50,completionSource:'manual',actualSeconds:1800}]},
+  {date:'2026-08-10',tasks:[{id:'end',kind:'work',dur:40,completion:0,completionSource:'manual',actualSeconds:0}]}
+]);
+const boundaryWindow=Records.filterCanonicalRecordsForInsightWindow(boundaryRecords,'30','2026-08-10');
+assert.deepEqual(boundaryWindow.records.map(record=>record.date),['2026-07-12','2026-08-10'],'30-day window must include both exact calendar boundaries');
+const boundaryEvidence=Analytics.createEvidenceIndex(boundaryWindow.records,classifyFoundationOutcome);
+const boundaryDaily=Analytics.computeDailySeries(boundaryEvidence);
+assert.equal(boundaryDaily.reduce((sum,row)=>sum+row.planned,0),100);
+assert.equal(boundaryDaily.reduce((sum,row)=>sum+row.completed,0),30);
+assert.equal(boundaryDaily[1].completion,0,'explicit zero completion must survive analytical preparation');
+assert.equal(boundaryDaily[1].actual,0,'explicit zero actual time must survive analytical preparation');
 
 // Formatter reuse must preserve calendar labels across local year boundaries,
 // leap days, daylight-saving changes and both extremes of time-zone offsets.

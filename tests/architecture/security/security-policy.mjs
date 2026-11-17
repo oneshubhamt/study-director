@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import {renderBuild,validateBuild} from '../../../build/build.mjs';
 import {externalModules,trustedExternalModuleIds} from '../../../build/module-manifest.mjs';
+import {readInsightsModelRuntimeSource} from '../../helpers/insights-model-runtime.mjs';
 
 const read=file=>fs.readFileSync(new URL(`../../../${file}`,import.meta.url),'utf8');
 const app=readHostHtml();
@@ -11,7 +12,7 @@ const drive=read('source/external/drive.js');
 const review=read('source/core/review.ts');
 const plan=read('source/core/plan.ts');
 const timer=read('source/core/timer-engine.ts');
-const insightsModel=read('source/external/insights-model.js');
+const insightsModel=readInsightsModelRuntimeSource();
 const insightsView=read('source/external/insights.js');
 const insights=insightsModel+'\n'+insightsView;
 const sw=read('source/platform/sw.js');

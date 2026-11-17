@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
+import {insightsModelSources,readInsightsModelRuntimeSource} from '../../helpers/insights-model-runtime.mjs';
 
-const sourcePath='source/external/insights-model.js';
-const source=fs.readFileSync(sourcePath,'utf8');
+const sourcePath=insightsModelSources.join('+');
+const source=readInsightsModelRuntimeSource();
 const context=vm.createContext({console});
 vm.runInContext(source,context,{filename:sourcePath});
 const {ModelEngine}=context.StudyDirectorInsightsModel;
