@@ -1108,8 +1108,8 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       if(!pane)return;
       observePane(pane);
       state.suppressScroll=true;
-      if(context&&context.restoreScroll!==false)restoreScroll({immediate:true});
-      else if(context&&context.restoreScroll===false){state.scrollWindow=0;state.scrollMain=0;restoreScroll({immediate:true});}
+      if(context&&context.restoreScroll!==false)void restoreScroll({immediate:true});
+      else if(context&&context.restoreScroll===false){state.scrollWindow=0;state.scrollMain=0;void restoreScroll({immediate:true});}
       if(state.errorTimer){clearTimeout(state.errorTimer);state.errorTimer=null;}
       const token=InsightsRenderCoordinator.begin();
       const notice=api.insights.notifications.begin({id:'report',foreground:false,announce:false,title:'Insights',message:'Preparing your saved study history…',action:{label:'Retry',run:()=>{void render(context);}}});
