@@ -100,9 +100,10 @@ function renderPlatformTokens(value,identity,sourceName,tokens={}){
   return renderTokens(rendered,identity,sourceName);
 }
 function renderExternalModule(module,identity,tokens={}){
-  const sources=moduleSourceFiles(module),sourceName=sources.join('+');
-  const rendered=renderPlatformTokens(moduleSource(module),identity,sourceName,tokens);
-  return sources.some(source=>source.endsWith('.ts'))?compileScript(rendered,sourceName):rendered;
+  return moduleSourceFiles(module).map(source=>{
+    const rendered=renderPlatformTokens(sourceFile(source),identity,source,tokens);
+    return source.endsWith('.ts')?compileScript(rendered,source):rendered;
+  }).join('\n');
 }
 function assertCanonicalSource(){
   const expected=[
@@ -165,8 +166,9 @@ function assertCanonicalSource(){
   invariant(externalModules.map(module=>module.id).join('|')===trustedExternalModuleIds.join('|'),'External runtime modules differ from the fixed reviewed allowlist.');
   invariant(externalModules.every(module=>module.execution==='startup'||module.execution==='on-demand'||module.execution==='worker'),'External runtime execution mode is invalid.');
   const insightsModule=externalModules.find(module=>module.id==='insights');
-  invariant(insightsModule&&JSON.stringify(moduleSourceFiles(insightsModule))===JSON.stringify(['external/insights-model.js','external/insights.js']),'Insights must remain a two-source model/view runtime.');
-  const insightsModel=sourceFile('external/insights-model.js');
+  const insightsSources=insightsModule?moduleSourceFiles(insightsModule):[];
+  invariant(JSON.stringify(insightsSources)===JSON.stringify(['external/insights-foundations.ts','external/insights-model.js','external/insights.js']),'Insights foundations, model remainder and view must remain ordered inside one runtime asset.');
+  const insightsModel=insightsSources.slice(0,-1).map(sourceFile).join('\n');
   invariant(!/\b(?:document|localStorage|sessionStorage|requestAnimationFrame|Worker|querySelector|createElement)\b/u.test(insightsModel),'Insights model must remain independent of DOM, browser storage, animation, and worker APIs.');
 }
 
