@@ -2231,10 +2231,10 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
   function computeScheduleSummary(recordsInput:readonly InsightRecord[]):ScheduleSummary{
     const records=recordsInput;
     const dailyPeakShiftTotal=records.reduce((total,record)=>total+Math.max(0,num(record.totalScheduleShiftMinutes)),0);
-    const maxDailyShift=records.reduce((maximum,record)=>Math.max(maximum,Math.max(0,num(record&&record.totalScheduleShiftMinutes))),0);
+    const maxDailyShift=records.reduce((maximum,record)=>Math.max(maximum,Math.max(0,num(record.totalScheduleShiftMinutes))),0);
     const shiftedRecords=records.filter(record=>num(record.shiftedStudyBlocks)>0);
     const shiftedDays=shiftedRecords.length;
-    const shiftedBlocks=shiftedRecords.reduce((total,record)=>total+Math.max(0,num(record&&record.shiftedStudyBlocks)),0);
+    const shiftedBlocks=shiftedRecords.reduce((total,record)=>total+Math.max(0,num(record.shiftedStudyBlocks)),0);
     const weightedNetShift=shiftedBlocks
       ? shiftedRecords.reduce((total,record)=>total+num(record.netScheduleShiftMinutes)*Math.max(0,num(record&&record.shiftedStudyBlocks)),0)/shiftedBlocks
       : null;
@@ -2248,14 +2248,14 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
   }
   function fitnessObservationForDay(dailyRow:DailySeriesRow,evidence:EvidenceIndex,recordByDate:ReadonlyMap<string,InsightRecord>):FitnessObservation{
     const record=recordByDate.get(dailyRow.date);
-    const work=record?recordRows(evidence,record,'work'):.filter(row=>row.planned>0):[];
+    const work=record?recordRows(evidence,record,'work').filter(row=>row.planned>0):[];
     const planned=Math.max(0,num(dailyRow.planned));
     const plannedByGroup:Record<CompletionEvidenceGroup,number>={explicit:0,'time-derived':0,unverified:0,skipped:0,missing:0};
     work.forEach(row=>{
       const group:CompletionEvidenceGroup=row.evidenceGroup;
       plannedByGroup[group]+=row.planned;
     });
-    const weightedPlanned=Object.entries(plannedByGroup).reduce((total,[group,value])=>total+value*num(FITNESS_SOURCE_WEIGHTS[group]),0);
+    const weightedPlanned=plannedByGroup.explicit*FITNESS_SOURCE_WEIGHTS.explicit+plannedByGroup['time-derived']*FITNESS_SOURCE_WEIGHTS['time-derived']+plannedByGroup.unverified*FITNESS_SOURCE_WEIGHTS.unverified+plannedByGroup.skipped*FITNESS_SOURCE_WEIGHTS.skipped+plannedByGroup.missing*FITNESS_SOURCE_WEIGHTS.missing;
     const evidenceWeight=planned>0?Math.max(0,Math.min(1,weightedPlanned/planned)):0;
     const informativeWeights=work
       .map(row=>row.planned*num(FITNESS_SOURCE_WEIGHTS[row.evidenceGroup]))
