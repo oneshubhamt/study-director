@@ -35,5 +35,20 @@ for(const record of records){
   assert.ok(Array.isArray(record.schedule));
   assert.ok(Array.isArray(record.practiceRuns));
   assert.deepEqual(Object.keys(record).sort(),expectedKeys,'Guide preview must use the exact canonical DailyRecord envelope.');
+  for(const row of record.schedule){
+    assert.deepEqual(Object.keys(row).sort(),['area','duration','id','kind','measure','name','start','target'],'Guide sample schedule rows must use the current stored shape.');
+  }
+  for(const result of Object.values(record.results)){
+    assert.notEqual(result.skipped,false,'canonical DailyResult omits a false skipped flag');
+    assert.notEqual(result.doneFlag,false,'canonical DailyResult omits a false doneFlag');
+    for(const key of ['actualStart','actualEnd']){
+      if(result[key])assert.equal(new Date(result[key]).toISOString(),result[key],`Guide sample ${key} must already be canonical ISO.`);
+    }
+    for(const pause of result.pauseEvents||[]){
+      assert.equal(new Date(pause.startedAt).toISOString(),pause.startedAt,'Guide sample pause start must already be canonical ISO.');
+      assert.equal(new Date(pause.endedAt).toISOString(),pause.endedAt,'Guide sample pause end must already be canonical ISO.');
+    }
+  }
+  for(const run of record.practiceRuns)assert.notEqual(run.partial,false,'canonical Practice runs omit a false partial flag');
 }
-console.log(JSON.stringify({status:'PASS',suite:'guide-preview-canonical',records:records.length,schema:16},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'guide-preview-canonical',records:records.length,schema:16,nestedCanonical:true},null,2));

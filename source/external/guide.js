@@ -576,16 +576,16 @@
       const events=[];
       if((dayIndex+workOrdinal)%4===0){
         const seconds=180+((dayIndex+workOrdinal)%3)*120;
-        events.push({startedAt:date+'T'+start+':00.000',endedAt:date+'T'+endTime(start,Math.round(seconds/60))+':00.000',seconds,type:'manual'});
+        events.push({startedAt:date+'T'+start+':00.000Z',endedAt:date+'T'+endTime(start,Math.round(seconds/60))+':00.000Z',seconds,type:'manual'});
       }
       if((dayIndex===6&&workOrdinal>=3)||(dayIndex===10&&workOrdinal>=2)||((dayIndex+workOrdinal)%11===0)){
         const seconds=600+((dayIndex+workOrdinal)%2)*420;
-        events.push({startedAt:date+'T'+start+':00.000',endedAt:date+'T'+endTime(start,Math.round(seconds/60))+':00.000',seconds,type:'inactive-gap'});
+        events.push({startedAt:date+'T'+start+':00.000Z',endedAt:date+'T'+endTime(start,Math.round(seconds/60))+':00.000Z',seconds,type:'inactive-gap'});
       }
       if(completion>=70&&workOrdinal%2===0&&dayIndex%3!==0){
         const plannedSeconds=300;
         const seconds=plannedSeconds+(((dayIndex+workOrdinal)%4)*90);
-        events.push({startedAt:date+'T'+start+':00.000',endedAt:date+'T'+endTime(start,Math.round(seconds/60))+':00.000',seconds,plannedSeconds,type:'pomodoro'});
+        events.push({startedAt:date+'T'+start+':00.000Z',endedAt:date+'T'+endTime(start,Math.round(seconds/60))+':00.000Z',seconds,plannedSeconds,type:'pomodoro'});
       }
       return events;
     }
@@ -655,9 +655,10 @@
           completion,completionSource,actualSeconds:minutesToSeconds(actualMin),
           actualStart:date+'T'+actualStart+':00.000Z',actualEnd:date+'T'+endTime(actualStart,actualMin)+':00.000Z',
           actualStartLocalMinute:clockMinute(actualStart),actualStartUtcOffsetMinutes:0,actualStartTimeZone:'Etc/UTC',
-          sessionCount:pauseEvents&&pauseEvents.length?pauseEvents.length+1:1,
-          skipped:completionSource==='skipped',doneFlag:completionSource==='finished-time'||completionSource==='finished-unverified'||completion>=98
+          sessionCount:pauseEvents&&pauseEvents.length?pauseEvents.length+1:1
         };
+        if(completionSource==='skipped')result.skipped=true;
+        if(completionSource==='finished-time'||completionSource==='finished-unverified'||completion>=98)result.doneFlag=true;
         if(shiftAmount)result.adjustedStart=adjustedStart;
         if(done!==null)result.done=done;
         if(total!==null)result.total=total;
