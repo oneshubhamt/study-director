@@ -93,7 +93,7 @@ try{
     const canonical=records.map((record,index)=>{const current=__InsightsUiDebug.sanitizeCurrentDailyRecord(record);if(!current)throw new Error('Invalid Saved Day fixture at '+index+': '+JSON.stringify(record));return current;});
     const saved=await __InsightsUiDebug.AppData.dailyRecords.saveBatch(canonical.slice(0,1));
     window.__InsightsDenseRecords=canonical;
-    localStorage.setItem('studyDirector.insights.window.v1','all');
+    window.StudyDirector.data.deviceState.writeInsightsWindow('all');
     window.__StudyDirectorInsightsLastProfile=null;__InsightsUiDebug.goTab('insights');
     return {saved,total};
   })()`);
@@ -113,6 +113,18 @@ try{
   })()`);
   assert.equal(dense.total,590);
   await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-wrap')&&window.__StudyDirectorInsightsLastProfile?.records===590`),{timeout:15000,label:'dense Insights render'});
+  const labBefore=await page.evaluate(`(()=>{const details=document.querySelector('#insights-lab details.insights-dynamics-lab');return {exists:!!details,open:!!details?.open,built:!!details?.querySelector('.insights-dynamics-lab-body')};})()`);
+  assert.deepEqual(labBefore,{exists:true,open:false,built:false},'Analytics Lab must remain unbuilt until its disclosure is opened');
+  await page.evaluate(`(()=>{const details=document.querySelector('#insights-lab details.insights-dynamics-lab');details?.scrollIntoView({block:'center'});details?.querySelector('summary')?.click();})()`);
+  await waitFor(()=>page.evaluate(`!!document.querySelector('#insights-lab .insights-dynamics-lab-body')&&!document.querySelector('#insights-lab details.insights-dynamics-lab')?.hasAttribute('aria-busy')`),{timeout:15000,label:'lazy Analytics Lab evidence'});
+  const lab=await page.evaluate(`(()=>{const details=document.querySelector('#insights-lab details.insights-dynamics-lab');const body=details?.querySelector('.insights-dynamics-lab-body');return {open:!!details?.open,built:!!body,text:body?.innerText||'',tables:body?.querySelectorAll('.insights-lab-table').length||0};})()`);
+  assert.equal(lab.open,true);
+  assert.equal(lab.built,true);
+  assert.match(lab.text,/1\. Sample & reliability/i);
+  assert.match(lab.text,/8\. Current Study State model evidence/i);
+  assert.match(lab.text,/9\. Study Dynamics model evidence/i);
+  assert.match(lab.text,/10\. Metric guide/i);
+  assert.ok(lab.tables>0,'opened Analytics Lab must materialize its audit tables');
   const desktop=await page.evaluate(`(()=>{
     const pane=document.getElementById('pane-insights');
     const evidence=[...pane.querySelectorAll('.insights-evidence-item')].map(item=>({label:item.querySelector('.l')?.textContent||'',value:item.querySelector('.v')?.textContent||'',note:item.querySelector('.n')?.textContent||''}));
@@ -183,7 +195,7 @@ try{
     return {entered,kept:!!pane.querySelector('.insights-wrap'),loading:!!pane.querySelector('.plugin-loading-panel')};})()`);
   assert.deepEqual(reopened,{entered:true,kept:true,loading:false},'reopened Insights animates its kept view');
 
-  const evidence={status:'PASS',release:manifest.release,states:{empty:true,insufficientDays:1,populatedDays:590},denseHistoryDays:590,desktop:{renderMilliseconds:Number(desktop.elapsed.toFixed(2)),window:desktop.window,workTrend:desktop.workTrend,practiceSummary:desktop.practiceSummary,overflow:desktop.documentOverflow,profile:desktop.profile},phone};
+  const evidence={status:'PASS',release:manifest.release,states:{empty:true,insufficientDays:1,populatedDays:590},analyticsLab:{lazyBefore:!labBefore.built,builtAfterOpen:lab.built,tables:lab.tables},denseHistoryDays:590,desktop:{renderMilliseconds:Number(desktop.elapsed.toFixed(2)),window:desktop.window,workTrend:desktop.workTrend,practiceSummary:desktop.practiceSummary,overflow:desktop.documentOverflow,profile:desktop.profile},phone};
   writeArtifact('insights-ui.json',`${JSON.stringify(evidence,null,2)}\n`);
   console.log(JSON.stringify(evidence,null,2));
 }finally{
