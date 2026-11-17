@@ -1,0 +1,46 @@
+name: P5.9 targeted Insights closure
+
+on:
+  push:
+    branches: [ts-exp]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p59-targeted-insights-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  insights:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+      - name: Use pinned npm
+        run: npm install --global npm@12.2.1
+      - run: npm ci --ignore-scripts
+      - name: Strict TypeScript and typed lint
+        run: npm run check:types
+      - name: P5.9 direct model witnesses
+        run: |
+          node tests/integration/insights/insights-scaling.mjs
+          node tests/integration/insights/insights-memory-retention.mjs
+      - name: Fresh source build
+        run: npm run build
+      - name: Verify generated build
+        run: node build/verify-build.mjs
+      - name: Verify generated syntax
+        run: node tests/architecture/build/generated-syntax-check.mjs
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: P5.9 populated Insights journey
+        run: node tests/browser/insights/insights-populated-ui.mjs
