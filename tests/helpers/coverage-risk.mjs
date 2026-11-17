@@ -12,7 +12,7 @@ export const COVERAGE_FLOORS=Object.freeze([
   Object.freeze({file:'source/core/timer-engine.ts',lines:42,branches:38,functions:42}),
   Object.freeze({file:'source/core/backup-codec.ts',lines:85,branches:58,functions:90}),
   Object.freeze({file:'source/core/repository-journals.ts',lines:90,branches:55,functions:75}),
-  Object.freeze({file:'source/external/insights-foundations.ts',lines:75,branches:55,functions:70})
+  Object.freeze({file:'source/external/insights-model.ts',lines:75,branches:55,functions:70})
 ]);
 
 export const CRITICAL_PATHS=Object.freeze([
@@ -55,7 +55,6 @@ const NON_FAST_COVERAGE_OWNERS=Object.freeze([
   Object.freeze({file:'source/external/aurora.js',owner:'browser',reason:'Visual UI layer.'}),
   Object.freeze({file:'source/external/guide.js',owner:'browser',reason:'Guide UI layer.'}),
   Object.freeze({file:'source/external/wordgard.js',owner:'browser/release',reason:'Generated Wordgard runtime bundle; authored rich-text sources are covered by bundle integrity/build contracts and browser/release editor certification.'}),
-  Object.freeze({file:'source/external/insights-model.js',owner:'integration/insights',reason:'P5.9B model remainder is still classic-script source; P5.9A tests execute it as the consumer of checked foundations until its own conversion.'}),
   Object.freeze({file:'source/external/insights.js',owner:'browser/release',reason:'Insights presentation, worker transport, and interaction layer; the extracted computation engine is covered directly by the fast suite.'})
 ]);
 

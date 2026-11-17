@@ -167,7 +167,7 @@ function assertCanonicalSource(){
   invariant(externalModules.every(module=>module.execution==='startup'||module.execution==='on-demand'||module.execution==='worker'),'External runtime execution mode is invalid.');
   const insightsModule=externalModules.find(module=>module.id==='insights');
   const insightsSources=insightsModule?moduleSourceFiles(insightsModule):[];
-  invariant(JSON.stringify(insightsSources)===JSON.stringify(['external/insights-foundations.ts','external/insights-model.js','external/insights.js']),'Insights foundations, model remainder and view must remain ordered inside one runtime asset.');
+  invariant(JSON.stringify(insightsSources)===JSON.stringify(['external/insights-model.ts','external/insights.js']),'The checked Insights model must remain ordered before its view inside one runtime asset.');
   const insightsModel=insightsSources.slice(0,-1).map(sourceFile).join('\n');
   invariant(!/\b(?:document|localStorage|sessionStorage|requestAnimationFrame|Worker|querySelector|createElement)\b/u.test(insightsModel),'Insights model must remain independent of DOM, browser storage, animation, and worker APIs.');
 }
