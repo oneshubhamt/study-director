@@ -9,11 +9,16 @@ const source=readInsightsModelRuntimeSource();
 const context=vm.createContext({console});
 vm.runInContext(source,context,{filename:sourcePath});
 const {Config,PacerEvidence:Pacer,ModelEngine}=context.StudyDirectorInsightsModel;
-const {classifyTaskOutcome,summarizePracticeRuns}=realInsightsProviders();
+const {classifyTaskOutcome,summarizePracticeRuns,practice:practiceProvider}=realInsightsProviders();
 
 
 const {Analytics,Primitives,Records}=context.StudyDirectorInsightsModel;
 const classifyFoundationOutcome=task=>task.completion>=100?'full':task.completion>0?'partial':task.skipped?'skipped':'untouched';
+// The real-provider witness must use production configuration, not a copied
+// unit-test profile. These bounds deliberately differ from older test defaults.
+assert.equal(practiceProvider.validPracticeMs(4000),0,'production Practice Pacer minimum target is 5 seconds');
+assert.equal(practiceProvider.validPracticeMs(6*60*60*1000),6*60*60*1000,'production Practice Pacer permits targets beyond the old 4-hour test cap');
+
 // Hand-computable foundation witnesses: unavailable evidence is not zero,
 // calendar windows include exact boundaries, and core aggregates conserve input.
 const emptyEvidence=Analytics.createEvidenceIndex([],classifyFoundationOutcome);
@@ -188,6 +193,25 @@ const twelvePrepared=changePointEngine.prepare(changePointRecords,'change-point-
 const twelveModel=changePointEngine.buildPrepared(twelvePrepared.records,twelvePrepared,{windowKey:'all',windowLabel:'All records',allRecordCount:12,currentStudyDate:changePointRecords[11].date});
 assert.equal(twelveModel.dynamics.changePoint.ready,true,'the change-point evidence gate must open exactly at the configured minimum day count');
 
+const workloadRecords=Array.from({length:36},(_,index)=>{
+  const planned=60+(index%6)*30;
+  const completion=[92,88,82,76,68,60][index%6]+((Math.floor(index/6)%3)-1);
+  return {
+    date:isoFromDay(endDay-35+index),
+    tasks:[{id:`workload-${index}`,name:'Workload frontier',area:'Provider',kind:'work',dur:planned,completion,completionSource:'manual',actualSeconds:Math.round(planned*completion/100*60)}],
+    practiceRuns:[]
+  };
+});
+const workloadEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+const workloadPrepared=workloadEngine.prepare(workloadRecords,'workload-supported-frontier');
+const workloadModel=workloadEngine.buildPrepared(workloadPrepared.records,workloadPrepared,{windowKey:'all',windowLabel:'All records',allRecordCount:workloadRecords.length,currentStudyDate:workloadRecords.at(-1).date});
+assert.equal(workloadModel.dynamics.workload.days,36);
+assert.equal(workloadModel.dynamics.workload.span,150);
+assert.equal(workloadModel.dynamics.workload.ready,true,'36 varied workload days must clear the descriptive response-surface gate');
+assert.ok(workloadModel.dynamics.workload.recommendation,'a locally supported workload surface must produce a recommendation');
+assert.ok(workloadModel.dynamics.workload.recommendation.minPlanned<=workloadModel.dynamics.workload.recommendation.typicalPlanned);
+assert.ok(workloadModel.dynamics.workload.recommendation.typicalPlanned<=workloadModel.dynamics.workload.recommendation.maxPlanned);
+
 const historyDays=1100;
 const historyStart=endDay-historyDays+1;
 const historyRecords=Array.from({length:historyDays},(_,index)=>{
@@ -265,7 +289,7 @@ const evidence={
   horizon:{selectedDays:model.recordCount,trendDays:model.advanced.trendCompletionDayCount,label:model.trendBasis.label,descriptivePracticeDays:model.practice.practiceDays,trendPracticeDays:model.practice.trendBasis.practiceDays},
   fullModel:{days:historyDays},
   uncappedAllHistoryReuse:{days:reuseRecords.length,parity:true},
-  providerAndThresholdWitnesses:{realProviders:true,controlledBoundary:[79.9,80],changePointDays:[11,12]}
+  providerAndThresholdWitnesses:{realProviders:true,productionPacerLimits:true,controlledBoundary:[79.9,80],changePointDays:[11,12],workloadFrontier:{days:36,span:150,recommendation:true}}
 };
 writeArtifact('insights-scaling.json',`${JSON.stringify(evidence,null,2)}\n`);
 console.log(JSON.stringify(evidence,null,2));

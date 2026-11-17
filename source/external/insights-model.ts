@@ -1,5 +1,5 @@
 /*
-  Study Director Insights Model — portable foundations (M8.1–M8.4)
+  Study Director Insights Model — portable model (M8.1–M8.8, M8.11)
   Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.
 
   Source-available for personal and noncommercial use only.
@@ -3473,19 +3473,20 @@ export type InsightsEngineDependencies=Readonly<{classifyTaskOutcome:OutcomeClas
       };
     }
     const bestExpected=Math.max(...supportedCurve.map(point=>point.expectedCompleted));
-    let efficient:typeof curve,selected:typeof curve[number]|undefined,rangePoints:typeof curve;
+    let efficient:typeof curve,selected:typeof curve[number]|undefined;
     if(surface.strongReady){
       const bestReliability=Math.max(...supportedCurve.map(point=>num(point.strongProbability))),reliabilityFloor=bestReliability>=55?Math.max(55,bestReliability-10):Math.max(0,bestReliability-10);
       efficient=supportedCurve.filter(point=>point.frontier&&num(point.strongProbability)>=reliabilityFloor&&point.expectedCompleted>=bestExpected*.35);
       selected=(efficient.length?efficient:supportedCurve).slice().sort((a,b)=>(b.expectedCompleted*(.5+num(b.strongProbability)/200))-(a.expectedCompleted*(.5+num(a.strongProbability)/200)))[0];
-      rangePoints=supportedCurve.filter(point=>num(point.strongProbability)>=num(selected?.strongProbability)-5&&point.expectedCompleted>=selectedPoint.expectedCompleted*.9);
     }else{
       const bestCompletion=Math.max(...supportedCurve.map(point=>point.completionMean)),completionFloor=bestCompletion>=65?Math.max(60,bestCompletion-10):Math.max(0,bestCompletion-10);
       efficient=supportedCurve.filter(point=>point.frontier&&point.completionMean>=completionFloor&&point.expectedCompleted>=bestExpected*.35);
       selected=(efficient.length?efficient:supportedCurve).slice().sort((a,b)=>(b.expectedCompleted*(.5+b.completionMean/200))-(a.expectedCompleted*(.5+a.completionMean/200)))[0];
-      rangePoints=supportedCurve.filter(point=>point.completionMean>=selectedPoint.completionMean-5&&point.expectedCompleted>=selectedPoint.expectedCompleted*.9);
     }
     const selectedPoint=selected!;
+    const rangePoints=surface.strongReady
+      ?supportedCurve.filter(point=>num(point.strongProbability)>=num(selectedPoint.strongProbability)-5&&point.expectedCompleted>=selectedPoint.expectedCompleted*.9)
+      :supportedCurve.filter(point=>point.completionMean>=selectedPoint.completionMean-5&&point.expectedCompleted>=selectedPoint.expectedCompleted*.9);
     const anchorBand=empiricalBands.find(band=>selectedPoint.planned>=band.minPlanned&&selectedPoint.planned<=band.maxPlanned)||empiricalBands.slice().sort((a,b)=>Math.abs(a.meanPlanned-selectedPoint.planned)-Math.abs(b.meanPlanned-selectedPoint.planned))[0]||null;
     const recommendation={minPlanned:Math.min(...rangePoints.map(point=>point.planned)),maxPlanned:Math.max(...rangePoints.map(point=>point.planned)),typicalPlanned:selectedPoint.planned,expectedCompleted:selectedPoint.expectedCompleted,strongProbability:selectedPoint.strongProbability,probabilityLow:selectedPoint.strongLow,probabilityHigh:selectedPoint.strongHigh,completionMean:selectedPoint.completionMean,confidence:descriptiveEvidenceConfidence(rows.length,sum(rows.map(row=>row.completed))),days:rows.length,localSupport:selectedPoint.localSupport,belowStrongThreshold:surface.strongReady?Math.max(...supportedCurve.map(point=>num(point.strongProbability)))<55:null,pointIndex:selectedPoint.index,mode:surface.strongReady?'completion-and-strong':'completion-only',empiricalBandIndex:anchorBand&&anchorBand.index};
     const lowPoint=supportedCurve.slice(0,Math.ceil(supportedCurve.length/2)).sort((a,b)=>b.completionMean-a.completionMean)[0]!,highPoint=supportedCurve[supportedCurve.length-1]!;
