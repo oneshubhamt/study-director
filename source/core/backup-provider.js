@@ -44,16 +44,11 @@ registry.define('backup-provider',1,input=>{
   const VERIFIED_HISTORY_READ_CONCURRENCY=8;
   const RECENT_HISTORY_TTL_MS=30*1000;
   const VERIFIED_HISTORY_INTERPRETATION_VERSION='managed-history-v1:'+APP_VERSION;
-  const {publicationMaxAgeMs:PUBLICATION_MAX_AGE_MS,publicationRenewMs:PUBLICATION_RENEW_MS,publicationStaleMs:PUBLICATION_STALE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
+  const {publicationRenewMs:PUBLICATION_RENEW_MS,publicationStaleMs:PUBLICATION_STALE_MS,maintenanceWorkBudgetMs:PROVIDER_MAINTENANCE_BUDGET_MS,maintenanceMaxAgeMs:MAINTENANCE_MAX_AGE_MS,objectGcGraceMs:OBJECT_GC_GRACE_MS,automaticQuietMs:AUTOMATIC_QUIET_MS,automaticUrgentMs:AUTOMATIC_URGENT_MS,automaticExpiryLeadMs:AUTOMATIC_EXPIRY_LEAD_MS}=RepositoryPolicy.protocol;
   const PROVIDER_RECOVERY_MAINTENANCE_POLL_MS=500,PROVIDER_RECOVERY_MAINTENANCE_YIELD_MS=MAINTENANCE_MAX_AGE_MS+PROVIDER_RECOVERY_MAINTENANCE_POLL_MS;
   const SESSION_CLAIM_FORMAT='study-director.active-session-claim',SESSION_CLAIM_VERSION=4,SESSION_CLAIM_MAX_BYTES=4096,SESSION_OWNER_PATTERN=/^inst_[a-z0-9_]{8,128}$/iu,SESSION_CLAIM_TOKEN_PATTERN=/^[a-f0-9]{64}$/u,SESSION_HANDOFF_TOKEN_PATTERN=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
   const MAINTENANCE_MIN_CHECKPOINT_DELETES=16,MAINTENANCE_MAX_CHECKPOINT_DELETES=128,MAINTENANCE_MAX_OBJECT_DELETES=48,PROVIDER_CONVERGENCE_BUSY_RETRY_MS=15*1000,PROVIDER_CONVERGENCE_RETRY_DELAYS=freeze([30*1000,2*60*1000,10*60*1000,30*60*1000]);
   const MAINTENANCE_POLICY=Background.maintenance;
-  // The formats of each location's kept versions, as its last cleanup left them.
-  const formatsByProvider=new Map();
-  // Whether the newest Continue Here claim each location holds is in the
-  // current form or an older one (a device on an older build made it).
-  const claimFormByProvider=new Map();
   // The versions each location's last complete scan could not read (by id).
   const unreadableByProvider=new Map();
   const sessionWatchByProvider=new Map(),ownCommitIds=new Set();
@@ -171,7 +166,7 @@ registry.define('backup-provider',1,input=>{
     const previous=repositoryScopeByProvider.get(id)||'',pending=maintenanceHooks?await maintenanceHooks.read(id):null,persistedScope=String(pending&&pending.repositoryScope||'');repositoryScopeByProvider.set(id,scope);
     const changed=!!previous&&previous!==scope,stalePersisted=!!pending&&persistedScope!==scope;if(!changed&&!stalePersisted)return false;
     if(changed)await discardProviderPublication(selected);
-    recentHistoryByProvider.delete(id);verifiedHistoryByProvider.delete(id);formatsByProvider.delete(id);unreadableByProvider.delete(id);providerConvergenceRetryAttempts.delete(id);providerBackground(selected).clearAllScheduled();claimFormByProvider.delete(id);
+    recentHistoryByProvider.delete(id);verifiedHistoryByProvider.delete(id);unreadableByProvider.delete(id);providerConvergenceRetryAttempts.delete(id);providerBackground(selected).clearAllScheduled();
     if(stalePersisted)await maintenanceHooks.clear(id,pending);
     OperationDiagnostics.mark('provider-repository-generation-reset',{provider:id,changed:true});return true;
   }
@@ -289,7 +284,7 @@ registry.define('backup-provider',1,input=>{
     let history=null;
     if(kind==='checkpoint'&&raw.history&&typeof raw.history==='object'){
       const fingerprint=String(raw.history.logicalFingerprint||'').toLowerCase(),exportedAt=String(raw.history.exportedAt||''),daily=Number(raw.history.counts&&raw.history.counts.dailyRecord),notes=Number(raw.history.counts&&raw.history.counts.note),role=String(raw.history.retention&&raw.history.retention.role||'normal'),protectedUntil=String(raw.history.retention&&raw.history.retention.protectedUntil||''),purpose=String(raw.history.retention&&raw.history.retention.purpose||''),calendarRaw=raw.history.retention&&raw.history.retention.calendar||{},localDate=String(calendarRaw.localDate||''),weekStart=String(calendarRaw.weekStart||''),month=String(calendarRaw.month||''),utcOffsetMinutes=Number(calendarRaw.utcOffsetMinutes),notesFingerprint=String(raw.history.retention&&raw.history.retention.notesFingerprint||'').toLowerCase(),calendar=/^\d{4}-\d{2}-\d{2}$/u.test(localDate)&&/^\d{4}-\d{2}-\d{2}$/u.test(weekStart)&&/^\d{4}-\d{2}$/u.test(month)&&Number.isInteger(utcOffsetMinutes)?freeze({localDate,weekStart,month,utcOffsetMinutes}):null;
-      if(/^[a-f0-9]{64}$/u.test(fingerprint)&&Number.isFinite(Date.parse(exportedAt))&&Number.isSafeInteger(daily)&&daily>=0&&Number.isSafeInteger(notes)&&notes>=0&&['normal','before-restore'].includes(role)&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil)))&&(!purpose||['before-restore','before-combine','before-clear-library','before-clear-archive'].includes(purpose)))history=freeze({format:Number.isSafeInteger(Number(raw.history.format))&&Number(raw.history.format)>0?Number(raw.history.format):0,logicalFingerprint:fingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:freeze({dailyRecord:daily,note:notes}),encrypted:raw.history.encrypted===true,retention:freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',purpose:role==='before-restore'?(purpose==='before-clear-archive'?'before-clear-library':(purpose||'before-restore')):'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(notesFingerprint)?notesFingerprint:''}),origin:/^inst_[a-z0-9_]{8,96}$/u.test(String(raw.history.origin||''))?String(raw.history.origin):'',attachmentsMissing:Number.isSafeInteger(Number(raw.history.attachmentsMissing))&&Number(raw.history.attachmentsMissing)>0?Number(raw.history.attachmentsMissing):0});
+      if(/^[a-f0-9]{64}$/u.test(fingerprint)&&Number.isFinite(Date.parse(exportedAt))&&Number.isSafeInteger(daily)&&daily>=0&&Number.isSafeInteger(notes)&&notes>=0&&['normal','before-restore'].includes(role)&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil)))&&(!purpose||['before-restore','before-combine','before-clear-library'].includes(purpose)))history=freeze({format:Number.isSafeInteger(Number(raw.history.format))&&Number(raw.history.format)>0?Number(raw.history.format):0,logicalFingerprint:fingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:freeze({dailyRecord:daily,note:notes}),encrypted:raw.history.encrypted===true,retention:freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',purpose:role==='before-restore'?(purpose==='before-clear-archive'?'before-clear-library':(purpose||'before-restore')):'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(notesFingerprint)?notesFingerprint:''}),origin:/^inst_[a-z0-9_]{8,96}$/u.test(String(raw.history.origin||''))?String(raw.history.origin):'',attachmentsMissing:Number.isSafeInteger(Number(raw.history.attachmentsMissing))&&Number(raw.history.attachmentsMissing)>0?Number(raw.history.attachmentsMissing):0});
     }
     // A location that reads each version for its summary (the Device Folder)
     // says which ones it could not read, and which wait for the password.
@@ -539,22 +534,22 @@ registry.define('backup-provider',1,input=>{
     const known=unreadableByProvider.get(selected.id),unreadable=pair=>pair.item.unreadable===true||!!known?.has(pair.item.id);
     const retentionRows=[];
     for(const pair of rows){const summary=pair.item.history,calendar=summary?.retention?.calendar;if(!summary||!calendar||unreadable(pair))continue;retentionRows.push(freeze({id:pair.item.id,manifest:freeze({version:summary.format,exportedAt:summary.exportedAt,retention:summary.retention,installationId:String(summary.origin||'')})}));}
-    let retainedIds=null,tiers={},currentFormat=false;
-    if(retentionRows.length){const selection=RepositoryCheckpointPipeline.selectRetention(freeze(retentionRows),{now:new Date(now)});retainedIds=new Set(selection.retained.map(row=>row.id));tiers=selection.tiers;currentFormat=selection.currentFormat===true;}
-    const legacyLimit=Math.max(1,Number(RepositoryCheckpointPipeline.retention?.normalLimit)||15);let legacyKept=0;
+    let retainedIds=null,tiers={};
+    if(retentionRows.length){const selection=RepositoryCheckpointPipeline.selectRetention(freeze(retentionRows),{now:new Date(now)});retainedIds=new Set(selection.retained.map(row=>row.id));tiers=selection.tiers;}
     return freeze(rows.map(pair=>{
       // A version this build cannot read is listed on its own (never matched
       // with another location's copy) so the person can see it and remove it.
-      if(unreadable(pair)){const at=repositoryMetadataTimestamp(pair.item);return Number.isFinite(Date.parse(at))?freeze({logicalId:'unreadable_'+pair.item.id,logicalFingerprint:'',exportedAt:at,counts:null,origin:'',unreadable:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:pair.item.id,exportedAt:at,tier:'unreadable',encrypted:false,verification:'unreadable',legacyMetadata:false,quarantineDeferred:false})}):null;}
+      // So is one listed without the summary every version carries, unless
+      // it waits for the password (its summary comes once it is opened).
+      if(unreadable(pair)||!pair.item.history&&!pair.item.locked){const at=repositoryMetadataTimestamp(pair.item);return Number.isFinite(Date.parse(at))?freeze({logicalId:'unreadable_'+pair.item.id,logicalFingerprint:'',exportedAt:at,counts:null,origin:'',unreadable:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:pair.item.id,exportedAt:at,tier:'unreadable',encrypted:false,verification:'unreadable',quarantineDeferred:false})}):null;}
       const item=pair.item,summary=item.history,exportedAt=summary?.exportedAt||repositoryMetadataTimestamp(item),fingerprint=summary?.logicalFingerprint||item.digest;
       if(!/^[a-f0-9]{64}$/u.test(String(fingerprint||''))||!Number.isFinite(Date.parse(exportedAt)))return null;
       let tier='retained';
       if(summary?.retention?.calendar){if(!retainedIds?.has(item.id))return null;tier=String(tiers[item.id]||'retained');}
       // A version waiting for the password (item.locked) has no summary yet:
       // it is listed as locked, never matched by data with another copy.
-      else{if(currentFormat&&!item.locked||legacyKept>=legacyLimit)return null;legacyKept+=1;tier=legacyKept===1?'latest':'retained';}
-      if(item.locked)return freeze({logicalId:'locked_'+item.id,logicalFingerprint:'',exportedAt,counts:null,origin:'',locked:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:true,verification:'on-restore',legacyMetadata:true,quarantineDeferred:quarantined.length>0})});
-      return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',legacyMetadata:!summary,quarantineDeferred:quarantined.length>0,attachmentsMissing:Number(summary?.attachmentsMissing)||0})});
+      if(item.locked)return freeze({logicalId:'locked_'+item.id,logicalFingerprint:'',exportedAt,counts:null,origin:'',locked:true,location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:true,verification:'on-restore',quarantineDeferred:quarantined.length>0})});
+      return freeze({logicalId:'state_'+fingerprint,logicalFingerprint:fingerprint,exportedAt,counts:summary?.counts||freeze({dailyRecord:0,note:0}),origin:String(summary?.origin||''),location:freeze({sourceId:source.id,sourceLabel:source.label,checkpointId:item.id,exportedAt,tier,encrypted:summary?.encrypted===true,verification:'on-restore',quarantineDeferred:quarantined.length>0,attachmentsMissing:Number(summary?.attachmentsMissing)||0})});
     }).filter(Boolean));
   }
 
@@ -640,12 +635,12 @@ registry.define('backup-provider',1,input=>{
     if(!repositoryPublicationCapable(selected))return freeze({blocked:false,reason:'publication-protection-unavailable',active:0,invalid:0});
     let listed;try{listed=await selected.repository.listPublications();}catch(error){if(!expectedRequestFailure(error))AppDiagnostics.capture('backup-provider.repository-publications',error,'warn');return freeze({blocked:true,reason:'publication-state-unavailable',active:0,invalid:1});}
     const rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],offset=repositoryClockOffset(selected),now=Date.now()+offset;let active=0,invalid=Math.max(0,Number(listed&&listed.ignored)||0)+(listed&&listed.overflow===true?1:0),nextEligibleAt=0;
-    // A marker that renews and has gone unrenewed past publicationStaleMs was
-    // left by an upload that stopped (a closed or frozen page): it is removed,
-    // so the upload, if it ever resumes, fails its own check before commit. A
-    // marker from an older build that does not renew keeps the full day.
+    // A marker unrenewed past publicationStaleMs (every upload renews its
+    // own) was left by an upload that stopped (a closed or frozen page): it
+    // is removed, so the upload, if it ever resumes, fails its own check
+    // before commit.
     let abandoned=0;
-    for(const row of rows){const created=Date.parse(String(row&&row.createdAt||''));if(!Number.isFinite(created)){invalid+=1;continue;}const lifetime=row&&row.renews===true?PUBLICATION_STALE_MS:PUBLICATION_MAX_AGE_MS;if(now-created<lifetime){active+=1;const expires=created+lifetime;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}const renewing=lifetime===PUBLICATION_STALE_MS;try{await selected.repository.endPublication(row);if(renewing)abandoned+=1;}catch(error){AppDiagnostics.capture('backup-provider.repository-publication-expired-cleanup',error,'warn');if(renewing)invalid+=1;}}
+    for(const row of rows){const created=Date.parse(String(row&&row.createdAt||''));if(!Number.isFinite(created)){invalid+=1;continue;}if(now-created<PUBLICATION_STALE_MS){active+=1;const expires=created+PUBLICATION_STALE_MS;if(!nextEligibleAt||expires<nextEligibleAt)nextEligibleAt=expires;continue;}try{await selected.repository.endPublication(row);abandoned+=1;}catch(error){AppDiagnostics.capture('backup-provider.repository-publication-expired-cleanup',error,'warn');invalid+=1;}}
     return freeze({blocked:active>0||invalid>0,reason:active>0?'active-publication':invalid>0?'uncertain-publication-state':'',active,invalid,abandoned,nextEligibleAt:nextEligibleAt?new Date(nextEligibleAt-offset).toISOString():''});
   }
   // Cleanup leases this page holds now. A mark from this device that this
@@ -766,7 +761,6 @@ registry.define('backup-provider',1,input=>{
       // Going offline or yielding mid-cleanup is not a problem: the next pass retries.
       onError:(kind,error)=>{if(!expectedRequestFailure(error))AppDiagnostics.capture(kind==='checkpoint-delete'?'backup-provider.repository-checkpoint-delete':kind==='incomplete-delete'?'backup-provider.repository-incomplete-delete':'backup-provider.repository-object-gc',error,'warn');}
     }));
-    if(cleaned.formats)formatsByProvider.set(selected.id,freeze({...cleaned.formats,checkedAt:new Date().toISOString()}));
     if(!cleaned.gcPending){const cache=verifiedHistoryByProvider.get(selected.id);if(cache)pruneRepositoryHistoryProofs(selected,cleaned.retained.flatMap(row=>[row.ref.checkpoint,row.ref.commit].filter(Boolean)),cache.scope);}
     return cleaned;
   }
@@ -1228,28 +1222,6 @@ registry.define('backup-provider',1,input=>{
     if(!value||typeof value!=='object'||Array.isArray(value)||Number(value.version)!==SESSION_CLAIM_VERSION||Object.keys(value).sort().join('|')!==SESSION_CLAIM_KEYS)return null;
     return sessionClaimValue(value,{observedContentFingerprint:String(value.observedContentFingerprint||''),handoffToken:String(value.handoffToken||'')});
   }
-  async function decodeSessionClaim(value,{signal=null}={}){return normalizeSessionClaim(value)||upgradeOlderSessionClaim(value,{signal});}
-  /* COMPATIBILITY --- Released builds write ownership claims as hashed v2,
-     and Drive can still hold a newest claim in the earlier plain form with a
-     date and device ids. Each is read as a v4 claim without the fields it
-     lacks. Retire with the compatibility layer once every device writes v4
-     (registry: older-session-claims). */
-  async function upgradeOlderSessionClaim(value,{signal=null}={}){
-    if(!value||typeof value!=='object'||Array.isArray(value))return null;
-    const version=Number(value.version),keys=Object.keys(value).sort().join('|');
-    if(version===2&&keys==='claimedAt|epoch|format|observedOwnerToken|observedRevision|ownerToken|revision|sessionToken|state|version')return sessionClaimValue(value,{observedContentFingerprint:'',handoffToken:''});
-    const plain=plainSessionClaim(value);if(!plain)return null;
-    const [sessionToken,ownerToken,observedOwnerToken]=await Promise.all([sessionClaimToken('session',plain.date,{signal}),sessionClaimToken('owner',plain.owner,{signal}),sessionClaimToken('owner',plain.observedOwner,{signal})]);
-    return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch:plain.epoch,state:plain.state,ownerToken,revision:plain.revision,observedOwnerToken,observedRevision:plain.observedRevision,observedContentFingerprint:'',handoffToken:'',claimedAt:plain.claimedAt});
-  }
-  function plainSessionClaim(value){
-    const version=Number(value.version),keys=Object.keys(value).sort().join('|'),v1=version===1&&keys==='claimedAt|date|epoch|format|observedRevision|owner|version',v2=version===2&&keys==='claimedAt|date|epoch|format|observedOwner|observedRevision|owner|revision|state|version';
-    if(!v1&&!v2)return null;
-    const date=String(value.date||''),epoch=Number(value.epoch),owner=String(value.owner||''),observedOwner=v1?owner:String(value.observedOwner||''),observedRevision=Number(value.observedRevision),revision=v1?observedRevision+1:Number(value.revision),state=v1?'owned':String(value.state||''),claimedAt=String(value.claimedAt||'');
-    if(value.format!==SESSION_CLAIM_FORMAT||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u.test(date)||!Number.isSafeInteger(epoch)||epoch<1||!SESSION_OWNER_PATTERN.test(owner)||!SESSION_OWNER_PATTERN.test(observedOwner)||!Number.isSafeInteger(observedRevision)||observedRevision<1||!Number.isSafeInteger(revision)||revision<1||!['owned','released'].includes(state)||!Number.isFinite(Date.parse(claimedAt)))return null;
-    return freeze({date,epoch,state,owner,revision,observedOwner,observedRevision,claimedAt:new Date(claimedAt).toISOString()});
-  }
-  /* END COMPATIBILITY */
   // A claim file never changes once written; a new claim is a new file. The
   // last verified claim is reused while the listing shows exactly the same
   // file, so each ownership check is one listing rather than a listing and a
@@ -1284,8 +1256,7 @@ registry.define('backup-provider',1,input=>{
         if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,newer:true}));
         throw newerSessionClaim(selected,latest);
       }
-      const claim=await decodeSessionClaim(parsed,{signal});if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
-      claimFormByProvider.set(selected.id,normalizeSessionClaim(parsed)?'current':'older');
+      const claim=normalizeSessionClaim(parsed);if(!claim||sessionClaimId(claim.epoch)!==latest.id)throw syncError('REPOSITORY_SESSION_CLAIM_UNCERTAIN','Active-session ownership state is malformed.');
       if(identity)verifiedSessionClaimByProvider.set(selected.id,freeze({identity,claim}));newerSessionClaimGone(selected);
       return freeze({claim,item:latest});
     }finally{
@@ -1318,15 +1289,15 @@ registry.define('backup-provider',1,input=>{
       return freeze({item:newest,claim:normalized});
     }finally{if(protectedFile&&protectedFile.blob instanceof Blob&&protectedFile.blob!==source)await Exports.run('file.release',{file:protectedFile.blob}).catch(()=>{});}
   }
-  // Another device's upload that started first goes first. One whose marker
-  // renews holds the turn only while it keeps renewing (its marker's
-  // createdAt is its last renewal); one from an older build, for the window.
+  // Another device's upload that started first goes first. It holds the turn
+  // only while its marker keeps renewing (the marker's createdAt is its last
+  // renewal).
   // Turns only save wasted work: each upload still checks before its commit
   // that Drive has not moved on.
   async function sharedPublicationTurnHolder(selected,publicationLease){
     if(!publicationLease||!repositoryPublicationCapable(selected))return null;
     const listed=await selected.repository.listPublications(),rows=Array.isArray(listed)?listed:Array.isArray(listed&&listed.items)?listed.items:[],began=row=>Date.parse(String(row&&(row.startedAt||row.createdAt)||'')),mine=began(publicationLease),offset=repositoryClockOffset(selected),now=Date.now()+offset;
-    const holders=rows.filter(row=>{const id=String(row&&row.id||''),at=began(row),renewedAt=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&now-at<SYNC_TURN_WINDOW_MS&&(row.renews!==true||Number.isFinite(renewedAt)&&now-renewedAt<SYNC_TURN_RENEWED_MS)&&(at<mine||at===mine&&id<publicationLease.id);}).sort((a,b)=>began(a)-began(b));
+    const holders=rows.filter(row=>{const id=String(row&&row.id||''),at=began(row),renewedAt=Date.parse(String(row&&row.createdAt||''));return id!==publicationLease.id&&!ownPublications.has(id)&&row.sameDevice!==true&&Number.isFinite(at)&&now-at<SYNC_TURN_WINDOW_MS&&Number.isFinite(renewedAt)&&now-renewedAt<SYNC_TURN_RENEWED_MS&&(at<mine||at===mine&&id<publicationLease.id);}).sort((a,b)=>began(a)-began(b));
     const holder=holders[0];
     return holder?freeze({device:String(holder.device||''),startedAt:new Date(began(holder)-offset).toISOString(),renewedAt:Number.isFinite(Date.parse(String(holder.createdAt||'')))?new Date(Date.parse(holder.createdAt)-offset).toISOString():'',renews:holder.renews===true}):null;
   }
@@ -2389,7 +2360,7 @@ registry.define('backup-provider',1,input=>{
   function backgroundStatus(){return freeze([...providerBackgroundCoordinators.entries()].flatMap(([id,coordinator])=>[freeze({job:id+' maintenance',...(providerMaintenanceSchedulers.get(id)?.status()||coordinator.jobStatus('maintenance'))}),freeze({job:id+' integrity',...(providerIntegritySchedulers.get(id)?.status()||coordinator.jobStatus('integrity'))}),freeze({job:id+' convergence',...coordinator.jobStatus('convergence')})]));}
   // Sync state of each shared location, for diagnostics: times and flags only.
   function diagnosticSync(){return freeze([...providers.values()].filter(selected=>selected.shared).map(selected=>{const state=syncState(selected),job=providerBackgroundCoordinators.get(selected.id)?.jobStatus('convergence');let endsAt=NaN;try{endsAt=Number(selected.connectionExpiresAt?.());}catch{}return freeze({id:selected.id,connected:providerConnected(selected),syncedAt:state.syncedAt,checkedAt:state.checkedAt?new Date(state.checkedAt).toISOString():'',nextEligibleAt:String(job?.nextEligibleAt||''),needsReview:!!state.review,needsUpdate:!!state.newer,needsPassword:!!state.password,behind:!!state.behind,catchingUp:!!state.catching,turnWaits:Math.max(0,Number(state.turnWaits)||0),waitingFor:String(state.turnHolder?.device||''),waitingSince:String(state.turnHolder?.startedAt||''),waitingRenewedAt:String(state.turnHolder?.renewedAt||''),signInEndsAt:Number.isFinite(endsAt)&&endsAt>0?new Date(endsAt).toISOString():''});}));}
-  function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),formats:formatsByProvider.get(selected.id)||null,claimForm:claimFormByProvider.get(selected.id)||'',scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
+  function diagnosticConnections(){return freeze([...providers.values()].map(selected=>freeze({id:selected.id,connected:providerConnected(selected),scopeBound:repositoryScopeByProvider.has(selected.id),retryAttempt:providerConvergenceRetryAttempts.get(selected.id)||0,retryBackoffCapped:(providerConvergenceRetryAttempts.get(selected.id)||0)>=PROVIDER_CONVERGENCE_RETRY_DELAYS.length})));}
   function status(){return Object.freeze({busy,cancellable:!!foregroundController&&!foregroundController.signal.aborted,operation:foregroundView()?Object.freeze({...foregroundView()}):null});}
   return Object.freeze({register,list,syncing:()=>sharingActive(),status,locationStatus,reviewSync,unlockSync,subscribeStatus,disconnect:id=>disconnectProvider(providers.get(safeId(id))),forget:async id=>{const selected=providers.get(safeId(id));if(!selected)return false;await forgetProvider(selected);return true;},backgroundStatus,diagnosticConnections,diagnosticSync,connected:id=>providerConnected(providers.get(safeId(id))),connect:id=>connectProvider(providers.get(safeId(id))),createProtectedSafety,noteChange,flushAutomatic,automaticWaiting:()=>[...providers.values()].some(automaticWaiting),automaticActive:()=>[...providers.values()].some(selected=>providerConnected(selected)&&automaticEnabled(selected)),refresh:notifyStatus,wakeBackground:trigger=>{for(const selected of providers.values())wakeProviderBackground(selected,trigger);},cancelForeground,history:historyRepositoryProvider,noteVersions:noteVersionsRepositoryProvider,backup:backupProvider,backupRepositoryProvider,syncRepositoryProvider,bringInRepositoryProvider,loadRepositoryProviderCandidate,restoreRepositoryProviderVersion,removeRepositoryProviderVersion,scrubRepositoryProvider,requestIntegrity:id=>scheduleProviderIntegrityScrub(providers.get(safeId(id)),1000),configureIntegrityScrub,configureManagedRecovery,configurePendingBackupRetry,configureRepositoryMaintenance,configureAutomaticBackup,configureSessionOwnership,readSessionHandoffSource,claimSessionOwnership,releaseSessionClaim,readSessionClaim,watchSession,bringInSessionVersions,scheduleSharedSync,suspendBackground,repositoryScope});
 

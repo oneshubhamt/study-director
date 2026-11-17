@@ -37,8 +37,7 @@ registry.define('backup',1,input=>{
     exactObject(input,['ports'],'Backup input');
     const rawPorts=input.ports;
     const configuration=exactObject(rawPorts&&rawPorts.configuration,PORT_FIELDS.configuration,'Backup configuration port');
-    const portableAssets=Number(configuration.backupVersion)>=10;
-    const expectedPortNames=Object.keys(PORT_FIELDS).filter(name=>portableAssets||name!=='assets');
+    const expectedPortNames=Object.keys(PORT_FIELDS);
     const ports=exactObject(rawPorts,expectedPortNames,'Backup ports');
     for(const name of expectedPortNames)exactObject(ports[name],PORT_FIELDS[name],'Backup '+name+' port');
     requireFunctions(ports.exports,PORT_FIELDS.exports,'Backup export port');
@@ -53,7 +52,7 @@ registry.define('backup',1,input=>{
     requireFunctions(ports.interactions,PORT_FIELDS.interactions,'Backup interactions port');
     requireFunctions(ports.environment,['AbortController','clearTimeout','setTimeout','yieldTask'],'Backup environment port');
     requireFunctions(ports.diagnostics,PORT_FIELDS.diagnostics,'Backup diagnostics port');
-    if(portableAssets)requireFunctions(ports.assets,PORT_FIELDS.assets,'Backup assets port');
+    requireFunctions(ports.assets,PORT_FIELDS.assets,'Backup assets port');
     if(!Object.isFrozen(ports.configuration.limits)){
       throw new TypeError('Backup configuration objects must be frozen.');
     }
@@ -99,9 +98,9 @@ registry.define('backup',1,input=>{
       pendingReviews:freeze({list:pendingReviewsList,readItems:pendingReviewsReadItems,merge:pendingReviewsMerge,replace:pendingReviewsReplace,resolve:pendingReviewsResolve}),
       provenance:freeze({installationId}),mutationEpoch:freeze({read:canonicalMutationEpochRead,rebasePreparation:canonicalPreparationRebase}),preparationUnits:freeze({list:preparationUnitStamps,replace:preparationUnitReplace}),deletionRecovery:freeze({flush:deletionRecoveryFlush,savedDays:deletionRecoverySavedDays,replaceSavedDays:deletionRecoveryReplaceSavedDays,notes:deletionRecoveryNotes,replaceNotes:deletionRecoveryReplaceNotes,attachments:deletionRecoveryAttachments,replaceAttachments:deletionRecoveryReplaceAttachments,clearAttachment:deletionRecoveryClearAttachment}),reconciliationBase:freeze({read:reconciliationBaseRead,readNotes:reconciliationBaseReadNotes,readDayAncestry:reconciliationBaseReadDayAncestry,write:reconciliationBaseWrite})
     });
-    const AssetData=portableAssets?freeze({
+    const AssetData=freeze({
       get:ports.assets.get,put:ports.assets.put,keys:ports.assets.keys,list:ports.assets.list,importAll:ports.assets.importAll,restoreAll:ports.assets.restoreAll,removeMany:ports.assets.removeMany,removeMetadata:ports.assets.removeMetadata,scheduleMaintenance:ports.assets.scheduleMaintenance
-    }):null;
+    });
     const ReviewView=freeze({refresh:refreshReview});
     const TASKS=freeze({get length(){return hasTasks()?1:0;}});
     function requireBackupMutationControl(action){
@@ -159,7 +158,7 @@ async function yieldImport(signal,authorityOptions=null){
 function status(){return Object.freeze({busy:activeOperations>0,activeOperations,importActive:!!activeImportOperation,importHoldsBackground:!!activeImportOperation&&!activeImportOperation.backgroundPreemptible,importCancelled:!!activeImportOperation?.signal.aborted,standaloneExportActive:!!localExportPromise||!!localExportRequest});}
 async function track(operation,wait=false,surface='managed'){activeOperations+=1;try{return await Exports.job(operation,{wait,surface});}finally{activeOperations=Math.max(0,activeOperations-1);}}
 const BackupCapture=BackupCaptureModule.create(freeze({
-  configuration:freeze({backupVersion,limits:APP_LIMITS,portableAssets}),
+  configuration:freeze({limits:APP_LIMITS}),
   data:freeze({
     activeSession:freeze({save:AppData.activeSession.save,settled:AppData.activeSession.settled,load:AppData.activeSession.load}),
     dailyRecords:freeze({backupDates:AppData.dailyRecords.backupDates,backupMonth:AppData.dailyRecords.backupMonth}),
@@ -170,7 +169,7 @@ const BackupCapture=BackupCaptureModule.create(freeze({
   }),
   codecs:freeze({activeSession:ActiveSessionCodec,backup:BackupCodec}),
   session:freeze({canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasTasks,toActiveSession:activeSessionPayload}),
-  personal:freeze({settle:personalSettle,export:personalExport}),assets:portableAssets?freeze({get:AssetData.get,list:AssetData.list}):null,
+  personal:freeze({settle:personalSettle,export:personalExport}),assets:freeze({get:AssetData.get,list:AssetData.list}),
   exports:freeze({check:Exports.check,run:Exports.run}),
   persistence:freeze({sourceRevision:ports.persistence.sourceRevision,snapshotRevision:ports.persistence.snapshotRevision,dailyRecordDocuments:getDailyRecordDocumentsByDates,storageGeneration:ports.persistence.storageGeneration}),
   diagnostics:freeze({capture:AppDiagnostics.capture,mark:OperationDiagnostics.mark}),
@@ -190,10 +189,9 @@ async function* createPortableBackupLines(plan,{compression='none'}={}){
     chunkHashes.push(result.checksum);actual[entityType]+=items.length;
     return result.line+'\n';
   };
-  if(Number(backupVersion)>=15)yield await emit('checkpointManifest',[plan.protectedCheckpointManifest||BackupCodec.createProtectedManifest(plan,manifest.checkpoint)]);
+  yield await emit('checkpointManifest',[plan.protectedCheckpointManifest||BackupCodec.createProtectedManifest(plan,manifest.checkpoint)]);
   for(let offset=0;offset<plan.recordDates.length;offset+=APP_LIMITS.backupChunkItems){
-    const dates=plan.recordDates.slice(offset,offset+APP_LIMITS.backupChunkItems);
-    const docs=portableAssets?plan.dailyDocuments.slice(offset,offset+APP_LIMITS.backupChunkItems):currentDailyRecords(await getDailyRecordDocumentsByDates(dates),'Backup Daily Records').sort((a,b)=>a.date.localeCompare(b.date));
+    const docs=plan.dailyDocuments.slice(offset,offset+APP_LIMITS.backupChunkItems);
     for(const group of BackupCodec.splitItems(docs))yield await emit('dailyRecord',group);
   }
   for(const group of BackupCodec.splitItems(plan.noteItems))yield await emit('note',group);
@@ -211,27 +209,22 @@ async function portableBackupMetadataBlob(plan,compression){
 }
 // The name is known at the click, so the save dialog can open before the
 // backup is prepared.
-function portableBackupFilename(studentName,compression='gzip'){return filenameSafeStudentName(studentName)+'-study-director-backup-'+todayISO()+(portableAssets?'.sdbackup':(compression==='gzip'?'.sdbackup.gz':'.sdbackup'));}
+function portableBackupFilename(studentName){return filenameSafeStudentName(studentName)+'-study-director-backup-'+todayISO()+'.sdbackup';}
 async function createPortableBackupBlob(plan,{preferCompression=true,verify=true,retainInspection=false,report=null}={}){
   let compression=preferCompression&&BackupCodec.compressionSupported()?'gzip':'none',blob=null,compressionFallback=false;
-  if(portableAssets){
-    const metadataBlob=await portableBackupMetadataBlob(plan,compression);
-    blob=BackupCodec.createV10Container(metadataBlob,{compression,assetBlobs:[...new Map((plan.assetItems||[]).filter(item=>item.blob instanceof Blob).map(item=>[item.descriptor.checksum+':'+item.blob.size,item.blob])).values()]});
-  }else{
-    blob=await portableBackupMetadataBlob(plan,compression);
-    if(blob.size>APP_LIMITS.backupMaxCompressedBytes)throw new Error(`Backup exceeds the ${Math.round(APP_LIMITS.backupMaxCompressedBytes/1048576)} MB safe file-size limit.`);
-  }
-  const maxFileBytes=portableAssets?APP_LIMITS.backupMaxFileBytes:APP_LIMITS.backupMaxCompressedBytes;
-  if(blob.size>maxFileBytes)throw new Error(`Backup exceeds the ${Math.round(maxFileBytes/1048576)} MB safe file-size limit.`);
-  const filename=portableBackupFilename(plan.studentName,compression);
+  const metadataBlob=await portableBackupMetadataBlob(plan,compression);
+  blob=BackupCodec.createV10Container(metadataBlob,{compression,assetBlobs:[...new Map((plan.assetItems||[]).filter(item=>item.blob instanceof Blob).map(item=>[item.descriptor.checksum+':'+item.blob.size,item.blob])).values()]});
+  if(blob.size>APP_LIMITS.backupMaxFileBytes)throw new Error(`Backup exceeds the ${Math.round(APP_LIMITS.backupMaxFileBytes/1048576)} MB safe file-size limit.`);
+  const filename=portableBackupFilename(plan.studentName);
   report?.stage('Packaging the backup…');blob=await Exports.run('file.copy',{file:blob},{onProgress:report?.progress});
   let inspection=null;
   try{if(verify){
     report?.stage('Verifying the backup…');inspection=await BackupCodec.inspect(blob,{filename,validateOnly:retainInspection!==true});
-    if(!inspection||inspection.formatVersion!==DATA_CONTRACT.schemas.Backup.version||inspection.report.skipped)throw new Error('The generated backup did not pass its self-restore verification.');
+    if(!inspection||inspection.formatVersion!==DATA_CONTRACT.schemas.Backup.version)throw new Error('The generated backup did not pass its self-restore verification.');
     if(!BackupCodec.countsEqual(inspection.counts,plan.counts))throw new Error('The generated backup failed its count verification.');
-    if(Number(backupVersion)>=18){const expectedCaptureAuthority=plan&&plan.completeness&&plan.completeness.complete===true?'canonical-complete':'rescue-partial';if(inspection.captureAuthority!==expectedCaptureAuthority)throw new Error('The generated backup failed its capture-authority verification.');}
-    if(portableAssets&&Number(inspection.assetDescriptors&&inspection.assetDescriptors.length)!==Number(plan.assetItems&&plan.assetItems.length))throw new Error('The generated backup failed its attachment verification.');
+    const expectedCaptureAuthority=plan&&plan.completeness&&plan.completeness.complete===true?'canonical-complete':'rescue-partial';
+    if(inspection.captureAuthority!==expectedCaptureAuthority)throw new Error('The generated backup failed its capture-authority verification.');
+    if(Number(inspection.assetDescriptors&&inspection.assetDescriptors.length)!==Number(plan.assetItems&&plan.assetItems.length))throw new Error('The generated backup failed its attachment verification.');
   }
   return retainInspection&&inspection?{blob,filename,compression,compressionFallback,inspection}:{blob,filename,compression,compressionFallback};
   }catch(error){await Exports.run('file.release',{file:blob});throw error;}
@@ -247,7 +240,7 @@ const PortableCheckpointMaterializer=freeze({materialize:materializePortableChec
 const ManagedRepository=ManagedRepositoryModule.createEngine(freeze({
   codec:BackupCodec,
   ports:freeze({
-    configuration:freeze({backupVersion,limits:APP_LIMITS,logicalCaptureFormat:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,logicalCaptureVersion:LOGICAL_CHECKPOINT_CAPTURE_VERSION}),
+    configuration:freeze({limits:APP_LIMITS,logicalCaptureFormat:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,logicalCaptureVersion:LOGICAL_CHECKPOINT_CAPTURE_VERSION}),
     persistence:freeze({reconciliationBaseRead:AppData.reconciliationBase.read,reconciliationBaseWrite:AppData.reconciliationBase.write,personalFingerprint:value=>personalFingerprint(value),personalFields:value=>personalFields(value),dayFingerprints:records=>dayFingerprintMonths(records),semanticDayFingerprints:records=>dayFingerprintMonths(records,{semantic:true}),sessionFingerprint:value=>sessionFingerprint(value),sessionContentFingerprint:value=>sessionContentFingerprint(value)}),
     assets:freeze({get:assetId=>AssetData.get(assetId),verifyAliases:(catalogue,assetIds)=>verifyAnomalousPhysicalAssetAliases(catalogue,assetIds)}),
     files:freeze({protect:Exports.protect,unprotect:Exports.unprotect,run:Exports.run,scope:Exports.scope}),
@@ -317,7 +310,7 @@ async function exportPortableBackup(){
   // browser allows it and the person gets an answer at once. The backup is
   // prepared once a location is chosen. Browsers without a save dialog
   // download the verified file instead.
-  const chosen=Exports.chooseSave(portableBackupFilename(getStudentNameFromDisplay()),{'application/octet-stream':[portableAssets?'.sdbackup':'.gz']},{id:'study-director-backups'});
+  const chosen=Exports.chooseSave(portableBackupFilename(getStudentNameFromDisplay()),{'application/octet-stream':['.sdbackup']},{id:'study-director-backups'});
   const traceId=OperationDiagnostics.start('standalone-export','Standalone backup');
   portablePresentation=presentation.begin('file','export',{label:'File backup',message:'Choose where to save the backup…'});
   localExportPromise=(async()=>{
@@ -373,10 +366,10 @@ function normalizeImportedDailyRecordSet(records){
   for(const record of records||[]){
     const clean=BackupCodec.normalizeRecord(record);
     if(!clean)throw new Error(`Imported Saved Day ${String(record&&record.date||'?')} is outside the current canonical schema.`);
-    if(byDate.has(clean.date))throw new Error(`Imported Saved Day ${clean.date} is duplicated after compatibility conversion.`);
+    if(byDate.has(clean.date))throw new Error(`Imported Saved Day ${clean.date} is duplicated.`);
     byDate.set(clean.date,clean);
   }
-  return {records:[...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date)),skipped:0,duplicates:0};
+  return {records:[...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date))};
 }
 async function getDailyRecordDocumentsByDates(dates,options={}){return AppData.dailyRecords.documents(dates,options);}
 async function storeImportedDailyRecordBatches(records,operation,reportProgress=null){
@@ -577,10 +570,8 @@ async function buildRestoreReconciliationPlan(parsed,preview,{missingOnly=false,
   const backupNotes=missingOnly?Object.create(null):AppData.notes.alignByTitle(parsed&&parsed.data&&parsed.data.notes||{},allLocalNoteDeletions.map(entry=>entry.key)),incomingNotes=note?Object.create(null):backupNotes;
   if(note&&Object.prototype.hasOwnProperty.call(backupNotes,note))incomingNotes[note]=backupNotes[note];
   const loadedSession=await readCanonicalActiveSession(),localSession=loadedSession&&loadedSession.value||null;
-  const currentCheckpoint=Number(parsed&&parsed.formatVersion)>=15&&!!parsed.protectedCheckpointManifest;
-  const rawIncomingSession=parsed&&parsed.importedActiveSession||null;
-  const incomingSession=note?null:currentCheckpoint?rawIncomingSession:(rawIncomingSession&&rawIncomingSession.date===todayISO()?rawIncomingSession:null);
-  const backupAt=Date.parse(String(preview&&preview.exportedAt||'')),incomingLabel=note&&Number.isFinite(backupAt)?`Backup from ${new Date(backupAt).toLocaleString(undefined,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}`:currentCheckpoint?'Backup copy':(preview&&preview.filename||'Backup file');
+  const incomingSession=note?null:parsed&&parsed.importedActiveSession||null;
+  const backupAt=Date.parse(String(preview&&preview.exportedAt||'')),incomingLabel=note&&Number.isFinite(backupAt)?`Backup from ${new Date(backupAt).toLocaleString(undefined,{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}`:'Backup copy';
   const checkpointId=String(parsed&&parsed.protectedCheckpointManifest&&parsed.protectedCheckpointManifest.checkpointId||preview&&preview.checkpoint&&preview.checkpoint.checkpointId||'incoming');
   return Reconciliation.createPlan({
     local:{id:'local',label:'This device',savedDays:localRecords,savedDayDeletions:localDeletions,notes:localNotes,noteDeletions:allLocalNoteDeletions,activeSession:localSession},
@@ -1887,7 +1878,6 @@ function backupCandidatePreview(parsed,file,metadata={}){
   const exportedAtValue=manifest.exportedAt||data.exportedAt||null;
   const exportedAt=exportedAtValue&&Number.isFinite(Date.parse(exportedAtValue))?new Date(exportedAtValue).toISOString():null;
   const filename=clampText(metadata.filename||file&&file.name||'',240);
-  const report=parsed&&parsed.report&&typeof parsed.report==='object'?parsed.report:{};
   const dates=(parsed&&Array.isArray(parsed.records)?parsed.records:[]).map(record=>String(record&&record.date||'')).filter(Boolean).sort();
   return Object.freeze({
     filename,
@@ -1896,15 +1886,11 @@ function backupCandidatePreview(parsed,file,metadata={}){
     formatVersion:Number(parsed&&parsed.formatVersion)||0,
     counts:Object.freeze({...counts}),
     assets:Object.freeze({...BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]),library:(parsed.assetDescriptors||[]).filter(item=>item.library).length}),
-    legacy:!!report.legacy,
-    ignoredTombstones:Number(report.ignoredTombstones)||0,
-    ignoredOrInvalid:(Number(report.skipped)||0)+(Number(report.duplicates)||0),
     dateRange:dates.length?Object.freeze({first:dates[0],last:dates[dates.length-1]}):null,
     checksumAlgorithm:clampText(manifest.checksumAlgorithm||'',20)||null,
     authenticated:metadata.encrypted===true,
     encrypted:metadata.encrypted===true,
     checkpoint:manifest.checkpoint?Object.freeze({checkpointId:String(manifest.checkpoint.checkpointId||''),createdAt:String(manifest.checkpoint.createdAt||''),originInstallationId:String(manifest.checkpoint.originInstallationId||'')}):null,
-    reconciliationCapable:Number(parsed&&parsed.formatVersion)>=15&&!!parsed&&!!parsed.protectedCheckpointManifest,
     captureAuthority:String(parsed&&parsed.captureAuthority||'unknown'),
     size:Math.max(0,Number(metadata.size!==undefined?metadata.size:file&&file.size)||0)
   });
@@ -1912,21 +1898,15 @@ function backupCandidatePreview(parsed,file,metadata={}){
 async function restoreImpactPreview(parsed,preview,assetAssessment=null,options={}){
   const reconciliationPlan=await buildRestoreReconciliationPlan(parsed,preview,options);
   const summary=Reconciliation.summarizePlan(reconciliationPlan);
-  const currentCheckpoint=Number(parsed&&parsed.formatVersion)>=15&&!!parsed.protectedCheckpointManifest;
   return freeze({
-    reconciliationCapable:currentCheckpoint,reconciliationPlan,
+    reconciliationPlan,
     savedDays:summary.savedDays,
     notes:summary.notes,
     activeSession:summary.activeSession,
-    assets:freeze({total:(parsed.assetDescriptors||[]).length,available:(assetAssessment&&assetAssessment.available||[]).length,missing:(assetAssessment&&assetAssessment.missing||[]).length,newItems:(assetAssessment&&assetAssessment.toWrite||[]).length,reused:Number(assetAssessment&&assetAssessment.reused)||0}),
-    ignoredOrInvalid:Number(preview.ignoredOrInvalid)||0
+    assets:freeze({total:(parsed.assetDescriptors||[]).length,available:(assetAssessment&&assetAssessment.available||[]).length,missing:(assetAssessment&&assetAssessment.missing||[]).length,newItems:(assetAssessment&&assetAssessment.toWrite||[]).length,reused:Number(assetAssessment&&assetAssessment.reused)||0})
   });
 }
-function restoreModeForBackup(impact){
-  if(!impact.reconciliationCapable){requireNoActiveSession('importing this older backup');return 'import';}
-  return 'reconcile';
-}
-function restoreDecisionSetup(parsed,impact,mode='import',localPersonal=null,noteState=null,personal=null,settledDays=null,session=''){
+function restoreDecisionSetup(parsed,impact,localPersonal=null,noteState=null,personal=null,settledDays=null,session=''){
   // Plans and settings changed on one side only since the shared base are settled
   // without asking ('replace' takes the backup's, 'keep' this device's).
   const plan=impact.reconciliationPlan,groups=[],defaults={plans:personal||'keep',personalSettings:personal||'keep',safetyCopy:false};
@@ -1962,7 +1942,6 @@ function restoreDecisionSetup(parsed,impact,mode='import',localPersonal=null,not
   return freeze({groups:freeze(groups.map(group=>freeze({...group,choices:freeze(group.choices.map(choice=>freeze(choice)))}))),defaults:freeze(defaults)});
 }
 async function assessImportedAssets(parsed,signal){
-  if(!portableAssets||Number(parsed&&parsed.formatVersion)<10)return freeze({available:freeze([]),missing:freeze([]),toWrite:freeze([]),reused:0});
   const available=Array.isArray(parsed.importedAssets)?parsed.importedAssets:[],missing=(parsed.assetDescriptors||[]).filter(item=>item&&item.missing===true),localRows=await AssetData.list(),localById=new Map(localRows.map(row=>[row.id,row])),verifiedPhysical=new Set();
   const toWrite=[];let reused=0;
   for(const item of available){
@@ -1980,7 +1959,6 @@ async function assessImportedAssets(parsed,signal){
   return freeze({available:freeze([...available]),missing:freeze([...missing]),toWrite:freeze(toWrite),reused});
 }
 async function resolvedAssetReferenceIds(resolvedPlan,signal,reviews=freeze([])){
-  if(!portableAssets)return freeze([]);
   const references=new Set(),collect=value=>{for(const id of BackupCodec.assetIds(value))references.add(id);};
   const recordSource=await AppData.dailyRecords.backupDates(),recordDates=Array.isArray(recordSource&&recordSource.dates)?recordSource.dates:[];
   const records=new Map((await getDailyRecordDocumentsByDates(recordDates)).map(record=>[record.date,record]));
@@ -1995,7 +1973,6 @@ async function resolvedAssetReferenceIds(resolvedPlan,signal,reviews=freeze([]))
   return freeze([...references].sort());
 }
 async function buildAttachmentDeletionPlan(parsed,resolvedPlan,assessment,decisions=freeze({}),signal=null,resolvedReferences=null){
-  if(!portableAssets)return freeze({conflicts:freeze([]),states:freeze({}),expectedDeletions:freeze([]),deleteLocalIds:freeze([]),references:freeze([])});
   const references=Array.isArray(resolvedReferences)?resolvedReferences:await resolvedAssetReferenceIds(resolvedPlan,signal),referenceSet=new Set(references);
   const localRows=await AssetData.list(),localById=new Map(localRows.map(row=>[row.id,row]));
   const incomingAvailable=Array.isArray(assessment&&assessment.available)?assessment.available:[],incomingById=new Map(incomingAvailable.map(item=>[item.assetId,item]));
@@ -2041,7 +2018,7 @@ function attachmentDeletionDecisionGroups(plan){
   ])})));
 }
 async function selectResolvedImportedAssets(assessment,resolvedPlan,signal,attachmentPlan=null,resolvedReferences=null){
-  if(!portableAssets||!assessment)return freeze({available:freeze([]),toWrite:freeze([]),reused:0,references:freeze([])});
+  if(!assessment)return freeze({available:freeze([]),toWrite:freeze([]),reused:0,references:freeze([])});
   const references=Array.isArray(resolvedReferences)?resolvedReferences:await resolvedAssetReferenceIds(resolvedPlan,signal),referenceSet=new Set(references);
   const available=Array.isArray(assessment.available)?assessment.available:[],missing=Array.isArray(assessment.missing)?assessment.missing:[];
   const availableById=new Map(available.map(item=>[item.assetId,item])),knownCheckpointIds=new Set([...available.map(item=>item.assetId),...missing.map(item=>item.assetId)]);
@@ -2056,7 +2033,7 @@ async function selectResolvedImportedAssets(assessment,resolvedPlan,signal,attac
   return freeze({available:freeze(selected),toWrite:freeze(toWrite),reused:selected.length-toWrite.length,references});
 }
 async function commitImportedAssets(selection,signal,attachmentPlan=null){
-  if(!portableAssets||!selection)return freeze({written:0,published:0,reused:0,deleted:0,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:null});
+  if(!selection)return freeze({written:0,published:0,reused:0,deleted:0,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:null});
   throwIfImportAborted(signal);
   const selected=selection.available||freeze([]),published=selected.length;
   if(published)await AssetData.importAll(selected,signal);
@@ -2069,7 +2046,6 @@ async function commitImportedAssets(selection,signal,attachmentPlan=null){
   return freeze({written:(selection.toWrite||[]).length,published,reused:Number(selection.reused)||0,deleted,changed:!!(published||deleted||deletionLedgerChanged),expected:freeze([...selected]),expectedRemovedIds:freeze([...deleteLocalIds]),references:selection.references||freeze([]),expectedDeletions:storedDeletions});
 }
 async function restoreSnapshotAssets(snapshot){
-  if(!portableAssets||Number(snapshot&&snapshot.formatVersion)<10)return freeze({restored:false,removed:0,written:0});
   await AssetData.restoreAll(snapshot.importedAssets||[]);
   return freeze({restored:true,written:snapshot.importedAssets?.length||0});
 }
@@ -2165,20 +2141,11 @@ function managedParsedSnapshot(capture,metadata={}){
   if(!Canonical.same(repositoryManifest.checkpoint,plan.checkpoint)||String(repositoryManifest.sourceRevision||'')!==String(plan.sourceRevision||'')||String(repositoryManifest.exportedAt||'')!==String(plan.exportedAt||''))throw new Error('Managed repository provenance does not match the reconstructed checkpoint.');
   const records=managedSnapshotStage('daily-records','MANAGED_CHECKPOINT_DAILY_RECORDS_FAILED',()=>[...(plan.dailyDocuments||[])].map(record=>{const clean=BackupCodec.normalizeRecord(record);if(!clean)throw new Error('Managed repository Daily Records contain a record outside the supported schema range.');return clean;}).sort((a,b)=>a.date.localeCompare(b.date)));
   const recordDates=managedSnapshotStage('daily-records-membership','MANAGED_CHECKPOINT_DAILY_RECORDS_FAILED',()=>{const actual=records.map(record=>String(record.date)),declared=[...(plan.recordDates||[])].map(String).sort();if(actual.length!==declared.length||actual.some((date,index)=>date!==declared[index]))throw new Error('Managed repository Saved-Day membership failed verification.');return actual;});
-  // Versions saved before notes had permanent ids (manifest 5 and older) keep
-  // notes, and their deletion history, under note names; both convert to ids.
-  const nameKeyedNotes=Number(repositoryManifest.version)<=ManagedRepository.releasedManifestVersion;
-  // A version older than this build's (manifest 10 and before) can hold
-  // Support Activities under its retired title (registry: support-note-identity).
-  const olderVersion=Number(repositoryManifest.version)<ManagedRepository.manifestVersion;
-  const notes=managedSnapshotStage('notes','MANAGED_CHECKPOINT_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.noteItems||[]){const key=String(raw&&raw.key||''),clean=nameKeyedNotes||olderVersion&&BackupCodec.olderNote(raw)?BackupCodec.legacyNote(raw,key):BackupCodec.normalizeNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
-  const activeSession=managedSnapshotStage('active-session','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED',()=>{const clean=plan.activeSession?BackupCodec.normalizeImportedActiveSession(plan.activeSession,{legacy:Number(repositoryManifest.version)<=4}):null;if(plan.activeSession&&!clean)throw new Error('Managed repository Active Session failed schema verification.');return clean;});
+  const notes=managedSnapshotStage('notes','MANAGED_CHECKPOINT_NOTES_FAILED',()=>{const out=Object.create(null);for(const raw of plan.noteItems||[]){const key=String(raw&&raw.key||''),clean=BackupCodec.normalizeNote(raw,key);if(!clean||!key||Object.prototype.hasOwnProperty.call(out,clean.key))throw new Error('Managed repository note failed current-schema verification.');out[clean.key]=clean;}return out;});
+  const activeSession=managedSnapshotStage('active-session','MANAGED_CHECKPOINT_ACTIVE_SESSION_FAILED',()=>{const clean=plan.activeSession?BackupCodec.normalizeActiveSession(plan.activeSession):null;if(plan.activeSession&&!clean)throw new Error('Managed repository Active Session failed schema verification.');return clean;});
   const personalData=managedSnapshotStage('personal-data','MANAGED_CHECKPOINT_PERSONAL_DATA_FAILED',()=>plan.personalData?BackupCodec.normalizePersonalData(plan.personalData):null);
-  // Versions kept for review (manifest 8 and later; manifest 8 holds them in
-  // their v1 form, without a device).
-  const reviewV1=Number(repositoryManifest.version)<ManagedRepository.reviewOriginManifestVersion;
-  const pendingReviews=managedSnapshotStage('pending-reviews','MANAGED_CHECKPOINT_PENDING_REVIEWS_FAILED',()=>{const seen=new Set();return freeze((plan.pendingReviewItems||[]).map(raw=>{const clean=BackupCodec.storedPendingReview(raw,{reviewV1,older:olderVersion});if(!clean||seen.has(clean.id))throw new Error('Managed repository version kept for review failed current-schema verification.');seen.add(clean.id);return clean;}).sort((a,b)=>a.id.localeCompare(b.id)));});
-  const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});if(!noteScope&&Number(repositoryManifest.version)>=5&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
+  const pendingReviews=managedSnapshotStage('pending-reviews','MANAGED_CHECKPOINT_PENDING_REVIEWS_FAILED',()=>{const seen=new Set();return freeze((plan.pendingReviewItems||[]).map(raw=>{const clean=BackupCodec.normalizePendingReview(raw);if(!clean||seen.has(clean.id))throw new Error('Managed repository version kept for review failed current-schema verification.');seen.add(clean.id);return clean;}).sort((a,b)=>a.id.localeCompare(b.id)));});
+  const counts=managedSnapshotStage('counts','MANAGED_CHECKPOINT_COUNTS_FAILED',()=>{const value=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:records.length,note:Object.keys(notes).length,activeSession:activeSession?1:0,pendingReview:pendingReviews.length});if(!noteScope&&(!BackupCodec.countsEqual(value,plan.counts)||!BackupCodec.countsEqual(value,repositoryManifest.counts)))throw new Error('Managed repository counts failed portable-snapshot verification.');return value;});
   const attachmentState=managedSnapshotStage('attachments','MANAGED_CHECKPOINT_ATTACHMENTS_FAILED',()=>{
     const rawAssetItems=Array.isArray(plan.assetItems)?plan.assetItems:[],assetDescriptors=BackupCodec.normalizeAssetDescriptors(rawAssetItems.map(item=>item&&item.descriptor)),assetById=new Map(rawAssetItems.map(item=>[String(item&&item.descriptor&&item.descriptor.assetId||''),item])),importedAssets=[];
     for(const descriptor of assetDescriptors){const item=assetById.get(descriptor.assetId);if(!item)throw new Error(`Managed repository attachment ${descriptor.assetId} is unavailable.`);if(descriptor.missing===true){if(item.blob!==null&&item.blob!==undefined)throw new Error(`Managed repository missing attachment ${descriptor.assetId} unexpectedly contains bytes.`);continue;}if(!(item.blob instanceof Blob)||item.blob.size!==descriptor.size)throw new Error(`Managed repository attachment ${descriptor.assetId} failed snapshot binding.`);importedAssets.push(freeze({...descriptor,blob:item.blob.slice(0,item.blob.size,descriptor.mimeType)}));}
@@ -2188,10 +2155,10 @@ function managedParsedSnapshot(capture,metadata={}){
   });
   const {assetDescriptors,assetById,importedAssets,referencedAssetIds}=attachmentState;
   const normalizedPlan=freeze({...plan,dailyDocuments:freeze(records),recordDates:freeze(recordDates),noteItems:freeze(Object.values(notes).sort((a,b)=>String(a.key).localeCompare(String(b.key)))),activeSession,personalData,pendingReviewItems:pendingReviews,counts:freeze({...counts}),assetItems:freeze(assetDescriptors.map(descriptor=>freeze({descriptor,blob:descriptor.missing===true?null:assetById.get(descriptor.assetId).blob})))});
-  const protectedCheckpointManifest=managedSnapshotStage('protected-manifest','MANAGED_CHECKPOINT_PROTECTED_MANIFEST_FAILED',()=>{if(noteScope)return BackupCodec.withNoteIdDeletions(repositoryManifest.protectedCheckpointManifest,nameKeyedNotes);const value=BackupCodec.createProtectedManifest(normalizedPlan,plan.checkpoint);if(Number(repositoryManifest.version)>=5&&(!Canonical.same(value,plan.protectedCheckpointManifest)||!Canonical.same(value,repositoryManifest.protectedCheckpointManifest)))throw new Error('Managed repository protected checkpoint state failed portable-snapshot verification.');return BackupCodec.withNoteIdDeletions(value,nameKeyedNotes);});
-  const manifest=freeze(BackupCodec.createManifest(normalizedPlan,{compression:'none',algorithm:BackupCodec.checksumAlgorithm()})),report=freeze({legacy:false,sourceVersion:null,degraded:0,skipped:0,duplicates:0,invalidActiveSession:0,ignoredTombstones:0,warnings:freeze([])});
+  const protectedCheckpointManifest=managedSnapshotStage('protected-manifest','MANAGED_CHECKPOINT_PROTECTED_MANIFEST_FAILED',()=>{if(noteScope)return repositoryManifest.protectedCheckpointManifest;const value=BackupCodec.createProtectedManifest(normalizedPlan,plan.checkpoint);if((!Canonical.same(value,plan.protectedCheckpointManifest)||!Canonical.same(value,repositoryManifest.protectedCheckpointManifest)))throw new Error('Managed repository protected checkpoint state failed portable-snapshot verification.');return value;});
+  const manifest=freeze(BackupCodec.createManifest(normalizedPlan,{compression:'none',algorithm:BackupCodec.checksumAlgorithm()}));
   const sourceBytes=Math.max(0,Number(metadata&&metadata.verifiedSourceBytes)||0),entityCount=records.length+Object.keys(notes).length+(activeSession?1:0)+(personalData?1:0)+pendingReviews.length+1,chunkOverhead=Math.ceil(entityCount/Math.max(1,Number(APP_LIMITS.backupChunkItems)||1))*512+8192;
-  return freeze({noteScope,importedPersonalData:personalData,data:freeze({notes:freeze(notes)}),records:freeze(records),pendingReviews,hasNotes:true,notesComplete:true,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority:'canonical-complete',formatVersion:Number(backupVersion),counts:freeze({...counts}),manifest,report,uncompressedBytes:sourceBytes+chunkOverhead,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort()),importedAssets:freeze(importedAssets),assetBytes:importedAssets.reduce((total,item)=>total+item.size,0)});
+  return freeze({noteScope,importedPersonalData:personalData,data:freeze({notes:freeze(notes)}),records:freeze(records),pendingReviews,hasNotes:true,notesComplete:true,importedActiveSession:activeSession,protectedCheckpointManifest,captureAuthority:'canonical-complete',formatVersion:Number(backupVersion),counts:freeze({...counts}),manifest,uncompressedBytes:sourceBytes+chunkOverhead,assetDescriptors,referencedAssetIds:freeze([...referencedAssetIds].sort()),importedAssets:freeze(importedAssets),assetBytes:importedAssets.reduce((total,item)=>total+item.size,0)});
 }
 async function inspectVerifiedLogicalCapture(capture,metadata={}){
   const signal=metadata&&metadata.signal||activeImportOperation&&activeImportOperation.signal||null;throwIfImportAborted(signal);
@@ -2244,13 +2211,10 @@ async function replacePortableCanonicalSnapshot(snapshot,{deletionState=null,sig
   const restoredNotes=await restoreNotesSnapshot(targetNotes);
   if(!restoredNotes||typeof restoredNotes!=='object'||Array.isArray(restoredNotes))throw new Error('Note version restore did not return a canonical committed payload.');
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
-  let restoredAssets=0;
-  if(portableAssets&&Number(source.formatVersion)>=10){
-    await mark('attachments');
-    const assets=Array.isArray(source.importedAssets)?source.importedAssets:[];
-    await restoreSnapshotAssets(source);restoredAssets=assets.length;
-    throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
-  }
+  await mark('attachments');
+  await restoreSnapshotAssets(source);
+  const restoredAssets=Array.isArray(source.importedAssets)?source.importedAssets.length:0;
+  throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   await mark('active-session');
   await restoreSessionState(targetSession);
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
@@ -2265,15 +2229,15 @@ async function replacePortableCanonicalSnapshot(snapshot,{deletionState=null,sig
   await AppData.deletionRecovery.replaceAttachments(deletions.attachments);
   await AppData.activeSession.settled();
   await mark('verifying');
-  const expectedAssets=portableAssets&&Number(source.formatVersion)>=10?(source.importedAssets||[]):undefined;
+  const expectedAssets=Array.isArray(source.importedAssets)?source.importedAssets:[];
   await verifyRestoreCommit({
     personalData:targetPersonal,records,recordDatesExact:targetDates,notes:AppData.notes.normalizePayload(restoredNotes),
-    assets:expectedAssets,assetIdsExact:Array.isArray(expectedAssets)?expectedAssets.map(item=>item.assetId):undefined,
+    assets:expectedAssets,assetIdsExact:expectedAssets.map(item=>item.assetId),
     activeSession:targetSession,savedDayDeletions:deletions.savedDays,noteDeletions:deletions.notes,attachmentDeletions:deletions.attachments,
     ...(targetReviews?{pendingReviews:targetReviews}:{})
   },signal,authorityOptions);
   for(const [scope,operation] of [['library',libraryChanged],['notes',refreshPnote],['review',()=>ReviewView.refresh()],['schedule',renderSched]])try{operation();}catch(error){AppDiagnostics.capture(`backup.version-restore-${scope}`,error,'warn');}
-  if(portableAssets)AssetData.scheduleMaintenance(0);
+  AssetData.scheduleMaintenance(0);
   return freeze({records:records.length,removedRecords:removedDates.length,recordBatches,notes:Object.keys(targetNotes).length,activeSession:!!targetSession,personalData:!!targetPersonal,assets:restoredAssets});
 }
 async function rebaseRepositoryPreparationAcceleration(reason='authoritative-recovery',authorityOptions=null){
@@ -2309,14 +2273,12 @@ async function rollbackImportedState(journal,deletionState=null){
 
 async function ensureRestoreCapacity(parsed,preview={}){
   const expandedBytes=Math.max(0,Number(parsed&&parsed.uncompressedBytes)||Number(preview&&preview.size)||0);let safetyAssetBytes=0;
-  if(portableAssets){
-    const physicalSizes=new Map();
-    for(const row of await AssetData.list()){
-      const identity=String(row&&row.file||row&&row.id||''),size=Number(row&&row.size);if(!identity||!Number.isSafeInteger(size)||size<=0)continue;
-      physicalSizes.set(identity,Math.max(size,physicalSizes.get(identity)||0));
-    }
-    for(const size of physicalSizes.values())safetyAssetBytes=Math.min(Number.MAX_SAFE_INTEGER,safetyAssetBytes+size);
+  const physicalSizes=new Map();
+  for(const row of await AssetData.list()){
+    const identity=String(row&&row.file||row&&row.id||''),size=Number(row&&row.size);if(!identity||!Number.isSafeInteger(size)||size<=0)continue;
+    physicalSizes.set(identity,Math.max(size,physicalSizes.get(identity)||0));
   }
+  for(const size of physicalSizes.values())safetyAssetBytes=Math.min(Number.MAX_SAFE_INTEGER,safetyAssetBytes+size);
   try{
     const estimate=globalThis.navigator&&globalThis.navigator.storage&&typeof globalThis.navigator.storage.estimate==='function'?await globalThis.navigator.storage.estimate():null;
     if(estimate&&Number.isFinite(estimate.quota)&&Number.isFinite(estimate.usage)){
@@ -2390,7 +2352,6 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const session=decision.state,derivedSession=decision.value;
   const holdSession=['hold','local','graft'].includes(session),clearSession=session==='incoming'&&!(parsed&&parsed.importedActiveSession);
   const stable=await buildStableRestoreImpact(parsed,preview,signal,{missingOnly,note,holdSession}),impact=stable.impact;
-  if((quiet||note)&&!impact.reconciliationCapable)return needsDecision();
   // A one-note restore stops here when the backup has no copy of the note or
   // the same text, so nothing is written and no safety backup is made.
   const noteItem=note?impact.reconciliationPlan.notes.find(item=>item.key===note)||null:null,noteRecord=local=>noteItem?.candidates.find(candidate=>candidate.local===local&&candidate.kind==='record')||null;
@@ -2403,9 +2364,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   const restoredNote=text=>{const base=noteRecord(true)||noteRecord(false),revision=Math.max(Date.now(),(Date.parse(String(noteRecord(true)?.value?.updatedAt||''))||0)+1);return freeze({[note]:freeze({value:freeze({...base.value,key:note,text,updatedAt:new Date(revision).toISOString()})})});};
   OperationDiagnostics.mark('reconciliation-impact-ready',{savedDayConflicts:Number(impact.savedDays&&impact.savedDays.conflicts)||0,activeSessionConflicts:Number(impact.activeSession&&impact.activeSession.conflicts)||0});
   const reconciliationRevision=stable.revision,relevantDates=stable.relevantDates;
-  const mode=restoreModeForBackup(impact);
-  if(!mode)return Object.freeze({cancelled:true,mode:null,added:0,replaced:0,kept:0,batches:0,assetsRestored:0,notesReconciled:false,activeSessionReconciled:false,savedDayDeletionsApplied:0});
-  const currentCheckpoint=mode==='reconcile';
+  const mode='reconcile';
   // Restoring one note always shows the comparison, so it never settles itself.
   const differingNotes=note?[]:impact.reconciliationPlan.notes.filter(item=>item.conflict&&notesTrashKey(item.key)).map(item=>item.key);
   const noteState=noteReconciliationState(impact.reconciliationPlan,differingNotes.length?await noteReconciliationAncestor(base,differingNotes):null);
@@ -2444,7 +2403,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     }
   }
   const noteConflicts=sync?freeze([]):noteState.conflicts,decisionNoteState=sync?freeze({...noteState,deletions:freeze([]),titles:freeze([])}):noteState;
-  const decisionSetup=restoreDecisionSetup(parsed,impact,mode,localPersonal,note?null:decisionNoteState,personal,settledDays,session);
+  const decisionSetup=restoreDecisionSetup(parsed,impact,localPersonal,note?null:decisionNoteState,personal,settledDays,session);
   let selectedDecisions=freeze({});
   if(quiet&&(decisionSetup.groups.some(group=>sync||!['plans','personalSettings'].includes(group.id))||noteConflicts.length))return needsDecision();
   if(decisionSetup.groups.length&&!quiet&&!note){
@@ -2452,7 +2411,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       title:'Different versions found',
       message:'Choose what to keep where this device and the backup differ. This device is selected by default; nothing missing from the backup is treated as deleted.',
       details:[
-        `${currentCheckpoint?'Backup copy':(preview.filename||'Backup file')} · ${preview.exportedAt?new Date(preview.exportedAt).toLocaleString():'date unavailable'}`,
+        `Backup copy · ${preview.exportedAt?new Date(preview.exportedAt).toLocaleString():'date unavailable'}`,
         `Saved Days: ${impact.savedDays.conflicts} conflict${impact.savedDays.conflicts===1?'':'s'} · Active Session: ${impact.activeSession.conflicts} conflict${impact.activeSession.conflicts===1?'':'s'}.`,
         'Study Director automatically keeps verified rollback protection while changes are applied.'
       ],groups:decisionSetup.groups,checkboxes:[{id:'safetyCopy',label:'Download an extra standalone safety copy before applying',description:'Optional. This does not replace Study Director’s automatic rollback protection.',defaultChecked:false}],confirmLabel:'Apply choices',cancelLabel:'Keep current'
@@ -2522,12 +2481,10 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
   }
   throwIfImportAborted(signal);await yieldImport(signal);
   await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
-  if(!impact.reconciliationCapable)requireNoActiveSession('using an older backup');
   // Taking in Drive's newest version makes it what both sides last shared.
-  const sharedBase=currentCheckpoint&&!note&&!missingOnly&&snapshot.provenance&&snapshot.provenance.sharedHead===true?await sharedBaseUpdate(parsed):null;
+  const sharedBase=!note&&!missingOnly&&snapshot.provenance&&snapshot.provenance.sharedHead===true?await sharedBaseUpdate(parsed):null;
   return runRestoreMutation(stored,'restore-backup',async()=>{
   OperationDiagnostics.mark('local-restore-mutation-enter');
-  if(!impact.reconciliationCapable)requireNoActiveSession('using an older backup');
   await assertRestoreReconciliationCurrent(reconciliationRevision,relevantDates,stable.scope);
   await ensureRestoreCapacity(parsed,preview);
   restoreSurfaceStatus(stored,'Creating and verifying a local rollback snapshot…',true,'local-safety');
@@ -2542,18 +2499,15 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
     await AppData.restoreJournal.prepare({id:restoreId,blob:safetyFile.blob,filename:safetyFile.filename,savedDayDeletions:rollbackDeletionState.savedDays,noteDeletions:rollbackDeletionState.notes,attachmentDeletions:rollbackDeletionState.attachments});
     journalPrepared=true;OperationDiagnostics.mark('restore-journal-prepare-complete');
     let assetResult=freeze({written:0,published:0,reused:0,deleted:0,changed:false,expected:freeze([]),expectedRemovedIds:freeze([]),references:freeze([]),expectedDeletions:freeze([])});
-    if(portableAssets&&Number(parsed.formatVersion)>=10){
-      assetResult=await runRestoreMutationStage('assets',async()=>{
-        await AppData.restoreJournal.mark(restoreId,'applying-assets');
-        const currentAssessment=await assessImportedAssets(parsed,signal);
-        const selectedAssets=await selectResolvedImportedAssets(currentAssessment,resolvedPlan,signal,attachmentPlan,resolvedAssetReferences);
-        const result=await commitImportedAssets(selectedAssets,signal,attachmentPlan);
-        if(result.published)committedDescription=String(result.published)+' selected attachment'+(result.published===1?' was':'s were')+' already updated';
-        await AppData.restoreJournal.mark(restoreId,'assets-committed');
-        throwIfImportAborted(signal);await yieldImport(signal);return result;
-      });
-    }
-    const report={...(parsed.report||{}),warnings:[...((parsed.report&&parsed.report.warnings)||[])]};
+    assetResult=await runRestoreMutationStage('assets',async()=>{
+      await AppData.restoreJournal.mark(restoreId,'applying-assets');
+      const currentAssessment=await assessImportedAssets(parsed,signal);
+      const selectedAssets=await selectResolvedImportedAssets(currentAssessment,resolvedPlan,signal,attachmentPlan,resolvedAssetReferences);
+      const result=await commitImportedAssets(selectedAssets,signal,attachmentPlan);
+      if(result.published)committedDescription=String(result.published)+' selected attachment'+(result.published===1?' was':'s were')+' already updated';
+      await AppData.restoreJournal.mark(restoreId,'assets-committed');
+      throwIfImportAborted(signal);await yieldImport(signal);return result;
+    });
     const dailyResult=await runRestoreMutationStage('saved-day-state',async()=>{
       await AppData.restoreJournal.mark(restoreId,'applying-saved-day-state');
       const result=await applyResolvedSavedDays(resolvedPlan,operation,(message,progress)=>restoreSurfaceStatus(stored,message,true,'local-apply',{current:Number(progress&&progress.committed)||0,total:Number(progress&&progress.total)||0}));
@@ -2608,7 +2562,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       ...(appliedRecords.length?{records:appliedRecords}:{}),
       ...(removedRecordDates.length?{removedRecordDates}:{}),
       ...(noteResult.expectedItems?.length?{noteItems:noteResult.expectedItems}:{}),
-      ...(portableAssets&&Number(parsed.formatVersion)>=10&&assetResult.changed?{assets:assetResult.expected,removedAssetIds:assetResult.expectedRemovedIds}:{}),
+      ...(assetResult.changed?{assets:assetResult.expected,removedAssetIds:assetResult.expectedRemovedIds}:{}),
       ...(Array.isArray(expectedDeletions)?{savedDayDeletions:expectedDeletions}:{}),
       ...(Array.isArray(noteResult.expectedDeletions)?{noteDeletions:noteResult.expectedDeletions}:{}),
       ...(Array.isArray(assetResult.expectedDeletions)?{attachmentDeletions:assetResult.expectedDeletions}:{}),
@@ -2642,18 +2596,11 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
         ancestryWarning=' Shared ancestry could not be saved locally. The merged data was verified, but a later sync may ask you to review differences again. Retry Drive sync after local storage recovers.';
       }
     }
-    if(portableAssets)AssetData.scheduleMaintenance(0);
-    const compatibility=[];
-    if(report.legacy)compatibility.push(`accepted older${report.sourceVersion?` v${report.sourceVersion}`:''} backup data`);
-    if(report.degraded)compatibility.push(`preserved explicit unknowns in ${report.degraded} degraded entit${report.degraded===1?'y':'ies'}`);
-    if(report.invalidActiveSession)compatibility.push('skipped an incompatible active session while keeping the rest');
-    if(report.ignoredTombstones)compatibility.push(`ignored ${report.ignoredTombstones} legacy deletion marker${report.ignoredTombstones===1?'':'s'} so local data was not deleted`);
-    if(report.skipped)compatibility.push(`skipped ${report.skipped} unusable entit${report.skipped===1?'y':'ies'}`);
-    if(report.duplicates)compatibility.push(`kept the first usable copy of ${report.duplicates} duplicate backup entr${report.duplicates===1?'y':'ies'}`);
+    AssetData.scheduleMaintenance(0);
     let summary='';
     if(!changed){
       const baseMsg=kept?`Combine made no changes. ${kept} divergent local Saved Day${kept===1?' was':'s were'} kept.`:(impact.savedDays.total?'Combine found no applicable Saved-Day changes.':'Combine made no changes: this device already has everything in the backup.');
-      summary=baseMsg+(compatibility.length?' '+compatibility.join(' · ')+'.':'')+ancestryWarning;restoreSurfaceStatus(stored,summary,false,'local-warning');
+      summary=baseMsg+ancestryWarning;restoreSurfaceStatus(stored,summary,false,'local-warning');
     }else{
       const parts=[];
       if(personalChanged)parts.push('plans or personal settings restored');
@@ -2664,7 +2611,7 @@ async function restoreBackupAttemptWithOperation(candidate,operation,options={})
       if(assetResult.deleted)parts.push(assetResult.deleted+' Attachment Library deletion'+(assetResult.deleted===1?'':'s')+' applied');
       if(batches>1)parts.push(batches+' committed record batches');
       if(reviewResult.kept)parts.push(reviewResult.kept+' version'+(reviewResult.kept===1?'':'s')+' kept for review');
-      summary=`✓ ${currentCheckpoint?'Merged':'Imported'} `+(parts.join(' · ')||'backup data')+noteResult.message+sessionResult.message+(kept?' · kept '+kept+' divergent local Saved Day'+(kept===1?'':'s'):'')+(identical?' · '+identical+' identical Saved Day'+(identical===1?'':'s')+' unchanged':'')+(compatibility.length?' · '+compatibility.join(' · '):'')+'. Final verification passed.';
+      summary='✓ Merged '+(parts.join(' · ')||'backup data')+noteResult.message+sessionResult.message+(kept?' · kept '+kept+' divergent local Saved Day'+(kept===1?'':'s'):'')+(identical?' · '+identical+' identical Saved Day'+(identical===1?'':'s')+' unchanged':'')+'. Final verification passed.';
       if(ancestryWarning)summary+=ancestryWarning;
       restoreSurfaceStatus(stored,summary,!ancestryWarning,ancestryWarning?'local-warning':'local-complete');
     }
@@ -2714,8 +2661,8 @@ async function planReplacement(stored,parsed){
   const deletedByBackup=gone.filter(key=>backupNoteDeletions.has(key)||!!target[notesTrashKey(key)]);
   const backupDates=ids(parsed.records,'date'),backupDayDeletions=ids(manifest.savedDayDeletions,'date');
   const days=((await AppData.dailyRecords.backupDates()).dates||[]).filter(date=>!backupDates.has(date)&&!backupDayDeletions.has(date));
-  let assets=[];
-  if(portableAssets&&Number(parsed.formatVersion)>=10){const known=new Set([...ids(parsed.assetDescriptors,'assetId'),...ids(manifest.attachmentDeletions,'assetId')]);assets=(await AssetData.list()).map(row=>String(row&&row.id||'')).filter(id=>id&&!known.has(id));}
+  const knownAssets=new Set([...ids(parsed.assetDescriptors,'assetId'),...ids(manifest.attachmentDeletions,'assetId')]);
+  const assets=(await AssetData.list()).map(row=>String(row&&row.id||'')).filter(id=>id&&!knownAssets.has(id));
   const backupPlans=parsed.importedPersonalData?parsed.importedPersonalData.plans.savedPlans:null,localPlans=backupPlans?((await personalExport({flush:false}))?.plans?.savedPlans||[]):[],backupPlanIds=ids(backupPlans,'id');
   const plans=localPlans.map(plan=>String(plan&&plan.id||'')).filter(id=>id&&!backupPlanIds.has(id));
   const reviewKeys=[...changed,...deletedByBackup],ancestor=reviewKeys.length?await noteReconciliationAncestor(await lastSharedBase(stored),reviewKeys):null;
@@ -2774,11 +2721,9 @@ function replacementSnapshot(parsed,journal,plan,notes,keepExtras){
   const pendingReviews=freeze(PendingReviewCodec.merge([journal.pendingReviews,parsed.pendingReviews],APP_LIMITS.maxPendingReviews).map(freeze));
   let personal=parsed.importedPersonalData||null,assets=parsed.importedAssets;
   if(personal&&plans.size){const kept=(journal.importedPersonalData?.plans?.savedPlans||[]).filter(item=>plans.has(String(item&&item.id||'')));personal=freeze({...personal,plans:freeze({...personal.plans,savedPlans:freeze([...personal.plans.savedPlans,...kept])})});}
-  if(portableAssets&&Number(parsed.formatVersion)>=10){
-    const have=new Set((parsed.importedAssets||[]).map(item=>item.assetId)),wanted=new Set(keepExtras?plan.extras.assets:[]);
-    for(const value of [...Object.values(notes),...records,parsed.importedActiveSession,...pendingReviews])if(value)for(const id of BackupCodec.assetIds(value))wanted.add(id);
-    assets=freeze([...(parsed.importedAssets||[]),...(journal.importedAssets||[]).filter(item=>wanted.has(item.assetId)&&!have.has(item.assetId))]);
-  }
+  const have=new Set((parsed.importedAssets||[]).map(item=>item.assetId)),wanted=new Set(keepExtras?plan.extras.assets:[]);
+  for(const value of [...Object.values(notes),...records,parsed.importedActiveSession,...pendingReviews])if(value)for(const id of BackupCodec.assetIds(value))wanted.add(id);
+  assets=freeze([...(parsed.importedAssets||[]),...(journal.importedAssets||[]).filter(item=>wanted.has(item.assetId)&&!have.has(item.assetId))]);
   return freeze({...parsed,records,data:freeze({...parsed.data,notes:notes}),importedAssets:assets,importedPersonalData:personal,pendingReviews});
 }
 // Deletion records after a replace: the backup's and this device's, for
@@ -2804,7 +2749,7 @@ async function restoreExactVersionWithOperation(candidate,operation,{confirmed=f
   if(!parsed)throw new Error('The selected backup is not a current verified Study Director backup.');
   if(parsed.noteScope)throw new Error('This backup version was read for one note only and cannot replace current data.');
   if(requireManaged&&(!repositoryManifest||provenance.repositoryCommitted!==true))throw new Error('Replace current data is available here only for a verified Device Folder or Google Drive backup.');
-  if(Number(parsed.formatVersion)<15||!parsed.protectedCheckpointManifest)throw new Error('The selected backup is too old for exact replacement. Combine it with current data instead.');
+  if(!parsed.protectedCheckpointManifest)throw new Error('The selected backup has no checkpoint manifest, so it cannot replace current data.');
   if(!BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable)throw new Error('This verified backup is missing attachment bytes. Combine or add what is missing instead of replacing current data.');
   const checkpointId=String(repositoryManifest&&repositoryManifest.checkpoint&&repositoryManifest.checkpoint.checkpointId||parsed.protectedCheckpointManifest.checkpointId||''),preview=candidate.preview||{};
   if(!checkpointId||checkpointId!==String(parsed.protectedCheckpointManifest.checkpointId||''))throw new Error('The selected backup identity is inconsistent.');
@@ -2898,7 +2843,7 @@ async function restoreStandaloneVersion(candidate,options={}){
   const owned=!activeImportOperation,operation=activeImportOperation||beginImport();
   try{
     const stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
-    if(Number(parsed&&parsed.formatVersion)<18||String(parsed&&parsed.captureAuthority||'')!=='canonical-complete'||!parsed.protectedCheckpointManifest)throw new Error('Authoritative replacement requires a current standalone backup with verified complete-capture authority. Combine this backup instead.');
+    if(String(parsed&&parsed.captureAuthority||'')!=='canonical-complete'||!parsed.protectedCheckpointManifest)throw new Error('Authoritative replacement requires a current standalone backup with verified complete-capture authority. Combine this backup instead.');
     return await restoreExactVersionWithOperation(candidate,operation,{confirmed:options&&options.confirmed===true,requireManaged:false});
   }finally{try{await candidate.release();}catch(error){AppDiagnostics.capture('backup.file-version-candidate-release',error,'warn');}if(owned)finishImport(operation);}
 }
@@ -2972,8 +2917,8 @@ async function importPortableBackup(ev){
   try{
     OperationDiagnostics.mark('standalone-inspection-start',{bytes:Number(f.size)||0},traceId);candidate=await inspectBackup(f,{filename:f.name||'',signal:operation.signal});OperationDiagnostics.mark('standalone-inspection-complete',{},traceId);
     const preview=candidate.preview||{},stored=inspectedBackups.get(candidate),snapshot=stored?candidateSnapshotState(stored):null,parsed=snapshot&&snapshot.parsed||null;
-    const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=Number(parsed&&parsed.formatVersion)>=18&&captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest&&BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable,rescuePartial=captureAuthority==='rescue-partial';
-    const restoreChoices=presentation.restoreChoices,choices=[...(preview.reconciliationCapable?[restoreChoices.missing]:[]),restoreChoices.combine,...(exactCapable?[restoreChoices.replace]:[])];
+    const captureAuthority=String(parsed&&parsed.captureAuthority||'unknown'),exactCapable=captureAuthority==='canonical-complete'&&!!parsed&&!!parsed.protectedCheckpointManifest&&BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable,rescuePartial=captureAuthority==='rescue-partial';
+    const restoreChoices=presentation.restoreChoices,choices=[restoreChoices.missing,restoreChoices.combine,...(exactCapable?[restoreChoices.replace]:[])];
     const missingBinary=!BackupCodec.attachmentCoverage(parsed.assetDescriptors||[]).fullyRecoverable;
     const decisionDetails=[exactCapable?'Choose how this backup should be applied.':missingBinary?'This backup is missing attachment bytes. You can combine or add its available data, but exact replacement is unsafe.':rescuePartial?'This backup was saved while browser storage was failing. It can bring back what it holds, but it cannot replace current data.':'This backup is from an older version of Study Director. It can be combined with current data, but it cannot replace it.',BackupCodec.missingAttachmentWarning(parsed.assetDescriptors||[]),...[presentation.reach?.()||''].filter(Boolean)].filter(Boolean);
     OperationDiagnostics.mark('standalone-decision-start',{},traceId);const mode=await choose({title:'Use this backup',message:`Verified backup${preview.exportedAt?` from ${new Date(preview.exportedAt).toLocaleString()}`:''}.`,details:decisionDetails,cancelLabel:'Keep current',choices});

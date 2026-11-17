@@ -18,6 +18,7 @@ An offline-first app must never lose local data by itself: deep audit first, bef
 | 2026-11-05 | iPad | The same, on the first start of a new version (the phone was on the same version as before: so neither an update nor a sync is needed for it, only a cold start or the browser while the app is unused). Safari's data was never cleared; about 1 TB free; no cleaning tool ever used. |
 | 2026-11-08 | Phone, F24 | A block ran, the app was swiped away and the phone locked; 30 minutes later a cold start showed "Browser data was cleared". The session was rescued, the notice offered restore or keep, and the Saved Days (probably all) came back through the restore at Drive sign-in; what else was missing is not known. No other device in use, nothing that clears data used; F24 had worked for three or four opens before. Diagnostics (copied after the sync, so from a later page load: its `startedFresh=false` does not contradict the notice): bookkeeping `state=never`, Device Folder disconnected since 16:13:50 (the likely start), storage persisted. The phone was 97% full (about 125 of 128 GB) and the site used about 4.3 GB of a 15 GB quota. |
 | 2026-11-11 | Phone, F24 | The notice again at a cold start, two days after the last open (installed app, closed by a swipe); Drive's latest version came back in (4 versions, no conflicts). `databases=1` (no old database left beside the new one); attachment cleanup and Drive convergence paused with `reason=storage-reset`. F25's census was not on the phone yet. Usage then 0.25 MB of about 10 GB: the 4.3 GB went with the database, and the quota shrank with the phone's free space. |
+| 2026-11-17 | Device not stated, F29 | Diagnostics copied 01:17 UTC, after Drive had refilled the device. `Database this start: state=fresh, foundVersion=0, openedVersion=9`; `Profile storage: startedFresh=true, databases=1, scoped=false`, profile list present and listing this profile. **No "Database before last loss" line**, so either the loss record in localStorage was not written or this start was not counted as a loss. Drive sync at 01:15:07 restored the latest of 4 versions (16 objects, no conflicts; `startup-restore-recovery recovered=false`, so no interrupted-restore rollback). Storage: usage 12.9 MB of about 10.7 GB, persisted; census measured 6.3 MB, 6.5 MB unexplained, the browser's cache figure (11.2 MB) twice the measured caches (5.0 MB). 15 notes, 17 Saved Days, 7 attachments after the refill. `Format cleanup: state=unknown, retirementReady=false`; `google-drive formats: state=unknown, currentVersions=0` (the formats count was not filled in yet). |
 
 **Ruled out, and why.**
 
@@ -46,6 +47,8 @@ An offline-first app must never lose local data by itself: deep audit first, bef
 3. The fix follows the evidence: a test for each path found, at the right layer, and a guard so that no automatic path can leave local data emptier than it found it without the person's choice.
 4. Faster backups limit the damage whatever the cause: a loss costs only what has not reached Drive or the Device Folder yet (items 18 and 22 once stopped Drive backups for up to 30 minutes).
 5. Still to explain: why the phone on 11-05 showed no automatic recovery (perhaps nothing survived that said data had been there).
+
+**From the 2026-11-17 diagnostics, to check next.** Why no "Database before last loss" record was kept, although localStorage survived (`Local storage health` and the profile list are there): the record may be written only after the start's first count, or skipped for a database it did not see open before. Whether the owner saw "Browser data was cleared" this time. Why the Drive formats row reads `unknown` with a connected, verified Drive (F30 needs it to read `ready`).
 
 **Related.**
 
@@ -169,6 +172,18 @@ After resolving every review on the iPad and on the laptop, they came back again
 - Each review's default is "keep this device's". Resolved that way on both devices while they hold different versions, the difference remains, and a later sync can find it and keep it again under a new review.
 - Each Continue Here may keep a session for review when the two copies' decisions differ (`yield`, `hand-over`); the trace marks `session-kept-for-review` with its reason.
 - *Next:* Copy diagnostics on the device where a review reappears, right after it does (the "Status badge" line, the Kept version lines and `session-kept-for-review`), and note which item it is. Workaround: on one device choose "Use kept", so both hold the same version.
+
+## Release B (F30): in progress on `refactor/background-coordination` (2026-11-17)
+
+Work in progress, committed unfinished at the owner's request: it does not build or pass tests yet, and must not reach `main` before every device on F29 shows "Format cleanup" ready (the 2026-11-17 diagnostics above show `unknown`).
+
+- **Done in source:** the compatibility modules deleted; the compatibility block and its inputs gone from `repositories.js`; current-only readers in `backup-codec.js`, `managed-repository.js`, `backup-provider.js`, `drive.js` and the Device Folder; `backup.js` and `backup-capture.js` without the older-backup import mode and version branches; `app.html` without the facade, the start-up conversion and proof, or "Format cleanup". Start-up runs the census only. The census holds older records as well as newer ones, with fitting messages, and an older database is not opened; an empty version-1 database still takes the current stores. The F29 Daily Records marker (`dailyRecordMigration`) is left in place and ignored.
+- **Kept on purpose:** the theme alias (`director-dark` → `dark`), because F29 stores those names in the current preferences format.
+- **Left to do:**
+  - `app.html`: the Device Folder `legacyRoot` identity (about line 10855).
+  - Contracts: delete `contracts/compatibility.mjs`; remove the obsolete and renamed lists, migration surfaces and `dailyRecordMigration` from `data-architecture.mjs`; remove `OBSOLETE_INDEXED_DB`, `OBSOLETE_OPFS_IDENTITIES` and `deviceFolderLegacyRoot` from `canonical-identities.mjs`, and rename the cache identity `updateBridge` to `updateControl` (same value, no recovery prefix); `format-ledger.mjs`; `maxLegacyImportTombstones`; `backup-operation-diagnostics.js` fields (`olderClaim`, `oldFolder*`).
+  - Tests: delete the compatibility tests and fixtures (compatibility-contract, compatibility-isolation, retirement-readiness, compatibility-host, compatibility-retirement, indexeddb-topology-retirement, legacy-attachment-cleanup, support-note-identity, the upgrade-renamed-names browser test). Update asset-storage-contract, capture-safety, profiles, data-architecture, storage-census, device-folder-world and repository-retention (no `backupVersion`, `legacyDirectory` or `oldFolder`), and every test that calls the removed codec functions (use `codec.inspect`). Add guard tests: older database, older record, older backup file, older Drive version, older claim.
+  - Docs, release `SDVB75F30`, then build, fast suite, smoke, notes browser tests and the Drive journeys.
 
 ## Decided, not yet scheduled
 

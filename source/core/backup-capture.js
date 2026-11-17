@@ -9,7 +9,7 @@ registry.define('backup-capture',1,()=>{
   const freeze=Object.freeze;
   function create(input){
     exactObject(input,['configuration','data','codecs','session','personal','assets','exports','persistence','diagnostics','domain','environment'],'Backup capture input');
-    const configuration=exactObject(input.configuration,['backupVersion','limits','portableAssets'],'Backup capture configuration');
+    const configuration=exactObject(input.configuration,['limits'],'Backup capture configuration');
     const data=exactObject(input.data,['activeSession','dailyRecords','notes','deletionRecovery','mutationEpoch','preparationUnits','provenance','pendingReviews'],'Backup capture data port');
     const activeSessionData=functions(data.activeSession,['save','settled','load'],'Backup capture active-session data port');
     const dailyRecordData=functions(data.dailyRecords,['backupDates','backupMonth'],'Backup capture Saved-Day data port');
@@ -29,10 +29,9 @@ registry.define('backup-capture',1,()=>{
     const diagnostics=functions(input.diagnostics,['capture','mark'],'Backup capture diagnostics port');
     const domain=functions(input.domain,['getStudentName','currentDailyRecords'],'Backup capture domain port');
     const environment=functions(input.environment,['yieldTask'],'Backup capture environment port');
-    const portableAssets=configuration.portableAssets===true;
-    if(portableAssets)functions(input.assets,['get','list'],'Backup capture asset port');
-    const AssetData=portableAssets?input.assets:null;
-    const APP_LIMITS=configuration.limits,backupVersion=configuration.backupVersion;
+    functions(input.assets,['get','list'],'Backup capture asset port');
+    const AssetData=input.assets;
+    const APP_LIMITS=configuration.limits;
     const ActiveSessionCodec=codecs.activeSession,BackupCodec=codecs.backup;
     const appCanMutate=session.canMutate,cancelLiveDraftSave=session.cancelLiveDraftSave,captureSessionSnapshot=session.captureSnapshot,activeSessionPayload=session.toActiveSession;
     const TASKS=freeze({get length(){return session.hasTasks()?1:0;}});
@@ -99,12 +98,11 @@ const LOGICAL_CHECKPOINT_CAPTURE_FORMAT='study-director.logical-checkpoint-captu
 const logicalCheckpointGuards=new WeakMap();
 function requireLogicalCheckpointCapture(capture){
   if(!capture||!Object.isFrozen(capture)||capture.format!==LOGICAL_CHECKPOINT_CAPTURE_FORMAT||Number(capture.version)!==LOGICAL_CHECKPOINT_CAPTURE_VERSION)throw new TypeError('Logical checkpoint capture is invalid.');
-  if(Number(backupVersion)>=14&&(!capture.checkpoint||capture.checkpoint.createdAt!==capture.exportedAt))throw new Error('Logical checkpoint provenance is invalid.');
-  if(Number(backupVersion)>=15&&(!capture.protectedCheckpointManifest||capture.protectedCheckpointManifest.checkpointId!==capture.checkpoint.checkpointId))throw new Error('Logical checkpoint protected manifest is invalid.');
+  if((!capture.checkpoint||capture.checkpoint.createdAt!==capture.exportedAt))throw new Error('Logical checkpoint provenance is invalid.');
+  if((!capture.protectedCheckpointManifest||capture.protectedCheckpointManifest.checkpointId!==capture.checkpoint.checkpointId))throw new Error('Logical checkpoint protected manifest is invalid.');
   return capture;
 }
 async function verifyAnomalousPhysicalAssetAliases(catalogue,assetIds,{checkpoint=null}={}){
-  if(!portableAssets)return true;
   const selected=new Set((assetIds||[]).map(String).filter(Boolean)),groups=new Map();
   for(const row of Array.isArray(catalogue)?catalogue:[]){
     const assetId=String(row&&row.id||'');if(!selected.has(assetId))continue;
@@ -190,43 +188,41 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
     : null;
   const counts=BackupCodec.countShape({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:recordDates.length,note:noteItems.length,activeSession:activeSession?1:0,pendingReview:pendingReviewItems.length});
   const assetItems=[],dailyDocuments=[];
-  if(portableAssets){
-    const catalogue=await AssetData.list(),rows=new Map(catalogue.map(row=>[row.id,row])),contentBlobs=new Map();
-    const ids=new Set(catalogue.filter(row=>row.library).map(row=>row.id));
-    const collect=value=>{for(const id of BackupCodec.assetIds(value))ids.add(id);};
-    for(const item of noteItems){await checkpoint();collect(item);}if(activeSession)collect(activeSession);
-    for(const item of pendingReviewItems){await checkpoint();collect(item);}
-    for(let offset=0;offset<recordDates.length;offset+=APP_LIMITS.backupChunkItems){
-      await checkpoint();
-      const dates=recordDates.slice(offset,offset+APP_LIMITS.backupChunkItems);
-      let rawDocs;
-      try{rawDocs=await getDailyRecordDocumentsByDates(dates,{requireCanonical:options&&options.requireCanonicalComplete===true});}
-      catch(error){if(options&&options.requireCanonicalComplete===true)throw backupPreparationError('BACKUP_CANONICAL_CAPTURE_INCOMPLETE','checkpoint-canonical-completeness','Managed backup publication stopped because Saved Days could not be read completely from canonical IndexedDB storage. No incomplete rescue checkpoint was published.',error);throw error;}
-      const docs=currentDailyRecords(rawDocs,'Backup Daily Records').sort((a,b)=>a.date.localeCompare(b.date));
-      if(docs.length!==dates.length||docs.some((doc,index)=>doc.date!==dates[index]))throw new Error('A saved day changed while the backup was being prepared. Please export again.');
-      dailyDocuments.push(...docs);docs.forEach(collect);
-    }
-    await verifyAnomalousPhysicalAssetAliases(catalogue,[...ids],{checkpoint});
-    for(const assetId of [...ids].sort()){
-      await checkpoint();
-      const row=rows.get(assetId);
-      if(!row){assetItems.push(freeze({descriptor:freeze({assetId,missing:true}),blob:null}));continue;}
-      const descriptor=freeze({assetId,mimeType:row.type,size:row.size,checksum:row.hash,name:row.name,library:row.library});
-      if(!includeAssetBlobs){assetItems.push(freeze({descriptor,blob:null}));continue;}
-      const contentKey=String(row.file||assetId)+'\u0000'+String(row.hash||'')+'\u0000'+Number(row.size),cached=contentBlobs.get(contentKey);
-      let blob=cached instanceof Blob?cached.slice(0,cached.size,row.type):await AssetData.get(assetId);
-      if(!(blob instanceof Blob)){assetItems.push(freeze({descriptor:freeze({assetId,missing:true}),blob:null}));continue;}
-      if(row.size!==blob.size||row.type!==blob.type)throw new Error('An attachment changed while the snapshot was being captured. Retry the backup.');
-      if(!(cached instanceof Blob))contentBlobs.set(contentKey,blob);
-      assetItems.push(freeze({descriptor,blob}));
-    }
+  const catalogue=await AssetData.list(),rows=new Map(catalogue.map(row=>[row.id,row])),contentBlobs=new Map();
+  const ids=new Set(catalogue.filter(row=>row.library).map(row=>row.id));
+  const collect=value=>{for(const id of BackupCodec.assetIds(value))ids.add(id);};
+  for(const item of noteItems){await checkpoint();collect(item);}if(activeSession)collect(activeSession);
+  for(const item of pendingReviewItems){await checkpoint();collect(item);}
+  for(let offset=0;offset<recordDates.length;offset+=APP_LIMITS.backupChunkItems){
+    await checkpoint();
+    const dates=recordDates.slice(offset,offset+APP_LIMITS.backupChunkItems);
+    let rawDocs;
+    try{rawDocs=await getDailyRecordDocumentsByDates(dates,{requireCanonical:options&&options.requireCanonicalComplete===true});}
+    catch(error){if(options&&options.requireCanonicalComplete===true)throw backupPreparationError('BACKUP_CANONICAL_CAPTURE_INCOMPLETE','checkpoint-canonical-completeness','Managed backup publication stopped because Saved Days could not be read completely from canonical IndexedDB storage. No incomplete rescue checkpoint was published.',error);throw error;}
+    const docs=currentDailyRecords(rawDocs,'Backup Daily Records').sort((a,b)=>a.date.localeCompare(b.date));
+    if(docs.length!==dates.length||docs.some((doc,index)=>doc.date!==dates[index]))throw new Error('A saved day changed while the backup was being prepared. Please export again.');
+    dailyDocuments.push(...docs);docs.forEach(collect);
+  }
+  await verifyAnomalousPhysicalAssetAliases(catalogue,[...ids],{checkpoint});
+  for(const assetId of [...ids].sort()){
+    await checkpoint();
+    const row=rows.get(assetId);
+    if(!row){assetItems.push(freeze({descriptor:freeze({assetId,missing:true}),blob:null}));continue;}
+    const descriptor=freeze({assetId,mimeType:row.type,size:row.size,checksum:row.hash,name:row.name,library:row.library});
+    if(!includeAssetBlobs){assetItems.push(freeze({descriptor,blob:null}));continue;}
+    const contentKey=String(row.file||assetId)+'\u0000'+String(row.hash||'')+'\u0000'+Number(row.size),cached=contentBlobs.get(contentKey);
+    let blob=cached instanceof Blob?cached.slice(0,cached.size,row.type):await AssetData.get(assetId);
+    if(!(blob instanceof Blob)){assetItems.push(freeze({descriptor:freeze({assetId,missing:true}),blob:null}));continue;}
+    if(row.size!==blob.size||row.type!==blob.type)throw new Error('An attachment changed while the snapshot was being captured. Retry the backup.');
+    if(!(cached instanceof Blob))contentBlobs.set(contentKey,blob);
+    assetItems.push(freeze({descriptor,blob}));
   }
   if(snapshotRevision!==await ports.persistence.snapshotRevision(Object.freeze({legacy:forceLegacySnapshotFence})))throw new Error('Stored data changed while capturing the backup. Retry the backup.');
   const finalSourceRevision=String(await ports.persistence.sourceRevision()||sourceRevision);
   if(finalSourceRevision!==sourceRevision)throw new Error('Stored data changed while capturing the backup. Retry the backup.');
   assertStorageGeneration(generation);
   const installationId=AppData.provenance.installationId();
-  const checkpointMetadata=Number(backupVersion)>=14?BackupCodec.createCheckpointMetadata(installationId,exportedAt):null;
+  const checkpointMetadata=BackupCodec.createCheckpointMetadata(installationId,exportedAt);
   const attachmentCoverage=BackupCodec.attachmentCoverage(assetItems.map(item=>item.descriptor));
   const attachmentWarning=BackupCodec.missingAttachmentWarning(assetItems.map(item=>item.descriptor));
   const captureCompleteness=freeze({...completeness,attachments:attachmentCoverage.fullyRecoverable?'complete':'missing',fullyRecoverable:completeness.complete&&attachmentCoverage.fullyRecoverable});
@@ -237,7 +233,7 @@ async function captureLogicalCheckpoint(exportedAt=new Date().toISOString(),opti
     savedDayDeletions:freeze([...(savedDayDeletions||[])]),noteDeletions:freeze([...(noteDeletions||[])]),attachmentDeletions:freeze([...(attachmentDeletions||[])]),counts,assetItems:freeze(assetItems),
     warning:[sessionResult.warning,recordSource.warning,recoveryWarning,noteRecoveryWarning,attachmentWarning].filter(Boolean).join(' '),completeness:captureCompleteness
   };
-  const protectedCheckpointManifest=Number(backupVersion)>=15?BackupCodec.createProtectedManifest(captureBase,checkpointMetadata):null;
+  const protectedCheckpointManifest=BackupCodec.createProtectedManifest(captureBase,checkpointMetadata);
   const capture=freeze({...captureBase,protectedCheckpointManifest});
   logicalCheckpointGuards.set(capture,freeze({snapshotRevision,sourceRevision,forceLegacySnapshotFence,generation}));
   return capture;
@@ -310,7 +306,7 @@ async function beginManagedPreparationCaptureAt(exportedAt){
   let savedDayDeletions,noteDeletions,attachmentDeletions,assetCatalogue;
   OperationDiagnostics.mark('checkpoint-canonical-state-read-start');
   try{[savedDayDeletions,noteDeletions,attachmentDeletions,assetCatalogue]=await Promise.all([
-    AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.notes(),AppData.deletionRecovery.attachments(),portableAssets?AssetData.list():Promise.resolve([])
+    AppData.deletionRecovery.savedDays(),AppData.deletionRecovery.notes(),AppData.deletionRecovery.attachments(),AssetData.list()
   ]);}catch(error){throw backupPreparationError('BACKUP_CAPTURE_STATE_READ_FAILED','checkpoint-canonical-state-read','Canonical deletion or attachment state could not be read for backup.',error);}
   OperationDiagnostics.mark('checkpoint-canonical-state-read-complete',{assets:Array.isArray(assetCatalogue)?assetCatalogue.length:0});
 
@@ -318,7 +314,7 @@ async function beginManagedPreparationCaptureAt(exportedAt){
   const finalSourceRevision=String(await ports.persistence.sourceRevision()||sourceRevision);
   if(finalSnapshot!==snapshotRevision||finalSourceRevision!==sourceRevision){OperationDiagnostics.mark('checkpoint-preparation-fallback',{reason:'source-changed'});return null;}
   try{
-    const installationId=AppData.provenance.installationId(),checkpointMetadata=Number(backupVersion)>=14?BackupCodec.createCheckpointMetadata(installationId,exportedAt):null;
+    const installationId=AppData.provenance.installationId(),checkpointMetadata=BackupCodec.createCheckpointMetadata(installationId,exportedAt);
     const capture=freeze({
       format:MANAGED_PREPARATION_CAPTURE_FORMAT,version:MANAGED_PREPARATION_CAPTURE_VERSION,exportedAt,sourceRevision,installationId,checkpoint:checkpointMetadata,epochToken,stamps:normalizedStamps,
       savedDayDeletions:freeze([...(savedDayDeletions||[])]),noteDeletions:freeze([...(noteDeletions||[])]),attachmentDeletions:freeze([...(attachmentDeletions||[])]),
@@ -366,7 +362,7 @@ async function finalizeManagedPreparationCapture(preparation,inventory){
     format:LOGICAL_CHECKPOINT_CAPTURE_FORMAT,version:LOGICAL_CHECKPOINT_CAPTURE_VERSION,dailyDocuments:freeze([]),exportedAt:preparation.exportedAt,sourceRevision:preparation.sourceRevision,studentName:getStudentNameFromDisplay(),installationId:preparation.installationId,checkpoint:preparation.checkpoint,
     recordDates,noteItems,activeSession:null,personalData:null,pendingReviewItems,savedDayDeletions:preparation.savedDayDeletions,noteDeletions:preparation.noteDeletions,attachmentDeletions:preparation.attachmentDeletions,counts,assetItems,warning:preparation.warning,completeness:preparation.completeness
   });
-  const protectedCheckpointManifest=Number(backupVersion)>=15?BackupCodec.createProtectedManifest(captureBase,preparation.checkpoint):null,capture=freeze({...captureBase,protectedCheckpointManifest});
+  const protectedCheckpointManifest=BackupCodec.createProtectedManifest(captureBase,preparation.checkpoint),capture=freeze({...captureBase,protectedCheckpointManifest});
   const generation=preparationGenerations.get(preparation);assertStorageGeneration(generation);
   logicalCheckpointGuards.set(capture,freeze({snapshotRevision:guard.snapshotRevision,sourceRevision:guard.sourceRevision,forceLegacySnapshotFence:false,generation}));return capture;
 }

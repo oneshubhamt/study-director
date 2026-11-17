@@ -8,7 +8,7 @@ const {exactFrozenObject:exactObject,declaredFunctions:requireFunctions}=registr
 registry.define('managed-repository',1,()=>{
   const freeze=Object.freeze;
   const PORT_FIELDS=freeze({
-    configuration:freeze(['backupVersion','limits','logicalCaptureFormat','logicalCaptureVersion']),
+    configuration:freeze(['limits','logicalCaptureFormat','logicalCaptureVersion']),
     persistence:freeze(['reconciliationBaseRead','reconciliationBaseWrite','personalFingerprint','personalFields','dayFingerprints','semanticDayFingerprints','sessionFingerprint','sessionContentFingerprint']),
     assets:freeze(['get','verifyAliases']),
     files:freeze(['protect','unprotect','run','scope']),
@@ -26,7 +26,7 @@ registry.define('managed-repository',1,()=>{
     if(!BackupCodec||!Object.isFrozen(BackupCodec))throw new TypeError('Managed repository backup codec is invalid.');
     requireFunctions(BackupCodec,['countShape','utf8Bytes','compressionSupported','assetIds'],'Managed repository backup codec');
     if(!Object.isFrozen(ports.configuration.limits))throw new TypeError('Managed repository limits must be frozen.');
-    const APP_LIMITS=ports.configuration.limits,backupVersion=ports.configuration.backupVersion;
+    const APP_LIMITS=ports.configuration.limits;
     const LOGICAL_CHECKPOINT_CAPTURE_FORMAT=ports.configuration.logicalCaptureFormat,LOGICAL_CHECKPOINT_CAPTURE_VERSION=ports.configuration.logicalCaptureVersion;
     const AppData=freeze({reconciliationBase:freeze({read:ports.persistence.reconciliationBaseRead,write:ports.persistence.reconciliationBaseWrite,personalFingerprint:ports.persistence.personalFingerprint,personalFields:ports.persistence.personalFields,dayFingerprints:ports.persistence.dayFingerprints,semanticDayFingerprints:ports.persistence.semanticDayFingerprints,sessionFingerprint:ports.persistence.sessionFingerprint,sessionContentFingerprint:ports.persistence.sessionContentFingerprint})});
     const AssetData=freeze({get:ports.assets.get,verifyAliases:ports.assets.verifyAliases});
@@ -44,28 +44,15 @@ registry.define('managed-repository',1,()=>{
       return value;
     }
     validateRepositoryRetentionPolicy(REPOSITORY_RETENTION_POLICY);
-// Released builds wrote manifests 1 to 5; this one writes 8 (6 and 7 came
-// only from unreleased builds, so nothing reads them). A released manifest
-// keys notes by name and calls a note areaNote (in object kinds, pack members,
-// counts and the deletion list), and holds no versions kept for review. It is
-// verified under the names it was written with; its notes leave the reader
-// under the current name.
-const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=11,REPOSITORY_RELEASED_MANIFEST_VERSION=5,REPOSITORY_SUPPORTED_MANIFEST_VERSIONS=freeze(new Set([1,2,3,4,5,8,9,10,11]));
-// Manifest 11 holds Support Activities under its own name; manifest 10 and
-// older under its retired reserved title, converted as it is read.
-// Manifest 10 holds an Active Session that may be finished (ActiveSession
-// v11); manifest 9 holds it in its v10 form, read as it is.
-const releasedRepositoryManifest=manifestVersion=>Number(manifestVersion)<=REPOSITORY_RELEASED_MANIFEST_VERSION;
-// Manifest 9 holds versions kept for review that name the device whose copy
-// held them (PendingReview v2); manifest 8 holds them in their v1 form.
-const REPOSITORY_REVIEW_ORIGIN_MANIFEST_VERSION=9;
-const PENDING_REVIEW_KIND='pendingReview',WRITTEN_NOTE_KIND='areaNote';
-const repositoryNoteKind=manifestVersion=>releasedRepositoryManifest(manifestVersion)?WRITTEN_NOTE_KIND:'note';
-const LEGACY_REFLECTION_DRAFT_PACK_KIND='reflectionDraftPack';
-const REPOSITORY_COMMIT_FORMAT='study-director.backup-repository-commit',REPOSITORY_COMMIT_VERSION=1,REPOSITORY_COMMIT_REQUIRED_MANIFEST_VERSION=2;
+// Versions are read and written in one manifest version. A version in any
+// other one is listed as one this app cannot read (an older Study Director
+// made it, or a newer one), and cleanup leaves it and what it uses alone.
+const REPOSITORY_MANIFEST_FORMAT='study-director.backup-repository-checkpoint',REPOSITORY_MANIFEST_VERSION=11;
+const PENDING_REVIEW_KIND='pendingReview';
+const REPOSITORY_COMMIT_FORMAT='study-director.backup-repository-commit',REPOSITORY_COMMIT_VERSION=1;
 const REPOSITORY_OBJECT_FORMAT='study-director.backup-repository-object',REPOSITORY_OBJECT_VERSION=1;
 const REPOSITORY_PACK_FORMAT='study-director.backup-repository-structured-pack',REPOSITORY_PACK_VERSION=1,REPOSITORY_PACK_SHARDS=4,REPOSITORY_PACK_MEMBER_MAX_BYTES=64*1024;
-const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['note','personalData',PENDING_REVIEW_KIND])),WRITTEN_PACKABLE_KINDS=freeze(new Set([WRITTEN_NOTE_KIND,'personalData']));
+const REPOSITORY_PACKABLE_KINDS=freeze(new Set(['note','personalData',PENDING_REVIEW_KIND]));
 const repositoryPreparedState=new WeakMap();
 const repositoryPublicationStates=new Map();
 const REPOSITORY_PREPARATION_INDEX_VERSION=3;
@@ -92,8 +79,8 @@ function repositoryPackShard(kind,key){
 function repositoryPackKey(shard){const value=Number(shard);if(!Number.isInteger(value)||value<0||value>=REPOSITORY_PACK_SHARDS)throw new Error('Repository structured-pack shard is invalid.');return `shard:${value}`;}
 function repositoryPackableEntry(entry){return !!(entry&&entry.present&&REPOSITORY_PACKABLE_KINDS.has(String(entry.kind))&&Number(entry.sourceBytes)>0&&Number(entry.sourceBytes)<=REPOSITORY_PACK_MEMBER_MAX_BYTES);}
 function repositoryPackMembersKey(members){return (members||[]).map(member=>`${member.kind}\u0000${member.key}\u0000${member.fingerprint}\u0000${member.sourceBytes}`).join('\u0001');}
-function repositoryPackManifestMembers(value,manifestVersion=REPOSITORY_MANIFEST_VERSION){
-  const rows=Array.isArray(value)?value:[],seen=new Set(),out=[],packable=repositoryNoteKind(manifestVersion)==='note'?REPOSITORY_PACKABLE_KINDS:WRITTEN_PACKABLE_KINDS;
+function repositoryPackManifestMembers(value){
+  const rows=Array.isArray(value)?value:[],seen=new Set(),out=[],packable=REPOSITORY_PACKABLE_KINDS;
   for(const raw of rows){
     if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('Repository structured-pack member is invalid.');
     const kind=String(raw.kind||''),key=String(raw.key||''),fingerprint=String(raw.fingerprint||'').toLowerCase(),sourceBytes=Number(raw.sourceBytes),unit=repositoryUnitKey(kind,key);
@@ -168,15 +155,9 @@ function repositoryPreparationInventory(entries){
   recordDates.sort();noteKeys.sort();pendingReviewIds.sort();return freeze({recordDates:freeze(recordDates),noteKeys:freeze(noteKeys),pendingReviewIds:freeze(pendingReviewIds),assetIds:freeze([...assetIds].sort()),counts:repositoryPreparationCounts(entries)});
 }
 function repositoryMonth(value){const match=/^(\d{4}-\d{2})-\d{2}$/u.exec(String(value||''));if(!match)throw new Error('Repository record date is invalid.');return match[1];}
-function repositoryManifestCounts(written,manifestVersion){
-  const value=repositoryNoteKind(manifestVersion)!=='note'&&written&&Object.hasOwn(written,WRITTEN_NOTE_KIND)?{...written,note:written[WRITTEN_NOTE_KIND]}:written;
-  const current=BackupCodec.countShape(value||{});
-  if(Number(manifestVersion)>=5)return freeze({...current});
-  const raw=Number(value&&value.reflectionDraft||0),reflectionDraft=Number.isSafeInteger(raw)&&raw>=0&&raw<=Math.max(1,Number(APP_LIMITS.maxImportRecords)||10000)?raw:0;
-  return freeze({dailyRecord:Number(current.dailyRecord||0),note:Number(current.note||0),activeSession:Number(current.activeSession||0),reflectionDraft,personalData:Number(current.personalData||0),checkpointManifest:Number(current.checkpointManifest||0)});
-}
-function repositoryCountsEqualForManifest(actual,expected,manifestVersion){
-  const a=repositoryManifestCounts(actual,manifestVersion),b=repositoryManifestCounts(expected,manifestVersion);
+function repositoryManifestCounts(value){return freeze({...BackupCodec.countShape(value||{})});}
+function repositoryCountsEqual(actual,expected){
+  const a=repositoryManifestCounts(actual),b=repositoryManifestCounts(expected);
   return Object.keys(a).every(key=>Number(a[key]||0)===Number(b[key]||0));
 }
 function repositoryManifestObject(entry){
@@ -192,8 +173,7 @@ function repositoryLogicalObjectRows(manifest){
   const out=[];
   for(const entry of Array.isArray(manifest&&manifest.objects)?manifest.objects:[]){
     const kind=String(entry&&entry.kind||'');
-    if(kind==='reflectionDraftPack')continue; // Legacy-only data intentionally retired from the current canonical state.
-    if(kind==='structuredPack'){for(const member of repositoryPackManifestMembers(entry.members,manifest.version))out.push(freeze({...member}));}
+    if(kind==='structuredPack'){for(const member of repositoryPackManifestMembers(entry.members))out.push(freeze({...member}));}
     else out.push(freeze({kind,key:String(entry&&entry.key||''),fingerprint:String(entry&&entry.fingerprint||''),sourceBytes:Number(entry&&entry.sourceBytes)||0}));
   }
   return freeze(out.sort((a,b)=>a.kind.localeCompare(b.kind)||a.key.localeCompare(b.key)||a.fingerprint.localeCompare(b.fingerprint)||a.sourceBytes-b.sourceBytes));
@@ -206,16 +186,10 @@ function repositoryLogicalIdentityPayload(value){
   const savedDayDeletions=(Array.isArray(protectedManifest.savedDayDeletions)?protectedManifest.savedDayDeletions:[]).map(entry=>freeze({date:String(entry&&entry.date||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.date.localeCompare(b.date)||a.deletedAt.localeCompare(b.deletedAt));
   const noteDeletions=(Array.isArray(protectedManifest.noteDeletions)?protectedManifest.noteDeletions:[]).map(entry=>freeze({key:String(entry&&entry.key||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.key.localeCompare(b.key)||a.deletedAt.localeCompare(b.deletedAt));
   const attachmentDeletions=(Array.isArray(protectedManifest.attachmentDeletions)?protectedManifest.attachmentDeletions:[]).map(entry=>freeze({assetId:String(entry&&entry.assetId||''),deletedAt:String(entry&&entry.deletedAt||'')})).sort((a,b)=>a.assetId.localeCompare(b.assetId)||a.deletedAt.localeCompare(b.deletedAt));
-  // Logical identity is defined by the current portable canonical domains. Legacy-only
-  // Reflection Draft counts are verified when reading old manifests but are deliberately
-  // excluded here because L16F discards that retired domain during compatibility migration.
-  // A version written before the note rename keeps the identity it was
-  // written with: the same fields, in the same order, under the old names.
-  const shaped=BackupCodec.countShape(manifest.counts||{}),written=repositoryNoteKind(manifest.version)!=='note';
-  const counts=releasedRepositoryManifest(manifest.version)?Object.fromEntries(Object.entries(shaped).filter(([type])=>type!==PENDING_REVIEW_KIND)):shaped;
-  const identityCounts=written?Object.fromEntries(Object.entries(counts).map(([type,count])=>[type==='note'?WRITTEN_NOTE_KIND:type,count])):{...counts};
-  const deletions=written?{savedDays:freeze(savedDayDeletions),areaNotes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)}:{savedDays:freeze(savedDayDeletions),notes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)};
-  return freeze({format:'study-director.managed-backup-logical-state',version:1,counts:freeze(identityCounts),objects:freeze(objects),assets:freeze(assets),deletions:freeze(deletions)});
+  // Logical identity is defined by the portable canonical domains.
+  const counts=freeze({...BackupCodec.countShape(manifest.counts||{})});
+  const deletions=freeze({savedDays:freeze(savedDayDeletions),notes:freeze(noteDeletions),attachments:freeze(attachmentDeletions)});
+  return freeze({format:'study-director.managed-backup-logical-state',version:1,counts,objects:freeze(objects),assets:freeze(assets),deletions});
 }
 async function repositoryLogicalFingerprint(value){
   const payload=repositoryLogicalIdentityPayload(value),serialized=await Exports.run('stringify',{value:payload});
@@ -228,10 +202,8 @@ function repositoryLocalWeekStartKey(value){const date=value instanceof Date?new
 function repositoryRetentionCalendar(value){const date=value instanceof Date?new Date(value.getTime()):new Date(value);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');const localDate=repositoryLocalDateKey(date);return freeze({localDate,weekStart:repositoryLocalWeekStartKey(date),month:localDate.slice(0,7),utcOffsetMinutes:-date.getTimezoneOffset()});}
 function repositoryUtcDateKey(value){const date=value instanceof Date?new Date(value.getTime()):new Date(value);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryOffsetDateKey(value,offsetMinutes){const date=value instanceof Date?new Date(value.getTime()):new Date(value),offset=Number(offsetMinutes);if(!Number.isFinite(date.getTime())||!Number.isInteger(offset)||Math.abs(offset)>14*60)throw new Error('Repository retention calendar offset is invalid.');return repositoryUtcDateKey(new Date(date.getTime()+offset*60000));}
-function repositoryLegacyRetentionDescriptor(exportedAt){const date=new Date(exportedAt);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');const localDate=repositoryUtcDateKey(date),localOrdinal=repositoryDateOrdinal(localDate),weekStart=repositoryDateKeyFromOrdinal(repositoryWeekStartOrdinal(localOrdinal));return freeze({format:'study-director.repository-retention',version:1,role:'normal',protectedUntil:'',calendar:freeze({localDate,weekStart,month:localDate.slice(0,7),utcOffsetMinutes:0}),notesFingerprint:''});}
-function canonicalRepositorySafetyPurpose(value,{legacy=false}={}){
+function canonicalRepositorySafetyPurpose(value){
   const purpose=String(value||'before-restore');
-  if(legacy&&purpose==='before-clear-archive')return 'before-clear-library';
   return ['before-restore','before-combine','before-clear-library'].includes(purpose)?purpose:'';
 }
 function repositoryRetentionDescriptor(exportedAt,input=null,notesFingerprint=''){
@@ -250,12 +222,11 @@ function repositoryDateOrdinal(key){
   if(date.getUTCFullYear()!==year||date.getUTCMonth()!==month-1||date.getUTCDate()!==day)return NaN;
   return Math.floor(date.getTime()/86400000);
 }
-function validateRepositoryRetention(value,exportedAt,{legacy=false}={}){
-  if(legacy)return repositoryLegacyRetentionDescriptor(exportedAt);
+function validateRepositoryRetention(value,exportedAt){
   if(!value||typeof value!=='object'||Array.isArray(value)||value.format!=='study-director.repository-retention'||Number(value.version)!==1)throw new Error('Device repository retention metadata is invalid.');
   const role=value.role==='before-restore'?'before-restore':value.role==='normal'?'normal':'';if(!role)throw new Error('Device repository retention role is invalid.');
   const exportedAtMs=Date.parse(exportedAt),protectedUntil=String(value.protectedUntil||''),protectedUntilMs=Date.parse(protectedUntil),rawPurpose=String(value.purpose||'');
-  const purpose=role==='before-restore'?canonicalRepositorySafetyPurpose(rawPurpose||'before-restore',{legacy:true}):'';
+  const purpose=role==='before-restore'?canonicalRepositorySafetyPurpose(rawPurpose||'before-restore'):'';
   if(role==='before-restore'&&(!Number.isFinite(protectedUntilMs)||!Number.isFinite(exportedAtMs)||protectedUntilMs<=exportedAtMs))throw new Error('Device repository protection expiry is invalid.');
   if(role==='before-restore'&&!purpose)throw new Error('Device repository safety purpose is invalid.');
   if(role==='normal'&&(protectedUntil||rawPurpose))throw new Error('Normal repository checkpoints cannot carry safety metadata.');
@@ -264,8 +235,6 @@ function validateRepositoryRetention(value,exportedAt,{legacy=false}={}){
   const notesFingerprint=String(value.notesFingerprint||'');if(notesFingerprint&&!/^[a-f0-9]{64}$/u.test(notesFingerprint))throw new Error('Device repository retention notes fingerprint is invalid.');
   return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil:role==='before-restore'?new Date(protectedUntilMs).toISOString():'',purpose,calendar:freeze({localDate,weekStart,month,utcOffsetMinutes:offset}),notesFingerprint});
 }
-function repositoryDateKeyFromOrdinal(value){const date=new Date(Number(value)*86400000);return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
-function repositoryWeekStartOrdinal(value){const date=new Date(Number(value)*86400000),day=date.getUTCDay(),delta=(day-REPOSITORY_RETENTION_POLICY.weekStartsOn+7)%7;return Number(value)-delta;}
 function newestRepositoryRow(rows){return rows.reduce((best,row)=>!best||Date.parse(row.manifest.exportedAt)>Date.parse(best.manifest.exportedAt)||Date.parse(row.manifest.exportedAt)===Date.parse(best.manifest.exportedAt)&&String(row.id).localeCompare(String(best.id))>0?row:best,null);}
 // The device that made a version.
 function repositoryRowDevice(row){return String(row?.manifest?.installationId||row?.manifest?.checkpoint?.originInstallationId||'');}
@@ -288,7 +257,7 @@ function classifyRepositoryState(input={}){
   const manifests=Array.isArray(input.manifests)?input.manifests:[],commits=Array.isArray(input.commits)?input.commits:[],commitById=new Map(),manifestIds=new Set(),committed=[],uncommitted=[],invalidPairs=[];
   for(const row of commits){const id=String(row&&row.id||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||commitById.has(id))throw new Error('Managed repository commit classification input is invalid.');commitById.set(id,row);}
   for(const row of manifests){const id=String(row&&row.id||''),manifest=row&&row.manifest;if(!/^cp_[a-f0-9]{32}$/u.test(id)||manifestIds.has(id)||!manifest||manifest.checkpoint?.checkpointId!==id)throw new Error('Managed repository checkpoint classification input is invalid.');manifestIds.add(id);const commit=commitById.get(id)||null;
-    if(Number(manifest.version)>=REPOSITORY_COMMIT_REQUIRED_MANIFEST_VERSION&&!commit){uncommitted.push(row);continue;}
+    if(!commit){uncommitted.push(row);continue;}
     if(commit){try{validateRepositoryCommitValue(commit.marker,manifest);}catch(error){invalidPairs.push(freeze({manifest:row,commit,error}));continue;}}
     committed.push(freeze({...row,commitRef:commit&&commit.ref||null}));
   }
@@ -300,14 +269,7 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
   const rows=Array.isArray(rowsValue)?[...rowsValue]:[];rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
   const nowMs=now instanceof Date?now.getTime():Date.parse(now);if(!Number.isFinite(nowMs))throw new Error('Repository retention evaluation time is invalid.');
   const protectedRows=activeProtectedRepositoryRows(rows,nowMs),activeProtected=newestRepositoryRow(protectedRows),everyNormal=rows.filter(row=>row&&row.manifest?.retention?.role==='normal');
-  // Once a version in the current format exists, versions in older formats
-  // retire: Version History and the next cleanup keep current ones only, so a
-  // location ends up holding one format.
-  const currentRows=everyNormal.filter(row=>Number(row.manifest.version)===REPOSITORY_MANIFEST_VERSION),normalRows=currentRows.length?currentRows:everyNormal;
-  // An older-format version newer than every current one (a device still on
-  // an older build published it) may hold work no current version has taken
-  // in yet, so it stays until a newer current version replaces it.
-  const newestCurrent=newestRepositoryRow(currentRows),newerOlderFormat=newestCurrent?everyNormal.filter(row=>Number(row.manifest.version)!==REPOSITORY_MANIFEST_VERSION&&newestRepositoryRow([newestCurrent,row])===row):[];
+  const normalRows=everyNormal;
   const selected=new Map(),tiers=new Map();
   const keep=(row,tier)=>{if(!row)return;selected.set(row.id,row);if(!tiers.has(row.id))tiers.set(row.id,tier);};
   const latest=newestRepositoryRow(normalRows);keep(latest,'latest');
@@ -356,10 +318,9 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
       keep(row,'hourly');hourly+=1;after=row;
     }
   }
-  for(const row of newerOlderFormat)keep(row,'saved');
   for(const row of protectedRows)keep(row,'before-restore');
   const retained=rows.filter(row=>selected.has(row.id)),remove=rows.filter(row=>!selected.has(row.id));
-  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,currentFormat:currentRows.length>0,policy:REPOSITORY_RETENTION_POLICY});
+  return freeze({retained:freeze(retained),remove:freeze(remove),activeProtected:activeProtected||null,tiers:freeze(Object.fromEntries(tiers)),normalRetained:retained.filter(row=>!protectedRows.includes(row)).length,policy:REPOSITORY_RETENTION_POLICY});
 }
 function projectManagedRepositoryHistory(rowsValue,source,{now=new Date(),quarantinedObjectIds=null}={}){
   const rows=Array.isArray(rowsValue)?rowsValue:[],sourceId=String(source&&source.id||''),sourceLabel=clampText(source&&source.label||'',80),quarantined=new Set(repositoryScrubObjectIds(quarantinedObjectIds));
@@ -398,13 +359,14 @@ async function inspectRepositoryCommitMarker(file,manifest=null){
 
 function validateRepositoryManifest(value){
   const manifestVersion=Number(value&&value.version);
-  if(!value||typeof value!=='object'||Array.isArray(value)||value.format!==REPOSITORY_MANIFEST_FORMAT||!REPOSITORY_SUPPORTED_MANIFEST_VERSIONS.has(manifestVersion))throw new Error('Device repository checkpoint is invalid.');
+  if(!value||typeof value!=='object'||Array.isArray(value)||value.format!==REPOSITORY_MANIFEST_FORMAT)throw new Error('Device repository checkpoint is invalid.');
+  if(manifestVersion!==REPOSITORY_MANIFEST_VERSION)throw new Error(`This backup version is in format ${manifestVersion||'?'}, which this version of Study Director does not read.`);
   const checkpoint=value.checkpoint;
   if(!checkpoint||!/^cp_[a-f0-9]{32}$/u.test(String(checkpoint.checkpointId||''))||!Number.isFinite(Date.parse(String(checkpoint.createdAt||'')))||!String(checkpoint.originInstallationId||''))throw new Error('Device repository checkpoint provenance is invalid.');
   const exportedAt=String(value.exportedAt||''),sourceRevision=String(value.sourceRevision||'');
   if(!Number.isFinite(Date.parse(exportedAt))||checkpoint.createdAt!==exportedAt||!Number.isFinite(Date.parse(sourceRevision)))throw new Error('Device repository checkpoint timestamps are invalid.');
   const protectionId=String(value.protectionId||'');if(protectionId.length>128)throw new Error('Device repository protection identity is invalid.');
-  const retention=validateRepositoryRetention(value.retention,exportedAt,{legacy:manifestVersion===1});
+  const retention=validateRepositoryRetention(value.retention,exportedAt);
   if(!Array.isArray(value.objects)||!Array.isArray(value.assets))throw new Error('Device repository checkpoint object index is invalid.');
   const objectIds=new Set(),unitKeys=new Set(),logicalUnitKeys=new Set(),objects=[];
   for(const raw of value.objects){
@@ -415,8 +377,8 @@ function validateRepositoryManifest(value){
     const unit=repositoryUnitKey(kind,key);if(objectIds.has(objectId)||unitKeys.has(unit))throw new Error('Device repository object index contains duplicates.');
     let members;
     if(kind==='structuredPack'){
-      if(manifestVersion<4||!/^shard:[0-3]$/u.test(key))throw new Error('Device repository structured-pack reference is invalid.');
-      members=repositoryPackManifestMembers(raw.members,manifestVersion);const shard=Number(key.slice('shard:'.length));
+      if(!/^shard:[0-3]$/u.test(key))throw new Error('Device repository structured-pack reference is invalid.');
+      members=repositoryPackManifestMembers(raw.members);const shard=Number(key.slice('shard:'.length));
       for(const member of members){const logicalUnit=repositoryUnitKey(member.kind,member.key);if(repositoryPackShard(member.kind,member.key)!==shard||logicalUnitKeys.has(logicalUnit))throw new Error('Device repository structured-pack membership is invalid.');logicalUnitKeys.add(logicalUnit);}
     }else if(kind!=='attachment'){const logicalUnit=repositoryUnitKey(kind,key);if(logicalUnitKeys.has(logicalUnit))throw new Error('Device repository logical object index contains duplicates.');logicalUnitKeys.add(logicalUnit);}
     objectIds.add(objectId);unitKeys.add(unit);objects.push(freeze({objectId,kind,key,fingerprint,compression,sourceBytes,storedBytes,storedChecksum,...(members?{members}:{})}));
@@ -429,16 +391,15 @@ function validateRepositoryManifest(value){
     if(!Number.isSafeInteger(size)||size<=0||!/^[a-f0-9]{64}$/u.test(checksum)||!objectIds.has(objectId))throw new Error('Device repository attachment reference is malformed.');
     assets.push(freeze({assetId:raw.assetId,mimeType:String(raw.mimeType||''),size,checksum,name:String(raw.name||''),library:raw.library===true,objectId}));
   }
-  const counts=repositoryManifestCounts(value.counts||{},manifestVersion);
+  const counts=repositoryManifestCounts(value.counts||{});
   const reconciliationBaseId=String(value.reconciliationBaseId||'');if(reconciliationBaseId&&!/^cp_[a-f0-9]{32}$/u.test(reconciliationBaseId))throw new Error('Device repository reconciliation base is invalid.');
   const rawAncestorIds=Array.isArray(value.reconciliationAncestorIds)?value.reconciliationAncestorIds:(reconciliationBaseId?[reconciliationBaseId]:[]),reconciliationAncestorIds=[],reconciliationAncestorSet=new Set();
   for(const rawId of rawAncestorIds){const id=String(rawId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||id===String(checkpoint.checkpointId||'')||reconciliationAncestorSet.has(id))throw new Error('Device repository reconciliation ancestry is invalid.');reconciliationAncestorSet.add(id);reconciliationAncestorIds.push(id);}
   if((reconciliationBaseId&&reconciliationAncestorIds[0]!==reconciliationBaseId)||(!reconciliationBaseId&&reconciliationAncestorIds.length)||repositoryReconciliationAncestryBytes(reconciliationAncestorIds)>REPOSITORY_RECONCILIATION_ANCESTRY_MAX_BYTES)throw new Error('Device repository reconciliation ancestry is invalid.');
-  const protectedCheckpointManifest=repositoryNoteKind(manifestVersion)==='note'?value.protectedCheckpointManifest:BackupCodec.currentProtectedManifestNames(value.protectedCheckpointManifest);
-  if(Number(backupVersion)>=15&&(!protectedCheckpointManifest||protectedCheckpointManifest.checkpointId!==checkpoint.checkpointId||protectedCheckpointManifest.sourceRevision!==new Date(sourceRevision).toISOString()))throw new Error('Device repository protected checkpoint manifest is invalid.');
+  const protectedCheckpointManifest=value.protectedCheckpointManifest;
+  if((!protectedCheckpointManifest||protectedCheckpointManifest.checkpointId!==checkpoint.checkpointId||protectedCheckpointManifest.sourceRevision!==new Date(sourceRevision).toISOString()))throw new Error('Device repository protected checkpoint manifest is invalid.');
   const logicalFingerprint=String(value.logicalFingerprint||'').toLowerCase();
-  if(manifestVersion>=3&&!/^[a-f0-9]{64}$/u.test(logicalFingerprint))throw new Error('Device repository logical checkpoint fingerprint is invalid.');
-  if(manifestVersion<3&&logicalFingerprint&&!/^[a-f0-9]{64}$/u.test(logicalFingerprint))throw new Error('Device repository logical checkpoint fingerprint is invalid.');
+  if(!/^[a-f0-9]{64}$/u.test(logicalFingerprint))throw new Error('Device repository logical checkpoint fingerprint is invalid.');
   return freeze({
     format:REPOSITORY_MANIFEST_FORMAT,version:manifestVersion,checkpoint:freeze({...checkpoint}),exportedAt,sourceRevision,
     installationId:String(value.installationId||''),protectionId,encrypted:value.encrypted===true,counts,protectedCheckpointManifest,reconciliationBaseId,reconciliationAncestorIds:freeze(reconciliationAncestorIds),retention,logicalFingerprint,
@@ -521,13 +482,6 @@ function rethrowCleanupControl(error){
   const code=String(error&&error.code||'');
   if(error&&error.name==='AbortError'||/_MAINTENANCE_BUDGET$/u.test(code))throw error;
 }
-// Which formats a location's kept versions are in: once none is older than
-// the current format and none is unreadable (its format is unknown), the code
-// that reads older ones can be removed.
-function repositoryFormats(rows,unreadable=0){
-  let current=0,older=0;for(const row of rows)if(Number(row?.manifest?.version)===REPOSITORY_MANIFEST_VERSION)current+=1;else older+=1;
-  return freeze({version:REPOSITORY_MANIFEST_VERSION,current,older,unreadable:Math.max(0,Number(unreadable)||0)});
-}
 async function cleanupRepositoryRetention(input){
   const rows=Array.isArray(input&&input.checkpoints)?[...input.checkpoints]:[];
   rows.sort((a,b)=>Date.parse(a.manifest?.exportedAt||0)-Date.parse(b.manifest?.exportedAt||0)||String(a.id||'').localeCompare(String(b.id||'')));
@@ -537,7 +491,7 @@ async function cleanupRepositoryRetention(input){
   // version this build cannot read (unreadableCount) is known and kept: the
   // versions around it are still cleaned up, but no shared object is removed,
   // since nothing says which ones it uses.
-  if(overflow||checkpointUncertain)return freeze({warning:'Repository cleanup was deferred because backup history could not be read completely. No backup files were removed.',retained:freeze(rows),formats:null,removedCheckpoints:0,removedUncommitted:0,removedOrphanCommits:0,deferredIncomplete:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:checkpointUncertain+(overflow?1:0),objectGcBlocked:input&&input.blockObjectGc===true,overflow,selection:null});
+  if(overflow||checkpointUncertain)return freeze({warning:'Repository cleanup was deferred because backup history could not be read completely. No backup files were removed.',retained:freeze(rows),removedCheckpoints:0,removedUncommitted:0,removedOrphanCommits:0,deferredIncomplete:0,checkpointDeferred:0,checkpointFailures:0,gcRemoved:0,gcDeferred:0,gcBudgetDeferred:0,gcFailures:0,gcSkipped:true,gcPending:true,uncertainCount:checkpointUncertain+(overflow?1:0),objectGcBlocked:input&&input.blockObjectGc===true,overflow,selection:null});
   const preparedObjects=input&&input.inventoryBeforeDelete===true?await input.listObjects():null;
   await input.beginDeletion?.();
   const selection=selectRepositoryRetention(rows,{now:input&&input.now||new Date()}),keep=[...selection.retained],remove=[...selection.remove],retainedIds=new Set();for(const row of keep)for(const entry of row.manifest?.objects||[])retainedIds.add(entry.objectId);
@@ -589,7 +543,7 @@ async function cleanupRepositoryRetention(input){
   // timer: nothing changes until a version is removed, and removing one runs
   // cleanup at once.
   const waitsOnUnreadable=unreadable>0&&!(Math.max(0,Number(input&&input.invalidCount)||0)>0||Math.max(0,Number(input&&input.ignoredCount)||0)>0||deletionFailures>0||checkpointDeferred>0||input&&input.blockObjectGc===true);
-  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),formats:repositoryFormats(actualRetained,unreadable),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped&&!waitsOnUnreadable||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,unreadableCount:unreadable,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
+  return freeze({warning:parts.join(' '),retained:freeze(actualRetained),removedCheckpoints,removedUncommitted,removedOrphanCommits,deferredIncomplete,checkpointDeferred,checkpointFailures:deletionFailures,gcRemoved,gcDeferred,gcBudgetDeferred,gcFailures,gcSkipped,gcPending:gcSkipped&&!waitsOnUnreadable||deferredIncomplete>0||checkpointDeferred>0||gcDeferred>0||gcBudgetDeferred>0||gcFailures>0,uncertainCount:uncertain,unreadableCount:unreadable,objectGcBlocked:input&&input.blockObjectGc===true,objectListingFailed,overflow:objectListingOverflow,selection});
 }
 
 async function prepareRepositoryCheckpointWork(previousManifests=null,{interactive=false,availableObjectIds=null,excludedObjectIds=null,retention=null,signal=null,baseUpdate=false,reuse=null}={}){
@@ -856,7 +810,7 @@ async function verifyRepositoryObject(file,entry,options={}){
   if(checksum!==expected.storedChecksum)throw repositoryCorruption('Repository object failed read-back verification.');
   return true;
 }
-const REPOSITORY_SCRUB_SKIPPED_KINDS=freeze(new Set(['activeSession',LEGACY_REFLECTION_DRAFT_PACK_KIND]));
+const REPOSITORY_SCRUB_SKIPPED_KINDS=freeze(new Set(['activeSession']));
 const REPOSITORY_SCRUB_KIND_PRIORITY=freeze(new Map([['attachment',0],['structuredPack',1],['note',2],['dailyRecordPack',3],['personalData',4]]));
 function repositoryScrubObjectIds(value){
   const rows=Array.isArray(value)?value:[],seen=new Set(),out=[];
@@ -871,7 +825,7 @@ async function scrubRepositoryIntegrity(manifests,readObjectValue,{cursor='',rec
     firstByObject.set(entry.objectId,freeze({manifest,entry}));
   }
   const rows=[...firstByObject.values()].sort((a,b)=>{
-    const pa=REPOSITORY_SCRUB_KIND_PRIORITY.get(a.entry.kind===WRITTEN_NOTE_KIND?'note':a.entry.kind)??99,pb=REPOSITORY_SCRUB_KIND_PRIORITY.get(b.entry.kind===WRITTEN_NOTE_KIND?'note':b.entry.kind)??99;
+    const pa=REPOSITORY_SCRUB_KIND_PRIORITY.get(a.entry.kind)??99,pb=REPOSITORY_SCRUB_KIND_PRIORITY.get(b.entry.kind)??99;
     return pa-pb||Date.parse(a.manifest.exportedAt)-Date.parse(b.manifest.exportedAt)||a.entry.objectId.localeCompare(b.entry.objectId);
   });
   const currentScanId=await Exports.run('checksum',{value:JSON.stringify(rows.map(({entry})=>[entry.objectId,entry.storedChecksum,entry.fingerprint]))},{signal});
@@ -987,7 +941,7 @@ async function readRepositoryStructuredObject(manifest,entry,readObject,options=
         }
         const shard=Number(String(entry.key).slice('shard:'.length));
         if(!body||typeof body!=='object'||Array.isArray(body)||body.format!==REPOSITORY_PACK_FORMAT||Number(body.version)!==REPOSITORY_PACK_VERSION||Number(body.shard)!==shard||!Array.isArray(body.members))throw repositoryCorruption(`Repository structured pack ${entry.objectId} identity is invalid.`);
-        const expected=repositoryPackManifestMembers(entry.members,manifest.version),actual=[];
+        const expected=repositoryPackManifestMembers(entry.members),actual=[];
         for(const raw of body.members){
           if(!raw||typeof raw!=='object'||Array.isArray(raw))throw repositoryCorruption(`Repository structured pack ${entry.objectId} contains an invalid member.`);
           const kind=String(raw.kind||''),key=String(raw.key||''),encoded=await (async()=>{const logicalBody=freeze({format:REPOSITORY_OBJECT_FORMAT,version:REPOSITORY_OBJECT_VERSION,kind,key,payload:raw.payload}),text=await Exports.run('stringify',{value:logicalBody}),bytes=BackupCodec.utf8Bytes(text).byteLength,hash=await Exports.run('checksum',{value:text,algorithm:'sha256'},{signal:options.signal});return freeze({bytes,hash});})();
@@ -1033,19 +987,19 @@ function repositoryStructuredMemberObject(manifest,kind,key){
   const wantedKind=String(kind||''),wantedKey=String(key||'');if(!wantedKind||!wantedKey)return null;
   for(const entry of manifest.objects||[]){
     if(entry.kind===wantedKind&&entry.key===wantedKey)return freeze({entry,fingerprint:entry.fingerprint});
-    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members,manifest.version).find(item=>item.kind===wantedKind&&item.key===wantedKey);if(member)return freeze({entry,fingerprint:member.fingerprint});}
+    if(entry.kind==='structuredPack'){const member=repositoryPackManifestMembers(entry.members).find(item=>item.kind===wantedKind&&item.key===wantedKey);if(member)return freeze({entry,fingerprint:member.fingerprint});}
   }
   return null;
 }
 function repositoryNoteObject(manifest,noteId){
-  const id=String(noteId||''),noteKind=repositoryNoteKind(manifest.version);if(!id||releasedRepositoryManifest(manifest.version))return null;
-  return repositoryStructuredMemberObject(manifest,noteKind,id);
+  const id=String(noteId||'');if(!id)return null;
+  return repositoryStructuredMemberObject(manifest,'note',id);
 }
 // Reads one note's stored record from a version, and nothing else.
 async function readRepositoryNote(manifest,readObject,noteId,options={}){
   const found=repositoryNoteObject(manifest,noteId);if(!found)return null;
   const rows=await readRepositoryStructuredObject(manifest,found.entry,repositoryReadPort(readObject),options);
-  const row=rows.find(item=>item.kind===repositoryNoteKind(manifest.version)&&item.key===String(noteId));
+  const row=rows.find(item=>item.kind==='note'&&item.key===String(noteId));
   return row?row.payload:null;
 }
 // Reads only the verified Active Session logical object. It may share a
@@ -1062,12 +1016,12 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
   throwIfImportAborted(signal);
   if(manifest.installationId&&manifest.installationId!==manifest.checkpoint.originInstallationId)throw new Error('Repository checkpoint installation provenance is inconsistent.');
   const objectById=new Map(manifest.objects.map(entry=>[entry.objectId,entry]));
-  const noteKind=repositoryNoteKind(manifest.version),allowedKinds=new Set(['dailyRecordPack',noteKind,'activeSession','personalData','structuredPack','attachment']);if(manifest.version<=4)allowedKinds.add(LEGACY_REFLECTION_DRAFT_PACK_KIND);if(!releasedRepositoryManifest(manifest.version))allowedKinds.add(PENDING_REVIEW_KIND);
+  const noteKind='note',allowedKinds=new Set(['dailyRecordPack',noteKind,'activeSession','personalData',PENDING_REVIEW_KIND,'structuredPack','attachment']);
   for(const entry of manifest.objects)if(!allowedKinds.has(entry.kind))throw new Error(`Repository object kind ${entry.kind} is unsupported.`);
-  const dailyDocuments=[],noteItems=[],pendingReviewItems=[];let activeSession=null,personalData=null,legacyReflectionDraftCount=0;
+  const dailyDocuments=[],noteItems=[],pendingReviewItems=[];let activeSession=null,personalData=null;
   // A one-note read names the note by id.
-  const holdsNote=entry=>entry.kind===noteKind&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members,manifest.version).some(member=>member.kind===noteKind&&member.key===noteKey);
-  const seenDates=new Set(),seenNoteKeys=new Set(),seenReviewIds=new Set(),seenDraftDates=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
+  const holdsNote=entry=>entry.kind===noteKind&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members).some(member=>member.kind===noteKind&&member.key===noteKey);
+  const seenDates=new Set(),seenNoteKeys=new Set(),seenReviewIds=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
   const structuredPayloads=await mapRepositoryBounded(structuredEntries,async entry=>{
     throwIfImportAborted(signal);
     return readRepositoryStructuredObject(manifest,entry,readObject,{interactive,signal});
@@ -1081,21 +1035,18 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
     }else if(entry.kind===noteKind){
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.key||'')!==entry.key||seenNoteKeys.has(entry.key))throw new Error('Repository note object is invalid.');
       seenNoteKeys.add(entry.key);noteItems.push(payload);
-    }else if(entry.kind===LEGACY_REFLECTION_DRAFT_PACK_KIND){
-      if(manifest.version>4||!Array.isArray(payload))throw new Error('Legacy repository Reflection Draft pack is invalid.');
-      for(const draft of payload){const date=String(draft&&draft.date||'');if(repositoryMonth(date)!==entry.key||seenDraftDates.has(date))throw new Error('Legacy repository Reflection Draft pack contains an invalid or duplicate date.');seenDraftDates.add(date);legacyReflectionDraftCount++;}
     }else if(entry.kind==='activeSession'){
       if(entry.key!=='active'||activeSession!==null)throw new Error('Repository Active Session object is invalid.');activeSession=payload;
     }else if(entry.kind==='personalData'){
       if(entry.key!=='personal'||personalData!==null)throw new Error('Repository personal-data object is invalid.');personalData=payload;
-    }else if(entry.kind===PENDING_REVIEW_KIND&&!releasedRepositoryManifest(manifest.version)){
+    }else if(entry.kind===PENDING_REVIEW_KIND){
       if(!payload||typeof payload!=='object'||Array.isArray(payload)||String(payload.id||'')!==entry.key||seenReviewIds.has(entry.key))throw new Error('Repository object kept for review is invalid.');
       seenReviewIds.add(entry.key);pendingReviewItems.push(payload);
     }else throw new Error(`Repository logical object kind ${entry.kind} is unsupported.`);
   }
   dailyDocuments.sort((a,b)=>String(a.date).localeCompare(String(b.date)));noteItems.sort((a,b)=>String(a.key).localeCompare(String(b.key)));pendingReviewItems.sort((a,b)=>String(a.id).localeCompare(String(b.id)));
-  const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,note:noteItems.length,activeSession:activeSession?1:0,pendingReview:pendingReviewItems.length,reflectionDraft:legacyReflectionDraftCount},manifest.version);
-  if(!noteKey&&!repositoryCountsEqualForManifest(counts,manifest.counts,manifest.version))throw new Error('Repository checkpoint counts do not match its reconstructed contents.');
+  const counts=repositoryManifestCounts({checkpointManifest:1,personalData:personalData?1:0,dailyRecord:dailyDocuments.length,note:noteItems.length,activeSession:activeSession?1:0,pendingReview:pendingReviewItems.length});
+  if(!noteKey&&!repositoryCountsEqual(counts,manifest.counts))throw new Error('Repository checkpoint counts do not match its reconstructed contents.');
   const referencedAttachmentIds=new Set(),attachmentLeases=new Map(),assetItems=[],noteAssetIds=noteKey?new Set(noteItems.flatMap(item=>[...BackupCodec.assetIds(item)])):null;
   try{
     for(const raw of manifest.assets){
@@ -1253,7 +1204,7 @@ async function publishRepositoryCheckpoint(history,options={},transport={}){
 }
 
     return freeze({
-      format:'study-director.managed-repository',contractVersion:1,releasedManifestVersion:REPOSITORY_RELEASED_MANIFEST_VERSION,manifestVersion:REPOSITORY_MANIFEST_VERSION,reviewOriginManifestVersion:REPOSITORY_REVIEW_ORIGIN_MANIFEST_VERSION,
+      format:'study-director.managed-repository',contractVersion:1,manifestVersion:REPOSITORY_MANIFEST_VERSION,
       noteObject:repositoryNoteObject,readNote:readRepositoryNote,readSession:readRepositoryActiveSession,
       createPublication:createRepositoryPublication,publish:publishRepositoryCheckpoint,inspectManifest:inspectRepositoryManifest,inspect:inspectRepositoryCheckpoint,verifyCheckpoint:verifyRepositoryCheckpoint,verifyObject:verifyRepositoryObject,scrub:scrubRepositoryIntegrity,cleanup:cleanupRepositoryRetention,inspectCommit:inspectRepositoryCommitMarker,
       retention:REPOSITORY_RETENTION_POLICY,validatePolicy:validateRepositoryRetentionPolicy,classifyState:classifyRepositoryState,activeProtected:activeProtectedRepositoryRow,selectRetention:selectRepositoryRetention,projectHistory:projectManagedRepositoryHistory,invalidatePreparation:invalidateRepositoryPreparation,establishBase:establishRepositoryBase
