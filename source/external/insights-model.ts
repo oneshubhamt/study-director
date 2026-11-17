@@ -9,16 +9,16 @@ import type {CompletionSource,TaskKind,TaskOutcome} from '../../types/domain.ts'
 import type {AreaSummary,DailyTaskView,PauseEvent,PracticeRun} from '../../types/record-models.ts';
 
 type InsightPauseEvent=Partial<PauseEvent>&Readonly<{reason?:string;plannedSeconds?:number|null}>;
-type InsightTask=Omit<Partial<DailyTaskView>,'kind'|'completionSource'|'pauseEvents'>&Readonly<{
+export type InsightTask=Omit<Partial<DailyTaskView>,'kind'|'completionSource'|'pauseEvents'>&Readonly<{
   kind?:TaskKind;completionSource?:CompletionSource;pauseEvents?:readonly InsightPauseEvent[];__sdOutcome?:TaskOutcome;
 }>;
-type InsightRecord=Readonly<{
+export type InsightRecord=Readonly<{
   date:string;dayName?:string;savedAt?:string;updatedAt?:string;createdAt?:string;studyQuality?:number|null;degraded?:boolean;
   originalPlannedStudyMinutes?:number|null;completedEquivalentMinutes?:number|null;actualFocusMinutes?:number|null;
   shiftedStudyBlocks?:number|null;totalScheduleShiftMinutes?:number|null;netScheduleShiftMinutes?:number|null;
   tasks?:readonly InsightTask[];originalSchedule?:readonly InsightTask[];practiceRuns?:readonly PracticeRun[];__sdPracticeSummary?:PracticeRunInsightSummary;
 }>;
-type InsightSummary=Readonly<{date:string;completedMinutes?:number|null;actualTrackedMinutes?:number|null;outcomeCounts?:Partial<Record<TaskOutcome,number>>;areaSummary?:AreaSummary}>;
+export type InsightSummary=Readonly<{date:string;completedMinutes?:number|null;actualTrackedMinutes?:number|null;outcomeCounts?:Partial<Record<TaskOutcome,number>>;areaSummary?:AreaSummary}>;
 type OutcomeClassifier=(task:InsightTask)=>TaskOutcome;
 type CompletionEvidenceGroup='explicit'|'time-derived'|'unverified'|'skipped'|'missing';
 type OutcomeCounts=Record<TaskOutcome,number>;
@@ -52,9 +52,9 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
 type PracticeEvidenceUnitSource=Readonly<{actualMs:number;targetMs:number;marks:number|null;segmentLabel:string}>;
 type PracticeEvidenceSegmentSource=Readonly<{index:number;label:string;units:number;plannedUnits:number;actualMs:number;targetMs:number;plannedTargetMs:number;completion:number|null;complete:boolean;varianceMs:number}>;
 type PracticeRunEvidenceSource=Readonly<{run:PracticeRun;plannedUnits:number;unitRows:readonly PracticeEvidenceUnitSource[];segmentRows:readonly PracticeEvidenceSegmentSource[]}>;
-type PracticeRunInsightSummary=Readonly<{runSummaries:readonly PracticeRunEvidenceSource[];audit?:Readonly<{rejectedRawIndexes?:readonly number[]}>}>;
+export type PracticeRunInsightSummary=Readonly<{runSummaries:readonly PracticeRunEvidenceSource[];audit?:Readonly<{rejectedRawIndexes?:readonly number[]}>}>;
 type PracticeRunSummarizer=(runs:readonly PracticeRun[])=>PracticeRunInsightSummary;
-type DirectionalBasis=Readonly<{key:string;label:string;horizonDays:number;fromDay:number|null;toDay:number|null;from:string|null;to:string|null;capped:boolean;recordCount?:number;selectedRecordCount?:number}>;
+export type DirectionalBasis=Readonly<{key:string;label:string;horizonDays:number;fromDay:number|null;toDay:number|null;from:string|null;to:string|null;capped:boolean;recordCount?:number;selectedRecordCount?:number}>;
 type PracticeMode=Readonly<{key:'paper-marks'|'paper-time'|'simple-planned'|'simple-open';label:string}>;
 type PracticeMaturity=Readonly<{key:'early'|'established'|'reliable';label:string;tone:string;rank:0|1|2;confidence:Confidence}>;
 type PracticeTrendBlock=Readonly<{index:number;start:number;end:number;slope:number}>;
@@ -75,7 +75,7 @@ type PracticeSizeDifference=Readonly<{family:string;low:PracticeSizeGroup;high:P
 type PracticeGroupRow=Readonly<{key:string;label:string;units:number;runs:number;days:number;maturity:PracticeMaturity;medianRunPace:number|null;typicalUnitPace:number|null;controlledRuns:number;controlledRunRate:number;withinBudgetRuns:number;withinBudgetRate:number}>;
 type PracticeAudit=Readonly<{savedRuns:number;acceptedRuns:number;excludedRuns:number;encounteredUnits:number;acceptedUnits:number;excludedUnits:number;reasonRows:readonly Readonly<{reason:string;count:number}>[]}>;
 type PracticePacerBase=Readonly<{practiceDays:number;runs:number;units:number;totalActualMs:number;medianPace:number|null;medianRunPace:number|null;typicalUnitPace:number|null;atOrBelowTarget:number;atOrBelowRate:number|null;controlledRuns:number;controlledRunRate:number|null;withinBudgetRuns:number;withinBudgetRate:number|null;plannedRuns:number;plannedUnits:number;completedPlannedUnits:number;plannedRunCompletionMedian:number|null;completedPlannedRuns:number;completedPlannedRunRate:number|null;plannedUnitCompletionRate:number|null;medianCompletedRunTimeUsed:number|null;medianFinishingMarginMs:number|null;completedWithinTimeRuns:number;completedWithinTimeRate:number|null;medianWithinRunSpread:number|null;spreadComparableRuns:number;paceSlopePerWeek:number|null;trend:PracticeTrendResult;trendBasis:Readonly<{key:string;label:string;from:string|null;to:string|null;horizonDays:number|null;capped:boolean;practiceDays:number;selectedPracticeDays:number;units:number}>;maturity:PracticeMaturity;overallConfidence:Confidence;summaryReady:boolean;patternReady:boolean;trendReady:boolean;daily:readonly PracticeDailyRow[];runRows:readonly PracticeRunRow[];unitRows:readonly PracticeUnitRow[];segmentRows:readonly PracticeSegmentRow[];position:PracticePosition;repeatedSegments:readonly RepeatedPracticeSegment[];unitSizeGroups:Readonly<{marks:readonly PracticeSizeGroup[];durations:readonly PracticeSizeGroup[];all:readonly PracticeSizeGroup[]}>;unitSizeDifference:PracticeSizeDifference|null;audit:PracticeAudit;distribution:readonly Readonly<{key:string;label:string;count:number;share:number}>[];areas:readonly PracticeGroupRow[];modes:readonly PracticeGroupRow[]}>;
-type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;reading:PracticeFinding;supportingReading:PracticeFinding|null;coachReading:PracticeFinding}>;
+export type PracticePacerResult=PracticePacerBase&Readonly<{readings:PracticeReadings;reading:PracticeFinding;supportingReading:PracticeFinding|null;coachReading:PracticeFinding}>;
 type FitnessKey='capacity'|'execution'|'recovery';
 type ScheduleSummary=Readonly<{maxDailyShiftMinutes:number;shiftedDays:number;shiftedBlocks:number;averageDailyPeakShiftOnShiftedDays:number;typicalNetShiftMinutes:number|null}>;
 type FitnessComponentObservation=Readonly<{value:number|null;measurementSd:number|null;evidenceCount:number}>;
@@ -88,13 +88,13 @@ type FitnessHistoryRow=Readonly<{date:string;day:number;observed:number|null;obs
 type FitnessCurrentHistory=FitnessHistoryRow&Readonly<{estimate:number;low:number;high:number}>;
 type FitnessTrajectory=Readonly<{key:'uncertain'|'recovering'|'rising'|'falling'|'stable';label:string;tone:string;delta?:number|null;lookbackDays?:number;recentEvidence?:number;troughDate?:string}>;
 type FitnessDimension=Readonly<{key:FitnessKey;label:string;current:FitnessStateValue|null;observedDays:number;confidence:Confidence;center:number;persistence:number;lastEvidenceDate:string|null;daysSinceLastEvidence:number|null}>;
-type FitnessPerformanceState=Readonly<{ready:boolean;history:readonly FitnessHistoryRow[];observations:readonly FitnessObservation[];current:FitnessHistoryRow|null;confidence:Confidence;trajectory:FitnessTrajectory;effectiveDays:number;observedDays:number;lastEvidenceDate:string|null;daysSinceLastEvidence:number|null;basis?:Readonly<{start:string|null;end:string;mode:string;historicalMode?:string}>;dimensions?:Record<FitnessKey,FitnessDimension>;parameters?:FitnessParameters;multivariateReady?:boolean;forecastCausal?:boolean;parameterUpdateCadence?:number;parameterWindowObservations?:number;intervalWidth?:number}>;
+export type FitnessPerformanceState=Readonly<{ready:boolean;history:readonly FitnessHistoryRow[];observations:readonly FitnessObservation[];current:FitnessHistoryRow|null;confidence:Confidence;trajectory:FitnessTrajectory;effectiveDays:number;observedDays:number;lastEvidenceDate:string|null;daysSinceLastEvidence:number|null;basis?:Readonly<{start:string|null;end:string;mode:string;historicalMode?:string}>;dimensions?:Record<FitnessKey,FitnessDimension>;parameters?:FitnessParameters;multivariateReady?:boolean;forecastCausal?:boolean;parameterUpdateCadence?:number;parameterWindowObservations?:number;intervalWidth?:number}>;
 type WorkloadRecommendation=Readonly<{minPlanned:number;maxPlanned:number;typicalPlanned:number}>;
 type WorkloadRead=Readonly<{ready:boolean;recommendation?:WorkloadRecommendation|null;reason?:string|null}>;
 type FitnessModelInput=Readonly<{daily:readonly DailySeriesRow[];currentStudyDate?:string|null;calendarRange?:Readonly<{start?:string|null;end?:string|null}>;dynamics?:Readonly<{workload?:WorkloadRead}>;advanced?:Readonly<{qualityPairCount?:number}>;overview?:Readonly<{averageQuality?:number|null}>;recordCount?:number}>;
 type FitnessLoadRange=Readonly<{min:number;max:number;typical:number}>;
 type FitnessLoadMatch=Readonly<{ready:boolean;key:string;label:string;tone:string;recentPlanned:number|null;recentCompletion:number|null;recentDays:number;range:FitnessLoadRange|null;reason?:string|null}>;
-type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;loadMatch:FitnessLoadMatch;quality:Readonly<{ratedDays:number;average:number|null;totalSavedDays:number;ready:boolean}>;readiness:Confidence;summary:Readonly<{text:string;stateText:string;trajectory:string}>;parameters:Readonly<{learned:FitnessParameters|null;sourceWeights:Record<CompletionEvidenceGroup,number>}>}>;
+export type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;loadMatch:FitnessLoadMatch;quality:Readonly<{ratedDays:number;average:number|null;totalSavedDays:number;ready:boolean}>;readiness:Confidence;summary:Readonly<{text:string;stateText:string;trajectory:string}>;parameters:Readonly<{learned:FitnessParameters|null;sourceWeights:Record<CompletionEvidenceGroup,number>}>}>;
 type SubjectInsight=Readonly<{label:string;blocks:number;days:number;planned:number;completed:number;actual:number;completion:number|null;share:number|null;plannedShare:number;lastDate:string|null;daysSinceLast:number|null;neverStudied:boolean;pairedBlocks:number;pairedPlanned:number;pairedCompleted:number;pairedActual:number;pairedTimerCoverage:number|null;pairedSourceMix:Readonly<Record<string,number>>;coverageCompletion:number|null;historicalPlanned:number;historicalDays:number;allocationScore:number;allocation:string;evidenceStrength:number;windowAbsent:boolean;coverageWatchEligible:boolean;coverageWatchScore:number}>;
 type DynamicsModelInput=FitnessModelInput&Readonly<{overview:Readonly<{completion:number|null;averageQuality?:number|null}>;advanced:Readonly<{completionDayCount:number;qualityPairCount?:number}>;subjects:readonly SubjectInsight[];trendBasis?:Partial<DirectionalBasis>|null}>;
 type PatternRawGroup=Readonly<{key:string;label:string;blocks:number;planned:number;completed:number;rawCompletion:number|null;nEff:number;dimension:string}>;
@@ -123,18 +123,21 @@ type PredictionInterval=Readonly<{mean:number|null;low:number|null;high:number|n
 type PredictionSummary=Readonly<{completionMean:number;completionLow:number;completionHigh:number;completionRangeMethod:string;strongProbability:number|null;strongLow:number|null;strongHigh:number|null;rawStrongProbability:number|null;expectedCompleted:number}>;
 type ForecastPrediction=PredictionSummary&Readonly<{planned:number;priorState?:number;fitness?:(FitnessPredictors&Readonly<{basis?:string}>);date:string;actualStrong:number;actualCompletion:number;naiveCompletion:number|null}>;
 type CompletionRangeCalibration=Readonly<{ready:boolean;target:number;backtests:number;coverageTests?:number;halfWidth:number|null;halfWidthPoints?:number|null;coverage:number|null;coverageError:number|null;reason:string|null}>;
-type ForecastCalibration=Readonly<{modelKey:string;modelLabel:string;ready:boolean;completionReady:boolean;strongReady:boolean;calibratorReady:boolean;crossFitReady:boolean;predictions:readonly ForecastPrediction[];strongPredictions:readonly ForecastPrediction[];calibrator:LogisticFit;backtests:number;strongBacktests:number;brier:number|null;baselineBrier:number|null;completionMae:number|null;naiveCompletionMae:number|null;naiveMaeGain:number|null;naiveBenchmarkReady:boolean;calibrationError:number|null;bins:readonly unknown[];completionRange:CompletionRangeCalibration;intervalReady:boolean;intervalReason:string|null;reason:string|null;completionReason:string|null;strongReason:string|null;gates:Readonly<Record<string,number>>;label:string;selectedModel?:string;selectedModelLabel?:string;selectionReason?:string;candidates?:Readonly<{baseline:ForecastCalibration;stateAware:ForecastCalibration}>;comparison?:Readonly<{maeGain:number|null;strongGuard:boolean;causalGuard:boolean;stateWins:boolean;requiredMaeGain:number}>}>;
-type ForecastSelectionCalibration=ForecastCalibration&Readonly<{selectedModel:string;selectedModelLabel:string;selectionReason:string;candidates:Readonly<{baseline:ForecastCalibration;stateAware:ForecastCalibration}>;comparison:Readonly<{maeGain:number|null;strongGuard:boolean;causalGuard:boolean;stateWins:boolean;requiredMaeGain:number}>}>;
+export type ForecastCalibrationBin=Readonly<{low:number;high:number;count:number;predicted:number|null;observed:number|null}>;
+type ForecastCalibrationGates=Readonly<{maximumCompletionMae:number;minimumNaiveMaeGain:number;maximumCalibrationError:number;brierBaselineTolerance:number;completionRangeTarget:number;maximumRangeCoverageError:number}>;
+export type ForecastCalibration=Readonly<{modelKey:string;modelLabel:string;ready:boolean;completionReady:boolean;strongReady:boolean;calibratorReady:boolean;crossFitReady:boolean;predictions:readonly ForecastPrediction[];strongPredictions:readonly ForecastPrediction[];calibrator:LogisticFit;backtests:number;strongBacktests:number;brier:number|null;baselineBrier:number|null;completionMae:number|null;naiveCompletionMae:number|null;naiveMaeGain:number|null;naiveBenchmarkReady:boolean;calibrationError:number|null;bins:readonly ForecastCalibrationBin[];completionRange:CompletionRangeCalibration;intervalReady:boolean;intervalReason:string|null;reason:string|null;completionReason:string|null;strongReason:string|null;gates:ForecastCalibrationGates;label:string;selectedModel?:string;selectedModelLabel?:string;selectionReason?:string;candidates?:Readonly<{baseline:ForecastCalibration;stateAware:ForecastCalibration}>;comparison?:Readonly<{maeGain:number|null;strongGuard:boolean;causalGuard:boolean;stateWins:boolean;requiredMaeGain:number}>}>;
+export type ForecastSelectionCalibration=ForecastCalibration&Readonly<{selectedModel:string;selectedModelLabel:string;selectionReason:string;candidates:Readonly<{baseline:ForecastCalibration;stateAware:ForecastCalibration}>;comparison:Readonly<{maeGain:number|null;strongGuard:boolean;causalGuard:boolean;stateWins:boolean;requiredMaeGain:number}>}>;
 type InteractionCell=Readonly<{rows:number;days:number;weight:number;raw:number|null;estimate:number|null;ready:boolean}>;
 type InteractionCells=Readonly<{a:InteractionCell;b:InteractionCell;c:InteractionCell;d:InteractionCell}>;
 type InteractionStability=Readonly<{ready:boolean;split?:string;earlyEffect:number|null;lateEffect:number|null;reason:string|null}>;
 type InteractionMeta=Readonly<{dedupeKey?:string;stability?:InteractionStability}>;
-type InteractionCandidate=Readonly<{key:string;label:string;cells:InteractionCells;ready:boolean;effect:number|null;meaningful:boolean;confidence:Confidence;text:string;dedupeKey?:string;stability:InteractionStability}>;
+export type InteractionCandidate=Readonly<{key:string;label:string;cells:InteractionCells;ready:boolean;effect:number|null;meaningful:boolean;confidence:Confidence;text:string;dedupeKey?:string;stability:InteractionStability}>;
 type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:number;start?:string|null;end?:string|null;modelRecords?:number;modelStart?:string|null;modelEnd?:string|null;horizonDays?:number;fitness?:Readonly<{performanceState:FitnessPerformanceState}>|null}>;
 type AllocationHistoryAccumulator={label:string;periods:number;under:number;over:number;gaps:number[]};
-
+export export export 
 (function(global:typeof globalThis){
   'use strict';
+  const isRecordObject=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
   const isFiniteNumber=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
   // M8.1 CONFIGURATION COMPONENT
   const InsightsConfig=(()=>{
@@ -923,7 +926,7 @@ type AllocationHistoryAccumulator={label:string;periods:number;under:number;over
     seen.add(value);
     let normalized;
     if(Array.isArray(value))normalized=value.map(item=>stableCacheValue(item,seen));
-    else {const source=value as Record<string,unknown>;normalized=Object.fromEntries(Object.keys(source).sort().map(key=>[key,stableCacheValue(source[key],seen)]));}
+    else if(isRecordObject(value))normalized=Object.fromEntries(Object.keys(value).sort().map(key=>[key,stableCacheValue(value[key],seen)]));
     seen.delete(value);
     return normalized;
   }
@@ -1874,11 +1877,11 @@ type AllocationHistoryAccumulator={label:string;periods:number;under:number;over
     );
   }
   function practiceRawRunAuditReason(value:unknown){
-    if(!value||typeof value!=='object')return 'Malformed saved run';
-    const raw=value as Partial<PracticeRun>;const rawUnits=Array.isArray(raw.unitMs)?raw.unitMs.filter(item=>Number.isFinite(Number(item))&&Number(item)>0):[];
+    if(!isRecordObject(value))return 'Malformed saved run';
+    const raw=value,rawUnits=Array.isArray(raw.unitMs)?raw.unitMs.filter(item=>Number.isFinite(Number(item))&&Number(item)>0):[];
     if(!rawUnits.length)return 'No completed units';
     if(!Number.isFinite(Number(raw.targetMs))||Number(raw.targetMs)<=0)return 'Invalid or missing target';
-    const plan=raw.unitPlan&&typeof raw.unitPlan==='object'?raw.unitPlan:null;
+    const plan=isRecordObject(raw.unitPlan)?raw.unitPlan:null;
     if(plan&&canonical(plan.mode)==='marks'&&(!Number.isFinite(Number(raw.sessionTargetMs))||Number(raw.sessionTargetMs)<=0))return 'Marks plan missing total time';
     return null;
   }
@@ -2339,7 +2342,13 @@ type AllocationHistoryAccumulator={label:string;periods:number;under:number;over
       measurementSd:measurementSd===null?null:round(measurementSd,2),
       hasObservation:isFiniteNumber(dailyRow.completion)&&evidenceWeight>0,
       components,
-      plannedByGroup:Object.fromEntries(Object.entries(plannedByGroup).map(([key,value])=>[key,round(value,1)])) as Record<CompletionEvidenceGroup,number>
+      plannedByGroup:{
+        explicit:round(plannedByGroup.explicit,1),
+        'time-derived':round(plannedByGroup['time-derived'],1),
+        unverified:round(plannedByGroup.unverified,1),
+        skipped:round(plannedByGroup.skipped,1),
+        missing:round(plannedByGroup.missing,1)
+      }
     };
   }
   function fitnessTrajectory(history:readonly FitnessHistoryRow[],current:FitnessCurrentHistory|null,confidence:Confidence,lastEvidenceDay:number|null,endDay:number):FitnessTrajectory{
@@ -2515,17 +2524,19 @@ type AllocationHistoryAccumulator={label:string;periods:number;under:number;over
     }
     const latest=history[history.length-1]||null;
     const reportedParameters=learnFitnessStateParameters(parameterObservations.slice(-FITNESS_PARAMETER_WINDOW_OBSERVATIONS),keys);
-    const current=isFiniteNumber(lastEvidenceDays.capacity)&&latest&&isFiniteNumber(latest.estimate)&&isFiniteNumber(latest.low)&&isFiniteNumber(latest.high)?latest as FitnessCurrentHistory:null;
+    const current=isFiniteNumber(lastEvidenceDays.capacity)&&latest&&isFiniteNumber(latest.estimate)&&isFiniteNumber(latest.low)&&isFiniteNumber(latest.high)
+      ?{...latest,estimate:latest.estimate,low:latest.low,high:latest.high}:null;
     const effectiveDays=round(sum(observations.filter(row=>row.hasObservation).map(row=>row.evidenceWeight)),1);
     const observedDays=observations.filter(row=>row.hasObservation).length;
     const intervalWidth=current?round(current.high-current.low,1):100;
     const confidence=evidenceConfidence(effectiveDays,intervalWidth);
     const trajectory=fitnessTrajectory(history,current,confidence,lastEvidenceDays.capacity,endDay);
-    const dimensions=Object.fromEntries(keys.map((key,index)=>{
+    const dimensionFor=(key:FitnessKey,index:number):FitnessDimension=>{
       const currentState=isFiniteNumber(lastEvidenceDays[key])&&latest?latest.states[key]:null;
       const observed=observations.filter(row=>isFiniteNumber(row.components[key].value)).length;
-      return [key,{key,label:key==='capacity'?'Output state':key==='execution'?'Schedule control':'Focus control',current:currentState,observedDays:observed,confidence:evidenceConfidence(observed,currentState?currentState.high-currentState.low:100),center:round(reportedParameters.centers[index]!,1),persistence:round(reportedParameters.empiricalPersistence[index]!,3),lastEvidenceDate:isFiniteNumber(lastEvidenceDays[key])?dateFromDay(lastEvidenceDays[key]!):null,daysSinceLastEvidence:isFiniteNumber(lastEvidenceDays[key])?Math.max(0,endDay-lastEvidenceDays[key]!):null}];
-    })) as Record<FitnessKey,FitnessDimension>;
+      return {key,label:key==='capacity'?'Output state':key==='execution'?'Schedule control':'Focus control',current:currentState,observedDays:observed,confidence:evidenceConfidence(observed,currentState?currentState.high-currentState.low:100),center:round(reportedParameters.centers[index]!,1),persistence:round(reportedParameters.empiricalPersistence[index]!,3),lastEvidenceDate:isFiniteNumber(lastEvidenceDays[key])?dateFromDay(lastEvidenceDays[key]!):null,daysSinceLastEvidence:isFiniteNumber(lastEvidenceDays[key])?Math.max(0,endDay-lastEvidenceDays[key]!):null};
+    };
+    const dimensions:Record<FitnessKey,FitnessDimension>={capacity:dimensionFor('capacity',0),execution:dimensionFor('execution',1),recovery:dimensionFor('recovery',2)};
     return {
       ready:Object.values(dimensions).some(dimension=>!!dimension.current),
       history,observations,current,confidence,trajectory,effectiveDays,observedDays,dimensions,parameters:reportedParameters,
@@ -3698,15 +3709,6 @@ type CoachGuardrails=Readonly<{
   variability:ReturnType<(typeof InsightsAnalytics)['computeAdvanced']>['outputStability'];
   progress:ReturnType<(typeof InsightsAnalytics)['progressEvidenceStrength']>;
 }>;
-type CoachChangePoint=Readonly<{detected?:boolean;confidence?:Confidence;delta?:number|null;date?:string|null;beforeMean?:number|null;afterMean?:number|null}>;
-type CoachWorkloadCurvePoint=Readonly<{planned:number;strongProbability?:number|null}>;
-type CoachWorkloadTradeoff=Readonly<{low:CoachWorkloadCurvePoint;high:CoachWorkloadCurvePoint;completionDrop:number;reliabilityDrop:number|null}>;
-type CoachWorkloadForecast=Readonly<{completionReady:boolean;strongReady:boolean;strongProbability?:number|null;scenarioPlanned:number;completionMean:number;completionLow:number;completionHigh:number;rangeReady:boolean}>;
-type CoachWorkload=Readonly<{ready:boolean;tradeoff?:CoachWorkloadTradeoff|null;forecast?:CoachWorkloadForecast|null;recommendation?:WorkloadRecommendation|null;confidence?:Confidence}>;
-type CoachCascade=Readonly<{ready:boolean;primary?:Readonly<{text:string;effect:number;confidence:Confidence}>|null}>;
-type CoachAllocation=Readonly<{ready:boolean;divergence?:number|null;label?:string;topOver?:Readonly<{label:string;gap:number}>|null;topUnder?:Readonly<{label:string;gap:number}>|null;confidence?:Confidence}>;
-type CoachBayesian=Readonly<{clearest?:Readonly<{label:string;dimension?:string;meaningful:boolean;effect:number;estimate:PatternEstimate}>|null}>;
-type CoachDynamics=Readonly<{changePoint?:CoachChangePoint;workload?:CoachWorkload;cascade?:CoachCascade;allocation?:CoachAllocation;bayesian?:CoachBayesian}>;
 type CoachModelInput=Readonly<{
   recordCount:number;windowLabel:string;trendBasis:DirectionalBasis;overview:CoachOverview;
   streak:ReturnType<(typeof InsightsAnalytics)['computeStreak']>;
