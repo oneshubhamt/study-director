@@ -111,10 +111,11 @@ type SequenceExampleRow=Readonly<{y:number;position:number;planned:number;base:r
 type FitnessPredictors=Readonly<{capacity:number;execution:number;recovery:number}>;
 type PriorFitnessPredictors=FitnessPredictors&Readonly<{date:string;day:number;basis:string}>;
 type WorkloadRow=DailySeriesWithDay&Readonly<{completion:number;strong:boolean;priorState:number;fitness:PriorFitnessPredictors|null}>;
-type WorkloadSurfaceUnavailable=Readonly<{ready:false;completionReady:false;strongReady:false;rows:number;span:number;reason:string;completionFit:LogisticFit;strongFit:LogisticFit}>;
+type WorkloadSurfaceUnavailable=Readonly<{ready:false;completionReady:false;strongReady:false;rows:number;span:number;reason:string;strongReason:string;completionFit:LogisticFit;strongFit:LogisticFit}>;
 type WorkloadSurfaceReady=Readonly<{ready:true;completionReady:true;strongReady:boolean;rows:number;span:number;reason:null;strongReason:string|null;completionFit:LogisticFit;strongFit:LogisticFit;loadMean:number;loadSd:number;stateMean:number;stateSd:number;features:(row:WorkloadRow)=>number[];residualSd:number|null;strongDays:number;nonStrongDays:number}>;
 type WorkloadSurface=WorkloadSurfaceUnavailable|WorkloadSurfaceReady;
 type StateAwareRow=WorkloadRow&Readonly<{fitness:PriorFitnessPredictors}>;
+type PredictionSurface=Readonly<{completionFit:LogisticFit;strongFit:LogisticFit;strongReady:boolean;residualSd:number|null}>;
 type StateAwareSurfaceUnavailable=Readonly<{ready:false;completionReady:false;strongReady:false;rows:number;span:number;reason:string;strongReason:string}>;
 type StateAwareSurfaceReady=Readonly<{ready:true;completionReady:true;strongReady:boolean;rows:number;span:number;reason:null;strongReason:string|null;completionFit:LogisticFit;strongFit:LogisticFit;loadMean:number;loadSd:number;stateKeys:readonly FitnessKey[];stateMeans:Record<FitnessKey,number>;stateSds:Record<FitnessKey,number>;features:(row:Readonly<{planned:number;fitness:FitnessPredictors}>)=>number[];residualSd:number|null;strongDays:number;nonStrongDays:number;forecastCausal:boolean}>;
 type StateAwareSurface=StateAwareSurfaceUnavailable|StateAwareSurfaceReady;
@@ -2401,7 +2402,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const processSd=keys.map((key,keyIndex)=>{
       const residuals:number[]=[];
       for(let index=1;index<observations.length;index+=1){
-        const before=observations[index-1],after=observations[index];
+        const before=observations[index-1]!,after=observations[index]!;
         if(after.day-before.day>3)continue;
         const beforeValue=before.components[key].value,afterValue=after.components[key].value;
         if(isFiniteNumber(beforeValue)&&isFiniteNumber(afterValue))residuals.push(afterValue-(centers[keyIndex]!+persistence[keyIndex]!*(beforeValue-centers[keyIndex]!)));
@@ -3160,7 +3161,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
         ? `Planned workload spans only ${minutesLabel(span)}; about ${minutesLabel(MIN_WORKLOAD_FRONTIER_SPAN)} is needed to compare load levels.`
         : null;
     if(baseReason)return {
-      ready:false,completionReady:false,strongReady:false,rows:rows.length,span,reason:baseReason,
+      ready:false,completionReady:false,strongReady:false,rows:rows.length,span,reason:baseReason,strongReason:'Completion response is not yet estimable.',
       completionFit:{ready:false,rows:rows.length,reason:baseReason},
       strongFit:{ready:false,rows:rows.length,reason:'Completion response is not yet estimable.'}
     };
@@ -3176,16 +3177,21 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const strongFit=strongDays>=5&&nonStrongDays>=5
       ? fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:row.strong?1:0})),{lambda:3.5,minimumRows:minimumDays})
       : {ready:false,rows:rows.length,strongDays,nonStrongDays,reason:'Need five strong and five non-strong days.'};
-    const residuals=completionFit.ready?preparedRows.map(({row,x})=>row.completion/100-predictRegularizedLogistic(completionFit,x,.8).mean):[];
+    if(!completionFit.ready)return {
+      ready:false,completionReady:false,strongReady:false,rows:rows.length,span,
+      reason:completionFit.reason||'Completion response could not be estimated.',
+      strongReason:strongFit.ready?'Strong-day probability is available but completion response is not.':strongFit.reason||'Strong-day probability could not be estimated.',
+      completionFit,strongFit
+    };
+    const residuals=preparedRows.map(({row,x})=>row.completion/100-num(predictRegularizedLogistic(completionFit,x,.8).mean));
     return {
-      ready:!!completionFit.ready,completionReady:!!completionFit.ready,strongReady:!!strongFit.ready,
+      ready:true,completionReady:true,strongReady:!!strongFit.ready,
       rows:rows.length,span,loadMean,loadSd,stateMean,stateSd,features,completionFit,strongFit,strongDays,nonStrongDays,
       residualSd:residuals.length?Math.sqrt(mean(residuals.map(value=>value*value))!):null,
-      reason:completionFit.ready?null:completionFit.reason||'Completion response could not be estimated.',
-      strongReason:strongFit.ready?null:strongFit.reason||'Strong-day probability could not be estimated.'
+      reason:null,strongReason:strongFit.ready?null:strongFit.reason||'Strong-day probability could not be estimated.'
     };
   }
-  function calibratedStrongPrediction(surface:WorkloadSurface,features:readonly number[],calibrator:LogisticFit|null=null){
+  function calibratedStrongPrediction(surface:PredictionSurface,features:readonly number[],calibrator:LogisticFit|null=null){
     if(!surface||!surface.strongReady)return {raw:null,calibrated:null};
     const raw=predictRegularizedLogistic(surface.strongFit,features,.8);
     const calibrated=calibrator&&calibrator.ready
@@ -3193,7 +3199,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       : raw;
     return {raw,calibrated};
   }
-  function completionPredictionEnvelope(surface:WorkloadSurface,features:readonly number[],completionHalfWidth:number|null=null){
+  function completionPredictionEnvelope(surface:PredictionSurface,features:readonly number[],completionHalfWidth:number|null=null){
     const completion=predictRegularizedLogistic(surface.completionFit,features,.8);
     const completionMean=num(completion.mean),completionWidth=num(completion.width);
     const residual=Math.max(.04,num(surface.residualSd,.12));
@@ -3207,7 +3213,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       rangeMethod:calibrated?'backtest-calibrated':'model-estimated'
     };
   }
-  function predictionSummary(surface:WorkloadSurface,features:readonly number[],planned:number,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null):PredictionSummary{
+  function predictionSummary(surface:PredictionSurface,features:readonly number[],planned:number,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null):PredictionSummary{
     const completion=completionPredictionEnvelope(surface,features,completionHalfWidth);
     const strong=calibratedStrongPrediction(surface,features,calibrator);
     return {
@@ -3219,8 +3225,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       expectedCompleted:planned*completion.mean
     };
   }
-  function predictWorkloadSurface(surface:WorkloadSurface,planned:number,priorState:number,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null){
-    if(!surface||!surface.completionReady)return null;
+  function predictWorkloadSurface(surface:WorkloadSurfaceReady,planned:number,priorState:number,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null){
     const load=(planned-surface.loadMean)/surface.loadSd,state=(priorState-surface.stateMean)/surface.stateSd;
     const features=[load,load*load-1,state];
     return {planned,priorState,...predictionSummary(surface,features,planned,calibrator,completionHalfWidth)};
@@ -3248,18 +3253,22 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const strongFit=strongDays>=5&&nonStrongDays>=5
       ? fitRegularizedLogistic(preparedRows.map(({row,x})=>({x,y:row.strong?1:0})),{lambda:6.5,minimumRows:minimumDays})
       : {ready:false,rows:complete.length,strongDays,nonStrongDays,reason:'Need five strong and five non-strong state-complete days.'};
-    const residuals=completionFit.ready?preparedRows.map(({row,x})=>row.completion/100-predictRegularizedLogistic(completionFit,x,.8).mean):[];
+    if(!completionFit.ready)return {
+      ready:false,completionReady:false,strongReady:false,rows:complete.length,span,
+      reason:completionFit.reason||'State-aware completion forecast could not be estimated.',
+      strongReason:strongFit.ready?'State-aware strong-day probability is available but completion response is not.':strongFit.reason||'State-aware strong-day probability could not be estimated.'
+    };
+    const residuals=preparedRows.map(({row,x})=>row.completion/100-num(predictRegularizedLogistic(completionFit,x,.8).mean));
     return {
-      ready:!!completionFit.ready,completionReady:!!completionFit.ready,strongReady:!!strongFit.ready,rows:complete.length,span,
+      ready:true,completionReady:true,strongReady:!!strongFit.ready,rows:complete.length,span,
       loadMean,loadSd,stateKeys,stateMeans,stateSds,features,completionFit,strongFit,strongDays,nonStrongDays,
-      residualSd:residuals.length?Math.sqrt(mean(residuals.map(value=>value*value))):null,
-      forecastCausal:complete.every(row=>row.fitness?.basis==='origin-causal-prior-day'),
-      reason:completionFit.ready?null:completionFit.reason||'State-aware completion forecast could not be estimated.',
-      strongReason:strongFit.ready?null:strongFit.reason||'State-aware strong-day probability could not be estimated.'
+      residualSd:residuals.length?Math.sqrt(mean(residuals.map(value=>value*value))!):null,
+      forecastCausal:complete.every(row=>row.fitness.basis==='origin-causal-prior-day'),
+      reason:null,strongReason:strongFit.ready?null:strongFit.reason||'State-aware strong-day probability could not be estimated.'
     };
   }
-  function predictStateAwareForecastSurface(surface:StateAwareSurface,planned:number,fitness:FitnessPredictors|null,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null){
-    if(!surface||!surface.completionReady||!fitness||!isFiniteNumber(fitness.capacity)||!isFiniteNumber(fitness.execution)||!isFiniteNumber(fitness.recovery))return null;
+  function predictStateAwareForecastSurface(surface:StateAwareSurfaceReady,planned:number,fitness:FitnessPredictors|null,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null){
+    if(!fitness||!isFiniteNumber(fitness.capacity)||!isFiniteNumber(fitness.execution)||!isFiniteNumber(fitness.recovery))return null;
     const features=surface.features({planned,fitness});
     return {planned,fitness:{...fitness},...predictionSummary(surface,features,planned,calibrator,completionHalfWidth)};
   }
@@ -3271,13 +3280,9 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const predictions:ForecastPrediction[]=[];
     for(const index of origins){
       const training=rows.slice(0,index),test=rows[index]!;
-      const surface=stateAware
-        ? fitStateAwareForecastSurface(training,{minimumDays:MIN_STATE_AWARE_FORECAST_COMPLETE_DAYS})
-        : fitWorkloadSurface(training,{minimumDays:18});
-      if(!surface.completionReady)continue;
       const prediction=stateAware
-        ? predictStateAwareForecastSurface(surface,test.planned,test.fitness)
-        : predictWorkloadSurface(surface,test.planned,test.priorState);
+        ? (()=>{const surface=fitStateAwareForecastSurface(training,{minimumDays:MIN_STATE_AWARE_FORECAST_COMPLETE_DAYS});return surface.completionReady?predictStateAwareForecastSurface(surface,test.planned,test.fitness):null;})()
+        : (()=>{const surface=fitWorkloadSurface(training,{minimumDays:18});return surface.completionReady?predictWorkloadSurface(surface,test.planned,test.priorState):null;})();
       const recentCompletion=median(training.slice(-7).map(row=>row.completion).filter(isFiniteNumber));
       if(prediction)predictions.push({
         date:test.date,actualStrong:test.strong?1:0,actualCompletion:test.completion/100,
@@ -3406,7 +3411,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const span=rows.length?Math.max(...plannedValues)-Math.min(...plannedValues):0;
     const observations=rows.map(row=>Object.freeze({date:row.date,day:row.day,planned:round(row.planned,1),completion:round(row.completion,1),completed:round(row.completed,1),strong:!!row.strong,stateReady:!!row.fitness,stateBasis:row.fitness&&row.fitness.basis||null}));
     const empiricalBands=empiricalWorkloadBands(rows);
-    const surface=fitWorkloadSurface(rows),stateAwareSurface=fitStateAwareForecastSurface(rows),calibration=surface.completionReady?forecastCalibration(rows):null;
+    const surface=fitWorkloadSurface(rows),stateAwareSurface=fitStateAwareForecastSurface(rows);
     if(!surface.completionReady)return {
       ready:false,completionReady:false,strongReady:false,days:rows.length,span,minimumDays:MIN_WORKLOAD_FRONTIER_DAYS,minimumSpan:MIN_WORKLOAD_FRONTIER_SPAN,observations,empiricalBands,curve:[],forecastCurve:[],recommendation:null,tradeoff:null,
       capabilities:{
@@ -3417,6 +3422,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       },
       confidence:descriptiveEvidenceConfidence(rows.length,sum(rows.map(row=>row.completed))),reason:surface.reason
     };
+    const calibration=forecastCalibration(rows);
     const minimum=Math.min(...plannedValues),maximum=Math.max(...plannedValues),latestState=rows.length?(.78*rows[rows.length-1].priorState+.22*rows[rows.length-1].completion):50;
     const baselineCalibrator=calibration.selectedModel==='baseline'&&calibration.strongReady?calibration.calibrator:null;
     const supportRadius=Math.max(45,surface.loadSd*WORKLOAD_LOCAL_SUPPORT_RADIUS_SD);
@@ -3430,11 +3436,11 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     else curve.forEach(point=>{point.frontier=!curve.some(other=>other!==point&&other.expectedCompleted>=point.expectedCompleted&&other.completionMean>=point.completionMean&&(other.expectedCompleted>point.expectedCompleted||other.completionMean>point.completionMean));});
     const supportedCurve=curve.filter(point=>point.localSupport>=MIN_WORKLOAD_LOCAL_SUPPORT_DAYS);
     if(!supportedCurve.length){
-      const checkedCalibration=calibration!;const publicCalibration=detail?checkedCalibration:compactForecastCalibration(checkedCalibration);
+      const publicCalibration=detail?calibration:compactForecastCalibration(calibration);
       const supportReason=`No workload region has ${MIN_WORKLOAD_LOCAL_SUPPORT_DAYS}+ nearby observed days within ${minutesLabel(supportRadius)}.`;
       return {
         ready:true,completionReady:true,strongReady:surface.strongReady,days:rows.length,span,minimumDays:MIN_WORKLOAD_FRONTIER_DAYS,minimumSpan:MIN_WORKLOAD_FRONTIER_SPAN,method:'regularised-probabilistic-response-surface',curve,forecastCurve:[],
-        surface:{loadMean:round(surface.loadMean,1),loadSd:round(surface.loadSd,1),stateMean:round(surface.stateMean,1),stateSd:round(surface.stateSd,1),residualSd:round(surface.residualSd,3),strongDays:surface.strongDays,nonStrongDays:surface.nonStrongDays,stateAwareRows:stateAwareSurface.rows||0,stateAwareReady:!!stateAwareSurface.completionReady,stateAwareCausal:!!stateAwareSurface.forecastCausal},
+        surface:{loadMean:round(surface.loadMean,1),loadSd:round(surface.loadSd,1),stateMean:round(surface.stateMean,1),stateSd:round(surface.stateSd,1),residualSd:round(surface.residualSd,3),strongDays:surface.strongDays,nonStrongDays:surface.nonStrongDays,stateAwareRows:stateAwareSurface.rows||0,stateAwareReady:!!stateAwareSurface.completionReady,stateAwareCausal:stateAwareSurface.completionReady?stateAwareSurface.forecastCausal:false},
         capabilities:{
           completion:capabilityResult(true,null,{confidence:descriptiveEvidenceConfidence(rows.length,sum(rows.map(row=>row.completed))),observations:rows.length,days:rows.length,method:'regularised-completion-response'}),
           strong:capabilityResult(surface.strongReady,surface.strongReason,{confidence:surface.strongReady?descriptiveEvidenceConfidence(rows.length,sum(rows.map(row=>row.completed))):null,observations:rows.length,days:rows.length,method:'regularised-strong-day-response'}),
@@ -3449,31 +3455,32 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const bestExpected=Math.max(...supportedCurve.map(point=>point.expectedCompleted));
     let efficient:typeof curve,selected:typeof curve[number]|undefined,rangePoints:typeof curve;
     if(surface.strongReady){
-      const bestReliability=Math.max(...supportedCurve.map(point=>point.strongProbability)),reliabilityFloor=bestReliability>=55?Math.max(55,bestReliability-10):Math.max(0,bestReliability-10);
-      efficient=supportedCurve.filter(point=>point.frontier&&point.strongProbability>=reliabilityFloor&&point.expectedCompleted>=bestExpected*.35);
-      selected=(efficient.length?efficient:supportedCurve).slice().sort((a,b)=>(b.expectedCompleted*(.5+b.strongProbability/200))-(a.expectedCompleted*(.5+a.strongProbability/200)))[0];
-      rangePoints=supportedCurve.filter(point=>point.strongProbability>=num(selected?.strongProbability)-5&&point.expectedCompleted>=selected.expectedCompleted*.9);
+      const bestReliability=Math.max(...supportedCurve.map(point=>num(point.strongProbability))),reliabilityFloor=bestReliability>=55?Math.max(55,bestReliability-10):Math.max(0,bestReliability-10);
+      efficient=supportedCurve.filter(point=>point.frontier&&num(point.strongProbability)>=reliabilityFloor&&point.expectedCompleted>=bestExpected*.35);
+      selected=(efficient.length?efficient:supportedCurve).slice().sort((a,b)=>(b.expectedCompleted*(.5+num(b.strongProbability)/200))-(a.expectedCompleted*(.5+num(a.strongProbability)/200)))[0];
+      rangePoints=supportedCurve.filter(point=>num(point.strongProbability)>=num(selected?.strongProbability)-5&&point.expectedCompleted>=selectedPoint.expectedCompleted*.9);
     }else{
       const bestCompletion=Math.max(...supportedCurve.map(point=>point.completionMean)),completionFloor=bestCompletion>=65?Math.max(60,bestCompletion-10):Math.max(0,bestCompletion-10);
       efficient=supportedCurve.filter(point=>point.frontier&&point.completionMean>=completionFloor&&point.expectedCompleted>=bestExpected*.35);
       selected=(efficient.length?efficient:supportedCurve).slice().sort((a,b)=>(b.expectedCompleted*(.5+b.completionMean/200))-(a.expectedCompleted*(.5+a.completionMean/200)))[0];
-      rangePoints=supportedCurve.filter(point=>point.completionMean>=selected.completionMean-5&&point.expectedCompleted>=selected.expectedCompleted*.9);
+      rangePoints=supportedCurve.filter(point=>point.completionMean>=selectedPoint.completionMean-5&&point.expectedCompleted>=selectedPoint.expectedCompleted*.9);
     }
-    const anchorBand=empiricalBands.find(band=>selected.planned>=band.minPlanned&&selected.planned<=band.maxPlanned)||empiricalBands.slice().sort((a,b)=>Math.abs(a.meanPlanned-selected.planned)-Math.abs(b.meanPlanned-selected.planned))[0]||null;
-    const recommendation={minPlanned:Math.min(...rangePoints.map(point=>point.planned)),maxPlanned:Math.max(...rangePoints.map(point=>point.planned)),typicalPlanned:selected.planned,expectedCompleted:selected.expectedCompleted,strongProbability:selected.strongProbability,probabilityLow:selected.strongLow,probabilityHigh:selected.strongHigh,completionMean:selected.completionMean,confidence:descriptiveEvidenceConfidence(rows.length,sum(rows.map(row=>row.completed))),days:rows.length,localSupport:selected.localSupport,belowStrongThreshold:surface.strongReady?Math.max(...supportedCurve.map(point=>point.strongProbability))<55:null,pointIndex:selected.index,mode:surface.strongReady?'completion-and-strong':'completion-only',empiricalBandIndex:anchorBand&&anchorBand.index};
-    const lowPoint=supportedCurve.slice(0,Math.ceil(supportedCurve.length/2)).sort((a,b)=>b.completionMean-a.completionMean)[0],highPoint=supportedCurve[supportedCurve.length-1];
+    const selectedPoint=selected!;
+    const anchorBand=empiricalBands.find(band=>selectedPoint.planned>=band.minPlanned&&selectedPoint.planned<=band.maxPlanned)||empiricalBands.slice().sort((a,b)=>Math.abs(a.meanPlanned-selectedPoint.planned)-Math.abs(b.meanPlanned-selectedPoint.planned))[0]||null;
+    const recommendation={minPlanned:Math.min(...rangePoints.map(point=>point.planned)),maxPlanned:Math.max(...rangePoints.map(point=>point.planned)),typicalPlanned:selectedPoint.planned,expectedCompleted:selectedPoint.expectedCompleted,strongProbability:selectedPoint.strongProbability,probabilityLow:selectedPoint.strongLow,probabilityHigh:selectedPoint.strongHigh,completionMean:selectedPoint.completionMean,confidence:descriptiveEvidenceConfidence(rows.length,sum(rows.map(row=>row.completed))),days:rows.length,localSupport:selectedPoint.localSupport,belowStrongThreshold:surface.strongReady?Math.max(...supportedCurve.map(point=>num(point.strongProbability)))<55:null,pointIndex:selectedPoint.index,mode:surface.strongReady?'completion-and-strong':'completion-only',empiricalBandIndex:anchorBand&&anchorBand.index};
+    const lowPoint=supportedCurve.slice(0,Math.ceil(supportedCurve.length/2)).sort((a,b)=>b.completionMean-a.completionMean)[0]!,highPoint=supportedCurve[supportedCurve.length-1]!;
     const completionDrop=round(lowPoint.completionMean-highPoint.completionMean,1),reliabilityDrop=surface.strongReady?round(num(lowPoint?.strongProbability)-num(highPoint?.strongProbability),1):null;
-    const tradeoff=(completionDrop>=MIN_CHANGE_POINT_DELTA_POINTS||(Number.isFinite(reliabilityDrop)&&reliabilityDrop>=10))?{low:lowPoint,high:highPoint,completionDrop,reliabilityDrop,effect:Math.max(completionDrop,Number.isFinite(reliabilityDrop)?reliabilityDrop:0)}:null;
-    const recentPlans=rows.slice(-FITNESS_RECENT_LOAD_DAYS).map(row=>row.planned).sort((a,b)=>a-b),scenarioPlanned=Math.round(median(recentPlans)||selected.planned);
+    const tradeoff=(completionDrop>=MIN_CHANGE_POINT_DELTA_POINTS||(isFiniteNumber(reliabilityDrop)&&reliabilityDrop>=10))?{low:lowPoint,high:highPoint,completionDrop,reliabilityDrop,effect:Math.max(completionDrop,Number.isFinite(reliabilityDrop)?reliabilityDrop:0)}:null;
+    const recentPlans=rows.slice(-FITNESS_RECENT_LOAD_DAYS).map(row=>row.planned).sort((a,b)=>a-b),scenarioPlanned=Math.round(median(recentPlans)??selectedPoint.planned);
     const currentFitness=currentFitnessPredictors(performanceState),useStateAware=calibration.selectedModel==='state-aware'&&stateAwareSurface.completionReady&&stateAwareSurface.forecastCausal&&currentFitness;
-    const forecastCalibrator=checkedCalibration.strongReady?checkedCalibration.calibrator:null;
-    const forecastHalfWidth=checkedCalibration.intervalReady&&checkedCalibration.completionRange?calibration.completionRange.halfWidth:null;
-    const forecastPrediction=planned=>useStateAware
+    const forecastCalibrator=calibration.strongReady?calibration.calibrator:null;
+    const forecastHalfWidth=calibration.intervalReady&&calibration.completionRange?calibration.completionRange.halfWidth:null;
+    const forecastPrediction=(planned:number)=>useStateAware
       ? predictStateAwareForecastSurface(stateAwareSurface,planned,currentFitness,forecastCalibrator,forecastHalfWidth)
       : predictWorkloadSurface(surface,planned,latestState,forecastCalibrator,forecastHalfWidth);
-    const scenarioPrediction=forecastPrediction(scenarioPlanned);
+    const scenarioPrediction=forecastPrediction(scenarioPlanned)!;
     const forecastCurve=Array.from({length:WORKLOAD_CURVE_POINTS},(_,index)=>{
-      const planned=minimum+(maximum-minimum)*(index/(WORKLOAD_CURVE_POINTS-1)),prediction=forecastPrediction(planned);
+      const planned=minimum+(maximum-minimum)*(index/(WORKLOAD_CURVE_POINTS-1)),prediction=forecastPrediction(planned)!;
       return {index,planned:Math.round(planned),completionMean:round(prediction.completionMean*100,1),completionLow:round(prediction.completionLow*100,1),completionHigh:round(prediction.completionHigh*100,1),strongProbability:Number.isFinite(prediction.strongProbability)?round(prediction.strongProbability*100,1):null,strongLow:Number.isFinite(prediction.strongLow)?round(prediction.strongLow*100,1):null,strongHigh:Number.isFinite(prediction.strongHigh)?round(prediction.strongHigh*100,1):null,expectedCompleted:round(prediction.expectedCompleted,1)};
     });
     const publicCalibration=detail?checkedCalibration:compactForecastCalibration(checkedCalibration);
@@ -3484,7 +3491,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const forecast={
       ready:(calibration.ready&&scenarioSupported),completionReady:forecastCompletionReady,strongReady:forecastStrongReady,completionReason:supportReason||calibration.completionReason,strongReason:supportReason||calibration.strongReason,scenarioPlanned,scenarioSource:'recent eligible-plan median',scenarioSupport,state:round(latestState,1),
       modelKey:useStateAware?'state-aware':'baseline',modelLabel:useStateAware?'State-aware forecast':'Baseline workload forecast',selectionReason:calibration.selectionReason,statePredictors:useStateAware?{...currentFitness}:null,statePredictorsCausal:useStateAware?true:null,
-      completionMean:round(scenarioPrediction.completionMean*100,1),completionLow:round(scenarioPrediction.completionLow*100,1),completionHigh:round(scenarioPrediction.completionHigh*100,1),completionRangeMethod:scenarioPrediction.completionRangeMethod,rangeReady:!!calibration.intervalReady,rangeLabel:calibration.intervalReady?'Backtest-checked 80% range':'Estimated model range',rangeCoverage:calibration.completionRange&&calibration.completionRange.coverage,rangeBacktests:calibration.completionRange&&calibration.completionRange.coverageTests,rangeReason:checkedCalibration.intervalReason,strongProbability:Number.isFinite(scenarioPrediction.strongProbability)?round(scenarioPrediction.strongProbability*100,1):null,strongLow:Number.isFinite(scenarioPrediction.strongLow)?round(scenarioPrediction.strongLow*100,1):null,strongHigh:Number.isFinite(scenarioPrediction.strongHigh)?round(scenarioPrediction.strongHigh*100,1):null,expectedCompleted:round(scenarioPrediction.expectedCompleted,1),calibration:publicCalibration
+      completionMean:round(scenarioPrediction.completionMean*100,1),completionLow:round(scenarioPrediction.completionLow*100,1),completionHigh:round(scenarioPrediction.completionHigh*100,1),completionRangeMethod:scenarioPrediction.completionRangeMethod,rangeReady:!!calibration.intervalReady,rangeLabel:calibration.intervalReady?'Backtest-checked 80% range':'Estimated model range',rangeCoverage:calibration.completionRange&&calibration.completionRange.coverage,rangeBacktests:calibration.completionRange&&calibration.completionRange.coverageTests,rangeReason:calibration.intervalReason,strongProbability:Number.isFinite(scenarioPrediction.strongProbability)?round(scenarioPrediction.strongProbability*100,1):null,strongLow:Number.isFinite(scenarioPrediction.strongLow)?round(scenarioPrediction.strongLow*100,1):null,strongHigh:Number.isFinite(scenarioPrediction.strongHigh)?round(scenarioPrediction.strongHigh*100,1):null,expectedCompleted:round(scenarioPrediction.expectedCompleted,1),calibration:publicCalibration
     };
     return {
       ready:true,completionReady:true,strongReady:surface.strongReady,days:rows.length,span,minimumDays:MIN_WORKLOAD_FRONTIER_DAYS,minimumSpan:MIN_WORKLOAD_FRONTIER_SPAN,method:'regularised-probabilistic-response-surface',curve,forecastCurve,
