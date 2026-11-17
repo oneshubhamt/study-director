@@ -1,5 +1,32 @@
 import type {InsightsModelRuntime,InsightsResult} from './insights-model.ts';
 
+type Model=InsightsResult;
+type Subject=Model['subjects'][number];
+type DailyRow=Model['daily'][number];
+type Practice=Model['practice'];
+type PracticeDailyRow=Practice['daily'][number];
+type PracticePositionRow=Practice['position']['profile'][number];
+type PracticeRepeatedSegment=Practice['repeatedSegments'][number];
+type PracticeSizeGroup=Practice['unitSizeGroups']['all'][number];
+type PracticeGroupRow=Practice['areas'][number];
+type Fitness=Model['fitness'];
+type FitnessDimension=NonNullable<Fitness['performanceState']['dimensions']>[keyof NonNullable<Fitness['performanceState']['dimensions']>];
+type Dynamics=Model['dynamics'];
+type Workload=NonNullable<Dynamics['workload']>;
+type ChartHit=Readonly<{node:SVGElement;text:string;initial?:boolean}>;
+type ChartNode=Element;
+type ChartItem={draw:()=>ChartNode;after?:()=>void;node:ChartNode};
+type RendererApi=Readonly<{
+  preview?:Readonly<{
+    clear?(target:string):unknown;
+    useSample?(options:Readonly<{label:string;target:'insights';today:string}>):PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>;
+  }>;
+  ui?:Readonly<{goTab?(tab:string):unknown}>;
+}>;
+type Reload=()=>unknown;
+type DisplayValue=string|number|null|undefined;
+
+
 const PREVIEW_SAMPLE_DAYS=28;
 const MIN_WEEKDAY_SAMPLES_FOR_PATTERN=3;
 const MIN_VISIBLE_PRACTICE_DIFFERENCE_POINTS=8;
@@ -47,23 +74,23 @@ function createInsightsRendering(
     const {
       hasBestSubjectEvidence
     }=Coach;
-  function el(tag,className,text){
+  function el<K extends keyof HTMLElementTagNameMap>(tag:K,className?:string|null,text?:DisplayValue):HTMLElementTagNameMap[K]{
     const node=document.createElement(tag);
     if(className)node.className=className;
     if(text!==undefined&&text!==null)node.textContent=String(text);
     return node;
   }
-  function evidenceNote(text,className=''){
+  function evidenceNote(text:DisplayValue,className=''):HTMLDivElement{
     return el('div',`insights-note${className?' '+className:''} ui-mono`,text);
   }
-  function kvItem(className,label,value,note='',valueFirst=false,labelClass='k ui-label',valueClass='v ui-mono'){
+  function kvItem(className:string,label:DisplayValue,value:DisplayValue,note:DisplayValue='',valueFirst=false,labelClass='k ui-label',valueClass='v ui-mono'):HTMLDivElement{
     const item=el('div',className);
     const labelNode=el('div',labelClass,label),valueNode=el('div',valueClass,value);
     item.append(...(valueFirst?[valueNode,labelNode]:[labelNode,valueNode]));
     if(note)item.appendChild(el('div','n ui-mono',note));
     return item;
   }
-  function lazyDisclosure(className,summary,build,busy=false){
+  function lazyDisclosure(className:string,summary:string|Node,build:()=>Node|null|undefined,busy=false):HTMLDetailsElement{
     const details=el('details',className);
     details.appendChild(typeof summary==='string'?el('summary',null,summary):summary);
     let rendered=false,builder=build;
@@ -78,7 +105,7 @@ function createInsightsRendering(
     });
     return details;
   }
-  function svgEl(tag,attrs={}){
+  function svgEl<K extends keyof SVGElementTagNameMap>(tag:K,attrs:Readonly<Record<string,string|number>>={}):SVGElementTagNameMap[K]{
     const node=document.createElementNS(SVG_NS,tag);
     Object.entries(attrs).forEach(([key,value])=>node.setAttribute(key,String(value)));
     return node;
@@ -87,12 +114,12 @@ function createInsightsRendering(
     return !!(window.matchMedia&&window.matchMedia('(max-width:620px)').matches);
   }
   const Layout=(()=>{
-    const charts=new Set();let compact=isCompact(),timer;
-    const purge=pane=>charts.forEach(item=>{if(!item.node.isConnected||pane.contains(item.node))charts.delete(item);});
-    const chart=(draw,after)=>{const item={draw,after,node:draw()};charts.add(item);return item.node;};
-    const redraw=pane=>charts.forEach(item=>{if(!item.node.isConnected){charts.delete(item);return;}if(pane.contains(item.node)){const next=item.draw();item.node.replaceWith(next);item.node=next;if(item.after)item.after();}});
+    const charts=new Set<ChartItem>();let compact=isCompact(),timer:number|null=null;
+    const purge=(pane:HTMLElement)=>charts.forEach(item=>{if(!item.node.isConnected||pane.contains(item.node))charts.delete(item);});
+    const chart=(draw:()=>ChartNode,after?:()=>void)=>{const item:ChartItem={draw,after,node:draw()};charts.add(item);return item.node;};
+    const redraw=(pane:HTMLElement)=>charts.forEach(item=>{if(!item.node.isConnected){charts.delete(item);return;}if(pane.contains(item.node)){const next=item.draw();item.node.replaceWith(next);item.node=next;if(item.after)item.after();}});
     const mark=()=>{compact=isCompact();};
-    const resize=getPane=>{
+    const resize=(getPane:()=>HTMLElement|null)=>{
       const next=isCompact();if(next===compact){if(timer){clearTimeout(timer);timer=null;}return;}
       if(timer)clearTimeout(timer);
       timer=setTimeout(()=>{timer=null;const final=isCompact();if(final===compact)return;compact=final;const pane=getPane();if(pane)redraw(pane);},120);
@@ -100,7 +127,7 @@ function createInsightsRendering(
     return Object.freeze({chart,mark,purge,resize});
   })();
   let accessibleGraphicSequence=0;
-  function labelGraphic(svg,label,description=''){
+  function labelGraphic(svg:SVGSVGElement,label:string,description=''):SVGSVGElement{
     if(!svg)return svg;
     const id=`insights-graphic-${++accessibleGraphicSequence}`;
     const title=svgEl('title',{id:`${id}-title`});
@@ -116,7 +143,7 @@ function createInsightsRendering(
     svg.setAttribute('aria-labelledby',labelledBy.join(' '));
     return svg;
   }
-  function chartHitRadiusClass(radius){
+  function chartHitRadiusClass(radius:number){
     const value=Number(radius);
     if(value===8)return ' chart-hit-xs';
     if(value===9)return ' chart-hit-sm';
@@ -126,18 +153,18 @@ function createInsightsRendering(
     if(value===22)return ' chart-hit-touch';
     return '';
   }
-  function chartHitCircle(svg,x,y,text,items,r=14){
+  function chartHitCircle(svg:SVGSVGElement,x:number,y:number,text:string,items:ChartHit[],r=14){
     const hit=svgEl('circle',{class:`chart-hit-zone${chartHitRadiusClass(r)}`,cx:x,cy:y,r,tabindex:'0',role:'button','aria-label':text});
     svg.appendChild(hit);items.push({node:hit,text});return hit;
   }
-  function chartHitRect(svg,x,y,width,height,text,items){
+  function chartHitRect(svg:SVGSVGElement,x:number,y:number,width:number,height:number,text:string,items:ChartHit[]){
     const hit=svgEl('rect',{class:'chart-hit-zone',x,y,width,height,tabindex:'0',role:'button','aria-label':text});
     svg.appendChild(hit);items.push({node:hit,text});return hit;
   }
   function coarsePointerActive(){
     return !!(window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches);
   }
-  function nearestInteractiveItem(items,clientX,clientY){
+  function nearestInteractiveItem(items:readonly ChartHit[],clientX:number,clientY:number):ChartHit|null{
     let nearest=null,best=Infinity;
     items.forEach(item=>{
       const rect=item&&item.node&&item.node.getBoundingClientRect&&item.node.getBoundingClientRect();
@@ -148,10 +175,10 @@ function createInsightsRendering(
     });
     return nearest;
   }
-  function inspectedChart(svg,items=[],initialText='Tap a point or bar to inspect it.'){
+  function inspectedChart(svg:SVGSVGElement,items:ChartHit[]=[],initialText='Tap a point or bar to inspect it.'):HTMLDivElement{
     const wrap=el('div','insights-chart-widget ui-canvas');
     const caption=el('div','insights-chart-inspector ui-mono',initialText);
-    const select=item=>{
+    const select=(item:ChartHit)=>{
       items.forEach(row=>row.node.classList.toggle('selected',row===item));
       caption.textContent=item.text;
     };
@@ -175,11 +202,11 @@ function createInsightsRendering(
     wrap.append(svg,caption);
     return wrap;
   }
-  function appendChartNote(widget,text){
+  function appendChartNote(widget:HTMLElement,text:string){
     if(widget&&text)widget.appendChild(el('div','insights-rhythm-note ui-mono',text));
     return widget;
   }
-  function chartFrame(width,height,pad,rightPad=pad){
+  function chartFrame(width:number,height:number,pad:number,rightPad=pad){
     const svg=svgEl('svg',{class:'insights-chart',viewBox:`0 0 ${width} ${height}`,role:'group'});
     const plotRight=width-rightPad;
     const plotBottom=height-pad;
@@ -187,7 +214,7 @@ function createInsightsRendering(
     svg.appendChild(svgEl('line',{class:'axis',x1:pad,y1:pad,x2:pad,y2:plotBottom}));
     return {svg,plotRight,plotBottom,plotWidth:plotRight-pad,plotHeight:plotBottom-pad};
   }
-  function chartEmpty(svg,text,x,y,textAnchor){
+  function chartEmpty(svg:SVGSVGElement,text:string,x:number,y:number,textAnchor?:string):SVGSVGElement{
     const label=svgEl('text',{class:'label',x,y,...(textAnchor?{'text-anchor':textAnchor}:{})});
     label.textContent=text;
     svg.appendChild(label);
@@ -826,7 +853,7 @@ function createInsightsRendering(
   }
 
   // 9D. SURFACE RENDERERS
-  function renderDemoBanner(api,reload){
+  function renderDemoBanner(api:RendererApi,reload:Reload){
     const banner=el('div','demo-data-banner ui-card');
     const copy=el('div','demo-data-banner-copy');
     copy.append(el('div','demo-data-banner-title ui-label','Sample Data Mode'),el('div','demo-data-banner-note ui-mono',`Insights is reading a ${PREVIEW_SAMPLE_DAYS}-day sample. These patterns are for guidance only, not your real Library.`));
@@ -839,7 +866,7 @@ function createInsightsRendering(
     banner.append(copy,back);
     return banner;
   }
-  function renderEmptyState(api,reload,currentStudyDate){
+  function renderEmptyState(api:RendererApi,reload:Reload,currentStudyDate:string){
     const box=el('div','insights-empty ui-card ui-mono');
     box.appendChild(el('div',null,'No saved daily records yet. Use Review -> Save Today, then return here.'));
     const actions=el('div','insights-empty-actions');
@@ -869,13 +896,13 @@ function createInsightsRendering(
     if(actions.childNodes.length)box.appendChild(actions);
     return box;
   }
-  function evidenceItem(label,value,note=''){
+  function evidenceItem(label:DisplayValue,value:DisplayValue,note:DisplayValue=''){
     return kvItem('insights-evidence-item',label,value,note,true,'l ui-label');
   }
-  function subjectSignal(label,main,note=''){
+  function subjectSignal(label:DisplayValue,main:DisplayValue,note:DisplayValue=''){
     return kvItem('insights-subject-signal ui-canvas',label,main,note,false,'k ui-label','v ui-label');
   }
-  function renderSubjectSignalStrip(model){
+  function renderSubjectSignalStrip(model:Model){
     const strip=el('div','insights-subject-signals');
     const best=model.interpretation.signals.bestSubject;
     const weak=model.interpretation.signals.weakSubject;
@@ -885,7 +912,7 @@ function createInsightsRendering(
     );
     return strip;
   }
-  function barRow(label,value,detail){
+  function barRow(label:string,value:number|null,detail?:DisplayValue){
     const row=el('div','insights-bar-row');
     const fill=el('div','insights-fill');
     fill.style.width=clampPct(value)+'%';
@@ -896,7 +923,7 @@ function createInsightsRendering(
     row.append(name,track,el('div','insights-pct ui-mono',detail!==undefined?detail:percentLabel(value)));
     return row;
   }
-  function areaCompletionRow(subject){
+  function areaCompletionRow(subject:Subject){
     const early=!hasBestSubjectEvidence(subject);
     const row=el('div','insights-bar-row insights-area-completion-row'+(early?' early':''));
     const fill=el('div','insights-fill');
@@ -911,7 +938,7 @@ function createInsightsRendering(
     row.append(name,track,stats);
     return row;
   }
-  function lifeRow(label,value,total){
+  function lifeRow(label:string,value:number,total:number){
     const pctValue=total>0?Math.round(num(value)/total*100):0;
     const row=el('div','insights-life-row');
     const head=el('div','insights-life-head ui-mono');
@@ -923,19 +950,19 @@ function createInsightsRendering(
     row.append(head,track);
     return row;
   }
-  function card(label,main,note){
+  function card(label:DisplayValue,main:DisplayValue,note?:DisplayValue){
     const box=el('section','insights-card ui-card');
     box.append(el('div','insights-label ui-label',label),el('div','insights-main ui-label',main));
     if(note)box.appendChild(evidenceNote(note));
     return box;
   }
-  function sectionTitle(label,note){
+  function sectionTitle(label:DisplayValue,note?:DisplayValue){
     const row=el('div','insights-section-title');
     row.appendChild(el('div','insights-label ui-label',label));
     if(note)row.appendChild(evidenceNote(note));
     return row;
   }
-  function summaryChip(label,value){
+  function summaryChip(label:DisplayValue,value:DisplayValue){
     const chip=el('div','insights-rhythm-chip ui-canvas');
     chip.append(el('div','k ui-label',label),el('div','v ui-mono',value));
     return chip;
@@ -951,20 +978,20 @@ function createInsightsRendering(
     });
     return wrap;
   }
-  function clusterHeader(label,note){
+  function clusterHeader(label:DisplayValue,note?:DisplayValue){
     const head=el('div','insights-cluster-head');
     head.appendChild(el('div','insights-cluster-title ui-label',label));
     if(note)head.appendChild(el('div','insights-cluster-note ui-mono',note));
     return head;
   }
-  function insightWindowSubtitle(model){
+  function insightWindowSubtitle(model:Model){
     if(!model.recordCount)return 'No saved records in this window yet.';
     const total=model.allRecordCount&&model.allRecordCount!==model.recordCount?` of ${model.allRecordCount}`:'';
     const range=model.dateRange.start&&model.dateRange.end?` · ${shortDate(model.dateRange.start)} to ${shortDate(model.dateRange.end)}`:'';
     const direction=model.trendBasis&&model.trendBasis.capped?' · day-by-day charts and analytical models use the latest 2 years':'';
     return `${model.windowLabel||'Selected window'} · ${model.recordCount}${total} saved day${model.recordCount===1?'':'s'}${range} · totals, averages and counts use the full window${direction}.`;
   }
-  function renderWindowSelector(model,onChange){
+  function renderWindowSelector(model:Model,onChange?:(key:string)=>unknown){
     const bar=el('div','insights-window-bar');
     const copy=el('div','insights-window-copy');
     copy.appendChild(el('div','insights-window-title ui-label','Window'));
@@ -986,7 +1013,7 @@ function createInsightsRendering(
     return bar;
   }
   const executionActivators=new WeakMap();
-  async function openAndScrollToInsightsTarget(targetId){
+  async function openAndScrollToInsightsTarget(targetId:string){
     const target=document.getElementById(targetId);
     if(!target)return false;
     const executionPanel=target.closest&&target.closest('[data-execution-panel]');
@@ -1034,7 +1061,7 @@ function createInsightsRendering(
     });
     return nav;
   }
-  function valueToY(value,min,max,height,pad){
+  function valueToY(value:number,min:number,max:number,height:number,pad:number){
     if(max===min)return height/2;
     return height-pad-((value-min)/(max-min))*(height-pad*2);
   }
@@ -1323,7 +1350,7 @@ function createInsightsRendering(
     });
     return inspectedChart(svg,inspect);
   }
-  function heatLevel(value){
+  function heatLevel(value:number|null){
     if(!Number.isFinite(value))return '';
     const displayed=Math.round(value);
     if(displayed>=80)return 'l4';
@@ -1402,7 +1429,7 @@ function createInsightsRendering(
     wrap.append(grid,legend,inspector);
     return wrap;
   }
-  function coverageRiskCode(label,index,usedCodes){
+  function coverageRiskCode(label:string,index:number,usedCodes:Set<string>){
     const clean=String(label||'Subject').replace(/[^a-zA-Z0-9\s]/g,' ').trim();
     const words=clean.split(/\s+/).filter(Boolean);
     let code=words.length>=2?words.map(word=>word[0]).join('').slice(0,4).toUpperCase():String(words[0]||'S').toUpperCase().slice(0,4);
@@ -1411,7 +1438,7 @@ function createInsightsRendering(
     usedCodes.add(code);
     return code;
   }
-  function coverageRecencyLabel(subject,compact=false){
+  function coverageRecencyLabel(subject:Subject,compact=false){
     if(subject&&subject.neverStudied)return compact?'no activity evidence':'no saved study-activity evidence';
     const days=Math.max(0,num(subject&&subject.daysSinceLast));
     return compact?`last ${days}d`:`last studied ${days} day${days===1?'':'s'} ago`;
@@ -1710,7 +1737,7 @@ function createInsightsRendering(
     box.append(main,evidenceNote(relationship.note));
     return box;
   }
-  function coachEvidenceRecency(model){
+  function coachEvidenceRecency(model:Model){
     const latest=model.dynamics&&model.dynamics.history&&model.dynamics.history.end||model.dateRange&&model.dateRange.end;
     const current=model.currentStudyDate;
     const latestDay=dateDay(latest),currentDay=dateDay(current);
@@ -1793,7 +1820,7 @@ function createInsightsRendering(
     coach.appendChild(renderCoachSynthesis(model));
     return coach;
   }
-  function progressEvidenceSummary(progress){
+  function progressEvidenceSummary(progress:Model['progressEvidence']){
     if(!progress||!num(progress.total))return 'No progress evidence in this window.';
     const counts=[
       num(progress.explicitBlocks),
@@ -1810,7 +1837,7 @@ function createInsightsRendering(
     if(counts[3]>0)parts.push(`${shares[3]}% skipped`);
     return `Evidence · ${parts.join(' · ')}`;
   }
-  function renderMetrics(model){
+  function renderMetrics(model:Model){
     const stability=model.advanced.outputStability&&model.advanced.outputStability.label||'No stability read';
     const variability=model.advanced.completionSd===null?'Need more saved days.':`${model.advanced.completionSd} point completion variability; not a performance score.`;
     const trend=model.advanced.completionSlopePerWeek===null?'No data':`${model.advanced.completionSlopePerWeek>0?'+':''}${model.advanced.completionSlopePerWeek} pts/wk`;
@@ -1829,7 +1856,7 @@ function createInsightsRendering(
     }));
     return metrics;
   }
-  function renderExecutionRhythm(model){
+  function renderExecutionRhythm(model:Model){
     const rhythmGrid=el('div','insights-rhythm-grid');
 
     const delaySeries=model.startDelays||[];
@@ -1892,7 +1919,7 @@ function createInsightsRendering(
     rhythmGrid.append(rhythmCard,positionCard);
     return rhythmGrid;
   }
-  function renderExecutionQuality(model){
+  function renderExecutionQuality(model:Model){
     const section=el('section','insights-execution');
     const grid=el('div','insights-grid insights-diagnostics');
     const friction=model.interruption;
@@ -1914,7 +1941,7 @@ function createInsightsRendering(
     section.append(grid,renderExecutionRhythm(model));
     return section;
   }
-  function renderVisuals(model){
+  function renderVisuals(model:Model){
     const grid=el('section','insights-visuals');
     const left=el('div','insights-visual-left');
     const trendCard=el('section','insights-card soft ui-card insights-trend-card');
@@ -2043,7 +2070,7 @@ function createInsightsRendering(
     if(capped)appendChartNote(widget,`Pace above the ${yMax}% visual ceiling is pinned to the top marker; the actual value remains in the inspector.`);
     return widget;
   }
-  function practicePaceConcernDistance(value){
+  function practicePaceConcernDistance(value:number|null){
     if(!Number.isFinite(value))return 0;
     if(value>PRACTICE_CONTROLLED_MAX)return value-PRACTICE_CONTROLLED_MAX;
     if(value<PRACTICE_CONTROLLED_MIN)return PRACTICE_CONTROLLED_MIN-value;
@@ -2137,7 +2164,7 @@ function createInsightsRendering(
     });
     return card;
   }
-  function renderPracticePacer(model,{embedded=false}={}){
+  function renderPracticePacer(model:Model,{embedded=false}:{embedded?:boolean}={}){
     const practice=model.practice||{units:0,runs:0,practiceDays:0,reading:practicePacerReading({units:0})};
     const details=embedded?el('section','insights-practice insights-practice-embedded ui-card'):el('details','insights-practice ui-disclosure');
     const summary=embedded?el('div','insights-practice-embedded-head'):el('summary',null),summaryCopy=el('span','insights-practice-summary-copy');
@@ -2191,7 +2218,7 @@ function createInsightsRendering(
     grid.append(trendCard,renderPracticePositionCard(practice));
     body.append(metrics,reading,grid,renderPracticeDifferences(practice));details.append(summary,body);return details;
   }
-  function renderExecutionSurface(model){
+  function renderExecutionSurface(model:Model){
     const surface=el('section','insights-execution-surface');
     const tabs=el('div','insights-execution-tabs ui-inset');
     tabs.setAttribute('role','tablist');
@@ -2228,7 +2255,7 @@ function createInsightsRendering(
     }));
     tabs.append(dailyButton,practiceButton);surface.append(tabs,dailyPanel,practicePanel);return surface;
   }
-  function renderSubjectCoverage(model){
+  function renderSubjectCoverage(model:Model){
     const section=el('section','insights-area-coverage');
     const presentSubjects=(model.subjects||[]).filter(row=>num(row.blocks)>0||num(row.planned)>0||num(row.completed)>0);
     const overview=el('div','insights-area-overview-grid');
@@ -2250,7 +2277,7 @@ function createInsightsRendering(
     section.append(overview,riskCard);
     return section;
   }
-  function plannedOutputRows(subjects){
+  function plannedOutputRows(subjects:readonly Subject[]){
     const rows=(Array.isArray(subjects)?subjects:[])
       .filter(row=>num(row.planned)>0||num(row.completed)>0)
       .slice()
@@ -2293,7 +2320,7 @@ function createInsightsRendering(
     wrap.title=`Window totals across ${days} saved day${days===1?'':'s'}: ${minutesLabel(planned)} planned; ${minutesLabel(completed)} completed-equivalent.`;
     return wrap;
   }
-  function allocationSeriesClass(index){
+  function allocationSeriesClass(index:number){
     return `insights-series-${String(index%16+1).padStart(2,'0')}`;
   }
   function allocationCompositionBar(label,rows,shareKey,displayShares){
@@ -2314,7 +2341,7 @@ function createInsightsRendering(
     line.append(el('div','k ui-label',label),track);
     return line;
   }
-  function renderAreaAllocationVisual(model,subjects){
+  function renderAreaAllocationVisual(model:Model,subjects:readonly Subject[]){
     const visual=el('div','insights-allocation-visual');
     const mixRows=plannedOutputRows(subjects);
     if(model.overview.planned<240||model.overview.completed<60||mixRows.length<2){
@@ -2394,7 +2421,7 @@ function createInsightsRendering(
       .filter(row=>Number.isFinite(num(row.conversion,null)))
       .sort((a,b)=>num(a.conversion)-num(b.conversion)||num(b.pairedActual)-num(a.pairedActual)||labelCompare(a,b));
   }
-  function renderAreaConversionEvidence(model){
+  function renderAreaConversionEvidence(model:Model){
     const conversionCard=el('section','insights-card soft ui-card insights-area-conversion-card');
     conversionCard.appendChild(sectionTitle('Focus-to-output by area','Every eligible top-level area, sorted from lowest conversion; paired Timer-backed evidence only.'));
     const subjects=(model.subjects||[]).filter(row=>num(row.planned)>0||num(row.completed)>0);
@@ -2409,7 +2436,7 @@ function createInsightsRendering(
     }
     return conversionCard;
   }
-  function renderTrainingLog(model){
+  function renderTrainingLog(model:Model){
     const days=Math.max(1,model.recordCount||0);
     const box=el('section','insights-card ui-card');
     box.appendChild(sectionTitle('Training log','Milestones and support structure.'));
@@ -2437,14 +2464,14 @@ function createInsightsRendering(
     box.appendChild(structure);
     return box;
   }
-  function fitnessSummaryMeta(model){
+  function fitnessSummaryMeta(model:Model){
     const fitness=model.fitness||{};
     const state=fitness.performanceState&&fitness.performanceState.current;
     if(!state)return `Current state unavailable · display ${(model&&model.windowLabel||'selected window').toLowerCase()}`;
     const trajectory=fitness.performanceState.trajectory&&fitness.performanceState.trajectory.label||'Uncertain';
     return `All-history state · output ${trajectory.toLowerCase()} · ${percentLabel(state.estimate,1)} (${percentLabel(state.low,0)}–${percentLabel(state.high,0)}) · ${(fitness.readiness&&fitness.readiness.label||'weak signal').toLowerCase()} · display ${(model&&model.windowLabel||'selected window').toLowerCase()}`;
   }
-  function fitnessStateChart(model){
+  function fitnessStateChart(model:Model){
     const state=model&&model.fitness&&model.fitness.performanceState||{};
     const allRows=(Array.isArray(state.history)?state.history:[]).filter(row=>Number.isFinite(row.estimate));
     const showAll=model&&model.windowKey==='all';
@@ -2528,7 +2555,7 @@ function createInsightsRendering(
     row.append(el('div','insights-fitness-context-label ui-label',label),el('div','insights-fitness-context-value ui-mono',value),el('div','insights-fitness-context-note ui-mono',note));
     return row;
   }
-  function renderFitnessStateRows(model){
+  function renderFitnessStateRows(model:Model){
     const fitness=model.fitness||{};
     const state=fitness.performanceState||{};
     const dimensions=state.dimensions||{};
@@ -2540,7 +2567,7 @@ function createInsightsRendering(
     );
     return rows;
   }
-  function renderFitnessContext(model){
+  function renderFitnessContext(model:Model){
     const fitness=model.fitness||{};
     const load=fitness.loadMatch||{};
     const quality=fitness.quality||{};
@@ -2561,7 +2588,7 @@ function createInsightsRendering(
     );
     return context;
   }
-  function renderStudyFitnessReport(model){
+  function renderStudyFitnessReport(model:Model){
     const summary=el('summary'),copy=el('span','insights-fitness-summary-copy');
     copy.append(el('span','insights-fitness-summary-title ui-label','Current Study State'),el('span','insights-fitness-summary-meta ui-mono',fitnessSummaryMeta(model)));
     summary.appendChild(copy);
@@ -2579,7 +2606,7 @@ function createInsightsRendering(
       return body;
     },true);
   }
-  function dynamicsRead(confidence,copy,value=''){
+  function dynamicsRead(confidence:{key:string;label:string;tone:string},copy:string,value:DisplayValue=''){
     const strength=confidence||{label:'Weak signal',tone:'low'};
     const item=el('div',`insights-brain-read ui-canvas ${strength.tone||'low'}`);
     const head=el('div','insights-brain-read-head');
@@ -2588,7 +2615,7 @@ function createInsightsRendering(
     item.append(head,el('div','insights-brain-read-copy ui-mono',copy));
     return item;
   }
-  function dynamicsSupportingList(rows){
+  function dynamicsSupportingList(rows:readonly {priority:number;label:string;value:string}[]){
     const clean=(Array.isArray(rows)?rows:[]).filter(row=>row&&row.value)
       .sort((a,b)=>num(b.priority)-num(a.priority)||String(a.label||'').localeCompare(String(b.label||'')))
       .slice(0,MAX_DYNAMICS_SUPPORTING_READS);
@@ -2597,7 +2624,7 @@ function createInsightsRendering(
     clean.forEach(row=>{const item=el('div','insights-dynamics-support-row');item.append(el('div','insights-dynamics-support-label',row.label||'Evidence'),el('div','insights-dynamics-support-value',row.value));list.appendChild(item);});
     return list;
   }
-  function dynamicsCardColumns(leftNodes,rightNodes){
+  function dynamicsCardColumns(leftNodes:readonly Node[],rightNodes:Node|null){
     const layout=el('div','insights-dynamics-card-columns'),copy=el('div','insights-dynamics-card-copy'),visual=el('div','insights-dynamics-card-visual');
     (Array.isArray(leftNodes)?leftNodes:[leftNodes]).filter(Boolean).forEach(node=>copy.appendChild(node));
     (Array.isArray(rightNodes)?rightNodes:[rightNodes]).filter(Boolean).forEach(node=>visual.appendChild(node));
@@ -2612,7 +2639,7 @@ function createInsightsRendering(
       .sort((a,b)=>Math.abs(b.row.effect)-Math.abs(a.row.effect))
       .slice(0,3);
   }
-  function evidenceIntervalLabel(estimate){
+  function evidenceIntervalLabel(estimate:{mean:number|null;low:number|null;high:number|null}){
     return estimate?`${percentLabel(estimate.low,0)}–${percentLabel(estimate.high,0)}`:'No interval';
   }
   function persistentPatternChart(patterns,bayesian){
@@ -2663,7 +2690,7 @@ function createInsightsRendering(
     });
     return inspectedChart(svg,items,'Largest planned-versus-completed share differences; this is descriptive, not a balance target.');
   }
-  function renderPersistentPatternsCard(model){
+  function renderPersistentPatternsCard(model:Model){
     const cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-state-card');
     cardNode.appendChild(sectionTitle('1. What patterns keep repeating?','Shows recurring completion patterns and where completed work repeatedly differs from the plan.'));
     const bayesian=model.dynamics.bayesian||{},allocation=model.dynamics.allocation||{};
@@ -2707,7 +2734,7 @@ function createInsightsRendering(
     cardNode.appendChild(dynamicsCardColumns(left,visual.childElementCount?visual:null));
     return cardNode;
   }
-  function dynamicsChangeRows(model,{excludeInitialization=false}={}){
+  function dynamicsChangeRows(model:Model,{excludeInitialization=false}:{excludeInitialization?:boolean}={}){
     const regime=model.dynamics&&model.dynamics.changePoint||{};
     const displayedCompletion=new Map((Array.isArray(model&&model.daily)?model.daily:[]).filter(row=>row&&isIsoDate(row.date)&&Number.isFinite(row.completion)).map(row=>[row.date,row.completion]));
     const all=(regime.history||[]).filter(row=>Number.isFinite(row.day)&&Number.isFinite(row.recentChangeProbability))
@@ -2720,7 +2747,7 @@ function createInsightsRendering(
     const selected=eligible.filter(row=>(!Number.isFinite(fromDay)||row.day>=fromDay)&&(!Number.isFinite(toDay)||row.day<=toDay));
     return (selected.length?selected:eligible).slice(-(isCompact()?45:120));
   }
-  function dynamicsPhaseChart(model){
+  function dynamicsPhaseChart(model:Model){
     const regime=model.dynamics&&model.dynamics.changePoint||{},rows=dynamicsChangeRows(model);
     const compact=isCompact(),width=compact?360:700,height=compact?206:224,pad=compact?50:42,right=compact?10:20;
     const {svg,plotRight,plotBottom,plotWidth,plotHeight}=chartFrame(width,height,pad,right);
@@ -2742,7 +2769,7 @@ function createInsightsRendering(
     [rows[0],rows[rows.length-1]].forEach((row,index)=>{const label=svgEl('text',{class:'axis-label',x:xFor(row.day),y:plotBottom+20,'text-anchor':index?'end':'start'});label.textContent=shortDate(row.date);svg.appendChild(label);});
     return inspectedChart(svg,items,regime.detected?`A credible phase change is marked near ${shortDate(regime.date)}.`:'No performance-phase change currently clears both likelihood and size gates.');
   }
-  function dynamicsChangeProbabilityStrip(model){
+  function dynamicsChangeProbabilityStrip(model:Model){
     const rows=dynamicsChangeRows(model,{excludeInitialization:true});
     const compact=isCompact(),width=compact?360:700,height=78,left=compact?34:42,right=compact?10:20,top=17,bottom=18,plotRight=width-right,plotBottom=height-bottom,plotWidth=plotRight-left,plotHeight=plotBottom-top;
     const svg=svgEl('svg',{class:'insights-chart insights-dynamics-change-strip',viewBox:`0 0 ${width} ${height}`,role:'group'});
@@ -2759,7 +2786,7 @@ function createInsightsRendering(
     const label=svgEl('text',{class:'axis-label strong',x:left,y:11});label.textContent=`Change likelihood · threshold ${percentLabel(BOCPD_DETECTION_PROBABILITY*100,0)}`;svg.appendChild(label);
     return inspectedChart(svg,items,'Early setup observations are excluded so they do not overstate later change.');
   }
-  function renderWhatChangedCard(model){
+  function renderWhatChangedCard(model:Model){
     const change=model.dynamics&&model.dynamics.changePoint||{},cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-change-card');
     cardNode.appendChild(sectionTitle('2. What changed recently?','Compares recent completion with the preceding performance phase and withholds a conclusion when the shift is unclear.'));
     const copy=change.detected
@@ -2795,7 +2822,7 @@ function createInsightsRendering(
     });
     return inspectedChart(svg,items,'Select a position to inspect its estimated breakdown risk.');
   }
-  function renderWhatBreaksCard(model){
+  function renderWhatBreaksCard(model:Model){
     const cascade=model.dynamics&&model.dynamics.cascade||{},adjusted=cascade.adjusted||{},cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-break-card');
     cardNode.appendChild(sectionTitle('3. Where does the day tend to break down?','Looks for recorded conditions that tend to precede a weak next block or a missed end of day. These are associations, not proof of cause.'));
     const confidence=adjusted.primary&&adjusted.primary.confidence||(cascade.ready?cascade.confidence:{key:'weak',label:'Needs more history',tone:'low'});
@@ -2814,7 +2841,7 @@ function createInsightsRendering(
     cardNode.appendChild(dynamicsCardColumns(left,visual));
     return cardNode;
   }
-  function workloadPointAt(workload,planned){
+  function workloadPointAt(workload:Workload,planned:number){
     const source=workload&&workload.forecast&&workload.forecast.completionReady&&Array.isArray(workload.forecastCurve)&&workload.forecastCurve.length?workload.forecastCurve:workload&&workload.curve||[];
     const curve=source.slice().sort((a,b)=>a.planned-b.planned);
     if(!curve.length)return null;
@@ -2827,7 +2854,7 @@ function createInsightsRendering(
     });
     return result;
   }
-  function workloadObservationInDisplayWindow(observation,model){
+  function workloadObservationInDisplayWindow(observation:Workload['observations'][number],model:Model){
     const day=dateDay(observation&&observation.date);
     if(!Number.isFinite(day))return false;
     const from=isIsoDate(model.calendarRange&&model.calendarRange.start)?dateDay(model.calendarRange.start):null;
@@ -2836,13 +2863,13 @@ function createInsightsRendering(
     const to=[calendarTo,current].filter(Number.isFinite).sort((a,b)=>b-a)[0];
     return (!Number.isFinite(from)||day>=from)&&(!Number.isFinite(to)||day<=to);
   }
-  function evenlySampleRows(rows,limit){
+  function evenlySampleRows<T>(rows:readonly T[],limit:number):T[]{
     const source=Array.isArray(rows)?rows:[];
     if(source.length<=limit)return source.slice();
     if(limit<=1)return [source[source.length-1]];
     return [...new Set(Array.from({length:limit},(_,index)=>Math.round(index*(source.length-1)/(limit-1))))].map(index=>source[index]);
   }
-  function prioritizedChartPoints(rows,limit,isSelected){
+  function prioritizedChartPoints<T extends {day?:number|null;date?:string}>(rows:readonly T[],limit:number,isSelected:(row:T)=>boolean){
     const source=Array.isArray(rows)?rows:[],points=source.map(row=>{const selected=!!isSelected(row);return Object.freeze({row,selected,day:Number.isFinite(row&&row.day)?row.day:dateDay(row&&row.date)});});
     const selected=points.filter(point=>point.selected),older=points.filter(point=>!point.selected);
     const shownSelected=selected.length<=limit?selected.slice():evenlySampleRows(selected,limit);
@@ -2850,12 +2877,12 @@ function createInsightsRendering(
     const shown=[...shownOlder,...shownSelected].sort((a,b)=>a.day-b.day);
     return {points:shown,shown:shown.length,total:points.length};
   }
-  function workloadChartObservations(workload,model,compact){
+  function workloadChartObservations(workload:Workload,model:Model,compact:boolean){
     const all=Array.isArray(workload&&workload.observations)?workload.observations:[];
     const limit=compact?MAX_WORKLOAD_HISTORY_POINTS_COMPACT:MAX_WORKLOAD_HISTORY_POINTS_DESKTOP;
     return prioritizedChartPoints(all,limit,row=>workloadObservationInDisplayWindow(row,model));
   }
-  function workloadResponseChart(workload,model){
+  function workloadResponseChart(workload:Workload,model:Model){
     const curve=workload&&workload.curve||[],compact=isCompact(),width=compact?360:720,height=250,pad=compact?50:42,right=18;
     const {svg,plotRight,plotBottom}=chartFrame(width,height,pad,right);svg.classList.add('insights-response-chart');
     const strongReady=!!(workload&&workload.capabilities&&workload.capabilities.strong&&workload.capabilities.strong.ready),observationView=workloadChartObservations(workload,model,compact);
@@ -2894,7 +2921,7 @@ function createInsightsRendering(
       : `Historical workload curve; ${String(workload&&workload.calibration&&workload.calibration.label||'reliability checks pending').toLowerCase()}. ${observationView.shown}/${observationView.total} actual days are plotted; select a day or band to inspect the underlying evidence.`;
     return inspectedChart(svg,items,inspection);
   }
-  function renderPlanningCard(model){
+  function renderPlanningCard(model:Model){
     const workload=model.dynamics&&model.dynamics.workload||{},cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-planning-card');
     cardNode.appendChild(sectionTitle('4. What workload is realistic?','Uses your past planned and completed work to identify a personally supportable range, while withholding forecasts that are not reliable enough.'));
     if(!workload.ready){
@@ -2963,7 +2990,7 @@ function createInsightsRendering(
     cardNode.appendChild(dynamicsCardColumns(left,Layout.chart(()=>workloadResponseChart(workload,model))));
     return cardNode;
   }
-  function dynamicsSummaryMeta(model){
+  function dynamicsSummaryMeta(model:Model){
     const dynamics=model.dynamics||{};
     const parts=[];
     if(dynamics.changePoint&&dynamics.changePoint.detected)parts.push(`change likelihood ${percentLabel(dynamics.changePoint.probability,0)}`);
@@ -2973,7 +3000,7 @@ function createInsightsRendering(
     const basis=history.records?`All ${history.records} saved day${history.records===1?'':'s'}`:'All saved history';
     return `${basis} · display ${String(model.windowLabel||'selected window').toLowerCase()} · ${parts.join(' · ')||'building careful evidence'}`;
   }
-  function renderStudyDynamics(model){
+  function renderStudyDynamics(model:Model){
     const summary=el('summary'),copy=el('span','insights-brain-summary-copy');
     copy.append(el('span','insights-brain-summary-title ui-label','Study Dynamics'),el('span','insights-brain-summary-meta ui-mono',dynamicsSummaryMeta(model)));
     summary.appendChild(copy);
