@@ -304,7 +304,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function dateFromDay(day:number){
     return new Date(day*86400000).toISOString().slice(0,10);
   }
-  function localIsoDate(date=new Date())){
+  function localIsoDate(date=new Date()){
     const y=date.getFullYear();
     const m=String(date.getMonth()+1).padStart(2,'0');
     const d=String(date.getDate()).padStart(2,'0');
@@ -816,7 +816,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const practiceUnits=(Array.isArray(record&&record.practiceRuns)?record.practiceRuns:[]).reduce((sum,run)=>sum+(Array.isArray(run&&run.unitMs)?run.unitMs.length:0),0);
     return tasks.length*1000000+Math.round(planned*1000)+Math.round(actual*100)+Math.round(completed*10)+practiceUnits;
   }
-  function stableCacheValue(value:unknown,seen=new Set<object>())){
+  function stableCacheValue(value:unknown,seen=new Set<object>()){
     if(value===null||value===undefined)return value===undefined?'[undefined]':null;
     const type=typeof value;
     if(type==='number')return Number.isFinite(value)?value:String(value);
@@ -963,7 +963,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       taskHasActualEvidence,taskHasCompletionEvidence,taskHasTimerEvidence,taskKind,taskOutcomeKey,taskPlanned,
       timeBandForHour,topLevelAreaLabel
     }=Primitives;
-  function createEvidenceRow(record:InsightRecord,task:InsightTask,kind:TaskKind,classifyTaskOutcome:OutcomeClassifier),classifyTaskOutcome=null){
+  function createEvidenceRow(record:InsightRecord,task:InsightTask,kind:TaskKind,classifyTaskOutcome:OutcomeClassifier){
     const pauseEvents=taskPauseEvents(task);
     const frictionDurations=pauseEvents.map(pauseEventFrictionSeconds).filter(value=>value>0);
     const source=completionSourceKey(task);
