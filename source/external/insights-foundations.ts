@@ -582,7 +582,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     return den?nume/den:null;
   }
   function sum(values:readonly unknown[]){
-    return values.reduce((total,value)=>total+num(value),0);
+    return values.reduce<number>((total,value)=>total+num(value),0);
   }
   function clamp(value:unknown,low:number,high:number){return Math.max(low,Math.min(high,num(value)));}
   function sigmoid(value:unknown){
@@ -1593,9 +1593,12 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     const qualityPairs=daily.filter(d=>isFiniteNumber(d.quality)&&isFiniteNumber(d.completion));
     const directionalRows=trendDaily;
     const trendCompletionValues=directionalRows.map(d=>d.completion).filter(isFiniteNumber);
-    const completionSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.completion)).map(d=>({x:d.day,y:d.completion})));
-    const actualSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.actual)).map(d=>({x:d.day,y:d.actual})));
-    const plannedSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.planned)).map(d=>({x:d.day,y:d.planned})));
+    const completionPoints:Point[]=directionalRows.flatMap(d=>isFiniteNumber(d.day)&&isFiniteNumber(d.completion)?[{x:d.day,y:d.completion}]:[]);
+    const actualPoints:Point[]=directionalRows.flatMap(d=>isFiniteNumber(d.day)&&isFiniteNumber(d.actual)?[{x:d.day,y:d.actual}]:[]);
+    const plannedPoints:Point[]=directionalRows.flatMap(d=>isFiniteNumber(d.day)&&isFiniteNumber(d.planned)?[{x:d.day,y:d.planned}]:[]);
+    const completionSlope=regressionSlope(completionPoints);
+    const actualSlope=regressionSlope(actualPoints);
+    const plannedSlope=regressionSlope(plannedPoints);
     const completionSd=stdev(completionValues);
     const completionSdRounded=completionSd===null?null:round(completionSd,1);
     const qualityCorrelation=correlation(qualityPairs.map(d=>d.quality!),qualityPairs.map(d=>d.completion!));
