@@ -216,7 +216,16 @@ function protocolContext(extra={}){
   boundary.preview.setRecords([study('2026-06-01'),diary('2026-06-02')],{label:'Mixed'});
   const previewSnapshot=await boundary.appInsights.dataSource.getDailySnapshot();
   assert.equal(Array.from(previewSnapshot.records,row=>row.recordKind).join(','),'study','Diary entries must stay out of preview Insights data');
-  boundary.preview.clear();
+  let publicToday='';
+  boundary.preview.registerProvider('insights',({today})=>{
+    publicToday=today;
+    return Array.from({length:28},(_,index)=>study(`2026-07-${String(index+1).padStart(2,'0')}`,'Public sample'));
+  });
+  const publicSample=await boundary.publicPreview.useSample({target:'insights',today:'2026-07-28',label:'Public sample'});
+  assert.equal(publicSample.ok,true,'public preview adapter must activate the registered sample provider');
+  assert.equal(publicToday,'2026-07-28','public preview adapter must preserve the caller study date');
+  assert.equal(boundary.preview.status('insights').label,'Public sample','public preview adapter must preserve the caller label');
+  boundary.publicPreview.clear('insights');
   const savedSnapshot=await boundary.appInsights.dataSource.getDailySnapshot();
   assert.equal(Array.from(savedSnapshot.records,row=>row.recordKind).join(','),'study','Diary entries must stay out of saved Insights data');
 

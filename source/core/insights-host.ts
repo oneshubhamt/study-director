@@ -19,6 +19,7 @@ type PreviewStatus=Readonly<{
   type:'demo'|'real';target:PreviewTarget;available:boolean;label:string;mode:'preview'|'saved';revision:string;
 }>;
 type PreviewState=Readonly<{target:PreviewTarget;label:string;revision:number;records:readonly StudyRecordView[]}>;
+type PublicPreviewOptions=Readonly<{target?:unknown;today?:unknown;label?:unknown}>;
 export interface InsightsDeviceStateInput {
   readWindow(fallback:string):unknown;
   writeWindow(value:string):unknown;
@@ -153,6 +154,11 @@ function createBoundary(input:Readonly<InsightsHostInput>){
     return status('insights');
   };
   const previewRuntime=freeze({status,setRecords,registerProvider,useSample,clear,clearExcept,records:(target:unknown='insights')=>active(target)?preview!.records:null});
+  const publicPreview=freeze({
+    useSample:(options:PublicPreviewOptions={})=>previewRuntime.useSample(options.target??'insights',options),
+    setRecords:(records:unknown,options:Readonly<{target?:unknown;label?:unknown}>={})=>previewRuntime.setRecords(records,options),
+    clear:(target:unknown='insights')=>previewRuntime.clear(target)
+  });
   const dataSource=freeze({
     async getDailySnapshot(){
       const records=previewRuntime.records('insights');
@@ -180,7 +186,7 @@ function createBoundary(input:Readonly<InsightsHostInput>){
   });
   const appInsights=freeze({notifications:input.notifications,dataSource});
   const logic=freeze({classifyTaskOutcome:input.logic.classifyTaskOutcome,summarizePracticeRuns:input.logic.summarizePracticeRuns});
-  return freeze({format:'study-director.insights-host',contractVersion:1,preview:previewRuntime,appInsights,logic});
+  return freeze({format:'study-director.insights-host',contractVersion:1,preview:previewRuntime,publicPreview,appInsights,logic});
 }
 const module=freeze({format:'study-director.insights-host-module',contractVersion:1,createBoundary,createDeviceState,createPreloadScheduler});
 registry.define('insights-host',1,()=>module);return module;

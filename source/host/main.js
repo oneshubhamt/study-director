@@ -4517,11 +4517,7 @@ const StudyDirectorPublicAPI=Object.freeze({
     getDraft:getPlanDraftText,
     loadDraft:loadScheduleIntoDraft
   }),
-  preview:Object.freeze({
-    useSample:PreviewRuntime.useSample,
-    setRecords:PreviewRuntime.setRecords,
-    clear:PreviewRuntime.clear
-  }),
+  preview:InsightsBoundary.publicPreview,
   backup:Object.freeze({
     createCheckpoint:CheckpointPipeline.create,
     inspect:CheckpointPipeline.inspect,

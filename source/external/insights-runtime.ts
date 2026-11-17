@@ -36,7 +36,7 @@ type PreviewSource=Readonly<{type?:string;mode?:string;target?:string;label?:str
 type DailySummary=ReturnType<ModelRuntime['Records']['normalizeSummaries']>[number];
 type InsightDataSource=InsightsHostBoundary['appInsights']['dataSource'];
 type InsightNotifications=InsightsHostBoundary['appInsights']['notifications'];
-type PublicPreview=Readonly<{clear(target:string):unknown;useSample(options:Readonly<{label:string;target:'insights';today:string}>):PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>}>;
+type PublicPreview=InsightsHostBoundary['publicPreview'];
 interface InsightsPluginApi {
   readonly capabilities:Capabilities;
   readonly insights:Readonly<{notifications:InsightNotifications;dataSource:InsightDataSource}>;
