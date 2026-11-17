@@ -8,6 +8,11 @@ const sourcePath=insightsModelSources.join('+');
 const source=readInsightsModelRuntimeSource();
 const context=vm.createContext({console});
 vm.runInContext(source,context,{filename:sourcePath});
+const retryContext=vm.createContext({console});
+vm.runInContext(source,retryContext,{filename:sourcePath});
+const firstRetryModel=retryContext.StudyDirectorInsightsModel;
+vm.runInContext(source,retryContext,{filename:sourcePath});
+assert.notEqual(retryContext.StudyDirectorInsightsModel,firstRetryModel,'classic Insights model source must remain re-evaluable for the optional-plugin retry path');
 const {Config,PacerEvidence:Pacer,ModelEngine}=context.StudyDirectorInsightsModel;
 const {classifyTaskOutcome,summarizePracticeRuns,practice:practiceProvider}=realInsightsProviders();
 
@@ -313,7 +318,8 @@ const evidence={
   fullModel:{days:historyDays},
   uncappedAllHistoryReuse:{days:reuseRecords.length,parity:true},
   providerAndThresholdWitnesses:{realProviders:true,productionPacerLimits:true,controlledBoundary:[79.9,80],changePointDays:[11,12],workloadFrontier:{days:36,span:150,recommendation:true}},
-  canonicalPreparation:{invalidDateRejected:true,duplicateResolution:'newest',nonPositivePlanRejected:true,callerInputImmutable:true}
+  canonicalPreparation:{invalidDateRejected:true,duplicateResolution:'newest',nonPositivePlanRejected:true,callerInputImmutable:true},
+  classicRetryReevaluation:true
 };
 writeArtifact('insights-scaling.json',`${JSON.stringify(evidence,null,2)}\n`);
 console.log(JSON.stringify(evidence,null,2));
