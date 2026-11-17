@@ -142,7 +142,7 @@ export type InsightsBuildOptions=Readonly<{
 export type PreparedInsights=Readonly<{records:readonly InsightRecord[];revision:string}>;
 export type InsightsEngineDependencies=Readonly<{classifyTaskOutcome:OutcomeClassifier;summarizePracticeRuns:PracticeRunSummarizer}>;
 
-(function(global:typeof globalThis){
+const createInsightsModelRuntime=(global:typeof globalThis)=>{
   'use strict';
   const isRecordObject=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
   const isFiniteNumber=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
@@ -4374,8 +4374,9 @@ type HistoryCacheEntry={
       let model:ReturnType<typeof buildInsightsFromCanonical>;
       try{model=buildInsightsFromCanonical(records,options,entry.compact,classifyTaskOutcome,summarizePracticeRuns,reusable);}
       finally{entry.reusable=null;}
-      Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:()=>labEvidence(entry)});
-      return model;
+      const getLabEvidence=()=>labEvidence(entry);
+      Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:getLabEvidence});
+      return model as ReturnType<typeof buildInsightsFromCanonical>&Readonly<{getLabEvidence:typeof getLabEvidence}>;
     };
     return Object.freeze({
       build:(recordsInput:readonly InsightRecord[]|null|undefined,options:InsightsBuildOptions={})=>{
@@ -4404,4 +4405,12 @@ type HistoryCacheEntry={
     Coach:InsightsCoach,ModelEngine:InsightsModelEngine
   });
   Object.defineProperty(global,'StudyDirectorInsightsModel',{value:InsightsModel,writable:false,configurable:true});
-})(globalThis);
+  return InsightsModel;
+};
+createInsightsModelRuntime(globalThis);
+
+export type InsightsModelRuntime=ReturnType<typeof createInsightsModelRuntime>;
+export type InsightsEngine=ReturnType<InsightsModelRuntime['ModelEngine']['createInsightsEngine']>;
+export type InsightsResult=ReturnType<InsightsEngine['buildPrepared']>;
+export type InsightsLabEvidence=ReturnType<InsightsResult['getLabEvidence']>;
+export type InsightsPreparedWindow=ReturnType<InsightsEngine['filterPreparedWindow']>;
