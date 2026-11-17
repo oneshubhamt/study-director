@@ -168,6 +168,8 @@ A redesign must fit each kind of data, not one rule for all. Likely a fusion: me
 The notes audit's findings A to D are done (D, Support Activities under its own name and a fixed id, in F29).
 
 - **Real-device check of the notes work of 2026-11-13 to 16.** Not yet tried on Safari, the iPad or the phone: swiping the tag row, the line under each note and its "# Tag" picker, Rename from ⋯ (the fix for a menu handing focus back late), right-click and long press (no system callout or text selection on the rows), New and Move, pinch zoom in the image view, dropping files. One pass per device.
+- **Recently Deleted has no right-click or long-press menu** (owner, 2026-11-17). In the Library's notes list, deleted notes open no actions menu. Give them their own: Restore, and Delete forever. Fix it, and test it like the other rows.
+- **Recently Deleted's arrow points the wrong way** (owner, 2026-11-17). When the drawer is open, the arrow left of the "Recently Deleted" label points down, but the drawer opens upward. The arrow should match the direction the drawer opens, in both states.
 
 ## Kept versions that keep coming back (owner, 2026-11-16)
 
