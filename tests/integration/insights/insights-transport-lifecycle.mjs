@@ -187,10 +187,9 @@ function protocolContext(extra={}){
   assert.match(previewRevision,/^preview:/,'preview source must carry explicit revision provenance');
   boundary.preview.setRecords([study('2026-06-01'),diary('2026-06-02')],{label:'Mixed'});
   const previewSnapshot=await boundary.appInsights.dataSource.getDailySnapshot();
-  assert.deepEqual(previewSnapshot.records.map(row=>row.recordKind),['study'],'Diary entries must stay out of preview Insights data');
+  assert.equal(Array.from(previewSnapshot.records,row=>row.recordKind).join(','),'study','Diary entries must stay out of preview Insights data');
   boundary.preview.clear();
   const savedSnapshot=await boundary.appInsights.dataSource.getDailySnapshot();
-  assert.deepEqual(savedSnapshot.records.map(row=>row.recordKind),['study'],'Diary entries must stay out of saved Insights data');
-}
+  assert.equal(Array.from(savedSnapshot.records,row=>row.recordKind).join(','),'study','Diary entries must stay out of saved Insights data');
 }
 console.log(JSON.stringify({status:'PASS',suite:'insights-transport-lifecycle'}));
