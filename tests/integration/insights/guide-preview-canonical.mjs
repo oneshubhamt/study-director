@@ -87,13 +87,12 @@ for(const record of records){
   const canonical=dailyRecordCodec.sanitizeCurrentDailyRecord(record);
   if(!canonical){
     const ids=new Set(record.schedule.map(row=>row.id));
-    const badResults=Object.entries(record.results).filter(([id,result])=>{
-      const clean=dailyRecordCodec.normalizeDailyResultEntry(result,record.schedule.find(row=>row.id===id));
-      return !clean||!primitives.sameDataValue(result,clean);
-    }).map(([id])=>id);
+    const badResults=Object.entries(record.results).map(([id,result])=>({
+      id,result,clean:dailyRecordCodec.normalizeDailyResultEntry(result,record.schedule.find(row=>row.id===id))
+    })).filter(row=>!row.clean||!primitives.sameDataValue(row.result,row.clean));
     const badRuns=record.practiceRuns.map((run,index)=>({index,clean:practice.sanitizePracticeRun(run,{allowedTaskIds:ids}),run}))
-      .filter(row=>!row.clean||!primitives.sameDataValue(row.run,row.clean)).map(row=>row.index);
-    assert.fail(`Guide sample ${record.date} is rejected by the current DailyRecord codec; badResults=${badResults.join(',')||'none'} badRuns=${badRuns.join(',')||'none'}`);
+      .filter(row=>!row.clean||!primitives.sameDataValue(row.run,row.clean));
+    assert.fail(`Guide sample ${record.date} is rejected by the current DailyRecord codec; badResult=${JSON.stringify(badResults[0]||null)} badRun=${JSON.stringify(badRuns[0]||null)}`);
   }
 }
 console.log(JSON.stringify({status:'PASS',suite:'guide-preview-canonical',records:records.length,schema:16,nestedCanonical:true,productionCodec:true},null,2));
