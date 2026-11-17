@@ -3247,7 +3247,12 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze({
   reconciliation:Object.freeze({createPlan:ReconciliationModule.createPlan,resolvePlan:ReconciliationModule.resolvePlan,summarizePlan:ReconciliationModule.summarizePlan,savedDayContentValue:ReconciliationModule.savedDayContentValue}),
   noteReconciliation:Object.freeze({controller:NoteReconciliationUI,maintenancePause:RecoveryAssetMaintenancePause,merge:(base,local,incoming)=>RichTextApi.mergeThreeWay(base,local,incoming)}),
   recoveryNotes:Object.freeze({lifecycle:SessionLifecycle,date:()=>getReviewDate()}),
-  session:Object.freeze({canMutate:()=>appCanMutate(),cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),captureSnapshot:captureSessionSnapshot,hasActiveSession:hasBlockingActiveSession,hasTasks:()=>TASKS.length>0,toActiveSession:activeSessionPayload,withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),yieldSession:options=>yieldSessionToOtherDevice(options)}),
+  session:Object.freeze({
+    canMutate:()=>appCanMutate(),cancelLiveDraftSave:()=>cancelPendingLiveDraftSave(),captureSnapshot:captureSessionSnapshot,
+    checkpointPendingReview:async()=>await ReviewEditor.flushPending({strict:true,allowDuringRecoveryQuiescence:true})!==false,
+    hasActiveSession:hasBlockingActiveSession,hasTasks:()=>TASKS.length>0,toActiveSession:activeSessionPayload,
+    withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),yieldSession:options=>yieldSessionToOtherDevice(options)
+  }),
   domain:Object.freeze({clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}),
   view:Object.freeze({presentation:BackupPresentation,refreshPnote,refreshReview:()=>ReviewView.refresh(),renderSchedule:renderSched,deviceName:(id,others)=>deviceName(id,others)}),
   events:Object.freeze({

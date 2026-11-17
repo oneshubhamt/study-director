@@ -42,7 +42,7 @@ const createModule=(input:BackupModuleInput)=>{
     reconciliation:freeze(['createPlan','resolvePlan','summarizePlan','savedDayContentValue']),
     noteReconciliation:freeze(['resolve','merge']),
     exports:freeze(['backgroundAvailable','cancel','protect','unprotect','followProtection','check','scope','job','run','download','chooseSave','save']),
-    session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
+    session:freeze(['canMutate','cancelLiveDraftSave','captureSnapshot','checkpointPendingReview','hasActiveSession','hasTasks','toActiveSession','withPersistenceSuppressed','yieldSession']),
     domain:freeze(['clampText','filenameSafeStudentName','getStudentName','materializeDailyRecordView','sanitizeCurrentDailyRecord','todayISO']),
     view:freeze(['presentation','refreshPnote','refreshReview','renderSchedule','deviceName']),
     events:freeze(['libraryChanged','backupCompleted','reconcileNotes','restoreNotesSnapshot','restoreSessionState','verifyActiveSessionRuntime','restoredFromFile']),
@@ -101,10 +101,13 @@ const createModule=(input:BackupModuleInput)=>{
     const Reconciliation=ports.reconciliation;
     const NoteReconciliation=ports.noteReconciliation;
     const Exports=ports.exports;
-    const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed,yieldSession}=ports.session;
+    const {canMutate:appCanMutate,cancelLiveDraftSave,captureSnapshot:captureSessionSnapshot,checkpointPendingReview,hasActiveSession,hasTasks,toActiveSession:activeSessionPayload,withPersistenceSuppressed,yieldSession}=ports.session;
     const {clampText,filenameSafeStudentName,getStudentName:getStudentNameFromDisplay,materializeDailyRecordView,sanitizeCurrentDailyRecord,todayISO}=ports.domain;
     const {refreshPnote,refreshReview,renderSchedule:renderSched,deviceName}=ports.view;
     const {libraryChanged,backupCompleted,reconcileNotes,restoreNotesSnapshot,restoreSessionState,verifyActiveSessionRuntime,restoredFromFile}=ports.events;
+    let recoverySessionCheckpointDepth=0;
+    const restoreSessionStateWithRecoveryProof=(value:ActiveSession|null,options:Readonly<{keepRunning?:boolean}>={})=>
+      restoreSessionState(value,{...options,recoverySessionCheckpointed:recoverySessionCheckpointDepth>0});
     const {assertAuthority,clearFault,failClosed,runExclusive}=ports.operations;
     const {choose,configure,notify}=ports.interactions;
     const {AbortController,clearTimeout,setTimeout,yieldTask}=ports.environment;
@@ -474,12 +477,12 @@ async function applyResolvedActiveSession(resolvedPlan:ResolvedSession,{clear=fa
   // Active Session reconciliation owns only session/runtime state. The Plan
   // working draft is portable Personal Data and is never transported through
   // this path.
-  if(clear&&resolved&&resolved.value){requireBackupMutationControl('reconciling the active session');await restoreSessionState(null);return {message:' and active session',changed:true,expected:null};}
+  if(clear&&resolved&&resolved.value){requireBackupMutationControl('reconciling the active session');await restoreSessionStateWithRecoveryProof(null);return {message:' and active session',changed:true,expected:null};}
   if(!resolved||!resolved.changed||!resolved.value)return {message:'',changed:false,expected:null};
   requireBackupMutationControl('reconciling the active session');
   const expected=ActiveSessionCodec.sanitizeCurrent(resolved.value);
   if(!expected)throw new Error('Resolved Active Session is invalid.');
-  await restoreSessionState(expected,{keepRunning});
+  await restoreSessionStateWithRecoveryProof(expected,{keepRunning});
   return {message:' and active session',changed:true,expected};
 }
 function staleReconciliationError(){
@@ -2248,7 +2251,7 @@ async function replacePortableCanonicalSnapshot(snapshot:Parsed,{deletionState=n
     throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   }
   await mark('active-session');
-  await restoreSessionState(targetSession);
+  await restoreSessionStateWithRecoveryProof(targetSession);
   throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);
   if(targetPersonal){await mark('personal-data');await personalImport(targetPersonal);throwIfImportAborted(signal,authorityOptions);await yieldImport(signal,authorityOptions);}
   // The snapshot's versions kept for review, exactly (a version restore
@@ -2338,7 +2341,17 @@ async function captureLocalSafetyCopy(_stored:StoredCandidate|null|undefined,{af
 async function runRestoreMutation(stored:StoredCandidate,kind:string,operation:()=>Promise<RecoveryOutcome>){
   if(typeof operation!=='function')throw new TypeError('Restore mutation operation is required.');
   const snapshot=candidateSnapshotState(stored),managed=snapshot&&snapshot.provenance&&typeof snapshot.provenance.managedRecovery==='function'?snapshot.provenance.managedRecovery:null;
-  const apply=()=>withPersistenceSuppressed(operation);
+  // Recovery deliberately suppresses ordinary Active Session persistence while
+  // canonical state is being replaced. Checkpoint Review/session state once,
+  // immediately before that suppression begins. Managed recovery reaches this
+  // callback only after its rich-text quiescence has flushed the live editor,
+  // so the proof also covers the last keystrokes before reconciliation.
+  const apply=async()=>{
+    if(await checkpointPendingReview()!==true)throw new Error('The pending Review could not be safely checkpointed before recovery mutation.');
+    recoverySessionCheckpointDepth+=1;
+    try{return await withPersistenceSuppressed(operation);}
+    finally{recoverySessionCheckpointDepth=Math.max(0,recoverySessionCheckpointDepth-1);}
+  };
   if(managed)return managed(freeze({kind,apply}));
   return runExclusive(kind,apply);
 }

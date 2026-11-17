@@ -35,7 +35,13 @@ function createLifecycleHooks(input:Readonly<ReviewLifecycleHooksInput>):Readonl
   const recoveryFlushKinds=new Set(['reconciled-notes','restored-notes-snapshot']);
   return freeze({
     canMutate,
-    flushPending:(kind,options)=>canMutate()?reviewEditor.flushPending({strict:true,allowDuringRecoveryQuiescence:recoveryFlushKinds.has(String(kind||''))&&options?.['allowDuringRecoveryQuiescence']===true}):false,
+    flushPending:(kind,options)=>{
+      // Backup recovery checkpoints live Review/session state immediately
+      // before entering persistence suppression. Its internal session lifecycle
+      // must not persist a partially-mutated recovery state a second time.
+      if(String(kind||'')==='restore-journal-rollback'&&options?.['recoverySessionCheckpointed']===true)return true;
+      return canMutate()?reviewEditor.flushPending({strict:true,allowDuringRecoveryQuiescence:recoveryFlushKinds.has(String(kind||''))&&options?.['allowDuringRecoveryQuiescence']===true}):false;
+    },
     prepare:(context)=>lifecycleViews.invalidateLifecycleEditors(context),
     reconcile:(context)=>lifecycleViews.reconcileLifecycleEditors(context),
     complete:(context)=>lifecycleViews.completeLifecycleTransition(context),

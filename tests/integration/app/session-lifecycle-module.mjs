@@ -74,11 +74,14 @@ assert.deepEqual(asyncBlockedEvents,['flush']);
   await reviewHooks.flushPending('reconciled-notes',Object.freeze({allowDuringRecoveryQuiescence:true}));
   await reviewHooks.flushPending('restored-notes-snapshot',Object.freeze({allowDuringRecoveryQuiescence:true}));
   await reviewHooks.flushPending('date-change',Object.freeze({allowDuringRecoveryQuiescence:true}));
+  await reviewHooks.flushPending('restore-journal-rollback',Object.freeze({recoverySessionCheckpointed:true}));
+  await reviewHooks.flushPending('restore-journal-rollback',Object.freeze({}));
   assert.deepEqual(forwarded,[
     {strict:true,allowDuringRecoveryQuiescence:true},
     {strict:true,allowDuringRecoveryQuiescence:true},
+    {strict:true,allowDuringRecoveryQuiescence:false},
     {strict:true,allowDuringRecoveryQuiescence:false}
-  ],'only recovery-owned note transitions may pierce managed-recovery session quiescence');
+  ],'only recovery-owned note transitions may pierce quiescence, and only a proven recovery checkpoint may skip the redundant session write');
 }
 
 const syncResult=coordinator.runSync('schedule-replacement',{scheduleIdentity:true},ctx=>{

@@ -504,7 +504,7 @@ async function resetTodaySession(){
     return false;
   }
 }
-async function restoreSessionStateThroughLifecycle(importedSession:unknown,options:{keepRunning?:boolean}={}){
+async function restoreSessionStateThroughLifecycle(importedSession:unknown,options:{keepRunning?:boolean;recoverySessionCheckpointed?:boolean}={}){
   const session=importedSession?ports.ActiveSessionCodec.sanitizeCurrent(importedSession):null;
   // A sync merge into the session running here keeps the timer running: when
   // the merged session has no timer (the other device had stopped), the
@@ -515,7 +515,8 @@ async function restoreSessionStateThroughLifecycle(importedSession:unknown,optio
   if(session&&!snapshot)throw new Error('The rollback active-session snapshot is incompatible.');
   const result=await ports.SessionLifecycle.run('restore-journal-rollback',{
     scheduleIdentity:true,date,autoDate:date===todayISO(),sessionRevision:session&&session.revision||0,
-    snapshotReview:snapshot&&snapshot.review
+    snapshotReview:snapshot&&snapshot.review,
+    recoverySessionCheckpointed:options.recoverySessionCheckpointed===true
   },async()=>{
     if(session&&snapshot){
       const saved=await ports.ActiveSessionRuntime.saveCanonicalSession(session,'restoring an Active Session');
