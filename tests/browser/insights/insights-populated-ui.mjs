@@ -144,7 +144,7 @@ try{
   assert.doesNotMatch(desktop.practiceCopy,/block-jackknife|time-stratified slope/i);
   assert.equal(desktop.calculationClosed,true);
   await page.send('Page.bringToFront');
-  const practiceFocusState=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));tab?.click();tab?.focus();return {exists:!!tab,focused:!!tab&&document.activeElement===tab,selected:tab?.getAttribute('aria-selected')==='true',documentFocused:document.hasFocus()};})()`);
+  const practiceFocusState=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));tab?.scrollIntoView({block:'center'});tab?.click();tab?.focus();return {exists:!!tab,focused:!!tab&&document.activeElement===tab,selected:tab?.getAttribute('aria-selected')==='true',documentFocused:document.hasFocus(),rect:tab?{top:tab.getBoundingClientRect().top,bottom:tab.getBoundingClientRect().bottom}:null};})()`);
   assert.equal(practiceFocusState.exists,true,'Practice Pacing tab must exist in the populated renderer');
   assert.equal(practiceFocusState.selected,true,'Practice Pacing tab must be selected before keyboard navigation');
   assert.equal(practiceFocusState.focused,true,`Practice Pacing tab must accept keyboard focus: ${JSON.stringify(practiceFocusState)}`);
