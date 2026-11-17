@@ -17,10 +17,10 @@ const Domain=registry.require('domain',1,freeze({
 const Foundation=registry.require('foundation-host',1);
 const primitives=Foundation.createPrimitives({document:{createElement(){throw new Error('DOM creation is not used by this codec witness.');}},APP_LIMITS:limits,CompletionModel:Domain.CompletionModel});
 const PracticePacer=registry.require('practice-pacer',1);
-const practice=PracticePacer.createModel({ports:freeze({
+const practice=PracticePacer.createModel(freeze({ports:freeze({
   configuration:freeze({APP_LIMITS:limits}),
   domain:freeze({boundedInt:primitives.boundedInt,boundedNumber:primitives.boundedNumber,clampArray:primitives.clampArray,clampText:primitives.clampText,fmtS:value=>String(value??'')})
-})});
+})}));
 const normalizeTimestamp=(value,fallback=null)=>{const parsed=Date.parse(String(value||''));return Number.isFinite(parsed)?new Date(parsed).toISOString():fallback;};
 const normalizeStudyQuality=value=>value===null?null:(Number.isInteger(Number(value))&&Number(value)>=1&&Number(value)<=5?Number(value):null);
 const dailyRecordCodec=registry.require('record-codecs',1).createDailyRecordCodec(freeze({
