@@ -13,7 +13,8 @@ type DailySummaryView=NonNullable<ReturnType<DailyRecordCodec['materializeDailyR
 type DailyWindowOptions=NonNullable<Parameters<DailyRecords['window']>[0]>;
 type InsightNotifications=ReturnType<NoticeCoordinator['presentation']>;
 type PreviewTarget='insights';
-type PreviewProvider=(options:Readonly<{today:string}>)=>readonly unknown[];
+export type InsightsPreviewProvider=(options:Readonly<{today:string}>)=>readonly unknown[];
+type PreviewProvider=InsightsPreviewProvider;
 type PreviewStatus=Readonly<{
   type:'demo'|'real';target:PreviewTarget;available:boolean;label:string;mode:'preview'|'saved';revision:string;
 }>;
@@ -78,10 +79,10 @@ function createBoundary(input:Readonly<InsightsHostInput>){
     preview=freeze({target,label:input.clampText(options.label||`Sample ${normalized.length} days`,80)||'Sample data',revision:sourceRevision,records:normalized});
     return status(target);
   };
-  const registerProvider=(target:unknown,provider:unknown)=>{
+  const registerProvider=(target:unknown,provider:PreviewProvider)=>{
     const clean=normalizeTarget(target);
     if(typeof provider!=='function')return false;
-    providers.set(clean,provider as PreviewProvider);return true;
+    providers.set(clean,provider);return true;
   };
   const useSample=async(targetInput:unknown='insights',options:Readonly<{today?:unknown;label?:unknown}>={})=>{
     const target=normalizeTarget(targetInput),request=++requestRevision,sourceAtStart=sourceRevision;

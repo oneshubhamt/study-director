@@ -104,6 +104,33 @@ function protocolContext(extra={}){
   assert.deepEqual(result.model,{count:160,parity:'same-model-engine'},'worker startup failure must fall back through the same model engine');
 }
 {
+  class RuntimeFailWorker{
+    postMessage(message){
+      if(message.type==='SD_INSIGHTS_BUILD')queueMicrotask(()=>this.onmessageerror?.());
+    }
+    terminate(){this.terminated=true;}
+  }
+  function HTMLScriptElement(){}
+  const script=Object.create(HTMLScriptElement.prototype);script.src='https://example.test/sd.insights.js';
+  const context=protocolContext({
+    document:{currentScript:script},HTMLScriptElement,Worker:RuntimeFailWorker,
+    location:{origin:'https://example.test',href:'https://example.test/'},
+    performance:{now:()=>35},setTimeout:()=>1,clearTimeout:()=>{},queueMicrotask
+  });
+  vm.runInContext(computeSource,context,{filename:'insights-compute.ts'});
+  const engine={
+    buildPrepared(records){return {count:records.length,parity:'same-model-engine'};},
+    getLabEvidence(){return {ok:true};}
+  };
+  const api=Object.freeze({logic:Object.freeze({classifyTaskOutcome:()=> 'untouched',summarizePracticeRuns:()=>Object.freeze({runSummaries:[]})})});
+  const records=Array.from({length:160},(_,index)=>({date:`2026-02-${String(index%28+1).padStart(2,'0')}`}));
+  const prepared={records,revision:'runtime-fallback-r1'};
+  const expected=engine.buildPrepared(records,prepared,{});
+  const result=await context.StudyDirectorInsightsComputeBridge.create(api,engine).build(records,prepared,{});
+  assert.equal(result.mode,'main-thread-worker-failure');
+  assert.deepEqual(result.model,expected,'worker runtime failure must fall back through the same model engine on the same fixture');
+}
+{
   const workers=[],timers=new Map();let nextTimer=0;
   class ReuseWorker{
     constructor(){this.messages=[];this.terminated=false;workers.push(this);}
@@ -129,6 +156,7 @@ function protocolContext(extra={}){
   const computation=context.StudyDirectorInsightsComputeBridge.create(api,engine,{yieldTask:()=>Promise.resolve()});
   const first=await computation.build(records,prepared,{});
   assert.equal(first.sentRecords,320);
+  assert.equal(first.model.count,engine.buildPrepared(records,prepared,{}).count,'worker result must match the same model-engine fixture used by fallback');
   const retained=workers[0];
   const firstParts=retained.messages.filter(message=>message.type==='SD_INSIGHTS_RECORDS');
   assert.deepEqual(firstParts.map(message=>message.records.length),[150,150,20]);
