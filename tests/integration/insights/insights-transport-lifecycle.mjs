@@ -219,5 +219,35 @@ function protocolContext(extra={}){
   boundary.preview.clear();
   const savedSnapshot=await boundary.appInsights.dataSource.getDailySnapshot();
   assert.equal(Array.from(savedSnapshot.records,row=>row.recordKind).join(','),'study','Diary entries must stay out of saved Insights data');
+
+  let windowValue='all';
+  const deviceState=hostModule.createDeviceState(Object.freeze({
+    readWindow:fallback=>windowValue||fallback,
+    writeWindow:value=>{windowValue=value;return true;}
+  }));
+  assert.equal(deviceState.readInsightsWindow('90'),'all');
+  assert.equal(deviceState.writeInsightsWindow('28'),true);
+  assert.equal(windowValue,'28','checked device-state adapter must own only the bounded Insights window preference');
+
+  let timer=null,idle=null,visibilityListener=null,requests=0;
+  const preloadDocument={
+    visibilityState:'hidden',
+    addEventListener:(type,listener,options)=>{assert.equal(type,'visibilitychange');assert.equal(options.once,true);visibilityListener=listener;}
+  };
+  const preload=hostModule.createPreloadScheduler(Object.freeze({
+    document:preloadDocument,
+    setTimer:(callback,delayMs)=>{timer={callback,delayMs};return 1;},
+    scheduleIdle:(callback,timeoutMs)=>{idle={callback,timeoutMs};return 2;},
+    requestTab:async()=>{requests+=1;return true;}
+  }));
+  preload.schedule();
+  assert.equal(timer.delayMs,4000,'Insights preload must remain behind startup housekeeping');
+  timer.callback();
+  assert.equal(idle.timeoutMs,10000,'Insights preload keeps the bounded idle timeout');
+  idle.callback();
+  assert.equal(requests,0,'hidden pages must defer optional Insights loading');
+  preloadDocument.visibilityState='visible';
+  visibilityListener();
+  assert.equal(requests,1,'visibility recovery must request the Insights tab exactly once');
 }
 console.log(JSON.stringify({status:'PASS',suite:'insights-transport-lifecycle'}));

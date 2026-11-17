@@ -25,6 +25,7 @@ const appMeta=read('source/core/app-meta.ts');
 const persistence=read('source/core/persistence.ts');
 const dataBootstrap=read('source/core/data-bootstrap-host.ts');
 const insights=read('source/external/insights-runtime.ts');
+const insightsHost=read('source/core/insights-host.ts');
 const sourceFiles=[];
 const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const full=path.join(dir,entry.name);if(entry.isDirectory())walk(full);else if(/\.(?:js|ts|html)$/u.test(entry.name))sourceFiles.push(full);}};
 walk(path.join(root,'source'));
@@ -220,7 +221,9 @@ for(const identity of ['studyDirectorFolder','studyDirectorSecurity','studyDirec
 for(const field of ['driveFolderMarker','driveFileSecurityMarker','driveFileDigestMarker','driveRepositoryMarker','driveRepositoryVersionMarker','driveRepositoryKindMarker','driveRepositoryIdMarker','driveAppVersionMarker','driveExportedAtMarker'])assert.ok(driveSource.includes(`REPOSITORY_IDENTITIES.${field}`),`Drive must consume canonical external identity ${field}`);
 assert.doesNotMatch(insights,/\blocalStorage\.(?:getItem|setItem|removeItem)\(/u,'Insights must use the injected device-state storage capability');
 assert.match(insights,/StudyDirector\?\.data\?\.deviceState/u,'Insights must consume the host device-state capability');
-assert.match(app,/deviceState:Object\.freeze\(\{[\s\S]{0,320}readInsightsWindow:[\s\S]{0,180}AppData\.local\.getText[\s\S]{0,220}writeInsightsWindow:[\s\S]{0,180}AppData\.local\.setText/u,'host must expose only the bounded Insights device-local preference capability');
+assert.match(insightsHost,/function createDeviceState\(input[\s\S]{0,520}readInsightsWindow:[\s\S]{0,120}input\.readWindow[\s\S]{0,180}writeInsightsWindow:[\s\S]{0,120}input\.writeWindow/u,'checked Insights host must own the bounded device-state capability');
+assert.match(app,/const InsightsDeviceState=InsightsHostModule\.createDeviceState\(Object\.freeze\(\{[\s\S]{0,260}readWindow:fallback=>AppData\.local\.getText\(STORAGE_KEYS\.insightsWindow[\s\S]{0,220}writeWindow:value=>AppData\.local\.setText\(STORAGE_KEYS\.insightsWindow/u,'host composition must inject only bounded Insights window storage adapters');
+assert.match(app,/deviceState:InsightsDeviceState/u,'public API must expose the checked Insights device-state capability rather than redeclare storage callbacks');
 assert.match(app,/function pwaLastUpdateCheckAt\(\)[\s\S]{0,260}AppData\.local\.getText\(STORAGE_KEYS\.pwaUpdateCheck/u,'PWA update bookkeeping must use the LocalStorage abstraction');
 const appDirectLocal=[...app.matchAll(/\blocalStorage\.(?:getItem|setItem|removeItem)\(/gu)];
 assert.equal(appDirectLocal.length,3,'host direct localStorage access must be limited to the profile scope read and the two pre-hydration appearance mirror helpers');

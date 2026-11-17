@@ -19,6 +19,16 @@ type PreviewStatus=Readonly<{
   type:'demo'|'real';target:PreviewTarget;available:boolean;label:string;mode:'preview'|'saved';revision:string;
 }>;
 type PreviewState=Readonly<{target:PreviewTarget;label:string;revision:number;records:readonly StudyRecordView[]}>;
+export interface InsightsDeviceStateInput {
+  readWindow(fallback:string):unknown;
+  writeWindow(value:string):unknown;
+}
+export interface InsightsPreloadInput {
+  readonly document:Document;
+  setTimer(callback:()=>void,delayMs:number):unknown;
+  readonly scheduleIdle:((callback:()=>void,timeoutMs:number)=>unknown)|null;
+  requestTab():Promise<unknown>;
+}
 export interface InsightsHostInput {
   readonly dailyRecords:Pick<DailyRecords,'normalizeWindow'|'insightsSnapshot'|'sortedSummaries'|'window'|'datasetRevision'>;
   readonly dailyRecordCodec:Pick<DailyRecordCodec,'materializeDailyRecordView'|'buildDailyRecordSummary'|'sanitizeDailyRecordSummary'>;
@@ -40,6 +50,31 @@ function isIsoDate(value:unknown):value is string{
   if(typeof value!=='string'||!ISO_DATE.test(value))return false;
   const parsed=new Date(value+'T00:00:00Z');
   return Number.isFinite(parsed.getTime())&&parsed.toISOString().slice(0,10)===value;
+}
+function createDeviceState(input:Readonly<InsightsDeviceStateInput>){
+  exactFrozenObject(input,['readWindow','writeWindow'],'Insights device-state input');
+  functionPort(input,['readWindow','writeWindow'],'Insights device-state adapters');
+  return freeze({
+    readInsightsWindow:(fallback:unknown='')=>input.readWindow(String(fallback??'')),
+    writeInsightsWindow:(value:unknown='')=>input.writeWindow(String(value??''))
+  });
+}
+function createPreloadScheduler(input:Readonly<InsightsPreloadInput>){
+  exactFrozenObject(input,['document','setTimer','scheduleIdle','requestTab'],'Insights preload input');
+  functionPort(input,['setTimer','requestTab'],'Insights preload adapters');
+  if(input.scheduleIdle!==null&&typeof input.scheduleIdle!=='function')throw new TypeError('Insights idle scheduler must be a function or null.');
+  const schedule=()=>input.setTimer(()=>{
+    const load=()=>{
+      if(input.document.visibilityState==='hidden'){
+        input.document.addEventListener('visibilitychange',load,{once:true});
+        return;
+      }
+      void input.requestTab();
+    };
+    if(input.scheduleIdle)input.scheduleIdle(load,10000);
+    else load();
+  },4000);
+  return freeze({schedule});
 }
 function createBoundary(input:Readonly<InsightsHostInput>){
   exactFrozenObject(input,['dailyRecords','dailyRecordCodec','notifications','logic','requestProviderTab','capture','todayISO','clampText'],'Insights host input');
@@ -147,7 +182,7 @@ function createBoundary(input:Readonly<InsightsHostInput>){
   const logic=freeze({classifyTaskOutcome:input.logic.classifyTaskOutcome,summarizePracticeRuns:input.logic.summarizePracticeRuns});
   return freeze({format:'study-director.insights-host',contractVersion:1,preview:previewRuntime,appInsights,logic});
 }
-const module=freeze({format:'study-director.insights-host-module',contractVersion:1,createBoundary});
+const module=freeze({format:'study-director.insights-host-module',contractVersion:1,createBoundary,createDeviceState,createPreloadScheduler});
 registry.define('insights-host',1,()=>module);return module;
 })();
 export type InsightsHostModule=typeof sdInsightsHostFactory;

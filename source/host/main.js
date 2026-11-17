@@ -1950,20 +1950,15 @@ const PluginRuntime=(()=>{
   }
   return Object.freeze({registerPlaceholders,requestTab,register,status});
 })();
-// Insights prepares a long saved history in idle time so its first opening
-// does not wait on a cold worker. Load its file only after start-up
-// housekeeping has had its turn, while the page is visible and idle.
-const INSIGHTS_PRELOAD_DELAY_MS=4000;
-function scheduleInsightsPreload(){
-  setTimeout(()=>{
-    const load=()=>{
-      if(document.visibilityState==='hidden'){document.addEventListener('visibilitychange',load,{once:true});return;}
-      // requestTab reports load failures in plugin status and never rejects.
-      void PluginRuntime.requestTab('insights');
-    };
-    if(typeof requestIdleCallback==='function')requestIdleCallback(load,{timeout:10000});else load();
-  },INSIGHTS_PRELOAD_DELAY_MS);
-}
+// Insights-owned preload policy is checked; the generic optional-plugin loader remains P5.13-owned.
+const InsightsPreload=InsightsHostModule.createPreloadScheduler(Object.freeze({
+  document,
+  setTimer:(callback,delayMs)=>setTimeout(callback,delayMs),
+  scheduleIdle:typeof requestIdleCallback==='function'
+    ?(callback,timeoutMs)=>requestIdleCallback(callback,{timeout:timeoutMs})
+    :null,
+  requestTab:()=>PluginRuntime.requestTab('insights')
+}));
 function registerStudyDirectorPlugin(plugin){
   return PluginRuntime.register(plugin);
 }
@@ -3943,6 +3938,10 @@ const InsightsBoundary=InsightsHostModule.createBoundary(Object.freeze({
 }));
 const PreviewRuntime=InsightsBoundary.preview;
 const AppInsights=InsightsBoundary.appInsights;
+const InsightsDeviceState=InsightsHostModule.createDeviceState(Object.freeze({
+  readWindow:fallback=>AppData.local.getText(STORAGE_KEYS.insightsWindow,fallback),
+  writeWindow:value=>AppData.local.setText(STORAGE_KEYS.insightsWindow,value)
+}));
 /* DOM BINDINGS AND STARTUP */
 function currentBackupDiagnosticStates(){
   const states=[],sample=(job,read,project)=>{try{states.push(...project(read()));}catch{states.push({job,state:'unavailable',reason:'state-unavailable'});}};
@@ -4499,7 +4498,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
     hasTasks:()=>TASKS.length>0,showEmpty,canMutate:appCanMutate,restoreSession:attemptAutoRestoreActiveSession,refreshBadge:refreshPersistedSessionBadge,inspectStorage:inspectStorageCapability,offerInstallNotice:()=>CapabilityInstallation.offerInstallNotice(),topology:()=>IndexedDb.topology(),
     setFastFenceReady:value=>{BackupRuntimeHost.setFastFenceReady(value);},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock(),resumeStorageReset:resumeUnresolvedStorageReset,
     installBackground:installBackgroundOwners,scheduleMaintenance:scheduleDataMaintenance,wakeBackground:reason=>wakeBackgroundOperations(reason),installSessionWatch,refreshKeptVersions:()=>KeptVersions.refresh(),announceUnsupported:()=>UnsupportedData.announce(),renderUnsupported:renderUnsupportedData,
-    collectProfiles:()=>Profiles.collect(),askProfilePassword,collectFiles:()=>BackupFiles.collect(),preloadInsights:scheduleInsightsPreload,confirmBoot:()=>PwaLifecycle.confirmBoot(),offerDeviceRecovery:()=>offerDeviceRecoveryIfLocalEmpty({reason:'startup'}),
+    collectProfiles:()=>Profiles.collect(),askProfilePassword,collectFiles:()=>BackupFiles.collect(),preloadInsights:InsightsPreload.schedule,confirmBoot:()=>PwaLifecycle.confirmBoot(),offerDeviceRecovery:()=>offerDeviceRecoveryIfLocalEmpty({reason:'startup'}),
     reportUnsupported:()=>UnsupportedData.reportBlocked(),setPlanStatus,noticeCanCompact,getReviewDate,reconcileLifecycle:(...args)=>SessionLifecycle.reconcile(...args)
   })
 }));
@@ -4510,10 +4509,7 @@ const StudyDirectorPublicAPI=Object.freeze({
   capabilities:STUDY_DIRECTOR_CAPABILITIES,
   data:Object.freeze({
     contract:DATA_CONTRACT,
-    deviceState:Object.freeze({
-      readInsightsWindow:fallback=>AppData.local.getText(STORAGE_KEYS.insightsWindow,String(fallback??'')),
-      writeInsightsWindow:value=>AppData.local.setText(STORAGE_KEYS.insightsWindow,String(value??''))
-    })
+    deviceState:InsightsDeviceState
   }),
   insights:AppInsights,
   logic:InsightsBoundary.logic,
