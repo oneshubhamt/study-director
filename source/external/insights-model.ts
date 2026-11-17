@@ -131,6 +131,7 @@ type InteractionStability=Readonly<{ready:boolean;split?:string;earlyEffect:numb
 type InteractionMeta=Readonly<{dedupeKey?:string;stability?:InteractionStability}>;
 type InteractionCandidate=Readonly<{key:string;label:string;cells:InteractionCells;ready:boolean;effect:number|null;meaningful:boolean;confidence:Confidence;text:string;dedupeKey?:string;stability:InteractionStability}>;
 type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:number;start?:string|null;end?:string|null;modelRecords?:number;modelStart?:string|null;modelEnd?:string|null;horizonDays?:number;fitness?:Readonly<{performanceState:FitnessPerformanceState}>|null}>;
+type AllocationHistoryAccumulator={label:string;periods:number;under:number;over:number;gaps:number[]};
 
 (function(global:typeof globalThis){
   'use strict';
@@ -3539,13 +3540,13 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       selectedPeriods:Math.max(localTrendBasis.periods+1,Math.ceil(num(modelTrendBasis.selectedRecordCount,localTrendBasis.periods)/7))
     }:localTrendBasis;
     if(periods.length<MIN_DYNAMIC_ALIGNMENT_PERIODS)return {ready:false,periods:detail?periods:[],allPeriods:detail?allPeriods:[],provisionalPeriod,trendBasis,minimumPeriods:MIN_DYNAMIC_ALIGNMENT_PERIODS,reason:`Need ${Math.max(0,MIN_DYNAMIC_ALIGNMENT_PERIODS-periods.length)} more completed eligible weekly allocation periods.${provisionalPeriod?' The current week is provisional and excluded from this count.':''}`};
-    const areaMap=new Map();
+    const areaMap=new Map<string,AllocationHistoryAccumulator>();
     periods.forEach(period=>period.rows.forEach(row=>{
       if(row.plannedShare<MIN_DYNAMIC_ALIGNMENT_AREA_SHARE)return;
       if(!areaMap.has(row.label))areaMap.set(row.label,{label:row.label,periods:0,under:0,over:0,gaps:[]});
-      const item=areaMap.get(row.label);item.periods+=1;item.gaps.push(row.gap);if(row.gap<=-MIN_DYNAMIC_ALIGNMENT_GAP_POINTS)item.under+=1;if(row.gap>=MIN_DYNAMIC_ALIGNMENT_GAP_POINTS)item.over+=1;
+      const item=areaMap.get(row.label)!;item.periods+=1;item.gaps.push(row.gap);if(row.gap<=-MIN_DYNAMIC_ALIGNMENT_GAP_POINTS)item.under+=1;if(row.gap>=MIN_DYNAMIC_ALIGNMENT_GAP_POINTS)item.over+=1;
     }));
-    const areaRows=[...areaMap.values()].map(row=>({...row,underRate:pct0(row.under,row.periods),overRate:pct0(row.over,row.periods),meanGap:round(mean(row.gaps),1)}));
+    const areaRows=[...areaMap.values()].map(row=>({...row,underRate:pct0(row.under,row.periods),overRate:pct0(row.over,row.periods),meanGap:round(mean(row.gaps)!,1)}));
     const persistentUnder=areaRows.filter(row=>row.periods>=MIN_DYNAMIC_ALIGNMENT_PERIODS&&row.under>=3&&row.underRate>=60).sort((a,b)=>b.underRate-a.underRate||a.meanGap-b.meanGap)[0]||null;
     const persistentOver=areaRows.filter(row=>row.periods>=MIN_DYNAMIC_ALIGNMENT_PERIODS&&row.over>=3&&row.overRate>=60).sort((a,b)=>b.overRate-a.overRate||b.meanGap-a.meanGap)[0]||null;
     const slope=regressionSlope(trendPeriods.flatMap((period,index)=>isFiniteNumber(period.divergence)?[{x:index,y:period.divergence*100}]:[]));
