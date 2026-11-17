@@ -143,8 +143,11 @@ try{
   assert.match(desktop.practiceSummary,/590 practice days/i);
   assert.doesNotMatch(desktop.practiceCopy,/block-jackknife|time-stratified slope/i);
   assert.equal(desktop.calculationClosed,true);
-  const practiceFocused=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));tab?.focus();return !!tab&&document.activeElement===tab&&tab.getAttribute('aria-selected')==='true';})()`);
-  assert.equal(practiceFocused,true,'Practice Pacing tab must accept keyboard focus while selected');
+  await page.send('Page.bringToFront');
+  const practiceFocusState=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Practice Pacing/i.test(button.textContent));tab?.click();tab?.focus();return {exists:!!tab,focused:!!tab&&document.activeElement===tab,selected:tab?.getAttribute('aria-selected')==='true',documentFocused:document.hasFocus()};})()`);
+  assert.equal(practiceFocusState.exists,true,'Practice Pacing tab must exist in the populated renderer');
+  assert.equal(practiceFocusState.selected,true,'Practice Pacing tab must be selected before keyboard navigation');
+  assert.equal(practiceFocusState.focused,true,`Practice Pacing tab must accept keyboard focus: ${JSON.stringify(practiceFocusState)}`);
   await page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'ArrowLeft',code:'ArrowLeft'});
   await page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'ArrowLeft',code:'ArrowLeft'});
   const keyboardDaily=await page.evaluate(`(()=>{const tab=[...document.querySelectorAll('#pane-insights .insights-execution-tab')].find(button=>/Daily Execution/i.test(button.textContent));return !!tab&&document.activeElement===tab&&tab.getAttribute('aria-selected')==='true';})()`);
