@@ -95,6 +95,35 @@ type FitnessModelInput=Readonly<{daily:readonly DailySeriesRow[];currentStudyDat
 type FitnessLoadRange=Readonly<{min:number;max:number;typical:number}>;
 type FitnessLoadMatch=Readonly<{ready:boolean;key:string;label:string;tone:string;recentPlanned:number|null;recentCompletion:number|null;recentDays:number;range:FitnessLoadRange|null;reason?:string|null}>;
 type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;loadMatch:FitnessLoadMatch;quality:Readonly<{ratedDays:number;average:number|null;totalSavedDays:number;ready:boolean}>;readiness:Confidence;summary:Readonly<{text:string;stateText:string;trajectory:string}>;parameters:Readonly<{learned:FitnessParameters|null;sourceWeights:Record<CompletionEvidenceGroup,number>}>}>;
+type SubjectInsight=Readonly<{label:string;blocks:number;days:number;planned:number;completed:number;actual:number;completion:number|null;share:number|null;plannedShare:number;lastDate:string|null;daysSinceLast:number|null;neverStudied:boolean;pairedBlocks:number;pairedPlanned:number;pairedCompleted:number;pairedActual:number;pairedTimerCoverage:number|null;pairedSourceMix:Readonly<Record<string,number>>;coverageCompletion:number|null;historicalPlanned:number;historicalDays:number;allocationScore:number;allocation:string;evidenceStrength:number;windowAbsent:boolean;coverageWatchEligible:boolean;coverageWatchScore:number}>;
+type DynamicsModelInput=FitnessModelInput&Readonly<{overview:Readonly<{completion:number|null;averageQuality?:number|null}>;advanced:Readonly<{completionDayCount:number;qualityPairCount?:number}>;subjects:readonly SubjectInsight[];trendBasis?:Partial<DirectionalBasis>|null}>;
+type PatternRawGroup=Readonly<{key:string;label:string;blocks:number;planned:number;completed:number;rawCompletion:number|null;nEff:number;dimension:string}>;
+type PatternEstimate=Readonly<{mean:number;low:number;high:number;width:number;nEff:number;prior:number;confidence:Confidence;method:string}>;
+type PatternRow=PatternRawGroup&Readonly<{estimate:PatternEstimate;effect:number;meaningful:boolean}>;
+type PatternHierarchy={ready:boolean;groups:number;totalEffective:number;populationMean:number;populationConcentration:number;populationLow:number;populationHigh:number;hyperGridSize:number;rows:PatternRow[]};
+type PatternDimensionOptions=Readonly<{key?:(row:EvidenceRow,index:number)=>string|null|undefined;label?:(row:EvidenceRow,index:number,key:string)=>string|null|undefined;labelName?:string;sort?:(a:PatternRow,b:PatternRow)=>number}>;
+type NigState=Readonly<{mean:number;kappa:number;alpha:number;beta:number}>;
+type CascadeState='strong'|'attempted'|'missed';
+type OrderedWork=Readonly<{row:EvidenceRow;allIndex:number;ordinal:number;index:number}>;
+type SequenceEffect=Readonly<{key:string;label:string;coefficient:number;low:number;high:number;oddsRatio:number;oddsLow:number;oddsHigh:number;clear:boolean}>;
+type SequenceExampleRow=Readonly<{y:number;position:number;planned:number;base:readonly number[]}>;
+type FitnessPredictors=Readonly<{capacity:number;execution:number;recovery:number}>;
+type PriorFitnessPredictors=FitnessPredictors&Readonly<{date:string;day:number;basis:string}>;
+type WorkloadRow=DailySeriesWithDay&Readonly<{completion:number;strong:boolean;priorState:number;fitness:PriorFitnessPredictors|null}>;
+type WorkloadSurface=Readonly<{ready:boolean;completionReady:boolean;strongReady:boolean;rows:number;span:number;reason:string|null;strongReason?:string|null;completionFit:LogisticFit;strongFit:LogisticFit;loadMean?:number;loadSd?:number;stateMean?:number;stateSd?:number;features?:(row:WorkloadRow)=>number[];residualSd?:number|null;strongDays?:number;nonStrongDays?:number}>;
+type StateAwareRow=WorkloadRow&Readonly<{fitness:PriorFitnessPredictors}>;
+type StateAwareSurface=Readonly<{ready:boolean;completionReady:boolean;strongReady:boolean;rows:number;span:number;reason:string|null;strongReason?:string|null;completionFit?:LogisticFit;strongFit?:LogisticFit;loadMean?:number;loadSd?:number;stateKeys?:readonly FitnessKey[];stateMeans?:Record<FitnessKey,number>;stateSds?:Record<FitnessKey,number>;features?:(row:Readonly<{planned:number;fitness:FitnessPredictors}>)=>number[];residualSd?:number|null;strongDays?:number;nonStrongDays?:number;forecastCausal?:boolean}>;
+type PredictionInterval=Readonly<{mean:number|null;low:number|null;high:number|null;width:number|null;eta?:number;standardError?:number}>;
+type PredictionSummary=Readonly<{completionMean:number;completionLow:number;completionHigh:number;completionRangeMethod:string;strongProbability:number|null;strongLow:number|null;strongHigh:number|null;rawStrongProbability:number|null;expectedCompleted:number}>;
+type ForecastPrediction=PredictionSummary&Readonly<{planned:number;priorState?:number;fitness?:FitnessPredictors;date:string;actualStrong:number;actualCompletion:number;naiveCompletion:number|null}>;
+type CompletionRangeCalibration=Readonly<{ready:boolean;target:number;backtests:number;coverageTests?:number;halfWidth:number|null;halfWidthPoints?:number|null;coverage:number|null;coverageError:number|null;reason:string|null}>;
+type ForecastCalibration=Readonly<{modelKey:string;modelLabel:string;ready:boolean;completionReady:boolean;strongReady:boolean;calibratorReady:boolean;crossFitReady:boolean;predictions:readonly ForecastPrediction[];strongPredictions:readonly ForecastPrediction[];calibrator:LogisticFit;backtests:number;strongBacktests:number;brier:number|null;baselineBrier:number|null;completionMae:number|null;naiveCompletionMae:number|null;naiveMaeGain:number|null;naiveBenchmarkReady:boolean;calibrationError:number|null;bins:readonly unknown[];completionRange:CompletionRangeCalibration;intervalReady:boolean;intervalReason:string|null;reason:string|null;completionReason:string|null;strongReason:string|null;gates:Readonly<Record<string,number>>;label:string;selectedModel?:string;selectedModelLabel?:string;selectionReason?:string;candidates?:Readonly<{baseline:ForecastCalibration;stateAware:ForecastCalibration}>;comparison?:Readonly<{maeGain:number|null;strongGuard:boolean;causalGuard:boolean;stateWins:boolean;requiredMaeGain:number}>}>;
+type InteractionCell=Readonly<{rows:number;days:number;weight:number;raw:number|null;estimate:number|null;ready:boolean}>;
+type InteractionCells=Readonly<{a:InteractionCell;b:InteractionCell;c:InteractionCell;d:InteractionCell}>;
+type InteractionStability=Readonly<{ready:boolean;split?:string;earlyEffect:number|null;lateEffect:number|null;reason:string|null}>;
+type InteractionMeta=Readonly<{dedupeKey?:string;stability?:InteractionStability}>;
+type InteractionCandidate=Readonly<{key:string;label:string;cells:InteractionCells;ready:boolean;effect:number|null;meaningful:boolean;confidence:Confidence;text:string;dedupeKey?:string;stability:InteractionStability}>;
+type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:number;start?:string|null;end?:string|null;modelRecords?:number;modelStart?:string|null;modelEnd?:string|null;horizonDays?:number;fitness?:FitnessResult|null}>;
 
 (function(global:typeof globalThis){
   'use strict';
@@ -2586,12 +2615,12 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     const {
       blockOrderKey,ordinalLabel,recordRows,rowsCompleted,rowsPlanned
     }=Analytics;
-  function hierarchicalRatePosterior(groups,baseline){
-    const usable=(Array.isArray(groups)?groups:[]).filter(group=>num(group.nEff)>0&&Number.isFinite(group.rawCompletion));
+  function hierarchicalRatePosterior(groups:readonly PatternRawGroup[],baseline:number):PatternHierarchy{
+    const usable=groups.filter(group=>num(group.nEff)>0&&Number.isFinite(group.rawCompletion));
     const totalEffective=sum(usable.map(group=>group.nEff));
     const hierarchyReady=usable.length>=MIN_HIERARCHICAL_GROUPS&&totalEffective>=4;
     const muValues=Array.from({length:HIERARCHICAL_MU_STEPS},(_,index)=>.05+index*(.9/(HIERARCHICAL_MU_STEPS-1)));
-    const hyper=[];
+    const hyper:{mu:number;kappa:number;logWeight:number;weight:number}[]=[];
     const baselineRate=clamp(num(baseline,50)/100,.02,.98);
     (hierarchyReady?muValues:[baselineRate]).forEach(mu=>{
       (hierarchyReady?HIERARCHICAL_KAPPA_GRID:[EVIDENCE_PRIOR_EFFECTIVE_BLOCKS]).forEach(kappa=>{
@@ -2600,7 +2629,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
           const n=Math.max(.01,num(group.nEff)),successes=clamp(num(group.rawCompletion)/100,0,1)*n;
           logWeight+=logBeta(mu*kappa+successes,(1-mu)*kappa+n-successes)-logBeta(mu*kappa,(1-mu)*kappa);
         });
-        hyper.push({mu,kappa,logWeight});
+        hyper.push({mu,kappa,logWeight,weight:0});
       });
     });
     const weights=normalizedLogWeights(hyper.map(row=>row.logWeight));
@@ -2619,14 +2648,14 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
         const alpha=row.mu*row.kappa+successes,beta=(1-row.mu)*row.kappa+n-successes;
         return {logWeight:Math.log(row.weight),alpha,beta,normalizer:logBeta(alpha,beta)};
       });
-      const density=[];
+      const density:{value:number;logWeight:number}[]=[];
       for(let index=0;index<HIERARCHICAL_RATE_STEPS;index+=1){
         const rate=.0025+index*(.995/(HIERARCHICAL_RATE_STEPS-1));
         const components=posteriorComponents.map(row=>row.logWeight+(row.alpha-1)*Math.log(rate)+(row.beta-1)*Math.log(1-rate)-row.normalizer);
         density.push({value:rate,logWeight:logSumExp(components)});
       }
       const densityWeights=normalizedLogWeights(density.map(point=>point.logWeight));
-      const posteriorPoints=density.map((point,index)=>({value:point.value,weight:densityWeights[index]}));
+      const posteriorPoints=density.map((point,index)=>({value:point.value,weight:densityWeights[index]!}));
       const posteriorMean=sum(posteriorPoints.map(point=>point.value*point.weight));
       const low=weightedQuantile(posteriorPoints,.025),high=weightedQuantile(posteriorPoints,.975);
       const estimate={
@@ -2644,16 +2673,16 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       hyperGridSize:hyper.length,rows
     };
   }
-  function completionPatternDimension(evidence,baseline,{key,label,labelName,sort}={}){
-    const map=new Map();
-    (evidence&&Array.isArray(evidence.work)?evidence.work:[]).forEach((row,index)=>{
+  function completionPatternDimension(evidence:EvidenceIndex,baseline:number,{key,label,labelName,sort}:PatternDimensionOptions={}):PatternHierarchy{
+    const map=new Map<string,{key:string;label:string;blocks:number;planned:number;completed:number;weights:number[]}>();
+    evidence.work.forEach((row,index)=>{
       if(!(row.planned>0))return;
       const rawKey=typeof key==='function'?key(row,index):null;
       if(rawKey===null||rawKey===undefined||rawKey==='')return;
       const groupKey=String(rawKey);
       const groupLabel=typeof label==='function'?label(row,index,groupKey):groupKey;
       if(!map.has(groupKey))map.set(groupKey,{key:groupKey,label:groupLabel,blocks:0,planned:0,completed:0,weights:[]});
-      const item=map.get(groupKey);
+      const item=map.get(groupKey)!;
       item.blocks+=1;
       item.planned+=row.planned;
       item.completed+=row.completed;
@@ -2673,8 +2702,8 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     hierarchy.rows=typeof sort==='function'?rows.sort(sort):rows.sort((a,b)=>Math.abs(b.effect)-Math.abs(a.effect)||b.planned-a.planned||labelCompare(a,b));
     return hierarchy;
   }
-  function computeBayesianPatterns(evidence,model,detail=true){
-    const baseline=Number.isFinite(model&&model.overview&&model.overview.completion)?model.overview.completion:50;
+  function computeBayesianPatterns(evidence:EvidenceIndex,model:DynamicsModelInput,detail=true){
+    const baseline=isFiniteNumber(model.overview.completion)?model.overview.completion:50;
     const area=completionPatternDimension(evidence,baseline,{
       key:row=>canonical(row.subject),label:row=>row.subject,labelName:'Top-level area'
     });
@@ -2717,16 +2746,16 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       return {...dimension,rows:strongest?[strongest]:[]};
     })};
   }
-  function studentTLogDensity(value,location,scale,degrees){
+  function studentTLogDensity(value:number,location:number,scale:number,degrees:number){
     const safeScale=Math.max(1e-6,num(scale,1)),df=Math.max(1,num(degrees,1));
     const z=(num(value)-num(location))/safeScale;
     return logGamma((df+1)/2)-logGamma(df/2)-.5*Math.log(df*Math.PI)-Math.log(safeScale)-((df+1)/2)*Math.log(1+z*z/df);
   }
-  function nigPredictiveLogDensity(state,value){
+  function nigPredictiveLogDensity(state:NigState,value:number){
     const scale=Math.sqrt(Math.max(1e-6,state.beta*(state.kappa+1)/(state.alpha*state.kappa)));
     return studentTLogDensity(value,state.mean,scale,2*state.alpha);
   }
-  function updateNig(state,value){
+  function updateNig(state:NigState,value:number):NigState{
     const kappa=state.kappa+1;
     return {
       mean:(state.kappa*state.mean+value)/kappa,
@@ -2735,20 +2764,20 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       beta:state.beta+state.kappa*Math.pow(value-state.mean,2)/(2*kappa)
     };
   }
-  function changeProbabilityStrength(probability,days){
+  function changeProbabilityStrength(probability:number,days:number):Confidence{
     const value=num(probability);
     if(days<MIN_CHANGE_POINT_DAYS||value<.18)return CONFIDENCE.weak;
     if(value<.4)return CONFIDENCE.emerging;
     if(value<.7)return CONFIDENCE.reliable;
     return CONFIDENCE.strong;
   }
-  function computeCompletionChangePoint(daily,detail=true){
-    const rows=(Array.isArray(daily)?daily:[]).filter(row=>Number.isFinite(row&&row.completion)&&Number.isFinite(row&&row.day)).sort((a,b)=>a.day-b.day);
+  function computeCompletionChangePoint(daily:readonly DailySeriesRow[],detail=true){
+    const rows=daily.filter((row):row is DailySeriesWithDay&{completion:number}=>isFiniteNumber(row.completion)&&isFiniteNumber(row.day)).sort((a,b)=>a.day-b.day);
     const n=rows.length;
     if(!n)return {ready:false,detected:false,days:0,minimumDays:MIN_CHANGE_POINT_DAYS,history:[],confidence:CONFIDENCE.weak,reason:`Need ${MIN_CHANGE_POINT_DAYS} completion-eligible days.`};
     const prior={mean:50,kappa:.35,alpha:2.5,beta:950};
     let states=[{runLength:0,logProbability:0,parameters:{...prior}}];
-    const history=[];
+    const history:{date:string;day:number;completion?:number;changeProbability?:number;recentChangeProbability:number;modalRunLength:number;regimeMean:number;regimeProbability?:number}[]=[];
     rows.forEach((row,index)=>{
       const gap=index?Math.max(1,row.day-rows[index-1].day):1;
       const hazard=1-Math.pow(1-1/BOCPD_EXPECTED_REGIME_DAYS,gap);
@@ -2799,13 +2828,13 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       reason:detected?'The likelihood of a shift and the size of the completion change both cleared their evidence gates.':n<MIN_CHANGE_POINT_DAYS?`Need ${MIN_CHANGE_POINT_DAYS-n} more completion-eligible day${MIN_CHANGE_POINT_DAYS-n===1?'':'s'}.`:'No date has enough evidence for both a likely shift and a meaningful completion change.'
     };
   }
-  function computeAllocationConcentration(model,detail=true){
-    const rows=(model&&Array.isArray(model.subjects)?model.subjects:[]).filter(row=>num(row.planned)>0||num(row.completed)>0);
+  function computeAllocationConcentration(model:DynamicsModelInput,detail=true){
+    const rows=model.subjects.filter(row=>num(row.planned)>0||num(row.completed)>0);
     const totalPlanned=sum(rows.map(row=>row.planned)),totalCompleted=sum(rows.map(row=>row.completed));
     const ready=rows.length>=2&&totalPlanned>=MIN_ALLOCATION_EVIDENCE_PLANNED&&totalCompleted>=MIN_ALLOCATION_EVIDENCE_COMPLETED;
     if(!ready)return {
       ready:false,areas:rows.length,totalPlanned,totalCompleted,rows:[],...(detail?{}:{displayRows:[]}),divergence:null,
-      confidence:descriptiveEvidenceConfidence(model&&model.advanced&&model.advanced.completionDayCount,totalCompleted),
+      confidence:descriptiveEvidenceConfidence(model.advanced.completionDayCount,totalCompleted),
       reason:`Needs 2+ areas, ${minutesLabel(MIN_ALLOCATION_EVIDENCE_PLANNED)} planned, and ${minutesLabel(MIN_ALLOCATION_EVIDENCE_COMPLETED)} completed-equivalent work.`
     };
     const plannedShares=rows.map(row=>num(row.planned)/totalPlanned);
@@ -2827,24 +2856,24 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       effectivePlannedAreas:round(effectivePlannedAreas,1),effectiveCompletedAreas:round(effectiveCompletedAreas,1),
       topOver:evidenceRows.filter(row=>row.gap>0).sort((a,b)=>b.gap-a.gap)[0]||null,
       topUnder:evidenceRows.filter(row=>row.gap<0).sort((a,b)=>a.gap-b.gap)[0]||null,
-      confidence:descriptiveEvidenceConfidence(model&&model.advanced&&model.advanced.completionDayCount,totalCompleted)
+      confidence:descriptiveEvidenceConfidence(model.advanced.completionDayCount,totalCompleted)
     };
   }
-  function cascadeState(row){
+  function cascadeState(row:EvidenceRow|null|undefined):CascadeState{
     if(!row)return 'missed';
     if(row.completion>=80&&row.outcome!=='finished-unverified')return 'strong';
     if(['skipped','untouched'].includes(row.outcome)&&!evidenceRowShowsStudyActivity(row))return 'missed';
     return 'attempted';
   }
-  function orderedWorkEvidence(evidence,record){
+  function orderedWorkEvidence(evidence:EvidenceIndex,record:InsightRecord):OrderedWork[]{
     const all=recordRows(evidence,record,'all');
     return recordRows(evidence,record,'work').map((row,index)=>{
       const rawOrdinal=num(row.task&&row.task.studyOrdinal,null);
       return {row,allIndex:all.indexOf(row),ordinal:Number.isFinite(rawOrdinal)&&rawOrdinal>0?Math.round(rawOrdinal):index+1,index};
     }).sort((a,b)=>a.ordinal-b.ordinal||a.index-b.index);
   }
-  function fittedSequenceEffects(fit,names){
-    if(!fit||!fit.ready)return [];
+  function fittedSequenceEffects(fit:LogisticFit,names:readonly string[]):SequenceEffect[]{
+    if(!fit||!fit.ready||!fit.coefficients||!fit.covariance)return [];
     return names.map((label,index)=>{
       const coefficient=num(fit.coefficients[index+1]);
       const standardError=Math.sqrt(Math.max(0,num(fit.covariance[index+1]&&fit.covariance[index+1][index+1])));
@@ -2856,15 +2885,15 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       };
     }).sort((a,b)=>Number(b.clear)-Number(a.clear)||Math.abs(b.coefficient)-Math.abs(a.coefficient)||String(a.label).localeCompare(String(b.label)));
   }
-  function adjustedSequenceConfidence(fit,effects,minimumRows){
+  function adjustedSequenceConfidence(fit:LogisticFit,effects:readonly SequenceEffect[],minimumRows:number):Confidence{
     if(!fit||!fit.ready||fit.rows<minimumRows)return CONFIDENCE.weak;
     const clear=(effects||[]).filter(row=>row.clear).length;
     if(fit.rows<60||!clear)return CONFIDENCE.emerging;
     if(fit.rows<120||clear<2)return CONFIDENCE.reliable;
     return CONFIDENCE.strong;
   }
-  function computeAdjustedSequenceModels(evidence,detail=true){
-    const transitions=[],hazards=[];
+  function computeAdjustedSequenceModels(evidence:EvidenceIndex,detail=true){
+    const transitions:SequenceExampleRow[]=[],hazards:SequenceExampleRow[]=[];
     evidence.records.forEach(record=>{
       const ordered=orderedWorkEvidence(evidence,record);
       if(!ordered.length)return;
@@ -2905,7 +2934,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
         });
       });
     });
-    const transform=rows=>{
+    const transform=(rows:readonly SequenceExampleRow[])=>{
       const positionMean=mean(rows.map(row=>row.position))||1,positionSd=Math.max(.75,num(stdev(rows.map(row=>row.position)),1));
       const loadMean=mean(rows.map(row=>row.planned))||0,loadSd=Math.max(45,num(stdev(rows.map(row=>row.planned)),60));
       return {
@@ -2944,8 +2973,8 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       reason:transitionFit.ready||hazardFit.ready?null:`Transition: ${transitionFit.reason||'not ready'} Hazard: ${hazardFit.reason||'not ready'}`
     };
   }
-  function computeExecutionCascade(evidence,detail=true){
-    const states=[
+  function computeExecutionCascade(evidence:EvidenceIndex,detail=true){
+    const states:readonly Readonly<{key:CascadeState;label:string}>[]=[
       {key:'strong',label:'Strong (80%+)'},
       {key:'attempted',label:'Attempted / partial'},
       {key:'missed',label:'Missed'}
@@ -3024,7 +3053,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       const rate=pct(row.collapses,row.daysAtRisk);
       return {...row,rate,estimate:bayesianRateEstimate(rate,row.daysAtRisk,collapsePrior===null?0:collapsePrior)};
     });
-    const candidates=[];
+    const candidates:{effect:number;confidence:Confidence;text:string}[]=[];
     transitionRows.filter(row=>row.total>=3).forEach(row=>candidates.push({
       effect:row.effect,confidence:row.estimate.confidence,
       text:`After a ${row.label.toLowerCase()} block, the estimated chance that the next planned block was strong was ${percentLabel(row.estimate.mean,1)} (${percentLabel(row.estimate.low,0)}–${percentLabel(row.estimate.high,0)}).`
@@ -3056,23 +3085,23 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       minimumTransitions:MIN_CASCADE_TRANSITIONS
     };
   }
-  function priorFitnessStatesByDay(performanceState){
-    return (Array.isArray(performanceState&&performanceState.history)?performanceState.history:[])
+  function priorFitnessStatesByDay(performanceState:FitnessPerformanceState|null|undefined){
+    return (performanceState?.history??[])
       .filter(row=>Number.isFinite(row&&row.day)&&row.states)
       .sort((a,b)=>a.day-b.day);
   }
-  function currentFitnessPredictors(performanceState){
-    const dimensions=performanceState&&performanceState.dimensions||{};
-    const capacity=dimensions.capacity&&dimensions.capacity.current&&dimensions.capacity.current.estimate;
-    const execution=dimensions.execution&&dimensions.execution.current&&dimensions.execution.current.estimate;
-    const recovery=dimensions.recovery&&dimensions.recovery.current&&dimensions.recovery.current.estimate;
-    return [capacity,execution,recovery].every(Number.isFinite)?{capacity,execution,recovery}:null;
+  function currentFitnessPredictors(performanceState:FitnessPerformanceState|null|undefined):FitnessPredictors|null{
+    const dimensions=performanceState?.dimensions;
+    const capacity=dimensions?.capacity.current?.estimate;
+    const execution=dimensions?.execution.current?.estimate;
+    const recovery=dimensions?.recovery.current?.estimate;
+    return isFiniteNumber(capacity)&&isFiniteNumber(execution)&&isFiniteNumber(recovery)?{capacity,execution,recovery}:null;
   }
-  function workloadModelRows(daily,performanceState=null){
-    const source=(Array.isArray(daily)?daily:[]).filter(row=>row&&row.planned>0&&Number.isFinite(row.completion)&&Number.isFinite(row.day)).sort((a,b)=>a.day-b.day);
-    const causalStateHistory=!!(performanceState&&performanceState.forecastCausal===true&&performanceState.basis&&performanceState.basis.historicalMode==='origin-causal');
+  function workloadModelRows(daily:readonly DailySeriesRow[],performanceState:FitnessPerformanceState|null=null):WorkloadRow[]{
+    const source=daily.filter((row):row is DailySeriesWithDay&{completion:number}=>row.planned>0&&isFiniteNumber(row.completion)&&isFiniteNumber(row.day)).sort((a,b)=>a.day-b.day);
+    const causalStateHistory=performanceState?.forecastCausal===true&&performanceState.basis?.historicalMode==='origin-causal';
     const stateHistory=causalStateHistory?priorFitnessStatesByDay(performanceState):[];
-    let stateCursor=0,priorFitness=null,state=50;
+    let stateCursor=0,priorFitness:Omit<PriorFitnessPredictors,'basis'>|null=null,state=50;
     return source.map(row=>{
       while(stateCursor<stateHistory.length&&stateHistory[stateCursor].day<row.day){
         const candidate=stateHistory[stateCursor],states=candidate.states||{};
@@ -3085,9 +3114,9 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       return result;
     });
   }
-  function balancedWorkloadBins(rows,count){
-    const sorted=(Array.isArray(rows)?rows:[]).slice().sort((a,b)=>a.planned-b.planned||a.day-b.day);
-    const bins=[];
+  function balancedWorkloadBins(rows:readonly WorkloadRow[],count:number):WorkloadRow[][]{
+    const sorted=rows.slice().sort((a,b)=>a.planned-b.planned||a.day-b.day);
+    const bins:WorkloadRow[][]=[];
     let cursor=0;
     for(let index=0;index<count;index+=1){
       const remaining=sorted.length-cursor,groups=count-index;
@@ -3098,11 +3127,11 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     }
     return bins.filter(bin=>bin.length);
   }
-  function empiricalWorkloadBands(rows){
-    if(!Array.isArray(rows)||!rows.length)return [];
+  function empiricalWorkloadBands(rows:readonly WorkloadRow[]){
+    if(!rows.length)return [];
     const bandCount=rows.length>=24?4:Math.min(3,rows.length);
     return balancedWorkloadBins(rows,bandCount).map((bin,index)=>{
-      const meanPlanned=mean(bin.map(row=>row.planned)),meanCompletion=mean(bin.map(row=>row.completion));
+      const meanPlanned=mean(bin.map(row=>row.planned))!,meanCompletion=mean(bin.map(row=>row.completion))!;
       const strongDays=bin.filter(row=>row.strong).length;
       return {
         index,label:`Band ${index+1}`,days:bin.length,
@@ -3115,7 +3144,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       };
     });
   }
-  function fitWorkloadSurface(rows,{minimumDays=MIN_WORKLOAD_FRONTIER_DAYS}={}){
+  function fitWorkloadSurface(rows:readonly WorkloadRow[],{minimumDays=MIN_WORKLOAD_FRONTIER_DAYS}:Readonly<{minimumDays?:number}>={}):WorkloadSurface{
     const plannedValues=rows.map(row=>row.planned),span=rows.length?Math.max(...plannedValues)-Math.min(...plannedValues):0;
     const baseReason=rows.length<minimumDays
       ? `Need ${minimumDays-rows.length} more completion-eligible workload day${minimumDays-rows.length===1?'':'s'}.`
@@ -3127,9 +3156,9 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       completionFit:{ready:false,rows:rows.length,reason:baseReason},
       strongFit:{ready:false,rows:rows.length,reason:'Completion response is not yet estimable.'}
     };
-    const loadMean=mean(plannedValues),loadSd=Math.max(45,num(stdev(plannedValues),60));
-    const stateMean=mean(rows.map(row=>row.priorState)),stateSd=Math.max(8,num(stdev(rows.map(row=>row.priorState)),12));
-    const features=row=>{
+    const loadMean=mean(plannedValues)!,loadSd=Math.max(45,num(stdev(plannedValues),60));
+    const stateMean=mean(rows.map(row=>row.priorState))!,stateSd=Math.max(8,num(stdev(rows.map(row=>row.priorState)),12));
+    const features=(row:WorkloadRow)=>{
       const load=(row.planned-loadMean)/loadSd,state=(row.priorState-stateMean)/stateSd;
       return [load,load*load-1,state];
     };
@@ -3143,12 +3172,12 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     return {
       ready:!!completionFit.ready,completionReady:!!completionFit.ready,strongReady:!!strongFit.ready,
       rows:rows.length,span,loadMean,loadSd,stateMean,stateSd,features,completionFit,strongFit,strongDays,nonStrongDays,
-      residualSd:residuals.length?Math.sqrt(mean(residuals.map(value=>value*value))):null,
+      residualSd:residuals.length?Math.sqrt(mean(residuals.map(value=>value*value))!):null,
       reason:completionFit.ready?null:completionFit.reason||'Completion response could not be estimated.',
       strongReason:strongFit.ready?null:strongFit.reason||'Strong-day probability could not be estimated.'
     };
   }
-  function calibratedStrongPrediction(surface,features,calibrator=null){
+  function calibratedStrongPrediction(surface:WorkloadSurface,features:readonly number[],calibrator:LogisticFit|null=null){
     if(!surface||!surface.strongReady)return {raw:null,calibrated:null};
     const raw=predictRegularizedLogistic(surface.strongFit,features,.8);
     const calibrated=calibrator&&calibrator.ready
@@ -3156,11 +3185,11 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       : raw;
     return {raw,calibrated};
   }
-  function completionPredictionEnvelope(surface,features,completionHalfWidth=null){
+  function completionPredictionEnvelope(surface:WorkloadSurface,features:readonly number[],completionHalfWidth:number|null=null){
     const completion=predictRegularizedLogistic(surface.completionFit,features,.8);
     const residual=Math.max(.04,num(surface.residualSd,.12));
     const modelUncertainty=1.282*Math.sqrt(residual*residual+Math.pow(completion.width/2.56,2));
-    const calibrated=Number.isFinite(completionHalfWidth)&&completionHalfWidth>0;
+    const calibrated=isFiniteNumber(completionHalfWidth)&&completionHalfWidth>0;
     const uncertainty=calibrated?completionHalfWidth:modelUncertainty;
     return {
       mean:clamp(completion.mean,0,1),
@@ -3169,7 +3198,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       rangeMethod:calibrated?'backtest-calibrated':'model-estimated'
     };
   }
-  function predictionSummary(surface,features,planned,calibrator=null,completionHalfWidth=null){
+  function predictionSummary(surface:WorkloadSurface,features:readonly number[],planned:number,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null):PredictionSummary{
     const completion=completionPredictionEnvelope(surface,features,completionHalfWidth);
     const strong=calibratedStrongPrediction(surface,features,calibrator);
     return {
@@ -3181,14 +3210,14 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       expectedCompleted:planned*completion.mean
     };
   }
-  function predictWorkloadSurface(surface,planned,priorState,calibrator=null,completionHalfWidth=null){
+  function predictWorkloadSurface(surface:WorkloadSurface,planned:number,priorState:number,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null){
     if(!surface||!surface.completionReady)return null;
     const load=(planned-surface.loadMean)/surface.loadSd,state=(priorState-surface.stateMean)/surface.stateSd;
     const features=[load,load*load-1,state];
     return {planned,priorState,...predictionSummary(surface,features,planned,calibrator,completionHalfWidth)};
   }
-  function fitStateAwareForecastSurface(rows,{minimumDays=MIN_STATE_AWARE_FORECAST_COMPLETE_DAYS}={}){
-    const complete=(Array.isArray(rows)?rows:[]).filter(row=>row&&row.fitness&&[row.fitness.capacity,row.fitness.execution,row.fitness.recovery].every(Number.isFinite));
+  function fitStateAwareForecastSurface(rows:readonly WorkloadRow[],{minimumDays=MIN_STATE_AWARE_FORECAST_COMPLETE_DAYS}:Readonly<{minimumDays?:number}>={}):StateAwareSurface{
+    const complete=rows.filter((row):row is StateAwareRow=>!!row.fitness&&isFiniteNumber(row.fitness.capacity)&&isFiniteNumber(row.fitness.execution)&&isFiniteNumber(row.fitness.recovery));
     const plannedValues=complete.map(row=>row.planned),span=complete.length?Math.max(...plannedValues)-Math.min(...plannedValues):0;
     const reason=complete.length<minimumDays
       ? `Need ${Math.max(0,minimumDays-complete.length)} more days with origin-causal prior-day output, schedule, and focus states.`
@@ -3197,10 +3226,10 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
         : null;
     if(reason)return {ready:false,completionReady:false,strongReady:false,rows:complete.length,span,reason,strongReason:reason};
     const loadMean=mean(plannedValues),loadSd=Math.max(45,num(stdev(plannedValues),60));
-    const stateKeys=['capacity','execution','recovery'];
-    const stateMeans=Object.fromEntries(stateKeys.map(key=>[key,mean(complete.map(row=>row.fitness[key]))]));
-    const stateSds=Object.fromEntries(stateKeys.map(key=>[key,Math.max(8,num(stdev(complete.map(row=>row.fitness[key])),12))]));
-    const features=row=>{
+    const stateKeys:readonly FitnessKey[]=['capacity','execution','recovery'];
+    const stateMeans:Record<FitnessKey,number>={capacity:mean(complete.map(row=>row.fitness.capacity))!,execution:mean(complete.map(row=>row.fitness.execution))!,recovery:mean(complete.map(row=>row.fitness.recovery))!};
+    const stateSds:Record<FitnessKey,number>={capacity:Math.max(8,num(stdev(complete.map(row=>row.fitness.capacity)),12)),execution:Math.max(8,num(stdev(complete.map(row=>row.fitness.execution)),12)),recovery:Math.max(8,num(stdev(complete.map(row=>row.fitness.recovery)),12))};
+    const features=(row:Readonly<{planned:number;fitness:FitnessPredictors}>)=>{
       const load=(row.planned-loadMean)/loadSd;
       return [load,load*load-1,...stateKeys.map(key=>(row.fitness[key]-stateMeans[key])/stateSds[key])];
     };
@@ -3220,17 +3249,17 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       strongReason:strongFit.ready?null:strongFit.reason||'State-aware strong-day probability could not be estimated.'
     };
   }
-  function predictStateAwareForecastSurface(surface,planned,fitness,calibrator=null,completionHalfWidth=null){
+  function predictStateAwareForecastSurface(surface:StateAwareSurface,planned:number,fitness:FitnessPredictors|null,calibrator:LogisticFit|null=null,completionHalfWidth:number|null=null){
     if(!surface||!surface.completionReady||!fitness||![fitness.capacity,fitness.execution,fitness.recovery].every(Number.isFinite))return null;
     const features=surface.features({planned,fitness});
     return {planned,fitness:{...fitness},...predictionSummary(surface,features,planned,calibrator,completionHalfWidth)};
   }
-  function rollingForecastPredictions(rows,variant){
+  function rollingForecastPredictions(rows:readonly WorkloadRow[],variant:'baseline'|'state-aware'):ForecastPrediction[]{
     const stateAware=variant==='state-aware',minimumTraining=stateAware?MIN_STATE_AWARE_FORECAST_TRAINING_DAYS:18;
     const available=Math.max(0,rows.length-minimumTraining),originCount=Math.min(MAX_FORECAST_BACKTESTS,available);
     const origins=[...new Set(Array.from({length:originCount},(_,index)=>originCount===1?rows.length-1:Math.round(minimumTraining+index*(rows.length-minimumTraining-1)/(originCount-1))))]
       .filter(index=>index>=minimumTraining&&index<rows.length);
-    const predictions=[];
+    const predictions:ForecastPrediction[]=[];
     for(const index of origins){
       const training=rows.slice(0,index),test=rows[index];
       const surface=stateAware
@@ -3249,14 +3278,14 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     }
     return predictions;
   }
-  function finiteSampleQuantile(values,target=FORECAST_COMPLETION_RANGE_TARGET){
-    const clean=(Array.isArray(values)?values:[]).filter(Number.isFinite).sort((a,b)=>a-b);
+  function finiteSampleQuantile(values:readonly number[],target=FORECAST_COMPLETION_RANGE_TARGET){
+    const clean=values.filter(isFiniteNumber).sort((a,b)=>a-b);
     if(!clean.length)return null;
     const rank=Math.min(clean.length,Math.max(1,Math.ceil((clean.length+1)*clamp(target,0,1))));
-    return clean[rank-1];
+    return clean[rank-1]!;
   }
-  function completionRangeCalibration(predictions){
-    const rows=(Array.isArray(predictions)?predictions:[]).filter(row=>Number.isFinite(row.actualCompletion)&&Number.isFinite(row.completionMean));
+  function completionRangeCalibration(predictions:readonly ForecastPrediction[]):CompletionRangeCalibration{
+    const rows=predictions.filter(row=>isFiniteNumber(row.actualCompletion)&&isFiniteNumber(row.completionMean));
     const errors=rows.map(row=>Math.abs(row.actualCompletion-row.completionMean));
     if(rows.length<MIN_FORECAST_BACKTESTS)return {
       ready:false,target:FORECAST_COMPLETION_RANGE_TARGET,backtests:rows.length,halfWidth:null,coverage:null,coverageError:null,
@@ -3276,7 +3305,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       reason:ready?null:`The estimated range covered ${percentLabel(Number.isFinite(coverage)?coverage*100:null,1)} of held-out outcomes; approximately ${percentLabel(FORECAST_COMPLETION_RANGE_TARGET*100,0)} is required.`
     };
   }
-  function evaluateForecastPredictions(predictions,modelKey,modelLabel){
+  function evaluateForecastPredictions(predictions:readonly ForecastPrediction[],modelKey:string,modelLabel:string):ForecastCalibration{
     const completionMae=predictions.length?mean(predictions.map(row=>Math.abs(row.completionMean-row.actualCompletion))):null;
     const naiveRows=predictions.filter(row=>Number.isFinite(row.naiveCompletion));
     const naiveMae=naiveRows.length?mean(naiveRows.map(row=>Math.abs(row.naiveCompletion-row.actualCompletion))):null;
@@ -3295,7 +3324,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     const calibrator=strongPredictions.length>=MIN_FORECAST_BACKTESTS&&strongYes>=4&&strongNo>=4
       ? fitRegularizedLogistic(strongPredictions.map(row=>({x:[logit(row.rawStrongProbability)],y:row.actualStrong})),{lambda:4,minimumRows:MIN_FORECAST_BACKTESTS})
       : {ready:false,rows:strongPredictions.length,reason:`Need ${MIN_FORECAST_BACKTESTS}+ rolling strong-day forecasts with both outcomes.`};
-    const foldCounters={0:0,1:0};
+    const foldCounters:Record<0|1,number>={0:0,1:0};
     const foldAssignments=strongPredictions.map(row=>{const key=row.actualStrong?1:0;return foldCounters[key]++%FORECAST_CALIBRATION_FOLDS;});
     // Every row assigned to the same fold has the exact same cross-fit
     // training set. Fit that set once per fold instead of recomputing an
@@ -3335,12 +3364,12 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       gates:{maximumCompletionMae:FORECAST_MAX_COMPLETION_MAE_POINTS,minimumNaiveMaeGain:FORECAST_MIN_NAIVE_MAE_GAIN_POINTS,maximumCalibrationError:FORECAST_MAX_CALIBRATION_ERROR_POINTS,brierBaselineTolerance:FORECAST_BRIER_BASELINE_TOLERANCE,completionRangeTarget:FORECAST_COMPLETION_RANGE_TARGET,maximumRangeCoverageError:FORECAST_COMPLETION_RANGE_MAX_COVERAGE_ERROR_POINTS},label
     };
   }
-  function compactForecastCalibration(calibration){
-    const strip=value=>{const {predictions,strongPredictions,calibrator,bins,...summary}=value||{};return summary;};
+  function compactForecastCalibration(calibration:ForecastCalibration){
+    const strip=(value:ForecastCalibration)=>{const {predictions,strongPredictions,calibrator,bins,...summary}=value||{};return summary;};
     const {candidates,...summary}=strip(calibration);
     return {...summary,candidates:candidates?Object.fromEntries(Object.entries(candidates).map(([key,value])=>[key,strip(value)])):candidates};
   }
-  function forecastCalibration(rows){
+  function forecastCalibration(rows:readonly WorkloadRow[]){
     const baseline=evaluateForecastPredictions(rollingForecastPredictions(rows,'baseline'),'baseline','Baseline workload model');
     const stateAware=evaluateForecastPredictions(rollingForecastPredictions(rows,'state-aware'),'state-aware','State-aware model');
     const maeGain=Number.isFinite(baseline.completionMae)&&Number.isFinite(stateAware.completionMae)?round(baseline.completionMae-stateAware.completionMae,1):null;
@@ -3362,7 +3391,7 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       candidates:{baseline,stateAware},comparison:{maeGain,strongGuard,causalGuard,stateWins,requiredMaeGain:MIN_STATE_AWARE_MAE_GAIN_POINTS}
     };
   }
-  function computeWorkloadFrontier(daily,performanceState=null,detail=true){
+  function computeWorkloadFrontier(daily:readonly DailySeriesRow[],performanceState:FitnessPerformanceState|null=null,detail=true){
     const rows=workloadModelRows(daily,performanceState);
     const plannedValues=rows.map(row=>row.planned);
     const span=rows.length?Math.max(...plannedValues)-Math.min(...plannedValues):0;
@@ -3460,20 +3489,20 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       recommendation,tradeoff,forecast,calibration:publicCalibration,confidence:recommendation.confidence,observations,empiricalBands,anchorBand,reason:null,strongReason:surface.strongReason,localSupport:{minimumDays:MIN_WORKLOAD_LOCAL_SUPPORT_DAYS,radius:round(supportRadius,1)}
     };
   }
-  function periodStartDay(day,size=7){
+  function periodStartDay(day:number,size=7){
     if(size===7){const weekday=new Date(day*86400000).getUTCDay();return day-((weekday+6)%7);}
     return Math.floor(day/size)*size;
   }
-  function computeDynamicAllocation(evidence,currentStudyDate=null,detail=true,modelTrendBasis=null){
-    const rows=(evidence&&Array.isArray(evidence.work)?evidence.work:[]).filter(row=>row.planned>0&&isIsoDate(row.date));
+  function computeDynamicAllocation(evidence:EvidenceIndex,currentStudyDate:string|null=null,detail=true,modelTrendBasis:Partial<DirectionalBasis>|null=null){
+    const rows=evidence.work.filter(row=>row.planned>0&&isIsoDate(row.date));
     const currentDay=isIsoDate(currentStudyDate)?dateDay(currentStudyDate):dateDay(localIsoDate()),currentPeriodStart=Number.isFinite(currentDay)?periodStartDay(currentDay,7):null;
-    const groups=new Map();
+    const groups=new Map<string,{startDay:number;endDay:number;planned:number;completed:number;areas:Map<string,{label:string;planned:number;completed:number}>}>();
     rows.forEach(row=>{
       const day=dateDay(row.date),start=periodStartDay(day,7),key=String(start);
       if(!groups.has(key))groups.set(key,{startDay:start,endDay:start+6,planned:0,completed:0,areas:new Map()});
-      const period=groups.get(key);period.planned+=row.planned;period.completed+=row.completed;
+      const period=groups.get(key)!;period.planned+=row.planned;period.completed+=row.completed;
       if(!period.areas.has(row.subject))period.areas.set(row.subject,{label:row.subject,planned:0,completed:0});
-      const area=period.areas.get(row.subject);area.planned+=row.planned;area.completed+=row.completed;
+      const area=period.areas.get(row.subject)!;area.planned+=row.planned;area.completed+=row.completed;
     });
     const allPeriods=[...groups.values()].sort((a,b)=>a.startDay-b.startDay).filter(period=>period.planned>=MIN_DYNAMIC_ALIGNMENT_PERIOD_PLANNED).map(period=>{
       const areas=[...period.areas.values()].filter(area=>area.planned>0||area.completed>0),plannedTotal=sum(areas.map(area=>area.planned)),completedTotal=sum(areas.map(area=>area.completed));
@@ -3511,18 +3540,18 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     const recent=trendPeriods.slice(-6),recentMean=recent.length?round(mean(recent.map(period=>period.divergence))*100,1):null;
     return {ready:true,periods:detail?periods:[],allPeriods:detail?allPeriods:[],provisionalPeriod,areaRows:detail?areaRows:[],persistentUnder,persistentOver,trend,trendBasis,recentPeriods:recent.length,recentMeanDivergence:recentMean,minimumPeriodPlanned:MIN_DYNAMIC_ALIGNMENT_PERIOD_PLANNED};
   }
-  function interactionCell(rows,valueFor,weightFor,baseline){
-    const clean=(Array.isArray(rows)?rows:[]).filter(row=>Number.isFinite(valueFor(row))&&num(weightFor(row))>0),weights=clean.map(weightFor),totalWeight=sum(weights),raw=totalWeight?sum(clean.map((row,index)=>valueFor(row)*weights[index]))/totalWeight:null;
+  function interactionCell<T extends Readonly<{date:string}>>(rows:readonly T[],valueFor:(row:T)=>number|null,weightFor:(row:T)=>number,baseline:number):InteractionCell{
+    const clean=rows.filter(row=>isFiniteNumber(valueFor(row))&&num(weightFor(row))>0),weights=clean.map(weightFor),totalWeight=sum(weights),raw=totalWeight?sum(clean.map((row,index)=>num(valueFor(row))*weights[index]!))/totalWeight:null;
     const typicalWeight=median(weights)||1,priorWeight=typicalWeight*EVIDENCE_PRIOR_EFFECTIVE_BLOCKS,estimate=Number.isFinite(raw)?(raw*totalWeight+baseline*priorWeight)/(totalWeight+priorWeight):null;
     return {rows:clean.length,days:new Set(clean.map(row=>row.date)).size,weight:round(totalWeight,1),raw:roundNullable(raw,1),estimate:roundNullable(estimate,1),ready:clean.length>=MIN_INTERACTION_CELL_ROWS&&new Set(clean.map(row=>row.date)).size>=MIN_INTERACTION_CELL_DAYS};
   }
-  function interactionStability(groups,valueFor,weightFor,baseline){
-    const dates=[...new Set((Array.isArray(groups)?groups:[]).flatMap(group=>(Array.isArray(group)?group:[]).map(row=>row&&row.date).filter(isIsoDate)))].sort();
+  function interactionStability<T extends Readonly<{date:string}>>(groups:readonly (readonly T[])[],valueFor:(row:T)=>number|null,weightFor:(row:T)=>number,baseline:number):InteractionStability{
+    const dates=[...new Set(groups.flatMap(group=>group.map(row=>row.date).filter(isIsoDate)))].sort();
     if(dates.length<MIN_INTERACTION_CELL_DAYS*2)return {ready:false,earlyEffect:null,lateEffect:null,reason:`Need ${MIN_INTERACTION_CELL_DAYS*2}+ distinct dates for an early/late stability check.`};
-    const split=dates[Math.floor(dates.length/2)],effectFor=side=>{
-      const cells=(Array.isArray(groups)?groups:[]).map(group=>interactionCell((group||[]).filter(row=>side==='early'?row.date<split:row.date>=split),valueFor,weightFor,baseline));
+    const split=dates[Math.floor(dates.length/2)]!,effectFor=(side:'early'|'late')=>{
+      const cells=groups.map(group=>interactionCell(group.filter(row=>side==='early'?row.date<split:row.date>=split),valueFor,weightFor,baseline));
       const ready=cells.length===4&&cells.every(cell=>cell.ready&&Number.isFinite(cell.estimate));
-      return ready?(cells[0].estimate-cells[1].estimate)-(cells[2].estimate-cells[3].estimate):null;
+      return ready?(num(cells[0]!.estimate)-num(cells[1]!.estimate))-(num(cells[2]!.estimate)-num(cells[3]!.estimate)):null;
     };
     const earlyEffect=effectFor('early'),lateEffect=effectFor('late');
     const sameDirection=Number.isFinite(earlyEffect)&&Number.isFinite(lateEffect)&&Math.sign(earlyEffect)===Math.sign(lateEffect);
@@ -3532,42 +3561,42 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
       reason:ready?null:'The interaction did not repeat with the same material direction in the early and late evidence halves.'
     };
   }
-  function interactionDifference(label,key,cells,textFor,meta={}){
+  function interactionDifference(label:string,key:string,cells:InteractionCells,textFor:(effect:number)=>string,meta:InteractionMeta={}):InteractionCandidate{
     const ready=Object.values(cells).every(cell=>cell.ready&&Number.isFinite(cell.estimate));
     const effect=ready?(cells.a.estimate-cells.b.estimate)-(cells.c.estimate-cells.d.estimate):null;
     const minimumRows=Math.min(...Object.values(cells).map(cell=>cell.rows)),minimumDays=Math.min(...Object.values(cells).map(cell=>cell.days));
     const stability=meta.stability||{ready:false,reason:'No repeated-period stability check is available.'};
     return {key,label,cells,ready,effect:roundNullable(effect,1),meaningful:ready&&Math.abs(effect)>=MIN_INTERACTION_EFFECT_POINTS&&stability.ready,confidence:ready&&stability.ready?descriptiveEvidenceConfidence(minimumRows,minimumDays*120):CONFIDENCE.weak,text:ready?textFor(effect):'The four comparison cells are not yet sufficiently represented.',...meta,stability};
   }
-  function canonicalInteractionPartition(groups){
-    const clean=(Array.isArray(groups)?groups:[]).map(group=>(Array.isArray(group)?group:[]).slice().sort((a,b)=>a-b));
+  function canonicalInteractionPartition(groups:readonly (readonly number[])[]):string{
+    const clean=groups.map(group=>group.slice().sort((a,b)=>a-b));
     if(clean.length!==4)return '';
-    const variants=[clean,[clean[2],clean[3],clean[0],clean[1]],[clean[1],clean[0],clean[3],clean[2]],[clean[3],clean[2],clean[1],clean[0]]];
+    const variants=[clean,[clean[2]!,clean[3]!,clean[0]!,clean[1]!],[clean[1]!,clean[0]!,clean[3]!,clean[2]!],[clean[3]!,clean[2]!,clean[1]!,clean[0]!]];
     return variants.map(variant=>variant.map(group=>group.join(',')).join('|')).sort()[0];
   }
-  function deduplicateInteractionCandidates(candidates){
-    const seen=new Set(),unique=[];
-    (Array.isArray(candidates)?candidates:[]).forEach(candidate=>{
+  function deduplicateInteractionCandidates(candidates:readonly InteractionCandidate[]):InteractionCandidate[]{
+    const seen=new Set<string>(),unique:InteractionCandidate[]=[];
+    candidates.forEach(candidate=>{
       const key=String(candidate&&candidate.dedupeKey||`${candidate&&candidate.key||'interaction'}:${candidate&&candidate.label||''}`);
       if(seen.has(key))return;
       seen.add(key);unique.push(candidate);
     });
     return unique;
   }
-  function selectDiverseInteractions(candidates,limit=2){
-    const source=Array.isArray(candidates)?candidates:[],shown=[],usedTypes=new Set();
+  function selectDiverseInteractions(candidates:readonly InteractionCandidate[],limit=2):InteractionCandidate[]{
+    const source=candidates,shown:InteractionCandidate[]=[],usedTypes=new Set<string>();
     source.forEach(candidate=>{if(shown.length<limit&&!usedTypes.has(candidate.key)){shown.push(candidate);usedTypes.add(candidate.key);}});
     source.forEach(candidate=>{if(shown.length<limit&&!shown.includes(candidate))shown.push(candidate);});
     return shown;
   }
-  function interactionCells(groups,value,weight,baseline){
+  function interactionCells<T extends Readonly<{date:string}>>(groups:readonly [readonly T[],readonly T[],readonly T[],readonly T[]],value:(row:T)=>number|null,weight:(row:T)=>number,baseline:number):InteractionCells{
     return {a:interactionCell(groups[0],value,weight,baseline),b:interactionCell(groups[1],value,weight,baseline),c:interactionCell(groups[2],value,weight,baseline),d:interactionCell(groups[3],value,weight,baseline)};
   }
-  function computeAreaTimeInteractions(evidence){
-    const rows=(evidence&&Array.isArray(evidence.work)?evidence.work:[]).filter(row=>row.planned>0&&Number.isFinite(firstHourSource(row.task).hour)),baseline=pct(rowsCompleted(rows),rowsPlanned(rows))??50,rowIndex=new Map(rows.map((row,index)=>[row,index]));
+  function computeAreaTimeInteractions(evidence:EvidenceIndex):InteractionCandidate[]{
+    const rows=evidence.work.filter(row=>row.planned>0&&Number.isFinite(firstHourSource(row.task).hour)),baseline=pct(rowsCompleted(rows),rowsPlanned(rows))??50,rowIndex=new Map(rows.map((row,index)=>[row,index]));
     const areaTotals=new Map();rows.forEach(row=>areaTotals.set(row.subject,num(areaTotals.get(row.subject))+row.planned));
     const areas=[...areaTotals.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label])=>label),bands=TIME_BANDS;
-    const candidates=[];
+    const candidates:InteractionCandidate[]=[];
     areas.forEach(area=>bands.forEach(band=>{
       const inBand=row=>{const current=timeBandForHour(firstHourSource(row.task).hour);return current&&current.id===band.id;};
       const groups=[rows.filter(row=>row.subject===area&&inBand(row)),rows.filter(row=>row.subject===area&&!inBand(row)),rows.filter(row=>row.subject!==area&&inBand(row)),rows.filter(row=>row.subject!==area&&!inBand(row))];
@@ -3577,8 +3606,8 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     }));
     return candidates;
   }
-  function computePositionWorkloadInteraction(evidence,daily){
-    const dailyLoad=new Map((Array.isArray(daily)?daily:[]).map(row=>[row.date,row.planned])),loads=[...dailyLoad.values()].filter(Number.isFinite),cut=median(loads);
+  function computePositionWorkloadInteraction(evidence:EvidenceIndex,daily:readonly DailySeriesRow[]):InteractionCandidate{
+    const dailyLoad=new Map<string,number>(daily.map(row=>[row.date,row.planned])),loads=[...dailyLoad.values()].filter(Number.isFinite),cut=median(loads);
     const rows=(evidence&&Array.isArray(evidence.work)?evidence.work:[]).filter(row=>row.planned>0&&Number.isFinite(dailyLoad.get(row.date))),baseline=pct(rowsCompleted(rows),rowsPlanned(rows))??50;
     const late=row=>{const recordWork=recordRows(evidence,row.record,'work'),index=Math.max(0,recordWork.indexOf(row)),raw=num(row.task&&row.task.studyOrdinal,null),ordinal=Number.isFinite(raw)&&raw>0?Math.round(raw):index+1;return ordinal>=4;};
     const high=row=>dailyLoad.get(row.date)>=cut;
@@ -3586,9 +3615,9 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     const cells=interactionCells(groups,row=>row.completion,row=>row.planned,baseline);
     return interactionDifference('Late position × workload','position-workload',cells,effect=>`Fourth-and-later blocks changed by ${Math.abs(round(effect,1))} completion points ${effect<0?'more negatively':'more positively'} on higher-load days than early blocks did.`,{stability:interactionStability(groups,row=>row.completion,row=>row.planned,baseline)});
   }
-  function computePreviousSupportInteraction(evidence){
-    const transitions=[];
-    (evidence&&Array.isArray(evidence.records)?evidence.records:[]).forEach(record=>{
+  function computePreviousSupportInteraction(evidence:EvidenceIndex):InteractionCandidate{
+    const transitions:{date:string;previousStrong:boolean;support:boolean;nextStrong:boolean}[]=[];
+    evidence.records.forEach(record=>{
       const all=recordRows(evidence,record,'all'),work=all.filter(row=>row.kind==='work'&&row.planned>0);
       for(let index=1;index<work.length;index+=1){
         const previous=work[index-1],next=work[index],left=all.indexOf(previous),right=all.indexOf(next),support=left>=0&&right>=0&&all.slice(left+1,right).some(row=>row.kind==='support');
@@ -3600,17 +3629,17 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
     const cells=interactionCells(groups,value,weight,baseline);
     return interactionDifference('Previous result × support break','previous-support',cells,effect=>`A support break changed next-block recovery after a non-strong block by ${Math.abs(round(effect,1))} points ${effect>=0?'more favourably':'less favourably'} than it changed continuation after a strong block.`,{stability:interactionStability(groups,value,weight,baseline)});
   }
-  function computeRestrainedInteractions(evidence,daily,detail=true){
+  function computeRestrainedInteractions(evidence:EvidenceIndex,daily:readonly DailySeriesRow[],detail=true){
     const tests=[...computeAreaTimeInteractions(evidence),computePositionWorkloadInteraction(evidence,daily),computePreviousSupportInteraction(evidence)];
     const ranked=tests.filter(test=>test.meaningful).sort((a,b)=>Math.abs(b.effect)-Math.abs(a.effect)),candidates=deduplicateInteractionCandidates(ranked),shown=selectDiverseInteractions(candidates,2);
     const observations=sum(tests.map(test=>sum(Object.values(test.cells||{}).map(cell=>num(cell&&cell.rows)))));
     return {ready:candidates.length>0,tests:detail?tests:[],candidates:detail?candidates:[],shown,...(detail?{}:{observations}),minimumCellRows:MIN_INTERACTION_CELL_ROWS,minimumCellDays:MIN_INTERACTION_CELL_DAYS,minimumEffect:MIN_INTERACTION_EFFECT_POINTS,minimumStabilityEffect:MIN_INTERACTION_STABILITY_EFFECT_POINTS,reason:candidates.length?'Only distinct interactions clearing four-cell evidence, effect-size, and repeated-period stability gates are retained; mirrored descriptions are collapsed before ranking.':'No tested combination was both sufficiently large and stable across the early and late evidence halves.'};
   }
-  function computeStudyDynamics(model,evidence,historyMeta={},detail=true){
+  function computeStudyDynamics(model:DynamicsModelInput,evidence:EvidenceIndex,historyMeta:DynamicsHistoryMeta={},detail=true){
     const bayesian=computeBayesianPatterns(evidence,model,detail);
     const changePoint=computeCompletionChangePoint(model.daily,detail);
     const allocation=computeAllocationConcentration(model,detail);
-    allocation.dynamic=computeDynamicAllocation(evidence,model&&model.currentStudyDate,detail,model&&model.trendBasis);
+    const dynamicAllocation=computeDynamicAllocation(evidence,model.currentStudyDate,detail,model.trendBasis);
     const cascade=computeExecutionCascade(evidence,detail);
     const interactions=computeRestrainedInteractions(evidence,model.daily,detail);
     const interactionObservations=detail?sum((interactions.tests||[]).map(test=>sum(Object.values(test.cells||{}).map(cell=>num(cell&&cell.rows))))):num(interactions.observations);
@@ -3624,9 +3653,9 @@ type FitnessResult=Readonly<{version:3;performanceState:FitnessPerformanceState;
         modelRecords:Math.max(0,num(historyMeta.modelRecords)),modelStart:isIsoDate(historyMeta.modelStart)?historyMeta.modelStart:null,
         modelEnd:isIsoDate(historyMeta.modelEnd)?historyMeta.modelEnd:null,horizonDays:Math.max(0,num(historyMeta.horizonDays)),capped:!!historyMeta.capped
       }),
-      bayesian:withEvidenceMetadata(bayesian,{observations:evidence&&evidence.work&&evidence.work.length,days:completionDays,method:'hierarchical-completion-patterns',limitations:bayesian.readyDimensions?[]:['No dimension has cleared the hierarchy evidence gate.']}),
+      bayesian:withEvidenceMetadata(bayesian,{observations:evidence.work.length,days:completionDays,method:'hierarchical-completion-patterns',limitations:bayesian.readyDimensions?[]:['No dimension has cleared the hierarchy evidence gate.']}),
       changePoint:withEvidenceMetadata(changePoint,{confidence:changePoint.confidence,observations:changePoint.days,days:changePoint.days,method:'bayesian-online-change-point',limitations:changePoint.reason?[changePoint.reason]:[]}),
-      allocation:withEvidenceMetadata(allocation,{confidence:allocation.confidence,observations:allocation.areas,days:completionDays,method:'jensen-shannon-plus-weekly-drift',limitations:allocation.reason?[allocation.reason]:[]}),
+      allocation:withEvidenceMetadata({...allocation,dynamic:dynamicAllocation},{confidence:allocation.confidence,observations:allocation.areas,days:completionDays,method:'jensen-shannon-plus-weekly-drift',limitations:allocation.reason?[allocation.reason]:[]}),
       cascade:withEvidenceMetadata(cascade,{confidence:cascade.confidence,observations:cascade.transitions,days:cascade.daysWithWork,method:'regularised-sequence-and-hazard',limitations:cascade.reason?[cascade.reason]:[]}),
       interactions:withEvidenceMetadata(interactions,{observations:interactionObservations,days:completionDays,method:'gated-four-cell-interactions',limitations:interactions.ready?[]:[interactions.reason]}),
       workload:withEvidenceMetadata(workload,{confidence:workload.confidence,observations:workload.days,days:workload.days,method:workload.method||'regularised-workload-response',limitations:[workload.reason,workload.strongReason].filter(Boolean)})
