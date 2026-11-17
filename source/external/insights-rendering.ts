@@ -50,17 +50,19 @@ type Allocation=Model['dynamics']['allocation'];
 type Cascade=Model['dynamics']['cascade'];
 type UnionKeys<T>=T extends T?keyof T:never;
 type UnionValue<T,K extends PropertyKey>=T extends T?K extends keyof T?T[K]:never:never;
-type CompleteUnion<T>={ [K in UnionKeys<T>]?:UnionValue<T,K> };
+type CompleteUnion<T>={ [K in UnionKeys<T>]?:UnionValue<T,K>|undefined };
 type RenderBayesian=CompleteUnion<Bayesian>;
 type RenderAllocation=CompleteUnion<Allocation>;
 type RenderDynamicAllocation=CompleteUnion<NonNullable<RenderAllocation['dynamic']>>;
 type RenderCascade=CompleteUnion<Cascade>;
 type RenderCascadeAdjusted=CompleteUnion<NonNullable<RenderCascade['adjusted']>>;
+type RenderHazard=CompleteUnion<NonNullable<RenderCascadeAdjusted['hazard']>>;
+type HazardCurveRow=NonNullable<RenderHazard['curve']>[number];
 type RenderWorkload=CompleteUnion<Workload>;
 type RenderForecast=CompleteUnion<NonNullable<RenderWorkload['forecast']>>;
 type RenderChangePoint=CompleteUnion<Model['dynamics']['changePoint']>;
 type RenderCalibration=CompleteUnion<NonNullable<RenderForecast['calibration']>|NonNullable<RenderWorkload['calibration']>>;
-type WorkloadCurveRow=NonNullable<RenderWorkload['curve']>[number];
+type WorkloadCurveRow=NonNullable<RenderWorkload['curve']>[number]|NonNullable<RenderWorkload['forecastCurve']>[number];
 type WorkloadPoint={
   planned:number;completionMean:number|null;completionLow:number|null;completionHigh:number|null;
   strongProbability:number|null;strongLow:number|null;strongHigh:number|null;expectedCompleted:number|null;
@@ -209,8 +211,8 @@ function createInsightsRendering(
   function coarsePointerActive(){
     return !!(window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches);
   }
-  function nearestInteractiveItem(items:readonly ChartHit[],clientX:number,clientY:number):ChartHit|null{
-    let nearest=null,best=Infinity;
+  function nearestInteractiveItem<T extends ChartHit>(items:readonly T[],clientX:number,clientY:number):T|null{
+    let nearest:T|null=null,best=Infinity;
     items.forEach(item=>{
       const rect=item&&item.node&&item.node.getBoundingClientRect&&item.node.getBoundingClientRect();
       if(!rect||!rect.width||!rect.height)return;
@@ -1601,7 +1603,8 @@ function createInsightsRendering(
     const line2=svgEl('text',{class:'inspect-body',x:inspectX+13,y:inspectY+(compact?56:51)});
     inspect.append(inspectBox,title,line1,line2);svg.appendChild(inspectLine);
     const legendX=compact?inspectX:plotRight-216,legendY=compact?inspectY+inspectH+28:plotBottom+60;
-    [['risk-low','low'],['risk-mid','watch'],['risk-high','high']].forEach(([cls,label],index)=>{
+    const riskLegend:readonly (readonly [string,string])[]=[['risk-low','low'],['risk-mid','watch'],['risk-high','high']];
+    riskLegend.forEach(([cls,label],index)=>{
       const x=legendX+index*70;svg.appendChild(svgEl('circle',{class:'point chart-point-current '+cls,cx:x,cy:legendY-5,r:5}));
       const text=svgEl('text',{class:'label',x:x+9,y:legendY});text.textContent=label;svg.appendChild(text);
     });
@@ -1888,7 +1891,7 @@ function createInsightsRendering(
       `${shares[1]}% time-derived`,
       `${shares[2]}% uncertain`
     ];
-    if(counts[3]>0)parts.push(`${shares[3]}% skipped`);
+    if(num(counts[3])>0)parts.push(`${num(shares[3])}% skipped`);
     return `Evidence · ${parts.join(' · ')}`;
   }
   function renderMetrics(model:Model){
@@ -2035,7 +2038,7 @@ function createInsightsRendering(
     const scalePeak=isolatedExtreme?runnerUp*1.15:maxObserved;
     const yMin=0,yMax=Math.max(150,Math.ceil(scalePeak/25)*25);
     const hasCappedValues=rows.some(row=>num(row.medianPace)>yMax||(row.spreadReady&&num(row.paceQ3)>yMax));
-    const yFor=(value:number)=>pad+(1-(Math.max(yMin,Math.min(yMax,num(value)))-yMin)/(yMax-yMin))*plotHeight;
+    const yFor=(value:number|null|undefined)=>pad+(1-(Math.max(yMin,Math.min(yMax,num(value)))-yMin)/(yMax-yMin))*plotHeight;
     const firstPracticeRow=rows[0],lastPracticeRow=rows[rows.length-1];
     const firstDay=firstPracticeRow?dateDay(firstPracticeRow.date):null,lastDay=lastPracticeRow?dateDay(lastPracticeRow.date):null,daySpan=Math.max(1,num(lastDay)-num(firstDay));
     const xFor=(row:PracticeDailyRow,index:number)=>rows.length===1?pad+plotWidth/2:pad+((num(dateDay(row.date),index)-num(firstDay))/(daySpan||1))*plotWidth;
@@ -2096,7 +2099,7 @@ function createInsightsRendering(
     const yMin=Math.max(0,Math.min(60,Math.floor((minObserved-15)/10)*10));
     const rawMax=Math.max(140,Math.ceil(maxObserved/25)*25),yMax=Math.min(250,rawMax);
     const capped=maxObserved>yMax;
-    const yFor=(value:number)=>pad+(1-(Math.max(yMin,Math.min(yMax,num(value)))-yMin)/(yMax-yMin))*plotHeight;
+    const yFor=(value:number|null|undefined)=>pad+(1-(Math.max(yMin,Math.min(yMax,num(value)))-yMin)/(yMax-yMin))*plotHeight;
     const xFor=(index:number)=>rows.length===1?pad+plotWidth/2:pad+(index/(rows.length-1))*plotWidth;
     const bandTop=yFor(PRACTICE_CONTROLLED_MAX),bandBottom=yFor(PRACTICE_CONTROLLED_MIN);
     const firstChild=svg.firstChild;
@@ -2165,8 +2168,8 @@ function createInsightsRendering(
   function practiceDifferenceDisplay(practice:Practice){
     const established=practiceDifferenceRows(practice);
     if(established.length)return {rows:established,early:false};
-    const early=[practiceEarlyComparisonRow(practice&&practice.areas,'Area'),practiceEarlyComparisonRow(practice&&practice.modes,'Setup')]
-      .filter(Boolean)
+    const early=[practiceEarlyComparisonRow(practice.areas,'Area'),practiceEarlyComparisonRow(practice.modes,'Setup')]
+      .filter((row):row is NonNullable<typeof row>=>!!row)
       .sort((a,b)=>num(b.score)-num(a.score)||String(a.family).localeCompare(String(b.family)))
       .slice(0,2);
     return {rows:early,early:true};
@@ -2187,7 +2190,7 @@ function createInsightsRendering(
       if(incomplete||paceEffect>=MIN_PRACTICE_SEGMENT_EFFECT_POINTS||practicePaceConcernDistance(num(row.medianPace))>=MIN_PRACTICE_SEGMENT_EFFECT_POINTS){
         const note=incomplete
           ?`${row.completedSegments}/${row.runs} repeated segments were fully completed; median completion ${percentLabel(row.medianCompletion,1)}.`
-          :`${row.medianRelativeDelta>0?'+':''}${numberLabel(row.medianRelativeDelta,1)} pace points versus the rest of the same runs.`;
+          :`${num(row.medianRelativeDelta)>0?'+':''}${numberLabel(row.medianRelativeDelta,1)} pace points versus the rest of the same runs.`;
         candidates.push({family:'Segment',label:row.label,value:Number.isFinite(row.medianPace)?percentLabel(row.medianPace,1):percentLabel(row.medianCompletion,1),tone:incomplete||practicePaceConcernDistance(num(row.medianPace))>=MIN_PRACTICE_SEGMENT_EFFECT_POINTS?'watch':'quiet',meta:`${row.evidenceUnits} units · ${row.runs} runs · ${row.days} days · ${row.maturity.label}`,note,score:Math.max(100-num(row.completedSegmentRate),100-num(row.medianCompletion),paceEffect,practicePaceConcernDistance(num(row.medianPace)))+num(row.maturity.rank)*4});
       }
     }
@@ -2222,7 +2225,7 @@ function createInsightsRendering(
     return card;
   }
   function renderPracticePacer(model:Model,{embedded=false}:{embedded?:boolean}={}){
-    const practice=model.practice||{units:0,runs:0,practiceDays:0,reading:practicePacerReading({units:0})};
+    const practice=model.practice;
     const details=embedded?el('section','insights-practice insights-practice-embedded ui-card'):el('details','insights-practice ui-disclosure');
     const summary=embedded?el('div','insights-practice-embedded-head'):el('summary',null),summaryCopy=el('span','insights-practice-summary-copy');
     summaryCopy.append(el('span','insights-practice-summary-title ui-label','Practice Pacing'),el('span','insights-practice-summary-meta ui-mono',practice.units?`${practice.units} unit${practice.units===1?'':'s'} · ${practice.runs} run${practice.runs===1?'':'s'} · ${practice.practiceDays} practice day${practice.practiceDays===1?'':'s'}`:'No completed runs in this window'));
@@ -2707,7 +2710,7 @@ function createInsightsRendering(
   }
   function persistentPatternChart(patterns:readonly PatternRead[],bayesian:RenderBayesian){
     const rows=(Array.isArray(patterns)?patterns:[]).filter(item=>item&&item.row&&item.row.estimate);
-    if(!rows.length)return null;
+    if(!rows.length)return evidenceNote('Repeated completion-pattern chart needs a stable pattern.');
     const compact=isCompact(),width=compact?360:680,height=52+rows.length*42,left=compact?120:158,right=18,top=28,bottom=24,plotWidth=width-left-right;
     const svg=svgEl('svg',{class:'insights-chart insights-persistent-pattern-chart',viewBox:`0 0 ${width} ${height}`,role:'group'});
     labelGraphic(svg,'Repeated completion patterns','Estimated completion and likely ranges for the clearest stable Area, start-time, and plan-position patterns. The dashed line is your overall work average.');
@@ -2736,7 +2739,7 @@ function createInsightsRendering(
   }
   function allocationComparisonChart(allocation:RenderAllocation){
     const rows=allocation&&Array.isArray(allocation.displayRows)?allocation.displayRows:[];
-    if(!allocation||!allocation.ready||!rows.length)return null;
+    if(!allocation.ready||!rows.length)return evidenceNote('Allocation comparison needs stable area evidence.');
     const compact=isCompact(),width=compact?360:680,height=48+rows.length*38,left=compact?94:152,right=18,top=33,plotWidth=width-left-right;
     const svg=svgEl('svg',{class:'insights-chart insights-allocation-compare-chart',viewBox:`0 0 ${width} ${height}`,role:'group'});
     labelGraphic(svg,'Planned and completed area shares','Paired share lines for the largest lifetime differences between planned work and completed-equivalent work. Equal allocation is not assumed to be desirable.');
@@ -2863,12 +2866,12 @@ function createInsightsRendering(
     const copy=detected
       ? `A likely ${change.delta>=0?'upward':'downward'} completion phase began near ${shortDate(change.date)}: ${percentLabel(change.beforeMean,1)} before versus ${percentLabel(change.afterMean,1)} after. The estimated likelihood of a real shift reached ${percentLabel(change.probability,1)}.`
       : change.reason||'No clear performance-phase change is present.';
-    const left=[dynamicsRead(change.confidence??{key:'weak',label:'Needs more history',tone:'low'},copy,detected?`${change.delta>0?'+':''}${change.delta} pts`:`Latest ${percentLabel(change.latestProbability,1)}`)];
+    const left=[dynamicsRead(change.confidence??{key:'weak',label:'Needs more history',tone:'low'},copy,detected?`${num(change.delta)>0?'+':''}${num(change.delta)} pts`:`Latest ${percentLabel(change.latestProbability,1)}`)];
     const supporting=[];
-    if(finiteNumber(change.currentRunLength))supporting.push({priority:80,label:'Current phase length',value:`About ${change.currentRunLength+1} completion-eligible day${change.currentRunLength===0?'':'s'}`});
+    if(finiteNumber(change.currentRunLength))supporting.push({priority:80,label:'Current phase length',value:`About ${num(change.currentRunLength)+1} completion-eligible day${change.currentRunLength===0?'':'s'}`});
     if(finiteNumber(change.currentRegimeMean))supporting.push({priority:70,label:'Current phase average',value:percentLabel(change.currentRegimeMean,1)});
     if(finiteNumber(change.latestProbability))supporting.push({priority:100,label:'Latest change likelihood',value:`${percentLabel(change.latestProbability,1)} · gate ${percentLabel(change.threshold&&change.threshold.probability,0)}`});
-    if(detected&&finiteNumber(change.beforeMean)&&finiteNumber(change.afterMean))supporting.push({priority:110,label:'Before → after',value:`${percentLabel(change.beforeMean,1)} → ${percentLabel(change.afterMean,1)} · ${change.delta>0?'+':''}${change.delta} pts`});
+    if(detected&&finiteNumber(change.beforeMean)&&finiteNumber(change.afterMean))supporting.push({priority:110,label:'Before → after',value:`${percentLabel(change.beforeMean,1)} → ${percentLabel(change.afterMean,1)} · ${num(change.delta)>0?'+':''}${num(change.delta)} pts`});
     const list=dynamicsSupportingList(supporting);
     if(list)left.push(list);
     const visual=el('div','insights-dynamics-visual-stack');
@@ -2877,7 +2880,7 @@ function createInsightsRendering(
     return cardNode;
   }
   function sequenceHazardChart(cascade:RenderCascade){
-    const adjusted=cascade&&cascade.adjusted||{},curve=adjusted.hazard&&adjusted.hazard.curve||[];
+    const adjusted:RenderCascadeAdjusted=cascade.adjusted??{},hazard:RenderHazard=adjusted.hazard??{},curve:readonly HazardCurveRow[]=hazard.curve??[];
     const compact=isCompact(),width=compact?360:620,height=220,pad=42,right=20;
     const {svg,plotRight,plotBottom}=chartFrame(width,height,pad,right);svg.classList.add('insights-hazard-chart');
     labelGraphic(svg,'Breakdown risk by planned block position','Estimated risk that each planned position begins a missed end-of-day tail, after accounting for the other recorded factors.');
@@ -2896,7 +2899,7 @@ function createInsightsRendering(
   function renderWhatBreaksCard(model:Model){
     const cascade:RenderCascade=model.dynamics.cascade,adjusted:RenderCascadeAdjusted=cascade.adjusted??{},cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-break-card');
     cardNode.appendChild(sectionTitle('3. Where does the day tend to break down?','Looks for recorded conditions that tend to precede a weak next block or a missed end of day. These are associations, not proof of cause.'));
-    const confidence=adjusted.primary&&adjusted.primary.confidence||(cascade.ready?cascade.confidence:{key:'weak',label:'Needs more history',tone:'low'});
+    const confidence=adjusted.primary?.confidence??cascade.confidence??{key:'weak',label:'Needs more history',tone:'low'};
     const copy=cascade.primary&&cascade.primary.text||adjusted.reason||'No recorded sequence factor is consistent enough to report yet.';
     const left=[dynamicsRead(confidence,copy,`${cascade.transitions||0} block transitions · ${(adjusted.hazard&&adjusted.hazard.events)||0} end-of-day breakdowns`)];
     const transitionLabels:Readonly<Record<string,string>>={strong:'After strong',attempted:'After partial',missed:'After missed'};
@@ -2913,7 +2916,7 @@ function createInsightsRendering(
     return cardNode;
   }
   function workloadPointAt(workload:RenderWorkload,planned:number):WorkloadPoint|null{
-    const forecast:RenderForecast=workload.forecast??{};
+    const forecast:RenderForecast=workload.forecast??Object.freeze({});
     const source=forecast.completionReady&&Array.isArray(workload.forecastCurve)&&workload.forecastCurve.length?workload.forecastCurve:workload.curve||[];
     const curve=source.slice().sort((a,b)=>a.planned-b.planned);
     const first=curve[0],last=curve[curve.length-1];
@@ -2968,7 +2971,7 @@ function createInsightsRendering(
     return {points:shown,shown:shown.length,total:points.length};
   }
   function workloadChartObservations(workload:RenderWorkload,model:Model,compact:boolean){
-    const all=Array.isArray(workload&&workload.observations)?workload.observations:[];
+    const all:readonly NonNullable<RenderWorkload['observations']>[number][]=Array.isArray(workload.observations)?workload.observations:[];
     const limit=compact?MAX_WORKLOAD_HISTORY_POINTS_COMPACT:MAX_WORKLOAD_HISTORY_POINTS_DESKTOP;
     return prioritizedChartPoints(all,limit,row=>workloadObservationInDisplayWindow(row,model));
   }
@@ -2999,8 +3002,8 @@ function createInsightsRendering(
     svg.append(svgEl('polygon',{class:'response-band',points:band.join(' ')}),svgEl('polyline',{class:'response-completion',points:curve.map(point=>`${xFor(point.planned)},${yFor(point.completionMean)}`).join(' ')}));
     if(strongReady)svg.appendChild(svgEl('polyline',{class:'response-strong',points:curve.map(point=>`${xFor(point.planned)},${yFor(point.strongProbability)}`).join(' ')}));
     const selected=workload.recommendation,forecast:RenderForecast=workload.forecast??{},scenario=finiteNumber(forecast.scenarioPlanned)?forecast:null;
-    if(selected)svg.appendChild(svgEl('circle',{class:'frontier-point selected chart-point-onset',cx:xFor(selected.typicalPlanned),cy:yFor(selected.completionMean),r:6}));
-    if(scenario)svg.appendChild(svgEl('line',{class:'scenario-line',x1:xFor(scenario.scenarioPlanned),y1:pad,x2:xFor(scenario.scenarioPlanned),y2:plotBottom}));
+    if(selected)svg.appendChild(svgEl('circle',{class:'frontier-point selected chart-point-onset',cx:xFor(num(selected.typicalPlanned)),cy:yFor(num(selected.completionMean)),r:6}));
+    if(scenario&&finiteNumber(scenario.scenarioPlanned))svg.appendChild(svgEl('line',{class:'scenario-line',x1:xFor(scenario.scenarioPlanned),y1:pad,x2:xFor(scenario.scenarioPlanned),y2:plotBottom}));
     [first,last].forEach((point,index)=>{const label=svgEl('text',{class:'axis-label',x:xFor(point.planned),y:plotBottom+20,'text-anchor':index?'end':'start'});label.textContent=minutesLabel(point.planned);svg.appendChild(label);});
     const legend=svgEl('text',{class:'axis-label strong',x:pad,y:17});
     legend.textContent=compact
@@ -3031,7 +3034,7 @@ function createInsightsRendering(
       return cardNode;
     }
     const range=`${minutesLabel(recommendation.minPlanned)}–${minutesLabel(recommendation.maxPlanned)}`;
-    const calibration:RenderCalibration=forecast.calibration??workload.calibration??{};
+    const calibration:RenderCalibration=forecast.calibration??workload.calibration??Object.freeze({});
     const completionAbstention=forecast.completionReason||calibration.completionReason||`Only ${calibration.backtests||0}/${MIN_FORECAST_BACKTESTS} qualifying rolling completion forecasts are available.`;
     const strongUnavailable=workload.capabilities&&workload.capabilities.strong&&!workload.capabilities.strong.ready
       ? workload.capabilities.strong.reason
