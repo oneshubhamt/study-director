@@ -790,7 +790,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     const p=left,q=right;
     if(!p.length||p.length!==q.length)return null;
     const kl=(a:readonly number[],b:readonly number[])=>a.reduce((total,value,index)=>value>0&&b[index]!>0?total+value*log2(value/b[index]!):total,0);
-    const midpoint=p.map((value,index)=>(value+q[index])/2);
+    const midpoint=p.map((value,index)=>(value+q[index]!)/2);
     return Math.max(0,Math.min(1,(kl(p,midpoint)+kl(q,midpoint))/2));
   }
     return Object.freeze({
