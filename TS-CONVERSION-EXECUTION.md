@@ -1,13 +1,17 @@
 # TypeScript conversion — execution record
 
-## Current handoff — P5.10B ACTIVE, 2026-11-17
+## Current handoff — P5.10B CLOSED — TARGETED VERIFIED, 2026-11-17
 
-- **Baseline:** `bc3b3d577f90c202322c06965aabc996e2fa3f51` on remote `ts-exp`; P5.10A remains targeted-verified at source checkpoint `c2095db383cf4e00a083def4f15e3e9611182228`.
-- **Outcome:** move the actual M8.9 dashboard renderer—DOM construction, SVG/charts, cards, disclosures, tables/tooltips and interaction callbacks—into strict browser TypeScript consuming the P5.9 model. Keep M8.10 Analytics Lab and M8.12 retained-view/lifecycle for P5.10C.
-- **Invariants:** no simplified/replaced UI; preserve copy/order, unavailable-versus-zero semantics, accessible labels/keyboard/focus, responsive/narrow geometry, bounded chart sampling and reduced-motion behavior. Renderer factory may be shared in the generated asset, but DOM construction must occur only after the worker exit. P5.10A transport/host behavior must remain unchanged.
-- **Design:** extract the existing M8.9 factory at its component seam into checked `source/external/insights-rendering.ts`; leave only thin browser assembly in `insights.js`. Reuse exact P5.9 model/runtime types and native DOM/event types rather than a declaration facade or generic bags.
-- **Targeted QA:** strict TypeScript + typed lint; `tests/integration/insights/render-lifecycle.mjs`; existing model/transport witnesses as affected-source guards; fresh build + generated verification/syntax; `tests/browser/insights/insights-populated-ui.mjs` including narrow viewport/real worker. Add focused renderer interaction coverage only where current tests do not exercise changed native controls.
-- **Open:** P5.10C retained-view/Lab conversion, P5.11a Guide producer conversion, and P5.13 shared plugin-loader mechanics remain explicitly outside this pass. Full QA remains Phase 7.
+- **Baseline and checkpoint:** P5.10B started from `bc3b3d577f90c202322c06965aabc996e2fa3f51`; targeted-verified source/test checkpoint is `27449a517a47aa88270ded7318d875465aef68ee`. P5.10A remains intact.
+- **Renderer ownership:** the actual M8.9 dashboard implementation moved from `source/external/insights.js` into checked `source/external/insights-rendering.ts`—DOM construction, SVG/charts, cards, disclosures, tables/tooltips and interaction callbacks. `insights.js` now has one thin renderer construction call; no M8.9 renderer definition remains duplicated there.
+- **Type topology:** the renderer uses native DOM/SVG/event types plus exact P5.9 model-derived rows/evidence unions, including explicit unavailable/insufficient states. It has no explicit `any`, TS suppression or declaration facade. Browser and worker projects remain separate.
+- **Runtime ordering:** the one generated Insights asset is ordered model → protocol → worker → compute bridge → renderer → retained view. Renderer construction occurs only after the worker-only exit, so the same generated URL still terminates before DOM construction in worker context.
+- **Behavior preserved:** existing copy/order, zero-versus-unavailable semantics, bounded chart sampling, responsive geometry, reduced-motion behavior, native labels/disclosures and retained-view callers remain unchanged. M8.10 Analytics Lab and M8.12 retained-view/lifecycle are still owned by P5.10C.
+- **Focused browser coverage strengthened:** the populated Insights journey now proves empty Saved Days, one-day insufficient evidence and 590-day populated evidence in sequence; native execution tabs are exercised with real keyboard ArrowLeft/ArrowRight input; the unrelated first-start onboarding dialog is deterministically dismissed in the fixture so it cannot steal focus. Existing 390 px narrow-layout, no-overflow, chart-width and retained reopen checks remain.
+- **Targeted QA:** workflow run `44093742266` / job `134075328070` at `27449a5` passed strict TypeScript + typed lint (227 checked TS files, zero unchecked TS), P5.9 model/transport guards, `insights-render-lifecycle`, fresh build, generated build verification, generated syntax, Chromium and the strengthened browser journey. Browser evidence reported `empty=true`, `insufficientDays=1`, `populatedDays=590`, zero desktop/390 px overflow, actual `worker` mode and all 590 records transferred.
+- **Closure audit:** manifest/build order matches the required six-source Insights runtime; worker exit precedes renderer construction; each audited M8.9 renderer owner exists once in `insights-rendering.ts` and zero times in `insights.js`; no renderer `any` or suppression remains.
+- **Open by canonical ownership:** P5.10C retained-view/Lab conversion, P5.11a Guide producer conversion and P5.13 shared plugin-loader mechanics remain open. Full QA was **not** run and remains Phase 7.
+- **Disposition:** no known P5.10B source or targeted-evidence gap remains.
 
 ## Last verified application checkpoint
 
