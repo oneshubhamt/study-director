@@ -495,7 +495,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
     if(sizeRows.length)section.appendChild(labTable(['Grouping','Band','Units','Runs','Days','Evidence','Run-balanced pace','Controlled','Over budget','Below 80%'],sizeRows,{wide:true,columns:'94px minmax(170px,1.4fr) 58px 58px 58px 88px 130px 128px 128px 128px'}));
     const orderedRuns=(practice.runRows||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))||num(b.index)-num(a.index));
     const runRows=orderedRuns.map(row=>[
-      shortDate(row.date),`${row.area} · ${row.block}`,row.modeLabel,row.plannedUnits?`${row.units}/${row.plannedUnits}`:String(row.units),percentLabel(row.runPace,1),row.units>=MIN_PRACTICE_COMPARABLE_UNITS?`${percentLabel(row.medianUnitPace,1)} · IQR ${row.paceSpread} pts`:percentLabel(row.medianUnitPace,1),row.controlled?'Controlled':row.runPace<PRACTICE_CONTROLLED_MIN?'Below 80%':'Over budget',`${millisecondsLabel(row.actualMs)} / ${millisecondsLabel(row.targetMs)}`,row.completePlanned?signedMillisecondsLabel(row.finishingMarginMs):'—'
+      shortDate(row.date),`${row.area} · ${row.block}`,row.modeLabel,row.plannedUnits?`${row.units}/${row.plannedUnits}`:String(row.units),percentLabel(row.runPace,1),row.units>=MIN_PRACTICE_COMPARABLE_UNITS?`${percentLabel(row.medianUnitPace,1)} · IQR ${row.paceSpread} pts`:percentLabel(row.medianUnitPace,1),row.controlled?'Controlled':num(row.runPace)<PRACTICE_CONTROLLED_MIN?'Below 80%':'Over budget',`${millisecondsLabel(row.actualMs)} / ${millisecondsLabel(row.targetMs)}`,row.completePlanned?signedMillisecondsLabel(row.finishingMarginMs):'—'
     ]);
     section.appendChild(el('div','insights-mobile-scroll-cue ui-label','Swipe table →'));
     section.appendChild(progressiveLabTable(['Date','Area / linked block','Setup','Units','Run pace','Typical unit / spread','Band','Actual / target','Finish margin'],runRows,{wide:true,mobileScroll:true,columns:'80px minmax(210px,1.7fr) 118px 72px 92px 150px 98px 138px 110px'},'run'));
@@ -602,14 +602,14 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       ],{wide:true,columns:'minmax(155px,1fr) minmax(165px,1fr) minmax(280px,1.7fr)'}));
       const dimensionRows=Object.values(state.dimensions||{}).map((dimension,index)=>[
         dimension.label,dimension.current?percentLabel(dimension.current.estimate,1):'Unknown',dimension.current?`${percentLabel(dimension.current.low,0)}–${percentLabel(dimension.current.high,0)}`:'—',dimension.observedDays||0,
-        learned.processSd&&Number.isFinite(learned.processSd[index])?numberLabel(learned.processSd[index],1):'—',learned.measurementSd&&Number.isFinite(learned.measurementSd[index])?numberLabel(learned.measurementSd[index],1):'—',numberLabel(dimension.persistence,2),dimension.confidence&&dimension.confidence.label||'Weak signal'
+        learned?.processSd&&finiteNumber(learned.processSd[index])?numberLabel(learned.processSd[index],1):'—',learned?.measurementSd&&finiteNumber(learned.measurementSd[index])?numberLabel(learned.measurementSd[index],1):'—',numberLabel(dimension.persistence,2),dimension.confidence&&dimension.confidence.label||'Weak signal'
       ]);
       if(dimensionRows.length)overview.appendChild(labTable(['Latent component','Current','95% range','Observed days','Process SD','Measure SD','Empirical persistence','Strength'],dimensionRows,{wide:true,columns:'minmax(150px,1.2fr) 82px 104px 92px 90px 94px 130px 112px'}));
       body.appendChild(overview);
       const stateByDate=new Map((state.history||[]).map(row=>[row.date,row]));
       const observationRows=(state.observations||[]).slice().sort((a,b)=>b.day-a.day).map(observation=>{
-        const filtered=stateByDate.get(observation.date)||{};
-        const filteredStates=filtered.states||{};
+        const filtered=stateByDate.get(observation.date);
+        const filteredStates=filtered?.states;
         return [
           shortDate(observation.date),
           Number.isFinite(observation.completion)?percentLabel(observation.completion,1):'No completion',
@@ -618,9 +618,9 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
           minutesLabel(observation.planned),
           fitnessSourceMixLabel(observation.plannedByGroup),
           numberLabel(observation.evidenceWeight,2),
-          Number.isFinite(filtered.estimate)?percentLabel(filtered.estimate,1):'No state',
-          filteredStates.execution?percentLabel(filteredStates.execution.estimate,1):'—',
-          filteredStates.recovery?percentLabel(filteredStates.recovery.estimate,1):'—'
+          finiteNumber(filtered?.estimate)?percentLabel(filtered.estimate,1):'No state',
+          filteredStates?.execution?percentLabel(filteredStates.execution.estimate,1):'—',
+          filteredStates?.recovery?percentLabel(filteredStates.recovery.estimate,1):'—'
         ];
       });
       const observations=el('section','insights-card soft ui-card');
@@ -663,14 +663,14 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
         ['Current modal run',Number.isFinite(change.currentRunLength)?`${change.currentRunLength} eligible days`:'Unavailable',Number.isFinite(change.currentRegimeMean)?`Current regime mean ${percentLabel(change.currentRegimeMean,1)}`:'No regime estimate'],
         ['Decision',change.detected?'Regime change detected':'No qualifying change',change.reason||'']
       ],{wide:true,columns:'minmax(160px,1fr) 130px minmax(230px,1.5fr)'}));
-      const regimeRows=(change.history||[]).slice().reverse().map(row=>[shortDate(row.date),percentLabel(row.completion,1),percentLabel(row.changeProbability*100,1),percentLabel(row.recentChangeProbability*100,1),row.modalRunLength,percentLabel(row.regimeMean,1)]);
+      const regimeRows=(change.history||[]).slice().reverse().map(row=>[shortDate(row.date),percentLabel(row.completion,1),percentLabel(finiteNumber(row.changeProbability)?row.changeProbability*100:null,1),percentLabel(finiteNumber(row.recentChangeProbability)?row.recentChangeProbability*100:null,1),row.modalRunLength,percentLabel(row.regimeMean,1)]);
       if(regimeRows.length)changeCard.appendChild(progressiveLabTable(['Date','Completion','New-regime P','Recent-change P','Modal run','Regime mean'],regimeRows,{wide:true,columns:'82px 88px 104px 116px 84px 104px'},'regime day'));
       body.appendChild(changeCard);
-      const allocation:LabAllocation=dynamics.allocation;
+      const allocation=dynamics.allocation;
       if(allocation.ready){
         const allocationCard=el('section','insights-card soft ui-card');
         allocationCard.appendChild(sectionTitle('Allocation-distance evidence',`${allocation.label} · Jensen–Shannon divergence ${allocation.divergence} (${allocation.divergencePercent}% of its bounded scale).`));
-        allocationCard.appendChild(labTable(['Area','Planned share','Completed share','Shift','Window plan','Completed equivalent'],allocation.rows.map(row=>[
+        allocationCard.appendChild(labTable(['Area','Planned share','Completed share','Shift','Window plan','Completed equivalent'],(allocation.rows||[]).map(row=>[
           row.label,percentLabel(row.plannedShare,1),percentLabel(row.completedShare,1),`${row.gap>0?'+':''}${row.gap} pts`,minutesLabel(row.planned),minutesLabel(row.completed)
         ]),{wide:true,columns:'minmax(150px,1.3fr) 105px 120px 82px 100px 150px'}));
         body.appendChild(allocationCard);
@@ -701,22 +701,25 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       if(interactions.tests&&interactions.tests.length){
         const interactionCard=el('section','insights-card soft ui-card');
         interactionCard.appendChild(sectionTitle('Restrained interaction checks','Difference-in-differences after shrinkage; all four cells must clear row and day gates, then the direction must repeat across early and late evidence halves.'));
-        interactionCard.appendChild(labTable(['Combination','Effect','Cells ready','Early half','Late half','Stable','Retained'],interactions.tests.filter(test=>test.ready||test.key!=='area-time').map(test=>[
-          test.label,
-          finiteNumber(test.effect)?`${test.effect>0?'+':''}${test.effect} pts`:'—',
-          test.ready?'Yes':'No',
-          Number.isFinite(test.stability&&test.stability.earlyEffect)?`${test.stability.earlyEffect>0?'+':''}${test.stability.earlyEffect} pts`:'—',
-          Number.isFinite(test.stability&&test.stability.lateEffect)?`${test.stability.lateEffect>0?'+':''}${test.stability.lateEffect} pts`:'—',
-          test.stability&&test.stability.ready?'Yes':'No',
-          test.meaningful?'Yes':'No'
-        ]),{wide:true,columns:'minmax(180px,1.2fr) 88px 88px 88px 88px 76px 78px'}));
+        interactionCard.appendChild(labTable(['Combination','Effect','Cells ready','Early half','Late half','Stable','Retained'],interactions.tests.filter(test=>test.ready||test.key!=='area-time').map(test=>{
+          const early=test.stability?.earlyEffect,late=test.stability?.lateEffect;
+          return [
+            test.label,
+            finiteNumber(test.effect)?`${test.effect>0?'+':''}${test.effect} pts`:'—',
+            test.ready?'Yes':'No',
+            finiteNumber(early)?`${early>0?'+':''}${early} pts`:'—',
+            finiteNumber(late)?`${late>0?'+':''}${late} pts`:'—',
+            test.stability?.ready?'Yes':'No',
+            test.meaningful?'Yes':'No'
+          ];
+        }),{wide:true,columns:'minmax(180px,1.2fr) 88px 88px 88px 88px 76px 78px'}));
         interactionCard.appendChild(evidenceNote(interactions.reason));
         body.appendChild(interactionCard);
       }
-      const workload:LabWorkload=dynamics.workload;
+      const workload=dynamics.workload;
       if(workload.ready){
         const workloadCard=el('section','insights-card soft ui-card');
-        const calibration=workload.calibration||{};
+        const calibration=workload.calibration;
         workloadCard.appendChild(sectionTitle('Response-surface & forecast evidence',`${workload.days} eligible days · planned span ${minutesLabel(workload.span)} · ${calibration.label||'calibration pending'}.`));
         workloadCard.appendChild(labTable(['Calibration evidence','Value','Reading'],[
           ['Rolling completion backtests',calibration.backtests||0,`${MIN_FORECAST_BACKTESTS}+ required for completion calibration`],
@@ -728,17 +731,19 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
           ['Naïve median MAE',calibration.naiveCompletionMae===null||calibration.naiveCompletionMae===undefined?'Unavailable':`${calibration.naiveCompletionMae} pts`,`Recent-seven-day median benchmark; model gain ${Number.isFinite(calibration.naiveMaeGain)?`${calibration.naiveMaeGain>0?'+':''}${calibration.naiveMaeGain} pts`:'unavailable'} · ${FORECAST_MIN_NAIVE_MAE_GAIN_POINTS}+ required`],
           ['Completion-range status',calibration.intervalReady?'Backtest-checked 80% range':'Estimated model range',calibration.intervalReady?`${percentLabel(calibration.completionRange&&calibration.completionRange.coverage,1)} leave-one-out coverage across ${calibration.completionRange&&calibration.completionRange.coverageTests||0} checks`:(calibration.intervalReason||'Historical range coverage has not passed')],
           ['Completion-range half-width',Number.isFinite(calibration.completionRange&&calibration.completionRange.halfWidthPoints)?`${calibration.completionRange.halfWidthPoints} pts`:'Unavailable',`Finite-sample ${percentLabel(FORECAST_COMPLETION_RANGE_TARGET*100,0)} absolute-error quantile from held-out rolling forecasts`],
-          ['Selected forecast model',workload.forecast&&workload.forecast.modelLabel||calibration.selectedModelLabel||'Baseline workload model',calibration.selectionReason||'The simpler model remains the default unless the expanded state model wins held-out tests.'],
+          ['Selected forecast model',workload.forecast?.calibration?.modelLabel||calibration.selectedModelLabel||'Baseline workload model',calibration.selectionReason||'The simpler model remains the default unless the expanded state model wins held-out tests.'],
           ['State predictor causality',calibration.comparison&&calibration.comparison.causalGuard?'Origin-causal':'Guarded',calibration.comparison&&calibration.comparison.causalGuard?'Every historical state predictor used only evidence available before its forecast date.':'The state-aware model cannot win selection.'],
           ['Baseline vs state-aware MAE',`${numberLabel(calibration.candidates&&calibration.candidates.baseline&&calibration.candidates.baseline.completionMae,1)} vs ${numberLabel(calibration.candidates&&calibration.candidates.stateAware&&calibration.candidates.stateAware.completionMae,1)} pts`,Number.isFinite(calibration.comparison&&calibration.comparison.maeGain)?`State-aware gain ${calibration.comparison.maeGain>0?'+':''}${calibration.comparison.maeGain} points; ${calibration.comparison.requiredMaeGain}+ required`:'State-aware comparison not yet complete'],
           ['Local workload support',workload.recommendation?`${workload.recommendation.localSupport} days at anchor`:'Region withheld',workload.recommendation?`${MIN_WORKLOAD_LOCAL_SUPPORT_DAYS}+ nearby days required inside ${minutesLabel(workload.localSupport&&workload.localSupport.radius||45)}`:workload.recommendationReason||'No locally supported region'],
-          ['Completion forecast',workload.forecast&&workload.forecast.completionReady?'Calibrated':'Abstained',workload.forecast&&workload.forecast.completionReady?'Rolling error, naïve-benchmark, and local-support gates cleared':workload.forecast&&workload.forecast.completionReason||calibration.completionReason||'Completion surface remains descriptive'],
-          ['Strong-day forecast',workload.forecast&&workload.forecast.strongReady?'Calibrated':'Withheld',workload.forecast&&workload.forecast.strongReady?'Outcome diversity, probability calibration, and local-support gates cleared':workload.forecast&&workload.forecast.strongReason||calibration.strongReason||workload.strongReason||'Strong-day probability unavailable']
+          ['Completion forecast',workload.forecast?.completionReady?'Calibrated':'Abstained',workload.forecast?.completionReady?'Rolling error, naïve-benchmark, and local-support gates cleared':workload.forecast?.completionReason||calibration.completionReason||'Completion surface remains descriptive'],
+          ['Strong-day forecast',workload.forecast?.strongReady?'Calibrated':'Withheld',workload.forecast?.strongReady?'Outcome diversity, probability calibration, and local-support gates cleared':workload.forecast?.strongReason||calibration.strongReason||workload.strongReason||'Strong-day probability unavailable']
         ],{wide:true,columns:'minmax(180px,1fr) 150px minmax(280px,1.6fr)'}));
-        if((workload.empiricalBands||[]).length)workloadCard.appendChild(labTable(['Empirical band','Days','Plan range','Mean plan','Mean completion','Strong days','Expected completed'],workload.empiricalBands.map(band=>[
+        const empiricalBands=workload.empiricalBands||[];
+        if(empiricalBands.length)workloadCard.appendChild(labTable(['Empirical band','Days','Plan range','Mean plan','Mean completion','Strong days','Expected completed'],empiricalBands.map(band=>[
           band.label,band.days,`${minutesLabel(band.minPlanned)}–${minutesLabel(band.maxPlanned)}`,minutesLabel(band.meanPlanned),percentLabel(band.meanCompletion,1),`${band.strongDays}/${band.days} · ${percentLabel(band.strongRate,1)}`,minutesLabel(band.expectedCompleted)
         ]),{wide:true,mobileScroll:true,columns:'105px 62px 135px 90px 118px 125px 135px'}));
-        if((workload.observations||[]).length)workloadCard.appendChild(progressiveLabTable(['Date','Planned','Completion','Completed equivalent','Strong day'],workload.observations.slice().reverse().map(row=>[
+        const workloadObservations=workload.observations||[];
+        if(workloadObservations.length)workloadCard.appendChild(progressiveLabTable(['Date','Planned','Completion','Completed equivalent','Strong day'],workloadObservations.slice().reverse().map(row=>[
           shortDate(row.date),minutesLabel(row.planned),percentLabel(row.completion,1),minutesLabel(row.completed),row.strong?'Yes':'No'
         ]),{wide:true,mobileScroll:true,columns:'90px 100px 100px 150px 90px'},'workload day'));
         workloadCard.appendChild(progressiveLabTable(['Planned','Completion','Estimated model range','P(strong)','Probability range','Expected completed','Nearby days','Frontier'],(workload.curve||[]).map(row=>[
@@ -1120,8 +1125,8 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       try{
         const firstRender=!state.rendered;
         if(firstRender){
-          let resolveNavigationReady;
-          state.navigationReady=new Promise(resolve=>{resolveNavigationReady=resolve;});
+          let resolveNavigationReady:(value:boolean)=>void=()=>{};
+          state.navigationReady=new Promise<boolean>(resolve=>{resolveNavigationReady=resolve;});
           renderInitialInsightsLoading(pane);
           profile.shellMs=performance.now()-profile.started;
           resolveNavigationReady(true);
