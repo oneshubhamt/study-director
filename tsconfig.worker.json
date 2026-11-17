@@ -32,6 +32,7 @@
     "rich-text/tags.ts",
     "rich-text/wg1-codec.ts",
     "types/checks/phase3.ts",
+    "source/external/insights-worker.ts",
     "types/checks/worker.ts"
   ]
 }

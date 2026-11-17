@@ -202,6 +202,8 @@
     "source/core/startup.ts",
     "types/startup.ts",
     "source/core/startup-host.ts",
+    "source/core/insights-host.ts",
+    "source/external/insights-compute.ts",
     "types/startup-host.ts",
     "types/checks/startup.ts",
     "source/core/plan-host.ts",

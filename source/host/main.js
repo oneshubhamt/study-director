@@ -84,6 +84,7 @@ const PlanHostModule=INTERNAL_MODULES.load('plan-host',1,'study-director.plan-ho
 const PlanModule=INTERNAL_MODULES.load('plan',1,'study-director.plan-module',1);
 const StartupLifecycleModule=INTERNAL_MODULES.load('startup-lifecycle',1,'study-director.startup-lifecycle',1);
 const StartupHostModule=INTERNAL_MODULES.load('startup-host',1,'study-director.startup-host-module',1);
+const InsightsHostModule=INTERNAL_MODULES.load('insights-host',1,'study-director.insights-host-module',1);
 const OwnershipModule=INTERNAL_MODULES.load('ownership',1,'study-director.ownership',1);
 const TimerStateModule=INTERNAL_MODULES.load('timer-state',1,'study-director.timer-state',1);
 const SessionLifecycleModule=INTERNAL_MODULES.load('session-lifecycle',1,'study-director.session-lifecycle',1);
@@ -3930,126 +3931,18 @@ window.addEventListener('storage',event=>{if(event.key===STORAGE_KEYS.pwaUpdateC
 /* INSIGHTS AND PLUGIN BOUNDARY */
 // Read-only Insights boundary. Insights modules should read through this object
 // and return derived metrics without mutating records, notes, timer state, or storage.
-function normalizeInsightsRecordWindowOptions(options,summaries){return AppData.dailyRecords.normalizeWindow(options,summaries);}
-const PREVIEW_SAMPLE_DAYS=28;
-const PreviewRuntime=(()=>{
-  let preview=null,revision=0;
-  const providers=new Map();
-  const TARGETS=Object.freeze(new Set(['insights']));
-  const PROVIDER_TABS=Object.freeze({insights:'guide'});
-  function normalizeTarget(target='insights'){
-    const clean=String(target||'insights').trim();
-    return TARGETS.has(clean)?clean:'insights';
-  }
-  function normalizeRecords(records){
-    return clampArray(records,PREVIEW_SAMPLE_DAYS).map(record=>{
-      const clean=materializeDailyRecordView(record);
-      return clean;
-    }).filter(r=>r&&isValidIsoDate(r.date)).sort((a,b)=>a.date.localeCompare(b.date));
-  }
-  function active(target=''){
-    return !!(preview&&(!target||preview.target===target));
-  }
-  function status(target=''){
-    return active(target)
-      ? {type:'demo',label:preview.label,mode:'preview',available:true,target:preview.target,revision:`preview:${preview.revision}`}
-      : {type:'real',label:'Saved Data',mode:'real',available:false,target:target||null};
-  }
-  function summaries(target){
-    if(!active(target))return null;
-    return preview.records.map(record=>{
-      const summary=buildDailyRecordSummary(record);
-      return sanitizeDailyRecordSummary(summary);
-    }).filter(Boolean).sort((a,b)=>a.date.localeCompare(b.date));
-  }
-  function applyWindow(records,options={}){
-    const opts=options&&typeof options==='object'?options:{};
-    if(!(opts.windowDays||opts.from||opts.to||opts.limit))return records;
-    const window=normalizeInsightsRecordWindowOptions(opts,summaries(preview.target));
-    const allow=new Set(window.dates);
-    return records.filter(record=>allow.has(record.date));
-  }
-  function records(target,options={}){
-    if(!active(target))return null;
-    return applyWindow(preview.records,options);
-  }
-  function setRecords(records,options={}){
-    const opts=options&&typeof options==='object'?options:{};
-    const label=clampText(opts.label||'Sample Data',80);
-    const target=normalizeTarget(opts.target);
-    revision+=1;
-    preview=Object.freeze({target,label,revision,records:normalizeRecords(records)});
-    return status(target);
-  }
-  function registerProvider(target,provider){
-    const cleanTarget=normalizeTarget(target);
-    if(typeof provider!=='function')return false;
-    providers.set(cleanTarget,provider);
-    return true;
-  }
-  async function useSample(options={}){
-    const opts=options&&typeof options==='object'?options:{};
-    const target=normalizeTarget(opts.target);
-    let provider=providers.get(target);
-    if(!provider){
-      const providerTab=PROVIDER_TABS[target];
-      if(providerTab)await PluginRuntime.requestTab(providerTab);
-      provider=providers.get(target);
-    }
-    if(!provider)return {ok:false,status:status(target)};
-    try{
-      const records=provider({today:isValidIsoDate(opts.today)?opts.today:todayISO()});
-      const normalized=normalizeRecords(records);
-      if(normalized.length!==PREVIEW_SAMPLE_DAYS)throw new Error(`Expected ${PREVIEW_SAMPLE_DAYS} sample records.`);
-      setRecords(normalized,{target,label:opts.label||`Sample ${PREVIEW_SAMPLE_DAYS} days`});
-      return {ok:true,status:status(target)};
-    }catch(error){
-      AppDiagnostics.capture('preview.sample-provider',error);
-      return {ok:false,status:status(target)};
-    }
-  }
-  function clear(target=''){
-    if(!target||active(target)){if(preview)revision+=1;preview=null;}
-    return status(target);
-  }
-  function clearExcept(target){
-    if(preview&&preview.target!==target){revision+=1;preview=null;}
-    return status(target);
-  }
-  return Object.freeze({registerProvider,useSample,setRecords,clear,clearExcept,status,summaries,records});
-})();
-const InsightsDataSource=Object.freeze({
-  async getDailySnapshot(){
-    const previewRecords=PreviewRuntime.records('insights',{});
-    if(previewRecords)return Object.freeze({records:previewRecords,summaries:PreviewRuntime.summaries('insights')||[]});
-    const snapshot=await AppData.dailyRecords.insightsSnapshot({yieldProjection:true});
-    return Object.freeze({records:snapshot.records,summaries:snapshot.summaries.filter(summary=>summary?.recordKind==='study')});
-  },
-  async getDailySummaries(){
-    const preview=PreviewRuntime.summaries('insights');
-    if(preview)return preview;
-    return (await AppData.dailyRecords.sortedSummaries()).filter(summary=>summary?.recordKind==='study');
-  },
-  async getDailyRecords(options={}){
-    const preview=PreviewRuntime.records('insights',options);
-    if(preview)return preview;
-    return AppData.dailyRecords.window({...options,yieldProjection:true});
-  },
-  getRecordSource(){
-    return PreviewRuntime.status('insights');
-  },
-  async getDatasetRevision(){
-    if(PreviewRuntime.status('insights').type==='demo')return null;
-    return AppData.dailyRecords.datasetRevision();
-  },
-  getCurrentStudyDate(){
-    return todayISO();
-  }
-});
-const AppInsights = Object.freeze({
+const InsightsBoundary=InsightsHostModule.createBoundary(Object.freeze({
+  dailyRecords:AppData.dailyRecords,
+  dailyRecordCodec:DailyRecordCodec,
   notifications:NoticeCoordinator.presentation('insights'),
-  dataSource: InsightsDataSource
-});
+  logic:Object.freeze({classifyTaskOutcome,summarizePracticeRuns:summarizePracticeRunsForInsights}),
+  requestProviderTab:tab=>PluginRuntime.requestTab(tab),
+  capture:(scope,error)=>AppDiagnostics.capture(scope,error),
+  todayISO:()=>todayISO(),
+  clampText
+}));
+const PreviewRuntime=InsightsBoundary.preview;
+const AppInsights=InsightsBoundary.appInsights;
 /* DOM BINDINGS AND STARTUP */
 function currentBackupDiagnosticStates(){
   const states=[],sample=(job,read,project)=>{try{states.push(...project(read()));}catch{states.push({job,state:'unavailable',reason:'state-unavailable'});}};
@@ -4623,10 +4516,7 @@ const StudyDirectorPublicAPI=Object.freeze({
     })
   }),
   insights:AppInsights,
-  logic:Object.freeze({
-    classifyTaskOutcome,
-    summarizePracticeRuns:summarizePracticeRunsForInsights
-  }),
+  logic:InsightsBoundary.logic,
   plan:Object.freeze({
     getDraft:getPlanDraftText,
     loadDraft:loadScheduleIntoDraft

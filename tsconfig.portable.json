@@ -16,6 +16,7 @@
     "rich-text/tags.ts",
     "rich-text/wg1-codec.ts",
     "source/external/insights-model.ts",
+    "source/external/insights-protocol.ts",
     "source/core/domain.ts",
     "source/core/session-lifecycle.ts",
     "types/checks/portable.ts",

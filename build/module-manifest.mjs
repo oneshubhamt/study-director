@@ -75,7 +75,8 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'pwa-lifecycle',source:'core/pwa-lifecycle.js',stem:'sd.pwa-lifecycle'}),
   Object.freeze({id:'native-capabilities',source:'core/native-capabilities.ts',stem:'sd.native-capabilities'}),
   Object.freeze({id:'startup',registryId:'startup-lifecycle',source:'core/startup.ts',stem:'sd.startup'}),
-  Object.freeze({id:'startup-host',source:'core/startup-host.ts',stem:'sd.startup-host'})
+  Object.freeze({id:'startup-host',source:'core/startup-host.ts',stem:'sd.startup-host'}),
+  Object.freeze({id:'insights-host',source:'core/insights-host.ts',stem:'sd.insights-host'})
 ]);
 
 // Direct runtime dependencies after host composition. The manifest order is a
@@ -157,7 +158,8 @@ export const runtimeDependencies=Object.freeze({
   'pwa-lifecycle':Object.freeze([]),
   'native-capabilities':Object.freeze([]),
   startup:Object.freeze(['library','backup','pomodoro','plan','repositories','review','session-lifecycle','timer-engine','timer-state']),
-  'startup-host':Object.freeze([])
+  'startup-host':Object.freeze([]),
+  'insights-host':Object.freeze([])
 });
 
 export const trustedExternalModuleIds=Object.freeze(['glass','aurora','guide','insights','drive','rich-text','search-worker','image-worker','attachment-worker','export-worker']);
@@ -165,7 +167,7 @@ export const externalModules=Object.freeze([
   Object.freeze({id:'glass',source:'external/glass.js',stem:'sd.glass',execution:'startup'}),
   Object.freeze({id:'aurora',source:'external/aurora.js',stem:'sd.aurora',execution:'startup'}),
   Object.freeze({id:'guide',source:'external/guide.js',stem:'sd.guide',execution:'on-demand'}),
-  Object.freeze({id:'insights',sources:Object.freeze(['external/insights-model.ts','external/insights.js']),stem:'sd.insights',execution:'on-demand'}),
+  Object.freeze({id:'insights',sources:Object.freeze(['external/insights-model.ts','external/insights-protocol.ts','external/insights-worker.ts','external/insights-compute.ts','external/insights.js']),stem:'sd.insights',execution:'on-demand'}),
   Object.freeze({id:'drive',source:'external/drive.ts',stem:'sd.drive',execution:'startup'}),
   // Wordgard is its own module, loaded with (before) Study Director's editor.
   Object.freeze({id:'rich-text',sources:Object.freeze(['external/wordgard.js','external/rich-text.js']),stem:'sd.richtext',execution:'startup'}),

@@ -8,8 +8,6 @@
 (function(){
   'use strict';
   const window=globalThis.window||globalThis;
-  const INSIGHTS_RUNTIME_URL=typeof document!=='undefined'&&document.currentScript?String(document.currentScript.src||''):'';
-
   const TAB_ID='insights';
   const PREVIEW_SAMPLE_DAYS=28;
   const REQUIRED_CAPABILITIES=Object.freeze({
@@ -36,13 +34,6 @@
   const WORK_TREND_MAX_CONNECTED_GAP_DAYS=3;
   const SVG_NS='http://www.w3.org/2000/svg';
 
-  let workerURLPolicy;
-  function trustedWorkerURL(){
-    if(!globalThis.trustedTypes)return INSIGHTS_RUNTIME_URL;
-    if(!workerURLPolicy)workerURLPolicy=globalThis.trustedTypes.createPolicy('sd-insights-worker',{createScriptURL:value=>{if(value!==INSIGHTS_RUNTIME_URL||new URL(value).origin!==location.origin)throw new TypeError('Unapproved Insights worker.');return value;}});
-    return workerURLPolicy.createScriptURL(INSIGHTS_RUNTIME_URL);
-  }
-
   const InsightsModel=globalThis.StudyDirectorInsightsModel;
   if(!InsightsModel)throw new Error('Study Director Insights model is unavailable.');
   const {
@@ -51,45 +42,14 @@
   }=InsightsModel;
   try{delete globalThis.StudyDirectorInsightsModel;}catch(error){}
 
-  // Workers need only the already-loaded model. Exit before constructing any
-  // DOM/render/runtime components so worker startup pays no UI initialization cost.
-  if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function'){
-    const classifyTaskOutcome=task=>task&&typeof task.__sdOutcome==='string'?task.__sdOutcome:'untouched';
-    const summarizePracticeRuns=()=>{throw new Error('Worker input is missing precomputed Practice Pacer evidence.');};
-    const engine=InsightsModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
-    // The host sends a revision's prepared records once, in parts, and later
-    // builds for that revision name only the window. One revision is kept.
-    let held=null,incoming=null;
-    self.addEventListener('message',event=>{
-      const message=event.data&&typeof event.data==='object'?event.data:{};
-      if(message.type==='SD_INSIGHTS_RECORDS'){
-        const revision=String(message.revision||''),parts=Number(message.parts),part=Number(message.part);
-        if(part===0||!incoming||incoming.revision!==revision)incoming={revision,parts,next:0,records:[]};
-        if(part!==incoming.next||!Array.isArray(message.records)){incoming=null;return;}
-        incoming.records.push(...message.records);incoming.next+=1;
-        if(incoming.next===incoming.parts){held={revision,records:incoming.records};incoming=null;}
-        return;
-      }
-      if(message.type!=='SD_INSIGHTS_BUILD')return;
-      const started=performance.now();
-      try{
-        if(!held||held.revision!==String(message.revision||''))throw new Error('Insights worker is missing this revision\'s records.');
-        const prepared=engine.reusePrepared(held.records,held.revision);
-        const view=message.window&&typeof message.window==='object'?message.window:{all:true};
-        const records=view.all===true?prepared.records:(Array.isArray(view.indices)?view.indices:[]).map(index=>{
-          const record=prepared.records[index];
-          if(!record)throw new Error('Insights window names a record the worker does not hold.');
-          return record;
-        });
-        const model=engine.buildPrepared(records,prepared,message.options||{});
-        self.postMessage({type:'SD_INSIGHTS_RESULT',id:message.id,model,computeMs:performance.now()-started});
-      }catch(error){
-        self.postMessage({type:'SD_INSIGHTS_ERROR',id:message.id,message:String(error&&error.message||error)});
-      }
-    });
-    return;
+  // The checked worker entry above owns compute transport. In a worker the
+  // shared asset stops here, before any DOM/render/runtime components exist.
+  if(typeof document==='undefined'&&typeof self!=='undefined'&&typeof self.postMessage==='function')return;
+  const InsightsWorkerModel=globalThis.StudyDirectorInsightsComputeBridge;
+  if(!InsightsWorkerModel||InsightsWorkerModel.format!=='study-director.insights-compute-bridge'||InsightsWorkerModel.version!==1){
+    throw new Error('Study Director Insights compute bridge is unavailable.');
   }
-
+  try{delete globalThis.StudyDirectorInsightsComputeBridge;}catch(error){}
   function insightWindowDeviceState(){
     const state=window.StudyDirector?.data?.deviceState;
     if(!state||typeof state.readInsightsWindow!=='function'||typeof state.writeInsightsWindow!=='function')throw new Error('Study Director Insights device-state capability is unavailable.');
@@ -3713,127 +3673,6 @@
 
 
 
-  const InsightsWorkerModel=(()=>{
-    const MIN_RECORDS=120;
-    const WORKER_TIMEOUT_MS=30000;
-    // One structured clone of a long history is a main-thread task. Parts of
-    // this size keep each clone well inside the long-task budget.
-    const RECORDS_PER_MESSAGE=150;
-    // A hidden Insights tab keeps its idle worker this long, so a rebuild soon
-    // after new data runs on already-compiled code, then frees the memory.
-    const IDLE_RETIRE_MS=120000;
-    const defaultYield=()=>globalThis.scheduler&&typeof globalThis.scheduler.yield==='function'
-      ?globalThis.scheduler.yield()
-      :new Promise(resolve=>setTimeout(resolve,0));
-    function create(api,engine,{yieldTask=defaultYield}={}){
-      let active=null,nextId=0,worker=null,heldRevision='',retireTimer=null;
-      const supported=()=>!!(INSIGHTS_RUNTIME_URL&&typeof Worker==='function');
-      const cancelRetire=()=>{if(retireTimer!==null){clearTimeout(retireTimer);retireTimer=null;}};
-      const retireWorker=()=>{cancelRetire();const current=worker;worker=null;heldRevision='';try{current?.terminate();}catch{}};
-      const rejectActive=error=>{const current=active;active=null;if(current)current.reject(error);};
-      const ensureWorker=()=>{
-        if(worker)return worker;
-        const created=new Worker(trustedWorkerURL(),{name:'study-director-insights'});
-        created.onmessage=event=>{
-          const message=event.data&&typeof event.data==='object'?event.data:{},current=active;
-          if(!current||message.id!==current.id)return;
-          if(message.type==='SD_INSIGHTS_ERROR')current.reject(new Error(message.message||'Insights worker failed.'));
-          else if(message.type==='SD_INSIGHTS_RESULT')current.resolve(message);
-        };
-        created.onerror=event=>{
-          event.preventDefault?.();
-          const error=new Error(event.message||'Insights worker failed.');
-          retireWorker();rejectActive(error);
-        };
-        created.onmessageerror=()=>{const error=new Error('Insights worker returned an unreadable response.');retireWorker();rejectActive(error);};
-        worker=created;heldRevision='';return created;
-      };
-      const warm=()=>{
-        if(!supported())return false;
-        try{ensureWorker();return true;}catch(error){retireWorker();return false;}
-      };
-      const abortActive=(rewarm=false)=>{
-        if(!active)return false;
-        const current=active;active=null;retireWorker();
-        current.reject(Object.assign(new Error('Insights computation superseded.'),{name:'AbortError'}));
-        if(rewarm)warm();
-        return true;
-      };
-      const cancel=()=>abortActive(true);
-      const dispose=()=>{const changed=abortActive(false)||!!worker;retireWorker();return changed;};
-      // The tab was hidden: stop any running build now, but keep an idle,
-      // already-compiled worker for a while before freeing it.
-      const release=()=>{
-        if(abortActive(false))return true;
-        if(!worker)return false;
-        cancelRetire();retireTimer=setTimeout(()=>{retireTimer=null;if(!active)retireWorker();},IDLE_RETIRE_MS);
-        return true;
-      };
-      const enrichRecords=records=>(Array.isArray(records)?records:[]).map(record=>{
-        const tasks=(Array.isArray(record&&record.tasks)?record.tasks:[]).map(task=>({...task,__sdOutcome:api.logic.classifyTaskOutcome(task)}));
-        let practiceSummary=null;
-        try{practiceSummary=api.logic.summarizePracticeRuns(Array.isArray(record&&record.practiceRuns)?record.practiceRuns:[]);}catch(error){}
-        return {...record,tasks,__sdPracticeSummary:practiceSummary};
-      });
-      const fallback=(records,prepared,options,started,reason='main-thread')=>{
-        const model=engine.buildPrepared(records,prepared,options);
-        return {model,mode:reason,computeMs:performance.now()-started,roundTripMs:0};
-      };
-      // Name the window by position in the held records, so a window change
-      // sends a few hundred integers instead of the records again.
-      const windowOf=(records,prepared)=>{
-        if(records===prepared.records)return {all:true};
-        const positions=new Map(prepared.records.map((record,index)=>[record,index]));
-        const indices=records.map(record=>positions.has(record)?positions.get(record):-1);
-        if(indices.some(index=>index<0))throw new Error('Insights window records are not part of the prepared history.');
-        return {indices};
-      };
-      const build=async(records,prepared,options)=>{
-        const started=performance.now();
-        if(Math.max(records.length,prepared.records.length)<MIN_RECORDS||!supported())return fallback(records,prepared,options,started,supported()?'main-thread-small':'main-thread-unavailable');
-        cancel();cancelRetire();
-        const id=++nextId;let timeout=null,sentRecords=0;
-        try{
-          const currentWorker=ensureWorker();
-          const view=windowOf(records,prepared),revision=String(prepared.revision||'');
-          const response=new Promise((resolve,reject)=>{
-            active={id,resolve,reject};
-            timeout=setTimeout(()=>reject(new Error('Insights processing timed out. Retry the report.')),WORKER_TIMEOUT_MS);
-          });
-          // A superseded build rejects through `response`; keep the sends
-          // from surfacing that same rejection a second time.
-          response.catch(()=>{});
-          if(heldRevision!==revision){
-            const all=prepared.records,parts=Math.max(1,Math.ceil(all.length/RECORDS_PER_MESSAGE));
-            for(let part=0;part<parts;part+=1){
-              if(part>0){await yieldTask();if(worker!==currentWorker||!active||active.id!==id)return await response;}
-              const slice=all.slice(part*RECORDS_PER_MESSAGE,(part+1)*RECORDS_PER_MESSAGE);
-              currentWorker.postMessage({type:'SD_INSIGHTS_RECORDS',revision,part,parts,records:slice});sentRecords+=slice.length;
-            }
-            heldRevision=revision;
-          }
-          currentWorker.postMessage({type:'SD_INSIGHTS_BUILD',id,revision,window:view,options});
-          const result=await response;
-          const model=result.model;
-          Object.defineProperty(model,'getLabEvidence',{enumerable:false,value:()=>engine.getLabEvidence(prepared,options)});
-          return {model,mode:'worker',computeMs:Number(result.computeMs)||0,roundTripMs:performance.now()-started,sentRecords};
-        }catch(error){
-          // cancel() already retires the superseded worker and may prewarm its
-          // replacement. Do not immediately kill that replacement from the
-          // cancelled build's rejection path.
-          if(error&&error.name==='AbortError')throw error;
-          retireWorker();
-          throw Object.assign(new Error('Insights processing failed. Retry the report.'),{code:'INSIGHTS_PROCESSING_FAILED',cause:error});
-        }finally{
-          clearTimeout(timeout);
-          if(active&&active.id===id)active=null;
-        }
-      };
-      return Object.freeze({build,cancel,dispose,release,warm,enrichRecords,supported,minimumRecords:MIN_RECORDS});
-    }
-    return Object.freeze({create,minimumRecords:MIN_RECORDS});
-  })();
-
   // M8.12 RETAINED VIEW COMPONENT
   const InsightsRetainedView=((Primitives,Records,Rendering,AnalyticsLab)=>{
     const {
@@ -4026,8 +3865,8 @@
         apply();resolve(true);requestAnimationFrame(()=>{state.suppressScroll=false;});
       }));
     };
-    const readDatasetRevision=async(dataSource,source)=>{
-      if(source&&source.type==='demo'||typeof dataSource.getDatasetRevision!=='function')return null;
+    const readDatasetRevision=async(dataSource)=>{
+      if(typeof dataSource.getDatasetRevision!=='function')return null;
       try{return await dataSource.getDatasetRevision();}catch(error){return null;}
     };
     const loadSession=async({dataSource,source,sourceKey,currentStudyDate,datasetRevision,isCurrent,profile})=>{
@@ -4042,18 +3881,19 @@
           dataSource.getDailyRecords({})
         ]);
       };
-      let [rawSummaries,rawRecords]=await readCanonicalInputs();
-      let summaries=normalizeSummaries(rawSummaries),records=Array.isArray(rawRecords)?rawRecords:[];
-      if(!isCurrent())return null;
-      let after=await readDatasetRevision(dataSource,source);
-      if(datasetRevision&&after&&datasetRevision!==after){
-        const retryRevision=after;
+      let rawSummaries=[],rawRecords=[],summaries=[],records=[],stable=false;
+      for(let attempt=0;attempt<3&&!stable;attempt+=1){
         [rawSummaries,rawRecords]=await readCanonicalInputs();
         summaries=normalizeSummaries(rawSummaries);records=Array.isArray(rawRecords)?rawRecords:[];
-        after=await readDatasetRevision(dataSource,source);
-        datasetRevision=retryRevision&&after===retryRevision?after:null;
-      }else if(!(datasetRevision&&after===datasetRevision))datasetRevision=null;
-      if(!isCurrent())return null;
+        if(!isCurrent())return null;
+        const afterSource=typeof dataSource.getRecordSource==='function'?dataSource.getRecordSource():source;
+        const afterSourceKey=sourceIdentity(afterSource);
+        const afterRevision=await readDatasetRevision(dataSource);
+        if(!isCurrent())return null;
+        stable=afterSourceKey===sourceKey&&((datasetRevision&&afterRevision===datasetRevision)||(!datasetRevision&&!afterRevision));
+        source=afterSource;sourceKey=afterSourceKey;datasetRevision=afterRevision;
+      }
+      if(!stable)return null;
       profile.recordLoadMs+=performance.now()-loadStarted;
       const evidenceStarted=performance.now();
       records=computation.enrichRecords(records);
@@ -4117,7 +3957,7 @@
       if(!source||source.type!=='real')return publishPrefetch({state:'skipped',reason:'not-saved-data'});
       const currentStudyDate=typeof dataSource.getCurrentStudyDate==='function'?dataSource.getCurrentStudyDate():localIsoDate();
       const windowKey=readInsightWindowKey();
-      const datasetRevision=await readDatasetRevision(dataSource,source);
+      const datasetRevision=await readDatasetRevision(dataSource);
       if(!datasetRevision)return publishPrefetch({state:'skipped',reason:'no-revision'});
       const sourceKey=sourceIdentity(source),baseKey=`${sourceKey}|${currentStudyDate}|${datasetRevision}`;
       if(state.rendered&&state.renderedBaseKey===baseKey&&state.renderedWindowKey===windowKey)return publishPrefetch({state:'skipped',reason:'view-current'});
@@ -4201,7 +4041,7 @@
         const source=typeof dataSource.getRecordSource==='function'?dataSource.getRecordSource():null;
         const windowKey=readInsightWindowKey();
         const revisionStarted=performance.now();
-        const datasetRevision=await readDatasetRevision(dataSource,source);
+        const datasetRevision=await readDatasetRevision(dataSource);
         profile.revisionMs=performance.now()-revisionStarted;
         if(!InsightsRenderCoordinator.isCurrent(token))return;
         const sourceKey=sourceIdentity(source);
@@ -4238,7 +4078,7 @@
         if(!InsightsRenderCoordinator.isCurrent(token))return;
         const previousScroll=state.rendered;
         const renderMetrics=await renderModel(pane,model,{
-          source,
+          source:session.source,
           api,
           currentStudyDate,
           isCurrent:()=>InsightsRenderCoordinator.isCurrent(token),
