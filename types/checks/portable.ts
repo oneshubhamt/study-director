@@ -1,4 +1,3 @@
-export {};
 import type {InsightsLabEvidence,InsightsPreparedWindow,InsightsResult} from '../../source/external/insights-model.ts';
 
 const value: unknown = JSON.parse('{}');
