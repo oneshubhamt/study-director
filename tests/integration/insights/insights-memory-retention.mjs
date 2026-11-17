@@ -66,5 +66,5 @@ assert.equal(JSON.stringify(prepared.records),preparedBeforeBuild,'model/Lab con
 
 
 console.log(JSON.stringify({status:'PASS',preparedCache:'current + previous LRU',historyCache:'current + previous LRU',labEvidence:'released and parity-rebuilt',historyContext:'date + summary keyed; not retained',preparedInput:'immutable across model/Lab consumers'},null,2));
-\nawait import('./guide-preview-canonical.mjs');
-await import('./insights-transport-lifecycle.mjs');\n
+await import('./guide-preview-canonical.mjs');
+await import('./insights-transport-lifecycle.mjs');
