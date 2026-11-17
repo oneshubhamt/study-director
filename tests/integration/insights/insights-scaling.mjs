@@ -1,7 +1,7 @@
 import {insightsModelSources,readInsightsModelRuntimeSource} from '../../helpers/insights-model-runtime.mjs';
 import assert from 'node:assert/strict';
 import {writeArtifact} from '../../helpers/artifacts.mjs';
-import fs from 'node:fs';
+import {realInsightsProviders} from '../../helpers/insights-providers.mjs';
 import vm from 'node:vm';
 
 const sourcePath=insightsModelSources.join('+');
@@ -9,6 +9,7 @@ const source=readInsightsModelRuntimeSource();
 const context=vm.createContext({console});
 vm.runInContext(source,context,{filename:sourcePath});
 const {Config,PacerEvidence:Pacer,ModelEngine}=context.StudyDirectorInsightsModel;
+const {classifyTaskOutcome,summarizePracticeRuns}=realInsightsProviders();
 
 
 const {Analytics,Primitives,Records}=context.StudyDirectorInsightsModel;
@@ -85,18 +86,6 @@ function exactSlopeReference(values){
   };
 }
 
-function summarizePracticeRuns(rawRuns){
-  return {
-    runSummaries:rawRuns.map(run=>({
-      run,
-      plannedUnits:run.unitMs.length,
-      unitRows:run.unitMs.map(actualMs=>({actualMs,targetMs:run.targetMs})),
-      segmentRows:[]
-    })),
-    audit:{rejectedRawIndexes:[]}
-  };
-}
-
 function practiceRecord(date,pace,completion=80,index=0){
   const targetMs=60000;
   const actualMs=Math.max(1000,Math.round(targetMs*pace/100));
@@ -152,6 +141,53 @@ assert.equal(denseFirst.trend.sampledDays,Config.MAX_PRACTICE_TREND_EXACT_DAYS);
 assert.equal(denseFirst.trend.pairCount,Config.MAX_PRACTICE_TREND_EXACT_DAYS*(Config.MAX_PRACTICE_TREND_EXACT_DAYS-1)/2);
 assert.equal(denseFirst.trend.blockCount,Config.PRACTICE_TREND_JACKKNIFE_BLOCKS);
 
+// P5.9B numerical/provider witnesses use the actual canonical Outcome and
+// Practice Pacer providers. Threshold-adjacent pace classification must not
+// collapse 79.9% into the controlled 80% boundary.
+const thresholdRecords=recordsForPaces([79.9,80],endDay-1);
+const thresholdPractice=Pacer.computePracticePacer(thresholdRecords,summarizePracticeRuns,trendBasis(thresholdRecords));
+assert.equal(thresholdPractice.runRows[0].controlled,false,'79.9% of target is below the controlled-pace boundary');
+assert.equal(thresholdPractice.runRows[1].controlled,true,'80% of target is exactly inside the controlled-pace boundary');
+assert.equal(thresholdPractice.controlledRuns,1);
+
+const rejectedPractice=Pacer.computePracticePacer([{
+  date:endDate,tasks:[{id:'invalid-pacer',name:'Practice',area:'Practice',kind:'work',dur:30,completion:0,completionSource:'none',actualSeconds:0}],
+  practiceRuns:[{taskId:'invalid-pacer',targetMs:0,totalUnits:1,unitMs:[1000]}]
+}],summarizePracticeRuns,trendBasis([{date:endDate}]));
+assert.equal(rejectedPractice.audit.savedRuns,1);
+assert.equal(rejectedPractice.audit.acceptedRuns,0);
+assert.equal(rejectedPractice.audit.excludedRuns,1,'the real Practice Pacer sanitizer must reject an invalid target');
+
+const providerEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+const providerDate=endDate;
+const providerRecords=[{date:providerDate,tasks:[
+  {id:'full',name:'Full',area:'Provider',kind:'work',dur:10,completion:100,completionSource:'manual',actualSeconds:600},
+  {id:'skipped',name:'Skipped',area:'Provider',kind:'work',dur:10,completion:0,completionSource:'skipped',actualSeconds:0,skipped:true},
+  {id:'zero',name:'Zero',area:'Provider',kind:'work',dur:10,completion:0,completionSource:'manual',actualSeconds:60},
+  {id:'untouched',name:'Untouched',area:'Provider',kind:'work',dur:10,completion:0,completionSource:'none',actualSeconds:0}
+],practiceRuns:[]}];
+const providerPrepared=providerEngine.prepare(providerRecords,'real-provider-outcomes');
+const providerModel=providerEngine.buildPrepared(providerPrepared.records,providerPrepared,{windowKey:'all',windowLabel:'All records',allRecordCount:1,currentStudyDate:providerDate});
+assert.deepEqual(JSON.parse(JSON.stringify(providerModel.outcomes.counts)),{
+  full:1,partial:0,skipped:1,untouched:1,'finished-unverified':0,'zero-output':1
+},'Insights must consume the canonical outcome classifier rather than a local approximation');
+assert.equal(providerModel.fitness.performanceState.observedDays,1);
+assert.equal(providerModel.fitness.performanceState.confidence.key,'weak','one observed day must remain weak fitness evidence');
+
+const changePointRecords=Array.from({length:12},(_,index)=>({
+  date:isoFromDay(endDay-11+index),
+  tasks:[{id:`cp-${index}`,name:'Change point',area:'Provider',kind:'work',dur:30,completion:index<6?40:80,completionSource:'manual',actualSeconds:1200}],
+  practiceRuns:[]
+}));
+const changePointEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+const elevenPrepared=changePointEngine.prepare(changePointRecords.slice(0,11),'change-point-11');
+const elevenModel=changePointEngine.buildPrepared(elevenPrepared.records,elevenPrepared,{windowKey:'all',windowLabel:'All records',allRecordCount:11,currentStudyDate:changePointRecords[10].date});
+assert.equal(elevenModel.dynamics.changePoint.ready,false);
+assert.equal(elevenModel.dynamics.changePoint.minimumDays,Config.MIN_CHANGE_POINT_DAYS);
+const twelvePrepared=changePointEngine.prepare(changePointRecords,'change-point-12');
+const twelveModel=changePointEngine.buildPrepared(twelvePrepared.records,twelvePrepared,{windowKey:'all',windowLabel:'All records',allRecordCount:12,currentStudyDate:changePointRecords[11].date});
+assert.equal(twelveModel.dynamics.changePoint.ready,true,'the change-point evidence gate must open exactly at the configured minimum day count');
+
 const historyDays=1100;
 const historyStart=endDay-historyDays+1;
 const historyRecords=Array.from({length:historyDays},(_,index)=>{
@@ -161,7 +197,6 @@ const historyRecords=Array.from({length:historyDays},(_,index)=>{
   const completion=recent?45+recentIndex*.05:95-index*.08;
   return practiceRecord(isoFromDay(historyStart+index),pace,Math.max(5,Math.min(100,completion)),index);
 });
-const classifyTaskOutcome=task=>task.completion>=100?'full':task.completion>0?'partial':'zero-output';
 const engine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
 const canonicalPrepared=engine.prepare(historyRecords,'canonical-worker-reuse');
 const asyncEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
@@ -229,7 +264,8 @@ const evidence={
   boundedLargeSample:{eligibleDays:denseFirst.trend.eligibleDays,sampledDays:denseFirst.trend.sampledDays,pairs:denseFirst.trend.pairCount,blocks:denseFirst.trend.blockCount},
   horizon:{selectedDays:model.recordCount,trendDays:model.advanced.trendCompletionDayCount,label:model.trendBasis.label,descriptivePracticeDays:model.practice.practiceDays,trendPracticeDays:model.practice.trendBasis.practiceDays},
   fullModel:{days:historyDays},
-  uncappedAllHistoryReuse:{days:reuseRecords.length,parity:true}
+  uncappedAllHistoryReuse:{days:reuseRecords.length,parity:true},
+  providerAndThresholdWitnesses:{realProviders:true,controlledBoundary:[79.9,80],changePointDays:[11,12]}
 };
 writeArtifact('insights-scaling.json',`${JSON.stringify(evidence,null,2)}\n`);
 console.log(JSON.stringify(evidence,null,2));
