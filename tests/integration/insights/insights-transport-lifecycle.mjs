@@ -126,7 +126,7 @@ function protocolContext(extra={}){
   const records=Array.from({length:160},(_,index)=>({date:`2026-02-${String(index%28+1).padStart(2,'0')}`}));
   const prepared={records,revision:'runtime-fallback-r1'};
   const expected=engine.buildPrepared(records,prepared,{});
-  const result=await context.StudyDirectorInsightsComputeBridge.create(api,engine).build(records,prepared,{});
+  const result=await context.StudyDirectorInsightsComputeBridge.create(api,engine,{yieldTask:()=>Promise.resolve()}).build(records,prepared,{});
   assert.equal(result.mode,'main-thread-worker-failure');
   assert.deepEqual(result.model,expected,'worker runtime failure must fall back through the same model engine on the same fixture');
 }
