@@ -814,8 +814,9 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     if(n<21||v<600)return CONFIDENCE.reliable;
     return CONFIDENCE.strong;
   }
-  function confidenceAtLeast(confidence:Confidence|null|undefined,key:keyof typeof COACH_CONFIDENCE_RANK='emerging'){
-    return num(confidence?(COACH_CONFIDENCE_RANK[confidence.key]??0):0,0)>=num(COACH_CONFIDENCE_RANK[key]??1,1);
+  function confidenceAtLeast(confidence:Readonly<{key:string}>|null|undefined,key:keyof typeof COACH_CONFIDENCE_RANK='emerging'){
+    const rankFor=(value:string|undefined)=>value==='strong'?3:value==='reliable'?2:value==='emerging'?1:0;
+    return rankFor(confidence?.key)>=rankFor(key);
   }
   function evidenceMetadata(meta:EvidenceMetadataInput={}){
     const confidence=meta&&meta.confidence&&typeof meta.confidence==='object'?meta.confidence:null;
@@ -3001,11 +3002,11 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       if(!ordered.length)return;
       daysWithWork+=1;
       const statesForDay=ordered.map(entry=>cascadeState(entry.row));
-      const riskKeys=new Set();
+      const riskKeys=new Set<string>();
       ordered.forEach((entry,index)=>riskKeys.add(blockOrderKey(index+1)));
       riskKeys.forEach(key=>{
         if(!hazards.has(key))hazards.set(key,{key,label:key.endsWith('+')?`${ordinalLabel(MAX_EXPLICIT_BLOCK_ORDER+1)}+`:ordinalLabel(Number(key)),sort:num(key.replace('+',''),99),daysAtRisk:0,collapses:0});
-        hazards.get(key).daysAtRisk+=1;
+        hazards.get(key)!.daysAtRisk+=1;
       });
       if(statesForDay[statesForDay.length-1]==='missed'){
         terminalCollapseDays+=1;
@@ -3013,7 +3014,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
         while(start>0&&statesForDay[start-1]==='missed')start-=1;
         const key=blockOrderKey(start+1);
         if(!hazards.has(key))hazards.set(key,{key,label:key.endsWith('+')?`${ordinalLabel(MAX_EXPLICIT_BLOCK_ORDER+1)}+`:ordinalLabel(Number(key)),sort:num(key.replace('+',''),99),daysAtRisk:0,collapses:0});
-        hazards.get(key).collapses+=1;
+        hazards.get(key)!.collapses+=1;
       }
       const all=recordRows(evidence,record,'all');
       for(let index=0;index<ordered.length-1;index+=1){
@@ -3430,7 +3431,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       const planned=minimum+(maximum-minimum)*(index/(WORKLOAD_CURVE_POINTS-1));
       const prediction=predictWorkloadSurface(surface,planned,latestState,baselineCalibrator)!;
       const localSupport=rows.filter(row=>Math.abs(row.planned-planned)<=supportRadius).length;
-      return {index,planned:Math.round(planned),completionMean:round(prediction.completionMean*100,1),completionLow:round(prediction.completionLow*100,1),completionHigh:round(prediction.completionHigh*100,1),strongProbability:Number.isFinite(prediction.strongProbability)?round(prediction.strongProbability*100,1):null,strongLow:Number.isFinite(prediction.strongLow)?round(prediction.strongLow*100,1):null,strongHigh:Number.isFinite(prediction.strongHigh)?round(prediction.strongHigh*100,1):null,expectedCompleted:round(prediction.expectedCompleted,1),localSupport,frontier:false};
+      return {index,planned:Math.round(planned),completionMean:round(prediction.completionMean*100,1),completionLow:round(prediction.completionLow*100,1),completionHigh:round(prediction.completionHigh*100,1),strongProbability:isFiniteNumber(prediction.strongProbability)?round(prediction.strongProbability*100,1):null,strongLow:isFiniteNumber(prediction.strongLow)?round(prediction.strongLow*100,1):null,strongHigh:isFiniteNumber(prediction.strongHigh)?round(prediction.strongHigh*100,1):null,expectedCompleted:round(prediction.expectedCompleted,1),localSupport,frontier:false};
     });
     if(surface.strongReady)curve.forEach(point=>{point.frontier=!curve.some(other=>other!==point&&other.expectedCompleted>=point.expectedCompleted&&num(other.strongProbability)>=num(point.strongProbability)&&(other.expectedCompleted>point.expectedCompleted||num(other.strongProbability)>num(point.strongProbability)));});
     else curve.forEach(point=>{point.frontier=!curve.some(other=>other!==point&&other.expectedCompleted>=point.expectedCompleted&&other.completionMean>=point.completionMean&&(other.expectedCompleted>point.expectedCompleted||other.completionMean>point.completionMean));});
@@ -3470,7 +3471,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     const recommendation={minPlanned:Math.min(...rangePoints.map(point=>point.planned)),maxPlanned:Math.max(...rangePoints.map(point=>point.planned)),typicalPlanned:selectedPoint.planned,expectedCompleted:selectedPoint.expectedCompleted,strongProbability:selectedPoint.strongProbability,probabilityLow:selectedPoint.strongLow,probabilityHigh:selectedPoint.strongHigh,completionMean:selectedPoint.completionMean,confidence:descriptiveEvidenceConfidence(rows.length,sum(rows.map(row=>row.completed))),days:rows.length,localSupport:selectedPoint.localSupport,belowStrongThreshold:surface.strongReady?Math.max(...supportedCurve.map(point=>num(point.strongProbability)))<55:null,pointIndex:selectedPoint.index,mode:surface.strongReady?'completion-and-strong':'completion-only',empiricalBandIndex:anchorBand&&anchorBand.index};
     const lowPoint=supportedCurve.slice(0,Math.ceil(supportedCurve.length/2)).sort((a,b)=>b.completionMean-a.completionMean)[0]!,highPoint=supportedCurve[supportedCurve.length-1]!;
     const completionDrop=round(lowPoint.completionMean-highPoint.completionMean,1),reliabilityDrop=surface.strongReady?round(num(lowPoint?.strongProbability)-num(highPoint?.strongProbability),1):null;
-    const tradeoff=(completionDrop>=MIN_CHANGE_POINT_DELTA_POINTS||(isFiniteNumber(reliabilityDrop)&&reliabilityDrop>=10))?{low:lowPoint,high:highPoint,completionDrop,reliabilityDrop,effect:Math.max(completionDrop,Number.isFinite(reliabilityDrop)?reliabilityDrop:0)}:null;
+    const tradeoff=(completionDrop>=MIN_CHANGE_POINT_DELTA_POINTS||(isFiniteNumber(reliabilityDrop)&&reliabilityDrop>=10))?{low:lowPoint,high:highPoint,completionDrop,reliabilityDrop,effect:Math.max(completionDrop,isFiniteNumber(reliabilityDrop)?reliabilityDrop:0)}:null;
     const recentPlans=rows.slice(-FITNESS_RECENT_LOAD_DAYS).map(row=>row.planned).sort((a,b)=>a-b),scenarioPlanned=Math.round(median(recentPlans)??selectedPoint.planned);
     const currentFitness=currentFitnessPredictors(performanceState),useStateAware=calibration.selectedModel==='state-aware'&&stateAwareSurface.completionReady&&stateAwareSurface.forecastCausal&&currentFitness;
     const forecastCalibrator=calibration.strongReady?calibration.calibrator:null;
@@ -3483,7 +3484,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       const planned=minimum+(maximum-minimum)*(index/(WORKLOAD_CURVE_POINTS-1)),prediction=forecastPrediction(planned)!;
       return {index,planned:Math.round(planned),completionMean:round(prediction.completionMean*100,1),completionLow:round(prediction.completionLow*100,1),completionHigh:round(prediction.completionHigh*100,1),strongProbability:Number.isFinite(prediction.strongProbability)?round(prediction.strongProbability*100,1):null,strongLow:Number.isFinite(prediction.strongLow)?round(prediction.strongLow*100,1):null,strongHigh:Number.isFinite(prediction.strongHigh)?round(prediction.strongHigh*100,1):null,expectedCompleted:round(prediction.expectedCompleted,1)};
     });
-    const publicCalibration=detail?checkedCalibration:compactForecastCalibration(checkedCalibration);
+    const publicCalibration=detail?calibration:compactForecastCalibration(calibration);
     const scenarioSupport=rows.filter(row=>Math.abs(row.planned-scenarioPlanned)<=supportRadius).length;
     const scenarioSupported=scenarioSupport>=MIN_WORKLOAD_LOCAL_SUPPORT_DAYS;
     const supportReason=scenarioSupported?null:`The next-plan scenario has only ${scenarioSupport} nearby observed day${scenarioSupport===1?'':'s'}; ${MIN_WORKLOAD_LOCAL_SUPPORT_DAYS}+ are required.`;
@@ -3495,7 +3496,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
     };
     return {
       ready:true,completionReady:true,strongReady:surface.strongReady,days:rows.length,span,minimumDays:MIN_WORKLOAD_FRONTIER_DAYS,minimumSpan:MIN_WORKLOAD_FRONTIER_SPAN,method:'regularised-probabilistic-response-surface',curve,forecastCurve,
-      surface:{loadMean:round(surface.loadMean,1),loadSd:round(surface.loadSd,1),stateMean:round(surface.stateMean,1),stateSd:round(surface.stateSd,1),residualSd:round(surface.residualSd,3),strongDays:surface.strongDays,nonStrongDays:surface.nonStrongDays,stateAwareRows:stateAwareSurface.rows||0,stateAwareReady:!!stateAwareSurface.completionReady,stateAwareCausal:!!stateAwareSurface.forecastCausal},
+      surface:{loadMean:round(surface.loadMean,1),loadSd:round(surface.loadSd,1),stateMean:round(surface.stateMean,1),stateSd:round(surface.stateSd,1),residualSd:round(surface.residualSd,3),strongDays:surface.strongDays,nonStrongDays:surface.nonStrongDays,stateAwareRows:stateAwareSurface.rows||0,stateAwareReady:!!stateAwareSurface.completionReady,stateAwareCausal:stateAwareSurface.completionReady?stateAwareSurface.forecastCausal:false},
       capabilities:{
         completion:capabilityResult(true,null,{confidence:recommendation.confidence,observations:rows.length,days:rows.length,method:'regularised-completion-response'}),
         strong:capabilityResult(surface.strongReady,surface.strongReason,{confidence:surface.strongReady?recommendation.confidence:null,observations:rows.length,days:rows.length,method:'regularised-strong-day-response'}),
@@ -3558,7 +3559,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
   }
   function interactionCell<T extends Readonly<{date:string}>>(rows:readonly T[],valueFor:(row:T)=>number|null,weightFor:(row:T)=>number,baseline:number):InteractionCell{
     const clean=rows.filter(row=>isFiniteNumber(valueFor(row))&&num(weightFor(row))>0),weights=clean.map(weightFor),totalWeight=sum(weights),raw=totalWeight?sum(clean.map((row,index)=>num(valueFor(row))*weights[index]!))/totalWeight:null;
-    const typicalWeight=median(weights)??1,priorWeight=typicalWeight*EVIDENCE_PRIOR_EFFECTIVE_BLOCKS,estimate=Number.isFinite(raw)?(raw*totalWeight+baseline*priorWeight)/(totalWeight+priorWeight):null;
+    const typicalWeight=median(weights)??1,priorWeight=typicalWeight*EVIDENCE_PRIOR_EFFECTIVE_BLOCKS,estimate=isFiniteNumber(raw)?(raw*totalWeight+baseline*priorWeight)/(totalWeight+priorWeight):null;
     return {rows:clean.length,days:new Set(clean.map(row=>row.date)).size,weight:round(totalWeight,1),raw:roundNullable(raw,1),estimate:roundNullable(estimate,1),ready:clean.length>=MIN_INTERACTION_CELL_ROWS&&new Set(clean.map(row=>row.date)).size>=MIN_INTERACTION_CELL_DAYS};
   }
   function interactionStability<T extends Readonly<{date:string}>>(groups:readonly (readonly T[])[],valueFor:(row:T)=>number|null,weightFor:(row:T)=>number,baseline:number):InteractionStability{
@@ -3570,8 +3571,8 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
       return ready?(num(cells[0]!.estimate)-num(cells[1]!.estimate))-(num(cells[2]!.estimate)-num(cells[3]!.estimate)):null;
     };
     const earlyEffect=effectFor('early'),lateEffect=effectFor('late');
-    const sameDirection=Number.isFinite(earlyEffect)&&Number.isFinite(lateEffect)&&Math.sign(earlyEffect)===Math.sign(lateEffect);
-    const ready=sameDirection&&Math.abs(earlyEffect)>=MIN_INTERACTION_STABILITY_EFFECT_POINTS&&Math.abs(lateEffect)>=MIN_INTERACTION_STABILITY_EFFECT_POINTS;
+    const sameDirection=isFiniteNumber(earlyEffect)&&isFiniteNumber(lateEffect)&&Math.sign(earlyEffect)===Math.sign(lateEffect);
+    const ready=sameDirection&&isFiniteNumber(earlyEffect)&&isFiniteNumber(lateEffect)&&Math.abs(earlyEffect)>=MIN_INTERACTION_STABILITY_EFFECT_POINTS&&Math.abs(lateEffect)>=MIN_INTERACTION_STABILITY_EFFECT_POINTS;
     return {
       ready,split,earlyEffect:roundNullable(earlyEffect,1),lateEffect:roundNullable(lateEffect,1),
       reason:ready?null:'The interaction did not repeat with the same material direction in the early and late evidence halves.'
@@ -3610,7 +3611,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
   }
   function computeAreaTimeInteractions(evidence:EvidenceIndex):InteractionCandidate[]{
     const rows=evidence.work.filter(row=>row.planned>0&&Number.isFinite(firstHourSource(row.task).hour)),baseline=pct(rowsCompleted(rows),rowsPlanned(rows))??50,rowIndex=new Map(rows.map((row,index)=>[row,index]));
-    const areaTotals=new Map();rows.forEach(row=>areaTotals.set(row.subject,num(areaTotals.get(row.subject))+row.planned));
+    const areaTotals=new Map<string,number>();rows.forEach(row=>areaTotals.set(row.subject,num(areaTotals.get(row.subject))+row.planned));
     const areas=[...areaTotals.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label])=>label),bands=TIME_BANDS;
     const candidates:InteractionCandidate[]=[];
     areas.forEach(area=>bands.forEach(band=>{
@@ -3625,7 +3626,7 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
   function computePositionWorkloadInteraction(evidence:EvidenceIndex,daily:readonly DailySeriesRow[]):InteractionCandidate{
     const dailyLoad=new Map<string,number>(daily.map(row=>[row.date,row.planned])),loads=[...dailyLoad.values()].filter(Number.isFinite),cut=median(loads);
     const rows=evidence.work.filter(row=>row.planned>0&&isFiniteNumber(dailyLoad.get(row.date))),baseline=pct(rowsCompleted(rows),rowsPlanned(rows))??50;
-    const late=(row:EvidenceRow)=>{const recordWork=recordRows(evidence,row.record,'work'),index=Math.max(0,recordWork.indexOf(row)),raw=num(row.task&&row.task.studyOrdinal,null),ordinal=Number.isFinite(raw)&&raw>0?Math.round(raw):index+1;return ordinal>=4;};
+    const late=(row:EvidenceRow)=>{const recordWork=recordRows(evidence,row.record,'work'),index=Math.max(0,recordWork.indexOf(row)),raw=num(row.task.studyOrdinal,null),ordinal=isFiniteNumber(raw)&&raw>0?Math.round(raw):index+1;return ordinal>=4;};
     const high=(row:EvidenceRow)=>num(dailyLoad.get(row.date))>=num(cut);
     const groups:[EvidenceRow[],EvidenceRow[],EvidenceRow[],EvidenceRow[]]=[rows.filter(row=>late(row)&&high(row)),rows.filter(row=>late(row)&&!high(row)),rows.filter(row=>!late(row)&&high(row)),rows.filter(row=>!late(row)&&!high(row))];
     const cells=interactionCells(groups,row=>row.completion,row=>row.planned,baseline);
@@ -3684,14 +3685,16 @@ type DynamicsHistoryMeta=Readonly<{capped?:boolean;records?:number;workBlocks?:n
 
   type CoachKind='concern'|'positive'|'context';
 type CoachSurface=(typeof InsightsConfig.COACH_SURFACES)[number];
-type CoachSignalMeta=Readonly<{kind?:CoachKind;domain?:string;surface?:string;surfaceLabel?:string;targetId?:string;topic?:string;theme?:string;priority?:number;confidence?:Confidence|null;compact?:boolean}>;
-type InternalCoachSignal={text:string;tag:string;tone:string;_domain:string;_surface:string;_surfaceLabel:string;_targetId:string;_topic:string;_theme:string;_kind:CoachKind;_priority:number;_confidence:Confidence|null;_confidenceRank:number;_compact:boolean;_order:number};
+type CoachConfidence=Readonly<{key:string;label:string;tone:string}>;
+type CoachSignalMeta=Readonly<{kind?:CoachKind;domain?:string;surface?:string;surfaceLabel?:string;targetId?:string;topic?:string;theme?:string;priority?:number;confidence?:CoachConfidence|null|undefined;compact?:boolean}>;
+type InternalCoachSignal={text:string;tag:string;tone:string;_domain:string;_surface:string;_surfaceLabel:string;_targetId:string;_topic:string;_theme:string;_kind:CoachKind;_priority:number;_confidence:CoachConfidence|null;_confidenceRank:number;_compact:boolean;_order:number};
 type PublicCoachSignal=Readonly<{text:string;tag:string;tone:string;kind:CoachKind;domain:string;topic:string;theme:string;surfaceKey:string;surfaceLabel:string;targetId:string;confidenceLabel:string|null;confidenceTone:string}>;
+type CoachSurfaceTakeaway=Readonly<{text:string;tag:string;tone:string;kind:CoachKind;domain?:string;topic?:string;theme?:string;surfaceKey:string;surfaceLabel:string;targetId:string;confidenceLabel:string|null;confidenceTone:string}>;
 type CoachOverview=Readonly<{planned:number;completed:number;actual:number;completion:number|null;actualVsPlanned:number;strongDays:number;averageQuality:number|null}>;
 type CoachGuardrails=Readonly<{
   sample:ReturnType<(typeof InsightsAnalytics)['sampleStrength']>;
   trend:ReturnType<(typeof InsightsAnalytics)['trendStrength']>;
-  variability:ReturnType<(typeof InsightsAnalytics)['variabilityLabel']>;
+  variability:ReturnType<(typeof InsightsAnalytics)['computeAdvanced']>['outputStability'];
   progress:ReturnType<(typeof InsightsAnalytics)['progressEvidenceStrength']>;
 }>;
 type CoachChangePoint=Readonly<{detected?:boolean;confidence?:Confidence;delta?:number|null;date?:string|null;beforeMean?:number|null;afterMean?:number|null}>;
@@ -3719,7 +3722,7 @@ type CoachModelInput=Readonly<{
 }>;
 type CoachAreaShare=Readonly<{label:string;gap:number}>;
 type CoachAreaGap=Readonly<{under:CoachAreaShare;over:CoachAreaShare;effect:number;confidence:Confidence}>;
-type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['computeStartDelayBuckets']>[number]|undefined;weakDelay:ReturnType<(typeof InsightsAnalytics)['computeStartDelayBuckets']>[number]|null;bestSubject:SubjectInsight|undefined;weakSubject:SubjectInsight|undefined;coach:readonly PublicCoachSignal[];surfaces:readonly PublicCoachSignal[];candidateCount:number}>;
+type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['computeStartDelayBuckets']>[number]|undefined;weakDelay:ReturnType<(typeof InsightsAnalytics)['computeStartDelayBuckets']>[number]|undefined|null;bestSubject:SubjectInsight|undefined;weakSubject:SubjectInsight|undefined;coach:readonly PublicCoachSignal[];surfaces:readonly CoachSurfaceTakeaway[];candidateCount:number}>;
 
   // M8.8 COACH COMPONENT
   const InsightsCoach=((Config:typeof InsightsConfig,Primitives:typeof InsightsPrimitives,PacerEvidence:typeof InsightsPacerEvidence)=>{
@@ -3860,7 +3863,7 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     }
     return chosen.slice(0,limit).map(publicCoachSignal);
   }
-  function coachSurfaceFallback(model:CoachModelInput,surface:CoachSurface):PublicCoachSignal{
+  function coachSurfaceFallback(model:CoachModelInput,surface:CoachSurface):CoachSurfaceTakeaway{
     const guardrail=model&&model.guardrails&&model.guardrails.sample||{label:'Low sample',tone:'low'};
     const base={
       tag:'No clear signal',tone:'quiet',kind:'context',surfaceKey:surface.key,surfaceLabel:surface.label,targetId:surface.targetId,
@@ -3886,7 +3889,7 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     if(surface.key==='areas')return {...base,confidenceLabel:'No qualifying area signal',text:'No top-level area currently produces an evidence-qualified Coverage Watch, allocation, or completion takeaway.'};
     return {...base,confidenceLabel:'No qualifying model signal',text:'No uncertainty-aware Study Dynamics pattern cleared the effect-size and evidence gates.'};
   }
-  function coachSurfaceTakeaways(model:CoachModelInput,signals:readonly InternalCoachSignal[],coachSignals:readonly PublicCoachSignal[]=[]):PublicCoachSignal[]{
+  function coachSurfaceTakeaways(model:CoachModelInput,signals:readonly InternalCoachSignal[],coachSignals:readonly PublicCoachSignal[]=[]):CoachSurfaceTakeaway[]{
     const source=signals;
     const represented=new Set<string>(coachSignals.map(signal=>signal.surfaceKey));
     const usedTopics=new Set<string>(coachSignals.map(signal=>signal.topic));
