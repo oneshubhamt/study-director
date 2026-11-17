@@ -44,7 +44,7 @@ type CoverageNodeView=Readonly<{
 }>;
 type HeatCell=HTMLDivElement;
 type PracticeComparisonRow=Practice['areas'][number]|Practice['modes'][number];
-type AllocationRow=Subject&Readonly<{share:number;plannedShare:number}>;
+type AllocationRow=Subject;
 type Bayesian=Model['dynamics']['bayesian'];
 type Allocation=Model['dynamics']['allocation'];
 type Cascade=Model['dynamics']['cascade'];
@@ -2139,7 +2139,9 @@ function createInsightsRendering(
     const eligible=rows.filter(row=>row.maturity.rank>=1&&finiteNumber(row.medianRunPace));
     if(eligible.length<2)return null;
     const sorted=eligible.slice().sort((a,b)=>num(a.medianRunPace)-num(b.medianRunPace));
-    const low=sorted[0],high=sorted[sorted.length-1],gap=num(high.medianRunPace)-num(low.medianRunPace);
+    const low=sorted[0],high=sorted[sorted.length-1];
+    if(!low||!high)return null;
+    const gap=num(high.medianRunPace)-num(low.medianRunPace);
     if(gap<MIN_VISIBLE_PRACTICE_DIFFERENCE_POINTS)return null;
     const lowConcern=practicePaceConcernDistance(num(low.medianRunPace)),highConcern=practicePaceConcernDistance(num(high.medianRunPace));
     const focus=highConcern>=lowConcern?high:low,other=focus===high?low:high;
@@ -2155,7 +2157,9 @@ function createInsightsRendering(
     const eligible=rows.filter(row=>finiteNumber(row.medianRunPace)&&num(row.units)>=MIN_PRACTICE_EARLY_VIEW_UNITS&&num(row.runs)>=1&&num(row.days)>=1);
     if(eligible.length<2)return null;
     const sorted=eligible.slice().sort((a,b)=>num(a.medianRunPace)-num(b.medianRunPace));
-    const low=sorted[0],high=sorted[sorted.length-1],gap=num(high.medianRunPace)-num(low.medianRunPace);
+    const low=sorted[0],high=sorted[sorted.length-1];
+    if(!low||!high)return null;
+    const gap=num(high.medianRunPace)-num(low.medianRunPace);
     if(num(low.units)+num(high.units)<MIN_PRACTICE_EARLY_VIEW_TOTAL_UNITS)return null;
     const evidenceLabel=(row:PracticeComparisonRow)=>`${row.units} unit${num(row.units)===1?'':'s'} · ${row.runs} run${num(row.runs)===1?'':'s'} · ${row.days} day${num(row.days)===1?'':'s'}`;
     return {
