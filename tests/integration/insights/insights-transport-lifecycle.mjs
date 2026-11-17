@@ -190,8 +190,14 @@ function protocolContext(extra={}){
     window:async()=>Object.freeze(canonical),
     datasetRevision:async()=> 'canonical-r1'
   });
+  const materializedViews=new WeakSet();
   const dailyRecordCodec=Object.freeze({
-    materializeDailyRecordView:value=>value&&typeof value==='object'?value:null,
+    materializeDailyRecordView:value=>{
+      if(!value||typeof value!=='object'||materializedViews.has(value))return null;
+      const view=Object.freeze({...value});
+      materializedViews.add(view);
+      return view;
+    },
     buildDailyRecordSummary:value=>value,
     sanitizeDailyRecordSummary:value=>value&&typeof value==='object'?value:null
   });
@@ -225,6 +231,8 @@ function protocolContext(extra={}){
   assert.equal(publicSample.ok,true,'public preview adapter must activate the registered sample provider');
   assert.equal(publicToday,'2026-07-28','public preview adapter must preserve the caller study date');
   assert.equal(boundary.preview.status('insights').label,'Public sample','public preview adapter must preserve the caller label');
+  const publicSnapshot=await boundary.appInsights.dataSource.getDailySnapshot();
+  assert.equal(publicSnapshot.records.length,28,'sample records must be materialized exactly once and retained in preview state');
   boundary.publicPreview.clear('insights');
   const savedSnapshot=await boundary.appInsights.dataSource.getDailySnapshot();
   assert.equal(Array.from(savedSnapshot.records,row=>row.recordKind).join(','),'study','Diary entries must stay out of saved Insights data');

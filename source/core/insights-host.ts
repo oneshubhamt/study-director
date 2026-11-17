@@ -109,12 +109,13 @@ function createBoundary(input:Readonly<InsightsHostInput>){
     const dates=new Set(recordWindow.dates);
     return freeze(records.filter(record=>dates.has(record.date)));
   };
-  const setRecords=(records:unknown,options:Readonly<{target?:unknown;label?:unknown}>={})=>{
+  const commitRecords=(normalized:readonly StudyRecordView[],options:Readonly<{target?:unknown;label?:unknown}>={})=>{
     requestRevision+=1;sourceRevision+=1;
-    const target=normalizeTarget(options.target),normalized=normalizeRecords(records);
+    const target=normalizeTarget(options.target);
     preview=freeze({target,label:input.clampText(options.label||`Sample ${normalized.length} days`,80)||'Sample data',revision:sourceRevision,records:normalized});
     return status(target);
   };
+  const setRecords=(records:unknown,options:Readonly<{target?:unknown;label?:unknown}>={})=>commitRecords(normalizeRecords(records),options);
   const registerProvider=(target:unknown,provider:PreviewProvider)=>{
     const clean=normalizeTarget(target);
     if(typeof provider!=='function')return false;
@@ -134,7 +135,10 @@ function createBoundary(input:Readonly<InsightsHostInput>){
       if(request!==requestRevision||sourceRevision!==sourceAtStart)return freeze({ok:false,status:status(target),reason:'superseded'});
       const normalized=normalizeRecords(records);
       if(normalized.length!==PREVIEW_SAMPLE_DAYS)throw new Error(`Expected ${PREVIEW_SAMPLE_DAYS} sample records.`);
-      const next=setRecords(normalized,{target,label:options.label||`Sample ${PREVIEW_SAMPLE_DAYS} days`});
+      // The normalized values are derived StudyRecordViews. Commit them
+      // directly; sending them through the strict stored-record codec again
+      // would reject their derived fields and silently empty the preview.
+      const next=commitRecords(normalized,{target,label:options.label||`Sample ${PREVIEW_SAMPLE_DAYS} days`});
       return freeze({ok:true,status:next});
     }catch(error){
       input.capture('preview.sample-provider',error);
