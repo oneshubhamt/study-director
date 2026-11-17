@@ -3,8 +3,8 @@
   Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.
 */
 import type {
-  InsightRecord,InsightsBuildOptions,InsightsEngine,InsightsLabEvidence,InsightsModelRuntime,
-  InsightsPreparedWindow,InsightsResult,PreparedInsights
+  FitnessPerformanceState,FitnessResult,ForecastCalibration,ForecastSelectionCalibration,InsightRecord,InsightsBuildOptions,
+  InsightsEngine,InsightsLabEvidence,InsightsModelRuntime,InsightsPreparedWindow,InsightsResult,PreparedInsights
 } from './insights-model.ts';
 import type {
   InsightsComputation,InsightsComputeBridgeRuntime,InsightsComputeResult
@@ -14,7 +14,17 @@ import type {InsightsHostBoundary} from '../core/insights-host.ts';
 
 type ModelRuntime=InsightsModelRuntime;
 type Rendering=InsightsRenderingRuntime;
-type LabModel=InsightsResult&Readonly<{dynamics:InsightsLabEvidence['dynamics'];fitness:InsightsLabEvidence['fitness']}>;
+type LabModel=Omit<InsightsResult,'dynamics'|'fitness'>&Readonly<{dynamics:InsightsLabEvidence['dynamics'];fitness:FitnessResult}>;
+type UnionKeys<T>=T extends T?keyof T:never;
+type UnionValue<T,K extends PropertyKey>=T extends T?K extends keyof T?T[K]:never:never;
+type CompleteUnion<T>={ [K in UnionKeys<T>]?:UnionValue<T,K>|undefined };
+type LabDynamics=InsightsLabEvidence['dynamics'];
+type LabAllocation=CompleteUnion<LabDynamics['allocation']>;
+type LabDynamicAllocation=CompleteUnion<NonNullable<LabAllocation['dynamic']>>;
+type LabWorkload=CompleteUnion<LabDynamics['workload']>;
+type LabForecast=CompleteUnion<NonNullable<LabWorkload['forecast']>>;
+type LabCalibration=CompleteUnion<ForecastCalibration|ForecastSelectionCalibration>;
+type SummaryInput=Parameters<ModelRuntime['Records']['normalizeSummaries']>[0];
 type LabCell=string|number|null|undefined;
 type LabRow=readonly LabCell[];
 type LabRows=readonly LabRow[];
@@ -26,17 +36,18 @@ type PreviewSource=Readonly<{type?:string;mode?:string;target?:string;label?:str
 type DailySummary=ReturnType<ModelRuntime['Records']['normalizeSummaries']>[number];
 type InsightDataSource=InsightsHostBoundary['appInsights']['dataSource'];
 type InsightNotifications=InsightsHostBoundary['appInsights']['notifications'];
-type PublicPreview=Readonly<{clear?:(target:string)=>unknown;useSample?:(options:Readonly<{label:string;target:'insights';today:string}>)=>unknown}>;
+type PublicPreview=Readonly<{clear(target:string):unknown;useSample(options:Readonly<{label:string;target:'insights';today:string}>):PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>}>;
 interface InsightsPluginApi {
   readonly capabilities:Capabilities;
   readonly insights:Readonly<{notifications:InsightNotifications;dataSource:InsightDataSource}>;
   readonly logic:InsightsHostBoundary['logic'];
-  readonly preview?:PublicPreview;
-  readonly ui:Readonly<{registerTab(input:Readonly<{id:string;label:string;icon:string;render:(context:InsightsRenderContext)=>unknown;ready:()=>Promise<boolean>}>):boolean}>;
+  readonly preview:PublicPreview;
+  readonly ui:Readonly<{registerTab(input:Readonly<{id:string;label:string;icon:string;render:(context:InsightsRenderContext)=>unknown;ready:()=>Promise<boolean>}>):boolean;goTab?(tab:string):unknown}>;
 }
 interface InsightsRenderContext {readonly pane?:HTMLElement|null;readonly restoreScroll?:boolean}
+interface DeviceState{readInsightsWindow(fallback:string):unknown;writeInsightsWindow(value:string):unknown}
 interface RuntimeWindow extends Window {
-  StudyDirector?:InsightsPluginApi&Readonly<{registerPlugin?:(descriptor:InsightsPluginDescriptor)=>boolean;data?:Readonly<{deviceState?:Readonly<{readInsightsWindow?(fallback:string):unknown;writeInsightsWindow?(value:string):unknown}>}>}>;
+  StudyDirector?:InsightsPluginApi&Readonly<{registerPlugin?:(descriptor:InsightsPluginDescriptor)=>boolean;data?:Readonly<{deviceState?:Partial<DeviceState>}>}>;
   __StudyDirectorInsightsPrefetch?:Readonly<Record<string,unknown>>;
   __StudyDirectorInsightsLastProfile?:InsightsProfile;
 }
@@ -71,6 +82,9 @@ declare function createInsightsRendering(
 
 function bootInsightsRuntime(){
 'use strict';
+const finiteNumber=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
+const errorName=(error:unknown)=>error instanceof Error?error.name:'';
+const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error?String((error as {code?:unknown}).code||''):'';
   const window=(globalThis.window||globalThis) as RuntimeWindow;
   const TAB_ID='insights';
   const REQUIRED_CAPABILITIES:Capabilities=Object.freeze({
@@ -88,7 +102,7 @@ function bootInsightsRuntime(){
     Config:InsightsConfig,Primitives:InsightsPrimitives,Records:InsightsRecords,
     PacerEvidence:InsightsPacerEvidence,Coach:InsightsCoach,ModelEngine:InsightsModelEngine
   }=InsightsModel;
-  try{delete globalThis.StudyDirectorInsightsModel;}catch(error){}
+  try{Reflect.deleteProperty(globalThis,'StudyDirectorInsightsModel');}catch(error){}
 
   // The checked worker entry above owns compute transport. In a worker the
   // shared asset stops here, before any DOM/render/runtime components exist.
@@ -97,11 +111,11 @@ function bootInsightsRuntime(){
   if(!InsightsWorkerModel||InsightsWorkerModel.format!=='study-director.insights-compute-bridge'||InsightsWorkerModel.version!==1){
     throw new Error('Study Director Insights compute bridge is unavailable.');
   }
-  try{delete globalThis.StudyDirectorInsightsComputeBridge;}catch(error){}
+  try{Reflect.deleteProperty(globalThis,'StudyDirectorInsightsComputeBridge');}catch(error){}
   function insightWindowDeviceState(){
     const state=window.StudyDirector?.data?.deviceState;
     if(!state||typeof state.readInsightsWindow!=='function'||typeof state.writeInsightsWindow!=='function')throw new Error('Study Director Insights device-state capability is unavailable.');
-    return state;
+    return state as DeviceState;
   }
   function readInsightWindowKey(){
     const {DEFAULT_INSIGHT_WINDOW_KEY}=InsightsConfig;
@@ -116,6 +130,7 @@ function bootInsightsRuntime(){
 
   // M8.9 checked renderer factory is defined before this view source and is
   // constructed only here, after the worker-only exit above.
+  const computeBridge=InsightsWorkerModel;
   const InsightsRendering=createInsightsRendering(InsightsConfig,InsightsPrimitives,InsightsPacerEvidence,InsightsCoach);
 
   // M8.10 ANALYTICS LAB COMPONENT
@@ -197,7 +212,7 @@ function bootInsightsRuntime(){
         node.setAttribute('role',head?'columnheader':'cell');
         node.setAttribute('aria-colindex',String(index+1));
         if(!head){
-          node.dataset.label=headers[index]||'';
+          node.dataset['label']=headers[index]||'';
           node.setAttribute('aria-label',`${headers[index]||'Value'}: ${cell}`);
         }
         row.appendChild(node);
@@ -321,7 +336,7 @@ function bootInsightsRuntime(){
       ['Plan gap / day',signedMinutesLabel(model.overview.actualVsPlanned/days),'Tracked focus minus planned work; interpret with Timer coverage'],
       ['Tracked time / plan',percentLabel(pct(model.overview.actual,model.overview.planned)),'Tracked focus against planned work time']
     ],{wide:true,columns:'minmax(160px,1fr) 110px minmax(170px,1fr)'}));
-    if(!Number.isFinite(timerCoverage)||timerCoverage<MIN_TIMER_COVERAGE_FOR_PLAN_READ){
+    if(!finiteNumber(timerCoverage)||timerCoverage<MIN_TIMER_COVERAGE_FOR_PLAN_READ){
       section.appendChild(evidenceNote(`Coverage-limited: plan-realism coaching is withheld below ${MIN_TIMER_COVERAGE_FOR_PLAN_READ}% Timer coverage because untracked blocks are unknown, not zero effort. Daily chart points below that threshold remain visible but unclassified.`,'insights-lab-caution'));
     }
     return section;
@@ -465,7 +480,7 @@ function bootInsightsRuntime(){
     const distributionRows=(practice.distribution||[]).map(row=>[row.label,row.count,percentLabel(row.share,1)]);
     if(distributionRows.length)section.appendChild(labTable(['Completed-run pace band','Runs','Share'],distributionRows,{columns:'minmax(190px,1fr) 72px 90px'}));
     if((position.profile||[]).length){
-      const rows=position.profile.map(row=>[row.label,row.runs,row.days,percentLabel(row.medianPace,1),Number.isFinite(row.medianDeltaFromOpening)?`${row.medianDeltaFromOpening>0?'+':''}${row.medianDeltaFromOpening} pts`:'—',row.ready?'Ready':'Early']);
+      const rows=position.profile.map(row=>[row.label,row.runs,row.days,percentLabel(row.medianPace,1),finiteNumber(row.medianDeltaFromOpening)?`${row.medianDeltaFromOpening>0?'+':''}${row.medianDeltaFromOpening} pts`:'—',row.ready?'Ready':'Early']);
       section.appendChild(labTable(['Run position','Runs','Days','Median pace','Change from opening','Evidence'],rows,{wide:true,columns:'minmax(145px,1.2fr) 62px 62px 105px 140px 90px'}));
     }
     const areaRows=(practice.areas||[]).map(row=>[row.label,row.units,row.runs,row.days,row.maturity&&row.maturity.label||'Early',percentLabel(row.medianRunPace,1),percentLabel(row.typicalUnitPace,1),`${row.controlledRuns}/${row.runs} · ${percentLabel(row.controlledRunRate,1)}`]);
@@ -473,7 +488,7 @@ function bootInsightsRuntime(){
     const modeRows=(practice.modes||[]).map(row=>[row.label,row.units,row.runs,row.days,row.maturity&&row.maturity.label||'Early',percentLabel(row.medianRunPace,1),percentLabel(row.typicalUnitPace,1),`${row.controlledRuns}/${row.runs} · ${percentLabel(row.controlledRunRate,1)}`]);
     section.appendChild(labTable(['Setup','Units','Runs','Days','Evidence','Median run pace','Typical unit','Controlled runs'],modeRows,{wide:true,columns:'minmax(150px,1.3fr) 62px 58px 58px 88px 116px 104px 138px'}));
     if((practice.repeatedSegments||[]).length){
-      const rows=practice.repeatedSegments.map(row=>[row.area,row.modeLabel,row.label,`${row.units}/${row.plannedUnits}`,row.runs,row.days,percentLabel(row.medianCompletion,1),`${row.completedSegments}/${row.runs} · ${percentLabel(row.completedSegmentRate,1)}`,percentLabel(row.medianPace,1),Number.isFinite(row.medianRelativeDelta)?`${row.medianRelativeDelta>0?'+':''}${row.medianRelativeDelta} pts`:'—',row.maturity.label]);
+      const rows=practice.repeatedSegments.map(row=>[row.area,row.modeLabel,row.label,`${row.units}/${row.plannedUnits}`,row.runs,row.days,percentLabel(row.medianCompletion,1),`${row.completedSegments}/${row.runs} · ${percentLabel(row.completedSegmentRate,1)}`,percentLabel(row.medianPace,1),finiteNumber(row.medianRelativeDelta)?`${row.medianRelativeDelta>0?'+':''}${row.medianRelativeDelta} pts`:'—',row.maturity.label]);
       section.appendChild(labTable(['Area','Setup','Repeated segment','Units done / planned','Runs','Days','Median completion','Fully completed','Median pace','Vs rest of run','Evidence'],rows,{wide:true,columns:'minmax(130px,1fr) 110px minmax(150px,1.2fr) 104px 58px 58px 118px 120px 100px 110px 88px'}));
     }
     const sizeRows=(practice.unitSizeGroups&&practice.unitSizeGroups.all||[]).map(row=>[row.family==='marks'?'Marks':'Target time',row.label,row.units,row.runs,row.days,row.maturity.label,percentLabel(row.medianPace,1),`${row.controlledRuns}/${row.runs} · ${percentLabel(row.controlledRunRate,1)}`,`${row.overBudgetRuns}/${row.runs} · ${percentLabel(row.overBudgetRunRate,1)}`,`${row.belowBandRuns}/${row.runs} · ${percentLabel(row.belowBandRunRate,1)}`]);
@@ -486,7 +501,7 @@ function bootInsightsRuntime(){
     section.appendChild(progressiveLabTable(['Date','Area / linked block','Setup','Units','Run pace','Typical unit / spread','Band','Actual / target','Finish margin'],runRows,{wide:true,mobileScroll:true,columns:'80px minmax(210px,1.7fr) 118px 72px 92px 150px 98px 138px 110px'},'run'));
     if((practice.segmentRows||[]).length){
       const orderedSegments=practice.segmentRows.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))||String(b.runId).localeCompare(String(a.runId)));
-      const rows=orderedSegments.map(row=>[shortDate(row.date),row.area,row.label,`${row.units}/${row.plannedUnits}`,percentLabel(row.completion,1),row.targetMs?`${millisecondsLabel(row.actualMs)} / ${millisecondsLabel(row.targetMs)}`:'Not attempted',percentLabel(row.paceRatio,1),Number.isFinite(row.relativeDelta)?`${row.relativeDelta>0?'+':''}${row.relativeDelta} pts`:'—']);
+      const rows=orderedSegments.map(row=>[shortDate(row.date),row.area,row.label,`${row.units}/${row.plannedUnits}`,percentLabel(row.completion,1),row.targetMs?`${millisecondsLabel(row.actualMs)} / ${millisecondsLabel(row.targetMs)}`:'Not attempted',percentLabel(row.paceRatio,1),finiteNumber(row.relativeDelta)?`${row.relativeDelta>0?'+':''}${row.relativeDelta} pts`:'—']);
       section.appendChild(progressiveLabTable(['Date','Area','Segment','Units','Completion','Actual / completed target','Pace','Vs rest of run'],rows,{wide:true,columns:'80px minmax(140px,1fr) minmax(170px,1.2fr) 76px 100px 170px 90px 110px'},'segment'));
     }
     if((audit.reasonRows||[]).length)section.appendChild(labTable(['Excluded evidence reason','Saved runs'],audit.reasonRows.map(row=>[row.reason,row.count]),{columns:'minmax(210px,1fr) 90px'}));
@@ -555,34 +570,34 @@ function bootInsightsRuntime(){
     return section;
   }
   function fitnessSourceMixLabel(plannedByGroup:SourceMix|null|undefined){
-    const labels={explicit:'explicit','time-derived':'time',unverified:'unverified',skipped:'skipped',missing:'missing'};
+    const labels:Readonly<Record<string,string>>={explicit:'explicit','time-derived':'time',unverified:'unverified',skipped:'skipped',missing:'missing'};
     const parts=Object.entries(plannedByGroup||{}).filter(([,value])=>num(value)>0).map(([key,value])=>`${labels[key]||key} ${minutesLabel(value)}`);
     return parts.join(' · ')||'No planned evidence';
   }
-  function resolveLabModel(model:InsightsResult):LabModel|InsightsResult{
-    const evidence=typeof model.getLabEvidence==='function'?model.getLabEvidence():null;
-    return evidence?{...model,dynamics:evidence.dynamics,fitness:evidence.fitness}:model;
+  function resolveLabModel(model:InsightsResult):LabModel{
+    const evidence=model.getLabEvidence();
+    return {...model,dynamics:evidence.dynamics,fitness:evidence.fitness};
   }
   function renderFitnessEvidence(model:InsightsResult){
     const section=labSection('8. Current Study State model evidence','The state tracker remains inspectable without expanding the normal report or Analytics Lab by default.',true);
     const details=lazyDisclosure('insights-fitness-model-evidence ui-inset','Open state & weighting evidence',()=>{
       const auditModel=resolveLabModel(model);
       const body=el('div','insights-fitness-model-evidence-body');
-      const fitness=auditModel&&auditModel.fitness||{};
-      const state=fitness.performanceState||{};
-      const parameters=fitness.parameters||{};
-      const learned=parameters.learned||{};
+      const fitness:FitnessResult=auditModel.fitness;
+      const state:FitnessPerformanceState=fitness.performanceState;
+      const parameters=fitness.parameters;
+      const learned=parameters.learned;
       const current=state.current;
       const overview=el('section','insights-card soft ui-card');
       overview.appendChild(sectionTitle('State model audit',`A regularised multivariate learned-transition filter. Historical updates and parameter learning are origin-causal: each dated state uses only evidence available by that date. Parameter fits use at most ${FITNESS_PARAMETER_WINDOW_OBSERVATIONS} prior informative observations; absent components remain missing rather than becoming zero.`));
       overview.appendChild(labTable(['Metric','Value','Interpretation'],[
         ['Output state',current?percentLabel(current.estimate,1):'No estimate',current?`${percentLabel(current.low,0)}–${percentLabel(current.high,0)} approximate 95% model range`:'No usable progress-source evidence'],
-        ['Trajectory',state.trajectory&&state.trajectory.label||'Uncertain',Number.isFinite(state.trajectory&&state.trajectory.delta)?`${state.trajectory.delta>0?'+':''}${state.trajectory.delta} points across ${state.trajectory.lookbackDays} days`:'No restrained comparison'],
+        ['Trajectory',state.trajectory&&state.trajectory.label||'Uncertain',finiteNumber(state.trajectory?.delta)?`${finiteNumber(state.trajectory.delta)&&state.trajectory.delta>0?'+':''}${state.trajectory.delta} points across ${state.trajectory.lookbackDays} days`:'No restrained comparison'],
         ['Evidence',`${state.observedDays||0} observed · ${numberLabel(state.effectiveDays,1)} equivalent days`,`${fitness.readiness&&fitness.readiness.label||'Weak signal'} · last usable evidence ${state.lastEvidenceDate?shortDate(state.lastEvidenceDate):'unavailable'}`],
-        ['Learned process SD',(learned.processSd||[]).map(value=>numberLabel(value,1)).join(' · ')||'Not learned','Output state · Schedule control · Focus control; uncertainty widens across unsaved gaps'],
-        ['Learned measurement SD',(learned.measurementSd||[]).map(value=>numberLabel(value,1)).join(' · ')||'Not learned','Current bounded-window parameter summary; historical forecast states remain origin-causal'],
+        ['Learned process SD',(learned?.processSd||[]).map((value:number)=>numberLabel(value,1)).join(' · ')||'Not learned','Output state · Schedule control · Focus control; uncertainty widens across unsaved gaps'],
+        ['Learned measurement SD',(learned?.measurementSd||[]).map((value:number)=>numberLabel(value,1)).join(' · ')||'Not learned','Current bounded-window parameter summary; historical forecast states remain origin-causal'],
         ['Historical forecast causality',state.forecastCausal?'Origin-causal':'Not established',state.forecastCausal?`Prior-day state predictors use only evidence available before each forecast date; parameters refresh every ${state.parameterUpdateCadence||FITNESS_PARAMETER_UPDATE_CADENCE} observations from at most ${state.parameterWindowObservations||FITNESS_PARAMETER_WINDOW_OBSERVATIONS} prior observations.`:'State-aware forecast cannot win model selection.'],
-        ['Cross-state learning',`${learned.completePairs||0} complete adjacent pairs`,state.multivariateReady?'Multivariate state available':'Sparse components remain independently uncertain'],
+        ['Cross-state learning',`${learned?.completePairs||0} complete adjacent pairs`,state.multivariateReady?'Multivariate state available':'Sparse components remain independently uncertain'],
         ['Progress weights',`Explicit ${numberLabel(parameters.sourceWeights&&parameters.sourceWeights.explicit,2)} · time ${numberLabel(parameters.sourceWeights&&parameters.sourceWeights['time-derived'],2)} · unverified ${numberLabel(parameters.sourceWeights&&parameters.sourceWeights.unverified,2)}`,'Skipped is explicit zero evidence; missing progress receives zero update weight']
       ],{wide:true,columns:'minmax(155px,1fr) minmax(165px,1fr) minmax(280px,1.7fr)'}));
       const dimensionRows=Object.values(state.dimensions||{}).map((dimension,index)=>[
@@ -623,8 +638,8 @@ function bootInsightsRuntime(){
     const details=lazyDisclosure('insights-dynamics-evidence ui-inset','Open uncertainty & model evidence',()=>{
       const body=el('div','insights-dynamics-evidence-body');
       const auditModel=resolveLabModel(model);
-      const dynamics=auditModel.dynamics||{};
-      const bayesian=dynamics.bayesian||{};
+      const dynamics:LabDynamics=auditModel.dynamics;
+      const bayesian=dynamics.bayesian;
       const patternRows=(bayesian.dimensions||[]).flatMap(dimension=>(dimension.rows||[]).map(row=>[
         dimension.label,row.label,row.blocks,minutesLabel(row.planned),percentLabel(row.rawCompletion,1),percentLabel(row.estimate.mean,1),evidenceIntervalLabel(row.estimate),numberLabel(row.nEff,1),row.estimate.confidence.label
       ]));
@@ -651,7 +666,7 @@ function bootInsightsRuntime(){
       const regimeRows=(change.history||[]).slice().reverse().map(row=>[shortDate(row.date),percentLabel(row.completion,1),percentLabel(row.changeProbability*100,1),percentLabel(row.recentChangeProbability*100,1),row.modalRunLength,percentLabel(row.regimeMean,1)]);
       if(regimeRows.length)changeCard.appendChild(progressiveLabTable(['Date','Completion','New-regime P','Recent-change P','Modal run','Regime mean'],regimeRows,{wide:true,columns:'82px 88px 104px 116px 84px 104px'},'regime day'));
       body.appendChild(changeCard);
-      const allocation=dynamics.allocation||{};
+      const allocation:LabAllocation=dynamics.allocation;
       if(allocation.ready){
         const allocationCard=el('section','insights-card soft ui-card');
         allocationCard.appendChild(sectionTitle('Allocation-distance evidence',`${allocation.label} · Jensen–Shannon divergence ${allocation.divergence} (${allocation.divergencePercent}% of its bounded scale).`));
@@ -673,13 +688,14 @@ function bootInsightsRuntime(){
         else cascadeCard.appendChild(evidenceNote(adjusted.reason||'Adjusted models are not yet estimable.'));
         body.appendChild(cascadeCard);
       }
-      const interactions=dynamics.interactions||{},dynamicAllocation=dynamics.allocation&&dynamics.allocation.dynamic||{};
+      const interactions=dynamics.interactions;
+      const dynamicAllocation:LabDynamicAllocation=allocation.dynamic??{};
       const allocationPeriods=dynamicAllocation.allPeriods||dynamicAllocation.periods||[];
       if(allocationPeriods.length){
         const dynamicCard=el('section','insights-card soft ui-card');
         dynamicCard.appendChild(sectionTitle('Allocation over time','All completed eligible weeks determine persistence; directional trend uses at most the latest two years. The current open week is shown separately as provisional, and lifetime allocation remains the anchor.'));
-        dynamicCard.appendChild(labTable(['Week','Status','Planned','Completed eq.','Divergence'],allocationPeriods.slice().reverse().map(period=>[`${shortDate(period.start)}–${shortDate(period.end)}`,period.provisional?'Provisional':'Completed',minutesLabel(period.planned),minutesLabel(period.completed),numberLabel(period.divergence*100,1)]),{wide:true,columns:'minmax(150px,1fr) 90px 100px 110px 100px'}));
-        dynamicCard.appendChild(evidenceNote(dynamicAllocation.ready?`${dynamicAllocation.trend.label} · ${dynamicAllocation.trendBasis&&dynamicAllocation.trendBasis.label||'directional basis'}. ${dynamicAllocation.persistentUnder?`${dynamicAllocation.persistentUnder.label} was under plan in ${dynamicAllocation.persistentUnder.under}/${dynamicAllocation.persistentUnder.periods} completed eligible weeks.`:'No area cleared the persistent under-allocation gate.'}${dynamicAllocation.provisionalPeriod?' The current week is excluded from those calculations.':''}`:dynamicAllocation.reason));
+        dynamicCard.appendChild(labTable(['Week','Status','Planned','Completed eq.','Divergence'],allocationPeriods.slice().reverse().map(period=>[`${shortDate(period.start)}–${shortDate(period.end)}`,period.provisional?'Provisional':'Completed',minutesLabel(period.planned),minutesLabel(period.completed),numberLabel(finiteNumber(period.divergence)?period.divergence*100:null,1)]),{wide:true,columns:'minmax(150px,1fr) 90px 100px 110px 100px'}));
+        dynamicCard.appendChild(evidenceNote(dynamicAllocation.ready&&dynamicAllocation.trend?`${dynamicAllocation.trend.label} · ${dynamicAllocation.trendBasis&&dynamicAllocation.trendBasis.label||'directional basis'}. ${dynamicAllocation.persistentUnder?`${dynamicAllocation.persistentUnder.label} was under plan in ${dynamicAllocation.persistentUnder.under}/${dynamicAllocation.persistentUnder.periods} completed eligible weeks.`:'No area cleared the persistent under-allocation gate.'}${dynamicAllocation.provisionalPeriod?' The current week is excluded from those calculations.':''}`:dynamicAllocation.reason));
         body.appendChild(dynamicCard);
       }
       if(interactions.tests&&interactions.tests.length){
@@ -687,7 +703,7 @@ function bootInsightsRuntime(){
         interactionCard.appendChild(sectionTitle('Restrained interaction checks','Difference-in-differences after shrinkage; all four cells must clear row and day gates, then the direction must repeat across early and late evidence halves.'));
         interactionCard.appendChild(labTable(['Combination','Effect','Cells ready','Early half','Late half','Stable','Retained'],interactions.tests.filter(test=>test.ready||test.key!=='area-time').map(test=>[
           test.label,
-          Number.isFinite(test.effect)?`${test.effect>0?'+':''}${test.effect} pts`:'—',
+          finiteNumber(test.effect)?`${test.effect>0?'+':''}${test.effect} pts`:'—',
           test.ready?'Yes':'No',
           Number.isFinite(test.stability&&test.stability.earlyEffect)?`${test.stability.earlyEffect>0?'+':''}${test.stability.earlyEffect} pts`:'—',
           Number.isFinite(test.stability&&test.stability.lateEffect)?`${test.stability.lateEffect>0?'+':''}${test.stability.lateEffect} pts`:'—',
@@ -697,7 +713,7 @@ function bootInsightsRuntime(){
         interactionCard.appendChild(evidenceNote(interactions.reason));
         body.appendChild(interactionCard);
       }
-      const workload=dynamics.workload||{};
+      const workload:LabWorkload=dynamics.workload;
       if(workload.ready){
         const workloadCard=el('section','insights-card soft ui-card');
         const calibration=workload.calibration||{};
@@ -850,7 +866,7 @@ function bootInsightsRuntime(){
     let generation=0;
     return Object.freeze({
       begin(){generation+=1;return generation;},
-      isCurrent(token){return token===generation;}
+      isCurrent(token:number){return token===generation;}
     });
   })();
   function supportsCapabilities(api:InsightsPluginApi|null|undefined,requirements:Capabilities){
@@ -893,7 +909,7 @@ function bootInsightsRuntime(){
     pane.setAttribute('aria-busy','false');
   }
   function createInsightsView(api:InsightsPluginApi,engine:InsightsEngine){
-    const computation=InsightsWorkerModel.create(api,engine);
+    const computation=computeBridge.create(api,engine);
     const state:ViewState={
       pane:null,
       rendered:false,
@@ -951,7 +967,7 @@ function bootInsightsRuntime(){
     };
     const loadSession=async({dataSource,source,sourceKey,currentStudyDate,datasetRevision,isCurrent,profile}:Readonly<{dataSource:InsightDataSource;source:PreviewSource|null;sourceKey:string;currentStudyDate:string;datasetRevision:string|null;isCurrent:()=>boolean;profile:Pick<ProfileAccumulator,'recordLoadMs'|'evidencePreparationMs'>}>):Promise<Session|null>=>{
       const loadStarted=performance.now();
-      const readCanonicalInputs=async():Promise<readonly [readonly unknown[],readonly InsightRecord[]]>=>{
+      const readCanonicalInputs=async():Promise<readonly [SummaryInput,readonly InsightRecord[]]>=>{
         if(typeof dataSource.getDailySnapshot==='function'){
           const snapshot=await dataSource.getDailySnapshot();
           return [Array.isArray(snapshot&&snapshot.summaries)?snapshot.summaries:[],Array.isArray(snapshot&&snapshot.records)?snapshot.records:[]];
@@ -961,7 +977,7 @@ function bootInsightsRuntime(){
           dataSource.getDailyRecords({})
         ]);
       };
-      let rawSummaries:readonly unknown[]=[],rawRecords:readonly InsightRecord[]=[],summaries:readonly DailySummary[]=[],records:readonly InsightRecord[]=[],stable=false;
+      let rawSummaries:SummaryInput=[],rawRecords:readonly InsightRecord[]=[],summaries:readonly DailySummary[]=[],records:readonly InsightRecord[]=[],stable=false;
       for(let attempt=0;attempt<3&&!stable;attempt+=1){
         [rawSummaries,rawRecords]=await readCanonicalInputs();
         summaries=normalizeSummaries(rawSummaries);records=Array.isArray(rawRecords)?rawRecords:[];
@@ -1056,7 +1072,7 @@ function bootInsightsRuntime(){
     };
     const prefetch=():Promise<PrefetchStatus>=>{
       if(state.prefetching)return state.prefetching;
-      const running=runPrefetch().catch(error=>publishPrefetch({state:error&&error.name==='AbortError'?'skipped':'failed',reason:error&&error.name==='AbortError'?'superseded':'error'})).finally(()=>{if(state.prefetching===running){state.prefetching=null;state.prefetchWorking=false;}});
+      const running=runPrefetch().catch(error=>publishPrefetch({state:errorName(error)==='AbortError'?'skipped':'failed',reason:errorName(error)==='AbortError'?'superseded':'error'})).finally(()=>{if(state.prefetching===running){state.prefetching=null;state.prefetchWorking=false;}});
       state.prefetching=running;
       return running;
     };
@@ -1093,7 +1109,7 @@ function bootInsightsRuntime(){
       // waiting for idle time sees the open tab and stands down by itself.
       const joining=state.prefetchWorking?state.prefetching:null;
       if(!joining){computation.cancel();computation.warm();}
-      const profile={started:performance.now(),shellMs:0,revisionMs:0,recordLoadMs:0,evidencePreparationMs:0,modelComputeMs:0,workerRoundTripMs:0,domMs:0,maxDomChunkMs:0,domChunks:0,layoutPaintMs:0,maxLongTaskMs:0,mode:'retained',records:0};
+      const profile:ProfileAccumulator={started:performance.now(),shellMs:0,revisionMs:0,recordLoadMs:0,evidencePreparationMs:0,modelComputeMs:0,workerRoundTripMs:0,domMs:0,maxDomChunkMs:0,domChunks:0,layoutPaintMs:0,maxLongTaskMs:0,mode:'retained',records:0};
       let longTaskObserver=null;
       try{
         if(typeof PerformanceObserver==='function'&&PerformanceObserver.supportedEntryTypes?.includes('longtask')){
@@ -1189,8 +1205,8 @@ function bootInsightsRuntime(){
         publishProfile(profile,model);
       }catch(error){
         if(!InsightsRenderCoordinator.isCurrent(token))return;
-        if(error?.name==='AbortError'){notice.finish('cancelled','',{announce:false});pane.setAttribute('aria-busy','false');return;}
-        const message=error?.code==='INSIGHTS_PROCESSING_FAILED'?'Insights processing failed. Retry the report.':'Could not read saved daily records for insights.';
+        if(errorName(error)==='AbortError'){notice.finish('cancelled','',{announce:false});pane.setAttribute('aria-busy','false');return;}
+        const message=errorCode(error)==='INSIGHTS_PROCESSING_FAILED'?'Insights processing failed. Retry the report.':'Could not read saved daily records for insights.';
         notice.finish('failed',message+(state.rendered?' The previous view is still available.':''),{announce:false,cue:'none'});
         const retry=el('button','btn ui-btn insights-retry','Retry');retry.type='button';retry.addEventListener('click',()=>render(context),{once:true});
         if(state.rendered){
@@ -1244,8 +1260,8 @@ function bootInsightsRuntime(){
       view.prefetch();
       document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')view.prefetch();});
     }
-    if(registered&&document.documentElement.dataset.insightsResizeBound!=='1'){
-      document.documentElement.dataset.insightsResizeBound='1';
+    if(registered&&document.documentElement.dataset['insightsResizeBound']!=='1'){
+      document.documentElement.dataset['insightsResizeBound']='1';
       window.addEventListener('resize',()=>Layout.resize(()=>document.getElementById('pane-insights')));
     }
     return registered;
