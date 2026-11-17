@@ -15,7 +15,7 @@ assert.match(app,/const InsightsDeviceState=InsightsHostModule\.createDeviceStat
 assert.match(app,/const InsightsPreload=InsightsHostModule\.createPreloadScheduler\(Object\.freeze\(\{[\s\S]{0,520}requestTab:\(\)=>PluginRuntime\.requestTab\('insights'\)/u,'main must only inject the generic plugin request into checked Insights preload policy');
 assert.match(app,/preloadInsights:InsightsPreload\.schedule/u,'startup must call the checked feature-owned preload scheduler');
 assert.match(app,/deviceState:InsightsDeviceState/u,'public API must expose the checked device-state capability');
-assert.match(runtime,/registerPlugin\?\(PLUGIN_DESCRIPTOR\)/u,'checked Insights runtime must retain public plugin registration');
+assert.match(runtime,/const register=window\.StudyDirector&&window\.StudyDirector\.registerPlugin;[\s\S]{0,260}register\(PLUGIN_DESCRIPTOR\)===true/u,'checked Insights runtime must retain public plugin registration');
 assert.match(app,/const PluginRuntime=\(\(\)=>\{/u,'shared generic plugin-loader mechanics must remain host-owned for P5.13');
 assert.doesNotMatch(runtime,/AppData\.|localStorage|indexedDB/u,'Insights retained runtime must not reach host persistence directly');
 assert.match(manifest,/external\/insights-rendering\.ts','external\/insights-runtime\.ts','external\/insights\.js'/u,'one generated Insights asset must keep renderer then checked retained runtime then inert tracked shell');
