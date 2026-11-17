@@ -1039,48 +1039,70 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
     // only with a worker, a trusted dataset revision and a visible page, and its
     // result is used only when every key part still matches.
     const PREFETCH_IDLE_TIMEOUT_MS=10000;
-    const publishPrefetch=(status:Readonly<Record<string,unknown>>):PrefetchStatus=>{
+    let prefetchGeneration=0;
+    const publishPrefetch=(status:Readonly<Record<string,unknown>>,token:number):PrefetchStatus=>{
       const result=Object.freeze({...status,at:Number(performance.now().toFixed(2))});
-      window.__StudyDirectorInsightsPrefetch=result;
-      return result;
+      if(token===prefetchGeneration)window.__StudyDirectorInsightsPrefetch=result;
+      return token===prefetchGeneration?result:Object.freeze({state:'skipped',reason:'superseded',at:result.at});
     };
     const whenIdle=()=>new Promise<void>(resolve=>{
       if(typeof requestIdleCallback==='function')requestIdleCallback(()=>resolve(),{timeout:PREFETCH_IDLE_TIMEOUT_MS});
       else setTimeout(resolve,200);
     });
     const insightsOpen=()=>{const pane=document.getElementById('pane-insights');return !!pane&&!pane.hidden&&pane.classList.contains('on');};
-    const runPrefetch=async():Promise<PrefetchStatus>=>{
+    const runPrefetch=async(token:number):Promise<PrefetchStatus>=>{
       await whenIdle();
-      if(document.visibilityState==='hidden')return publishPrefetch({state:'skipped',reason:'hidden'});
-      if(insightsOpen())return publishPrefetch({state:'skipped',reason:'open'});
-      if(!computation.supported())return publishPrefetch({state:'skipped',reason:'no-worker'});
+      if(token!==prefetchGeneration)return publishPrefetch({state:'skipped',reason:'superseded'},token);
+      if(document.visibilityState==='hidden')return publishPrefetch({state:'skipped',reason:'hidden'},token);
+      if(insightsOpen())return publishPrefetch({state:'skipped',reason:'open'},token);
+      if(!computation.supported())return publishPrefetch({state:'skipped',reason:'no-worker'},token);
       // From here an opening of the tab waits for this work and reuses it.
       state.prefetchWorking=true;
       const started=performance.now();
       const dataSource=api.insights.dataSource;
       const source=typeof dataSource.getRecordSource==='function'?dataSource.getRecordSource():null;
-      if(!source||source.type!=='real')return publishPrefetch({state:'skipped',reason:'not-saved-data'});
+      if(!source||source.type!=='real')return publishPrefetch({state:'skipped',reason:'not-saved-data'},token);
       const currentStudyDate=typeof dataSource.getCurrentStudyDate==='function'?dataSource.getCurrentStudyDate():localIsoDate();
       const windowKey=readInsightWindowKey();
       const datasetRevision=await readDatasetRevision(dataSource);
-      if(!datasetRevision)return publishPrefetch({state:'skipped',reason:'no-revision'});
+      if(!datasetRevision)return publishPrefetch({state:'skipped',reason:'no-revision'},token);
       const sourceKey=sourceIdentity(source),baseKey=`${sourceKey}|${currentStudyDate}|${datasetRevision}`;
-      if(state.rendered&&state.renderedBaseKey===baseKey&&state.renderedWindowKey===windowKey)return publishPrefetch({state:'skipped',reason:'view-current'});
-      if(state.prefetched&&state.prefetched.baseKey===baseKey&&state.prefetched.windowKey===windowKey)return publishPrefetch({state:'ready',reason:'already-prepared'});
+      const identityCurrent=async()=>{
+        if(token!==prefetchGeneration)return false;
+        const nextSource=typeof dataSource.getRecordSource==='function'?dataSource.getRecordSource():source;
+        const nextDate=typeof dataSource.getCurrentStudyDate==='function'?dataSource.getCurrentStudyDate():localIsoDate();
+        const nextRevision=await readDatasetRevision(dataSource);
+        return token===prefetchGeneration&&sourceIdentity(nextSource)===sourceKey&&nextDate===currentStudyDate&&nextRevision===datasetRevision&&readInsightWindowKey()===windowKey;
+      };
+      if(state.rendered&&state.renderedBaseKey===baseKey&&state.renderedWindowKey===windowKey)return publishPrefetch({state:'skipped',reason:'view-current'},token);
+      if(state.prefetched&&state.prefetched.baseKey===baseKey&&state.prefetched.windowKey===windowKey)return publishPrefetch({state:'ready',reason:'already-prepared'},token);
       const timing={recordLoadMs:0,evidencePreparationMs:0};
-      const session=state.session&&state.session.baseKey===baseKey?state.session:await loadSession({dataSource,source,sourceKey,currentStudyDate,datasetRevision,isCurrent:()=>true,profile:timing});
-      if(!session||session.baseKey!==baseKey)return publishPrefetch({state:'skipped',reason:'revision-changed'});
-      state.session=session;
+      const session=state.session&&state.session.baseKey===baseKey?state.session:await loadSession({dataSource,source,sourceKey,currentStudyDate,datasetRevision,isCurrent:()=>token===prefetchGeneration,profile:timing});
+      if(!session||session.baseKey!==baseKey||!await identityCurrent())return publishPrefetch({state:'skipped',reason:'revision-changed'},token);
       const plan=planModel(session,windowKey,currentStudyDate);
-      if(Math.max(plan.windowInfo.records.length,session.prepared.records.length)<computation.minimumRecords)return publishPrefetch({state:'skipped',reason:'short-history',recordLoadMs:timing.recordLoadMs});
-      const result=await computation.build(plan.windowInfo.records,session.prepared,plan.modelOptions);
+      if(Math.max(plan.windowInfo.records.length,session.prepared.records.length)<computation.minimumRecords){
+        if(await identityCurrent())state.session=session;
+        return publishPrefetch({state:'skipped',reason:'short-history',recordLoadMs:timing.recordLoadMs},token);
+      }
+      let result:InsightsComputeResult;
+      try{result=await computation.build(plan.windowInfo.records,session.prepared,plan.modelOptions);}
+      catch(error){
+        if(!await identityCurrent())return publishPrefetch({state:'skipped',reason:'superseded'},token);
+        throw error;
+      }
+      if(!await identityCurrent()){
+        if(!insightsOpen())computation.release();
+        return publishPrefetch({state:'skipped',reason:'revision-changed'},token);
+      }
       if(!insightsOpen())computation.release();
+      state.session=session;
       state.prefetched=Object.freeze({baseKey,windowKey,fullKey:plan.fullKey,result});
-      return publishPrefetch({state:'ready',reason:'prepared',mode:result.mode,records:plan.windowInfo.records.length,recordLoadMs:Number(timing.recordLoadMs.toFixed(2)),evidencePreparationMs:Number(timing.evidencePreparationMs.toFixed(2)),modelComputeMs:Number(result.computeMs.toFixed(2)),workerRoundTripMs:Number(result.roundTripMs.toFixed(2)),totalMs:Number((performance.now()-started).toFixed(2))});
+      return publishPrefetch({state:'ready',reason:'prepared',mode:result.mode,records:plan.windowInfo.records.length,recordLoadMs:Number(timing.recordLoadMs.toFixed(2)),evidencePreparationMs:Number(timing.evidencePreparationMs.toFixed(2)),modelComputeMs:Number(result.computeMs.toFixed(2)),workerRoundTripMs:Number(result.roundTripMs.toFixed(2)),totalMs:Number((performance.now()-started).toFixed(2))},token);
     };
     const prefetch=():Promise<PrefetchStatus>=>{
       if(state.prefetching)return state.prefetching;
-      const running=runPrefetch().catch(error=>publishPrefetch({state:errorName(error)==='AbortError'?'skipped':'failed',reason:errorName(error)==='AbortError'?'superseded':'error'})).finally(()=>{if(state.prefetching===running){state.prefetching=null;state.prefetchWorking=false;}});
+      const token=++prefetchGeneration;
+      const running=runPrefetch(token).catch(error=>publishPrefetch({state:errorName(error)==='AbortError'?'skipped':'failed',reason:errorName(error)==='AbortError'?'superseded':'error'},token)).finally(()=>{if(state.prefetching===running){state.prefetching=null;state.prefetchWorking=false;}});
       state.prefetching=running;
       return running;
     };
@@ -1116,7 +1138,7 @@ const errorCode=(error:unknown)=>error&&typeof error==='object'&&'code' in error
       // Join only work that is already reading data; a pre-computation still
       // waiting for idle time sees the open tab and stands down by itself.
       const joining=state.prefetchWorking?state.prefetching:null;
-      if(!joining){computation.cancel();computation.warm();}
+      if(!joining){prefetchGeneration+=1;computation.cancel();computation.warm();}
       const profile:ProfileAccumulator={started:performance.now(),shellMs:0,revisionMs:0,recordLoadMs:0,evidencePreparationMs:0,modelComputeMs:0,workerRoundTripMs:0,domMs:0,maxDomChunkMs:0,domChunks:0,layoutPaintMs:0,maxLongTaskMs:0,mode:'retained',records:0};
       let longTaskObserver=null;
       try{
