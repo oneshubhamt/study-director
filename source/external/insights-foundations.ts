@@ -10,7 +10,7 @@ import type {AreaSummary,DailyTaskView,PauseEvent,PracticeRun} from '../../types
 
 type InsightPauseEvent=Partial<PauseEvent>&Readonly<{reason?:string;plannedSeconds?:number|null}>;
 type InsightTask=Omit<Partial<DailyTaskView>,'kind'|'completionSource'|'pauseEvents'>&Readonly<{
-  kind?:TaskKind|string;completionSource?:CompletionSource|string;pauseEvents?:readonly InsightPauseEvent[];__sdOutcome?:TaskOutcome;
+  kind?:TaskKind;completionSource?:CompletionSource;pauseEvents?:readonly InsightPauseEvent[];__sdOutcome?:TaskOutcome;
 }>;
 type InsightRecord=Readonly<{
   date:string;dayName?:string;savedAt?:string;updatedAt?:string;createdAt?:string;studyQuality?:number|null;degraded?:boolean;
@@ -291,7 +291,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     return isFiniteNumber(value)?round(value,digits):null;
   }
   function apportionedPercents(values:readonly unknown[],digits=0){
-    const clean=(Array.isArray(values)?values:[]).map(value=>Math.max(0,num(value)));
+    const clean=values.map(value=>Math.max(0,num(value)));
     const total=clean.reduce((sum,value)=>sum+value,0);
     if(!total)return clean.map(()=>0);
     const scale=Math.pow(10,Math.max(0,Math.round(digits))),target=100*scale;
@@ -426,7 +426,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     if(num(task.sessionCount)>0||num(task.actualSeconds)>0||task.actualStart)return true;
     if(task.actualStartLocalMinute!==null&&task.actualStartLocalMinute!==undefined)return true;
     if(task.actualStartUtcOffsetMinutes!==null&&task.actualStartUtcOffsetMinutes!==undefined)return true;
-    return Array.isArray(task.pauseEvents)&&task.pauseEvents.length>0;
+    return !!task.pauseEvents?.length;
   }
   function completionSourceKey(task:InsightTask|null|undefined){
     if(task&&task.skipped)return 'skipped';
@@ -605,7 +605,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
   }
   function logBeta(left:number,right:number){return logGamma(left)+logGamma(right)-logGamma(left+right);}
   function logSumExp(values:readonly number[]){
-    const clean=(Array.isArray(values)?values:[]).filter(isFiniteNumber);
+    const clean=values.filter(isFiniteNumber);
     if(!clean.length)return -Infinity;
     const maximum=Math.max(...clean);
     return maximum+Math.log(sum(clean.map(value=>Math.exp(value-maximum))));
@@ -737,8 +737,8 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
   }
   function evidenceMetadata(meta:EvidenceMetadataInput={}){
     const confidence=meta&&meta.confidence&&typeof meta.confidence==='object'?meta.confidence:null;
-    const limitationSource=meta.limitations;
-    const limitations=(Array.isArray(limitationSource)?limitationSource:[])
+    const limitationSource=meta.limitations??[];
+    const limitations=limitationSource
       .map(value=>String(value||'').trim()).filter(Boolean);
     return Object.freeze({
       level:confidence&&confidence.key||null,
@@ -787,7 +787,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
   }
   function log2(value:number){return Math.log(value)/Math.LN2;}
   function jensenShannonDivergence(left:readonly number[],right:readonly number[]){
-    const p=Array.isArray(left)?left:[],q=Array.isArray(right)?right:[];
+    const p=left,q=right;
     if(!p.length||p.length!==q.length)return null;
     const kl=(a:readonly number[],b:readonly number[])=>a.reduce((total,value,index)=>value>0&&b[index]!>0?total+value*log2(value/b[index]!):total,0);
     const midpoint=p.map((value,index)=>(value+q[index])/2);
@@ -826,7 +826,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     const planned=tasks.reduce((sum,t)=>sum+taskPlanned(t),0);
     const actual=tasks.reduce((sum,t)=>sum+taskActual(t),0);
     const completed=tasks.reduce((sum,t)=>sum+taskCompleted(t),0);
-    const practiceUnits=(record.practiceRuns??[]).reduce((sum,run)=>sum+(Array.isArray(run&&run.unitMs)?run.unitMs.length:0),0);
+    const practiceUnits=(record.practiceRuns??[]).reduce((sum,run)=>sum+run.unitMs.length,0);
     return tasks.length*1000000+Math.round(planned*1000)+Math.round(actual*100)+Math.round(completed*10)+practiceUnits;
   }
   function stableCacheValue(value:unknown,seen=new Set<object>()):unknown{
@@ -1095,7 +1095,7 @@ type ResourceAccumulator={label:string;blocks:number;planned:number;completed:nu
     });
   }
   function computeStreakFromDays(dayList:readonly (number|null)[],currentStudyDate:unknown){
-    const days=[...new Set((Array.isArray(dayList)?dayList:[]).filter(isFiniteNumber))]
+    const days=[...new Set(dayList.filter(isFiniteNumber))]
       .sort((a,b)=>a-b);
     let longest=0,latest=0,current=0;
     days.forEach((day,index)=>{
