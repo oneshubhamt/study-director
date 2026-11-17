@@ -16,8 +16,8 @@ const {Analytics,Primitives,Records}=context.StudyDirectorInsightsModel;
 const classifyFoundationOutcome=task=>task.completion>=100?'full':task.completion>0?'partial':task.skipped?'skipped':'untouched';
 // The real-provider witness must use production configuration, not a copied
 // unit-test profile. These bounds deliberately differ from older test defaults.
-assert.equal(practiceProvider.validPracticeMs(4000),0,'production Practice Pacer minimum target is 5 seconds');
-assert.equal(practiceProvider.validPracticeMs(6*60*60*1000),6*60*60*1000,'production Practice Pacer permits targets beyond the old 4-hour test cap');
+assert.equal(practiceProvider.sanitizePracticeRun({targetMs:4000,unitMs:[1000]}),null,'production Practice Pacer rejects a target below 5 seconds');
+assert.equal(practiceProvider.sanitizePracticeRun({targetMs:6*60*60*1000,unitMs:[60000]})?.targetMs,6*60*60*1000,'production Practice Pacer permits targets beyond the old 4-hour test cap');
 
 // Hand-computable foundation witnesses: unavailable evidence is not zero,
 // calendar windows include exact boundaries, and core aggregates conserve input.
