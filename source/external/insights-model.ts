@@ -142,7 +142,8 @@ export type InsightsBuildOptions=Readonly<{
 export type PreparedInsights=Readonly<{records:readonly InsightRecord[];revision:string}>;
 export type InsightsEngineDependencies=Readonly<{classifyTaskOutcome:OutcomeClassifier;summarizePracticeRuns:PracticeRunSummarizer}>;
 
-const createInsightsModelRuntime=(global:typeof globalThis)=>{
+// A declaration, rather than a top-level lexical factory, keeps optional-plugin retry re-evaluation legal in the same classic-script realm.
+function createInsightsModelRuntime(global:typeof globalThis){
   'use strict';
   const isRecordObject=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
   const isFiniteNumber=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
@@ -4407,7 +4408,7 @@ type HistoryCacheEntry={
   });
   Object.defineProperty(global,'StudyDirectorInsightsModel',{value:InsightsModel,writable:false,configurable:true});
   return InsightsModel;
-};
+}
 createInsightsModelRuntime(globalThis);
 
 export type InsightsModelRuntime=ReturnType<typeof createInsightsModelRuntime>;
