@@ -13,7 +13,7 @@ type Fitness=Model['fitness'];
 type FitnessDimension=NonNullable<Fitness['performanceState']['dimensions']>[keyof NonNullable<Fitness['performanceState']['dimensions']>];
 type Dynamics=Model['dynamics'];
 type Workload=NonNullable<Dynamics['workload']>;
-type ChartHit=Readonly<{node:SVGElement;text:string;initial?:boolean}>;
+type ChartHit={node:SVGElement;text:string;initial?:boolean};
 type ChartNode=Element;
 type ChartItem={draw:()=>ChartNode;after:(()=>void)|undefined;node:ChartNode};
 type RendererApi=Readonly<{
@@ -28,7 +28,7 @@ type DisplayValue=string|number|null|undefined;
 type StartDelayRow=Model['startDelays'][number];
 type BlockOrderRow=Model['blockOrder'][number];
 type BarSeriesRow=Readonly<{blocks:number;label:string;completion:number|null}>;
-type TrendDailyRow=DailyRow&Readonly<{rolling7?:number|null}>;
+type TrendDailyRow=DailyRow&Readonly<{rolling7:number|null|undefined}>;
 type LineChartKey='completion'|'rolling7';
 type LineChartOptions=Readonly<{key?:LineChartKey;softKey?:LineChartKey;label?:string}>;
 type CalendarRange=Readonly<{start?:string|null;end?:string|null}>;
@@ -36,20 +36,38 @@ type ResourceRow=Model['resourceMix'][number];
 type CoachSignal=Model['interpretation']['signals']['coach'][number];
 type CoachSurfaceSignal=Model['interpretation']['signals']['surfaces'][number];
 type CoverageGeometry={plotTop:number;plotBottom:number;plotLeft:number;plotRight:number;plotW:number;plotH:number;compact:boolean;pointCount:number};
-type CoveragePoint=Subject&{
-  evidenceConfidence:number;index:number;code:string;cx:number;cy:number;r:number;tone:string;
-  group?:SVGGElement;node?:SVGGElement;
-};
+type CoveragePoint=Subject&{evidenceConfidence:number;index:number;code:string;cx:number;cy:number;r:number;tone:string};
+type CoverageInteractivePoint=CoveragePoint&{group:SVGGElement;node:SVGGElement;text:string};
 type CoverageNodeView=Readonly<{
-  svg:SVGSVGElement;groups:CoveragePoint[];inspectLine:SVGLineElement;title:SVGTextElement;line1:SVGTextElement;line2:SVGTextElement;
+  svg:SVGSVGElement;groups:CoverageInteractivePoint[];inspectLine:SVGLineElement;title:SVGTextElement;line1:SVGTextElement;line2:SVGTextElement;
   inspectX:number;inspectY:number;inspectW:number;riskLabel:(subject:Subject)=>string;compact:boolean;
 }>;
-type HeatCell=HTMLButtonElement;
-type PracticeSizeFamily='marks'|'durations';
+type HeatCell=HTMLDivElement;
+type PracticeComparisonRow=Practice['areas'][number]|Practice['modes'][number];
 type AllocationRow=Subject&Readonly<{share:number;plannedShare:number}>;
 type Bayesian=Model['dynamics']['bayesian'];
 type Allocation=Model['dynamics']['allocation'];
 type Cascade=Model['dynamics']['cascade'];
+type UnionKeys<T>=T extends T?keyof T:never;
+type UnionValue<T,K extends PropertyKey>=T extends T?K extends keyof T?T[K]:never:never;
+type CompleteUnion<T>={ [K in UnionKeys<T>]?:UnionValue<T,K> };
+type RenderBayesian=CompleteUnion<Bayesian>;
+type RenderAllocation=CompleteUnion<Allocation>;
+type RenderDynamicAllocation=CompleteUnion<NonNullable<RenderAllocation['dynamic']>>;
+type RenderCascade=CompleteUnion<Cascade>;
+type RenderCascadeAdjusted=CompleteUnion<NonNullable<RenderCascade['adjusted']>>;
+type RenderWorkload=CompleteUnion<Workload>;
+type RenderForecast=CompleteUnion<NonNullable<RenderWorkload['forecast']>>;
+type RenderChangePoint=CompleteUnion<Model['dynamics']['changePoint']>;
+type RenderCalibration=CompleteUnion<NonNullable<RenderForecast['calibration']>|NonNullable<RenderWorkload['calibration']>>;
+type WorkloadCurveRow=NonNullable<RenderWorkload['curve']>[number];
+type WorkloadPoint={
+  planned:number;completionMean:number|null;completionLow:number|null;completionHigh:number|null;
+  strongProbability:number|null;strongLow:number|null;strongHigh:number|null;expectedCompleted:number|null;
+};
+type BayesianDimension=NonNullable<RenderBayesian['dimensions']>[number];
+type BayesianPatternRow=BayesianDimension['rows'][number];
+type PatternRead={dimension:BayesianDimension;row:BayesianPatternRow};
 
 
 const PREVIEW_SAMPLE_DAYS=28;
@@ -997,7 +1015,7 @@ function createInsightsRendering(
     chip.append(el('div','k ui-label',label),el('div','v ui-mono',value));
     return chip;
   }
-  function barRowsFromSeries(series:readonly BarSeriesRow[],{showEmpty=false,detailFor=null}:{showEmpty?:boolean;detailFor?:((row:BarSeriesRow)=>DisplayValue)|null}={}){
+  function barRowsFromSeries<T extends BarSeriesRow>(series:readonly T[],{showEmpty=false,detailFor=null}:{showEmpty?:boolean;detailFor?:((row:T)=>DisplayValue)|null}={}){
     const wrap=el('div','insights-bars');
     const rows=showEmpty?series:series.filter(row=>row.blocks>0);
     rows.forEach(row=>{
@@ -1105,7 +1123,7 @@ function createInsightsRendering(
     labelGraphic(svg,options.label||'Work completion trend',`Daily work completion with a rolling mean over the latest seven completion-eligible saved days. Records without work completion are omitted from the mean. Trend lines break when sampled dates are more than ${WORK_TREND_MAX_CONNECTED_GAP_DAYS} calendar days apart. Focus a point to hear its date and value.`);
     const inspect:ChartHit[]=[];
     const key:LineChartKey=options.key||'completion';
-    const values=rows.map(r=>r[key]).filter(Number.isFinite);
+    const values=rows.map(r=>r[key]).filter(finiteNumber);
     if(values.length<2){
       return chartEmpty(svg,'Need at least two work-completion days in the displayed span',pad,height/2);
     }
@@ -1124,7 +1142,7 @@ function createInsightsRendering(
       const segments:string[][]=[];let segment:string[]=[];let previousDay:number|null=null;let calendarBroken=false;
       rows.forEach((row,index)=>{
         const value=row&&row[valueKey],day=dateDay(row&&row.date);
-        if(!Number.isFinite(value)){
+        if(!finiteNumber(value)){
           if(segment.length)segments.push(segment);
           segment=[];previousDay=null;return;
         }
@@ -1141,7 +1159,7 @@ function createInsightsRendering(
     const softBroken=options.softKey?drawSegments(options.softKey,'line soft'):false;
     rows.forEach((r,i)=>{
       const v=r[key];
-      if(!Number.isFinite(v))return;
+      if(!finiteNumber(v))return;
       const x=xFor(i),y=yFor(v);
       const dot=svgEl('circle',{class:`dot ${compact?'chart-point-xl':'chart-point-xs'}`,cx:x,cy:y,r:compact?3.4:2});
       const title=svgEl('title');
@@ -1156,7 +1174,8 @@ function createInsightsRendering(
     const xLabel=svgEl('text',{class:'axis-label',x:width/2-34,y:height-6});
     xLabel.textContent='Saved days';
     const right=svgEl('text',{class:'label',x:width-pad-116,y:height-6});
-    right.textContent=rows.length?`${shortDate(rows[0].date)} -> ${shortDate(rows[rows.length-1].date)}`:'';
+    const firstRow=rows[0],lastRow=rows[rows.length-1];
+    right.textContent=firstRow&&lastRow?`${shortDate(firstRow.date)} -> ${shortDate(lastRow.date)}`:'';
     svg.append(left,xLabel,right);
     const widget=inspectedChart(svg,inspect);
     if(primaryBroken||softBroken)appendChartNote(widget,`Line breaks mark sampled dates more than ${WORK_TREND_MAX_CONNECTED_GAP_DAYS} calendar days apart; points remain visible.`);
@@ -1211,7 +1230,7 @@ function createInsightsRendering(
     const width=compact?360:700,height=compact?238:238,pad=compact?38:42;
     const {svg}=chartFrame(width,height,pad);
     labelGraphic(svg,'Work-completion stability','Daily work completion against the selected-window average and descriptive reference band. Focus a point to hear its date and value.');
-    const cleanAll=rows.filter(r=>Number.isFinite(r.completion));
+    const cleanAll=rows.filter((r):r is DailyRow&Readonly<{completion:number}>=>finiteNumber(r.completion));
     const limit=compact?MAX_STABILITY_CHART_DAYS_COMPACT:MAX_STABILITY_CHART_DAYS_DESKTOP;
     const clean=cleanAll.slice(-limit);
     const inspect:ChartHit[]=[];
@@ -1219,12 +1238,12 @@ function createInsightsRendering(
       return chartEmpty(svg,'Need at least five work-completion days for stability evidence',pad,height/2);
     }
     const values=cleanAll.map(r=>r.completion);
-    const avg=mean(values);
+    const avg=mean(values)??0;
     const sd=stdev(values)||0;
     const upper=Math.min(100,avg+2*sd);
     const lower=Math.max(0,avg-2*sd);
-    const xFor=i=>pad+(i/(Math.max(1,clean.length-1)))*(width-pad*2);
-    const yFor=v=>height-pad-(v/100)*(height-pad*2);
+    const xFor=(i:number)=>pad+(i/(Math.max(1,clean.length-1)))*(width-pad*2);
+    const yFor=(v:number)=>height-pad-(v/100)*(height-pad*2);
     const band=svgEl('rect',{class:'completion-reference-band',x:pad,y:yFor(upper),width:width-pad*2,height:Math.max(1,yFor(lower)-yFor(upper))});
     svg.appendChild(band);
     [0,50,100].forEach(mark=>{
@@ -1277,8 +1296,8 @@ function createInsightsRendering(
       return chartEmpty(svg,'Need planned and actual focus across saved days',pad,height/2);
     }
     const max=Math.max(60,...clean.flatMap(r=>[r.planned||0,r.actual||0]));
-    const xFor=v=>pad+(Math.max(0,v)/max)*plotW;
-    const yFor=v=>height-pad-(Math.max(0,v)/max)*plotH;
+    const xFor=(v:number)=>pad+(Math.max(0,v)/max)*plotW;
+    const yFor=(v:number)=>height-pad-(Math.max(0,v)/max)*plotH;
     [0,.5,1].forEach(mark=>{
       const value=max*mark;
       const x=xFor(value),y=yFor(value);
@@ -1293,12 +1312,13 @@ function createInsightsRendering(
     svg.appendChild(svgEl('line',{class:'line soft chart-opacity-soft',x1:xFor(0),y1:yFor(0),x2:xFor(max),y2:yFor(max)}));
     const nearBand=svgEl('path',{class:'near-plan-band',d:`M ${xFor(0)} ${yFor(0)} L ${xFor(max)} ${yFor(max*.9)} L ${xFor(max)} ${yFor(max)} L ${xFor(max/1.1)} ${yFor(max)} Z`});
     svg.insertBefore(nearBand,svg.querySelector('line'));
-    const plotted=clean.map(row=>({row,x:xFor(row.planned||0),y:yFor(row.actual||0)}));
-    const coincident=new Map();
+    type ScatterPoint={row:DailyRow;x:number;y:number;coincident?:number};
+    const plotted:ScatterPoint[]=clean.map(row=>({row,x:xFor(row.planned||0),y:yFor(row.actual||0)}));
+    const coincident=new Map<string,ScatterPoint[]>();
     plotted.forEach(point=>{
       const key=`${Math.round(point.x/4)}|${Math.round(point.y/4)}`;
       if(!coincident.has(key))coincident.set(key,[]);
-      coincident.get(key).push(point);
+      coincident.get(key)?.push(point);
     });
     coincident.forEach(group=>group.forEach((point,index)=>{
       if(group.length<2)return;
@@ -1312,7 +1332,7 @@ function createInsightsRendering(
       const {row}=point;
       const ratio=row.planned>0?row.actual/row.planned:null;
       const timerCoverage=finiteOrNull(row.timerCoverage);
-      const coverageLimited=!Number.isFinite(timerCoverage)||timerCoverage<MIN_TIMER_COVERAGE_FOR_PLAN_READ;
+      const coverageLimited=timerCoverage===null||timerCoverage<MIN_TIMER_COVERAGE_FOR_PLAN_READ;
       const cls=coverageLimited?'dot coverage-limited':ratio!==null&&ratio>=.9&&ratio<=1.1?'dot near-plan':'dot';
       const dot=svgEl('circle',{class:`${cls} ${coverageLimited?'chart-point-emphasis':'chart-point-large'}`,cx:point.x,cy:point.y,r:coverageLimited?4:3.2});
       const title=svgEl('title');
@@ -1358,7 +1378,7 @@ function createInsightsRendering(
     const barW=Math.min(48,gap*.55);
     groups.forEach((group,index)=>{
       const x=pad+index*gap+(gap-barW)/2;
-      const value=Number.isFinite(group.average)?group.average:0;
+      const value=finiteNumber(group.average)?group.average:0;
       const repeated=group.days>=MIN_WEEKDAY_SAMPLES_FOR_PATTERN;
       const h=(value/100)*(height-pad*2);
       const rect=svgEl('rect',{class:`bar actual${repeated?'':' chart-opacity-muted'}`,x,y:height-pad-h,width:barW,height:h});
@@ -1368,7 +1388,7 @@ function createInsightsRendering(
       rect.appendChild(title);
       svg.appendChild(rect);
       chartHitRect(svg,pad+index*gap,pad,Math.max(20,gap),height-pad*2,detail,inspect);
-      if(group.days)inspect[inspect.length-1].initial=true;
+      if(group.days){const latest=inspect[inspect.length-1];if(latest)latest.initial=true;}
       const day=svgEl('text',{class:'axis-label',x:x+barW/2-10,y:height-7});
       day.textContent=group.label;
       svg.appendChild(day);
@@ -1381,7 +1401,7 @@ function createInsightsRendering(
     return inspectedChart(svg,inspect);
   }
   function heatLevel(value:number|null){
-    if(!Number.isFinite(value))return '';
+    if(!finiteNumber(value))return '';
     const displayed=Math.round(value);
     if(displayed>=80)return 'l4';
     if(displayed>=60)return 'l3';
@@ -1394,7 +1414,8 @@ function createInsightsRendering(
     grid.setAttribute('role','group');
     grid.setAttribute('aria-label','Calendar work-completion heatmap');
     const byDate=new Map((Array.isArray(rows)?rows:[]).filter(row=>isIsoDate(row.date)).map(row=>[row.date,row]));
-    const lastSavedDay=rows.length?dateDay(rows[rows.length-1].date):null;
+    const lastRecord=rows[rows.length-1];
+    const lastSavedDay=lastRecord?dateDay(lastRecord.date):null;
     const rangeStart=isIsoDate(range.start)?dateDay(range.start):null;
     const rangeEnd=isIsoDate(range.end)?dateDay(range.end):null;
     const endDay=rangeEnd!==null?rangeEnd:lastSavedDay;
@@ -1436,8 +1457,9 @@ function createInsightsRendering(
       cell.addEventListener('keydown',event=>{
         if(event.key==='Enter'||event.key===' '){event.preventDefault();select(cell,detail);return;}
         const current=cells.indexOf(cell);
-        const moves={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7};
-        let next=Object.prototype.hasOwnProperty.call(moves,event.key)?current+moves[event.key]:null;
+        const moves:Readonly<Record<string,number>>={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7};
+        const move=moves[event.key];
+        let next=move===undefined?null:current+move;
         if(event.key==='Home')next=0;
         if(event.key==='End')next=cells.length-1;
         if(next===null)return;
@@ -1451,7 +1473,7 @@ function createInsightsRendering(
     const legend=el('div','insights-legend ui-mono');
     [['missing','No record'],['no-work','Saved · no work'],['l1','Low <40'],['l2','Partial 40–59'],['l3','Good 60–79'],['l4','Strong 80+']].forEach(([cls,label])=>{
       const item=el('span',null);
-      item.append(el('i','insights-cell '+cls),document.createTextNode(label));
+      item.append(el('i','insights-cell '+String(cls||'')),document.createTextNode(String(label||'')));
       legend.appendChild(item);
     });
     const lastSaved=[...cells].reverse().find(cell=>!cell.classList.contains('missing'))||cells[cells.length-1];
@@ -1520,6 +1542,7 @@ function createInsightsRendering(
       for(let i=0;i<points.length;i+=1){
         for(let j=i+1;j<points.length;j+=1){
           const a=points[i],b=points[j];
+          if(!a||!b)continue;
           let dx=b.cx-a.cx,dy=b.cy-a.cy;
           let dist=Math.sqrt(dx*dx+dy*dy);
           const minDist=a.r+b.r+gap;
@@ -1558,7 +1581,8 @@ function createInsightsRendering(
       yTick.textContent=mark===0?'lower':mark===.5?'mid':'higher';
       svg.append(xTick,yTick);
     });
-    [['Maintain',plotLeft+14,plotTop+18],['Practice now',plotLeft+14,plotBottom-12],['Revisit soon',plotRight-122,plotTop+18],['Review first',plotRight-112,plotBottom-12]].forEach(([text,x,y])=>{
+    const quadrantLabels:readonly (readonly [string,number,number])[]=[['Maintain',plotLeft+14,plotTop+18],['Practice now',plotLeft+14,plotBottom-12],['Revisit soon',plotRight-122,plotTop+18],['Review first',plotRight-112,plotBottom-12]];
+    quadrantLabels.forEach(([text,x,y])=>{
       const label=svgEl('text',{class:'quadrant',x,y});label.textContent=text;svg.appendChild(label);
     });
     const yLabel=svgEl('text',{class:'label strong',x:plotLeft,y:24});yLabel.textContent='Work completion ↑';
@@ -1583,7 +1607,7 @@ function createInsightsRendering(
     });
     const legendNote=svgEl('text',{class:'label',x:legendX,y:legendY-22});legendNote.textContent='Watch color';svg.appendChild(legendNote);
     const nodeLayer=svgEl('g',{class:'risk-node-layer'});
-    const groups:CoveragePoint[]=[];
+    const groups:CoverageInteractivePoint[]=[];
     points.slice().sort((a,b)=>num(a.coverageWatchScore)-num(b.coverageWatchScore)).forEach(point=>{
       // The name starts with the node's visible text (its code and, for the top
       // three, its short name), as WCAG 2.5.3 asks.
@@ -1599,7 +1623,7 @@ function createInsightsRendering(
         const label=svgEl('text',{class:'risk-name',x:alignRight?point.cx-point.r-7:point.cx+point.r+7,y:point.cy+(point.index%2?12:-8),'text-anchor':alignRight?'end':'start'});
         label.textContent=shownName;group.append(' ',label);
       }
-      point.group=group;point.node=group;groups.push(point);nodeLayer.appendChild(group);
+      groups.push({...point,group,node:group,text:`${point.label} · ${riskLabel(point)}`});nodeLayer.appendChild(group);
     });
     svg.appendChild(nodeLayer);svg.appendChild(inspect);
     return {svg,groups,inspectLine,title,line1,line2,inspectX,inspectY,inspectW,riskLabel,compact};
@@ -1612,7 +1636,6 @@ function createInsightsRendering(
     }
     function select(point:CoveragePoint){
       groups.forEach(row=>{
-        if(!row.group)return;
         const active=row.index===point.index;
         row.group.classList.toggle('selected',active);
         row.group.setAttribute('aria-pressed',active?'true':'false');
@@ -1630,10 +1653,11 @@ function createInsightsRendering(
       line2.textContent=compact?`${point.allocation||'saved allocation'} · evidence confidence ${point.evidenceConfidence}%`:`${point.allocation||'saved allocation'} · evidence confidence ${point.evidenceConfidence}%${nearby.length?' · nearby '+nearby.join(', '):''}`;
     }
     groups.forEach(point=>{
-      point.group.addEventListener('mouseenter',()=>select(point));
-      point.group.addEventListener('focus',()=>select(point));
-      point.group.addEventListener('click',event=>{event.preventDefault();select(point);});
-      point.group.addEventListener('keydown',event=>{
+      const group=point.group;
+      group.addEventListener('mouseenter',()=>select(point));
+      group.addEventListener('focus',()=>select(point));
+      group.addEventListener('click',event=>{event.preventDefault();select(point);});
+      group.addEventListener('keydown',event=>{
         if(event.key!=='Enter'&&event.key!==' ')return;
         event.preventDefault();select(point);
       });
@@ -1656,7 +1680,8 @@ function createInsightsRendering(
         event.preventDefault();select(point);
       });
     });
-    select(points.slice().sort((a,b)=>num(b.coverageWatchScore)-num(a.coverageWatchScore))[0]);
+    const initial=points.slice().sort((a,b)=>num(b.coverageWatchScore)-num(a.coverageWatchScore))[0];
+    if(initial)select(initial);
   }
   function coverageRiskMap(subjects:readonly Subject[]){
     const wrap=el('div','insights-risk-widget');
@@ -1806,8 +1831,8 @@ function createInsightsRendering(
     const items=[
       ['Window evidence',sample.label||'Low sample',sample.tone||'low'],
       ['Saved days',`${num(model.recordCount)} window · ${num(model.allRecordCount)} all-history`,model.recordCount>=10?'good':model.recordCount>=5?'watch':'low'],
-      ['Timer coverage',percentLabel(timerCoverage),timerCoverage>=65?'good':timerCoverage===null?'low':'watch'],
-      ['Explicit progress',percentLabel(explicitRate),explicitRate>=60?'good':explicitRate===null?'low':'watch'],
+      ['Timer coverage',percentLabel(timerCoverage),timerCoverage!==null&&timerCoverage>=65?'good':timerCoverage===null?'low':'watch'],
+      ['Explicit progress',percentLabel(explicitRate),explicitRate!==null&&explicitRate>=60?'good':explicitRate===null?'low':'watch'],
       ['Latest evidence',recency.label,recency.tone]
     ];
     items.forEach(([label,value,tone])=>{
@@ -1842,8 +1867,8 @@ function createInsightsRendering(
     coach.appendChild(sectionTitle('Study coach','Evidence first, then Primary and Secondary Focus. Practice Pacing retains high priority when its evidence is mature and actionable.'));
     coach.appendChild(renderCoachEvidence(model));
     const coachLines=el('div','insights-coach');
-    const signals=(model.interpretation.signals.coach||[]).slice(0,COACH_VISIBLE_SIGNAL_LIMIT).map(signal=>typeof signal==='string'?{text:signal,tag:'Insight',tone:'quiet'}:signal);
-    if(!signals.length)signals.push({text:'Save a few days in Review and this page will start reading the daily-record pattern clearly.',tag:'Low sample',tone:'low',surfaceLabel:'Performance',targetId:'insights-performance',confidenceLabel:'Low sample',surfaceKey:'performance'});
+    const signals:CoachSignal[]=(model.interpretation.signals.coach||[]).slice(0,COACH_VISIBLE_SIGNAL_LIMIT);
+    if(!signals.length)signals.push({text:'Save a few days in Review and this page will start reading the daily-record pattern clearly.',tag:'Low sample',tone:'low',kind:'context',domain:'performance',topic:'evidence',theme:'evidence-quality',surfaceLabel:'Performance',targetId:'insights-performance',confidenceLabel:'Low sample',confidenceTone:'low',surfaceKey:'performance'});
     signals.forEach((signal,index)=>coachLines.appendChild(renderCoachDecision(model,signal,index)));
     coach.appendChild(coachLines);
     coach.appendChild(renderCoachSynthesis(model));
@@ -1904,7 +1929,7 @@ function createInsightsRendering(
       rhythmSummary.append(
         summaryChip('Sample',`${totalDelayBlocks} work block${totalDelayBlocks===1?'':'s'}`),
         summaryChip('Avg delay',delayLabel(weightedDelay)),
-        comparableDelayRows.length>=2&&delaySpread>=MIN_MEANINGFUL_DIFFERENCE_POINTS
+        bestDelay&&weakestDelay&&comparableDelayRows.length>=2&&delaySpread>=MIN_MEANINGFUL_DIFFERENCE_POINTS
           ? summaryChip('Clearest bucket',`${bestDelay.label} · ${percentLabel(bestDelay.completion)}`)
           : summaryChip('Pattern',comparableDelayRows.length>=2?`Similar · ${Math.round(delaySpread)} pt range`:`Need 2 buckets with n≥${MIN_BLOCKS_FOR_SIGNAL}`)
       );
@@ -1926,7 +1951,7 @@ function createInsightsRendering(
     positionCard.appendChild(sectionTitle('Planned block position','Work completion by the block’s planned ordinal.'));
     const orderSummary=el('div','insights-rhythm-summary');
     if(orderRows.length){
-      if(comparableOrderRows.length>=2&&orderSpread>=MIN_MEANINGFUL_DIFFERENCE_POINTS){
+      if(strongestOrder&&weakestOrder&&comparableOrderRows.length>=2&&orderSpread>=MIN_MEANINGFUL_DIFFERENCE_POINTS){
         orderSummary.append(
           summaryChip('Strongest',`${strongestOrder.label} · ${percentLabel(strongestOrder.completion)}`),
           summaryChip('Weakest',`${weakestOrder.label} · ${percentLabel(weakestOrder.completion)}`)
@@ -2003,21 +2028,22 @@ function createInsightsRendering(
     svg.classList.add('insights-practice-chart');
     labelGraphic(svg,'Practice pace over time',`Daily median run time as a percentage of the combined targets recorded in each run. One hundred percent equals the total target; the controlled band is ${PRACTICE_CONTROLLED_MIN}–${PRACTICE_CONTROLLED_MAX}%; the translucent ribbon is the middle 50% across runs when a day contains ${MIN_PRACTICE_ESTABLISHED_RUNS}+ runs; point size represents runs.`);
     if(!rows.length)return chartEmpty(svg,'No completed practice runs in this window',pad,height/2);
-    const upperValues=rows.map(row=>Math.max(num(row.medianPace),row.spreadReady?num(row.paceQ3):0)).filter(Number.isFinite).sort((a,b)=>a-b);
+    const upperValues=rows.map(row=>Math.max(num(row.medianPace),row.spreadReady?num(row.paceQ3):0)).filter(finiteNumber).sort((a,b)=>a-b);
     const maxObserved=Math.max(110,...upperValues);
-    const runnerUp=upperValues.length>1?upperValues[upperValues.length-2]:maxObserved;
+    const runnerUp=upperValues.length>1?(upperValues[upperValues.length-2]??maxObserved):maxObserved;
     const isolatedExtreme=upperValues.length>=4&&maxObserved>Math.max(200,runnerUp*1.75);
     const scalePeak=isolatedExtreme?runnerUp*1.15:maxObserved;
     const yMin=0,yMax=Math.max(150,Math.ceil(scalePeak/25)*25);
     const hasCappedValues=rows.some(row=>num(row.medianPace)>yMax||(row.spreadReady&&num(row.paceQ3)>yMax));
     const yFor=(value:number)=>pad+(1-(Math.max(yMin,Math.min(yMax,num(value)))-yMin)/(yMax-yMin))*plotHeight;
-    const firstDay=dateDay(rows[0].date),lastDay=dateDay(rows[rows.length-1].date),daySpan=Math.max(1,num(lastDay)-num(firstDay));
-    const xFor=(row,index)=>rows.length===1?pad+plotWidth/2:pad+((num(dateDay(row.date),index)-num(firstDay))/(daySpan||1))*plotWidth;
+    const firstPracticeRow=rows[0],lastPracticeRow=rows[rows.length-1];
+    const firstDay=firstPracticeRow?dateDay(firstPracticeRow.date):null,lastDay=lastPracticeRow?dateDay(lastPracticeRow.date):null,daySpan=Math.max(1,num(lastDay)-num(firstDay));
+    const xFor=(row:PracticeDailyRow,index:number)=>rows.length===1?pad+plotWidth/2:pad+((num(dateDay(row.date),index)-num(firstDay))/(daySpan||1))*plotWidth;
     const bandTop=yFor(PRACTICE_CONTROLLED_MAX),bandBottom=yFor(PRACTICE_CONTROLLED_MIN);
     const band=svgEl('rect',{class:'pace-band',x:pad,y:bandTop,width:plotWidth,height:Math.max(1,bandBottom-bandTop)});
     svg.insertBefore(band,svg.querySelector('line'));
-    const spreadSegments=[];
-    let spreadSegment=[];
+    const spreadSegments:Array<Array<{row:PracticeDailyRow;index:number}>>=[];
+    let spreadSegment:Array<{row:PracticeDailyRow;index:number}>=[];
     rows.forEach((row,index)=>{
       if(row.spreadReady&&Number.isFinite(row.paceQ1)&&Number.isFinite(row.paceQ3))spreadSegment.push({row,index});
       else if(spreadSegment.length){spreadSegments.push(spreadSegment);spreadSegment=[];}
@@ -2049,12 +2075,12 @@ function createInsightsRendering(
       const spread=row.spreadReady?` · middle 50% ${percentLabel(row.paceQ1,1)}–${percentLabel(row.paceQ3,1)} · ${row.paceSpread} pt spread`:` · spread needs ${MIN_PRACTICE_ESTABLISHED_RUNS}+ runs`;
       chartHitCircle(svg,x,y,`${shortDate(row.date)} · median run time ${percentLabel(row.medianPace,1)} of target${spread} · ${row.runs} run${row.runs===1?'':'s'} · ${row.units} unit${row.units===1?'':'s'} · ${percentLabel(row.controlledRate,1)} of runs in the 80–100% band`,inspect,Math.max(14,radius+7));
     });
-    const firstLabel=svgEl('text',{class:'label',x:pad,y:plotBottom+22});firstLabel.textContent=shortDate(rows[0].date);
-    const lastLabel=svgEl('text',{class:'label',x:plotRight,y:plotBottom+22,'text-anchor':'end'});lastLabel.textContent=shortDate(rows[rows.length-1].date);
+    const firstLabel=svgEl('text',{class:'label',x:pad,y:plotBottom+22});firstLabel.textContent=firstPracticeRow?shortDate(firstPracticeRow.date):'';
+    const lastLabel=svgEl('text',{class:'label',x:plotRight,y:plotBottom+22,'text-anchor':'end'});lastLabel.textContent=lastPracticeRow?shortDate(lastPracticeRow.date):'';
     svg.append(firstLabel,lastLabel);
     const trend=practice&&practice.trend||{};
     const basis=practice&&practice.trendBasis&&practice.trendBasis.label||'Selected window';
-    const stability=practice&&practice.trendReady?(trend.stable?` Direction ${trend.slopePerWeek>0?'+':''}${trend.slopePerWeek} pts/week; consistent across ${trend.blockCount} history checks · ${basis}.`:` No consistent directional claim across the saved history · ${basis}.`):` Trend interpretation needs more practice-day evidence · ${basis}.`;
+    const stability=practice&&practice.trendReady&&finiteNumber(trend.slopePerWeek)?(trend.stable?` Direction ${trend.slopePerWeek>0?'+':''}${trend.slopePerWeek} pts/week; consistent across ${trend.blockCount} history checks · ${basis}.`:` No consistent directional claim across the saved history · ${basis}.`):` Trend interpretation needs more practice-day evidence · ${basis}.`;
     const widget=inspectedChart(svg,inspect,`Daily medians give each completed run equal weight; the ribbon shows variation across runs${allRows.length>rows.length?`; chart shows the latest ${rows.length} of ${allRows.length} practice days`:''}.${stability}`);
     if(hasCappedValues)appendChartNote(widget,`Isolated pace above the ${yMax}% visual ceiling is pinned to the top marker for readability; its actual value remains in the point inspector.`);
     return widget;
@@ -2066,14 +2092,15 @@ function createInsightsRendering(
     svg.classList.add('insights-practice-position-chart');
     labelGraphic(svg,'Pace by relative run position','Median normalized pace across five relative positions. The shaded band marks 80–100% of target.');
     if(!rows.length)return chartEmpty(svg,`Need ${MIN_PRACTICE_POSITION_RUNS} repeated runs with ${MIN_PRACTICE_POSITION_UNITS}+ completed units`,pad,height/2);
-    const values=rows.map(row=>num(row.medianPace)).filter(Number.isFinite),minObserved=Math.min(...values),maxObserved=Math.max(...values);
+    const values=rows.map(row=>num(row.medianPace)).filter(finiteNumber),minObserved=Math.min(...values),maxObserved=Math.max(...values);
     const yMin=Math.max(0,Math.min(60,Math.floor((minObserved-15)/10)*10));
     const rawMax=Math.max(140,Math.ceil(maxObserved/25)*25),yMax=Math.min(250,rawMax);
     const capped=maxObserved>yMax;
     const yFor=(value:number)=>pad+(1-(Math.max(yMin,Math.min(yMax,num(value)))-yMin)/(yMax-yMin))*plotHeight;
-    const xFor=index=>rows.length===1?pad+plotWidth/2:pad+(index/(rows.length-1))*plotWidth;
+    const xFor=(index:number)=>rows.length===1?pad+plotWidth/2:pad+(index/(rows.length-1))*plotWidth;
     const bandTop=yFor(PRACTICE_CONTROLLED_MAX),bandBottom=yFor(PRACTICE_CONTROLLED_MIN);
-    svg.insertBefore(svgEl('rect',{class:'position-band',x:pad,y:bandTop,width:plotWidth,height:Math.max(1,bandBottom-bandTop)}),svg.firstChild.nextSibling);
+    const firstChild=svg.firstChild;
+    svg.insertBefore(svgEl('rect',{class:'position-band',x:pad,y:bandTop,width:plotWidth,height:Math.max(1,bandBottom-bandTop)}),firstChild?.nextSibling??null);
     const marks=[yMin,80,100,yMax].filter((value,index,array)=>value>=yMin&&value<=yMax&&array.indexOf(value)===index);
     marks.forEach(mark=>{
       const y=yFor(mark);svg.appendChild(svgEl('line',{class:`${mark===100?'pace-target':'axis chart-opacity-reference'}`,x1:pad,y1:y,x2:plotRight,y2:y}));
@@ -2089,7 +2116,7 @@ function createInsightsRendering(
       const x=xFor(index),valueCapped=num(row.medianPace)>yMax,y=valueCapped?pad+8:yFor(row.medianPace),isOnset=row.key===onsetKey;
       svg.appendChild(svgEl('circle',{class:`position-point chart-point-${isOnset?'onset':'current'}${isOnset?' onset':''}`,cx:x,cy:y,r:isOnset?6:5}));
       if(valueCapped)svg.appendChild(svgEl('path',{class:'pace-cap-marker',d:`M ${x} ${pad+1} L ${x-5} ${pad+8} L ${x+5} ${pad+8} Z`}));
-      const delta=Number.isFinite(row.medianDeltaFromOpening)?` · ${row.medianDeltaFromOpening>0?'+':''}${row.medianDeltaFromOpening} pts from opening`:'';
+      const delta=finiteNumber(row.medianDeltaFromOpening)?` · ${row.medianDeltaFromOpening>0?'+':''}${row.medianDeltaFromOpening} pts from opening`:'';
       chartHitCircle(svg,x,y,`${row.label} · median pace ${percentLabel(row.medianPace,1)}${delta} · ${row.runs} runs · ${row.days} days${isOnset?' · detected slippage onset':''}`,inspect,15);
       const label=svgEl('text',{class:'label'+(isOnset?' bright':''),x,y:plotBottom+22,'text-anchor':'middle'});label.textContent=shortLabels[index]||row.label;svg.appendChild(label);
     });
@@ -2100,12 +2127,12 @@ function createInsightsRendering(
     return widget;
   }
   function practicePaceConcernDistance(value:number|null){
-    if(!Number.isFinite(value))return 0;
+    if(!finiteNumber(value))return 0;
     if(value>PRACTICE_CONTROLLED_MAX)return value-PRACTICE_CONTROLLED_MAX;
     if(value<PRACTICE_CONTROLLED_MIN)return PRACTICE_CONTROLLED_MIN-value;
     return 0;
   }
-  function practiceComparisonDifference(rows:readonly PracticeSizeGroup[],family:PracticeSizeFamily){
+  function practiceComparisonDifference(rows:readonly PracticeComparisonRow[],family:string){
     const eligible=(Array.isArray(rows)?rows:[]).filter(row=>row&&row.maturity&&row.maturity.rank>=1&&Number.isFinite(row.medianRunPace));
     if(eligible.length<2)return null;
     const sorted=eligible.slice().sort((a,b)=>num(a.medianRunPace)-num(b.medianRunPace));
@@ -2121,13 +2148,13 @@ function createInsightsRendering(
       score:gap+practicePaceConcernDistance(num(focus.medianRunPace))*1.5+num(focus.maturity.rank)*4
     };
   }
-  function practiceEarlyComparisonRow(rows:readonly PracticeSizeGroup[],family:PracticeSizeFamily){
+  function practiceEarlyComparisonRow(rows:readonly PracticeComparisonRow[],family:string){
     const eligible=(Array.isArray(rows)?rows:[]).filter(row=>row&&Number.isFinite(row.medianRunPace)&&num(row.units)>=MIN_PRACTICE_EARLY_VIEW_UNITS&&num(row.runs)>=1&&num(row.days)>=1);
     if(eligible.length<2)return null;
     const sorted=eligible.slice().sort((a,b)=>num(a.medianRunPace)-num(b.medianRunPace));
     const low=sorted[0],high=sorted[sorted.length-1],gap=num(high.medianRunPace)-num(low.medianRunPace);
     if(num(low.units)+num(high.units)<MIN_PRACTICE_EARLY_VIEW_TOTAL_UNITS)return null;
-    const evidenceLabel=row=>`${row.units} unit${num(row.units)===1?'':'s'} · ${row.runs} run${num(row.runs)===1?'':'s'} · ${row.days} day${num(row.days)===1?'':'s'}`;
+    const evidenceLabel=(row:PracticeComparisonRow)=>`${row.units} unit${num(row.units)===1?'':'s'} · ${row.runs} run${num(row.runs)===1?'':'s'} · ${row.days} day${num(row.days)===1?'':'s'}`;
     return {
       family,label:`${high.label} vs ${low.label}`,value:`${percentLabel(high.medianRunPace,1)} / ${percentLabel(low.medianRunPace,1)}`,tone:'quiet',early:true,
       meta:`${high.label}: ${evidenceLabel(high)} · ${high.maturity&&high.maturity.label||'Early'}`,
@@ -2145,15 +2172,16 @@ function createInsightsRendering(
     return {rows:early,early:true};
   }
   function practiceDifferenceRows(practice:Practice){
-    const candidates=[];
+    const candidates:Array<{family:string;label:string;value:string;tone:string;meta:string;note:string;score:number;early?:boolean}>=[];
     const area=practiceComparisonDifference(practice&&practice.areas,'Area');if(area)candidates.push(area);
     const setup=practiceComparisonDifference(practice&&practice.modes,'Setup');if(setup)candidates.push(setup);
     const segments=(practice&&practice.repeatedSegments||[]).filter(row=>row&&row.maturity&&row.maturity.rank>=1);
     if(segments.length){
       const row=segments.slice().sort((a,b)=>{
-        const score=value=>Math.max(0,100-num(value.medianCompletion),100-num(value.completedSegmentRate),Math.abs(num(value.medianRelativeDelta)),practicePaceConcernDistance(num(value.medianPace)));
+        const score=(value:PracticeRepeatedSegment)=>Math.max(0,100-num(value.medianCompletion),100-num(value.completedSegmentRate),Math.abs(num(value.medianRelativeDelta)),practicePaceConcernDistance(num(value.medianPace)));
         return score(b)-score(a)||num(b.maturity.rank)-num(a.maturity.rank)||num(b.runs)-num(a.runs);
       })[0];
+      if(!row)return candidates;
       const incomplete=num(row.completedSegmentRate)<100||num(row.medianCompletion)<100;
       const paceEffect=Math.abs(num(row.medianRelativeDelta));
       if(incomplete||paceEffect>=MIN_PRACTICE_SEGMENT_EFFECT_POINTS||practicePaceConcernDistance(num(row.medianPace))>=MIN_PRACTICE_SEGMENT_EFFECT_POINTS){
@@ -2255,17 +2283,17 @@ function createInsightsRendering(
     const dailyButton=el('button','insights-execution-tab ui-btn active ui-label','Daily Execution');
     const practiceButton=el('button','insights-execution-tab ui-btn ui-label','Practice Pacing');
     dailyButton.type=practiceButton.type='button';
-    dailyButton.dataset.executionTab='daily';practiceButton.dataset.executionTab='practice';
+    dailyButton.dataset['executionTab']='daily';practiceButton.dataset['executionTab']='practice';
     dailyButton.setAttribute('role','tab');practiceButton.setAttribute('role','tab');
     dailyButton.setAttribute('aria-selected','true');practiceButton.setAttribute('aria-selected','false');
     dailyButton.setAttribute('aria-controls','insights-execution-daily');practiceButton.setAttribute('aria-controls','insights-practice');
     const dailyPanel=el('div','insights-execution-tab-panel');
-    dailyPanel.id='insights-execution-daily';dailyPanel.dataset.executionPanel='daily';dailyPanel.setAttribute('role','tabpanel');
+    dailyPanel.id='insights-execution-daily';dailyPanel.dataset['executionPanel']='daily';dailyPanel.setAttribute('role','tabpanel');
     const practicePanel=el('div','insights-execution-tab-panel');
-    practicePanel.id='insights-practice';practicePanel.dataset.executionPanel='practice';practicePanel.setAttribute('role','tabpanel');practicePanel.hidden=true;
+    practicePanel.id='insights-practice';practicePanel.dataset['executionPanel']='practice';practicePanel.setAttribute('role','tabpanel');practicePanel.hidden=true;
     dailyPanel.appendChild(renderExecutionQuality(model));
     practicePanel.appendChild(renderPracticePacer(model,{embedded:true}));
-    const activate=key=>{
+    const activate=(key:string)=>{
       const daily=key==='daily';
       if((daily&&!dailyPanel.hidden)||(!daily&&!practicePanel.hidden))return true;
       dailyButton.classList.toggle('active',daily);practiceButton.classList.toggle('active',!daily);
@@ -2403,12 +2431,12 @@ function createInsightsRendering(
     visual.append(bars,legend,el('div','insights-allocation-note ui-mono','Each bar is independently normalised to its own 100% total so it compares area mix. Area gap is average absolute planned work versus completed-equivalent work per saved day; window totals remain in Analytics Lab.'));
     return visual;
   }
-  function conversionReading(row:Subject,conversion:number|null){
+  function conversionReading(row:Subject,conversion:number){
     const mix=row&&row.pairedSourceMix||{};
-    const explicit=num(mix.units)+num(mix.manual);
-    const timeDerived=num(mix.time)+num(mix['finished-time']);
+    const explicit=num(mix['units'])+num(mix['manual']);
+    const timeDerived=num(mix['time'])+num(mix['finished-time']);
     if(timeDerived>0&&explicit===0)return 'Time-derived completion: focus supplied progress, so this is not an independent conversion measure.';
-    const completion=pct(row.pairedCompleted,row.pairedPlanned);
+    const completion=num(pct(row.pairedCompleted,row.pairedPlanned));
     const planned=num(row.pairedPlanned);
     const actual=num(row.pairedActual);
     if(completion<65&&actual>=planned*.9)return 'Enough focus, weaker output: check scope, difficulty, or progress evidence.';
@@ -2420,10 +2448,10 @@ function createInsightsRendering(
   }
   function conversionConfidenceNote(row:Subject){
     const mix=row&&row.pairedSourceMix||{};
-    const explicit=num(mix.units)+num(mix.manual);
-    const timeDerived=num(mix.time)+num(mix['finished-time']);
+    const explicit=num(mix['units'])+num(mix['manual']);
+    const timeDerived=num(mix['time'])+num(mix['finished-time']);
     const unverified=num(mix['finished-unverified']);
-    const missing=num(mix.none);
+    const missing=num(mix['none']);
     const notes=[];
     if(num(row&&row.pairedBlocks)<MIN_BLOCKS_FOR_SIGNAL||num(row&&row.pairedActual)<120)notes.push(`Early sample: n=${num(row&&row.pairedBlocks)}, ${minutesLabel(row&&row.pairedActual)} paired focus.`);
     if(timeDerived+unverified+missing>0)notes.push(`Evidence: ${explicit} explicit · ${timeDerived} time-derived · ${unverified+missing} unverified or missing.`);
@@ -2480,14 +2508,14 @@ function createInsightsRendering(
     const life=el('div','insights-life-grid');
     const supportCard=el('section','insights-card soft ui-card');
     supportCard.append(sectionTitle('Support blocks','Average planned minutes per saved day for top maintenance categories.'),el('div','insights-life-bars'));
-    const supportBars=supportCard.querySelector('.insights-life-bars');
-    model.support.resources.slice(0,4).forEach(row=>supportBars.appendChild(lifeRow(row.label,row.planned/days,model.support.planned/days)));
-    if(!model.support.resources.length)supportBars.appendChild(evidenceNote('No support blocks saved yet.'));
+    const supportBars=supportCard.querySelector<HTMLDivElement>('.insights-life-bars');
+    model.support.resources.slice(0,4).forEach(row=>supportBars?.appendChild(lifeRow(row.label,row.planned/days,model.support.planned/days)));
+    if(!model.support.resources.length)supportBars?.appendChild(evidenceNote('No support blocks saved yet.'));
     const fixedCard=el('section','insights-card soft ui-card');
     fixedCard.append(sectionTitle('Fixed anchors','Average planned minutes per saved day; structure only.'),el('div','insights-life-bars'));
-    const fixedBars=fixedCard.querySelector('.insights-life-bars');
-    model.fixed.resources.slice(0,4).forEach(row=>fixedBars.appendChild(lifeRow(row.label,row.planned/days,model.fixed.planned/days)));
-    if(!model.fixed.resources.length)fixedBars.appendChild(evidenceNote('No fixed blocks saved yet.'));
+    const fixedBars=fixedCard.querySelector<HTMLDivElement>('.insights-life-bars');
+    model.fixed.resources.slice(0,4).forEach(row=>fixedBars?.appendChild(lifeRow(row.label,row.planned/days,model.fixed.planned/days)));
+    if(!model.fixed.resources.length)fixedBars?.appendChild(evidenceNote('No fixed blocks saved yet.'));
     life.append(supportCard,fixedCard);
     structure.append(mixCard,life);
     box.appendChild(structure);
@@ -2506,7 +2534,7 @@ function createInsightsRendering(
     const showAll=model&&model.windowKey==='all';
     const displayStart=!showAll&&isIsoDate(model&&model.calendarRange&&model.calendarRange.start)?dateDay(model.calendarRange.start):null;
     const displayEnd=!showAll&&isIsoDate(model&&model.calendarRange&&model.calendarRange.end)?dateDay(model.calendarRange.end):null;
-    const windowRows=allRows.filter(row=>(!Number.isFinite(displayStart)||row.day>=displayStart)&&(!Number.isFinite(displayEnd)||row.day<=displayEnd));
+    const windowRows=allRows.filter(row=>(!finiteNumber(displayStart)||row.day>=displayStart)&&(!finiteNumber(displayEnd)||row.day<=displayEnd));
     const compact=isCompact();
     const visibleCalendarDays=compact?30:90;
     const latestDay=windowRows.length?windowRows[windowRows.length-1].day:null;
@@ -2519,9 +2547,11 @@ function createInsightsRendering(
       chartEmpty(svg,'No usable progress evidence for a state estimate.',56,118);
       return inspectedChart(svg,[],'Save explicit, time-derived, unverified-finish, or skipped progress evidence to begin this read.');
     }
-    const startDay=rows[0].day,endDay=rows[rows.length-1].day,span=Math.max(1,endDay-startDay);
+    const firstStateRow=rows[0],lastStateRow=rows[rows.length-1];
+    if(!firstStateRow||!lastStateRow)return inspectedChart(svg,[],'No usable progress evidence for a state estimate.');
+    const startDay=firstStateRow.day,endDay=lastStateRow.day,span=Math.max(1,endDay-startDay);
     const xFor=(day:number)=>chartPad+(day-startDay)/span*plotWidth;
-    const yFor=(value:number)=>plotBottom-Math.max(0,Math.min(100,num(value)))/100*plotHeight;
+    const yFor=(value:number|null|undefined)=>plotBottom-Math.max(0,Math.min(100,num(value)))/100*plotHeight;
     [0,25,50,75,100].forEach(value=>{
       const y=yFor(value);
       if(value>0)svg.appendChild(svgEl('line',{class:'grid',x1:chartPad,y1:y,x2:plotRight,y2:y}));
@@ -2531,30 +2561,31 @@ function createInsightsRendering(
     svg.appendChild(svgEl('polygon',{class:'fitness-band',points:bandPoints.join(' ')}));
     const change=model&&model.dynamics&&model.dynamics.changePoint;
     const changeDay=change&&change.detected&&isIsoDate(change.date)?dateDay(change.date):null;
-    if(Number.isFinite(changeDay)&&changeDay>=startDay&&changeDay<=endDay){
+    if(finiteNumber(changeDay)&&changeDay>=startDay&&changeDay<=endDay){
       const x=xFor(changeDay);
       svg.appendChild(svgEl('line',{class:'fitness-change',x1:x,y1:chartPad,x2:x,y2:plotBottom}));
       const label=svgEl('text',{class:'fitness-change-label',x:x+5,y:chartPad+13});label.textContent='record shift';svg.appendChild(label);
     }
     svg.appendChild(svgEl('polyline',{class:'fitness-line',points:rows.map(row=>`${xFor(row.day)},${yFor(row.estimate)}`).join(' ')}));
-    rows.filter(row=>Number.isFinite(row.observed)).forEach(row=>{
+    rows.filter(row=>finiteNumber(row.observed)).forEach(row=>{
       svg.appendChild(svgEl('circle',{class:`fitness-dot ${row.observationUsed?'chart-point-large':'chart-point-md'}${row.observationUsed?'':' weak'}`,cx:xFor(row.day),cy:yFor(row.observed),r:row.observationUsed?3.2:3}));
     });
     const current=rows[rows.length-1];
+    if(!current)return inspectedChart(svg,[],'No usable progress evidence for a state estimate.');
     svg.appendChild(svgEl('circle',{class:'fitness-current chart-point-current',cx:xFor(current.day),cy:yFor(current.estimate),r:5}));
     const items:ChartHit[]=[];
-    rows.filter(row=>Number.isFinite(row.observed)).forEach(row=>{
+    rows.filter(row=>finiteNumber(row.observed)).forEach(row=>{
       const copy=`${shortDate(row.date)} · observed ${percentLabel(row.observed,1)} · Output state ${percentLabel(row.estimate,1)} (${percentLabel(row.low,0)}–${percentLabel(row.high,0)}) · ${row.observationUsed?`evidence weight ${numberLabel(row.evidenceWeight,2)}`:'no usable progress-source weight; state not updated'}`;
       chartHitCircle(svg,xFor(row.day),yFor(row.observed),copy,items,10);
     });
     const currentCopy=`${shortDate(current.date)} · current Output state ${percentLabel(current.estimate,1)} · model range ${percentLabel(current.low,0)}–${percentLabel(current.high,0)} · last usable evidence ${state.daysSinceLastEvidence===0?'today':state.daysSinceLastEvidence===1?'1 day ago':`${state.daysSinceLastEvidence} days ago`}`;
     chartHitCircle(svg,xFor(current.day),yFor(current.estimate),currentCopy,items,14);
-    if(items.length)items[items.length-1].initial=true;
-    [rows[0],rows[Math.floor((rows.length-1)/2)],rows[rows.length-1]].filter((row,index,list)=>row&&list.findIndex(item=>item.date===row.date)===index).forEach((row,index,list)=>{
+    if(items.length){const latest=items[items.length-1];if(latest)latest.initial=true;}
+    [rows[0],rows[Math.floor((rows.length-1)/2)],rows[rows.length-1]].filter((row):row is NonNullable<typeof row>=>!!row).filter((row,index,list)=>list.findIndex(item=>item.date===row.date)===index).forEach((row,index,list)=>{
       const label=svgEl('text',{class:'axis-label',x:xFor(row.day),y:plotBottom+22,'text-anchor':index===0?'start':index===list.length-1?'end':'middle'});label.textContent=shortDate(row.date);svg.appendChild(label);
     });
     const widget=inspectedChart(svg,items,currentCopy);
-    const basis=state.basis||{};
+    const basis=state.basis;
     appendChartNote(widget,`Chart shows up to ${Math.min(visibleCalendarDays,Math.max(1,endDay-startDay+1))} calendar days from the selected display window; the displayed endpoint comes from the canonical all-history run spanning ${basis.start?shortDate(basis.start):'the first eligible day'} to ${basis.end?shortDate(basis.end):shortDate(current.date)}. Raw dots use canonical work completion; muted dots have no usable progress-source weight and do not update the state.`);
     return widget;
   }
@@ -2587,8 +2618,9 @@ function createInsightsRendering(
   function renderFitnessStateRows(model:Model){
     const fitness=model.fitness||{};
     const state=fitness.performanceState||{};
-    const dimensions=state.dimensions||{};
+    const dimensions=state.dimensions;
     const rows=el('div','insights-fitness-state-list');
+    if(!dimensions)return rows;
     rows.append(
       fitnessStateRow(dimensions.capacity,{trajectory:state.trajectory,note:'Filtered canonical work completion; it is a present plan-execution estimate, not a personal ability ceiling.'}),
       fitnessStateRow(dimensions.execution,{note:'Uses captured start delay and saved schedule movement. Movement may reflect disruption or deliberate adaptation.'}),
@@ -2653,36 +2685,38 @@ function createInsightsRendering(
     clean.forEach(row=>{const item=el('div','insights-dynamics-support-row');item.append(el('div','insights-dynamics-support-label',row.label||'Evidence'),el('div','insights-dynamics-support-value',row.value));list.appendChild(item);});
     return list;
   }
-  function dynamicsCardColumns(leftNodes:readonly Node[],rightNodes:Node|null){
+  function dynamicsCardColumns(leftNodes:Node|readonly Node[],rightNodes:Node|readonly Node[]|null){
     const layout=el('div','insights-dynamics-card-columns'),copy=el('div','insights-dynamics-card-copy'),visual=el('div','insights-dynamics-card-visual');
-    (Array.isArray(leftNodes)?leftNodes:[leftNodes]).filter(Boolean).forEach(node=>copy.appendChild(node));
-    (Array.isArray(rightNodes)?rightNodes:[rightNodes]).filter(Boolean).forEach(node=>visual.appendChild(node));
+    const left=Array.isArray(leftNodes)?leftNodes:[leftNodes];
+    const right=Array.isArray(rightNodes)?rightNodes:[rightNodes];
+    left.filter((node):node is Node=>node instanceof Node).forEach(node=>copy.appendChild(node));
+    right.filter((node):node is Node=>node instanceof Node).forEach(node=>visual.appendChild(node));
     if(!visual.childElementCount)visual.appendChild(el('div','insights-dynamics-visual-empty ui-canvas ui-mono','This visual will appear when enough consistent evidence is available.'));
     layout.append(copy,visual);
     return layout;
   }
-  function strongestPatternReads(bayesian:Bayesian){
+  function strongestPatternReads(bayesian:RenderBayesian):PatternRead[]{
     return (bayesian&&Array.isArray(bayesian.dimensions)?bayesian.dimensions:[])
       .map(dimension=>({dimension,row:(dimension.rows||[]).filter(row=>row.meaningful&&row.estimate&&confidenceAtLeast(row.estimate.confidence,'emerging')).sort((a,b)=>Math.abs(b.effect)-Math.abs(a.effect)||b.estimate.nEff-a.estimate.nEff)[0]}))
-      .filter(item=>item.row)
+      .filter((item):item is PatternRead=>!!item.row)
       .sort((a,b)=>Math.abs(b.row.effect)-Math.abs(a.row.effect))
       .slice(0,3);
   }
   function evidenceIntervalLabel(estimate:{mean:number|null;low:number|null;high:number|null}){
     return estimate?`${percentLabel(estimate.low,0)}–${percentLabel(estimate.high,0)}`:'No interval';
   }
-  function persistentPatternChart(patterns,bayesian){
+  function persistentPatternChart(patterns:readonly PatternRead[],bayesian:RenderBayesian){
     const rows=(Array.isArray(patterns)?patterns:[]).filter(item=>item&&item.row&&item.row.estimate);
     if(!rows.length)return null;
     const compact=isCompact(),width=compact?360:680,height=52+rows.length*42,left=compact?120:158,right=18,top=28,bottom=24,plotWidth=width-left-right;
     const svg=svgEl('svg',{class:'insights-chart insights-persistent-pattern-chart',viewBox:`0 0 ${width} ${height}`,role:'group'});
     labelGraphic(svg,'Repeated completion patterns','Estimated completion and likely ranges for the clearest stable Area, start-time, and plan-position patterns. The dashed line is your overall work average.');
-    const xFor=(value:number)=>left+clamp(num(value),0,100)/100*plotWidth,items=[];
+    const xFor=(value:number)=>left+clamp(num(value),0,100)/100*plotWidth,items:ChartHit[]=[];
     [0,50,100].forEach(value=>{
       const x=xFor(value);svg.appendChild(svgEl('line',{class:'grid',x1:x,y1:top,x2:x,y2:height-bottom}));
       const label=svgEl('text',{class:'axis-label',x,y:height-5,'text-anchor':value===0?'start':value===100?'end':'middle'});label.textContent=percentLabel(value,0);svg.appendChild(label);
     });
-    if(Number.isFinite(bayesian&&bayesian.baseline)){
+    if(finiteNumber(bayesian.baseline)){
       const baselineX=xFor(bayesian.baseline);
       svg.appendChild(svgEl('line',{class:'pattern-baseline',x1:baselineX,y1:top-5,x2:baselineX,y2:height-bottom}));
     }
@@ -2700,13 +2734,13 @@ function createInsightsRendering(
     });
     return inspectedChart(svg,items,'Ranges show the clearest repeated completion patterns; the dashed marker is your overall work average.');
   }
-  function allocationComparisonChart(allocation:Allocation){
+  function allocationComparisonChart(allocation:RenderAllocation){
     const rows=allocation&&Array.isArray(allocation.displayRows)?allocation.displayRows:[];
     if(!allocation||!allocation.ready||!rows.length)return null;
     const compact=isCompact(),width=compact?360:680,height=48+rows.length*38,left=compact?94:152,right=18,top=33,plotWidth=width-left-right;
     const svg=svgEl('svg',{class:'insights-chart insights-allocation-compare-chart',viewBox:`0 0 ${width} ${height}`,role:'group'});
     labelGraphic(svg,'Planned and completed area shares','Paired share lines for the largest lifetime differences between planned work and completed-equivalent work. Equal allocation is not assumed to be desirable.');
-    const xFor=(value:number)=>left+clamp(num(value),0,100)/100*plotWidth,items=[];
+    const xFor=(value:number)=>left+clamp(num(value),0,100)/100*plotWidth,items:ChartHit[]=[];
     const legend=svgEl('text',{class:'axis-label strong',x:left,y:16});legend.textContent='Planned grey · completed cyan';svg.appendChild(legend);
     rows.forEach((row,index)=>{
       const y=top+index*38+8,label=svgEl('text',{class:'pattern-label',x:left-10,y:y+4,'text-anchor':'end'});
@@ -2722,35 +2756,40 @@ function createInsightsRendering(
   function renderPersistentPatternsCard(model:Model){
     const cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-state-card');
     cardNode.appendChild(sectionTitle('1. What patterns keep repeating?','Shows recurring completion patterns and where completed work repeatedly differs from the plan.'));
-    const bayesian=model.dynamics.bayesian||{},allocation=model.dynamics.allocation||{};
+    const bayesian:RenderBayesian=model.dynamics.bayesian;
+    const allocation:RenderAllocation=model.dynamics.allocation;
     const patterns=strongestPatternReads(bayesian);
     const supporting=patterns.map(({dimension,row},index)=>({priority:90-index,label:dimension.label,value:`${row.label}: ${row.effect>0?'+':''}${row.effect} pts · ${percentLabel(row.estimate.mean,1)} (${evidenceIntervalLabel(row.estimate)})`}));
-    const dynamic=allocation.dynamic||{};
+    const dynamic:RenderDynamicAllocation=allocation.dynamic??{};
+    const dynamicTrend=dynamic.trend;
     let confidence={key:'weak',label:'Needs more history',tone:'low'},copy='No repeated completion or allocation pattern is stable enough to report yet.',meta=`${bayesian.actualStartBlocks||0} blocks with recorded starts`;
     if(dynamic.ready&&dynamic.persistentUnder){
       confidence=descriptiveEvidenceConfidence(dynamic.persistentUnder.periods,dynamic.persistentUnder.periods*120);
       copy=`${dynamic.persistentUnder.label} was under-allocated against plan in ${dynamic.persistentUnder.under}/${dynamic.persistentUnder.periods} completed eligible weeks.`;
       meta=`Mean gap ${dynamic.persistentUnder.meanGap} share pts`;
     }else if(patterns.length){
-      const {dimension,row}=patterns[0];
+      const pattern=patterns[0];
+      if(!pattern)return cardNode;
+      const {dimension,row}=pattern;
       confidence=row.estimate.confidence;
       copy=`${row.label} is the clearest repeated ${dimension.label.toLowerCase()} completion pattern: ${Math.abs(row.effect)} points ${row.effect>=0?'above':'below'} your overall work average.`;
       meta=`${percentLabel(row.estimate.mean,1)} · ${evidenceIntervalLabel(row.estimate)} interval`;
-    }else if(dynamic.ready){
-      confidence=descriptiveEvidenceConfidence(dynamic.recentPeriods,dynamic.recentPeriods*180);
-      copy=`Weekly plan alignment is ${dynamic.trend.label.toLowerCase()}; no area shows a repeated material under-allocation pattern.`;
-      meta=`${dynamic.recentPeriods} recent eligible weeks · ${dynamic.trendBasis&&dynamic.trendBasis.label||'directional basis'}`;
+    }else if(dynamic.ready&&dynamicTrend){
+      const recentPeriods=num(dynamic.recentPeriods);
+      confidence=descriptiveEvidenceConfidence(recentPeriods,recentPeriods*180);
+      copy=`Weekly plan alignment is ${dynamicTrend.label.toLowerCase()}; no area shows a repeated material under-allocation pattern.`;
+      meta=`${recentPeriods} recent eligible weeks · ${dynamic.trendBasis&&dynamic.trendBasis.label||'directional basis'}`;
     }else if(allocation.ready){
-      confidence=allocation.confidence;
+      confidence=allocation.confidence??{key:'weak',label:'Needs more history',tone:'low'};
       copy=`Lifetime completed-work allocation is ${String(allocation.label||'available').toLowerCase()}, but repeated weekly direction is not established.`;
-      meta=`${allocation.areas} areas · overall plan-completion difference ${numberLabel(allocation.divergencePercent,1)}%`;
+      meta=`${allocation.areas} areas · overall plan-completion difference ${numberLabel(num(allocation.divergencePercent),1)}%`;
     }
     const left=[dynamicsRead(confidence,copy,meta)];
     if(dynamic.ready&&dynamic.persistentUnder)supporting.push({priority:110,label:'Repeated under-allocation',value:`${dynamic.persistentUnder.label} · ${dynamic.persistentUnder.under}/${dynamic.persistentUnder.periods} completed eligible weeks · mean ${dynamic.persistentUnder.meanGap} share pts`});
-    else if(dynamic.ready)supporting.push({priority:100,label:'Allocation direction',value:`${dynamic.trend.label}${Number.isFinite(dynamic.trend.slope)?` · ${dynamic.trend.slope>0?'+':''}${dynamic.trend.slope} alignment-change pts/week`:''} · ${dynamic.trendBasis&&dynamic.trendBasis.label||'directional basis'}`});
+    else if(dynamic.ready&&dynamicTrend)supporting.push({priority:100,label:'Allocation direction',value:`${dynamicTrend.label}${finiteNumber(dynamicTrend.slope)?` · ${dynamicTrend.slope>0?'+':''}${dynamicTrend.slope} alignment-change pts/week`:''} · ${dynamic.trendBasis&&dynamic.trendBasis.label||'directional basis'}`});
     if(dynamic.provisionalPeriod)supporting.push({priority:72,label:'Current week · provisional',value:`${minutesLabel(dynamic.provisionalPeriod.planned)} planned · ${minutesLabel(dynamic.provisionalPeriod.completed)} completed-equivalent · excluded from persistence and trend`});
     if(allocation.ready){
-      supporting.push({priority:70,label:'Plan breadth',value:`${numberLabel(allocation.effectivePlannedAreas,1)} planned → ${numberLabel(allocation.effectiveCompletedAreas,1)} completed-equivalent areas`});
+      supporting.push({priority:70,label:'Plan breadth',value:`${numberLabel(num(allocation.effectivePlannedAreas),1)} planned → ${numberLabel(num(allocation.effectiveCompletedAreas),1)} completed-equivalent areas`});
       const shifts=[allocation.topOver?`${allocation.topOver.label} +${allocation.topOver.gap}`:'',allocation.topUnder?`${allocation.topUnder.label} ${allocation.topUnder.gap}`:''].filter(Boolean);
       if(shifts.length)supporting.push({priority:95,label:'Largest lifetime shifts',value:`${shifts.join(' · ')} share pts`});
     }
@@ -2764,38 +2803,39 @@ function createInsightsRendering(
     return cardNode;
   }
   function dynamicsChangeRows(model:Model,{excludeInitialization=false}:{excludeInitialization?:boolean}={}){
-    const regime=model.dynamics&&model.dynamics.changePoint||{};
-    const displayedCompletion=new Map((Array.isArray(model&&model.daily)?model.daily:[]).filter(row=>row&&isIsoDate(row.date)&&Number.isFinite(row.completion)).map(row=>[row.date,row.completion]));
-    const all=(regime.history||[]).filter(row=>Number.isFinite(row.day)&&Number.isFinite(row.recentChangeProbability))
-      .map(row=>({...row,completion:Number.isFinite(row.completion)?row.completion:displayedCompletion.get(row.date)}));
+    const regime:RenderChangePoint=model.dynamics.changePoint;
+    const displayedCompletion=new Map((Array.isArray(model.daily)?model.daily:[]).filter(row=>isIsoDate(row.date)&&finiteNumber(row.completion)).map(row=>[row.date,row.completion]));
+    const all=(regime.history||[]).filter(row=>finiteNumber(row.day)&&finiteNumber(row.recentChangeProbability))
+      .map(row=>({...row,completion:finiteNumber(row.completion)?row.completion:displayedCompletion.get(row.date)}));
     const eligible=excludeInitialization?all.slice(Math.min(MIN_CHANGE_POINT_SEGMENT_DAYS,all.length)):all;
     const fromDay=isIsoDate(model.calendarRange&&model.calendarRange.start)?dateDay(model.calendarRange.start):null;
     const calendarToDay=isIsoDate(model.calendarRange&&model.calendarRange.end)?dateDay(model.calendarRange.end):null;
     const currentDay=isIsoDate(model.currentStudyDate)?dateDay(model.currentStudyDate):null;
-    const toDay=[calendarToDay,currentDay].filter(Number.isFinite).sort((a,b)=>b-a)[0];
-    const selected=eligible.filter(row=>(!Number.isFinite(fromDay)||row.day>=fromDay)&&(!Number.isFinite(toDay)||row.day<=toDay));
+    const toDay=[calendarToDay,currentDay].filter(finiteNumber).sort((a,b)=>b-a)[0];
+    const selected=eligible.filter(row=>(!finiteNumber(fromDay)||row.day>=fromDay)&&(!finiteNumber(toDay)||row.day<=toDay));
     return (selected.length?selected:eligible).slice(-(isCompact()?45:120));
   }
   function dynamicsPhaseChart(model:Model){
-    const regime=model.dynamics&&model.dynamics.changePoint||{},rows=dynamicsChangeRows(model);
+    const regime:RenderChangePoint=model.dynamics.changePoint,rows=dynamicsChangeRows(model);
     const compact=isCompact(),width=compact?360:700,height=compact?206:224,pad=compact?50:42,right=compact?10:20;
     const {svg,plotRight,plotBottom,plotWidth,plotHeight}=chartFrame(width,height,pad,right);
     svg.classList.add('insights-dynamics-phase');
     labelGraphic(svg,'Daily completion and performance phases','Daily completion is shown as dots and the estimated longer-running performance phase as a line.');
     if(!rows.length)return chartEmpty(svg,'No completion-phase history',width/2,height/2,'middle');
-    const start=rows[0].day,end=rows[rows.length-1].day,span=Math.max(1,end-start),xFor=(day:number)=>pad+(day-start)/span*plotWidth;
-    const yFor=(value:number)=>plotBottom-clamp(num(value),0,100)/100*plotHeight;
+    const first=rows[0],last=rows[rows.length-1];if(!first||!last)return chartEmpty(svg,'No completion-phase history',width/2,height/2,'middle');
+    const start=first.day,end=last.day,span=Math.max(1,end-start),xFor=(day:number)=>pad+(day-start)/span*plotWidth;
+    const yFor=(value:number|null|undefined)=>plotBottom-clamp(num(value),0,100)/100*plotHeight;
     [0,50,100].forEach(value=>{const y=yFor(value);svg.appendChild(svgEl('line',{class:'grid',x1:pad,y1:y,x2:plotRight,y2:y}));const label=svgEl('text',{class:'axis-label',x:pad-6,y:y+4,'text-anchor':'end'});label.textContent=percentLabel(value,0);svg.appendChild(label);});
     svg.appendChild(svgEl('polyline',{class:'phase-line',points:rows.filter(row=>Number.isFinite(row.regimeMean)).map(row=>`${xFor(row.day)},${yFor(row.regimeMean)}`).join(' ')}));
     const items:ChartHit[]=[];
     rows.forEach(row=>{
-      if(Number.isFinite(row.completion))svg.appendChild(svgEl('circle',{class:'phase-dot chart-point-phase',cx:xFor(row.day),cy:yFor(row.completion),r:2.5}));
+      if(finiteNumber(row.completion))svg.appendChild(svgEl('circle',{class:'phase-dot chart-point-phase',cx:xFor(row.day),cy:yFor(row.completion),r:2.5}));
       const copy=`${shortDate(row.date)} · completion ${percentLabel(row.completion,1)} · estimated phase ${percentLabel(row.regimeMean,1)} · recent change likelihood ${percentLabel(row.recentChangeProbability*100,1)}`;
-      chartHitCircle(svg,xFor(row.day),yFor(Number.isFinite(row.completion)?row.completion:row.regimeMean),copy,items,9);
+      chartHitCircle(svg,xFor(row.day),yFor(finiteNumber(row.completion)?row.completion:row.regimeMean),copy,items,9);
     });
-    if(regime.detected&&isIsoDate(regime.date)){const changeDay=dateDay(regime.date);if(changeDay>=start&&changeDay<=end){const x=xFor(changeDay);svg.appendChild(svgEl('line',{class:'fitness-change',x1:x,y1:pad,x2:x,y2:plotBottom}));}}
+    if(regime.detected&&isIsoDate(regime.date)){const changeDay=dateDay(regime.date);if(finiteNumber(changeDay)&&changeDay>=start&&changeDay<=end){const x=xFor(changeDay);svg.appendChild(svgEl('line',{class:'fitness-change',x1:x,y1:pad,x2:x,y2:plotBottom}));}}
     const legend=svgEl('text',{class:'axis-label strong',x:pad,y:17});legend.textContent=compact?'Completion • · phase —':'Daily completion • · estimated phase —';svg.appendChild(legend);
-    [rows[0],rows[rows.length-1]].forEach((row,index)=>{const label=svgEl('text',{class:'axis-label',x:xFor(row.day),y:plotBottom+20,'text-anchor':index?'end':'start'});label.textContent=shortDate(row.date);svg.appendChild(label);});
+    [first,last].forEach((row,index)=>{const label=svgEl('text',{class:'axis-label',x:xFor(row.day),y:plotBottom+20,'text-anchor':index?'end':'start'});label.textContent=shortDate(row.date);svg.appendChild(label);});
     return inspectedChart(svg,items,regime.detected?`A credible phase change is marked near ${shortDate(regime.date)}.`:'No performance-phase change currently clears both likelihood and size gates.');
   }
   function dynamicsChangeProbabilityStrip(model:Model){
@@ -2804,7 +2844,8 @@ function createInsightsRendering(
     const svg=svgEl('svg',{class:'insights-chart insights-dynamics-change-strip',viewBox:`0 0 ${width} ${height}`,role:'group'});
     labelGraphic(svg,'Likelihood of a recent performance change','Shows whether the recent pattern differs enough from the preceding phase to count as a meaningful change. Early setup observations are excluded.');
     if(!rows.length)return chartEmpty(svg,'Change evidence needs more eligible days',width/2,height/2,'middle');
-    const start=rows[0].day,end=rows[rows.length-1].day,span=Math.max(1,end-start),xFor=(day:number)=>left+(day-start)/span*plotWidth;
+    const first=rows[0],last=rows[rows.length-1];if(!first||!last)return chartEmpty(svg,'Change evidence needs more eligible days',width/2,height/2,'middle');
+    const start=first.day,end=last.day,span=Math.max(1,end-start),xFor=(day:number)=>left+(day-start)/span*plotWidth;
     const scaleMax=Math.min(1,Math.max(BOCPD_DETECTION_PROBABILITY,...rows.map(row=>num(row.recentChangeProbability))));
     const yFor=(value:number)=>plotBottom-clamp(num(value),0,scaleMax)/scaleMax*plotHeight;
     svg.appendChild(svgEl('line',{class:'axis',x1:left,y1:plotBottom,x2:plotRight,y2:plotBottom}));
@@ -2816,17 +2857,18 @@ function createInsightsRendering(
     return inspectedChart(svg,items,'Early setup observations are excluded so they do not overstate later change.');
   }
   function renderWhatChangedCard(model:Model){
-    const change=model.dynamics&&model.dynamics.changePoint||{},cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-change-card');
+    const change:RenderChangePoint=model.dynamics.changePoint,cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-change-card');
     cardNode.appendChild(sectionTitle('2. What changed recently?','Compares recent completion with the preceding performance phase and withholds a conclusion when the shift is unclear.'));
-    const copy=change.detected
+    const detected=!!(change.detected&&finiteNumber(change.delta)&&isIsoDate(change.date));
+    const copy=detected
       ? `A likely ${change.delta>=0?'upward':'downward'} completion phase began near ${shortDate(change.date)}: ${percentLabel(change.beforeMean,1)} before versus ${percentLabel(change.afterMean,1)} after. The estimated likelihood of a real shift reached ${percentLabel(change.probability,1)}.`
       : change.reason||'No clear performance-phase change is present.';
-    const left=[dynamicsRead(change.confidence,copy,change.detected?`${change.delta>0?'+':''}${change.delta} pts`:`Latest ${percentLabel(change.latestProbability,1)}`)];
+    const left=[dynamicsRead(change.confidence??{key:'weak',label:'Needs more history',tone:'low'},copy,detected?`${change.delta>0?'+':''}${change.delta} pts`:`Latest ${percentLabel(change.latestProbability,1)}`)];
     const supporting=[];
-    if(Number.isFinite(change.currentRunLength))supporting.push({priority:80,label:'Current phase length',value:`About ${change.currentRunLength+1} completion-eligible day${change.currentRunLength===0?'':'s'}`});
-    if(Number.isFinite(change.currentRegimeMean))supporting.push({priority:70,label:'Current phase average',value:percentLabel(change.currentRegimeMean,1)});
-    if(Number.isFinite(change.latestProbability))supporting.push({priority:100,label:'Latest change likelihood',value:`${percentLabel(change.latestProbability,1)} · gate ${percentLabel(change.threshold&&change.threshold.probability,0)}`});
-    if(change.detected&&Number.isFinite(change.beforeMean)&&Number.isFinite(change.afterMean))supporting.push({priority:110,label:'Before → after',value:`${percentLabel(change.beforeMean,1)} → ${percentLabel(change.afterMean,1)} · ${change.delta>0?'+':''}${change.delta} pts`});
+    if(finiteNumber(change.currentRunLength))supporting.push({priority:80,label:'Current phase length',value:`About ${change.currentRunLength+1} completion-eligible day${change.currentRunLength===0?'':'s'}`});
+    if(finiteNumber(change.currentRegimeMean))supporting.push({priority:70,label:'Current phase average',value:percentLabel(change.currentRegimeMean,1)});
+    if(finiteNumber(change.latestProbability))supporting.push({priority:100,label:'Latest change likelihood',value:`${percentLabel(change.latestProbability,1)} · gate ${percentLabel(change.threshold&&change.threshold.probability,0)}`});
+    if(detected&&finiteNumber(change.beforeMean)&&finiteNumber(change.afterMean))supporting.push({priority:110,label:'Before → after',value:`${percentLabel(change.beforeMean,1)} → ${percentLabel(change.afterMean,1)} · ${change.delta>0?'+':''}${change.delta} pts`});
     const list=dynamicsSupportingList(supporting);
     if(list)left.push(list);
     const visual=el('div','insights-dynamics-visual-stack');
@@ -2834,7 +2876,7 @@ function createInsightsRendering(
     cardNode.appendChild(dynamicsCardColumns(left,visual));
     return cardNode;
   }
-  function sequenceHazardChart(cascade:Cascade){
+  function sequenceHazardChart(cascade:RenderCascade){
     const adjusted=cascade&&cascade.adjusted||{},curve=adjusted.hazard&&adjusted.hazard.curve||[];
     const compact=isCompact(),width=compact?360:620,height=220,pad=42,right=20;
     const {svg,plotRight,plotBottom}=chartFrame(width,height,pad,right);svg.classList.add('insights-hazard-chart');
@@ -2852,12 +2894,12 @@ function createInsightsRendering(
     return inspectedChart(svg,items,'Select a position to inspect its estimated breakdown risk.');
   }
   function renderWhatBreaksCard(model:Model){
-    const cascade=model.dynamics&&model.dynamics.cascade||{},adjusted=cascade.adjusted||{},cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-break-card');
+    const cascade:RenderCascade=model.dynamics.cascade,adjusted:RenderCascadeAdjusted=cascade.adjusted??{},cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-break-card');
     cardNode.appendChild(sectionTitle('3. Where does the day tend to break down?','Looks for recorded conditions that tend to precede a weak next block or a missed end of day. These are associations, not proof of cause.'));
     const confidence=adjusted.primary&&adjusted.primary.confidence||(cascade.ready?cascade.confidence:{key:'weak',label:'Needs more history',tone:'low'});
     const copy=cascade.primary&&cascade.primary.text||adjusted.reason||'No recorded sequence factor is consistent enough to report yet.';
     const left=[dynamicsRead(confidence,copy,`${cascade.transitions||0} block transitions · ${(adjusted.hazard&&adjusted.hazard.events)||0} end-of-day breakdowns`)];
-    const transitionLabels={strong:'After strong',attempted:'After partial',missed:'After missed'};
+    const transitionLabels:Readonly<Record<string,string>>={strong:'After strong',attempted:'After partial',missed:'After missed'};
     const supporting=(cascade.transitionRows||[]).filter(row=>row.total>0).map(row=>({priority:row.key==='missed'?95:row.key==='attempted'?85:65,label:transitionLabels[row.key]||row.label,value:`${percentLabel(row.estimate&&row.estimate.mean,1)} next block strong · n=${row.total}`}));
     const interactions=model.dynamics&&model.dynamics.interactions||{};
     (interactions.shown||[]).forEach((interaction,index)=>supporting.push({priority:110-index,label:'Combined pattern',value:interaction.text}));
@@ -2870,54 +2912,74 @@ function createInsightsRendering(
     cardNode.appendChild(dynamicsCardColumns(left,visual));
     return cardNode;
   }
-  function workloadPointAt(workload:Workload,planned:number){
-    const source=workload&&workload.forecast&&workload.forecast.completionReady&&Array.isArray(workload.forecastCurve)&&workload.forecastCurve.length?workload.forecastCurve:workload&&workload.curve||[];
+  function workloadPointAt(workload:RenderWorkload,planned:number):WorkloadPoint|null{
+    const forecast:RenderForecast=workload.forecast??{};
+    const source=forecast.completionReady&&Array.isArray(workload.forecastCurve)&&workload.forecastCurve.length?workload.forecastCurve:workload.curve||[];
     const curve=source.slice().sort((a,b)=>a.planned-b.planned);
-    if(!curve.length)return null;
-    if(planned<=curve[0].planned)return {...curve[0],planned};
-    if(planned>=curve[curve.length-1].planned)return {...curve[curve.length-1],planned};
-    const upperIndex=curve.findIndex(point=>point.planned>=planned),lower=curve[upperIndex-1],upper=curve[upperIndex],ratio=(planned-lower.planned)/Math.max(1,upper.planned-lower.planned);
-    const result={planned};
-    ['completionMean','completionLow','completionHigh','strongProbability','strongLow','strongHigh','expectedCompleted'].forEach(key=>{
-      result[key]=Number.isFinite(lower[key])&&Number.isFinite(upper[key])?lower[key]+ratio*(upper[key]-lower[key]):null;
+    const first=curve[0],last=curve[curve.length-1];
+    if(!first||!last)return null;
+    const from=(row:WorkloadCurveRow,value:number):WorkloadPoint=>({
+      planned:value,
+      completionMean:finiteNumber(row.completionMean)?row.completionMean:null,
+      completionLow:finiteNumber(row.completionLow)?row.completionLow:null,
+      completionHigh:finiteNumber(row.completionHigh)?row.completionHigh:null,
+      strongProbability:finiteNumber(row.strongProbability)?row.strongProbability:null,
+      strongLow:finiteNumber(row.strongLow)?row.strongLow:null,
+      strongHigh:finiteNumber(row.strongHigh)?row.strongHigh:null,
+      expectedCompleted:finiteNumber(row.expectedCompleted)?row.expectedCompleted:null
     });
-    return result;
+    if(planned<=first.planned)return from(first,planned);
+    if(planned>=last.planned)return from(last,planned);
+    const upperIndex=curve.findIndex(point=>point.planned>=planned),lower=curve[upperIndex-1],upper=curve[upperIndex];
+    if(!lower||!upper)return null;
+    const ratio=(planned-lower.planned)/Math.max(1,upper.planned-lower.planned);
+    const interpolate=(key:'completionMean'|'completionLow'|'completionHigh'|'strongProbability'|'strongLow'|'strongHigh'|'expectedCompleted')=>{
+      const low=lower[key],high=upper[key];
+      return finiteNumber(low)&&finiteNumber(high)?low+ratio*(high-low):null;
+    };
+    return {
+      planned,
+      completionMean:interpolate('completionMean'),completionLow:interpolate('completionLow'),completionHigh:interpolate('completionHigh'),
+      strongProbability:interpolate('strongProbability'),strongLow:interpolate('strongLow'),strongHigh:interpolate('strongHigh'),
+      expectedCompleted:interpolate('expectedCompleted')
+    };
   }
-  function workloadObservationInDisplayWindow(observation:Workload['observations'][number],model:Model){
+  function workloadObservationInDisplayWindow(observation:NonNullable<RenderWorkload['observations']>[number],model:Model){
     const day=dateDay(observation&&observation.date);
     if(!finiteNumber(day))return false;
     const from=isIsoDate(model.calendarRange&&model.calendarRange.start)?dateDay(model.calendarRange.start):null;
     const calendarTo=isIsoDate(model.calendarRange&&model.calendarRange.end)?dateDay(model.calendarRange.end):null;
     const current=isIsoDate(model.currentStudyDate)?dateDay(model.currentStudyDate):null;
-    const to=[calendarTo,current].filter(Number.isFinite).sort((a,b)=>b-a)[0];
+    const to=[calendarTo,current].filter(finiteNumber).sort((a,b)=>b-a)[0];
     return (!finiteNumber(from)||day>=from)&&(!finiteNumber(to)||day<=to);
   }
   function evenlySampleRows<T>(rows:readonly T[],limit:number):T[]{
     const source=Array.isArray(rows)?rows:[];
     if(source.length<=limit)return source.slice();
-    if(limit<=1)return [source[source.length-1]];
-    return [...new Set(Array.from({length:limit},(_,index)=>Math.round(index*(source.length-1)/(limit-1))))].map(index=>source[index]);
+    if(limit<=1){const last=source[source.length-1];return last===undefined?[]:[last];}
+    return [...new Set(Array.from({length:limit},(_,index)=>Math.round(index*(source.length-1)/(limit-1))))].flatMap(index=>{const row=source[index];return row===undefined?[]:[row];});
   }
   function prioritizedChartPoints<T extends {day?:number|null;date?:string}>(rows:readonly T[],limit:number,isSelected:(row:T)=>boolean){
-    const source=Array.isArray(rows)?rows:[],points=source.map(row=>{const selected=!!isSelected(row);return Object.freeze({row,selected,day:Number.isFinite(row&&row.day)?row.day:dateDay(row&&row.date)});});
+    const source=Array.isArray(rows)?rows:[],points=source.map(row=>{const selected=!!isSelected(row),day=finiteNumber(row.day)?row.day:dateDay(row.date);return Object.freeze({row,selected,day:num(day)});});
     const selected=points.filter(point=>point.selected),older=points.filter(point=>!point.selected);
     const shownSelected=selected.length<=limit?selected.slice():evenlySampleRows(selected,limit);
     const remaining=Math.max(0,limit-shownSelected.length),shownOlder=remaining?evenlySampleRows(older,remaining):[];
     const shown=[...shownOlder,...shownSelected].sort((a,b)=>a.day-b.day);
     return {points:shown,shown:shown.length,total:points.length};
   }
-  function workloadChartObservations(workload:Workload,model:Model,compact:boolean){
+  function workloadChartObservations(workload:RenderWorkload,model:Model,compact:boolean){
     const all=Array.isArray(workload&&workload.observations)?workload.observations:[];
     const limit=compact?MAX_WORKLOAD_HISTORY_POINTS_COMPACT:MAX_WORKLOAD_HISTORY_POINTS_DESKTOP;
     return prioritizedChartPoints(all,limit,row=>workloadObservationInDisplayWindow(row,model));
   }
-  function workloadResponseChart(workload:Workload,model:Model){
+  function workloadResponseChart(workload:RenderWorkload,model:Model){
     const curve=workload&&workload.curve||[],compact=isCompact(),width=compact?360:720,height=250,pad=compact?50:42,right=18;
     const {svg,plotRight,plotBottom}=chartFrame(width,height,pad,right);svg.classList.add('insights-response-chart');
     const strongReady=!!(workload&&workload.capabilities&&workload.capabilities.strong&&workload.capabilities.strong.ready),observationView=workloadChartObservations(workload,model,compact);
     labelGraphic(svg,'Workload and likely completion',strongReady?'Planned work is on the horizontal axis. Actual days anchor the estimated completion and 80%+ day curves; shading shows the likely range.':'Planned work is on the horizontal axis. Actual days anchor the estimated completion curve; shading shows the likely range. The 80%+ day chance waits for enough varied outcomes.');
     if(!curve.length)return chartEmpty(svg,'Need more varied planned-work days',width/2,height/2,'middle');
-    const min=curve[0].planned,max=curve[curve.length-1].planned,xFor=value=>pad+(value-min)/Math.max(1,max-min)*(plotRight-pad),yFor=value=>valueToY(value,0,100,height,pad);
+    const first=curve[0],last=curve[curve.length-1];if(!first||!last)return chartEmpty(svg,'Need more varied planned-work days',width/2,height/2,'middle');
+    const min=first.planned,max=last.planned,xFor=(value:number)=>pad+(value-min)/Math.max(1,max-min)*(plotRight-pad),yFor=(value:number|null|undefined)=>valueToY(num(value),0,100,height,pad);
     [0,50,80,100].forEach(value=>{const y=yFor(value);svg.appendChild(svgEl('line',{class:'grid',x1:pad,y1:y,x2:plotRight,y2:y}));const label=svgEl('text',{class:'axis-label',x:pad-6,y:y+4,'text-anchor':'end'});label.textContent=`${value}%`;svg.appendChild(label);});
     const items:ChartHit[]=[];
     observationView.points.forEach(point=>{
@@ -2925,7 +2987,7 @@ function createInsightsRendering(
       svg.appendChild(svgEl('circle',{class:`response-observation ${selected?'chart-point-lg selected-window':'chart-point-sm'}`,cx:x,cy:y,r:selected?3.1:2.3}));
       const copy=`${shortDate(observation.date)} · planned ${minutesLabel(observation.planned)} · completion ${percentLabel(observation.completion,1)} · completed-equivalent ${minutesLabel(observation.completed)}${selected?' · inside selected display window':' · older model-history day'}`;
       chartHitCircle(svg,x,y,copy,items,selected?10:8);
-      if(selected)items[items.length-1].initial=true;
+      if(selected){const latest=items[items.length-1];if(latest)latest.initial=true;}
     });
     (workload.empiricalBands||[]).forEach(band=>{
       const y=yFor(band.meanCompletion),x1=xFor(band.minPlanned),x2=xFor(band.maxPlanned),x=xFor(band.meanPlanned);
@@ -2936,10 +2998,10 @@ function createInsightsRendering(
     const band=curve.map(point=>`${xFor(point.planned)},${yFor(point.completionHigh)}`).concat(curve.slice().reverse().map(point=>`${xFor(point.planned)},${yFor(point.completionLow)}`));
     svg.append(svgEl('polygon',{class:'response-band',points:band.join(' ')}),svgEl('polyline',{class:'response-completion',points:curve.map(point=>`${xFor(point.planned)},${yFor(point.completionMean)}`).join(' ')}));
     if(strongReady)svg.appendChild(svgEl('polyline',{class:'response-strong',points:curve.map(point=>`${xFor(point.planned)},${yFor(point.strongProbability)}`).join(' ')}));
-    const selected=workload.recommendation,scenario=workload.forecast&&Number.isFinite(workload.forecast.scenarioPlanned)?workload.forecast:null;
+    const selected=workload.recommendation,forecast:RenderForecast=workload.forecast??{},scenario=finiteNumber(forecast.scenarioPlanned)?forecast:null;
     if(selected)svg.appendChild(svgEl('circle',{class:'frontier-point selected chart-point-onset',cx:xFor(selected.typicalPlanned),cy:yFor(selected.completionMean),r:6}));
     if(scenario)svg.appendChild(svgEl('line',{class:'scenario-line',x1:xFor(scenario.scenarioPlanned),y1:pad,x2:xFor(scenario.scenarioPlanned),y2:plotBottom}));
-    [curve[0],curve[curve.length-1]].forEach((point,index)=>{const label=svgEl('text',{class:'axis-label',x:xFor(point.planned),y:plotBottom+20,'text-anchor':index?'end':'start'});label.textContent=minutesLabel(point.planned);svg.appendChild(label);});
+    [first,last].forEach((point,index)=>{const label=svgEl('text',{class:'axis-label',x:xFor(point.planned),y:plotBottom+20,'text-anchor':index?'end':'start'});label.textContent=minutesLabel(point.planned);svg.appendChild(label);});
     const legend=svgEl('text',{class:'axis-label strong',x:pad,y:17});
     legend.textContent=compact
       ? strongReady?'Completion — · strong ··· · actual •':'Completion — · actual • · bands –'
@@ -2951,7 +3013,7 @@ function createInsightsRendering(
     return inspectedChart(svg,items,inspection);
   }
   function renderPlanningCard(model:Model){
-    const workload=model.dynamics&&model.dynamics.workload||{},cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-planning-card');
+    const workload:RenderWorkload=model.dynamics.workload,cardNode=el('section','insights-card soft ui-card insights-brain-card insights-dynamics-planning-card');
     cardNode.appendChild(sectionTitle('4. What workload is realistic?','Uses your past planned and completed work to identify a personally supportable range, while withholding forecasts that are not reliable enough.'));
     if(!workload.ready){
       cardNode.appendChild(dynamicsCardColumns(
@@ -2960,7 +3022,7 @@ function createInsightsRendering(
       ));
       return cardNode;
     }
-    const forecast=workload.forecast||{},recommendation=workload.recommendation;
+    const forecast:RenderForecast=workload.forecast??{},recommendation=workload.recommendation;
     if(!recommendation){
       cardNode.appendChild(dynamicsCardColumns(
         dynamicsRead({key:'weak',label:'Range not ready',tone:'low'},workload.recommendationReason||'A workload pattern is visible, but no well-supported planning range is available yet.',`${workload.days||0} days · ${minutesLabel(workload.span||0)} span`),
@@ -2969,7 +3031,7 @@ function createInsightsRendering(
       return cardNode;
     }
     const range=`${minutesLabel(recommendation.minPlanned)}–${minutesLabel(recommendation.maxPlanned)}`;
-    const calibration=forecast.calibration||workload.calibration||{};
+    const calibration:RenderCalibration=forecast.calibration??workload.calibration??{};
     const completionAbstention=forecast.completionReason||calibration.completionReason||`Only ${calibration.backtests||0}/${MIN_FORECAST_BACKTESTS} qualifying rolling completion forecasts are available.`;
     const strongUnavailable=workload.capabilities&&workload.capabilities.strong&&!workload.capabilities.strong.ready
       ? workload.capabilities.strong.reason
@@ -3002,14 +3064,16 @@ function createInsightsRendering(
       const reliability=Number.isFinite(workload.tradeoff.reliabilityDrop)?` and strong-day probability ${workload.tradeoff.reliabilityDrop} points`:'';
       left.push(evidenceNote(`Estimated trade-off: at ${minutesLabel(workload.tradeoff.high.planned)}, expected completion is ${workload.tradeoff.completionDrop} points${reliability} below the lower-load comparison. This remains association, not causal proof.`,'insights-lab-caution'));
     }
-    const curve=workload.curve||[],minimum=curve[0].planned,maximum=curve[curve.length-1].planned;
+    const curve=workload.curve||[],firstCurve=curve[0],lastCurve=curve[curve.length-1];
+    if(!firstCurve||!lastCurve)return cardNode;
+    const minimum=firstCurve.planned,maximum=lastCurve.planned;
     const scenario=el('div','insights-dynamics-scenario ui-inset');
     const label=el('div','insights-dynamics-scenario-label ui-label','Next-plan scenario');
     const value=el('div','insights-dynamics-scenario-value ui-mono');
     const slider=el('input','insights-dynamics-scenario-slider');slider.type='range';slider.min=String(minimum);slider.max=String(maximum);slider.step='15';slider.value=String(clamp(forecast.scenarioPlanned,minimum,maximum));slider.setAttribute('aria-label','Next plan workload scenario in minutes');
     const result=el('div','insights-dynamics-scenario-result ui-mono');
     const update=()=>{
-      const point=workloadPointAt(workload,num(slider.value));value.textContent=minutesLabel(point.planned);
+      const point=workloadPointAt(workload,num(slider.value));if(!point)return;value.textContent=minutesLabel(point.planned);
       const strongPart=Number.isFinite(point.strongProbability)?` · 80%+ day chance ${percentLabel(point.strongProbability,1)}`:` · 80%+ day chance unavailable`;
       const rangeText=forecast.rangeReady?'backtest-checked 80% range':'estimated model range';
       result.textContent=`Expected completion ${percentLabel(point.completionMean,1)} (${percentLabel(point.completionLow,0)}–${percentLabel(point.completionHigh,0)} ${rangeText})${strongPart} · expected completed work ${minutesLabel(point.expectedCompleted)}${forecast.completionReady?'':` · checks pending`}`;
