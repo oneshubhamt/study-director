@@ -4410,6 +4410,8 @@ type HistoryCacheEntry={
   return InsightsModel;
 }
 createInsightsModelRuntime(globalThis);
+// Preserve the type anchor without leaving an extra callable runtime global.
+Reflect.set(globalThis,'createInsightsModelRuntime',undefined);
 
 export type InsightsModelRuntime=ReturnType<typeof createInsightsModelRuntime>;
 export type InsightsEngine=ReturnType<InsightsModelRuntime['ModelEngine']['createInsightsEngine']>;
