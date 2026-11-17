@@ -66,6 +66,21 @@ try{
   const empty=await page.evaluate(`(()=>({copy:document.querySelector('#pane-insights .insights-empty')?.textContent||'',sample:document.querySelector('#pane-insights .insights-empty-actions button')?.textContent||''}))()`);
   assert.match(empty.copy,/No saved daily records yet/i);
   assert.match(empty.sample,/Preview with 28-day sample/i);
+
+  // P5.10C owns demo/source switching end to end, not only the host revision
+  // fence. Exercise the actual empty-state action and the rendered return path.
+  await page.evaluate(`document.querySelector('#pane-insights .insights-empty-actions button')?.click()`);
+  await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .demo-data-banner')&&window.__StudyDirectorInsightsLastProfile?.records===28`),{timeout:15000,label:'Insights sample preview'});
+  const demo=await page.evaluate(`(()=>({title:document.querySelector('#pane-insights .demo-data-banner-title')?.textContent||'',note:document.querySelector('#pane-insights .demo-data-banner-note')?.textContent||'',records:window.__StudyDirectorInsightsLastProfile?.records||0,button:document.querySelector('#pane-insights .demo-data-banner button')?.textContent||''}))()`);
+  assert.match(demo.title,/Sample Data Mode/i);
+  assert.match(demo.note,/28-day sample/i);
+  assert.equal(demo.records,28);
+  assert.match(demo.button,/Go back to real data/i);
+  await page.evaluate(`document.querySelector('#pane-insights .demo-data-banner button')?.click()`);
+  await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-empty')&&!document.querySelector('#pane-insights .demo-data-banner')`),{timeout:15000,label:'return from Insights sample to saved data'});
+  const backToSaved=await page.evaluate(`document.querySelector('#pane-insights .insights-empty')?.textContent||''`);
+  assert.match(backToSaved,/No saved daily records yet/i);
+
   await page.evaluate(`__InsightsUiDebug.goTab('plan');window.__StudyDirectorInsightsLastProfile=null`);
   const seeded=await page.evaluate(`(async()=>{
     const total=590,now=new Date(),end=Math.floor(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate())/86400000),records=[];
@@ -195,7 +210,7 @@ try{
     return {entered,kept:!!pane.querySelector('.insights-wrap'),loading:!!pane.querySelector('.plugin-loading-panel')};})()`);
   assert.deepEqual(reopened,{entered:true,kept:true,loading:false},'reopened Insights animates its kept view');
 
-  const evidence={status:'PASS',release:manifest.release,states:{empty:true,insufficientDays:1,populatedDays:590},analyticsLab:{lazyBefore:!labBefore.built,builtAfterOpen:lab.built,tables:lab.tables},denseHistoryDays:590,desktop:{renderMilliseconds:Number(desktop.elapsed.toFixed(2)),window:desktop.window,workTrend:desktop.workTrend,practiceSummary:desktop.practiceSummary,overflow:desktop.documentOverflow,profile:desktop.profile},phone};
+  const evidence={status:'PASS',release:manifest.release,states:{empty:true,demoDays:demo.records,backToSaved:true,insufficientDays:1,populatedDays:590},analyticsLab:{lazyBefore:!labBefore.built,builtAfterOpen:lab.built,tables:lab.tables},denseHistoryDays:590,desktop:{renderMilliseconds:Number(desktop.elapsed.toFixed(2)),window:desktop.window,workTrend:desktop.workTrend,practiceSummary:desktop.practiceSummary,overflow:desktop.documentOverflow,profile:desktop.profile},phone};
   writeArtifact('insights-ui.json',`${JSON.stringify(evidence,null,2)}\n`);
   console.log(JSON.stringify(evidence,null,2));
 }finally{
