@@ -44,6 +44,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
 
 (function(global:typeof globalThis){
   'use strict';
+  const isFiniteNumber=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
   // M8.1 CONFIGURATION COMPONENT
   const InsightsConfig=(()=>{
   const PLUGIN_VERSION='@@SD_RELEASE@@';
@@ -201,7 +202,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   const STUDY_DAY_ROLLOVER_MINUTE=4*60;
   const SUPPORT_KINDS=new Set(['support']);
   const FIXED_KINDS=new Set(['fixed']);
-  const OUTCOME_KEYS=Object.freeze(['full','partial','skipped','untouched','finished-unverified','zero-output']);
+  const OUTCOME_KEYS:readonly TaskOutcome[]=Object.freeze(['full','partial','skipped','untouched','finished-unverified','zero-output']);
     return Object.freeze({
       BOCPD_DETECTION_PROBABILITY,BOCPD_EXPECTED_REGIME_DAYS,BOCPD_MAX_RUN_LENGTH,COACH_CONFIDENCE_RANK,
       COACH_MATERIAL_CONCERN_MARGIN,COACH_SIGNAL_LIMIT,COACH_SURFACES,COACH_SYNTHESIS_LIMIT,
@@ -255,14 +256,17 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       COACH_CONFIDENCE_RANK,CONFIDENCE,EVIDENCE_PRIOR_EFFECTIVE_BLOCKS,FIXED_KINDS,MIN_RECORDS_FOR_TREND,
       OUTCOME_KEYS,STUDY_DAY_ROLLOVER_MINUTE,SUPPORT_KINDS,TIME_BANDS
     }=Config;
-  function num(value:unknown,fallback=0){
+  function num(value:unknown):number;
+  function num(value:unknown,fallback:number):number;
+  function num(value:unknown,fallback:null):number|null;
+  function num(value:unknown,fallback:number|null=0){
     const n=Number(value);
-    return Number.isFinite(n)?n:fallback;
+    return isFiniteNumber(n)?n:fallback;
   }
   function finiteOrNull(value:unknown){
     if(value===null||value===undefined||value==='')return null;
     const n=Number(value);
-    return Number.isFinite(n)?n:null;
+    return isFiniteNumber(n)?n:null;
   }
   function pct(part:number,total:number){
     return total>0?(part/total)*100:null;
@@ -276,7 +280,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return Math.round(num(value)*scale)/scale;
   }
   function roundNullable(value:number|null|undefined,digits=1){
-    return Number.isFinite(value)?round(value,digits):null;
+    return isFiniteNumber(value)?round(value,digits):null;
   }
   function apportionedPercents(values:readonly unknown[],digits=0){
     const clean=(Array.isArray(values)?values:[]).map(value=>Math.max(0,num(value)));
@@ -285,9 +289,9 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const scale=Math.pow(10,Math.max(0,Math.round(digits))),target=100*scale;
     const exact=clean.map(value=>value/total*target),units=exact.map(Math.floor);
     let remainder=Math.max(0,Math.round(target-units.reduce((sum,value)=>sum+value,0)));
-    exact.map((value,index)=>({index,fraction:value-units[index]}))
+    exact.map((value,index)=>({index,fraction:value-units[index]!}))
       .sort((a,b)=>b.fraction-a.fraction||a.index-b.index)
-      .forEach(row=>{if(remainder>0){units[row.index]+=1;remainder-=1;}});
+      .forEach(row=>{if(remainder>0){units[row.index]=units[row.index]!+1;remainder-=1;}});
     return units.map(value=>value/scale);
   }
   function clampPct(value:unknown){
@@ -299,7 +303,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function dateDay(iso:unknown){
     if(!isIsoDate(iso))return null;
     const parts=iso.split('-').map(Number);
-    return Math.floor(Date.UTC(parts[0],parts[1]-1,parts[2])/86400000);
+    return Math.floor(Date.UTC(parts[0]!,parts[1]!-1,parts[2]!)/86400000);
   }
   function dateFromDay(day:number){
     return new Date(day*86400000).toISOString().slice(0,10);
@@ -342,7 +346,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return `${s}s`;
   }
   function signedMillisecondsLabel(value:unknown){
-    if(!Number.isFinite(Number(value)))return 'No data';
+    if(!isFiniteNumber(Number(value)))return 'No data';
     const n=Math.round(Number(value));
     if(n===0)return 'on time';
     return `${n>0?'+':'−'}${millisecondsLabel(Math.abs(n))}`;
@@ -353,13 +357,13 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return `${m>0?'+':'-'}${minutesLabel(m)}`;
   }
   function delayLabel(minutes:unknown){
-    if(!Number.isFinite(Number(minutes)))return 'Need data';
+    if(!isFiniteNumber(Number(minutes)))return 'Need data';
     const m=Math.round(Number(minutes));
     if(m===0)return 'On time';
     return m>0?`${m}m late`:`${Math.abs(m)}m early`;
   }
   function scheduleShiftLabel(minutes:unknown){
-    if(!Number.isFinite(Number(minutes)))return 'No data';
+    if(!isFiniteNumber(Number(minutes)))return 'No data';
     const m=Math.round(Number(minutes));
     if(m===0)return 'No net movement';
     return `${minutesLabel(Math.abs(m))} ${m>0?'later':'earlier'}`;
@@ -371,7 +375,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return value===null||value===undefined||Number.isNaN(Number(value))?'No data':String(round(value,digits));
   }
   function topLevelAreaLabel(value:unknown){
-    return String(value||'General Study').split('>')[0].trim().replace(/\s+/g,' ')||'General Study';
+    return String(value||'General Study').split('>')[0]!.trim().replace(/\s+/g,' ')||'General Study';
   }
   function subjectLabel(task:InsightTask|null|undefined){
     return topLevelAreaLabel((task&&task.areaLabel)||(task&&task.area)||(task&&task.areaKey)||'General Study');
@@ -396,12 +400,12 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   }
   function taskHasCompletionEvidence(task:InsightTask|null|undefined){
     if(!task||typeof task!=='object')return false;
-    if(task.completion!==null&&task.completion!==undefined&&Number.isFinite(Number(task.completion)))return true;
+    if(task.completion!==null&&task.completion!==undefined&&isFiniteNumber(Number(task.completion)))return true;
     const source=canonical(task.completionSource);
     return !!task.skipped||!!task.doneFlag||['skipped','finished-unverified','manual','units','time','finished-time'].includes(source);
   }
   function taskHasActualEvidence(task:InsightTask|null|undefined){
-    return !!task&&task.actualSeconds!==null&&task.actualSeconds!==undefined&&Number.isFinite(Number(task.actualSeconds));
+    return !!task&&task.actualSeconds!==null&&task.actualSeconds!==undefined&&isFiniteNumber(Number(task.actualSeconds));
   }
   function taskCompleted(task:InsightTask|null|undefined){
     return taskPlanned(task)*taskCompletion(task)/100;
@@ -422,7 +426,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     if(['units','manual','time','finished-time','finished-unverified','skipped'].includes(source))return source;
     return 'none';
   }
-  function taskOutcomeKey(task:InsightTask|null|undefined,classifyTaskOutcome:OutcomeClassifier){
+  function taskOutcomeKey(task:InsightTask,classifyTaskOutcome:OutcomeClassifier){
     return task&&typeof task.__sdOutcome==='string'?task.__sdOutcome:classifyTaskOutcome(task);
   }
   function completionSourceLabel(source:unknown){
@@ -458,14 +462,14 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     if(!value)return null;
     const text=String(value).trim();
     if(/^\d{1,2}:\d{2}$/.test(text)){
-      const [hh,mm]=text.split(':').map(Number);
+      const [hh=NaN,mm=NaN]=text.split(':').map(Number);
       return hh>=0&&hh<=23&&mm>=0&&mm<=59?hh*60+mm:null;
     }
     const d=new Date(text);
     return Number.isNaN(d.getTime())?null:d.getHours()*60+d.getMinutes();
   }
   function wrappedMinuteDelta(actual:number,planned:number){
-    if(!Number.isFinite(actual)||!Number.isFinite(planned))return null;
+    if(!isFiniteNumber(actual)||!isFiniteNumber(planned))return null;
     const studyMinute=(minute:number)=>minute<STUDY_DAY_ROLLOVER_MINUTE?minute+1440:minute;
     return Math.round(studyMinute(actual)-studyMinute(planned));
   }
@@ -479,7 +483,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     if(rawOffset!==null&&rawOffset!==undefined&&task&&task.actualStart){
       const offset=Number(rawOffset);
       const stamp=Date.parse(task.actualStart);
-      if(Number.isInteger(offset)&&offset>=-840&&offset<=840&&Number.isFinite(stamp)){
+      if(Number.isInteger(offset)&&offset>=-840&&offset<=840&&isFiniteNumber(stamp)){
         const utc=new Date(stamp);
         const minute=((utc.getUTCHours()*60+utc.getUTCMinutes()+offset)%1440+1440)%1440;
         return {minute,source:'captured-offset'};
@@ -489,47 +493,47 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   }
   function plannedStartMinute(task:InsightTask|null|undefined){
     const adjusted=parseClockMinute(task&&task.adjustedStart);
-    if(Number.isFinite(adjusted))return {minute:adjusted,source:'adjusted'};
+    if(isFiniteNumber(adjusted))return {minute:adjusted,source:'adjusted'};
     const original=parseClockMinute(task&&task.originalStart);
-    if(Number.isFinite(original))return {minute:original,source:'original'};
+    if(isFiniteNumber(original))return {minute:original,source:'original'};
     return {minute:null,source:'missing'};
   }
   function startDelayMinutes(task:InsightTask|null|undefined){
     const planned=plannedStartMinute(task);
-    if(!Number.isFinite(planned.minute))return null;
+    if(!isFiniteNumber(planned.minute))return null;
     const actual=actualStartMinuteEvidence(task);
-    if(!Number.isFinite(actual.minute))return null;
+    if(!isFiniteNumber(actual.minute))return null;
     return wrappedMinuteDelta(actual.minute,planned.minute);
   }
   function firstHourSource(task:InsightTask|null|undefined){
     const actual=actualStartMinuteEvidence(task);
-    return Number.isFinite(actual.minute)
+    return isFiniteNumber(actual.minute)
       ? {hour:Math.floor(actual.minute/60),source:actual.source}
       : {hour:null,source:'missing'};
   }
   function timeBandForHour(hour:number|null|undefined){
-    if(!Number.isFinite(hour))return null;
+    if(!isFiniteNumber(hour))return null;
     return TIME_BANDS.find(b=>b.start<b.end?hour>=b.start&&hour<b.end:hour>=b.start||hour<b.end)||null;
   }
   function mean(values:readonly number[]){
-    const clean=values.filter(v=>Number.isFinite(v));
+    const clean=values.filter(v=>isFiniteNumber(v));
     return clean.length?clean.reduce((a,b)=>a+b,0)/clean.length:null;
   }
   function median(values:readonly number[]){
-    const clean=values.filter(v=>Number.isFinite(v)).sort((a,b)=>a-b);
+    const clean=values.filter(v=>isFiniteNumber(v)).sort((a,b)=>a-b);
     if(!clean.length)return null;
     const middle=Math.floor(clean.length/2);
-    return clean.length%2?clean[middle]:(clean[middle-1]+clean[middle])/2;
+    return clean.length%2?clean[middle]!:(clean[middle-1]!+clean[middle]!)/2;
   }
   function percentile(values:readonly number[],fraction:number){
-    const clean=values.filter(v=>Number.isFinite(v)).sort((a,b)=>a-b);
+    const clean=values.filter(v=>isFiniteNumber(v)).sort((a,b)=>a-b);
     if(!clean.length)return null;
     const position=(clean.length-1)*Math.max(0,Math.min(1,num(fraction)));
     const lower=Math.floor(position),upper=Math.ceil(position),weight=position-lower;
-    return lower===upper?clean[lower]:clean[lower]*(1-weight)+clean[upper]*weight;
+    return lower===upper?clean[lower]!:clean[lower]!*(1-weight)+clean[upper]!*weight;
   }
   function stdev(values:readonly number[]){
-    const clean=values.filter(v=>Number.isFinite(v));
+    const clean=values.filter(v=>isFiniteNumber(v));
     if(clean.length<2)return null;
     const m=mean(clean);
     return Math.sqrt(clean.reduce((sum,v)=>sum+Math.pow(v-m,2),0)/(clean.length-1));
@@ -537,18 +541,18 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function robustScale(values:readonly number[]){
     const clean=(Array.isArray(values)?values:[]).filter(Number.isFinite);
     if(clean.length<2)return null;
-    const centre=median(clean);
+    const centre=median(clean)!;
     return 1.4826*num(median(clean.map(value=>Math.abs(value-centre))));
   }
   function correlation(xs:readonly number[],ys:readonly number[]){
-    const pairs=[];
+    const pairs:[number,number][]=[];
     xs.forEach((x,i)=>{
       const y=ys[i];
-      if(Number.isFinite(x)&&Number.isFinite(y))pairs.push([x,y]);
+      if(isFiniteNumber(x)&&isFiniteNumber(y))pairs.push([x,y]);
     });
     if(pairs.length<3)return null;
-    const mx=mean(pairs.map(p=>p[0]));
-    const my=mean(pairs.map(p=>p[1]));
+    const mx=mean(pairs.map(p=>p[0]))!;
+    const my=mean(pairs.map(p=>p[1]))!;
     let nume=0,dx=0,dy=0;
     pairs.forEach(([x,y])=>{
       nume+=(x-mx)*(y-my);
@@ -558,10 +562,10 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return dx&&dy?nume/Math.sqrt(dx*dy):null;
   }
   function regressionSlope(points:readonly Point[]){
-    const clean=points.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y));
+    const clean=points.filter(p=>isFiniteNumber(p.x)&&isFiniteNumber(p.y));
     if(clean.length<MIN_RECORDS_FOR_TREND)return null;
-    const mx=mean(clean.map(p=>p.x));
-    const my=mean(clean.map(p=>p.y));
+    const mx=mean(clean.map(p=>p.x))!;
+    const my=mean(clean.map(p=>p.y))!;
     let nume=0,den=0;
     clean.forEach(p=>{
       nume+=(p.x-mx)*(p.y-my);
@@ -581,7 +585,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const p=clamp(value,1e-6,1-1e-6);
     return Math.log(p/(1-p));
   }
-  function logGamma(value:unknown){
+  function logGamma(value:unknown):number{
     const coefficients=[676.5203681218851,-1259.1392167224028,771.32342877765313,-176.61502916214059,12.507343278686905,-.13857109526572012,9.9843695780195716e-6,1.5056327351493116e-7];
     let z=num(value);
     if(z<.5)return Math.log(Math.PI)-Math.log(Math.sin(Math.PI*z))-logGamma(1-z);
@@ -600,23 +604,23 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   }
   function normalizedLogWeights(values:readonly number[]){
     const normalizer=logSumExp(values);
-    return values.map(value=>Number.isFinite(value)&&Number.isFinite(normalizer)?Math.exp(value-normalizer):0);
+    return values.map(value=>isFiniteNumber(value)&&isFiniteNumber(normalizer)?Math.exp(value-normalizer):0);
   }
   function weightedQuantile(points:readonly WeightedPoint[],target:number){
-    const sorted=(Array.isArray(points)?points:[]).filter(point=>Number.isFinite(point.value)&&point.weight>0).sort((a,b)=>a.value-b.value);
+    const sorted=(Array.isArray(points)?points:[]).filter(point=>isFiniteNumber(point.value)&&point.weight>0).sort((a,b)=>a.value-b.value);
     const total=sum(sorted.map(point=>point.weight));
     if(!total)return null;
     let running=0;
     for(const point of sorted){running+=point.weight;if(running/total>=target)return point.value;}
-    return sorted[sorted.length-1].value;
+    return sorted[sorted.length-1]!.value;
   }
   function zeroMatrix(rows:number,columns=rows){return Array.from({length:rows},()=>Array(columns).fill(0));}
   function transposeMatrix(matrix:readonly (readonly number[])[]){return matrix[0]!.map((_,column)=>matrix.map(row=>row[column]!));}
   function multiplyMatrices(left:readonly (readonly number[])[],right:readonly (readonly number[])[]){
-    const columns=right[0].length,shared=right.length;
+    const columns=right[0]!.length,shared=right.length;
     return left.map(row=>Array.from({length:columns},(_,column)=>{
       let total=0;
-      for(let index=0;index<shared;index+=1)total+=num(row[index])*num(right[index][column]);
+      for(let index=0;index<shared;index+=1)total+=num(row[index])*num(right[index]?.[column]);
       return total;
     }));
   }
@@ -628,22 +632,22 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const augmented=matrix.map((row,index)=>row.map(num).concat([num(vector[index])]));
     for(let column=0;column<size;column+=1){
       let pivot=column;
-      for(let row=column+1;row<size;row+=1)if(Math.abs(augmented[row][column])>Math.abs(augmented[pivot][column]))pivot=row;
-      if(Math.abs(augmented[pivot][column])<1e-10)return null;
-      if(pivot!==column)[augmented[pivot],augmented[column]]=[augmented[column],augmented[pivot]];
-      const divisor=augmented[column][column];
-      for(let index=column;index<=size;index+=1)augmented[column][index]/=divisor;
+      for(let row=column+1;row<size;row+=1)if(Math.abs(augmented[row]![column]!)>Math.abs(augmented[pivot]![column]!))pivot=row;
+      if(Math.abs(augmented[pivot]![column]!)<1e-10)return null;
+      if(pivot!==column)[augmented[pivot],augmented[column]]=[augmented[column]!,augmented[pivot]!];
+      const columnRow=augmented[column]!,divisor=columnRow[column]!;
+      for(let index=column;index<=size;index+=1)columnRow[index]=columnRow[index]!/divisor;
       for(let row=0;row<size;row+=1){
         if(row===column)continue;
-        const factor=augmented[row][column];
-        for(let index=column;index<=size;index+=1)augmented[row][index]-=factor*augmented[column][index];
+        const target=augmented[row]!,factor=target[column]!;
+        for(let index=column;index<=size;index+=1)target[index]=target[index]!-factor*columnRow[index]!;
       }
     }
-    return augmented.map(row=>row[size]);
+    return augmented.map(row=>row[size]!);
   }
   function invertMatrix(matrix:readonly (readonly number[])[]){
     const size=matrix.length;
-    const columns=[];
+    const columns:number[][]=[];
     for(let column=0;column<size;column+=1){
       const basis=Array(size).fill(0);basis[column]=1;
       const solved=solveLinearSystem(matrix,basis);
@@ -657,7 +661,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return sum(vector.map((value,index)=>num(value)*num(projected[index])));
   }
   function fitRegularizedLogistic(examples:readonly LogisticExample[],{lambda=2,minimumRows=8}:Readonly<{lambda?:number;minimumRows?:number}>={}){
-    const rows=(Array.isArray(examples)?examples:[]).filter(row=>Array.isArray(row.x)&&Number.isFinite(row.y)&&row.y>=0&&row.y<=1);
+    const rows=(Array.isArray(examples)?examples:[]).filter(row=>Array.isArray(row.x)&&isFiniteNumber(row.y)&&row.y>=0&&row.y<=1);
     if(rows.length<minimumRows)return {ready:false,rows:rows.length,reason:`Need ${Math.max(0,minimumRows-rows.length)} more eligible observations.`};
     const dimension=rows[0]!.x.length+1;
     // The design vector and observation weight are invariant across Newton
@@ -671,21 +675,21 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       hessian=zeroMatrix(dimension);const gradient=Array(dimension).fill(0);
       for(const row of design){
         const {x,weight}=row;let eta=0;
-        for(let index=0;index<dimension;index+=1)eta+=x[index]*coefficients[index];
+        for(let index=0;index<dimension;index+=1)eta+=x[index]!*coefficients[index]!;
         const probability=sigmoid(eta),variance=Math.max(1e-5,probability*(1-probability))*weight,residual=(row.y-probability)*weight;
         for(let left=0;left<dimension;left+=1){
-          gradient[left]+=x[left]*residual;
-          const weightedLeft=x[left]*variance;
-          for(let right=left;right<dimension;right+=1)hessian[left][right]+=weightedLeft*x[right];
+          gradient[left]=gradient[left]!+x[left]!*residual;
+          const weightedLeft=x[left]!*variance;
+          for(let right=left;right<dimension;right+=1)hessian[left]![right]=hessian[left]![right]!+weightedLeft*x[right]!;
         }
       }
-      for(let left=1;left<dimension;left+=1)for(let right=0;right<left;right+=1)hessian[left][right]=hessian[right][left];
-      for(let index=1;index<dimension;index+=1){hessian[index][index]+=lambda;gradient[index]-=lambda*coefficients[index];}
-      hessian[0][0]+=.05;
+      for(let left=1;left<dimension;left+=1)for(let right=0;right<left;right+=1)hessian[left]![right]=hessian[right]![left]!;
+      for(let index=1;index<dimension;index+=1){hessian[index]![index]=hessian[index]![index]!+lambda;gradient[index]=gradient[index]!-lambda*coefficients[index]!;}
+      hessian[0]![0]=hessian[0]![0]!+.05;
       const step=solveLinearSystem(hessian,gradient);
       if(!step)break;
       let maximumStep=0;
-      for(let index=0;index<dimension;index+=1){const delta=step[index];maximumStep=Math.max(maximumStep,Math.abs(delta));coefficients[index]=clamp(coefficients[index]+delta,-20,20);}
+      for(let index=0;index<dimension;index+=1){const delta=step[index]!;maximumStep=Math.max(maximumStep,Math.abs(delta));coefficients[index]=clamp(coefficients[index]!+delta,-20,20);}
       if(maximumStep<1e-6)break;
     }
     const covariance=hessian&&invertMatrix(hessian);
@@ -693,7 +697,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return {ready:!!covariance,rows:rows.length,positives,negatives:rows.length-positives,coefficients,covariance,lambda};
   }
   function predictRegularizedLogistic(fit:LogisticFit|null|undefined,features:readonly number[],interval=.95){
-    if(!fit||!fit.ready)return {mean:null,low:null,high:null,width:null};
+    if(!fit||!fit.ready||!fit.coefficients||!fit.covariance)return {mean:null,low:null,high:null,width:null};
     const x=[1,...features.map(num)];let eta=0;
     for(let index=0;index<x.length;index+=1)eta+=x[index]*num(fit.coefficients[index]);
     const multiplier=interval>=.95?1.96:1.282;
@@ -721,7 +725,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return CONFIDENCE.strong;
   }
   function confidenceAtLeast(confidence:Confidence|null|undefined,key:keyof typeof COACH_CONFIDENCE_RANK='emerging'){
-    return num(COACH_CONFIDENCE_RANK[confidence&&confidence.key],0)>=num(COACH_CONFIDENCE_RANK[key],1);
+    return num(confidence?COACH_CONFIDENCE_RANK[confidence.key]:0,0)>=num(COACH_CONFIDENCE_RANK[key],1);
   }
   function evidenceMetadata(meta:EvidenceMetadataInput={}){
     const confidence=meta&&meta.confidence&&typeof meta.confidence==='object'?meta.confidence:null;
@@ -804,22 +808,22 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const {
       dateDay,dateFromDay,isIsoDate,taskActual,taskCompleted,taskPlanned
     }=Primitives;
-  function recordTimestamp(record:InsightRecord|null|undefined){
+  function recordTimestamp(record:InsightRecord){
     const n=Date.parse(record&&((record.updatedAt)||(record.savedAt)||(record.createdAt))||'');
-    return Number.isFinite(n)?n:0;
+    return isFiniteNumber(n)?n:0;
   }
-  function recordEvidenceScore(record:InsightRecord|null|undefined){
-    const tasks=Array.isArray(record&&record.tasks)?record.tasks:[];
+  function recordEvidenceScore(record:InsightRecord){
+    const tasks=record.tasks??[];
     const planned=tasks.reduce((sum,t)=>sum+taskPlanned(t),0);
     const actual=tasks.reduce((sum,t)=>sum+taskActual(t),0);
     const completed=tasks.reduce((sum,t)=>sum+taskCompleted(t),0);
-    const practiceUnits=(Array.isArray(record&&record.practiceRuns)?record.practiceRuns:[]).reduce((sum,run)=>sum+(Array.isArray(run&&run.unitMs)?run.unitMs.length:0),0);
+    const practiceUnits=(record.practiceRuns??[]).reduce((sum,run)=>sum+(Array.isArray(run&&run.unitMs)?run.unitMs.length:0),0);
     return tasks.length*1000000+Math.round(planned*1000)+Math.round(actual*100)+Math.round(completed*10)+practiceUnits;
   }
-  function stableCacheValue(value:unknown,seen=new Set<object>()){
+  function stableCacheValue(value:unknown,seen=new Set<object>()):unknown{
     if(value===null||value===undefined)return value===undefined?'[undefined]':null;
     const type=typeof value;
-    if(type==='number')return Number.isFinite(value)?value:String(value);
+    if(type==='number')return isFiniteNumber(value)?value:String(value);
     if(type==='string'||type==='boolean')return value;
     if(type!=='object')return `[${type}]`;
     if(seen.has(value))return '[circular]';
@@ -830,26 +834,26 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     seen.delete(value);
     return normalized;
   }
-  function stableRecordSignature(record:InsightRecord|null|undefined){
+  function stableRecordSignature(record:InsightRecord){
     try{
       return JSON.stringify(stableCacheValue({
-        date:record&&record.date,
-        dayName:record&&record.dayName,
-        savedAt:record&&record.savedAt,
-        updatedAt:record&&record.updatedAt,
-        createdAt:record&&record.createdAt,
-        studyQuality:record&&record.studyQuality,
-        originalPlannedStudyMinutes:record&&record.originalPlannedStudyMinutes,
-        completedEquivalentMinutes:record&&record.completedEquivalentMinutes,
-        actualFocusMinutes:record&&record.actualFocusMinutes,
-        shiftedStudyBlocks:record&&record.shiftedStudyBlocks,
-        totalScheduleShiftMinutes:record&&record.totalScheduleShiftMinutes,
-        netScheduleShiftMinutes:record&&record.netScheduleShiftMinutes,
-        tasks:Array.isArray(record&&record.tasks)?record.tasks:[],
-        originalSchedule:Array.isArray(record&&record.originalSchedule)?record.originalSchedule:[],
-        practiceRuns:Array.isArray(record&&record.practiceRuns)?record.practiceRuns:[]
+        date:record.date,
+        dayName:record.dayName,
+        savedAt:record.savedAt,
+        updatedAt:record.updatedAt,
+        createdAt:record.createdAt,
+        studyQuality:record.studyQuality,
+        originalPlannedStudyMinutes:record.originalPlannedStudyMinutes,
+        completedEquivalentMinutes:record.completedEquivalentMinutes,
+        actualFocusMinutes:record.actualFocusMinutes,
+        shiftedStudyBlocks:record.shiftedStudyBlocks,
+        totalScheduleShiftMinutes:record.totalScheduleShiftMinutes,
+        netScheduleShiftMinutes:record.netScheduleShiftMinutes,
+        tasks:Array.isArray(record.tasks)?record.tasks:[],
+        originalSchedule:Array.isArray(record.originalSchedule)?record.originalSchedule:[],
+        practiceRuns:Array.isArray(record.practiceRuns)?record.practiceRuns:[]
       }));
-    }catch(e){return String(record&&record.date||'');}
+    }catch(e){return String(record.date||'');}
   }
   function chooseCanonicalRecord(existing:InsightRecord|undefined,candidate:InsightRecord){
     if(!existing)return candidate;
@@ -860,15 +864,15 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return stableRecordSignature(candidate)>stableRecordSignature(existing)?candidate:existing;
   }
   function normalizeRecords(records:readonly InsightRecord[]|null|undefined){
-    const byDate=new Map();
-    (Array.isArray(records)?records:[])
+    const byDate=new Map<string,InsightRecord>();
+    (records??[])
       .filter(r=>r&&typeof r==='object'&&isIsoDate(r.date))
       .map(r=>({...r,tasks:Array.isArray(r.tasks)?r.tasks.filter(t=>t&&typeof t==='object'&&taskPlanned(t)>0):[]}))
       .forEach(record=>byDate.set(record.date,chooseCanonicalRecord(byDate.get(record.date),record)));
     return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
   }
   async function normalizeRecordsAsync(records:readonly InsightRecord[]|null|undefined,yieldTask:(()=>unknown|PromiseLike<unknown>)|null=null,batchSize=64){
-    const source=Array.isArray(records)?records:[],byDate=new Map(),size=Math.max(8,Math.min(256,Math.floor(Number(batchSize)||64)));
+    const source=records??[],byDate=new Map<string,InsightRecord>(),size=Math.max(8,Math.min(256,Math.floor(Number(batchSize)||64)));
     for(let start=0;start<source.length;start+=size){
       const end=Math.min(source.length,start+size);
       for(let index=start;index<end;index+=1){
@@ -882,7 +886,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
   }
   function normalizeSummaries(summaries:readonly InsightSummary[]|null|undefined){
-    return (Array.isArray(summaries)?summaries:[]).filter(s=>s&&typeof s==='object'&&isIsoDate(s.date)).sort((a,b)=>a.date.localeCompare(b.date));
+    return (summaries??[]).filter(s=>s&&typeof s==='object'&&isIsoDate(s.date)).sort((a,b)=>a.date.localeCompare(b.date));
   }
   function revisionHash(value:unknown){
     const text=String(value||'');let hash=2166136261;
@@ -896,9 +900,9 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const rows=normalizeSummaries(summaries);
     return `${rows.length}:${revisionHash(JSON.stringify(rows))}`;
   }
-  function insightWindowByKey(key:unknown){
+  function insightWindowByKey(key:unknown):typeof INSIGHT_WINDOW_OPTIONS[number]{
     const clean=String(key||'').toLowerCase();
-    return INSIGHT_WINDOW_OPTIONS.find(option=>option.key===clean)||INSIGHT_WINDOW_OPTIONS.find(option=>option.key===DEFAULT_INSIGHT_WINDOW_KEY)||INSIGHT_WINDOW_OPTIONS[0];
+    return INSIGHT_WINDOW_OPTIONS.find(option=>option.key===clean)||INSIGHT_WINDOW_OPTIONS.find(option=>option.key===DEFAULT_INSIGHT_WINDOW_KEY)||INSIGHT_WINDOW_OPTIONS[0]!;
   }
   function normalizeInsightWindowKey(value:unknown){
     return insightWindowByKey(value).key;
@@ -911,10 +915,10 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     }
     const latestSavedDay=allRecords.length?dateDay(allRecords[allRecords.length-1].date):null;
     const currentDay=isIsoDate(currentStudyDate)?dateDay(currentStudyDate):null;
-    const endDay=Number.isFinite(currentDay)&&Number.isFinite(latestSavedDay)
+    const endDay=isFiniteNumber(currentDay)&&isFiniteNumber(latestSavedDay)
       ? Math.max(currentDay,latestSavedDay)
-      : Number.isFinite(currentDay)?currentDay:latestSavedDay;
-    if(!Number.isFinite(endDay)){
+      : isFiniteNumber(currentDay)?currentDay:latestSavedDay;
+    if(!isFiniteNumber(endDay)){
       return {records:[],key:option.key,label:option.summary,days:option.days,allRecordCount:0,from:null,to:null};
     }
     const startDay=endDay-option.days+1;
@@ -970,7 +974,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return Object.freeze({
       record,
       task,
-      date:record&&record.date||'',
+      date:record.date||'',
       kind,
       subject:subjectLabel(task),
       planned:taskPlanned(task),
@@ -987,11 +991,11 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     });
   }
   function createEvidenceIndex(records:readonly InsightRecord[],classifyTaskOutcome:OutcomeClassifier){
-    const all=[],work=[],support=[],fixed=[];
-    const byRecord=new Map();
-    (Array.isArray(records)?records:[]).forEach(record=>{
-      const groups={all:[],work:[],support:[],fixed:[]};
-      (Array.isArray(record&&record.tasks)?record.tasks:[]).forEach(task=>{
+    const all:EvidenceRow[]=[],work:EvidenceRow[]=[],support:EvidenceRow[]=[],fixed:EvidenceRow[]=[];
+    const byRecord=new Map<InsightRecord,EvidenceGroups>();
+    records.forEach(record=>{
+      const groups:{all:EvidenceRow[];work:EvidenceRow[];support:EvidenceRow[];fixed:EvidenceRow[]}={all:[],work:[],support:[],fixed:[]};
+      (record.tasks??[]).forEach(task=>{
         const kind=taskKind(task);
         if(record.degraded===true&&kind!=='fixed'&&(!taskHasCompletionEvidence(task)||!taskHasActualEvidence(task)))return;
         const row=createEvidenceRow(record,task,kind,classifyTaskOutcome);
@@ -1001,10 +1005,10 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
         else {fixed.push(row);groups.fixed.push(row);}
       });
       if(!groups.fixed.length){
-        (Array.isArray(record&&record.originalSchedule)?record.originalSchedule:[])
+        (record.originalSchedule??[])
           .filter(row=>taskKind(row)==='fixed')
           .forEach(scheduleRow=>{
-            const task={...scheduleRow,kind:'fixed',completion:null,actualSeconds:null};
+            const task:InsightTask={...scheduleRow,kind:'fixed',completion:null,actualSeconds:null};
             const row=createEvidenceRow(record,task,'fixed',classifyTaskOutcome);
             all.push(row);fixed.push(row);groups.all.push(row);groups.fixed.push(row);
           });
@@ -1030,15 +1034,15 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function rowsActual(rows:readonly EvidenceRow[]){return rows.reduce((sum,row)=>sum+row.actual,0);}
   function recordRows(evidence:EvidenceIndex,record:InsightRecord,kind:keyof EvidenceGroups){return evidence.byRecord.get(record)![kind];}
   function taskPauseEvents(task:InsightTask|null|undefined){
-    return Array.isArray(task&&task.pauseEvents)?task.pauseEvents
-      .map(ev=>{
+    return task?.pauseEvents?task.pauseEvents
+      .map((ev):NormalizedPauseEvent=>{
         const row=(ev&&typeof ev==='object')?ev:{};
         const type=canonical(row.type||row.reason||'manual');
         const rawPlanned=Number(row.plannedSeconds);
         return {
           type:type==='pomodoro'?'pomodoro':type==='inactive-gap'?'inactive-gap':'manual',
           seconds:Math.max(0,num(row.seconds)),
-          plannedSeconds:Number.isFinite(rawPlanned)&&rawPlanned>0?rawPlanned:null
+          plannedSeconds:isFiniteNumber(rawPlanned)&&rawPlanned>0?rawPlanned:null
         };
       })
       .filter(ev=>ev.seconds>0):[];
@@ -1058,7 +1062,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       const timerBackedPlanned=rowsPlanned(timerBacked);
       return {
         date:record.date,
-        day:dateDay(record.date),
+        day:dateDay(record.date)!,
         dayName:record.dayName||dayName(record.date),
         planned,
         completed,
@@ -1073,9 +1077,9 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     });
   }
   function rollingAverage(rows:readonly DailySeriesRow[],key:'completion',windowSize:number){
-    const eligible=[];
+    const eligible:number[]=[];
     return rows.map(row=>{
-      if(Number.isFinite(row&&row[key]))eligible.push(row[key]);
+      if(isFiniteNumber(row&&row[key]))eligible.push(row[key]);
       const slice=eligible.slice(-Math.max(1,windowSize));
       return {...row,value:slice.length?round(slice.reduce((a,b)=>a+b,0)/slice.length,1):null};
     });
@@ -1091,8 +1095,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     });
     const lastDay=days.length?days[days.length-1]:null;
     const today=dateDay(isIsoDate(currentStudyDate)?currentStudyDate:localIsoDate());
-    const daysSinceLast=Number.isFinite(today)&&Number.isFinite(lastDay)?today-lastDay:null;
-    const isCurrent=Number.isFinite(daysSinceLast)&&daysSinceLast>=0&&daysSinceLast<=1;
+    const daysSinceLast=isFiniteNumber(today)&&isFiniteNumber(lastDay)?today-lastDay:null;
+    const isCurrent=isFiniteNumber(daysSinceLast)&&daysSinceLast>=0&&daysSinceLast<=1;
     return {
       current:isCurrent?latest:0,
       latest,
@@ -1120,7 +1124,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const savedDates=new Set();
     const inReferenceRange=(date:unknown)=>{
       const day=dateDay(date);
-      return Number.isFinite(day)&&(!Number.isFinite(referenceStartDay)||day>=referenceStartDay)&&(!Number.isFinite(referenceDay)||day<=referenceDay);
+      return isFiniteNumber(day)&&(!isFiniteNumber(referenceStartDay)||day>=referenceStartDay)&&(!isFiniteNumber(referenceDay)||day<=referenceDay);
     };
     const add=(date:string,rawLabel:unknown,planned:number,completed:number,actual=0,activityBlocks=0)=>{
       if(!inReferenceRange(date)||!(planned>0||completed>0||actual>0||activityBlocks>0))return;
@@ -1128,7 +1132,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       const label=topLevelAreaLabel(rawLabel);
       const key=canonical(label);
       if(!map.has(key))map.set(key,{label,days:new Set(),activityDays:new Set(),planned:0,completed:0,actual:0,activityBlocks:0,lastDate:null});
-      const row=map.get(key);
+      const row=map.get(key)!;
       row.days.add(date);
       row.planned+=planned;
       row.completed+=completed;
@@ -1167,16 +1171,16 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const firstDay=records.length?dateDay(records[0].date):null;
     const latestDay=records.length?dateDay(records[records.length-1].date):null;
     const requestedReferenceDay=isIsoDate(currentStudyDate)?dateDay(currentStudyDate):null;
-    const referenceDay=Number.isFinite(requestedReferenceDay)&&Number.isFinite(latestDay)
+    const referenceDay=isFiniteNumber(requestedReferenceDay)&&isFiniteNumber(latestDay)
       ? Math.max(requestedReferenceDay,latestDay)
-      : Number.isFinite(requestedReferenceDay)?requestedReferenceDay:latestDay;
-    const referenceStartDay=Number.isFinite(referenceDay)?referenceDay-COVERAGE_WATCH_REFERENCE_DAYS+1:null;
+      : isFiniteNumber(requestedReferenceDay)?requestedReferenceDay:latestDay;
+    const referenceStartDay=isFiniteNumber(referenceDay)?referenceDay-COVERAGE_WATCH_REFERENCE_DAYS+1:null;
     evidence.work.forEach(evidenceRow=>{
       const {record}=evidenceRow;
       const label=evidenceRow.subject;
       const key=canonical(label);
       if(!map.has(key))map.set(key,emptySubject(label));
-      const row=map.get(key);
+      const row=map.get(key)!;
       row.blocks+=1;
       row.days.add(record.date);
       row.planned+=evidenceRow.planned;
@@ -1191,7 +1195,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
         row.pairedSources[evidenceRow.source]=(row.pairedSources[evidenceRow.source]||0)+1;
       }
       const recordDay=dateDay(record.date);
-      if(Number.isFinite(recordDay)&&(!Number.isFinite(referenceStartDay)||recordDay>=referenceStartDay)&&(!Number.isFinite(referenceDay)||recordDay<=referenceDay)){
+      if(isFiniteNumber(recordDay)&&(!isFiniteNumber(referenceStartDay)||recordDay>=referenceStartDay)&&(!isFiniteNumber(referenceDay)||recordDay<=referenceDay)){
         row.watchBlocks+=1;
         row.watchDays.add(record.date);
         row.watchPlanned+=evidenceRow.planned;
@@ -1241,7 +1245,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       const watchActualShare=pct0(row.watchActual,totalWatchActual);
       const watchCompletion=pct(row.watchCompleted,row.watchPlanned);
       const underAllocation=Math.min(100,Math.max(0,historicalPlannedShare-Math.max(watchActualShare,watchOutputShare))*3);
-      const lowCompletion=row.watchBlocks>0&&Number.isFinite(watchCompletion)?Math.max(0,75-watchCompletion)*0.65:0;
+      const lowCompletion=row.watchBlocks>0&&isFiniteNumber(watchCompletion)?Math.max(0,75-watchCompletion)*0.65:0;
       const coverageWatchEligible=!!ref;
       const windowAbsent=row.blocks===0&&coverageWatchEligible;
       const absencePressure=windowAbsent?100:0;
@@ -1266,7 +1270,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     evidence.work.forEach(evidenceRow=>{
       const key=evidenceRow.source;
       if(!map.has(key))map.set(key,{key,label:completionSourceLabel(key),group:evidenceRow.evidenceGroup,blocks:0,planned:0,completed:0,actual:0});
-      const row=map.get(key);
+      const row=map.get(key)!;
       row.blocks+=1;
       row.planned+=evidenceRow.planned;
       row.completed+=evidenceRow.completed;
@@ -1287,7 +1291,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       skipped:{key:'skipped',label:'Skipped',blocks:0,planned:0}
     };
     evidence.work.forEach(row=>{
-      const item=rows[row.evidenceGroup]||rows.missing;
+      const item=rows[row.evidenceGroup];
       item.blocks+=1;
       item.planned+=row.planned;
     });
@@ -1304,18 +1308,18 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     };
   }
   function startDelayBucketFor(minutes:number|null){
-    if(!Number.isFinite(minutes))return null;
+    if(!isFiniteNumber(minutes))return null;
     return START_DELAY_BUCKETS.find(bucket=>minutes>bucket.min&&minutes<=bucket.max)||null;
   }
   function computeStartDelayBuckets(evidence:EvidenceIndex){
-    const map=new Map(START_DELAY_BUCKETS.map(bucket=>[bucket.id,{...bucket,blocks:0,planned:0,completed:0,actual:0,skipped:0,outcomeCounts:emptyOutcomeCounts(),delays:[]} ]));
+    const map=new Map(START_DELAY_BUCKETS.map(bucket=>[bucket.id,{...bucket,blocks:0,planned:0,completed:0,actual:0,skipped:0,outcomeCounts:emptyOutcomeCounts(),delays:Array<number>()}]));
     evidence.work.forEach(evidenceRow=>{
       const {task}=evidenceRow;
       const delay=startDelayMinutes(task);
-      if(!Number.isFinite(delay))return;
+      if(!isFiniteNumber(delay))return;
       const bucket=startDelayBucketFor(delay);
       if(!bucket)return;
-      const row=map.get(bucket.id);
+      const row=map.get(bucket.id)!;
       row.blocks+=1;
       row.planned+=evidenceRow.planned;
       row.completed+=evidenceRow.completed;
@@ -1326,8 +1330,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     });
     return [...map.values()].map(row=>({
       ...row,
-      min:Number.isFinite(row.min)?row.min:null,
-      max:Number.isFinite(row.max)?row.max:null,
+      min:isFiniteNumber(row.min)?row.min:null,
+      max:isFiniteNumber(row.max)?row.max:null,
       completion:pct(row.completed,row.planned),
       averageDelay:row.delays.length?Math.round(mean(row.delays)):null
     }));
@@ -1348,11 +1352,11 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       recordRows(evidence,record,'work').forEach((evidenceRow,index)=>{
         const {task}=evidenceRow;
         const rawOrdinal=num(task.studyOrdinal,null);
-        const ordinal=Number.isFinite(rawOrdinal)&&rawOrdinal>0?Math.round(rawOrdinal):index+1;
+        const ordinal=isFiniteNumber(rawOrdinal)&&rawOrdinal>0?Math.round(rawOrdinal):index+1;
         const key=blockOrderKey(ordinal);
         const label=key.endsWith('+')?`${ordinalLabel(MAX_EXPLICIT_BLOCK_ORDER+1)}+`:ordinalLabel(Number(key));
         if(!map.has(key))map.set(key,{key,label,sort:Math.min(ordinal,MAX_EXPLICIT_BLOCK_ORDER+1),blocks:0,planned:0,completed:0,actual:0,timerBackedBlocks:0,timerBackedActual:0,skipped:0,outcomeCounts:emptyOutcomeCounts()});
-        const row=map.get(key);
+        const row=map.get(key)!;
         row.blocks+=1;
         row.planned+=evidenceRow.planned;
         row.completed+=evidenceRow.completed;
@@ -1472,8 +1476,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
         row.seconds+=friction;
         const taskIdentity=task&&task.id
           ? task.id
-          : Number.isFinite(Number(task&&task.idx))?`idx:${Number(task.idx)}`:`row:${index}:${task&&task.name||'block'}`;
-        row.blocks.add(`${record&&record.date||'unknown-date'}|${taskIdentity}`);
+          : isFiniteNumber(Number(task&&task.idx))?`idx:${Number(task.idx)}`:`row:${index}:${task&&task.name||'block'}`;
+        row.blocks.add(`${record.date||'unknown-date'}|${taskIdentity}`);
       });
     });
     const totalSeconds=rows.reduce((sum,row)=>sum+row.seconds,0);
@@ -1491,7 +1495,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     const timerBacked=work.filter(row=>row.timerBacked);
     const pauseEligible=timerBacked.length;
     const eventBlocks=timerBacked.filter(row=>row.pauseEvents.length>0).length;
-    const startEvidenceBlocks=work.filter(({task})=>Number.isFinite(actualStartMinuteEvidence(task).minute)).length;
+    const startEvidenceBlocks=work.filter(({task})=>isFiniteNumber(actualStartMinuteEvidence(task).minute)).length;
     const timerBackedPlanned=rowsPlanned(timerBacked);
     const plannedWork=rowsPlanned(work);
     return {
@@ -1565,7 +1569,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     if(sd>=14)return {label:'Mixed',tone:'quiet'};
     return {label:'Stable',tone:'quiet'};
   }
-  function progressEvidenceStrength(progress:ProgressEvidence|null|undefined){
+  function progressEvidenceStrength(progress:ProgressEvidence){
     const total=num(progress&&progress.total);
     if(!total)return {label:'No progress evidence',tone:'low',note:'Save work completion to establish evidence quality.'};
     const explicit=Math.round(num(progress.explicitRate));
@@ -1575,12 +1579,12 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   }
   function computeAdvanced(daily:readonly DailySeriesRow[],trendDaily:readonly DailySeriesRow[]=daily){
     const completionValues=daily.map(d=>d.completion).filter(Number.isFinite);
-    const qualityPairs=daily.filter(d=>Number.isFinite(d.quality)&&Number.isFinite(d.completion));
+    const qualityPairs=daily.filter(d=>isFiniteNumber(d.quality)&&isFiniteNumber(d.completion));
     const directionalRows=Array.isArray(trendDaily)?trendDaily:daily;
     const trendCompletionValues=directionalRows.map(d=>d.completion).filter(Number.isFinite);
-    const completionSlope=regressionSlope(directionalRows.filter(d=>Number.isFinite(d.completion)).map(d=>({x:d.day,y:d.completion})));
-    const actualSlope=regressionSlope(directionalRows.filter(d=>Number.isFinite(d.actual)).map(d=>({x:d.day,y:d.actual})));
-    const plannedSlope=regressionSlope(directionalRows.filter(d=>Number.isFinite(d.planned)).map(d=>({x:d.day,y:d.planned})));
+    const completionSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.completion)).map(d=>({x:d.day,y:d.completion})));
+    const actualSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.actual)).map(d=>({x:d.day,y:d.actual})));
+    const plannedSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.planned)).map(d=>({x:d.day,y:d.planned})));
     const completionSd=stdev(completionValues);
     const completionSdRounded=completionSd===null?null:round(completionSd,1);
     const qualityCorrelation=correlation(qualityPairs.map(d=>d.quality),qualityPairs.map(d=>d.completion));
@@ -1599,18 +1603,18 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     };
   }
   function computeQualityEvidence(daily:readonly DailySeriesRow[]){
-    const map=new Map();
-    (Array.isArray(daily)?daily:[]).forEach(row=>{
+    const map=new Map<string,{rating:string;days:number;completionValues:number[];trackedActualValues:number[];planned:number;timerBackedPlanned:number}>();
+    daily.forEach(row=>{
       const rating=Number(row&&row.quality);
-      if(!Number.isFinite(rating)||rating<1)return;
+      if(!isFiniteNumber(rating)||rating<1)return;
       const key=String(Math.round(rating));
       if(!map.has(key))map.set(key,{rating:key,days:0,completionValues:[],trackedActualValues:[],planned:0,timerBackedPlanned:0});
       const item=map.get(key);
       item.days+=1;
-      if(Number.isFinite(row.completion))item.completionValues.push(row.completion);
+      if(isFiniteNumber(row.completion))item.completionValues.push(row.completion);
       item.planned+=Math.max(0,num(row.planned));
       item.timerBackedPlanned+=Math.max(0,num(row.timerBackedPlanned));
-      if(num(row.timerBackedBlocks)>0&&Number.isFinite(row.actual))item.trackedActualValues.push(row.actual);
+      if(num(row.timerBackedBlocks)>0&&isFiniteNumber(row.actual))item.trackedActualValues.push(row.actual);
     });
     return [...map.values()].sort((a,b)=>Number(a.rating)-Number(b.rating)).map(row=>({
       rating:row.rating,
