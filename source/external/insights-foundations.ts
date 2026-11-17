@@ -535,11 +535,11 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function stdev(values:readonly number[]){
     const clean=values.filter(v=>isFiniteNumber(v));
     if(clean.length<2)return null;
-    const m=mean(clean);
+    const m=mean(clean)!;
     return Math.sqrt(clean.reduce((sum,v)=>sum+Math.pow(v-m,2),0)/(clean.length-1));
   }
   function robustScale(values:readonly number[]){
-    const clean=(Array.isArray(values)?values:[]).filter(Number.isFinite);
+    const clean=(Array.isArray(values)?values:[]).filter(isFiniteNumber);
     if(clean.length<2)return null;
     const centre=median(clean)!;
     return 1.4826*num(median(clean.map(value=>Math.abs(value-centre))));
@@ -597,7 +597,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   }
   function logBeta(left:number,right:number){return logGamma(left)+logGamma(right)-logGamma(left+right);}
   function logSumExp(values:readonly number[]){
-    const clean=(Array.isArray(values)?values:[]).filter(Number.isFinite);
+    const clean=(Array.isArray(values)?values:[]).filter(isFiniteNumber);
     if(!clean.length)return -Infinity;
     const maximum=Math.max(...clean);
     return maximum+Math.log(sum(clean.map(value=>Math.exp(value-maximum))));
@@ -698,8 +698,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   }
   function predictRegularizedLogistic(fit:LogisticFit|null|undefined,features:readonly number[],interval=.95){
     if(!fit||!fit.ready||!fit.coefficients||!fit.covariance)return {mean:null,low:null,high:null,width:null};
-    const x=[1,...features.map(num)];let eta=0;
-    for(let index=0;index<x.length;index+=1)eta+=x[index]*num(fit.coefficients[index]);
+    const x=[1,...features.map(value=>num(value))];let eta=0;
+    for(let index=0;index<x.length;index+=1)eta+=x[index]!*num(fit.coefficients[index]);
     const multiplier=interval>=.95?1.96:1.282;
     const standardError=Math.sqrt(Math.max(0,quadraticForm(x,fit.covariance)));
     const low=sigmoid(eta-multiplier*standardError),high=sigmoid(eta+multiplier*standardError);
@@ -725,7 +725,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return CONFIDENCE.strong;
   }
   function confidenceAtLeast(confidence:Confidence|null|undefined,key:keyof typeof COACH_CONFIDENCE_RANK='emerging'){
-    return num(confidence?COACH_CONFIDENCE_RANK[confidence.key]:0,0)>=num(COACH_CONFIDENCE_RANK[key],1);
+    return num(confidence?(COACH_CONFIDENCE_RANK[confidence.key]??0):0,0)>=num(COACH_CONFIDENCE_RANK[key]??1,1);
   }
   function evidenceMetadata(meta:EvidenceMetadataInput={}){
     const confidence=meta&&meta.confidence&&typeof meta.confidence==='object'?meta.confidence:null;
@@ -780,7 +780,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function jensenShannonDivergence(left:readonly number[],right:readonly number[]){
     const p=Array.isArray(left)?left:[],q=Array.isArray(right)?right:[];
     if(!p.length||p.length!==q.length)return null;
-    const kl=(a:readonly number[],b:readonly number[])=>a.reduce((total,value,index)=>value>0&&b[index]>0?total+value*log2(value/b[index]):total,0);
+    const kl=(a:readonly number[],b:readonly number[])=>a.reduce((total,value,index)=>value>0&&b[index]!>0?total+value*log2(value/b[index]!):total,0);
     const midpoint=p.map((value,index)=>(value+q[index])/2);
     return Math.max(0,Math.min(1,(kl(p,midpoint)+kl(q,midpoint))/2));
   }
@@ -913,7 +913,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       const to=allRecords[allRecords.length-1]?.date||null;
       return {records:allRecords,key:option.key,label:option.summary,days:option.days,allRecordCount:allRecords.length,from:null,to};
     }
-    const latestSavedDay=allRecords.length?dateDay(allRecords[allRecords.length-1].date):null;
+    const latestSavedDay=allRecords.length?dateDay(allRecords[allRecords.length-1]!.date):null;
     const currentDay=isIsoDate(currentStudyDate)?dateDay(currentStudyDate):null;
     const endDay=isFiniteNumber(currentDay)&&isFiniteNumber(latestSavedDay)
       ? Math.max(currentDay,latestSavedDay)
@@ -1079,13 +1079,14 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
   function rollingAverage(rows:readonly DailySeriesRow[],key:'completion',windowSize:number){
     const eligible:number[]=[];
     return rows.map(row=>{
-      if(isFiniteNumber(row&&row[key]))eligible.push(row[key]);
+      const value=row[key];
+      if(isFiniteNumber(value))eligible.push(value);
       const slice=eligible.slice(-Math.max(1,windowSize));
       return {...row,value:slice.length?round(slice.reduce((a,b)=>a+b,0)/slice.length,1):null};
     });
   }
   function computeStreakFromDays(dayList:readonly (number|null)[],currentStudyDate:unknown){
-    const days=[...new Set((Array.isArray(dayList)?dayList:[]).filter(Number.isFinite))]
+    const days=[...new Set((Array.isArray(dayList)?dayList:[]).filter(isFiniteNumber))]
       .sort((a,b)=>a-b);
     let longest=0,latest=0,current=0;
     days.forEach((day,index)=>{
@@ -1112,12 +1113,12 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return computeStreakFromDays(evidence.records
       .filter(r=>recordRows(evidence,r,'work').some(evidenceRowShowsStudyActivity))
       .map(r=>dateDay(r.date))
-      .filter(Number.isFinite),currentStudyDate);
+      .filter(isFiniteNumber),currentStudyDate);
   }
   function computeSummaryStreak(summaries:readonly InsightSummary[],currentStudyDate:unknown){
-    return computeStreakFromDays(summaries.filter(s=>num(s.completedMinutes)>0||num(s.actualTrackedMinutes)>0||['full','partial','finished-unverified','zero-output'].some(key=>num(s.outcomeCounts&&s.outcomeCounts[key])>0))
+    return computeStreakFromDays(summaries.filter(s=>num(s.completedMinutes)>0||num(s.actualTrackedMinutes)>0||(['full','partial','finished-unverified','zero-output'] as const).some(key=>num(s.outcomeCounts?.[key])>0))
       .map(s=>dateDay(s.date))
-      .filter(Number.isFinite),currentStudyDate);
+      .filter(isFiniteNumber),currentStudyDate);
   }
   function computeSubjectReference(summaries:readonly InsightSummary[],evidence:EvidenceIndex,referenceStartDay:number|null,referenceDay:number|null){
     const map=new Map();
@@ -1168,8 +1169,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     });
     const records=evidence.records;
     const savedDays=Math.max(1,records.length);
-    const firstDay=records.length?dateDay(records[0].date):null;
-    const latestDay=records.length?dateDay(records[records.length-1].date):null;
+    const firstDay=records.length?dateDay(records[0]!.date):null;
+    const latestDay=records.length?dateDay(records[records.length-1]!.date):null;
     const requestedReferenceDay=isIsoDate(currentStudyDate)?dateDay(currentStudyDate):null;
     const referenceDay=isFiniteNumber(requestedReferenceDay)&&isFiniteNumber(latestDay)
       ? Math.max(requestedReferenceDay,latestDay)
@@ -1227,8 +1228,9 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       const completion=pct(row.completed,row.planned);
       const share=pct(row.completed,totalCompleted);
       const plannedShare=pct0(row.planned,totalPlanned);
-      const lastDate=[row.lastDate,ref&&ref.lastDate].filter(Boolean).sort().pop()||null;
-      const daysSinceLast=referenceDay!==null&&lastDate?Math.max(0,referenceDay-dateDay(lastDate)):null;
+      const lastDate=[row.lastDate,ref&&ref.lastDate].filter((value):value is string=>typeof value==='string'&&value.length>0).sort().pop()||null;
+      const lastDay=lastDate?dateDay(lastDate):null;
+      const daysSinceLast=isFiniteNumber(referenceDay)&&isFiniteNumber(lastDay)?Math.max(0,referenceDay-lastDay):null;
       const neverStudied=!lastDate;
       const historicalPlanned=ref?ref.planned:0;
       const historicalDays=ref?ref.dayCount:0;
@@ -1333,7 +1335,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       min:isFiniteNumber(row.min)?row.min:null,
       max:isFiniteNumber(row.max)?row.max:null,
       completion:pct(row.completed,row.planned),
-      averageDelay:row.delays.length?Math.round(mean(row.delays)):null
+      averageDelay:row.delays.length?Math.round(mean(row.delays)!):null
     }));
   }
   function ordinalLabel(n:unknown){
@@ -1578,10 +1580,10 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return {label:`${explicit}% explicit`,tone,note:`${progress.timeDerivedBlocks} time-derived · ${weak} unverified or missing.`};
   }
   function computeAdvanced(daily:readonly DailySeriesRow[],trendDaily:readonly DailySeriesRow[]=daily){
-    const completionValues=daily.map(d=>d.completion).filter(Number.isFinite);
+    const completionValues=daily.map(d=>d.completion).filter(isFiniteNumber);
     const qualityPairs=daily.filter(d=>isFiniteNumber(d.quality)&&isFiniteNumber(d.completion));
     const directionalRows=Array.isArray(trendDaily)?trendDaily:daily;
-    const trendCompletionValues=directionalRows.map(d=>d.completion).filter(Number.isFinite);
+    const trendCompletionValues=directionalRows.map(d=>d.completion).filter(isFiniteNumber);
     const completionSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.completion)).map(d=>({x:d.day,y:d.completion})));
     const actualSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.actual)).map(d=>({x:d.day,y:d.actual})));
     const plannedSlope=regressionSlope(directionalRows.filter(d=>isFiniteNumber(d.planned)).map(d=>({x:d.day,y:d.planned})));
@@ -1592,7 +1594,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       completionSlopePerWeek:completionSlope===null?null:round(completionSlope*7,1),
       actualSlopePerWeek:actualSlope===null?null:Math.round(actualSlope*7),
       plannedSlopePerWeek:plannedSlope===null?null:Math.round(plannedSlope*7),
-      completionMean:mean(completionValues)===null?null:round(mean(completionValues),1),
+      completionMean:completionValues.length?round(mean(completionValues)!,1):null,
       completionSd:completionSdRounded,
       completionDayCount:completionValues.length,
       trendCompletionDayCount:trendCompletionValues.length,
@@ -1609,7 +1611,7 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
       if(!isFiniteNumber(rating)||rating<1)return;
       const key=String(Math.round(rating));
       if(!map.has(key))map.set(key,{rating:key,days:0,completionValues:[],trackedActualValues:[],planned:0,timerBackedPlanned:0});
-      const item=map.get(key);
+      const item=map.get(key)!;
       item.days+=1;
       if(isFiniteNumber(row.completion))item.completionValues.push(row.completion);
       item.planned+=Math.max(0,num(row.planned));
@@ -1619,8 +1621,8 @@ type ProgressEvidence=Readonly<{total:number;explicitBlocks:number;timeDerivedBl
     return [...map.values()].sort((a,b)=>Number(a.rating)-Number(b.rating)).map(row=>({
       rating:row.rating,
       days:row.days,
-      averageCompletion:row.completionValues.length?round(mean(row.completionValues),1):null,
-      averageActual:row.trackedActualValues.length?Math.round(mean(row.trackedActualValues)):null,
+      averageCompletion:row.completionValues.length?round(mean(row.completionValues)!,1):null,
+      averageActual:row.trackedActualValues.length?Math.round(mean(row.trackedActualValues)!):null,
       trackedDays:row.trackedActualValues.length,
       timerCoverage:pct(row.timerBackedPlanned,row.planned)
     }));
