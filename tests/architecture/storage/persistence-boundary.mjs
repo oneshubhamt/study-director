@@ -18,8 +18,8 @@ assert.doesNotMatch(codecs,/sanitizeCurrentSyncMetadata|sanitizeHistoricalSyncMe
 assert.doesNotMatch(notes,/meta\.put\('noteRecoveryPrefix'/u,'Notes save straight to their canonical rows and never journal edits in appMeta');
 assert.match(notes,/async function idbApplyDelta[\s\S]*?idbStrictTransaction\(\[DB_NOTES_STORE,DB_APP_META_STORE\],'readwrite'/,'canonical note commits and deletion markers must share one strict transaction');
 
-assert.match(app,/async function contentBackupSnapshotRevision\(\)[\s\S]*AppData\.dailyRecords\.datasetRevision\(\)[\s\S]*PlanData\.exportData\(\{flush:false\}\)[\s\S]*AttachmentStorage\.list\(\)/,'the legacy heavyweight fence must remain available as a conservative fallback');
-assert.match(app,/async function backupSnapshotRevision\(options=\{\}\)[\s\S]*options&&options\.legacy===true[\s\S]*AppData\.mutationEpoch\.eligible\(\)[\s\S]*study-director\.fast-capture-fence\.v1/,'healthy backup fencing must use the constant-size epoch/generation guard and fail back to the legacy fence when explicitly requested or ineligible');
+assert.match(app,/async function contentBackupSnapshotRevision\(\)[\s\S]*AppData\.dailyRecords\.datasetRevision\(\)[\s\S]*PlanData\.exportData\(\{flush:false\}\)[\s\S]*AttachmentStorage\.list\(\)/,'the full-content fence must remain available as a conservative fallback');
+assert.match(app,/async function backupSnapshotRevision\(options=\{\}\)[\s\S]*options&&options\.full===true[\s\S]*AppData\.mutationEpoch\.eligible\(\)[\s\S]*study-director\.fast-capture-fence\.v1/,'healthy backup fencing must use the constant-size epoch/generation guard and fall back to the full-content fence when explicitly requested or ineligible');
 assert.match(app,/captureMutationGeneration\+\+/,'in-process textarea mutations must advance the local capture generation before canonical persistence necessarily settles');
 assert.match(app,/markReady:async\(\)=>\{[\s\S]*backupFastFenceReady=false;[\s\S]*AppData\.mutationEpoch\.reseed\(\)[\s\S]*backupFastFenceReady=true/,'the fast fence must activate only after startup completes its census and successfully reseeds the durable epoch');
 
