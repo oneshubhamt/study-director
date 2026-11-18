@@ -6,9 +6,9 @@ import fs from 'node:fs';
 import {launchChromium,startReleaseServer,instrumentedHtml,waitForStudyDirector,waitFor} from '../../helpers/browser-harness.mjs';
 
 const server=await startReleaseServer(),browser=await launchChromium({profilePrefix:'qa-exports-'});
-server.setOverride('deployment','exports-fixture.html',instrumentedHtml('deployment',{expose:['Exports', 'NoteExporter', 'BackupCodec:RuntimeBackupCodec']}).replace('configure:options=>Interactions.configure(options)',configureFixtureHook));
+server.setOverride('deployment','exports-fixture.html',instrumentedHtml('deployment',{expose:['Exports','NoteExporter','BackupCodec']}).replace('configure:options=>Interactions.configure(options)',configureFixtureHook));
 const preload=`window.chooseIncomingBackup=${chooseIncomingBackup.toString()};(()=>{
-  const date=new Date(),today=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Export QA',updatedAt:date.toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));
+(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));
   const NativeWorker=Worker;window.workerCounts={started:0,live:0,messages:0};
   window.Worker=class extends NativeWorker{
     constructor(url,options){if(options?.name==='study-director-exports'&&window.failWorker)throw new Error('Injected worker startup failure');super(url,options);this.exports=options?.name==='study-director-exports';if(this.exports){workerCounts.started++;workerCounts.live++;}}
@@ -22,6 +22,8 @@ let page;const result={status:'PASS',suite:'exports',checks:{}};
 try{
   page=await browser.createPage(server.url('deployment','exports-fixture.html'),{preload,viewport:{width:1200,height:850}});
   try{await waitForStudyDirector(page,{instrumented:true,timeout:10000});}catch(error){console.log(JSON.stringify({events:page.events,body:await page.evaluate('document.body.innerText.slice(-1000)')}));throw error;}await waitFor(()=>page.evaluate('__PWA6.AppOwnership.status().hasControl'));
+  await page.evaluate(`(()=>{document.getElementById('profile-tag').click();document.getElementById('profile-name-button').click();const input=document.getElementById('profile-name-input');input.value='Export QA';input.blur();document.querySelector('[data-action="close-profile"]').click();})()`);
+  await waitFor(()=>page.evaluate(`document.querySelector('.profile-tag-name').textContent==='Export QA'`),{label:'renamed export profile'});
   assert.equal(await page.evaluate('workerCounts.started'),0,'export worker stays cold at startup');
   await page.evaluate(`__PWA6.goTab('library');__PWA6.LibraryView.showSection('data');document.querySelectorAll('details').forEach(el=>el.open=true);document.getElementById('download-backup').scrollIntoView()`);
   // Export backup opens the save dialog straight from the click, writes the
@@ -103,12 +105,11 @@ try{
   const safety=await page.evaluate(`(async()=>{
     const d=__PWA6,before=d.AppData.notes.get('History').text,bytes=new Uint8Array(await fixtureBackup.blob.arrayBuffer());bytes[bytes.length-1]^=1;let rejected=false;
     try{await d.BackupController.inspect(new Blob([bytes]),{filename:'corrupt.sdbackup'});}catch(error){rejected=/integrity/.test(error.message);}
-    const unchanged=d.AppData.notes.get('History').text===before;
-    const legacy=new Blob([JSON.stringify({version:6,records:[],areaNotes:{History:{...d.AppData.notes.get('History'),text:'Legacy plain note',syncStatus:'synced'}}})],{type:'application/json'});
-    await d.AppData.notes.remove('History');await d.AppData.notes.flush();const candidate=await d.BackupController.inspect(legacy,{filename:'legacy.json'});window.restoreChoices=chooseIncomingBackup;
-    const click=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){};
-    try{await d.BackupController.restore(candidate);return {rejected,unchanged,legacy:candidate.preview.legacy,legacyRestored:d.AppData.notes.get('History').text==='Legacy plain note',workersRemaining:workerCounts.live};}finally{HTMLAnchorElement.prototype.click=click;delete window.restoreChoices;}
-  })()`);assert.equal(safety.rejected,true);assert.equal(safety.unchanged,true);assert.equal(safety.legacy,true);assert.equal(safety.legacyRestored,true);assert.equal(safety.workersRemaining,0);result.checks.corruptAndLegacyRestore=safety;
+    const obsolete=new Blob([JSON.stringify({version:6,records:[],areaNotes:{History:{text:'Old backup note'}}})],{type:'application/json'});
+    let obsoleteRejected=false;
+    try{await d.BackupController.inspect(obsolete,{filename:'old.json'});}catch(error){obsoleteRejected=/not a Study Director backup/.test(error.message);}
+    return {rejected,obsoleteRejected,unchanged:d.AppData.notes.get('History').text===before,workersRemaining:workerCounts.live};
+  })()`);assert.deepEqual(safety,{rejected:true,obsoleteRejected:true,unchanged:true,workersRemaining:0});result.checks.corruptAndObsoleteFilesRefused=safety;
   const parity=await page.evaluate(`(async()=>{
     const api=StudyDirectorRichText,values=['plain \u03b1 ** text','WG1:'+JSON.stringify({version:1,doc:{type:'Doc',content:[{type:'Heading',param:2,content:[{type:'Text',param:'Title'}]},{type:'Blockquote',content:[{type:'Paragraph',content:[{type:'Text',param:'Quoted',marks:{Emphasis:true}}]}]}]}})];
     return await __PWA6.Exports.job(async()=>{for(const value of values){const {doc,text}=api.exportDocument(value),actual=await __PWA6.Exports.run('markdown',{doc,text,paths:{}});if(actual!==api.toMarkdown(value))return false;}return true;});

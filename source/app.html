@@ -416,8 +416,7 @@
   const owns=(record,value)=>Object.prototype.hasOwnProperty.call(record,value);
   const safePresentationId=value=>String(value||'').trim().toLowerCase().match(presentationIdPattern)?.[0]||'';
   const normalizeThemeId=value=>{
-    const raw=String(value||'').trim();
-    const candidate=raw;
+    const candidate=String(value||'').trim();
     return owns(manifest.themes,candidate)?candidate:manifest.defaults.theme;
   };
   const normalizePresentationId=value=>{
@@ -1178,7 +1177,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
                   <span id="file-processing-status" class="ui-status" role="status" aria-live="polite"></span>
                 </div>
                 <div class="backup-inline-note ui-helper" id="backup-file-status" role="status" aria-live="polite" hidden></div>
-                <input aria-label="Import a Study Director backup file" class="file-input" type="file" id="import-file" accept=".sdbackup,.sdbackup.gz,.json,application/json,application/gzip" data-change="import-backup">
+                <input aria-label="Import a Study Director backup file" class="file-input" type="file" id="import-file" accept=".sdbackup" data-change="import-backup">
               </section>
               <section class="backup-section backup-advanced-section" aria-label="Backup encryption">
                 <div class="backup-security-group">
@@ -5034,8 +5033,8 @@ const UnsupportedData=(()=>{
   const versionField=store=>store===DB_DAILY_SUMMARY_STORE?'summaryVersion':'version';
   const recordStores=Object.freeze(Object.entries(DATA_CONTRACT.storage.stores).filter(([id])=>id!=='appMeta').map(([id,value])=>Object.freeze([DB_STORES[id],schemaVersion(value.schema)])));
   const envelopeVersion=Number(DATA_CONTRACT.schemas.AppMeta?.version)||1;
-  // SDVB75F29 and earlier kept this marker of their Daily Records conversion.
-  // Nothing reads it now, and it is left as it is.
+  // This reserved bookkeeping key can be present on an upgraded installation.
+  // Its value is unused and must not block access to the library.
   const EARLIER_CONVERSION_MARKER='dailyRecordMigration';
   const versionVerdict=(version,max)=>version>max?'newer':version<max?'older':'';
   const recordVerdict=(store,max)=>value=>{

@@ -137,6 +137,15 @@ for(const version of [1,2,3,4,5,6,7,8,9,10,12]){
   assert.equal(reads,0);assert.equal(JSON.stringify({records,notes,currentPersonal,deletions}),before);
   await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...manifest,version})])),{interactive:false}),/does not read|newer/u);
 }
+// A v11 manifest supplies its ancestry and fingerprint rather than inferring them.
+for(const [change,reason] of [
+  [{reconciliationAncestorIds:undefined},/ancestry is invalid/u],
+  [{retention:{...manifest.retention,role:'before-restore',protectedUntil:new Date(Date.parse(manifest.exportedAt)+86400000).toISOString(),purpose:undefined}},/safety purpose is invalid/u],
+  [{logicalFingerprint:undefined},/fingerprint is invalid/u],
+  [{logicalFingerprint:'0'.repeat(64)},/fingerprint failed verification/u]
+]){
+  await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...manifest,...change})])),{interactive:false}),reason);
+}
 // Simulate another installation receiving this checkpoint rather than the publishing installation's newly established local ancestry.
 reconciliationBase=null;reconciliationBaseNotes=Object.create(null);
 

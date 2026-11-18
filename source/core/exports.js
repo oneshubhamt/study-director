@@ -110,7 +110,7 @@ registry.define('exports',1,input=>{
       return scope(async()=>{
         const task=async()=>{
           check();if(options.signal?.aborted)throw cancelled();await awaitCollection(options.signal);check();if(options.signal?.aborted)throw cancelled();
-          const nextPhase=type==='crypto.verifier.create'?'Preparing protection…':type==='crypto.verifier.check'?'Unlocking backup…':type==='crypto.key'?'Preparing protection…':type==='decode.open'||type==='parseBlob'?'Reading backup…':type==='equalFiles'?'Verifying saved file…':type==='file.hash'?'Verifying backup file…':type==='file.copy'?'Preparing backup file…':type==='encode.open'?'Preparing backup…':type==='encode.write'?'Packaging backup data…':type==='encode.finish'?'Finishing backup file…':type==='zip'?'Packaging notes…':type==='markdown'?'Preparing notes…':phase;if(phase!==nextPhase){phase=nextPhase;publish();}
+          const nextPhase=type==='crypto.verifier.create'?'Preparing protection…':type==='crypto.verifier.check'?'Unlocking backup…':type==='crypto.key'?'Preparing protection…':type==='decode.open'||type==='repository.readManifest'?'Reading backup…':type==='equalFiles'?'Verifying saved file…':type==='file.hash'?'Verifying backup file…':type==='file.copy'?'Preparing backup file…':type==='encode.open'?'Preparing backup…':type==='encode.write'?'Packaging backup data…':type==='encode.finish'?'Finishing backup file…':type==='zip'?'Packaging notes…':type==='markdown'?'Preparing notes…':phase;if(phase!==nextPhase){phase=nextPhase;publish();}
           let staged=null;if(type==='file.copy'||type.startsWith('crypto.stream.')){staged=await files.stage();data={...data,output:Object.freeze({kind:'opfs',name:staged.name,directory:staged.directory})};}
           const id=++sequence;
           const abort=()=>stop(cancelled());options.signal?.addEventListener('abort',abort,{once:true});
@@ -181,7 +181,7 @@ registry.define('exports',1,input=>{
     });}
     async function open(input){
       if(typeof window.showOpenFilePicker!=='function'){input.click();return null;}
-      try{const [handle]=await window.showOpenFilePicker({multiple:false,types:[{description:'Study Director backup',accept:{'application/octet-stream':['.sdbackup','.gz'],'application/json':['.json']}}]});return await handle.getFile();}
+      try{const [handle]=await window.showOpenFilePicker({multiple:false,types:[{description:'Study Director backup',accept:{'application/octet-stream':['.sdbackup']}}]});return await handle.getFile();}
       catch(error){if(error.name==='AbortError')return null;throw error;}
     }
     return Object.freeze({scope,job,run,receiveStream,download,chooseSave,save,open,status,check,checkpoint:()=>{const epoch=cancelEpoch;return ()=>{check();if(epoch!==cancelEpoch)throw cancelled();};},cancel:()=>{cancelEpoch++;aborted=true;if(fileJobActive){phase='Cancelling standalone file…';publish();}for(const abort of streamAborts)abort();stop(cancelled());}});

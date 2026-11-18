@@ -80,7 +80,7 @@ await assert.rejects(coordinator.chooseSave('test',{}),{name:'AbortError'});asse
 delete fakeWindow.showSaveFilePicker;assert.equal(await coordinator.chooseSave('test',{}),null);
 assert.equal((await coordinator.save({blob:png,filename:'test'})).status,'downloaded');assert.equal(downloads,1);
 let fallbackOpened=0;assert.equal(await coordinator.open({click:()=>fallbackOpened++}),null);assert.equal(fallbackOpened,1);
-fakeWindow.showOpenFilePicker=async()=>[{getFile:async()=>png}];assert.equal(await coordinator.open({}),png);
+fakeWindow.showOpenFilePicker=async options=>{assert.deepEqual(options.types[0].accept,{'application/octet-stream':['.sdbackup']});return [{getFile:async()=>png}];};assert.equal(await coordinator.open({}),png);
 fakeWindow.showOpenFilePicker=async()=>{throw new DOMException('cancelled','AbortError');};assert.equal(await coordinator.open({}),null);
 scenarios.push('picker activation, cancellation, fallback, verified save, mismatched reopen, write abort, open');
 
@@ -90,7 +90,10 @@ await nextTurn();assert.equal(coordinator.status().fileBusy,true,'standalone can
 hold=false;failStart=true;await assert.rejects(coordinator.run('checksum',{value:png}),/startup unavailable/);assert.equal(coordinator.status().busy,false);failStart=false;
 assert.equal(typeof await coordinator.run('checksum',{value:png}),'string');assert.equal(alive,0);
 hold=true;const failure=coordinator.run('checksum',{value:png});await nextTurn();lastWorker.onerror({preventDefault(){}});await assert.rejects(failure,/processor failed/);hold=false;assert.equal(alive,0);
-await assert.rejects(coordinator.run('parseBlob',{file:new Blob(['{']),maxBytes:100}),/JSON|Expected/);
+assert.deepEqual(await coordinator.run('repository.readManifest',{file:new Blob(['{"version":11}']),maxBytes:14}),{version:11});
+await assert.rejects(coordinator.run('repository.readManifest',{file:new Blob(['{']),maxBytes:100}),/JSON|Expected/);
+await assert.rejects(coordinator.run('repository.readManifest',{file:new Blob(['{}']),maxBytes:1}),/safe JSON size limit/);
+await assert.rejects(coordinator.run('checksum',{value:'current text',algorithm:'fnv1a32'}),/Unsupported backup checksum algorithm/);
 await coordinator.job(async()=>{
   const id=await coordinator.run('decode.open',{file:new Blob(['x'.repeat(256)]),maxBytes:128,maxLineBytes:64});
   await assert.rejects(coordinator.run('decode.next',{id}),/expands beyond/);

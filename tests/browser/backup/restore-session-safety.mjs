@@ -12,7 +12,7 @@ const manifest=JSON.parse(fs.readFileSync(path.join(root,'dist/build-manifest.js
 const deployment=path.join(root,'dist/deployment');
 const mainPath=path.join(deployment,manifest.main);
 const marker='/* PUBLIC PLUGIN API */';
-const exposure=`window.__RestoreSafetyQA=Object.freeze({StartupLifecycle,AppOwnership,OwnershipUiProjection,AppMutationCoordinator,BackupController,BackupCodec:RuntimeBackupCodec,LibraryView,ReviewEditor,AppData,TimerEngine,TimerState,TIMER_MODES,TASKS,applySchedule,goTab,flushLiveDraft,setStudyQuality,hasBlockingActiveSession,resetRuntimeSessionState,setSessionPanelMode,setTimerMode,todayISO});\n`;
+const exposure=`window.__RestoreSafetyQA=Object.freeze({StartupLifecycle,AppOwnership,OwnershipUiProjection,AppMutationCoordinator,BackupController,BackupCodec,LibraryView,ReviewEditor,AppData,TimerEngine,TimerState,TIMER_MODES,TASKS,applySchedule,goTab,flushLiveDraft,setStudyQuality,hasBlockingActiveSession,resetRuntimeSessionState,setSessionPanelMode,setTimerMode,todayISO});\n`;
 let main=fs.readFileSync(mainPath,'utf8');
 if(!main.includes(marker))throw new Error('Restore-safety browser harness hook is unavailable.');
 main=withoutPwaChecks(main.replace(marker,exposure+marker));
@@ -102,9 +102,6 @@ try{
   // must preserve the local session, and must not download an optional copy.
   const cancelledRestore=await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA,before=await d.AppData.activeSession.load();let done=false,outcome,error;d.BackupController.restore(window.__RestoreSafetyQACandidate).then(v=>{outcome=v;done=true},e=>{error=e;done=true});const deadline=Date.now()+10000;while(!done&&Date.now()<deadline){document.querySelector('#sd-interaction-dialog[open] [data-interaction-cancel]')?.click();await new Promise(r=>setTimeout(r,20));}if(!done)throw new Error('Restore cancellation did not settle');if(error)throw error;return {outcome,unchanged:(await d.AppData.activeSession.load()).value?.scheduleText===before.value?.scheduleText&&(await d.AppData.activeSession.load()).value?.snapshot?.review?.reflection==='ACTIVE SESSION REVIEW'};})()`);
   assert.equal(cancelledRestore.unchanged,true,'cancelled reconciliation changed the active session');
-  const blockedRestore=await page1.evaluate(`(async()=>{const d=__RestoreSafetyQA,legacy=await d.BackupController.inspect(new Blob([JSON.stringify({version:6,records:[]})],{type:'application/json'}),{filename:'legacy.json'});try{await d.BackupController.restore(legacy);return {ok:true};}catch(error){return {ok:false,message:error.message};}})()`);
-  assert.equal(blockedRestore.ok,false,'legacy import bypassed active-session protection');
-  assert.match(blockedRestore.message,/End or suspend the active session before importing/u);
   const blockedClear=await page1.evaluate(`(async()=>{await __RestoreSafetyQA.LibraryView.clearAll();return document.getElementById('library-status').textContent;})()`);
   assert.match(blockedClear,/End or suspend the active session before clearing Library data/u,'Clear Library internal precondition did not surface');
 

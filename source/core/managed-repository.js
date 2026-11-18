@@ -203,7 +203,7 @@ function repositoryRetentionCalendar(value){const date=value instanceof Date?new
 function repositoryUtcDateKey(value){const date=value instanceof Date?new Date(value.getTime()):new Date(value);if(!Number.isFinite(date.getTime()))throw new Error('Repository retention calendar date is invalid.');return `${date.getUTCFullYear()}-${repositoryPad2(date.getUTCMonth()+1)}-${repositoryPad2(date.getUTCDate())}`;}
 function repositoryOffsetDateKey(value,offsetMinutes){const date=value instanceof Date?new Date(value.getTime()):new Date(value),offset=Number(offsetMinutes);if(!Number.isFinite(date.getTime())||!Number.isInteger(offset)||Math.abs(offset)>14*60)throw new Error('Repository retention calendar offset is invalid.');return repositoryUtcDateKey(new Date(date.getTime()+offset*60000));}
 function canonicalRepositorySafetyPurpose(value){
-  const purpose=String(value||'before-restore');
+  const purpose=String(value||'');
   return ['before-restore','before-combine','before-clear-library'].includes(purpose)?purpose:'';
 }
 function repositoryRetentionDescriptor(exportedAt,input=null,notesFingerprint=''){
@@ -226,7 +226,7 @@ function validateRepositoryRetention(value,exportedAt){
   if(!value||typeof value!=='object'||Array.isArray(value)||value.format!=='study-director.repository-retention'||Number(value.version)!==1)throw new Error('Device repository retention metadata is invalid.');
   const role=value.role==='before-restore'?'before-restore':value.role==='normal'?'normal':'';if(!role)throw new Error('Device repository retention role is invalid.');
   const exportedAtMs=Date.parse(exportedAt),protectedUntil=String(value.protectedUntil||''),protectedUntilMs=Date.parse(protectedUntil),rawPurpose=String(value.purpose||'');
-  const purpose=role==='before-restore'?canonicalRepositorySafetyPurpose(rawPurpose||'before-restore'):'';
+  const purpose=role==='before-restore'?canonicalRepositorySafetyPurpose(rawPurpose):'';
   if(role==='before-restore'&&(!Number.isFinite(protectedUntilMs)||!Number.isFinite(exportedAtMs)||protectedUntilMs<=exportedAtMs))throw new Error('Device repository protection expiry is invalid.');
   if(role==='before-restore'&&!purpose)throw new Error('Device repository safety purpose is invalid.');
   if(role==='normal'&&(protectedUntil||rawPurpose))throw new Error('Normal repository checkpoints cannot carry safety metadata.');
@@ -393,8 +393,9 @@ function validateRepositoryManifest(value){
   }
   const counts=repositoryManifestCounts(value.counts||{});
   const reconciliationBaseId=String(value.reconciliationBaseId||'');if(reconciliationBaseId&&!/^cp_[a-f0-9]{32}$/u.test(reconciliationBaseId))throw new Error('Device repository reconciliation base is invalid.');
-  const rawAncestorIds=Array.isArray(value.reconciliationAncestorIds)?value.reconciliationAncestorIds:(reconciliationBaseId?[reconciliationBaseId]:[]),reconciliationAncestorIds=[],reconciliationAncestorSet=new Set();
-  for(const rawId of rawAncestorIds){const id=String(rawId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||id===String(checkpoint.checkpointId||'')||reconciliationAncestorSet.has(id))throw new Error('Device repository reconciliation ancestry is invalid.');reconciliationAncestorSet.add(id);reconciliationAncestorIds.push(id);}
+  if(!Array.isArray(value.reconciliationAncestorIds))throw new Error('Device repository reconciliation ancestry is invalid.');
+  const reconciliationAncestorIds=[],reconciliationAncestorSet=new Set();
+  for(const rawId of value.reconciliationAncestorIds){const id=String(rawId||'');if(!/^cp_[a-f0-9]{32}$/u.test(id)||id===String(checkpoint.checkpointId||'')||reconciliationAncestorSet.has(id))throw new Error('Device repository reconciliation ancestry is invalid.');reconciliationAncestorSet.add(id);reconciliationAncestorIds.push(id);}
   if((reconciliationBaseId&&reconciliationAncestorIds[0]!==reconciliationBaseId)||(!reconciliationBaseId&&reconciliationAncestorIds.length)||repositoryReconciliationAncestryBytes(reconciliationAncestorIds)>REPOSITORY_RECONCILIATION_ANCESTRY_MAX_BYTES)throw new Error('Device repository reconciliation ancestry is invalid.');
   const protectedCheckpointManifest=value.protectedCheckpointManifest;
   if((!protectedCheckpointManifest||protectedCheckpointManifest.checkpointId!==checkpoint.checkpointId||protectedCheckpointManifest.sourceRevision!==new Date(sourceRevision).toISOString()))throw new Error('Device repository protected checkpoint manifest is invalid.');
@@ -453,7 +454,7 @@ function repositoryReconciliationAncestors(history,baseId){
   while(current&&!seen.has(current)){
     if(!append(current))break;
     const manifest=byId.get(current);if(!manifest)break;
-    const inherited=Array.isArray(manifest.reconciliationAncestorIds)&&manifest.reconciliationAncestorIds.length?manifest.reconciliationAncestorIds:(manifest.reconciliationBaseId?[manifest.reconciliationBaseId]:[]);
+    const inherited=manifest.reconciliationAncestorIds;
     let tail=current,exhausted=false;
     for(const id of inherited){if(seen.has(id)){tail=id;continue;}if(!append(id)){exhausted=true;break;}tail=id;}
     if(exhausted)break;
@@ -795,11 +796,11 @@ async function inspectRepositoryManifest(file,{interactive=false}={}){
   if(!(file instanceof Blob))throw new TypeError('Repository checkpoint file is unreadable.');
   const decoded=await Exports.unprotect(file,{interactive}).catch(error=>{throw String(error?.code||'')==='BACKUP_ENCRYPTION_UNSUPPORTED'?unreadableVersion(error):error;});
   try{
-    const parsed=await Exports.run('parseBlob',{file:decoded.blob,maxBytes:Math.min(Number(APP_LIMITS.backupMaxCompressedBytes)||67108864,67108864)}).catch(error=>{throw error?.name==='SyntaxError'?unreadableVersion(error):error;});
+    const parsed=await Exports.run('repository.readManifest',{file:decoded.blob,maxBytes:Math.min(Number(APP_LIMITS.backupMaxCompressedBytes)||67108864,67108864)}).catch(error=>{throw error?.name==='SyntaxError'?unreadableVersion(error):error;});
     let manifest;try{manifest=validateRepositoryManifest(parsed);if(decoded.encrypted!==manifest.encrypted)throw new Error('Repository checkpoint protection metadata is inconsistent.');}catch(error){throw unreadableVersion(error);}
     const logicalFingerprint=await repositoryLogicalFingerprint(manifest);
-    if(manifest.logicalFingerprint&&manifest.logicalFingerprint!==logicalFingerprint)throw unreadableVersion(new Error('Repository checkpoint logical-state fingerprint failed verification.'));
-    return manifest.logicalFingerprint===logicalFingerprint?manifest:freeze({...manifest,logicalFingerprint});
+    if(manifest.logicalFingerprint!==logicalFingerprint)throw unreadableVersion(new Error('Repository checkpoint logical-state fingerprint failed verification.'));
+    return manifest;
   }finally{if(decoded.blob!==file)await Exports.run('file.release',{file:decoded.blob});}
 }
 function repositoryCorruption(message){const error=new Error(message);error.code='REPOSITORY_INTEGRITY_CORRUPT';return error;}

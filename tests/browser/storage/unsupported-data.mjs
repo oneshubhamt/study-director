@@ -30,7 +30,7 @@ const cases=[
   {name:'older database is never upgraded',blocked:true,older:true,
     seed:`(async()=>{${idb}await req(indexedDB.deleteDatabase('sdmLocalAppDB.v1'));const db=await open(8,db=>db.createObjectStore('notes',{keyPath:'key'}));const tx=db.transaction('notes','readwrite');tx.objectStore('notes').put({key:'sentinel',text:'preserve'});await done(tx);db.close();return 8;})()`},
   {name:'inert F29 marker does not block current data',
-    seed:`(async()=>{${idb}const db=await open(),tx=db.transaction('appMeta','readwrite');tx.objectStore('appMeta').put({key:'dailyRecordMigration',version:1,value:{complete:true},updatedAt:'2026-11-14T08:00:00.000Z'});await done(tx);db.close();return 'dailyRecordMigration';})()`,
+    seed:`(async()=>{${idb}const db=await open(),tx=db.transaction('appMeta','readwrite');tx.objectStore('appMeta').put({key:'dailyRecordMigration',version:1,value:{recordVersion:16,summaryVersion:5,complete:true,recordCount:0},updatedAt:'2026-11-14T08:00:00.000Z'});await done(tx);db.close();return 'dailyRecordMigration';})()`,
     stored:({before,after})=>assert.deepEqual(after.stores.appMeta.values.find(row=>row.key==='dailyRecordMigration'),before.stores.appMeta.values.find(row=>row.key==='dailyRecordMigration'))},
   {name:'newer database with a store this build does not know',
     seed:`(async()=>{${idb}const db=await open(),v=db.version;db.close();(await open(v+1,created=>created.createObjectStore('futureThings',{keyPath:'id'}))).close();return v+1;})()`,

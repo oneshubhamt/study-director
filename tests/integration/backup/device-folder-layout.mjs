@@ -16,6 +16,19 @@ await test('a new folder holds one backup folder named for the profile and devic
   assert.equal(w.repositoryChoices.length,0,'no other backup folder to offer');
 });
 
+await test('a completed F29 folder move preserves its repository identity and existing versions',async()=>{
+  const previous=world(),folder=previous.directory();await previous.controller.install();previous.choose(folder);await previous.controller.connect();await previous.settle();
+  const before=await marker(folder,REPOSITORY_NAME);
+  const root=await folder.getDirectoryHandle(REPOSITORY_NAME),writer=await (await root.getFileHandle(SCOPE_FILE)).createWritable();
+  const moved={...before,movedFrom:'Study-Director-Automatic-Backup-Repository'};
+  await writer.write(JSON.stringify(moved));await writer.close();
+  const current=world();current.store(folder);await current.controller.install();await current.settle();
+  assert.equal(current.controller.status().repositoryName,REPOSITORY_NAME);
+  assert.deepEqual(await marker(folder,REPOSITORY_NAME),moved,'the canonical marker is used as it stands');
+  assert.deepEqual(folder.names(),[REPOSITORY_NAME]);
+  assert.equal((await current.commits(folder)).length,1,'the existing checkpoint stays in place');
+});
+
 await test('an unrecognized old folder is left untouched and never imported',async()=>{
   const w=world(),folder=w.directory(),old=await folder.getDirectoryHandle('Study-Director-Automatic-Backup-Repository',{create:true});
   const writer=await (await old.getFileHandle('sentinel',{create:true})).createWritable();await writer.write('unchanged');await writer.close();

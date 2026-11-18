@@ -59,7 +59,7 @@ export function instrumentedHtml(kind='deployment',options={}){
   let html=fs.readFileSync(path.join(root,'dist',kind,manifest.main),'utf8');
   const marker='/* PUBLIC PLUGIN API */';
   if(!html.includes(marker))throw new Error(`PWA6 instrumentation marker missing from ${kind}.`);
-  // options.expose adds more host names for one test ("Exports" or "BackupCodec:RuntimeBackupCodec").
+  // options.expose adds more host names for one test ("Exports" or "BackupCodec").
   const extra=(options.expose||[]).map(name=>`${name},`).join('');
   const exposure=`window.__PWA6=Object.freeze({${extra}readDataDiagnosticStates,DatabaseLifecycle,StartupLifecycle,SessionLifecycle,AppOwnership,TimerState,TimerEngine,PracticePacer,Interactions,SystemNotifications,Pomodoro,NoticeCoordinator,AppData,PlanData,DailyReflectionPersistence,restoreSessionStateThroughLifecycle,IndexedDb,UnsupportedData,Profiles,BackupController,BackupProviderRuntime,DeviceBackup,NativeCapabilities,PwaLifecycle,SessionEvidenceGateway,ReviewModel,ReviewView,ReviewEditor,LibraryView,PlanDraftEditor,applySchedule,goTab,commitTaskNoteEditor,setStudyQuality,saveDayRecord,flushLiveDraft,todayISO,readStorageHealth,loadScheduleIntoDraft,resetTodaySession,markDone,togglePause,setCurrentTask,refreshPnote,checkSessionOwnershipClaim,RichTextRuntime,RichTextAssets,withRichTextAssetMaintenancePaused,renderRichTextContent});\n`;
   html=html.replace(marker,exposure+marker);

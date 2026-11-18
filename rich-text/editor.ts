@@ -124,9 +124,9 @@ const MIN_IMAGE_WIDTH_PCT = 20,
   MAX_TABLE_DIMENSION = 15,
   MIN_TABLE_COLUMN_PCT = 50 / MAX_TABLE_DIMENSION,
   MIN_TABLE_CELL_PX = 120,
-  LEGACY_MIN_TABLE_WIDTH_PCT = 45,
-  LEGACY_MIN_TABLE_ROW_HEIGHT = 34,
-  LEGACY_MAX_TABLE_ROW_HEIGHT = 240;
+  STORED_MIN_TABLE_WIDTH_PCT = 45,
+  STORED_MIN_TABLE_ROW_HEIGHT = 34,
+  STORED_MAX_TABLE_ROW_HEIGHT = 240;
 const IMAGE_POSITION_ERROR = 'Image position is no longer available. Choose Image and try again.',
   IMAGE_TABLE_ERROR = 'Images cannot go inside tables.';
 
@@ -398,7 +398,7 @@ const ChecklistChecked = Mark.Type.define<boolean>('SDChecklistChecked', {
 const TableWidth = Mark.Type.define<number>('SDTableWidth', {
   target: Table,
   validate: value => {
-    if (!finiteWithin(value, LEGACY_MIN_TABLE_WIDTH_PCT, 100)) throw new RangeError('Invalid table width.');
+    if (!finiteWithin(value, STORED_MIN_TABLE_WIDTH_PCT, 100)) throw new RangeError('Invalid table width.');
   },
   shape: {attribute: 'style/width', value: value => `${value}%`}
 });
@@ -412,7 +412,7 @@ const CellWidth = Mark.Type.define<number>('SDCellWidth', {
 const CellHeight = Mark.Type.define<number>('SDCellHeight', {
   target: Node.Group.TableCell,
   validate: value => {
-    if (!finiteWithin(value, LEGACY_MIN_TABLE_ROW_HEIGHT, LEGACY_MAX_TABLE_ROW_HEIGHT)) throw new RangeError('Invalid table row height.');
+    if (!finiteWithin(value, STORED_MIN_TABLE_ROW_HEIGHT, STORED_MAX_TABLE_ROW_HEIGHT)) throw new RangeError('Invalid table row height.');
   },
   shape: {attribute: 'style/height', value: value => `${value}px`}
 });
@@ -849,7 +849,6 @@ const markAction = (mark: Mark): HeadlessAction =>
 const paragraphAction = editableAction(Command.bind(setTypographyPreset, 'N'), state => typographyState(state).preset === 'N');
 const h1Action = editableAction(Command.bind(setTypographyPreset, 'H1'), state => typographyState(state).preset === 'H1');
 const h2Action = editableAction(Command.bind(setTypographyPreset, 'H2'), state => typographyState(state).preset === 'H2');
-const headingAction = h2Action; // Compatibility alias: Study Director's historical Heading is Wordgard H2.
 const strongAction = markAction(Strong),
   emphasisAction = markAction(Emphasis),
   underlineAction = markAction(Underline),
@@ -4584,7 +4583,7 @@ async function mountRichTextEditor(options: MountOptions): Promise<MountedRichTe
       table = textTable || nodeTable,
       rows = table && table.node.isPlot ? table.node.content.length : 0,
       columns = table && table.node.isPlot && table.node.firstChild?.isPlot ? table.node.firstChild.content.length : 0,
-      isHeading = textSelection && actionActive(headingAction),
+      isHeading = textSelection && actionActive(h2Action),
       isParagraph = textSelection && actionActive(paragraphAction),
       isChecklist = !!list && list.node.type === BulletList.type && !!Checklist.isInSet(list.node.marks),
       header =

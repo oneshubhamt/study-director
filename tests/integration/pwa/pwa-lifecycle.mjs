@@ -80,7 +80,7 @@ await test('concurrent apply prepares only once',async()=>{
  const h=harness();await h.api.install();const first=h.api.apply();assert.equal(await h.api.apply(),false);await first;assert.equal(h.counts().prepareCalls,1);h.win.emit('pagehide');
 });
 await test('failed reload marker does not prevent safe retry',async()=>{
- const h=harness();h.storage.set('reload','next');await h.api.install();await h.api.apply();await h.activate();assert.equal(h.counts().reloads,1);await h.advance(8000);assert.equal(h.counts().held,0);assert.equal(h.api.status().reloading,false);await h.api.apply();assert.equal(h.counts().reloads,2);h.win.emit('pagehide');
+ const h=harness();h.storage.set('reload',JSON.stringify({version:2,releaseId:'next',buildId:'qa-build',assetId:'a'.repeat(24)}));await h.api.install();await h.api.apply();await h.activate();assert.equal(h.counts().reloads,1);await h.advance(8000);assert.equal(h.counts().held,0);assert.equal(h.api.status().reloading,false);await h.api.apply();assert.equal(h.counts().reloads,2);h.win.emit('pagehide');
 });
 await test('registration failure retries without duplicate listeners',async()=>{
  const h=harness();h.behavior.register=async()=>{throw new Error('offline');};await h.api.install();assert.equal(h.api.status().registered,false);assert.ok(h.api.status().registrationError);h.behavior.register=async()=>{};assert.equal(await h.api.checkForUpdate(),true);assert.equal(h.counts().registerCalls,2);assert.equal(h.sw.listenerCount('message'),1);assert.equal(h.sw.listenerCount('controllerchange'),1);assert.equal(h.api.status().registrationError,'');
@@ -117,8 +117,8 @@ await test('wrong loaded assets keep boot pending and advertise safe manual reco
  assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'mismatch');assert.equal(h.api.status().phase,'boot-failed');assert.equal(h.api.status().updateReady,true);assert.equal(h.storage.has('reload'),true);assert.equal(h.counts().reloads,0);
  await h.api.apply();await flush();assert.equal(h.counts().reloads,1);assert.equal(JSON.parse(h.storage.get('reload')).assetId,'b'.repeat(24));h.win.emit('pagehide');
 });
-await test('legacy markers confirm without suppressing retries; current boot without an update reports client generation',async()=>{
- const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload','old');assert.equal(await h.api.confirmBoot(),true);assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.storage.has('reload'),false);
+await test('an obsolete reload marker cannot stand in for the current update receipt',async()=>{
+ const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload','an-unrelated-worker');
  assert.equal(await h.api.confirmBoot(),true);assert.equal(h.api.status().bootState,'current');const before=h.old.messages.length;h.win.emit('pageshow');await flush();assert.ok(h.old.messages.length>before);assert.equal(h.counts().reloads,0);
 });
 await test('download failure has an explicit stage and actionable error; success clears it',async()=>{
@@ -148,12 +148,12 @@ await test('boot identity timeout stays visible and focus retries proof without 
  h.old.identityBlocked=false;h.win.emit('focus');await flush();assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.api.status().phase,'idle');assert.equal(h.storage.has('reload'),false);assert.equal(h.counts().reloads,0);assert.equal(h.counts().reserves,0);
 });
 await test('successful checks retry pending proof and never advertise an unconfirmed boot as current',async()=>{
- const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload','old');h.old.identityBlocked=true;const pending=h.api.confirmBoot();await flush();await h.advance(3000);await pending;
+ const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload',JSON.stringify({version:2,releaseId:'old',buildId:'qa-build',assetId:'a'.repeat(24)}));h.old.identityBlocked=true;const pending=h.api.confirmBoot();await flush();await h.advance(3000);await pending;
  const check=h.api.checkForUpdate();await flush();await h.advance(3000);assert.equal(await check,true);assert.equal(h.api.status().bootState,'pending');assert.equal(h.api.status().phase,'boot-pending');assert.ok(!/up to date|version is confirmed/u.test(h.api.status().message));assert.ok(h.storage.has('reload'));
  h.old.identityBlocked=false;assert.equal(await h.api.checkForUpdate(),true);assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.api.status().phase,'idle');assert.equal(h.storage.has('reload'),false);
 });
 await test('confirmation can recover offline while preserving an unrelated failed-check status',async()=>{
- const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload','old');h.old.identityBlocked=true;const pending=h.api.confirmBoot();await flush();await h.advance(3000);await pending;
+ const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload',JSON.stringify({version:2,releaseId:'old',buildId:'qa-build',assetId:'a'.repeat(24)}));h.old.identityBlocked=true;const pending=h.api.confirmBoot();await flush();await h.advance(3000);await pending;
  h.old.identityBlocked=false;h.behavior.update=async()=>{throw new Error('offline');};assert.equal(await h.api.checkForUpdate(),false);assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.api.status().phase,'installation-failed');assert.ok(h.api.status().checkError);assert.equal(h.storage.has('reload'),false);
 });
 await test('successful proof clears obsolete mismatch status and retains a newer ready candidate',async()=>{
@@ -165,12 +165,12 @@ await test('foreground boot retries coalesce, ignore hidden visibility and do no
  h.old.identityBlocked=false;h.doc.hidden=false;h.doc.emit('visibilitychange');await flush();assert.equal(h.api.status().bootState,'current');assert.equal(h.timers.size,0);assert.equal(h.counts().reloads,0);
 });
 await test('pending proof waits for first control without a preparation or reload',async()=>{
- const h=harness({controlled:false});h.registration.waiting=null;await h.api.install();h.storage.set('reload','next');assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'pending');await h.activate();assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.storage.has('reload'),false);assert.equal(h.counts().reloads,0);assert.equal(h.counts().prepareCalls,0);
+ const h=harness({controlled:false});h.registration.waiting=null;await h.api.install();h.storage.set('reload',JSON.stringify({version:2,releaseId:'next',buildId:'qa-build',assetId:'a'.repeat(24)}));assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'pending');await h.activate();assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.storage.has('reload'),false);assert.equal(h.counts().reloads,0);assert.equal(h.counts().prepareCalls,0);
 });
 await test('unavailable boot marker storage retains pending state until a foreground retry succeeds',async()=>{
- const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload','old');const read=h.win.sessionStorage.getItem;h.win.sessionStorage.getItem=()=>{throw new Error('session storage unavailable');};assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'pending');assert.ok(h.storage.has('reload'));h.win.sessionStorage.getItem=read;h.win.emit('focus');await flush();assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.storage.has('reload'),false);
+ const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload',JSON.stringify({version:2,releaseId:'old',buildId:'qa-build',assetId:'a'.repeat(24)}));const read=h.win.sessionStorage.getItem;h.win.sessionStorage.getItem=()=>{throw new Error('session storage unavailable');};assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'pending');assert.ok(h.storage.has('reload'));h.win.sessionStorage.getItem=read;h.win.emit('focus');await flush();assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.storage.has('reload'),false);
 });
 await test('boot opportunities cannot clear a reload marker or replace an active update phase',async()=>{
- const h=harness();await h.api.install();await h.api.confirmBoot();await h.api.apply();h.storage.set('reload','next');const before=h.api.status().phase;assert.equal(await h.api.confirmBoot(),false);h.win.emit('focus');await flush();assert.equal(h.api.status().phase,before);assert.ok(h.storage.has('reload'));assert.equal(h.counts().held,1);h.win.emit('pagehide');
+ const h=harness();await h.api.install();await h.api.confirmBoot();await h.api.apply();h.storage.set('reload',JSON.stringify({version:2,releaseId:'next',buildId:'qa-build',assetId:'a'.repeat(24)}));const before=h.api.status().phase;assert.equal(await h.api.confirmBoot(),false);h.win.emit('focus');await flush();assert.equal(h.api.status().phase,before);assert.ok(h.storage.has('reload'));assert.equal(h.counts().held,1);h.win.emit('pagehide');
 });
 console.log(JSON.stringify({status:'PASS',suite:'pwa-lifecycle',cases},null,2));

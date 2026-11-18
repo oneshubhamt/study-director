@@ -26,7 +26,6 @@ const rawObjectTokens=new Set([
 function renderSyntaxTemplate(source){
   return source.replace(/@@SD_([A-Z_]+)@@/gu,(_match,name)=>{
     if(rawObjectTokens.has(name))return '{}';
-    if(name==='LEGACY_BACKUP_SCHEMA_VERSION')return '1';
     if(name==='PWA_ASSET_MANIFEST')return '[]';
     return 'qa';
   });

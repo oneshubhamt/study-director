@@ -74,7 +74,7 @@ Local recovery readers check storage failure immediately, before another success
 
 Notes recovery also fences adoption against the live model revision and save chain. A mutation during an awaited read preserves the live model, dirty work and autosave timer; canonical maintenance yields with `notes-changed` and its existing 15-second wake-up retries. A recovery snapshot cannot acknowledge an intervening edit merely because its storage reads succeeded.
 
-Drive's deletion work allowance and coordination lease have separate purposes. Deletion retains its cooperative 30-second allowance. Version 2 maintenance markers last five minutes, renew after one quarter of that lifetime, and retain a 75-second assertion margin for the existing 45-second metadata request limit plus release grace. The shared safety reader uses the adapter's verified expiry. Immutable overlap, missing/expired/unreadable protection checks and foreground cancellation remain mandatory. Cancellation releases coordination markers using the operation's verified folder receipt; repository identity changes invalidate that receipt. Version 1 markers retain their original 60-second expiry. Older clients classify version 2 as uncertain and defer while it exists, rather than removing an active marker using their shorter expiry; an abandoned version 2 marker is retired by a current client after expiry.
+Drive's deletion work allowance and coordination lease have separate purposes. Deletion retains its cooperative 30-second allowance. Version 2 maintenance markers last five minutes, renew after one quarter of that lifetime, and retain a 75-second assertion margin for the existing 45-second metadata request limit plus release grace. The shared safety reader uses the adapter's verified expiry. Immutable overlap, missing/expired/unreadable protection checks and foreground cancellation remain mandatory. Cancellation releases coordination markers using the operation's verified folder receipt; repository identity changes invalidate that receipt. Only version 2 markers are recognized. An unrecognized marker blocks coordination, and an abandoned current marker is eligible for removal after expiry.
 
 Other owners that meet the same standard:
 
@@ -86,7 +86,7 @@ Other owners that meet the same standard:
 | Deletion records | Bounded, trimmed by canonical maintenance |
 | Storage health and quota | Persistent storage requested at launch; warnings at 80% and 92%; the estimate is refreshed on returning to the app, at most hourly |
 | Removed profiles' data (`Profiles.collect`) | Runs in any tab, only for profiles no tab holds; waits while the profile list comes from a newer version |
-| Device Folder preparation and the one-time move (`prepareInBackground`) | Behind the shared gate, in the writing tab only, under one lock across tabs |
+| Device Folder preparation (`prepareInBackground`) | Behind the shared gate, in the writing tab only, under one lock across tabs |
 
 **Considered and left out.**
 - *Run upkeep only while the page is visible.* A desktop tab left in the background all day would never run it. Upkeep already runs at background priority (`scheduler.postTask`) and yields to anything the person does.

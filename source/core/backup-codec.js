@@ -99,10 +99,10 @@ function backupMissingAttachmentWarning(descriptors=[]){
   const examples=coverage.missingIds.slice(0,3).join(', '),rest=coverage.missing>3?` and ${coverage.missing-3} more`:'';
   return `Partial attachment recovery: ${coverage.missing} attachment${coverage.missing===1?'':'s'} missing (${examples}${rest}). Saved Days and Notes are preserved, but missing files cannot be restored from this backup.`;
 }
-function backupCountShape(value={},types=BACKUP_ENTITY_TYPES){
-  return Object.fromEntries(types.map(type=>[type,boundedInt(value[type],{min:0,max:backupEntityLimit(type),fallback:0})]));
+function backupCountShape(value={}){
+  return Object.fromEntries(BACKUP_ENTITY_TYPES.map(type=>[type,boundedInt(value[type],{min:0,max:backupEntityLimit(type),fallback:0})]));
 }
-function backupCountsEqual(a,b,types=BACKUP_ENTITY_TYPES){return types.every(type=>Number(a&&a[type]||0)===Number(b&&b[type]||0));}
+function backupCountsEqual(a,b){return BACKUP_ENTITY_TYPES.every(type=>Number(a&&a[type]||0)===Number(b&&b[type]||0));}
 function backupEntityLimit(entityType){return entityType===PENDING_REVIEW_TYPE?PENDING_REVIEW_LIMIT:['personalData','checkpointManifest'].includes(entityType)?1:entityDefinition(entityType)?.backupLimit||0;}
 function splitBackupItems(items){
   const groups=[];let current=[],bytes=2;

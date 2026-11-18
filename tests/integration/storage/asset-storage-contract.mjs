@@ -5,8 +5,7 @@ import {webcrypto} from 'node:crypto';
 import {OPFS_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
 
 const render=source=>source
-  .replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments)
-  .replaceAll('@@SD_LEGACY_ATTACHMENT_OPFS_DIRECTORY@@'.attachmentsV1);
+  .replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments);
 const context={console,Blob,TextEncoder,TextDecoder,Uint8Array,ArrayBuffer,Map,Set,Object,Promise,Number,String,Math,Date,JSON,crypto:webcrypto,Symbol,TypeError,Error};
 context.globalThis=context;vm.createContext(context);
 vm.runInContext(fs.readFileSync('source/core/internal.js','utf8'),context,{filename:'source/core/internal.js'});
