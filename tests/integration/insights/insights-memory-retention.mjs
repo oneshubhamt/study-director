@@ -63,6 +63,23 @@ assert.strictEqual(historyModel('history-a').getLabEvidence(),historyA,'A histor
 historyModel('history-c');
 assert.strictEqual(historyModel('history-a').getLabEvidence(),historyA,'The revisited history entry should survive the next insertion');
 
+// Detailed Lab evidence may outlive the two-entry LRU only because the
+// currently retained dashboard still owns that model. releaseTransient() must
+// therefore clear the one audited evictee as well as entries still in the LRU.
+const evictedAuditEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+const evictedAuditModel=revision=>{
+  const item=evictedAuditEngine.prepare(records,revision);
+  return evictedAuditEngine.buildPrepared(item.records,item,{windowKey:'all',windowLabel:'All records',allRecordCount:1,currentStudyDate:'2026-08-10'});
+};
+const retainedModelA=evictedAuditModel('evicted-a');
+const retainedAuditA=retainedModelA.getLabEvidence();
+evictedAuditModel('evicted-b');
+evictedAuditModel('evicted-c');
+evictedAuditEngine.releaseTransient();
+const rebuiltRetainedAuditA=retainedModelA.getLabEvidence();
+assert.notStrictEqual(rebuiltRetainedAuditA,retainedAuditA,'transient release must clear detailed Lab evidence even after its history entry was evicted from the LRU');
+assert.deepEqual(JSON.parse(JSON.stringify(rebuiltRetainedAuditA)),JSON.parse(JSON.stringify(retainedAuditA)),'evicted detailed Lab evidence must rebuild with identical semantics after release');
+
 // History cache identity must include study date and summary context; neither
 // context may alias a prior Lab result for the same dataset revision.
 const contextPrepared=historyEngine.prepare(records,'context-revision');
@@ -89,6 +106,6 @@ assert.deepEqual(JSON.parse(JSON.stringify(rebuiltAudit)),JSON.parse(JSON.string
 assert.equal(JSON.stringify(prepared.records),preparedBeforeBuild,'model/Lab consumers must not mutate shared prepared input');
 
 
-console.log(JSON.stringify({status:'PASS',preparedCache:'current + previous LRU',guardedAsyncPreparation:'fresh + cached pre-return validated',historyCache:'current + previous LRU',labEvidence:'released and parity-rebuilt',historyContext:'date + summary keyed; not retained',preparedInput:'immutable across model/Lab consumers'},null,2));
+console.log(JSON.stringify({status:'PASS',preparedCache:'current + previous LRU',guardedAsyncPreparation:'fresh + cached pre-return validated',historyCache:'current + previous LRU',labEvidence:'released and parity-rebuilt, including audited LRU evictee',historyContext:'date + summary keyed; not retained',preparedInput:'immutable across model/Lab consumers'},null,2));
 await import('./guide-preview-canonical.mjs');
 await import('./insights-transport-lifecycle.mjs');

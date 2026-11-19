@@ -147,6 +147,7 @@ function createInsightsModelRuntime(global:typeof globalThis){
   'use strict';
   const isRecordObject=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
   const isFiniteNumber=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value);
+  const isStrongCompletion=(value:unknown)=>isFiniteNumber(value)&&value>=80;
   // M8.1 CONFIGURATION COMPONENT
   const InsightsConfig=(()=>{
   const PLUGIN_VERSION='@@SD_RELEASE@@';
@@ -2889,7 +2890,7 @@ function createInsightsModelRuntime(global:typeof globalThis){
   }
   function cascadeState(row:EvidenceRow|null|undefined):CascadeState{
     if(!row)return 'missed';
-    if(row.completion>=80&&row.outcome!=='finished-unverified')return 'strong';
+    if(isStrongCompletion(row.completion)&&row.outcome!=='finished-unverified')return 'strong';
     if(['skipped','untouched'].includes(row.outcome)&&!evidenceRowShowsStudyActivity(row))return 'missed';
     return 'attempted';
   }
@@ -3139,7 +3140,7 @@ function createInsightsModelRuntime(global:typeof globalThis){
         if([capacity,execution,recovery].every(Number.isFinite))priorFitness={capacity,execution,recovery,date:candidate.date,day:candidate.day};
         stateCursor+=1;
       }
-      const result={...row,strong:Math.round(row.completion)>=80,priorState:state,fitness:priorFitness?{...priorFitness,basis:'origin-causal-prior-day'}:null};
+      const result={...row,strong:isStrongCompletion(row.completion),priorState:state,fitness:priorFitness?{...priorFitness,basis:'origin-causal-prior-day'}:null};
       state=.78*state+.22*row.completion;
       return result;
     });
@@ -4284,7 +4285,7 @@ type HistoryCacheEntry={
     const trendDaily=reusable?.advanced?daily:filterDailyForDirectionalBasis(daily,trendBasis);
     const strongDays=records.reduce<number>((count,record)=>{
       const rows=recordRows(evidence,record,'work'),completion=pct(rowsCompleted(rows),rowsPlanned(rows));
-      return count+(isFiniteNumber(completion)&&Math.round(completion)>=80?1:0);
+      return count+(isStrongCompletion(completion)?1:0);
     },0);
     const cleanAllRecordCount=num(options.allRecordCount,null),allRecordCount=isFiniteNumber(cleanAllRecordCount)?cleanAllRecordCount:records.length;
     const overview:CoachOverview={planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:reusable?.overview?reusable.overview.averageQuality:(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)};
@@ -4319,9 +4320,24 @@ type HistoryCacheEntry={
     if(typeof summarizePracticeRuns!=='function')throw new Error('Study Director Practice Pacer evidence is unavailable.');
     const PREPARED_REVISION_CACHE_LIMIT=2,HISTORY_CACHE_LIMIT=2;
     const preparedRevisions=new Map<string,PreparedInsights>(),historyCache=new Map<string,HistoryCacheEntry>();
+    let evictedDetailedHistory:HistoryCacheEntry|null=null;
     const remember=<T>(cache:Map<string,T>,key:string,value:T,limit:number):T=>{
       cache.delete(key);cache.set(key,value);
       while(cache.size>limit){const oldest=cache.keys().next().value;if(oldest!==undefined)cache.delete(oldest);}
+      return value;
+    };
+    const rememberHistory=(key:string,value:HistoryCacheEntry):HistoryCacheEntry=>{
+      historyCache.delete(key);historyCache.set(key,value);
+      while(historyCache.size>HISTORY_CACHE_LIMIT){
+        const oldest=historyCache.keys().next().value;
+        if(oldest===undefined)break;
+        const evicted=historyCache.get(oldest)||null;
+        historyCache.delete(oldest);
+        if(evicted?.audit){
+          if(evictedDetailedHistory&&evictedDetailedHistory!==evicted)evictedDetailedHistory.audit=null;
+          evictedDetailedHistory=evicted;
+        }
+      }
       return value;
     };
     const trustedRevision=(value:unknown)=>{
@@ -4369,13 +4385,16 @@ type HistoryCacheEntry={
     const historyEntry=(prepared:PreparedInsights,options:InsightsBuildOptions={}):HistoryCacheEntry=>{
       const currentStudyDate=isIsoDate(options.currentStudyDate)?options.currentStudyDate:localIsoDate();
       const key=`${prepared.revision}|${currentStudyDate}|${options.subjectReferenceRevision||summariesRevisionKey(options.subjectReferenceSummaries)}`;
-      const cached=historyCache.get(key);if(cached)return remember(historyCache,key,cached,HISTORY_CACHE_LIMIT);
+      const cached=historyCache.get(key);if(cached)return rememberHistory(key,cached);
       const contextOptions:HistoryContextOptions=Object.freeze({currentStudyDate,...(options.subjectReferenceSummaries?{subjectReferenceSummaries:options.subjectReferenceSummaries}:{})});
       const context=createAllHistoryContext(prepared.records,contextOptions,classifyTaskOutcome);
-      return remember(historyCache,key,{prepared,contextOptions,compact:buildAllHistoryInsights(context,false),reusable:context,audit:null},HISTORY_CACHE_LIMIT);
+      return rememberHistory(key,{prepared,contextOptions,compact:buildAllHistoryInsights(context,false),reusable:context,audit:null});
     };
     const labEvidence=(entry:HistoryCacheEntry):DetailedAllHistoryInsights=>entry.audit||(entry.audit=buildAllHistoryInsights(createAllHistoryContext(entry.prepared.records,entry.contextOptions,classifyTaskOutcome),true));
-    const releaseTransient=()=>{historyCache.forEach(entry=>{entry.audit=null;});};
+    const releaseTransient=()=>{
+      historyCache.forEach(entry=>{entry.audit=null;});
+      if(evictedDetailedHistory){evictedDetailedHistory.audit=null;evictedDetailedHistory=null;}
+    };
     const buildPrepared=(records:readonly InsightRecord[],prepared:PreparedInsights,options:InsightsBuildOptions={})=>{
       const entry=historyEntry(prepared,options),context=entry.reusable;
       const reusable:ReusableInsights|null=context&&records===prepared.records&&context.historyMeta.capped===false
