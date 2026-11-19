@@ -1,4 +1,4 @@
-name: P5.8A targeted Drive closure
+name: P5.8 targeted Drive/status closure
 
 on:
   push:
@@ -12,9 +12,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  drive:
+  drive-status:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
@@ -26,7 +26,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Strict TypeScript and typed lint
         run: npm run check:types
-      - name: P5.8A Drive and provider witnesses
+      - name: P5.8 Drive, provider and status witnesses
         run: >-
           node tests/helpers/run-category.mjs targeted
           tests/integration/backup/drive-security.mjs
@@ -34,9 +34,23 @@ jobs:
           tests/integration/backup/drive-repository-scale.mjs
           tests/unit/backup/repository-background.mjs
           tests/integration/backup/repository-checkpoint.mjs
+          tests/unit/backup/sync-status.mjs
+          tests/integration/ui/notification-lifecycle.mjs
+          tests/integration/app/storage-reset-connect-recovery.mjs
       - name: Source build
         run: node build/build.mjs
       - name: Verify generated build
         run: node build/verify-build.mjs
       - name: Verify generated syntax
         run: node tests/architecture/build/generated-syntax-check.mjs
+      - name: Locate Chromium
+        shell: bash
+        run: |
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          echo "CHROMIUM_PATH=$CHROME" >> "$GITHUB_ENV"
+      - name: P5.8 Drive/status browser journeys
+        run: |
+          node tests/browser/backup/cold-start-drive-recovery.mjs
+          node tests/browser/backup/sync-and-profiles.mjs
+          node tests/browser/backup/sync-journeys.mjs
