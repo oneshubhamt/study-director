@@ -471,12 +471,14 @@ const referenceNaiveMae=roundRef(naiveRows.reduce((sum,row)=>sum+Math.abs(row.na
 assert.equal(stateCandidate.completionMae,referenceCompletionMae);
 assert.equal(stateCandidate.naiveCompletionMae,referenceNaiveMae);
 assert.equal(stateCandidate.naiveMaeGain,roundRef(referenceNaiveMae-referenceCompletionMae,1));
-assert.equal(stateCandidate.crossFitReady,true,'balanced held-out strong/non-strong outcomes must support cross-fitted calibration');
 const strongHeldOut=Array.from(stateCandidate.strongPredictions);
+assert.equal(strongHeldOut.length,stateCandidate.strongBacktests);
+assert.ok(strongHeldOut.some(row=>row.actualStrong===1)&&strongHeldOut.some(row=>row.actualStrong===0),'held-out strong-day calibration evidence must contain both outcomes');
 const baseStrongRate=strongHeldOut.reduce((sum,row)=>sum+row.actualStrong,0)/strongHeldOut.length;
 const referenceBaselineBrier=roundRef(strongHeldOut.reduce((sum,row)=>sum+(baseStrongRate-row.actualStrong)**2,0)/strongHeldOut.length,3);
 assert.equal(stateCandidate.baselineBrier,referenceBaselineBrier);
 const calibrationWeight=stateCandidate.bins.reduce((sum,bin)=>sum+bin.count,0);
+assert.equal(calibrationWeight,strongHeldOut.length,'calibration bins must conserve every held-out strong-day probability');
 const referenceCalibrationError=roundRef(stateCandidate.bins.reduce((sum,bin)=>sum+(bin.count/calibrationWeight)*Math.abs((bin.predicted??0)-(bin.observed??0)),0)*100,1);
 assert.equal(stateCandidate.calibrationError,referenceCalibrationError);
 
