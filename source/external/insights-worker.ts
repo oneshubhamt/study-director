@@ -34,7 +34,10 @@ scope.addEventListener('message',(event:MessageEvent<unknown>)=>{
   }
   const message=decoded.message;
   if(message.type==='SD_INSIGHTS_RECORDS'){
-    if(message.part===0)incoming={requestId:message.requestId,revision:message.revision,parts:message.parts,next:0,records:[]};
+    if(message.part===0&&incoming?.requestId!==message.requestId){
+      held=null;
+      incoming={requestId:message.requestId,revision:message.revision,parts:message.parts,next:0,records:[]};
+    }
     const current=incoming;
     if(!current||current.requestId!==message.requestId||current.revision!==message.revision||current.parts!==message.parts){
       postError(message.requestId,message.revision,'Insights record-transfer identity changed before completion.');

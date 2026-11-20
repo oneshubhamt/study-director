@@ -71,10 +71,13 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     if(state.force401Once){state.force401Once=false;return json({error:{message:'expired token'}},401);}
     if(url.pathname==='/drive/v3/files'&&method==='GET'){
       const q=url.searchParams.get('q')||'';
+      const page=state.listPage?.(q,url.searchParams);
+      if(page!==undefined)return json(page);
       const deleted=q.match(/key='studyDirectorDeletedProfile' and value='([^']+)'/u);
       if(deleted)return json({files:state.deletionMarkers.filter(row=>row.profile===deleted[1]).map(row=>({id:row.id}))});
       if(q.includes("mimeType='application/vnd.google-apps.folder'")){state.folderListStarted+=1;if(state.folderListGate)await state.folderListGate;return json({files:state.folders.filter(id=>!state.trashedFolders.has(id)).map(folderMetadata)});}
-      let rows=[...state.files.values()].filter(file=>!file.trashed);
+      const parent=q.match(/'([^']+)' in parents/u)?.[1];
+      let rows=[...state.files.values()].filter(file=>!file.trashed&&(!parent||file.parents?.includes(parent)));
       const kindMatch=q.match(/key='studyDirectorRepositoryKind' and value='([^']+)'/u),idMatch=q.match(/key='studyDirectorRepositoryId' and value='([^']+)'/u);
       if(kindMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryKind||'')===kindMatch[1]);
       if(idMatch)rows=rows.filter(file=>String(file.appProperties?.studyDirectorRepositoryId||'')===idMatch[1]);

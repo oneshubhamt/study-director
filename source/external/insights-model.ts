@@ -400,13 +400,14 @@ function createInsightsModelRuntime(global:typeof globalThis){
   function clampPct(value:unknown){
     return Math.max(0,Math.min(100,Math.round(num(value))));
   }
-  function isIsoDate(value:unknown):value is string{
-    return /^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
+  function dateDay(iso:unknown):number|null{
+    if(typeof iso!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(iso))return null;
+    const year=Number(iso.slice(0,4)),month=Number(iso.slice(5,7)),day=Number(iso.slice(8));
+    const date=new Date(Date.UTC(year,month-1,day));
+    return date.getUTCFullYear()===year&&date.getUTCMonth()===month-1&&date.getUTCDate()===day?date.getTime()/86400000:null;
   }
-  function dateDay(iso:unknown){
-    if(!isIsoDate(iso))return null;
-    const parts=iso.split('-').map(Number);
-    return Math.floor(Date.UTC(parts[0]!,parts[1]!-1,parts[2]!)/86400000);
+  function isIsoDate(value:unknown):value is string{
+    return dateDay(value)!==null;
   }
   function dateFromDay(day:number){
     return new Date(day*86400000).toISOString().slice(0,10);
@@ -948,6 +949,8 @@ function createInsightsModelRuntime(global:typeof globalThis){
         updatedAt:record.updatedAt,
         createdAt:record.createdAt,
         studyQuality:record.studyQuality,
+        degraded:record.degraded,
+        practiceSummary:record.__sdPracticeSummary,
         originalPlannedStudyMinutes:record.originalPlannedStudyMinutes,
         completedEquivalentMinutes:record.completedEquivalentMinutes,
         actualFocusMinutes:record.actualFocusMinutes,
@@ -3712,7 +3715,7 @@ type CoachSignalMeta=Readonly<{kind?:CoachKind;domain?:string;surface?:string;su
 type InternalCoachSignal={text:string;tag:string;tone:string;_domain:string;_surface:string;_surfaceLabel:string;_targetId:string;_topic:string;_theme:string;_kind:CoachKind;_priority:number;_confidence:CoachConfidence|null;_confidenceRank:number;_compact:boolean;_order:number};
 type PublicCoachSignal=Readonly<{text:string;tag:string;tone:string;kind:CoachKind;domain:string;topic:string;theme:string;surfaceKey:string;surfaceLabel:string;targetId:string;confidenceLabel:string|null;confidenceTone:string}>;
 type CoachSurfaceTakeaway=Readonly<{text:string;tag:string;tone:string;kind:CoachKind;domain?:string;topic?:string;theme?:string;surfaceKey:string;surfaceLabel:string;targetId:string;confidenceLabel:string|null;confidenceTone:string}>;
-type CoachOverview=Readonly<{planned:number;completed:number;actual:number;completion:number|null;actualVsPlanned:number;strongDays:number;averageQuality:number|null}>;
+type CoachOverview=Readonly<{planned:number;completed:number;actual:number;completion:number|null;actualVsPlanned:number;eligibleDays:number;ratedEligibleDays:number;strongDays:number;averageQuality:number|null}>;
 type CoachGuardrails=Readonly<{
   sample:ReturnType<(typeof InsightsAnalytics)['sampleStrength']>;
   trend:ReturnType<(typeof InsightsAnalytics)['trendStrength']>;
@@ -3756,7 +3759,7 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     }=PacerEvidence;
   function computeMilestones(modelBase:CoachModelInput){
     const days=Math.max(1,modelBase.recordCount||0);
-    const completionDays=Math.max(0,num(modelBase.advanced&&modelBase.advanced.completionDayCount));
+    const completionDays=modelBase.overview.eligibleDays;
     const actualAvg=modelBase.recordCount?modelBase.overview.actual/days:0;
     const planGapAvg=modelBase.recordCount?modelBase.overview.actualVsPlanned/days:0;
     const totalGap=modelBase.overview.actualVsPlanned;
@@ -3885,13 +3888,13 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     };
     if(surface.key==='fitness')return {...base,confidenceLabel:'No usable state evidence',text:'No usable Output state or component-state estimate is available from the all-history evidence.'};
     if(surface.key==='performance'){
-      const eligible=num(model&&model.advanced&&model.advanced.completionDayCount),strong=num(model&&model.overview&&model.overview.strongDays);
-      const rated=num(model&&model.advanced&&model.advanced.qualityPairCount);
+      const eligible=model.overview.eligibleDays,strong=num(model&&model.overview&&model.overview.strongDays);
+      const rated=model.overview.ratedEligibleDays;
       return {...base,confidenceLabel:guardrail.label||'Descriptive sample',confidenceTone:guardrail.tone||'quiet',text:`The selected window has ${strong}/${eligible} completion-eligible days at 80%+ work completion and ${rated} rated day${rated===1?'':'s'}. No additional performance finding cleared the coaching gates.`};
     }
     if(surface.key==='output'){
       const completion=model&&model.overview&&Number.isFinite(model.overview.completion)?percentLabel(model.overview.completion,1):'unavailable';
-      const days=num(model&&model.advanced&&model.advanced.completionDayCount);
+      const days=model.overview.eligibleDays;
       const stability=model&&model.advanced&&model.advanced.outputStability&&model.advanced.outputStability.label||'not established';
       return {...base,confidenceLabel:guardrail.label||'Descriptive sample',confidenceTone:guardrail.tone||'quiet',text:`Window work completion is ${completion} across ${days} completion-eligible day${days===1?'':'s'}; output stability is ${String(stability).toLowerCase()}. No additional output concern cleared the coaching gates.`};
     }
@@ -4110,7 +4113,7 @@ type CoachSelection=Readonly<{bestDelay:ReturnType<(typeof InsightsAnalytics)['c
     const averageShift=num(model.schedule.averageDailyPeakShiftOnShiftedDays);
     if(model.recordCount>=3&&shiftedDays>=2&&(shiftedRate>=15||averageShift>=30))pushSignal(signals,`Schedule movement appears on ${model.schedule.shiftedDays}/${model.recordCount} saved days; average largest movement on shifted days is ${minutesLabel(model.schedule.averageDailyPeakShiftOnShiftedDays)}.`,'Schedule','watch',{domain:'schedule',topic:'schedule',kind:'concern',priority:48+Math.min(20,shiftedRate*.4)+Math.min(10,averageShift/10),confidence:model.guardrails.sample});
     if(model.interruption.hasTimerEvidence&&num(model.interruption.interruptionRate)>=25)pushSignal(signals,`Focus friction is visible in ${percentLabel(model.interruption.interruptionRate)} of ${model.interruption.blockCount} Timer-backed work blocks after excluding accepted Pomodoro recovery. Worst affected: ${model.interruption.worstAffected||'not clear yet'}.`,'Focus friction','watch',{domain:'friction',topic:'friction',kind:'concern',priority:72+Math.min(22,num(model.interruption.interruptionRate)*.4),confidence:model.guardrails.sample});
-    const eligibleDays=num(model.advanced&&model.advanced.completionDayCount),strongDays=num(model.overview&&model.overview.strongDays),strongRate=eligibleDays?pct(strongDays,eligibleDays):null;
+    const eligibleDays=model.overview.eligibleDays,strongDays=num(model.overview&&model.overview.strongDays),strongRate=eligibleDays?pct(strongDays,eligibleDays):null;
     if(eligibleDays>=5&&isFiniteNumber(strongRate)){
       if(strongRate<=25&&num(model.overview.completion)<70)pushSignal(signals,`${strongDays}/${eligibleDays} completion-eligible days reached the descriptive 80% strong-day threshold; aggregate work completion is ${percentLabel(model.overview.completion,1)}.`,'Training record','watch',{domain:'performance',topic:'training-record',kind:'concern',priority:64+Math.min(12,Math.max(0,25-strongRate)*.4),confidence:model.guardrails.sample});
       else if(strongRate>=60&&num(model.overview.completion)>=80)pushSignal(signals,`${strongDays}/${eligibleDays} completion-eligible days reached 80%+ work completion, with ${percentLabel(model.overview.completion,1)} aggregate completion.`,'Training record','good',{domain:'performance',topic:'training-record',kind:'positive',priority:40,confidence:model.guardrails.sample});
@@ -4283,12 +4286,16 @@ type HistoryCacheEntry={
     const analyticalEvidence=analyticalRecords===records?evidence:createEvidenceIndex(analyticalRecords,classifyTaskOutcome);
     const daily=reusable&&analyticalEvidence===evidence&&reusable.daily?reusable.daily:computeDailySeries(analyticalEvidence);
     const trendDaily=reusable?.advanced?daily:filterDailyForDirectionalBasis(daily,trendBasis);
-    const strongDays=records.reduce<number>((count,record)=>{
+    let strongDays=0,eligibleDays=0,ratedEligibleDays=0;
+    for(const record of records){
       const rows=recordRows(evidence,record,'work'),completion=pct(rowsCompleted(rows),rowsPlanned(rows));
-      return count+(isStrongCompletion(completion)?1:0);
-    },0);
+      if(completion===null)continue;
+      eligibleDays+=1;
+      if(isStrongCompletion(completion))strongDays+=1;
+      if(isFiniteNumber(record.studyQuality)&&Number.isInteger(record.studyQuality)&&record.studyQuality>=1&&record.studyQuality<=5)ratedEligibleDays+=1;
+    }
     const cleanAllRecordCount=num(options.allRecordCount,null),allRecordCount=isFiniteNumber(cleanAllRecordCount)?cleanAllRecordCount:records.length;
-    const overview:CoachOverview={planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,strongDays,averageQuality:reusable?.overview?reusable.overview.averageQuality:(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)};
+    const overview:CoachOverview={planned,completed,actual,completion:pct(completed,planned),actualVsPlanned:actual-planned,eligibleDays,ratedEligibleDays,strongDays,averageQuality:reusable?.overview?reusable.overview.averageQuality:(quality.length?round(quality.reduce((a,b)=>a+b,0)/quality.length):null)};
     const subjects=reusable?.subjects??computeSubjects(evidence,subjectReferenceDate,options.subjectReferenceSummaries);
     const interruption=reusable?.interruption??computeInterruption(evidence);
     const sampleAudit=reusable?.sampleAudit??computeSampleAudit(evidence);

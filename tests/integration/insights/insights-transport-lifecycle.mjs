@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import {realInsightsProviders} from '../../helpers/insights-providers.mjs';
+import {readInsightsModelRuntimeSource} from '../../helpers/insights-model-runtime.mjs';
 import {readScript} from '../../../build/source-script.mts';
 
 const protocolSource=readScript('source/external/insights-protocol.ts');
@@ -40,12 +42,26 @@ function protocolContext(extra={}){
   const send=data=>listeners.message({data});
   send({type:'SD_INSIGHTS_RECORDS',requestId:1,revision:'r1',part:1,parts:2,records:[]});
   assert.equal(outbound.at(-1)?.type,'SD_INSIGHTS_ERROR','out-of-order transfer must fail closed');
+  for(const record of [{date:'2026-01-01',tasks:[{completion:40}]},{date:'2026-01-01',tasks:[{__sdOutcome:'unknown'}]}]){
+    send({type:'SD_INSIGHTS_RECORDS',requestId:2,revision:'r2',part:0,parts:1,records:[record]});
+    assert.equal(outbound.at(-1)?.type,'SD_INSIGHTS_ERROR','malformed outcome cannot be treated as untouched work');
+  }
   send({type:'SD_INSIGHTS_RECORDS',requestId:2,revision:'r2',part:0,parts:1,records:[{date:'2026-01-01'}]});
   send({type:'SD_INSIGHTS_BUILD',id:2,revision:'r2',window:{indices:[9]},options:{}});
   assert.equal(outbound.at(-1)?.type,'SD_INSIGHTS_ERROR','invalid window index must fail closed');
+  for(const indices of [[0,0],[1,0],new Array(1)]){
+    send({type:'SD_INSIGHTS_BUILD',id:2,revision:'r2',window:{indices},options:{}});
+    assert.equal(outbound.at(-1)?.type,'SD_INSIGHTS_ERROR');
+  }
   send({type:'SD_INSIGHTS_BUILD',id:3,revision:'r2',window:{all:true},options:{windowKey:'all'}});
   assert.equal(outbound.at(-1)?.type,'SD_INSIGHTS_RESULT');
   assert.equal(Object.hasOwn(outbound.at(-1).model,'getLabEvidence'),false,'Lab evidence must stay off the worker wire');
+  const start={type:'SD_INSIGHTS_RECORDS',requestId:4,revision:'r2',part:0,parts:2,records:[]};
+  send(start);
+  send({type:'SD_INSIGHTS_BUILD',id:4,revision:'r2',window:{all:true},options:{}});
+  assert.equal(outbound.at(-1)?.type,'SD_INSIGHTS_ERROR','unfinished replacement must never expose the old history');
+  send(start);
+  assert.match(outbound.at(-1)?.message,/out of order/u,'duplicate opening chunk rejects the transfer');
 }
 {
   let serial=0,releaseYield=()=>{};
@@ -84,6 +100,19 @@ function protocolContext(extra={}){
   await assert.rejects(first,error=>error?.name==='AbortError');
 }
 {
+  function HTMLScriptElement(){}
+  const script=Object.assign(new HTMLScriptElement(),{src:'https://example.test/insights.js'});
+  const context=protocolContext({document:{currentScript:script},HTMLScriptElement,performance:{now:()=>0}});
+  vm.runInContext(computeSource,context);
+  const logic=Object.freeze({classifyTaskOutcome:()=> 'untouched',summarizePracticeRuns:()=>({})});
+  const compute=context.StudyDirectorInsightsComputeBridge.create({logic},{buildPrepared:()=>({recordCount:140})});
+  const records=Array(140).fill({date:'2026-03-01'});
+  assert.equal(compute.warm(),false);
+  const result=await compute.build(records,{records,revision:'no-worker'},{});
+  assert.equal(result.mode,'main-thread-unavailable');
+  assert.equal(result.model.recordCount,140);
+}
+{
   class FailingWorker{constructor(){throw new Error('worker startup failed');}}
   function HTMLScriptElement(){}
   const script=Object.create(HTMLScriptElement.prototype);script.src='https://example.test/sd.insights.js';
@@ -103,10 +132,13 @@ function protocolContext(extra={}){
   assert.equal(result.mode,'main-thread-worker-failure');
   assert.deepEqual(result.model,{count:160,parity:'same-model-engine'},'worker startup failure must fall back through the same model engine');
 }
-{
+for(const failure of ['unreadable','missing report fields']){
   class RuntimeFailWorker{
     postMessage(message){
-      if(message.type==='SD_INSIGHTS_BUILD')queueMicrotask(()=>this.onmessageerror?.());
+      if(message.type==='SD_INSIGHTS_BUILD')queueMicrotask(()=>{
+        if(failure==='unreadable')this.onmessageerror?.();
+        else this.onmessage({data:{type:'SD_INSIGHTS_RESULT',id:message.id,revision:message.revision,model:{},computeMs:0}});
+      });
     }
     terminate(){this.terminated=true;}
   }
@@ -133,13 +165,21 @@ function protocolContext(extra={}){
 {
   const workers=[],timers=new Map();let nextTimer=0;
   class ReuseWorker{
-    constructor(){this.messages=[];this.terminated=false;workers.push(this);}
+    constructor(){
+      this.messages=[];this.terminated=false;workers.push(this);
+      const worker=protocolContext({
+        performance:{now:()=>2},postMessage:data=>queueMicrotask(()=>this.onmessage?.({data:structuredClone(data)})),
+        addEventListener:(_type,handler)=>{this.receive=handler;}
+      });
+      vm.runInContext(readInsightsModelRuntimeSource(),worker);
+      vm.runInContext(workerSource,worker);
+    }
     postMessage(message){
       this.messages.push(message);
-      if(message.type==='SD_INSIGHTS_BUILD'){
-        if(message.id>1)queueMicrotask(()=>this.onmessage?.({data:{type:'SD_INSIGHTS_RESULT',id:message.id-1,revision:message.revision,model:null,computeMs:2}}));
-        queueMicrotask(()=>this.onmessage?.({data:{type:'SD_INSIGHTS_RESULT',id:message.id,revision:message.revision,model:{count:message.window.all?320:message.window.indices.length},computeMs:2}}));
+      if(message.type==='SD_INSIGHTS_BUILD'&&message.id>1){
+        queueMicrotask(()=>this.onmessage?.({data:{type:'SD_INSIGHTS_RESULT',id:message.id-1,revision:message.revision,model:null,computeMs:2}}));
       }
+      this.receive({data:structuredClone(message)});
     }
     terminate(){this.terminated=true;}
   }
@@ -152,18 +192,26 @@ function protocolContext(extra={}){
     clearTimeout:id=>timers.delete(id),queueMicrotask
   });
   vm.runInContext(computeSource,context,{filename:'insights-compute.ts'});
-  const engine={buildPrepared(records){return {count:records.length};},getLabEvidence(){return {audit:true};}};
-  const api=Object.freeze({logic:Object.freeze({classifyTaskOutcome:()=> 'untouched',summarizePracticeRuns:()=>Object.freeze({runSummaries:[]})})});
-  const records=Array.from({length:320},(_,index)=>({date:`2026-07-${String(index%28+1).padStart(2,'0')}`}));
-  const prepared={records,revision:'reuse-r1'};
+  const logic=realInsightsProviders(),api={logic};
+  vm.runInContext(readInsightsModelRuntimeSource(),context);
+  const engine=context.StudyDirectorInsightsModel.ModelEngine.createInsightsEngine(logic);
+  const input=Array.from({length:320},(_,index)=>({
+    date:new Date(Date.UTC(2025,0,index+1)).toISOString().slice(0,10),
+    tasks:[{id:'a',name:'Study',kind:'work',dur:20,completion:index%3===0?80:40,completionSource:'manual'}],
+    practiceRuns:index%5===0?[{taskId:'a',targetMs:60000,totalUnits:3,unitMs:[55000,60000,65000]}]:[]
+  }));
   const computation=context.StudyDirectorInsightsComputeBridge.create(api,engine,{yieldTask:()=>Promise.resolve()});
-  const first=await computation.build(records,prepared,{});
+  const prepared=engine.prepare(computation.enrichRecords(input),'reuse-r1'),records=prepared.records;
+  const reference=context.StudyDirectorInsightsModel.ModelEngine.createInsightsEngine(logic);
+  const raw=reference.prepare(input,'reference'),options={currentStudyDate:records.at(-1).date};
+  const first=await computation.build(records,prepared,options);
   assert.equal(first.sentRecords,320);
-  assert.equal(first.model.count,engine.buildPrepared(records,prepared,{}).count,'worker result must match the same model-engine fixture used by fallback');
+  assert.deepEqual(JSON.parse(JSON.stringify(first.model)),JSON.parse(JSON.stringify(reference.buildPrepared(raw.records,raw,options))),'worker and main thread agree across the complete report');
   const retained=workers[0];
   const firstParts=retained.messages.filter(message=>message.type==='SD_INSIGHTS_RECORDS');
   assert.deepEqual(firstParts.map(message=>message.records.length),[150,150,20]);
-  const second=await computation.build(records.slice(-7),prepared,{});
+  const week=records.slice(-7),second=await computation.build(week,prepared,options);
+  assert.deepEqual(JSON.parse(JSON.stringify(second.model)),JSON.parse(JSON.stringify(reference.buildPrepared(raw.records.slice(-7),raw,options))),'retained window computes the same report as the main thread');
   assert.equal(second.mode,'worker','a malformed reply from a completed request must not disable the current worker');
   assert.equal(second.sentRecords,0,'same revision window change must reuse worker-held records');
   assert.equal(workers.length,1,'same revision builds must reuse the retained worker');

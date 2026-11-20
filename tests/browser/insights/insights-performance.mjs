@@ -152,7 +152,8 @@ try{
 
   // Without workers the report still renders, on the main thread and without
   // idle pre-computation, and it computes the same model.
-  const fallbackPage=await open(`Object.defineProperty(window,'Worker',{configurable:true,writable:true,value:undefined});`);
+  const fallbackPage=await open(`Reflect.deleteProperty(window,'Worker');`);
+  assert.equal(await fallbackPage.evaluate(`'Worker' in window`),false,'exercise browsers where the Worker global is absent');
   const fallback=await render(fallbackPage);
   checkStructure(fallback,'Worker-unavailable fallback',{mode:'main-thread-unavailable',source:'computed'});
   assert.equal(fallback.profile.modelSignature,cold.profile.modelSignature,'Worker and fallback model results differ.');

@@ -77,6 +77,81 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   assert.equal(await provider.repository.deleteSessionClaim(uploaded),true);assert.equal((await provider.repository.listSessionClaims()).items.length,0);
 }
 
+// An unauthenticated reader cannot cancel an interactive sign-in already in progress.
+{
+  const {provider,state}=createHarness();
+  await provider.prepare();state.authorizationHold=true;
+  const signingIn=provider.authorize();
+  await assert.rejects(provider.repository.list({kind:'object'}),/authorization expired/i);
+  state.authorizationResponder();await signingIn;
+  assert.equal(provider.connected(),true);
+}
+
+// A stale request or revocation can finish after another tab has signed in.
+for(const kind of ['list','download','disconnect','refused binding']){
+  let storageListener,finishRequest;
+  const {provider,context,state}=createHarness({bind:async()=>{if(kind==='refused binding'&&!finishRequest){replaceSession();finishRequest=true;return 'refuse';}return 'continue';},addEventListener(type,listener){if(type==='storage')storageListener=listener;}});
+  await provider.prepare();await provider.authorize();
+  const operation=provider.repository.beginOperation();
+  const replaceSession=()=>storageListener({key:'studyDirector.driveSession.v1',newValue:JSON.stringify({token:'token-next',expiresAt:Date.now()+3600000})});
+  if(kind==='refused binding'){
+    await assert.rejects(operation.list({kind:'object'}),/authorization|cancelled|abort/i);
+    await new Promise(resolve=>setTimeout(resolve,5));
+    assert.equal(provider.connected(),true,'late binding refusal must preserve the replacement sign-in');
+    await provider.repository.list({kind:'object'});
+    assert.equal(state.binds.length,2);
+    continue;
+  }
+  await operation.list({kind:'object'});
+  if(kind==='disconnect')context.google.accounts.oauth2.revoke=(_token,callback)=>{finishRequest=()=>callback({successful:true});};
+  else if(kind==='list')state.listPage=()=>{replaceSession();return {files:[]};};
+  if(kind==='list')await assert.rejects(operation.list({kind:'object'}),/authorization|session|cancelled/i);
+  else if(kind==='download'){
+    const file=await operation.upload(await makeRepositoryFile('object','obj_'+'8'.repeat(32),'download bytes'));
+    await assert.rejects(operation.download(file,{onProgress:replaceSession}),/authorization changed/u);
+    assert.equal(state.releasedDownloads,1,'a superseded download releases its temporary file');
+  }else{
+    const revoking=provider.disconnect();
+    await waitFor(()=>finishRequest,'revocation started');
+    replaceSession();
+    finishRequest();await revoking;
+  }
+  assert.equal(provider.connected(),true,'old completion must preserve the replacement sign-in');
+  state.listPage=undefined;
+  await provider.repository.list({kind:'object'});
+  assert.equal(state.requests.at(-1).authorization,'Bearer token-next');
+  assert.equal(state.binds.length,2,'a replacement sign-in must verify its own library binding');
+}
+
+{
+  const {provider,state}=createHarness();await provider.prepare();await provider.authorize();
+  state.folders.push('existing');
+  state.listPage=(q,params)=>q.includes("key='studyDirectorFolder'")&&!params.has('pageToken')?{files:[],nextPageToken:'more'}:undefined;
+  await provider.repository.list({kind:'object'});
+  assert.deepEqual(state.folders,['existing'],'a partial empty listing cannot authorize creation of another folder');
+  state.listPage=q=>q.includes("key='studyDirectorRepositoryKind'")?{}:undefined;
+  await assert.rejects(provider.repository.list({kind:'commit'}),/inventory|list|information/i,'missing inventory cannot establish an empty repository');
+  state.listPage=q=>q.includes("key='studyDirectorRepositoryKind'")?{files:[],incompleteSearch:true}:undefined;
+  for(const read of [()=>provider.repository.listPublications(),()=>provider.repository.listMaintenances()]){
+    assert.equal((await read()).overflow,true,'an incomplete coordination search cannot certify absence of live leases');
+  }
+  const file=await makeRepositoryFile('object','obj_'+'9'.repeat(32),'same identity');
+  await assert.rejects(provider.repository.upload(file),/incomplete|inventory/i);
+  assert.equal(state.files.size,0);
+  state.listPage=undefined;
+  let finishUpload;
+  state.uploadPutGate=new Promise(resolve=>{finishUpload=resolve;});
+  const first=provider.repository.upload(file);
+  await waitFor(()=>state.uploadPutStarted===1,'first multipart request started');
+  const second=provider.repository.upload(file);
+  const observation=second.then(()=>null,error=>error);
+  await new Promise(resolve=>setImmediate(resolve));
+  finishUpload();await first;
+  assert.match(String(await observation),/already uploading/u);
+  assert.equal(state.files.size,1,'overlapping uploads cannot create duplicate logical files');
+  await provider.disconnect();
+}
+
 // Complete history discovery is independent of retention capacity. Page work
 // stays bounded, while incomplete searches and repeated tokens cannot certify it.
 {
@@ -349,7 +424,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   for(const version of ['1','3']){
     markerFile.appProperties.studyDirectorRepositoryVersion=version;const unknown=await operation.listMaintenances();
     assert.equal(unknown.items.length,0);assert.equal(unknown.ignored,1,`maintenance marker version ${version} is not a lease`);
-    await assert.rejects(()=>operation.assertMaintenance(marker),/disappeared during cleanup/u);
+    await assert.rejects(()=>operation.assertMaintenance(marker),/invalid marker metadata/u);
   }
   markerFile.appProperties.studyDirectorRepositoryVersion='2';markerFile.createdTime=marker.createdAt;markerFile.modifiedTime=marker.createdAt;
   const maintenanceReleaseStart=state.requests.length;state.networkFailCoordinationDeleteOnce=true;assert.equal(await operation.endMaintenance(marker),true);const maintenanceReleaseRequests=state.requests.slice(maintenanceReleaseStart).map(request=>({method:request.method,url:new URL(request.url)}));assert.equal(maintenanceReleaseRequests.some(request=>request.method==='GET'&&request.url.pathname===`/drive/v3/files/${marker.remoteId}`),false,'known verified maintenance release must DELETE directly instead of paying for a redundant metadata GET');active=await operation.listMaintenances();assert.equal(active.items.length,0,'ambiguous maintenance deletion must recheck exact identity and retry until the marker is confirmed absent');

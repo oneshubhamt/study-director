@@ -1,3 +1,4 @@
+import type {TaskOutcome} from '../../types/domain.ts';
 import type {InsightRecord,InsightSummary,InsightsBuildOptions,InsightsResult} from './insights-model.ts';
 
 const INSIGHTS_RECORDS_PER_MESSAGE=150;
@@ -41,7 +42,16 @@ function optionalFinite(value:unknown):value is number|null|undefined{
   return value===undefined||value===null||finite(value);
 }
 function insightRecord(value:unknown):value is InsightRecord{
-  return object(value)&&typeof value['date']==='string';
+  return object(value)&&typeof value['date']==='string'
+    &&['tasks','originalSchedule','practiceRuns'].every(key=>value[key]===undefined||(Array.isArray(value[key])&&value[key].every(object)));
+}
+const outcomes=Object.freeze({full:true,partial:true,skipped:true,untouched:true,'finished-unverified':true,'zero-output':true} satisfies Record<TaskOutcome,true>);
+function transferredRecord(value:unknown):value is InsightRecord{
+  if(!insightRecord(value))return false;
+  for(const task of value.tasks??[]){
+    if(!task||typeof task.__sdOutcome!=='string'||!Object.hasOwn(outcomes,task.__sdOutcome))return false;
+  }
+  return true;
 }
 function insightSummary(value:unknown):value is InsightSummary{
   return object(value)&&typeof value['date']==='string';
@@ -62,7 +72,13 @@ function windowRequest(value:unknown):value is InsightsWindowRequest{
   if(!object(value))return false;
   if(value['all']===true)return Object.keys(value).every(key=>key==='all');
   if(!Array.isArray(value['indices'])||value['indices'].length>INSIGHTS_MAX_RETAINED_RECORDS)return false;
-  return Object.keys(value).every(key=>key==='indices')&&value['indices'].every(index=>Number.isSafeInteger(index)&&Number(index)>=0);
+  if(!Object.keys(value).every(key=>key==='indices'))return false;
+  let previous=-1;
+  for(const index of value['indices']){
+    if(typeof index!=='number'||!Number.isSafeInteger(index)||index<=previous)return false;
+    previous=index;
+  }
+  return true;
 }
 function failure(value:unknown,message:string):InsightsDecode<never>{
   const row=object(value)?value:{};
@@ -79,7 +95,7 @@ function decodeWorkerRequest(value:unknown):InsightsDecode<InsightsWorkerRequest
     if(!requestId(value['requestId'])||!revision(value['revision']))return failure(value,'Insights record-transfer identity is invalid.');
     if(!Number.isSafeInteger(value['parts'])||Number(value['parts'])<1||Number(value['parts'])>INSIGHTS_MAX_PARTS)return failure(value,'Insights record-transfer part count is invalid.');
     if(!Number.isSafeInteger(value['part'])||Number(value['part'])<0||Number(value['part'])>=Number(value['parts']))return failure(value,'Insights record-transfer part index is invalid.');
-    if(!Array.isArray(value['records'])||value['records'].length>INSIGHTS_RECORDS_PER_MESSAGE||!value['records'].every(insightRecord))return failure(value,'Insights record-transfer payload is invalid.');
+    if(!Array.isArray(value['records'])||value['records'].length>INSIGHTS_RECORDS_PER_MESSAGE||!Array.from(value['records']).every(transferredRecord))return failure(value,'Insights record-transfer payload is invalid.');
     return Object.freeze({ok:true,message:Object.freeze({
       type:'SD_INSIGHTS_RECORDS',requestId:value['requestId'],revision:value['revision'],part:Number(value['part']),parts:Number(value['parts']),records:value['records']
     })});
@@ -92,8 +108,25 @@ function decodeWorkerRequest(value:unknown):InsightsDecode<InsightsWorkerRequest
   }
   return failure(value,'Unsupported Insights worker request.');
 }
+// Validate the report envelope before handing it to the renderer. Keep this
+// bounded by the number of fields even for maximum-size histories.
+const count=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0;
+const label=(value:unknown)=>typeof value==='string';
+const wireFields=Object.entries({
+  version:label,windowDays:(v:unknown)=>v===null||count(v),windowKey:label,windowLabel:label,
+  allRecordCount:count,recordCount:count,taskCount:count,currentStudyDate:label,trendBasis:object,
+  dateRange:object,calendarRange:object,daily:Array.isArray,overview:object,streak:object,
+  subjects:Array.isArray,startDelays:Array.isArray,blockOrder:Array.isArray,interruption:object,
+  frictionSources:Array.isArray,completionSources:Array.isArray,progressEvidence:object,outcomes:object,
+  qualityEvidence:Array.isArray,sampleAudit:object,support:object,fixed:object,resourceMix:Array.isArray,
+  practice:object,schedule:object,advanced:object,dynamics:object,fitness:object,guardrails:object,
+  milestones:Array.isArray,interpretation:object
+} satisfies Record<keyof InsightsWireModel,(value:unknown)=>boolean>);
 function wireModel(value:unknown):value is InsightsWireModel{
-  return object(value)&&!Object.hasOwn(value,'getLabEvidence');
+  if(!object(value)||Object.hasOwn(value,'getLabEvidence')||!wireFields.every(([key,check])=>check(value[key])))return false;
+  const overview=value['overview'],interpretation=value['interpretation'];
+  return object(overview)&&['eligibleDays','ratedEligibleDays','strongDays'].every(key=>count(overview[key]))
+    &&object(interpretation)&&object(interpretation['signals']);
 }
 function decodeWorkerResponse(value:unknown):InsightsDecode<InsightsWorkerResponse>{
   if(!object(value))return failure(value,'Insights worker response must be an object.');

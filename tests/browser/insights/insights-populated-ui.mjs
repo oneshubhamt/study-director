@@ -98,8 +98,8 @@ try{
     for(let index=0;index<total;index+=1){
       const date=iso(end-total+1+index),recent=true,recentIndex=index;
       const pace=recent?125-recentIndex*.06:65+index*.12,targetMs=60000,actualMs=Math.max(1000,Math.round(targetMs*pace/100));
-      const completionA=Math.max(5,Math.min(100,recent?45+recentIndex*.05:95-index*.08));
-      const completionB=Math.max(0,100-completionA/2),actualSecondsA=Math.round(completionA*18),actualSecondsB=1200;
+      const completionA=index===total-2?79:index===total-1?80:Math.max(5,Math.min(100,recent?45+recentIndex*.05:95-index*.08));
+      const completionB=index>=total-2?80:Math.max(0,100-completionA/2),actualSecondsA=Math.round(completionA*18),actualSecondsB=1200;
       const taskA='a-'+index,taskB='b-'+index;
       records.push({version:__InsightsUiDebug.dailyRecordVersion,recordKind:'study',date,savedAt:savedAt(date),updatedAt:savedAt(date),sourceRevision:1,
         quote:'',reflection:'',carryForwardDraft:'',studyQuality:index%5+1,realTimeSnapshot:null,
@@ -136,6 +136,9 @@ try{
   })()`);
   assert.equal(dense.total,590);
   await waitFor(()=>page.evaluate(`document.getElementById('pane-insights')?.getAttribute('aria-busy')==='false'&&!!document.querySelector('#pane-insights .insights-wrap')&&window.__StudyDirectorInsightsLastProfile?.records===590`),{timeout:15000,label:'dense Insights render'});
+  const nearThreshold=await page.evaluate(`[...document.querySelectorAll('#pane-insights .insights-cell[aria-label]')].filter(cell=>cell.classList.contains('l3')||cell.classList.contains('l4')).slice(-2).map(cell=>({band:cell.classList.contains('l4')?'strong':'good',label:cell.getAttribute('aria-label')}))`);
+  assert.deepEqual(nearThreshold.map(cell=>cell.band),['good','strong']);
+  assert.match(nearThreshold[0].label,/79\.5%/);
   const labBefore=await page.evaluate(`(()=>{const details=document.querySelector('details#insights-lab.insights-dynamics-lab');return {exists:!!details,open:!!details?.open,built:!!details?.querySelector('.insights-dynamics-lab-body')};})()`);
   assert.deepEqual(labBefore,{exists:true,open:false,built:false},'Analytics Lab must remain unbuilt until its disclosure is opened');
   await page.evaluate(`(()=>{const details=document.querySelector('details#insights-lab.insights-dynamics-lab');details?.scrollIntoView({block:'center'});details?.querySelector('summary')?.click();})()`);

@@ -17,7 +17,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   type SessionValue={token:string;expiresAt:number};
   type ProfileSnapshot=Readonly<{id:string;generation:number}>;
   type FolderReceipt=Readonly<{id:string;epoch:number;profile:ProfileSnapshot}>;
-  type FolderState={receipt:FolderReceipt|null};
+  type FolderState={readonly authorization:number;profile:ProfileSnapshot;receipt:FolderReceipt|null};
   type DriveOperation=Readonly<{signal:AbortSignal|null;checkProtection:DriveCheck|null;checkSource:DriveCheck|null;folderState:FolderState|null}>;
   type DriveOperationOptions={signal?:AbortSignal|null|undefined;checkProtection?:DriveCheck|null|undefined;checkSource?:DriveCheck|null|undefined;folderState?:FolderState|null|undefined};
   type DriveCapabilities={canAddChildren?:boolean;canDownload?:boolean};
@@ -172,7 +172,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   const responsePayloads=new WeakMap<Response,DrivePayload>();
   let gisPromise:Promise<void>|null=null;
   let oauthClient:GoogleOAuth2|null=null;
-  let accessToken='';
+  let accessToken='',authorizationGeneration=0;
   let tokenExpiresAt=0,signedInBefore=false;
   let connectionExpiryTimer:ReturnType<typeof setTimeout>|null=null;
   const connectionListeners=new Set<()=>void>();
@@ -185,7 +185,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   let folderResolutionFlight:FolderFlight|null=null;
   let pendingAuthorization:PendingAuthorization|null=null;
   let maxBackupBytes=DEFAULT_MAX_BACKUP_BYTES;
-  const repositoryUploads=new Map<string,UploadSession>(),MAX_RETAINED_UPLOADS=16;
+  const repositoryUploads=new Map<string,UploadSession>(),uploadsInFlight=new Set<string>(),MAX_RETAINED_UPLOADS=16;
   let releaseFile:(file:Blob)=>unknown|PromiseLike<unknown>=async()=>{},receiveBackupStream:ReceiveStream|null=null;
 
   const EMPTY_DRIVE_OPERATION:DriveOperation=Object.freeze({signal:null,checkProtection:null,checkSource:null,folderState:null});
@@ -194,7 +194,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       signal:signal&&typeof signal.addEventListener==='function'?signal:null,
       checkProtection:typeof checkProtection==='function'?checkProtection:null,
       checkSource:typeof checkSource==='function'?checkSource:null,
-      folderState:folderState&&typeof folderState==='object'?folderState:{receipt:null}
+      folderState:folderState&&typeof folderState==='object'?folderState:{authorization:authorizationGeneration,profile:profileSnapshot(),receipt:null}
     });
   }
   function childDriveOperationContext(base:DriveOperation=EMPTY_DRIVE_OPERATION,{signal=null,checkProtection=null,checkSource=null}:DriveOperationOptions={}):DriveOperation{
@@ -210,20 +210,29 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   function verifiedFolderReceipt(context:DriveOperation=EMPTY_DRIVE_OPERATION):string{
     const state=context&&context.folderState,receipt=state&&state.receipt;
     if(!receipt)return '';
-    const current=profileSnapshot();if(!folderId||receipt.id!==folderId||receipt.epoch!==folderEpoch||receipt.profile.id!==current.id||receipt.profile.generation!==current.generation){state.receipt=null;return '';}
+    if(!folderId||receipt.id!==folderId||receipt.epoch!==folderEpoch){state.receipt=null;return '';}
     return receipt.id;
   }
   function rememberVerifiedFolder(context:DriveOperation,id:string):string{
     const value=String(id||''),state=context&&context.folderState;if(!value||!state)return value;
-    state.receipt=Object.freeze({id:value,epoch:folderEpoch,profile:profileSnapshot()});return value;
+    state.profile=profileSnapshot();
+    state.receipt=Object.freeze({id:value,epoch:folderEpoch,profile:state.profile});return value;
   }
   async function assertDriveOperationCurrent(context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<void>{
     const operation=context||EMPTY_DRIVE_OPERATION;
     if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
-    const receipt=operation.folderState?.receipt;if(receipt)assertProfileCurrent(receipt.profile);
+    const state=operation.folderState,receipt=state?.receipt;
+    const verifyIdentity=()=>{
+      if(state&&state.authorization!==authorizationGeneration)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));
+      if(receipt){
+        assertProfileCurrent(receipt.profile);
+        if(receipt.epoch!==folderEpoch||receipt.id!==folderId)throw noRetry(new Error('The Google Drive repository changed during the operation.'));
+      }
+    };
+    verifyIdentity();
     await operation.checkProtection?.();
     await operation.checkSource?.();
-    if(receipt)assertProfileCurrent(receipt.profile);
+    verifyIdentity();
     if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
   }
 
@@ -274,7 +283,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   }
   function notifyConnectionChange():void{for(const listener of [...connectionListeners])try{listener();}catch{}}
   function clearConnectionExpiryTimer():void{if(connectionExpiryTimer!==null){clearTimeout(connectionExpiryTimer);connectionExpiryTimer=null;}}
-  function scheduleConnectionExpiry():void{clearConnectionExpiryTimer();if(!accessToken||!tokenExpiresAt)return;const delay=Math.max(0,tokenExpiresAt-Date.now());connectionExpiryTimer=setTimeout(()=>{connectionExpiryTimer=null;if(!accessToken)return;if(Date.now()>=tokenExpiresAt)clearSession();else scheduleConnectionExpiry();},delay);}
+  function scheduleConnectionExpiry():void{clearConnectionExpiryTimer();if(!accessToken||!tokenExpiresAt)return;const delay=Math.max(0,tokenExpiresAt-Date.now());connectionExpiryTimer=setTimeout(()=>{connectionExpiryTimer=null;if(!accessToken)return;if(Date.now()>=tokenExpiresAt)expireSession();else scheduleConnectionExpiry();},delay);}
   // The sign-in is kept in this browser until it expires (about an hour), so a
   // reload or reopening the app does not ask again. Other tabs pick it up too.
   function parseSession(raw:string|null|undefined):SessionValue|null{try{const value:unknown=JSON.parse(raw||'null');if(!isRecord(value)||typeof value['token']!=='string'||typeof value['expiresAt']!=='number')return null;return {token:value['token'],expiresAt:value['expiresAt']};}catch{return null;}}
@@ -282,7 +291,12 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   function storedSession():SessionValue|null{try{return parseSession(window.localStorage.getItem(SESSION_KEY));}catch{return null;}}
   function rememberSession():void{try{window.localStorage.setItem(SESSION_KEY,JSON.stringify({token:accessToken,expiresAt:tokenExpiresAt}));}catch{}}
   function forgetSession(token:string):void{if(token&&storedSession()?.token===token)try{window.localStorage.removeItem(SESSION_KEY);}catch{}}
-  function adoptSession(value:SessionValue):void{cancelPendingAuthorization(noRetry(new Error('Google authorization was superseded by another signed-in session.')));accessToken=value.token;tokenExpiresAt=Number(value.expiresAt);signedInBefore=true;scheduleConnectionExpiry();notifyConnectionChange();}
+  function startAuthorization():void{
+    authorizationGeneration+=1;
+    invalidateFolderIdentity();
+    cancelFolderResolution();
+  }
+  function adoptSession(value:SessionValue):void{startAuthorization();cancelPendingAuthorization(noRetry(new Error('Google authorization was superseded by another signed-in session.')));accessToken=value.token;tokenExpiresAt=Number(value.expiresAt);signedInBefore=true;scheduleConnectionExpiry();notifyConnectionChange();}
   function restoreSession():void{
     const value=storedSession();
     if(usableSession(value))adoptSession(value);else try{window.localStorage.removeItem(SESSION_KEY);}catch{}
@@ -294,7 +308,8 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     });}catch{}
   }
   function clearAccessToken():void{const changed=!!accessToken||tokenExpiresAt!==0;forgetSession(accessToken);clearConnectionExpiryTimer();accessToken='';tokenExpiresAt=0;if(changed)notifyConnectionChange();}
-  function clearSession():void{cancelPendingAuthorization(noRetry(new Error('Google authorization was superseded.')));clearAccessToken();invalidateFolderIdentity();cancelFolderResolution();}
+  function expireSession():void{if(accessToken){startAuthorization();clearAccessToken();}}
+  function clearSession():void{cancelPendingAuthorization(noRetry(new Error('Google authorization was superseded.')));startAuthorization();clearAccessToken();}
   function grantedScopeSet(response:Readonly<{scope?:string}>):Set<string>{return new Set(String(response.scope||'').split(/\s+/).filter(Boolean));}
   function cancelPendingAuthorization(error:unknown):void{const pending=pendingAuthorization;if(!pending)return;pendingAuthorization=null;if(pending.timer!==null)clearTimeout(pending.timer);pending.reject(error);}
   function parseOAuthResponse(value:unknown):Readonly<{access_token?:string;expires_in?:number;token_type?:string;scope?:string;error?:string;error_description?:string}>|null{
@@ -311,7 +326,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     if(!oauth||!oauth.hasGrantedAllScopes(response,DRIVE_SCOPE)||!scopes.has(DRIVE_SCOPE)){clearSession();request.reject(new Error('Google Drive permission was not granted.'));return;}
     if(scopes.size!==1){clearSession();request.reject(new Error('Google returned permissions beyond the requested Drive-file scope. Use a dedicated Study Director OAuth client.'));return;}
     if(response.token_type&&response.token_type.toLowerCase()!=='bearer'){clearSession();request.reject(new Error('Google returned an unsupported authorization token.'));return;}
-    accessToken=String(response.access_token||'');const lifetimeMs=Math.max(1,Number(response.expires_in)||3600)*1000;const safetyMs=Math.min(60000,Math.max(5000,Math.floor(lifetimeMs*0.1)));tokenExpiresAt=Date.now()+Math.max(1000,lifetimeMs-safetyMs);
+    startAuthorization();accessToken=String(response.access_token||'');const lifetimeMs=Math.max(1,Number(response.expires_in)||3600)*1000;const safetyMs=Math.min(60000,Math.max(5000,Math.floor(lifetimeMs*0.1)));tokenExpiresAt=Date.now()+Math.max(1000,lifetimeMs-safetyMs);
     if(!accessToken){clearSession();request.reject(new Error('Google did not return an access token.'));return;}signedInBefore=true;rememberSession();scheduleConnectionExpiry();notifyConnectionChange();request.resolve(accessToken);
   }
   async function prepare():Promise<void>{
@@ -329,7 +344,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   }
   function requireAccessToken():string{
     if(tokenValid())return accessToken;
-    clearSession();
+    expireSession();
     throw new Error('Google authorization expired. Retry the Drive action.');
   }
   function parseDriveUrl(value:unknown):URL{
@@ -414,7 +429,8 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     const headers=new Platform.Headers(options.headers||{});
     headers.set('Authorization',`Bearer ${token}`);
     const response=await fetchWithTimeout(safeUrl,{...options,method,headers},timeoutMs,context);
-    if(response.status===401){clearSession();throw new Error('Google authorization expired. Retry the Drive action.');}
+    if(token!==accessToken)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));
+    if(response.status===401){expireSession();throw new Error('Google authorization expired. Retry the Drive action.');}
     return response;
   }
   function transientStatus(status:number):boolean{return status===429||status===500||status===502||status===503||status===504;}
@@ -461,6 +477,27 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     const payload=responsePayloads.get(response);if(!payload)throw noRetry(new Error('Google Drive backup information is unavailable.'));
     return payload;
   }
+  function listResponse(response:Response){
+    const payload=jsonResponse(response);
+    if(!payload.files)throw noRetry(new Error('Google Drive returned no file inventory. Retry the Drive action.'));
+    return {files:payload.files,nextPageToken:payload.nextPageToken,incomplete:payload.incompleteSearch===true};
+  }
+  // Partial pages may be empty. A first match suffices for presence/latest;
+  // a unique folder requires exhausting the search or seeing a second match.
+  async function firstMatches(params:URLSearchParams,limit:number,context:DriveOperation,failure:string):Promise<readonly DriveFile[]>{
+    params.set('fields','nextPageToken,incompleteSearch,'+params.get('fields'));
+    const matches:DriveFile[]=[],seen=new Set<string>();
+    for(;;){
+      const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
+      if(!response.ok)throw await apiError(response,failure);
+      const page=listResponse(response);
+      if(page.incomplete)throw noRetry(new Error('Google Drive returned an incomplete file search. Retry the Drive action.'));
+      matches.push(...page.files.slice(0,limit-matches.length));
+      if(matches.length>=limit||!page.nextPageToken)return matches;
+      if(seen.has(page.nextPageToken)||seen.size>=100)throw noRetry(new Error('Google Drive could not complete the file search.'));
+      seen.add(page.nextPageToken);params.set('pageToken',page.nextPageToken);
+    }
+  }
   function validFolderMetadata(folder:DriveFile|null|undefined):boolean{
     return !!(folder&&folder.id&&folder.mimeType===FOLDER_MIME&&folder.ownedByMe===true&&folder.shared===false&&folder.trashed===false&&
       folder.appProperties&&folder.appProperties[FOLDER_MARKER.key]===FOLDER_MARKER.value&&
@@ -492,10 +529,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     ]);
     const fields='files(id,name,mimeType,ownedByMe,shared,trashed,appProperties,capabilities(canAddChildren))';
     const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'10',fields});
-    const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
-    if(!response.ok)throw await apiError(response,'Could not find the Study Director backup folder.');
-    const payload=jsonResponse(response);
-    const folders=payload.files||[];
+    const folders=await firstMatches(params,2,context,'Could not find the Study Director backup folder.');
     if(folders.length>1){invalidateFolderIdentity();throw noRetry(new Error('More than one marked Study Director backup folder was found. Drive backup was stopped without choosing or deleting anything.'));}
     if(folders.length===1&&!validFolderMetadata(folders[0])){invalidateFolderIdentity();throw noRetry(new Error('The marked Study Director backup folder is shared, foreign-owned, trashed, or otherwise unsafe. Drive backup was stopped.'));}
     folderId=String(folders[0]&&folders[0].id||'');seenFolder=folders[0]||null;
@@ -515,23 +549,32 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     folderId='';
     assertProfileCurrent(expected);const found=await findFolder(context);assertProfileCurrent(expected);return found;
   }
+  function disconnectProfileLater(profile:ProfileSnapshot):void{
+    const generation=authorizationGeneration;
+    setTimeout(()=>{
+      const current=profileSnapshot();
+      if(generation===authorizationGeneration&&current.id===profile.id&&current.generation===profile.generation){
+        clearSession();signedInBefore=false;
+      }
+    },0);
+  }
   async function resolveFolder(context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<string>{
     const expected=profileSnapshot();if(!expected.id)throw new Error('This profile is still starting. Try again in a moment.');
     if(libraryDeleted===expected.id)throw noRetry(Object.assign(new Error('This profile was deleted. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));
     if(deletionChecked!==expected.id){
-      if(await deletionMarker(expected.id,context)){assertProfileCurrent(expected);setTimeout(()=>{const current=profileSnapshot();if(current.id===expected.id&&current.generation===expected.generation){clearSession();signedInBefore=false;}},0);Promise.resolve().then(()=>profilePort?.deleted?.(Object.freeze({profile:expected.id}))).catch(()=>{});throw noRetry(Object.assign(new Error('This profile was deleted on another device. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));}
+      if(await deletionMarker(expected.id,context)){assertProfileCurrent(expected);disconnectProfileLater(expected);Promise.resolve().then(()=>profilePort?.deleted?.(Object.freeze({profile:expected.id}))).catch(()=>{});throw noRetry(Object.assign(new Error('This profile was deleted on another device. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));}
       assertProfileCurrent(expected);deletionChecked=expected.id;
     }
     let found=await findFolder(context);assertProfileCurrent(expected);if(!found){found=await createFolder(context,expected);assertProfileCurrent(expected);}await bindFolder(found,context,expected);return found;
   }
   function profileSnapshot():ProfileSnapshot{
     let id='';try{id=String(profilePort?.id()||'');if(!PROFILE_PATTERN.test(id))id='';}catch{id='';}
-    if(observedProfileId===null){observedProfileId=id;profileGeneration=1;}else if(id!==observedProfileId){observedProfileId=id;profileGeneration+=1;}
+    if(observedProfileId===null){observedProfileId=id;profileGeneration=1;}else if(id!==observedProfileId){observedProfileId=id;profileGeneration+=1;invalidateFolderIdentity();}
     return Object.freeze({id,generation:profileGeneration});
   }
   function assertProfileCurrent(expected:ProfileSnapshot):ProfileSnapshot{
     const current=profileSnapshot();
-    if(current.id!==expected.id||current.generation!==expected.generation){invalidateFolderIdentity();cancelFolderResolution();throw noRetry(new Error('The active Study Director profile changed while Google Drive was working. Retry the Drive action.'));}
+    if(current.id!==expected.id||current.generation!==expected.generation){throw noRetry(new Error('The active Study Director profile changed while Google Drive was working. Retry the Drive action.'));}
     return current;
   }
   function expectedProfile():string{return profileSnapshot().id;}
@@ -540,10 +583,12 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     assertProfileCurrent(expected);if(boundFolder===id+'\n'+expected.id)return;
     const metadata=seenFolder&&seenFolder.id===id?seenFolder:await getFolderMetadata(id,context);assertProfileCurrent(expected);
     const found=folderProfile(metadata),mine=found===expected.id;const [email,library]=await Promise.all([accountEmail(context),mine?Promise.resolve(null):latestLibrary(id,context)]);assertProfileCurrent(expected);
-    if(!profilePort)throw new Error('Study Director profile binding is unavailable.');const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));const current=profileSnapshot();
+    if(!profilePort)throw new Error('Study Director profile binding is unavailable.');const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
+    await assertDriveOperationCurrent(context);
+    const current=profileSnapshot();
     const adopted=!!found&&decision==='adopt'&&current.id===found&&current.generation!==expected.generation;
     if(!adopted&&(current.id!==expected.id||current.generation!==expected.generation)){invalidateFolderIdentity();cancelFolderResolution();throw noRetry(new Error('The active Study Director profile changed while the Drive library choice was open. Nothing was changed.'));}
-    if(mine&&decision==='continue'){}else if(!found&&decision==='claim'){await markFolder(id,expected.id,context);assertProfileCurrent(expected);}else if(adopted){}else{setTimeout(()=>{const latest=profileSnapshot();if(latest.id===current.id&&latest.generation===current.generation){clearSession();signedInBefore=false;}},0);throw noRetry(Object.assign(new Error(found?'This Google account holds the library of another profile. Drive was not used.':'This Google account already holds a Study Director library. Drive was not used.'),{studyDirectorProfileRefused:true}));}
+    if(mine&&decision==='continue'){}else if(!found&&decision==='claim'){await markFolder(id,expected.id,context);assertProfileCurrent(expected);}else if(adopted){}else{disconnectProfileLater(current);throw noRetry(Object.assign(new Error(found?'This Google account holds the library of another profile. Drive was not used.':'This Google account already holds a Study Director library. Drive was not used.'),{studyDirectorProfileRefused:true}));}
     if(adopted){folderId=id;seenFolder=metadata;}const settled=profileSnapshot();boundFolder=id+'\n'+settled.id;const name=libraryName();if(name&&metadata.name!==name)await renameFolder(id,name,context).catch(()=>{});
   }
   function libraryName():string{try{const name=String(profilePort?.name()||'').trim();return name&&name.length<=200?name:FOLDER_NAME;}catch{return FOLDER_NAME;}}
@@ -557,10 +602,8 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   async function deletionMarker(profile:string,context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<boolean>{
     const q=driveQuery([`mimeType='${FOLDER_MIME}'`,`appProperties has { key='${DELETED_MARKER}' and value='${profile}' }`,'trashed=false']);
     const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1',fields:'files(id)'});
-    const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
-    if(!response.ok)throw await apiError(response,'Could not check whether this profile was deleted.');
-    const payload=jsonResponse(response);
-    return !!payload.files?.length;
+    const files=await firstMatches(params,1,context,'Could not check whether this profile was deleted.');
+    return files.length>0;
   }
   // Delete everywhere: the marker first, so no device makes the library
   // again, then the library folder goes to the Drive Trash, where it can be
@@ -592,17 +635,22 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   async function latestLibrary(id:string,context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<Readonly<{savedAt:string;days:number|null;notes:number|null}>|null>{
     const q=driveQuery([`'${String(id).replaceAll("'","\\'")}' in parents`,`appProperties has { key='${REPOSITORY_MARKER.key}' and value='${REPOSITORY_MARKER.value}' }`,`appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='commit' }`,'trashed=false']);
     const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1',orderBy:'createdTime desc',fields:'files(id,createdTime,appProperties)'});
-    const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
-    if(!response.ok)throw await apiError(response,'Could not read the Study Director library on Google Drive.');
-    const file=(jsonResponse(response).files||[])[0];if(!file)return null;
+    const [file]=await firstMatches(params,1,context,'Could not read the Study Director library on Google Drive.');
+    if(!file)return null;
     const checkpoint=await latestCheckpoint(id,context),counts=/^(\d+),(\d+)$/u.exec(String(checkpoint?.appProperties?.[HISTORY_COUNTS_MARKER]||''));
     return Object.freeze({savedAt:String(file.createdTime||''),days:counts?Number(counts[1]):null,notes:counts?Number(counts[2]):null});
   }
   async function latestCheckpoint(id:string,context:DriveOperation):Promise<DriveFile|null>{
     const q=driveQuery([`'${String(id).replaceAll("'","\\'")}' in parents`,`appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='checkpoint' }`,`appProperties has { key='${HISTORY_ROLE_MARKER}' and value='normal' }`,'trashed=false']);
     const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1',orderBy:'createdTime desc',fields:'files(id,createdTime,appProperties)'});
-    const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);
-    return response.ok?(jsonResponse(response).files||[])[0]||null:null;
+    try{
+      const [file]=await firstMatches(params,1,context,'Could not read the latest Study Director checkpoint.');
+      return file??null;
+    }catch(error){
+      // The latest commit still identifies the library when optional counts are unavailable.
+      if(asDriveError(error).driveStatus)return null;
+      throw error;
+    }
   }
   function cancelFolderResolution():void{
     const flight=folderResolutionFlight;
@@ -640,6 +688,10 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
   async function ensureFolder(context:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<string>{
     const operation=context||EMPTY_DRIVE_OPERATION;
     if(operation.signal&&operation.signal.aborted)throw noRetry(driveAbortError(operation.signal));
+    if(operation.folderState){
+      if(operation.folderState.authorization!==authorizationGeneration)throw noRetry(new Error('Google Drive authorization changed. Retry the Drive action.'));
+      assertProfileCurrent(operation.folderState.profile);
+    }
     const verified=verifiedFolderReceipt(operation);if(verified){await assertDriveOperationCurrent(operation);return verified;}
     const current=profileSnapshot();if(folderResolutionFlight&&(folderResolutionFlight.profile.id!==current.id||folderResolutionFlight.profile.generation!==current.generation))cancelFolderResolution();
     const flight=folderResolutionFlight||startFolderResolution(current);
@@ -726,10 +778,13 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       `appProperties has { key='${REPOSITORY_ID_MARKER}' and value='${String(id).replaceAll("'","\\'")}' }`,
       'trashed=false'
     ]);
-    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'3',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});
+    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'3',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not verify the Study Director backup publication marker.');
-    const payload=jsonResponse(response),files=(payload.files||[]).filter(file=>validPublicationMetadata(file,parent)&&file.appProperties[REPOSITORY_ID_MARKER]===id);
+    const payload=listResponse(response),files=payload.files;
+    if(payload.incomplete)throw noRetry(new Error('Google Drive returned an incomplete marker inventory.'));
     if(payload.nextPageToken||files.length>1)throw noRetry(new Error('Duplicate Study Director backup publication markers were found. Maintenance stopped safely.'));
+    const marker=files[0];
+    if(marker&&(!validPublicationMetadata(marker,parent)||marker.appProperties[REPOSITORY_ID_MARKER]!==id))throw noRetry(new Error('Google Drive returned invalid marker metadata.'));
     return files[0]||null;
   }
   // Drive's clock, learned from the markers this device creates (Drive
@@ -765,11 +820,11 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       `'${String(parent).replaceAll("'","\\'")}' in parents`,
       `appProperties has { key='${REPOSITORY_MARKER.key}' and value='${REPOSITORY_MARKER.value}' }`,
       `appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='${PUBLICATION_KIND}' }`,'trashed=false'
-    ]),params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'100',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});
+    ]),params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'100',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not inspect active Study Director backup publications.');
-    const payload=jsonResponse(response),raw=payload.files||[],items=[];let ignored=0;
+    const payload=listResponse(response),raw=payload.files,items=[];let ignored=0;
     for(const file of raw){if(validPublicationMetadata(file,parent))items.push(publicationDescriptor(file,parent));else ignored+=1;}
-    return Object.freeze({items:Object.freeze(items),overflow:!!(payload.nextPageToken),ignored});
+    return Object.freeze({items:Object.freeze(items),overflow:!!payload.nextPageToken||payload.incomplete,ignored});
   }
   async function assertRepositoryPublication(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<CoordinationLease>{
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');let metadata:DriveFile|null=null;
@@ -827,10 +882,13 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       `appProperties has { key='${REPOSITORY_ID_MARKER}' and value='${String(id).replaceAll("'","\\'")}' }`,
       'trashed=false'
     ]);
-    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'3',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});
+    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'3',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not verify the Study Director repository-maintenance marker.');
-    const payload=jsonResponse(response),files=(payload.files||[]).filter(file=>validMaintenanceMetadata(file,parent)&&file.appProperties[REPOSITORY_ID_MARKER]===id);
+    const payload=listResponse(response),files=payload.files;
+    if(payload.incomplete)throw noRetry(new Error('Google Drive returned an incomplete marker inventory.'));
     if(payload.nextPageToken||files.length>1)throw noRetry(new Error('Duplicate Study Director repository-maintenance markers were found. Maintenance stopped safely.'));
+    const marker=files[0];
+    if(marker&&(!validMaintenanceMetadata(marker,parent)||marker.appProperties[REPOSITORY_ID_MARKER]!==id))throw noRetry(new Error('Google Drive returned invalid marker metadata.'));
     return files[0]||null;
   }
   async function beginRepositoryMaintenance(baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<CoordinationLease>{
@@ -855,11 +913,11 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       `'${String(parent).replaceAll("'","\\'")}' in parents`,
       `appProperties has { key='${REPOSITORY_MARKER.key}' and value='${REPOSITORY_MARKER.value}' }`,
       `appProperties has { key='${REPOSITORY_KIND_MARKER}' and value='${MAINTENANCE_KIND}' }`,'trashed=false'
-    ]),params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'100',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});
+    ]),params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'100',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not inspect active Study Director repository maintenance.');
-    const payload=jsonResponse(response),raw=payload.files||[],items=[];let ignored=0;
+    const payload=listResponse(response),raw=payload.files,items=[];let ignored=0;
     for(const file of raw){if(validMaintenanceMetadata(file,parent))items.push(maintenanceDescriptor(file,parent));else ignored+=1;}
-    return Object.freeze({items:Object.freeze(items),overflow:!!(payload.nextPageToken),ignored});
+    return Object.freeze({items:Object.freeze(items),overflow:!!payload.nextPageToken||payload.incomplete,ignored});
   }
   async function assertRepositoryMaintenance(ref:Lease,baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<CoordinationLease>{
     const context=childDriveOperationContext(baseContext),parent=await ensureFolder(context),id=String(ref&&ref.id||'');let metadata:DriveFile|null=null;
@@ -904,8 +962,8 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     do{
       const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'1000',orderBy:'createdTime desc',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});if(pageToken)params.set('pageToken',pageToken);
       const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not read the Study Director backup history in Google Drive.');
-      const payload=jsonResponse(response),files=payload.files||[];
-      if(payload&&payload.incompleteSearch===true){overflow=true;break;}
+      const payload=listResponse(response),files=payload.files;
+      if(payload.incomplete){overflow=true;break;}
       for(const file of files){if(validRepositoryMetadata(file,parent,kind)){items.push(repositoryDescriptor(file,parent));if(items.length>=limit){overflow=!!payload?.nextPageToken||files.indexOf(file)<files.length-1;break;}}else ignored+=1;}
       if(items.length>=limit)break;pageToken=String(payload.nextPageToken||'');
       if(pageToken){if(pageTokens.has(pageToken))throw noRetry(new Error('Google Drive repeated a backup inventory page. Nothing was changed.'));pageTokens.add(pageToken);}
@@ -922,9 +980,10 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       `appProperties has { key='${REPOSITORY_ID_MARKER}' and value='${String(id).replaceAll("'","\\'")}' }`,
       'trashed=false'
     ]);
-    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'3',fields:`nextPageToken,files(${REPOSITORY_FIELDS})`});
+    const params=new Platform.URLSearchParams({q,spaces:'drive',pageSize:'3',fields:`nextPageToken,incompleteSearch,files(${REPOSITORY_FIELDS})`});
     const response=await authorizedGet(`${DRIVE_API}/files?${params}`,{},context);if(!response.ok)throw await apiError(response,'Could not locate a required Study Director backup file in Google Drive.');
-    const payload=jsonResponse(response),files=payload.files||[];
+    const payload=listResponse(response),files=payload.files;
+    if(payload.incomplete)throw noRetry(new Error('Google Drive returned an incomplete backup inventory.'));
     if(payload.nextPageToken||files.length>1)throw noRetry(new Error('Duplicate Study Director backup files were found. Nothing was changed.'));
     // A marked identity with unsafe metadata is *not* proof that the identity
     // is absent. Do not create a duplicate beside a malformed remote file.
@@ -971,16 +1030,21 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     const context=childDriveOperationContext(baseContext,{checkProtection:file.checkProtection,checkSource:file.checkSource});
     await assertDriveOperationCurrent(context);
     const parent=await ensureFolder(context),uploadKey=parent+':'+file.kind+':'+file.id;
+    if(uploadsInFlight.has(uploadKey))throw noRetry(new Error('This Study Director backup file is already uploading.'));
+    uploadsInFlight.add(uploadKey);
+    try{return await uploadVerifiedFile(upload,parent,uploadKey,context);}
+    finally{uploadsInFlight.delete(uploadKey);}
+  }
+  async function uploadVerifiedFile(upload:Upload&{blob:Blob},parent:string,uploadKey:string,context:DriveOperation):Promise<ProviderItem>{
     for(const [key,row] of repositoryUploads)if(row.parent!==parent&&!row.busy)repositoryUploads.delete(key);
     const saved=repositoryUploads.get(uploadKey);
-    if(saved&&(saved.digest!==file.digest||saved.size!==upload.blob.size))throw noRetry(new Error('An incomplete Study Director upload has different content for this identity.'));
-    if(saved?.busy)throw noRetry(new Error('This Study Director backup file is already uploading.'));
+    if(saved&&(saved.digest!==upload.digest||saved.size!==upload.blob.size))throw noRetry(new Error('An incomplete Study Director upload has different content for this identity.'));
     // A presumed-new identity is not proof of absence after an interrupted
     // upload or page restart. Check the remote logical identity before any
     // multipart POST or resumable session creation; only metadata is read.
-    const existing=await findRepositoryFile(parent,file.kind,file.id,context);
+    const existing=await findRepositoryFile(parent,upload.kind,upload.id,context);
     if(existing){
-      const descriptor=repositoryDescriptor(existing,parent);if(descriptor.size!==upload.blob.size||descriptor.digest!==file.digest||descriptor.serverDigest&&descriptor.serverDigest!==file.digest)throw noRetry(new Error('A Study Director backup file with this identity already exists but has different content.'));
+      const descriptor=repositoryDescriptor(existing,parent);if(descriptor.size!==upload.blob.size||descriptor.digest!==upload.digest||descriptor.serverDigest&&descriptor.serverDigest!==upload.digest)throw noRetry(new Error('A Study Director backup file with this identity already exists but has different content.'));
       await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;
     }
     let payload:DrivePayload|undefined,session:UploadSession|null=saved||null;
@@ -997,21 +1061,21 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
         }
         if(!session){
           if(repositoryUploads.size>=MAX_RETAINED_UPLOADS){const old=[...repositoryUploads].find(([,row])=>!row.busy);if(!old)throw new Error('Google Drive upload continuation capacity is busy. Retry later.');repositoryUploads.delete(old[0]);}
-          session={parent,digest:file.digest,size:upload.blob.size,url:await beginRepositoryUpload(upload,parent,context),offset:0,busy:true};repositoryUploads.set(uploadKey,session);
+          session={parent,digest:upload.digest,size:upload.blob.size,url:await beginRepositoryUpload(upload,parent,context),offset:0,busy:true};repositoryUploads.set(uploadKey,session);
         }
         const activeSession=session;payload=recovered?.complete?jsonResponse(recovered.response):await uploadContent(activeSession.url,upload.blob,'application/octet-stream',recovered?.offset||0,context,offset=>{activeSession.offset=offset;});
       }
     }catch(error){
       if(operationStopped(error))throw error;
-      const recovered=await findRepositoryFile(parent,file.kind,file.id,context);if(recovered){const descriptor=repositoryDescriptor(recovered,parent);if(descriptor.size===upload.blob.size&&descriptor.digest===file.digest&&(!descriptor.serverDigest||descriptor.serverDigest===file.digest)){await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;}}
+      const recovered=await findRepositoryFile(parent,upload.kind,upload.id,context);if(recovered){const descriptor=repositoryDescriptor(recovered,parent);if(descriptor.size===upload.blob.size&&descriptor.digest===upload.digest&&(!descriptor.serverDigest||descriptor.serverDigest===upload.digest)){await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;}}
       throw error;
     }finally{if(session)session.busy=false;}
     await assertDriveOperationCurrent(context);
     const responseDigest=String(payload&&payload.sha256Checksum||'').toLowerCase();
-    let metadata=payload&&validRepositoryMetadata(payload,parent,file.kind)&&/^[a-f0-9]{64}$/u.test(responseDigest)?payload:null;
-    if(!metadata){const remoteId=String(payload&&payload.id||'');metadata=remoteId?await getFileMetadata(remoteId,context):await findRepositoryFile(parent,file.kind,file.id,context);}
-    if(!metadata||!validRepositoryMetadata(metadata,parent,file.kind))throw new Error('Google Drive did not confirm the backup upload.');
-    const descriptor=repositoryDescriptor(metadata,parent);if(descriptor.id!==file.id||descriptor.size!==upload.blob.size||descriptor.digest!==file.digest||!descriptor.serverDigest||descriptor.serverDigest!==file.digest)throw noRetry(new Error('Google Drive server SHA-256 did not confirm the uploaded backup bytes.'));
+    let metadata=payload&&validRepositoryMetadata(payload,parent,upload.kind)&&/^[a-f0-9]{64}$/u.test(responseDigest)?payload:null;
+    if(!metadata){const remoteId=String(payload&&payload.id||'');metadata=remoteId?await getFileMetadata(remoteId,context):await findRepositoryFile(parent,upload.kind,upload.id,context);}
+    if(!metadata||!validRepositoryMetadata(metadata,parent,upload.kind))throw new Error('Google Drive did not confirm the backup upload.');
+    const descriptor=repositoryDescriptor(metadata,parent);if(descriptor.id!==upload.id||descriptor.size!==upload.blob.size||descriptor.digest!==upload.digest||!descriptor.serverDigest||descriptor.serverDigest!==upload.digest)throw noRetry(new Error('Google Drive server SHA-256 did not confirm the uploaded backup bytes.'));
     await assertDriveOperationCurrent(context);repositoryUploads.delete(uploadKey);return descriptor;
   }
   async function repositoryDownload(ref:ItemRef,options:DriveDownloadOptions={},baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<RangeDownload|BlobDownload>{
@@ -1043,7 +1107,10 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
       const latest=repositoryDescriptor(await getFileMetadata(metadata.id,context),parent);if(latest.remoteVersion!==descriptor.remoteVersion)throw new Error('The repository object changed while reading a range.');
       return Object.freeze({blob,totalBytes:total,version:descriptor.remoteVersion});
     }
-    const blob=await downloadBlob(metadata,context,typeof options.onProgress==='function'?options.onProgress:null);return Object.freeze({blob,release:async()=>releaseFile(blob)});
+    const blob=await downloadBlob(metadata,context,typeof options.onProgress==='function'?options.onProgress:null);
+    try{await assertDriveOperationCurrent(context);}
+    catch(error){await releaseFile(blob);throw error;}
+    return Object.freeze({blob,release:async()=>releaseFile(blob)});
   }
   async function repositoryDelete(ref:ItemRef,options:{signal?:AbortSignal|null}={},baseContext:DriveOperation=EMPTY_DRIVE_OPERATION):Promise<boolean>{
     if(!ref||!REPOSITORY_KINDS.has(ref['kind'])||!repositoryIdValid(ref['kind'],ref.id))throw new Error('A Study Director backup deletion request has an invalid identity.');
@@ -1191,10 +1258,10 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
     }
     throw lastError||new Error('Could not download the selected Google Drive backup.');
   }
-  async function release():Promise<void>{if(accessToken&&Date.now()>=tokenExpiresAt)clearSession();}
+  async function release():Promise<void>{if(accessToken&&Date.now()>=tokenExpiresAt)expireSession();}
   async function disconnect():Promise<void>{
     await prepare();
-    const token=requireAccessToken();
+    const token=requireAccessToken(),generation=authorizationGeneration;
     const oauth=googleOAuth();
     if(!oauth)throw new Error('Google Drive disconnection is unavailable.');
     try{
@@ -1207,7 +1274,7 @@ import type {DownloadOptions,HistorySummary,ItemRef,Lease,ProviderConfig,Provide
           finish(reject,new Error(String(response?.['error_description']||response?.['error']||'Google did not confirm permission revocation.')));
         });
       });
-    }finally{repositoryUploads.clear();clearSession();signedInBefore=false;}
+    }finally{if(authorizationGeneration===generation){repositoryUploads.clear();clearSession();signedInBefore=false;}}
   }
   function bindRepositoryDownload(base:DriveOperation):RepositoryTransport['download']{
     return ((ref:ItemRef,options?:DriveDownloadOptions)=>repositoryDownload(ref,options||{},base)) as RepositoryTransport['download'];

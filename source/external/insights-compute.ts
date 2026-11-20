@@ -43,7 +43,7 @@ const MIN_RECORDS=120,WORKER_TIMEOUT_MS=30000,IDLE_RETIRE_MS=120000;
 const runtimeUrl=document.currentScript instanceof HTMLScriptElement?document.currentScript.src:'';
 // lib.dom's Worker constructor does not yet model TrustedScriptURL, although
 // browsers accept that Trusted Types value at this script-URL sink.
-const WorkerWithTrustedUrl=Worker as unknown as WorkerConstructorWithTrustedUrl;
+
 let workerUrlPolicy:{createScriptURL(value:string):unknown}|null=null;
 function trustedWorkerURL():unknown{
   const trustedTypes=Reflect.get(globalThis,'trustedTypes') as {createPolicy(name:string,rules:{createScriptURL(value:string):string}):{createScriptURL(value:string):unknown}}|undefined;
@@ -88,7 +88,10 @@ function create(api:InsightsComputeApi,engine:InsightsEngine,{yieldTask=defaultY
     if(worker)return worker;
     if(workerDisabled)throw new Error('Insights worker is unavailable for this session.');
     let created:Worker;
-    try{created=new WorkerWithTrustedUrl(trustedWorkerURL(),{name:'study-director-insights'});}
+    try{
+      const WorkerWithTrustedUrl=Worker as unknown as WorkerConstructorWithTrustedUrl;
+      created=new WorkerWithTrustedUrl(trustedWorkerURL(),{name:'study-director-insights'});
+    }
     catch(error){workerDisabled=true;throw error;}
     created.onmessage=(event:MessageEvent<unknown>)=>{
       if(worker!==created)return;

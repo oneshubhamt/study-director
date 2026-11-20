@@ -84,6 +84,19 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   cases.push('a changed profile id settles the folder again');
 }
 {
+  let current=QA_PROFILE_ID;
+  const {provider,state}=await connected({profileId:()=>current});
+  const verified=provider.repository.beginOperation(),unstarted=provider.repository.beginOperation();
+  await verified.list({kind:'object'});
+  current=OTHER;
+  const calls=state.requests.length;
+  for(const operation of [verified,unstarted]){
+    await assert.rejects(operation.list({kind:'object'}),/profile changed/u);
+  }
+  assert.equal(state.requests.length,calls,'a predecessor operation cannot discover or bind a successor profile');
+  cases.push('both fresh and verified operation views belong to the originating profile');
+}
+{
   let current=QA_PROFILE_ID,releaseBind;const bindGate=new Promise(resolve=>{releaseBind=resolve;});
   const harness=createDriveHarness({profileId:()=>current,bind:async()=>{await bindGate;return 'claim';}});const {state,provider}=harness;
   state.folders.push('folder-late');state.folderProperties.set('folder-late',{});

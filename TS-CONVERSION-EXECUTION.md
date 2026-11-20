@@ -1,6 +1,16 @@
 # TypeScript conversion — execution record
 
-## Current handoff — P5.9/P5.10 OWNER-AUDIT CORRECTION CLOSED — TARGETED, 2026-11-19
+## Owner audit of P5.8, P5.9 and P5.10 · 2026-11-20
+
+- Audited branch `ts-exp` from `b98ce000` against the original JavaScript at `28c8c1d`, the phase objectives, host wiring and production-shaped tests.
+- Drive requests, profile choices, delayed revocation and completed streams check their originating authorization. Scoped operations belong to their originating profile. Incomplete inventories cannot establish absence, empty paginated searches continue, and overlapping uploads of the same logical file share an exclusion check before discovery. Existing resumable transfers and intentional library adoption retain their own verification paths.
+- Insights counts strong, eligible and rated eligible days over the selected window. The 730-day trend horizon remains bounded. Heatmap bands use the exact thresholds and disclose fractional boundary values. Invalid calendar dates are rejected and the content-derived cache key includes degraded state and precomputed practice evidence.
+- Worker startup handles a missing global. The wire decoder checks the report envelope and transferred outcomes. Ordered windows and in-progress history replacements have explicit tests. The real worker and main-thread engine agree over complete 320-day and seven-day reports. The retained worker sends zero records for the second selection.
+- Compared every serialized report and detailed Lab field on 15 combinations of history length and selected window covering 0–830 saved dates. Differences were the selected-window counts and resulting descriptions, plus the existing improvement that explains an unavailable strong-day forecast.
+- Local direct evidence includes Drive transport, profile binding, repository scale, checkpoint, background work, sync status, notification and cold recovery. Insights evidence includes scaling, Guide, memory release, worker parity, render rollback, prefetch and the affected architecture checks. The strict compiler and typed lint cover 228 files across five projects. Negative type/lint gates, generated build verification and generated syntax also passed.
+- Implementation checkpoint. Repeated Chromium journeys and branch CI are under verification. The next planned conversion is P5.11a after audit closure. Full maximum-import and Phase 7 certification remain open.
+
+## Prior handoff — P5.9/P5.10 OWNER-AUDIT CORRECTION CLOSED — TARGETED, 2026-11-19
 
 - **Baseline and code/test head:** owner-authorized correction started from `ef246ad12f8f2aaeb680b728b7883e7874a84206`; production/test closure is `2088b43bddea3034eb938e5f503bbd717b9a36b8` on `ts-exp`. Production correction is `53f4c9689c34d39b7bc5db62916ff20f6a1fb96a`; `2088b43` only made the forecast witness capability-aware after hosted QA exposed an over-strong test assumption.
 - **Strong-day semantics:** one checked `isStrongCompletion(value) => finite && value >= 80` now owns the documented **80%+** boundary for cascade, overall strong-day counting and workload/forecast labels. The prior rounded classifications are gone. Real-engine witnesses cover **79.49, 79.5, 79.9 and 80.0**, proving only 80.0 qualifies.

@@ -1424,11 +1424,15 @@ function createInsightsRendering(
   }
   function heatLevel(value:number|null){
     if(!finiteNumber(value))return '';
-    const displayed=Math.round(value);
-    if(displayed>=80)return 'l4';
-    if(displayed>=60)return 'l3';
-    if(displayed>=40)return 'l2';
+    if(value>=80)return 'l4';
+    if(value>=60)return 'l3';
+    if(value>=40)return 'l2';
     return 'l1';
+  }
+  function heatPercent(value:number|null){
+    if(value===null)return 'No data';
+    const displayed=round(value,1);
+    return heatLevel(value)===heatLevel(displayed)?percentLabel(displayed,1):`<${displayed}%`;
   }
   function heatmap(rows:readonly DailyRow[],range:CalendarRange={}){
     const wrap=el('div','insights-heatmap-widget');
@@ -1466,7 +1470,7 @@ function createInsightsRendering(
       const cell=el('div','insights-cell '+(!row?'missing':hasCompletion?heatLevel(row.completion):'no-work'));
       const detail=row
         ? hasCompletion
-          ? `${shortDate(row.date)} ${row.dayName||''}: ${percentLabel(row.completion)} work completion`
+          ? `${shortDate(row.date)} ${row.dayName||''}: ${heatPercent(row.completion)} work completion`
           : `${shortDate(row.date)} ${row.dayName||''}: saved day with no planned work`
         : `${shortDate(iso)}: no saved record`;
       cell.title=detail;
@@ -1493,7 +1497,7 @@ function createInsightsRendering(
       grid.appendChild(cell);
     }
     const legend=el('div','insights-legend ui-mono');
-    [['missing','No record'],['no-work','Saved · no work'],['l1','Low <40'],['l2','Partial 40–59'],['l3','Good 60–79'],['l4','Strong 80+']].forEach(([cls,label])=>{
+    [['missing','No record'],['no-work','Saved · no work'],['l1','Low <40'],['l2','Partial 40–<60'],['l3','Good 60–<80'],['l4','Strong 80+']].forEach(([cls,label])=>{
       const item=el('span',null);
       item.append(el('i','insights-cell '+String(cls||'')),document.createTextNode(String(label||'')));
       legend.appendChild(item);

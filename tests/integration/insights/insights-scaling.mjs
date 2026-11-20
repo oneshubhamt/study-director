@@ -52,6 +52,8 @@ assert.equal(boundaryDaily[1].actual,0,'explicit zero actual time must survive a
 const dirtyCanonicalInput=[
   null,
   {date:'not-a-date',tasks:[]},
+  {date:'2026-02-29',tasks:[]},
+  {date:'2026-13-01',tasks:[]},
   {date:'2026-08-09',updatedAt:'2026-08-09T08:00:00.000Z',tasks:[
     {id:'old',kind:'work',dur:30,completion:100,completionSource:'manual',actualSeconds:1800},
     {id:'drop-zero-plan',kind:'work',dur:0,completion:100,completionSource:'manual',actualSeconds:60}
@@ -63,6 +65,8 @@ const dirtyCanonicalInput=[
     {id:'new',kind:'work',dur:40,completion:75,completionSource:'manual',actualSeconds:1800}
   ]}
 ];
+assert.equal(Primitives.dateDay('2026-02-29'),null,'a non-leap February cannot roll into March');
+assert.equal(Primitives.dateDay('2024-03-01')-Primitives.dateDay('2024-02-29'),1);
 const dirtyCanonicalBefore=JSON.stringify(dirtyCanonicalInput);
 const normalizedDirty=Records.normalizeRecords(dirtyCanonicalInput);
 assert.equal(JSON.stringify(dirtyCanonicalInput),dirtyCanonicalBefore,'canonical preparation must not mutate caller-owned input');
@@ -492,6 +496,11 @@ const historyRecords=Array.from({length:historyDays},(_,index)=>{
   return practiceRecord(isoFromDay(historyStart+index),pace,Math.max(5,Math.min(100,completion)),index);
 });
 const engine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+const incompleteDay={date:'2026-01-22',tasks:[{kind:'work',dur:30}]};
+const normalDay=engine.prepare([incompleteDay]);
+const degradedDay=engine.prepare([{...incompleteDay,degraded:true}]);
+assert.notEqual(normalDay.revision,degradedDay.revision,'degraded records use different evidence rules and cannot share a content revision');
+assert.equal(engine.buildPrepared(degradedDay.records,degradedDay).overview.planned,0);
 const canonicalPrepared=engine.prepare(historyRecords,'canonical-worker-reuse');
 const asyncEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
 let asyncYields=0;
@@ -512,6 +521,10 @@ assert.equal(model.allRecordCount,historyDays);
 assert.equal(model.overview.planned,exactPlanned);
 assert.equal(model.overview.completed,exactCompleted);
 assert.equal(model.overview.actual,exactActual);
+const strongMilestone=model.milestones.find(row=>row.label==='Strong days');
+const expectedStrong=historyRecords.filter(record=>record.tasks.reduce((sum,task)=>sum+task.dur*task.completion,0)>=80*record.tasks.reduce((sum,task)=>sum+task.dur,0)).length;
+assert.equal(strongMilestone.value,expectedStrong+'/'+historyDays,'the strong-day numerator and denominator cover the same selected history');
+assert.match(strongMilestone.note,/0 no-work saved days/);
 assert.equal(model.subjects.reduce((sum,row)=>sum+row.planned,0),exactPlanned);
 assert.equal(model.completionSources.reduce((sum,row)=>sum+row.blocks,0),historyDays*2);
 assert.equal(model.completionSources.length,1);
@@ -549,6 +562,14 @@ const reusedModel=reuseEngine.buildPrepared(reuseEngine.filterPreparedWindow(reu
 const referenceEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns}),referencePrepared=referenceEngine.prepare(reuseRecords,'uncapped-reference');
 const referenceModel=referenceEngine.buildPrepared([...referencePrepared.records],referencePrepared,reuseOptions);
 assert.deepEqual(JSON.parse(JSON.stringify(reusedModel)),JSON.parse(JSON.stringify(referenceModel)),'uncapped All-history intermediate reuse must not change Insights model output');
+
+// A selected window may end after the current study date, for example after importing a later device's records.
+const futureOptions={currentStudyDate:'2026-08-01',windowTo:'2026-08-10',windowKey:'all'};
+const futureEngine=ModelEngine.createInsightsEngine({classifyTaskOutcome,summarizePracticeRuns});
+const futurePrepared=futureEngine.prepare([practiceRecord('2026-07-24',100),{date:'2026-08-10',tasks:[]}],'future-end');
+const futureOptimized=futureEngine.buildPrepared(futurePrepared.records,futurePrepared,futureOptions);
+const futureReference=futureEngine.buildPrepared([...futurePrepared.records],futurePrepared,futureOptions);
+assert.deepEqual(futureOptimized.subjects.map(subject=>subject.daysSinceLast),futureReference.subjects.map(subject=>subject.daysSinceLast),'subject recency must use the selected window end on both calculation paths');
 
 
 const evidence={
