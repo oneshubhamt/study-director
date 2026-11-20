@@ -251,7 +251,7 @@ for(const rescued of [false,true]){
     const sandbox={Date,Object,Error,String,
       IndexedDb:{lifecycle:()=>({startedFresh:fresh})},appCanMutate:()=>primary,
       readStorageHealth:()=>({...health}),writeStorageHealth:patch=>{calls.writes++;Object.assign(health,patch);return true;},
-      AppData:{local:{getJson:()=>({...health})}},STORAGE_KEYS:{storageHealth:'health'},
+      readStoredStorageHealth:()=>({...health}),
       beginStorageResetHold:clearedAt=>{const hold={clearedAt,reloaded:false};calls.holds.push(hold);return hold;},
       showStorageResetDecision:()=>{calls.decisions++;},
       storageResetConnectionsChanged:()=>{calls.connections=(calls.connections||0)+1;return false;},

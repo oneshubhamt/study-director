@@ -1756,6 +1756,15 @@ const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
   onError:(operation,error)=>StorageHealthController?.observeLocalStorage(operation,error),
   onOk:operation=>StorageHealthController?.observeLocalStorage(operation,null)
 }));
+function readStoredStorageHealth(local=LocalStorageContract){
+  const value=local.getJson(STORAGE_KEYS.storageHealth,null);
+  if(value?.version!==3||Object.keys(value).length!==4)return null;
+  for(const field of ['lastLocalSaveAt','lastStudyDataSaveAt','browserDataClearedAt']){
+    const time=value[field];
+    if(time!==null&&(typeof time!=='string'||!Number.isFinite(Date.parse(time))))return null;
+  }
+  return value;
+}
 function createStorageHealthController(local){
   const sourceLabels=Object.freeze({
     'indexedDB':'Browser database','localStorage.read':'Browser storage read','localStorage.write':'Browser storage write',
@@ -1765,8 +1774,7 @@ function createStorageHealthController(local){
   });
   const issueMap=new Map();
   let active=false,mirroring=false;
-  const stored=local.getJson(STORAGE_KEYS.storageHealth,null);
-  let history=Object.assign(emptyStorageHealth(),stored&&typeof stored==='object'?stored:{},{version:3});
+  let history=readStoredStorageHealth(local)||emptyStorageHealth();
   const initialReadError=local.lastError;
   if(initialReadError){
     issueMap.set('localStorage.read',Object.freeze({
@@ -1797,17 +1805,22 @@ function createStorageHealthController(local){
     const recovered=issueMap.delete(key);
     const hasPatch=!!(patch&&typeof patch==='object'&&Object.keys(patch).length);
     if(!recovered&&!hasPatch)return snapshot();
-    if(hasPatch){history=Object.assign({},history,patch,{version:3});if(!options||options.mirror!==false)mirror();}
+    if(hasPatch)patchHistory(patch,options?.mirror!==false);
     notify();
     return snapshot();
   }
   // Each tab mirrors its own copy of this record. An unresolved browser-data
   // clear is kept as stored unless this tab set or resolved it itself.
   let clearMarkerOwned=false;
+  function patchHistory(patch,write=true){
+    const {lastLocalSaveAt=history.lastLocalSaveAt,lastStudyDataSaveAt=history.lastStudyDataSaveAt,browserDataClearedAt=history.browserDataClearedAt}=patch;
+    const marker=Object.hasOwn(patch,'browserDataClearedAt');
+    history={version:3,lastLocalSaveAt,lastStudyDataSaveAt,browserDataClearedAt};
+    if(write)mirror({marker});
+    if(marker)clearMarkerOwned=!!history.browserDataClearedAt;
+  }
   function updateHistory(patch){
-    const marker=!!patch&&typeof patch==='object'&&Object.hasOwn(patch,'browserDataClearedAt');
-    history=Object.assign({},history,patch&&typeof patch==='object'?patch:{},{version:3});
-    mirror({marker});if(marker)clearMarkerOwned=!!history.browserDataClearedAt;
+    patchHistory(patch);
     notify();return snapshot();
   }
   function observeLocalStorage(operation,error){
@@ -1828,7 +1841,7 @@ function createStorageHealthController(local){
     if(mirroring)return false;
     mirroring=true;
     try{
-      const stored=local.getJson(STORAGE_KEYS.storageHealth,null),known=stored&&typeof stored==='object'?stored:{};
+      const known=readStoredStorageHealth(local)||emptyStorageHealth();
       history=Object.assign({},history,{lastLocalSaveAt:laterTime(history.lastLocalSaveAt,known.lastLocalSaveAt),lastStudyDataSaveAt:laterTime(history.lastStudyDataSaveAt,known.lastStudyDataSaveAt)});
       if(!clearMarkerOwned&&!marker)history=Object.assign({},history,{browserDataClearedAt:known.browserDataClearedAt||null});
       return local.setJson(STORAGE_KEYS.storageHealth,history);
@@ -5011,7 +5024,7 @@ const IndexedDb=PersistenceModule.createIndexedDb(Object.freeze({
 }));
 const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.noteKeys.isKey}));
 const AppMetaGateway=AppMetaModule.create(Object.freeze({
-  indexedDb:Object.freeze({transaction:IndexedDb.transaction,strictTransaction:IndexedDb.strictTransaction,get:IndexedDb.get,getAll:IndexedDb.getAll}),
+  indexedDb:Object.freeze({transaction:IndexedDb.transaction,strictTransaction:IndexedDb.strictTransaction,get:IndexedDb.get}),
   store:DB_APP_META_STORE,
   registry:APP_META_REGISTRY
 }));
@@ -5044,8 +5057,9 @@ const UnsupportedData=(()=>{
     return Number.isFinite(version)?versionVerdict(version,max):'unreadable';
   };
   function metaVerdict(row){
-    const key=String(row&&row.key||'');if(!key||key===EARLIER_CONVERSION_MARKER)return '';
-    if(row&&typeof row==='object'&&Number(row.version)>envelopeVersion)return 'newer';
+    const key=String(row&&row.key||'');if(!key)return '';
+    if(Number(row.version)>envelopeVersion)return 'newer';
+    if(key===EARLIER_CONVERSION_MARKER&&row.version===envelopeVersion)return '';
     const family=AppMetaGateway.resolve(key);
     if(!family)return 'unknown';
     if(AppMetaGateway.readable(row))return '';
@@ -10294,7 +10308,7 @@ async function importBackupAttachments(items,{signal,replace=false}={}){
   });
 }
 function currentBackupSourceRevision(){
-  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),memory=readStorageHealth();let latest='',latestAt=NaN;
+  const stored=readStoredStorageHealth(),memory=readStorageHealth();let latest='',latestAt=NaN;
   for(const value of [stored&&stored.lastLocalSaveAt,memory.lastLocalSaveAt]){
     const revision=String(value||''),at=Date.parse(revision);
     if(Number.isFinite(at)&&(!Number.isFinite(latestAt)||at>latestAt)){latest=revision;latestAt=at;}
@@ -10524,18 +10538,8 @@ BackupPresentation.subscribe(()=>{
 const REPOSITORY_MAINTENANCE_FORMAT='study-director.repository-maintenance-pending';
 const REPOSITORY_MAINTENANCE_VERSION=4;
 let repositoryMaintenanceWriteChain=Promise.resolve();
-function maintenanceReason(value){const reason=String(value||'legacy').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'legacy';}
+function maintenanceReason(value){const reason=String(value||'').trim().toLowerCase();return /^[a-z][a-z0-9-]{0,47}$/u.test(reason)?reason:'catch-up';}
 function maintenanceIso(value,fallback=''){const text=String(value||'');return Number.isFinite(Date.parse(text))?text:fallback;}
-function normalizeRepositoryMaintenancePending(value){
-  const entries=[],seen=new Set(),rows=value&&value.format===REPOSITORY_MAINTENANCE_FORMAT&&Number(value.version)===REPOSITORY_MAINTENANCE_VERSION&&Array.isArray(value.entries)?value.entries:[];
-  for(const raw of rows){
-    const providerId=String(raw&&raw.providerId||''),requestedAt=maintenanceIso(raw&&raw.requestedAt),nextEligibleAt=maintenanceIso(raw&&raw.nextEligibleAt,requestedAt),reason=maintenanceReason(raw&&raw.reason),repositoryScope=String(raw&&raw.repositoryScope||''),requestId=String(raw&&raw.requestId||'');
-    if(!/^[a-z][a-z0-9-]{0,40}$/u.test(providerId)||seen.has(providerId)||!requestedAt||!nextEligibleAt)continue;
-    if(repositoryScope.length>320||requestId&&!/^[a-f0-9-]{36}$/u.test(requestId))continue;seen.add(providerId);entries.push(Object.freeze({providerId,requestedAt,nextEligibleAt,reason,repositoryScope,requestId}));
-  }
-  return Object.freeze({format:REPOSITORY_MAINTENANCE_FORMAT,version:REPOSITORY_MAINTENANCE_VERSION,entries:Object.freeze(entries)});
-}
-async function readRepositoryMaintenancePending({throwOnError=false}={}){try{return normalizeRepositoryMaintenancePending(await BackupAppMeta.read('repositoryMaintenancePending'));}catch(error){AppDiagnostics.capture('backup.repository-maintenance-read',error,'warn');if(throwOnError)throw error;return normalizeRepositoryMaintenancePending(null);}}
 function mutateRepositoryMaintenancePending(providerId,mode,state={},expected=undefined){
   const id=String(providerId||'');if(!/^[a-z][a-z0-9-]{0,40}$/u.test(id))return Promise.resolve(false);
   const task=repositoryMaintenanceWriteChain.then(()=>BackupAppMeta.transaction('readwrite',(view,tx,finish)=>{
@@ -10543,7 +10547,7 @@ function mutateRepositoryMaintenancePending(providerId,mode,state={},expected=un
     handle.request.onerror=()=>finish(false,handle.request.error||new Error('Maintenance intent could not be read.'));
     handle.request.onsuccess=()=>{
       try{
-        const current=normalizeRepositoryMaintenancePending(handle.value()),byId=new Map(current.entries.map(entry=>[entry.providerId,entry])),previous=byId.get(id)||null;
+        const current=handle.value(),byId=new Map(current?.entries.map(entry=>[entry.providerId,entry])),previous=byId.get(id)||null;
         if(expected!==undefined&&(!previous!==!expected||expected&&['requestId','requestedAt','nextEligibleAt','reason','repositoryScope'].some(key=>String(previous?.[key]||'')!==String(expected[key]||'')))){outcome='superseded';return;}
         if(mode==='mark'){
           const now=new Date().toISOString(),requestedAt=previous?.requestedAt||now,nextEligibleAt=maintenanceIso(state&&state.nextEligibleAt,now),reason=maintenanceReason(state&&state.reason||previous?.reason||'catch-up'),repositoryScope=String((state&&state.repositoryScope)??previous?.repositoryScope??'').slice(0,320),requestId=state.newRequest!==true&&expected!==undefined&&previous?.requestId?previous.requestId:crypto.randomUUID();
@@ -10558,7 +10562,7 @@ function mutateRepositoryMaintenancePending(providerId,mode,state={},expected=un
   },{strict:true,abortMessage:'Maintenance intent transaction aborted'})).catch(error=>{AppDiagnostics.capture('backup.repository-maintenance-write',error,'warn');return false;});
   repositoryMaintenanceWriteChain=task.then(()=>{});return task;
 }
-const repositoryMaintenanceState=async providerId=>(await readRepositoryMaintenancePending({throwOnError:true})).entries.find(entry=>entry.providerId===String(providerId||''))||null;
+const repositoryMaintenanceState=async providerId=>(await BackupAppMeta.read('repositoryMaintenancePending'))?.entries.find(entry=>entry.providerId===providerId)||null;
 const markRepositoryMaintenancePending=(providerId,state={},expected=undefined)=>mutateRepositoryMaintenancePending(providerId,'mark',state,expected);
 const clearRepositoryMaintenancePending=(providerId,expected=undefined)=>mutateRepositoryMaintenancePending(providerId,'clear',{},expected);
 BackupProviderRuntime.configureRepositoryMaintenance(Object.freeze({read:repositoryMaintenanceState,mark:markRepositoryMaintenancePending,clear:clearRepositoryMaintenancePending}));
@@ -10791,7 +10795,7 @@ function noteDatabaseRemovedWhileClosed(){
 // A reload or a takeover in another tab brings back an unresolved clear.
 function resumeUnresolvedStorageReset(){
   noteDatabaseRemovedWhileClosed();
-  const stored=AppData.local.getJson(STORAGE_KEYS.storageHealth,null),clearedAt=String(stored&&stored.browserDataClearedAt||readStorageHealth().browserDataClearedAt||'');
+  const stored=readStoredStorageHealth(),clearedAt=stored?stored.browserDataClearedAt:readStorageHealth().browserDataClearedAt;
   if(!clearedAt||storageResetHold||!appCanMutate())return false;
   beginStorageResetHold(clearedAt).reloaded=true;showStorageResetDecision();storageResetConnectionsChanged();return true;
 }

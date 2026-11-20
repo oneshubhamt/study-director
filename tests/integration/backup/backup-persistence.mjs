@@ -37,7 +37,7 @@ const limits=freeze({
   backupMaxLineBytes:262144,backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,
   backupMaxUncompressedBytes:8*1024*1024,backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,
   importBytes:4*1024*1024,maxImportRecords:100,maxNotes:100,
-  maxLegacyImportTombstones:100,maxReflectionChars:10000,maxNoteLinks:50,maxPendingReviews:2000
+  maxReflectionChars:10000,maxNoteLinks:50,maxPendingReviews:2000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const entityDefinitions=freeze({
@@ -53,22 +53,6 @@ const normalizeNote=(item,key)=>{
   const id=String(key||item.key||'').trim();
   if(!id)return null;
   return freeze({version:2,key:id,label:String(item.label||id),text:clampText(item.text,10000),updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-05T00:00:00.000Z'});
-};
-const normalizeDrafts=value=>{
-  const source=Array.isArray(value)?value:(value&&typeof value==='object'&&value.drafts?Object.values(value.drafts):[]);
-  const byDate=new Map();
-  for(const item of source){
-    if(!item||typeof item!=='object'||!isDate(item.date))continue;
-    const clean=freeze({
-      version:1,date:item.date,reflection:clampText(item.reflection,limits.maxReflectionChars),
-      studyQuality:[1,2,3,4,5].includes(Number(item.studyQuality))?Number(item.studyQuality):null,
-      revision:Math.max(0,Math.floor(Number(item.revision)||0)),
-      sessionRevision:Math.max(0,Math.floor(Number(item.sessionRevision)||0)),
-      updatedAt:normalizeTimestamp(item.updatedAt)||'2026-08-05T00:00:00.000Z'
-    });
-    if(!byDate.has(clean.date))byDate.set(clean.date,clean);
-  }
-  return [...byDate.values()].sort((a,b)=>a.date.localeCompare(b.date));
 };
 const dailyRecordCodec=freeze({
   sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)&&Number(item.version)===16?freeze({...item,date:item.date}):null,

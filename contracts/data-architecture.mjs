@@ -1,5 +1,5 @@
 import {
-  INDEXED_DB,OPFS_IDENTITIES as CURRENT_OPFS_IDENTITIES,
+  INDEXED_DB,CURRENT_SCHEMA_VERSIONS,OPFS_IDENTITIES as CURRENT_OPFS_IDENTITIES,
   CACHE_STORAGE_IDENTITIES,EXTERNAL_REPOSITORY_IDENTITIES
 } from './canonical-identities.mjs';
 const freeze=Object.freeze;
@@ -133,15 +133,15 @@ export const DATA_ARCHITECTURE=freeze({
     backupFiles:surface('recovery-temporary','exports','protect-if-source-is-protected','while durably journaled/leased','',{protects:'external backup/export construction',created:'when a streamed backup/export requires durable scratch storage',cleared:'after verified completion, release, or stale-file collection',supersededBy:'verified external output'})
   }),
   localStorage:freeze({
-    recovery:surface('recovery','repositories','protect','until canonical session settles','',{protects:'indexedDb.activeSessions',created:'when live session state needs crash recovery',cleared:'after canonical session persistence/finalization settles',supersededBy:'newer canonical ActiveSession or canonical deletion'}),
-    appOwner:surface('coordination','ownership','operational','lease lifetime'),
+    recovery:surface('recovery','repositories','protect','until canonical session settles','LocalRecoveryEnvelope.v'+CURRENT_SCHEMA_VERSIONS.LocalRecoveryEnvelope,{protects:'indexedDb.activeSessions',created:'when live session state needs crash recovery',cleared:'after canonical session persistence/finalization settles',supersededBy:'newer canonical ActiveSession or canonical deletion'}),
+    appOwner:surface('coordination','ownership','operational','lease lifetime','AppOwnerLease.v2'),
     mutationLock:surface('coordination','host','operational','lease lifetime'),
-    storageHealth:surface('operational','host','operational','bounded operational diagnostics; no user-content details'),
+    storageHealth:surface('operational','host','operational','bounded operational diagnostics; no user-content details','StorageHealth.v3'),
     databaseLifecycle:surface('operational','host','operational','bounded operational diagnostics; no user-content details: counts, times and storage error names for this start and the start before a database loss'),
     installationId:surface('coordination-identity','persistence','protect-identifiers','retained'),
-    deletionRecovery:surface('recovery','repositories','protect-identifiers','until the failed DailyRecord/ActiveSession delete is reconciled','',{protects:'DailyRecord/ActiveSession deletion intent',created:'when authoritative deletion cannot complete atomically',cleared:'after canonical deletion state is verified',supersededBy:'verified canonical record/deletion state'}),
+    deletionRecovery:surface('recovery','repositories','protect-identifiers','until the failed DailyRecord/ActiveSession delete is reconciled','DeletionRecovery.v1',{protects:'DailyRecord/ActiveSession deletion intent',created:'when authoritative deletion cannot complete atomically',cleared:'after canonical deletion state is verified',supersededBy:'verified canonical record/deletion state'}),
     fallbackDailyRecords:surface('recovery','repositories','protect','until replayed and verified in IndexedDB','',{protects:'indexedDb.dailyRecords',created:'when a DailyRecord cannot be persisted to IndexedDB',cleared:'after replay and verification in canonical IndexedDB',supersededBy:'verified canonical DailyRecord'}),
-    noteRescue:surface('recovery','repositories','protect','until the unsaved notes it holds are saved','',{protects:'indexedDb.notes',created:'when a note save fails or the page is hidden or closed before a save finishes',cleared:'after the matching canonical Note/deletion commits',supersededBy:'newer canonical Note or deletion state',capacity:'noteRescueBytes (1 MiB), newest notes first; the save failure names any unsaved note left out'}),
+    noteRescue:surface('recovery','repositories','protect','until the unsaved notes it holds are saved','NoteRescue.v1',{protects:'indexedDb.notes',created:'when a note save fails or the page is hidden or closed before a save finishes',cleared:'after the matching canonical Note/deletion commits',supersededBy:'newer canonical Note or deletion state',capacity:'noteRescueBytes (1 MiB), newest notes first; the save failure names any unsaved note left out'}),
     fontScale:surface('startup-mirror','host','operational','disposable mirror of appMeta portable Preferences fontScale','',{mirrorOf:'appMeta.personalPreferences.fontScale'}),
     keepScreenAwake:surface('preference','native-capabilities','operational','retained'),
     installNoticeShown:surface('preference','native-capabilities','operational','retained'),

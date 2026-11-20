@@ -81,7 +81,7 @@ const rowB=metadata.get(B);const restored={id:B,...rowB,name:'incoming.pdf',libr
 await store.publish([[B,{...rowB,name:'incoming.pdf',library:false}]],100,()=>{}, {restoreLabels:true,replaceAll:true});assert.equal(metadata.get(B).name,'incoming.pdf');
 await assert.rejects(()=>store.publish([[B,{...metadata.get(B),hash:'f'.repeat(64)}]],101,()=>{}),/conflicts with an existing file/);
 
-console.log(JSON.stringify({status:'PASS',suite:'asset-storage-contract',commits:commits.length,metadataRows:metadata.size,files:files.size,lease:true,legacyCleanup:true,publication:true,collection:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'asset-storage-contract',commits:commits.length,metadataRows:metadata.size,files:files.size,lease:true,publication:true,collection:true},null,2));
 
 // Physical collection releases the retention/metadata locks between bounded
 // opportunities, while rebuilding the retained set for every continuation.

@@ -19,7 +19,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const localWrites={pending:0,all:0,sessionBytes:0},idbWrites={recovery:0},idbReads={metaGetAll:0,boundedMetaGetAll:0,unboundedMetaGetAll:0},idbDurability={strict:0,normal:0,strictStores:[],normalStores:[]},validationCalls={within:0,clamp:0};
   const stores=sharedStores||{area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
   const localStorage={
-    getItem(key){if(controls.failLocalGetKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery read failure');return sharedLocal.has(key)?JSON.stringify(sharedLocal.get(key)):null;},
+    getItem(key){if(controls.failLocalGetKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery read failure');return controls.rawLocal?.get(key)??(sharedLocal.has(key)?JSON.stringify(sharedLocal.get(key)):null);},
     setItem(key,text){if(controls.failLocal||controls.failLocalSetKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery write failure');if(key==='recovery')localWrites.sessionBytes+=Buffer.byteLength(text);localWrites.all++;if(key==='pending')localWrites.pending++;sharedLocal.set(key,JSON.parse(text));},
     removeItem(key){if(controls.failLocalRemove||controls.failLocalRemoveKeys?.has?.(key))throw new Error('QA_FIXTURE local recovery removal failure');sharedLocal.delete(key);}
   };
@@ -106,7 +106,7 @@ export function createHarness(sharedLocal=new Map(),sharedStores=null,controls={
   const decisionClock=freeze({nowMs:()=>new ClockDate().getTime()});
   const pendingReviewCodec=controls.pendingReviewCodec||testPendingReviewCodec(registry.require('record-codecs',1),{dataContract:RUNTIME_DATA_CONTRACT,personalDataCodec:freeze({...personalDataCodec,normalize:value=>structuredClone(value)}),dailyRecordCodec,activeSessionCodec});
   const metaKeys=freeze({planDraft:'planDraft',planLibrary:'planLibrary',personalPreferences:'personalPreferences',canonicalMutationEpoch:'canonicalMutationEpoch',backupPreparationUnitPrefix:'backupPreparationUnit:',insightsDatasetRevision:'insightsDatasetRevision',dataMaintenance:'dataMaintenance',savedDayDeletionPrefix:'savedDayDeletion:',noteDeletionPrefix:'noteDeletion:',attachmentDeletionPrefix:'attachmentDeletion:',pendingReviewPrefix:'pendingReview:'});
-  const gateway=appMetaModule.create(freeze({indexedDb:freeze({transaction:indexedDb.transaction,strictTransaction:indexedDb.strictTransaction,get:indexedDb.get,getAll:indexedDb.getAll}),store:'meta',registry:APP_META_RUNTIME_REGISTRY}));
+  const gateway=appMetaModule.create(freeze({indexedDb:freeze({transaction:indexedDb.transaction,strictTransaction:indexedDb.strictTransaction,get:indexedDb.get}),store:'meta',registry:APP_META_RUNTIME_REGISTRY}));
   gateway.registerValidators('repositories',module.createAppMetaValidators(freeze({limits,dataContract,personalDataCodec,pendingReviewCodec,helpers:freeze({isValidIsoDate:helpers.isValidIsoDate,isNoteId:noteKeys.isId,isNoteKey:noteKeys.isKey,normalizeTimestamp:helpers.normalizeTimestamp,sameDataValue:helpers.sameDataValue})})));
   gateway.registerValidators('journals',journalModule.createAppMetaValidators(freeze({limits})));
   const repositoryMeta=gateway.bind('repositories'),journalMeta=gateway.bind('repository-journals');

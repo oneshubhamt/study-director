@@ -31,11 +31,11 @@ registry.define('host-metadata',1,()=>{
         return true;
       }
       if(key===keys.repositoryMaintenancePending){
-        if(!value||!exactKeys(value,['format','version','entries'])||value.format!=='study-director.repository-maintenance-pending'||Number(value.version)!==4||!Array.isArray(value.entries)||value.entries.length>8)return false;
+        if(!exactKeys(value,['format','version','entries'])||value.format!=='study-director.repository-maintenance-pending'||value.version!==4||!Array.isArray(value.entries)||value.entries.length>8)return false;
         const seen=new Set();
         for(const entry of value.entries){
-          if(!entry||!exactKeys(entry,['providerId','requestedAt','nextEligibleAt','reason','repositoryScope','requestId'])||typeof entry.requestId!=='string')return false;
-          const providerId=String(entry.providerId||''),requestedAt=String(entry.requestedAt||''),nextEligibleAt=String(entry.nextEligibleAt||''),reason=String(entry.reason||''),repositoryScope=String(entry.repositoryScope||''),requestId=entry.requestId;
+          if(!exactKeys(entry,['providerId','requestedAt','nextEligibleAt','reason','repositoryScope','requestId'])||Object.values(entry).some(field=>typeof field!=='string'))return false;
+          const {providerId,requestedAt,nextEligibleAt,reason,repositoryScope,requestId}=entry;
           if(!/^[a-z][a-z0-9-]{0,40}$/u.test(providerId)||seen.has(providerId)||!Number.isFinite(Date.parse(requestedAt))||!Number.isFinite(Date.parse(nextEligibleAt))||!/^[a-z][a-z0-9-]{0,47}$/u.test(reason)||repositoryScope.length>320||requestId&&!/^[a-f0-9-]{36}$/u.test(requestId))return false;seen.add(providerId);
         }
         return true;

@@ -64,4 +64,4 @@ assert.deepEqual({...ua('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) 
 assert.deepEqual({...ua('Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')},{type:'chromeos',browser:'chrome'});
 assert.deepEqual({...ua('')},{type:'device',browser:'browser'});
 
-console.log(JSON.stringify({status:'PASS',suite:'installation-identity',currentOnly:true,legacyMigrationIsolated:true,namesFromIds:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'installation-identity',currentOnly:true,namesFromIds:true},null,2));

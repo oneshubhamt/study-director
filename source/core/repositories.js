@@ -266,6 +266,8 @@ registry.define('repositories',1,()=>{
       return lastSessionRevision;
     }
 
+    const NO_RECOVERY=Symbol('missing local recovery');
+    const DELETION_RECOVERY_FORMAT='study-director.deletion-recovery';
     function deletionRecoveryKey(kind,id){return `${String(kind||'').trim()}:${String(id||'').trim()}`;}
     function readLocalRecoveryJson(key,fallback){
       const value=LocalStorageContract.getJson(key,fallback);
@@ -294,34 +296,43 @@ registry.define('repositories',1,()=>{
       }
       return [...byKey.values()].sort((a,b)=>a.deletedAt.localeCompare(b.deletedAt));
     }
-    function currentDeletionRecoveryEntries(){
-      const raw=readLocalRecoveryJson(STORAGE_KEYS.deletionRecovery,null);
-      return sanitizeDeletionRecoveryEntries(raw&&raw.entries);
+    function pendingDeletionEntries(){
+      const raw=readLocalRecoveryJson(STORAGE_KEYS.deletionRecovery,NO_RECOVERY);
+      if(raw===NO_RECOVERY)return [];
+      if(!exactValue(raw,['format','version','updatedAt','entries'])||raw.format!==DELETION_RECOVERY_FORMAT||raw.version!==1||
+        typeof raw.updatedAt!=='string'||!Number.isFinite(Date.parse(raw.updatedAt))||!Array.isArray(raw.entries)){
+        throw canonicalRuntimeError('Pending deletion recovery is not in the current format. The browser copy was preserved.');
+      }
+      const entries=sanitizeDeletionRecoveryEntries(raw.entries);
+      const byKey=new Map(entries.map(entry=>[entry.key,entry]));
+      if(entries.length!==raw.entries.length||raw.entries.some(entry=>!sameDataValue(entry,byKey.get(entry?.key)))){
+        throw canonicalRuntimeError('Pending deletion recovery contains unrecognized entries. The browser copy was preserved.');
+      }
+      return entries;
     }
-    function pendingDeletionEntries(){return sanitizeDeletionRecoveryEntries(currentDeletionRecoveryEntries());}
     function pendingDeletionEntryMap(){return new Map(pendingDeletionEntries().map(entry=>[entry.key,entry]));}
     // Clearing or rewriting what is stored keeps the record's own ceiling; only
     // a new entry has to fit in the shared emergency budget.
     function writeDeletionRecoveryEntries(values,room=APP_LIMITS.deletionRecoveryBytes){
       const ordered=sanitizeDeletionRecoveryEntries(values),kept=[];
       for(let i=ordered.length-1;i>=0;i--){
-        const candidate=[ordered[i],...kept],payload={format:'study-director.deletion-recovery',version:1,updatedAt:new Date().toISOString(),entries:candidate};
+        const candidate=[ordered[i],...kept],payload={format:DELETION_RECOVERY_FORMAT,version:1,updatedAt:new Date().toISOString(),entries:candidate};
         if(jsonByteLength(payload)>room)break;
         kept.unshift(ordered[i]);
       }
       if(kept.length!==ordered.length)return false;
       if(!kept.length)return LocalStorageContract.remove(STORAGE_KEYS.deletionRecovery);
-      return LocalStorageContract.setJson(STORAGE_KEYS.deletionRecovery,{format:'study-director.deletion-recovery',version:1,updatedAt:new Date().toISOString(),entries:kept});
+      return LocalStorageContract.setJson(STORAGE_KEYS.deletionRecovery,{format:DELETION_RECOVERY_FORMAT,version:1,updatedAt:new Date().toISOString(),entries:kept});
     }
     function stageDeletionRecovery(kind,id,deletedAt=new Date().toISOString()){
-      const entries=currentDeletionRecoveryEntries(),next=sanitizeDeletionRecoveryEntries([...entries,{kind,id,deletedAt}]);
+      const entries=pendingDeletionEntries(),next=sanitizeDeletionRecoveryEntries([...entries,{kind,id,deletedAt}]);
       return writeDeletionRecoveryEntries(next,rescueRoom(STORAGE_KEYS.deletionRecovery,APP_LIMITS.deletionRecoveryBytes));
     }
     function clearDeletionRecoveryKeys(keys,expected=null){
       const serviced=expected&&new Map(expected.map(entry=>[entry.key,entry.deletedAt]));
       const remove=new Set((keys||[]).map(String));if(!remove.size)return true;
       try{
-        const current=currentDeletionRecoveryEntries();
+        const current=pendingDeletionEntries();
         return writeDeletionRecoveryEntries(current.filter(entry=>!remove.has(entry.key)||serviced&&serviced.get(entry.key)!==entry.deletedAt));
       }catch(error){markStorageHealthError('deletionRecovery',`Pending deletion recovery could not be read safely: ${error&&error.message||error}`);return false;}
     }
@@ -398,15 +409,17 @@ function sessionFromRecoveryEnvelope(raw){
   lastSessionRevision=Math.max(lastSessionRevision,envelope.revision);
   return ActiveSessionCodec.sanitizeCurrent({...envelope.shell,snapshot:envelope.snapshot,revision:envelope.revision,updatedAt:envelope.updatedAt});
 }
-function localRecoverySession(raw){
-  if(raw===null)return null;
-  // A durable logical deletion is authoritative over the stale recovery copy it
-  // protects. Do not interpret a payload that is already shadowed for cleanup.
-  const shadowed=pendingDeletionShadowsEntity('activeSession',ACTIVE_SESSION_ID,raw);
-  if(shadowed)return null;
-  const session=sessionFromRecoveryEnvelope(raw);if(!session)throw canonicalRuntimeError('Active Session recovery is not in the current canonical schema.');return session;
+function readActiveSessionRecovery(){
+  const raw=readLocalRecoveryJson(STORAGE_KEYS.recovery,NO_RECOVERY);
+  if(raw===NO_RECOVERY)return null;
+  const session=sessionFromRecoveryEnvelope(raw);
+  if(!session)throw canonicalRuntimeError('Active Session recovery is not in the current canonical schema. The browser copy was preserved.');
+  return session;
 }
-function readLocalRecoverySession(){return localRecoverySession(readLocalRecoveryJson(STORAGE_KEYS.recovery,null));}
+function readLocalRecoverySession(){
+  const session=readActiveSessionRecovery();
+  return session&&pendingDeletionShadowsEntity('activeSession',ACTIVE_SESSION_ID,session)?null:session;
+}
 const idbTransaction=IndexedDb.transaction;
 const idbStrictTransaction=IndexedDb.strictTransaction;
 const idbStoreTransaction=IndexedDb.storeTransaction;
@@ -503,9 +516,9 @@ async function applyDeletionRecoveryEntry(entry){
     },'DailyRecord deletion recovery aborted');
   }
   if(entry.kind==='activeSession'){
-    const raw=readLocalRecoveryJson(STORAGE_KEYS.recovery,null),local=localRecoverySession(raw);
+    const local=readActiveSessionRecovery();
     if(local&&entityTimestamp(local,'activeSession')>cutoff)return true;
-    if(raw!==null&&!LocalStorageContract.remove(STORAGE_KEYS.recovery))throw LocalStorageContract.lastError||new Error('ActiveSession recovery envelope could not be cleared.');
+    if(local&&!LocalStorageContract.remove(STORAGE_KEYS.recovery))throw LocalStorageContract.lastError||new Error('ActiveSession recovery envelope could not be cleared.');
     return idbStrictTransaction([DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
       const store=tx.objectStore(DB_ACTIVE_SESSION_STORE);
       const request=store.get(ACTIVE_SESSION_ID);
@@ -841,8 +854,12 @@ async function saveActiveSessionRecord(session,{emergency=false,backupCapture=fa
   let localSaved=false;
   function checkpoint(){
     assertWriteToken(ownershipToken,'the local recovery-envelope write');
-    const envelope=activeSessionRecoveryEnvelope(clean);
-    localSaved=!!(envelope&&LocalStorageContract.setJson(STORAGE_KEYS.recovery,envelope));
+    try{
+      const existing=readActiveSessionRecovery();
+      if(existing&&newerActiveSession(clean,existing)===existing)return;
+      const envelope=activeSessionRecoveryEnvelope(clean);
+      localSaved=!!(envelope&&LocalStorageContract.setJson(STORAGE_KEYS.recovery,envelope));
+    }catch(error){AppDiagnostics.capture('active-session.recovery-write',error,'warn');}
   }
   // Before page-exit asynchronous work can be suspended, retain the latest full snapshot.
   if(emergency){try{checkpoint();}catch(error){if(isOwnershipLostError(error))return {ok:false,value:clean,error,storage:{local:false,idb:false}};throw error;}}
@@ -863,7 +880,11 @@ async function saveActiveSessionRecord(session,{emergency=false,backupCapture=fa
       }
     }
     if(idbSaved&&writeEpoch===activeSessionMutationEpoch){
-      try{assertWriteToken(ownershipToken,'clearing committed session recovery');LocalStorageContract.remove(STORAGE_KEYS.recovery);}catch(error){if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.recovery-cleanup',error);}
+      try{
+        assertWriteToken(ownershipToken,'clearing committed session recovery');
+        const existing=readActiveSessionRecovery();
+        if(existing&&(newerActiveSession(existing,clean)===clean||sameDataValue(existing,clean)))LocalStorageContract.remove(STORAGE_KEYS.recovery);
+      }catch(error){if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.recovery-cleanup',error);}
     }
     if(localSaved||idbSaved){
       return {ok:true,value:clean,error:idbError,storage:{local:localSaved,idb:idbSaved}};
@@ -885,10 +906,7 @@ async function loadActiveSessionRecord(retry=0,options={}){
   const readEpoch=activeSessionMutationEpoch;
   let localSession=null;
   try{
-    const rawLocal=readLocalRecoverySession();
-    const currentLocal=rawLocal?ActiveSessionCodec.sanitizeCurrent(rawLocal):null;
-    if(rawLocal&&!currentLocal)throw canonicalRuntimeError('Active Session recovery resolved to a non-current canonical session.');
-    localSession=pendingDeletionShadowsEntity('activeSession',ACTIVE_SESSION_ID,currentLocal)?null:currentLocal;
+    localSession=readLocalRecoverySession();
     const rawIdb=await idbGetActiveSession();
     if(readEpoch!==activeSessionMutationEpoch)return activeSessionEpochFallback(retry,options);
     const currentIdb=rawIdb?ActiveSessionCodec.sanitizeCurrent(rawIdb):null;
@@ -906,15 +924,20 @@ async function loadActiveSessionRecord(retry=0,options={}){
           if(readEpoch!==activeSessionMutationEpoch)return;
           assertWriteToken(reconciliationToken,'the active-session reconciliation');
           await idbPutActiveSession(value,reconciliationToken,true);
-          if(readEpoch===activeSessionMutationEpoch){assertWriteToken(reconciliationToken,'clearing reconciled session recovery');if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Reconciled session recovery could not be cleared.');}
+          if(readEpoch===activeSessionMutationEpoch){
+            assertWriteToken(reconciliationToken,'clearing reconciled session recovery');
+            if(sameDataValue(readActiveSessionRecovery(),value)&&!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Reconciled session recovery could not be cleared.');
+          }
           if(!clearDeletionRecoveryKeys([deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID)])&&options.strict)throw LocalStorageContract.lastError||new Error('Session deletion recovery could not be reconciled.');
         }catch(e){reconciliationError=e;if(!isOwnershipLostError(e))AppDiagnostics.capture('active-session.reconcile-idb',e);}
       }else if(reconciliationToken&&value===idbSession&&value&&(!localSession||newerActiveSession(localSession,idbSession)===idbSession)){
         try{
           if(readEpoch!==activeSessionMutationEpoch)return;
-          assertWriteToken(reconciliationToken,'the active-session canonical read-repair');
-          if(rawIdb&&!sameDataValue(rawIdb,idbSession))await idbPutActiveSession(idbSession,reconciliationToken,true);
-          if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Session recovery could not be cleared.');
+          assertWriteToken(reconciliationToken,'clearing superseded session recovery');
+          const existing=readActiveSessionRecovery();
+          if(existing&&(newerActiveSession(existing,idbSession)===idbSession||sameDataValue(existing,idbSession))){
+            if(!LocalStorageContract.remove(STORAGE_KEYS.recovery)&&options.strict)throw LocalStorageContract.lastError||new Error('Session recovery could not be cleared.');
+          }
         }catch(error){reconciliationError=error;if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.reconcile-local',error);}
       }
     });
@@ -939,6 +962,7 @@ async function clearActiveSessionRecord(){
     const deletedAt=new Date().toISOString(),recoveryKey=deletionRecoveryKey('activeSession',ACTIVE_SESSION_ID);
     let staged=false,localCleared=false,idbCleared=false,idbError=null;
     try{
+      readActiveSessionRecovery();
       staged=stageDeletionRecovery('activeSession',ACTIVE_SESSION_ID,deletedAt);
       assertWriteToken(ownershipToken,'the active-session deletion');
       localCleared=LocalStorageContract.remove(STORAGE_KEYS.recovery);
@@ -967,7 +991,9 @@ function readableDailyRecord(record){
 function fallbackDailyRecordsRawGet(){
   const raw=readLocalRecoveryJson(STORAGE_KEYS.fallbackDailyRecords,[]);
   if(!Array.isArray(raw))throw canonicalRuntimeError('Fallback Daily Records are not in a recognized array format.');
-  return capFallbackDailyRecords(raw.map(readableDailyRecord).filter(Boolean));
+  const records=raw.map(readableDailyRecord);
+  if(records.includes(null))throw canonicalRuntimeError('Fallback Daily Records contain an unrecognized entry. The browser copy was preserved.');
+  return capFallbackDailyRecords(records);
 }
 function fallbackDailyRecordsGet(){return filterPendingDeletedEntities(fallbackDailyRecordsRawGet(),'dailyRecord','date');}
 function fallbackDailyRecordsSet(arr){
@@ -1373,7 +1399,6 @@ async function runDataMaintenance(options={}){
       async()=>{const fallback=fallbackDailyRecordsGet();if(fallback.length)await storeFallbackDailyRecords(fallback,{strict:true});},
       async()=>{if(await NotesRepository.load({strict:true})!==true)throw new Error('Notes could not be loaded for maintenance.');},
       async()=>{await NotesRepository.flush({strict:true});},
-      async()=>{const rawRecovery=readLocalRecoveryJson(STORAGE_KEYS.recovery,null);if(rawRecovery&&!sessionFromRecoveryEnvelope(rawRecovery)&&!LocalStorageContract.remove(STORAGE_KEYS.recovery))throw LocalStorageContract.lastError||new Error('Invalid session recovery could not be removed.');},
       async()=>{const session=await loadActiveSessionRecord(0,{strict:true});if(!session?.ok||session.error)throw session?.error||new Error('Active Session reconciliation is incomplete.');},
       async()=>{if(await flushDeletionRecovery({check:requireSameOwner,workBudget:options.workBudget})!==true)throw new Error('Pending deletion recovery is incomplete.');},
       async()=>{await pruneDeletionLedgers();}
@@ -1605,20 +1630,7 @@ async function runDataMaintenance(options={}){
     const pendingReviews=freeze({list:listPendingReviews,readItems:readPendingReviewItems,merge:values=>writePendingReviews(values),replace:values=>writePendingReviews(values,{replace:true}),resolve:resolvePendingReviews});
     const maintenanceApi=freeze({intervalMs:DATA_MAINTENANCE_INTERVAL_MS,status:()=>freeze({busy:!!dataMaintenancePromise}),run:runDataMaintenance,repairSummaries:repairDailySummaries,settled:()=>dataMaintenancePromise||Promise.resolve()});
 
-    async function verifyCurrentRepositoryMetadata(){
-      const issues=[],families=['planDraft','planLibrary','personalPreferences','canonicalMutationEpoch','insightsDatasetRevision','dataMaintenance'];let rows=0;
-      const results=await Promise.allSettled([...families.map(name=>Meta.readEntry(name)),Meta.list('backupPreparationUnitPrefix')]);
-      results.forEach((result,index)=>{
-        const family=index===results.length-1?'backupPreparationUnitPrefix':families[index];
-        if(result.status==='rejected')issues.push(`${family}:${String(result.reason&&result.reason.message||result.reason)}`);
-        else if(index===results.length-1)rows+=Array.isArray(result.value)?result.value.length:0;
-        else if(result.value)rows++;
-      });
-      const rescueProof=NotesRepository.verifyRescue();
-      issues.push(...rescueProof.issues);
-      return freeze({ok:issues.length===0,issues:freeze(issues),rows:rows+rescueProof.rows});
-    }
-    const metadata=freeze({verifyCurrent:verifyCurrentRepositoryMetadata,diagnostics:async()=>{
+    const metadata=freeze({diagnostics:async()=>{
       const maintenance=await Meta.read('dataMaintenance'),deletions=pendingDeletionEntries();
       const localRecovery=LocalStorageContract.getText(STORAGE_KEYS.recovery,null)!==null;if(LocalStorageContract.lastError)throw LocalStorageContract.lastError;
       return freeze({maintenanceStatus:maintenance?.status||'never',completedAt:maintenance?.completedAt||'',deletions:deletions.length,localRecovery});

@@ -61,14 +61,18 @@ await maintenanceFailure('canonical note read unavailable',async(h,c)=>{h.app.no
 await maintenanceFailure('session read unavailable',async(h,c)=>{c.onSessionRead=async()=>{throw new Error('session read unavailable');};return async()=>{c.onSessionRead=null;};},async()=>{});
 const sessionFixture={id:'active',version:1,revision:1,date:'2026-09-17',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-17'},updatedAt:'2026-09-17T11:00:00.000Z'};
 await maintenanceFailure('session reconciliation write failure',async(h,c)=>{c.failSessionWrite=true;assert.equal((await h.app.activeSession.save(sessionFixture)).ok,true);return async()=>{c.failSessionWrite=false;};},async h=>{assert.ok(h.sharedLocal.has('recovery'));assert.equal(h.stores.session.has('active'),false);});
-await maintenanceFailure('session recovery retirement failure',async(h,c)=>{await h.app.activeSession.save(sessionFixture);h.sharedLocal.set('recovery',{stale:true});c.failLocalRemoveKeys=new Set(['recovery']);return async()=>{c.failLocalRemoveKeys.clear();};},async h=>assert.ok(h.sharedLocal.has('recovery')));
+await maintenanceFailure('session recovery retirement failure',async(h,c)=>{
+  c.failSessionWrite=true;assert.equal((await h.app.activeSession.save(sessionFixture)).storage.local,true);
+  c.failSessionWrite=false;c.failLocalRemoveKeys=new Set(['recovery']);
+  return async()=>{c.failLocalRemoveKeys.clear();};
+},async h=>assert.ok(h.sharedLocal.has('recovery')));
 const dayFixture={version:1,date:'2026-09-16',savedAt:'2026-09-17T10:00:00.000Z',updatedAt:'2026-09-17T10:00:00.000Z',reflection:'pending deletion'};
 async function pendingDelete(h,c){await h.app.dailyRecords.save(dayFixture);c.failNextDailyWrite=true;await h.app.dailyRecords.remove(dayFixture.date);assert.ok(h.sharedLocal.has('deletionRecovery'));}
 await maintenanceFailure('deletion recovery transaction failure',async(h,c)=>{await pendingDelete(h,c);c.failNextDailyWrite=true;return async()=>{};},async h=>{assert.equal(h.stores.daily.has(dayFixture.date),true);assert.equal(await h.app.dailyRecords.get(dayFixture.date),null);assert.ok(h.sharedLocal.has('deletionRecovery'));});
 await maintenanceFailure('deletion recovery read unavailable',async(h,c)=>{await pendingDelete(h,c);c.failLocalGetKeys=new Set(['deletionRecovery']);return async()=>{c.failLocalGetKeys.clear();};},async h=>assert.ok(h.sharedLocal.has('deletionRecovery')));
 await maintenanceFailure('deletion recovery marker retirement failure',async(h,c)=>{await pendingDelete(h,c);c.failLocalRemoveKeys=new Set(['deletionRecovery']);return async()=>{c.failLocalRemoveKeys.clear();};},async h=>{assert.equal(h.stores.daily.has(dayFixture.date),false);assert.ok(h.sharedLocal.has('deletionRecovery'));});
-await maintenanceFailure('fallback migration transaction failure',async(h,c)=>{h.sharedLocal.set('fallback',[dayFixture]);c.failNextDailyWrite=true;return async()=>{};},async h=>{assert.equal(h.stores.daily.has(dayFixture.date),false);assert.equal(h.sharedLocal.get('fallback').length,1);});
-await maintenanceFailure('fallback migration cleanup failure',async(h,c)=>{h.sharedLocal.set('fallback',[dayFixture]);c.failLocalSetKeys=new Set(['fallback']);return async()=>{c.failLocalSetKeys.clear();};},async h=>{assert.equal(h.stores.daily.has(dayFixture.date),true);assert.equal(h.sharedLocal.get('fallback').length,1);});
+await maintenanceFailure('fallback replay transaction failure',async(h,c)=>{h.sharedLocal.set('fallback',[dayFixture]);c.failNextDailyWrite=true;return async()=>{};},async h=>{assert.equal(h.stores.daily.has(dayFixture.date),false);assert.equal(h.sharedLocal.get('fallback').length,1);});
+await maintenanceFailure('fallback replay cleanup failure',async(h,c)=>{h.sharedLocal.set('fallback',[dayFixture]);c.failLocalSetKeys=new Set(['fallback']);return async()=>{c.failLocalSetKeys.clear();};},async h=>{assert.equal(h.stores.daily.has(dayFixture.date),true);assert.equal(h.sharedLocal.get('fallback').length,1);});
 await maintenanceFailure('pending intent commit failure',async(_h,c)=>{c.failNextMetaOnlyWrite=true;return async()=>{};},async()=>{});
 await maintenanceFailure('completion metadata commit failure',async(_h,c)=>{c.failNextMaintenanceCompletion=true;return async()=>{};},async h=>assert.equal(h.stores.meta.get('dataMaintenance').value.status,'pending'));
 {
@@ -108,7 +112,7 @@ for(const change of ['canonical','unsaved-note','rescue','ownership','reload','u
  const first=await job.run('initial');assert.equal(first.status,'yielded');assert.equal(first.phase,2);
  if(change==='canonical')await h.app.mutationEpoch.reseed();
  if(change==='unsaved-note')h.app.notes.update('new-note','New Note','new unsaved value','');
- if(change==='rescue')h.sharedLocal.set('recovery',{stale:true});
+ if(change==='rescue'){controls.failSessionWrite=true;assert.equal((await h.app.activeSession.save(sessionFixture)).storage.local,true);controls.failSessionWrite=false;}
  if(change==='ownership')controls.ownershipRevision=2;
  if(change==='reload'){job.dispose();current=createHarness(h.sharedLocal,h.stores,controls);job=automaticMaintenance(current,clock,controls);}
  if(change==='local-unavailable'){controls.failLocalGetKeys=new Set(['recovery']);assert.equal((await job.run('local-unavailable')).status,'failed');assert.equal(h.stores.meta.get('dataMaintenance').value.status,'pending');controls.failLocalGetKeys.clear();}

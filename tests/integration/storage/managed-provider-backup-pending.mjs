@@ -25,8 +25,7 @@ function runTransaction(mode,operation,strict=false){
 const indexedDb=freeze({
   transaction:(_store,mode,operation)=>runTransaction(mode,operation,false),
   strictTransaction:(_store,mode,operation)=>runTransaction(mode,operation,true),
-  get:async(_store,key)=>structuredClone(rows.get(key)||null),
-  getAll:async()=>[...rows.values()].map(structuredClone)
+  get:async(_store,key)=>structuredClone(rows.get(key)||null)
 });
 const hostKeys=freeze({
   verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
@@ -118,7 +117,10 @@ for(const path of ['adopt-complete','adopt-pending','run-complete']){
 {
  const h=host();await h.mark('google-drive',{reason:'canonical',nextEligibleAt:new Date().toISOString()});const valid=structuredClone(rows.get(APP_META_KEYS.repositoryMaintenancePending));
  for(const requestId of [null,'invalid']){const invalid=structuredClone(valid);invalid.value.entries[0].requestId=requestId;rows.set(APP_META_KEYS.repositoryMaintenancePending,invalid);await assert.rejects(h.read('google-drive'),/not canonical/u);}
- rows.set(APP_META_KEYS.repositoryMaintenancePending,valid);await h.clear('google-drive');intentCases.push('noncanonical request identity rejected');
+ const wrongVersion=structuredClone(valid),wrongField=structuredClone(valid);
+ wrongVersion.value.version='4';wrongField.value.entries[0].repositoryScope=123;
+ for(const invalid of [wrongVersion,wrongField]){rows.set(APP_META_KEYS.repositoryMaintenancePending,invalid);await assert.rejects(h.read('google-drive'),/not canonical/u);assert.equal(await h.clear('google-drive'),false);assert.equal(rows.get(APP_META_KEYS.repositoryMaintenancePending),invalid);}
+ rows.set(APP_META_KEYS.repositoryMaintenancePending,valid);await h.clear('google-drive');intentCases.push('noncanonical maintenance intent rejected without rewrite');
 }
 console.log(JSON.stringify({status:'PASS',suite:'repository-maintenance-request-fencing',cases:intentCases.length,intentCases,canonicalMetadataGateway:true,atomicTransactions:true,newerRequestsExecuted:true,restartPersistence:true},null,2));
 

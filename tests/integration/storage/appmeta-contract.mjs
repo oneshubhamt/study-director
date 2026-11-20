@@ -1,44 +1,21 @@
 import assert from 'node:assert/strict';
 import {createHarness} from '../../helpers/repository-harness.mjs';
 
-// AppMeta is tested as one contract: canonical values, gateway ownership/bounds, and revision-envelope migration.
-
-{ // appmeta-current-values
-const stores={area:new Map(),sync:new Map(),tombstones:new Map(),reflection:new Map(),daily:new Map(),summary:new Map(),session:new Map(),meta:new Map()};
-const {app}=createHarness(new Map(),stores);
-
-let proof=await app.metadata.verifyCurrent();
-assert.equal(proof.ok,true,'an empty optional appMeta surface must be canonical');
-
+// Test the read boundary used by live owners and the startup census.
+{
+const {repositoryMeta,stores}=createHarness();
+assert.equal(await repositoryMeta.read('canonicalMutationEpoch'),null,'optional metadata may be absent');
 const epoch={format:'study-director.canonical-mutation-epoch',version:1,token:'a'.repeat(32),committedAt:'2026-09-16T09:59:00.000Z'};
-stores.meta.set('canonicalMutationEpoch',{key:'canonicalMutationEpoch',version:1,value:epoch,updatedAt:epoch.committedAt});
-proof=await app.metadata.verifyCurrent();
-assert.equal(proof.ok,true,'the canonical mutation epoch must be accepted as device-local coordination metadata');
-stores.meta.set('canonicalMutationEpoch',{key:'canonicalMutationEpoch',version:1,value:{...epoch,token:'too-short'},updatedAt:epoch.committedAt});
-proof=await app.metadata.verifyCurrent();
-assert.equal(proof.ok,false,'a malformed canonical mutation epoch must fail closed');
-assert.ok(proof.issues.some(issue=>issue.startsWith('canonicalMutationEpoch:')&&issue.includes('value is not canonical')));
-stores.meta.delete('canonicalMutationEpoch');
-
+const row=(key,value,updatedAt)=>({key,version:1,value,updatedAt});
+stores.meta.set('canonicalMutationEpoch',row('canonicalMutationEpoch',epoch,epoch.committedAt));
+assert.deepEqual(await repositoryMeta.read('canonicalMutationEpoch'),epoch);
+stores.meta.set('canonicalMutationEpoch',row('canonicalMutationEpoch',{...epoch,token:'too-short'},epoch.committedAt));
+await assert.rejects(repositoryMeta.read('canonicalMutationEpoch'),/value is not canonical/);
 const maintenance={version:6,status:'completed',completedAt:'2026-09-16T10:00:00.000Z'};
-stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:maintenance,updatedAt:maintenance.completedAt});
-proof=await app.metadata.verifyCurrent();
-assert.equal(proof.ok,true,'current maintenance metadata must validate exactly');
-stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{...maintenance,version:5},updatedAt:maintenance.completedAt});
-proof=await app.metadata.verifyCurrent();
-assert.equal(proof.ok,false,'an older maintenance version is not current; it cannot prove completed maintenance');
-
-stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:{...maintenance,staleField:true},updatedAt:maintenance.completedAt});
-proof=await app.metadata.verifyCurrent();
-assert.equal(proof.ok,false,'unknown appMeta value fields must be rejected');
-assert.ok(proof.issues.some(issue=>issue.startsWith('dataMaintenance:')&&issue.includes('value is not canonical')));
-
-stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:maintenance,updatedAt:maintenance.completedAt,legacy:true});
-proof=await app.metadata.verifyCurrent();
-assert.equal(proof.ok,false,'noncanonical appMeta row envelopes must be rejected');
-assert.ok(proof.issues.some(issue=>issue.startsWith('dataMaintenance:')&&issue.includes('envelope is not canonical')));
-
-console.log(JSON.stringify({status:'PASS',suite:'appmeta-current-values',proof},null,2));
+for(const value of [{...maintenance,version:5},{...maintenance,staleField:true}]){
+  stores.meta.set('dataMaintenance',row('dataMaintenance',value,maintenance.completedAt));
+  await assert.rejects(repositoryMeta.read('dataMaintenance'),/value is not canonical/);
+}
 }
 
 { // appmeta-gateway
@@ -78,9 +55,7 @@ stores.meta.set('dataMaintenance',{key:'dataMaintenance',version:1,value:mainten
 await assert.rejects(repositoryMeta.read('dataMaintenance'),/envelope is not canonical/,'typed reads must fail closed on malformed envelopes');
 stores.meta.delete('dataMaintenance');
 stores.meta.set('unclassified',{key:'unclassified',version:1,value:{},updatedAt:deletedAt});
-const proof=await gateway.verifyAll();
-assert.equal(proof.ok,false);
-assert.ok(proof.issues.some(issue=>issue==='unclassified:unclassified'));
+assert.equal(gateway.readable(stores.meta.get('unclassified')),false,'the startup census holds keys without a current family');
 
 console.log(JSON.stringify({status:'PASS',suite:'appmeta-gateway',ownerRestrictions:true,boundedPrefixReads:true,transactionView:true,failClosed:true},null,2));
 }

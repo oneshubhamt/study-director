@@ -136,8 +136,12 @@ assert.equal(await h.app.deletionRecovery.flush(),true);
 assert.equal(h.stores.session.has('active'),false);
 assert.equal(h.sharedLocal.has('deletionRecovery'),false);
 
+// Use the same recovery envelope a failed F29/F30 session save writes.
+const rescueHarness=createHarness(new Map(),null,{failSessionWrite:true});
+assert.equal((await rescueHarness.app.activeSession.save(session)).storage.local,true);
+const currentRecovery=rescueHarness.sharedLocal.get('recovery');
 await h.app.activeSession.save({...session,revision:2,updatedAt:'2026-09-17T11:10:00.000Z'});
-h.sharedLocal.set('recovery',{stale:true});
+h.sharedLocal.set('recovery',structuredClone(currentRecovery));
 controls.failLocalSetKeys=new Set(['deletionRecovery']);
 controls.failLocalRemoveKeys=new Set(['recovery']);
 const failClosedSession=await h.app.activeSession.clear();
@@ -149,7 +153,7 @@ controls.failLocalSetKeys=new Set();controls.failLocalRemoveKeys=new Set();
 assert.equal((await h.app.activeSession.clear()).ok,true);
 
 await h.app.activeSession.save({...session,revision:3,updatedAt:'2026-09-17T11:20:00.000Z'});
-h.sharedLocal.set('recovery',{stale:true});
+h.sharedLocal.set('recovery',structuredClone(currentRecovery));
 controls.failLocalRemoveKeys=new Set(['recovery']);
 const durableSessionDelete=await h.app.activeSession.clear();
 assert.equal(durableSessionDelete.ok,true,'a durable deletion marker may safely commit logical deletion while stale local recovery awaits cleanup');
@@ -161,6 +165,52 @@ controls.failLocalRemoveKeys=new Set();
 assert.equal(await h.app.deletionRecovery.flush(),true);
 assert.equal(h.sharedLocal.has('recovery'),false,'recovery flush must physically retire stale Active Session recovery before clearing its marker');
 assert.equal(h.sharedLocal.has('deletionRecovery'),false);
+
+// An unavailable/unknown journal is never treated as an empty queue.
+{
+  const fixture=createHarness(),date='2026-09-17',at='2026-09-17T11:00:00.000Z';
+  await fixture.app.dailyRecords.save(day(date));
+  const entry={key:'dailyRecord:'+date,kind:'dailyRecord',id:date,deletedAt:at};
+  const current={format:'study-director.deletion-recovery',version:1,updatedAt:at,entries:[entry]};
+  for(const unknown of [null,{...current,version:2},{...current,format:'other'},{...current,entries:[entry,null]}]){
+    fixture.sharedLocal.set('deletionRecovery',unknown);
+    assert.throws(()=>fixture.app.deletionRecovery.pending(),/pending deletion recovery/i);
+    assert.equal(await fixture.app.deletionRecovery.flush(),false);
+    await assert.rejects(fixture.app.dailyRecords.remove(date),/pending deletion recovery/i);
+    assert.ok(fixture.stores.daily.has(date),'an unrecognized record cannot authorize deletion');
+    assert.equal(fixture.sharedLocal.get('deletionRecovery'),unknown,'refusal leaves the entire record untouched');
+  }
+  fixture.sharedLocal.set('deletionRecovery',current);
+  assert.equal(await fixture.app.deletionRecovery.flush(),true,'the current envelope still replays');
+  assert.equal(fixture.stores.daily.has(date),false);
+  assert.equal(fixture.sharedLocal.has('deletionRecovery'),false);
+}
+{
+  const fixture=createHarness(),unknown={...currentRecovery,version:currentRecovery.version+1};
+  fixture.sharedLocal.set('recovery',unknown);
+  await assert.rejects(fixture.app.activeSession.load(),/browser copy was preserved/);
+  assert.equal((await fixture.app.maintenance.run({force:true})).status,'failed');
+  assert.equal((await fixture.app.activeSession.clear()).ok,false);
+  assert.equal((await fixture.app.activeSession.save(session,{emergency:true})).storage.idb,true,'an independent canonical save can succeed');
+  assert.equal(fixture.sharedLocal.get('recovery'),unknown,'replay, deletion and saving cannot erase an unreadable session rescue');
+}
+{
+  const fixture=createHarness(),date='2026-09-17';
+  await fixture.app.dailyRecords.save(day(date));
+  const current=[fixture.stores.daily.get(date)],unknown=[...current,null];
+  fixture.sharedLocal.set('fallback',unknown);
+  assert.equal((await fixture.app.maintenance.run({force:true})).status,'failed');
+  await assert.rejects(fixture.app.dailyRecords.get(date),/fallback daily records contain an unrecognized entry/i);
+  assert.equal(fixture.sharedLocal.get('fallback'),unknown,'maintenance preserves the entire unreadable fallback');
+  fixture.sharedLocal.set('fallback',current);
+  assert.equal((await fixture.app.maintenance.run({force:true})).status,'completed');
+  assert.equal(fixture.sharedLocal.get('fallback').length,0,'current fallback can still replay and retire');
+}
+{
+  const fixture=createHarness(new Map(),null,{rawLocal:new Map([['recovery','']])});
+  assert.equal((await fixture.app.activeSession.clear()).ok,false,'an empty stored payload is unreadable, not an absent copy');
+  assert.equal(fixture.sharedLocal.has('deletionRecovery'),false,'an unreadable copy must not be staged for deletion');
+}
 
 // Deletion ledgers stay bounded: past the limit only the oldest records go.
 // Listing applies the rule, so a full ledger never stops a backup, and data
@@ -183,7 +233,7 @@ assert.equal(h.sharedLocal.has('deletionRecovery'),false);
   assert.equal(replaced.length,1000);assert.ok(replaced.some(entry=>entry.key===noteId('newest')),'a new deletion is always kept');assert.equal(replaced.some(entry=>entry.key===nth(3)),false);
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery',boundedDeletionLedgers:true,savedDayLedger:true,noteDeletionLedger:true,reflectionDraftDomainRetired:true,attachmentDeletionLedger:true,failedDailyDeleteRecovery:true,failedActiveSessionDeleteRecovery:true,legacySyncStateMigrated:true,normalWritesUseNoSyncStores:true},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'deletion-recovery',boundedDeletionLedgers:true,savedDayLedger:true,noteDeletionLedger:true,reflectionDraftDomainRetired:true,attachmentDeletionLedger:true,failedDailyDeleteRecovery:true,failedActiveSessionDeleteRecovery:true,normalWritesUseNoSyncStores:true},null,2));
 
 // Servicing an older request cannot retire a newer request for the same entity.
 // The second async database read observes a foreground save followed by a

@@ -36,10 +36,6 @@ registry.define('repository-background',1,input=>{
     unavailableRetryMs:60*60*1000
   });
   function validIso(value){const raw=String(value||'');return Number.isFinite(Date.parse(raw))?raw:'';}
-  function normalizeMaintenanceState(value){
-    if(!value||typeof value!=='object')return null;
-    return freeze({requestedAt:validIso(value.requestedAt),nextEligibleAt:validIso(value.nextEligibleAt),reason:String(value.reason||'legacy'),repositoryScope:String(value.repositoryScope||''),requestId:String(value.requestId||'')});
-  }
   function maintenanceDelay(state,now=Date.now(),fallback=MAINTENANCE.continuationMs){
     const due=Date.parse(String(state&&state.nextEligibleAt||''));return Number.isFinite(due)?Math.max(1000,due-Number(now)):Math.max(1000,Number(fallback)||MAINTENANCE.continuationMs);
   }
@@ -181,7 +177,7 @@ registry.define('repository-background',1,input=>{
     for(const key of ['capture','clear','mark','read','scope'])if(typeof input[key]!=='function')throw new TypeError('Repository maintenance-intent port is invalid.');
     const nowMs=()=>input.coordinator.now();
     async function read({throwOnError=false}={}){
-      try{return normalizeMaintenanceState(await input.read());}
+      try{return await input.read();}
       catch(error){input.capture('read',error);if(throwOnError)throw error;return null;}
     }
     async function mark(reason,delay,{expected=undefined,newRequest=false}={}){

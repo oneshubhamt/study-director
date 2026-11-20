@@ -28,8 +28,9 @@ registry.define('persistence',1,()=>{
       getJson(key,fallback=null){
         try{
           const raw=globalThis.localStorage.getItem(key);
+          const value=raw===null?fallback:JSON.parse(raw);
           lastError=null;onOk('read');
-          return raw?JSON.parse(raw):fallback;
+          return value;
         }catch(error){lastError=error;onError('read',error);return fallback;}
       },
       setJson(key,value){

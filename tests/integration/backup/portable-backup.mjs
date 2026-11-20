@@ -22,7 +22,7 @@ const limits=freeze({
   backupChunkItems:10,backupChunkTargetBytes:65536,backupMaxEntryBytes:65536,backupMaxLineBytes:262144,
   backupMaxCompressedBytes:4*1024*1024,backupMaxFileBytes:16*1024*1024,backupMaxUncompressedBytes:8*1024*1024,
   backupMaxAssetDescriptors:100,richAssetMaxBytes:8*1024*1024,maxBackupChunks:1000,importBytes:4*1024*1024,
-  maxImportRecords:100,maxNotes:100,maxLegacyImportTombstones:100,maxImportReflectionDrafts:100,maxReflectionChars:10000
+  maxImportRecords:100,maxNotes:100,maxReflectionChars:10000
 });
 const dataContract=RUNTIME_DATA_CONTRACT;
 const defs=freeze({
@@ -31,7 +31,6 @@ const defs=freeze({
 });
 const isDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(String(value||''));
 const normalizeArea=(item,key)=>item&&String(key||item.key||'')?freeze({key:String(key||item.key),text:String(item.text||''),updatedAt:String(item.updatedAt||'2026-08-31T00:00:00.000Z')}):null;
-const normalizeDrafts=value=>(Array.isArray(value)?value:[]).filter(x=>x&&isDate(x.date)).map(x=>freeze({...x,reflection:String(x.reflection||'')}));
 const dailyRecordCodec=freeze({sanitizeCurrentDailyRecord:item=>item&&isDate(item.date)?freeze({...item}):null,sanitizeImportedNote:normalizeArea,sanitizeCurrentNote:normalizeArea,isSupportedSavedDate:isDate});
 const activeSessionCodec=freeze({sanitizeCurrent:item=>item&&item.id==='current'?freeze({...item}):null});
 const reflectionDraftCodec=freeze({format:'study-director.reflection-draft-codec',contractVersion:1,sanitizeCurrent:item=>item&&isDate(item.date)?freeze({...item,reflection:String(item.reflection||'')}):null});
