@@ -15,7 +15,7 @@ const budget=tasks.budget();clock=7;assert.equal(budget(),false);clock=8;assert.
 
 const controls={},h=createHarness(new Map(),null,controls);
 const emptySession=await h.app.activeSession.load();assert.equal(emptySession.ok,true,'an empty canonical Active Session store is a successful read, not a storage failure');assert.equal(emptySession.value,null);assert.equal(emptySession.error,null);
-const session=revision=>({id:'active',revision,date:'2026-09-06',status:'active',scheduleText:'08:00 30 Study',snapshot:{date:'2026-09-06',contentRevision:revision,review:{reflection:'x'.repeat(512*1024),studyQuality:null}},updatedAt:'2026-09-06T12:00:00.000Z'});
+const session=revision=>({id:'active',type:'activeSession',version:11,revision,date:'2026-09-06',status:'active',runningOn:'inst_linux_chrome_mx008k1m_aabbccdd',scheduleText:'08:00 30 Study',suspendedAt:null,updatedAt:'2026-09-06T12:00:00.000Z',snapshot:{date:'2026-09-06',contentRevision:revision,review:{reflection:'x'.repeat(512*1024),studyQuality:null}}});
 for(let i=1;i<=8;i++){const result=await h.app.activeSession.save(session(i));assert.equal(result.storage.idb,true);}
 assert.equal(h.localWrites.sessionBytes,0,'routine successful commits must not serialize a duplicate local snapshot');
 const saved=await h.app.activeSession.load();assert.equal(saved.value.revision,8);assert.equal(h.localWrites.sessionBytes,0,'loading canonical IndexedDB state must not recreate local duplication');
