@@ -231,9 +231,9 @@ const AppDiagnostics=(()=>{
   return Object.freeze({capture,guard});
 })();
 const BackupOperationDiagnostics=BackupOperationDiagnosticsModule.createRecorder(Object.freeze<Parameters<typeof BackupOperationDiagnosticsModule.createRecorder>[0]>({
-  configuration:Object.freeze({release:APP_VERSION,limit:20}),
+  configuration:Object.freeze<ReviewPersistenceInput['configuration']>({release:APP_VERSION,limit:20}),
   environment:Object.freeze({now:()=>Date.now()}),
-  storage:Object.freeze({
+  storage:Object.freeze<PlanDataInput['storage']>({
     read:()=>sessionStorage.getItem('study-director.backup-operation-diagnostics.v1')||'',
     write:value=>{try{sessionStorage.setItem('study-director.backup-operation-diagnostics.v1',String(value||''));return true;}catch{return false;}}
   })
@@ -680,14 +680,16 @@ async function withRestoreSessionPersistenceSuppressed<T>(operation:()=>Promise<
   return ActiveSessionRuntime.withPersistenceSuppressed(operation);
 }
 function hasBlockingActiveSession(...args:Parameters<typeof SessionActions.hasBlockingActiveSession>){return SessionActions.hasBlockingActiveSession(...args);}
-let hydrateReviewState=()=>false;
-let currentReviewSnapshot=()=>Object.freeze({reflection:'',studyQuality:null});
-let bindReviewSession=()=>false;
-let richTextClose=()=>Promise.resolve();
-let richTextCloseField=()=>false;
-let richTextSyncField=()=>false;
-let richTextSyncAll=()=>false;
-let richTextReconcileExternal=()=>Object.freeze({status:'unmounted'});
+type ReviewEditorAdapter=ReturnType<typeof ReviewModule.createReviewSubsystem>['ReviewEditor'];
+type RichTextRuntimeAdapter=ReturnType<typeof RichTextHostModule.createRuntime>;
+let hydrateReviewState:ReviewEditorAdapter['hydrate']=()=>{throw new Error('Study Director review editor is unavailable.');};
+let currentReviewSnapshot:ReviewEditorAdapter['activeSessionReview']=()=>Object.freeze({reflection:'',studyQuality:null});
+let bindReviewSession:ReviewEditorAdapter['bindSession']=()=>false;
+let richTextClose:RichTextRuntimeAdapter['close']=()=>Promise.resolve(false);
+let richTextCloseField:RichTextRuntimeAdapter['closeField']=()=>false;
+let richTextSyncField:RichTextRuntimeAdapter['syncField']=()=>false;
+let richTextSyncAll:RichTextRuntimeAdapter['syncAll']=()=>false;
+let richTextReconcileExternal:RichTextRuntimeAdapter['reconcileExternal']=()=>Object.freeze({status:'unmounted'});
 let NotesRuntime:ReturnType<typeof NotesHostModule.createController>|null=null,LibraryNoteWorkflows:ReturnType<typeof NotesHostModule.createLibraryWorkflows>|null=null;
 let executeIdleDisplayKey='';
 let realTimeAwarenessRenderKey='';
@@ -910,7 +912,7 @@ const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze<P
     sameDataValue,normalizeStudyQuality,todayISO,dateInsightsMeta,sanitizePracticeRun
   }),
   timestamps:Object.freeze<ActiveSessionCodecInput['timestamps']>({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
-  timer:Object.freeze({
+  timer:Object.freeze<RecoveryQuiescenceInput['timer']>({
     modes:Object.freeze({PAUSED:TIMER_MODES.PAUSED,RUNNING:TIMER_MODES.RUNNING}),
     defaultBreakSeconds:()=>Pomodoro.configuration.breakSeconds()
   })
@@ -1358,7 +1360,7 @@ CapabilityBadge=CapabilitiesHostModule.createBadge(Object.freeze<Parameters<type
 }));
 NativeCapabilities=CapabilitiesHostModule.createController(Object.freeze<Parameters<typeof CapabilitiesHostModule.createController>[0]>({
   module:NativeCapabilitiesModule,
-  configuration:Object.freeze({installNoticeKey:STORAGE_KEYS.installNoticeShown,wakePreferenceKey:STORAGE_KEYS.keepScreenAwake}),
+  configuration:Object.freeze<NotesControllerInput['configuration']>({installNoticeKey:STORAGE_KEYS.installNoticeShown,wakePreferenceKey:STORAGE_KEYS.keepScreenAwake}),
   environment:Object.freeze({document,navigator,window}),
   hooks:Object.freeze({
     capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
@@ -1423,7 +1425,7 @@ function normalizeOngoingAreaInput(value:unknown){return notesRuntime().normaliz
 function orderOngoingAreaEntries(source:readonly NoteCatalogueInput[]){return notesRuntime().orderEntries(source);}
 function noteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
 function noteCatalogue(){return notesRuntime().catalogue();}
-let refreshLibraryNotes=()=>false;
+let refreshLibraryNotes:ReturnType<typeof LibraryModule.createView>['refreshNotes']=()=>false;
 let updateNoteSearchDocument:(document:Readonly<{key:string;revision:string;plain:string}>)=>unknown=()=>false;
 function updateNoteSearchText(key:string,plain:unknown){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
 function refreshNoteConsumers(){
@@ -1549,12 +1551,12 @@ PresentationRuntime=PresentationHostModule.createController(Object.freeze<Parame
     remove:key=>AppData.local.remove(key),
     lastError:()=>AppData.lastStorageError
   }),
-  preferences:Object.freeze({
+  preferences:Object.freeze<PlanDataInput['preferences']>({
     hydrated:()=>protectedPreferencesHydrated,current:()=>protectedPreferencesState,
     persist:value=>persistProtectedPreferences(value)
   }),
-  ownership:Object.freeze({require:reason=>requirePrimaryTab(null,reason)}),
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+  ownership:Object.freeze<NotesControllerInput['ownership']>({require:reason=>requirePrimaryTab(null,reason)}),
+  diagnostics:Object.freeze<RichTextRuntimeInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   popovers:Object.freeze({create:menu=>RichTextApi.createAnchoredPopover(menu,{align:'end',side:'top'})})
 }));
 if(!Object.isFrozen(PresentationRuntime)||PresentationRuntime.format!=='study-director.presentation-host'||PresentationRuntime.contractVersion!==1){
@@ -2001,9 +2003,10 @@ function getTaskCompletion(idx){
 }
 function commitTaskNoteEditor(field,value,event=null){return notesRuntime().commitEditor(field,value,event);}
 /* DAILY REFLECTION + DIARY PERSISTENCE · P5.5B CHECKED OWNER */
-const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze<Parameters<typeof ReviewPersistenceModule.createPersistence>[0]>({
+type ReviewPersistenceInput=Parameters<typeof ReviewPersistenceModule.createPersistence>[0];
+const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze<ReviewPersistenceInput>({
   configuration:Object.freeze({limits:APP_LIMITS,dataContract:DATA_CONTRACT}),
-  records:Object.freeze({
+  records:Object.freeze<ReviewPersistenceInput['records']>({
     get:(...args)=>AppData.dailyRecords.get(...args),
     save:(...args)=>AppData.dailyRecords.save(...args),
     remove:(...args)=>AppData.dailyRecords.remove(...args),
@@ -2011,20 +2014,20 @@ const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze<
     verifyCanonicalAbsent:(...args)=>AppData.dailyRecords.verifyCanonicalAbsent(...args),
     timestamp:(...args)=>AppData.dailyRecords.timestamp(...args)
   }),
-  codec:Object.freeze({createDiaryRecord}),
-  ownership:Object.freeze({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
-  text:Object.freeze({clampEditorContent,editorContentWithinLimits,plain:plainTextContent,isRich:value=>RichTextApi.isRichTextValue(value)}),
-  richText:Object.freeze({
+  codec:Object.freeze<ReviewPersistenceInput['codec']>({createDiaryRecord}),
+  ownership:Object.freeze<ReviewPersistenceInput['ownership']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
+  text:Object.freeze<ReviewPersistenceInput['text']>({clampEditorContent,editorContentWithinLimits,plain:plainTextContent,isRich:value=>RichTextApi.isRichTextValue(value)}),
+  richText:Object.freeze<ReviewPersistenceInput['richText']>({
     closeField:field=>richTextCloseField(field),syncField:field=>richTextSyncField(field),
     validatedInput:(event,field)=>validatedRichInputMeta(event,field)
   }),
-  dates:Object.freeze({isSupported:isSupportedSavedDate,insights:dateInsightsMeta}),
+  dates:Object.freeze<ReviewPersistenceInput['dates']>({isSupported:isSupportedSavedDate,insights:dateInsightsMeta}),
   saveLane:SaveLaneModule,
-  environment:Object.freeze({nowIso:()=>new Date().toISOString(),queueMicrotask,setTimeout,clearTimeout})
+  environment:Object.freeze<ReviewPersistenceInput['environment']>({nowIso:()=>new Date().toISOString(),queueMicrotask,setTimeout,clearTimeout})
 }));
 const {DailyReflectionPersistence,DiaryEditor:LibraryDiaryEditor}=ReviewPersistence;
 /* RICH TEXT */
-function richTextDocumentFor(field,options={}){
+function richTextDocumentFor(field:HTMLTextAreaElement,options:Readonly<{requireVisible?:boolean;editable?:boolean}>={}){
   if(!(field instanceof HTMLTextAreaElement)||!field.isConnected)return null;
   const editable=options.editable!==false,requireVisible=options.requireVisible!==false;
   if(editable&&(field.disabled||field.readOnly||!appCanMutate()))return null;
@@ -2035,25 +2038,27 @@ function richTextDocumentFor(field,options={}){
     return Object.freeze({documentId:`reflection:${date}`,label:`Daily reflection for ${date}`,initialValue:ReviewEditor.contentForDate(date),maxWords:APP_LIMITS.maxRichTextWords,surface:'reflection'});
   }
   if(field.matches('.task-note-field')){
-    const binding=editable?resolveTaskNoteEditorBinding(field,{requireVisible}):(()=>{const areaKey=normalizeAreaName(field.dataset.areaKey);return areaKey?Object.freeze({areaKey,areaLabel:displayAreaName(field.dataset.areaLabel||areaKey)}):null;})();
+    const binding=editable?resolveTaskNoteEditorBinding(field,{requireVisible}):(()=>{const areaKey=normalizeAreaName(field.dataset['areaKey']);return areaKey?Object.freeze({areaKey,areaLabel:displayAreaName(field.dataset['areaLabel']||areaKey)}):null;})();
     if(!binding)return null;
     return Object.freeze({documentId:`area:${binding.areaKey}`,label:`Note for ${binding.areaLabel}`,initialValue:noteStoredValueForKey(binding.areaKey),maxWords:APP_LIMITS.maxRichTextWords,surface:field.id==='pn-extra'?'execute-note':'note'});
   }
   return null;
 }
 // Links between notes: the one note picker and the linked-notes bar.
-const NoteLinks=NoteLinksModule.createController(Object.freeze<Parameters<typeof NoteLinksModule.createController>[0]>({ports:Object.freeze({
-  view:Object.freeze({document}),
-  notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
-  text:Object.freeze({tagsIn:value=>RichTextApi.tagsIn(value)}),
-  ownership:Object.freeze({canMutate:()=>appCanMutate()})
+type NoteLinksInput=Parameters<typeof NoteLinksModule.createController>[0];
+const NoteLinks=NoteLinksModule.createController(Object.freeze<NoteLinksInput>({ports:Object.freeze<NoteLinksInput['ports']>({
+  view:Object.freeze<NoteLinksInput['ports']['view']>({document}),
+  notes:Object.freeze<NoteLinksInput['ports']['notes']>({documents:()=>AppData.notes.searchSnapshot(),get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
+  text:Object.freeze<NoteLinksInput['ports']['text']>({tagsIn:value=>RichTextApi.tagsIn(value)}),
+  ownership:Object.freeze<NoteLinksInput['ports']['ownership']>({canMutate:()=>appCanMutate()})
 })}));
 // Checked P5.6B navigation keeps link context with the rich-text surface while
 // deferring Library access until a user actually follows a link or tag.
-const NoteLinkNavigation=NoteLinksModule.createNavigation(Object.freeze<Parameters<typeof NoteLinksModule.createNavigation>[0]>({
+type NoteLinkNavigationInput=Parameters<typeof NoteLinksModule.createNavigation>[0];
+const NoteLinkNavigation=NoteLinksModule.createNavigation(Object.freeze<NoteLinkNavigationInput>({
   controller:NoteLinks,
-  notes:Object.freeze({get:ref=>AppData.notes.get(ref)}),
-  execution:Object.freeze({
+  notes:Object.freeze<NoteLinkNavigationInput['notes']>({get:ref=>AppData.notes.get(ref)}),
+  execution:Object.freeze<NoteLinkNavigationInput['execution']>({
     isLiveTrackableTimer:()=>isLiveTrackableTimer(),
     current:()=>{
       const index=TimerState.currentIndex,task=TASKS[index];
@@ -2061,7 +2066,7 @@ const NoteLinkNavigation=NoteLinksModule.createNavigation(Object.freeze<Paramete
     },
     open:(id,taskId,ownNote)=>openExecuteNote(id,taskId,ownNote)
   }),
-  library:Object.freeze({
+  library:Object.freeze<NoteLinkNavigationInput['library']>({
     open:()=>goTab('library',{source:'note-link'}),
     reveal:ref=>LibraryView.revealNoteReference(ref),
     filterTag:(name,options)=>LibraryView.filterTag(name,options)
@@ -2074,40 +2079,42 @@ const showNotesTagged=NoteLinkNavigation.showTagged;
 // meanwhile is left as it is and named in the result.
 async function renameNoteTag(from,to){return notesRuntime().renameTag(from,to);}
 async function importNoteFiles(files,parent=''){return notesRuntime().importFiles(files,parent);}
-const RichTextRuntime=RichTextHostModule.createRuntime(Object.freeze<Parameters<typeof RichTextHostModule.createRuntime>[0]>({
-  configuration:Object.freeze({maxRichTextBytes:APP_LIMITS.maxRichTextBytes}),document,window,
+type RichTextRuntimeInput=Parameters<typeof RichTextHostModule.createRuntime>[0];
+const RichTextRuntime=RichTextHostModule.createRuntime(Object.freeze<RichTextRuntimeInput>({
+  configuration:Object.freeze<RichTextRuntimeInput['configuration']>({maxRichTextBytes:APP_LIMITS.maxRichTextBytes}),document,window,
   richText:RichTextApi,assets:RichTextAssets,
-  attachments:Object.freeze({
+  attachments:Object.freeze<RichTextRuntimeInput['attachments']>({
     port:()=>RichTextAttachmentPort,
     createImageWorker:()=>new Worker(trustedAssetURL('@@SD_IMAGE_WORKER_FILENAME@@'),{name:'study-director-image'}),
-    workspaceOverlay:RichTextWorkspaceOverlay,
+    workspaceOverlay:RichTextWorkspaceOverlay as WorkspaceOverlayPort,
     onBusy:busy=>{imagePreparationCount+=busy?1:-1;if(busy)pwaWorkRevision++;else schedulePwaUpdateEvaluation(250);}
   }),
-  notes:Object.freeze({
+  notes:Object.freeze<RichTextRuntimeInput['notes']>({
     repository:AppData.notes,links:field=>richTextNotes(field),normalizeArea:normalizeAreaName,
     setSyncState:(key,state)=>setNoteSyncStateForKey(key,state),updateSearchText:(key,plain)=>updateNoteSearchText(key,plain)
   }),
-  review:Object.freeze({date:()=>getReviewDate(),flushPending:options=>ReviewEditor.flushPending(options),settled:()=>ReviewEditor.settled()}),
-  session:Object.freeze({settled:()=>AppData.activeSession.settled()}),
-  view:Object.freeze({
+  review:Object.freeze<RichTextRuntimeInput['review']>({date:()=>getReviewDate(),flushPending:options=>ReviewEditor.flushPending(options),settled:()=>ReviewEditor.settled()}),
+  session:Object.freeze<RichTextRuntimeInput['session']>({settled:()=>AppData.activeSession.settled()}),
+  view:Object.freeze<RichTextRuntimeInput['view']>({
     documentFor:(field,options)=>richTextDocumentFor(field,options),render:(container,value,emptyText,label)=>renderRichTextContent(container,value,emptyText,label),
     plain:value=>plainTextContent(value),visible:field=>taskNoteEditorIsVisible(field),validatedInput:(event,field)=>validatedRichInputMeta(event,field),
     applyOwnership:root=>OwnershipUiProjection.apply(root)
   }),
-  activation:Object.freeze({kinds:APP_ACTIVATION_KINDS,subscribe:callback=>AppActivation.subscribe(callback)}),
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
+  activation:Object.freeze<RichTextRuntimeInput['activation']>({kinds:APP_ACTIVATION_KINDS,subscribe:callback=>AppActivation.subscribe(callback)}),
+  diagnostics:Object.freeze<RecoveryQuiescenceInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
 if(!Object.isFrozen(RichTextRuntime)||RichTextRuntime.format!=='study-director.rich-text-runtime'||RichTextRuntime.contractVersion!==1){
   throw new Error('Study Director rich-text host runtime is unavailable or incompatible.');
 }
 SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
-ManagedRecoveryQuiescence=BackupRecoveryHostModule.createQuiescence(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createQuiescence>[0]>({
+type RecoveryQuiescenceInput=Parameters<typeof BackupRecoveryHostModule.createQuiescence>[0];
+ManagedRecoveryQuiescence=BackupRecoveryHostModule.createQuiescence(Object.freeze<RecoveryQuiescenceInput>({
   cancelPendingLiveDraftSave:()=>cancelPendingLiveDraftSave(),
-  clock:Object.freeze({nowMs:()=>DecisionClock.nowMs()}),
+  clock:Object.freeze<RecoveryQuiescenceInput['clock']>({nowMs:()=>DecisionClock.nowMs()}),
   timer:Object.freeze({stopExecution:()=>TimerEngine.stopExecution(),resumeAfterPrimaryRestore:options=>TimerEngine.resumeAfterPrimaryRestore(options)}),
-  richText:Object.freeze({quiesce:operation=>RichTextRuntime.quiesce(operation)}),
-  mutation:Object.freeze({settled:()=>AppMutationCoordinator.settled(),active:()=>!!AppMutationCoordinator.status().active}),
-  handoff:Object.freeze({frozen:()=>!!SessionHandoffRuntime?.frozen()}),
+  richText:Object.freeze<RecoveryQuiescenceInput['richText']>({quiesce:operation=>RichTextRuntime.quiesce(operation)}),
+  mutation:Object.freeze<RecoveryQuiescenceInput['mutation']>({settled:()=>requireMutationCoordinator().settled(),active:()=>!!requireMutationCoordinator().status().active}),
+  handoff:Object.freeze<RecoveryQuiescenceInput['handoff']>({frozen:()=>!!SessionHandoffRuntime?.frozen()}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
 if(!Object.isFrozen(ManagedRecoveryQuiescence)||ManagedRecoveryQuiescence.format!=='study-director.recovery-quiescence'||ManagedRecoveryQuiescence.contractVersion!==1){
@@ -2118,23 +2125,24 @@ richTextCloseField=field=>RichTextRuntime.closeField(field);
 richTextSyncField=field=>RichTextRuntime.syncField(field);
 richTextSyncAll=()=>RichTextRuntime.syncAll(document);
 richTextReconcileExternal=(field,canonical,revision)=>RichTextRuntime.reconcileExternal(field,canonical,revision);
-NotesRuntime=NotesHostModule.createController(Object.freeze<Parameters<typeof NotesHostModule.createController>[0]>({
+type NotesControllerInput=Parameters<typeof NotesHostModule.createController>[0];
+NotesRuntime=NotesHostModule.createController(Object.freeze<NotesControllerInput>({
   configuration:Object.freeze({
     maxAreaNameChars:APP_LIMITS.maxAreaNameChars,maxNoteChars:APP_LIMITS.maxNoteChars,maxNotes:APP_LIMITS.maxNotes,
     maxRichTextWords:APP_LIMITS.maxRichTextWords,maxRichTextBytes:APP_LIMITS.maxRichTextBytes,supportNote:SUPPORT_NOTE
   }),
   repository:AppData.notes,
   tasks:()=>TASKS,
-  taskIdentity:Object.freeze({
+  taskIdentity:Object.freeze<NotesControllerInput['taskIdentity']>({
     validIndex:value=>TaskIdentity.validIndex(value),idAt:index=>TaskIdentity.idAt(index),indexForId:id=>TaskIdentity.indexForId(id),
     scheduleRevision:()=>taskNoteScheduleRevision
   }),
-  domain:Object.freeze({
+  domain:Object.freeze<NotesControllerInput['domain']>({
     normalizeAreaName,displayAreaName,areaParentKeys,clampText,hasOngoingTaskNotes,noteKeyForTask,noteLabelForTask,isSupportBlock,isTrackableBlock
   }),
-  lifecycle:Object.freeze({canWrite:()=>SessionLifecycle.canWrite(),revision:()=>SessionLifecycle.revision}),
-  ownership:Object.freeze({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
-  richText:Object.freeze({
+  lifecycle:Object.freeze<NotesControllerInput['lifecycle']>({canWrite:()=>SessionLifecycle.canWrite(),revision:()=>SessionLifecycle.revision}),
+  ownership:Object.freeze<PlanDataInput['ownership']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
+  richText:Object.freeze<NotesControllerInput['richText']>({
     closeField:field=>RichTextRuntime.closeField(field),syncField:field=>RichTextRuntime.syncField(field),
     reconcileExternal:(field,canonical,revision)=>RichTextRuntime.reconcileExternal(field,canonical,revision),
     validatedInput:(event,field)=>validatedRichInputMeta(event,field),plain:plainTextContent,
@@ -2144,9 +2152,9 @@ NotesRuntime=NotesHostModule.createController(Object.freeze<Parameters<typeof No
     fromText:value=>RichTextApi.fromText(value),fromMarkdown:value=>RichTextApi.fromMarkdown(value),
     quiesce:operation=>RichTextRuntime.quiesce(operation)
   }),
-  tags:Object.freeze({tagged:names=>NoteLinks.tagged(names)}),
-  mutation:Object.freeze({runExclusive:(name,operation)=>AppMutationCoordinator.runExclusive(name,operation)}),
-  view:Object.freeze({
+  tags:Object.freeze<NotesControllerInput['tags']>({tagged:names=>NoteLinks.tagged(names)}),
+  mutation:Object.freeze<NotesControllerInput['mutation']>({runExclusive:(name,operation)=>requireMutationCoordinator().runExclusive(name,operation)}),
+  view:Object.freeze<NotesControllerInput['view']>({
     document,currentTaskIndex:()=>TimerState.currentIndex,saveLiveDraft:()=>saveLiveDraft(),
     updateSearchText:(key,plain)=>updateNoteSearchText(key,plain),refreshExecute:()=>refreshPnote(),refreshLibrary:()=>refreshLibraryNotes(),
     requestScheduleRender:()=>requestRender('schedule'),
@@ -2155,24 +2163,25 @@ NotesRuntime=NotesHostModule.createController(Object.freeze<Parameters<typeof No
     setStatus:(...args)=>setStatus(...args),setPlanStatus:(...args)=>setPlanStatus(...args),
     publishSafetyNotice:(...args)=>publishSafetyNotice(...args),syncPopover:element=>NoteSyncPopover.refresh(element)
   }),
-  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  environment:Object.freeze({queueMicrotask:callback=>queueMicrotask(callback)})
+  diagnostics:Object.freeze<NotesControllerInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+  environment:Object.freeze<NotesControllerInput['environment']>({queueMicrotask:callback=>queueMicrotask(callback)})
 }));
 if(!Object.isFrozen(NotesRuntime)||NotesRuntime.format!=='study-director.notes-runtime'||NotesRuntime.contractVersion!==1){
   throw new Error('Study Director notes runtime is unavailable or incompatible.');
 }
 /* PERSONAL PLAN DOCUMENTS · checked host persistence/default adapter */
-const PlanData=PlanHostModule.createData(Object.freeze<Parameters<typeof PlanHostModule.createData>[0]>({
+type PlanDataInput=Parameters<typeof PlanHostModule.createData>[0];
+const PlanData=PlanHostModule.createData(Object.freeze<PlanDataInput>({
   codec:PersonalDataCodec,
-  repositories:Object.freeze({
-    plans:Object.freeze({
+  repositories:Object.freeze<PlanDataInput['repositories']>({
+    plans:Object.freeze<PlanDataInput['repositories']['plans']>({
       read:()=>AppData.planData.read(),
       replace:value=>AppData.planData.replace(value),
       replacePortable:value=>AppData.planData.replacePortable(value),
       writeDraft:(value,options)=>AppData.planData.writeDraft(value,options),
       writeLibrary:(value,options)=>AppData.planData.writeLibrary(value,options)
     }),
-    preferences:Object.freeze({read:()=>AppData.personalPreferences.read()})
+    preferences:Object.freeze<PlanDataInput['repositories']['preferences']>({read:()=>AppData.personalPreferences.read()})
   }),
   ownership:Object.freeze({
     issueWriteToken:(reason,options)=>AppOwnership.issueWriteToken(reason,options),
@@ -2187,50 +2196,51 @@ const PlanData=PlanHostModule.createData(Object.freeze<Parameters<typeof PlanHos
     applyRuntime:value=>applyPortablePreferencesToRuntime(value),
     studentName:()=>readUserDefaults()?.studentName||null
   }),
-  runtime:Object.freeze({
+  runtime:Object.freeze<PlanDataInput['runtime']>({
     canMutate:()=>appCanMutate(),
     flushDraft:options=>PlanDraftEditor.flush(options),
-    replaceDraftText:value=>{const input=document.getElementById('plan-input');if(input)input.value=value;},
+    replaceDraftText:value=>{const input=document.getElementById('plan-input');if(input instanceof HTMLTextAreaElement)input.value=value;},
     previewDraft:()=>PlanDraftEditor.preview({silent:true,enterDraft:false}),
     renderSavedPlans:()=>PlanRuntime.savedPlans.render()
   }),
-  defaults:Object.freeze({factory:Object.freeze({studentName:FACTORY_DEFAULTS.studentName,scheduleText:FACTORY_DEFAULTS.scheduleText})})
+  defaults:Object.freeze<PlanDataInput['defaults']>({factory:Object.freeze<PlanDataInput['defaults']['factory']>({studentName:FACTORY_DEFAULTS.studentName,scheduleText:FACTORY_DEFAULTS.scheduleText})})
 }));
 
 /* PLAN MODULE COMPOSITION */
-const PlanRuntime=PlanHostModule.createController(Object.freeze<Parameters<typeof PlanHostModule.createController>[0]>({
+type PlanControllerInput=Parameters<typeof PlanHostModule.createController>[0];
+const PlanRuntime=PlanHostModule.createController(Object.freeze<PlanControllerInput>({
   module:PlanModule,
   data:PlanData,
-  ports:Object.freeze({
-    configuration:Object.freeze({limits:Object.freeze({
+  ports:Object.freeze<PlanControllerInput['ports']>({
+    configuration:Object.freeze<PlanControllerInput['ports']['configuration']>({limits:Object.freeze({
       maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars,
       maxDurationMinutes:APP_LIMITS.maxDurationMinutes,
       maxTaskNameChars:APP_LIMITS.maxTaskNameChars,
       maxAreaNameChars:APP_LIMITS.maxAreaNameChars,
       maxUnitChars:APP_LIMITS.maxUnitChars
     })}),
-    persistence:Object.freeze({
+    persistence:Object.freeze<PlanControllerInput['ports']['persistence']>({
       lastError:()=>AppData.lastStorageError,
       reportDraftResult:(ok,error)=>{
         if(ok)markStorageHealthOk('planDraft.write');
         else markStorageHealthError('planDraft.write',`Plan draft was not saved: ${error&&error.message?error.message:error||'browser storage is unavailable'}. Keep this tab open and copy the draft before closing.`);
       }
     }),
-    defaults:Object.freeze({applyStudentName}),
-    domain:Object.freeze({
+    defaults:Object.freeze<PlanControllerInput['ports']['defaults']>({applyStudentName}),
+    domain:Object.freeze<PlanControllerInput['ports']['domain']>({
       clampText,fmtDur,fmtS,hasOngoingTaskNotes,isFixedBlock,isSupportBlock,isTrackableBlock,isWorkBlock,
       makeScheduleRow,normalizeScheduleKind,normalizeScheduleTarget,positiveMinutes,scheduleFingerprintForRows,
       scheduleToken,scheduleWarningsMessage,taskAreaKey:noteKeyForTask,taskAreaValue,taskMeasureValue,taskTargetValue,noteTextForKey
     }),
-    parser:Object.freeze({isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}),
-    clock:Object.freeze({clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}),
-    view:Object.freeze({document,on,textEl,updateRealTimeAwareness,window}),
+    parser:Object.freeze<PlanControllerInput['ports']['parser']>({isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}),
+    clock:Object.freeze<PlanControllerInput['ports']['clock']>({clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}),
+    view:Object.freeze<PlanControllerInput['ports']['view']>({document,on,textEl,updateRealTimeAwareness,window}),
     notifications:NoticeCoordinator.presentation('plan'),
     scheduleGateway:PlanScheduleGateway,
-    ownership:Object.freeze({canMutate:()=>appCanMutate(),requirePrimary:(event,reason)=>!AppMutationCoordinator.blocksUi()&&requirePrimaryTab(event,reason)}),
-    interactions:Object.freeze({confirm:options=>Interactions.confirm(options),input:options=>Interactions.input(options)}),
-    overlays:Object.freeze({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
-    environment:Object.freeze({
+    ownership:Object.freeze<PlanControllerInput['ports']['ownership']>({canMutate:()=>appCanMutate(),requirePrimary:(event,reason)=>!requireMutationCoordinator().blocksUi()&&requirePrimaryTab(event,reason)}),
+    interactions:Object.freeze<PlanControllerInput['ports']['interactions']>({confirm:async options=>(await Interactions.confirm(options))===true,input:options=>Interactions.input(options)}),
+    overlays:Object.freeze<PlanControllerInput['ports']['overlays']>({createAnchoredPopover:(popup,options)=>RichTextApi.createAnchoredPopover(popup,options)}),
+    environment:Object.freeze<PlanControllerInput['ports']['environment']>({
       clearTimeout:id=>clearTimeout(id),
       setTimeout:(callback,delay)=>setTimeout(callback,delay)
     })
@@ -2243,7 +2253,7 @@ const {
 }=PlanRuntime;
 LibraryNoteWorkflows=NotesHostModule.createLibraryWorkflows(Object.freeze<Parameters<typeof NotesHostModule.createLibraryWorkflows>[0]>({
   runtime:NotesRuntime,repository:AppData.notes,plan:PlanRuntime,
-  interactions:Object.freeze({confirm:options=>Interactions.confirm(options)}),
+  interactions:Object.freeze({confirm:async options=>(await Interactions.confirm(options))===true}),
   mergeText:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value
 }));
 if(!Object.isFrozen(LibraryNoteWorkflows)||LibraryNoteWorkflows.format!=='study-director.library-note-workflows'||LibraryNoteWorkflows.contractVersion!==1){
