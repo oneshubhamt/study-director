@@ -7,8 +7,9 @@ import fs from 'node:fs';
 const html=readHostHtml();
 const planJs=fs.readFileSync('source/core/plan.ts','utf8');
 const coreCss=fs.readFileSync('source/styles/core.css','utf8');
-const glassCss=fs.readFileSync('source/external/glass.js','utf8');
-const auroraCss=fs.readFileSync('source/external/aurora.js','utf8');
+const presentationHost=readScript('source/core/presentation-host.ts');
+const glassCss=readScript('source/external/glass.ts');
+const auroraCss=readScript('source/external/aurora.ts');
 const guideJs=readScript('source/external/guide.ts');
 
 assert.match(coreCss,/html\[data-theme="light"\]\{[\s\S]*?--sd-color-canvas:#f2f0ea;[\s\S]*?--sd-color-surface-1:#fcfbf8;/u,'Director Light must use the low-glare off-white foundation rather than a pure-white primary surface.');
@@ -49,7 +50,8 @@ assert.match(coreCss,/\.pane\.on\[data-sd-enter\]>\*\{animation:var\(--sd-motion
 assert.match(coreCss,/@media \(prefers-reduced-motion: reduce\)\{[\s\S]*?\.pane\.on\[data-sd-enter\]>\*\{animation:none!important\}/u,'reduced motion must remove pane entrances entirely, including staggered delays.');
 assert.match(glassCss,/--sd-motion-pane-enter-name:sd-pane-enter-float;/u,'Glass must present its own pane entrance.');
 assert.match(foundation,/pane\.classList\.add\('on'\);[^\n]*\n\s*if\(previousTab!==tabName\)markPaneEntrance\(pane\);/u,'only a real tab change may mark a pane entrance.');
-assert.match(html,/function runAppearanceChange\(origin,change\)\{[\s\S]*?prefers-reduced-motion: reduce[\s\S]*?\{change\(\);return;\}[\s\S]*?typeof document\.startViewTransition!=='function'\)\{beginAppearanceShift\(\);change\(\);return;\}/u,'appearance changes must be immediate under reduced motion and fall back to the colour crossfade without View Transitions.');
+assert.match(presentationHost,/function runAppearanceChange\([^)]*\)[^{]*\{[\s\S]*?prefers-reduced-motion: reduce[\s\S]*?\{change\(\);return;\}[\s\S]*?typeof document\.startViewTransition!==\'function\'\)\{beginAppearanceShift\(\);change\(\);return;\}/u,'checked presentation host owns immediate reduced-motion changes and the fallback colour crossfade.');
+assert.doesNotMatch(html,/function runAppearanceChange\(/u,'unchecked main host must not retain appearance-transition behavior.');
 assert.match(coreCss,/html\[data-sd-appearance-reveal\]::view-transition-old\(root\)\{animation:none;[\s\S]*?html\[data-sd-appearance-reveal\] \*,html\[data-sd-appearance-reveal\] \*::before,html\[data-sd-appearance-reveal\] \*::after\{transition:none!important\}/u,'the reveal holds the old view still and settles the live new view without replaying control transitions.');
 assert.match(glassCss,/html\[data-presentation="glass"\]\[data-sd-appearance-reveal\]::view-transition-new\(root\)\{[\s\S]*?mask-image:radial-gradient/u,'Glass reveals appearance changes as a feathered bloom.');
 assert.match(coreCss,/\.pfield input\{\s*--field-local-border:var\(--sd-color-border-2\);\s*border:2px solid var\(--field-local-border\);/u,'progress fields must draw their local border colour instead of currentColor.');
@@ -71,9 +73,17 @@ assert.match(foundation,/function markPaneEntrance\(pane\s*\)\{[\s\S]*?if\(pane\
 assert.match(foundation,/markPaneEntrance\(pane\);\n\s*document\.documentElement\.dataset\['sdArea'\]=tabName;/u,'navigation publishes the active area for presentation atmospheres.');
 assert.doesNotMatch(coreCss,/--row-name-color:rgba\(/u,'plan row names must not be dimmed with alpha below readable contrast.');
 
-assert.match(auroraCss,/const PROFILE=Object\.freeze\(\{\s*contractVersion:2,\s*id:'aurora',\s*label:'Aurora',\s*typography:'aurora',\s*shape:'aurora',\s*material:'aurora',\s*depth:'aurora',/u,'Aurora is its own presentation profile.');
+assert.match(auroraCss,/const PROFILE\s*=\s*Object\.freeze\(\{\s*contractVersion:2,\s*id:'aurora',\s*label:'Aurora',\s*typography:'aurora',\s*shape:'aurora',\s*material:'aurora',\s*depth:'aurora',/u,'Aurora is its own presentation profile.');
 assert.doesNotMatch(auroraCss,/data-(?:presentation|typography|shape|material|depth)="glass"|presentation==='glass'/u,'Aurora is an independent snapshot: no rule may depend on Glass, so reimagining Glass never changes it.');
 assert.match(html,/<script src="@@SD_EXTERNAL_GLASS_FILENAME@@"><\/script>\n<script src="@@SD_EXTERNAL_AURORA_FILENAME@@"><\/script>/u,'Aurora loads synchronously beside Glass so a saved Aurora choice paints without a flash.');
+for(const [label,pack,marker] of [['Glass',glassCss,'glass'],['Aurora',auroraCss,'aurora']]){
+  assert.match(pack,/function registerPack\(\)[\s\S]*?registerPresentation\(PROFILE\)/u,`${label} registration is owned by the checked startup pack.`);
+  assert.match(pack,/if\(!install\(\)\)window\.addEventListener\('studydirector:ready',[\s\S]*?once:true/u,`${label} retries DOM coordination at the ready boundary.`);
+  assert.match(pack,new RegExp(`dataset\\['${marker}OverlayCoordinator'\\]===['"]installed['"]`,'u'),`${label} deduplicates its effective overlay observer.`);
+}
+assert.match(presentationHost,/function refreshMirrors\([^)]*\)[^{]*\{[\s\S]*?preferences\.mirror-write/u,'checked presentation host owns first-paint mirror refresh failure handling.');
+assert.match(presentationHost,/function toggleDisplayTools\([^)]*\)[^{]*\{[\s\S]*?display-tools-menu[\s\S]*?popovers\.create/u,'checked presentation host owns display-tools interaction.');
+assert.match(html,/function registerPresentationPack\(definition\)\{return requirePresentationRuntime\(\)\.registerPresentation\(definition\);\}/u,'main keeps presentation-pack registration as thin composition.');
 
 assert.doesNotMatch(html,/presentationId:'director-current'/u,'themes own light/dark roles only and must not name a skin.');
 assert.match(coreCss,/html\[data-theme="light"\]\[data-presentation="director-current"\] #cd\{/u,'Director-specific light styling is scoped to the Director skin, not to the theme.');
@@ -85,4 +95,4 @@ assert.match(coreCss,/\.si\.sd-just-done \.si-card\{animation:sd-moment-settle v
 assert.match(planJs,/completionMomentElapsed\(`\$\{i\}\|\$\{t\.name\}`,!!scheduleGateway\.row\(i\)\.done\)[\s\S]*?animationend[\s\S]*?classList\.remove\('sd-just-done'\)/u,'only a row seen incomplete then complete gets the moment, and it is cleared after playing so re-showing the pane cannot replay it.');
 assert.match(coreCss,/@media \(prefers-reduced-motion: reduce\)\{[\s\S]*?\.si\.sd-just-done \.si-card,\.si\.sd-just-done \.si-chk\{animation:none!important\}[\s\S]*?html\{--sd-motion-press-transform:none!important\}[\s\S]*?::details-content\{transition:none!important\}/u,'reduced motion removes the completion moment, press motion and disclosure unfolding.');
 
-console.log(JSON.stringify({status:'PASS',contract:'presentation-source-contracts',paths:['prepaint-appearance','prepaint-browser-chrome','touch-minimums','execute-note-alignment','copy-report-centering','version-history-scroll','guide-touch','low-glare-light','tablet-plan-grid','compact-backup-layout','glass-legibility','glass-palettes','glass-aurora','pane-entrance','appearance-shift','appearance-reveal','typography-roles','hero-islands','area-atmosphere','readable-plan-rows','aurora-snapshot','theme-skin-separation','motion-system','progress-field-border']},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'presentation-source-contracts',paths:['checked-presentation-host','pack-ready-retry','overlay-observer-dedup','prepaint-appearance','prepaint-browser-chrome','touch-minimums','execute-note-alignment','copy-report-centering','version-history-scroll','guide-touch','low-glare-light','tablet-plan-grid','compact-backup-layout','glass-legibility','glass-palettes','glass-aurora','pane-entrance','appearance-shift','appearance-reveal','typography-roles','hero-islands','area-atmosphere','readable-plan-rows','aurora-snapshot','theme-skin-separation','motion-system','progress-field-border']},null,2));

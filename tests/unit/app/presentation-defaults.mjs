@@ -1,6 +1,5 @@
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 
 const html=readHostHtml();
@@ -36,7 +35,7 @@ function loadKernel({storedTheme=null,storedPresentation=null,scope=''}={}){
   const compiledPresentationSource=presentationSource
     .replaceAll('@@SD_THEME_STORAGE_KEY@@','studyDirector.theme.v1')
     .replaceAll('@@SD_PRESENTATION_STORAGE_KEY@@','studyDirector.presentation.v1');
-  vm.runInContext(compiledPresentationSource,context,{filename:'presentation-kernel.js'});
+  vm.runInContext(compiledPresentationSource,context,{filename:'presentation-kernel.ts'});
   const kernel=window[Symbol.for('studyDirector.presentationKernel.v1')];
   assert.ok(kernel);
   return {kernel,storage,root,meta};
@@ -93,9 +92,17 @@ for(const [storedPresentation,storedTheme,expectedColor,expectedStatus] of [
 
 {
   // A later profile reads its own appearance, not the first profile's.
-  const {root,storage}=loadKernel({storedTheme:'light',scope:'prof_ben_mve00000_abcdef01'});
+  const {root,storage}=loadKernel({storedTheme:'light',storedPresentation:'director-current',scope:'prof_ben_mve00000_abcdef01'});
   assert.equal(root.dataset.theme,'light','the profile theme applies before the app starts');
+  assert.equal(root.dataset.presentation,'director-current','the profile presentation applies before the app starts');
   assert.equal(storage.has('studyDirector.theme.v1'),false,'the first profile keeps its own theme');
+  assert.equal(storage.has('studyDirector.presentation.v1'),false,'the first profile keeps its own presentation');
+}
+{
+  const {kernel,root,storage}=loadKernel({storedTheme:'light',storedPresentation:'future-skin'});
+  assert.equal(root.dataset.presentation,'director-current','a well-formed unregistered presentation fails closed to Director at first paint');
+  assert.equal(storage.get('studyDirector.presentation.v1'),'future-skin','fallback must not rewrite a potentially future saved presentation');
+  assert.equal(kernel.activePresentationId(),'director-current');
 }
 // Aurora preserves the pre-reimagining Glass as its own skin; a saved choice
 // must restore at first paint, before its pack script registers.
@@ -119,4 +126,4 @@ assert.equal(loadKernel().kernel.normalizeThemeId('director-sepia'),'dark','Unkn
 
 assert.equal('motion' in loadKernel().kernel,false,'Presentation Kernel must not expose snapshot-transition machinery to plugins; appearance transitions are host-owned.');
 
-console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','retired-theme-ids-fall-back','saved-aurora','profile-scoped-appearance','prepaint-browser-chrome','no-plugin-snapshot-api']},null,2));
+console.log(JSON.stringify({status:'PASS',contract:'presentation-defaults',paths:['implicit-glass-dark','saved-director-dark','saved-director-light','saved-glass-dark','saved-glass-light','retired-theme-ids-fall-back','saved-aurora','profile-scoped-appearance','unregistered-fallback','prepaint-browser-chrome','no-plugin-snapshot-api']},null,2));

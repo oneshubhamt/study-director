@@ -10,7 +10,7 @@ A theme (`dark` / `light`) chooses semantic colour roles; a skin (Director / Gla
 
 Director keeps the host palettes: neon lime on black for Dark, and paper, ink and signal orange for Light (lime cannot carry text on a light ground). Glass is a separate visual language. It sets its own values for the same semantic roles for each theme (iris on midnight, indigo on cool daylight). It uses sentence-case Barlow with tabular figures instead of condensed capitals and terminal mono. Every text role stays at WCAG AA or better on its surfaces.
 
-Aurora is a third skin and a preserved snapshot of Glass, taken before Glass is reimagined. It is its own startup pack (`external/aurora.js`), keyed to its own presentation, typography, shape, material and depth IDs (`aurora`), so later Glass work never changes it. It loads synchronously beside Glass, so a saved Aurora choice paints without a flash.
+Aurora is a third skin and a preserved snapshot of Glass, taken before Glass is reimagined. It is its own startup pack (`external/aurora.ts`), keyed to its own presentation, typography, shape, material and depth IDs (`aurora`), so later Glass work never changes it. It loads synchronously beside Glass, so a saved Aurora choice paints without a flash.
 
 ## Typography and heroes
 
