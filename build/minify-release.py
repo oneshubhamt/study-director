@@ -474,7 +474,7 @@ def update_service_worker(public: Path, replacements: dict[str, str]) -> None:
         source = source.replace(old, new)
     manifests: dict[str, list[dict[str, str]]] = {}
     for constant in ("PRECACHE",):
-        match = re.search(rf"const {constant}=Object\.freeze\(JSON\.parse\('(.+?)'\)\);", source)
+        match = re.search(rf"const {constant}=parsePrecache\('(.+?)'\)", source)
         if not match:
             raise RuntimeError(f"Could not locate service-worker {constant.lower()} manifest")
         manifest = json.loads(match.group(1))
@@ -487,10 +487,26 @@ def update_service_worker(public: Path, replacements: dict[str, str]) -> None:
         manifest_json = json.dumps(manifest, separators=(",", ":"), ensure_ascii=False)
         source = source[:match.start(1)] + manifest_json + source[match.end(1):]
         manifests[constant] = manifest
-    precache_json = json.dumps(manifests["PRECACHE"], separators=(",", ":"), ensure_ascii=False)
-    release_id = sha256_bytes(precache_json.encode("utf-8"))[:24]
-    source = re.sub(r"const RELEASE_ID='[0-9a-f]+';", f"const RELEASE_ID='{release_id}';", source, count=1)
-    sw_path.write_text(minify_js(source), encoding="utf-8", newline="\n")
+    normalized = re.sub(
+        r"const RELEASE_ID='[0-9a-f]+';",
+        "const RELEASE_ID='@@SD_PWA_RELEASE_ID@@';",
+        source,
+        count=1,
+    )
+    worker_template = minify_js(normalized)
+    worker_hash = sha256_bytes(worker_template.encode("utf-8"))
+    release_payload = json.dumps(
+        {"precache": manifests["PRECACHE"], "worker": worker_hash},
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    release_id = sha256_bytes(release_payload.encode("utf-8"))[:24]
+    final_worker = worker_template.replace(
+        "const RELEASE_ID='@@SD_PWA_RELEASE_ID@@';",
+        f"const RELEASE_ID='{release_id}';",
+        1,
+    )
+    sw_path.write_text(final_worker, encoding="utf-8", newline="\n")
 
 
 def write_deployment_identity(destination: Path, public: Path) -> None:

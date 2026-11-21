@@ -73,17 +73,17 @@ assert.match(enforcementCsp,/trusted-types sd-inert-html sd-assets sd-legal-html
 for(const source of inline){const digest=crypto.createHash('sha256').update(source).digest('base64');assert.ok(csp.includes(`'sha256-${digest}'`),`CSP omitted inline hash ${digest}`);assert.ok(enforcementCsp.includes(`'sha256-${digest}'`),`Enforcement CSP omitted inline hash ${digest}`);}
 
 const sw=read(publicDir,'sw.js').toString('utf8');new vm.Script(sw,{filename:'sw.js'});
-const manifest=JSON.parse(sw.match(/const PRECACHE=Object\.freeze\(JSON\.parse\('(.+?)'\)\);/)?.[1]||'[]');
+const manifest=JSON.parse(sw.match(/const PRECACHE=parsePrecache\('(.+?)'\)/)?.[1]||'[]');
 assert.ok(manifest.length>=34,'Precache inventory is unexpectedly small.');
 for(const asset of manifest){const name=asset.path.replace(/^\.\//,'');assert.ok(fs.existsSync(path.join(publicDir,name)),name);assert.equal(sha(read(publicDir,name)),asset.sha256,name);}
 assert.ok(richScript&&manifest.some(row=>row.path===`./${richScript}`),'Eager rich-text runtime must be install-time precached.');
 const searchWorker=externalScripts.find(name=>/^sd\.note-search\./.test(name));
 assert.ok(searchWorker&&manifest.some(row=>row.path===`./${searchWorker}`),'Lazy search Worker runtime must be precached without being eagerly executed.');
-const releaseId=sha(JSON.stringify(manifest)).slice(0,24);assert.ok(sw.includes(`const RELEASE_ID='${releaseId}';`));
+const normalizedWorker=sw.replace(/const RELEASE_ID='[0-9a-f]+';/u,"const RELEASE_ID='@@SD_PWA_RELEASE_ID@@';");const releaseId=sha(JSON.stringify({precache:manifest,worker:sha(normalizedWorker)})).slice(0,24);assert.ok(sw.includes(`const RELEASE_ID='${releaseId}';`));
 assert.doesNotMatch(sw,/CompatibilityFacade|installBridgeRequired|recoveryHandoff/,'deployment must contain no historical updater bridge');
-const cacheIdentityMatch=sw.match(/const CACHE_IDENTITIES=Object\.freeze\((\{[^\n]+\})\);/);
+const cacheIdentityMatch=sw.match(/parseCacheIdentities\(decodeURIComponent\('([^']+)'\)\)/);
 assert.ok(cacheIdentityMatch,'Service worker must embed the centralized Cache Storage identities.');
-assert.deepEqual(JSON.parse(cacheIdentityMatch[1]),CACHE_STORAGE_IDENTITIES,'Service-worker Cache Storage identities drifted from the canonical contract.');
+assert.deepEqual(JSON.parse(decodeURIComponent(cacheIdentityMatch[1])),CACHE_STORAGE_IDENTITIES,'Service-worker Cache Storage identities drifted from the canonical contract.');
 assert.match(sw,/caches\.open\(CACHE_IDENTITIES\.clientState\)/,'current client acknowledgements must still protect live shell generations');
 assert.match(sw,/SD_PWA_ACTIVATION_ACK/);
 assert.match(sw,/SD_PWA_ACTIVATED/);

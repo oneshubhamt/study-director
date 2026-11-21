@@ -329,7 +329,7 @@ function verifyPwaTarget(files,pwa,label){
   }
   const serviceWorker=files.get(platformFiles.serviceWorker.output);
   invariant(typeof serviceWorker==='string'&&serviceWorker.includes(`const RELEASE_ID='${pwa.releaseId}';`),`${label} service worker release identity drifted.`);
-  invariant(serviceWorker.includes(`const PRECACHE=Object.freeze(JSON.parse('${JSON.stringify(pwa.precache)}'));`),`${label} service worker asset manifest drifted.`);
+  invariant(serviceWorker.includes(`const PRECACHE=parsePrecache('${JSON.stringify(pwa.precache)}')`),`${label} service worker asset manifest drifted.`);
 }
 
 export function validateBuild(build){
