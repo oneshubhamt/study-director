@@ -1,6 +1,7 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {PrimitivesInput,WorkspaceRouterInput,RecentInput,SystemInput,SoundInput,BackupActionsInput,NavigationUIInput,DelegatedInput,WorkspaceHandler,WorkspaceDescriptor,WorkspaceOpenMeta,WorkspaceCloseMeta,NavigationContext,DepartureContext,NavigationOptions,TabConfig} from '../../types/foundation-host.ts';
 import type {NotificationInput,BannerState,Lifecycle} from '../../types/notifications.ts';
+import type {BoundedOptions} from '../../types/record-models.ts';
 import type {NoticeCoordinator,NotificationState,NotificationEvent,RecentState} from './notice-coordinator.ts';
 const sdFoundationHostFactory=(()=>{
 'use strict';
@@ -94,15 +95,17 @@ function clampText(value:unknown,max=APP_LIMITS.maxNoteChars){
 }
 function clampArray<T>(arr:readonly T[]|null|undefined,max:number){return Array.isArray(arr)?(arr as readonly T[]).slice(0,Math.max(0,Number(max)||0)):[];}
 function wipeObject(obj:Record<string,unknown>|null|undefined){Object.keys(obj||{}).forEach(k=>delete obj![k]);}
-function boundedInt(value:unknown,{min=0,max=Number.MAX_SAFE_INTEGER,fallback=0}={}){
+function boundedInt<F extends number|null=number>(value:unknown,options:Partial<BoundedOptions<F>>={}):number|F{
+  const min=options.min??0,max=options.max??Number.MAX_SAFE_INTEGER,fallback=options.fallback;
   const n=Number(value);
-  if(!Number.isFinite(n))return fallback;
+  if(!Number.isFinite(n))return fallback===undefined?0:fallback;
   const i=Math.trunc(n);
   return Math.min(max,Math.max(min,i));
 }
-function boundedNumber(value:unknown,{min=-Number.MAX_SAFE_INTEGER,max=Number.MAX_SAFE_INTEGER,fallback=0}={}){
+function boundedNumber<F extends number|null=number>(value:unknown,options:Partial<BoundedOptions<F>>={}):number|F{
+  const min=options.min??-Number.MAX_SAFE_INTEGER,max=options.max??Number.MAX_SAFE_INTEGER,fallback=options.fallback;
   const n=Number(value);
-  if(!Number.isFinite(n))return fallback;
+  if(!Number.isFinite(n))return fallback===undefined?0:fallback;
   return Math.min(max,Math.max(min,n));
 }
 function safeBoolean(value:unknown){
