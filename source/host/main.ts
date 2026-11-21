@@ -3,7 +3,7 @@ import type {PresentationKernel} from '../../types/presentation.ts';
 import type {ProfileScopeValue} from '../../types/profile-scope.ts';
 import type {StudyDirectorPublicApi} from '../../types/public-api-host.ts';
 import type {RichTextApi,AssetStore,WorkspaceOverlayPort,NotePort} from '../../rich-text/editor.ts';
-import type {ActiveSession} from '../../types/record-models.ts';
+import type {ActiveSession,PersonalPreferences} from '../../types/record-models.ts';
 import type {SessionActionState} from '../../types/session-actions.ts';
 import type {Task} from '../../types/domain.ts';
 import type {NoteEditorBinding,NoteSyncState,NoteCatalogueInput} from '../../types/notes-host.ts';
@@ -230,10 +230,11 @@ const AppDiagnostics=(()=>{
   function guard<T,F=null>(scope:string,fn:()=>T,fallback:F|null=null):T|F|null{try{return fn();}catch(error){capture(scope,error,'error');return fallback;}}
   return Object.freeze({capture,guard});
 })();
-const BackupOperationDiagnostics=BackupOperationDiagnosticsModule.createRecorder(Object.freeze<Parameters<typeof BackupOperationDiagnosticsModule.createRecorder>[0]>({
-  configuration:Object.freeze<ReviewPersistenceInput['configuration']>({release:APP_VERSION,limit:20}),
-  environment:Object.freeze({now:()=>Date.now()}),
-  storage:Object.freeze<PlanDataInput['storage']>({
+type BackupRecorderInput=Parameters<typeof BackupOperationDiagnosticsModule.createRecorder>[0];
+const BackupOperationDiagnostics=BackupOperationDiagnosticsModule.createRecorder(Object.freeze<BackupRecorderInput>({
+  configuration:Object.freeze<BackupRecorderInput['configuration']>({release:APP_VERSION,limit:20}),
+  environment:Object.freeze<BackupRecorderInput['environment']>({now:()=>Date.now()}),
+  storage:Object.freeze<BackupRecorderInput['storage']>({
     read:()=>sessionStorage.getItem('study-director.backup-operation-diagnostics.v1')||'',
     write:value=>{try{sessionStorage.setItem('study-director.backup-operation-diagnostics.v1',String(value||''));return true;}catch{return false;}}
   })
@@ -902,17 +903,18 @@ function flushAndReleaseAppOwner(requestId:Parameters<typeof AppOwnership['flush
 function requirePrimaryTab(...args:Parameters<typeof StartupOwnershipViews.requirePrimaryTab>){return StartupOwnershipViews.requirePrimaryTab(...args);}
 function renderPrimaryTabBlock(...args:Parameters<typeof StartupOwnershipViews.renderPrimaryTabBlock>){return StartupOwnershipViews.renderPrimaryTabBlock(...args);}
 /* DAILY RECORD COMPACTION AND SANITIZERS · IMPORTED */
-const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze<Parameters<typeof RecordCodecsModule.createDailyRecordCodec>[0]>({
+type DailyRecordCodecInput=Parameters<typeof RecordCodecsModule.createDailyRecordCodec>[0];
+const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze<DailyRecordCodecInput>({
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   domain:DomainModule,
   keyedRecord:KeyedRecord,
-  helpers:Object.freeze({
+  helpers:Object.freeze<DailyRecordCodecInput['helpers']>({
     boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,optionalBoundedNumber,optionalText,safeBoolean,
     sameDataValue,normalizeStudyQuality,todayISO,dateInsightsMeta,sanitizePracticeRun
   }),
-  timestamps:Object.freeze<ActiveSessionCodecInput['timestamps']>({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
-  timer:Object.freeze<RecoveryQuiescenceInput['timer']>({
+  timestamps:Object.freeze<DailyRecordCodecInput['timestamps']>({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
+  timer:Object.freeze<DailyRecordCodecInput['timer']>({
     modes:Object.freeze({PAUSED:TIMER_MODES.PAUSED,RUNNING:TIMER_MODES.RUNNING}),
     defaultBreakSeconds:()=>Pomodoro.configuration.breakSeconds()
   })
@@ -1358,11 +1360,12 @@ CapabilityBadge=CapabilitiesHostModule.createBadge(Object.freeze<Parameters<type
   persistedActiveSessionUnfinished,
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
 }));
-NativeCapabilities=CapabilitiesHostModule.createController(Object.freeze<Parameters<typeof CapabilitiesHostModule.createController>[0]>({
+type NativeCapabilitiesHostInput=Parameters<typeof CapabilitiesHostModule.createController>[0];
+NativeCapabilities=CapabilitiesHostModule.createController(Object.freeze<NativeCapabilitiesHostInput>({
   module:NativeCapabilitiesModule,
-  configuration:Object.freeze<NotesControllerInput['configuration']>({installNoticeKey:STORAGE_KEYS.installNoticeShown,wakePreferenceKey:STORAGE_KEYS.keepScreenAwake}),
-  environment:Object.freeze({document,navigator,window}),
-  hooks:Object.freeze({
+  configuration:Object.freeze<NativeCapabilitiesHostInput['configuration']>({installNoticeKey:STORAGE_KEYS.installNoticeShown,wakePreferenceKey:STORAGE_KEYS.keepScreenAwake}),
+  environment:Object.freeze<NativeCapabilitiesHostInput['environment']>({document,navigator,window}),
+  hooks:Object.freeze<NativeCapabilitiesHostInput['hooks']>({
     capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
     isTimerRunning:()=>appCanMutate()&&TimerState.mode===TIMER_MODES.RUNNING&&!TimerState.paused&&isLiveTrackableTimer(),
     readPreference:key=>AppData.local.getJson(key,false)===true,
@@ -1481,24 +1484,27 @@ let protectedPreferencesWriteChain:Promise<unknown>=Promise.resolve();
 type PresentationController=ReturnType<typeof PresentationHostModule.createController>;
 let PresentationRuntime:PresentationController|null=null;
 function requirePresentationRuntime(){if(!PresentationRuntime)throw new Error('Study Director presentation host is unavailable.');return PresentationRuntime;}
-function acceptProtectedPreferences(value){
-  const clean=PersonalDataCodec.currentPortablePreferences(value)||PersonalDataCodec.portablePreferences({version:2,...value});
+function canonicalPortablePreferences(value:unknown):PortablePreferencesState{
+  return PersonalDataCodec.currentPortablePreferences(value)??PersonalDataCodec.portablePreferences(value);
+}
+function acceptProtectedPreferences(value:unknown){
+  const clean=canonicalPortablePreferences(value);
   protectedPreferencesState=Object.freeze({...clean});protectedPreferencesHydrated=true;return protectedPreferencesState;
 }
-function refreshAppearanceMirrors(value=protectedPreferencesState){
-  const clean=PersonalDataCodec.currentPortablePreferences(value)||PersonalDataCodec.portablePreferences({version:2,...value});
+function refreshAppearanceMirrors(value:unknown=protectedPreferencesState){
+  const clean=canonicalPortablePreferences(value);
   return requirePresentationRuntime().refreshMirrors(clean);
 }
-function applyPortablePreferencesToRuntime(value=protectedPreferencesState){
-  const clean=PersonalDataCodec.currentPortablePreferences(value)||PersonalDataCodec.portablePreferences({version:2,...value});
+function applyPortablePreferencesToRuntime(value:unknown=protectedPreferencesState){
+  const clean=canonicalPortablePreferences(value);
   applyStudentName(clean.studentName||FACTORY_DEFAULTS.studentName);
   requirePresentationRuntime().applyPreferences(clean);
-  const qi=document.getElementById('quote-input');if(qi){qi.value=clean.quote||'';const display=document.getElementById('quote-display');if(display)display.textContent=qi.value.trim();}
+  const qi=document.getElementById('quote-input');if(qi instanceof HTMLInputElement||qi instanceof HTMLTextAreaElement){qi.value=clean.quote||'';const display=document.getElementById('quote-display');if(display)display.textContent=qi.value.trim();}
   Pomodoro.configuration.load();
   NoticeCoordinator.setSoundMode(clean.soundMode??(clean.nudge?.sound===false?'off':'full'));renderSoundSettings();
   return clean;
 }
-async function hydrateProtectedPreferences({force=false}={}){
+async function hydrateProtectedPreferences({force=false}:Readonly<{force?:boolean}>={}){
   if(protectedPreferencesHydrated&&!force)return protectedPreferencesState;
   const saved=await AppData.personalPreferences.read();
   protectedPreferencesDirty=false;protectedPreferencesWriteFailure=null;
@@ -1506,7 +1512,7 @@ async function hydrateProtectedPreferences({force=false}={}){
   refreshAppearanceMirrors(accepted);applyPortablePreferencesToRuntime(accepted);
   return accepted;
 }
-async function flushProtectedPreferences(options={}){
+async function flushProtectedPreferences(options:Readonly<{backupCapture?:boolean}>={}){
   if(protectedPreferencesWriteTimer!==null){clearTimeout(protectedPreferencesWriteTimer);protectedPreferencesWriteTimer=null;}
   if(!appCanMutate())return false;
   while(protectedPreferencesDirty){
@@ -1532,7 +1538,8 @@ function scheduleProtectedPreferencesWrite(){
   if(protectedPreferencesWriteTimer!==null)clearTimeout(protectedPreferencesWriteTimer);
   protectedPreferencesWriteTimer=setTimeout(()=>{protectedPreferencesWriteTimer=null;void flushProtectedPreferences().catch(()=>{});},PROTECTED_PREFERENCES_SAVE_DELAY_MS);
 }
-function persistProtectedPreferences(overrides={}){
+type PortablePreferenceOverrides=Partial<Omit<PortablePreferencesState,'version'|'updatedAt'>>;
+function persistProtectedPreferences(overrides:PortablePreferenceOverrides={}){
   if(!appCanMutate()||!protectedPreferencesHydrated)return false;
   const next=PersonalDataCodec.portablePreferences({
     ...protectedPreferencesState,...overrides,version:2,updatedAt:new Date().toISOString()
@@ -1542,48 +1549,50 @@ function persistProtectedPreferences(overrides={}){
   else scheduleProtectedPreferencesWrite();
   return true;
 }
-PresentationRuntime=PresentationHostModule.createController(Object.freeze<Parameters<typeof PresentationHostModule.createController>[0]>({
+type PresentationHostInput=Parameters<typeof PresentationHostModule.createController>[0];
+PresentationRuntime=PresentationHostModule.createController(Object.freeze<PresentationHostInput>({
   kernel:PRESENTATION_KERNEL,document,window,
-  storage:Object.freeze({
-    keys:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale}),
+  storage:Object.freeze<PresentationHostInput['storage']>({
+    keys:Object.freeze<PresentationHostInput['storage']['keys']>({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale}),
     getText:(key,fallback)=>AppData.local.getText(key,fallback),
     setText:(key,value)=>AppData.local.setText(key,value),
     remove:key=>AppData.local.remove(key),
     lastError:()=>AppData.lastStorageError
   }),
-  preferences:Object.freeze<PlanDataInput['preferences']>({
+  preferences:Object.freeze<PresentationHostInput['preferences']>({
     hydrated:()=>protectedPreferencesHydrated,current:()=>protectedPreferencesState,
     persist:value=>persistProtectedPreferences(value)
   }),
-  ownership:Object.freeze<NotesControllerInput['ownership']>({require:reason=>requirePrimaryTab(null,reason)}),
-  diagnostics:Object.freeze<RichTextRuntimeInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-  popovers:Object.freeze({create:menu=>RichTextApi.createAnchoredPopover(menu,{align:'end',side:'top'})})
+  ownership:Object.freeze<PresentationHostInput['ownership']>({require:reason=>requirePrimaryTab(null,reason)}),
+  diagnostics:Object.freeze<PresentationHostInput['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+  popovers:Object.freeze<PresentationHostInput['popovers']>({create:menu=>RichTextApi.createAnchoredPopover(menu,{align:'end',side:'top'})})
 }));
 if(!Object.isFrozen(PresentationRuntime)||PresentationRuntime.format!=='study-director.presentation-host'||PresentationRuntime.contractVersion!==1){
   throw new Error('Study Director presentation host is unavailable or incompatible.');
 }
 function saveQuoteDraft(){
   if(!appCanMutate())return;
-  try{const el=document.getElementById('quote-input');if(el){const value=clampText(el.value,APP_LIMITS.maxQuoteChars);if(el.value!==value)el.value=value;persistProtectedPreferences({quote:value});}}catch(e){}
+  try{const el=document.getElementById('quote-input');if(el instanceof HTMLInputElement||el instanceof HTMLTextAreaElement){const value=clampText(el.value,APP_LIMITS.maxQuoteChars);if(el.value!==value)el.value=value;persistProtectedPreferences({quote:value});}}catch(e){}
 }
 const StartupDraftHydration=StartupHostModule.createDraftHydration({document,hydratePlan:()=>PlanData.hydrate(),hydratePreferences:options=>hydrateProtectedPreferences(options),
  capture:AppDiagnostics.capture,markStorageError:markStorageHealthError,projectPlan:options=>PlanRuntime.hydrate(options),renderSavedPlans:()=>PlanRuntime.savedPlans.render(),quote:()=>protectedPreferencesState.quote,quoteChanged:options=>onQuoteChange(options)});
-async function hydrateSavedDrafts(options={}){return StartupDraftHydration(options);}
-function userDefaultsPayload(overrides={}){
-  const saved=readUserDefaults()||{},has=key=>Object.prototype.hasOwnProperty.call(overrides,key);
+async function hydrateSavedDrafts(options:Parameters<typeof StartupDraftHydration>[0]={}){return StartupDraftHydration(options);}
+type UserDefaultOverrides=Partial<Pick<PersonalPreferences,'studentName'|'practiceTargetMs'|'practiceCueMode'>>;
+function userDefaultsPayload(overrides:UserDefaultOverrides={}){
+  const saved=readUserDefaults()??{},has=(key:keyof UserDefaultOverrides)=>Object.prototype.hasOwnProperty.call(overrides,key);
   const studentName=normalizeStudentName(has('studentName')?overrides.studentName:saved.studentName||getStudentNameFromDisplay());
   const practiceTargetMs=validPracticeMs(has('practiceTargetMs')?overrides.practiceTargetMs:saved.practiceTargetMs,{min:APP_LIMITS.minPracticeTargetMs});
   const practiceCueMode=sanitizePracticeCueMode(has('practiceCueMode')?overrides.practiceCueMode:saved.practiceCueMode);
   return {studentName,practiceTargetMs:practiceTargetMs||null,practiceCueMode};
 }
-function persistUserDefaults(overrides={}){return persistProtectedPreferences(userDefaultsPayload(overrides));}
-function persistUserDefaultName(studentName){if(!appCanMutate())return false;return persistUserDefaults({studentName:normalizeStudentName(studentName)});}
-function persistPracticeTarget(targetMs){if(!appCanMutate())return false;const cleanTarget=validPracticeMs(targetMs,{min:APP_LIMITS.minPracticeTargetMs});if(!cleanTarget)return false;return persistUserDefaults({practiceTargetMs:cleanTarget});}
-function persistPracticeCueMode(mode){if(!appCanMutate())return false;return persistUserDefaults({practiceCueMode:sanitizePracticeCueMode(mode)});}
+function persistUserDefaults(overrides:UserDefaultOverrides={}){return persistProtectedPreferences(userDefaultsPayload(overrides));}
+function persistUserDefaultName(studentName:unknown){if(!appCanMutate())return false;return persistUserDefaults({studentName:normalizeStudentName(studentName)});}
+function persistPracticeTarget(targetMs:unknown){if(!appCanMutate())return false;const cleanTarget=validPracticeMs(targetMs,{min:APP_LIMITS.minPracticeTargetMs});if(!cleanTarget)return false;return persistUserDefaults({practiceTargetMs:cleanTarget});}
+function persistPracticeCueMode(mode:unknown){if(!appCanMutate())return false;return persistUserDefaults({practiceCueMode:sanitizePracticeCueMode(mode)});}
 function ensureTaskIds(){return TimerState.ensureTaskIds();}
 /* SHELL DEFAULTS AND CLOCK HEADER */
 function normalizeStudentName(...args:Parameters<typeof ProfileViews.normalizeStudentName>){return ProfileViews.normalizeStudentName(...args);}
-function filenameSafeStudentName(name){
+function filenameSafeStudentName(name:unknown){
   const base=normalizeStudentName(name).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,Math.max(1,APP_LIMITS.maxBackupFilenameChars-64)).replace(/-$/g,'');
   return base||'student';
 }
@@ -2141,7 +2150,7 @@ NotesRuntime=NotesHostModule.createController(Object.freeze<NotesControllerInput
     normalizeAreaName,displayAreaName,areaParentKeys,clampText,hasOngoingTaskNotes,noteKeyForTask,noteLabelForTask,isSupportBlock,isTrackableBlock
   }),
   lifecycle:Object.freeze<NotesControllerInput['lifecycle']>({canWrite:()=>SessionLifecycle.canWrite(),revision:()=>SessionLifecycle.revision}),
-  ownership:Object.freeze<PlanDataInput['ownership']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
+  ownership:Object.freeze<NotesControllerInput['ownership']>({canMutate:()=>appCanMutate(),revision:()=>AppOwnership.revision}),
   richText:Object.freeze<NotesControllerInput['richText']>({
     closeField:field=>RichTextRuntime.closeField(field),syncField:field=>RichTextRuntime.syncField(field),
     reconcileExternal:(field,canonical,revision)=>RichTextRuntime.reconcileExternal(field,canonical,revision),
