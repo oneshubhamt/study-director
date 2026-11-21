@@ -1,5 +1,9 @@
 # TypeScript conversion — execution record
 
+## Executor handoff · 2026-11-21
+
+The audited application baseline is `6b16c82a`. Start with **P5.11a, Guide and its Insights sample producer**. P5.11–P5.13 are planned and unstarted. Use the [executor handoff](docs/typescript/PHASE-5.md#executor-handoff) for source owners, acceptance criteria and targeted checks. After P5.13, hand Phase 5 to the owner for independent audit before Phase 6. The [branch decision](docs/typescript/DECISIONS.md#branch-lifecycle-and-f30-parity) places F30 parity after the complete TypeScript program.
+
 ## Owner audit of P5.8, P5.9 and P5.10 · closed with targeted verification · 2026-11-21
 
 - Audited branch `ts-exp` from `b98ce000` against the original JavaScript at `28c8c1d`, the phase objectives, host wiring and production-shaped tests.
