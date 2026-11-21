@@ -116,8 +116,10 @@ function makeHarness(options={}){
 // New work after reservation readiness invalidates the exact reservation.
 {
   const t=makeHarness(),abort=new AbortController();
-  const guard=t.controller.reserve(Object.freeze({requestId:'r2',releaseId:'release-2',automatic:false,external:false,signal:abort.signal}));
-  await guard.ready;t.setWorkRevision(2);assert.equal(guard.validate(),false);await guard.release();
+  const update=Object.freeze({requestId:'r2',releaseId:'release-2',automatic:false,external:false,signal:abort.signal});
+  const guard=t.controller.reserve(update);
+  await guard.ready;assert.equal((await t.controller.prepare(update)).ok,true);
+  t.setWorkRevision(2);assert.equal(guard.validate(),false);await guard.release();
 }
 
 // Direct preparation still waits for the mutation coordinator and verifies durable read-back.
