@@ -21,7 +21,7 @@ export interface ExecutionViewInput{
  NativeCapabilities:{syncWake(options:{forceCycle:boolean}):PromiseLike<unknown>}|null;Interactions:SessionActionInput['Interactions'];
  isTrackableBlock:ScheduleModel['isTrackable'];isWorkBlock:ScheduleModel['isWork'];isFixedBlock:ScheduleModel['isFixed'];isSupportBlock:ScheduleModel['isSupport'];
  shortTaskLabel(task:Task):string;clockHMS(now:Date):string;setElementText(element:HTMLElement|null|undefined,value:unknown):unknown;
- textEl(tag:string,className:string,text:string):HTMLElement;requestRender(...surfaces:string[]):unknown;appCanMutate():boolean;
+ textEl<K extends keyof HTMLElementTagNameMap>(tag:K,className?:string,text?:unknown):HTMLElementTagNameMap[K];requestRender(...surfaces:string[]):unknown;appCanMutate():boolean;
  fmtS(value:number):string;studyMinuteToHHMM:TimeModel['studyMinuteToHHMM'];invalidateScheduleDerived(options:{adjustments?:boolean;render?:boolean}):unknown;
  clearFutureUntouchedProgress():unknown;getTaskCompletion(index:number):number;taskTargetValue:ScheduleModel['targetValue'];
  applicableNotesForTask:TimerEngineInput['ports']['reviewEvidence']['applicableNotesForTask'];
