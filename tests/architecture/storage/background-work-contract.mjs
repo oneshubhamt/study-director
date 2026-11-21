@@ -137,11 +137,6 @@ function productionFunction(signature){
  assert.ok(start>=0&&end>start,'missing production function '+signature);
  return app.slice(start,end+2);
 }
-function productionFunction(signature){
- const start=app.indexOf(signature),end=start>=0?app.indexOf('\n}',start):-1;
- assert.ok(start>=0&&end>start,'missing production function '+signature);
- return app.slice(start,end+2);
-}
 const claimRuntime=productionFunction('async function checkSessionOwnershipClaim(){')+'\n'
  +productionFunction('function wakeSessionOwnershipClaim(slackMs=0){');
 for(const path of ['source/core/internal.ts','source/core/execution-views.ts'])vm.runInThisContext(readScript(path),{filename:path});
