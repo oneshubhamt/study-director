@@ -60,11 +60,26 @@ await test('early candidate announcement binds follower role before registration
  assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'exact candidate must retain follower role captured before the primary unloads');
  h.behavior.prepare=async()=>({ok:true});await h.api.apply();assert.equal(h.counts().reloads,1);h.win.emit('pagehide');
 });
-await test('captured follower release survives ServiceWorker wrapper replacement across activation',async()=>{
+await test('captured follower identity survives ServiceWorker wrapper replacement after activation',async()=>{
+ const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
+ h.behavior.follower=true;h.candidate.state='installing';h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'claimed-next'}});await flush();
+ h.behavior.follower=false;const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;
+ assert.equal(h.api.reconcileFollowerRole(false),false,'controller change must preserve the already-captured follower identity through ownership handoff');
+ h.sw.emit('controllerchange');await flush();
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'verified candidate identity must preserve follower role when Chromium exposes a new ServiceWorker wrapper');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
+});
+await test('primary takeover before activation clears stale follower identity',async()=>{
  const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
  h.behavior.follower=true;h.candidate.state='installing';h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next'}});await flush();
+ h.behavior.follower=false;assert.equal(h.api.reconcileFollowerRole(false),true,'primary ownership before controller change must revoke follower evidence');
+ const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,false,'a tab that became primary before activation must take the normal persistence path');h.win.emit('pagehide');await flush();
+});
+await test('candidate hint cannot transfer follower role through a forged release name',async()=>{
+ const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
+ h.behavior.follower=true;const rogue=h.worker('rogue','installing');h.sw.emit('message',{source:rogue,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next'}});await flush();
  h.behavior.follower=false;const activatedWrapper=h.worker('next','activated');h.registration.active=activatedWrapper;h.sw.controller=activatedWrapper;h.sw.emit('controllerchange');await flush();
- assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'stable release identity must preserve follower role when Chromium exposes a new ServiceWorker wrapper');assert.equal(h.counts().reloads,1);h.win.emit('pagehide');await flush();assert.equal(h.counts().held,0);
+ assert.equal(h.prepares.length,1);assert.equal(h.prepares[0].follower,false,'message release strings are hints and cannot confer follower authority on another worker');h.win.emit('pagehide');await flush();
 });
 await test('candidate replacement during preparation never gets stale release request',async()=>{
  const h=harness(),gate=deferred();await h.api.install();h.behavior.prepare=()=>gate.promise;const task=h.api.apply();await flush();const newer=h.worker('newer');h.registration.waiting=newer;h.message('SD_PWA_UPDATE_AVAILABLE',newer);await flush();gate.resolve({ok:true});assert.equal(await task,false);assert.equal(h.counts().held,0);assert.ok(!newer.messages.some(m=>m.type==='SD_PWA_APPLY_UPDATE'));assert.equal(h.api.status().waitingReleaseId,'newer');
@@ -142,6 +157,10 @@ await test('legacy markers confirm without suppressing retries; current boot wit
 });
 await test('malformed structured reload marker fails closed and remains available for recovery',async()=>{
  const h=harness();h.registration.waiting=null;await h.api.install();const malformed='{"version":2';h.storage.set('reload',malformed);
+ assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'mismatch');assert.equal(h.storage.get('reload'),malformed);assert.equal(h.counts().reloads,0);
+});
+await test('structurally invalid versioned reload marker cannot omit identity fields',async()=>{
+ const h=harness();h.registration.waiting=null;await h.api.install();const malformed=JSON.stringify({version:2,releaseId:'old',buildId:0,assetId:false});h.storage.set('reload',malformed);
  assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'mismatch');assert.equal(h.storage.get('reload'),malformed);assert.equal(h.counts().reloads,0);
 });
 await test('download failure has an explicit stage and actionable error; success clears it',async()=>{

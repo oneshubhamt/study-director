@@ -100,6 +100,11 @@ function makeHarness(options={}){
   assert.equal(t.calls.pause,0);assert.equal(t.calls.backup,0);assert.equal(t.calls.apply,0);
 }
 {
+  const t=makeHarness({timerLive:true,driveBackingUp:true});
+  assert.equal(await t.controller.applyFromUi(),false);
+  assert.equal(t.calls.pause,0);assert.equal(t.calls.backup,0);assert.equal(t.calls.apply,0);
+}
+{
   const t=makeHarness({timerLive:true,pacerRunning:true});
   assert.equal(await t.controller.applyFromUi(),true);
   assert.equal(t.calls.pause,1);assert.equal(t.calls.pacer,1);assert.equal(t.calls.backup,1);assert.equal(t.calls.apply,1);

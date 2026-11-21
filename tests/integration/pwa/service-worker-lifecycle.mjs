@@ -44,7 +44,10 @@ function evaluateWorkerValidation({cacheJson=JSON.stringify(CACHE_STORAGE_IDENTI
  assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'asset.js',sha256:'0'.repeat(64)}])}),/invalid asset/u);
  assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'./asset.js',sha256:'bad'}])}),/invalid asset/u);
  assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'./asset.js',sha256:'0'.repeat(64)},{path:'./asset.js',sha256:'1'.repeat(64)}])}),/invalid asset/u);
- cases.push('embedded cache identities and precache rows reject malformed or incomplete data');
+ assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'./../escape.js',sha256:'0'.repeat(64)}])}),/invalid asset/u);
+ assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'./asset.js?variant=1',sha256:'0'.repeat(64)}])}),/invalid asset/u);
+ assert.throws(evaluateWorkerValidation({precacheJson:JSON.stringify([{path:'./nested/../asset.js',sha256:'0'.repeat(64)},{path:'./asset.js',sha256:'1'.repeat(64)}])}),/invalid asset/u);
+ cases.push('embedded cache identities and precache rows reject malformed, escaping or canonically duplicated data');
 }
 {
  const h=fixture();await h.emit('install');assert.equal(h.stores.get(current).size,rows.length+1);assert.equal(h.maximum(),8);assert.equal(h.fetches.length,rows.length);assert.ok(h.fetches.every(row=>row.cache==='default'));assert.deepEqual(h.claims,['skip']);assert.equal(h.deletions.length,0);cases.push('eight-way verified precache and first installation');

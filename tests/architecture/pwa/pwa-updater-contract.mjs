@@ -34,8 +34,11 @@ assert.match(updater,/token\.workRevision!==state\.workRevision\(\)/u,'reservati
 assert.match(updater,/await input\.reservation\.settleMutation\(\)/u,'unreserved preparation must still wait for the mutation coordinator');
 assert.match(app,/flushPendingReview:\(\)=>flushPendingReviewSave\(\{strict:true,allowDuringRecoveryQuiescence:true\}\)/u,'PWA-owned Review checkpoint must be allowed inside its recovery-quiesced reservation');
 assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.revision\)/u,'active-session persistence must retain read-back verification');
+assert.match(updater,/state\.providerBusy\(\)\|\|state\.providerDriveBackingUp\(\)/u,'a running background Drive backup must defer update activation');
+assert.match(updater,/lifecycle\.reconcileFollowerRole\(state\.ownership\(\)\.state===configuration\.secondaryState\)/u,'ownership projection must clear stale follower evidence before a later controller change');
 assert.match(lifecycle,/identity\.releaseId!==target\.releaseId\|\|identity\.buildId!==target\.buildId\|\|identity\.assetId!==target\.assetId/u,'reload authorization must re-identify the exact release, build and page-asset tuple');
-assert.match(lifecycle,/followerReleases\.has\(target\.releaseId\)/u,'external follower ownership must survive browser ServiceWorker wrapper replacement by stable release identity');
+assert.match(lifecycle,/followerIdentities\.has\(followerIdentity\(target\)\)/u,'external follower ownership must survive browser ServiceWorker wrapper replacement by verified full identity');
+assert.doesNotMatch(lifecycle,/captureWorkerRole\(source,String\(data\['releaseId'\]/u,'candidate hint release strings must not establish follower identity');
 
 assert.match(sw,/\bPRECACHE_CONCURRENCY=8\b/u,'Service Worker precache concurrency must be explicitly bounded at eight');
 assert.match(sw,/const worker=async\(\)=>\{while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');
@@ -43,5 +46,6 @@ assert.match(sw,/Promise\.all\(Array\.from\(\{length:Math\.min\(PRECACHE_CONCURR
 assert.match(sw,/if\(failure\)throw failure;/u,'worker-queue failures must still fail installation before release metadata is committed');
 assert.match(sw,/parseCacheIdentities\(decodeURIComponent\('@@SD_CACHE_STORAGE_IDENTITIES_URI@@'\)\)/u,'cache identities must be safely quoted then validated');
 assert.match(sw,/const PRECACHE=parsePrecache\('@@SD_PWA_ASSET_MANIFEST@@'\)/u,'precache data must be validated at consumption');
+assert.match(sw,/resolved\.origin!==base\.origin\|\|!resolved\.pathname\.startsWith\(base\.pathname\)\|\|resolved\.search\|\|resolved\.hash/u,'precache paths must remain inside the service-worker scope without query or fragment ambiguity');
 
 console.log(JSON.stringify({status:'PASS',suite:'pwa-updater-contract',checks:{checkedOwner:true,cooldown24h:true,successTimestamp:true,boundedBackoff:true,preflightBeforePause:true,reservationIdentity:true,sessionReadback:true,precacheValidation:true,precacheConcurrency8:true,workerQueue:true}},null,2));
