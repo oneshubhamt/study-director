@@ -429,7 +429,7 @@ type ExecutionHostPorts=Parameters<typeof ExecutionHostModule.createRuntime>[0];
 const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameters<typeof ExecutionHostModule.createRuntime>[0]>({
   modules:Object.freeze<ExecutionHostPorts['modules']>({timerState:TimerStateModule,pomodoro:PomodoroModule,practicePacer:PracticePacerModule,timerEngine:TimerEngineModule}),
   timerState:Object.freeze<ExecutionHostPorts['timerState']>({
-    helpers:Object.freeze({makeTaskId}),
+    helpers:Object.freeze<RepositoryCompositionInput['appData']['helpers']>({makeTaskId}),
     diagnostics:Object.freeze<ExecutionHostPorts['timerState']['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
     effects:Object.freeze<ExecutionHostPorts['timerState']['effects']>({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
   }),
@@ -961,7 +961,7 @@ function dateInsightsMeta(iso:string){
   return {dayOfWeek,dayName:FULL_WEEKDAY_NAMES[dayOfWeek]||'Invalid Date'};
 }
 function hoursLabel(min:unknown){
-  const n=Math.round((min||0)*10)/10;
+  const n=Math.round((Number(min)||0)*10)/10;
   if(n<60)return Math.round(n)+'m';
   const h=n/60;
   return (Math.round(h*10)/10)+'h';
@@ -1081,28 +1081,29 @@ const UnsupportedData=DataBootstrapHostModule.createUnsupportedData(Object.freez
   checkForUpdate:()=>PwaLifecycle.checkForUpdate(),
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
 }));
-const {RepositoryAppMeta,JournalAppMeta,HostAppMeta,ExportsAppMeta,DeviceFolderAppMeta,BackupAppMeta}=DataBootstrapHostModule.createMetadataOwners(Object.freeze<Parameters<typeof DataBootstrapHostModule.createMetadataOwners>[0]>({
+type MetadataOwnersInput=Parameters<typeof DataBootstrapHostModule.createMetadataOwners>[0];
+const {RepositoryAppMeta,JournalAppMeta,HostAppMeta,ExportsAppMeta,DeviceFolderAppMeta,BackupAppMeta}=DataBootstrapHostModule.createMetadataOwners(Object.freeze<MetadataOwnersInput>({
   gateway:AppMetaGateway,
   repositoriesModule:RepositoryModule,
-  repositoryValidatorInput:Object.freeze({
+  repositoryValidatorInput:Object.freeze<MetadataOwnersInput['repositoryValidatorInput']>({
     limits:APP_LIMITS,
     dataContract:DATA_CONTRACT,
     personalDataCodec:PersonalDataCodec,
     pendingReviewCodec:PendingReviewCodec,
-    helpers:Object.freeze({isValidIsoDate,isNoteId:DailyRecordCodec.noteKeys.isId,isNoteKey:DailyRecordCodec.noteKeys.isKey,normalizeTimestamp,sameDataValue})
+    helpers:Object.freeze<MetadataOwnersInput['repositoryValidatorInput']['helpers']>({isValidIsoDate,isNoteId:DailyRecordCodec.noteKeys.isId,isNoteKey:DailyRecordCodec.noteKeys.isKey,normalizeTimestamp,sameDataValue})
   }),
   journalsModule:RepositoryJournalModule,
   journalLimits:APP_LIMITS,
   hostMetadataModule:HostMetadataModule,
-  hostValidatorInput:Object.freeze({
-    keys:Object.freeze({
+  hostValidatorInput:Object.freeze<MetadataOwnersInput['hostValidatorInput']>({
+    keys:Object.freeze<MetadataOwnersInput['hostValidatorInput']['keys']>({
       verifiedRecoveryBackups:APP_META_KEYS.verifiedRecoveryBackups,backupProtection:APP_META_KEYS.backupProtection,
       attachmentIntegrityAudit:APP_META_KEYS.attachmentIntegrityAudit,deviceFolder:APP_META_KEYS.deviceFolder,
       repositoryIntegrityScrub:APP_META_KEYS.repositoryIntegrityScrub,managedProviderBackupPending:APP_META_KEYS.managedProviderBackupPending,repositoryMaintenancePending:APP_META_KEYS.repositoryMaintenancePending,
       reconciliationBase:APP_META_KEYS.reconciliationBase,reconciliationBaseNotePrefix:APP_META_KEYS.reconciliationBaseNotePrefix,reconciliationBaseDayPrefix:APP_META_KEYS.reconciliationBaseDayPrefix
     }),
     same:sameDataValue,
-    normalizers:Object.freeze({
+    normalizers:Object.freeze<MetadataOwnersInput['hostValidatorInput']['normalizers']>({
       verifiedRecovery:value=>BackupReadinessHostModule.normalizeVerifiedRecoveryState(value),attachmentIntegrity:normalizeAttachmentIntegrityState,
       repositoryIntegrity:normalizeRepositoryIntegrityState,
       reconciliationBase:ReconciliationBaselineCodec.normalizeHeader,reconciliationBaseNote:ReconciliationBaselineCodec.normalizeNote,reconciliationBaseDays:ReconciliationBaselineCodec.normalizeDays
@@ -1197,22 +1198,22 @@ function renderRichTextContent(container:HTMLElement|null,value:unknown,emptyTex
   try{return RichTextApi.renderRichText({container,value:canonical,label:String(label||'Rich text'),assets:RichTextAssets,workspaceOverlay:RichTextWorkspaceOverlay,notes:richTextNotes()});}
   catch(error){AppDiagnostics.capture('rich-text.display',error,'warn');container.textContent=plainTextContent(canonical).trim()||String(emptyText||'');return false;}
 }
-function exactAppMetaFamily(capability,key,label='app metadata'){
+function exactAppMetaFamily(capability:typeof HostAppMeta,key:unknown,label:string='app metadata'){
   const resolved=AppMetaGateway.resolve(String(key||''));
   if(!resolved||resolved.owner!==capability.owner||resolved.kind!=='exact')throw new TypeError(`Unclassified ${label} key.`);
   return resolved.family;
 }
-function exactAppMetaStorage(capability,family,key,label){
+function exactAppMetaStorage(capability:typeof HostAppMeta,family:string,key:unknown,label:string){
   const expected=String(key||'');
-  const assertKey=value=>{if(String(value||'')!==expected)throw new TypeError(`${label} metadata identity is invalid.`);};
+  const assertKey=(value:unknown)=>{if(String(value||'')!==expected)throw new TypeError(`${label} metadata identity is invalid.`);};
   return Object.freeze({
-    read:async value=>{assertKey(value);return capability.read(family);},
-    write:async(value,payload,options={})=>{assertKey(value);return capability.write(family,payload,options);},
-    remove:async(value,options={})=>{assertKey(value);return capability.remove(family,'',options);}
+    read:async (value:unknown)=>{assertKey(value);return capability.read(family);},
+    write:async(value:unknown,payload:unknown,options:Parameters<typeof capability.write>[2]={})=>{assertKey(value);return capability.write(family,payload,options);},
+    remove:async(value:unknown,options:Parameters<typeof capability.remove>[2]={})=>{assertKey(value);return capability.remove(family,'',options);}
   });
 }
-async function readHostAppMetaValue(key){return HostAppMeta.read(exactAppMetaFamily(HostAppMeta,key,'host app metadata'));}
-function writeHostAppMetaValue(key,value,options={}){return HostAppMeta.write(exactAppMetaFamily(HostAppMeta,key,'host app metadata'),value,options);}
+async function readHostAppMetaValue(key:unknown){return HostAppMeta.read(exactAppMetaFamily(HostAppMeta,key,'host app metadata'));}
+function writeHostAppMetaValue(key:unknown,value:unknown,options:Parameters<typeof HostAppMeta.write>[2]={}){return HostAppMeta.write(exactAppMetaFamily(HostAppMeta,key,'host app metadata'),value,options);}
 async function readReconciliationBase(){return ReconciliationBaselineStore.readHeader();}
 async function readReconciliationBaseNotes(keys:Parameters<typeof ReconciliationBaselineStore['readNotes']>[0]){return ReconciliationBaselineStore.readNotes(keys);}
 async function readReconciliationBaseDayAncestry(dates:Parameters<typeof ReconciliationBaselineStore['readDayAncestry']>[0],checkpointId:Parameters<typeof ReconciliationBaselineStore['readDayAncestry']>[1]){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
@@ -1245,7 +1246,7 @@ if(!Object.isFrozen(BackupNudge)||BackupNudge.format!=='study-director.backup-nu
   throw new Error('Study Director backup reminder readiness is unavailable or incompatible.');
 }
 /* APPDATA REPOSITORY FACADE */
-function handleRepositoryDailyRecordsChanged(change){
+function handleRepositoryDailyRecordsChanged(change:Parameters<RepositoryCompositionInput['appData']['hooks']['onDailyRecordsChanged']>[0]){
   richAssetReferenceRevision++;
   LibraryView.invalidate();
   if(document.getElementById('pane-library')?.classList.contains('on'))setTimeout(()=>{if(document.getElementById('pane-library')?.classList.contains('on'))void LibraryView.render();},0);
@@ -1254,7 +1255,7 @@ function handleRepositoryDatasetRevisionChanged(){
   if(!document.getElementById('pane-insights')?.classList.contains('on'))return;
   setTimeout(()=>{if(document.getElementById('pane-insights')?.classList.contains('on'))UiTabRegistry.renderTab('insights');},0);
 }
-function persistedActiveSessionUnfinished(session){
+function persistedActiveSessionUnfinished(session:ActiveSession|null){
   if(!session||session.deleted===true||!['active','suspended'].includes(session.status||'active'))return false;
   const snapshot=activeSessionSnapshot(session);
   const draft=parseScheduleDraftText(String(session.scheduleText||''));
@@ -1270,16 +1271,17 @@ function persistedActiveSessionUnfinished(session){
 function handleCanonicalCommit(event:Parameters<typeof CanonicalCommitHost['handle']>[0]){return CanonicalCommitHost.handle(event);}
 
 async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
-const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryComposition(Object.freeze<Parameters<typeof DataBootstrapHostModule.createRepositoryComposition>[0]>({
+type RepositoryCompositionInput=Parameters<typeof DataBootstrapHostModule.createRepositoryComposition>[0];
+const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryComposition(Object.freeze<RepositoryCompositionInput>({
   repositoriesModule:RepositoryModule,
   journalsModule:RepositoryJournalModule,
-  journal:Object.freeze({
+  journal:Object.freeze<RepositoryCompositionInput['journal']>({
     appMeta:JournalAppMeta,
     limits:APP_LIMITS,
-    helpers:Object.freeze({clampText}),
-    clock:Object.freeze({nowMs:DecisionClock.nowMs})
+    helpers:Object.freeze<RepositoryCompositionInput['journal']['helpers']>({clampText}),
+    clock:Object.freeze<RepositoryCompositionInput['journal']['clock']>({nowMs:DecisionClock.nowMs})
   }),
-  appData:Object.freeze({
+  appData:Object.freeze<RepositoryCompositionInput['appData']>({
     local:LocalStorageContract,
     indexedDb:IndexedDb,
     appMeta:RepositoryAppMeta,
@@ -1293,20 +1295,20 @@ const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryCompo
     saveLaneModule:SaveLaneModule,
     limits:APP_LIMITS,
     dataContract:DATA_CONTRACT,
-    stores:Object.freeze({
+    stores:Object.freeze<RepositoryCompositionInput['appData']['stores']>({
       dailyRecords:DB_DAILY_RECORD_STORE,
       dailySummaries:DB_DAILY_SUMMARY_STORE,
       notes:DB_NOTES_STORE,
       activeSessions:DB_ACTIVE_SESSION_STORE,
       appMeta:DB_APP_META_STORE
     }),
-    keys:Object.freeze({
+    keys:Object.freeze<RepositoryCompositionInput['appData']['keys']>({
       recovery:STORAGE_KEYS.recovery,
       fallbackDailyRecords:STORAGE_KEYS.fallbackDailyRecords,
       noteRescue:STORAGE_KEYS.noteRescue,
       deletionRecovery:STORAGE_KEYS.deletionRecovery
     }),
-    metaKeys:Object.freeze({
+    metaKeys:Object.freeze<RepositoryCompositionInput['appData']['metaKeys']>({
       planDraft:APP_META_KEYS.planDraft,
       planLibrary:APP_META_KEYS.planLibrary,
       personalPreferences:APP_META_KEYS.personalPreferences,
@@ -1320,12 +1322,12 @@ const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryCompo
       pendingReviewPrefix:APP_META_KEYS.pendingReviewPrefix
     }),
     activeSessionId:ACTIVE_SESSION_ID,
-    clock:Object.freeze({nowMs:DecisionClock.nowMs}),
+    clock:Object.freeze<RepositoryCompositionInput['appData']['clock']>({nowMs:DecisionClock.nowMs}),
     helpers:Object.freeze({
       boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
       activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay,normalizeTimestamp,jsonByteLength
     }),
-    hooks:Object.freeze({
+    hooks:Object.freeze<RepositoryCompositionInput['appData']['hooks']>({
       canMutate:appCanMutate,
       getOwnershipRevision:()=>AppOwnership.revision,
       issueWriteToken:(reason,options)=>AppOwnership.issueWriteToken(reason,options),
@@ -1420,7 +1422,7 @@ function orderOngoingAreaEntries(source:readonly NoteCatalogueInput[]){return no
 function noteSearchDocuments(){return AppData.notes.searchSnapshot().documents;}
 function noteCatalogue(){return notesRuntime().catalogue();}
 let refreshLibraryNotes=()=>false;
-let updateNoteSearchDocument=()=>false;
+let updateNoteSearchDocument:(document:Readonly<{key:string;revision:string;plain:string}>)=>unknown=()=>false;
 function updateNoteSearchText(key:string,plain:unknown){const entry=key?AppData.notes.get(key):null;if(entry)updateNoteSearchDocument({key,revision:entry.updatedAt||'',plain:String(plain||'')});}
 function refreshNoteConsumers(){
   richAssetReferenceRevision++;
