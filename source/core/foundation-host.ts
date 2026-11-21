@@ -35,7 +35,7 @@ function setProgressSummary(el:HTMLElement|null,done:unknown,total:unknown,measu
   const safeTotal=Number(total);
   el.replaceChildren();
   if(Number.isFinite(safeDone)&&safeTotal>0){
-    const pct=Math.round(CompletionModel.fromUnits(safeDone,safeTotal));
+    const pct=Math.round(CompletionModel.fromUnits(safeDone,safeTotal)??0);
     el.append(textEl('span','hi',`${safeDone}/${safeTotal} ${measure||'units'}`),document.createTextNode(suffix||` · ${pct}%`));
   }else if(Number.isFinite(safeDone)&&(safeDone>0||showZero)){
     el.append(textEl('span','hi',`${safeDone} ${measure||'units'}`),document.createTextNode(suffix||' done'));
