@@ -37,8 +37,8 @@ assert.doesNotMatch(host,/const PluginRuntime=\(\(\)=>\{/u,'unchecked optional-p
 assert.doesNotMatch(host,/const StudyDirectorPublicAPI=Object\.freeze\(\{/u,'unchecked public API assembly must not remain in main');
 for(const required of ['MAX_LOAD_ATTEMPTS=2','MAX_REGISTRATION_ATTEMPTS=2','function registerPlaceholders','function requestTab','function createPublicApi'])assert.ok(owner.includes(required),`checked public API owner is missing ${required}`);
 assert.match(owner,/if\(activeTabId\(\)===tabId\)input\.tabs\.renderTab\(tabId\)/u,'optional plugin completion may rerender only its active tab');
-assert.match(owner,/if\(missing\.length\)[\s\S]{0,420}state:'incompatible'/u,'capability rejection happens before plugin setup');
-assert.match(owner,/if\(previous\?\.state==='registered'\)return true/u,'successful plugin registration is idempotent');
+assert.match(owner,/if\(unmet\.length\)[\s\S]{0,520}state:'incompatible'/u,'capability rejection happens before plugin setup');
+assert.match(owner,/if\(previous\?\.state==='registered'\)\{[\s\S]{0,260}return true;/u,'successful plugin registration is idempotent while refreshing the optional-tab state');
 const published=host.indexOf('window.StudyDirector=StudyDirectorPublicAPI;'),ready=host.indexOf('window.dispatchEvent(new CustomEvent(STUDY_DIRECTOR_READY_EVENT'),invalidate=host.indexOf("SessionLifecycle.invalidate('app-restart'"),startup=host.indexOf('StartupLifecycle.start();'),pwa=host.indexOf('void PwaRuntime.install();');
 assert.ok(published>=0&&published<ready&&ready<invalidate&&invalidate<startup&&startup<pwa,'public API publication and ready event must remain before lifecycle startup and PWA install');
 }
