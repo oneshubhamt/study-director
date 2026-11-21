@@ -1167,7 +1167,7 @@ const AttachmentStorage=AssetStorageModule.create(Object.freeze<AttachmentStorag
     for(const [id,row] of rows)store.put(row,id);for(const id of remove)store.delete(id);tx.oncomplete=()=>finish(true,undefined);
   },'attachment metadata commit aborted').then(result=>{writeStorageHealth({lastLocalSaveAt:AppData.mutationEpoch.nextChangeAt()});notifyBackupChange({reason:'attachment-metadata'});if(BackupIntegrity?.attachmentState()?.issues.length)scheduleAttachmentIntegrityAudit(5000);return result;})
 }));
-type RichTextAssetStore=AssetStore&Readonly<{keys():Promise<string[]>;removeMany(assetIds:readonly string[]):Promise<number>}>;
+type RichTextAssetStore=AssetStore&Readonly<{retain():Promise<()=>void>;keys():Promise<string[]>;removeMany(assetIds:readonly string[]):Promise<number>}>;
 const RichTextAssets:RichTextAssetStore=Object.freeze({
   retain:()=>AttachmentStorage.retain(),
   get:(assetId:string)=>AttachmentStorage.get(richAssetId(assetId)),
@@ -1183,7 +1183,7 @@ const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze<RichT
   canMutate:()=>appCanMutate(),
   mutationActive:()=>RecoveryAssetMaintenancePause.active()||backgroundMaintenanceForegroundBusy()||storageResetUnresolved(),
   collect:(operation,options)=>AttachmentStorage.collect(operation,options),
-  readRestoreJournal:()=>AppData.restoreJournal.read(),
+  readRestoreJournal:async()=>{const value=await AppData.restoreJournal.read();return value&&typeof value==='object'&&'state' in value?value as {state:unknown}:null;},
   readLibraryClearJournal:async()=>{const value=await AppData.libraryClearJournal.read();return value&&typeof value==='object'&&'state' in value?value as {state:unknown}:null;},
   liveFields:()=>[...document.querySelectorAll<HTMLTextAreaElement>('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection')],
   getReferenceRevision:()=>richAssetReferenceRevision,
@@ -2026,10 +2026,10 @@ function unfinishedNoteDraftText(...args:Parameters<typeof ExecutionViews.unfini
 function closeUnfinishedNotePanel(...args:Parameters<typeof ExecutionViews.closeUnfinishedNotePanel>){return ExecutionViews.closeUnfinishedNotePanel(...args);}
 function renderRecoveryReview(...args:Parameters<typeof ExecutionViews.renderRecoveryReview>){return ExecutionViews.renderRecoveryReview(...args);}
 /* TASK PROGRESS AND ONGOING NOTE EDITORS */
-function getTaskCompletion(idx){
+function getTaskCompletion(idx:number){
   return resolveTaskCompletion(idx).pct;
 }
-function commitTaskNoteEditor(field,value,event=null){return notesRuntime().commitEditor(field,value,event);}
+function commitTaskNoteEditor(field:HTMLTextAreaElement,value:unknown,event:Event|null=null){return notesRuntime().commitEditor(field,value,event);}
 /* DAILY REFLECTION + DIARY PERSISTENCE · P5.5B CHECKED OWNER */
 type ReviewPersistenceInput=Parameters<typeof ReviewPersistenceModule.createPersistence>[0];
 const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze<ReviewPersistenceInput>({
@@ -2105,8 +2105,8 @@ const richTextNotes=NoteLinkNavigation.richText;
 const showNotesTagged=NoteLinkNavigation.showTagged;
 // Renames a tag in every note that has it, then saves. A note that changed
 // meanwhile is left as it is and named in the result.
-async function renameNoteTag(from,to){return notesRuntime().renameTag(from,to);}
-async function importNoteFiles(files,parent=''){return notesRuntime().importFiles(files,parent);}
+function renameNoteTag(...args:Parameters<ReturnType<typeof NotesHostModule.createController>['renameTag']>){return notesRuntime().renameTag(...args);}
+function importNoteFiles(...args:Parameters<ReturnType<typeof NotesHostModule.createController>['importFiles']>){return notesRuntime().importFiles(...args);}
 type RichTextRuntimeInput=Parameters<typeof RichTextHostModule.createRuntime>[0];
 const RichTextRuntime=RichTextHostModule.createRuntime(Object.freeze<RichTextRuntimeInput>({
   configuration:Object.freeze<RichTextRuntimeInput['configuration']>({maxRichTextBytes:APP_LIMITS.maxRichTextBytes}),document,window,
@@ -2211,12 +2211,12 @@ const PlanData=PlanHostModule.createData(Object.freeze<PlanDataInput>({
     }),
     preferences:Object.freeze<PlanDataInput['repositories']['preferences']>({read:()=>AppData.personalPreferences.read()})
   }),
-  ownership:Object.freeze({
+  ownership:Object.freeze<PlanDataInput['ownership']>({
     issueWriteToken:(reason,options)=>AppOwnership.issueWriteToken(reason,options),
     assertWriteToken:(token,reason)=>AppOwnership.assertWriteToken(token,reason)
   }),
-  storage:Object.freeze({markError:(surface,message)=>markStorageHealthError(surface,message)}),
-  preferences:Object.freeze({
+  storage:Object.freeze<PlanDataInput['storage']>({markError:(surface,message)=>markStorageHealthError(surface,message)}),
+  preferences:Object.freeze<PlanDataInput['preferences']>({
     fallback:()=>protectedPreferencesState,
     flush:options=>flushProtectedPreferences(options),
     accept:value=>acceptProtectedPreferences(value),
@@ -2243,6 +2243,7 @@ const PlanRuntime=PlanHostModule.createController(Object.freeze<PlanControllerIn
     configuration:Object.freeze<PlanControllerInput['ports']['configuration']>({limits:Object.freeze({
       maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars,
       maxDurationMinutes:APP_LIMITS.maxDurationMinutes,
+      maxScheduleChars:APP_LIMITS.maxScheduleChars,
       maxTaskNameChars:APP_LIMITS.maxTaskNameChars,
       maxAreaNameChars:APP_LIMITS.maxAreaNameChars,
       maxUnitChars:APP_LIMITS.maxUnitChars
@@ -2251,7 +2252,7 @@ const PlanRuntime=PlanHostModule.createController(Object.freeze<PlanControllerIn
       lastError:()=>AppData.lastStorageError,
       reportDraftResult:(ok,error)=>{
         if(ok)markStorageHealthOk('planDraft.write');
-        else markStorageHealthError('planDraft.write',`Plan draft was not saved: ${error&&error.message?error.message:error||'browser storage is unavailable'}. Keep this tab open and copy the draft before closing.`);
+        else{const detail=error instanceof Error?error.message:String(error||'browser storage is unavailable');markStorageHealthError('planDraft.write',`Plan draft was not saved: ${detail}. Keep this tab open and copy the draft before closing.`);}
       }
     }),
     defaults:Object.freeze<PlanControllerInput['ports']['defaults']>({applyStudentName}),
@@ -2290,30 +2291,30 @@ if(!Object.isFrozen(LibraryNoteWorkflows)||LibraryNoteWorkflows.format!=='study-
 /* TIMER COUNTDOWN EXECUTION · PRIVATE ENGINE */
 /* EXECUTE ONGOING PROGRESS NOTE PANEL */
 function saveNote(){
-  const doneEl=document.getElementById('pn-done');
-  const totalEl=document.getElementById('pn-total');
+  const doneNode=document.getElementById('pn-done'),totalNode=document.getElementById('pn-total');
+  const doneEl=doneNode instanceof HTMLInputElement?doneNode:null,totalEl=totalNode instanceof HTMLInputElement?totalNode:null;
   if(doneEl&&totalEl){
     const state=progressInputState(TimerState.currentIndex,doneEl.value,totalEl.value,taskTargetValue(TASKS[TimerState.currentIndex]));
     syncProgressInputsToState(TimerState.currentIndex,state,{updateUI:false,save:false});
   }
   if(hasOngoingTaskNotes(TASKS[TimerState.currentIndex])){
     const field=document.getElementById('pn-extra');
-    if(field)commitTaskNoteEditor(field,field.value);
+    if(field instanceof HTMLTextAreaElement)commitTaskNoteEditor(field,field.value);
   }
 }
 let pnoteInfoPopover:ReturnType<typeof RichTextApi.createAnchoredPopover>|null=null;
 function togglePnoteInfo(){const button=document.getElementById('pn-info-btn'),popover=document.getElementById('pn-info-popover');if(!button||!popover)return false;pnoteInfoPopover??=RichTextApi.createAnchoredPopover(popover,{align:'end'});const opening=popover.hidden;if(opening)pnoteInfoPopover.show(button);else pnoteInfoPopover.hide();return opening;}
-const backupInfoPopovers=new Map();
-function toggleBackupInfo(event){const button=event?.target?.closest?.('[data-backup-info-target]'),id=String(button?.dataset?.backupInfoTarget||''),popover=id?document.getElementById(id):null;if(!button||!popover)return false;let controller=backupInfoPopovers.get(id);if(!controller){controller=RichTextApi.createAnchoredPopover(popover,{align:'end',onClose:()=>button.setAttribute('aria-expanded','false')});backupInfoPopovers.set(id,controller);}const opening=popover.hidden;if(opening){controller.show(button);button.setAttribute('aria-expanded','true');}else{controller.hide();button.setAttribute('aria-expanded','false');}return opening;}
+const backupInfoPopovers=new Map<string,ReturnType<typeof RichTextApi.createAnchoredPopover>>();
+function toggleBackupInfo(event:MouseEvent){const button=event.target instanceof Element?event.target.closest<HTMLElement>('[data-backup-info-target]'):null,id=String(button?.dataset?.backupInfoTarget||''),popover=id?document.getElementById(id):null;if(!button||!popover)return false;let controller=backupInfoPopovers.get(id);if(!controller){controller=RichTextApi.createAnchoredPopover(popover,{align:'end',onClose:()=>button.setAttribute('aria-expanded','false')});backupInfoPopovers.set(id,controller);}const opening=popover.hidden;if(opening){controller.show(button);button.setAttribute('aria-expanded','true');}else{controller.hide();button.setAttribute('aria-expanded','false');}return opening;}
 let executeNoteView:Readonly<{taskId:string;id:string}>|null=null;
-function refreshPnote(options={}){
+function refreshPnote(options:Readonly<{force?:boolean}>={}){
   const t=TASKS[TimerState.currentIndex];
-  if(!isLiveTrackableTimer()){
+  if(!isLiveTrackableTimer()||!t){
     const key=`no-area:${taskNoteScheduleRevision}:${TimerState.mode}:${TASKS.length}`;
     if(!options.force&&key===executeProgressPanelRenderKey)return false;
     executeProgressPanelRenderKey=key;
     setTextSafe('pn-utag','—');setTextSafe('pn-dlbl','Done');
-    const doneEl=document.getElementById('pn-done'),totalEl=document.getElementById('pn-total');
+    const doneNode=document.getElementById('pn-done'),totalNode=document.getElementById('pn-total'),doneEl=doneNode instanceof HTMLInputElement?doneNode:null,totalEl=totalNode instanceof HTMLInputElement?totalNode:null;
     setElementValue(doneEl,'');setElementValue(totalEl,'');setElementDisabled(doneEl,true);setElementDisabled(totalEl,true);
     const pbar=document.getElementById('pbar');if(pbar)pbar.style.width='0%';
     setTextSafe('pn-sum','No active trackable block');
@@ -2321,7 +2322,7 @@ function refreshPnote(options={}){
     const areaShare=document.getElementById('pn-area-share');
     if(areaShare){areaShare.textContent='';areaShare.hidden=true;}
     setTextSafe('pn-info-popover','Persistent notes stay with their shared Area or support context. Use the Daily Diary for observations specific to today.');
-    const pn=document.getElementById('pn-extra');
+    const pnNode=document.getElementById('pn-extra'),pn=pnNode instanceof HTMLTextAreaElement?pnNode:null;
     if(pn){const shell=pn.closest('.execute-note-editor-shell'),active=document.activeElement;if(shell&&active instanceof HTMLElement&&shell.contains(active))active.blur();clearTaskNoteEditorBinding(pn);setElementValue(pn,'');setElementDisabled(pn,true);pn.hidden=false;setElementAttribute(pn,'placeholder','');setElementAttribute(pn,'aria-label','Note unavailable: no work or support block is active');}
     executeNoteView=null;document.getElementById('pn-links')?.replaceChildren();
     renderInheritedNotes(document.getElementById('pn-inherited'),'');
@@ -2337,12 +2338,12 @@ function refreshPnote(options={}){
   if(!viewed)executeNoteView=null;
   const noteKey=viewed?viewed.key:areaKey,noteText=hasNotes?noteTextForKey(noteKey):'',inheritedText=inheritedSubjectNotesHtml(t);
   const key=[taskNoteScheduleRevision,taskId,TimerState.currentIndex,measure,done,total,areaKey,noteKey,noteText,inheritedText].join('|');
-  if(!options.force&&key===executeProgressPanelRenderKey){document.querySelector('#pn-links .note-links')?.refresh?.();return false;}
+  if(!options.force&&key===executeProgressPanelRenderKey){document.querySelector<HTMLElement&{refresh?:()=>void}>('#pn-links .note-links')?.refresh?.();return false;}
   executeProgressPanelRenderKey=key;
   setTextSafe('pn-utag',measure||'—');
-  const labels={pages:'Pages',min:'Minutes',Qs:'Questions',videos:'Videos',cards:'Cards',topics:'Topics',answers:'Answers',block:'Block',blocks:'Blocks'};
+  const labels:Readonly<Record<string,string>>={pages:'Pages',min:'Minutes',Qs:'Questions',videos:'Videos',cards:'Cards',topics:'Topics',answers:'Answers',block:'Block',blocks:'Blocks'};
   setTextSafe('pn-dlbl',labels[measure]||'Done');
-  const doneEl=document.getElementById('pn-done'),totalEl=document.getElementById('pn-total');
+  const doneNode=document.getElementById('pn-done'),totalNode=document.getElementById('pn-total'),doneEl=doneNode instanceof HTMLInputElement?doneNode:null,totalEl=totalNode instanceof HTMLInputElement?totalNode:null;
   setElementValue(doneEl,done);setElementValue(totalEl,total);
   setElementDisabled(doneEl,false);setElementDisabled(totalEl,false);
   const areaShare=document.getElementById('pn-area-share');
@@ -2355,7 +2356,7 @@ function refreshPnote(options={}){
   }
   setTextSafe('pn-info-popover',support?'One shared persistent note for every support activity. Use the Daily Diary for observations specific to today.':'This note is shared by blocks with the exact same Area. Parent-Area notes may appear as read-only context. Use the Daily Diary for observations specific to today.');
   const infoButton=document.getElementById('pn-info-btn');if(infoButton)infoButton.setAttribute('aria-label',support?'About support notes':'About notes');
-  const pn=document.getElementById('pn-extra');
+  const pnNode=document.getElementById('pn-extra'),pn=pnNode instanceof HTMLTextAreaElement?pnNode:null;
   if(pn){
     if(viewed)bindNoteEditor(pn,viewed.key,viewed.label,'execute');
     else if(hasNotes)bindTaskNoteEditor(pn,TimerState.currentIndex,'execute');
@@ -2374,7 +2375,7 @@ function refreshPnote(options={}){
 }
 // Execute's editor shows a linked note in place of the block's own until the
 // own chip is tapped or the block changes.
-function openExecuteNote(ref,taskId,own){
+function openExecuteNote(ref:string,taskId:string|null,own:ReturnType<typeof AppData.notes.get>|null){
   const target=AppData.notes.get(ref);
   executeNoteView=target&&(!own||target.id!==own.id)?Object.freeze({taskId,id:target.id}):null;
   return refreshPnote({force:true});
@@ -2387,10 +2388,9 @@ async function openNotesLibrary(){
   return true;
 }
 function onPnoteChange(){
-  const doneEl=document.getElementById('pn-done');
-  const totalEl=document.getElementById('pn-total');
-  const t=TASKS[TimerState.currentIndex];const measure=taskMeasureValue(t,'units');
-  if(!t||!doneEl||!totalEl)return;
+  const doneNode=document.getElementById('pn-done'),totalNode=document.getElementById('pn-total');
+  const doneEl=doneNode instanceof HTMLInputElement?doneNode:null,totalEl=totalNode instanceof HTMLInputElement?totalNode:null;
+  const t=TASKS[TimerState.currentIndex];if(!t||!doneEl||!totalEl)return;const measure=taskMeasureValue(t,'units');
   const state=progressInputState(TimerState.currentIndex,doneEl.value,totalEl.value,taskTargetValue(t));
   const resolved=syncProgressInputsToState(TimerState.currentIndex,state,{updateUI:false,save:false});
   const unitPct=state.pct!==null?state.pct:0;
@@ -3712,7 +3712,7 @@ const OwnershipUiProjection=(()=>{
       reason:mutationBlocked?'A protected data operation is in progress.':reasonFor(status.state)
     });
   }
-  function candidateElements(root=document){
+  function candidateElements(root:ParentNode=document){
     const found=new Set();
     const elementRoot=root&&root.nodeType===1?root:null;
     const queryRoot=root&&typeof root.querySelectorAll==='function'?root:document;
@@ -3790,7 +3790,7 @@ const OwnershipUiProjection=(()=>{
     if(ACTIVE_SESSION_BLOCKED_CLICK_ACTIONS.has(element.getAttribute('data-action')||''))return true;
     return ACTIVE_SESSION_BLOCKED_CHANGE_ACTIONS.has(element.getAttribute('data-change')||'');
   }
-  function apply(root=document){
+  function apply(root:ParentNode=document){
     const previousCanMutate=current.canMutate;
     current=createSnapshot();
     const page=document.documentElement;

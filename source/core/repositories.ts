@@ -455,7 +455,7 @@ const planData=freeze({
       portable=PersonalDataCodec.portablePreferences({...clean.preferences,version:2,updatedAt:now});
     if(new TextEncoder().encode(JSON.stringify(clean.plans)).length>1024*1024)
       throw new RangeError('Plan data exceeds its storage allowance.');
-    return Meta.transaction('readwrite',(meta,tx,finish)=>{
+    return Meta.transaction<PortablePreferences>('readwrite',(meta,tx,finish)=>{
       assertWriteToken(token,'restore portable Plans and Preferences');
       stageCanonicalMutationEpoch(tx,['personalData']);
       meta.put('planDraft',clean.plans.draft,{updatedAt:now});
@@ -464,7 +464,7 @@ const planData=freeze({
       tx.oncomplete=()=>{reportCanonicalCommit('planData','upsert');finish(true,freeze(portable));};
     },{strict:true,abortMessage:'Portable Plans and Preferences restore aborted'});
   },
-  read:async()=>{const [draft,rawLibrary]=await Promise.all([Meta.read('planDraft'),Meta.read('planLibrary')]);const library=rawLibrary as Omit<SavedPlans,'draft'>|null;return {draft:draft??null,savedPlans:library?.savedPlans||[],defaultId:library?.defaultId||null};},
+  read:async():Promise<SavedPlans>=>{const [draft,rawLibrary]=await Promise.all([Meta.read('planDraft'),Meta.read('planLibrary')]);const library=rawLibrary as Omit<SavedPlans,'draft'>|null;return {draft:typeof draft==='string'?draft:null,savedPlans:[...(library?.savedPlans||[])],defaultId:library?.defaultId||null};},
   writeDraft:(value:string|null,options:WriteOptions={})=>{if(value!==null&&(typeof value!=='string'||value.length>APP_LIMITS.maxScheduleChars))throw new RangeError('Plan draft exceeds its text limit.');return writePlanMeta('planDraft',value,options);},
   writeLibrary:(value:Omit<SavedPlans,'draft'>,options:WriteOptions={})=>writePlanMeta('planLibrary',value,{...options,strictDurability:true})
 });

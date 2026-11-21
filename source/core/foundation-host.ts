@@ -377,7 +377,7 @@ const SystemNotifications=(()=>{
       options.silent=isSilent();new window.Notification(String(event.title||'Study Director'),options);return true;
     }catch(error){AppDiagnostics.capture('system-notifications.display',error,'warn');return false;}
   }
-  async function notify(title:string,body:string,tag:string,occurrence:string,test=false){
+  async function notify(title:string,body:string,tag:string,occurrence?:string,test=false){
     if(!enabled())return false;
     const event={source:'system',id:String(tag||title||'study-director'),occurrence,title,message:body,test};
     return NoticeCoordinator.deliverSystem(event,isCurrent=>deliver(event,isCurrent));

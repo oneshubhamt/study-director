@@ -17,10 +17,7 @@ export interface PlanRow{
   [key:string]:string|number|null|undefined;
   start:string;dur:number|string;name:string;kind:string;area:string;measure:string;target:number|string|null;id?:string;
 }
-export interface PlanParseResult{
-  ok:boolean;kind:string;message?:string;parsed:readonly import('./domain.ts').ScheduleRow[];errors:readonly string[];warnings:readonly string[];
-  rawOriginal?:string;raw?:string;
-}
+export type PlanParseResult=import('./domain.ts').ScheduleParse;
 export interface ImmutablePlanDraft{
   readonly ok:boolean;readonly kind:string;readonly message:string;readonly parsed:readonly Readonly<import('./domain.ts').ScheduleRow>[];
   readonly errors:readonly string[];readonly warnings:readonly string[];
@@ -97,9 +94,9 @@ export interface PlanModuleInput{
     parser:Readonly<{isCanonicalScheduleText(value:unknown):boolean;parseScheduleDraftText(value:unknown):PlanParseResult;scheduleTextFromRows(rows:readonly PlanRow[]):string}>;
     clock:Readonly<{
       clockHM():string;clockMinuteToStudyMinute(value:number):number;getMinuteOfDay():number;isValidHHMM(value:unknown):boolean;
-      normalizeHHMM(value:unknown):string;studyMinuteToHHMM(value:number):string;t2m(value:string):number;timeLabelFromIso(value:unknown):string;
+      normalizeHHMM(value:unknown):string;studyMinuteToHHMM(value:number):string;t2m(value:string):number;timeLabelFromIso(value:unknown):string|null;
     }>;
-    view:Readonly<{document:PlanDocument;on<K extends keyof HTMLElementEventMap>(target:PlanElement,type:K,handler:(event:HTMLElementEventMap[K])=>unknown):unknown;textEl(tag:string,className:string,text:string):PlanElement;updateRealTimeAwareness(...args:unknown[]):unknown;window:Readonly<{matchMedia?(query:string):Readonly<{matches:boolean}>;requestAnimationFrame(callback:()=>void):number}>}>;
+    view:Readonly<{document:PlanDocument;on<T extends EventTarget>(target:T,type:string,handler:EventListenerOrEventListenerObject,options?:boolean|AddEventListenerOptions):T;textEl(tag:string,className:string,text:string):PlanElement;updateRealTimeAwareness(...args:unknown[]):unknown;window:Readonly<{matchMedia?(query:string):Readonly<{matches:boolean}>;requestAnimationFrame(callback:()=>void):number}>}>;
     scheduleGateway:Readonly<PlanScheduleGateway>;
     ownership:Readonly<{canMutate():boolean;requirePrimary(event:PlanEvent|null,reason:string):boolean}>;
     interactions:Readonly<{
