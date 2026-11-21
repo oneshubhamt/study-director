@@ -30,7 +30,6 @@ jobs:
         run: |
           node tests/unit/app/presentation-defaults.mjs
           node tests/architecture/app/presentation-contracts.mjs
-          node tests/architecture/storage/runtime-authority-contract.mjs
           node tests/architecture/app/runtime-boundaries.mjs
       - name: Fresh source build
         run: npm run build

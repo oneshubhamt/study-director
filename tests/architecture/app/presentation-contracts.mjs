@@ -21,6 +21,13 @@ const coreStyleIndex=html.indexOf('<link rel="stylesheet" href="@@SD_CORE_STYLE_
 assert.ok(criticalStyleIndex>=0&&metadataBootstrapIndex>criticalStyleIndex&&metadataSyncIndex>metadataBootstrapIndex&&coreStyleIndex>metadataSyncIndex,'saved-theme browser chrome must synchronize from the checked metadata bootstrap and critical CSS before the full stylesheet is requested.');
 assert.equal((html.match(/value\.synchronizeMetadata\(\);/g)||[]).length,1,'first-paint metadata synchronization must have one canonical call site.');
 assert.match(html,/function persistProtectedPreferences\(overrides=\{\}\)\{[\s\S]*?if\('theme' in overrides\|\|'presentation' in overrides\|\|'fontScale' in overrides\)void flushProtectedPreferences\(\)\.catch\(\(\)=>\{\}\);[\s\S]*?else scheduleProtectedPreferencesWrite\(\);/u,'appearance changes must bypass the debounce so canonical persistence settles before its startup mirror is refreshed.');
+const preferenceFlushStart=html.indexOf('async function flushProtectedPreferences(');
+const preferenceFlushEnd=html.indexOf('function scheduleProtectedPreferencesWrite()',preferenceFlushStart);
+const preferenceFlush=html.slice(preferenceFlushStart,preferenceFlushEnd);
+assert.ok(preferenceFlushStart>=0&&preferenceFlushEnd>preferenceFlushStart,'protected-preference flush must remain present for presentation persistence.');
+assert.ok(preferenceFlush.indexOf('const saved=await run;')<preferenceFlush.indexOf('refreshAppearanceMirrors(saved)'),'first-paint mirrors advance only after canonical preference persistence succeeds.');
+assert.match(preferenceFlush,/if\(protectedPreferencesState\.updatedAt===snapshot\.updatedAt\)\{acceptProtectedPreferences\(saved\);refreshAppearanceMirrors\(saved\);\}/u,'a delayed appearance write must not overwrite a newer in-memory preference or mirror.');
+assert.match(preferenceFlush,/catch\(error\)\{[\s\S]*?protectedPreferencesDirty=true;protectedPreferencesWriteFailure=error;[\s\S]*?throw error;/u,'a failed appearance write remains dirty/retryable and does not masquerade as durable success.');
 
 assert.match(coreCss,/@media \(any-pointer:coarse\) and \(min-width:721px\)\{[\s\S]*?#pane-plan \.si\.draft \.plan-draft-fields\{[\s\S]*?--plan-draft-control-height:max\(var\(--_sd-touch-min,44px\),var\(--sd-density-touch-target,0px\)\);[\s\S]*?grid-template-columns:repeat\(3,minmax\(0,1fr\)\);[\s\S]*?"start dur kind"[\s\S]*?"area measure target"/u,'touch-capable tablets must use the three-column Plan composition even when iPadOS reports a fine primary pointer.');
 assert.doesNotMatch(coreCss,/@media \(hover:none\) and \(pointer:coarse\) and \(min-width: 901px\)\{[\s\S]*?grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/u,'large touch devices must not reacquire the brittle dense Plan grid.');
