@@ -164,12 +164,17 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
   }
   function restoreFontScale():number{return applyFontScale(readFontScale());}
   function renderControls():void{renderThemeControls();renderPresentationControls();}
+  function closeDisplayTools():boolean{
+    if(!displayToolsPopover)return false;
+    displayToolsPopover.hide();return true;
+  }
   function toggleDisplayTools():void{
     const menu=document.getElementById('display-tools-menu'),trigger=document.getElementById('display-tools-trigger');
     if(!menu||!trigger)return;
     displayToolsPopover??=popovers.create(menu);
-    if(menu.hidden)displayToolsPopover.show(trigger);else displayToolsPopover.hide();
+    if(menu.hidden)displayToolsPopover.show(trigger);else closeDisplayTools();
   }
+  window.addEventListener('studydirector:displaytoolsclose',closeDisplayTools);
   return freeze({
     format:'study-director.presentation-host' as const,contractVersion:1 as const,
     refreshMirrors,applyPreferences,restoreTheme,restorePresentation,restoreFontScale,

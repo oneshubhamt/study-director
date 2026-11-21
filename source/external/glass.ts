@@ -5,6 +5,7 @@ import type {PresentationDefinition,PresentationKernel} from '../../types/presen
 
 const KERNEL_KEY=Symbol.for('studyDirector.presentationKernel.v1');
 const STYLE_ID='sd-glass-presentation-v1';
+const DISPLAY_TOOLS_CLOSE_EVENT='studydirector:displaytoolsclose';
 const PROFILE:PresentationDefinition=Object.freeze({
   contractVersion:2,
   id:'glass',
@@ -1184,7 +1185,7 @@ function installOverlayCoordinator():boolean{
       surfaces.forEach(surface=>surface.element.classList.toggle('sd-glass-surface-suppressed',!!winner&&surface!==winner));
       if(winner){root.dataset['glassOverlayActive']=winner.id;root.dataset['glassOverlayBlocksTools']=winner.blocksTools?'true':'false';}
       else{delete root.dataset['glassOverlayActive'];delete root.dataset['glassOverlayBlocksTools'];}
-      if(winner?.blocksTools&&!displayMenu.hidden){displayMenu.hidden=true;displayTrigger.setAttribute('aria-expanded','false');}
+      if(winner?.blocksTools&&!displayMenu.hidden){window.dispatchEvent(new Event(DISPLAY_TOOLS_CLOSE_EVENT));if(!displayMenu.hidden){displayMenu.hidden=true;displayTrigger.setAttribute('aria-expanded','false');}}
     }finally{running=false;}
   }
   function schedule():void{if(queued)return;queued=true;queueMicrotask(reconcile);}

@@ -5,6 +5,7 @@ import type {PresentationDefinition,PresentationKernel} from '../../types/presen
 
 const KERNEL_KEY=Symbol.for('studyDirector.presentationKernel.v1');
 const STYLE_ID='sd-aurora-presentation-v1';
+const DISPLAY_TOOLS_CLOSE_EVENT='studydirector:displaytoolsclose';
 const PROFILE:PresentationDefinition=Object.freeze({
   contractVersion:2,
   id:'aurora',
@@ -1189,7 +1190,7 @@ function installOverlayCoordinator():boolean{
       surfaces.forEach(surface=>surface.element.classList.toggle('sd-aurora-surface-suppressed',!!winner&&surface!==winner));
       if(winner){root.dataset['auroraOverlayActive']=winner.id;root.dataset['auroraOverlayBlocksTools']=winner.blocksTools?'true':'false';}
       else{delete root.dataset['auroraOverlayActive'];delete root.dataset['auroraOverlayBlocksTools'];}
-      if(winner?.blocksTools&&!displayMenu.hidden){displayMenu.hidden=true;displayTrigger.setAttribute('aria-expanded','false');}
+      if(winner?.blocksTools&&!displayMenu.hidden){window.dispatchEvent(new Event(DISPLAY_TOOLS_CLOSE_EVENT));if(!displayMenu.hidden){displayMenu.hidden=true;displayTrigger.setAttribute('aria-expanded','false');}}
     }finally{running=false;}
   }
   function schedule():void{if(queued)return;queued=true;queueMicrotask(reconcile);}

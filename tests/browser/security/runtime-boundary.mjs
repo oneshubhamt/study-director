@@ -130,7 +130,12 @@ try{
  await page.evaluate(`__PWA6.NoticeCoordinator.publish('qa-pwa-update',null)`);
  await waitFor(()=>page.evaluate(`document.documentElement.dataset.auroraOverlayActive==='nudge'&&document.getElementById('display-tools-menu').hidden&&document.getElementById('display-tools-trigger').getAttribute('aria-expanded')==='false'`),{label:'blocking overlay closes display tools'});
  assert.equal(await page.evaluate(`document.getElementById('nudge-overlay').classList.contains('sd-aurora-surface-suppressed')`),false);
+ assert.equal(await page.evaluate(`(()=>{const menu=document.getElementById('display-tools-menu');return typeof menu.showPopover==='function'?menu.matches(':popover-open'):false;})()`),false,'blocking overlay closure must also leave the native popover top-layer state closed');
  await page.evaluate(`__PWA6.Pomodoro.timerEvent('clear-cue')`);
+ await waitFor(()=>page.evaluate(`!document.documentElement.dataset.auroraOverlayActive`),{label:'blocking overlay released'});
+ await openDisplayTools();
+ assert.equal(await page.evaluate(`document.getElementById('display-tools-trigger').getAttribute('aria-expanded')`),'true','Display Tools controller must remain reusable after a pack-forced close');
+ await page.click('#display-tools-trigger');
 
  // Repeat HTML paste to catch duplicate policy creation under enforcement.
  await page.evaluate(`(async()=>{const field=document.createElement('textarea');field.id='security-note';document.body.appendChild(field);window.testEditor=await StudyDirectorRichText.mountRichTextEditor({field,label:'Security paste',initialValue:'',maxWords:10000,maxBytes:917504,assets:{get:async()=>null,put:async()=>{},remove:async()=>{}}});for(let i=0;i<2;i++){const editor=document.querySelector('#security-note + .sd-rte .sd-rte-editor');editor.focus();const data=new DataTransfer();data.setData('text/html','<p><strong>Safe text</strong><img src=x onerror="window.badPaste=true"><a href="javascript:alert(1)">bad link</a></p>');data.setData('text/plain','Safe text');${pasteInPage}(editor,data);await new Promise(r=>setTimeout(r,50));}})()`);

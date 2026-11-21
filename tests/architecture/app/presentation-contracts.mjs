@@ -96,10 +96,12 @@ for(const [label,pack,marker] of [['Glass',glassCss,'glass'],['Aurora',auroraCss
   assert.match(pack,/function ensureStyle\(\)[\s\S]*?document\.getElementById\(STYLE_ID\)[\s\S]*?document\.head\.appendChild\(style\)/u,`${label} pack stylesheet installation is idempotent.`);
   assert.match(pack,/function registerPack\(\)[\s\S]*?ensureStyle\(\);const registered=kernel\.registerPresentation\(PROFILE\);if\(registered\)kernel\.synchronizeMetadata\(\);return registered;/u,`${label} registration is owned by the checked startup pack and immediately resynchronizes browser chrome after pack CSS activates.`);
   assert.match(pack,/if\(!install\(\)\)window\.addEventListener\('studydirector:ready',[\s\S]*?once:true/u,`${label} retries DOM coordination at the ready boundary.`);
+  assert.match(pack,/DISPLAY_TOOLS_CLOSE_EVENT='studydirector:displaytoolsclose'[\s\S]*?winner\?\.blocksTools&&!displayMenu\.hidden[\s\S]*?window\.dispatchEvent\(new Event\(DISPLAY_TOOLS_CLOSE_EVENT\)\)/u,`${label} must ask the checked Display Tools owner to close its popover before using the defensive direct-hide fallback.`);
   const markerGuard=pack.indexOf(`dataset['${marker}OverlayCoordinator']==='installed'`),observerCreation=pack.indexOf('new MutationObserver(schedule)');
   assert.ok(markerGuard>=0&&observerCreation>markerGuard,`${label} coordinator marker must short-circuit before observer creation.`);
 }
 assert.match(presentationHost,/function refreshMirrors\([^)]*\)[^{]*\{[\s\S]*?preferences\.mirror-write/u,'checked presentation host owns first-paint mirror refresh failure handling.');
+assert.match(presentationHost,/function closeDisplayTools\(\):boolean\{[\s\S]*?displayToolsPopover\.hide\(\);return true;[\s\S]*?window\.addEventListener\('studydirector:displaytoolsclose',closeDisplayTools\)/u,'checked presentation host must own forced Display Tools closure so popover state and listeners settle through their controller.');
 assert.match(presentationHost,/function toggleDisplayTools\([^)]*\)[^{]*\{[\s\S]*?display-tools-menu[\s\S]*?popovers\.create/u,'checked presentation host owns display-tools interaction.');
 assert.match(html,/function registerPresentationPack\(definition\)\{return requirePresentationRuntime\(\)\.registerPresentation\(definition\);\}/u,'main keeps presentation-pack registration as thin composition.');
 
