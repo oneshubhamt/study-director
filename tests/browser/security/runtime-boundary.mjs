@@ -11,7 +11,7 @@ if(process.env.SD_MINIFIED_TEST==='1'){
  const root=path.resolve('dist',deploymentDirectoryName,'public');
  for(const name of fs.readdirSync(root))if(fs.statSync(path.join(root,name)).isFile())server.setOverride('deployment',name,fs.readFileSync(path.join(root,name)));
  const expose=html.match(/window\.__PWA6=Object\.freeze\(\{[^;]+;\n/)[0];
- html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void PwaLifecycle\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'');
+ html=fs.readFileSync(path.join(root,'index.html'),'utf8').replace('window.StudyDirector=StudyDirectorPublicAPI;',expose+'window.StudyDirector=StudyDirectorPublicAPI;').replace(/void (?:PwaRuntime|PwaLifecycle)\.install\(\)(?:\.then\(\(\)=>schedulePwaUpdateCheck\(750\)\))?;/,'');
 }
 server.setOverride('deployment','runtime-security.html',html.replace('<head>','<head><meta http-equiv="Content-Security-Policy" content="'+policy+'">').replace('Object.freeze({StartupLifecycle,','Object.freeze({BackupProtectionStorage,ExportsAppMeta,trustedAssetURL,trustedTypeViolations,StartupLifecycle,'));
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
@@ -182,7 +182,7 @@ try{
    return {badFirst,badSecond,incompatibleSetup,goodFirst,goodSecond,setup,navs:document.querySelectorAll('[data-tab="qa-p513-tab"]').length,badState:state.registered.find(row=>row.name==='qa-p513-incompatible')?.state||'',goodState:state.registered.find(row=>row.name==='qa-p513-single')?.state||'',apiFrozen:Object.isFrozen(StudyDirector)&&Object.isFrozen(StudyDirector.backup)&&Object.isFrozen(StudyDirector.ui)};
  })()`);
  assert.deepEqual(pluginContract,{badFirst:false,badSecond:false,incompatibleSetup:0,goodFirst:true,goodSecond:true,setup:1,navs:1,badState:'incompatible',goodState:'registered',apiFrozen:true});
- delete globalThis.__p513Optional;
+ await page.evaluate('delete window.__p513Optional');
 
  await page.evaluate(`__PWA6.goTab('guide')`);await waitFor(()=>page.evaluate('!!document.getElementById("pane-guide")'));
  await waitFor(()=>page.evaluate('!!document.querySelector("#pane-guide .guide-life-node[data-guide-step=plan]")'));
