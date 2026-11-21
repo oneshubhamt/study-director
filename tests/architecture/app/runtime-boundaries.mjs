@@ -493,7 +493,7 @@ for(const token of ['--sd-motion-workspace-open-duration','--sd-motion-workspace
   assert.ok(app.includes(token),`presentation manifest exposes ${token}`);
   assert.ok(core.includes(token),`core presentation profile defines ${token}`);
 }
-for(const source of [foundation,insights,readRuntimeSource('source/core/navigation.ts'),fs.readFileSync('source/core/library.ts','utf8'),fs.readFileSync('source/external/guide.js','utf8')]){
+for(const source of [foundation,insights,readRuntimeSource('source/core/navigation.ts'),fs.readFileSync('source/core/library.ts','utf8'),readScript('source/external/guide.ts')]){
   assert.doesNotMatch(source,/startViewTransition|viewTransitionName|view-transition-name/,
     'navigation and lazy feature surfaces must not start snapshot transitions');
 }
@@ -522,7 +522,7 @@ assert.doesNotMatch(readRuntimeSource('source/core/workspace-overlay.ts'),/prese
   'workspace overlays have no dead snapshot-interruption dependency');
 assert.doesNotMatch(readRuntimeSource('source/core/interactions.ts'),/presentation.*interrupt|interrupt.*snapshot/,
   'interaction prompts have no dead snapshot-interruption dependency');
-assert.doesNotMatch(fs.readFileSync('source/external/guide.js','utf8'),/replaceGuidePanel|motion\.replace|appearance\.presentation\.motion/,
+assert.doesNotMatch(readScript('source/external/guide.ts'),/replaceGuidePanel|motion\.replace|appearance\.presentation\.motion/,
   'Guide structural replacements update the live DOM directly');
 assert.doesNotMatch(fs.readFileSync('source/core/library.ts','utf8'),/transition\(\{oldElement|motion\.replace/,
   'Library saved-day replacement updates the live DOM directly');
@@ -595,7 +595,7 @@ assert.ok(editorBundle.includes('.workspace-overlay-rich-text .sd-rte-focus-body
 
 
 // Execute is the workspace/surface vocabulary; Timer remains reserved for genuine timing behavior.
-const guideSource=fs.readFileSync('source/external/guide.js','utf8');
+const guideSource=readScript('source/external/guide.ts');
 assert.match(guideSource,/GUIDE_ORDER=Object\.freeze\(\['plan','execute','review','library','insights'\]\)/,
   'Guide lifecycle uses Execute as the canonical workspace id');
 assert.match(guideSource,/\s*execute:guideSection\(\{\s*label:"Execute"/,

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import vm from 'node:vm';
 import {readScript} from '../../../build/source-script.mts';
 import {PRODUCTION_LIMITS} from '../../../contracts/production-limits.mjs';
@@ -38,24 +37,37 @@ const dailyRecordCodec=registry.require('record-codecs',1).createDailyRecordCode
 }));
 
 let descriptor=null;
+const windowListeners=new Map();
 const context=vm.createContext({
-  console,
-  Date,
-  Math,
-  Object,
-  Promise,
-  String,
-  Number,
-  Array,
-  Set,
-  Map,
+  console,Date,Math,Object,Promise,String,Number,Array,Set,Map,
   window:{
     StudyDirector:{registerPlugin(value){descriptor=value;return true;}},
-    addEventListener(){}
+    addEventListener(type,listener){
+      const listeners=windowListeners.get(type)||[];listeners.push(listener);windowListeners.set(type,listeners);
+    }
   }
 });
-vm.runInContext(fs.readFileSync('source/external/guide.js','utf8'),context,{filename:'source/external/guide.js'});
+vm.runInContext(readScript('source/external/guide.ts'),context,{filename:'source/external/guide.ts'});
 assert.ok(descriptor,'Guide plugin should register.');
+
+let tabRegistrationAttempts=0,historyRegistrations=0;
+const retryApi=Object.freeze({
+  capabilities:Object.freeze({pluginApi:1,tabRegistry:1,planDraft:1,previewRecords:1,installation:1,workspaceHistory:1}),
+  ui:Object.freeze({
+    registerTab(){tabRegistrationAttempts+=1;return tabRegistrationAttempts>1;},goTab(){},
+    workspaceHistory:Object.freeze({
+      register(){historyRegistrations+=1;return true;},open(){},replace(){},close(){return true;},closed(){}
+    })
+  }),
+  plan:Object.freeze({loadDraft(){return Promise.resolve({ok:true});}}),
+  preview:Object.freeze({useSample(){return Promise.resolve({ok:true});},clear(){}}),
+  installation:Object.freeze({status(){return Object.freeze({});},prompt(){},inspect(){},showHelp(){}})
+});
+assert.equal(descriptor.setup(retryApi),false,'a failed tab registration must keep plugin setup retryable');
+assert.equal(descriptor.setup(retryApi),true,'the retry must complete Guide setup');
+assert.equal(descriptor.setup(retryApi),true,'completed Guide setup remains idempotent');
+assert.equal(historyRegistrations,1,'Guide retries must reuse one Legal Center history registration');
+assert.equal(windowListeners.get('studydirector:installationchange')?.length,1,'Guide retries must install one installation listener');
 const provider=descriptor.previewProviders?.insights;
 assert.equal(typeof provider,'function','Guide must expose the Insights sample provider.');
 const records=provider({today:'2026-09-16'});

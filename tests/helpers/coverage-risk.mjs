@@ -53,7 +53,7 @@ const NON_FAST_COVERAGE_OWNERS=Object.freeze([
   Object.freeze({file:'source/external/image-worker.js',owner:'browser/worker',reason:'Image worker behavior is owned by browser image workflows and release build checks.'}),
   Object.freeze({file:'source/external/glass.js',owner:'browser',reason:'Visual UI layer.'}),
   Object.freeze({file:'source/external/aurora.js',owner:'browser',reason:'Visual UI layer.'}),
-  Object.freeze({file:'source/external/guide.js',owner:'browser',reason:'Guide UI layer.'}),
+  Object.freeze({file:'source/external/guide.ts',owner:'integration/insights + browser',reason:'Checked Guide content, sample producer and UI are exercised by the canonical preview witness and browser Guide journeys.'}),
   Object.freeze({file:'source/core/insights-host.ts',owner:'integration/insights + browser',reason:'Read-only Insights repository/preview host is exercised by the transport lifecycle integration witness and populated browser journey.'}),
   Object.freeze({file:'source/external/insights-protocol.ts',owner:'integration/insights + worker',reason:'Shared Insights wire decoding is exercised directly by the transport lifecycle witness and through the generated worker path.'}),
   Object.freeze({file:'source/external/insights-worker.ts',owner:'integration/insights + browser/worker',reason:'Insights worker entry and malformed-message handling are exercised by the transport lifecycle witness and populated browser journey.'}),

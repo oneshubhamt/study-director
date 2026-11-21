@@ -58,7 +58,7 @@ console.log(JSON.stringify({noteReadOnly:true,standaloneStatusLocal:true,library
 
 { // workspace-history-boundary
 const navigation=readRuntimeSource('source/core/navigation.ts');
-const guide=fs.readFileSync('source/external/guide.js','utf8');
+const guide=readScript('source/external/guide.ts');
 const app=readHostHtml();
 const overlay=readRuntimeSource('source/core/workspace-overlay.ts');
 const interactions=readRuntimeSource('source/core/interactions.ts');
