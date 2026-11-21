@@ -17,6 +17,7 @@ window.__p512InstallPromptPrevented=false;
     prompt:{value:async()=>{window.__p512InstallPromptCalls+=1;}},
     userChoice:{value:Promise.resolve({outcome:'accepted'})}
   });
+  window.__p512InstallPromptEvent=promptEvent;
   window.dispatchEvent(promptEvent);
   window.__p512InstallPromptPrevented=promptEvent.defaultPrevented;
 }
@@ -32,12 +33,16 @@ try{
   await skipFirstStart(page);
   assert.equal(await page.evaluate(`window.__p512InstallPromptPrevented`),true,'the pre-host prompt must be captured and prevented by the early bridge');
   assert.equal(await page.evaluate(`__PWA6.NativeCapabilities.status().installationAction`),'install','host startup must consume the prompt retained by the early bridge');
+  assert.equal(await page.evaluate(`window[Symbol.for('studyDirector.installCapture.v1')].status().prompt===window.__p512InstallPromptEvent`),true,'the early bridge must still own the exact captured prompt object');
 
   await page.evaluate(`__PWA6.goTab('guide')`);
   await waitFor(()=>page.evaluate(`document.querySelector('#guide-install-card .mini-btn')?.textContent.trim()==='Install app'`),{timeout:60000,label:'Guide install action'});
-  await page.evaluate(`document.querySelector('#guide-install-card .mini-btn').click()`);
-  await waitFor(()=>page.evaluate(`window.__p512InstallPromptCalls===1`),{label:'captured prompt consumed through Guide'});
-  assert.equal(await page.evaluate(`window.__p512InstallPromptCalls`),1,'Guide must invoke the retained prompt exactly once');
+  assert.equal(await page.evaluate(`window.StudyDirector.installation.status().installationAction`),'install');
+  await page.click('#guide-install-card .mini-btn');
+  await waitFor(()=>page.evaluate(`window.__p512InstallPromptCalls===1`),{timeout:8000,label:'captured prompt consumed through Guide'});
+  const installResult=await page.evaluate(`({calls:window.__p512InstallPromptCalls,state:window.StudyDirector.installation.status().installationState,feedback:window.StudyDirector.installation.status().installFeedback||''})`);
+  assert.equal(installResult.calls,1,'Guide must invoke the retained prompt exactly once');
+  assert.ok(installResult.state==='installing'||/accepted/i.test(installResult.feedback),'accepted prompt must reach the installation state machine');
 
   const errors=page.events.filter(event=>!/favicon|ResizeObserver loop/i.test(event.text));
   assert.deepEqual(errors,[]);
