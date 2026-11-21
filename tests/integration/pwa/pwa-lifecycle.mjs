@@ -50,11 +50,14 @@ await test('first installation never reloads or prepares an interactive page',as
 await test('untrusted messages and release names never authorize reload',async()=>{
  const h=harness();await h.api.install();h.message('SD_PWA_ACTIVATED',{},'forged');h.message('SD_PWA_ACTIVATED',h.old,'forged');await flush();assert.equal(h.counts().reloads,0);assert.equal(h.counts().reserves,0);
 });
-await test('hidden follower role is bound to the exact waiting worker before ownership handoff',async()=>{
- const h=harness();h.behavior.follower=true;h.behavior.prepare=async()=>({ok:false,reason:'Ownership is changing.'});await h.api.install();
- assert.equal(h.api.status().waitingReleaseId,'next');
- h.behavior.follower=false;await h.activate();
- assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'waiting worker must retain the follower role captured before the primary unloads');
+await test('early candidate announcement binds follower role before registration waiting settles',async()=>{
+ const h=harness();h.registration.waiting=null;h.registration.installing=null;await h.api.install();
+ h.behavior.follower=true;h.candidate.state='installing';
+ h.sw.emit('message',{source:h.candidate,data:{type:'SD_PWA_UPDATE_AVAILABLE',releaseId:'next'}});
+ h.behavior.follower=false;h.registration.installing=h.candidate;h.registration.waiting=h.candidate;h.candidate.state='installed';h.candidate.emit('statechange');await flush();
+ assert.equal(h.api.status().waitingReleaseId,'next','candidate announcement must lead only to verified registration discovery');
+ h.behavior.prepare=async()=>({ok:false,reason:'Ownership is changing.'});h.registration.installing=null;await h.activate();
+ assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'exact candidate must retain follower role captured before the primary unloads');
  h.behavior.prepare=async()=>({ok:true});await h.api.apply();assert.equal(h.counts().reloads,1);h.win.emit('pagehide');
 });
 await test('candidate replacement during preparation never gets stale release request',async()=>{
