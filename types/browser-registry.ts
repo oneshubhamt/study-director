@@ -86,6 +86,7 @@ export interface BrowserModuleInputs extends ModuleInputs{'note-export':[];'rich
 // the ES-only domain/registry contracts.
 type BrowserModuleIdentity<K extends keyof BrowserModules>=BrowserModules[K] extends {readonly format:infer F extends string;readonly contractVersion:infer C extends number}?Readonly<{format:F;contractVersion:C}>:never;
 export interface BrowserRegistry extends Omit<PilotRegistry,'define'|'require'|'load'>{
+ lock():Readonly<{format:'study-director.internal-module-status';version:1;locked:boolean;modules:readonly Readonly<{name:string;contractVersion:number;initialized:boolean}>[]}>;
  define<K extends keyof BrowserModules>(name:K,version:K extends 'timer-engine'?2:1,factory:(...input:BrowserModuleInputs[K])=>BrowserModules[K]):boolean;
  require<K extends keyof BrowserModules>(name:K,version:K extends 'timer-engine'?2:1,...input:BrowserModuleInputs[K]):Readonly<BrowserModules[K]>;
  load<K extends keyof BrowserModules>(name:K,version:K extends 'timer-engine'?2:1,format:BrowserModuleIdentity<K>['format'],contractVersion:BrowserModuleIdentity<K>['contractVersion'],...input:BrowserModuleInputs[K]):Readonly<BrowserModules[K]>;
