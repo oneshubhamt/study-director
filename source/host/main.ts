@@ -2403,63 +2403,65 @@ function badgeElements(...args:Parameters<typeof ExecutionViews.badgeElements>){
 function updateBadges(...args:Parameters<typeof ExecutionViews.updateBadges>){return ExecutionViews.updateBadges(...args);}
 function updateSessionControls(...args:Parameters<typeof ExecutionViews.updateSessionControls>){return ExecutionViews.updateSessionControls(...args);}
 /* REVIEW SUBSYSTEM · PRIVATE MODULE */
-const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze<Parameters<typeof ReviewHostModule.createSubsystem>[0]>({
+type ReviewHostInput=Parameters<typeof ReviewHostModule.createSubsystem>[0];
+type ReviewSubsystemInput=ReviewHostInput['subsystem'];
+const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze<ReviewHostInput>({
   module:ReviewModule,
-  subsystem:Object.freeze({
-  constants:Object.freeze({
+  subsystem:Object.freeze<ReviewSubsystemInput>({
+  constants:Object.freeze<ReviewSubsystemInput['constants']>({
     limits:APP_LIMITS,dataContract:DATA_CONTRACT,
     completionSources:COMPLETION_SOURCES,taskOutcomes:TASK_OUTCOMES,timerModes:TIMER_MODES
   }),
-  services:Object.freeze({
+  services:Object.freeze<ReviewSubsystemInput['services']>({
     appData:AppData,diagnostics:AppDiagnostics,practicePacer:PracticePacer,
     taskIdentity:TaskIdentity,taskSessionState:TaskSessionState,keyedRecord:KeyedRecord,
     evidenceGateway:SessionEvidenceGateway,dailyReflection:DailyReflectionPersistence,saveLane:SaveLaneModule
   }),
-  runtime:Object.freeze({
+  runtime:Object.freeze<ReviewSubsystemInput['runtime']>({
     tasks:TASKS,sessionState:SessionState,scheduleDerivedState:ScheduleDerivedState,
     currentIndex:()=>TimerState.currentIndex,timerMode:()=>TimerState.mode,isPaused:()=>TimerState.paused,pendingGap:()=>TimerState.inactiveGap,
     carryForward:()=>latestCarryForward,originalSchedule:()=>TimerState.originalSchedule,
     setSafetyMessage:value=>{sessionSafetyMessage=String(value||'');}
   }),
-  ports:Object.freeze({
-    domain:Object.freeze({
+  ports:Object.freeze<ReviewSubsystemInput['ports']>({
+    domain:Object.freeze<ReviewSubsystemInput['ports']['domain']>({
       boundedInt,clampText,clampEditorContent,editorContentWithinLimits,plainTextContent,classifyTaskOutcome,cleanDayRevision,dailyRecordMetricsFromEvidence,
       emptyTaskOutcomeCounts,finiteNumber,materializeDailyRecordView,normalizeCompletionSource,
       normalizeDailyResultEntry,positiveMinutes,sanitizePracticeRuns,sanitizeTaskOutcomeCounts,
       summarizeCleanPracticeRuns,taskAreaValue,taskMeasureValue,taskOutcomeInfo,taskOutcomeSummaryText,
       taskOutcomeTotal,taskTargetValue
     }),
-    presentation:Object.freeze({
+    presentation:Object.freeze<ReviewSubsystemInput['ports']['presentation']>({
       dateInsightsMeta,fmtS,formatPracticeMs,practicePaceBandLabel,prettyDate,renderRichTextContent,
       setProgressSummary,studyMinuteToHHMM,textEl,timeLabelFromIso
     }),
-    schedule:Object.freeze({
+    schedule:Object.freeze<ReviewSubsystemInput['ports']['schedule']>({
       adjustedEndMin,adjustedStartMin,effectiveNowMin,hasAdjustedTiming,isLiveTrackableTimer,
       isTaskResolved,isTrackableBlock,isWorkBlock,latestTrackableEndMin,originalEndMin,
       originalStartMin,scheduleFingerprint
     }),
-    evidence:Object.freeze({
+    evidence:Object.freeze<ReviewSubsystemInput['ports']['evidence']>({
       actualRecordsSnapshot,applicableNotesForTask,clearManualCompletionOverride,
       liveTaskOutcome,progressInputState,recordCurrentActiveToTask,
       resolveTaskCompletion,storeResolvedCompletion,setCompletionState,syncProgressInputsToState,updateTimerFocusMetrics
     }),
-    session:Object.freeze({
+    session:Object.freeze<ReviewSubsystemInput['ports']['session']>({
       acknowledgeSavedStudyDay,clearCanonicalSessionAfterSavedDay,
       cancelPendingLiveDraftSave,clearSaveReminder,flushLiveDraft,
       getLifecycleRevision:()=>SessionLifecycle.revision,getOwnershipRevision:()=>AppOwnership.revision,getReviewDate,
       lifecycleCanWrite:()=>SessionLifecycle.canWrite(),markDayContentChanged,markDayContentSaved,resetRuntimeSessionState,
       runLifecycle:(kind,options,operation)=>SessionLifecycle.run(kind,options,operation),
       saveLiveDraft,setReviewDateTitle,setSessionPanelMode,stopTimerExecution:()=>TimerEngine.stopExecution(),
-      appCanMutate,writeCanonicalNow:(operation,options)=>ActiveSessionRuntime.writeCanonicalNow(operation,options),writeLiveDraftNow
+      appCanMutate,writeCanonicalNow:(operation,options)=>requireActiveSessionRuntime().writeCanonicalNow(operation,options),writeLiveDraftNow
     }),
-    notesDefaults:Object.freeze({
+    notesDefaults:Object.freeze<ReviewSubsystemInput['ports']['notesDefaults']>({
       noteStoredValueForKey,bindTaskNoteEditor,closeRichTextField:field=>richTextCloseField(field),commitTaskNoteEditor,currentNoteEntriesForWorkTasks,
       refreshPlanAfterSessionReset,renderInheritedNotes,setPlanStatus,syncUnfinishedNoteDraft,unfinishedNoteDraftText
     }),
     notifications:NoticeCoordinator.presentation('review',Object.freeze({label:'Open Review',run:()=>goTab('review')})),
-    view:Object.freeze({markStorageHealthTimestamp,notifyUser,on,refreshLibraryAfterSave:async()=>{LibraryView.invalidate();return LibraryView.render();},refreshStorageFallbackWarning,setStatus,updateBadges}),
-    interactions:Object.freeze({confirm:options=>Interactions.confirm(options),notify:options=>Interactions.notify({...options,source:'review'})}),
-    environment:Object.freeze({cancelAnimationFrame,clearTimeout,requestAnimationFrame,setTimeout,todayISO})
+    view:Object.freeze<ReviewSubsystemInput['ports']['view']>({markStorageHealthTimestamp,notifyUser,on,refreshLibraryAfterSave:async()=>{LibraryView.invalidate();return LibraryView.render();},refreshStorageFallbackWarning,setStatus,updateBadges}),
+    interactions:Object.freeze<ReviewSubsystemInput['ports']['interactions']>({confirm:async options=>(await Interactions.confirm(options))===true,notify:options=>Interactions.notify({...options,source:'review'})}),
+    environment:Object.freeze<ReviewSubsystemInput['ports']['environment']>({cancelAnimationFrame,clearTimeout,requestAnimationFrame,setTimeout,todayISO})
   })
   })
 }));
