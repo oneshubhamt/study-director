@@ -130,7 +130,7 @@ assert.match(pwaUpdateHost,/if\(!force&&\(state\.providerBusy\(\)\|\|state\.prov
 assert.match(pwaUpdateHost,/const perform=async\(\)=>\{[\s\S]*if\(!force&&\(state\.providerBusy\(\)\|\|state\.providerDriveBackingUp\(\)\)\)\{deferred=true;return false;\}/u,'provider busy state is checked again after waiting on the Web Lock');
 assert.match(pwaUpdateHost,/locks\.request\(CHECK_LOCK,\{mode:'exclusive'\},perform\)/u,'automatic discovery is serialized through the checked update lock');
 assert.match(pwaUpdateHost,/if\(state\.ownership\(\)\.state!==configuration\.primaryState\|\|environment\.navigator\.onLine===false\)return false;/u,'offline and non-primary windows do not perform network update checks');
-assert.match(app,/providerBusy:\(\)=>BackupProviderRuntime\.status\(\)\.busy,providerDriveBackingUp:\(\)=>BackupProviderRuntime\.locationStatus\('google-drive'\)\?\.backingUp===true/u,'main supplies live provider-transfer state through narrow checked ports');
+assert.match(app,/providerBusy:\(\)=>BackupProviderRuntime\.status\(\)\.busy,[\s\S]*providerBackgroundBackupActive:\(\)=>BackupProviderRuntime\.list\(\)\.some\(row=>BackupProviderRuntime\.locationStatus\(row\.id\)\?\.backingUp===true\),[\s\S]*providerDriveBackingUp:\(\)=>BackupProviderRuntime\.locationStatus\('google-drive'\)\?\.backingUp===true/u,'main supplies foreground, background-backup and Drive transfer state through narrow checked ports');
 
 function productionFunction(signature){
  const start=app.indexOf(signature),end=start>=0?app.indexOf('\n}',start):-1;
