@@ -364,6 +364,7 @@ const app=readHostHtml();
 assert.match(app,/<html[^>]*data-presentation="glass"[^>]*data-typography="glass"[^>]*data-shape="glass"[^>]*data-material="glass"[^>]*data-depth="glass"/u,'Glass must be the pre-hydration presentation before bootstrap JavaScript runs.');
 const core=fs.readFileSync('source/styles/core.css','utf8');
 const glass=readRuntimeSource('source/external/glass.ts');
+const presentationHost=readRuntimeSource('source/core/presentation-host.ts');
 const insights=readRuntimeSource('source/external/insights-rendering.ts')+'\n'+readRuntimeSource('source/external/insights-runtime.ts');
 const editorSource=fs.readFileSync('rich-text/editor.ts','utf8');
 const editorBundle=richTextRuntimeSource();
@@ -497,10 +498,11 @@ for(const source of [foundation,insights,readRuntimeSource('source/core/navigati
   assert.doesNotMatch(source,/startViewTransition|viewTransitionName|view-transition-name/,
     'navigation and lazy feature surfaces must not start snapshot transitions');
 }
-assert.equal((app.match(/startViewTransition\(/g)||[]).length,1,'the app starts native View Transitions from one appearance boundary only');
-const appearanceChange=app.slice(app.indexOf('function runAppearanceChange'),app.indexOf('function renderThemeControls'));
-assert.match(appearanceChange,/prefers-reduced-motion: reduce[\s\S]*?typeof document\.startViewTransition!=='function'[\s\S]*?document\.startViewTransition\(\(\)=>\{change\(\);\}\)/,
-  'appearance transitions fall back to an immediate change under reduced motion or without the API, and only run a synchronous update');
+assert.equal((app.match(/startViewTransition\(/g)||[]).length,0,'unchecked main composition must not own native View Transitions');
+assert.equal((presentationHost.match(/startViewTransition\(/g)||[]).length,1,'the checked presentation host starts native View Transitions from one appearance boundary only');
+const appearanceChange=presentationHost.slice(presentationHost.indexOf('function runAppearanceChange'),presentationHost.indexOf('function renderThemeControls'));
+assert.match(appearanceChange,/prefers-reduced-motion: reduce[\s\S]*?typeof document\.startViewTransition!=='function'[\s\S]*?document\.startViewTransition\(change\)/,
+  'appearance transitions fall back to an immediate change under reduced motion or without the API, and only run a synchronous checked update');
 const tabCommit=foundation.slice(foundation.indexOf('async function presentTabCommit'),foundation.indexOf('async function prepareTabDeparture'));
 assert.doesNotMatch(tabCommit,/startViewTransition/,'primary tab presentation never waits behind a snapshot');
 assert.doesNotMatch(app,/motion:\s*PRESENTATION_KERNEL\.motion|PRESENTATION_KERNEL\.motion/,
