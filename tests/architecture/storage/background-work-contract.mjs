@@ -132,6 +132,11 @@ assert.match(pwaUpdateHost,/locks\.request\(CHECK_LOCK,\{mode:'exclusive'\},perf
 assert.match(pwaUpdateHost,/if\(state\.ownership\(\)\.state!==configuration\.primaryState\|\|environment\.navigator\.onLine===false\)return false;/u,'offline and non-primary windows do not perform network update checks');
 assert.match(app,/providerBusy:\(\)=>BackupProviderRuntime\.status\(\)\.busy,providerDriveBackingUp:\(\)=>BackupProviderRuntime\.locationStatus\('google-drive'\)\?\.backingUp===true/u,'main supplies live provider-transfer state through narrow checked ports');
 
+function productionFunction(signature){
+ const start=app.indexOf(signature),end=start>=0?app.indexOf('\n}',start):-1;
+ assert.ok(start>=0&&end>start,'missing production function '+signature);
+ return app.slice(start,end+2);
+}
 const claimRuntime=productionFunction('async function checkSessionOwnershipClaim(){')+'\n'
  +productionFunction('function wakeSessionOwnershipClaim(slackMs=0){');
 for(const path of ['source/core/internal.ts','source/core/execution-views.ts'])vm.runInThisContext(readScript(path),{filename:path});
