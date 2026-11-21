@@ -50,6 +50,30 @@ try{
    if(expectFocus)assert.equal(state.focus,presentation,`${presentation}/${theme} user-driven selection must restore focus to the selected skin control`);
    assert.equal(state.themeColor,state.computedThemeColor,`${presentation}/${theme} metadata must follow the active presentation token`);
  };
+
+ const overlappingReveal=await page.evaluate(`(async()=>{
+   const own=Object.getOwnPropertyDescriptor(document,'startViewTransition'),hadOwn=Object.prototype.hasOwnProperty.call(document,'startViewTransition'),finishes=[];
+   Object.defineProperty(document,'startViewTransition',{configurable:true,value:change=>{change();let resolve;const finished=new Promise(done=>{resolve=done;});finishes.push(resolve);return {ready:Promise.resolve(),finished};}});
+   const snapshot=()=>({reveal:document.documentElement.hasAttribute('data-sd-appearance-reveal'),x:document.documentElement.style.getPropertyValue('--sd-reveal-x'),y:document.documentElement.style.getPropertyValue('--sd-reveal-y'),radius:document.documentElement.style.getPropertyValue('--sd-reveal-radius')});
+   try{
+     window.StudyDirector.appearance.theme.set('light');
+     window.StudyDirector.appearance.presentation.set('aurora');
+     const before=snapshot();
+     finishes[0]();await Promise.resolve();await Promise.resolve();
+     const afterOlder=snapshot();
+     finishes[1]();await Promise.resolve();await Promise.resolve();
+     const afterNewest=snapshot();
+     return {before,afterOlder,afterNewest,theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation};
+   }finally{
+     if(hadOwn&&own)Object.defineProperty(document,'startViewTransition',own);else delete document.startViewTransition;
+   }
+ })()`);
+ assert.equal(overlappingReveal.before.reveal,true,'newest appearance transition must own reveal state while both transitions are pending');
+ assert.ok(overlappingReveal.before.x&&overlappingReveal.before.y&&overlappingReveal.before.radius,'newest appearance transition must publish its reveal geometry');
+ assert.deepEqual(overlappingReveal.afterOlder,overlappingReveal.before,'settling an older appearance transition must not clear the newer reveal state');
+ assert.deepEqual(overlappingReveal.afterNewest,{reveal:false,x:'',y:'',radius:''},'settling the newest appearance transition must clear its reveal state exactly once');
+ assert.deepEqual({theme:overlappingReveal.theme,presentation:overlappingReveal.presentation},{theme:'light',presentation:'aurora'});
+
  for(const presentation of ['director-current','glass','aurora'])for(const theme of ['dark','light'])await chooseAppearance(presentation,theme);
 
  await chooseAppearance('director-current','light');

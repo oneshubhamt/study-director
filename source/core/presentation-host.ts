@@ -15,17 +15,23 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     throw new TypeError('Study Director presentation kernel is unavailable or incompatible.');
   }
   const root=document.documentElement;
-  let appearanceShiftTimer:number|null=null,displayToolsPopover:ReturnType<PresentationHostInput['popovers']['create']>|null=null;
+  let appearanceShiftTimer:number|null=null,appearanceRevealRevision=0,displayToolsPopover:ReturnType<PresentationHostInput['popovers']['create']>|null=null;
 
   function beginAppearanceShift():void{
     root.setAttribute('data-sd-appearance-shift','');
     if(appearanceShiftTimer!==null)window.clearTimeout(appearanceShiftTimer);
     appearanceShiftTimer=window.setTimeout(()=>{appearanceShiftTimer=null;root.removeAttribute('data-sd-appearance-shift');},520);
   }
+  function clearAppearanceReveal(revision:number):void{
+    if(revision!==appearanceRevealRevision)return;
+    root.removeAttribute('data-sd-appearance-reveal');
+    ['--sd-reveal-x','--sd-reveal-y','--sd-reveal-radius'].forEach(name=>root.style.removeProperty(name));
+  }
   function runAppearanceChange(origin:HTMLElement|null,change:()=>void):void{
+    const revision=++appearanceRevealRevision;
     const reduce=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if(reduce||document.visibilityState!=='visible'){change();return;}
-    if(typeof document.startViewTransition!=='function'){beginAppearanceShift();change();return;}
+    if(reduce||document.visibilityState!=='visible'){clearAppearanceReveal(revision);change();return;}
+    if(typeof document.startViewTransition!=='function'){clearAppearanceReveal(revision);beginAppearanceShift();change();return;}
     const rect=origin?.getBoundingClientRect()??null;
     const x=rect?rect.left+rect.width/2:window.innerWidth/2,y=rect?rect.top+rect.height/2:window.innerHeight/2;
     const radius=Math.hypot(Math.max(x,window.innerWidth-x),Math.max(y,window.innerHeight-y));
@@ -33,7 +39,7 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     root.style.setProperty('--sd-reveal-y',`${Math.round(y)}px`);
     root.style.setProperty('--sd-reveal-radius',`${Math.ceil(radius)}px`);
     root.setAttribute('data-sd-appearance-reveal','');
-    const settle=()=>{root.removeAttribute('data-sd-appearance-reveal');['--sd-reveal-x','--sd-reveal-y','--sd-reveal-radius'].forEach(name=>root.style.removeProperty(name));};
+    const settle=()=>clearAppearanceReveal(revision);
     try{
       const transition=document.startViewTransition(change);
       void Promise.resolve(transition.finished).then(settle,settle);
