@@ -136,6 +136,7 @@ function decodeBuildStringRecord(value:string,label:string):Readonly<Record<stri
   return Object.freeze(Object.fromEntries(entries) as Record<string,string>);
 }
 const RAW_LOCAL_STORAGE_KEYS=decodeBuildStringRecord('@@SD_LOCAL_STORAGE_KEYS_URI@@','local storage keys');
+const DEVICE_WIDE_STORAGE_KEY_NAMES=new Set<string>(decodeBuildJson('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS_URI@@','device-wide storage keys') as string[]);
 const {
   APP_VERSION,APP_CONFIG,APP_LIMITS,ProfileScope,DEVICE_WIDE_STORAGE_KEYS,STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,EXTERNAL_REPOSITORY_IDENTITIES,APP_META_REGISTRY,
   DATA_CONTRACT,DB_STORES,DB_NAME,DB_VER,DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_NOTES_STORE,DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE,DB_ASSET_STORE,
@@ -145,7 +146,7 @@ const {
   profileScope:ProfileScopeBootstrap,
   raw:Object.freeze({
     productionLimits:decodeBuildJson('@@SD_PRODUCTION_LIMITS_URI@@','production limits'),
-    deviceWideStorageKeys:decodeBuildJson('@@SD_DEVICE_WIDE_LOCAL_STORAGE_KEYS_URI@@','device-wide storage keys'),
+    deviceWideStorageKeys:[...DEVICE_WIDE_STORAGE_KEY_NAMES],
     localStorageKeys:RAW_LOCAL_STORAGE_KEYS,
     sessionStorageKeys:decodeBuildJson('@@SD_SESSION_STORAGE_KEYS_URI@@','session storage keys'),
     appMetaKeys:decodeBuildJson('@@SD_APP_META_KEYS_URI@@','AppMeta keys'),
@@ -247,7 +248,7 @@ const Profiles=ProfilesHostModule.createController(Object.freeze({module:Profile
     keys:()=>LocalStorageContract.keys(),
     remove:key=>LocalStorageContract.remove(key)
   }),
-  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(RAW_LOCAL_STORAGE_KEYS).filter(([name])=>!DEVICE_WIDE_STORAGE_KEYS.includes(name)).map(([,key])=>key))}),
+  names:Object.freeze({database:DATA_CONTRACT.storage.dbName,directories:Object.freeze(['@@SD_ATTACHMENT_OPFS_DIRECTORY@@','@@SD_BACKUP_FILES_OPFS_DIRECTORY@@']),keys:Object.freeze(Object.entries(RAW_LOCAL_STORAGE_KEYS).filter(([name])=>!DEVICE_WIDE_STORAGE_KEY_NAMES.has(name)).map(([,key])=>key))}),
   platform:ProfilesHostModule.createPlatform({indexedDB,window,localStorage,storage:navigator.storage,now:()=>Date.now(),random:randomIdPart,reload:()=>location.reload()}),
   limits:Object.freeze({maxName:APP_LIMITS.maxStudentNameChars})
 })}));
