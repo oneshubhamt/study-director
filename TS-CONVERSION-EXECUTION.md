@@ -1,5 +1,13 @@
 # TypeScript conversion — execution record
 
+## P5.11a implementation checkpoint · OPEN · 2026-11-21
+
+- Started from published `ts-exp` head `33597f7a`; scope is P5.11a only.
+- Audit found two in-scope lifecycle defects: failed Guide registration could retain duplicate installation listeners on retry, and a close/reopen Legal Center transition could restore focus to the stale opener.
+- Guide is converted to checked TypeScript, its Insights sample producer is typed against the canonical `StudyRecord` contract, and compiled-source readers/coverage ownership follow the new source.
+- Registration retry and Legal Center ownership fixes are implemented without changing P5.11b presentation, P5.12 install/update policy, P5.13 generic loading, canonical storage topology, or vendored Wordgard.
+- **Still open:** strict type/lint/build/generated gates, Guide browser acceptance including delayed legal reads and template accept/cancel, targeted five-run browser evidence, and final execution-record closure. Full QA remains intentionally deferred.
+
 ## Executor handoff · 2026-11-21
 
 The audited application baseline is `6b16c82a`. Start with **P5.11a, Guide and its Insights sample producer**. P5.11–P5.13 are planned and unstarted. P5.11b covers Director, Glass and Aurora together. P5.12 checks the page and worker sides of one update. P5.13 checks the public plugin API and then the assembled host. These checkpoints can share an implementation session and its verification. Follow the [five-step procedure](AGENTS.md#five-step-procedure) and the [executor handoff](docs/typescript/PHASE-5.md#executor-handoff) for source owners, acceptance criteria and targeted checks. After P5.13, hand Phase 5 to the owner for independent audit before Phase 6. The [branch decision](docs/typescript/DECISIONS.md#branch-lifecycle-and-f30-parity) places F30 parity after the complete TypeScript program.

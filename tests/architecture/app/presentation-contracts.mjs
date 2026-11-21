@@ -9,7 +9,7 @@ const planJs=fs.readFileSync('source/core/plan.ts','utf8');
 const coreCss=fs.readFileSync('source/styles/core.css','utf8');
 const glassCss=fs.readFileSync('source/external/glass.js','utf8');
 const auroraCss=fs.readFileSync('source/external/aurora.js','utf8');
-const guideJs=fs.readFileSync('source/external/guide.js','utf8');
+const guideJs=readScript('source/external/guide.ts');
 
 assert.match(coreCss,/html\[data-theme="light"\]\{[\s\S]*?--sd-color-canvas:#f2f0ea;[\s\S]*?--sd-color-surface-1:#fcfbf8;/u,'Director Light must use the low-glare off-white foundation rather than a pure-white primary surface.');
 assert.match(html,/<style data-sd-critical>html\{[\s\S]*?--sd-meta-theme-color:#04050a;[\s\S]*?--sd-meta-apple-status-bar-style:black-translucent;[\s\S]*?background:#04050a;color:#f0f2ff\}html\[data-theme="light"\]\{[\s\S]*?--sd-meta-theme-color:#f2f0ea;[\s\S]*?--sd-meta-apple-status-bar-style:default;[\s\S]*?background:#f2f0ea;color:#0f1013\}/u,'critical appearance bootstrap must expose matching browser-chrome metadata for Dark and Light before the full stylesheet loads.');
