@@ -2,7 +2,7 @@
 
 ## Executor handoff · 2026-11-21
 
-The audited application baseline is `6b16c82a`. Start with **P5.11a, Guide and its Insights sample producer**. P5.11–P5.13 are planned and unstarted. P5.11b covers Director, Glass and Aurora together. P5.12 checks the page and worker sides of one update. P5.13 checks the public plugin API and then the assembled host. These checkpoints can share an implementation session and its verification. Use the [executor handoff](docs/typescript/PHASE-5.md#executor-handoff) for source owners, acceptance criteria and targeted checks. After P5.13, hand Phase 5 to the owner for independent audit before Phase 6. The [branch decision](docs/typescript/DECISIONS.md#branch-lifecycle-and-f30-parity) places F30 parity after the complete TypeScript program.
+The audited application baseline is `6b16c82a`. Start with **P5.11a, Guide and its Insights sample producer**. P5.11–P5.13 are planned and unstarted. P5.11b covers Director, Glass and Aurora together. P5.12 checks the page and worker sides of one update. P5.13 checks the public plugin API and then the assembled host. These checkpoints can share an implementation session and its verification. Follow the [five-step procedure](AGENTS.md#five-step-procedure) and the [executor handoff](docs/typescript/PHASE-5.md#executor-handoff) for source owners, acceptance criteria and targeted checks. After P5.13, hand Phase 5 to the owner for independent audit before Phase 6. The [branch decision](docs/typescript/DECISIONS.md#branch-lifecycle-and-f30-parity) places F30 parity after the complete TypeScript program.
 
 ## Owner audit of P5.8, P5.9 and P5.10 · closed with targeted verification · 2026-11-21
 

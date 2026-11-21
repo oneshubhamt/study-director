@@ -25,8 +25,12 @@ Keep one current canonical topology with validation, integrity and recovery inta
 1. **Audit:** confirm branch, HEAD, remote and local edits; read the [current record](TS-CONVERSION-EXECUTION.md), assigned [objectives](docs/typescript/PHASE-5.md), affected source, callers and tests. Consult other docs as needed. Name the complete outcome and invariants before editing.
 2. **Analyze:** choose the simplest sound design and coherent scope, including integration and failure paths. Tracked units are not mandatory separate sessions; combine related units when that reduces overhead without obscuring completion.
 3. **Implement:** finish the agreed scope end to end, including necessary fixes. Distinguish typing from intentional behavior changes. Continue through ordinary failures; do not stop because a useful subset works.
-4. **Verify objectives:** compare resulting source and consumers against every outcome. Repair missing wiring, unconverted behavior and unsafe shortcuts. Do not silently narrow objectives or defer required work to mark them complete.
+4. **Verify objectives.** Trace each agreed outcome through its shipped entry point, source and callers. Compare behavior-sensitive paths with the pre-conversion JavaScript and explain any intentional difference. Choose a check that would fail if the old bug or a plausible regression were present. Verify that the feature implementation and its callers are strictly checked. Repair gaps and recheck affected outcomes.
 5. **Targeted QA:** run checks appropriate to changed surfaces, add meaningful regression protection and repair failures. Run new/changed witnesses against their real checked owner; browser probes must leave later scenarios' fixtures valid. Rerun only invalidated checks. Close only when all outcomes and required checks pass; otherwise identify the concrete blocker and remaining work. Full certification belongs to Phase 7.
+
+In the existing execution record, tie each closure claim to the code commit and a reproducible command with its observed result or a hosted run link. One check can support several outcomes. Identify which checks ran locally or in hosted CI and which results came from an earlier commit. For carried-forward evidence, give that commit and confirm the relevant code and checks still apply. Label source-only conclusions, simulated providers and untested device paths where they limit the claim.
+
+Keep the original agreed scope visible. If a required outcome or check remains open, record the pass as partial, identify what passed, failed or was skipped, and name the concrete remaining work. Report an inaccessible source, chat or run when it affects a conclusion.
 
 ## Lean working memory
 
@@ -43,4 +47,3 @@ One owner per fact: this file owns procedure; execution record owns current stat
 - Never commit secrets, personal data/backups, dependencies, generated QA output or `dist`. Never upload private app data.
 - Edit authored runtime in `source`, `portable`, `rich-text`; use build scripts for generated bundles. Tooling/tests/contracts have their own source directories. `release.config.mjs` owns release identity; `LICENSE` must match `source/legal/LICENSE.txt`.
 - Follow [CONTRIBUTING](CONTRIBUTING.md) for commands and [tests/README](tests/README.md) for runner rules. Run browser tests marked `alone` in isolation; diagnose concurrency failures alone before changing code. Bug fixes need regression protection; data/storage changes need affected-layer checks.
-- Report actual evidence and limitations: local is not hosted CI, targeted is not whole-app/device certification. Do not claim skipped or failed checks passed.
