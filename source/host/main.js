@@ -3467,7 +3467,7 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze({
     isTrackableTask:task=>isTrackableBlock(task),isTaskResolved:index=>isTaskResolved(index),currentTaskIndex:()=>TimerState.currentIndex
   }),
   reservation:Object.freeze({
-    suspendProvider:()=>BackupProviderRuntime.suspendBackground('pwa-update'),settleRichTextAssets:()=>RichTextAssetMaintenance.settled(),settleMaintenance:()=>AppData.maintenance.settled(),
+    settleMutation:()=>AppMutationCoordinator.settled(),suspendProvider:()=>BackupProviderRuntime.suspendBackground('pwa-update'),settleRichTextAssets:()=>RichTextAssetMaintenance.settled(),settleMaintenance:()=>AppData.maintenance.settled(),
     settleAttachmentIntegrity:()=>AttachmentIntegrityJob.settled(),quiesceRichText:run=>RichTextRuntime.quiesce(run),
     runExclusive:(name,run)=>AppMutationCoordinator.runExclusive(name,run),runManagedRecovery:run=>ManagedRecoveryQuiescence.run(run),
     projectOwnership:()=>OwnershipUiProjection.apply(),foregroundChanged:()=>foregroundChanged()

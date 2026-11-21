@@ -21,7 +21,7 @@ interface UpdateStatePorts{
  isTaskResolved(index:number):boolean;currentTaskIndex():number;
 }
 interface ReservationPorts{
- suspendProvider():ProviderHold;settleRichTextAssets():PromiseLike<unknown>;settleMaintenance():PromiseLike<unknown>;settleAttachmentIntegrity():PromiseLike<unknown>;
+ settleMutation():PromiseLike<unknown>;suspendProvider():ProviderHold;settleRichTextAssets():PromiseLike<unknown>;settleMaintenance():PromiseLike<unknown>;settleAttachmentIntegrity():PromiseLike<unknown>;
  quiesceRichText<T>(run:()=>Promise<T>):Promise<T>;runExclusive<T>(name:string,run:(authority:UpdateAuthority)=>Promise<T>):Promise<T>;
  runManagedRecovery<T>(run:()=>Promise<T>):Promise<T>;projectOwnership():void;foregroundChanged():void;
 }
@@ -61,7 +61,7 @@ const sdPwaUpdateHostFactory=(()=>{
    if(!input||!Object.isFrozen(input))throw new TypeError('PWA update host input must be frozen.');
    exactObject(input,['configuration','effects','environment','lifecycle','persistence','reservation','state'],'PWA update host input');
    functions(input.state,['startupReady','ownership','sessionLifecycle','mutation','reviewSave','imagePreparationCount','attachmentLibraryBusy','attachmentIngestBusy','exportsBusy','backupBusy','providerBusy','providerDriveBackingUp','liveTimer','timerPaused','timerMode','pacerRunning','canMutate','blockingUiOpen','workRevision','tasks','isTrackableTask','isTaskResolved','currentTaskIndex'],'PWA update state ports');
-   functions(input.reservation,['suspendProvider','settleRichTextAssets','settleMaintenance','settleAttachmentIntegrity','quiesceRichText','runExclusive','runManagedRecovery','projectOwnership','foregroundChanged'],'PWA update reservation ports');
+   functions(input.reservation,['settleMutation','suspendProvider','settleRichTextAssets','settleMaintenance','settleAttachmentIntegrity','quiesceRichText','runExclusive','runManagedRecovery','projectOwnership','foregroundChanged'],'PWA update reservation ports');
    functions(input.persistence,['settleDiary','flushPlanDraft','planAuthoredText','planReadDraft','savePlanDraft','settlePlanData','readStoredPlan','flushPendingReview','settleReviewEditor','writeLiveDraft','flushNotes','noteFailure','flushDeletionRecovery','settleActiveSession','loadActiveSession','activeSessionIssue'],'PWA update persistence ports');
    functions(input.effects,['backupBeforeUpdate','pauseTimer','togglePacer','scheduleSyncStatus','publishNotice','capture','localGet','localSet'],'PWA update effect ports');
    const {configuration,environment,state,reservation,persistence,effects}=input,doc=environment.document,win=environment.window;
@@ -124,7 +124,7 @@ const sdPwaUpdateHostFactory=(()=>{
     if(context.external===true&&state.ownership().state===configuration.secondaryState){if(reservationToken)reservationToken.workRevision=state.workRevision();return Object.freeze({ok:true,reason:''});}
     const workRevision=state.workRevision(),ownershipBefore=state.ownership(),lifecycleBefore=state.sessionLifecycle();
     try{
-     if(!reservationToken)await Promise.resolve();
+     if(!reservationToken)await input.reservation.settleMutation();
      if(!await persistence.settleDiary())return Object.freeze({ok:false,reason:'The Diary edit could not be saved. Keep this tab open and retry.'});check();
      if(await persistence.flushPlanDraft()===false)return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});check();
      const planText=persistence.planAuthoredText();if(planText!==null&&(persistence.planReadDraft()??'')!==planText&&await persistence.savePlanDraft()===false)return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
@@ -151,7 +151,7 @@ const sdPwaUpdateHostFactory=(()=>{
    function markCheck(at=now()){const exact=Math.max(1,Math.floor(Number(at)||now()));lastSuccessMemory=Math.max(lastSuccessMemory,exact);try{return effects.localSet(configuration.updateCheckStorageKey,String(exact));}catch{return false;}}
    function checkDue(at=now()){const last=lastCheckAt();return !last||Math.max(0,Number(at)||now())-last>=CHECK_INTERVAL;}
    function checkBackoff(count=failureCount){const exponent=Math.max(0,Math.min(8,Math.floor(Number(count)||1)-1));return Math.min(CHECK_RETRY_MAX,CHECK_RETRY_BASE*(2**exponent));}
-   function clearCheckFailure(){failureCount=0;retryAt=0;}function recordCheckFailure(at=now()){failureCount=Math.min(9,failureCount+1);retryAt=Math.max(1,Math.floor(Number(at)||now())+checkBackoff();return retryAt;}
+   function clearCheckFailure(){failureCount=0;retryAt=0;}function recordCheckFailure(at=now()){failureCount=Math.min(9,failureCount+1);retryAt=Math.max(1,Math.floor(Number(at)||now()))+checkBackoff();return retryAt;}
    function clearCheckTimer(){checkDueAt=0;if(checkTimer!==null){environment.clearTimeout(checkTimer);checkTimer=null;}}
    function scheduleCheck(minimumDelay=0){clearCheckTimer();const current=lifecycle.status();if(!current.supported||state.ownership().state!==configuration.primaryState)return false;if(current.registrationError&&!retryAt)recordCheckFailure();const currentTime=now(),last=lastCheckAt(),dueIn=current.registered&&!current.checkError&&last?Math.max(0,last+CHECK_INTERVAL-currentTime):0,retryIn=retryAt?Math.max(0,retryAt-currentTime):0,delay=Math.max(dueIn,retryIn,Math.max(0,Number(minimumDelay)||0));checkDueAt=currentTime+delay;checkTimer=environment.setTimeout(()=>{checkTimer=null;checkDueAt=0;void checkIfDue();},delay);return true;}
    async function checkIfDue({force=false}:Readonly<{force?:boolean}>={}){const current=lifecycle.status();if(!current.supported||checkRunning||!force&&(current.registered&&!current.checkError&&!checkDue()||retryAt>now()))return false;if(state.ownership().state!==configuration.primaryState||environment.navigator.onLine===false)return false;if(!force&&(state.providerBusy()||state.providerDriveBackingUp())){scheduleCheck(30000);return false;}checkRunning=true;let deferred=false;const perform=async()=>{const status=lifecycle.status();if(!force&&(status.registered&&!status.checkError&&!checkDue()||retryAt>now()))return false;if(!force&&(state.providerBusy()||state.providerDriveBackingUp())){deferred=true;return false;}const success=await lifecycle.checkForUpdate();if(success){markCheck();clearCheckFailure();return true;}recordCheckFailure();return false;};try{const locks=environment.navigator.locks;if(locks&&typeof locks.request==='function')return await locks.request(CHECK_LOCK,{mode:'exclusive'},perform);return await perform();}catch(error){recordCheckFailure();effects.capture('pwa.update-check-scheduler',error,'warn');return false;}finally{checkRunning=false;scheduleCheck(deferred?30000:0);}}
