@@ -24,6 +24,7 @@ const maintenanceHost=readScript('source/core/backup-maintenance-host.ts');
 const readinessHost=readScript('source/core/backup-readiness-host.ts');
 const integrityHost=readScript('source/core/backup-integrity-host.ts');
 const drive=fs.readFileSync('source/external/drive.ts','utf8');
+const pwaUpdateHost=readScript('source/core/pwa-update-host.ts');
 
 assert.match(maintenanceHost,/providerId[\s\S]*requestedAt[\s\S]*nextEligibleAt[\s\S]*reason[\s\S]*repositoryScope[\s\S]*requestId/u,'durable maintenance intent must carry eligibility, reason and repository generation');
 assert.match(metadata,/Number\(value\.version\)!==4/u,'the ordinary runtime reads only the current maintenance intent');
@@ -121,52 +122,16 @@ assert.match(provider,/budgetMs:background\.integrity\.workBudgetMs/u,'integrity
 assert.doesNotMatch(provider,/Background\.integrity|PROVIDER_CONVERGENCE_BUDGET|backgroundAfter|convergenceAfter|resumePendingProviderBackup/u,'retired handoffs and transfer deadlines must be absent');
 assert.doesNotMatch(app,/dataMaintenanceTimer|attachmentIntegrityTimer|attachmentIntegrityRunning|attachmentIntegrityAwaitingControl|attachmentMaintenanceDailyTimer/u,'host timers must not duplicate lifecycle ownership');
 assert.doesNotMatch(device,/scheduledUrgent|scheduledRetry|automaticRetryPaused/u,'automatic deadlines and blockers belong to the shared lifecycle');
-// P5: exercise the exact production admission and ownership-wake functions
-// under deterministic provider, lock, visibility and wall-clock conditions.
-function productionFunction(signature){
- const start=app.indexOf(signature),end=start>=0?app.indexOf('\n}',start):-1;
- assert.ok(start>=0&&end>start,'missing production function '+signature);
- return app.slice(start,end+2);
-}
-const updateRuntime=productionFunction('function pwaProviderNetworkBusy(){')+'\n'+productionFunction('async function checkPwaUpdateIfDue({force=false}={}){');
-function updateHarness({busy=false,backingUp=false,lockRace=false,offline=false}={}){
- const activity={busy,backingUp},calls={update:0,mark:0,fail:0,retry:[],lock:0};
- const context=vm.createContext({
-  navigator:{onLine:!offline,locks:{request:async(_,__,perform)=>{calls.lock++;if(lockRace)activity.backingUp=true;return perform();}}},
-  AppOwnership:{status:()=>({state:'primary'})},OWNERSHIP_STATES:{PRIMARY:'primary'},
-  BackupProviderRuntime:{status:()=>({busy:activity.busy}),locationStatus:()=>({backingUp:activity.backingUp})},
-  PwaLifecycle:{status:()=>({supported:true,registered:true,checkError:false}),checkForUpdate:async()=>{calls.update++;return true;}},
-  pwaUpdateCheckDue:()=>true,markPwaUpdateCheck:()=>{calls.mark++;},clearPwaUpdateCheckFailure:()=>{},
-  recordPwaUpdateCheckFailure:()=>{calls.fail++;},schedulePwaUpdateCheck:delay=>{calls.retry.push(delay);},
-  AppDiagnostics:{capture:()=>{}},PWA_UPDATE_CHECK_LOCK:'qa-update-check',
-  pwaUpdateCheckRetryAt:0,Date
- });
- vm.runInContext('let pwaUpdateCheckRunning=false;\n'+updateRuntime+'\nglobalThis.p5Check=checkPwaUpdateIfDue;',context);
- return {activity,calls,check:force=>context.p5Check({force})};
-}
-for(const mode of [{busy:true},{backingUp:true},{lockRace:true}]){
- const t=updateHarness(mode);
- assert.equal(await t.check(false),false);
- assert.equal(t.calls.update,0,'automatic discovery never competes with an observed provider transfer');
- assert.equal(t.calls.fail,0,'provider deferral must not count as update failure');
- assert.equal(t.calls.retry.at(-1),30000,'provider deferral retains a bounded retry on the existing timer');
- if(mode.lockRace)assert.equal(t.calls.lock,1,'busy state must be checked again after waiting on the Web Lock');
- else assert.equal(t.calls.lock,0,'busy provider does not acquire a network update lock');
- assert.equal(t.activity.backingUp===true||t.activity.busy===true,true);
-}
-{
- const t=updateHarness({busy:true,backingUp:true});
- assert.equal(await t.check(true),true,'manual user-triggered check must remain available');
- assert.equal(t.calls.update,1);assert.equal(t.calls.mark,1);assert.equal(t.calls.fail,0);
-}
-{
- const t=updateHarness();assert.equal(await t.check(false),true);
- assert.equal(t.calls.update,1);assert.equal(t.calls.mark,1);assert.equal(t.calls.lock,1);
-}
-{
- const t=updateHarness({offline:true});assert.equal(await t.check(false),false);
- assert.equal(t.calls.update,0);assert.equal(t.calls.lock,0);
-}
+// P5: PWA discovery admission now belongs to the checked update host. The direct
+// application-update-safety integration witness executes the provider-busy,
+// lock-race, manual-force and offline branches; this architecture contract
+// keeps the composition/ordering boundary explicit.
+assert.match(pwaUpdateHost,/if\(!force&&\(state\.providerBusy\(\)\|\|state\.providerDriveBackingUp\(\)\)\)\{scheduleCheck\(30000\);return false;\}/u,'automatic discovery defers before acquiring the update lock while a provider transfer is active');
+assert.match(pwaUpdateHost,/const perform=async\(\)=>\{[\s\S]*if\(!force&&\(state\.providerBusy\(\)\|\|state\.providerDriveBackingUp\(\)\)\)\{deferred=true;return false;\}/u,'provider busy state is checked again after waiting on the Web Lock');
+assert.match(pwaUpdateHost,/locks\.request\(CHECK_LOCK,\{mode:'exclusive'\},perform\)/u,'automatic discovery is serialized through the checked update lock');
+assert.match(pwaUpdateHost,/if\(state\.ownership\(\)\.state!==configuration\.primaryState\|\|environment\.navigator\.onLine===false\)return false;/u,'offline and non-primary windows do not perform network update checks');
+assert.match(app,/providerBusy:\(\)=>BackupProviderRuntime\.status\(\)\.busy,providerDriveBackingUp:\(\)=>BackupProviderRuntime\.locationStatus\('google-drive'\)\?\.backingUp===true/u,'main supplies live provider-transfer state through narrow checked ports');
+
 const claimRuntime=productionFunction('async function checkSessionOwnershipClaim(){')+'\n'
  +productionFunction('function wakeSessionOwnershipClaim(slackMs=0){');
 for(const path of ['source/core/internal.ts','source/core/execution-views.ts'])vm.runInThisContext(readScript(path),{filename:path});
