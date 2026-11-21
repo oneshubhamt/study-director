@@ -855,8 +855,10 @@ async function saveActiveSessionRecord(session,{emergency=false,backupCapture=fa
   function checkpoint(){
     assertWriteToken(ownershipToken,'the local recovery-envelope write');
     try{
-      const existing=readActiveSessionRecovery();
-      if(existing&&newerActiveSession(clean,existing)===existing)return;
+      // An unreadable copy throws here and is kept. A readable one is from an
+      // earlier save, so this one replaces it whatever its revision: a session
+      // brought in by sync or restore can carry a lower one than a flush here.
+      readActiveSessionRecovery();
       const envelope=activeSessionRecoveryEnvelope(clean);
       localSaved=!!(envelope&&LocalStorageContract.setJson(STORAGE_KEYS.recovery,envelope));
     }catch(error){AppDiagnostics.capture('active-session.recovery-write',error,'warn');}
@@ -882,8 +884,9 @@ async function saveActiveSessionRecord(session,{emergency=false,backupCapture=fa
     if(idbSaved&&writeEpoch===activeSessionMutationEpoch){
       try{
         assertWriteToken(ownershipToken,'clearing committed session recovery');
-        const existing=readActiveSessionRecovery();
-        if(existing&&(newerActiveSession(existing,clean)===clean||sameDataValue(existing,clean)))LocalStorageContract.remove(STORAGE_KEYS.recovery);
+        // No later save has started, so a readable copy is superseded by this
+        // committed write. An unreadable copy throws here and is kept.
+        if(readActiveSessionRecovery())LocalStorageContract.remove(STORAGE_KEYS.recovery);
       }catch(error){if(!isOwnershipLostError(error))AppDiagnostics.capture('active-session.recovery-cleanup',error);}
     }
     if(localSaved||idbSaved){

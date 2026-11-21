@@ -194,6 +194,30 @@ assert.equal(h.sharedLocal.has('deletionRecovery'),false);
   assert.equal((await fixture.app.activeSession.save(session,{emergency:true})).storage.idb,true,'an independent canonical save can succeed');
   assert.equal(fixture.sharedLocal.get('recovery'),unknown,'replay, deletion and saving cannot erase an unreadable session rescue');
 }
+// A session brought in by sync or restore can carry a lower revision than the
+// flush made here just before it. Saved after that flush, it is the session:
+// the flush's rescue copy must not outlive it and win the next load.
+{
+  const fixture=createHarness();
+  const flushed={...session,revision:500,scheduleText:'08:00 30 Flushed here',updatedAt:'2026-09-17T11:30:00.000Z'};
+  const arrived={...session,revision:400,scheduleText:'08:00 30 Arrived by sync',updatedAt:'2026-09-17T11:29:00.000Z'};
+  const first=fixture.app.activeSession.save(flushed,{emergency:true});
+  assert.equal(fixture.sharedLocal.get('recovery')?.revision,500,'the flush writes its rescue copy at once');
+  const flushedCopy=structuredClone(fixture.sharedLocal.get('recovery'));
+  const second=fixture.app.activeSession.save(arrived,{strictDurability:true});
+  assert.equal((await first).storage.idb,true);assert.equal((await second).storage.idb,true);
+  assert.equal(fixture.sharedLocal.has('recovery'),false,'the later committed save retires the earlier rescue copy');
+  const loaded=await fixture.app.activeSession.load(0,{strict:true});
+  assert.equal(loaded.value?.scheduleText,arrived.scheduleText,'the later save is what loads');
+  assert.equal(fixture.stores.session.get('active')?.scheduleText,arrived.scheduleText);
+  // A later emergency save replaces a copy an earlier save left, whatever
+  // the revisions, and its commit retires it.
+  fixture.sharedLocal.set('recovery',flushedCopy);
+  const later={...session,revision:2,scheduleText:'08:00 30 Leaving the page',updatedAt:'2026-09-17T11:31:00.000Z'};
+  assert.equal((await fixture.app.activeSession.save(later,{emergency:true})).storage.idb,true);
+  assert.equal(fixture.sharedLocal.has('recovery'),false);
+  assert.equal((await fixture.app.activeSession.load(0,{strict:true})).value?.scheduleText,later.scheduleText);
+}
 {
   const fixture=createHarness(),date='2026-09-17';
   await fixture.app.dailyRecords.save(day(date));

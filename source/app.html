@@ -10288,7 +10288,7 @@ async function verifyRestoredSessionRuntime(expected,scheduleText=''){
 async function importBackupAttachments(items,{signal,replace=false}={}){
   return AttachmentStorage.during(async()=>{
     const token=AppOwnership.issueWriteToken('restore attachments'),staged=[],rows=[],contents=new Map();
-    const local=new Map((await AttachmentStorage.list()).map(row=>[row.hash+':'+row.size,row]));
+    const local=new Map((await AttachmentStorage.list()).map(({id,...row})=>[row.hash+':'+row.size,row]));
     const check=()=>{AppOwnership.assertWriteToken(token,'restore attachments');if(signal?.aborted)throw Object.assign(new Error('Restore cancelled.'),{name:'AbortError'});};
     try{
       for(const item of items){

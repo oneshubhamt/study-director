@@ -107,6 +107,6 @@ F30 retires the F29 upgrade machinery on the owner's assumption that all devices
 
 The tab owner lease is version 2. Its page ID and claim distinguish a reloaded page or a second tab from the writer. The lease, storage-health record and their consumers use the current formats under the existing storage keys.
 
-Recovery readers validate the whole current session, Note, Saved Day fallback or pending-deletion record before using its contents. Unreadable copies stay in place and block replay or cleanup.
+Recovery readers validate the whole current session, Note, Saved Day fallback or pending-deletion record before using its contents. Unreadable copies stay in place and block replay or cleanup. A session save replaces a readable rescue copy, and its commit retires it, whatever the two revisions. Save order decides, as it does in IndexedDB: a session brought in by sync or restore can carry a lower revision than the flush made here just before it.
 
 F29 left `dailyRecordMigration` in appMeta. The census exempts the reserved key in its version-1 envelope, so an upgraded installation can open with the marker present. Startup leaves its value untouched. Crash recovery, failed-write rescue, restore journals, validation, integrity checks and in-session schedule progress remapping operate on current data.
