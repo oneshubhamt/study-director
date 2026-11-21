@@ -50,10 +50,11 @@ await test('first installation never reloads or prepares an interactive page',as
 await test('untrusted messages and release names never authorize reload',async()=>{
  const h=harness();await h.api.install();h.message('SD_PWA_ACTIVATED',{},'forged');h.message('SD_PWA_ACTIVATED',h.old,'forged');await flush();assert.equal(h.counts().reloads,0);assert.equal(h.counts().reserves,0);
 });
-await test('hidden follower classification is captured before async controller reconciliation',async()=>{
- const h=harness();h.registration.waiting=null;await h.api.install();h.behavior.follower=true;h.behavior.prepare=async()=>({ok:false,reason:'Ownership is changing.'});
- h.registration.active=h.candidate;h.candidate.state='activated';h.sw.controller=h.candidate;h.sw.emit('controllerchange');h.behavior.follower=false;await flush();
- assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'follower role must be captured before worker identity/discovery awaits');
+await test('hidden follower role is bound to the exact waiting worker before ownership handoff',async()=>{
+ const h=harness();h.behavior.follower=true;h.behavior.prepare=async()=>({ok:false,reason:'Ownership is changing.'});await h.api.install();
+ assert.equal(h.api.status().waitingReleaseId,'next');
+ h.behavior.follower=false;await h.activate();
+ assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'waiting worker must retain the follower role captured before the primary unloads');
  h.behavior.prepare=async()=>({ok:true});await h.api.apply();assert.equal(h.counts().reloads,1);h.win.emit('pagehide');
 });
 await test('candidate replacement during preparation never gets stale release request',async()=>{
