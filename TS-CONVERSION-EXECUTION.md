@@ -1,5 +1,14 @@
 # TypeScript conversion — execution record
 
+## P5.11b implementation checkpoint · OPEN · 2026-11-21
+
+- Started from published `ts-exp` head `dd1144b7`; scope is P5.11b only.
+- Audit confirmed presentation ownership was split: checked conversion required the inline kernel/metadata, Glass/Aurora packs, and appearance/preference callbacks still embedded in unchecked `main.js`.
+- A checked `presentation-host.ts` now owns theme/skin controls, font scaling, first-paint mirror refresh, appearance transitions and display-tools behavior; `main.js` retains thin composition and the existing canonical preference writer.
+- Audit also found an in-scope startup defect: Glass/Aurora ran in `<head>` before overlay surfaces existed, yet marked their overlay coordinators installed. Pack registration and DOM-coordinator installation are now independently retry-safe at `studydirector:ready`, with stylesheet/coordinator deduplication.
+- Source contracts and browser acceptance are staged for all three skins in both themes, reload/profile restoration, pack retry, and live overlay handoff.
+- **Still open:** strict type/lint, fresh build/verify/generated syntax, affected unit/architecture checks, changed browser witness 5×, populated accessibility, objective reconciliation and final record closure. Full QA remains intentionally deferred.
+
 ## P5.11a · VERIFIED — TARGETED · 2026-11-21
 
 - **Baseline / implementation head:** P5.11a started from published `ts-exp` `33597f7a`; checked implementation and targeted evidence are at `9e78fd457b5c0cf0b846452b4da8816f9ae60e46`.
