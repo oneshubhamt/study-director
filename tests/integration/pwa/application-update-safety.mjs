@@ -154,16 +154,15 @@ function makeHarness(options={}){
   await guard.release();
 }
 
-// A follower update remains read-only and valid if the initiating primary reload
-// releases ownership and this hidden page becomes primary before reload.
+// A follower classification captured at controller-change time remains read-only
+// even if the initiating primary reload releases ownership before reserve begins.
 {
-  const t=makeHarness();t.setOwnership({state:'secondary',revision:4});
-  const abort=new AbortController(),guard=t.controller.reserve(Object.freeze({requestId:'f2',releaseId:'release-f2',automatic:true,external:true,signal:abort.signal}));
-  t.setOwnership({state:'primary',revision:5,hydrating:false,takeoverPending:false,resolving:false});
+  const t=makeHarness();t.setOwnership({state:'primary',revision:5,hydrating:false,takeoverPending:false,resolving:false});
+  const abort=new AbortController(),guard=t.controller.reserve(Object.freeze({requestId:'f2',releaseId:'release-f2',automatic:true,external:true,follower:true,signal:abort.signal}));
   await guard.ready;
-  assert.equal(guard.validate(),true,'secondary-to-primary ownership handoff must not strand an old shell under the new controller');
-  const prepared=await t.controller.prepare({requestId:'f2',releaseId:'release-f2',automatic:true,external:true,signal:abort.signal});
-  assert.equal(prepared.ok,true);assert.equal(t.calls.settleMutation,0,'follower handoff must remain read-only after ownership changes');
+  assert.equal(guard.validate(),true,'captured follower role must survive a secondary-to-primary handoff before reservation');
+  const prepared=await t.controller.prepare({requestId:'f2',releaseId:'release-f2',automatic:true,external:true,follower:true,signal:abort.signal});
+  assert.equal(prepared.ok,true);assert.equal(t.calls.settleMutation,0,'captured follower handoff must remain read-only');
   await guard.release();
 }
 

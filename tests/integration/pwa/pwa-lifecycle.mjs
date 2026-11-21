@@ -18,8 +18,8 @@ function harness({controlled=true,supported=true}={}){
  const sw=emitter({controller:controlled?old:null,register:async(...args)=>{registerCalls++;behavior.registerArgs=args;await behavior.register();return registration;}});
  const win=emitter({crypto:{randomUUID:()=>`request-${next}`},sessionStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)},location:{reload(){reloads++;behavior.reload();}}});
  const doc=emitter({hidden:true});
- const behavior={prepare:async()=>({ok:true}),register:async()=>{},update:async()=>{},reload:()=>{},valid:true,ready:Promise.resolve()};
- const api=module.createCoordinator(freeze({configuration:freeze({assetId:'a'.repeat(24),buildId:'qa-build',reloadSessionKey:'reload',scope:'./',workerUrl:freeze({trusted:'./sw.js'})}),environment:freeze({AbortController,MessageChannel:Channel,clearTimeout:id=>timers.delete(id),setTimeout:setTimer,document:doc,navigator:supported?{serviceWorker:sw}:{},window:win}),hooks:freeze({capture:(scope,error)=>captures.push({scope,error}),render:state=>renders.push(state),reserve:context=>{reserves++;held++;let released=false;return freeze({ready:behavior.ready,validate:()=>behavior.valid&&!context.signal.aborted,release:async()=>{if(!released){released=true;releases++;held--;}}});},prepare:async context=>{prepareCalls++;prepares.push(context);return behavior.prepare(context);}})}));
+ const behavior={prepare:async()=>({ok:true}),register:async()=>{},update:async()=>{},reload:()=>{},valid:true,ready:Promise.resolve(),follower:false};
+ const api=module.createCoordinator(freeze({configuration:freeze({assetId:'a'.repeat(24),buildId:'qa-build',reloadSessionKey:'reload',scope:'./',workerUrl:freeze({trusted:'./sw.js'})}),environment:freeze({AbortController,MessageChannel:Channel,clearTimeout:id=>timers.delete(id),setTimeout:setTimer,document:doc,navigator:supported?{serviceWorker:sw}:{},window:win}),hooks:freeze({capture:(scope,error)=>captures.push({scope,error}),captureFollower:()=>behavior.follower,render:state=>renders.push(state),reserve:context=>{reserves++;held++;let released=false;return freeze({ready:behavior.ready,validate:()=>behavior.valid&&!context.signal.aborted,release:async()=>{if(!released){released=true;releases++;held--;}}});},prepare:async context=>{prepareCalls++;prepares.push(context);return behavior.prepare(context);}})}));
  const activate=async(worker=candidate,{control=true,state='activated'}={})=>{registration.waiting=null;registration.active=worker;worker.state=state;if(control)sw.controller=worker;worker.emit('statechange');if(control)sw.emit('controllerchange');await flush();};
  const message=(type,source=sw.controller,releaseId=source?.releaseId)=>sw.emit('message',{source,data:{type,releaseId}});
  return {api,sw,win,doc,old,candidate,registration,behavior,timers,channels,captures,renders,storage,prepares,advance,worker,activate,message,counts:()=>({reloads,registerCalls,checks,prepareCalls,reserves,releases,held})};
@@ -50,8 +50,10 @@ await test('first installation never reloads or prepares an interactive page',as
 await test('untrusted messages and release names never authorize reload',async()=>{
  const h=harness();await h.api.install();h.message('SD_PWA_ACTIVATED',{},'forged');h.message('SD_PWA_ACTIVATED',h.old,'forged');await flush();assert.equal(h.counts().reloads,0);assert.equal(h.counts().reserves,0);
 });
-await test('hidden follower prepares and can refuse reload',async()=>{
- const h=harness();h.registration.waiting=null;await h.api.install();h.behavior.prepare=async()=>({ok:false,reason:'Ownership is changing.'});await h.activate();assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);
+await test('hidden follower classification is captured before async controller reconciliation',async()=>{
+ const h=harness();h.registration.waiting=null;await h.api.install();h.behavior.follower=true;h.behavior.prepare=async()=>({ok:false,reason:'Ownership is changing.'});
+ h.registration.active=h.candidate;h.candidate.state='activated';h.sw.controller=h.candidate;h.sw.emit('controllerchange');h.behavior.follower=false;await flush();
+ assert.equal(h.counts().reloads,0);assert.equal(h.counts().held,0);assert.equal(h.prepares[0].external,true);assert.equal(h.prepares[0].follower,true,'follower role must be captured before worker identity/discovery awaits');
  h.behavior.prepare=async()=>({ok:true});await h.api.apply();assert.equal(h.counts().reloads,1);h.win.emit('pagehide');
 });
 await test('candidate replacement during preparation never gets stale release request',async()=>{
