@@ -47,10 +47,8 @@ try{
   await page.evaluate(`__PWA6.goTab('guide')`);
   await waitFor(()=>page.evaluate(`(()=>{const button=document.querySelector('#guide-install-card .mini-btn');return document.documentElement.dataset.studyDirectorUiMutable==='1'&&button?.textContent.trim()==='Install app'&&!button.disabled;})()`),{timeout:60000,label:'enabled Guide install action'});
   assert.equal(await page.evaluate(`window.StudyDirector.installation.status().installationAction`),'install');
-  await page.evaluate(`document.querySelector('#guide-install-card .mini-btn').click()`);
-  await waitFor(()=>page.evaluate(`window.__p512InstallPromptCalls===1`),{timeout:8000,label:'captured prompt consumed through Guide'});
-  const installResult=await page.evaluate(`({calls:window.__p512InstallPromptCalls,state:window.StudyDirector.installation.status().installationState,feedback:window.StudyDirector.installation.status().installFeedback||''})`);
-  assert.equal(installResult.calls,1,'Guide must invoke the retained prompt exactly once');
+  const installResult=await page.evaluate(`(async()=>{document.querySelector('#guide-install-card .mini-btn').click();await new Promise(resolve=>setTimeout(resolve,150));const status=window.StudyDirector.installation.status(),button=document.querySelector('#guide-install-card .mini-btn');return {calls:window.__p512InstallPromptCalls,state:status.installationState,action:status.installationAction,feedback:status.installFeedback||'',buttonText:button?.textContent||'',buttonDisabled:!!button?.disabled,mutable:document.documentElement.dataset.studyDirectorUiMutable||''};})()`);
+  assert.equal(installResult.calls,1,`Guide must invoke the retained prompt exactly once; state=${JSON.stringify(installResult)}`);
   assert.ok(installResult.state==='installing'||/accepted/i.test(installResult.feedback),'accepted prompt must reach the installation state machine');
 
   const errors=page.events.filter(event=>!/favicon|ResizeObserver loop/i.test(event.text));
