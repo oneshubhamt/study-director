@@ -17,7 +17,7 @@ server.setOverride('deployment','runtime-security.html',html.replace('<head>','<
 const preload=`(()=>{const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');localStorage.setItem('studyDirector.userDefaults.v1',JSON.stringify({version:1,studentName:'Security QA',updatedAt:d.toISOString()}));(localStorage.getItem('studyDirector.profiles.v1')||localStorage.setItem('studyDirector.profiles.v1',JSON.stringify({version:1,active:'prof_qa_mve00000_abcdef01',profiles:[{id:'prof_qa_mve00000_abcdef01',scope:'',name:'',email:'',folder:'',createdAt:'2026-08-01T00:00:00.000Z',fresh:false,from:null}],removing:[]})));})();`;
 let page;
 try{
- page=await browser.createPage(server.url('deployment','runtime-security.html'),{preload});await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate('__PWA6.AppOwnership.status().hasControl'));
+ page=await browser.createPage(server.url('deployment','runtime-security.html'),{preload,bypassServiceWorker:true});await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate('__PWA6.AppOwnership.status().hasControl'));
  const imageWorkerName=html.match(/sd\.image-worker\.[a-f0-9]+\.js/)[0];
  assert.equal(await page.evaluate(`new Promise((resolve,reject)=>{const w=new Worker(__PWA6.trustedAssetURL(${JSON.stringify(imageWorkerName)}));w.onmessage=({data})=>{w.terminate();resolve(data.result?.width)};w.onerror=()=>{w.terminate();reject(Error('Image worker failed under Trusted Types'))};w.postMessage({file:new Blob([Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'),c=>c.charCodeAt(0))],{type:'image/gif'}),mimeType:'image/gif'})})`),1);
 
