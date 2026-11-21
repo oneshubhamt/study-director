@@ -129,7 +129,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
       registered.set(name,{name,version:input.clampText(value['version']||'',40),state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()});
       if(descriptor){markFile(descriptor.tabId,ok?'registered':'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return ok;
     }catch(error){
-      const detail=input.clampText(error instanceof Error&&error.message||String(error),160);
+      const detail=input.clampText(isRecord(error)&&typeof error['message']==='string'&&error['message']||String(error),160);
       registered.set(name,{name,version:input.clampText(value['version']||'',40),state:'failed',attempts:nextAttempt,detail,updatedAt:nowStamp()});
       if(descriptor){markFile(descriptor.tabId,'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }

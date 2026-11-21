@@ -7,7 +7,7 @@ import type {PresentationKernel,PresentationManifest,PresentationProfile,ThemeDe
 import type {PresentationHostController} from './presentation-host.ts';
 import type {ProviderConfig} from './backup-provider.ts';
 import type {PlanController} from './plan.ts';
-import type {InsightsHostBoundary,InsightsHostModule,InsightsPreviewProvider} from '../source/core/insights-host.ts';
+import type {InsightsHostBoundary,InsightsHostModule} from '../source/core/insights-host.ts';
 
 export type CapabilityMap=Readonly<Record<string,number>>;
 export type PluginFileState='not-requested'|'loading'|'loaded'|'registered'|'missing'|'incompatible'|'failed';
