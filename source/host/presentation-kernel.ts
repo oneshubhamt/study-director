@@ -7,6 +7,7 @@ import type {AppearanceStorageRead,AppearanceStorageWrite,PresentationField,Pres
   const freeze=Object.freeze;
   const list=<T>(...values:T[]):readonly T[]=>freeze(values);
   const record=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
+  const isProfileScope=(value:unknown):value is Pick<ProfileScopeValue,'scoped'>=>record(value)&&typeof value['scoped']==='function';
   const presentations:Readonly<Record<string,PresentationProfile>>=freeze({
     'director-current':freeze({
       id:'director-current',
@@ -351,8 +352,8 @@ import type {AppearanceStorageRead,AppearanceStorageWrite,PresentationField,Pres
   });
   const root=document.documentElement;
   const profileScopeValue=(window as unknown as Record<PropertyKey,unknown>)[Symbol.for('studyDirector.profileScope.v1')];
-  if(!record(profileScopeValue)||typeof profileScopeValue['scoped']!=='function')throw new Error('Study Director profile scope is unavailable.');
-  const profileScope=profileScopeValue as unknown as ProfileScopeValue;
+  if(!isProfileScope(profileScopeValue))throw new Error('Study Director profile scope is unavailable.');
+  const profileScope=profileScopeValue;
   const themeStorageKey=profileScope.scoped('@@SD_THEME_STORAGE_KEY@@');
   const presentationStorageKey=profileScope.scoped('@@SD_PRESENTATION_STORAGE_KEY@@');
   const presentationIdPattern=/^[a-z][a-z0-9-]{0,40}$/;
@@ -398,7 +399,7 @@ import type {AppearanceStorageRead,AppearanceStorageWrite,PresentationField,Pres
     try{
       const value=localStorage.getItem(key);
       return value===null?fallback:value;
-    }catch(error){
+    }catch{
       return fallback;
     }
   };
@@ -406,7 +407,7 @@ import type {AppearanceStorageRead,AppearanceStorageWrite,PresentationField,Pres
     try{
       localStorage.setItem(key,String(value));
       return true;
-    }catch(error){
+    }catch{
       return false;
     }
   };
@@ -445,7 +446,7 @@ import type {AppearanceStorageRead,AppearanceStorageWrite,PresentationField,Pres
   };
   const switchTheme=(themeId:unknown,{persist=false,write=defaultWrite,syncMetadata=true}:Readonly<{persist?:boolean;write?:AppearanceStorageWrite;syncMetadata?:boolean}>={}):string=>{
     const clean=normalizeThemeId(themeId);
-    root.dataset.theme=clean;
+    root.dataset['theme']=clean;
     if(persist)write(themeStorageKey,clean);
     if(syncMetadata)synchronizeMetadata();
     return clean;

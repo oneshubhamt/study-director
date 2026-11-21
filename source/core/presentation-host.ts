@@ -60,7 +60,7 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     const clean=kernel.switchTheme(themeId,{persist:false});
     if(persist)preferences.persist({theme:clean});
     renderThemeControls();
-    if(restoreFocus)document.querySelector<HTMLElement>(`.theme-btn[data-theme-id="${CSS.escape(clean)}"]`)?.focus();
+    if(restoreFocus)[...document.querySelectorAll<HTMLElement>('.theme-btn[data-theme-id]')].find(button=>button.dataset['themeId']===clean)?.focus();
     return clean;
   }
   function setTheme(themeId:unknown,{restoreFocus=false,origin=null}:Readonly<{restoreFocus?:boolean;origin?:HTMLElement|null}>={}):string{
@@ -91,7 +91,7 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     const clean=kernel.switchPresentation(presentationId,{persist:false});
     if(persist)preferences.persist({presentation:clean});
     renderPresentationControls();
-    if(restoreFocus)document.querySelector<HTMLElement>(`.presentation-btn[data-presentation-id="${CSS.escape(clean)}"]`)?.focus();
+    if(restoreFocus)[...document.querySelectorAll<HTMLElement>('.presentation-btn[data-presentation-id]')].find(button=>button.dataset['presentationId']===clean)?.focus();
     return clean;
   }
   function setPresentation(presentationId:unknown,{restoreFocus=false,origin=null}:Readonly<{restoreFocus?:boolean;origin?:HTMLElement|null}>={}):string{

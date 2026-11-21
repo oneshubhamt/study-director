@@ -1134,11 +1134,14 @@ html[data-material="glass"] #pane-insights .ui-disclosure{
 `;
 
 type OverlaySurface=Readonly<{id:string;element:HTMLElement;visible:(element:HTMLElement)=>boolean;blocksTools:boolean}>;
+type PackKernel=Pick<PresentationKernel,'format'|'version'|'registerPresentation'>;
 const record=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null;
-function kernelValue():PresentationKernel|null{
+function isPackKernel(value:unknown):value is PackKernel{
+  return record(value)&&value['format']==='study-director.presentation-kernel'&&value['version']===1&&typeof value['registerPresentation']==='function';
+}
+function kernelValue():PackKernel|null{
   const value=(window as unknown as Record<PropertyKey,unknown>)[KERNEL_KEY];
-  if(!record(value)||value['format']!=='study-director.presentation-kernel'||value['version']!==1||typeof value['registerPresentation']!=='function')return null;
-  return value as unknown as PresentationKernel;
+  return isPackKernel(value)?value:null;
 }
 function ensureStyle():boolean{
   if(document.getElementById(STYLE_ID))return true;
@@ -1156,8 +1159,11 @@ function installOverlayCoordinator():boolean{
     {id:'update',element:document.querySelector<HTMLElement>('.pwa-update-control'),visible:element=>!element.hidden,blocksTools:false},
     {id:'nudge',element:document.getElementById('nudge-overlay'),visible:element=>element.classList.contains('on'),blocksTools:true}
   ];
-  if(candidates.some(surface=>!surface.element))return false;
-  const surfaces:readonly OverlaySurface[]=candidates.map(surface=>Object.freeze({id:surface.id,element:surface.element as HTMLElement,visible:surface.visible,blocksTools:surface.blocksTools}));
+  const surfaces:OverlaySurface[]=[];
+  for(const surface of candidates){
+    const element=surface.element;if(!element)return false;
+    surfaces.push(Object.freeze({id:surface.id,element,visible:surface.visible,blocksTools:surface.blocksTools}));
+  }
   const menu=document.getElementById('display-tools-menu'),trigger=document.getElementById('display-tools-trigger');
   if(!menu||!trigger)return false;
   let queued=false,running=false;
