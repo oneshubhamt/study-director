@@ -13,7 +13,7 @@ export interface StorageHealthInput{
   refreshWarning():unknown;
   scheduleSyncStatus():unknown;
   readonly document:Document;
-  timeLabelFromIso(value:string):string;
+  timeLabelFromIso(value:string):string|null;
   renderCapabilities():unknown;
 }
 export interface StorageHealthController{
