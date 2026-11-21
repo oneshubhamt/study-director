@@ -59,6 +59,10 @@ try{
     await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation===${JSON.stringify(presentation)}`),{label:`presentation accessibility ${presentation}`});
     await page.evaluate(`__PWA6.goTab('plan')`);await page.settle(2);await axe(`presentation:${presentation}:plan`);
   }
+  // Preserve the historical remainder of this journey under its original
+  // Glass baseline; the three-skin smoke above is the P5.11b addition.
+  await page.evaluate(`[...document.querySelectorAll('.presentation-btn[data-presentation-id]')].find(item=>item.dataset.presentationId==='glass').click()`);
+  await waitFor(()=>page.evaluate(`document.documentElement.dataset.presentation==='glass'`),{label:'restore Glass accessibility baseline'});
   result.checks.presentationControlsAccessible=true;
 
 
