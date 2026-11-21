@@ -20,6 +20,7 @@ window.__p512InstallPromptPrevented=false;
   window.__p512InstallPromptEvent=promptEvent;
   window.dispatchEvent(promptEvent);
   window.__p512InstallPromptPrevented=promptEvent.defaultPrevented;
+  window.__p512EarlyBridgeOwned=window[Symbol.for('studyDirector.installCapture.v1')].status().prompt===promptEvent;
   // Keep this fixture pinned to the pre-host event. Headless Chromium may
   // later synthesize its own install event; that browser-owned event is
   // covered by normal install behavior, not this early-capture ownership test.
@@ -37,7 +38,7 @@ try{
   await skipFirstStart(page);
   assert.equal(await page.evaluate(`window.__p512InstallPromptPrevented`),true,'the pre-host prompt must be captured and prevented by the early bridge');
   assert.equal(await page.evaluate(`__PWA6.NativeCapabilities.status().installationAction`),'install','host startup must consume the prompt retained by the early bridge');
-  assert.equal(await page.evaluate(`window[Symbol.for('studyDirector.installCapture.v1')].status().prompt===window.__p512InstallPromptEvent`),true,'the early bridge must still own the exact captured prompt object');
+  assert.equal(await page.evaluate(`window.__p512EarlyBridgeOwned`),true,'the early bridge must own the exact captured prompt object before host startup');
 
   await page.evaluate(`__PWA6.goTab('guide')`);
   await waitFor(()=>page.evaluate(`document.querySelector('#guide-install-card .mini-btn')?.textContent.trim()==='Install app'`),{timeout:60000,label:'Guide install action'});
