@@ -22,7 +22,7 @@ function makeHarness(options={}){
   let lifecycleStatus={...baseStatus(),...(options.lifecycle||{})},backupBusy=!!options.backupBusy,providerBusy=!!options.providerBusy;
   let timerLive=!!options.timerLive,timerPaused=!!options.timerPaused,pacerRunning=!!options.pacerRunning,tasks=options.tasks??[];
   let mutation={active:'',foreign:false,recoveryFault:'',...(options.mutation||{})},session={ready:true,transitioning:false,revision:1,...(options.session||{})};
-  const calls={pause:0,pacer:0,backup:0,apply:0,check:0,lock:0,providerRelease:0,settleMutation:0,project:0,foreground:0,captures:[],localWrites:0};
+  const calls={pause:0,pacer:0,backup:0,backupMessage:'',apply:0,check:0,lock:0,providerRelease:0,settleMutation:0,project:0,foreground:0,captures:[],localWrites:0};
   const elements=new Map([['pwa-update-control',node()],['pwa-update-apply',node('button')],['pwa-update-message',node()]]);
   const listeners={document:new Map(),window:new Map()};
   const document={
@@ -69,7 +69,8 @@ function makeHarness(options={}){
     activeSessionIssue:()=>options.activeSessionIssue??''
   });
   const effects=Object.freeze({
-    backupBeforeUpdate:async()=>{calls.backup++;},pauseTimer:()=>{calls.pause++;timerPaused=true;},
+    automaticBackupsWaiting:()=>options.backupWaiting===true,
+    backupBeforeUpdate:async()=>{calls.backup++;calls.backupMessage=elements.get('pwa-update-message')?.textContent||'';},pauseTimer:()=>{calls.pause++;timerPaused=true;},
     togglePacer:()=>{calls.pacer++;pacerRunning=false;},scheduleSyncStatus:()=>{},
     publishNotice:()=>{},capture:(scope,error,level)=>calls.captures.push({scope,error,level}),
     localGet:(key,fallback)=>local.get(key)??fallback,localSet:(key,value)=>{calls.localWrites++;local.set(key,value);return true;}
@@ -158,6 +159,11 @@ function makeHarness(options={}){
   const t=makeHarness({tasks:[{},{}],resolvedTasks:new Set([0])});
   assert.equal(await t.controller.evaluateAutomatic(),false);assert.equal(t.calls.apply,0);
   t.setTasks([]);assert.equal(await t.controller.evaluateAutomatic(),true);assert.equal(t.calls.backup,1);assert.equal(t.calls.apply,1);
+}
+{
+  const t=makeHarness({backupWaiting:true});
+  assert.equal(await t.controller.evaluateAutomatic(),true);
+  assert.equal(t.calls.backupMessage,'Backing up before the update…','the checked PWA owner must render backup-wait state before entering the host backup callback');
 }
 
 // Successful update checks persist their timestamp; failures do not.

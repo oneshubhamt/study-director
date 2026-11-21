@@ -764,7 +764,6 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden){if(appCanM
 const PWA_UPDATE_BACKUP_WAIT_MS=60*1000;
 async function backUpBeforeUpdate(){
   if(!automaticBackupsWaiting())return;
-  pwaAutomaticBlockMessage='Backing up before the update…';renderPwaUpdateStatus(PwaLifecycle.status());
   let timer=null;
   try{await Promise.race([flushAutomaticBackups('app-update'),new Promise(resolve=>{timer=setTimeout(resolve,PWA_UPDATE_BACKUP_WAIT_MS);})]);}
   finally{clearTimeout(timer);}
@@ -3481,7 +3480,7 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze({
     activeSessionIssue:loaded=>BackupRecoveryHostModule.activeSessionIssue(loaded)
   }),
   effects:Object.freeze({
-    backupBeforeUpdate:()=>backUpBeforeUpdate(),pauseTimer:()=>togglePause(),togglePacer:()=>PracticePacer.toggle(),scheduleSyncStatus:()=>scheduleSyncStatus(),
+    automaticBackupsWaiting:()=>automaticBackupsWaiting(),backupBeforeUpdate:()=>backUpBeforeUpdate(),pauseTimer:()=>togglePause(),togglePacer:()=>PracticePacer.toggle(),scheduleSyncStatus:()=>scheduleSyncStatus(),
     publishNotice:value=>NoticeCoordinator.publish('update',value),capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     localGet:(key,fallback)=>AppData.local.getText(key,fallback),localSet:(key,value)=>AppData.local.setText(key,value)
   })
