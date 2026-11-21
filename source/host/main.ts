@@ -709,35 +709,36 @@ const OWNERSHIP_STATES=OwnershipModule.OWNERSHIP_STATES;
 
 let AppMutationCoordinator:ReturnType<typeof MutationCoordinatorModule.createCoordinator>|null=null;
 let mutationUiOperationActive=false;
-const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Parameters<typeof StartupHostModule.createOwnershipController>[0]>({
+type OwnershipControllerInput=Parameters<typeof StartupHostModule.createOwnershipController>[0];
+const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<OwnershipControllerInput>({
   module:OwnershipModule,
-  config:Object.freeze({
+  config:Object.freeze<OwnershipControllerInput['config']>({
     storageKey:STORAGE_KEYS.appOwner,sessionTabKey:SESSION_STORAGE_KEYS.appTab,
     channelName:ProfileScope.scoped('study-director-app-owner'),heartbeatMs:OWNERSHIP_HEARTBEAT_MS,
     staleMs:OWNERSHIP_STALE_MS,probeMs:OWNERSHIP_PROBE_MS,webLockName:OWNERSHIP_WEB_LOCK_NAME
   }),
-  environment:Object.freeze({
+  environment:Object.freeze<OwnershipControllerInput['environment']>({
     document,window,now:DecisionClock.nowMs,randomIdPart,
     setInterval:(fn,delay)=>setInterval(fn,delay),clearInterval:id=>clearInterval(id),
     setTimeout:(fn,delay)=>setTimeout(fn,delay),clearTimeout:id=>clearTimeout(id)
   }),
-  local:Object.freeze({
+  local:Object.freeze<OwnershipControllerInput['local']>({
     getJson:(key,fallback)=>AppData.local.getJson(key,fallback),
     setJson:(key,value)=>AppData.local.setJson(key,value),
     remove:key=>AppData.local.remove(key),
     lastError:()=>AppData.lastStorageError
   }),
-  diagnostics:Object.freeze({
+  diagnostics:Object.freeze<OwnershipControllerInput['diagnostics']>({
     capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     guard:(scope,operation)=>AppDiagnostics.guard(scope,operation)
   }),
   activation:AppActivation,
-  reloadHint:()=>performance.getEntriesByType('navigation')[0]?.type==='reload'||performance.navigation?.type===1,
-  lifecycle:Object.freeze({
+  reloadHint:()=>performance.getEntriesByType('navigation').some(entry=>'type' in entry&&entry.type==='reload')||performance.navigation?.type===1,
+  lifecycle:Object.freeze<OwnershipControllerInput['lifecycle']>({
     isReady:()=>StartupLifecycle.status().fullyInitialized,
     resumeStorageReset:()=>resumeUnresolvedStorageReset()
   }),
-  hydration:Object.freeze({
+  hydration:Object.freeze<OwnershipControllerInput['hydration']>({
     hydratePlanData:()=>PlanData.hydrate(),
     hydratePlanRuntime:()=>PlanRuntime.hydrate(),
     renderSavedPlans:()=>PlanRuntime.savedPlans.render(),
@@ -745,7 +746,7 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Par
     censusUnsupported:()=>UnsupportedData.census(),
     hydrateSavedDrafts:options=>hydrateSavedDrafts(options)
   }),
-  hooks:Object.freeze({
+  hooks:Object.freeze<OwnershipControllerInput['hooks']>({
     render:()=>renderOwnershipUi(),
     refreshStorage:()=>refreshStorageFallbackWarning(),
     stopExecution:()=>TimerEngine.stopExecution(),
@@ -761,23 +762,27 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Par
   })
 }));
 const appCanMutate=()=>AppOwnership.canMutate()&&!(AppMutationCoordinator&&AppMutationCoordinator.writesBlocked());
-const transitionAppOwnership=next=>next===OWNERSHIP_STATES.RELEASING
+const transitionAppOwnership=(next:typeof AppOwnership.state)=>next===OWNERSHIP_STATES.RELEASING
   ?AppOwnership.transitionReleasing():AppOwnership.state;
-AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze<Parameters<typeof MutationCoordinatorModule.createCoordinator>[0]>({
-  configuration:Object.freeze({lockName:ProfileScope.scoped('study-director-data-mutation-v1'),storageKey:STORAGE_KEYS.mutationLock,leaseMs:20000,heartbeatMs:5000}),
-  environment:Object.freeze({
+type MutationCoordinatorInput=Parameters<typeof MutationCoordinatorModule.createCoordinator>[0];
+AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze<MutationCoordinatorInput>({
+  configuration:Object.freeze<MutationCoordinatorInput['configuration']>({lockName:ProfileScope.scoped('study-director-data-mutation-v1'),storageKey:STORAGE_KEYS.mutationLock,leaseMs:20000,heartbeatMs:5000}),
+  environment:Object.freeze<MutationCoordinatorInput['environment']>({
     AbortController,locks:navigator.locks||null,now:DecisionClock.nowMs,randomIdPart,
     setInterval:(callback,delay)=>setInterval(callback,delay),clearInterval:id=>clearInterval(id),setTimeout:(callback,delay)=>setTimeout(callback,delay),
     addStorageListener:listener=>window.addEventListener('storage',listener)
   }),
-  identity:Object.freeze({status:()=>AppOwnership.status(),canMutate:()=>AppOwnership.canMutate()}),
-  local:Object.freeze({getJson:(key,fallback)=>AppData.local.getJson(key,fallback),setJson:(key,value)=>AppData.local.setJson(key,value),remove:key=>AppData.local.remove(key)}),
-  durable:Object.freeze({acquire:request=>AppData.mutationLease.acquire(request),release:id=>AppData.mutationLease.release(id)}),
-  hooks:Object.freeze({refreshUi:()=>{
+  identity:Object.freeze<MutationCoordinatorInput['identity']>({status:()=>AppOwnership.status(),canMutate:()=>AppOwnership.canMutate()}),
+  local:Object.freeze<MutationCoordinatorInput['local']>({getJson:(key,fallback)=>AppData.local.getJson(key,fallback),setJson:(key,value)=>AppData.local.setJson(key,value),remove:key=>AppData.local.remove(key)}),
+  durable:Object.freeze<MutationCoordinatorInput['durable']>({
+    acquire:async request=>{const result=await AppData.mutationLease.acquire(request);return result.acquired?Object.freeze({acquired:true}):Object.freeze({acquired:false,holder:Object.freeze({expiresAt:result.holder['expiresAt']})});},
+    release:id=>AppData.mutationLease.release(id)
+  }),
+  hooks:Object.freeze<MutationCoordinatorInput['hooks']>({refreshUi:()=>{
     const active=!!AppMutationCoordinator?.status?.().active;
     try{OwnershipUiProjection.apply();}catch{}
     try{renderOwnershipBanner();}catch{}
-    if(mutationUiOperationActive&&!active&&!AppMutationCoordinator.blocksUi())queueProtectedMutationUiReconcile();
+    if(mutationUiOperationActive&&!active&&!requireMutationCoordinator().blocksUi())queueProtectedMutationUiReconcile();
     mutationUiOperationActive=active;
   },scheduleUpdate:delay=>schedulePwaUpdateEvaluation(delay),
   // Another tab's lease ran out without being released (it was closed in the
@@ -821,12 +826,13 @@ function finishPracticePacer(...args:Parameters<typeof ExecutionViews.finishPrac
 function handlePracticeStartKey(...args:Parameters<typeof ExecutionViews.handlePracticeStartKey>){return ExecutionViews.handlePracticeStartKey(...args);}
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
-function readStorageHealth(){return StorageHealthController.snapshot();}
-function writeStorageHealth(patch:Parameters<NonNullable<typeof StorageHealthController>['updateHistory']>[0]){return StorageHealthController.updateHistory(patch);}
-function renderStorageHealth(health=readStorageHealth()){return StorageHealthController.render(health);}
-function markStorageHealthOk(source:Parameters<NonNullable<typeof StorageHealthController>['markOk']>[0],key:Parameters<NonNullable<typeof StorageHealthController>['markOk']>[1]=''){return StorageHealthController.markOk(source,key);}
-function markStorageHealthTimestamp(key:Parameters<NonNullable<typeof StorageHealthController>['markTimestamp']>[0]){return StorageHealthController.markTimestamp(key);}
-function markStorageHealthError(source:Parameters<NonNullable<typeof StorageHealthController>['markError']>[0],reason:Parameters<NonNullable<typeof StorageHealthController>['markError']>[1],options:Parameters<NonNullable<typeof StorageHealthController>['markError']>[2]={}){return StorageHealthController.markError(source,reason,options);}
+function requireStorageHealthController(){if(!StorageHealthController)throw new Error('Study Director storage-health controller is unavailable.');return StorageHealthController;}
+function readStorageHealth(){return requireStorageHealthController().snapshot();}
+function writeStorageHealth(patch:Parameters<NonNullable<typeof StorageHealthController>['updateHistory']>[0]){return requireStorageHealthController().updateHistory(patch);}
+function renderStorageHealth(health=readStorageHealth()){return requireStorageHealthController().render(health);}
+function markStorageHealthOk(source:Parameters<NonNullable<typeof StorageHealthController>['markOk']>[0],key:Parameters<NonNullable<typeof StorageHealthController>['markOk']>[1]=''){return requireStorageHealthController().markOk(source,key);}
+function markStorageHealthTimestamp(key:Parameters<NonNullable<typeof StorageHealthController>['markTimestamp']>[0]){return requireStorageHealthController().markTimestamp(key);}
+function markStorageHealthError(source:Parameters<NonNullable<typeof StorageHealthController>['markError']>[0],reason:Parameters<NonNullable<typeof StorageHealthController>['markError']>[1],options:Parameters<NonNullable<typeof StorageHealthController>['markError']>[2]={}){return requireStorageHealthController().markError(source,reason,options);}
 function storageSizeLabel(bytes:unknown){
   const value=Math.max(0,Number(bytes)||0);
   if(value<1024*1024)return `${Math.round(value/1024)} KB`;
@@ -858,7 +864,7 @@ function showLiveDraftSaveWarning(reason:unknown){
 }
 function refreshStorageFallbackWarning(){
   const safetyMessage=String(sessionSafetyMessage||'').trim();
-  const issues=StorageHealthController.snapshot().issues,localFailures=issues.filter(issue=>issue.level==='error'&&['indexedDB','localStorage.write','planDraft.write','activeSession','notes','dailyRecords','deletionRecovery'].includes(issue.source));
+  const issues=requireStorageHealthController().snapshot().issues,localFailures=issues.filter(issue=>issue.level==='error'&&['indexedDB','localStorage.write','planDraft.write','activeSession','notes','dailyRecords','deletionRecovery'].includes(issue.source));
   const failedSources=new Set(localFailures.map(issue=>issue.source));
   for(const event of NoticeCoordinator.eventStatus().events)if(event.source==='local-saving'&&!failedSources.has(event.id))NoticeCoordinator.resolveEvent(event.source,event.id);
   for(const issue of localFailures)NoticeCoordinator.emit({source:'local-saving',id:issue.source,severity:'error',lifecycle:'failed',foreground:false,surface:'quiet',title:'Local saving failed',message:issue.message});
@@ -1211,7 +1217,7 @@ const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.f
     read:()=>readHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups),
     write:value=>writeHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups,value)
   }),
-  storageHealth:Object.freeze({snapshot:()=>StorageHealthController.snapshot(),updateHistory:patch=>StorageHealthController.updateHistory(patch)}),
+  storageHealth:Object.freeze({snapshot:()=>requireStorageHealthController().snapshot(),updateHistory:patch=>requireStorageHealthController().updateHistory(patch)}),
   mutationEpoch:Object.freeze({latestChangeAt:recorded=>AppData.mutationEpoch.latestChangeAt(recorded)}),
   backupVersion:DATA_CONTRACT.schemas.Backup.version,
   sourceRevision:()=>BackupRuntimeHost.sourceRevision(),
@@ -2935,7 +2941,7 @@ const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Par
     appVersion:APP_VERSION,backupVersion:DATA_CONTRACT.schemas.Backup.version,starterSchedule:FACTORY_DEFAULTS.scheduleText,
     limits:Object.freeze({backupChunkItems:APP_LIMITS.backupChunkItems,backupMaxCompressedBytes:APP_LIMITS.backupMaxCompressedBytes,backupMaxFileBytes:APP_LIMITS.backupMaxFileBytes,backupMaxAssetDescriptors:APP_LIMITS.backupMaxAssetDescriptors,maxImportRecords:APP_LIMITS.maxImportRecords,maxNoteLinks:APP_LIMITS.maxNoteLinks,maxNotes:APP_LIMITS.maxNotes,maxPendingReviews:APP_LIMITS.maxPendingReviews})
   }),
-  appData:AppData,storageHealthKey:STORAGE_KEYS.storageHealth,storageHealth:Object.freeze({snapshot:()=>StorageHealthController.snapshot(),markOk:(source,key)=>StorageHealthController.markOk(source,key)}),
+  appData:AppData,storageHealthKey:STORAGE_KEYS.storageHealth,storageHealth:Object.freeze({snapshot:()=>requireStorageHealthController().snapshot(),markOk:(source,key)=>requireStorageHealthController().markOk(source,key)}),
   storageGeneration:()=>IndexedDb.lifecycle().resets,
   personal:Object.freeze({draft:PlanDraftEditor,data:PlanData,inputValue:()=>document.getElementById('plan-input')?.value,canMutate:()=>appCanMutate()}),
   files:BackupFiles,processing:Exports,protection:BackupProtection,backgroundAvailable:backupBackgroundAvailability,
@@ -3357,7 +3363,7 @@ const InsightsDeviceState=InsightsHostModule.createDeviceState(Object.freeze<Par
 /* DOM BINDINGS AND STARTUP */
 function currentBackupDiagnosticStates(){
   const states=[],sample=(job,read,project)=>{try{states.push(...project(read()));}catch{states.push({job,state:'unavailable',reason:'state-unavailable'});}};
-  sample('Local storage health',()=>StorageHealthController.snapshot(),health=>{
+  sample('Local storage health',()=>requireStorageHealthController().snapshot(),health=>{
     const rows=[{job:'Local storage health',state:health.hasIssues?'attention':'observed',issues:health.issues?.length||0,completedAt:health.lastLocalSaveAt||'',studyDataSavedAt:health.lastStudyDataSaveAt||'',storagePersisted:CapabilityStorage.snapshot().persisted,usageBytes:CapabilityStorage.snapshot().usageBytes,quotaBytes:CapabilityStorage.snapshot().quotaBytes}];
     const sources=['indexedDB','localStorage.read','localStorage.write','planDraft.write','activeSession','notes','dailyRecords','deletionRecovery','maintenance','capacity','backup','attachmentIntegrity','repositoryIntegrity'];
     for(const source of sources){const issue=health.issues?.find(row=>row.source===source);if(issue)rows.push({job:'Storage '+source,state:'attention',severity:issue.level,failedAt:issue.at});}return rows;
