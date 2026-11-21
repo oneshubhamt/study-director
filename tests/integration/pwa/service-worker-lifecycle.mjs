@@ -21,7 +21,7 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
   };}
  };
  const self={registration:{scope,active,installing:null,waiting:null},location:{origin:'https://study.test'},addEventListener(type,fn){listeners.set(type,fn);},async skipWaiting(){claims.push('skip');}};
- const clients={async matchAll(){return windows;},async claim(){claims.push('claim');},async openWindow(url){opened.push(url);return {url};}};
+ const clients={async matchAll(){return windows;},async claim(){claims.push('claim');},async openWindow(url){opened.push(url);return {url};}};self.clients=clients;
  const fetch=async request=>{const row=rows.find(row=>new URL(row.path,scope).href===request.url);fetches.push({url:request.url,cache:request.cache});fetchEvents.push(`start:${row?.path||request.url}:${request.cache}`);if(!row)throw new Error('offline');concurrent++;maximum=Math.max(maximum,concurrent);await new Promise(resolve=>setTimeout(resolve,Number(delays[row.path])||1));concurrent--;fetchEvents.push(`finish:${row.path}:${request.cache}`);return new Response(row.body+(row.path===badPath?'corrupt':''));};
  const context=vm.createContext({self,caches,clients,URL,Request,Response,crypto:webcrypto,fetch,Date,console});
  const rendered=template.replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_BUILD_ID@@','qa-build').replaceAll('@@SD_PAGE_ASSET_ID@@',assetId).replaceAll('@@SD_PWA_RELEASE_ID@@','current').replaceAll('@@SD_PWA_ASSET_MANIFEST@@',JSON.stringify(manifest)).replaceAll('@@SD_CACHE_STORAGE_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(CACHE_STORAGE_IDENTITIES)));

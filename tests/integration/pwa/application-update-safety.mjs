@@ -22,7 +22,7 @@ function makeHarness(options={}){
   let lifecycleStatus={...baseStatus(),...(options.lifecycle||{})},backupBusy=!!options.backupBusy,providerBusy=!!options.providerBusy;
   let timerLive=!!options.timerLive,timerPaused=!!options.timerPaused,pacerRunning=!!options.pacerRunning,tasks=options.tasks??[];
   let mutation={active:'',foreign:false,recoveryFault:'',...(options.mutation||{})},session={ready:true,transitioning:false,revision:1,...(options.session||{})};
-  const calls={pause:0,pacer:0,backup:0,apply:0,check:0,providerRelease:0,settleMutation:0,project:0,foreground:0,captures:[],localWrites:0};
+  const calls={pause:0,pacer:0,backup:0,apply:0,check:0,lock:0,providerRelease:0,settleMutation:0,project:0,foreground:0,captures:[],localWrites:0};
   const elements=new Map([['pwa-update-control',node()],['pwa-update-apply',node('button')],['pwa-update-message',node()]]);
   const listeners={document:new Map(),window:new Map()};
   const document={
@@ -78,7 +78,7 @@ function makeHarness(options={}){
   const controller=UpdateHost.createController(Object.freeze({
     configuration:Object.freeze({assetId:'a'.repeat(24),buildId:'qa-build',reloadSessionKey:'reload',scope:'./',workerUrl:'./sw.js',updateCheckStorageKey:'last-check',primaryState:'primary',secondaryState:'secondary',runningTimerMode:'running'}),
     lifecycle:Object.freeze({module:lifecycleModule,environment:Object.freeze({})}),
-    environment:Object.freeze({document,window,navigator:Object.freeze({onLine:true}),setTimeout:(fn,delay)=>{const id=nextTimer++;timers.set(id,{fn,delay});return id;},clearTimeout:id=>timers.delete(id),now:()=>now}),
+    environment:Object.freeze({document,window,navigator:Object.freeze({onLine:options.offline!==true,locks:Object.freeze({request:async(_name,_lockOptions,perform)=>{calls.lock++;if(options.lockRace)providerBusy=true;return perform();}})}),setTimeout:(fn,delay)=>{const id=nextTimer++;timers.set(id,{fn,delay});return id;},clearTimeout:id=>timers.delete(id),now:()=>now}),
     state:statePorts,reservation:reservationPorts,persistence,effects
   }));
   lifecycleHooks.render(lifecycleStatus);
@@ -162,6 +162,25 @@ function makeHarness(options={}){
 {
   const ok=makeHarness({checkResult:true});assert.equal(await ok.controller.checkIfDue({force:true}),true);assert.equal(ok.calls.check,1);assert.equal(ok.calls.localWrites,1);
   const failed=makeHarness({checkResult:false});assert.equal(await failed.controller.checkIfDue({force:true}),false);assert.equal(failed.calls.check,1);assert.equal(failed.calls.localWrites,0);assert.equal(failed.controller.diagnostics().failureCount,1);
+}
+
+// Automatic discovery yields to provider work before and after lock acquisition; force remains user-driven.
+{
+  const t=makeHarness({providerBusy:true});assert.equal(await t.controller.checkIfDue(),false);
+  assert.equal(t.calls.check,0);assert.equal(t.calls.lock,0);
+  assert.ok([...t.timers.values()].some(row=>row.delay===30000));
+}
+{
+  const t=makeHarness({lockRace:true});assert.equal(await t.controller.checkIfDue(),false);
+  assert.equal(t.calls.lock,1);assert.equal(t.calls.check,0);
+}
+{
+  const t=makeHarness({providerBusy:true});assert.equal(await t.controller.checkIfDue({force:true}),true);
+  assert.equal(t.calls.lock,1);assert.equal(t.calls.check,1);
+}
+{
+  const t=makeHarness({offline:true});assert.equal(await t.controller.checkIfDue(),false);
+  assert.equal(t.calls.lock,0);assert.equal(t.calls.check,0);
 }
 
 // Controller changes and lifecycle UI remain driven by the checked lifecycle status, not host globals.
