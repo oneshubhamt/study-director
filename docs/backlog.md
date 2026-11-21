@@ -199,6 +199,7 @@ The notes audit's findings A to D are done (D, Support Activities under its own 
 - **Very large backups.** Measure restore of a very large library. Aggregate backup size and storage pressure on small devices are deferred until there is concrete evidence of a problem.
 - **Drive maintenance planning** can be expensive on a cold, paginated Drive inventory. Measure it with real Drive before building a resumable planning cursor.
 - **Duplicate local checkpoint captures**: an optimisation to make only if measurement shows it matters.
+- **An unreadable coordination file holds things up** (audit, 2026-11-21; F29 behaves the same). An unreadable Drive upload marker stops Drive cleanup, and an unreadable Device Folder lock stops that folder's cleanup, for good; a damaged Continue Here claim would block hand-overs. Unlikely: markers are written whole. Seen in diagnostics as cleanup waiting with an `uncertain` state. Then: ignore an unreadable marker or lock once it is over a day old by the file's own creation time, as Drive cleanup markers already are, with a test per location; claims need their own design.
 - **Large orchestration modules** (`backup-provider.js`, `backup.js`, `app.html`): no splitting by size alone; consolidate only proven duplication.
 
 ## Not yet checked
