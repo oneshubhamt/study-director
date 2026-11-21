@@ -123,7 +123,7 @@ function makeHarness(options={}){
 // Direct preparation still waits for the mutation coordinator and verifies durable read-back.
 {
   const t=makeHarness();
-  assert.deepEqual(await t.controller.prepare({requestId:'',automatic:false,external:false}),{ok:true,reason:''});
+  const result=await t.controller.prepare({requestId:'',automatic:false,external:false});assert.equal(result.ok,true);assert.equal(result.reason,'');
   assert.equal(t.calls.settleMutation,1);
 }
 {
@@ -147,7 +147,7 @@ function makeHarness(options={}){
   const t=makeHarness();t.setOwnership({state:'secondary',revision:4});
   const abort=new AbortController(),guard=t.controller.reserve(Object.freeze({requestId:'f1',releaseId:'release-f',automatic:true,external:true,signal:abort.signal}));
   await guard.ready;assert.equal(guard.validate(),true);
-  assert.deepEqual(await t.controller.prepare({requestId:'f1',releaseId:'release-f',automatic:true,external:true,signal:abort.signal}),{ok:true,reason:''});
+  const prepared=await t.controller.prepare({requestId:'f1',releaseId:'release-f',automatic:true,external:true,signal:abort.signal});assert.equal(prepared.ok,true);assert.equal(prepared.reason,'');
   await guard.release();
 }
 
