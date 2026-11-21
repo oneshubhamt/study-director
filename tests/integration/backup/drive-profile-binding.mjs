@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import {assertOperationalFormat} from '../../helpers/operational-format.mjs';
 import {createDriveHarness,QA_PROFILE_ID} from '../../helpers/drive-harness.mjs';
 
 // A Drive library belongs to one profile (5.3). Once per sign-in the app is
 // told the account and what the folder holds and settles it: its own folder
-// continues, an unmarked one is claimed, a library from another device can be
+// continues, a library from another device can be
 // taken over, and anything else is refused without touching it.
 const MARKER='studyDirectorProfile',OTHER='prof_ana_mvd00000_0000abcd';
 const cases=[];
@@ -17,24 +18,23 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   await provider.repository.list({kind:'object'});
   assert.equal(state.folders.length,1);assert.equal(state.folderProperties.get(state.folders[0])[MARKER],QA_PROFILE_ID,'a new folder carries the profile id');
   assert.equal(state.binds.length,1);assert.equal(state.binds[0].mine,true);assert.equal(state.binds[0].email,'qa@example.com','the app learns the account email');assert.equal(state.binds[0].library,null,'its own folder is not read for a library');
+  assertOperationalFormat('driveLibrary',state.folderWrites[0]);
   assert.equal(patches(state),0);
   await provider.repository.list({kind:'checkpoint'});await provider.repository.list({kind:'commit'});
   assert.equal(state.binds.length,1,'the folder is settled once per sign-in');
   cases.push('a new folder is made for the profile');
 }
 {
-  // A folder from before profiles (no mark): claimed, with what it holds shown first.
-  const harness=createDriveHarness();const {state,provider}=harness;
-  state.folders.push('folder-9');state.folderProperties.set('folder-9',{});
-  const stamp='2026-10-10T08:00:00.000Z';
-  state.files.set('repo-c',{id:'repo-c',name:'c.sdcommit',mimeType:'application/json',parents:['folder-9'],appProperties:{studyDirectorRepository:'true',studyDirectorRepositoryKind:'commit'},content:new Blob(['{}']),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:1,createdTime:stamp,modifiedTime:stamp});
-  state.files.set('repo-k',{id:'repo-k',name:'k.sdcheckpoint',mimeType:'application/octet-stream',parents:['folder-9'],appProperties:{studyDirectorRepository:'true',studyDirectorRepositoryKind:'checkpoint',sdHistoryRole:'normal',sdHistoryCounts:'42,17'},content:new Blob(['x']),ownedByMe:true,shared:false,trashed:false,canDownload:true,version:2,createdTime:stamp,modifiedTime:stamp});
-  await provider.prepare();await provider.authorize();await provider.repository.list({kind:'object'});
-  assert.equal(state.binds.length,1);const [info]=state.binds;
-  assert.equal(info.found,'');assert.equal(info.mine,false);assert.equal(info.folder,'folder-9');
-  assert.deepEqual({...info.library},{savedAt:stamp,days:42,notes:17},'the app is told what the library holds');
-  assert.equal(state.folderProperties.get('folder-9')[MARKER],QA_PROFILE_ID,'claiming marks the folder for this profile');assert.equal(patches(state),1);
-  cases.push('an unmarked folder is claimed and shown first');
+  for(const properties of [{},{[MARKER]:'invalid'},{[MARKER]:QA_PROFILE_ID,unrecognized:'true'}]){
+    const {state,provider}=await connected({bind:async()=>'claim'});
+    state.folders.push('folder-9');state.folderProperties.set('folder-9',properties);
+    await assert.rejects(provider.repository.list({kind:'object'}),error=>error.studyDirectorProfileRefused===true);
+    assert.equal(state.binds.length,0);
+    assert.equal(state.requests.some(r=>r.method!=='GET'||decodeURIComponent(r.url).includes(' in parents')),false);
+    assert.deepEqual(state.folderProperties.get('folder-9'),properties);
+    assert.equal(state.folders.length,1);
+  }
+  cases.push('missing or invalid profile identity refuses all library access');
 }
 {
   // The same person's library from another device: this profile takes its id.
@@ -59,12 +59,12 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   cases.push('another profile library is refused untouched');
 }
 {
-  // A decision that does not fit the folder is a refusal too.
-  const {state,provider}=await connected({bind:async()=>'continue'});
-  state.folders.push('folder-8');state.folderProperties.set('folder-8',{});
-  await assert.rejects(provider.repository.list({kind:'object'}),/already holds a Study Director library/u);
-  assert.equal(patches(state),0);
-  cases.push('an unmarked folder is only claimed when the app says so');
+  const {state,provider}=await connected();
+  await provider.repository.list({kind:'object'});
+  state.folderProperties.set(state.folders[0],{});
+  await assert.rejects(provider.repository.list({kind:'object'}),/no valid profile identity/u);
+  assert.equal(state.binds.length,1);assert.equal(patches(state),0);
+  cases.push('a changed marker invalidates the cached binding');
 }
 {
   // A profile still starting cannot use Drive yet.
@@ -78,8 +78,9 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   let current=QA_PROFILE_ID;
   const {state,provider}=await connected({profileId:()=>current});
   await provider.repository.list({kind:'object'});assert.equal(state.binds.length,1);
+  const operation=provider.repository.beginOperation();await operation.list({kind:'object'});
   current='prof_qa_mve00000_abcdef02';
-  await assert.rejects(provider.repository.list({kind:'object'}),/another profile/u,'a folder marked for the earlier id is not this profile');
+  await assert.rejects(operation.list({kind:'object'}),/another profile/u,'an operation receipt cannot outlive its profile');
   assert.equal(state.binds.length,2);
   cases.push('a changed profile id settles the folder again');
 }
@@ -97,14 +98,14 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   cases.push('the folder is named after its profile');
 }
 {
-  // A folder from before profiles is named as it is claimed; a failed rename never stops a backup.
+  // A failed rename of the current library can retry on the next sign-in.
   const harness=createDriveHarness({profileName:()=>'Study Director – Ben'});const {state,provider}=harness;
-  state.folders.push('folder-3');state.folderProperties.set('folder-3',{});state.folderRenameFails=true;
+  state.folders.push('folder-3');state.folderProperties.set('folder-3',{[MARKER]:QA_PROFILE_ID});state.folderRenameFails=true;
   await provider.prepare();await provider.authorize();await provider.repository.list({kind:'object'});
   assert.equal(state.folderProperties.get('folder-3')[MARKER],QA_PROFILE_ID);assert.equal(state.folderNames.has('folder-3'),false,'the old name stays when Drive refuses the rename');
   state.folderRenameFails=false;await provider.disconnect();await provider.authorize();await provider.repository.list({kind:'object'});
   assert.equal(state.folderNames.get('folder-3'),'Study Director – Ben','the next sign-in names it');
-  cases.push('a claimed folder is renamed, and a failed rename is harmless');
+  cases.push('a profile folder is renamed, and a failed rename is harmless');
 }
 {
   // Delete everywhere: a marker first, then the library goes to the Drive Trash.
@@ -112,6 +113,7 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   await provider.repository.list({kind:'object'});const library=state.folders[0];
   assert.equal(typeof state.libraryControl?.deleteLibrary,'function','the app is handed what it can do with the library');
   assert.equal(await state.libraryControl.deleteLibrary(),true);
+  assertOperationalFormat('driveDeletion',state.folderWrites.at(-1));
   assert.deepEqual(state.deletionMarkers.map(row=>[row.name,row.profile]),[['Study Director – Ana (deleted)',QA_PROFILE_ID]]);
   assert.equal(state.trashedFolders.has(library),true,'the library is in the Trash, where it can be brought back');
   await assert.rejects(provider.repository.list({kind:'object'}),error=>error.studyDirectorProfileDeleted===true,'this page never uses the library again');
@@ -137,5 +139,24 @@ const patches=state=>state.requests.filter(request=>request.method==='PATCH').le
   await provider.prepare();await provider.authorize();await provider.repository.list({kind:'object'});
   assert.equal(state.folders.length,1);assert.equal(state.deletedSignals.length,0);
   cases.push('another profile’s marker is ignored');
+}
+{
+  const incomplete=await connected();incomplete.state.folderListIncomplete=true;
+  await assert.rejects(incomplete.provider.repository.list({kind:'object'}),/complete folder listing/u);
+  assert.equal(incomplete.state.folderWrites.length,0);
+  const pending=await connected();await pending.provider.repository.list({kind:'object'});pending.state.deletionMarkerMetadata={shared:true};
+  await assert.rejects(pending.state.libraryControl.deleteLibrary(),/unverified profile deletion/u);assert.equal(pending.state.trashedFolders.size,0);
+  for(const metadata of [{shared:true},{ownedByMe:false},{trashed:true},{mimeType:'text/plain'},{appProperties:{studyDirectorDeletedProfile:QA_PROFILE_ID,studyDirectorFolder:'true'}}]){
+    const {provider,state}=await connected();
+    state.deletionMarkers.push({id:'unknown',profile:QA_PROFILE_ID,metadata});
+    await assert.rejects(provider.repository.list({kind:'object'}),/unverified profile deletion/u);
+    assert.equal(state.deletedSignals.length,0);assert.equal(state.folders.length,0);
+    assert.ok(state.requests.every(r=>r.method==='GET'));
+  }
+  const {state}=await connected();
+  state.folders.push('old');state.folderProperties.set('old',{});
+  await assert.rejects(state.libraryControl.deleteLibrary(),/does not identify/u);
+  assert.equal(state.deletionMarkers.length,0);assert.equal(state.trashedFolders.size,0);
+  cases.push('unverified markers and unidentified libraries cannot authorize profile deletion');
 }
 console.log(JSON.stringify({status:'PASS',suite:'drive-profile-binding',cases},null,2));

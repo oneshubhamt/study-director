@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {assertOperationalFormat} from '../../helpers/operational-format.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
@@ -15,9 +16,10 @@ const storage=registry.require('device-folder-storage',1).createStorage(freeze({
   checksum:async blob=>sha256(blob),
   inspectManifest:async file=>{const value=JSON.parse(await file.text());if(value.locked)throw Object.assign(new Error('locked'),{code:'BACKUP_LOCKED'});return manifestFor(value.id);},
   environment:freeze({canMutate:()=>canMutate,now:()=>now,setTimeout,clearTimeout,yieldTask:async()=>{}}),
-  limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
+  limits:freeze({publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
 }));
 folder=createMemoryDirectory({now:()=>now,faults});
+await storage.layout.create(identities.root);
 const id=n=>'cp_'+String(n).padStart(32,'0'),objectId=n=>'obj_'+String(n).padStart(32,'0');
 const upload=async(kind,fileId,text)=>{const blob=new Blob([text]);return storage.upload(freeze({kind,id:fileId,name:'',blob,size:blob.size,digest:await sha256(blob)}));};
 
@@ -104,11 +106,14 @@ assert.equal(await storage.scope(),listed[0].verificationScope);
 // the timeout instead of hanging the backup.
 {
   const stalled=createMemoryDirectory({now:()=>now,faults});
+  const stalledRoot=await stalled.getDirectoryHandle(identities.root,{create:true});
+  const markerWriter=await (await stalledRoot.getFileHandle('repository.sdscope',{create:true})).createWritable();
+  await markerWriter.write(await (await root.getFileHandle('repository.sdscope')).getFile());await markerWriter.close();
   const stallWrites=directory=>new Proxy(directory,{get:(target,key)=>key==='getFileHandle'?async(name,options)=>{const handle=await target.getFileHandle(name,options);return new Proxy(handle,{get:(file,prop)=>prop==='createWritable'?async()=>({write:()=>new Promise(()=>{}),close:async()=>{},abort:async()=>{}}):typeof file[prop]==='function'?file[prop].bind(file):file[prop]});}:key==='getDirectoryHandle'?async(name,options)=>stallWrites(await target.getDirectoryHandle(name,options)):typeof target[key]==='function'?target[key].bind(target):target[key]});
   const timers=[];const stalledStorage=registry.require('device-folder-storage',1).createStorage(freeze({
     folder:()=>stallWrites(stalled),identities,owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),checksum:async blob=>sha256(blob),inspectManifest:async()=>manifestFor(id(9)),
     environment:freeze({canMutate:()=>true,now:()=>now,setTimeout:(callback,ms)=>{timers.push(callback);return timers.length;},clearTimeout:()=>{},yieldTask:async()=>{}}),
-    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
+    limits:freeze({publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
   }));
   const blob=new Blob(['never lands']),pending=stalledStorage.upload(freeze({kind:'object',id:objectId(9),name:'',blob,size:blob.size,digest:await sha256(blob)}));
   for(let i=0;i<20&&!timers.length;i++)await new Promise(resolve=>setImmediate(resolve));
@@ -134,6 +139,8 @@ await assert.rejects(()=>storage.download({kind:'commit',id:id(1)}),error=>error
 // Locks keep their existing file names and format, expire by age, and renew.
 const publication=await storage.beginPublication();
 assert.match(publication.name,/^pub_[a-f0-9]{32}\.sdpublication$/u);assert.equal((await storage.listPublications()).items.length,1);
+const lockBody=async lease=>JSON.parse(await (await (await (await root.getDirectoryHandle('objects')).getFileHandle(lease.name)).getFile()).text());
+assertOperationalFormat('devicePublication',await lockBody(publication));
 assert.equal(await storage.assertPublication(publication),true);
 // An upload lock renews: its upload rewrites it while it runs. Unrenewed
 // close to the abandoned limit, it can no longer be renewed or relied on.
@@ -148,8 +155,9 @@ const objectsFolder=await root.getDirectoryHandle('objects'),legacyHandle=await 
 assert.equal((await storage.listPublications()).items.length,0);assert.equal((await storage.listPublications()).ignored,1);
 await assert.rejects(storage.assertPublication(publication),/could not be verified/u);
 await assert.rejects(storage.renewPublication(publication),/could not be verified/u);
-assert.equal(await storage.endPublication(publication),true);assert.equal((await storage.listPublications()).items.length,0);
-const maintenance=await storage.beginMaintenance();now+=40000;
+await assert.rejects(storage.endPublication(publication),/could not be verified/u);
+assert.equal((await storage.listPublications()).ignored,1,'release preserves an unrecognized marker');
+const maintenance=await storage.beginMaintenance();assertOperationalFormat('deviceMaintenance',await lockBody(maintenance));now+=40000;
 await assert.rejects(()=>storage.assertMaintenance(maintenance),/too old/u,'maintenance must renew before its window closes');
 await storage.endMaintenance(maintenance);const renewed=await storage.beginMaintenance();now+=20000;await storage.renewMaintenance(renewed);now+=20000;
 assert.equal(await storage.assertMaintenance(renewed),true,'renewal restarts the maintenance window');await storage.endMaintenance(renewed);

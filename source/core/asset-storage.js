@@ -23,7 +23,7 @@ registry.define('asset-storage',1,()=>{
     const opaqueFile=value=>typeof value==='string'&&/^attblob-[a-f0-9-]{20,80}$/i.test(value);
     const locked=work=>{available();return locks.request(writeLock,work);};
     function metadata(value){
-      if(!value||value.version!==2||value.storage!=='opfs'||!opaqueFile(value.file)||typeof value.hash!=='string'||! /^[a-f0-9]{64}$/.test(value.hash)||!Number.isSafeInteger(value.size)||value.size<=0||value.size>limit(value.type)||!validType(value.type)||typeof value.library!=='boolean'||typeof value.name!=='string'||value.name.length>160||/[\u0000-\u001f\u007f]/.test(value.name))throw new Error('Attachment metadata is invalid.');
+      if(!value||Object.keys(value).length!==8||value.version!==2||value.storage!=='opfs'||!opaqueFile(value.file)||typeof value.hash!=='string'||! /^[a-f0-9]{64}$/.test(value.hash)||!Number.isSafeInteger(value.size)||value.size<=0||value.size>limit(value.type)||!validType(value.type)||typeof value.library!=='boolean'||typeof value.name!=='string'||value.name.length>160||/[\u0000-\u001f\u007f]/.test(value.name))throw new Error('Attachment metadata is invalid.');
       return {version:2,storage:'opfs',file:value.file,hash:value.hash,size:value.size,type:value.type,name:value.name,library:value.library};
     }
     async function directory(){try{return await (await storage.getDirectory()).getDirectoryHandle(DIRECTORY,{create:true});}catch(error){if(['SecurityError','NotAllowedError','UnknownError'].includes(error.name))throw new Error('Attachment storage could not be opened. Open Study Director through its local launcher or hosted address, and allow site storage in your browser.',{cause:error});throw error;}}
@@ -125,7 +125,7 @@ registry.define('asset-storage',1,()=>{
       if(!canMutate())throw new Error('Take control before deleting attachments.');
       const token=issueToken(),remove=[...new Set(ids.map(id))];
       assertToken(token);if(!guard())throw new Error('Attachment references changed during deletion.');
-      const present=[];for(const key of remove)if(await read(key))present.push(key);
+      const present=[];for(const key of remove){const row=await read(key);if(row){metadata(row);present.push(key);}}
       assertToken(token);if(present.length)await commit([],present,token,guard,options.deletionState||null);return present.length;
     });}
     async function rename(key,name){id(key);const token=issueToken();return locked(async()=>{const row=metadata(await read(key));assertToken(token);const updated={...row,name:cleanName(name)};await commit([[key,updated]],[],token);return updated;});}
@@ -133,7 +133,17 @@ registry.define('asset-storage',1,()=>{
     async function verifiedMetadataRows(rows,options={}){
       if(!Array.isArray(rows))throw new TypeError('Attachment metadata verification input is invalid.');
       const incoming=[],seen=new Set(),verifiedPhysical=new Set();
-      for(const value of rows){const key=id(value?.id);if(seen.has(key))throw new Error('Duplicate attachment identity in rollback metadata.');seen.add(key);const row=metadata(value),physicalKey=row.file+'\u0000'+row.hash+'\u0000'+row.size;if(!verifiedPhysical.has(physicalKey)){if(!await ingest.verify(row.file,row.hash,row.size,options))throw new Error('Attachment rollback content is missing or failed verification. Preserve browser storage and restore from an external backup before making changes.');verifiedPhysical.add(physicalKey);}incoming.push([key,row]);}
+      for(const value of rows){
+        const {id:assetId,...fields}=value||{},key=id(assetId);
+        if(seen.has(key))throw new Error('Duplicate attachment identity in rollback metadata.');
+        seen.add(key);
+        const row=metadata(fields),physicalKey=row.file+'\u0000'+row.hash+'\u0000'+row.size;
+        if(!verifiedPhysical.has(physicalKey)){
+          if(!await ingest.verify(row.file,row.hash,row.size,options))throw new Error('Attachment rollback content is missing or failed verification. Preserve browser storage and restore from an external backup before making changes.');
+          verifiedPhysical.add(physicalKey);
+        }
+        incoming.push([key,row]);
+      }
       return incoming;
     }
     async function verifyMetadata(rows,options={}){available();return (await verifiedMetadataRows(rows,options)).length;}

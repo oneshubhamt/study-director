@@ -2969,6 +2969,7 @@ const controller=freeze({
   status
 });
 const repository=freeze({
+  manifestVersion:ManagedRepository.manifestVersion,
   createPublication:ManagedRepository.createPublication,
   publish:(...args)=>track(()=>ManagedRepository.publish(...args),true),
   // Inline publication is used only when the caller already owns the outer export job.

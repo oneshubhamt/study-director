@@ -21,3 +21,21 @@ export const SYNCED_FORMAT_LEDGER=freeze([
     records:{DailyRecord:16,Note:3,ActiveSession:11,SessionSnapshot:6,PendingReview:2,CheckpointMetadata:1,CheckpointProtectedManifest:3}})
 ]);
 export const CURRENT_SYNCED_FORMATS=freeze({backup:EXTERNAL_FORMATS.completeBackup.metadataVersion,records:freeze(Object.fromEntries(SYNCED_RECORDS.map(name=>[name,CURRENT_SCHEMA_VERSIONS[name]])))});
+
+// These records grant authority outside the synced containers. Tests compare the
+// bytes or properties produced by the actual adapters with these current forms.
+const shape=(constants,fields,optional=[])=>freeze({constants:freeze(constants),fields:freeze([...Object.keys(constants),...fields]),optional:freeze(optional)});
+const driveCoordination={studyDirectorRepository:'true',studyDirectorSecurity:'1'};
+const driveFields=['studyDirectorRepositoryId','studyDirectorVersion','exportedAt'];
+export const OPERATIONAL_FORMATS=freeze({
+  deviceScope:shape({format:'study-director.device-folder-scope',version:2},['id','profile','scope','device']),
+  devicePublication:shape({format:'study-director.repository-publication',version:1,renews:true},['id','startedAt']),
+  deviceMaintenance:shape({format:'study-director.repository-maintenance',version:1},['id','startedAt']),
+  driveLibrary:shape({studyDirectorFolder:'true'},['studyDirectorProfile']),
+  driveDeletion:shape({},['studyDirectorDeletedProfile']),
+  drivePublication:shape({...driveCoordination,studyDirectorRepositoryKind:'publication',studyDirectorRepositoryVersion:'1',sdPublicationRenews:'1'},driveFields,['sdPublicationDevice','sdPublicationStartedAt']),
+  driveMaintenance:shape({...driveCoordination,studyDirectorRepositoryKind:'maintenance',studyDirectorRepositoryVersion:'2'},driveFields,['sdMaintenanceDevice']),
+  appOwner:shape({version:2},['tabId','pageId','claimId','expiresAt']),
+  mutationLock:shape({version:1},['tabId','pageId','claimId','expiresAt','kind','id']),
+  attachment:shape({version:2,storage:'opfs'},['file','hash','size','type','name','library'])
+});

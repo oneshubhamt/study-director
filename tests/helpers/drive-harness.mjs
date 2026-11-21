@@ -20,10 +20,10 @@ const digest=repositoryDigest;
 function json(payload,status=200,headers={}){return new Response(JSON.stringify(payload),{status,headers:{'Content-Type':'application/json',...headers}});}
 export const QA_PROFILE_ID='prof_qa_mve00000_abcdef01';
 // The profile this test's page belongs to and how it settles a Drive folder:
-// its own folder continues, an unmarked one is claimed.
-const defaultBind=async info=>info.mine?'continue':'claim';
+// only its own folder continues.
+const defaultBind=async info=>info.mine?'continue':'refuse';
 export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=null,uploadProgressTransport=true,localStorage=undefined,remoteState=null,addEventListener=()=>{},profileId=()=>QA_PROFILE_ID,profileName=()=>'',bind=defaultBind,email='qa@example.com',device=()=>'inst_qa_harness_mve00000_abcdef01'}={}){
-  const state={email,folderProperties:new Map(),folderNames:new Map(),deletionMarkers:[],deletedSignals:[],libraryControl:null,binds:[],rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
+  const state={email,folderProperties:new Map(),folderNames:new Map(),deletionMarkers:[],folderWrites:[],deletedSignals:[],libraryControl:null,binds:[],rangeMode:'valid',expiresIn,folders:[],files:new Map(),uploads:new Map(),requests:[],deletions:[],trashedFolders:new Set(),nextId:1,nextFolderId:1,nextVersion:1,scope:'https://www.googleapis.com/auth/drive.file',force401Once:false,evilUploadLocation:false,networkFailPutOnce:false,networkFailCoordinationPostOnce:false,networkFailCoordinationDeleteOnce:false,folderShared:false,folderCreateDenied:false,folderListGate:null,folderListStarted:0,uploadPutGate:null,uploadPutStarted:0};
   // state.offline: the browser says it is offline (navigator.onLine).
   // state.driveClockAheadMs: how far Drive's clock is ahead of this device's
   // (negative: behind) for the files it creates without content (markers).
@@ -66,8 +66,8 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     if(url.pathname==='/drive/v3/files'&&method==='GET'){
       const q=url.searchParams.get('q')||'';
       const deleted=q.match(/key='studyDirectorDeletedProfile' and value='([^']+)'/u);
-      if(deleted)return json({files:state.deletionMarkers.filter(row=>row.profile===deleted[1]).map(row=>({id:row.id}))});
-      if(q.includes("mimeType='application/vnd.google-apps.folder'")){state.folderListStarted+=1;if(state.folderListGate)await state.folderListGate;return json({files:state.folders.filter(id=>!state.trashedFolders.has(id)).map(folderMetadata)});}
+      if(deleted)return json({files:state.deletionMarkers.filter(row=>row.profile===deleted[1]).map(row=>({id:row.id,mimeType:'application/vnd.google-apps.folder',ownedByMe:true,shared:false,trashed:false,appProperties:{studyDirectorDeletedProfile:row.profile},...row.metadata}))});
+      if(q.includes("mimeType='application/vnd.google-apps.folder'")){state.folderListStarted+=1;if(state.folderListGate)await state.folderListGate;return json({incompleteSearch:!!state.folderListIncomplete,files:state.folders.filter(id=>!state.trashedFolders.has(id)).map(folderMetadata)});}
       let rows=[...state.files.values()].filter(file=>!file.trashed);
       const kindMatch=q.match(/key='studyDirectorRepositoryKind' and value='([^']+)'/u),idMatch=q.match(/key='studyDirectorRepositoryId' and value='([^']+)'/u);
       // One kind, or either of several ("(kind a or kind b)", the session check).
@@ -86,8 +86,9 @@ export function createDriveHarness({expiresIn=3600,clock=null,registerProvider=n
     if(url.pathname==='/drive/v3/files'&&method==='POST'){
       if(state.folderCreateDenied)return json({error:{message:'folder creation denied'}},403);
       const metadata=JSON.parse(String(options.body||'{}'));
+      if(metadata.mimeType==='application/vnd.google-apps.folder')state.folderWrites.push(metadata.appProperties);
       if(metadata.mimeType==='application/vnd.google-apps.folder'&&metadata.appProperties?.studyDirectorDeletedProfile){
-        const id=`marker-${state.deletionMarkers.length+1}`;state.deletionMarkers.push({id,name:String(metadata.name||''),profile:String(metadata.appProperties.studyDirectorDeletedProfile)});return json({id});
+        const id=`marker-${state.deletionMarkers.length+1}`;state.deletionMarkers.push({id,name:String(metadata.name||''),profile:String(metadata.appProperties.studyDirectorDeletedProfile),metadata:state.deletionMarkerMetadata});return json({id});
       }
       if(metadata.mimeType==='application/vnd.google-apps.folder'){
         const id=`folder-${state.nextFolderId++}`;state.folders.push(id);if(metadata.name)state.folderNames.set(id,String(metadata.name));const {studyDirectorFolder:_marker,...properties}=metadata.appProperties||{};state.folderProperties.set(id,properties);return json(folderMetadata(id));

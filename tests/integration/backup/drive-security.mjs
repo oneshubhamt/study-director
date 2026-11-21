@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {assertOperationalFormat} from '../../helpers/operational-format.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {createDriveHarness as createHarness,repositoryDigest as digest} from '../../helpers/drive-harness.mjs';
@@ -32,6 +33,10 @@ async function waitFor(predicate,message){
   const KEY='studyDirector.driveSession.v1',rows=new Map(),storage={getItem:key=>rows.has(key)?rows.get(key):null,setItem:(key,value)=>{rows.set(key,String(value));},removeItem:key=>{rows.delete(key);}};
   const first=createHarness({localStorage:storage});await first.provider.prepare();await first.provider.authorize();
   const saved=JSON.parse(rows.get(KEY));assert.match(saved.token,/^token-/u);assert.ok(saved.expiresAt>Date.now()&&saved.expiresAt<=Date.now()+3600000);assert.deepEqual(Object.keys(saved).sort(),['expiresAt','token'],'only the token and its expiry are kept');
+  for(const invalid of [{...saved,expiresAt:String(saved.expiresAt)},{...saved,extra:true}]){
+    rows.set(KEY,JSON.stringify(invalid));assert.equal(createHarness({localStorage:storage}).provider.connected(),false);
+  }
+  rows.set(KEY,JSON.stringify(saved));
   const reloaded=createHarness({localStorage:storage});assert.equal(reloaded.provider.connected(),true,'a reload keeps the Drive sign-in for the rest of its hour');assert.equal(reloaded.provider.connectionExpiresAt(),saved.expiresAt);
   await reloaded.provider.repository.list({kind:'object'});assert.equal(reloaded.state.requests.at(-1).authorization,'Bearer '+saved.token,'the kept sign-in is used without asking again');
   reloaded.state.force401Once=true;await assert.rejects(()=>reloaded.provider.repository.list({kind:'object'}),/authorization expired/u);assert.equal(rows.has(KEY),false,'a sign-in Google rejects is forgotten');
@@ -126,11 +131,16 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   await assert.rejects(()=>provider.repository.delete({...uploaded,digest:'f'.repeat(64)}),/changed before deletion/u);assert.equal(state.deletions.length,0,'digest mismatch must fail closed before deletion');
   remote.version=Number(uploaded.remoteVersion)+1;await assert.rejects(()=>provider.repository.delete(uploaded),/changed version before deletion/u);assert.equal(state.deletions.length,0,'remote-version mismatch must fail closed before deletion even when digest metadata is unchanged');remote.version=Number(uploaded.remoteVersion);
   assert.equal(await provider.repository.delete(uploaded),true);assert.equal((await provider.repository.list({kind:'object'})).items.length,0);
-  const historyCheckpointId='cp_'+'b'.repeat(32),historyCheckpoint={...(await makeRepositoryFile('checkpoint',historyCheckpointId,'history-metadata-proof')),historySummary:{logicalFingerprint:'c'.repeat(64),counts:{dailyRecord:4,note:3},encrypted:false,retention:{role:'normal',protectedUntil:'',calendar:{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0}},attachmentsMissing:2}},uploadedHistoryCheckpoint=await provider.repository.upload(historyCheckpoint),listedHistoryCheckpoints=await provider.repository.list({kind:'checkpoint'});assert.equal(listedHistoryCheckpoints.items.length,1);
+  const historyCheckpointId='cp_'+'b'.repeat(32),historyCheckpoint={...(await makeRepositoryFile('checkpoint',historyCheckpointId,'history-metadata-proof')),historySummary:{format:11,logicalFingerprint:'c'.repeat(64),counts:{dailyRecord:4,note:3},encrypted:false,retention:{role:'normal',protectedUntil:'',notesFingerprint:'d'.repeat(64),calendar:{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0}},attachmentsMissing:2}},uploadedHistoryCheckpoint=await provider.repository.upload(historyCheckpoint),listedHistoryCheckpoints=await provider.repository.list({kind:'checkpoint'});assert.equal(listedHistoryCheckpoints.items.length,1);
   // Version History hides Replace for a version missing attachment bytes, so the
-  // count travels with the version's Drive properties; a version without it reads 0.
+  // count travels with the version's Drive properties.
+  const invalidSummary={...historyCheckpoint.historySummary,retention:{...historyCheckpoint.historySummary.retention,notesFingerprint:''}};
+  await assert.rejects(provider.repository.upload({...historyCheckpoint,id:'cp_'+'1'.repeat(32),historySummary:invalidSummary}),/notes fingerprint is invalid/u);
   const storedHistoryCheckpoint=state.files.get(uploadedHistoryCheckpoint.remoteId);assert.equal(storedHistoryCheckpoint.appProperties.sdHistoryAttachmentsMissing,'2');assert.equal(listedHistoryCheckpoints.items[0].history.attachmentsMissing,2,'Drive must round-trip the missing-attachment count');
-  delete storedHistoryCheckpoint.appProperties.sdHistoryAttachmentsMissing;assert.equal((await provider.repository.list({kind:'checkpoint'})).items[0].history.attachmentsMissing,0);storedHistoryCheckpoint.appProperties.sdHistoryAttachmentsMissing='2';
+  for(const field of ['sdHistoryFormat','sdHistoryAttachmentsMissing','sdHistoryEncrypted','sdHistoryRole','sdHistoryNotes']){
+    const props=storedHistoryCheckpoint.appProperties,original=props[field];assert.ok(original);
+    delete props[field];assert.equal((await provider.repository.list({kind:'checkpoint'})).items[0].history,null);props[field]=original;
+  }
   assert.deepEqual(JSON.parse(JSON.stringify(listedHistoryCheckpoints.items[0].history.retention.calendar)),{localDate:'2026-09-19',weekStart:'2026-09-14',month:'2026-09',utcOffsetMinutes:0},'Drive checkpoint metadata must round-trip the retention calendar so history can be tiered without downloading manifests');assert.equal(await provider.repository.delete(uploadedHistoryCheckpoint),true);
   const checkpointId='cp_'+'9'.repeat(32),commit=await makeRepositoryFile('commit',checkpointId,JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt:'2026-09-19T00:00:00.000Z',sourceRevision:'2026-09-19T00:00:00.000Z',manifestVersion:2})),uploadedCommit=await provider.repository.upload(commit);assert.equal(uploadedCommit.kind,'commit');assert.equal(uploadedCommit.name,checkpointId+'.sdcommit');const listedCommits=await provider.repository.list({kind:'commit'});assert.equal(listedCommits.items.length,1);assert.equal(listedCommits.items[0].id,checkpointId);const downloadedCommit=await provider.repository.download(uploadedCommit);assert.equal(JSON.parse(await downloadedCommit.blob.text()).checkpointId,checkpointId);await downloadedCommit.release();assert.equal(await provider.repository.delete(uploadedCommit),true);assert.equal((await provider.repository.list({kind:'commit'})).items.length,0,'Drive commit markers must use the same exact-identity transport lifecycle as manifests and objects');
   assert.ok(state.requests.filter(request=>request.authorization).every(request=>request.authorization.startsWith('Bearer token-')));
@@ -299,6 +309,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   let device='inst_qa_laptop_mve00000_aaaaaaaa';const {state,provider}=createHarness({device:()=>device});await provider.prepare();await provider.authorize();
   const markers=()=>[...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='publication'),markerFile=id=>markers().find(file=>file.appProperties.studyDirectorRepositoryId===id);
   const first=await provider.repository.beginPublication();
+  assertOperationalFormat('drivePublication',markerFile(first.id).appProperties);
   assert.equal(first.renews,true,'a new upload marker says it renews');assert.ok(Number.isFinite(Date.parse(first.startedAt)),'a new upload marker records when its upload began');
   assert.equal((await provider.repository.listPublications()).items.find(row=>row.id===first.id).renews,true,'cleanup sees that the marker renews');
   const second=await provider.repository.renewPublication(first);
@@ -312,10 +323,17 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   assert.equal(markers().length,0,'a failed renewal removes the fresh marker it made');
   // Unrenewed too long: cleanup may be about to take it for abandoned.
   const late=await provider.repository.beginPublication();markerFile(late.id).createdTime=new Date(Date.now()-14*60*1000).toISOString();
+  await assert.rejects(()=>provider.repository.assertPublication(late),/too old/u);
   await assert.rejects(()=>provider.repository.renewPublication(late),/too long without renewal/u,'renewal refuses a marker close to looking abandoned');
   assert.deepEqual(markers().map(file=>file.appProperties.studyDirectorRepositoryId),[late.id],'a refused renewal leaves only the old marker, for cleanup to judge');
   // Older marker shapes cannot authorize publication or be treated as a valid lease.
-  const legacy=markerFile(late.id);delete legacy.appProperties.sdPublicationRenews;delete legacy.appProperties.sdPublicationStartedAt;
+  const legacy=markerFile(late.id);
+  for(const field of ['studyDirectorSecurity','unexpected']){
+    const original=legacy.appProperties[field];legacy.appProperties[field]='unknown';
+    assert.equal((await provider.repository.listPublications()).ignored,1);
+    if(original===undefined)delete legacy.appProperties[field];else legacy.appProperties[field]=original;
+  }
+  delete legacy.appProperties.sdPublicationRenews;delete legacy.appProperties.sdPublicationStartedAt;
   const listed=await provider.repository.listPublications();assert.equal(listed.items.some(row=>row.id===late.id),false);assert.equal(listed.ignored,1);
   await assert.rejects(provider.repository.assertPublication(late),/disappeared|unsafe|verified/u);
 
@@ -344,7 +362,7 @@ const makeRepositoryFile=async(kind,id,text,checkProtection=async()=>{},checkSou
   const operation=provider.repository.beginOperation();state.networkFailCoordinationPostOnce=true;const marker=await operation.beginMaintenance();assert.match(marker.id,/^mnt_[a-f0-9]{32}$/u);assert.equal(marker.kind,'maintenance');assert.equal([...state.files.values()].filter(file=>file.appProperties.studyDirectorRepositoryKind==='maintenance').length,1,'ambiguous maintenance creation must recover the exact pre-generated marker instead of creating a duplicate');
   let active=await operation.listMaintenances();assert.equal(active.items.length,1,'a live Drive maintenance marker must be visible to publication coordination');assert.equal(active.ignored,0);
   const verified=await operation.assertMaintenance(marker);assert.equal(verified.id,marker.id,'destructive maintenance must be able to reverify its provider-visible protection');
-  const markerFile=state.files.get(marker.remoteId);assert.equal(markerFile.appProperties.studyDirectorRepositoryVersion,'2','the longer network lease must not be mistaken for the legacy 60-second marker');
+  const markerFile=state.files.get(marker.remoteId);assertOperationalFormat('driveMaintenance',markerFile.appProperties);markerFile.appProperties.extra='x';assert.equal((await operation.listMaintenances()).ignored,1);delete markerFile.appProperties.extra;assert.equal(markerFile.appProperties.studyDirectorRepositoryVersion,'2','the longer network lease must not be mistaken for the legacy 60-second marker');
   const maxAge=Date.parse(marker.expiresAt)-Date.parse(marker.createdAt);assert.equal(maxAge,300000);
   markerFile.createdTime=new Date(Date.now()-31*1000).toISOString();await operation.assertMaintenance(marker);
   markerFile.createdTime=new Date(Date.now()-(maxAge-75000)).toISOString();await assert.rejects(()=>operation.assertMaintenance(marker),/too old/u,'network protection must retain room for a bounded request and release');

@@ -78,7 +78,7 @@ assert.match(app,/configuration:Object\.freeze\(\{release:APP_VERSION,limit:20\}
 assert.match(repositories,/async function rebaseBackupPreparationState\(\)[\s\S]*Meta\.transaction\('readwrite'[\s\S]*canonicalMutationEpoch[\s\S]*backupPreparationUnitPrefix/u,'authoritative rebase must atomically reset durable acceleration metadata');
 
 // Persistence hardening and shared repository protocol policy.
-assert.match(app,/limits:Object\.freeze\(\{publicationMaxAgeMs:RepositoryPolicyModule\.protocol\.publicationMaxAgeMs[\s\S]*maintenanceMaxAgeMs:RepositoryPolicyModule\.protocol\.maintenanceMaxAgeMs/u,'Device Folder storage must use the shared repository protocol policy for its locks');
+assert.match(app,/limits:Object\.freeze\(\{publicationRenewMs:RepositoryPolicyModule\.protocol\.publicationRenewMs[\s\S]*maintenanceMaxAgeMs:RepositoryPolicyModule\.protocol\.maintenanceMaxAgeMs/u,'Device Folder storage must use the shared repository protocol policy for its locks');
 assert.match(provider,/RepositoryPolicy=input\.repositoryPolicy[\s\S]*RepositoryPolicy\.protocol/u,'Drive repository transport must consume shared repository protocol policy');
 assert.match(mutation,/function assertAuthority\(options=\{\}\)[\s\S]*allowDurableProtected[\s\S]*throw active\.authorityError/u,'destructive callers must have an explicit authority assertion with rollback-only durable protection');
 assert.match(backup,/requireCanonicalComplete:true/u,'managed repository publication must require a complete canonical capture');

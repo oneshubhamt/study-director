@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {assertOperationalFormat} from '../../helpers/operational-format.mjs';
 import {createDeviceFolderWorld as world,sharedLock,IDENTITIES,REPOSITORY_NAME,QA_DEVICE,QA_PROFILE} from '../../helpers/device-folder-world.mjs';
 
 // Inside the chosen Device Folder each profile and device has its own backup
@@ -18,7 +19,7 @@ await test('a new folder holds one backup folder named for the profile and devic
 
 await test('a completed F29 folder move preserves its repository identity and existing versions',async()=>{
   const previous=world(),folder=previous.directory();await previous.controller.install();previous.choose(folder);await previous.controller.connect();await previous.settle();
-  const before=await marker(folder,REPOSITORY_NAME);
+  const before=await marker(folder,REPOSITORY_NAME);assertOperationalFormat('deviceScope',before);
   const root=await folder.getDirectoryHandle(REPOSITORY_NAME),writer=await (await root.getFileHandle(SCOPE_FILE)).createWritable();
   const moved={...before,movedFrom:'Study-Director-Automatic-Backup-Repository'};
   await writer.write(JSON.stringify(moved));await writer.close();
@@ -27,6 +28,23 @@ await test('a completed F29 folder move preserves its repository identity and ex
   assert.deepEqual(await marker(folder,REPOSITORY_NAME),moved,'the canonical marker is used as it stands');
   assert.deepEqual(folder.names(),[REPOSITORY_NAME]);
   assert.equal((await current.commits(folder)).length,1,'the existing checkpoint stays in place');
+});
+
+await test('an existing folder with missing, ambiguous or foreign identity stays untouched through reads, writes and deletion',async()=>{
+  const w=world(),folder=w.directory();await w.controller.install();w.choose(folder);await w.controller.connect();await w.settle();
+  const storage=w.storageFor(()=>folder),root=await folder.getDirectoryHandle(REPOSITORY_NAME),before=await marker(folder,REPOSITORY_NAME);
+  const versions=(await root.getDirectoryHandle('commits')).names();
+  const replacement={...before,id:'b'.repeat(32)};
+  const swapped=await (await root.getFileHandle(SCOPE_FILE)).createWritable();await swapped.write(JSON.stringify(replacement));await swapped.close();
+  await assert.rejects(w.controller.deleteBackups(),/identity changed/u);
+  assert.deepEqual((await root.getDirectoryHandle('commits')).names(),versions);
+  for(const invalid of [null,{...before,version:'2'},{...before,scope:null},{...before,moving:'old'},{...before,movedFrom:'other'},{...before,extra:true},{...before,device:'unknown'},{...before,scope:QA_PROFILE}]){
+    if(!invalid)await root.removeEntry(SCOPE_FILE);
+    else{const writer=await (await root.getFileHandle(SCOPE_FILE,{create:true})).createWritable();await writer.write(JSON.stringify(invalid));await writer.close();}
+    for(const operation of [()=>storage.scope(),()=>storage.list({kind:'commit'}),()=>storage.beginPublication(),()=>w.controller.deleteBackups()])await assert.rejects(operation,/identity changed or is unreadable/u);
+    assert.deepEqual((await root.getDirectoryHandle('commits')).names(),versions);
+    if(invalid)assert.deepEqual(await marker(folder,REPOSITORY_NAME),invalid);else assert.ok(!root.names().includes(SCOPE_FILE));
+  }
 });
 
 await test('an unrecognized old folder is left untouched and never imported',async()=>{
@@ -76,6 +94,14 @@ await test('deleting a profile everywhere deletes its backup folder here and lea
   assert.deepEqual(folder.names(),['Study Director - Ben - Test Device'],'only this profile’s folder goes');
   assert.equal(ana.controller.status().connected,false);assert.equal(ana.settingsStore.size,0,'Device Folder backup is off for it');
   assert.equal(await ana.controller.deleteBackups(),'','nothing left to delete');
+});
+
+await test('two repositories with the same owner require a choice instead of selecting by directory order',async()=>{
+  const fresh=world(),folder=fresh.directory(),storage=fresh.storageFor(()=>folder);
+  await storage.layout.create(REPOSITORY_NAME);await storage.layout.create(REPOSITORY_NAME);
+  await fresh.controller.install();fresh.choose(folder);await fresh.controller.connect();
+  assert.match(fresh.note(),/More than one backup folder/u);assert.equal(fresh.controller.status().connected,false);
+  assert.equal(folder.names().length,2);
 });
 
 await test('read-only tabs never prepare a folder; concurrent writers share one current folder',async()=>{

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {assertOperationalFormat} from '../../helpers/operational-format.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
@@ -35,6 +36,7 @@ const ownershipInput=Object.freeze({
 });
 const ownership=ownershipModule.createOwnershipController(ownershipInput);
 assert.equal(ownership.writeLease({force:true}),true);
+assertOperationalFormat('appOwner',ownerStore.get('owner'));
 const initialHookCalls={...ownershipHookCalls};
 ownershipNow=1050;
 assert.equal(ownership.writeLease({force:true}),true,'A primary tab must be able to renew its ownership lease.');
@@ -54,7 +56,7 @@ assert.equal(ownership.status().format,'study-director.app-ownership-status');
 // missing or mismatched page identity never grants ownership of a v2 record.
 {
   const lease=ownerStore.get('owner');
-  for(const invalid of [{...lease,version:1,pageId:undefined},{...lease,pageId:undefined},{...lease,expiresAt:String(lease.expiresAt)}]){
+  for(const invalid of [{...lease,unexpected:true},{...lease,version:1,pageId:undefined},{...lease,pageId:undefined},{...lease,expiresAt:String(lease.expiresAt)}]){
     ownerStore.set('owner',invalid);
     assert.equal(ownership.canMutate(),false);
     assert.throws(()=>ownership.assertWriteToken(writeToken),error=>ownershipModule.isOwnershipLostError(error));

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {assertOperationalFormat} from '../../helpers/operational-format.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 
@@ -17,7 +18,7 @@ function fixture({durableHeartbeatFailure=false,localHeartbeatFailure=false}={})
     environment:freeze({AbortController,addStorageListener:()=>{},clearInterval:()=>{intervalCallback=null;},locks:null,now:()=>Date.now(),randomIdPart:()=> 'abcdefghij',setInterval:callback=>(intervalCallback=callback,1),setTimeout:(callback,delay)=>setTimeout(callback,Math.min(delay,2))}),
     hooks:freeze({foreignReleased:()=>{},refreshUi:()=>{},scheduleUpdate:()=>{}}),
     identity:freeze({canMutate:()=>true,status:()=>freeze({tabId:'tabqa123',pageId:'pageqa123',claimId:'claimqa123'})}),
-    local:freeze({getJson:()=>localValue,remove:()=>{localValue=null;return true;},setJson:(_key,value)=>{localWrites++;if(localHeartbeatFailure&&localWrites>1)return false;localValue=value;return true;}})
+    local:freeze({getJson:()=>localValue,remove:()=>{localValue=null;return true;},setJson:(_key,value)=>{assertOperationalFormat('mutationLock',value);localWrites++;if(localHeartbeatFailure&&localWrites>1)return false;localValue=value;return true;}})
   }));
   return {coordinator,heartbeat:async()=>{assert.equal(typeof intervalCallback,'function');intervalCallback();for(let i=0;i<20&&acquires<2;i++)await new Promise(r=>setTimeout(r,1));await new Promise(r=>setTimeout(r,1));},stats:()=>({releases,acquires,localWrites})};
 }
@@ -64,6 +65,11 @@ function fixture({durableHeartbeatFailure=false,localHeartbeatFailure=false}={})
     identity:freeze({canMutate:()=>true,status:()=>freeze({tabId:'tabqa123',pageId:'pageqa123',claimId:'claimqa123'})}),
     local:freeze({getJson:()=>localValue,remove:()=>{localValue=null;return true;},setJson:(_key,value)=>{localValue=value;return true;}})
   }));
+  const current=localValue;
+  for(const invalid of [{...current,extra:true},{...current,kind:null},{...current,expiresAt:String(current.expiresAt)}]){
+    localValue=invalid;assert.equal(coordinator.writesBlocked(),false);assert.equal(timers.length,0);
+  }
+  localValue=current;
   const fire=()=>{const due=timers.filter(timer=>timer.at<=now);for(const timer of due){timers.splice(timers.indexOf(timer),1);timer.callback();}};
   assert.equal(coordinator.writesBlocked(),true,'another tab\'s lease blocks writes here');
   coordinator.writesBlocked();coordinator.foreignActive();assert.equal(timers.length,1,'one look-again, however often it is asked');

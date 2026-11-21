@@ -206,7 +206,7 @@ function canonicalRepositorySafetyPurpose(value){
   const purpose=String(value||'');
   return ['before-restore','before-combine','before-clear-library'].includes(purpose)?purpose:'';
 }
-function repositoryRetentionDescriptor(exportedAt,input=null,notesFingerprint=''){
+function repositoryRetentionDescriptor(exportedAt,input,notesFingerprint){
   // `role` is a stable wire field; `purpose` identifies the current safety operation.
   const role=input&&input.role==='before-restore'?'before-restore':'normal',calendar=repositoryRetentionCalendar(exportedAt);let protectedUntil='',purpose='';
   if(role==='before-restore'){
@@ -214,7 +214,8 @@ function repositoryRetentionDescriptor(exportedAt,input=null,notesFingerprint=''
     protectedUntil=Number.isFinite(parsed)&&parsed>minimum?new Date(parsed).toISOString():new Date(minimum+REPOSITORY_RETENTION_POLICY.beforeRestoreProtectionMs).toISOString();
     purpose=canonicalRepositorySafetyPurpose(input&&input.purpose)||'before-restore';
   }
-  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil,purpose,calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(String(notesFingerprint||''))?String(notesFingerprint):''});
+  if(typeof notesFingerprint!=='string'||!/^[a-f0-9]{64}$/u.test(notesFingerprint))throw new Error('Device repository retention notes fingerprint is invalid.');
+  return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil,purpose,calendar,notesFingerprint});
 }
 function repositoryDateOrdinal(key){
   const match=/^(\d{4})-(\d{2})-(\d{2})$/u.exec(String(key||''));if(!match)return NaN;
@@ -232,7 +233,7 @@ function validateRepositoryRetention(value,exportedAt){
   if(role==='normal'&&(protectedUntil||rawPurpose))throw new Error('Normal repository checkpoints cannot carry safety metadata.');
   const calendar=value.calendar,localDate=String(calendar&&calendar.localDate||''),weekStart=String(calendar&&calendar.weekStart||''),month=String(calendar&&calendar.month||''),offset=Number(calendar&&calendar.utcOffsetMinutes),localOrdinal=repositoryDateOrdinal(localDate),weekOrdinal=repositoryDateOrdinal(weekStart);
   if(!calendar||typeof calendar!=='object'||Array.isArray(calendar)||!Number.isFinite(localOrdinal)||!Number.isFinite(weekOrdinal)||!/^(?:\d{4})-(?:0[1-9]|1[0-2])$/u.test(month)||month!==localDate.slice(0,7)||!Number.isInteger(offset)||Math.abs(offset)>14*60||repositoryOffsetDateKey(exportedAt,offset)!==localDate||weekOrdinal>localOrdinal||localOrdinal-weekOrdinal>6||new Date(weekOrdinal*86400000).getUTCDay()!==REPOSITORY_RETENTION_POLICY.weekStartsOn)throw new Error('Device repository retention calendar is invalid.');
-  const notesFingerprint=String(value.notesFingerprint||'');if(notesFingerprint&&!/^[a-f0-9]{64}$/u.test(notesFingerprint))throw new Error('Device repository retention notes fingerprint is invalid.');
+  const notesFingerprint=value.notesFingerprint;if(typeof notesFingerprint!=='string'||!/^[a-f0-9]{64}$/u.test(notesFingerprint))throw new Error('Device repository retention notes fingerprint is invalid.');
   return freeze({format:'study-director.repository-retention',version:1,role,protectedUntil:role==='before-restore'?new Date(protectedUntilMs).toISOString():'',purpose,calendar:freeze({localDate,weekStart,month,utcOffsetMinutes:offset}),notesFingerprint});
 }
 function newestRepositoryRow(rows){return rows.reduce((best,row)=>!best||Date.parse(row.manifest.exportedAt)>Date.parse(best.manifest.exportedAt)||Date.parse(row.manifest.exportedAt)===Date.parse(best.manifest.exportedAt)&&String(row.id).localeCompare(String(best.id))>0?row:best,null);}
@@ -308,13 +309,13 @@ function selectRepositoryRetention(rowsValue,{now=new Date()}={}){
     // version kept after it. Versions whose notes did not change would only
     // crowd Version History. The window follows the latest checkpoint rather
     // than the clock, so every device selects alike.
-    const windowStart=time(latest)-policy.hourlyWindowHours*3600000,hour=row=>Math.floor((time(row)+calendar(row).utcOffsetMinutes*60000)/3600000),notes=row=>String(row.manifest.retention.notesFingerprint||'');
+    const windowStart=time(latest)-policy.hourlyWindowHours*3600000,hour=row=>Math.floor((time(row)+calendar(row).utcOffsetMinutes*60000)/3600000),notes=row=>row.manifest.retention.notesFingerprint;
     let after=latest,hourly=0;
     for(const row of [...normalRows].reverse()){
       if(hourly>=policy.hourlyLimit||time(row)<=windowStart)break;
       if(row===latest)continue;
       if(selected.has(row.id)){after=row;continue;}
-      if(hour(row)===hour(after)||notes(row)&&notes(row)===notes(after))continue;
+      if(hour(row)===hour(after)||notes(row)===notes(after))continue;
       keep(row,'hourly');hourly+=1;after=row;
     }
   }
@@ -340,9 +341,9 @@ function projectManagedRepositoryHistory(rowsValue,source,{now=new Date(),quaran
   }));
 }
 function validateRepositoryCommitValue(value,manifest=null){
-  if(!value||typeof value!=='object'||Array.isArray(value)||value.format!==REPOSITORY_COMMIT_FORMAT||Number(value.version)!==REPOSITORY_COMMIT_VERSION)throw new Error('Repository checkpoint commit marker is invalid.');
+  if(!value||typeof value!=='object'||Array.isArray(value)||value.format!==REPOSITORY_COMMIT_FORMAT||value.version!==REPOSITORY_COMMIT_VERSION||!Number.isSafeInteger(value.manifestVersion)||value.manifestVersion<1)throw new Error('Repository checkpoint commit marker is invalid.');
   const checkpointId=String(value.checkpointId||''),exportedAt=String(value.exportedAt||''),sourceRevision=String(value.sourceRevision||'');if(!/^cp_[a-f0-9]{32}$/u.test(checkpointId)||!Number.isFinite(Date.parse(exportedAt))||!Number.isFinite(Date.parse(sourceRevision)))throw new Error('Repository checkpoint commit marker provenance is invalid.');
-  const normalized=freeze({format:REPOSITORY_COMMIT_FORMAT,version:REPOSITORY_COMMIT_VERSION,checkpointId,exportedAt:new Date(exportedAt).toISOString(),sourceRevision:new Date(sourceRevision).toISOString(),manifestVersion:Number(value.manifestVersion)||0});
+  const normalized=freeze({format:REPOSITORY_COMMIT_FORMAT,version:REPOSITORY_COMMIT_VERSION,checkpointId,exportedAt:new Date(exportedAt).toISOString(),sourceRevision:new Date(sourceRevision).toISOString(),manifestVersion:value.manifestVersion});
   if(manifest&&(manifest.checkpoint.checkpointId!==normalized.checkpointId||manifest.exportedAt!==normalized.exportedAt||manifest.sourceRevision!==normalized.sourceRevision||Number(manifest.version)!==normalized.manifestVersion))throw new Error('Repository checkpoint commit marker does not match its manifest.');
   return normalized;
 }
@@ -358,7 +359,7 @@ async function inspectRepositoryCommitMarker(file,manifest=null){
 }
 
 function validateRepositoryManifest(value){
-  const manifestVersion=Number(value&&value.version);
+  const manifestVersion=value?.version;
   if(!value||typeof value!=='object'||Array.isArray(value)||value.format!==REPOSITORY_MANIFEST_FORMAT)throw new Error('Device repository checkpoint is invalid.');
   if(manifestVersion!==REPOSITORY_MANIFEST_VERSION)throw new Error(`This backup version is in format ${manifestVersion||'?'}, which this version of Study Director does not read.`);
   const checkpoint=value.checkpoint;

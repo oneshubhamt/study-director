@@ -48,15 +48,26 @@ registry.define('profiles',1,()=>{
     // cleared (the app then writes back what it holds; the profile keeps its id).
     let lastText=null;
     function read(){
-      const text=storage.read();if(text)lastText=text;let raw=null,parsed=true;try{raw=JSON.parse(text||'null');}catch{raw=null;parsed=false;}
-      const unsupported=text!==null&&text!==''&&(!parsed||!raw||typeof raw!=='object'||raw.version!==VERSION);
+      const text=storage.read();
+      if(text!==null)lastText=text;
+      let raw=null;
+      try{raw=JSON.parse(text);}catch{}
+      let unsupported=text!==null&&(!raw||raw.version!==VERSION||Object.keys(raw).length!==4||
+        !Array.isArray(raw.profiles)||raw.profiles.length>MAX_PROFILES||!Array.isArray(raw.removing));
       const profiles=[],ids=new Set(),scopes=new Set();
-      if(raw&&(raw.version===VERSION||unsupported)&&Array.isArray(raw.profiles))for(const value of raw.profiles.slice(0,MAX_PROFILES)){const row=entry(value);if(!row||ids.has(row.id)||scopes.has(row.scope))continue;ids.add(row.id);scopes.add(row.scope);profiles.push(row);}
-      const removing=!unsupported&&raw&&Array.isArray(raw.removing)?[...new Set(raw.removing.filter(scope=>(scope===''||validId(scope))&&!scopes.has(scope)))]:[];
-      const active=profiles.some(row=>row.id===raw?.active)?raw.active:(profiles[0]?.id||'');
-      return freeze({version:VERSION,active,profiles:freeze(profiles),removing:freeze(removing),unsupported});
+      for(const value of Array.isArray(raw?.profiles)?raw.profiles.slice(0,MAX_PROFILES):[]){
+        const row=entry(value);
+        if(!row||ids.has(row.id)||scopes.has(row.scope)){unsupported=true;continue;}
+        if(!row.createdAt||Object.keys(value).length!==Object.keys(row).length||Object.keys(row).some(key=>row[key]!==value[key]))unsupported=true;
+        ids.add(row.id);scopes.add(row.scope);profiles.push(row);
+      }
+      const active=ids.has(raw?.active)?raw.active:(profiles[0]?.id||'');
+      const removing=Array.isArray(raw?.removing)?raw.removing:[];
+      if(raw&&(active!==raw.active||new Set(removing).size!==removing.length||
+        removing.some(scope=>scope!==''&&!validId(scope)||scopes.has(scope))))unsupported=true;
+      return freeze({version:VERSION,active,profiles:freeze(profiles),removing:freeze(unsupported?[]:removing),unsupported});
     }
-    function unsupportedError(){return Object.assign(new Error('The profile list on this device was saved by a newer version of Study Director. Update the app to add, switch or remove profiles.'),{code:'STUDY_DIRECTOR_PROFILES_UNSUPPORTED'});}
+    function unsupportedError(){return Object.assign(new Error('The profile list on this device cannot be read completely. The stored list and its data are being preserved.'),{code:'STUDY_DIRECTOR_PROFILES_UNSUPPORTED'});}
     function write(next){
       if(read().unsupported)throw unsupportedError();
       const value={version:VERSION,active:next.active,profiles:next.profiles.map(row=>({...row})),removing:[...next.removing]};
@@ -76,12 +87,11 @@ registry.define('profiles',1,()=>{
       const next=change(mine,list);if(!next)return mine;
       return current(write({...list,profiles:list.profiles.map(row=>row.scope===pageScope?entry({...row,...next}):row),active:list.active===mine.id&&next.id?next.id:list.active}));
     }
-    // The page's profile. A device's first is made here: for someone new its
-    // first start is still to come (fresh), for existing data it is done.
-    function ensure(name,{fresh=false}={}){
+    // Creating the first profile opens first start.
+    function ensure(name){
       const list=read(),mine=current(list);if(mine||list.unsupported)return mine;
       if(list.profiles.length>=MAX_PROFILES)throw new Error('This device already holds the most profiles it can.');
-      const row=entry({id:newId(name),scope:pageScope,name,email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:fresh===true,from:null});
+      const row=entry({id:newId(name),scope:pageScope,name,email:'',folder:'',createdAt:new Date(platform.now()).toISOString(),fresh:true,from:null});
       const next=write({...list,profiles:[...list.profiles,row],active:list.profiles.some(other=>other.id===list.active&&other.scope!==pageScope)?list.active:row.id,removing:list.removing.filter(scope=>scope!==pageScope)});
       return current(next);
     }
@@ -161,7 +171,7 @@ registry.define('profiles',1,()=>{
     // Another tab switched, added or removed a profile: every tab follows.
     function watch(){
       return platform.listen(key=>{if(key!==registryKey&&key!==null)return;
-        if(!storage.read()&&lastText){storage.write(lastText);return;}
+        if(storage.read()===null&&lastText!==null){storage.write(lastText);return;}
         const list=read(),mine=current(list),active=list.profiles.find(row=>row.id===list.active);if(list.unsupported)return;if(!mine||active&&active.scope!==pageScope)platform.reload();});
     }
     const list=()=>read().profiles;

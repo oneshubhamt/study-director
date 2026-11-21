@@ -197,7 +197,8 @@ const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/devi
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');
 assert.match(app,/const EXTERNAL_REPOSITORY_IDENTITIES=Object\.freeze\(@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@\)/u,'Device Backup repository directories must come from the canonical contract');assert.match(app,/identities:Object\.freeze\(\{root:repository,prefix:EXTERNAL_REPOSITORY_IDENTITIES\.backupFolderPrefix,/u,'Device Folder storage receives its directory names from the canonical contract');
-assert.doesNotMatch(deviceBackupSource,/Study-Director-Automatic-Backup-Repository/u,'Device Backup must not mint its repository root');
+// Only the completed-move provenance comparison may mention this historical name.
+assert.doesNotMatch(deviceBackupSource.replace("value.movedFrom!=='Study-Director-Automatic-Backup-Repository'",''),/Study-Director-Automatic-Backup-Repository/u,'Device Backup must not mint its repository root');
 assert.doesNotMatch(deviceBackupSource,/id:['"]study-director-device-backup/u,'Device Backup must not mint its persistent picker identity');
 assert.match(app,/pickerId:EXTERNAL_REPOSITORY_IDENTITIES\.deviceFolderPickerId/u,'Device Backup picker identity must come from the canonical contract');
 assert.doesNotMatch(driveSource,/const FOLDER_NAME=['"]Study Director Backups/u,'Drive must not mint its repository folder');

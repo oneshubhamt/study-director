@@ -135,7 +135,7 @@ function validateCheckpointMetadata(value){
   if(!contract||!value||typeof value!=='object'||Array.isArray(value))throw new Error('Backup checkpoint metadata is missing.');
   const keys=Object.keys(value).sort().join('|');
   if(keys!==['checkpointId','createdAt','format','originInstallationId','version'].sort().join('|'))throw new Error('Backup checkpoint metadata contains unexpected fields.');
-  if(value.format!==contract.format||Number(value.version)!==Number(contract.version)||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!/^inst_[a-z0-9_]{8,128}$/iu.test(String(value.originInstallationId||''))||!Number.isFinite(Date.parse(String(value.createdAt||''))))throw new Error('Backup checkpoint metadata is invalid.');
+  if(value.format!==contract.format||value.version!==contract.version||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!/^inst_[a-z0-9_]{8,128}$/iu.test(String(value.originInstallationId||''))||!Number.isFinite(Date.parse(String(value.createdAt||''))))throw new Error('Backup checkpoint metadata is invalid.');
   return value;
 }
 const CHECKPOINT_AUTHORITY=freeze({
@@ -203,7 +203,7 @@ function backupProtectedCheckpointManifest(plan,checkpoint){
 function validateProtectedCheckpointManifest(value,checkpoint=null){
   const contract=DATA_CONTRACT.schemas.CheckpointProtectedManifest;
   if(!contract||!value||typeof value!=='object'||Array.isArray(value))throw new Error('Protected checkpoint manifest is missing.');
-  if(Number(value.version)!==Number(contract.version))throw new Error('Protected checkpoint manifest version is unsupported.');
+  if(value.version!==contract.version)throw new Error('Protected checkpoint manifest version is unsupported.');
   if(Object.keys(value).sort().join('|')!==['noteDeletions','attachmentDeletions','authority','checkpointId','format','savedDayDeletions','sourceRevision','version'].sort().join('|'))throw new Error('Protected checkpoint manifest contains unexpected fields.');
   if(value.format!==contract.format||!/^cp_[a-f0-9]{32}$/u.test(String(value.checkpointId||''))||!Number.isFinite(Date.parse(String(value.sourceRevision||''))))throw new Error('Protected checkpoint manifest is invalid.');
   if(checkpoint&&String(value.checkpointId)!==String(checkpoint.checkpointId))throw new Error('Protected checkpoint manifest does not match its public checkpoint provenance.');
@@ -261,16 +261,17 @@ function backupVersionError(version){
 }
 function validateBackupManifest(manifest,gzip){
   if(!manifest||manifest.type!=='manifest'||manifest.format!==DATA_CONTRACT.schemas.Backup.format)throw new Error('File is not a Study Director backup.');
-  const version=Number(manifest.version)||0;
+  const version=manifest.version;
+  if(!Number.isSafeInteger(version))throw new Error('Backup format version is invalid.');
   if(version!==DATA_CONTRACT.schemas.Backup.version)throw backupVersionError(version);
   if(manifest.container!=='binary-v1')throw new Error('Backup container metadata is invalid.');
   if(manifest.encoding!=='ndjson')throw new Error('Unsupported backup encoding.');
-  if((gzip?'gzip':'none')!==String(manifest.compression||'none'))throw new Error('Backup compression metadata does not match the file.');
+  if((gzip?'gzip':'none')!==manifest.compression)throw new Error('Backup compression metadata does not match the file.');
   if(manifest.checksumAlgorithm!=='sha256')throw new Error('Backup requires SHA-256 integrity checks.');
   validateCheckpointMetadata(manifest.checkpoint);
   if(new Date(String(manifest.checkpoint.createdAt)).toISOString()!==new Date(String(manifest.exportedAt)).toISOString())throw new Error('Backup checkpoint timestamp does not match the backup timestamp.');
   const protectedContract=DATA_CONTRACT.schemas.CheckpointProtectedManifest,descriptor=manifest.protectedManifest;
-  if(!descriptor||typeof descriptor!=='object'||Array.isArray(descriptor)||Object.keys(descriptor).sort().join('|')!==['entityType','format','version'].sort().join('|')||descriptor.entityType!=='checkpointManifest'||descriptor.format!==protectedContract.format||Number(descriptor.version)!==Number(protectedContract.version))throw new Error('Backup protected-manifest descriptor is invalid.');
+  if(!descriptor||typeof descriptor!=='object'||Array.isArray(descriptor)||Object.keys(descriptor).sort().join('|')!==['entityType','format','version'].sort().join('|')||descriptor.entityType!=='checkpointManifest'||descriptor.format!==protectedContract.format||descriptor.version!==protectedContract.version)throw new Error('Backup protected-manifest descriptor is invalid.');
   if(manifest.declaredCounts?.personalData!==1)throw new Error('Backup is missing its personal-data section.');
   const counts=backupCountShape(manifest.declaredCounts);
   if(counts.checkpointManifest!==1)throw new Error('A backup must contain exactly one protected checkpoint manifest.');

@@ -993,7 +993,7 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
   for(let index=1;index<size;index++){
    const checkpointId='cp_'+(50000+index).toString(16).padStart(32,'0'),date=new Date(clock.now()-Math.floor((size-index)/2)*86400000).toISOString().slice(0,10),exportedAt=date+`T${index%2?'10':'11'}:00:00.000Z`;
    const manifest={...seed,checkpoint:{...seed.checkpoint,checkpointId,createdAt:exportedAt},exportedAt,sourceRevision:exportedAt,protectedCheckpointManifest:{...seed.protectedCheckpointManifest,checkpointId,sourceRevision:exportedAt},retention:{...seed.retention,calendar:{...retentionCalendar(date),utcOffsetMinutes:0}}};
-   const blob=new Blob([JSON.stringify(manifest)]);await h.provider.repository.upload({kind:'checkpoint',id:checkpointId,blob,digest:await engine.run('checksum',{value:blob}),exportedAt,historySummary:{logicalFingerprint:manifest.logicalFingerprint,counts:manifest.counts,retention:manifest.retention}});
+   const blob=new Blob([JSON.stringify(manifest)]);await h.provider.repository.upload({kind:'checkpoint',id:checkpointId,blob,digest:await engine.run('checksum',{value:blob}),exportedAt,historySummary:{format:manifest.version,attachmentsMissing:0,logicalFingerprint:manifest.logicalFingerprint,counts:manifest.counts,retention:manifest.retention}});
    const marker=await runtime.repository.inspectCommit(new Blob([JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision:exportedAt,manifestVersion:manifest.version})]));
    const commitBlob=new Blob([JSON.stringify(marker)]);await h.provider.repository.upload({kind:'commit',id:checkpointId,blob:commitBlob,digest:await engine.run('checksum',{value:commitBlob})});
   }
@@ -1062,7 +1062,7 @@ for(const {size,fault} of [{size:65,fault:''},{size:65,fault:'unavailable'},{siz
   for(let index=1;index<size;index++){
    const checkpointId='cp_'+(70000+index).toString(16).padStart(32,'0'),date=new Date(clock.now()-Math.floor((size-index)/2)*86400000).toISOString().slice(0,10),exportedAt=date+`T${index%2?'10':'11'}:00:00.000Z`;
    const manifest={...seed,checkpoint:{...seed.checkpoint,checkpointId,createdAt:exportedAt},exportedAt,sourceRevision:exportedAt,protectedCheckpointManifest:{...seed.protectedCheckpointManifest,checkpointId,sourceRevision:exportedAt},retention:{...seed.retention,calendar:{...retentionCalendar(date),utcOffsetMinutes:0}}};
-   const blob=new Blob([JSON.stringify(manifest)]);await h.provider.repository.upload({kind:'checkpoint',id:checkpointId,blob,digest:await engine.run('checksum',{value:blob}),exportedAt,historySummary:{logicalFingerprint:manifest.logicalFingerprint,counts:manifest.counts,retention:manifest.retention}});
+   const blob=new Blob([JSON.stringify(manifest)]);await h.provider.repository.upload({kind:'checkpoint',id:checkpointId,blob,digest:await engine.run('checksum',{value:blob}),exportedAt,historySummary:{format:manifest.version,attachmentsMissing:0,logicalFingerprint:manifest.logicalFingerprint,counts:manifest.counts,retention:manifest.retention}});
    const marker=await runtime.repository.inspectCommit(new Blob([JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision:exportedAt,manifestVersion:manifest.version})]));
    const commitBlob=new Blob([JSON.stringify(marker)]);await h.provider.repository.upload({kind:'commit',id:checkpointId,blob:commitBlob,digest:await engine.run('checksum',{value:commitBlob})});
   }

@@ -131,16 +131,19 @@ const attachmentObjectIds=new Set(manifest.objects.filter(entry=>entry.kind==='a
 const leasedReadObject=async entry=>{const blob=objectFiles.get(entry.objectId)||null;if(!blob)return null;return freeze({blob,release:async()=>leaseReleaseCounts.set(entry.objectId,(leaseReleaseCounts.get(entry.objectId)||0)+1)});};
 assert.equal(manifest.protectedCheckpointManifest.version,3);assert.equal(manifest.checkpoint.checkpointId,checkpointId);assert.equal(manifest.encrypted,true,'repository publication must preserve the configured encrypted protection state');
 // Refuse other container versions before reading objects or mutating local state.
-for(const version of [1,2,3,4,5,6,7,8,9,10,12]){
+for(const version of [1,2,3,4,5,6,7,8,9,10,12,'11']){
   let reads=0;const before=JSON.stringify({records,notes,currentPersonal,deletions});
   await assert.rejects(runtime.repository.inspect(freeze({...manifest,version}),async()=>{reads++;throw new Error('must not read');},{interactive:false,committed:true}),/does not read|newer/u);
   assert.equal(reads,0);assert.equal(JSON.stringify({records,notes,currentPersonal,deletions}),before);
   await assert.rejects(runtime.repository.inspectManifest(await encryptBlob(new Blob([JSON.stringify({...manifest,version})])),{interactive:false}),/does not read|newer/u);
 }
+const currentCommit=JSON.parse(await publishedCommitBlob.text());
+for(const field of ['version','manifestVersion'])await assert.rejects(runtime.repository.inspectCommit(new Blob([JSON.stringify({...currentCommit,[field]:String(currentCommit[field])})])),/marker is invalid/u);
 // A v11 manifest supplies its ancestry and fingerprint rather than inferring them.
 for(const [change,reason] of [
   [{reconciliationAncestorIds:undefined},/ancestry is invalid/u],
   [{retention:{...manifest.retention,role:'before-restore',protectedUntil:new Date(Date.parse(manifest.exportedAt)+86400000).toISOString(),purpose:undefined}},/safety purpose is invalid/u],
+  [{retention:{...manifest.retention,notesFingerprint:undefined}},/notes fingerprint is invalid/u],
   [{logicalFingerprint:undefined},/fingerprint is invalid/u],
   [{logicalFingerprint:'0'.repeat(64)},/fingerprint failed verification/u]
 ]){
@@ -406,7 +409,12 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
   const missingCount=async value=>{partialVersion.history=freeze({...completeSummary,attachmentsMissing:value});const listed=await runtime.providers.history('repository-missing-qa',{interactive:false});return listed.entries.find(entry=>entry.location.checkpointId===partialVersion.id)?.location.attachmentsMissing;};
   try{
     assert.equal(await missingCount(3),3,'a version missing attachment bytes reaches Version History with its count');
-    assert.equal(await missingCount('3x'),0);assert.equal(await missingCount(-1),0);assert.equal(await missingCount(undefined),0,'an absent or invalid count reads as none');
+    for(const value of ['3x',-1,undefined])assert.equal(await missingCount(value),undefined);
+    for(const format of [10,12,undefined]){
+      partialVersion.history={...completeSummary,format};
+      const listed=await runtime.providers.history('repository-missing-qa',{interactive:false});
+      assert.equal(listed.entries.find(entry=>entry.location.checkpointId===partialVersion.id)?.unreadable,true);
+    }
   }finally{partialVersion.history=completeSummary;}
   records=[];
   const none=await runtime.providers.bringInRepositoryProvider('repository-missing-qa',{missingOnly:true,quiet:true,before:'2000-01-01T00:00:00.000Z'});
@@ -423,8 +431,9 @@ records.push(freeze({version:16,recordKind:'study',date:'2026-09-21',reflection:
     folder:()=>folder,identities:freeze({root:'Study Director - QA - Test Device',prefix:'Study Director',objects:'objects',checkpoints:'checkpoints',commits:'commits'}),owner:()=>({profile:'prof_qa_mve00000_abcdef01',scope:'',device:'inst_qa_test_mve00000_abcdef01'}),
     checksum:async blob=>codec.checksumBlob(blob),inspectManifest:(file,options)=>runtime.repository.inspectManifest(file,options),
     environment:freeze({canMutate:()=>true,now:()=>Date.now(),setTimeout,clearTimeout,yieldTask:async()=>{}}),
-    limits:freeze({publicationMaxAgeMs:24*3600000,publicationAssertionMarginMs:30*60000,publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
+    limits:freeze({publicationRenewMs:2*60000,publicationStaleMs:15*60000,maintenanceMaxAgeMs:60000,maintenanceAssertionMarginMs:30000,responseTimeoutMs:10000})
   }));
+  await deviceStorage.layout.create('Study Director - QA - Test Device');
   assert.equal(runtime.providers.register(freeze({id:'device-folder-engine',label:'Device Folder',connected:()=>true,repository:deviceStorage})),true);
   notes={Ethics:normalizeArea({key:'Ethics',text:'folder version',updatedAt:'2026-09-21T01:00:00.000Z'},'Ethics')};
   const published=await runtime.providers.backupRepositoryProvider('device-folder-engine',{interactive:false});

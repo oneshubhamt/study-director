@@ -11,7 +11,7 @@ const sha256=async blob=>createHash('sha256').update(Buffer.from(await blob.arra
 const unexpected=()=>{throw new Error('Unexpected backup-pipeline operation in Active Session claim test.');};
 const pipeline=freeze({
   createPublication:unexpected,publish:unexpected,publishInline:unexpected,inspectManifest:unexpected,inspect:unexpected,bringIn:unexpected,restoreVersion:unexpected,verifyCheckpoint:unexpected,verifyObject:unexpected,scrub:unexpected,cleanup:unexpected,inspectCommit:unexpected,
-  retention:freeze({}),validatePolicy:unexpected,classifyState:unexpected,activeProtected:unexpected,selectRetention:unexpected,projectHistory:unexpected,noteObject:unexpected,readNote:unexpected,readSession:unexpected,markCompleted:unexpected,sharedBase:unexpected,establishBase:unexpected
+  retention:freeze({}),validatePolicy:unexpected,classifyState:unexpected,activeProtected:unexpected,manifestVersion:11,selectRetention:unexpected,projectHistory:unexpected,noteObject:unexpected,readNote:unexpected,readSession:unexpected,markCompleted:unexpected,sharedBase:unexpected,establishBase:unexpected
 });
 const presentation=freeze({
   begin:()=>freeze({update:noop,finish:noop}),read:()=>null,feedback:noop,condition:noop,notice:noop,detail:noop,outcome:noop,locationLabel:()=>'',resolve:noop,reset:noop,subscribe:()=>noop
@@ -166,6 +166,8 @@ assert.equal(b.diagnosticSync().find(row=>row.id==='google-drive')?.needsUpdate,
   }finally{Date.now=realNow;oddWatch={ignored:0,ignoredCommits:0};}
 }
 // Version 3 was written only by unreleased builds; it is refused like any unknown form.
+await replaceLast({...oldValue,version:'4'});
+await assert.rejects(()=>b.readSessionClaim('google-drive'),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN');
 const v3Value={...oldValue,version:3};delete v3Value.handoffToken;
 await replaceLast(v3Value);
 await assert.rejects(()=>b.readSessionClaim('google-drive'),error=>error?.code==='REPOSITORY_SESSION_CLAIM_UNCERTAIN','a version-3 claim is refused');

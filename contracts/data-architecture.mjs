@@ -135,7 +135,7 @@ export const DATA_ARCHITECTURE=freeze({
   localStorage:freeze({
     recovery:surface('recovery','repositories','protect','until canonical session settles','LocalRecoveryEnvelope.v'+CURRENT_SCHEMA_VERSIONS.LocalRecoveryEnvelope,{protects:'indexedDb.activeSessions',created:'when live session state needs crash recovery',cleared:'after canonical session persistence/finalization settles',supersededBy:'newer canonical ActiveSession or canonical deletion'}),
     appOwner:surface('coordination','ownership','operational','lease lifetime','AppOwnerLease.v2'),
-    mutationLock:surface('coordination','host','operational','lease lifetime'),
+    mutationLock:surface('coordination','mutation-coordinator','operational','lease lifetime','MutationLock.v1'),
     storageHealth:surface('operational','host','operational','bounded operational diagnostics; no user-content details','StorageHealth.v3'),
     databaseLifecycle:surface('operational','host','operational','bounded operational diagnostics; no user-content details: counts, times and storage error names for this start and the start before a database loss'),
     installationId:surface('coordination-identity','persistence','protect-identifiers','retained'),

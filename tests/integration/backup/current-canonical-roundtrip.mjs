@@ -62,11 +62,16 @@ await assert.rejects(codec.inspect(file.slice(0,-1)),/truncated/);
 // Container versions are gates, never requests to convert the payload.
 // Reuse the real binary writer with a changed declared version; every older
 // container must be rejected before record interpretation or mutation.
-async function withVersion(version){
-  const metadata=new Blob([JSON.stringify({...manifest,version})+'\n',...await Promise.all(groups.map(async([type,items],i)=>(await codec.encodeChunk(i,type,items,algorithm)).line+'\n')),JSON.stringify(await codec.encodeCompletion(groups.length,counts,(await Promise.all(groups.map(([type,items],i)=>codec.encodeChunk(i,type,items,algorithm)))).map(c=>c.checksum),algorithm,descriptors))+'\n']);
+async function withVersion(version,fields={}){
+  const metadata=new Blob([JSON.stringify({...manifest,version,...fields})+'\n',...await Promise.all(groups.map(async([type,items],i)=>(await codec.encodeChunk(i,type,items,algorithm)).line+'\n')),JSON.stringify(await codec.encodeCompletion(groups.length,counts,(await Promise.all(groups.map(([type,items],i)=>codec.encodeChunk(i,type,items,algorithm)))).map(c=>c.checksum),algorithm,descriptors))+'\n']);
   return codec.createV10Container(metadata,{compression:'none',assetBlobs:blobs});
 }
 for(const version of [1,20,21,22,23,24,25])await assert.rejects(codec.inspect(await withVersion(version)),/older version/u);
+for(const [version,fields,message] of [
+  ['26',{},/version is invalid/u],[26,{compression:undefined},/compression metadata/u],
+  [26,{checkpoint:{...manifest.checkpoint,version:'1'}},/checkpoint metadata is invalid/u],
+  [26,{protectedManifest:{...manifest.protectedManifest,version:'3'}},/descriptor is invalid/u]
+])await assert.rejects(codec.inspect(await withVersion(version,fields)),message);
 await assert.rejects(codec.inspect(await withVersion(27)),/newer Study Director version/u);
 await assert.rejects(codec.inspect(new Blob([JSON.stringify({version:1,records:[]})])),/not a Study Director backup/u);
 assert.equal(codec.inspectLegacy,undefined);assert.equal(codec.inspectCurrent,undefined);

@@ -18,7 +18,7 @@ Decisions (owner, 2026-10-18):
 - Device-wide, and nothing else: the profile list, the device ID, the install notice and the update check (with the service worker).
 - Switching reloads every open tab into the chosen profile. With one profile its backup key is kept on the device (a non-extractable key, never the password); with several, each start asks ("Not now" keeps sync and encrypted backups waiting). It is not a privacy lock: browser data is not encrypted. A forgotten password cannot be recovered, by design.
 - **Device names.** Nobody types one. The device ID says what the device is (`inst_<type>_<browser>_<first-use time>_<random>`), and any device can name any other from it ("iPhone · Safari", with "(since 12 Oct)" only when two would look the same).
-- **First start.** Someone new gives a name, an optional password (set before Drive is used, so no unencrypted version reaches it) and optionally connects Drive; joining a library from the form takes its name and settings. Existing data becomes the first profile with no form. Add profile opens the same form.
+- **First start.** Someone new gives a name, an optional password (set before Drive is used, so no unencrypted version reaches it) and optionally connects Drive; joining a library from the form takes its name and settings. A completed profile opens directly. Creating the first profile or adding another opens the form.
 
 ## What is stored
 
@@ -67,7 +67,7 @@ Notes use permanent `n_` IDs and Note v3; Support Activities has its own name an
 
 The storage layer (`persistence.js`) then keeps held records out of every read, refuses a write or delete of one (`STUDY_DIRECTOR_UNSUPPORTED_DATA`) and leaves them in place on a clear or a range delete; with nothing held, every transaction is the plain browser one. Bookkeeping whose family is `operational` in the data contract (leases, maintenance progress, caches) is held too but replaced as usual. While protected data is held, local clean-up waits (it decides what nothing refers to, and held data may refer to attachments) and Drive uploads wait (a version without that data would read as its deletion on other devices); Device Folder and file backups go on with what this build can read. The person is told once, Library → Data names what is held, and diagnostics has an "Unsupported data" row.
 
-An older database is left untouched and startup is blocked; an empty version-1 database from an interrupted first creation may initialize the current stores. A newer database opens as it is, never upgraded or downgraded. If a store this build needs is gone or keyed differently, the profile does not open: start-up says it needs a newer version and offers another profile, and nothing in it is touched. A profile list from a newer version is used read-only: nothing in it is rewritten, and adding, switching or removing profiles (and deleting removed profiles' data) waits for an update. On Drive, a version this build cannot read shows muted in Version History with Restore disabled and Remove in red; sync waits on it ("Needs app update") instead of retrying, and never uploads over it.
+An older database is left untouched and startup is blocked; an empty version-1 database from an interrupted first creation may initialize the current stores. A newer database opens as it is, never upgraded or downgraded. If a store this build needs is gone or keyed differently, the profile does not open: start-up says it needs a newer version and offers another profile, and nothing in it is touched. A newer or malformed profile list is read-only: nothing in it is rewritten, and adding, switching or removing profiles (and deleting removed profiles' data) waits for an update. On Drive, a version this build cannot read shows muted in Version History with Restore disabled and Remove in red; sync waits on it ("Needs app update") instead of retrying, and never uploads over it.
 
 For this to keep working, a later build bumps a record's `version` when its shape changes, gives new appMeta families names an older build does not know, and treats removing or re-keying a store as a change that older builds meet by leaving the profile alone.
 
@@ -83,7 +83,7 @@ What travels between devices is read inside a container whose version every buil
 
 ### Changing a synced form
 
-`contracts/format-ledger.mjs` records only the current synced and local forms. Future shape changes must raise the record version and the backup/repository containers that carry it (claims have their own version). Define rollout explicitly before shipping such a change; do not quietly add an older-format reader to a current codec. Git history retains earlier baselines.
+`contracts/format-ledger.mjs` also records the fields and version markers written for external repository ownership, publication and maintenance, tab leases and attachment metadata. The synced ledger records only the current synced and local forms. Future shape changes must raise the record version and the backup/repository containers that carry it (claims have their own version). Define rollout explicitly before shipping such a change; do not quietly add an older-format reader to a current codec. Git history retains earlier baselines.
 
 ## Emergency copies
 

@@ -22,7 +22,7 @@ registry.define('backup-provider',1,input=>{
     environment:freeze(['clearTimeout','setTimeout']),
     diagnostics:freeze(['capture','fail','finish','mark','start'])
   });
-  const REPOSITORY_FIELDS=freeze(['createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','readSession','markCompleted','sharedBase','establishBase']);
+  const REPOSITORY_FIELDS=freeze(['manifestVersion','createPublication','publish','publishInline','inspectManifest','inspect','bringIn','restoreVersion','verifyCheckpoint','verifyObject','scrub','cleanup','inspectCommit','retention','validatePolicy','classifyState','activeProtected','selectRetention','projectHistory','noteObject','readNote','readSession','markCompleted','sharedBase','establishBase']);
   function createRuntime(input){
     exactObject(input,['background','ports','repository'],'Backup provider input');
     const Background=exactObject(input.background,['contractVersion','createCoordinator','format','maintenance','maintenanceActionable'],'Backup provider repository-background dependency');
@@ -32,7 +32,7 @@ registry.define('backup-provider',1,input=>{
     for(const [name,fields] of Object.entries(PORT_FIELDS))exactObject(ports[name],fields,'Backup provider '+name+' port');
     for(const name of ['controller','exports','domain','ownership','environment','diagnostics'])requireFunctions(ports[name],PORT_FIELDS[name],'Backup provider '+name+' port');
     const RepositoryCheckpointPipeline=exactObject(input.repository,REPOSITORY_FIELDS,'Backup provider repository pipeline');
-    requireFunctions(RepositoryCheckpointPipeline,REPOSITORY_FIELDS.filter(key=>key!=='retention'),'Backup provider repository pipeline');
+    requireFunctions(RepositoryCheckpointPipeline,REPOSITORY_FIELDS.filter(key=>key!=='retention'&&key!=='manifestVersion'),'Backup provider repository pipeline');
     if(!RepositoryCheckpointPipeline.retention||!Object.isFrozen(RepositoryCheckpointPipeline.retention))throw new TypeError('Backup provider retention policy is invalid.');
     if(!Object.isFrozen(ports.view.presentation)||['begin','read','feedback','condition','notice','detail','outcome','locationLabel','resolve','reset','subscribe'].some(key=>typeof ports.view.presentation[key]!=='function'))throw new TypeError('Backup presentation port is invalid.');
     const APP_VERSION=ports.configuration.appVersion,BackupController=ports.controller,Exports=ports.exports,clampText=ports.domain.clampText,requireBackupMutationControl=ports.ownership.requireMutationControl;
@@ -284,7 +284,7 @@ registry.define('backup-provider',1,input=>{
     let history=null;
     if(kind==='checkpoint'&&raw.history&&typeof raw.history==='object'){
       const fingerprint=String(raw.history.logicalFingerprint||'').toLowerCase(),exportedAt=String(raw.history.exportedAt||''),daily=Number(raw.history.counts&&raw.history.counts.dailyRecord),notes=Number(raw.history.counts&&raw.history.counts.note),role=String(raw.history.retention&&raw.history.retention.role||'normal'),protectedUntil=String(raw.history.retention&&raw.history.retention.protectedUntil||''),purpose=String(raw.history.retention&&raw.history.retention.purpose||''),calendarRaw=raw.history.retention&&raw.history.retention.calendar||{},localDate=String(calendarRaw.localDate||''),weekStart=String(calendarRaw.weekStart||''),month=String(calendarRaw.month||''),utcOffsetMinutes=Number(calendarRaw.utcOffsetMinutes),notesFingerprint=String(raw.history.retention&&raw.history.retention.notesFingerprint||'').toLowerCase(),calendar=/^\d{4}-\d{2}-\d{2}$/u.test(localDate)&&/^\d{4}-\d{2}-\d{2}$/u.test(weekStart)&&/^\d{4}-\d{2}$/u.test(month)&&Number.isInteger(utcOffsetMinutes)?freeze({localDate,weekStart,month,utcOffsetMinutes}):null;
-      if(/^[a-f0-9]{64}$/u.test(fingerprint)&&Number.isFinite(Date.parse(exportedAt))&&Number.isSafeInteger(daily)&&daily>=0&&Number.isSafeInteger(notes)&&notes>=0&&['normal','before-restore'].includes(role)&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil)))&&(!purpose||['before-restore','before-combine','before-clear-library'].includes(purpose)))history=freeze({format:Number.isSafeInteger(Number(raw.history.format))&&Number(raw.history.format)>0?Number(raw.history.format):0,logicalFingerprint:fingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:freeze({dailyRecord:daily,note:notes}),encrypted:raw.history.encrypted===true,retention:freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',purpose:role==='before-restore'?(purpose||'before-restore'):'',calendar,notesFingerprint:/^[a-f0-9]{64}$/u.test(notesFingerprint)?notesFingerprint:''}),origin:/^inst_[a-z0-9_]{8,96}$/u.test(String(raw.history.origin||''))?String(raw.history.origin):'',attachmentsMissing:Number.isSafeInteger(Number(raw.history.attachmentsMissing))&&Number(raw.history.attachmentsMissing)>0?Number(raw.history.attachmentsMissing):0});
+      if(/^[a-f0-9]{64}$/u.test(notesFingerprint)&&raw.history.format===RepositoryCheckpointPipeline.manifestVersion&&Number.isSafeInteger(raw.history.attachmentsMissing)&&raw.history.attachmentsMissing>=0&&/^[a-f0-9]{64}$/u.test(fingerprint)&&Number.isFinite(Date.parse(exportedAt))&&Number.isSafeInteger(daily)&&daily>=0&&Number.isSafeInteger(notes)&&notes>=0&&['normal','before-restore'].includes(role)&&(!protectedUntil||Number.isFinite(Date.parse(protectedUntil)))&&(!purpose||['before-restore','before-combine','before-clear-library'].includes(purpose)))history=freeze({format:raw.history.format,logicalFingerprint:fingerprint,exportedAt:new Date(exportedAt).toISOString(),counts:freeze({dailyRecord:daily,note:notes}),encrypted:raw.history.encrypted===true,retention:freeze({role,protectedUntil:protectedUntil?new Date(protectedUntil).toISOString():'',purpose:role==='before-restore'?(purpose||'before-restore'):'',calendar,notesFingerprint}),origin:/^inst_[a-z0-9_]{8,96}$/u.test(String(raw.history.origin||''))?String(raw.history.origin):'',attachmentsMissing:raw.history.attachmentsMissing});
     }
     // A location that reads each version for its summary (the Device Folder)
     // says which ones it could not read, and which wait for the password.
@@ -1219,7 +1219,7 @@ registry.define('backup-provider',1,input=>{
     return freeze({format:SESSION_CLAIM_FORMAT,version:SESSION_CLAIM_VERSION,sessionToken,epoch,state,ownerToken,revision,observedOwnerToken,observedRevision,observedContentFingerprint,handoffToken,claimedAt:new Date(claimedAt).toISOString()});
   }
   function normalizeSessionClaim(value){
-    if(!value||typeof value!=='object'||Array.isArray(value)||Number(value.version)!==SESSION_CLAIM_VERSION||Object.keys(value).sort().join('|')!==SESSION_CLAIM_KEYS)return null;
+    if(!value||typeof value!=='object'||Array.isArray(value)||value.version!==SESSION_CLAIM_VERSION||Object.keys(value).sort().join('|')!==SESSION_CLAIM_KEYS)return null;
     return sessionClaimValue(value,{observedContentFingerprint:String(value.observedContentFingerprint||''),handoffToken:String(value.handoffToken||'')});
   }
   // A claim file never changes once written; a new claim is a new file. The
@@ -1265,7 +1265,7 @@ registry.define('backup-provider',1,input=>{
     }
   }
   async function writeRepositorySessionClaim(selected,claim,{signal=null,interactive=false}={}){
-    const normalized=normalizeSessionClaim(claim);if(Number(claim&&claim.version)!==SESSION_CLAIM_VERSION||!normalized||normalized.version!==SESSION_CLAIM_VERSION)throw new TypeError('Active-session ownership claim is invalid.');
+    const normalized=normalizeSessionClaim(claim);if(!normalized)throw new TypeError('Active-session ownership claim is invalid.');
     const id=sessionClaimId(normalized.epoch),source=new Blob([JSON.stringify(normalized)],{type:'application/json'});let protectedFile=null;
     try{
       protectedFile=await Exports.protect({blob:source,filename:id+'.sdsessionclaim'},{interactive,signal});

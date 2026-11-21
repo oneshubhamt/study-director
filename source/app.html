@@ -1487,7 +1487,7 @@ window[Symbol.for('studyDirector.presentationKernel.v1')].synchronizeMetadata();
           <ul class="profile-list" id="profile-list"></ul>
           <button class="profile-row profile-add" id="profile-add" type="button" data-action="add-profile"><span class="profile-add-mark" aria-hidden="true">+</span><span class="profile-row-label">Add profile</span></button>
         </div>
-        <p class="profile-note" id="profile-unsupported" hidden>This profile list was saved by a newer version of Study Director. Update the app to add, switch or remove profiles; the list stays as it is.</p>
+        <p class="profile-note" id="profile-unsupported" hidden>This build cannot read the complete profile list. The list and its data are being preserved. Adding, switching and removing profiles are paused.</p>
         <p class="profile-caption" id="profile-device"></p>
       </section>
       <section class="profile-section profile-recent" id="profile-recent" aria-labelledby="profile-recent-title">
@@ -7041,14 +7041,13 @@ async function bindDriveLibrary(info){
   const owner=others.find(row=>email&&row.email===email||found&&row.id===found);
   if(owner)return refuse(`This Google account holds ${owner.name||'another profile'}’s library on this device. Each profile syncs with its own Google account.`);
   if(info?.mine){await recordDriveLibrary(email,folder);return 'continue';}
-  if(!found&&(!info?.library||!others.length)){await recordDriveLibrary(email,folder);return 'claim';}
   if(Date.now()-driveConnectRequestedAt>DRIVE_CHOICE_WINDOW_MS)return refuse(`${email||'This Google account'} already holds a Study Director library. Connect Google Drive again to choose whether to continue with it.`);
   driveLibraryQuestion??=askToJoinLibrary(email,info.library).finally(()=>{driveLibraryQuestion=null;});
   if(!await driveLibraryQuestion){endDriveConnectCard();renderProfile();return 'refuse';}
-  if(found&&!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
+  if(!Profiles.adopt(found))return refuse('That library belongs to another profile on this device.');
   FirstStart.joined();
   await recordDriveLibrary(email,folder);
-  return found?'adopt':'claim';
+  return 'adopt';
 }
 // First start (and Add profile): name, an optional password and Google
 // Drive. Someone joining their own Drive library takes its name and settings
@@ -7116,7 +7115,7 @@ const FirstStart=(()=>{
 async function startProfile(){
   const name=getStudentNameFromDisplay(),named=!isDefaultStudentName(name);
   let mine=Profiles.current();
-  if(!mine)mine=Profiles.ensure(named?name:'',{fresh:!named&&await canonicalLocalRecoveryEmpty()===true});
+  if(!mine)mine=Profiles.ensure(named?name:'');
   else if(named)Profiles.rename(name);
   renderProfile();
   if(mine?.fresh&&appCanMutate())FirstStart.open();
@@ -10855,7 +10854,7 @@ DeviceBackup=DeviceBackupModule.createController(Object.freeze({
     checksum:(blob,{signal}={})=>Exports.run('checksum',{value:blob},{signal}),
     inspectManifest:(file,options)=>RepositoryCheckpointPipeline.inspectManifest(file,options),
     environment:Object.freeze({canMutate:()=>appCanMutate(),now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})}),
-    limits:Object.freeze({publicationMaxAgeMs:RepositoryPolicyModule.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:RepositoryPolicyModule.protocol.publicationAssertionMarginMs,publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
+    limits:Object.freeze({publicationRenewMs:RepositoryPolicyModule.protocol.publicationRenewMs,publicationStaleMs:RepositoryPolicyModule.protocol.publicationStaleMs,maintenanceMaxAgeMs:RepositoryPolicyModule.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:RepositoryPolicyModule.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }))
 }));
 if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){

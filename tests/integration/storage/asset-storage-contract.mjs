@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {assertOperationalFormat} from '../../helpers/operational-format.mjs';
 import fs from 'node:fs';
 import vm from 'node:vm';
 import {webcrypto} from 'node:crypto';
@@ -62,6 +63,14 @@ assert.equal((await store.list()).length,1);assert.equal((await store.rename(A,'
     /injected strict attachment metadata commit failure/u);
   assert.equal(metadata.has(key),false,'failed metadata commit cannot expose an attachment');
   assert.deepEqual([...files.keys()].filter(name=>!before.has(name)),[],'failed metadata commit reclaims the staged OPFS blob');
+}
+{
+  const original=metadata.get(A),invalid={...original,unexpected:true};
+  assertOperationalFormat('attachment',original);metadata.set(A,invalid);
+  for(const operation of [()=>store.list(),()=>store.get(A),()=>store.removeMetadata([A]),()=>store.verifyMetadata([{id:A,...invalid}]),()=>store.collect(gc=>gc.sweep())]){
+    await assert.rejects(operation,/metadata is invalid/);assert.equal(metadata.get(A),invalid);assert.ok(files.has(original.file));
+  }
+  metadata.set(A,original);
 }
 const b=await store.put(B,pdf,{name:'B.pdf',library:true});assert.equal(metadata.get(A).file,b.file);assert.equal(metadata.get(B).file,b.file);verifyCalls=0;assert.equal(await store.verifyMetadata([{id:A,...metadata.get(A)},{id:B,...metadata.get(B)}]),2);assert.equal(verifyCalls,1,'metadata verification must hash one shared physical attachment source once per verification phase while validating both logical IDs');
 const staged=await store.put(C,audio,{name:'C.mp3',library:true,stage:true,token:77});assert.equal(metadata.has(C),false);await store.publish([[C,staged]],77,()=>{});assert.equal(metadata.has(C),true);

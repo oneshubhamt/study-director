@@ -28,7 +28,7 @@ function device(fault={}){
   // Someone new: their first start is still to come; the id follows the name until it is done.
   const d=device(),first=d.page('');
   assert.equal(first.current(),null,'no profile before the first start');
-  const made=first.ensure('',{fresh:true});
+  const made=first.ensure('');
   assert.match(made.id,/^prof_profile_[a-z0-9]{6,12}_[a-f0-9]{8}$/u);assert.equal(made.scope,'','the first profile keeps the plain storage names');assert.equal(made.fresh,true);
   assert.equal(d.list().active,made.id);
   const named=first.rename('  Ana   María ');assert.equal(named.name,'Ana María');assert.match(named.id,/^prof_anamaria_/u,'the id says whose profile it is');assert.equal(named.scope,'');
@@ -40,12 +40,23 @@ function device(fault={}){
   assert.equal(first.ensure('Someone else').id,named.id,'ensure keeps an existing profile');
 }
 {
-  // Existing data on a device without a list: its profile is made at once, first start done.
+  // First start and malformed registry protection.
   const d=device(),made=d.page('').ensure('Ben');
-  assert.equal(made.fresh,false);assert.equal(made.from,null);assert.match(made.id,/^prof_ben_/u);
+  assert.equal(made.fresh,true);assert.equal(made.from,null);assert.match(made.id,/^prof_ben_/u);
   d.store.set(REGISTRY,'{not json');assert.equal(d.page('').current(),null,'an unreadable list reads as empty');
   d.store.set(REGISTRY,JSON.stringify({version:1,active:'x',profiles:[{id:'bad',scope:''},{id:made.id,scope:'',name:'Ben'},{id:made.id,scope:'prof_dup_mve00000_00000001',name:'Dup'}],removing:[]}));
-  assert.deepEqual([...d.page('').list()].map(row=>row.id),[made.id],'malformed and duplicate entries are dropped');assert.equal(d.page('').current().name,'Ben');
+  assert.deepEqual([...d.page('').list()].map(row=>row.id),[made.id],'malformed and duplicate entries are dropped');assert.equal(d.page('').current().name,'Ben');const original=d.store.get(REGISTRY);d.page('').rename('Changed');assert.equal(d.store.get(REGISTRY),original,'a malformed current list stays read-only');
+}
+{
+  const d=device(),page=d.page('');
+  const row=page.ensure('Ana'),scope='prof_gone_mve00000_abcdef02';
+  page.watch();
+  for(const broken of [{...d.list(),removing:[scope],profiles:[{...row,extra:true}]},'',{...d.list(),removing:['']} ]){
+    const raw=typeof broken==='string'?broken:JSON.stringify(broken);d.store.set(REGISTRY,raw);
+    for(const listener of d.listeners)listener(REGISTRY);
+    assert.equal(page.unsupported(),true);assert.equal((await page.collect()).removed,false);
+    assert.equal(d.store.get(REGISTRY),raw);assert.deepEqual(d.events.databases,[]);assert.deepEqual(d.events.directories,[]);
+  }
 }
 {
   // Add profile, Cancel (remove) back to where it was added from, and the removed data is deleted.
@@ -150,4 +161,4 @@ function device(fault={}){
   assert.equal(d.store.get('studyDirector.theme.v1'),'primary-preserved','another profile remains untouched');
 }
 
-console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['first start id follows the name','existing data','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere','kept through a site-data clear']},null,2));
+console.log(JSON.stringify({status:'PASS',suite:'profiles',cases:['first start id follows the name','malformed registry preservation','add, cancel and delete','switch and follow','first profile removed','adopt a library id','twelve at most','the last profile is replaced by a new one','kept after a deletion elsewhere','kept through a site-data clear']},null,2));

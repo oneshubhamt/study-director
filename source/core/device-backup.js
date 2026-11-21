@@ -129,6 +129,7 @@ registry.define('device-backup',1,()=>{
         const mine=hooks.repositoryOwner(),found=await layout.inspect();
         if(handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
         const mineRows=found.repositories.filter(row=>row.scope===mine.scope&&row.device===mine.device);
+        if(mineRows.length>1)throw new Error('More than one backup folder identifies this profile and device. Choose a folder with a single matching repository.');
         const own=mineRows[0]||null;
         // Folders of other devices can be taken over (after a browser data
         // clear this device has a new id); other profiles here keep theirs.
@@ -137,11 +138,14 @@ registry.define('device-backup',1,()=>{
         if(own){
           name=own.name;
           // The profile took another id (a Drive library from another device).
-          if(own.profile!==mine.profile)await layout.claim(own.name);
+          if(own.profile!==mine.profile)await layout.claim(own);
+          else await layout.select(target,name,own.id);
         }else if(choose&&offered.length){
           const picked=await hooks.chooseRepository(offered);
           if(picked===null)throw Object.assign(new Error('Folder selection was cancelled.'),{name:'AbortError'});
-          name=picked?await layout.claim(picked):await layout.create(mine.name);
+          const selected=offered.find(row=>row.name===picked);
+          if(picked&&!selected)throw new Error('Choose one of the listed backup folders.');
+          name=selected?await layout.claim(selected):await layout.create(mine.name);
         }else name=await layout.create(mine.name);
         if(handle!==target)throw Object.assign(new Error('The backup folder changed.'),{name:'AbortError'});
         repositoryName=name;return name;
@@ -308,8 +312,14 @@ registry.define('device-backup',1,()=>{
       if(preparing)await preparing.catch(()=>{});
       if(permission!=='granted'||!repositoryName)return '';
       const folder=handle,name=repositoryName;
+      const owned=await layout.ownedRoot(folder,name).catch(error=>{if(error?.name==='NotFoundError')return null;throw error;});
       if(!await engine.disconnect(ID))throw new Error('Device Folder backup could not be turned off, so its backups were not deleted.');
-      try{await folder.removeEntry(name,{recursive:true});}catch(error){if(error?.name!=='NotFoundError')throw error;}
+      if(!owned)return '';
+      try{
+        const current=await layout.ownedRoot(folder,name);
+        if(current.marker.id!==owned.marker.id)throw new Error('The backup folder changed before deletion.');
+        await folder.removeEntry(name,{recursive:true});
+      }catch(error){if(error?.name!=='NotFoundError')throw error;}
       return name;
     }
     // Clearing browser data removes the stored folder while this page still

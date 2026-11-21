@@ -291,7 +291,7 @@ for(const rescued of [false,true]){
   vm.runInThisContext(fs.readFileSync('source/core/profiles.js','utf8'));
   const profiles=globalThis[Symbol.for('studyDirector.internalModules.v1')].require('profiles',1);
   const removed='prof_removed_abcdef_12345678',live='prof_live_abcdef_12345679',registryKey='profiles-test-registry';
-  const registryRow={version:1,active:live,profiles:[{id:live,scope:live,name:'Current',createdAt:'2026-10-31T00:00:00.000Z'}],removing:[removed]};
+  const registryRow={version:1,active:live,profiles:[{id:live,scope:live,name:'Current',email:'',folder:'',fresh:false,from:null,createdAt:'2026-10-31T00:00:00.000Z'}],removing:[removed]};
   const store=new Map([[registryKey,JSON.stringify(registryRow)],['noteRescue~'+removed,'unsaved'],['noteRescue~'+live,'current']]);
   const events=[],fail={db:true,opfs:false,local:false};
   const controller=profiles.createController(freeze({ports:freeze({

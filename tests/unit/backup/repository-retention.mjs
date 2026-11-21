@@ -25,7 +25,7 @@ const repository=registry.require('managed-repository',1).createEngine(freeze({
 // days; deterministic selection, tier graduation, sparse and long-break
 // preservation, retention after every backup, and protected publication.
 const retentionCalendar=date=>{const d=new Date(date+'T12:00:00'),day=d.getDay(),monday=new Date(d);monday.setDate(d.getDate()-((day+6)%7));const key=value=>`${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`;return freeze({localDate:date,weekStart:key(monday),month:date.slice(0,7),utcOffsetMinutes:-d.getTimezoneOffset()});};
-const retentionRow=(id,date,time='12:00:00',role='normal',protectedUntil='',purpose='')=>freeze({id:`cp_${String(id).padStart(32,'0')}`,manifest:freeze({exportedAt:`${date}T${time}.000Z`,retention:freeze({role,protectedUntil,purpose,calendar:retentionCalendar(date)})})});
+const retentionRow=(id,date,time='12:00:00',role='normal',protectedUntil='',purpose='')=>freeze({id:`cp_${String(id).padStart(32,'0')}`,manifest:freeze({exportedAt:`${date}T${time}.000Z`,retention:freeze({role,protectedUntil,purpose,notesFingerprint:id.toString(16).padStart(64,'0'),calendar:retentionCalendar(date)})})});
 const retentionHistory=[];let retentionId=1;
 for(const date of ['2026-04-14','2026-05-12','2026-06-15','2026-07-16','2026-08-02','2026-08-09','2026-08-16','2026-08-23','2026-08-30','2026-09-06','2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12','2026-09-13','2026-09-14','2026-09-15','2026-09-16','2026-09-17','2026-09-18','2026-09-19','2026-09-20'])retentionHistory.push(retentionRow(retentionId++,date));
 const retentionNow=new Date(2026,8,20,12,0,0),tiered=repository.selectRetention(retentionHistory,{now:retentionNow}),tierValues=Object.values(tiered.tiers);
@@ -141,9 +141,8 @@ const sameDayUnderLimit=[retentionRow(920,'2026-09-20','09:00:00'),retentionRow(
   // newest backup of each earlier local hour whose notes differ from the
   // version kept after it, up to 10 more. Local hours follow the offset
   // captured with each backup, and the window follows the latest backup, not
-  // the clock, so every device selects alike. Rows without a notes
-  // fingerprint (older versions) count as changed.
-  const localRow=(id,iso,offset=0,notes='')=>{const local=new Date(Date.parse(iso)+offset*60000).toISOString().slice(0,10);return freeze({id:`cp_${String(id).padStart(32,'0')}`,manifest:freeze({exportedAt:iso,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({...retentionCalendar(local),utcOffsetMinutes:offset}),notesFingerprint:notes})})});};
+  // the clock, so every device selects alike.
+  const localRow=(id,iso,offset=0,notes=id.toString(16).padStart(64,'0'))=>{const local=new Date(Date.parse(iso)+offset*60000).toISOString().slice(0,10);return freeze({id:`cp_${String(id).padStart(32,'0')}`,manifest:freeze({exportedAt:iso,retention:freeze({role:'normal',protectedUntil:'',purpose:'',calendar:freeze({...retentionCalendar(local),utcOffsetMinutes:offset}),notesFingerprint:notes})})});};
   const hourlyOf=selection=>selection.retained.filter(row=>selection.tiers[row.id]==='hourly').map(row=>row.manifest.exportedAt);
   // Every 20 minutes for ten hours: one per hour, the newest of each.
   const working=Array.from({length:30},(_,index)=>localRow(70000+index,new Date(Date.UTC(2026,9,10,8,0)+index*20*60000).toISOString()));

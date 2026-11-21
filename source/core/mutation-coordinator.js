@@ -28,7 +28,11 @@ registry.define('mutation-coordinator',1,()=>{
     const nowMs=()=>{const value=Number(input.environment.now());return Number.isFinite(value)?value:Date.now();};
     function identity(){const status=input.identity.status();return {tabId:String(status.tabId||''),pageId:String(status.pageId||''),claimId:String(status.claimId||'')};}
     function ownerIdentity(){const own=identity();return `tab_${own.tabId}_${own.pageId}_${own.claimId}`.replace(/[^a-z0-9_-]/gi,'_').slice(0,164);}
-    function lease(){const value=input.local.getJson(STORAGE_KEY,null);return value&&value.version===1?value:null;}
+    function lease(){
+      const value=input.local.getJson(STORAGE_KEY,null);
+      if(value?.version!==1||Object.keys(value).length!==7||!Number.isSafeInteger(value.expiresAt))return null;
+      return ['tabId','pageId','claimId','kind','id'].every(key=>typeof value[key]==='string'&&value[key].length>0)?value:null;
+    }
     function sameOwner(value){const own=identity();return !!(value&&value.tabId===own.tabId&&value.pageId===own.pageId&&value.claimId===own.claimId);}
     // A tab closed in the middle of a change leaves its lease until it runs
     // out, and nothing announces that: a tab that finds one looks again when

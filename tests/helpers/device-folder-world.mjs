@@ -56,7 +56,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
     const entry=freeze({objectId,blob,storedBytes:blob.size,storedChecksum,reused,checkProtection:async()=>{}}),prepared=freeze({exportedAt,objects:freeze([entry])});
     if(!reused)await executor.writeObject(entry,prepared);
     const manifest=freeze({format:'study-director.backup-repository-checkpoint',version:manifestVersion,checkpoint:freeze({checkpointId,createdAt:exportedAt,originInstallationId:'qa'}),exportedAt,sourceRevision,logicalFingerprint:storedChecksum,counts:freeze({dailyRecord:1,note:1}),encrypted:!!protection,
-      retention:freeze({role,purpose:role==='before-restore'?options.retention.purpose:'',protectedUntil:role==='before-restore'?new Date(clock.now()+7*DAY).toISOString():'',calendar:calendar(exportedAt)}),objects:freeze([freeze({objectId,storedBytes:blob.size,storedChecksum})])});
+      retention:freeze({notesFingerprint:storedChecksum,role,purpose:role==='before-restore'?options.retention.purpose:'',protectedUntil:role==='before-restore'?new Date(clock.now()+7*DAY).toISOString():'',calendar:calendar(exportedAt)}),objects:freeze([freeze({objectId,storedBytes:blob.size,storedChecksum})])});
     await executor.writeManifest(freeze({blob:await seal(new Blob([JSON.stringify(manifest)])),manifest,exportedAt,checkSource:async()=>{},checkProtection:async()=>{}}));
     const marker={format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision,manifestVersion},markerBlob=new Blob([JSON.stringify(marker)]);
     await executor.commit(freeze({...marker,blob:markerBlob,size:markerBlob.size,digest:await sha256(markerBlob),checkSource:async()=>{},checkProtection:async()=>{}}));
@@ -71,7 +71,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const inspectManifest=async(file,options={})=>{const opened=protection?(await protection.unprotect(file,{interactive:options.interactive!==false})).blob:file;let value;try{value=JSON.parse(await opened.text());}catch(error){throw unreadable(error);}if(value.format!=='study-director.backup-repository-checkpoint')throw unreadable(new Error('not a manifest'));if(value.version!==11)throw unreadable(new Error('Backup manifest version is not supported by this build.'));return value;};
   const notSupported=()=>{throw new Error('Restore is covered by the browser and repository-restore suites.');};
   const pipeline=freeze({noteObject:notSupported,readNote:notSupported,readSession:notSupported,createPublication:notSupported,publish,publishInline:publish,inspectManifest,inspect:notSupported,bringIn:notSupported,restoreVersion:notSupported,verifyCheckpoint:notSupported,sharedBase:async()=>null,establishBase:notSupported,verifyObject:notSupported,scrub:notSupported,cleanup:rules.cleanup,inspectCommit:rules.inspectCommit,
-    retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,
+    retention:rules.retention,validatePolicy:rules.validatePolicy,classifyState:rules.classifyState,activeProtected:rules.activeProtected,manifestVersion:11,selectRetention:rules.selectRetention,projectHistory:rules.projectHistory,
     markCompleted:({copy})=>{if(copy)verified.set(copy.source,freeze({at:new clock.Date(clock.now()).toISOString(),sourceRevision:copy.sourceRevision}));}});
   const coordinator=registry.require('notice-coordinator',1).createCoordinator(freeze({setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout}));
   const notifications=freeze({...coordinator,emit:raw=>{notices.push(raw);return coordinator.emit(raw);}});
@@ -91,7 +91,7 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   const storageFor=(folderPort,repositoryPort=()=>IDENTITIES.root)=>registry.require('device-folder-storage',1).createStorage(freeze({
     folder:folderPort,identities:freeze({...IDENTITIES,root:repositoryPort}),checksum:(blob)=>sha256(blob),inspectManifest,owner:()=>owner,
     environment:freeze({canMutate:()=>canMutate,now:()=>clock.now(),setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,yieldTask:async()=>{}}),
-    limits:freeze({publicationMaxAgeMs:policy.protocol.publicationMaxAgeMs,publicationAssertionMarginMs:policy.protocol.publicationAssertionMarginMs,publicationRenewMs:policy.protocol.publicationRenewMs,publicationStaleMs:policy.protocol.publicationStaleMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
+    limits:freeze({publicationRenewMs:policy.protocol.publicationRenewMs,publicationStaleMs:policy.protocol.publicationStaleMs,maintenanceMaxAgeMs:policy.protocol.maintenanceMaxAgeMs,maintenanceAssertionMarginMs:policy.protocol.maintenanceAssertionMarginMs,responseTimeoutMs:10*1000})
   }));
   const identity=value=>value,metaKeys=freeze(Object.fromEntries(['verifiedRecoveryBackups','backupProtection','attachmentIntegrityAudit','deviceFolder','repositoryIntegrityScrub','managedProviderBackupPending','repositoryMaintenancePending','reconciliationBase','reconciliationBaseNotePrefix','reconciliationBaseDayPrefix'].map(name=>[name,name])));
   const settingsValid=registry.require('host-metadata',1).createAppMetaValidators(freeze({keys:metaKeys,same:(a,b)=>JSON.stringify(a)===JSON.stringify(b),normalizers:freeze({verifiedRecovery:identity,attachmentIntegrity:identity,repositoryIntegrity:identity,reconciliationBase:identity,reconciliationBaseNote:identity,reconciliationBaseDays:identity})})).deviceFolder;
@@ -127,9 +127,10 @@ export function createDeviceFolderWorld({start='2026-10-06T08:00:00.000Z',suppor
   // would (no cleanup runs): `version` is its manifest format, and a version
   // this build cannot read (newer than 8) is still listed.
   async function plant(handle,{version=11,at=clock.now()-DAY,role='normal',folderName=owner.name}={}){
-    const root=await handle.getDirectoryHandle(folderName,{create:true}),exportedAt=new Date(at).toISOString(),checkpointId='cp_'+(worldNumber*0x100000+0x80000+(++sequence)).toString(16).padStart(32,'0');
+    if(!handle.names().includes(folderName))await storageFor(()=>handle).layout.create(folderName);
+    const root=await handle.getDirectoryHandle(folderName),exportedAt=new Date(at).toISOString(),checkpointId='cp_'+(worldNumber*0x100000+0x80000+(++sequence)).toString(16).padStart(32,'0');
     const manifest={format:'study-director.backup-repository-checkpoint',version,checkpoint:{checkpointId,createdAt:exportedAt,originInstallationId:'qa'},exportedAt,sourceRevision:exportedAt,logicalFingerprint:await sha256(new Blob([checkpointId])),counts:{dailyRecord:2,note:3},encrypted:false,
-      retention:{role,purpose:role==='before-restore'?'before-restore':'',protectedUntil:role==='before-restore'?new Date(at+7*DAY).toISOString():'',calendar:calendar(exportedAt)},objects:[]};
+      retention:{notesFingerprint:await sha256(new Blob([checkpointId])),role,purpose:role==='before-restore'?'before-restore':'',protectedUntil:role==='before-restore'?new Date(at+7*DAY).toISOString():'',calendar:calendar(exportedAt)},objects:[]};
     const write=async(directory,name,blob)=>{const file=await (await root.getDirectoryHandle(directory,{create:true})).getFileHandle(name,{create:true}),writable=await file.createWritable();await writable.write(blob);await writable.close();};
     await write(IDENTITIES.checkpoints,checkpointId+'.sdcheckpoint',new Blob([JSON.stringify(manifest)]));
     await write(IDENTITIES.commits,checkpointId+'.sdcommit',new Blob([JSON.stringify({format:'study-director.backup-repository-commit',version:1,checkpointId,exportedAt,sourceRevision:exportedAt,manifestVersion:version})]));

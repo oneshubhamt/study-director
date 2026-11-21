@@ -102,7 +102,7 @@ registry.define('ownership',1,()=>{
     }
     function readOwner(){
       const owner=local.getJson(config.storageKey,null);
-      return owner?.version===2&&typeof owner.tabId==='string'&&owner.tabId&&
+      return owner?.version===2&&Object.keys(owner).length===5&&typeof owner.tabId==='string'&&owner.tabId&&
         typeof owner.pageId==='string'&&owner.pageId&&typeof owner.claimId==='string'&&owner.claimId&&
         Number.isFinite(owner.expiresAt)?owner:null;
     }
