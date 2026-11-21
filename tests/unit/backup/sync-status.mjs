@@ -123,6 +123,18 @@ function checkCard(name,input,expected){
 const linked=(patch={},sync={})=>drive({waiting:false,...patch},{syncedAt:'',...sync});
 checkCard('Signing in',{phase:'signing-in',drive:null},{tone:'working',title:'Connecting Google Drive',status:/^Signing in/u,steps:'active,pending,pending',action:''});
 checkCard('Sign-in failed',{phase:'failed',error:'The sign-in window was closed.',drive:null},{tone:'error',status:/window was closed/u,steps:'failed,pending,pending',action:'sign-in'});
+// Signing in again to the profile's library: the sign-in alone, then done;
+// syncing goes on at its usual times, in the ring (owner, 2026-11-21).
+{
+  const signing=card({phase:'signing-in',reconnect:true,drive:null});
+  assert.equal(signing.title,'Signing in to Google Drive');assert.equal(states(signing),'active','reconnect: the sign-in step alone');
+  const done=card({phase:'signed-in',reconnect:true,drive:drive({waiting:true},{syncedAt:LATER})});
+  assert.equal(done.done,true,'reconnect: done once signed in, with nothing claimed to be running');assert.equal(done.title,'Signed in to Google Drive');
+  assert.match(done.status,/^Signed in again\. Last synced at /u);assert.equal(states(done),'done');
+  const failed=card({phase:'failed',reconnect:true,error:'This profile syncs with ana@example.com, not other@example.com.',drive:null});
+  assert.equal(failed.tone,'error');assert.equal(states(failed),'failed');assert.equal(failed.action?.action,'sign-in');assert.match(failed.status,/This profile syncs with/u);
+  assert.equal(card({phase:'signed-in',drive:drive({},{syncedAt:''})}).done,false,'a first connect still follows its first sync');
+}
 checkCard('Checking Drive',{phase:'signed-in',drive:linked({waiting:true})},{tone:'working',status:/^Checking Google Drive/u,steps:'done,active,pending',labels:['Signed in to Google','Bring in what’s on Google Drive','Upload this device’s data']});
 checkCard('Reading existing backups (upload getting ready)',{phase:'signed-in',drive:linked({backingUp:true,waiting:true}),operation:{kind:'upload',message:'Reading existing backups in Google Drive…',progress:{stage:'scan',current:0,total:0}}},{status:/^Checking Google Drive/u,steps:'done,active,pending',detail:/^Reading existing backups in Google Drive…$/u,fraction:null});
 checkCard('Bringing in, with counts',{phase:'signed-in',drive:linked({busy:true,foregroundKind:'sync',waiting:true},{syncing:true}),operation:{kind:'sync',message:'Downloading backup data from Google Drive…',progress:{stage:'download',current:2,total:5,completedBytes:153600,totalBytes:307200}}},{status:/^Bringing in changes/u,steps:'done,active,pending',detail:/Downloading backup data from Google Drive… · 2 of 5 complete · 150 KB of 300 KB/u,fraction:0.4});

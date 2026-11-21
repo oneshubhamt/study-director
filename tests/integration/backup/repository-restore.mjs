@@ -205,11 +205,15 @@ for(const objectId of attachmentObjectIds)assert.equal(leaseReleaseCounts.get(ob
   const attachmentEntries=manifest.objects.filter(entry=>entry.kind==='attachment'),readIds=new Set(),countingReader=async entry=>{readIds.add(entry.objectId);return readObject(entry);};
   assert.ok(attachmentEntries.length>0);const savedAssets=new Map(assets);
   assets.clear();assets.set(assetId,image);
-  const local=await runtime.repository.inspect(manifest,countingReader,{interactive:false,committed:true});
+  // The plan the progress counts come from names exactly what is read.
+  let planned=null;const onPlan=entries=>{planned=new Set(entries.map(entry=>entry.objectId));};
+  const local=await runtime.repository.inspect(manifest,countingReader,{interactive:false,committed:true,onPlan});
   assert.ok(attachmentEntries.every(entry=>!readIds.has(entry.objectId)),'an attachment already here is not downloaded again');await local.release();
-  readIds.clear();assets.clear();
-  const remote=await runtime.repository.inspect(manifest,countingReader,{interactive:false,committed:true});
+  assert.deepEqual([...planned].sort(),[...readIds].sort(),'the download plan leaves out attachments already here');
+  readIds.clear();assets.clear();planned=null;
+  const remote=await runtime.repository.inspect(manifest,countingReader,{interactive:false,committed:true,onPlan});
   assert.ok(attachmentEntries.every(entry=>readIds.has(entry.objectId)),'a missing attachment is read from the backup');await remote.release();
+  assert.deepEqual([...planned].sort(),[...readIds].sort(),'the download plan includes attachments missing here');
   readIds.clear();assets.set(assetId,new Blob([new Uint8Array([1,2,3])],{type:'image/png'}));
   const different=await runtime.repository.inspect(manifest,countingReader,{interactive:false,committed:true});
   assert.ok(attachmentEntries.every(entry=>readIds.has(entry.objectId)),'a local file with different bytes is never used');await different.release();

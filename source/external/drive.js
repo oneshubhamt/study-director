@@ -66,7 +66,6 @@
   const AUTH_TIMEOUT_MS=120000;
   let API_TIMEOUT_MS=0;
   const TRANSFER_TIMEOUT_MS=120000;
-  const REVOKE_TIMEOUT_MS=30000;
   const MAX_TRANSIENT_ATTEMPTS=3;
   const Platform=Object.freeze({
     fetch:globalThis.fetch&&globalThis.fetch.bind(globalThis),
@@ -94,7 +93,7 @@
   const connectionListeners=new Set();
   let folderId='';
   // deletionChecked: the profile already checked for a deletion marker in this sign-in.
-  let profilePort=null,devicePort=null,boundFolder='',seenFolder=null,deletionChecked='',libraryDeleted='';
+  let profilePort=null,devicePort=null,boundFolder='',seenFolder=null,deletionChecked='',libraryDeleted='',checkedAccount='';
   function thisDevice(){try{const id=String(devicePort?.()||'');return DEVICE_PATTERN.test(id)?id:'';}catch{return '';}}
   let folderEpoch=0;
   let folderResolutionFlight=null;
@@ -121,7 +120,7 @@
       folderState:parent.folderState
     });
   }
-  function invalidateFolderIdentity(){folderId='';boundFolder='';seenFolder=null;deletionChecked='';folderEpoch+=1;}
+  function invalidateFolderIdentity(){folderId='';boundFolder='';seenFolder=null;deletionChecked='';checkedAccount='';folderEpoch+=1;}
   function verifiedFolderReceipt(context=EMPTY_DRIVE_OPERATION){
     const state=context&&context.folderState,receipt=state&&state.receipt;
     if(!receipt)return '';
@@ -267,7 +266,10 @@
     const promise=new Promise((ok,fail)=>{resolve=ok;reject=fail;});
     const timer=setTimeout(()=>settleAuthorization(timeoutError('Google authorization')),AUTH_TIMEOUT_MS);
     pendingAuthorization={promise,resolve,reject,timer};
-    try{tokenClient.requestAccessToken({include_granted_scopes:false,prompt:signedInBefore?'':'select_account'});}
+    // A profile syncs with one Google account: once it has one, the sign-in
+    // goes straight to it (no account chooser, here or after a reload).
+    const hint=profileEmail();
+    try{tokenClient.requestAccessToken({include_granted_scopes:false,prompt:signedInBefore||hint?'':'select_account',...(hint?{login_hint:hint}:{})});}
     catch(error){settleAuthorization(error instanceof Error?error:new Error(String(error)));}
     return promise;
   }
@@ -464,6 +466,7 @@
     const expected=expectedProfile();
     if(!expected)throw new Error('This profile is still starting. Try again in a moment.');
     if(libraryDeleted===expected)throw noRetry(Object.assign(new Error('This profile was deleted. Google Drive was not used.'),{studyDirectorProfileDeleted:true}));
+    await requireProfileAccount(context);
     // Before its library is looked for (or made again), once per sign-in: was
     // this profile deleted on another device?
     if(deletionChecked!==expected){
@@ -495,7 +498,7 @@
     }
     if(!found)refuse('The Study Director folder on this Google account has no valid profile identity. Drive was not used.');
     if(mine&&boundFolder===`${id}\n${expected}`)return;
-    const [email,library]=await Promise.all([accountEmail(context),mine?null:latestLibrary(id,context)]);
+    const [email,library]=await Promise.all([requireProfileAccount(context),mine?null:latestLibrary(id,context)]);
     const decision=await profilePort.bind(Object.freeze({email,folder:String(id),found,mine,library}));
     if(!(mine&&decision==='continue'||!mine&&decision==='adopt'&&expectedProfile()===found)){
       refuse('This Google account holds the library of another profile. Drive was not used.');
@@ -548,6 +551,19 @@
     }
     invalidateFolderIdentity();
     return true;
+  }
+  // The Google account the profile syncs with, once it has one. A sign-in to
+  // another account is refused before Drive is used: another account is
+  // another profile.
+  function profileEmail(){try{const email=String(profilePort?.email?.()||'').trim().toLowerCase();return /^[^\s@]{1,128}@[^\s@]{1,190}$/u.test(email)?email:'';}catch{return '';}}
+  async function requireProfileAccount(context=EMPTY_DRIVE_OPERATION){
+    if(checkedAccount)return checkedAccount;
+    const email=await accountEmail(context),wanted=profileEmail();
+    if(wanted&&email!==wanted){
+      setTimeout(()=>{clearSession();signedInBefore=false;},0);
+      throw noRetry(Object.assign(new Error(`This profile syncs with ${wanted}${email?`, not ${email}`:''}. Sign in with ${wanted}, or add a new profile for the other Google account. Google Drive was not used.`),{studyDirectorProfileRefused:true}));
+    }
+    checkedAccount=email;return email;
   }
   // The signed-in Google account, shown by its email (one small request).
   async function accountEmail(context=EMPTY_DRIVE_OPERATION){
@@ -1216,23 +1232,10 @@
     throw lastError||new Error('Could not download the selected Google Drive backup.');
   }
   function release(){if(accessToken&&Date.now()>=tokenExpiresAt)clearSession();}
-  async function disconnect(){
-    await prepare();
-    const token=requireAccessToken();
-    const oauth=window.google&&window.google.accounts&&window.google.accounts.oauth2;
-    if(!oauth||typeof oauth.revoke!=='function')throw new Error('Google Drive disconnection is unavailable.');
-    try{
-      await new Promise((resolve,reject)=>{
-        let settled=false;
-        const finish=(fn,value)=>{if(settled)return;settled=true;clearTimeout(timer);fn(value);};
-        const timer=setTimeout(()=>finish(reject,timeoutError('Google Drive disconnection')),REVOKE_TIMEOUT_MS);
-        oauth.revoke(token,response=>{
-          if(response&&response.successful===true){finish(resolve);return;}
-          finish(reject,new Error(response&&response.error_description||response&&response.error||'Google did not confirm permission revocation.'));
-        });
-      });
-    }finally{repositoryUploads.clear();clearSession();signedInBefore=false;}
-  }
+  // Disconnect signs this device out of Google Drive. Study Director keeps
+  // its permission on the Google account, so the profile's other devices
+  // stay signed in; the account's own settings withdraw it everywhere.
+  async function disconnect(){repositoryUploads.clear();clearSession();signedInBefore=false;return true;}
   function setup(api){
     if(!supportsCapabilities(api,REQUIRED_CAPABILITIES)||!api.backup||!api.backup.providers||typeof api.backup.providers.register!=='function')return false;
     const policy=api.backup.repositoryPolicy;
@@ -1258,6 +1261,7 @@
       shared:true,
       prepare,
       authorize,
+      verifyAccount:()=>requireProfileAccount(),
       backgroundAvailable:()=>tokenValid()&&Platform.online(),
       connected:()=>tokenValid(),
       automaticConfigured:()=>tokenValid()||signedInBefore,

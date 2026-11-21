@@ -175,6 +175,9 @@ registry.define('backup-provider',1,input=>{
     label:clampText(config.label||'',40),
     prepare:typeof config.prepare==='function'?config.prepare:null,
     authorize:typeof config.authorize==='function'?config.authorize:null,
+    // verifyAccount: checks right after a sign-in that it is the account
+    // this profile syncs with (Drive), so a wrong one is refused at once.
+    verifyAccount:typeof config.verifyAccount==='function'?config.verifyAccount:null,
     backgroundAvailable:typeof config.backgroundAvailable==='function'?config.backgroundAvailable:null,
     connected:typeof config.connected==='function'?config.connected:null,
     connectionExpiresAt:typeof config.connectionExpiresAt==='function'?config.connectionExpiresAt:null,
@@ -1107,7 +1110,14 @@ registry.define('backup-provider',1,input=>{
   function connectionChanged(selected){
     const state=automaticState(selected),connected=providerConnected(selected),was=state.connected;state.connected=connected;
     if(selected.hosted)return;
-    if(connected){connectedOnceByProvider.add(selected.id);state.noticeShown=false;presentation.resolve(selected.id,'permission');return;}
+    if(connected){
+      connectedOnceByProvider.add(selected.id);state.noticeShown=false;presentation.resolve(selected.id,'permission');
+      // Changes made while signed out go up as soon as the sign-in is back
+      // (with a look at Drive first). With none waiting, Drive is checked at
+      // its usual time, which a long gap has already reached.
+      if(!was&&automaticNeeded(selected))providerConvergenceJob(selected)?.schedule(0,'connection','earliest');
+      return;
+    }
     if(!was||state.noticeShown||!automaticEnabled(selected))return;
     state.noticeShown=true;presentation.notice(selected.id,'permission',`${selected.label} sign-in expired.`);
   }
@@ -1661,7 +1671,11 @@ registry.define('backup-provider',1,input=>{
     // versions; one it removed (its version is plain although it built on an
     // encrypted one) is removed here too.
     if(sync&&sharedHead){const ancestors=new Set(row.manifest.reconciliationAncestorIds||[]),removedElsewhere=row.manifest.encrypted!==true&&inventory.pairs.some(other=>ancestors.has(other.item.id)&&other.item.history?.encrypted===true);await Exports.followProtection(freeze({protectionId:String(row.manifest.protectionId||''),encrypted:row.manifest.encrypted===true,removedElsewhere}));}
-    const objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest),needed=new Set((row.manifest.objects||[]).map(entry=>entry.objectId)),total=needed.size,totalDownloadBytes=(row.manifest.objects||[]).reduce((sum,entry)=>sum+Math.max(0,Number(entry&&entry.storedBytes)||0),0),downloadSlots=new Map(),downloadProgressBytes=new Map();let started=0,completed=0;
+    const objectInventory=repositoryObjectInventoryForManifest(listedObjects,row.manifest),downloadSlots=new Map(),downloadProgressBytes=new Map();let started=0,completed=0,total=0,totalDownloadBytes=0;
+    // The counts are what this read downloads: the pipeline names those
+    // objects before reading, leaving out attachments already on the device.
+    const planDownloads=entries=>{total=entries.length;totalDownloadBytes=entries.reduce((sum,entry)=>sum+Math.max(0,Number(entry&&entry.storedBytes)||0),0);};
+    planDownloads(row.manifest.objects||[]);
     if((row.manifest.objects||[]).some(entry=>quarantined.has(entry.objectId)))throw readFailure(new Error('The selected backup version references an object that is quarantined after an integrity check. Choose another version or create a fresh backup.'));
     progress('inventory',`Preparing selected backup data from ${selected.label}…`);
     // A one-note read fetches a few of the version's objects, so whole-version totals would mislead.
@@ -1696,7 +1710,7 @@ registry.define('backup-provider',1,input=>{
       // upload, so the other devices get it too.
       publishPresent:async result=>{progress('finalize','Finalizing recovery…');return managedProviderPresent(providerSelected,result,{sourceNeeded:mode==='bring-in'||selected.shared===true,sourceCheckpoint:mode==='restore-version'?row.item.id:''});}
     }));
-    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,sharedHead,managedRecovery,managedProgress:onProgress,...(note&&mode==='bring-in'?{note}:{})});
+    return RepositoryCheckpointPipeline.inspect(row.manifest,readObject,{interactive:!quiet,signal:operation.signal,committed:true,sharedHead,managedRecovery,managedProgress:onProgress,onPlan:planDownloads,...(note&&mode==='bring-in'?{note}:{})});
   }
   // A protected safety version before a destructive action (Clear Library).
   // It is written in the foreground, preempting background work.
@@ -2313,6 +2327,7 @@ registry.define('backup-provider',1,input=>{
       // Sign-in opens from the click, so preparation runs alongside the
       // background work giving way rather than after it.
       await Promise.all([foreground.settled,selected.prepare?selected.prepare():null]);await authorize(selected,'connect');
+      if(selected.verifyAccount)await selected.verifyAccount();
       statusText('');return true;
     }catch(error){statusText(`Connection failed: ${userProviderMessage(error,`${selected.label} could not be connected.`)}`,false);return false;}
     finally{await release(selected,'connect');setBusy(false);foreground.release();}
@@ -2328,7 +2343,8 @@ registry.define('backup-provider',1,input=>{
     const foreground=beginForeground(selected);if(!foreground)return false;
     statusSource=selected.id;setBusy(true);statusText(`Disconnecting ${selected.label}…`);
     try{
-      await foreground.settled;await authorize(selected,'disconnect');
+      // Signing this device out needs no sign-in.
+      await foreground.settled;
       await selected.disconnect();await forgetProvider(selected);
       statusText('');return true;
     }catch(error){

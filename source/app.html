@@ -6950,7 +6950,9 @@ const DRIVE_CHOICE_WINDOW_MS=5*60*1000;
 // The indicator shows Connecting… from the click until the sign-in settles,
 // and the Connect card follows the first sync to its end.
 function connectDriveForProfile(){
-  driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard();scheduleSyncStatus();
+  // A profile that already has its Drive library signs in again to it; only
+  // a first connect follows the first sync on the card.
+  driveConnectRequestedAt=Date.now();driveConnecting=true;startDriveConnectCard({reconnect:!!Profiles.current()?.folder});scheduleSyncStatus();
   const settled=ok=>{
     driveConnecting=false;
     if(driveConnectCard&&driveConnectCard.phase==='signing-in'){
@@ -6963,9 +6965,9 @@ function connectDriveForProfile(){
 }
 // The Connect card (docs/areas/status-indicator.md, Connect card): it reads what Drive
 // reports and decides nothing itself.
-function startDriveConnectCard(){
+function startDriveConnectCard({reconnect=false}={}){
   clearTimeout(driveConnectCardHide);driveConnectCardHide=null;
-  driveConnectCard={startedAt:Date.now(),phase:'signing-in',error:'',seen:{sync:false,upload:false},kept:KeptVersions.count(),lastStatus:''};
+  driveConnectCard={startedAt:Date.now(),phase:'signing-in',reconnect,error:'',seen:{sync:false,upload:false},kept:KeptVersions.count(),lastStatus:''};
 }
 function endDriveConnectCard(){clearTimeout(driveConnectCardHide);driveConnectCardHide=null;driveConnectCard=null;renderDriveConnectCard();}
 function driveRunningOperation(){
@@ -6987,7 +6989,7 @@ function renderDriveConnectCard(){
     const drive=namedTurnDevice(BackupProviderRuntime.locationStatus('google-drive')),operation=driveRunningOperation();
     if(drive?.sync?.syncing||operation?.kind==='sync')state.seen.sync=true;
     if(operation?.kind==='upload'&&['upload','commit','complete'].includes(String(operation.progress?.stage||'')))state.seen.upload=true;
-    model=BackupPresentation.connectProgress({phase:state.phase,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
+    model=BackupPresentation.connectProgress({phase:state.phase,reconnect:state.reconnect===true,error:state.error,startedAt:state.startedAt,online:navigator.onLine!==false,drive,operation,seen:state.seen,keptNew:Math.max(0,KeptVersions.count()-state.kept)});
   }catch(error){AppDiagnostics.capture('drive-connect-card.render',error,'warn');root.hidden=true;return;}
   root.hidden=false;root.dataset.tone=model.tone;
   setTextSafe('drive-connect-title',model.title);
@@ -12253,7 +12255,7 @@ const StudyDirectorPublicAPI=Object.freeze({
     // This device, named on Drive's upload markers.
     device:()=>AppData.provenance.installationId(),
     // The active profile, and who decides which Drive library it may use.
-    profile:Object.freeze({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
+    profile:Object.freeze({id:()=>Profiles.current()?.id||'',email:()=>Profiles.current()?.email||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>{driveLibrary=control;}}),
     providers:Object.freeze({
       register:BackupProviderRuntime.register,
       list:BackupProviderRuntime.list

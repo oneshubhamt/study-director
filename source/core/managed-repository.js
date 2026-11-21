@@ -1013,7 +1013,7 @@ async function readRepositoryActiveSession(manifest,readObject,options={}){
   const row=rows.find(item=>item.kind==='activeSession'&&item.key==='active');
   return row?row.payload:null;
 }
-async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false}={}){
+async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectValue,{interactive=true,signal=null,note='',localAttachments=false,onPlan=null}={}){
   const manifest=validateRepositoryManifest(manifestValue),readObject=repositoryReadPort(readObjectValue),noteKey=String(note||'');
   throwIfImportAborted(signal);
   if(manifest.installationId&&manifest.installationId!==manifest.checkpoint.originInstallationId)throw new Error('Repository checkpoint installation provenance is inconsistent.');
@@ -1024,6 +1024,19 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
   // A one-note read names the note by id.
   const holdsNote=entry=>entry.kind===noteKind&&entry.key===noteKey||entry.kind==='structuredPack'&&repositoryPackManifestMembers(entry.members).some(member=>member.kind===noteKind&&member.key===noteKey);
   const seenDates=new Set(),seenNoteKeys=new Set(),seenReviewIds=new Set(),structuredEntries=manifest.objects.filter(entry=>entry.kind!=='attachment'&&(!noteKey||holdsNote(entry)));
+  // A whole-version read finds the attachments already on this device first,
+  // so onPlan hears exactly which objects it will download (progress counts
+  // those, not the attachments it reuses).
+  const localBlobs=new Map();
+  if(!noteKey){
+    if(localAttachments)for(const raw of manifest.assets){
+      throwIfImportAborted(signal);const entry=raw.missing===true?null:objectById.get(raw.objectId);
+      if(entry?.kind==='attachment'&&entry.fingerprint===raw.checksum&&entry.sourceBytes===raw.size){const local=await localRepositoryAttachment(raw,{signal});if(local)localBlobs.set(raw.assetId,local);}
+    }
+    const fetched=new Map(structuredEntries.map(entry=>[entry.objectId,entry]));
+    for(const raw of manifest.assets)if(raw.missing!==true&&!localBlobs.has(raw.assetId)&&objectById.has(raw.objectId))fetched.set(raw.objectId,objectById.get(raw.objectId));
+    if(typeof onPlan==='function')onPlan(freeze([...fetched.values()]));
+  }
   const structuredPayloads=await mapRepositoryBounded(structuredEntries,async entry=>{
     throwIfImportAborted(signal);
     return readRepositoryStructuredObject(manifest,entry,readObject,{interactive,signal});
@@ -1059,7 +1072,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
       if(!entry||entry.kind!=='attachment')throw new Error(`Repository attachment ${raw.assetId} references an unavailable object.`);
       referencedAttachmentIds.add(entry.objectId);
       const descriptor=freeze({assetId:raw.assetId,mimeType:raw.mimeType,size:raw.size,checksum:raw.checksum,name:raw.name,library:raw.library});
-      if(localAttachments&&entry.fingerprint===raw.checksum&&entry.sourceBytes===raw.size){const local=await localRepositoryAttachment(raw,{signal});if(local){assetItems.push(freeze({descriptor,blob:local}));continue;}}
+      if(localAttachments&&entry.fingerprint===raw.checksum&&entry.sourceBytes===raw.size){const local=noteKey?await localRepositoryAttachment(raw,{signal}):localBlobs.get(raw.assetId);if(local){assetItems.push(freeze({descriptor,blob:local}));continue;}}
       let opened=attachmentLeases.get(entry.objectId);
       if(!opened){opened=await openRepositoryAttachment(manifest,entry,raw,readObject,{interactive,signal});attachmentLeases.set(entry.objectId,opened);}
       else if(opened.blob.size!==raw.size||entry.fingerprint!==raw.checksum)throw new Error(`Repository attachment ${raw.assetId} shares an object with inconsistent metadata.`);
@@ -1083,7 +1096,7 @@ async function reconstructVerifiedRepositoryCheckpoint(manifestValue,readObjectV
 async function inspectRepositoryCheckpoint(manifest,readObject,options={}){
   const signal=options.signal||currentImportSignal()||null,managedRecovery=options.managedRecovery;
   if(managedRecovery!==undefined&&managedRecovery!==null&&typeof managedRecovery!=='function')throw new TypeError('Managed repository recovery orchestration is invalid.');
-  const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal,note:typeof options.note==='string'?options.note:'',localAttachments:true});
+  const normalizedManifest=validateRepositoryManifest(manifest),reconstructed=await reconstructVerifiedRepositoryCheckpoint(normalizedManifest,readObject,{interactive:options.interactive!==false,signal,note:typeof options.note==='string'?options.note:'',localAttachments:true,onPlan:typeof options.onPlan==='function'?options.onPlan:null});
   try{
     return await inspectVerifiedCapture(reconstructed.capture,freeze({signal,release:reconstructed.release,sourceEncrypted:normalizedManifest.encrypted,repositoryManifest:normalizedManifest,repositoryCommitted:options.committed===true,sharedHead:options.sharedHead===true,managedRecovery:managedRecovery||null,managedProgress:typeof options.managedProgress==='function'?options.managedProgress:null,verifiedSourceBytes:reconstructed.verifiedSourceBytes,storedBytes:reconstructed.storedBytes}));
   }catch(error){await reconstructed.release().catch(()=>{});throw error;}
