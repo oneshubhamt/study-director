@@ -114,7 +114,9 @@ try{
     const items=list=>[...list.querySelectorAll('.library-note-menu-item')].map(item=>item.id.replace('library-note-',''));
     d.AppData.notes.update('support activities','Support Activities','Shared text','');
     for(const [key,label] of [['to delete','To delete'],['gone','Gone']])d.AppData.notes.update(key,label,'Soon deleted','');
-    await d.AppData.notes.flush();for(const key of ['to delete','gone'])await d.AppData.notes.remove(key);await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(250);
+    await d.AppData.notes.flush();d.LibraryView.refreshNotes();await wait(250);
+    // Deleted as a person does, from the note's ⋯ menu: it goes to Recently deleted.
+    for(const key of ['to delete','gone']){row(key).click();await wait(150);document.getElementById('library-note-actions').click();await wait(100);document.getElementById('library-note-delete').click();await until(()=>!row(key));await wait(150);}
     document.querySelector('.library-note-context-menu')?.hidePopover?.();
     const support=row('support activities'),supportRect=support.getBoundingClientRect();
     out.supportPrevented=!support.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:supportRect.left+40,clientY:supportRect.top+10}));
