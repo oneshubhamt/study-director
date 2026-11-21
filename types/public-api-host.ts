@@ -10,11 +10,11 @@ import type {PlanController} from './plan.ts';
 import type {InsightsHostBoundary,InsightsHostModule,InsightsPreviewProvider} from '../source/core/insights-host.ts';
 
 export type CapabilityMap=Readonly<Record<string,number>>;
-export type PluginFileState='not-requested'|'loading'|'loaded'|'registered'|'missing'|'failed';
+export type PluginFileState='not-requested'|'loading'|'loaded'|'registered'|'missing'|'incompatible'|'failed';
 export type PluginRegistrationState='registered'|'incompatible'|'inactive'|'failed';
 export interface OptionalPluginDescriptor{readonly tabId:string;readonly label:string;readonly icon:string;readonly src:string;readonly pluginName:string}
-export interface PluginFileStatus{readonly tabId:string;readonly src:string;readonly state:PluginFileState;readonly attempts:number;readonly lastError:string;readonly lastAttemptAt:string}
-export interface PluginRegistrationStatus{readonly name:string;readonly version:string;readonly state:PluginRegistrationState;readonly attempts:number;readonly lastError:string;readonly lastAttemptAt:string}
+export interface PluginFileStatus extends OptionalPluginDescriptor{readonly state:PluginFileState;readonly detail:string;readonly attempts:number;readonly updatedAt:string|null}
+export interface PluginRegistrationStatus{readonly name:string;readonly version:string;readonly state:PluginRegistrationState;readonly attempts:number;readonly detail:string;readonly updatedAt:string}
 export interface PluginRuntimeStatus{readonly optionalFiles:readonly PluginFileStatus[];readonly registered:readonly PluginRegistrationStatus[]}
 export interface WorkspaceHistoryPublic{
  register(kind:string,handler:Readonly<{current():WorkspaceDescriptor|null;reconcile(desired:WorkspaceDescriptor|null,context:unknown):unknown}>):boolean;
@@ -68,14 +68,14 @@ export interface StudyDirectorPublicApi{
 }
 export interface StudyDirectorPluginDescriptor{
  readonly name:string;readonly version?:string;readonly requires?:Readonly<Record<string,number>>;
- readonly previewProviders?:Readonly<Record<string,InsightsPreviewProvider>>;
+ readonly previewProviders?:Readonly<Record<string,unknown>>;
  setup(api:StudyDirectorPublicApi):unknown;
 }
 export interface PublicApiRuntimeInput{
  readonly configuration:Readonly<{capabilities:CapabilityMap;descriptors:readonly OptionalPluginDescriptor[]}>;
  readonly environment:Readonly<{document:Document;trustedAssetURL(value:string):unknown}>;
  readonly tabs:Readonly<{registerTab(config:TabConfig):boolean;renderTab(id:string):unknown}>;
- readonly preview:Readonly<{registerProvider(target:string,provider:InsightsPreviewProvider):boolean}>;
+ readonly preview:Readonly<{registerProvider(target:string,provider:unknown):boolean}>;
  clampText(value:unknown,max:number):string;
 }
 export interface PublicApiRuntime{

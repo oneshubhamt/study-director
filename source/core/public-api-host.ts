@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {OptionalPluginDescriptor,PluginFileState,PluginFileStatus,PluginRegistrationStatus,PluginRuntimeStatus,PublicApiHostModule as PublicApiHostContract,PublicApiInput,PublicApiRuntime,PublicApiRuntimeInput,StudyDirectorPluginDescriptor,StudyDirectorPublicApi} from '../../types/public-api-host.ts';
+import type {OptionalPluginDescriptor,PluginFileState,PluginFileStatus,PluginRegistrationStatus,PluginRuntimeStatus,PublicApiHostModule as PublicApiHostContract,PublicApiInput,PublicApiRuntime,PublicApiRuntimeInput,StudyDirectorPublicApi} from '../../types/public-api-host.ts';
 const sdPublicApiHostFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'public-api-host','study-director.public-api-host-module'>|undefined;
@@ -8,7 +8,6 @@ const {exactFrozenObject,functionPort}=registry.contracts,freeze=Object.freeze;
 const ensureFunctions=(value:object,names:readonly string[],label:string)=>{const row=value as Record<string,unknown>;for(const name of names)if(typeof row[name]!=='function')throw new TypeError(label+' is unavailable or incompatible.');};
 const MAX_LOAD_ATTEMPTS=2,MAX_REGISTRATION_ATTEMPTS=2;
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
-const errorMessage=(error:unknown,fallback:string)=>error instanceof Error&&error.message?error.message:String(error||fallback);
 
 function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApiRuntime>{
   exactFrozenObject(input,['configuration','environment','tabs','preview','clampText'],'Public API runtime input');
@@ -21,6 +20,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
   functionPort(input.preview,['registerProvider'],'Public API preview ports');
   if(typeof input.clampText!=='function')throw new TypeError('Public API text adapter is unavailable.');
   if(!Object.isFrozen(input.configuration.capabilities)||!Object.values(input.configuration.capabilities).every(value=>typeof value==='number'&&Number.isFinite(value)&&value>=0))throw new TypeError('Public API capabilities are invalid.');
+
   const descriptors=input.configuration.descriptors.map(raw=>{
     if(!raw||typeof raw!=='object')throw new TypeError('Optional plugin descriptor is invalid.');
     const descriptor=raw as OptionalPluginDescriptor;
@@ -29,108 +29,136 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     return freeze({tabId,label,icon,src,pluginName});
   });
   if(new Set(descriptors.map(row=>row.tabId)).size!==descriptors.length||new Set(descriptors.map(row=>row.pluginName)).size!==descriptors.length)throw new TypeError('Optional plugin descriptors must be unique.');
-  const descriptorsByTab=new Map(descriptors.map(row=>[row.tabId,row] as const)),descriptorsByPlugin=new Map(descriptors.map(row=>[row.pluginName,row] as const));
-  const files=new Map(descriptors.map(row=>[row.tabId,{state:'not-requested' as PluginFileState,attempts:0,lastError:'',lastAttemptAt:''}]));
-  const loadPromises=new Map<string,Promise<boolean>>(),registered=new Map<string,PluginRegistrationStatus>();
-  let publicApi:StudyDirectorPublicApi|null=null,placeholdersRegistered=false;
+
+  const descriptorsByTab=new Map(descriptors.map(descriptor=>[descriptor.tabId,descriptor] as const));
+  const descriptorsByPlugin=new Map(descriptors.map(descriptor=>[descriptor.pluginName,descriptor] as const));
+  const files=new Map<string,PluginFileStatus>(descriptors.map(descriptor=>[descriptor.tabId,freeze({...descriptor,state:'not-requested' as PluginFileState,detail:'',attempts:0,updatedAt:null})]));
+  const loadPromises=new Map<string,Promise<boolean>>();
+  const registered=new Map<string,PluginRegistrationStatus>();
+  let publicApi:StudyDirectorPublicApi|null=null;
   const nowStamp=()=>new Date().toISOString();
 
+  function fileState(tabId:string):PluginFileStatus|null{
+    const descriptor=descriptorsByTab.get(tabId);
+    return descriptor?(files.get(tabId)||freeze({...descriptor,state:'not-requested',detail:'',attempts:0,updatedAt:null})):null;
+  }
+  function markFile(tabId:string,state:PluginFileState,detail='',attempts:number|null=null):PluginFileStatus|null{
+    const descriptor=descriptorsByTab.get(tabId);if(!descriptor)return null;
+    const previous=fileState(tabId);
+    const next=freeze({
+      ...descriptor,state,
+      detail:input.clampText(detail||'',200),
+      attempts:attempts===null?Math.max(0,Number(previous?.attempts)||0):Math.max(0,Number(attempts)||0),
+      updatedAt:nowStamp()
+    });
+    files.set(tabId,next);
+    const pane=input.environment.document.getElementById('pane-'+tabId);
+    if(pane)pane.setAttribute('aria-busy',state==='loading'?'true':'false');
+    return next;
+  }
   function activeTabId(){return input.environment.document.querySelector<HTMLElement>('.nav-item.on[data-tab]')?.dataset['tab']||'';}
   function renderIfActive(tabId:string){if(activeTabId()===tabId)input.tabs.renderTab(tabId);}
-  function fileStatus(tabId:string):PluginFileStatus|null{
-    const descriptor=descriptorsByTab.get(tabId),record=files.get(tabId);if(!descriptor||!record)return null;
-    return freeze({tabId,src:descriptor.src,state:record.state,attempts:record.attempts,lastError:record.lastError,lastAttemptAt:record.lastAttemptAt});
+  function canRetry(record:PluginFileStatus|null){return !!record&&(['loaded','missing','failed'] as PluginFileState[]).includes(record.state)&&record.attempts<MAX_LOAD_ATTEMPTS;}
+  function placeholderMessage(record:PluginFileStatus){
+    if(record.state==='loading')return `Loading ${record.label}…`;
+    if(record.state==='missing')return `${record.label} could not be loaded. The core app remains available.`;
+    if(record.state==='incompatible')return `${record.label} is not compatible with this core build.`;
+    if(record.state==='failed')return `${record.label} could not start. The core app remains available.`;
+    if(record.state==='loaded')return `${record.label} loaded but did not register.`;
+    if(record.state==='registered')return `Opening ${record.label}…`;
+    return `${record.label} loads only when you open this tab.`;
   }
-  function markFile(tabId:string,state:PluginFileState,error=''){
-    const record=files.get(tabId);if(!record)return;
-    record.state=state;record.lastError=String(error||'');record.lastAttemptAt=nowStamp();
-  }
-  function canRetry(record:ReturnType<typeof files.get>){return !!record&&(['loaded','missing','failed'] as PluginFileState[]).includes(record.state)&&record.attempts<MAX_LOAD_ATTEMPTS;}
-  function renderPlaceholder(descriptor:Readonly<OptionalPluginDescriptor>,pane:HTMLElement|null){
-    if(!pane)return;
-    const state=files.get(descriptor.tabId);if(!state)return;
-    pane.replaceChildren();
-    const card=input.environment.document.createElement('div');card.className='card plugin-loading-panel';
-    const heading=input.environment.document.createElement('div');heading.className='ui-section-title';heading.textContent=descriptor.label;
-    const message=input.environment.document.createElement('p');message.className='ui-body';
-    if(state.state==='loading')message.textContent=`Loading ${descriptor.label}…`;
-    else if(state.state==='loaded')message.textContent=`${descriptor.label} loaded, but did not register its interface.`;
-    else if(state.state==='missing')message.textContent=`${descriptor.label} is unavailable in this copy of Study Director.`;
-    else if(state.state==='failed')message.textContent=`${descriptor.label} could not start.`;
-    else message.textContent=`${descriptor.label} loads only when you open it.`;
-    card.append(heading,message);
-    if(canRetry(state)){
-      const retry=input.environment.document.createElement('button');retry.type='button';retry.className='mini-btn';retry.textContent='Retry loading';
-      retry.addEventListener('click',()=>{void requestTab(descriptor.tabId,{retry:true});});card.appendChild(retry);
+  function renderPlaceholder(context:Readonly<{pane:HTMLElement|null}>|null|undefined,descriptor:Readonly<OptionalPluginDescriptor>){
+    const pane=context?.pane;if(!pane)return;
+    const record=fileState(descriptor.tabId);if(!record)return;
+    pane.setAttribute('aria-busy',record.state==='loading'?'true':'false');
+    const panel=input.environment.document.createElement('section');
+    const insightsLoading=descriptor.tabId==='insights'&&!['missing','incompatible','failed','loaded'].includes(record.state);
+    panel.className='ui-panel'+(insightsLoading?' plugin-loading-panel':'');
+    const kicker=input.environment.document.createElement('div');kicker.className='ui-label';kicker.textContent=insightsLoading?'Study Coach + Evidence Dashboard':'Optional module';
+    const title=input.environment.document.createElement('h1');title.className='ui-title';title.textContent=descriptor.label;
+    const status=input.environment.document.createElement('div');
+    const isError=['missing','incompatible','failed','loaded'].includes(record.state);
+    status.className='ui-status'+(isError?' err':'');status.setAttribute('role',isError?'alert':'status');status.setAttribute('aria-live',isError?'assertive':'polite');
+    status.textContent=insightsLoading?(record.state==='registered'?'Opening Insights…':'Preparing your saved study history…'):placeholderMessage(record);
+    panel.append(kicker,title,status);
+    if(insightsLoading){
+      const copy=input.environment.document.createElement('div');copy.className='ui-body plugin-loading-copy';copy.textContent='Insights is loading once for this app session. Your existing page will be retained on later visits unless its source data changes.';
+      const track=input.environment.document.createElement('div');track.className='plugin-loading-track';track.setAttribute('aria-hidden','true');panel.append(copy,track);
     }
-    pane.appendChild(card);
+    if(record.detail){const detail=input.environment.document.createElement('div');detail.className='ui-helper';detail.textContent=record.detail;panel.appendChild(detail);}
+    if(canRetry(record)){
+      const retry=input.environment.document.createElement('button');retry.className='mini-btn ui-btn';retry.type='button';retry.textContent='Retry loading';
+      retry.addEventListener('click',()=>{void requestTab(descriptor.tabId,{retry:true});renderIfActive(descriptor.tabId);});panel.appendChild(retry);
+    }
+    pane.replaceChildren(panel);
   }
   function registerPlaceholders(){
-    if(placeholdersRegistered)return true;
+    let complete=true;
     for(const descriptor of descriptors){
-      if(!input.tabs.registerTab({id:descriptor.tabId,label:descriptor.label,icon:descriptor.icon,render:context=>renderPlaceholder(descriptor,context.pane)}))return false;
+      if(!input.tabs.registerTab({id:descriptor.tabId,label:descriptor.label,icon:descriptor.icon,render:context=>renderPlaceholder(context,descriptor)}))complete=false;
     }
-    placeholdersRegistered=true;return true;
+    return complete;
   }
-  function unmetCapabilities(requirements:unknown){
-    if(!isRecord(requirements))return [] as string[];
-    return Object.entries(requirements).filter(([key,minimum])=>Number(input.configuration.capabilities[key]||0)<Math.max(0,Number(minimum)||0)).map(([key,minimum])=>`${key} >= ${minimum}`);
-  }
-  function normalizePlugin(value:unknown):StudyDirectorPluginDescriptor|null{
-    if(!isRecord(value)||typeof value['setup']!=='function')return null;
-    const name=input.clampText(value['name']||'anonymous-plugin',80),version=input.clampText(value['version']||'',80);
-    if(!name)return null;
-    const requires=isRecord(value['requires'])?value['requires'] as Readonly<Record<string,number>>:freeze({});
-    const previewProviders=isRecord(value['previewProviders'])?value['previewProviders'] as StudyDirectorPluginDescriptor['previewProviders']:undefined;
-    const base={name,version,requires,setup:value['setup'] as StudyDirectorPluginDescriptor['setup']};
-    return previewProviders?{...base,previewProviders}:base;
+  function unmetCapabilities(requirements:unknown):Array<[string,unknown]>{
+    if(!isRecord(requirements))return [];
+    return Object.entries(requirements).filter(([key,minimum])=>Number(input.configuration.capabilities[key]||0)<Math.max(0,Number(minimum)||0));
   }
   function register(value:unknown){
-    const plugin=normalizePlugin(value);if(!plugin||!publicApi)return false;
-    const previous=registered.get(plugin.name);
-    if(previous?.state==='registered')return true;
-    if(previous?.state==='incompatible')return false;
-    const attempts=(previous?.attempts||0)+1;if(attempts>MAX_REGISTRATION_ATTEMPTS)return false;
-    const descriptor=descriptorsByPlugin.get(plugin.name),missing=unmetCapabilities(plugin.requires);
-    if(missing.length){
-      registered.set(plugin.name,freeze({name:plugin.name,version:plugin.version||'',state:'incompatible',attempts,lastError:`Missing capability: ${missing.join(', ')}`,lastAttemptAt:nowStamp()}));
-      if(descriptor){markFile(descriptor.tabId,'failed','This module needs a newer Study Director interface.');renderIfActive(descriptor.tabId);}return false;
+    if(!isRecord(value)||typeof value['setup']!=='function'||!publicApi)return false;
+    const name=input.clampText(value['name']||'anonymous-plugin',80),descriptor=descriptorsByPlugin.get(name)||null,previous=registered.get(name);
+    if(previous?.state==='registered'){
+      if(descriptor){markFile(descriptor.tabId,'registered','',fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return true;
+    }
+    if(previous?.state==='incompatible'){
+      if(descriptor){markFile(descriptor.tabId,'incompatible',previous.detail||'',fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
+    }
+    const attempts=Math.max(0,Number(previous?.attempts)||0);
+    if(attempts>=MAX_REGISTRATION_ATTEMPTS){
+      if(descriptor){markFile(descriptor.tabId,'failed','Registration attempt limit reached.',fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
+    }
+    const nextAttempt=attempts+1,unmet=unmetCapabilities(value['requires']);
+    if(unmet.length){
+      const detail='Missing capabilities: '+unmet.map(([key,minimum])=>`${key}>=${Math.max(0,Number(minimum)||0)}`).join(', ');
+      registered.set(name,{name,version:input.clampText(value['version']||'',40),state:'incompatible',attempts:nextAttempt,detail:input.clampText(detail,160),updatedAt:nowStamp()});
+      if(descriptor){markFile(descriptor.tabId,'incompatible',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
     try{
-      const ok=plugin.setup(publicApi)!==false;
-      if(ok&&plugin.previewProviders)for(const [target,provider] of Object.entries(plugin.previewProviders))if(typeof provider==='function')input.preview.registerProvider(target,provider);
-      registered.set(plugin.name,freeze({name:plugin.name,version:plugin.version||'',state:ok?'registered':'inactive',attempts,lastError:ok?'':'Plugin setup returned false.',lastAttemptAt:nowStamp()}));
-      if(descriptor){markFile(descriptor.tabId,ok?'registered':'failed',ok?'':'Plugin setup returned false.');renderIfActive(descriptor.tabId);}return ok;
+      const ok=(value['setup'] as (api:StudyDirectorPublicApi)=>unknown)(publicApi)!==false,detail=ok?'':'Plugin setup did not activate.';
+      if(ok&&isRecord(value['previewProviders']))for(const [target,provider] of Object.entries(value['previewProviders']))input.preview.registerProvider(target,provider);
+      registered.set(name,{name,version:input.clampText(value['version']||'',40),state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()});
+      if(descriptor){markFile(descriptor.tabId,ok?'registered':'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return ok;
     }catch(error){
-      const message=errorMessage(error,'Plugin setup failed.');
-      registered.set(plugin.name,freeze({name:plugin.name,version:plugin.version||'',state:'failed',attempts,lastError:message,lastAttemptAt:nowStamp()}));
-      if(descriptor){markFile(descriptor.tabId,'failed',message);renderIfActive(descriptor.tabId);}return false;
+      const detail=input.clampText(error instanceof Error&&error.message||String(error),160);
+      registered.set(name,{name,version:input.clampText(value['version']||'',40),state:'failed',attempts:nextAttempt,detail,updatedAt:nowStamp()});
+      if(descriptor){markFile(descriptor.tabId,'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return false;
     }
   }
   function startLoad(descriptor:Readonly<OptionalPluginDescriptor>){
-    const current=files.get(descriptor.tabId);if(!current)return Promise.resolve(false);
-    current.attempts+=1;markFile(descriptor.tabId,'loading','');renderIfActive(descriptor.tabId);
+    const previous=fileState(descriptor.tabId),attempts=Math.max(0,Number(previous?.attempts)||0)+1;
+    markFile(descriptor.tabId,'loading','',attempts);
     const promise=new Promise<boolean>(resolve=>{
-      const script=input.environment.document.createElement('script');script.async=false;script.dataset['studyDirectorPlugin']='optional';script.dataset['studyDirectorPluginTab']=descriptor.tabId;
-      Reflect.set(script,'src',input.environment.trustedAssetURL(descriptor.src));
-      script.onload=()=>{const state=files.get(descriptor.tabId);if(state?.state==='loading')markFile(descriptor.tabId,'loaded','The module loaded but did not register.');renderIfActive(descriptor.tabId);resolve(files.get(descriptor.tabId)?.state==='registered');};
-      script.onerror=()=>{script.remove();markFile(descriptor.tabId,'missing','The optional module file could not be loaded.');renderIfActive(descriptor.tabId);resolve(false);};
+      const script=input.environment.document.createElement('script');
+      Reflect.set(script,'src',input.environment.trustedAssetURL(descriptor.src));script.async=false;script.dataset['studyDirectorPlugin']='optional';script.dataset['studyDirectorPluginTab']=descriptor.tabId;
+      script.onload=()=>{const latest=fileState(descriptor.tabId);if(latest?.state==='loading')markFile(descriptor.tabId,'loaded','Plugin file loaded but did not register.',attempts);renderIfActive(descriptor.tabId);resolve(fileState(descriptor.tabId)?.state==='registered');};
+      script.onerror=()=>{script.remove();markFile(descriptor.tabId,'missing',`Could not load ${descriptor.src}.`,attempts);renderIfActive(descriptor.tabId);resolve(false);};
       input.environment.document.head.appendChild(script);
-    }).finally(()=>loadPromises.delete(descriptor.tabId));
-    loadPromises.set(descriptor.tabId,promise);return promise;
+    });
+    loadPromises.set(descriptor.tabId,promise);
+    void promise.finally(()=>{if(loadPromises.get(descriptor.tabId)===promise)loadPromises.delete(descriptor.tabId);});
+    return promise;
   }
   function requestTab(tabIdInput:unknown,{retry=false}:Readonly<{retry?:boolean}>={}){
-    const tabId=String(tabIdInput||'').trim().toLowerCase(),descriptor=descriptorsByTab.get(tabId);if(!descriptor)return null;
-    const pending=loadPromises.get(tabId);if(pending)return pending;
-    const record=files.get(tabId);if(record?.state==='registered')return Promise.resolve(true);
+    const descriptor=descriptorsByTab.get(String(tabIdInput||'').trim());if(!descriptor)return null;
+    const pending=loadPromises.get(descriptor.tabId);if(pending)return pending;
+    const record=fileState(descriptor.tabId);
+    if(record?.state==='registered')return Promise.resolve(true);
     if(record?.state==='not-requested')return startLoad(descriptor);
     if(retry&&canRetry(record))return startLoad(descriptor);
     return Promise.resolve(false);
   }
-  function status():PluginRuntimeStatus{
-    const optionalFiles=descriptors.map(row=>fileStatus(row.tabId)).filter((row):row is PluginFileStatus=>row!==null);
-    return freeze({optionalFiles:freeze(optionalFiles),registered:freeze([...registered.values()].map(row=>freeze({...row})))});
-  }
+  function status():PluginRuntimeStatus{return {optionalFiles:descriptors.map(descriptor=>fileState(descriptor.tabId)).filter((row):row is PluginFileStatus=>row!==null),registered:[...registered.values()]};}
+
   function createPublicApi(apiInput:Readonly<PublicApiInput>):StudyDirectorPublicApi{
     if(publicApi)return publicApi;
     exactFrozenObject(apiInput,['version','data','insights','logic','plan','preview','backup','installation','appearance','ui'],'Public API composition');
