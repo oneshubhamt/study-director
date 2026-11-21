@@ -33,7 +33,7 @@ assert.match(updater,/token\.workRevision!==state\.workRevision\(\)/u,'reservati
 assert.match(updater,/await input\.reservation\.settleMutation\(\)/u,'unreserved preparation must still wait for the mutation coordinator');
 assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.revision\)/u,'active-session persistence must retain read-back verification');
 
-assert.match(sw,/const PRECACHE_CONCURRENCY=8;/u,'Service Worker precache concurrency must be explicitly bounded at eight');
+assert.match(sw,/\bPRECACHE_CONCURRENCY=8\b/u,'Service Worker precache concurrency must be explicitly bounded at eight');
 assert.match(sw,/const worker=async\(\)=>\{while\(!failure\)/u,'precache installation must use a bounded worker queue rather than fixed batches');
 assert.match(sw,/Promise\.all\(Array\.from\(\{length:Math\.min\(PRECACHE_CONCURRENCY,PRECACHE\.length\)\},\(\)=>worker\(\)\)\)/u,'precache worker count must be bounded by both the concurrency limit and asset count');
 assert.match(sw,/if\(failure\)throw failure;/u,'worker-queue failures must still fail installation before release metadata is committed');
