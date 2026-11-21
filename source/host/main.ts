@@ -5,6 +5,7 @@ import type {StudyDirectorPublicApi} from '../../types/public-api-host.ts';
 import type {RichTextApi} from '../../rich-text/editor.ts';
 import type {ActiveSession} from '../../types/record-models.ts';
 import type {SessionActionState} from '../../types/session-actions.ts';
+import type {Task} from '../../types/domain.ts';
 
 type HostWindow=Window&{StudyDirector?:StudyDirectorPublicApi;StudyDirectorRichText?:RichTextApi};
 const HOST_WINDOW=window as HostWindow;
@@ -201,22 +202,22 @@ StorageHealthController=BackupReadinessHostModule.createStorageHealth(Object.fre
   timeLabelFromIso:value=>timeLabelFromIso(value),
   renderCapabilities:()=>NativeCapabilities?renderNativeCapabilities(NativeCapabilities.status()):false
 }));
-function localISODate(dateLike){
+function localISODate(dateLike:Date|string|number){
   const d=new Date(dateLike);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
-function storageHealthTime(iso){
+function storageHealthTime(iso:string|null|undefined){
   if(!iso)return 'never';
   const date=new Date(iso);if(!Number.isFinite(date.getTime()))return 'unknown';
   return localISODate(date)===localISODate(new Date())?timeLabelFromIso(iso)||'today':date.toLocaleDateString('en-IN',{day:'2-digit',month:'short'});
 }
-function publishSafetyNotice(message,title='Unsaved work needs attention',id='safety'){
+function publishSafetyNotice(message:unknown,title:string='Unsaved work needs attention',id:string='safety'){
   const text=String(message||'').trim();
   return NoticeCoordinator.publish(String(id||'safety'),{visible:!!text,kind:'safety',title,message:text||'Resolved.',compact:noticeCanCompact(text)});
 }
 function renderFileBackup(){return BackupActions?.renderFile();}
 const AppDiagnostics=(()=>{
-  function capture(scope,error,level='warn'){
+  function capture(scope:string,error:unknown,level:'warn'|'error'|'info'='warn'){
     // Contained faults remain observable to external QA without retaining a
     // second, private error database on the user's device.
     try{
@@ -225,7 +226,7 @@ const AppDiagnostics=(()=>{
     }catch(reportingError){}
     return null;
   }
-  function guard(scope,fn,fallback=null){try{return fn();}catch(error){capture(scope,error,'error');return fallback;}}
+  function guard<T,F=null>(scope:string,fn:()=>T,fallback:F|null=null):T|F|null{try{return fn();}catch(error){capture(scope,error,'error');return fallback;}}
   return Object.freeze({capture,guard});
 })();
 const BackupOperationDiagnostics=BackupOperationDiagnosticsModule.createRecorder(Object.freeze<Parameters<typeof BackupOperationDiagnosticsModule.createRecorder>[0]>({
@@ -311,7 +312,7 @@ const {renderNativeCapabilities}=CapabilitiesHostModule.createViews(Object.freez
 // panel. Kept for this window across a reload (sessionStorage), tied to the
 // profile; never uploaded or backed up. Opening the panel marks news seen.
 const {NotificationRecent}=FoundationHostModule.createRecent({document,sessionStorage,SESSION_STORAGE_KEYS,ProfileScope,NoticeCoordinator,AppDiagnostics,scheduleSyncStatus,closeProfilePanel});
-const {showBackupPresentation,openBackupRestore,backupRestoreChoices}=FoundationHostModule.createBackupActions({document,AppDiagnostics,device:()=>DeviceBackup,providers:()=>BackupProviderRuntime,history:()=>BackupRecoveryHost?.history,checkForUpdate:()=>PwaLifecycle.checkForUpdate(),connectDeviceBackupWithRecovery,connectDriveForProfile,goTab:(...args)=>goTab(...args),showData:()=>LibraryView.showSection('data'),preferredScrollBehavior:()=>preferredScrollBehavior()});
+const {showBackupPresentation,openBackupRestore,backupRestoreChoices}=FoundationHostModule.createBackupActions({document,AppDiagnostics,device:()=>{if(!DeviceBackup)throw new Error('Study Director Device Backup is unavailable.');return DeviceBackup;},providers:()=>BackupProviderRuntime,history:()=>BackupRecoveryHost?.history,checkForUpdate:()=>PwaLifecycle.checkForUpdate(),connectDeviceBackupWithRecovery,connectDriveForProfile,goTab:(...args)=>goTab(...args),showData:()=>LibraryView.showSection('data'),preferredScrollBehavior:()=>preferredScrollBehavior()});
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
 const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze<Parameters<typeof BackupPresentationModule.createPresentation>[0]>({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>VerifiedRecovery.verified(source),action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',opens:true,run:()=>showBackupPresentation(source,kind)})}));
 const Interactions=InteractionsModule.createController(Object.freeze<Parameters<typeof InteractionsModule.createController>[0]>({ports:Object.freeze({
@@ -358,20 +359,20 @@ function validatedRichInputMeta(event,field){
 if(typeof RichTextApi.mountRichTextEditor!=='function'||typeof RichTextApi.renderRichText!=='function'||typeof RichTextApi.toPlainText!=='function'||typeof RichTextApi.toMarkdown!=='function'||typeof RichTextApi.classifySerializedValue!=='function'||typeof RichTextApi.isRichTextValue!=='function'||typeof RichTextApi.measure!=='function'||typeof RichTextApi.assetIds!=='function'||typeof RichTextApi.scanAssetReferences!=='function'||typeof RichTextApi.scanAttachmentReferences!=='function'||typeof RichTextApi.insertAttachmentReference!=='function'||typeof RichTextApi.removeAttachmentReferences!=='function'||typeof RichTextApi.exportDocument!=='function'||typeof RichTextApi.compareRichText!=='function'||typeof RichTextApi.mergeIncomingAdditions!=='function'||typeof RichTextApi.appendIncomingAdditions!=='function'||typeof RichTextApi.mergeThreeWay!=='function'){
   throw new Error('Study Director rich text runtime is unavailable or incompatible.');
 }
-function clampEditorContent(value,plainLimit){
+function clampEditorContent(value:unknown,plainLimit:number){
   const text=String(value??''),kind=RichTextApi.classifySerializedValue(text);
   if(kind==='rich')return text;
   return kind==='invalid-rich'?'':clampText(text,plainLimit);
 }
-function editorContentWithinLimits(value){
+function editorContentWithinLimits(value:unknown){
   const text=String(value??''),kind=RichTextApi.classifySerializedValue(text);
   if(kind==='invalid-rich')return false;
   if(kind!=='rich')return true;
   const size=RichTextApi.measure(text);return size.words<=APP_LIMITS.maxRichTextWords&&size.bytes<=APP_LIMITS.maxRichTextBytes;
 }
-function plainTextContent(value){return RichTextApi.toPlainText(String(value??''));}
+function plainTextContent(value:unknown){return RichTextApi.toPlainText(String(value??''));}
 
-function normalizeStudyQuality(value){
+function normalizeStudyQuality(value:unknown){
   if(value===null||value===undefined||value==='')return null;
   const n=Number(value);
   return Number.isInteger(n)&&n>=1&&n<=5?n:null;
@@ -392,8 +393,8 @@ const SUPPORT_NOTE=Object.freeze({
   key:'__study_director_support_activities__',
   label:'Support Activities'
 });
-function noteKeyForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.key:taskAreaKey(task);}
-function noteLabelForTask(task){return isSupportBlock(task)?SUPPORT_NOTE.label:taskAreaLabel(task);}
+function noteKeyForTask(task:Task){return isSupportBlock(task)?SUPPORT_NOTE.key:taskAreaKey(task);}
+function noteLabelForTask(task:Task){return isSupportBlock(task)?SUPPORT_NOTE.label:taskAreaLabel(task);}
 const {
   normalizeSource:normalizeCompletionSource, parseProgressNumber
 }=CompletionModel;
@@ -415,15 +416,16 @@ const SLEEP_GAP_THRESHOLD_MS=120000;
 // wait; support and fixed blocks, a pause or the end let them show
 // (docs/areas/status-indicator.md, noise rules).
 function syncStudyQuiet(...args:Parameters<typeof ExecutionViews.syncStudyQuiet>){return ExecutionViews.syncStudyQuiet(...args);}
+type ExecutionHostPorts=Parameters<typeof ExecutionHostModule.createRuntime>[0];
 const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameters<typeof ExecutionHostModule.createRuntime>[0]>({
-  modules:Object.freeze({timerState:TimerStateModule,pomodoro:PomodoroModule,practicePacer:PracticePacerModule,timerEngine:TimerEngineModule}),
-  timerState:Object.freeze({
+  modules:Object.freeze<ExecutionHostPorts['modules']>({timerState:TimerStateModule,pomodoro:PomodoroModule,practicePacer:PracticePacerModule,timerEngine:TimerEngineModule}),
+  timerState:Object.freeze<ExecutionHostPorts['timerState']>({
     helpers:Object.freeze({makeTaskId}),
-    diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
-    effects:Object.freeze({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
+    diagnostics:Object.freeze<ExecutionHostPorts['timerState']['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+    effects:Object.freeze<ExecutionHostPorts['timerState']['effects']>({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
   }),
-  pomodoro:Object.freeze({
-    schedule:Object.freeze({isPomodoroEligibleBlock}),
+  pomodoro:Object.freeze<ExecutionHostPorts['pomodoro']>({
+    schedule:Object.freeze<ExecutionHostPorts['schedule']>({isPomodoroEligibleBlock}),
     persistence:Object.freeze({
       canMutate:()=>appCanMutate(),
       readConfiguration:()=>protectedPreferencesState.nudge,
@@ -433,11 +435,11 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameter
     view:Object.freeze({document,notifications:NoticeCoordinator,updateExecutePanels}),
     environment:Object.freeze({nowIso:()=>new Date().toISOString()})
   }),
-  practiceModel:Object.freeze({
-    configuration:Object.freeze({APP_LIMITS}),
-    domain:Object.freeze({boundedInt,boundedNumber,clampArray,clampText,fmtS})
+  practiceModel:Object.freeze<ExecutionHostPorts['practiceModel']>({
+    configuration:Object.freeze<ExecutionHostPorts['practiceModel']['configuration']>({APP_LIMITS}),
+    domain:Object.freeze<ExecutionHostPorts['practiceModel']['domain']>({boundedInt,boundedNumber,clampArray,clampText,fmtS})
   }),
-  practice:Object.freeze({
+  practice:Object.freeze<ExecutionHostPorts['practice']>({
     configuration:Object.freeze({APP_LIMITS}),
     schedule:Object.freeze({isWorkBlock}),
     persistence:Object.freeze({persistPracticeCueMode,persistPracticeTarget,saveLiveDraft,writeLiveDraftNow}),
@@ -455,13 +457,13 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameter
     compactAdjustedSchedule:value=>compactAdjustedSchedule(value),
     invalidateDerived:options=>invalidateScheduleDerived(options)
   }),
-  evidence:Object.freeze({
+  evidence:Object.freeze<ExecutionHostPorts['evidence']>({
     completionModel:CompletionModel,sources:COMPLETION_SOURCES,classifyTaskOutcome,
     taskTargetValue,
     renderCompletionChange:(...args)=>renderCompletionChange(...args),
     saveLiveDraft:()=>saveLiveDraft()
   }),
-  timer:Object.freeze({
+  timer:Object.freeze<ExecutionHostPorts['timer']>({
     configuration:Object.freeze({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
     domain:Object.freeze({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
     schedule:Object.freeze({getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),isLiveTrackableTimer,isWorkBlock,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
@@ -469,11 +471,11 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameter
     view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl}),
     clock:Object.freeze({nowMs:DecisionClock.nowMs}),
     reviewEvidence:Object.freeze({applicableNotesForTask,getReviewDate,updateRealTimeAwareness,updateTimerFocusMetrics}),
-    clockEnvironment:Object.freeze({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
+    clockEnvironment:Object.freeze<ExecutionHostPorts['timer']['clockEnvironment']>({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
     userPreferences:Object.freeze({notifications:NoticeCoordinator}),
     ownership:Object.freeze({appCanMutate:()=>appCanMutate()})
   }),
-  hooks:Object.freeze({syncStudyQuiet})
+  hooks:Object.freeze<ExecutionHostPorts['hooks']>({syncStudyQuiet})
 }));
 const {
   TimerState,SessionState,TASKS,TIMER_MODES,TaskIdentity,setTimerMode,TaskSessionState,
@@ -540,17 +542,20 @@ const SessionActionState={
  get saveReminderEvidence(){return ReviewDayState.reminder.evidence;},set saveReminderEvidence(value){ReviewDayState.reminder.evidence=value;},
  get saveReminderGeneration(){return ReviewDayState.reminder.generation;},set saveReminderGeneration(value){ReviewDayState.reminder.generation=value;}
 };
+function requireActiveSessionRuntime(){if(!ActiveSessionRuntime)throw new Error('Study Director Active Session runtime is unavailable.');return ActiveSessionRuntime;}
+function requireMutationCoordinator(){if(!AppMutationCoordinator)throw new Error('Study Director mutation coordinator is unavailable.');return AppMutationCoordinator;}
+function requireKeptVersions(){if(!KeptVersions)throw new Error('Study Director kept-version controller is unavailable.');return KeptVersions;}
 const SessionActions=SessionActionsModule.createController(Object.freeze<Parameters<typeof SessionActionsModule.createController>[0]>({
   checkUnsupportedUpdate:(...args)=>checkUnsupportedUpdate(...args),applySchedule:(...args)=>applySchedule(...args),schedulePwaUpdateEvaluation:(...args)=>schedulePwaUpdateEvaluation(...args),
   state:SessionActionState,runtime:ExecutionRuntime,completionSources:COMPLETION_SOURCES,
   get AppData(){return AppData;},
-  get ActiveSessionRuntime(){return ActiveSessionRuntime;},
+  get ActiveSessionRuntime(){return requireActiveSessionRuntime();},
   get SessionHandoffRuntime(){return SessionHandoffRuntime;},
   get ActiveSessionCodec(){return ActiveSessionCodec;},
   get DailyRecordCodec(){return DailyRecordCodec;},
   get CanonicalModule(){return CanonicalModule;},
   get AppDiagnostics(){return AppDiagnostics;},
-  get AppMutationCoordinator(){return AppMutationCoordinator;},
+  get AppMutationCoordinator(){return requireMutationCoordinator();},
   get Interactions(){return Interactions;},
   get NoticeCoordinator(){return NoticeCoordinator;},
   get PlanDraftEditor(){return PlanDraftEditor;},
@@ -561,7 +566,7 @@ const SessionActions=SessionActionsModule.createController(Object.freeze<Paramet
   get StartupLifecycle(){return StartupLifecycle;},
   get BackupProviderRuntime(){return BackupProviderRuntime;},
   get InstallationIdentity(){return InstallationIdentity;},
-  get KeptVersions(){return KeptVersions;},
+  get KeptVersions(){return requireKeptVersions();},
   markStorageHealthError:(...args)=>markStorageHealthError(...args),
   markStorageHealthOk:(...args)=>markStorageHealthOk(...args),
   refreshStorageFallbackWarning:(...args)=>refreshStorageFallbackWarning(...args),
@@ -660,7 +665,7 @@ let ManagedRecoveryQuiescence:ReturnType<typeof BackupRecoveryHostModule.createQ
 let refreshSessionSafetyUi=()=>{};
 function restoreSessionPersistenceSuppressed(){return !!ActiveSessionRuntime?.persistenceSuppressed();}
 function managedRecoverySessionQuiesced(){return ManagedRecoveryQuiescence?.active()||false;}
-async function withRestoreSessionPersistenceSuppressed(operation){
+async function withRestoreSessionPersistenceSuppressed<T>(operation:()=>Promise<T>):Promise<T>{
   if(!ActiveSessionRuntime)throw new Error('Active Session runtime is unavailable.');
   return ActiveSessionRuntime.withPersistenceSuppressed(operation);
 }
@@ -812,7 +817,7 @@ function renderStorageHealth(health=readStorageHealth()){return StorageHealthCon
 function markStorageHealthOk(source:Parameters<NonNullable<typeof StorageHealthController>['markOk']>[0],key:Parameters<NonNullable<typeof StorageHealthController>['markOk']>[1]=''){return StorageHealthController.markOk(source,key);}
 function markStorageHealthTimestamp(key:Parameters<NonNullable<typeof StorageHealthController>['markTimestamp']>[0]){return StorageHealthController.markTimestamp(key);}
 function markStorageHealthError(source:Parameters<NonNullable<typeof StorageHealthController>['markError']>[0],reason:Parameters<NonNullable<typeof StorageHealthController>['markError']>[1],options:Parameters<NonNullable<typeof StorageHealthController>['markError']>[2]={}){return StorageHealthController.markError(source,reason,options);}
-function storageSizeLabel(bytes){
+function storageSizeLabel(bytes:unknown){
   const value=Math.max(0,Number(bytes)||0);
   if(value<1024*1024)return `${Math.round(value/1024)} KB`;
   if(value<1024**3)return `${Math.round(value/(1024*1024)*10)/10} MB`;
@@ -836,7 +841,7 @@ const CapabilityInstallation=CapabilitiesHostModule.createInstallation(Object.fr
   preferredScrollBehavior:()=>preferredScrollBehavior()
 }));
 const runInstallationAction=CapabilityInstallation.runInstallationAction;
-function showLiveDraftSaveWarning(reason){
+function showLiveDraftSaveWarning(reason:unknown){
   const message=`Live draft could not be saved${reason?`: ${reason}`:''}. Save today in Review or export a backup before closing this tab.`;
   markStorageHealthError('activeSession',message);
   setPlanStatus('CRITICAL: Local storage is full or unavailable. Live draft is not saving.',false);
@@ -930,22 +935,22 @@ function todayISO(now=new Date()){
   if(d.getHours()<STUDY_DAY_ROLLOVER_HOUR)d.setDate(d.getDate()-1);
   return localISODate(d);
 }
-function prettyDate(iso){
+function prettyDate(iso:string){
   const d=new Date(iso+'T00:00:00');
   return d.toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
 }
-function dateInsightsMeta(iso){
+function dateInsightsMeta(iso:string){
   const d=new Date(iso+'T00:00:00');
   const dayOfWeek=d.getDay();
   return {dayOfWeek,dayName:FULL_WEEKDAY_NAMES[dayOfWeek]||'Invalid Date'};
 }
-function hoursLabel(min){
+function hoursLabel(min:unknown){
   const n=Math.round((min||0)*10)/10;
   if(n<60)return Math.round(n)+'m';
   const h=n/60;
   return (Math.round(h*10)/10)+'h';
 }
-function optionalHoursLabel(value){
+function optionalHoursLabel(value:unknown){
   return value===null||value===undefined||!Number.isFinite(Number(value))?'—':hoursLabel(Number(value));
 }
 const ScheduleDerivedState={fingerprint:'',adjustmentsRevision:0,adjustmentsCache:{revision:-1,value:Object.freeze({})},renderDirty:true};
@@ -977,7 +982,7 @@ function captureSessionSnapshot(evidence=null){return ActiveSessionRuntime?.capt
 // retaining any later text, completion or reflection edits for reconciliation.
 function snapshotWhileSessionClaimFrozen(){return SessionHandoffRuntime?.snapshotForWrite()||captureSessionSnapshot();}
 function nextSessionRevision(seed:Parameters<typeof AppData['activeSession']['nextRevision']>[0]=0){return AppData.activeSession.nextRevision(seed);}
-async function activeSessionContentFingerprint(session){
+async function activeSessionContentFingerprint(session:ActiveSession|null){
   const content=ActiveSessionCodec.contentValue(session);
   if(!content)throw new Error('Active Session content is invalid.');
   const fingerprint=String(await Exports.run('checksum',{value:CanonicalModule.signature(content),algorithm:'sha256'}));
@@ -994,7 +999,7 @@ function saveLiveDraft(options:Parameters<NonNullable<typeof ActiveSessionRuntim
 function cancelPendingLiveDraftSave(){return ActiveSessionRuntime?.cancelPendingLiveDraftSave()||false;}
 function flushLiveDraft(options={}){return ActiveSessionRuntime?.flushLiveDraft(options)||null;}
 function maybeSnapshotRunningTimer(){return ActiveSessionRuntime?.maybeSnapshotRunningTimer()||false;}
-function applySessionSnapshot(snapshot){return ActiveSessionRuntime?.applySnapshot(snapshot)||false;}
+function applySessionSnapshot(snapshot:Parameters<NonNullable<typeof ActiveSessionRuntime>['applySnapshot']>[0]){return ActiveSessionRuntime?.applySnapshot(snapshot)||false;}
 function restoreLiveDraftIfAny(...args:Parameters<typeof SessionActions.restoreLiveDraftIfAny>){return SessionActions.restoreLiveDraftIfAny(...args);}
 function activeSessionSnapshot(...args:Parameters<typeof SessionActions.activeSessionSnapshot>){return SessionActions.activeSessionSnapshot(...args);}
 
@@ -1109,7 +1114,7 @@ if(!Object.isFrozen(RecoveryAssetMaintenancePause)||RecoveryAssetMaintenancePaus
 }
 let BackupIntegrity:ReturnType<typeof BackupIntegrityHostModule.createController>|null=null,AttachmentIntegrityJob:ReturnType<typeof BackupIntegrityHostModule.createController>['attachmentJob']|null=null;
 const RichTextAssetWriteLease=AssetStorageModule.createLease();
-function richAssetId(value){const id=String(value||'');if(!RichTextApi.isAssetId(id))throw new TypeError('Rich-text asset identity is invalid.');return id;}
+function richAssetId(value:unknown){const id=String(value||'');if(!RichTextApi.isAssetId(id))throw new TypeError('Rich-text asset identity is invalid.');return id;}
 const AttachmentIngest=AttachmentIngestModule.create({
   createWorker:()=>new Worker(trustedAssetURL('@@SD_ATTACHMENT_WORKER_FILENAME@@'),{name:'study-director-attachment-ingest'}),storage:navigator.storage,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),onAbandoned:()=>scheduleRichTextAssetMaintenance(5000)
 });
