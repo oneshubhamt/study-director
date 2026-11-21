@@ -89,6 +89,7 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
   }
   function applyPresentation(presentationId:unknown,{persist=false,restoreFocus=false}:Readonly<{persist?:boolean;restoreFocus?:boolean}>={}):string{
     const clean=kernel.switchPresentation(presentationId,{persist:false});
+    kernel.synchronizeMetadata();
     if(persist)preferences.persist({presentation:clean});
     renderPresentationControls();
     if(restoreFocus)[...document.querySelectorAll<HTMLElement>('.presentation-btn[data-presentation-id]')].find(button=>button.dataset['presentationId']===clean)?.focus();
@@ -102,7 +103,7 @@ function createController(input:Readonly<PresentationHostInput>):Readonly<Presen
     return clean;
   }
   function registerPresentation(value:unknown):boolean{
-    const accepted=kernel.registerPresentation(value);if(accepted)renderPresentationControls();return accepted;
+    const accepted=kernel.registerPresentation(value);if(accepted){kernel.synchronizeMetadata();renderPresentationControls();}return accepted;
   }
   function handlePresentationSelection(event:Event):void{
     const target=event.target;if(!(target instanceof Element))return;
