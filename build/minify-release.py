@@ -518,21 +518,37 @@ def write_deployment_identity(destination: Path, public: Path) -> None:
     index_source = (public / "index.html").read_text(encoding="utf-8")
     release_match = re.search(r"\bRELEASE_ID\s*=\s*['\"]([0-9a-f]{24})['\"]", sw_source)
     build_match = re.search(
-        r'<meta name="study-director-build" content="([^"]+)">',
+        r'<meta\s+name=["\']study-director-build["\']\s+content=["\']([^"\']+)["\'][^>]*>',
         index_source,
     )
-    surface_match = re.search(r"const APP_VERSION='(SDV[A-Z][0-9]+[A-Za-z0-9]*)';", index_source)
+    surface_match = re.search(r"const\s+APP_VERSION\s*=\s*['\"](SDV[A-Z][0-9]+[A-Za-z0-9]*)['\"]", index_source)
+    title_release_match = re.search(r"<title>STUDY DIRECTOR · sd(v[a-z0-9]+)</title>", index_source, re.IGNORECASE)
     source_commit_match = re.search(
-        r'<meta name="study-director-source-commit" content="([0-9a-f]{40})">',
+        r'<meta\s+name=["\']study-director-source-commit["\']\s+content=["\']([0-9a-f]{40})["\'][^>]*>',
         index_source,
     )
-    if not release_match or not build_match or not surface_match or not source_commit_match:
-        raise RuntimeError("Deployment identity could not be derived from the minified release")
+    surface_release = (
+        surface_match.group(1)
+        if surface_match
+        else ("SD" + title_release_match.group(1).upper() if title_release_match else "")
+    )
+    missing = [
+        name
+        for name, value in (
+            ("service-worker release", release_match),
+            ("build id", build_match),
+            ("surface release", surface_release),
+            ("source commit", source_commit_match),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError("Deployment identity could not be derived from the minified release: " + ", ".join(missing))
     files = sorted(str(path.relative_to(public)).replace("\\", "/") for path in public.rglob("*") if path.is_file())
     identity = {
         "format": "study-director-deployment-identity",
         "version": 2,
-        "surfaceRelease": surface_match.group(1),
+        "surfaceRelease": surface_release,
         "buildId": build_match.group(1),
         "sourceCommit": source_commit_match.group(1),
         "serviceWorkerReleaseId": release_match.group(1),
