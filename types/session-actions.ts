@@ -9,6 +9,7 @@ import type {NoticeCoordinator} from '../source/core/notice-coordinator.ts';
 import type {InteractionsModule} from '../source/core/interactions.ts';
 import type {SessionCoordinator} from './session-lifecycle.ts';
 import type {PlanController,PlanTone} from './plan.ts';
+import type {MutationAuthority} from './mutation-coordinator.ts';
 export type SessionApplyOptions={source?:string;reviewOnly?:boolean;lifecycleManaged?:boolean};
 export interface SessionActionState{
   sessionPanelMode:'none'|'active'|'suspended'|'elsewhere'|'previous';sessionPanelSession:ActiveSession|null;
@@ -25,7 +26,7 @@ export interface SessionActionInput{
   DailyRecordCodec:ReturnType<RecordCodecsModule['createDailyRecordCodec']>;
   CanonicalModule:{same(a:unknown,b:unknown):boolean};
   AppDiagnostics:{capture(scope:string,error:unknown,severity:'warn'|'error'):unknown};
-  AppMutationCoordinator:{runExclusive<T>(kind:string,operation:()=>T|PromiseLike<T>):PromiseLike<T>};
+  AppMutationCoordinator:{runExclusive<T>(kind:string,operation:(authority:MutationAuthority)=>T|PromiseLike<T>):PromiseLike<T>};
   Interactions:ReturnType<InteractionsModule['createController']>;NoticeCoordinator:NoticeCoordinator;
   PlanDraftEditor:PlanController['draft'];PlanScheduleGateway:{hasLiveState():boolean};
   ReviewEditor:{persistenceCommitted():unknown;persistenceFailed(error:unknown):unknown};
