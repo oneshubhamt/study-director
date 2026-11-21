@@ -198,4 +198,4 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
 const createModule=():PublicApiHostContract=>freeze({format:'study-director.public-api-host-module',contractVersion:1,createRuntime});
 registry.define('public-api-host',1,createModule);return createModule;
 })();
-export type PublicApiHostModule=typeof sdPublicApiHostFactory;
+export type PublicApiHostModule=ReturnType<typeof sdPublicApiHostFactory>;
