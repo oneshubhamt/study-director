@@ -1,6 +1,6 @@
 # TypeScript conversion — execution record
 
-## Owner audit of P5.8, P5.9 and P5.10 · 2026-11-20
+## Owner audit of P5.8, P5.9 and P5.10 · closed with targeted verification · 2026-11-21
 
 - Audited branch `ts-exp` from `b98ce000` against the original JavaScript at `28c8c1d`, the phase objectives, host wiring and production-shaped tests.
 - Drive requests, profile choices, delayed revocation and completed streams check their originating authorization. Scoped operations belong to their originating profile. Incomplete inventories cannot establish absence, empty paginated searches continue, and overlapping uploads of the same logical file share an exclusion check before discovery. Existing resumable transfers and intentional library adoption retain their own verification paths.
@@ -8,7 +8,9 @@
 - Worker startup handles a missing global. The wire decoder checks the report envelope and transferred outcomes. Ordered windows and in-progress history replacements have explicit tests. The real worker and main-thread engine agree over complete 320-day and seven-day reports. The retained worker sends zero records for the second selection.
 - Compared every serialized report and detailed Lab field on 15 combinations of history length and selected window covering 0–830 saved dates. Differences were the selected-window counts and resulting descriptions, plus the existing improvement that explains an unavailable strong-day forecast.
 - Local direct evidence includes Drive transport, profile binding, repository scale, checkpoint, background work, sync status, notification and cold recovery. Insights evidence includes scaling, Guide, memory release, worker parity, render rollback, prefetch and the affected architecture checks. The strict compiler and typed lint cover 228 files across five projects. Negative type/lint gates, generated build verification and generated syntax also passed.
-- Implementation checkpoint. Repeated Chromium journeys and branch CI are under verification. The next planned conversion is P5.11a after audit closure. Full maximum-import and Phase 7 certification remain open.
+- GitHub Actions passed on implementation commit `8110d1fdbb3b8cd4a910ed42711f80a398fe5aba`. The Drive/status run covered cold-start recovery, multi-profile sync and ownership handoff. The repository and backup/recovery workflows also passed. [Drive/status](https://github.com/oneshubhamt/study-director/actions/runs/44765564646) · [Repository checks](https://github.com/oneshubhamt/study-director/actions/runs/44765564552) · [Backup/recovery](https://github.com/oneshubhamt/study-director/actions/runs/44765564580)
+- Hosted Chromium passed all five populated dashboard runs and all five isolated performance runs on the 590-day fixture, including worker/fallback parity and zero records resent on window changes. Locally, the default Chromium launch reported two extension console errors. The same performance test passed with extensions disabled and the console assertion intact. [Insights verification](https://github.com/oneshubhamt/study-director/actions/runs/44765564564)
+- P5.8, P5.9 and P5.10 are closed for this targeted audit. Drive coverage used a simulated provider. Maximum-import testing and whole-app/device certification remain open for Phase 7. The next planned conversion is P5.11a.
 
 ## Prior handoff — P5.9/P5.10 OWNER-AUDIT CORRECTION CLOSED — TARGETED, 2026-11-19
 
