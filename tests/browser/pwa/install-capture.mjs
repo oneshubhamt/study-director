@@ -20,6 +20,10 @@ window.__p512InstallPromptPrevented=false;
   window.__p512InstallPromptEvent=promptEvent;
   window.dispatchEvent(promptEvent);
   window.__p512InstallPromptPrevented=promptEvent.defaultPrevented;
+  // Keep this fixture pinned to the pre-host event. Headless Chromium may
+  // later synthesize its own install event; that browser-owned event is
+  // covered by normal install behavior, not this early-capture ownership test.
+  window.addEventListener('beforeinstallprompt',event=>event.stopImmediatePropagation(),true);
 }
 </script>`;
 const html=source.slice(0,scriptEnd+9)+earlyPrompt+source.slice(scriptEnd+9);
