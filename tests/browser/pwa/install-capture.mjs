@@ -45,7 +45,7 @@ try{
   assert.equal(await page.evaluate(`window.__p512EarlyBridgeOwned`),true,'the early bridge must own the exact captured prompt object before host startup');
 
   await page.evaluate(`__PWA6.goTab('guide')`);
-  await waitFor(()=>page.evaluate(`document.querySelector('#guide-install-card .mini-btn')?.textContent.trim()==='Install app'`),{timeout:60000,label:'Guide install action'});
+  await waitFor(()=>page.evaluate(`(()=>{const button=document.querySelector('#guide-install-card .mini-btn');return document.documentElement.dataset.studyDirectorUiMutable==='1'&&button?.textContent.trim()==='Install app'&&!button.disabled;})()`),{timeout:60000,label:'enabled Guide install action'});
   assert.equal(await page.evaluate(`window.StudyDirector.installation.status().installationAction`),'install');
   await page.click('#guide-install-card .mini-btn');
   await waitFor(()=>page.evaluate(`window.__p512InstallPromptCalls===1`),{timeout:8000,label:'captured prompt consumed through Guide'});
