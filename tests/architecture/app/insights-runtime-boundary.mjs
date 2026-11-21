@@ -4,6 +4,7 @@ import fs from 'node:fs';
 const read=path=>fs.readFileSync(path,'utf8');
 const runtime=read('source/external/insights-runtime.ts');
 const host=read('source/core/insights-host.ts');
+const publicApiHost=read('source/core/public-api-host.ts');
 const app=read('source/host/main.js');
 const manifest=read('build/module-manifest.mjs');
 const legacy=read('source/external/insights.js');
@@ -23,7 +24,10 @@ assert.match(runtime,/ready:async\(\)=>\{await state\.navigationReady;await rest
 assert.doesNotMatch(runtime,/await void restoreScroll\(\)/u,'scroll restoration must never be accidentally converted to an immediately resolved await');
 assert.match(runtime,/state\.renderRollback=Object\.freeze\(\{pane,token,nodes:Object\.freeze\(priorNodes\),focus:priorFocus\}\)[\s\S]{0,900}renderMetrics\.cancelled\|\|!InsightsRenderCoordinator\.isCurrent\(token\)[\s\S]{0,220}restoreInterruptedRender\(\)/u,'superseded progressive refreshes must roll back to the last complete retained view');
 assert.match(runtime,/rollback\.focus\?\.isConnected\)rollback\.focus\.focus\(\{preventScroll:true\}\)/u,'retained rollback must restore keyboard focus without disturbing restored scroll');
-assert.match(app,/const PluginRuntime=\(\(\)=>\{/u,'shared generic plugin-loader mechanics must remain host-owned for P5.13');
+assert.match(app,/const PluginRuntime=PublicApiHostModule\.createRuntime\(Object\.freeze\(\{/u,'main must compose the checked P5.13a generic plugin owner');
+assert.match(publicApiHost,/const MAX_LOAD_ATTEMPTS=2,MAX_REGISTRATION_ATTEMPTS=2/u,'checked P5.13a owner must retain bounded loader and registration retry policy');
+assert.match(publicApiHost,/function requestTab\(tabIdInput:unknown/u,'checked P5.13a owner must retain the generic optional-tab request path');
+assert.doesNotMatch(app,/const PluginRuntime=\(\(\)=>\{/u,'unchecked generic plugin-loader mechanics must not return to main');
 assert.doesNotMatch(runtime,/AppData\.|localStorage|indexedDB/u,'Insights retained runtime must not reach host persistence directly');
 assert.doesNotMatch(runtime,/\beval\s*\(|new Function\s*\(/u,'Insights runtime must not use string-to-code execution');
 assert.doesNotMatch(runtime,/querySelector(?:All)?\(`[^`]*\$\{/u,'Insights runtime values must not be interpolated into CSS selectors');
@@ -36,5 +40,5 @@ assert.ok(workerExit>=0&&renderer>workerExit,'worker context must exit before re
 
 console.log(JSON.stringify({
   status:'PASS',suite:'insights-runtime-boundary',
-  checkedHostPorts:true,genericLoaderDeferred:true,workerExitBeforeDom:true,inertLegacyShell:true,staticSelectors:true,noStringCode:true,retainedRollback:true,retainedFocusRollback:true,readyAwaitsScroll:true,registrationCleanup:true
+  checkedHostPorts:true,genericLoaderChecked:true,workerExitBeforeDom:true,inertLegacyShell:true,staticSelectors:true,noStringCode:true,retainedRollback:true,retainedFocusRollback:true,readyAwaitsScroll:true,registrationCleanup:true
 }));
