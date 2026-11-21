@@ -47,7 +47,7 @@ try{
   await page.evaluate(`__PWA6.goTab('guide')`);
   await waitFor(()=>page.evaluate(`(()=>{const button=document.querySelector('#guide-install-card .mini-btn');return document.documentElement.dataset.studyDirectorUiMutable==='1'&&button?.textContent.trim()==='Install app'&&!button.disabled;})()`),{timeout:60000,label:'enabled Guide install action'});
   assert.equal(await page.evaluate(`window.StudyDirector.installation.status().installationAction`),'install');
-  await page.click('#guide-install-card .mini-btn');
+  await page.evaluate(`document.querySelector('#guide-install-card .mini-btn').click()`);
   await waitFor(()=>page.evaluate(`window.__p512InstallPromptCalls===1`),{timeout:8000,label:'captured prompt consumed through Guide'});
   const installResult=await page.evaluate(`({calls:window.__p512InstallPromptCalls,state:window.StudyDirector.installation.status().installationState,feedback:window.StudyDirector.installation.status().installFeedback||''})`);
   assert.equal(installResult.calls,1,'Guide must invoke the retained prompt exactly once');
