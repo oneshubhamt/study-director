@@ -134,6 +134,10 @@ await test('legacy markers confirm without suppressing retries; current boot wit
  const h=harness();h.registration.waiting=null;await h.api.install();h.storage.set('reload','old');assert.equal(await h.api.confirmBoot(),true);assert.equal(h.api.status().bootState,'confirmed');assert.equal(h.storage.has('reload'),false);
  assert.equal(await h.api.confirmBoot(),true);assert.equal(h.api.status().bootState,'current');const before=h.old.messages.length;h.win.emit('pageshow');await flush();assert.ok(h.old.messages.length>before);assert.equal(h.counts().reloads,0);
 });
+await test('malformed structured reload marker fails closed and remains available for recovery',async()=>{
+ const h=harness();h.registration.waiting=null;await h.api.install();const malformed='{"version":2';h.storage.set('reload',malformed);
+ assert.equal(await h.api.confirmBoot(),false);assert.equal(h.api.status().bootState,'mismatch');assert.equal(h.storage.get('reload'),malformed);assert.equal(h.counts().reloads,0);
+});
 await test('download failure has an explicit stage and actionable error; success clears it',async()=>{
  const h=harness();h.registration.waiting=null;await h.api.install();const installer=h.worker('broken','installing');h.registration.installing=installer;
  const task=h.api.checkForUpdate();await flush();assert.equal(h.api.status().phase,'downloading');assert.equal(h.api.status().checking,true);installer.state='redundant';installer.emit('statechange');assert.equal(await task,false);assert.equal(h.api.status().phase,'installation-failed');assert.ok(h.api.status().checkError);assert.equal(h.api.status().checking,false);
