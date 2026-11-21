@@ -141,7 +141,7 @@ const {
   APP_VERSION,APP_CONFIG,APP_LIMITS,ProfileScope,DEVICE_WIDE_STORAGE_KEYS,STORAGE_KEYS,SESSION_STORAGE_KEYS,APP_META_KEYS,EXTERNAL_REPOSITORY_IDENTITIES,APP_META_REGISTRY,
   DATA_CONTRACT,DB_STORES,DB_NAME,DB_VER,DB_DAILY_RECORD_STORE,DB_DAILY_SUMMARY_STORE,DB_NOTES_STORE,DB_ACTIVE_SESSION_STORE,DB_APP_META_STORE,DB_ASSET_STORE,
   ACTIVE_SESSION_ID,ENTITY_DEFINITIONS,BACKUP_ENTITY_TYPES,FACTORY_DEFAULTS,entityDefinition,entityIdentity
-}=DataBootstrapHostModule.createConfiguration(Object.freeze({
+}=DataBootstrapHostModule.createConfiguration(Object.freeze<Parameters<typeof DataBootstrapHostModule.createConfiguration>[0]>({
   release:'@@SD_RELEASE@@',
   profileScope:ProfileScopeBootstrap,
   raw:Object.freeze({
@@ -183,11 +183,11 @@ let StorageResetRecovery=null,BackupNudge=null;
 let NativeCapabilities=null,CapabilityBadge=null;
 let DeviceBackup=null,BackupRecoveryHost=null,KeptVersions=null,BackupActions=null;
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
-const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze({
+const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze<Parameters<typeof PersistenceModule.createLocalStorage>[0]>({
   onError:(operation,error)=>StorageHealthController?.observeLocalStorage(operation,error),
   onOk:operation=>StorageHealthController?.observeLocalStorage(operation,null)
 }));
-StorageHealthController=BackupReadinessHostModule.createStorageHealth(Object.freeze({
+StorageHealthController=BackupReadinessHostModule.createStorageHealth(Object.freeze<Parameters<typeof BackupReadinessHostModule.createStorageHealth>[0]>({
   local:LocalStorageContract,key:STORAGE_KEYS.storageHealth,maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars,clampText,
   refreshWarning:()=>refreshStorageFallbackWarning(),scheduleSyncStatus:()=>scheduleSyncStatus(),document,
   timeLabelFromIso:value=>timeLabelFromIso(value),
@@ -220,7 +220,7 @@ const AppDiagnostics=(()=>{
   function guard(scope,fn,fallback=null){try{return fn();}catch(error){capture(scope,error,'error');return fallback;}}
   return Object.freeze({capture,guard});
 })();
-const BackupOperationDiagnostics=BackupOperationDiagnosticsModule.createRecorder(Object.freeze({
+const BackupOperationDiagnostics=BackupOperationDiagnosticsModule.createRecorder(Object.freeze<Parameters<typeof BackupOperationDiagnosticsModule.createRecorder>[0]>({
   configuration:Object.freeze({release:APP_VERSION,limit:20}),
   environment:Object.freeze({now:()=>Date.now()}),
   storage:Object.freeze({
@@ -236,11 +236,11 @@ const DecisionClock=Object.freeze({nowMs:()=>Date.now()});
 const {
   randomIdPart,normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis,jsonByteLength
 }=PersistenceModule;
-const InstallationIdentity=DataBootstrapHostModule.createInstallationIdentity(Object.freeze({
+const InstallationIdentity=DataBootstrapHostModule.createInstallationIdentity(Object.freeze<Parameters<typeof DataBootstrapHostModule.createInstallationIdentity>[0]>({
   module:PersistenceModule,local:LocalStorageContract,installationKey:STORAGE_KEYS.installationId,navigator
 }));
 // The people who use Study Director on this device (core/profiles.ts).
-const Profiles=ProfilesHostModule.createController(Object.freeze({module:ProfilesModule,ports:Object.freeze({
+const Profiles=ProfilesHostModule.createController(Object.freeze<Parameters<typeof ProfilesHostModule.createController>[0]>({module:ProfilesModule,ports:Object.freeze({
   scope:Object.freeze({pattern:ProfileScope.pattern,registryKey:ProfileScope.registryKey,scope:ProfileScope.scope,separator:ProfileScope.separator}),
   storage:Object.freeze({
     read:()=>LocalStorageContract.getText(ProfileScope.registryKey,null),
@@ -257,7 +257,7 @@ const ProfileViews=ProfilesHostModule.createViews({document,Profiles,APP_LIMITS,
  driveStatus:()=>BackupProviderRuntime.locationStatus('google-drive'),protectionStatus:()=>BackupProtection.status(),deviceName:()=>PersistenceModule.deviceName(InstallationIdentity.getId()),
  connectDrive:()=>connectDriveForProfile(),disconnectDrive:()=>BackupProviderRuntime.disconnect('google-drive'),AppDiagnostics,Interactions:{notify:input=>Interactions.notify(input)}
 });
-const {deviceName,backupFolderName}=DataBootstrapHostModule.createNaming(Object.freeze({
+const {deviceName,backupFolderName}=DataBootstrapHostModule.createNaming(Object.freeze<Parameters<typeof DataBootstrapHostModule.createNaming>[0]>({
   module:PersistenceModule,identity:InstallationIdentity,currentProfile:()=>Profiles.current(),repositories:EXTERNAL_REPOSITORY_IDENTITIES
 }));
 /* SHARED PURE HELPERS */
@@ -290,7 +290,7 @@ const {WorkspaceRouteCoordinator,WorkspaceHistoryBridge,WorkspaceHistoryPublic}=
 
 
 const {renderNotificationSurfaces,renderCoordinatedNotice,noticeCanCompact,setStatus}=FoundationHostModule.createNoticeViews({document,notifications:()=>NoticeCoordinator,clampText,maxStatusMessageChars:APP_LIMITS.maxStatusMessageChars});
-const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze({
+const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze<Parameters<typeof NoticeCoordinatorModule.createCoordinator>[0]>({
   render:renderCoordinatedNotice,now:()=>Date.now(),
   setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),
   installationCooldownMs:1200,capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
@@ -298,15 +298,15 @@ const NoticeCoordinator=NoticeCoordinatorModule.createCoordinator(Object.freeze(
 if(!Object.isFrozen(NoticeCoordinator)||NoticeCoordinator.format!=='study-director.notice-coordinator'||NoticeCoordinator.contractVersion!==1){
   throw new Error('Study Director notice coordinator is unavailable or incompatible.');
 }
-const {renderNativeCapabilities}=CapabilitiesHostModule.createViews(Object.freeze({document,window,notices:NoticeCoordinator}));
+const {renderNativeCapabilities}=CapabilitiesHostModule.createViews(Object.freeze<Parameters<typeof CapabilitiesHostModule.createViews>[0]>({document,window,notices:NoticeCoordinator}));
 // Recent (docs/areas/notifications.md): today's pop-ups and banners in the profile
 // panel. Kept for this window across a reload (sessionStorage), tied to the
 // profile; never uploaded or backed up. Opening the panel marks news seen.
 const {NotificationRecent}=FoundationHostModule.createRecent({document,sessionStorage,SESSION_STORAGE_KEYS,ProfileScope,NoticeCoordinator,AppDiagnostics,scheduleSyncStatus,closeProfilePanel});
 const {showBackupPresentation,openBackupRestore,backupRestoreChoices}=FoundationHostModule.createBackupActions({document,AppDiagnostics,device:()=>DeviceBackup,providers:()=>BackupProviderRuntime,history:()=>BackupRecoveryHost?.history,checkForUpdate:()=>PwaLifecycle.checkForUpdate(),connectDeviceBackupWithRecovery,connectDriveForProfile,goTab:(...args)=>goTab(...args),showData:()=>LibraryView.showSection('data'),preferredScrollBehavior:()=>preferredScrollBehavior()});
 NoticeCoordinator.subscribe(renderNotificationSurfaces);
-const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>VerifiedRecovery.verified(source),action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',opens:true,run:()=>showBackupPresentation(source,kind)})}));
-const Interactions=InteractionsModule.createController(Object.freeze({ports:Object.freeze({
+const BackupPresentation=BackupPresentationModule.createPresentation(Object.freeze<Parameters<typeof BackupPresentationModule.createPresentation>[0]>({notifications:NoticeCoordinator,timeLabel:storageHealthTime,synced:()=>BackupProviderRuntime.syncing()===true,verified:source=>VerifiedRecovery.verified(source),action:(source,kind)=>Object.freeze({label:kind==='permission'?(source==='device-folder'?'Allow access':'Reconnect'):kind==='sync-review'?'Review':kind==='sync-password'?'Enter password':kind==='sync-newer'?'Check for update':'Show details',opens:true,run:()=>showBackupPresentation(source,kind)})}));
+const Interactions=InteractionsModule.createController(Object.freeze<Parameters<typeof InteractionsModule.createController>[0]>({ports:Object.freeze({
   environment:Object.freeze({
     clearTimeout:id=>clearTimeout(id),document,
     nativeConfirm:message=>window.confirm(message),
@@ -321,7 +321,7 @@ const Interactions=InteractionsModule.createController(Object.freeze({ports:Obje
 if(!Object.isFrozen(Interactions)||Interactions.format!=='study-director.interactions'||Interactions.contractVersion!==1){
   throw new Error('Study Director interaction controller is unavailable or incompatible.');
 }
-const WorkspaceOverlay=WorkspaceOverlayModule.createController(Object.freeze({ports:Object.freeze({
+const WorkspaceOverlay=WorkspaceOverlayModule.createController(Object.freeze<Parameters<typeof WorkspaceOverlayModule.createController>[0]>({ports:Object.freeze({
   environment:Object.freeze({document}),
   history:WorkspaceHistoryBridge,
 })}));
@@ -407,7 +407,7 @@ const SLEEP_GAP_THRESHOLD_MS=120000;
 // wait; support and fixed blocks, a pause or the end let them show
 // (docs/areas/status-indicator.md, noise rules).
 function syncStudyQuiet(...args){return ExecutionViews.syncStudyQuiet(...args);}
-const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze({
+const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameters<typeof ExecutionHostModule.createRuntime>[0]>({
   modules:Object.freeze({timerState:TimerStateModule,pomodoro:PomodoroModule,practicePacer:PracticePacerModule,timerEngine:TimerEngineModule}),
   timerState:Object.freeze({
     helpers:Object.freeze({makeTaskId}),
@@ -480,7 +480,7 @@ const {
   setCurrentTask,resetBreakState,resetCountdownRuntime,clearProgressRuntime,isTaskResolved
 }=ExecutionRuntime;
 const FULL_WEEKDAY_NAMES=Object.freeze(['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']);
-const ReviewDayState=ReviewHostModule.createDayState(Object.freeze({
+const ReviewDayState=ReviewHostModule.createDayState(Object.freeze<Parameters<typeof ReviewHostModule.createDayState>[0]>({
   document,timerState:TimerState,tasks:()=>TASKS,isTrackableBlock,isValidIsoDate,todayISO,fullWeekdayNames:FULL_WEEKDAY_NAMES
 }));
 function getReviewDate(){return ReviewDayState.getReviewDate();}
@@ -510,7 +510,7 @@ const {
   setPausedUI,setTimerIdentity,skipTask:skipTaskTimer,startCur,syncTimerAfterWake,
   toggleDone,togglePause:togglePauseTimer,updateBreakMeter,updateCD
 }=TimerEngine;
-const TimerRestoration=ExecutionHostModule.createTimerRestoration(Object.freeze({
+const TimerRestoration=ExecutionHostModule.createTimerRestoration(Object.freeze<Parameters<typeof ExecutionHostModule.createTimerRestoration>[0]>({
   runtime:ExecutionRuntime,DecisionClock,isTrackableBlock,clampText,
   invalidateIdleDisplay:()=>{executeIdleDisplayKey='';},
   setExecuteShellVisible,setExecuteControlsEnabled,clearExecuteStateOverlay,refreshPnote,requestRender,updateBadges,flushLiveDraft
@@ -532,7 +532,7 @@ const SessionActionState={
  get saveReminderEvidence(){return ReviewDayState.reminder.evidence;},set saveReminderEvidence(value){ReviewDayState.reminder.evidence=value;},
  get saveReminderGeneration(){return ReviewDayState.reminder.generation;},set saveReminderGeneration(value){ReviewDayState.reminder.generation=value;}
 };
-const SessionActions=SessionActionsModule.createController(Object.freeze({
+const SessionActions=SessionActionsModule.createController(Object.freeze<Parameters<typeof SessionActionsModule.createController>[0]>({
   checkUnsupportedUpdate:(...args)=>checkUnsupportedUpdate(...args),applySchedule:(...args)=>applySchedule(...args),schedulePwaUpdateEvaluation:(...args)=>schedulePwaUpdateEvaluation(...args),
   state:SessionActionState,runtime:ExecutionRuntime,completionSources:COMPLETION_SOURCES,
   get AppData(){return AppData;},
@@ -593,7 +593,7 @@ const SessionActions=SessionActionsModule.createController(Object.freeze({
 
 function clearSessionSafetyMessage(...args){return SessionActions.clearSessionSafetyMessage(...args);}
 const ExecutionViewCache={get executePanelsRenderKey(){return executePanelsRenderKey;},set executePanelsRenderKey(value){executePanelsRenderKey=value;},get executeIdleDisplayKey(){return executeIdleDisplayKey;},set executeIdleDisplayKey(value){executeIdleDisplayKey=value;},get realTimeAwarenessRenderKey(){return realTimeAwarenessRenderKey;},set realTimeAwarenessRenderKey(value){realTimeAwarenessRenderKey=value;},get scheduleEndPromptKey(){return scheduleEndPromptKey;},set scheduleEndPromptKey(value){scheduleEndPromptKey=value;}};
-const ExecutionViews=ExecutionViewsModule.createController(Object.freeze({
+const ExecutionViews=ExecutionViewsModule.createController(Object.freeze<Parameters<typeof ExecutionViewsModule.createController>[0]>({
  state:SessionActionState,cache:ExecutionViewCache,runtime:ExecutionRuntime,actions:SessionActions,document,window,APP_LIMITS,STUDY_DAY_MINUTES,
  SESSION_WATCH_MS:2*60*1000,SESSION_CLAIM_WATCH_MS:15*1000,setInterval:(fn,delay)=>setInterval(fn,delay),
  getCarryForward:()=>latestCarryForward,setCarryForward:value=>{latestCarryForward=value;},
@@ -672,7 +672,7 @@ let executePanelsRenderKey='';
 let executeProgressPanelRenderKey='';
 let scheduleEndPromptKey='';
 /* APPLICATION ACTIVATION CONTRACT */
-const AppActivation=StartupHostModule.createActivation(Object.freeze({
+const AppActivation=StartupHostModule.createActivation(Object.freeze<Parameters<typeof StartupHostModule.createActivation>[0]>({
   capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
 }));
 const APP_ACTIVATION_KINDS=AppActivation.kinds;
@@ -686,7 +686,7 @@ const OWNERSHIP_STATES=OwnershipModule.OWNERSHIP_STATES;
 
 let AppMutationCoordinator=null;
 let mutationUiOperationActive=false;
-const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze({
+const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze<Parameters<typeof StartupHostModule.createOwnershipController>[0]>({
   module:OwnershipModule,
   config:Object.freeze({
     storageKey:STORAGE_KEYS.appOwner,sessionTabKey:SESSION_STORAGE_KEYS.appTab,
@@ -740,7 +740,7 @@ const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze({
 const appCanMutate=()=>AppOwnership.canMutate()&&!(AppMutationCoordinator&&AppMutationCoordinator.writesBlocked());
 const transitionAppOwnership=next=>next===OWNERSHIP_STATES.RELEASING
   ?AppOwnership.transitionReleasing():AppOwnership.state;
-AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze({
+AppMutationCoordinator=MutationCoordinatorModule.createCoordinator(Object.freeze<Parameters<typeof MutationCoordinatorModule.createCoordinator>[0]>({
   configuration:Object.freeze({lockName:ProfileScope.scoped('study-director-data-mutation-v1'),storageKey:STORAGE_KEYS.mutationLock,leaseMs:20000,heartbeatMs:5000}),
   environment:Object.freeze({
     AbortController,locks:navigator.locks||null,now:DecisionClock.nowMs,randomIdPart,
@@ -771,7 +771,7 @@ function togglePause(...args){return ExecutionViews.togglePause(...args);}
 // Every backup location that backs up on its own (the Device Folder, and
 // Google Drive once this device has backed up to it) hears about each change.
 // With no such location nothing happens.
-const BackupProviderBackground=BackupMaintenanceHostModule.createProviderBackgroundBridge(Object.freeze({
+const BackupProviderBackground=BackupMaintenanceHostModule.createProviderBackgroundBridge(Object.freeze<Parameters<typeof BackupMaintenanceHostModule.createProviderBackgroundBridge>[0]>({
   provider:()=>BackupProviderRuntime,capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
 }));
 function notifyBackupChange(change){return BackupProviderBackground.noteChange(change);}
@@ -814,7 +814,7 @@ function storageSizeLabel(bytes){
 // is returned to at most once an hour, so a tab left open for days still warns
 // before storage fills. It is kept in memory for diagnostics.
 const STORAGE_ESTIMATE_REFRESH_MS=60*60*1000;
-const CapabilityStorage=CapabilitiesHostModule.createStorage(Object.freeze({
+const CapabilityStorage=CapabilitiesHostModule.createStorage(Object.freeze<Parameters<typeof CapabilitiesHostModule.createStorage>[0]>({
   document,navigator,
   limits:Object.freeze({storageCriticalRatio:APP_LIMITS.storageCriticalRatio,storageWarningRatio:APP_LIMITS.storageWarningRatio}),
   controller:()=>NativeCapabilities,
@@ -822,7 +822,7 @@ const CapabilityStorage=CapabilitiesHostModule.createStorage(Object.freeze({
 }));
 const inspectStorageCapability=CapabilityStorage.inspectStorageCapability;
 const protectLocalData=CapabilityStorage.protectLocalData;
-const CapabilityInstallation=CapabilitiesHostModule.createInstallation(Object.freeze({
+const CapabilityInstallation=CapabilitiesHostModule.createInstallation(Object.freeze<Parameters<typeof CapabilitiesHostModule.createInstallation>[0]>({
   document,window,controller:()=>NativeCapabilities,
   goTab:(name,options)=>goTab(name,options),
   preferredScrollBehavior:()=>preferredScrollBehavior()
@@ -871,7 +871,7 @@ function flushAndReleaseAppOwner(requestId=''){return AppOwnership.flushAndRelea
 function requirePrimaryTab(...args){return StartupOwnershipViews.requirePrimaryTab(...args);}
 function renderPrimaryTabBlock(...args){return StartupOwnershipViews.renderPrimaryTabBlock(...args);}
 /* DAILY RECORD COMPACTION AND SANITIZERS · IMPORTED */
-const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze({
+const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze<Parameters<typeof RecordCodecsModule.createDailyRecordCodec>[0]>({
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   domain:DomainModule,
@@ -889,7 +889,7 @@ const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze({
 const PersonalDataCodec=RecordCodecsModule.createPersonalDataCodec(APP_LIMITS);
 /* ACTIVE SESSION CODEC */
 /* ACTIVE SESSION CODEC · IMPORTED */
-const ActiveSessionCodec=RecordCodecsModule.createActiveSessionCodec(Object.freeze({
+const ActiveSessionCodec=RecordCodecsModule.createActiveSessionCodec(Object.freeze<Parameters<typeof RecordCodecsModule.createActiveSessionCodec>[0]>({
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   activeSessionId:ACTIVE_SESSION_ID,
@@ -903,7 +903,7 @@ const ActiveSessionCodec=RecordCodecsModule.createActiveSessionCodec(Object.free
   timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
   dailyRecordCodec:DailyRecordCodec
 }));
-const PendingReviewCodec=RecordCodecsModule.createPendingReviewCodec(Object.freeze({
+const PendingReviewCodec=RecordCodecsModule.createPendingReviewCodec(Object.freeze<Parameters<typeof RecordCodecsModule.createPendingReviewCodec>[0]>({
   dataContract:DATA_CONTRACT,dailyRecordCodec:DailyRecordCodec,activeSessionCodec:ActiveSessionCodec,personalDataCodec:PersonalDataCodec,
   helpers:Object.freeze({sameDataValue,randomBytes:count=>crypto.getRandomValues(new Uint8Array(count))})
 }));
@@ -951,7 +951,7 @@ function invalidateScheduleDerived({identity=false,adjustments=false,render=fals
 function scheduleFingerprint(){
   return ScheduleDerivedState.fingerprint||(ScheduleDerivedState.fingerprint=scheduleFingerprintForRows(TASKS));
 }
-const PlanScheduleGateway=ExecutionHostModule.createScheduleGateway(Object.freeze({
+const PlanScheduleGateway=ExecutionHostModule.createScheduleGateway(Object.freeze<Parameters<typeof ExecutionHostModule.createScheduleGateway>[0]>({
   runtime:ExecutionRuntime,completionSources:COMPLETION_SOURCES,document,ScheduleDerivedState,APP_LIMITS,
   getCarryForward:()=>latestCarryForward,setCarryForward:value=>{latestCarryForward=value;},
   taskAreaKey,taskMeasureValue,taskTargetValue,isTrackableBlock,clampText,normalizeCompletionSource,makeTaskId,
@@ -1008,7 +1008,7 @@ function handlePreviousActiveSession(...args){return SessionActions.handlePrevio
 function revisitPreviousStoredSession(...args){return SessionActions.revisitPreviousStoredSession(...args);}
 function attemptAutoRestoreActiveSession(...args){return SessionActions.attemptAutoRestoreActiveSession(...args);}
 /* INDEXEDDB STORE ADAPTERS · IMPORTED */
-const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze({
+const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze<Parameters<typeof DataBootstrapHostModule.createIndexedDb>[0]>({
   module:PersistenceModule,
   config:Object.freeze({
     dbName:DB_NAME,
@@ -1030,8 +1030,8 @@ const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze({
   })
 
 }));
-const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.noteKeys.isKey}));
-const AppMetaGateway=DataBootstrapHostModule.createAppMetaGateway(Object.freeze({
+const ReconciliationBaselineCodec=ReconciliationBaselineModule.createCodec(Object.freeze<Parameters<typeof ReconciliationBaselineModule.createCodec>[0]>({limits:APP_LIMITS,isNoteKey:DailyRecordCodec.noteKeys.isKey}));
+const AppMetaGateway=DataBootstrapHostModule.createAppMetaGateway(Object.freeze<Parameters<typeof DataBootstrapHostModule.createAppMetaGateway>[0]>({
   module:AppMetaModule,indexedDb:IndexedDb,store:DB_APP_META_STORE,registry:APP_META_REGISTRY
 }));
 // Data this build cannot read stays exactly as it is. Every start, before
@@ -1045,13 +1045,13 @@ const AppMetaGateway=DataBootstrapHostModule.createAppMetaGateway(Object.freeze(
 // usual. A database a newer build changed so much that a store this build
 // needs is gone, or keyed differently, is not opened: the profile waits for
 // an update and the person can use another profile meanwhile.
-const UnsupportedData=DataBootstrapHostModule.createUnsupportedData(Object.freeze({
+const UnsupportedData=DataBootstrapHostModule.createUnsupportedData(Object.freeze<Parameters<typeof DataBootstrapHostModule.createUnsupportedData>[0]>({
   dataContract:DATA_CONTRACT,stores:DB_STORES,indexedDb:IndexedDb,appMeta:AppMetaGateway,profiles:Profiles,profileScope:ProfileScope,notices:NoticeCoordinator,
   checkUnsupportedUpdate:()=>checkUnsupportedUpdate(),
   checkForUpdate:()=>PwaLifecycle.checkForUpdate(),
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
 }));
-const {RepositoryAppMeta,JournalAppMeta,HostAppMeta,ExportsAppMeta,DeviceFolderAppMeta,BackupAppMeta}=DataBootstrapHostModule.createMetadataOwners(Object.freeze({
+const {RepositoryAppMeta,JournalAppMeta,HostAppMeta,ExportsAppMeta,DeviceFolderAppMeta,BackupAppMeta}=DataBootstrapHostModule.createMetadataOwners(Object.freeze<Parameters<typeof DataBootstrapHostModule.createMetadataOwners>[0]>({
   gateway:AppMetaGateway,
   repositoriesModule:RepositoryModule,
   repositoryValidatorInput:Object.freeze({
@@ -1079,7 +1079,7 @@ const {RepositoryAppMeta,JournalAppMeta,HostAppMeta,ExportsAppMeta,DeviceFolderA
     })
   })
 }));
-const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze({
+const ReconciliationBaselineStore=ReconciliationBaselineModule.createStore(Object.freeze<Parameters<typeof ReconciliationBaselineModule.createStore>[0]>({
   codec:ReconciliationBaselineCodec,meta:HostAppMeta,
   families:Object.freeze({header:'reconciliationBase',notes:'reconciliationBaseNotePrefix',days:'reconciliationBaseDayPrefix'})
 }));
@@ -1090,12 +1090,12 @@ document.addEventListener('change',()=>{pwaWorkRevision++;},true);
 let invalidateAttachmentLibrary=()=>false;
 let scheduleRichTextAssetMaintenance=()=>false;
 let notifyRichTextAssetLeaseReleased=()=>false;
-const CanonicalCommitHost=BackupReadinessHostModule.createCanonicalCommit(Object.freeze({
+const CanonicalCommitHost=BackupReadinessHostModule.createCanonicalCommit(Object.freeze<Parameters<typeof BackupReadinessHostModule.createCanonicalCommit>[0]>({
   storage:StorageHealthController,scanAttachmentReferences:value=>RichTextApi.scanAttachmentReferences(value),incrementReferenceRevision:()=>{richAssetReferenceRevision++;},
   syncCapability:event=>CapabilityBadge?.syncFromCanonicalCommit(event),notifyBackupChange:change=>notifyBackupChange(change),scheduleAssetMaintenance:()=>scheduleRichTextAssetMaintenance(),invalidateAttachmentLibrary:()=>invalidateAttachmentLibrary(),
   fullyInitialized:()=>StartupLifecycle.status().fullyInitialized,refreshKeptVersions:()=>KeptVersions?.refresh()||false,reminderDate:()=>ReviewDayState.reminder.date,revalidateSaveReminder:()=>revalidateSaveReminderAfterCanonicalConvergence(),nowIso:()=>new Date().toISOString()
 }));
-const RecoveryAssetMaintenancePause=BackupRecoveryHostModule.createMaintenancePause(Object.freeze({maintenance:()=>RichTextAssetMaintenance}));
+const RecoveryAssetMaintenancePause=BackupRecoveryHostModule.createMaintenancePause(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createMaintenancePause>[0]>({maintenance:()=>RichTextAssetMaintenance}));
 if(!Object.isFrozen(RecoveryAssetMaintenancePause)||RecoveryAssetMaintenancePause.format!=='study-director.backup-maintenance-pause'||RecoveryAssetMaintenancePause.contractVersion!==1){
   throw new Error('Study Director recovery attachment-maintenance pause is unavailable or incompatible.');
 }
@@ -1132,7 +1132,7 @@ const RichTextAssets=Object.freeze({
   keys:()=>AttachmentStorage.keys(),
   async removeMany(_assetIds){scheduleRichTextAssetMaintenance();return 0;}
 });
-const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze({
+const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze<Parameters<typeof AssetMaintenanceModule.create>[0]>({
   isAvailable:()=>upkeepBlocker()||(AttachmentStorage.supported()?true:'storage-unavailable'),
   canMutate:()=>appCanMutate(),
   mutationActive:()=>RecoveryAssetMaintenancePause.active()||backgroundMaintenanceForegroundBusy()||storageResetUnresolved(),
@@ -1183,7 +1183,7 @@ async function readReconciliationBase(){return ReconciliationBaselineStore.readH
 async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
 async function readReconciliationBaseDayAncestry(dates,checkpointId){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
 async function writeReconciliationBase(checkpointId,spec){return ReconciliationBaselineStore.write(checkpointId,spec);}
-const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.freeze({
+const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.freeze<Parameters<typeof BackupReadinessHostModule.createVerifiedRecovery>[0]>({
   metadata:Object.freeze({
     read:()=>readHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups),
     write:value=>writeHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups,value)
@@ -1200,7 +1200,7 @@ if(!Object.isFrozen(VerifiedRecovery)||VerifiedRecovery.format!=='study-director
   throw new Error('Study Director verified-recovery readiness is unavailable or incompatible.');
 }
 
-BackupNudge=BackupReadinessHostModule.createBackupNudge(Object.freeze({
+BackupNudge=BackupReadinessHostModule.createBackupNudge(Object.freeze<Parameters<typeof BackupReadinessHostModule.createBackupNudge>[0]>({
   verified:VerifiedRecovery,storageHealth:StorageHealthController,dueMs:7*24*60*60*1000,checkMs:60*60*1000,
   canMutate:()=>appCanMutate(),now:()=>Date.now(),automaticActive:()=>BackupProviderRuntime.automaticActive(),
   dailySummaryCount:async()=>{const summaries=await AppData.dailyRecords.summaries();return Array.isArray(summaries)?summaries.length:0;},
@@ -1236,7 +1236,7 @@ function persistedActiveSessionUnfinished(session){
 function handleCanonicalCommit(event){return CanonicalCommitHost.handle(event);}
 
 async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
-const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryComposition(Object.freeze({
+const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryComposition(Object.freeze<Parameters<typeof DataBootstrapHostModule.createRepositoryComposition>[0]>({
   repositoriesModule:RepositoryModule,
   journalsModule:RepositoryJournalModule,
   journal:Object.freeze({
@@ -1312,13 +1312,13 @@ const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryCompo
 // Saves made before the startup repair still continue the change clock from
 // the last recorded save, even if the system clock went back across a reload.
 try{AppData.mutationEpoch.seedChangeClock(readStorageHealth().lastLocalSaveAt);}catch(error){AppDiagnostics.capture('backup.change-clock-seed',error,'warn');}
-CapabilityBadge=CapabilitiesHostModule.createBadge(Object.freeze({
+CapabilityBadge=CapabilitiesHostModule.createBadge(Object.freeze<Parameters<typeof CapabilitiesHostModule.createBadge>[0]>({
   controller:()=>NativeCapabilities,
   activeSession:()=>AppData.activeSession,
   persistedActiveSessionUnfinished,
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn')
 }));
-NativeCapabilities=CapabilitiesHostModule.createController(Object.freeze({
+NativeCapabilities=CapabilitiesHostModule.createController(Object.freeze<Parameters<typeof CapabilitiesHostModule.createController>[0]>({
   module:NativeCapabilitiesModule,
   configuration:Object.freeze({installNoticeKey:STORAGE_KEYS.installNoticeShown,wakePreferenceKey:STORAGE_KEYS.keepScreenAwake}),
   environment:Object.freeze({document,navigator,window}),
@@ -1499,7 +1499,7 @@ function persistProtectedPreferences(overrides={}){
   else scheduleProtectedPreferencesWrite();
   return true;
 }
-PresentationRuntime=PresentationHostModule.createController(Object.freeze({
+PresentationRuntime=PresentationHostModule.createController(Object.freeze<Parameters<typeof PresentationHostModule.createController>[0]>({
   kernel:PRESENTATION_KERNEL,document,window,
   storage:Object.freeze({
     keys:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale}),
@@ -1572,7 +1572,7 @@ function syncStatusAction(event){return SyncStatusHost?SyncStatusHost.action(eve
 function renderProfilePanel(...args){return ProfileViews.renderProfilePanel(...args);}
 function renderProfile(...args){return ProfileViews.renderProfile(...args);}
 function reportProfileActionError(...args){return ProfileViews.reportProfileActionError(...args);}
-const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze({
+const ProfilePanelActions=ProfilesHostModule.createPanelActions(Object.freeze<Parameters<typeof ProfilesHostModule.createPanelActions>[0]>({
   document,
   getStudentName:()=>getStudentNameFromDisplay(),
   normalizeStudentName,
@@ -1591,7 +1591,7 @@ function handleProfileNameKey(event){return ProfilePanelActions.handleNameKey(ev
 
 function profileDriveAction(){return ProfileViews.profileDriveAction();}
 // Profile deletion composes backup/provider effects behind a checked profile-owned adapter.
-const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze({
+const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<Parameters<typeof ProfilesHostModule.createDeletion>[0]>({
   profiles:Profiles,
   provider:Object.freeze({
     locationStatus:id=>BackupProviderRuntime.locationStatus(id),
@@ -1611,7 +1611,7 @@ const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze({
 const deleteThisProfile=ProfileDeletion.deleteThisProfile;
 const driveProfileDeleted=ProfileDeletion.driveProfileDeleted;
 
-const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze({
+const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze<Parameters<typeof ProfilesHostModule.createDriveBinding>[0]>({
   profiles:Profiles,
   interactions:Interactions,
   clearBaseline:()=>ReconciliationBaselineStore.clear(),
@@ -1622,7 +1622,7 @@ const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze({
   storageHealthTime,
   now:()=>Date.now()
 }));
-SyncStatusHost=SyncStatusHostModule.createController(Object.freeze({
+SyncStatusHost=SyncStatusHostModule.createController(Object.freeze<Parameters<typeof SyncStatusHostModule.createController>[0]>({
   document,
   providers:()=>BackupProviderRuntime,
   presentation:BackupPresentation,
@@ -1664,7 +1664,7 @@ const bindDriveLibrary=ProfileDriveBinding.bind;
 // First start (and Add profile): name, an optional password and Google
 // Drive. Someone joining their own Drive library takes its name and settings
 // from it, so nothing typed here competes with them.
-const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze({
+const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<Parameters<typeof ProfilesHostModule.createFirstStart>[0]>({
   document,
   profiles:Profiles,
   backupProtection:Object.freeze({enable:password=>BackupProtection.enable(password)}),
@@ -1688,7 +1688,7 @@ async function settleCurrentProfileWriters(){return ProfileSettlement.settleCurr
 async function settleCurrentProfileBeforeReload(){return ProfileSettlement.settleCurrentProfileBeforeReload();}
 // Startup: make sure this page's profile is on the device's list, and offer
 // the first-start form to someone new.
-const ProfileLifecycle=ProfilesHostModule.createLifecycle(Object.freeze({
+const ProfileLifecycle=ProfilesHostModule.createLifecycle(Object.freeze<Parameters<typeof ProfilesHostModule.createLifecycle>[0]>({
   profiles:Profiles,
   firstStart:FirstStart,
   settleCurrentProfile:()=>settleCurrentProfileBeforeReload(),
@@ -1774,14 +1774,14 @@ const OPTIONAL_PLUGIN_DESCRIPTORS=Object.freeze([
   Object.freeze({tabId:'guide',label:'Guide',icon:'?',src:'@@SD_EXTERNAL_GUIDE_FILENAME@@',pluginName:'SD-guide'}),
   Object.freeze({tabId:'insights',label:'Insights',icon:'✦',src:'@@SD_EXTERNAL_INSIGHTS_FILENAME@@',pluginName:'SD-insights'})
 ]);
-const PluginRuntime=PublicApiHostModule.createRuntime(Object.freeze({
+const PluginRuntime=PublicApiHostModule.createRuntime(Object.freeze<Parameters<typeof PublicApiHostModule.createRuntime>[0]>({
   configuration:Object.freeze({capabilities:STUDY_DIRECTOR_CAPABILITIES,descriptors:OPTIONAL_PLUGIN_DESCRIPTORS}),
   environment:Object.freeze({document,trustedAssetURL:value=>trustedAssetURL(value)}),
   tabs:Object.freeze({registerTab:config=>UiTabRegistry.registerTab(config),renderTab:id=>UiTabRegistry.renderTab(id)}),
   preview:Object.freeze({registerProvider:(target,provider)=>PreviewRuntime.registerProvider(target,provider)}),
   clampText
 }));
-const InsightsPreload=InsightsHostModule.createPreloadScheduler(Object.freeze({
+const InsightsPreload=InsightsHostModule.createPreloadScheduler(Object.freeze<Parameters<typeof InsightsHostModule.createPreloadScheduler>[0]>({
   document,
   setTimer:(callback,delayMs)=>setTimeout(callback,delayMs),
   scheduleIdle:typeof requestIdleCallback==='function'
@@ -1960,7 +1960,7 @@ function getTaskCompletion(idx){
 }
 function commitTaskNoteEditor(field,value,event=null){return notesRuntime().commitEditor(field,value,event);}
 /* DAILY REFLECTION + DIARY PERSISTENCE · P5.5B CHECKED OWNER */
-const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze({
+const ReviewPersistence=ReviewPersistenceModule.createPersistence(Object.freeze<Parameters<typeof ReviewPersistenceModule.createPersistence>[0]>({
   configuration:Object.freeze({limits:APP_LIMITS,dataContract:DATA_CONTRACT}),
   records:Object.freeze({
     get:(...args)=>AppData.dailyRecords.get(...args),
@@ -2001,7 +2001,7 @@ function richTextDocumentFor(field,options={}){
   return null;
 }
 // Links between notes: the one note picker and the linked-notes bar.
-const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.freeze({
+const NoteLinks=NoteLinksModule.createController(Object.freeze<Parameters<typeof NoteLinksModule.createController>[0]>({ports:Object.freeze({
   view:Object.freeze({document}),
   notes:Object.freeze({documents:()=>AppData.notes.searchSnapshot(),get:ref=>AppData.notes.get(ref),link:(ref,id,options)=>AppData.notes.link(ref,id,options),linkedFrom:ref=>AppData.notes.linkedFrom(ref),list:()=>AppData.notes.metadataSnapshot().records}),
   text:Object.freeze({tagsIn:value=>RichTextApi.tagsIn(value)}),
@@ -2009,7 +2009,7 @@ const NoteLinks=NoteLinksModule.createController(Object.freeze({ports:Object.fre
 })}));
 // Checked P5.6B navigation keeps link context with the rich-text surface while
 // deferring Library access until a user actually follows a link or tag.
-const NoteLinkNavigation=NoteLinksModule.createNavigation(Object.freeze({
+const NoteLinkNavigation=NoteLinksModule.createNavigation(Object.freeze<Parameters<typeof NoteLinksModule.createNavigation>[0]>({
   controller:NoteLinks,
   notes:Object.freeze({get:ref=>AppData.notes.get(ref)}),
   execution:Object.freeze({
@@ -2033,7 +2033,7 @@ const showNotesTagged=NoteLinkNavigation.showTagged;
 // meanwhile is left as it is and named in the result.
 async function renameNoteTag(from,to){return notesRuntime().renameTag(from,to);}
 async function importNoteFiles(files,parent=''){return notesRuntime().importFiles(files,parent);}
-const RichTextRuntime=RichTextHostModule.createRuntime(Object.freeze({
+const RichTextRuntime=RichTextHostModule.createRuntime(Object.freeze<Parameters<typeof RichTextHostModule.createRuntime>[0]>({
   configuration:Object.freeze({maxRichTextBytes:APP_LIMITS.maxRichTextBytes}),document,window,
   richText:RichTextApi,assets:RichTextAssets,
   attachments:Object.freeze({
@@ -2060,7 +2060,7 @@ if(!Object.isFrozen(RichTextRuntime)||RichTextRuntime.format!=='study-director.r
   throw new Error('Study Director rich-text host runtime is unavailable or incompatible.');
 }
 SaveLaneModule.onBeforeFlush(()=>RichTextRuntime.flushEditors());
-ManagedRecoveryQuiescence=BackupRecoveryHostModule.createQuiescence(Object.freeze({
+ManagedRecoveryQuiescence=BackupRecoveryHostModule.createQuiescence(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createQuiescence>[0]>({
   cancelPendingLiveDraftSave:()=>cancelPendingLiveDraftSave(),
   clock:Object.freeze({nowMs:()=>DecisionClock.nowMs()}),
   timer:Object.freeze({stopExecution:()=>TimerEngine.stopExecution(),resumeAfterPrimaryRestore:options=>TimerEngine.resumeAfterPrimaryRestore(options)}),
@@ -2077,7 +2077,7 @@ richTextCloseField=field=>RichTextRuntime.closeField(field);
 richTextSyncField=field=>RichTextRuntime.syncField(field);
 richTextSyncAll=()=>RichTextRuntime.syncAll(document);
 richTextReconcileExternal=(field,canonical,revision)=>RichTextRuntime.reconcileExternal(field,canonical,revision);
-NotesRuntime=NotesHostModule.createController(Object.freeze({
+NotesRuntime=NotesHostModule.createController(Object.freeze<Parameters<typeof NotesHostModule.createController>[0]>({
   configuration:Object.freeze({
     maxAreaNameChars:APP_LIMITS.maxAreaNameChars,maxNoteChars:APP_LIMITS.maxNoteChars,maxNotes:APP_LIMITS.maxNotes,
     maxRichTextWords:APP_LIMITS.maxRichTextWords,maxRichTextBytes:APP_LIMITS.maxRichTextBytes,supportNote:SUPPORT_NOTE
@@ -2121,7 +2121,7 @@ if(!Object.isFrozen(NotesRuntime)||NotesRuntime.format!=='study-director.notes-r
   throw new Error('Study Director notes runtime is unavailable or incompatible.');
 }
 /* PERSONAL PLAN DOCUMENTS · checked host persistence/default adapter */
-const PlanData=PlanHostModule.createData(Object.freeze({
+const PlanData=PlanHostModule.createData(Object.freeze<Parameters<typeof PlanHostModule.createData>[0]>({
   codec:PersonalDataCodec,
   repositories:Object.freeze({
     plans:Object.freeze({
@@ -2157,7 +2157,7 @@ const PlanData=PlanHostModule.createData(Object.freeze({
 }));
 
 /* PLAN MODULE COMPOSITION */
-const PlanRuntime=PlanHostModule.createController(Object.freeze({
+const PlanRuntime=PlanHostModule.createController(Object.freeze<Parameters<typeof PlanHostModule.createController>[0]>({
   module:PlanModule,
   data:PlanData,
   ports:Object.freeze({
@@ -2200,7 +2200,7 @@ const {
   loadDefault:loadDefaultPlan, getDraft:getPlanDraftText,
   loadDraft:loadScheduleIntoDraft
 }=PlanRuntime;
-LibraryNoteWorkflows=NotesHostModule.createLibraryWorkflows(Object.freeze({
+LibraryNoteWorkflows=NotesHostModule.createLibraryWorkflows(Object.freeze<Parameters<typeof NotesHostModule.createLibraryWorkflows>[0]>({
   runtime:NotesRuntime,repository:AppData.notes,plan:PlanRuntime,
   interactions:Object.freeze({confirm:options=>Interactions.confirm(options)}),
   mergeText:(existing,moved)=>RichTextApi.appendIncomingAdditions(existing,moved).value
@@ -2343,7 +2343,7 @@ function badgeElements(...args){return ExecutionViews.badgeElements(...args);}
 function updateBadges(...args){return ExecutionViews.updateBadges(...args);}
 function updateSessionControls(...args){return ExecutionViews.updateSessionControls(...args);}
 /* REVIEW SUBSYSTEM · PRIVATE MODULE */
-const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze({
+const ReviewSubsystem=ReviewHostModule.createSubsystem(Object.freeze<Parameters<typeof ReviewHostModule.createSubsystem>[0]>({
   module:ReviewModule,
   subsystem:Object.freeze({
   constants:Object.freeze({
@@ -2436,7 +2436,7 @@ const {
 }=SharedReviewPresentation;
 
 /* CANONICAL SESSION / EDITOR LIFECYCLE */
-const SessionLifecycleViews=SessionActionsModule.createLifecycleViews(Object.freeze({
+const SessionLifecycleViews=SessionActionsModule.createLifecycleViews(Object.freeze<Parameters<typeof SessionActionsModule.createLifecycleViews>[0]>({
  document,NOTE_EDITOR_BINDING_VERSION,setTimeout:(fn,delay)=>setTimeout(fn,delay),
  get ReviewEditor(){return ReviewEditor;},get ReviewView(){return ReviewView;},
  invalidateProgressPanel:()=>{executeProgressPanelRenderKey='';},
@@ -2459,18 +2459,18 @@ function setLifecycleEditorsBlocked(...args){return SessionLifecycleViews.setLif
 function invalidateLifecycleEditors(...args){return SessionLifecycleViews.invalidateLifecycleEditors(...args);}
 function reconcileLifecycleEditors(...args){return SessionLifecycleViews.reconcileLifecycleEditors(...args);}
 function completeLifecycleTransition(...args){return SessionLifecycleViews.completeLifecycleTransition(...args);}
-const SessionLifecycleHooks=ReviewHostModule.createLifecycleHooks(Object.freeze({
+const SessionLifecycleHooks=ReviewHostModule.createLifecycleHooks(Object.freeze<Parameters<typeof ReviewHostModule.createLifecycleHooks>[0]>({
   canMutate:()=>appCanMutate(),
   reviewEditor:ReviewEditor,
   lifecycleViews:SessionLifecycleViews,
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
-const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze({hooks:SessionLifecycleHooks}));
+const SessionLifecycle=SessionLifecycleModule.createCoordinator(Object.freeze<Parameters<typeof SessionLifecycleModule.createCoordinator>[0]>({hooks:SessionLifecycleHooks}));
 if(!Object.isFrozen(SessionLifecycle)||SessionLifecycle.format!=='study-director.session-lifecycle-coordinator'||SessionLifecycle.contractVersion!==1){
   throw new Error('Study Director session lifecycle coordinator is unavailable or incompatible.');
 }
 
-ActiveSessionRuntime=SessionHostModule.createController(Object.freeze({
+ActiveSessionRuntime=SessionHostModule.createController(Object.freeze<Parameters<typeof SessionHostModule.createController>[0]>({
   configuration:Object.freeze({
     activeSessionId:ACTIVE_SESSION_ID,activeSessionVersion:DATA_CONTRACT.schemas.ActiveSession.version,
     sessionSnapshotVersion:DATA_CONTRACT.schemas.SessionSnapshot.version,maxCarryForwardChars:APP_LIMITS.maxCarryForwardChars,
@@ -2529,7 +2529,7 @@ if(!Object.isFrozen(ActiveSessionRuntime)||ActiveSessionRuntime.format!=='study-
   throw new Error('Study Director Active Session runtime is unavailable or incompatible.');
 }
 
-ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze({
+ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze<Parameters<typeof ReviewHostModule.createSavedDayCoordinator>[0]>({
   document,day:ReviewDayState,
   runtime:Object.freeze({
     tasks:()=>TASKS,timerState:TimerState,isTrackableBlock,captureSessionSnapshot:()=>captureSessionSnapshot(),
@@ -2571,7 +2571,7 @@ ReviewSavedDayRuntime=ReviewHostModule.createSavedDayCoordinator(Object.freeze({
 function timerMetricElements(...args){return ExecutionViews.timerMetricElements(...args);}
 function updateTimerFocusMetrics(...args){return ExecutionViews.updateTimerFocusMetrics(...args);}
 /* PORTABLE ONGOING-NOTE EXPORT · READ-ONLY */
-const RetainedBackupFiles=BackupRecoveryHostModule.createRetainedBackupFiles(Object.freeze({
+const RetainedBackupFiles=BackupRecoveryHostModule.createRetainedBackupFiles(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createRetainedBackupFiles>[0]>({
   restoreJournalPayload:()=>JournalAppMeta.read('restoreJournalPayload'),
   repositoryIntegrityState:()=>BackupAppMeta.read('repositoryIntegrityScrub')
 }));
@@ -2587,8 +2587,8 @@ const Exports=ExportsModule.createCoordinator({
 let BackupProtectionHost=null;
 function backupBackgroundAvailability(){return BackupProtectionHost?BackupProtectionHost.backgroundAvailability():backgroundBlocker()||'locked';}
 function setBackupProtectionSurfaceError(error){return BackupProtectionHost?.surfaceError(error)||false;}
-const BackupProtectionStorage=BackupActionsHostModule.createProtectionStorage(Object.freeze({meta:ExportsAppMeta,settingName:'backupProtection',settingKey:APP_META_KEYS.backupProtection}));
-BackupProtectionHost=BackupActionsHostModule.createProtectionHost(Object.freeze({
+const BackupProtectionStorage=BackupActionsHostModule.createProtectionStorage(Object.freeze<Parameters<typeof BackupActionsHostModule.createProtectionStorage>[0]>({meta:ExportsAppMeta,settingName:'backupProtection',settingKey:APP_META_KEYS.backupProtection}));
+BackupProtectionHost=BackupActionsHostModule.createProtectionHost(Object.freeze<Parameters<typeof BackupActionsHostModule.createProtectionHost>[0]>({
   module:ExportsModule,processing:Exports,storage:BackupProtectionStorage,
   interactions:Interactions,settingKey:APP_META_KEYS.backupProtection,
   mutation:Object.freeze({
@@ -2612,7 +2612,7 @@ if(!Object.isFrozen(BackupProtectionHost)||BackupProtectionHost.format!=='study-
 }
 const BackupProtection=BackupProtectionHost.protection;
 BackupProtectionHost.install();
-const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.freeze({
+const NoteExporter=NoteExportModule.createExporter(Object.freeze<Parameters<typeof NoteExportModule.createExporter>[0]>({ports:Object.freeze({
   assets:Object.freeze({get:id=>RichTextAssets.get(id)}),
   notes:Object.freeze({get:key=>AppData.notes.get(key)}),
   processing:Object.freeze({job:(operation,options)=>AttachmentStorage.during(()=>Exports.job(operation,options)),run:Exports.run,cancel:Exports.cancel,check:Exports.check}),
@@ -2623,17 +2623,17 @@ const NoteExporter=NoteExportModule.createExporter(Object.freeze({ports:Object.f
 if(!Object.isFrozen(NoteExporter)||NoteExporter.format!=='study-director.note-exporter'||NoteExporter.contractVersion!==2){
   throw new Error('Study Director note exporter is unavailable or incompatible.');
 }
-const PdfDocuments=DocumentHostModule.createPdfController(Object.freeze({
+const PdfDocuments=DocumentHostModule.createPdfController(Object.freeze<Parameters<typeof DocumentHostModule.createPdfController>[0]>({
   document,window,urls:URL,store:AttachmentStorage,overlay:WorkspaceOverlay,
   notifications:Object.freeze({notify:input=>Interactions.notify(input),resolve:(source,key)=>NoticeCoordinator.resolveEvent(source,key)}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)})
 }));
-const NotePrinter=DocumentHostModule.createPrinter(Object.freeze({
+const NotePrinter=DocumentHostModule.createPrinter(Object.freeze<Parameters<typeof DocumentHostModule.createPrinter>[0]>({
   document,window,richText:RichTextApi,assets:RichTextAssets,plain:value=>plainTextContent(value),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),now:()=>Date.now()
 }));
 let AttachmentLibrary=null;
-const LibraryDocuments=DocumentHostModule.createIntegration(Object.freeze({
+const LibraryDocuments=DocumentHostModule.createIntegration(Object.freeze<Parameters<typeof DocumentHostModule.createIntegration>[0]>({
   limits:Object.freeze({maxRichAssetPerDocument:APP_LIMITS.richAssetMaxPerDocument,maxRichAssetBytesPerDocument:RichTextApi.assetPolicy.maxBytesPerDocument}),
   notes:AppData.notes,
   ownership:Object.freeze({issue:reason=>AppOwnership.issueWriteToken(reason),assert:(token,reason)=>AppOwnership.assertWriteToken(token,reason)}),
@@ -2646,7 +2646,7 @@ if(!Object.isFrozen(LibraryDocuments)||LibraryDocuments.format!=='study-director
 }
 /* LIBRARY MODULE COMPOSITION */
 const settleAttachmentWriters=LibraryDocuments.settleAttachmentWriters;
-const AttachmentReferences=AttachmentsModule.createReferenceCoordinator(Object.freeze({
+const AttachmentReferences=AttachmentsModule.createReferenceCoordinator(Object.freeze<Parameters<typeof AttachmentsModule.createReferenceCoordinator>[0]>({
   data:AppData,
   scan:value=>RichTextApi.scanAttachmentReferences(String(value||'')),
   rewriteReferences:targets=>LibraryClearState.rewriteReferences(targets),
@@ -2658,7 +2658,7 @@ const AttachmentReferences=AttachmentsModule.createReferenceCoordinator(Object.f
     reviewDate:()=>getReviewDate(),todayIso:()=>todayISO(),noteKey:area=>{const title=normalizeAreaName(area);return title?AppData.notes.get(title)?.id||title:'';}
   })
 }));
-const LibraryClearState=LibraryClearModule.createState(Object.freeze({
+const LibraryClearState=LibraryClearModule.createState(Object.freeze<Parameters<typeof LibraryClearModule.createState>[0]>({
   createRollbackScope:(plan,policy)=>LibraryClearModule.createRollbackScope(plan,policy),
   withPersistenceSuppressed:operation=>withRestoreSessionPersistenceSuppressed(operation),
   data:AppData,
@@ -2716,7 +2716,7 @@ async function assertLibraryClearEligible(){
   if(!appCanMutate())throw new Error('Use the primary tab to clear Library data.');
   return true;
 }
-const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze({
+const LibraryClearCoordinator=LibraryClearModule.createCoordinator(Object.freeze<Parameters<typeof LibraryClearModule.createCoordinator>[0]>({
   diagnostics:Object.freeze({start:BackupOperationDiagnostics.start,mark:BackupOperationDiagnostics.mark,finish:BackupOperationDiagnostics.finish,fail:BackupOperationDiagnostics.fail}),
   runExclusive:(kind,operation)=>AppMutationCoordinator.runExclusive(kind,()=>withRestoreSessionPersistenceSuppressed(operation)),
   canMutate:()=>AppOwnership.canMutate(),assertAuthority:options=>AppMutationCoordinator.assertAuthority(options),assertEligible:assertLibraryClearEligible,settle:settleAttachmentWriters,snapshot:libraryClearSnapshot,
@@ -2752,7 +2752,7 @@ async function checkUnsupportedUpdate(){
     if(!PwaLifecycle.status().updateReady)Interactions.notify({source:'unsupported-data',key:'no-update',title:'No newer version yet',message:'This device has the newest version it can get right now. The data stays safe and hidden until an update arrives.'});
   }catch(error){AppDiagnostics.capture('unsupported-data.update-check',error,'warn');}
 }
-const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
+const LibraryView=LibraryModule.createView(Object.freeze<Parameters<typeof LibraryModule.createView>[0]>({ports:Object.freeze({
   notifications:NoticeCoordinator.presentation('library',Object.freeze({label:'Open Library',run:()=>goTab('library')})),
   records:Object.freeze({
     get:date=>AppData.dailyRecords.get(date),
@@ -2848,7 +2848,7 @@ const LibraryView=LibraryModule.createView(Object.freeze({ports:Object.freeze({
 if(!Object.isFrozen(LibraryView)||LibraryView.format!=='study-director.library-view'||LibraryView.contractVersion!==1){
   throw new Error('Study Director Library view is unavailable or incompatible.');
 }
-NavigationController=NavigationModule.createController(Object.freeze({
+NavigationController=NavigationModule.createController(Object.freeze<Parameters<typeof NavigationModule.createController>[0]>({
   window,
   host:Object.freeze({
     currentTab:()=>String(document.querySelector('.pane.on')?.id||'pane-plan').replace(/^pane-/,'')||'plan',
@@ -2869,7 +2869,7 @@ if(!Object.isFrozen(NavigationController)||NavigationController.format!=='study-
 refreshLibraryNotes=LibraryView.refreshNotes;
 updateNoteSearchDocument=LibraryView.updateSearchDocument;
 /* BACKUP MODULE COMPOSITION */
-const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze({
+const BackupCodec=BackupCodecModule.createBackupCodec(Object.freeze<Parameters<typeof BackupCodecModule.createBackupCodec>[0]>({
   processing:Object.freeze({run:Exports.run,scope:Exports.scope}),
   appConfig:Object.freeze({
     appName:APP_CONFIG.appName,
@@ -2896,14 +2896,14 @@ function verifyRestoredSessionRuntime(...args){return SessionActions.verifyResto
 
 // Byte staging finishes before the single attachment metadata commit. Rollback
 // replaces the catalogue; physical reclamation still waits for all readers.
-const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze({ports:Object.freeze({
+const NoteReconciliationUI=ReconciliationUIModule.createController(Object.freeze<Parameters<typeof ReconciliationUIModule.createController>[0]>({ports:Object.freeze({
   configuration:Object.freeze({maxWords:APP_LIMITS.maxRichTextWords,maxBytes:APP_LIMITS.maxRichTextBytes}),
   richText:Object.freeze({mountRichTextEditor:RichTextApi.mountRichTextEditor,compareRichText:RichTextApi.compareRichText,mergeIncomingAdditions:RichTextApi.mergeIncomingAdditions,appendIncomingAdditions:RichTextApi.appendIncomingAdditions,mergeThreeWay:RichTextApi.mergeThreeWay}),
   assets:Object.freeze({get:assetId=>RichTextAssets.get(assetId)}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   view:Object.freeze({document,requestAnimationFrame:callback=>requestAnimationFrame(callback),cancelAnimationFrame:id=>cancelAnimationFrame(id)})
 })}));
-const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze({
+const BackupRuntimeHost=BackupRecoveryHostModule.createRuntime(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createRuntime>[0]>({
   module:BackupModule,
   configuration:Object.freeze({
     appVersion:APP_VERSION,backupVersion:DATA_CONTRACT.schemas.Backup.version,starterSchedule:FACTORY_DEFAULTS.scheduleText,
@@ -2950,11 +2950,11 @@ if(!Object.isFrozen(BackupRuntimeHost)||BackupRuntimeHost.format!=='study-direct
 }
 const BackupRuntime=BackupRuntimeHost.runtime;
 const {controller:BackupController,checkpoint:CheckpointPipeline,repository:RepositoryCheckpointPipeline,providers:BackupProviderRuntime}=BackupRuntime;
-const KeptVersionsView=BackupRecoveryHostModule.createKeptVersionsView(Object.freeze({document,count:()=>KeptVersions?.count()||0}));
+const KeptVersionsView=BackupRecoveryHostModule.createKeptVersionsView(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createKeptVersionsView>[0]>({document,count:()=>KeptVersions?.count()||0}));
 if(!Object.isFrozen(KeptVersionsView)||KeptVersionsView.format!=='study-director.kept-versions-view'||KeptVersionsView.contractVersion!==1){
   throw new Error('Study Director Kept Versions view is unavailable or incompatible.');
 }
-KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze({
+KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createKeptVersions>[0]>({
   controller:Object.freeze({
     status:()=>BackupController.status(),
     resolveConvergedKeptVersions:()=>BackupController.resolveConvergedKeptVersions(),
@@ -2978,7 +2978,7 @@ KeptVersions=BackupRecoveryHostModule.createKeptVersions(Object.freeze({
 if(!Object.isFrozen(KeptVersions)||KeptVersions.format!=='study-director.kept-versions'||KeptVersions.contractVersion!==1){
   throw new Error('Study Director kept-version recovery controller is unavailable or incompatible.');
 }
-SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze({
+SessionHandoffRuntime=SessionHandoffModule.createController(Object.freeze<Parameters<typeof SessionHandoffModule.createController>[0]>({
   configuration:Object.freeze({
     providerId:'google-drive',claimWatchMs:SESSION_CLAIM_WATCH_MS,claimSyncRetryMs:SESSION_CLAIM_SYNC_RETRY_MS,
     claimSaveWarning:'The session moved to another device, but the latest local progress has not been verified in browser storage. Keep this tab open; saving will retry. Do not clear its data.'
@@ -3031,7 +3031,7 @@ if(!Object.isFrozen(SessionHandoffRuntime)||SessionHandoffRuntime.format!=='stud
 }
 // File/location controls, user entry points and foreground/background exclusion
 // are owned by the checked P5.7A host boundary.
-BackupActions=BackupActionsHostModule.createControls(Object.freeze({
+BackupActions=BackupActionsHostModule.createControls(Object.freeze<Parameters<typeof BackupActionsHostModule.createControls>[0]>({
   document,controller:BackupController,processing:Exports,protection:BackupProtectionHost,
   device:()=>DeviceBackup,providers:BackupProviderRuntime,presentation:BackupPresentation,
   verifiedAt:source=>VerifiedRecovery.verified(source)?.at||'',timeLabel:storageHealthTime,
@@ -3049,7 +3049,7 @@ if(!Object.isFrozen(BackupActions)||BackupActions.format!=='study-director.backu
 function renderDriveBackup(){return BackupActions.renderDrive();}
 function renderDeviceBackup(state){return BackupActions.renderDevice(state);}
 BackupActions.install();
-BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze({
+BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze<Parameters<typeof BackupMaintenanceHostModule.createBackground>[0]>({
   lifecycle:OperationLifecycle,
   environment:Object.freeze({now:()=>Date.now(),setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>clearTimeout(handle)}),
   authority:Object.freeze({
@@ -3085,7 +3085,7 @@ if(!Object.isFrozen(BackgroundMaintenance)||BackgroundMaintenance.format!=='stud
   throw new Error('Study Director background maintenance host is unavailable or incompatible.');
 }
 DataMaintenanceJob=BackgroundMaintenance.job;
-const RepositoryMaintenanceHost=BackupMaintenanceHostModule.createRepositoryMaintenance(Object.freeze({
+const RepositoryMaintenanceHost=BackupMaintenanceHostModule.createRepositoryMaintenance(Object.freeze<Parameters<typeof BackupMaintenanceHostModule.createRepositoryMaintenance>[0]>({
   meta:BackupAppMeta,metadataName:'repositoryMaintenancePending',
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
   environment:Object.freeze({nowIso:()=>new Date().toISOString(),uuid:()=>crypto.randomUUID()})
@@ -3107,14 +3107,14 @@ function resumeUnresolvedStorageReset(){return StorageResetRecovery?.resume()||f
 function settleStorageReset(){return StorageResetRecovery?.settle()||false;}
 function restoreAfterStorageReset(){return requireStorageResetRecovery().restore();}
 
-const DeviceBackupHooks=BackupActionsHostModule.createDeviceHooks(Object.freeze({
+const DeviceBackupHooks=BackupActionsHostModule.createDeviceHooks(Object.freeze<Parameters<typeof BackupActionsHostModule.createDeviceHooks>[0]>({
   interactions:Object.freeze({choose:options=>Interactions.choose(options)}),capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
   profileId:()=>Profiles.current()?.id||'',profileScope:()=>ProfileScope.scope,installationId:()=>InstallationIdentity.getId(),backupFolderName:()=>backupFolderName({device:true}),
   render:state=>renderDeviceBackup(state),sourceRevision:()=>BackupRuntimeHost.sourceRevision(),verifiedAt:()=>VerifiedRecovery.verified('device-folder')?.at||''
 }));
 // The Device Folder is one backup location of the engine. P5.7A owns the
 // browser picker, provider callbacks and typed Device Folder storage composition.
-DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze({
+DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze<Parameters<typeof BackupActionsHostModule.createDeviceBackup>[0]>({
   module:DeviceBackupModule,storageModule:DeviceFolderStorageModule,
   configuration:Object.freeze({metadataKey:APP_META_KEYS.deviceFolder,pickerId:EXTERNAL_REPOSITORY_IDENTITIES.deviceFolderPickerId,settingsTimeoutMs:10*1000}),
   engine:BackupProviderRuntime,
@@ -3138,7 +3138,7 @@ DeviceBackup=BackupActionsHostModule.createDeviceBackup(Object.freeze({
 if(!Object.isFrozen(DeviceBackup)||DeviceBackup.format!=='study-director.device-backup'||DeviceBackup.contractVersion!==1){
   throw new Error('Study Director automatic device backup is unavailable or incompatible.');
 }
-StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze({
+StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createStorageReset>[0]>({
   authority:Object.freeze({canMutate:()=>appCanMutate()}),
   canonical:Object.freeze({
     dailyRecordsList:()=>AppData.dailyRecords.list({strict:true}),notesReadFreshPayload:()=>AppData.notes.readFreshPayload(),activeSessionLoad:()=>AppData.activeSession.load(0,{strict:true}),
@@ -3180,7 +3180,7 @@ StorageResetRecovery=BackupRecoveryHostModule.createStorageReset(Object.freeze({
 if(!Object.isFrozen(StorageResetRecovery)||StorageResetRecovery.format!=='study-director.storage-reset-recovery'||StorageResetRecovery.contractVersion!==1){
   throw new Error('Study Director storage-reset recovery is unavailable or incompatible.');
 }
-BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze({
+BackupRecoveryHost=BackupRecoveryHostModule.createHost(Object.freeze<Parameters<typeof BackupRecoveryHostModule.createHost>[0]>({
   presentation:BackupPresentation,
   cancellation:Object.freeze({cancelImport:(reason,options)=>BackupController.cancelImport(reason,options)}),
   diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),mark:(phase,details)=>BackupOperationDiagnostics.mark(phase,details)}),
@@ -3218,7 +3218,7 @@ if(!Object.isFrozen(BackupRecoveryHost)||BackupRecoveryHost.format!=='study-dire
 }
 
 const RepositoryIntegrityContinuation=IntegrityContinuationModule.create({files:BackupFiles,processing:Exports,protection:BackupProtection,yieldTask:()=>BackgroundTasks.yieldTask({priority:'background'})});
-BackupIntegrity=BackupIntegrityHostModule.createController(Object.freeze({
+BackupIntegrity=BackupIntegrityHostModule.createController(Object.freeze<Parameters<typeof BackupIntegrityHostModule.createController>[0]>({
   lifecycle:OperationLifecycle,metadata:Object.freeze({attachment:HostAppMeta,repository:BackupAppMeta}),attachmentMetadataName:'attachmentIntegrityAudit',repositoryMetadataName:'repositoryIntegrityScrub',
   storage:AttachmentStorage,references:AttachmentReferences,validAttachmentId:AttachmentsModule.validId,
   data:Object.freeze({datasetRevision:()=>AppData.dailyRecords.datasetRevision()}),referenceRevision:()=>richAssetReferenceRevision,
@@ -3245,7 +3245,7 @@ if(!Object.isFrozen(BackupIntegrity)||BackupIntegrity.format!=='study-director.b
 AttachmentIntegrityJob=BackupIntegrity.attachmentJob;
 BackupProviderRuntime.configureIntegrityScrub(BackupIntegrity.repositoryHooks);
 
-const DeviceBackupActivation=BackupActionsHostModule.createDeviceActivation(Object.freeze({
+const DeviceBackupActivation=BackupActionsHostModule.createDeviceActivation(Object.freeze<Parameters<typeof BackupActionsHostModule.createDeviceActivation>[0]>({
   device:()=>DeviceBackup,
   refreshKinds:new Set([APP_ACTIVATION_KINDS.OWNERSHIP_TAKEOVER,APP_ACTIVATION_KINDS.ORDINARY_FOCUS,APP_ACTIVATION_KINDS.VISIBILITY_RETURN])
 }));
@@ -3256,15 +3256,15 @@ AppActivation.subscribe(event=>{
 // A location backs up on its own once this device has backed up to it (the
 // Device Folder from when it was chosen). A change found on start is backed up
 // only while local data is present.
-const AutomaticBackupPolicy=BackupReadinessHostModule.createAutomaticBackupPolicy(Object.freeze({verified:VerifiedRecovery,currentRevision:()=>BackupRuntimeHost.sourceRevision(),canonicalEmpty:()=>StorageResetRecovery.canonicalEmpty()}));
+const AutomaticBackupPolicy=BackupReadinessHostModule.createAutomaticBackupPolicy(Object.freeze<Parameters<typeof BackupReadinessHostModule.createAutomaticBackupPolicy>[0]>({verified:VerifiedRecovery,currentRevision:()=>BackupRuntimeHost.sourceRevision(),canonicalEmpty:()=>StorageResetRecovery.canonicalEmpty()}));
 BackupProviderRuntime.configureAutomaticBackup(AutomaticBackupPolicy);
-BackupProviderRuntime.configureSessionOwnership(Object.freeze({
+BackupProviderRuntime.configureSessionOwnership(Object.freeze<Parameters<typeof BackupProviderRuntime.configureSessionOwnership>[0]>({
   installationId:()=>InstallationIdentity.getId(),
   today:()=>todayISO(),
   read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
 }));
 /* PWA SHELL AND SAFE UPDATE COORDINATION */
-const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze({
+const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze<Parameters<typeof PwaUpdateHostModule.createController>[0]>({
   configuration:Object.freeze({
     assetId:'__SD_PAGE_ASSET_ID__',buildId:'@@SD_BUILD_ID@@',reloadSessionKey:SESSION_STORAGE_KEYS.pwaReload,scope:'./',workerUrl:trustedAssetURL('./sw.js'),
     updateCheckStorageKey:STORAGE_KEYS.pwaUpdateCheck,primaryState:OWNERSHIP_STATES.PRIMARY,secondaryState:OWNERSHIP_STATES.SECONDARY,runningTimerMode:TIMER_MODES.RUNNING
@@ -3312,7 +3312,7 @@ const applyPwaUpdateFromUi=()=>PwaRuntime.applyFromUi();
 /* INSIGHTS AND PLUGIN BOUNDARY */
 // Read-only Insights boundary. Insights modules should read through this object
 // and return derived metrics without mutating records, notes, timer state, or storage.
-const InsightsBoundary=InsightsHostModule.createBoundary(Object.freeze({
+const InsightsBoundary=InsightsHostModule.createBoundary(Object.freeze<Parameters<typeof InsightsHostModule.createBoundary>[0]>({
   dailyRecords:AppData.dailyRecords,
   dailyRecordCodec:DailyRecordCodec,
   notifications:NoticeCoordinator.presentation('insights'),
@@ -3324,7 +3324,7 @@ const InsightsBoundary=InsightsHostModule.createBoundary(Object.freeze({
 }));
 const PreviewRuntime=InsightsBoundary.preview;
 const AppInsights=InsightsBoundary.appInsights;
-const InsightsDeviceState=InsightsHostModule.createDeviceState(Object.freeze({
+const InsightsDeviceState=InsightsHostModule.createDeviceState(Object.freeze<Parameters<typeof InsightsHostModule.createDeviceState>[0]>({
   readWindow:fallback=>AppData.local.getText(STORAGE_KEYS.insightsWindow,fallback),
   writeWindow:value=>AppData.local.setText(STORAGE_KEYS.insightsWindow,value)
 }));
@@ -3859,7 +3859,7 @@ function installApplicationDomBindings(){
 function applyPwaLaunchRoute(){
   return NavigationController.hydrate({source:'launch-route',explicitOnly:true}).then(result=>result.ok===true);
 }
-StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
+StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze<Parameters<typeof StartupHostModule.createCoordinator>[0]>({
   module:StartupLifecycleModule,
   environment:Object.freeze({document,window}),
   diagnostics:Object.freeze({guard:AppDiagnostics.guard}),
@@ -3890,7 +3890,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
 }));
 /* PUBLIC PLUGIN API */
 PluginRuntime.registerPlaceholders();
-const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze({
+const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze<Parameters<typeof PluginRuntime.createPublicApi>[0]>({
   version:APP_VERSION,
   data:Object.freeze({contract:DATA_CONTRACT,deviceState:InsightsDeviceState}),
   insights:AppInsights,
