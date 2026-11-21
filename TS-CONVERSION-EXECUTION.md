@@ -1,5 +1,13 @@
 # TypeScript conversion — execution record
 
+## P5.13a · ACTIVE · 2026-11-21
+
+- **Baseline:** `7c5f0170b8489c3f6c69e85926a572e9bb7986f2`. Canonical scope is P5.13a only: checked generic optional-plugin loading/registration/retry plus checked construction/publication contract for the frozen `window.StudyDirector` capability object.
+- **Audit map:** `foundation-host.ts` already owns checked tab primitives/navigation. The remaining P5.13a algorithms are the `PluginRuntime` block and public API assembly in `source/host/main.js`. P5.13b still owns the rest of main startup/action/DOM composition and bare build-token closure.
+- **Invariants:** preserve optional Guide/Insights filenames and two-attempt semantics, active-tab-only rerendering, capability rejection, setup failure containment, preview-provider registration, single successful registration, public API shape/freeze, and the exact existing publication → ready-event → session invalidation → startup → PWA-install order.
+- **Verification target:** real normal navigation to a shipped optional tab; failed load + retry; tab switch during pending load; active-tab ownership; incompatible capability rejection; single registration through the real public API. Required strict type/build/verify/generated-syntax checks plus affected architecture/runtime-boundary browser evidence; no full QA.
+- **Next action:** extract the P5.13a owner into strict TypeScript, admit it to manifest/compiler/coverage, rewire `main.js` as thin composition, then reconcile the checkpoint end to end.
+
 ## P5.12 · VERIFIED — TARGETED · 2026-11-21 · SECOND DE NOVO AUDIT
 
 - **Audit baseline / final code head:** challenged the prior P5.12 closure again from published record head `360494a9`, reread `AGENTS.md` and the complete P5.12a/P5.12b acceptance text in `docs/typescript/PHASE-5.md`, then traced source ownership, host adapters, native/install events, update reservations, worker protocol, cache retirement, generated identities, minification and browser journeys back to original P5.12 baseline `a875595a`. Final corrected code/test head is `05348ed57684532a47cd80e03073ec29ffd2ac17`.
