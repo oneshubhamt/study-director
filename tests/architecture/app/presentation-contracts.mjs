@@ -101,7 +101,7 @@ for(const [label,pack,marker] of [['Glass',glassCss,'glass'],['Aurora',auroraCss
   assert.ok(markerGuard>=0&&observerCreation>markerGuard,`${label} coordinator marker must short-circuit before observer creation.`);
 }
 assert.match(presentationHost,/function refreshMirrors\([^)]*\)[^{]*\{[\s\S]*?preferences\.mirror-write/u,'checked presentation host owns first-paint mirror refresh failure handling.');
-assert.match(presentationHost,/function closeDisplayTools\(\):boolean\{[\s\S]*?displayToolsPopover\.hide\(\);return true;[\s\S]*?window\.addEventListener\('studydirector:displaytoolsclose',closeDisplayTools\)/u,'checked presentation host must own forced Display Tools closure so popover state and listeners settle through their controller.');
+assert.match(presentationHost,/function closeDisplayTools\(\s*\)\s*\{[\s\S]*?displayToolsPopover\.hide\(\);return true;[\s\S]*?window\.addEventListener\('studydirector:displaytoolsclose',closeDisplayTools\)/u,'checked presentation host must own forced Display Tools closure so popover state and listeners settle through their controller.');
 assert.match(presentationHost,/function toggleDisplayTools\([^)]*\)[^{]*\{[\s\S]*?display-tools-menu[\s\S]*?popovers\.create/u,'checked presentation host owns display-tools interaction.');
 assert.match(html,/function registerPresentationPack\(definition\)\{return requirePresentationRuntime\(\)\.registerPresentation\(definition\);\}/u,'main keeps presentation-pack registration as thin composition.');
 
