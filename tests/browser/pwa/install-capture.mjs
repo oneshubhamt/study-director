@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import {instrumentedHtml,startReleaseServer,launchChromium,skipFirstStart,waitFor} from '../../helpers/browser-harness.mjs';
 
 const server=await startReleaseServer();
-const source=instrumentedHtml('development');
+// This witness certifies the app-owned pre-host prompt bridge, not Chromium's
+// native installability heuristics. Remove the manifest so headless Chromium
+// cannot replace the synthetic prompt with a later browser-owned prompt.
+const source=instrumentedHtml('development').replace(/<link\b(?=[^>]*\brel=["']manifest["'])[^>]*>/iu,'');
 const captureMarker="Symbol.for('studyDirector.installCapture.v1')";
 const captureAt=source.indexOf(captureMarker);
 const scriptEnd=captureAt>=0?source.indexOf('</script>',captureAt):-1;
