@@ -36,6 +36,7 @@ const ReconciliationUIModule=INTERNAL_MODULES.load('reconciliation-ui',1,'study-
 const InteractionsModule=INTERNAL_MODULES.load('interactions',1,'study-director.interactions-module',1);
 const WorkspaceOverlayModule=INTERNAL_MODULES.load('workspace-overlay',1,'study-director.workspace-overlay-module',1);
 const BackupPresentationModule=INTERNAL_MODULES.load('backup-presentation',1,'study-director.backup-presentation-module',1);
+const PresentationHostModule=INTERNAL_MODULES.load('presentation-host',1,'study-director.presentation-host-module',1);
 const AudioEngineModule=INTERNAL_MODULES.load('audio-engine',1,'study-director.audio-engine-module',1);
 const NoticeCoordinatorModule=INTERNAL_MODULES.load('notice-coordinator',1,'study-director.notice-coordinator-module',1);
 const NavigationModule=INTERNAL_MODULES.load('navigation',1,'study-director.navigation-module',1);
@@ -103,9 +104,7 @@ if(!PRESENTATION_KERNEL||PRESENTATION_KERNEL.format!=='study-director.presentati
 }
 const DEFAULT_THEME_ID=PRESENTATION_MANIFEST.defaults.theme;
 const DEFAULT_PRESENTATION_ID=PRESENTATION_MANIFEST.defaults.preferredPresentation;
-const {
-  presentations:PRESENTATION_PROFILES, themes:THEME_DEFINITIONS
-}=PRESENTATION_MANIFEST;
+const {themes:THEME_DEFINITIONS}=PRESENTATION_MANIFEST;
 const THEME_IDS=Object.freeze(Object.keys(THEME_DEFINITIONS));
 const PUBLIC_THEME_METADATA=Object.freeze(THEME_IDS.map(id=>THEME_DEFINITIONS[id]));
 const {
@@ -1426,25 +1425,20 @@ function updateNoteSyncIndicators(idx,key){
 const PROTECTED_PREFERENCES_SAVE_DELAY_MS=250;
 let protectedPreferencesState=Object.freeze({version:2,studentName:null,theme:null,presentation:null,quote:null,practiceCueMode:null,fontScale:null,practiceTargetMs:null,nudge:null,updatedAt:null});
 let protectedPreferencesHydrated=false,protectedPreferencesDirty=false,protectedPreferencesWriteTimer=null,protectedPreferencesWriteFailure=null;
-let protectedPreferencesWriteChain=Promise.resolve();
+let protectedPreferencesWriteChain=Promise.resolve(),PresentationRuntime=null;
+function requirePresentationRuntime(){if(!PresentationRuntime)throw new Error('Study Director presentation host is unavailable.');return PresentationRuntime;}
 function acceptProtectedPreferences(value){
   const clean=PersonalDataCodec.currentPortablePreferences(value)||PersonalDataCodec.portablePreferences({version:2,...value});
   protectedPreferencesState=Object.freeze({...clean});protectedPreferencesHydrated=true;return protectedPreferencesState;
 }
 function refreshAppearanceMirrors(value=protectedPreferencesState){
   const clean=PersonalDataCodec.currentPortablePreferences(value)||PersonalDataCodec.portablePreferences({version:2,...value});
-  const entries=[['theme',clean.theme],['presentation',clean.presentation],['fontScale',clean.fontScale]];
-  for(const [name,current] of entries){
-    const ok=current===null?AppData.local.remove(STORAGE_KEYS[name]):AppData.local.setText(STORAGE_KEYS[name],String(current));
-    if(!ok)AppDiagnostics.capture('preferences.mirror-write',AppData.lastStorageError||new Error(`${name} startup mirror could not be refreshed.`),'warn');
-  }
-  return true;
+  return requirePresentationRuntime().refreshMirrors(clean);
 }
 function applyPortablePreferencesToRuntime(value=protectedPreferencesState){
   const clean=PersonalDataCodec.currentPortablePreferences(value)||PersonalDataCodec.portablePreferences({version:2,...value});
   applyStudentName(clean.studentName||FACTORY_DEFAULTS.studentName);
-  applyFontScale(clean.fontScale??1);
-  applyTheme(clean.theme??DEFAULT_THEME_ID);applyPresentation(clean.presentation??DEFAULT_PRESENTATION_ID);renderPresentationControls();
+  requirePresentationRuntime().applyPreferences(clean);
   const qi=document.getElementById('quote-input');if(qi){qi.value=clean.quote||'';const display=document.getElementById('quote-display');if(display)display.textContent=qi.value.trim();}
   Pomodoro.configuration.load();
   NoticeCoordinator.setSoundMode(clean.soundMode??(clean.nudge?.sound===false?'off':'full'));renderSoundSettings();
@@ -1493,6 +1487,26 @@ function persistProtectedPreferences(overrides={}){
   if('theme' in overrides||'presentation' in overrides||'fontScale' in overrides)void flushProtectedPreferences().catch(()=>{});
   else scheduleProtectedPreferencesWrite();
   return true;
+}
+PresentationRuntime=PresentationHostModule.createController(Object.freeze({
+  kernel:PRESENTATION_KERNEL,document,window,
+  storage:Object.freeze({
+    keys:Object.freeze({theme:STORAGE_KEYS.theme,presentation:STORAGE_KEYS.presentation,fontScale:STORAGE_KEYS.fontScale}),
+    getText:(key,fallback)=>AppData.local.getText(key,fallback),
+    setText:(key,value)=>AppData.local.setText(key,value),
+    remove:key=>AppData.local.remove(key),
+    lastError:()=>AppData.lastStorageError
+  }),
+  preferences:Object.freeze({
+    hydrated:()=>protectedPreferencesHydrated,current:()=>protectedPreferencesState,
+    persist:value=>persistProtectedPreferences(value)
+  }),
+  ownership:Object.freeze({require:reason=>requirePrimaryTab(null,reason)}),
+  diagnostics:Object.freeze({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
+  popovers:Object.freeze({create:menu=>RichTextApi.createAnchoredPopover(menu,{align:'end',side:'top'})})
+}));
+if(!Object.isFrozen(PresentationRuntime)||PresentationRuntime.format!=='study-director.presentation-host'||PresentationRuntime.contractVersion!==1){
+  throw new Error('Study Director presentation host is unavailable or incompatible.');
 }
 function saveQuoteDraft(){
   if(!appCanMutate())return;
@@ -1998,169 +2012,21 @@ function updateFullscreenButton(){
     btn.title=active?'Exit fullscreen':'Enter fullscreen';
   }
 }
-let appearanceShiftTimer=0;
-function beginAppearanceShift(){
-  // Fallback for engines without View Transitions: crossfade colour roles
-  // (see core.css APPEARANCE SHIFT).
-  const root=document.documentElement;
-  root.setAttribute('data-sd-appearance-shift','');
-  clearTimeout(appearanceShiftTimer);
-  appearanceShiftTimer=setTimeout(()=>root.removeAttribute('data-sd-appearance-shift'),520);
-}
-function runAppearanceChange(origin,change){
-  // The one native View Transition boundary. Appearance changes are
-  // synchronous, so the snapshot never waits on storage, plugins or layout
-  // work; the new appearance is revealed from the control that chose it.
-  const reduce=!!(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-  if(reduce||document.visibilityState!=='visible'){change();return;}
-  if(typeof document.startViewTransition!=='function'){beginAppearanceShift();change();return;}
-  const root=document.documentElement;
-  const rect=origin&&origin.getBoundingClientRect?origin.getBoundingClientRect():null;
-  const x=rect?rect.left+rect.width/2:window.innerWidth/2,y=rect?rect.top+rect.height/2:window.innerHeight/2;
-  const radius=Math.hypot(Math.max(x,window.innerWidth-x),Math.max(y,window.innerHeight-y));
-  root.style.setProperty('--sd-reveal-x',`${Math.round(x)}px`);
-  root.style.setProperty('--sd-reveal-y',`${Math.round(y)}px`);
-  root.style.setProperty('--sd-reveal-radius',`${Math.ceil(radius)}px`);
-  root.setAttribute('data-sd-appearance-reveal','');
-  let transition=null;
-  try{transition=document.startViewTransition(()=>{change();});}
-  catch(error){root.removeAttribute('data-sd-appearance-reveal');change();return;}
-  const settle=()=>{root.removeAttribute('data-sd-appearance-reveal');['--sd-reveal-x','--sd-reveal-y','--sd-reveal-radius'].forEach(name=>root.style.removeProperty(name));};
-  transition.finished.then(settle,settle);
-  transition.ready.catch(()=>{});
-}
-function renderThemeControls(){
-  const controls=document.getElementById('theme-controls');
-  if(!controls)return;
-  const shouldExpose=THEME_IDS.length>1;
-  controls.hidden=!shouldExpose;
-  if(!shouldExpose){controls.replaceChildren();return;}
-  const label=document.createElement('span');
-  label.className='theme-controls-label ui-label';
-  label.textContent='Theme';
-  const active=PRESENTATION_KERNEL.activeThemeId();
-  const buttons=THEME_IDS.map(id=>{
-    const definition=THEME_DEFINITIONS[id];
-    const button=document.createElement('button');
-    button.className='theme-btn';
-    button.type='button';
-    button.dataset.action='set-theme';
-    button.dataset.themeId=id;
-    button.textContent=definition.label;
-    button.setAttribute('aria-pressed',id===active?'true':'false');
-    return button;
-  });
-  controls.replaceChildren(label,...buttons);
-}
-function applyTheme(themeId,{persist=false,restoreFocus=false}={}){
-  const clean=PRESENTATION_KERNEL.switchTheme(themeId,{persist:false});
-  if(persist)persistProtectedPreferences({theme:clean});
-  renderThemeControls();
-  if(restoreFocus){
-    const selected=[...document.querySelectorAll('.theme-btn[data-theme-id]')].find(button=>button.dataset.themeId===clean)||null;
-    if(selected)selected.focus();
-  }
-  return clean;
-}
-function setTheme(themeId,{restoreFocus=false,origin=null}={}){
-  if(!requirePrimaryTab(null,'change appearance settings'))return PRESENTATION_KERNEL.activeThemeId();
-  const clean=PRESENTATION_KERNEL.normalizeThemeId(themeId);
-  if(clean===PRESENTATION_KERNEL.activeThemeId())return applyTheme(clean,{persist:true,restoreFocus});
-  runAppearanceChange(origin,()=>applyTheme(clean,{persist:true,restoreFocus}));
-  return clean;
-}
-function handleThemeSelection(ev){
-  const control=ev.target.closest('[data-theme-id]');
-  if(control)setTheme(control.dataset.themeId,{restoreFocus:true,origin:control});
-}
-function renderPresentationControls(){
-  const controls=document.getElementById('presentation-controls');
-  if(!controls)return;
-  const profiles=PRESENTATION_KERNEL.listPresentations();
-  const shouldExpose=profiles.length>1;
-  controls.hidden=!shouldExpose;
-  if(!shouldExpose){controls.replaceChildren();return;}
-  const label=document.createElement('span');
-  label.className='presentation-controls-label ui-label';
-  label.textContent='Skin';
-  const active=PRESENTATION_KERNEL.activePresentationId();
-  const buttons=profiles.map(profile=>{
-    const button=document.createElement('button');
-    button.className='presentation-btn';
-    button.type='button';
-    button.dataset.action='set-presentation';
-    button.dataset.presentationId=profile.id;
-    button.textContent=profile.label;
-    button.setAttribute('aria-pressed',profile.id===active?'true':'false');
-    return button;
-  });
-  controls.replaceChildren(label,...buttons);
-}
-function applyPresentation(presentationId,{persist=false,restoreFocus=false}={}){
-  const clean=PRESENTATION_KERNEL.switchPresentation(presentationId,{persist:false});
-  if(persist)persistProtectedPreferences({presentation:clean});
-  renderPresentationControls();
-  if(restoreFocus){
-    const selected=[...document.querySelectorAll('.presentation-btn[data-presentation-id]')].find(button=>button.dataset.presentationId===clean)||null;
-    if(selected)selected.focus();
-  }
-  return clean;
-}
-function setPresentation(presentationId,{restoreFocus=false,origin=null}={}){
-  if(!requirePrimaryTab(null,'change appearance settings'))return PRESENTATION_KERNEL.activePresentationId();
-  const clean=PRESENTATION_KERNEL.normalizePresentationId(presentationId);
-  if(clean===PRESENTATION_KERNEL.activePresentationId())return applyPresentation(clean,{persist:true,restoreFocus});
-  runAppearanceChange(origin,()=>applyPresentation(clean,{persist:true,restoreFocus}));
-  return clean;
-}
-function registerPresentationPack(definition){
-  const accepted=PRESENTATION_KERNEL.registerPresentation(definition);
-  if(accepted)renderPresentationControls();
-  return accepted;
-}
-function handlePresentationSelection(ev){
-  const control=ev.target.closest('[data-presentation-id]');
-  if(control)setPresentation(control.dataset.presentationId,{restoreFocus:true,origin:control});
-}
-const FONT_SCALE_STEPS=Object.freeze([0.95,1,1.08,1.16]);
-function normalizeFontScale(value){
-  const n=Number(value);
-  if(!Number.isFinite(n))return 1;
-  return FONT_SCALE_STEPS.reduce((best,step)=>Math.abs(step-n)<Math.abs(best-n)?step:best,1);
-}
-function readFontScale(){
-  if(protectedPreferencesHydrated)return normalizeFontScale(protectedPreferencesState.fontScale??1);
-  return normalizeFontScale(AppData.local.getText(STORAGE_KEYS.fontScale,'1'));
-}
-function applyFontScale(scale){
-  const clean=normalizeFontScale(scale);
-  const percent=Math.round(clean*1000)/10;
-  document.documentElement.style.fontSize=`${percent}%`;
-  document.documentElement.dataset.typeScale=String(clean);
-  document.documentElement.dataset.fontScale=String(clean);
-  document.querySelectorAll('.type-btn[data-action^="font-"]').forEach(btn=>{
-    const action=btn.dataset.action;
-    btn.setAttribute('aria-pressed',action==='font-reset'&&clean===1?'true':'false');
-  });
-  return clean;
-}
-function setFontScale(scale){
-  const clean=applyFontScale(scale);
-  persistProtectedPreferences({fontScale:clean});
-}
-function stepFontScale(delta){
-  const current=applyFontScale(readFontScale());
-  const idx=FONT_SCALE_STEPS.indexOf(current);
-  const next=FONT_SCALE_STEPS[Math.min(FONT_SCALE_STEPS.length-1,Math.max(0,idx+delta))];
-  setFontScale(next);
-}
-let displayToolsPopover=null;
-function toggleDisplayTools(){
-  const menu=document.getElementById('display-tools-menu'),trigger=document.getElementById('display-tools-trigger');
-  if(!menu||!trigger)return;
-  displayToolsPopover??=RichTextApi.createAnchoredPopover(menu,{align:'end',side:'top'});
-  if(menu.hidden)displayToolsPopover.show(trigger);else displayToolsPopover.hide();
-}
+function renderThemeControls(){return requirePresentationRuntime().renderThemeControls();}
+function applyTheme(themeId,options={}){return requirePresentationRuntime().applyTheme(themeId,options);}
+function setTheme(themeId,options={}){return requirePresentationRuntime().setTheme(themeId,options);}
+function handleThemeSelection(event){return requirePresentationRuntime().handleThemeSelection(event);}
+function renderPresentationControls(){return requirePresentationRuntime().renderPresentationControls();}
+function applyPresentation(presentationId,options={}){return requirePresentationRuntime().applyPresentation(presentationId,options);}
+function setPresentation(presentationId,options={}){return requirePresentationRuntime().setPresentation(presentationId,options);}
+function registerPresentationPack(definition){return requirePresentationRuntime().registerPresentation(definition);}
+function handlePresentationSelection(event){return requirePresentationRuntime().handlePresentationSelection(event);}
+function normalizeFontScale(value){return requirePresentationRuntime().normalizeFontScale(value);}
+function readFontScale(){return requirePresentationRuntime().readFontScale();}
+function applyFontScale(value){return requirePresentationRuntime().applyFontScale(value);}
+function setFontScale(value){return requirePresentationRuntime().setFontScale(value);}
+function stepFontScale(delta){return requirePresentationRuntime().stepFontScale(delta);}
+function toggleDisplayTools(){return requirePresentationRuntime().toggleDisplayTools();}
 function toggleFS(){
   if(!fullscreenAvailable())return;
   const action=document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
@@ -4493,7 +4359,7 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
   startup:StartupHostModule.createStages({document,window,version:APP_VERSION,notices:NoticeCoordinator,
     stages:{bindDom:installApplicationDomBindings,recoverInterruptedLibraryClear:()=>LibraryClearCoordinator.recoverInterrupted(),loadNotes:()=>AppData.notes.load(),hydrateDrafts:hydrateSavedDrafts,previewPlan:()=>PlanDraftEditor.preview({silent:true}),refreshCoreUi:()=>refreshCoreUi(),renderRecovery:renderRecoveryReview,checkBackup:()=>maybePromptBackupNudge(true),openInitialTab:()=>goTab('plan',{source:'startup-initial',history:'none',restoreScroll:false,force:true}),applyLaunchRoute:applyPwaLaunchRoute,showNameSetup:startProfile},
     profileSafe:()=>ProfileScope.safe===true,census:()=>UnsupportedData.census(),preferencesHydrated:()=>protectedPreferencesHydrated,applyProtectedAppearance:()=>applyPortablePreferencesToRuntime(protectedPreferencesState),
-    restoreTheme:()=>applyTheme(PRESENTATION_KERNEL.readStoredTheme((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false}),restorePresentation:()=>applyPresentation(PRESENTATION_KERNEL.readStoredPresentation((key,fallback)=>AppData.local.getText(key,fallback)),{persist:false}),restoreFontScale:()=>applyFontScale(readFontScale()),
+    restoreTheme:()=>requirePresentationRuntime().restoreTheme(),restorePresentation:()=>requirePresentationRuntime().restorePresentation(),restoreFontScale:()=>requirePresentationRuntime().restoreFontScale(),
     hydratePlan:()=>PlanData.hydrate(),readRestoreJournal:()=>AppData.restoreJournal.read(),waitForClosedTabLease,recoverRestore:()=>BackupController.recoverInterruptedRestore(),tickClock,updateHeader:updateHeaderInfo,setInterval:(fn,ms)=>setInterval(fn,ms),setTimeout:(fn,ms)=>setTimeout(fn,ms),
     hasTasks:()=>TASKS.length>0,showEmpty,canMutate:appCanMutate,restoreSession:attemptAutoRestoreActiveSession,refreshBadge:refreshPersistedSessionBadge,inspectStorage:inspectStorageCapability,offerInstallNotice:()=>CapabilityInstallation.offerInstallNotice(),topology:()=>IndexedDb.topology(),
     setFastFenceReady:value=>{BackupRuntimeHost.setFastFenceReady(value);},reseedEpoch:()=>AppData.mutationEpoch.reseed(),capture:AppDiagnostics.capture,reconcileChangeClock:()=>VerifiedRecovery.reconcileStartupChangeClock(),resumeStorageReset:resumeUnresolvedStorageReset,
