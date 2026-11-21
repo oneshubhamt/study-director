@@ -11,6 +11,10 @@ assert.ok(captureAt>=0&&scriptEnd>captureAt,'early install-capture script is mis
 const earlyPrompt=`<script>
 window.__p512InstallPromptCalls=0;
 window.__p512InstallPromptPrevented=false;
+// Keep the synthetic witness deterministic: startup installation inspection
+// must not race the retained pre-host prompt by reporting an unrelated
+// installed web app in the shared headless browser profile.
+try{Object.defineProperty(navigator,'getInstalledRelatedApps',{value:async()=>[],configurable:true});}catch{}
 {
   const promptEvent=new Event('beforeinstallprompt',{cancelable:true});
   Object.defineProperties(promptEvent,{
