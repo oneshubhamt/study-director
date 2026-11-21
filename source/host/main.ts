@@ -192,6 +192,11 @@ let StorageHealthController:ReturnType<typeof BackupReadinessHostModule.createSt
 let StorageResetRecovery:ReturnType<typeof BackupRecoveryHostModule.createStorageReset>|null=null,BackupNudge:ReturnType<typeof BackupReadinessHostModule.createBackupNudge>|null=null;
 let NativeCapabilities:ReturnType<typeof CapabilitiesHostModule.createController>|null=null,CapabilityBadge:ReturnType<typeof CapabilitiesHostModule.createBadge>|null=null;
 let DeviceBackup:ReturnType<typeof BackupActionsHostModule.createDeviceBackup>|null=null,BackupRecoveryHost:ReturnType<typeof BackupRecoveryHostModule.createHost>|null=null,KeptVersions:ReturnType<typeof BackupRecoveryHostModule.createKeptVersions>|null=null,BackupActions:ReturnType<typeof BackupActionsHostModule.createControls>|null=null;
+function requireDeviceBackup(){if(!DeviceBackup)throw new Error('Study Director Device Backup is unavailable.');return DeviceBackup;}
+function requireBackupActions(){if(!BackupActions)throw new Error('Study Director backup controls are unavailable.');return BackupActions;}
+function requireBackupProtectionHost(){if(!BackupProtectionHost)throw new Error('Study Director backup protection is unavailable.');return BackupProtectionHost;}
+function requireAttachmentLibrary(){if(!AttachmentLibrary)throw new Error('Study Director attachment library is unavailable.');return AttachmentLibrary;}
+
 const BackgroundTasks=NativeCapabilitiesModule.createTaskScheduler(window);
 const LocalStorageContract=PersistenceModule.createLocalStorage(Object.freeze<Parameters<typeof PersistenceModule.createLocalStorage>[0]>({
   onError:(operation,error)=>StorageHealthController?.observeLocalStorage(operation,error),
@@ -1650,10 +1655,14 @@ const ProfileDeletion=ProfilesHostModule.createDeletion(Object.freeze<Parameters
     suspendBackground:reason=>BackupProviderRuntime.suspendBackground(reason)
   }),
   device:Object.freeze({
-    status:()=>DeviceBackup.status(),
-    deleteBackups:()=>DeviceBackup.deleteBackups()
+    status:()=>requireDeviceBackup().status(),
+    deleteBackups:()=>requireDeviceBackup().deleteBackups()
   }),
-  interactions:Interactions,
+  interactions:Object.freeze({
+    choose:options=>Interactions.choose(options),
+    confirm:async options=>(await Interactions.confirm(options))===true,
+    notify:options=>Interactions.notify(options)
+  }),
   capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
   getStudentName:()=>getStudentNameFromDisplay(),
   renderProfile:()=>renderProfile(),
@@ -1665,7 +1674,7 @@ const driveProfileDeleted=ProfileDeletion.driveProfileDeleted;
 
 const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze<Parameters<typeof ProfilesHostModule.createDriveBinding>[0]>({
   profiles:Profiles,
-  interactions:Interactions,
+  interactions:Object.freeze({confirm:async options=>(await Interactions.confirm(options))===true,notify:options=>Interactions.notify(options)}),
   clearBaseline:()=>ReconciliationBaselineStore.clear(),
   renderProfile:()=>renderProfile(),
   endConnectCard:()=>endDriveConnectCard(),
@@ -1674,7 +1683,8 @@ const ProfileDriveBinding=ProfilesHostModule.createDriveBinding(Object.freeze<Pa
   storageHealthTime,
   now:()=>Date.now()
 }));
-SyncStatusHost=SyncStatusHostModule.createController(Object.freeze<Parameters<typeof SyncStatusHostModule.createController>[0]>({
+type SyncStatusHostInput=Parameters<typeof SyncStatusHostModule.createController>[0];
+SyncStatusHost=SyncStatusHostModule.createController(Object.freeze<SyncStatusHostInput>({
   document,
   providers:()=>BackupProviderRuntime,
   presentation:BackupPresentation,
@@ -1693,9 +1703,9 @@ SyncStatusHost=SyncStatusHostModule.createController(Object.freeze<Parameters<ty
   sessionElsewhere:()=>sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):'',
   sessionReady:()=>sessionParkedHere()&&sessionFromElsewhere(sessionPanelSession)?sessionDevice(sessionPanelSession):'',
   unseen:()=>NoticeCoordinator.recent().unseen,
-  actions:Object.freeze({
+  actions:Object.freeze<SyncStatusHostInput['actions']>({
     closeProfilePanel:()=>closeProfilePanel(),
-    enterPassword:()=>BackupActions.manageProtection(),
+    enterPassword:()=>requireBackupActions().manageProtection(),
     checkUpdate:()=>checkUnsupportedUpdate(),
     applyUpdate:()=>applyPwaUpdateFromUi(),
     connectDevice:()=>connectDeviceBackupWithRecovery(),
@@ -1703,7 +1713,7 @@ SyncStatusHost=SyncStatusHostModule.createController(Object.freeze<Parameters<ty
     continueSession:()=>continueSessionOnExecute('sync-status'),
     openData:async()=>{if(!await goTab('library',{source:'sync-status'}))return false;LibraryView.showSection('data');return true;}
   }),
-  environment:Object.freeze({
+  environment:Object.freeze<SyncStatusHostInput['environment']>({
     window,now:()=>Date.now(),online:()=>navigator.onLine!==false,visible:()=>document.visibilityState==='visible',
     setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:handle=>{if(handle!==null)clearTimeout(handle);},
     setInterval:(callback,delay)=>setInterval(callback,delay)
@@ -1732,7 +1742,7 @@ const FirstStart=ProfilesHostModule.createFirstStart(Object.freeze<Parameters<ty
 
 // A deliberate profile reload must not outrun writes owned by the current
 // profile. Page-exit flushing remains a last safety net, not the commit gate.
-const ProfileSettlement=ProfilesHostModule.createSettlement({AppOwnership,AppMutationCoordinator,appCanMutate,
+const ProfileSettlement=ProfilesHostModule.createSettlement({AppOwnership,AppMutationCoordinator:requireMutationCoordinator(),appCanMutate,
  PlanDraftEditor:{flush:options=>PlanDraftEditor.flush(options)},PlanData:{settled:()=>PlanData.settled()},settleAttachmentWriters:()=>LibraryDocuments.settleAttachmentWriters(),
  deletionRecovery:AppData.deletionRecovery,AppDiagnostics,setPlanStatus:(...args)=>setPlanStatus(...args)
 });
@@ -1761,10 +1771,11 @@ const askProfilePassword=ProfileLifecycle.askProfilePassword;
 // Version History reads each encrypted version for its date and counts, so a
 // password put off at start is asked for first. Not now still opens the list,
 // with those versions shown as locked.
-function withBackupPassword(open:Parameters<NonNullable<typeof BackupProtectionHost>['withPassword']>[0]){return BackupProtectionHost.withPassword(open);}
-function onQuoteChange(options={}){
+function withBackupPassword(open:Parameters<NonNullable<typeof BackupProtectionHost>['withPassword']>[0]){return requireBackupProtectionHost().withPassword(open);}
+function onQuoteChange(options:Readonly<{markChanged?:boolean}>={}){
   if(options.markChanged!==false)markDayContentChanged();
   const input=document.getElementById('quote-input');
+  if(!(input instanceof HTMLInputElement||input instanceof HTMLTextAreaElement))return;
   const bounded=clampText(input.value,APP_LIMITS.maxQuoteChars);
   if(input.value!==bounded)input.value=bounded;
   const v=bounded.trim();
@@ -1780,7 +1791,7 @@ function tickClock(){
   // Previous-day Review is an explicit recovery choice, not a live study
   // session eligible for automatic rollover or a surprise Day save.
   if(studyDayRolledOver(n)&&sessionPanelMode!=='previous'){handleStudyDayRollover();return;}
-  if(dd&&dd.dataset.autoDate==='1'&&dd.value!==autoDate&&!SessionLifecycle.transitioning){
+  if(dd instanceof HTMLInputElement&&dd.dataset['autoDate']==='1'&&dd.value!==autoDate&&!SessionLifecycle.transitioning){
     void SessionLifecycle.run('date-rollover',{date:autoDate,autoDate:true},()=>{
       dd.value=autoDate;return true;
     }).catch(error=>AppDiagnostics.capture('review.auto-date-rollover',error,'warn'));
@@ -1814,11 +1825,14 @@ function updateHeaderInfo(){
   const schedMeta=document.getElementById('sched-meta');if(schedMeta)schedMeta.textContent=workBlocks.length?`${hrsLabel} · ${blockLabel}`:'BUILD TODAY’S PLAN';
 }
 /* SHELL, PLUGINS, AND TABS */
-const {NAV_HORIZONTAL_MEDIA_QUERY,preferredScrollBehavior,UiTabRegistry,presentTabCommit,prepareTabDeparture,commitTabView,waitForTabReady,goTab}=FoundationHostModule.createNavigation({document,window,clampText,controller:()=>NavigationController,
-  library:()=>LibraryView,review:()=>ReviewView,attachments:()=>AttachmentLibrary,reviewEditor:()=>ReviewEditor,
+type NavigationUiInput=Parameters<typeof FoundationHostModule.createNavigation>[0];
+const {NAV_HORIZONTAL_MEDIA_QUERY,preferredScrollBehavior,UiTabRegistry,presentTabCommit,prepareTabDeparture,commitTabView,waitForTabReady,goTab}=FoundationHostModule.createNavigation(Object.freeze<NavigationUiInput>({document,window,clampText,controller:()=>NavigationController,
+  library:()=>Object.freeze({settleDiary:()=>LibraryView.settleDiary(),deactivate:options=>LibraryView.deactivate(options),activate:options=>LibraryView.activate(options)}),
+  review:()=>Object.freeze({deactivate:()=>ReviewView.deactivate(),activate:options=>ReviewView.activate(options)}),
+  attachments:()=>Object.freeze({close:()=>requireAttachmentLibrary().close(),refresh:()=>requireAttachmentLibrary().refresh()}),reviewEditor:()=>ReviewEditor,
   flushPendingReviewSave:(...args)=>flushPendingReviewSave(...args),setStatus:(...args)=>setStatus(...args),clearPreview:tab=>PreviewRuntime.clearExcept(tab),refreshPnote:(...args)=>refreshPnote(...args),updateCD:(...args)=>updateCD(...args),isLiveTrackableTimer:(...args)=>isLiveTrackableTimer(...args),refreshExecuteIdleDisplay:(...args)=>refreshExecuteIdleDisplay(...args),
   paused:()=>TimerState.paused,updateBreakMeter:(...args)=>updateBreakMeter(...args),renderPacer:()=>PracticePacer.render(),startTimerPresentation:()=>TimerPresentation.start(),stopTimerPresentation:()=>TimerPresentation.stop(),
-  renderScheduleOnPlanOpen:(...args)=>renderScheduleOnPlanOpen(...args),updateRealTimeAwareness:(...args)=>updateRealTimeAwareness(...args),requestPluginTab:tab=>PluginRuntime.requestTab(tab),applyOwnership:()=>OwnershipUiProjection.apply(),richTextSyncAll:(...args)=>richTextSyncAll(...args)});
+  renderScheduleOnPlanOpen:(...args)=>renderScheduleOnPlanOpen(...args),updateRealTimeAwareness:(...args)=>updateRealTimeAwareness(...args),requestPluginTab:tab=>PluginRuntime.requestTab(tab),applyOwnership:()=>OwnershipUiProjection.apply(),richTextSyncAll:(...args)=>richTextSyncAll(...args)}));
 
 
 const STUDY_DIRECTOR_READY_EVENT='studydirector:ready';
@@ -1826,11 +1840,12 @@ const OPTIONAL_PLUGIN_DESCRIPTORS=Object.freeze([
   Object.freeze({tabId:'guide',label:'Guide',icon:'?',src:'@@SD_EXTERNAL_GUIDE_FILENAME@@',pluginName:'SD-guide'}),
   Object.freeze({tabId:'insights',label:'Insights',icon:'✦',src:'@@SD_EXTERNAL_INSIGHTS_FILENAME@@',pluginName:'SD-insights'})
 ]);
-const PluginRuntime=PublicApiHostModule.createRuntime(Object.freeze<Parameters<typeof PublicApiHostModule.createRuntime>[0]>({
-  configuration:Object.freeze<SessionHostInput['configuration']>({capabilities:STUDY_DIRECTOR_CAPABILITIES,descriptors:OPTIONAL_PLUGIN_DESCRIPTORS}),
-  environment:Object.freeze({document,trustedAssetURL:value=>trustedAssetURL(value)}),
-  tabs:Object.freeze({registerTab:config=>UiTabRegistry.registerTab(config),renderTab:id=>UiTabRegistry.renderTab(id)}),
-  preview:Object.freeze({registerProvider:(target,provider)=>PreviewRuntime.registerProvider(target,provider)}),
+type PluginRuntimeInput=Parameters<typeof PublicApiHostModule.createRuntime>[0];
+const PluginRuntime=PublicApiHostModule.createRuntime(Object.freeze<PluginRuntimeInput>({
+  configuration:Object.freeze<PluginRuntimeInput['configuration']>({capabilities:STUDY_DIRECTOR_CAPABILITIES,descriptors:OPTIONAL_PLUGIN_DESCRIPTORS}),
+  environment:Object.freeze<PluginRuntimeInput['environment']>({document,trustedAssetURL:value=>trustedAssetURL(value)}),
+  tabs:Object.freeze<PluginRuntimeInput['tabs']>({registerTab:config=>UiTabRegistry.registerTab(config),renderTab:id=>UiTabRegistry.renderTab(id)}),
+  preview:Object.freeze<PluginRuntimeInput['preview']>({registerProvider:(target,provider)=>PreviewRuntime.registerProvider(target,provider)}),
   clampText
 }));
 const InsightsPreload=InsightsHostModule.createPreloadScheduler(Object.freeze<Parameters<typeof InsightsHostModule.createPreloadScheduler>[0]>({
@@ -1841,7 +1856,7 @@ const InsightsPreload=InsightsHostModule.createPreloadScheduler(Object.freeze<Pa
     :null,
   requestTab:()=>PluginRuntime.requestTab('insights')??Promise.resolve(false)
 }));
-function registerStudyDirectorPlugin(plugin){
+function registerStudyDirectorPlugin(plugin:unknown){
   return PluginRuntime.register(plugin);
 }
 if(location.protocol==='file:'){
@@ -1859,13 +1874,15 @@ document.addEventListener('securitypolicyviolation',event=>{
 });
 const trustedAssetURL=(()=>{
   const allowed=new Set(['@@SD_EXTERNAL_GUIDE_FILENAME@@','@@SD_EXTERNAL_INSIGHTS_FILENAME@@','@@SD_EXPORT_WORKER_FILENAME@@','@@SD_SEARCH_WORKER_FILENAME@@','@@SD_IMAGE_WORKER_FILENAME@@','@@SD_ATTACHMENT_WORKER_FILENAME@@','./sw.js'].map(value=>new URL(value,location.href).href));
-  const validate=value=>{const url=new URL(value,location.href).href;if(!allowed.has(url))throw new TypeError('Unapproved application script.');return url;};
-  const policy=globalThis.trustedTypes?.createPolicy('sd-assets',{createScriptURL:validate});
-  return value=>policy?policy.createScriptURL(value):validate(value);
+  const validate=(value:string)=>{const url=new URL(value,location.href).href;if(!allowed.has(url))throw new TypeError('Unapproved application script.');return url;};
+  type TrustedTypesFactory=Readonly<{createPolicy(name:string,rules:Readonly<{createScriptURL(value:string):string}>):Readonly<{createScriptURL(value:string):string}>}>;
+  const trustedTypes=(globalThis as typeof globalThis&{trustedTypes?:TrustedTypesFactory}).trustedTypes;
+  const policy=trustedTypes?.createPolicy('sd-assets',{createScriptURL:validate});
+  return (value:string)=>policy?policy.createScriptURL(value):validate(value);
 })();
 
 function fullscreenAvailable(){
-  const standalone=(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
+  const standalone=(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||(navigator as Navigator&{standalone?:boolean}).standalone===true;
   return document.fullscreenEnabled===true&&typeof document.documentElement.requestFullscreen==='function'&&!standalone;
 }
 function updateFullscreenButton(){
@@ -1901,14 +1918,14 @@ function toggleFS(){
   if(action&&typeof action.catch==='function')action.catch(error=>AppDiagnostics.capture('ui.fullscreen',error));
   updateFullscreenButton();
 }
-function shouldIgnoreFullscreenDblClick(target){
+function shouldIgnoreFullscreenDblClick(target:Element|null){
   if(!target||!target.closest||!target.closest('.app'))return true;
   if(target.closest('button,input,textarea,select,a,summary,label,[contenteditable="true"],[data-action],[data-tab]'))return true;
   if(target.closest('dialog,#gap-overlay,#nudge-overlay,.execute-state-overlay,.nav-item,.plan-draft-row,.sched-row,.rcard,.library-day'))return true;
   if(target.closest('span,code,pre,.ui-label,.ui-body,.ui-mono,.plan-header,.library-title,.review-date,.rt-value'))return true;
   return false;
 }
-function handleFullscreenDblClick(ev){
+function handleFullscreenDblClick(ev:MouseEvent){
   if((window.matchMedia&&window.matchMedia('(hover:none) and (pointer:coarse)').matches)||!appCanMutate()||shouldIgnoreFullscreenDblClick(ev.target))return;
   ev.preventDefault();
   toggleFS();
@@ -1919,11 +1936,11 @@ function clockHM(d=new Date()){
 function clockHMS(d=new Date()){
   return d.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 }
-function timeLabelFromIso(iso){
+function timeLabelFromIso(iso:unknown):string|null{
   if(!iso)return null;
   try{return clockHM(new Date(iso));}catch(e){return null;}
 }
-function shortTaskLabel(t){
+function shortTaskLabel(t:Task|undefined){
   if(!t)return '—';
   const prefix=isFixedBlock(t)?(taskAreaValue(t)||'fixed').toUpperCase()+': ':'';
   return prefix+t.name;
@@ -1931,13 +1948,14 @@ function shortTaskLabel(t){
 function realTimeAwarenessKey(...args:Parameters<typeof ExecutionViews.realTimeAwarenessKey>){return ExecutionViews.realTimeAwarenessKey(...args);}
 function realTimeElements(...args:Parameters<typeof ExecutionViews.realTimeElements>){return ExecutionViews.realTimeElements(...args);}
 function updateRealTimeAwareness(...args:Parameters<typeof ExecutionViews.updateRealTimeAwareness>){return ExecutionViews.updateRealTimeAwareness(...args);}
-const renderQueue=new Set();
+type RenderKey='schedule'|'badges'|'header'|'realtime'|'recovery';
+const renderQueue=new Set<RenderKey>();
 let renderQueueFrame=0;
 const markScheduleRenderDirty=()=>PlanRuntime.markRenderDirty();
 const renderScheduleIfVisible=()=>PlanRuntime.renderIfVisible();
 const renderScheduleOnPlanOpen=()=>PlanRuntime.renderOnOpen();
-const RENDER_ORDER=['schedule','badges','header','realtime','recovery'];
-const RENDER_HANDLERS={
+const RENDER_ORDER:readonly RenderKey[]=['schedule','badges','header','realtime','recovery'];
+const RENDER_HANDLERS:Readonly<Record<RenderKey,()=>unknown>>={
   schedule:()=>renderScheduleIfVisible(),
   badges:()=>updateBadges(),
   header:()=>updateHeaderInfo(),
@@ -1950,7 +1968,7 @@ function flushRenderQueue(){
   renderQueue.clear();
   RENDER_ORDER.forEach(key=>{if(pending.has(key))RENDER_HANDLERS[key]();});
 }
-function requestRender(...keys){
+function requestRender(...keys:RenderKey[]){
   keys.flat().forEach(key=>{
     if(!RENDER_HANDLERS[key])return;
     if(key==='schedule')markScheduleRenderDirty();
@@ -1958,7 +1976,7 @@ function requestRender(...keys){
   });
   if(!renderQueueFrame)renderQueueFrame=requestAnimationFrame(flushRenderQueue);
 }
-function refreshCoreUi(options={}){
+function refreshCoreUi(options:Readonly<{header?:boolean}>={}){
   renderSched();
   updateBadges();
   if(options.header)updateHeaderInfo();
@@ -1971,7 +1989,7 @@ function reconcileProtectedMutationUi(){
   try{renderSched();PlanRuntime.savedPlans.syncAccess();}catch(error){AppDiagnostics.capture('mutation-ui.plan',error,'warn');}
   try{setExecuteControlsEnabled(isLiveTrackableTimer());updateSessionControls();PracticePacer.render();}catch(error){AppDiagnostics.capture('mutation-ui.execute',error,'warn');}
   try{ReviewView.syncMode();if(document.getElementById('pane-review')?.classList.contains('on'))ReviewView.refresh({force:true});}catch(error){AppDiagnostics.capture('mutation-ui.review',error,'warn');}
-  try{LibraryView.refreshNotes();if(document.getElementById('pane-library')?.classList.contains('on')){LibraryView.requestRender();void AttachmentLibrary.refresh();}}catch(error){AppDiagnostics.capture('mutation-ui.library',error,'warn');}
+  try{LibraryView.refreshNotes();if(document.getElementById('pane-library')?.classList.contains('on')){LibraryView.requestRender();void requireAttachmentLibrary().refresh();}}catch(error){AppDiagnostics.capture('mutation-ui.library',error,'warn');}
   try{OwnershipUiProjection.apply();}catch(error){AppDiagnostics.capture('mutation-ui.ownership',error,'warn');}
   return true;
 }
