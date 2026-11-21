@@ -125,7 +125,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     }
     try{
       const ok=(value['setup'] as (api:StudyDirectorPublicApi)=>unknown)(publicApi)!==false,detail=ok?'':'Plugin setup did not activate.';
-      if(ok&&isRecord(value['previewProviders']))for(const [target,provider] of Object.entries(value['previewProviders']))input.preview.registerProvider(target,provider);
+      if(ok&&isRecord(value['previewProviders']))for(const [target,provider] of Object.entries(value['previewProviders']))if(typeof provider==='function')input.preview.registerProvider(target,provider as InsightsPreviewProvider);
       registered.set(name,{name,version:input.clampText(value['version']||'',40),state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()});
       if(descriptor){markFile(descriptor.tabId,ok?'registered':'failed',detail,fileState(descriptor.tabId)?.attempts??null);renderIfActive(descriptor.tabId);}return ok;
     }catch(error){
@@ -193,7 +193,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     });
     return publicApi;
   }
-  return freeze({format:'study-director.public-api-host',contractVersion:1,registerPlaceholders,requestTab,status,createPublicApi});
+  return freeze({format:'study-director.public-api-host',contractVersion:1,registerPlaceholders,requestTab,register,status,createPublicApi});
 }
 const createModule=():PublicApiHostContract=>freeze({format:'study-director.public-api-host-module',contractVersion:1,createRuntime});
 registry.define('public-api-host',1,createModule);return createModule;
