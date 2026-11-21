@@ -429,7 +429,7 @@ type ExecutionHostPorts=Parameters<typeof ExecutionHostModule.createRuntime>[0];
 const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameters<typeof ExecutionHostModule.createRuntime>[0]>({
   modules:Object.freeze<ExecutionHostPorts['modules']>({timerState:TimerStateModule,pomodoro:PomodoroModule,practicePacer:PracticePacerModule,timerEngine:TimerEngineModule}),
   timerState:Object.freeze<ExecutionHostPorts['timerState']>({
-    helpers:Object.freeze<RepositoryCompositionInput['appData']['helpers']>({makeTaskId}),
+    helpers:Object.freeze<ExecutionHostPorts['timerState']['helpers']>({makeTaskId}),
     diagnostics:Object.freeze<ExecutionHostPorts['timerState']['diagnostics']>({capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)}),
     effects:Object.freeze<ExecutionHostPorts['timerState']['effects']>({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
   }),
@@ -634,7 +634,7 @@ isFixedBlock:(...args)=>isFixedBlock(...args),
 isSupportBlock:(...args)=>isSupportBlock(...args),
 shortTaskLabel:(...args)=>shortTaskLabel(...args),
 clockHMS:(...args)=>clockHMS(...args),
-setElementText:(...args)=>setElementText(...args),
+setElementText:(element,value)=>setElementText(element??null,String(value??'')),
 textEl:(...args)=>textEl(...args),
 requestRender:(...args)=>requestRender(...args),
 appCanMutate:(...args)=>appCanMutate(...args),
@@ -909,7 +909,7 @@ const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze<P
     boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,optionalBoundedNumber,optionalText,safeBoolean,
     sameDataValue,normalizeStudyQuality,todayISO,dateInsightsMeta,sanitizePracticeRun
   }),
-  timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
+  timestamps:Object.freeze<ActiveSessionCodecInput['timestamps']>({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
   timer:Object.freeze({
     modes:Object.freeze({PAUSED:TIMER_MODES.PAUSED,RUNNING:TIMER_MODES.RUNNING}),
     defaultBreakSeconds:()=>Pomodoro.configuration.breakSeconds()
@@ -918,13 +918,14 @@ const DailyRecordCodec=RecordCodecsModule.createDailyRecordCodec(Object.freeze<P
 const PersonalDataCodec=RecordCodecsModule.createPersonalDataCodec(APP_LIMITS);
 /* ACTIVE SESSION CODEC */
 /* ACTIVE SESSION CODEC · IMPORTED */
-const ActiveSessionCodec=RecordCodecsModule.createActiveSessionCodec(Object.freeze<Parameters<typeof RecordCodecsModule.createActiveSessionCodec>[0]>({
+type ActiveSessionCodecInput=Parameters<typeof RecordCodecsModule.createActiveSessionCodec>[0];
+const ActiveSessionCodec=RecordCodecsModule.createActiveSessionCodec(Object.freeze<ActiveSessionCodecInput>({
   limits:APP_LIMITS,
   dataContract:DATA_CONTRACT,
   activeSessionId:ACTIVE_SESSION_ID,
   domain:DomainModule,
   keyedRecord:KeyedRecord,
-  helpers:Object.freeze({
+  helpers:Object.freeze<ActiveSessionCodecInput['helpers']>({
     boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,cleanDayRevision,sameDataValue,
     activeSessionScheduleFingerprint,isCanonicalScheduleText,isValidIsoDate,normalizeStudyQuality,
     parseProgressNumber,sanitizePracticeState
@@ -932,9 +933,10 @@ const ActiveSessionCodec=RecordCodecsModule.createActiveSessionCodec(Object.free
   timestamps:Object.freeze({normalizeTimestamp,normalizeImportedTimestamp,normalizeImportedEpochMillis}),
   dailyRecordCodec:DailyRecordCodec
 }));
-const PendingReviewCodec=RecordCodecsModule.createPendingReviewCodec(Object.freeze<Parameters<typeof RecordCodecsModule.createPendingReviewCodec>[0]>({
+type PendingReviewCodecInput=Parameters<typeof RecordCodecsModule.createPendingReviewCodec>[0];
+const PendingReviewCodec=RecordCodecsModule.createPendingReviewCodec(Object.freeze<PendingReviewCodecInput>({
   dataContract:DATA_CONTRACT,dailyRecordCodec:DailyRecordCodec,activeSessionCodec:ActiveSessionCodec,personalDataCodec:PersonalDataCodec,
-  helpers:Object.freeze({sameDataValue,randomBytes:count=>crypto.getRandomValues(new Uint8Array(count))})
+  helpers:Object.freeze<PendingReviewCodecInput['helpers']>({sameDataValue,randomBytes:count=>crypto.getRandomValues(new Uint8Array(count))})
 }));
 const {
   buildDailyRecordSummary, compactPauseEvents, compactRealTimeSnapshot, compactAdjustedSchedule,
@@ -1008,10 +1010,10 @@ async function activeSessionContentFingerprint(session:ActiveSession|null){
 function activeSessionPayload(snapshot=null,options={}){return ActiveSessionRuntime?.payload(snapshot,options)||null;}
 function readLocalRecoverySession(){return ActiveSessionRuntime?.readLocal()||null;}
 function handleActiveSessionRepositoryResult(...args:Parameters<typeof SessionActions.handleActiveSessionRepositoryResult>){return SessionActions.handleActiveSessionRepositoryResult(...args);}
-function requireCanonicalSessionWrite(saved:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[0],expected:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[1],operation:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[2]='active-session transition'){return ActiveSessionRuntime.requireCanonicalWrite(saved,expected,operation);}
-function writeActiveSessionNow(snapshot:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeSnapshot']>[0],options:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeSnapshot']>[1]={}){return ActiveSessionRuntime.writeSnapshot(snapshot,options);}
-function writeLiveDraftNow(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeNow']>[0]={}){return ActiveSessionRuntime.writeNow(options);}
-function saveLiveDraft(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['saveLiveDraft']>[0]={}){return ActiveSessionRuntime.saveLiveDraft(options);}
+function requireCanonicalSessionWrite(saved:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[0],expected:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[1],operation:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[2]='active-session transition'){return requireActiveSessionRuntime().requireCanonicalWrite(saved,expected,operation);}
+function writeActiveSessionNow(snapshot:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeSnapshot']>[0],options:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeSnapshot']>[1]={}){return requireActiveSessionRuntime().writeSnapshot(snapshot,options);}
+function writeLiveDraftNow(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeNow']>[0]={}){return requireActiveSessionRuntime().writeNow(options);}
+function saveLiveDraft(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['saveLiveDraft']>[0]={}){return requireActiveSessionRuntime().saveLiveDraft(options);}
 function cancelPendingLiveDraftSave(){return ActiveSessionRuntime?.cancelPendingLiveDraftSave()||false;}
 function flushLiveDraft(options={}){return ActiveSessionRuntime?.flushLiveDraft(options)||null;}
 function maybeSnapshotRunningTimer(){return ActiveSessionRuntime?.maybeSnapshotRunningTimer()||false;}
@@ -1263,7 +1265,7 @@ function persistedActiveSessionUnfinished(session:ActiveSession|null){
   const taskState=snapshot.taskState&&typeof snapshot.taskState==='object'?snapshot.taskState:{};
   return draft.parsed.some((task,index)=>{
     if(!isTrackableBlock(task))return false;
-    const taskId=String(task.id||makeTaskId(task,index));
+    const taskId=makeTaskId(task,index);
     const resolved=taskState[taskId]&&taskState[taskId].resolvedState;
     return resolved!=='done'&&resolved!=='skipped';
   });
