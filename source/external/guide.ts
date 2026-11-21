@@ -1,6 +1,7 @@
 import type {InsightsPreviewProvider} from '../core/insights-host.ts';
 import type {CompletionSource,TaskKind} from '../../types/domain.ts';
 import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,StudyRecord} from '../../types/record-models.ts';
+import type {NativeCapabilitiesStatus} from '../../types/native-capabilities.ts';
 
 /*
   Study Director Guide
@@ -22,7 +23,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
   type GuideRenderContext=Readonly<{pane:HTMLElement}>;
   type GuideState={step:GuideStep;status:string;ok:boolean;mapTabs:Record<string,string>;referenceOpen:Record<string,boolean>;installHelpOpen:boolean;context:GuideRenderContext|null};
   type QuickReferenceTab=Readonly<{id:string;label:string;render:()=>HTMLElement|null}>;
-  type InstallStatus=Readonly<{installationAction:string;installationState:string;installationLabel:string;installationSummary:string;installationContext:string;installationSteps:readonly string[];installationFallback:readonly string[];installInspecting:boolean;installHelpRequested:boolean}>;
+  type InstallStatus=Pick<NativeCapabilitiesStatus,'installationAction'|'installationState'|'installationLabel'|'installationSummary'|'installationContext'|'installationSteps'|'installationFallback'|'installInspecting'|'installHelpRequested'>;
   type WorkspaceRoute=Readonly<{kind:'legal';token:string;key:string}>;
   type WorkspaceHistoryPort=Readonly<{register:(kind:'legal',controller:Readonly<{current:()=>WorkspaceRoute|null;reconcile:(desired:unknown)=>Promise<WorkspaceRoute|null>}>)=>boolean;open:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;replace:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;close:(descriptor:WorkspaceRoute)=>unknown;closed:(descriptor:WorkspaceRoute,meta:Readonly<{fromHistory:boolean;historyPending:boolean}>)=>unknown}>;
   type GuideApi=Readonly<{capabilities:Readonly<Record<string,number>>;ui:Readonly<{registerTab:(definition:Readonly<{id:string;label:string;icon:string;render:(context:GuideRenderContext)=>void}>)=>boolean;goTab:(tab:string)=>unknown;workspaceHistory:WorkspaceHistoryPort}>;plan:Readonly<{loadDraft:(schedule:string,options:Readonly<{label:string}>)=>PromiseLike<Readonly<{ok?:boolean;error?:string}>>|Readonly<{ok?:boolean;error?:string}>}>;preview:Readonly<{useSample:(options:Readonly<{label:string;target:'insights'}>)=>PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>;clear:(target:'insights')=>unknown}>;installation:Readonly<{status:()=>InstallStatus;prompt:()=>PromiseLike<unknown>|unknown;inspect:()=>PromiseLike<unknown>|unknown;showHelp:()=>unknown}>}>;
