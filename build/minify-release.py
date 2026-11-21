@@ -501,11 +501,14 @@ def update_service_worker(public: Path, replacements: dict[str, str]) -> None:
         ensure_ascii=False,
     )
     release_id = sha256_bytes(release_payload.encode("utf-8"))[:24]
-    final_worker = worker_template.replace(
-        "const RELEASE_ID='@@SD_PWA_RELEASE_ID@@';",
+    final_worker, replacements = re.subn(
+        r"const\s+RELEASE_ID\s*=\s*'@@SD_PWA_RELEASE_ID@@';",
         f"const RELEASE_ID='{release_id}';",
-        1,
+        worker_template,
+        count=1,
     )
+    if replacements != 1:
+        raise RuntimeError("Could not stamp minified service-worker release identity")
     sw_path.write_text(final_worker, encoding="utf-8", newline="\n")
 
 
@@ -513,7 +516,7 @@ def write_deployment_identity(destination: Path, public: Path) -> None:
     sw_path = public / "sw.js"
     sw_source = sw_path.read_text(encoding="utf-8")
     index_source = (public / "index.html").read_text(encoding="utf-8")
-    release_match = re.search(r"const RELEASE_ID='([0-9a-f]+)';", sw_source)
+    release_match = re.search(r"\bRELEASE_ID\s*=\s*['\"]([0-9a-f]{24})['\"]", sw_source)
     build_match = re.search(
         r'<meta name="study-director-build" content="([^"]+)">',
         index_source,
