@@ -425,34 +425,34 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameter
     effects:Object.freeze<ExecutionHostPorts['timerState']['effects']>({modeChanged:()=>{updateExecutePanels();void NativeCapabilities?.syncWake();syncStudyQuiet();}})
   }),
   pomodoro:Object.freeze<ExecutionHostPorts['pomodoro']>({
-    schedule:Object.freeze<ExecutionHostPorts['schedule']>({isPomodoroEligibleBlock}),
-    persistence:Object.freeze({
+    schedule:Object.freeze<ExecutionHostPorts['pomodoro']['schedule']>({isPomodoroEligibleBlock}),
+    persistence:Object.freeze<ExecutionHostPorts['pomodoro']['persistence']>({
       canMutate:()=>appCanMutate(),
       readConfiguration:()=>protectedPreferencesState.nudge,
       writeConfiguration:value=>persistProtectedPreferences({nudge:value,soundMode:NoticeCoordinator.soundStatus().mode}),
       writeSession:(...args)=>writeLiveDraftNow(...args)
     }),
-    view:Object.freeze({document,notifications:NoticeCoordinator,updateExecutePanels}),
-    environment:Object.freeze({nowIso:()=>new Date().toISOString()})
+    view:Object.freeze<ExecutionHostPorts['pomodoro']['view']>({document,notifications:NoticeCoordinator,updateExecutePanels}),
+    environment:Object.freeze<ExecutionHostPorts['pomodoro']['environment']>({nowIso:()=>new Date().toISOString()})
   }),
   practiceModel:Object.freeze<ExecutionHostPorts['practiceModel']>({
     configuration:Object.freeze<ExecutionHostPorts['practiceModel']['configuration']>({APP_LIMITS}),
     domain:Object.freeze<ExecutionHostPorts['practiceModel']['domain']>({boundedInt,boundedNumber,clampArray,clampText,fmtS})
   }),
   practice:Object.freeze<ExecutionHostPorts['practice']>({
-    configuration:Object.freeze({APP_LIMITS}),
-    schedule:Object.freeze({isWorkBlock}),
-    persistence:Object.freeze({persistPracticeCueMode,persistPracticeTarget,saveLiveDraft,writeLiveDraftNow}),
-    view:Object.freeze({
+    configuration:Object.freeze<ExecutionHostPorts['practice']['configuration']>({APP_LIMITS}),
+    schedule:Object.freeze<ExecutionHostPorts['practice']['schedule']>({isWorkBlock}),
+    persistence:Object.freeze<ExecutionHostPorts['practice']['persistence']>({persistPracticeCueMode,persistPracticeTarget,saveLiveDraft,writeLiveDraftNow}),
+    view:Object.freeze<ExecutionHostPorts['practice']['view']>({
       document,
       isExecutePaneVisible:()=>!document.hidden&&!!document.getElementById('pane-execute')?.classList.contains('on'),
       setElementAttribute,setElementClass,setElementDisabled,setElementHidden,setElementStyle,setElementText,setTextSafe
     }),
-    userPreferences:Object.freeze({notifications:NoticeCoordinator,readUserDefaults}),
-    ownership:Object.freeze({appCanMutate:()=>appCanMutate()}),
-    clock:Object.freeze({nowMs:DecisionClock.nowMs})
+    userPreferences:Object.freeze<ExecutionHostPorts['practice']['userPreferences']>({notifications:NoticeCoordinator,readUserDefaults}),
+    ownership:Object.freeze<ExecutionHostPorts['practice']['ownership']>({appCanMutate:()=>appCanMutate()}),
+    clock:Object.freeze<ExecutionHostPorts['practice']['clock']>({nowMs:DecisionClock.nowMs})
   }),
-  schedule:Object.freeze({
+  schedule:Object.freeze<ExecutionHostPorts['schedule']>({
     model:ScheduleModel,time:TimeModel,
     compactAdjustedSchedule:value=>compactAdjustedSchedule(value),
     invalidateDerived:options=>invalidateScheduleDerived(options)
@@ -464,16 +464,16 @@ const ExecutionRuntime=ExecutionHostModule.createRuntime(Object.freeze<Parameter
     saveLiveDraft:()=>saveLiveDraft()
   }),
   timer:Object.freeze<ExecutionHostPorts['timer']>({
-    configuration:Object.freeze({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
-    domain:Object.freeze({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
-    schedule:Object.freeze({getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),isLiveTrackableTimer,isWorkBlock,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
-    persistence:Object.freeze({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}),
-    view:Object.freeze({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl}),
-    clock:Object.freeze({nowMs:DecisionClock.nowMs}),
-    reviewEvidence:Object.freeze({applicableNotesForTask,getReviewDate,updateRealTimeAwareness,updateTimerFocusMetrics}),
+    configuration:Object.freeze<ExecutionHostPorts['timer']['configuration']>({APP_LIMITS,SLEEP_GAP_THRESHOLD_MS}),
+    domain:Object.freeze<ExecutionHostPorts['timer']['domain']>({KeyedRecord,boundedInt,clampText,cleanDayRevision,fmtOver,fmtS,makeTaskId,positiveMinutes,shortTaskLabel,studyMinuteToHHMM,taskAreaValue,taskMeasureValue,taskTargetValue}),
+    schedule:Object.freeze<ExecutionHostPorts['timer']['schedule']>({getLatestCarryForward:()=>latestCarryForward,getScheduleDerivedState:()=>ScheduleDerivedState,handleStudyDayRollover:(...args)=>handleStudyDayRollover(...args),isLiveTrackableTimer,isWorkBlock,scheduleFingerprint,studyDayRolledOver:(...args)=>studyDayRolledOver(...args)}),
+    persistence:Object.freeze<ExecutionHostPorts['timer']['persistence']>({compactPauseEvents:(...args)=>compactPauseEvents(...args),compactRealTimeSnapshot:(...args)=>compactRealTimeSnapshot(...args),flushLiveDraft,maybeSnapshotRunningTimer,recoverySetStatus,saveLiveDraft,saveNote,writeLiveDraftNow}),
+    view:Object.freeze<ExecutionHostPorts['timer']['view']>({cachedElements,clearExecuteStateOverlay,invalidateExecuteIdleDisplay:()=>{executeIdleDisplayKey='';},refreshPnote,refreshExecuteIdleDisplay,requestRender,setElementStyle,setElementText,setTextSafe,setExecuteControlsEnabled,setExecuteShellVisible,showDone,showEmpty,textEl}),
+    clock:Object.freeze<ExecutionHostPorts['timer']['clock']>({nowMs:DecisionClock.nowMs}),
+    reviewEvidence:Object.freeze<ExecutionHostPorts['timer']['reviewEvidence']>({applicableNotesForTask,getReviewDate,updateRealTimeAwareness,updateTimerFocusMetrics}),
     clockEnvironment:Object.freeze<ExecutionHostPorts['timer']['clockEnvironment']>({cancelAnimationFrame:frame=>cancelAnimationFrame(frame),clearInterval:id=>clearInterval(id),document,getComputedStyle:element=>getComputedStyle(element),requestAnimationFrame:callback=>requestAnimationFrame(callback),setInterval:(callback,delay)=>setInterval(callback,delay),setTimeout:(callback,delay)=>setTimeout(callback,delay),window}),
-    userPreferences:Object.freeze({notifications:NoticeCoordinator}),
-    ownership:Object.freeze({appCanMutate:()=>appCanMutate()})
+    userPreferences:Object.freeze<ExecutionHostPorts['timer']['userPreferences']>({notifications:NoticeCoordinator}),
+    ownership:Object.freeze<ExecutionHostPorts['timer']['ownership']>({appCanMutate:()=>appCanMutate()})
   }),
   hooks:Object.freeze<ExecutionHostPorts['hooks']>({syncStudyQuiet})
 }));
