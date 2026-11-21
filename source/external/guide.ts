@@ -22,7 +22,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
   type GuideRenderContext=Readonly<{pane:HTMLElement}>;
   type GuideState={step:GuideStep;status:string;ok:boolean;mapTabs:Record<string,string>;referenceOpen:Record<string,boolean>;installHelpOpen:boolean;context:GuideRenderContext|null};
   type QuickReferenceTab=Readonly<{id:string;label:string;render:()=>HTMLElement|null}>;
-  type InstallStatus=Readonly<{installationAction:string;installationState:string;installationLabel:string;installationSummary:string;installationContext:string;installationSteps:readonly string[];installationFallback:readonly string[];installationInspecting:boolean;installHelpRequested:boolean}>;
+  type InstallStatus=Readonly<{installationAction:string;installationState:string;installationLabel:string;installationSummary:string;installationContext:string;installationSteps:readonly string[];installationFallback:readonly string[];installInspecting:boolean;installHelpRequested:boolean}>;
   type WorkspaceRoute=Readonly<{kind:'legal';token:string;key:string}>;
   type WorkspaceHistoryPort=Readonly<{register:(kind:'legal',controller:Readonly<{current:()=>WorkspaceRoute|null;reconcile:(desired:unknown)=>Promise<WorkspaceRoute|null>}>)=>boolean;open:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;replace:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;close:(descriptor:WorkspaceRoute)=>unknown;closed:(descriptor:WorkspaceRoute,meta:Readonly<{fromHistory:boolean;historyPending:boolean}>)=>unknown}>;
   type GuideApi=Readonly<{capabilities:Readonly<Record<string,number>>;ui:Readonly<{registerTab:(definition:Readonly<{id:string;label:string;icon:string;render:(context:GuideRenderContext)=>void}>)=>unknown;goTab:(tab:string)=>unknown;workspaceHistory:WorkspaceHistoryPort}>;plan:Readonly<{loadDraft:(schedule:string,options:Readonly<{label:string}>)=>PromiseLike<Readonly<{ok?:boolean;error?:string}>>|Readonly<{ok?:boolean;error?:string}>}>;preview:Readonly<{useSample:(options:Readonly<{label:string;target:'insights'}>)=>PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>;clear:(target:'insights')=>unknown}>;installation:Readonly<{status:()=>InstallStatus;prompt:()=>PromiseLike<unknown>|unknown;inspect:()=>PromiseLike<unknown>|unknown;showHelp:()=>unknown}>}>;
@@ -389,7 +389,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     })
   });
 
-  function el<K extends keyof HTMLElementTagNameMap>(tag:K,className:string,text?:unknown):HTMLElementTagNameMap[K]{
+  function el<K extends keyof HTMLElementTagNameMap>(tag:K,className:string='',text?:unknown):HTMLElementTagNameMap[K]{
     const node=document.createElement(tag);
     if(className)node.className=className;
     if(text!==undefined&&text!==null)node.textContent=String(text);
@@ -440,7 +440,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
       if(!active()&&!(overlay&&!overlay.hidden))return Promise.resolve(true);
       if(closing)return closePromise;
       const closingDescriptor=current();
-      loadRevision+=1;activeId='';closing=true;
+      loadRevision+=1;activeId=null;closing=true;
       closePromise=new Promise(resolve=>{resolveClose=resolve;});
       if(closingDescriptor)routeHistory?.closed(closingDescriptor,{fromHistory:meta.fromHistory===true,historyPending:meta.historyPending===true});
       const layer=overlay;if(!layer)return Promise.resolve(false);layer.classList.remove('is-open');layer.classList.add('is-closing');
@@ -460,25 +460,25 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
       const headCopy=el('div');headCopy.append(el('div','legal-center-kicker ui-label','Study Director'),title=el('h2','legal-center-title','Legal Center'));title.id='legal-center-title';
       closeButton=button('legal-center-close ui-btn','Close',requestClose);closeButton.setAttribute('aria-label','Close Legal Center');
       head.append(headCopy,closeButton);
-      navigation=el('nav','legal-center-nav');navigation.setAttribute('aria-label','Legal documents');navigation.setAttribute('role','tablist');
+      const nav=navigation=el('nav','legal-center-nav');nav.setAttribute('aria-label','Legal documents');nav.setAttribute('role','tablist');
       documents.forEach(documentDefinition=>{
         const control=button('legal-center-nav-button ui-btn',documentDefinition.label,()=>open(documentDefinition.id));
-        control.id=`legal-center-tab-${documentDefinition.id}`;control.dataset['legalDocument']=documentDefinition.id;control.setAttribute('role','tab');control.setAttribute('aria-selected','false');control.setAttribute('aria-controls','legal-center-content');navigation.appendChild(control);
+        control.id=`legal-center-tab-${documentDefinition.id}`;control.dataset['legalDocument']=documentDefinition.id;control.setAttribute('role','tab');control.setAttribute('aria-selected','false');control.setAttribute('aria-controls','legal-center-content');nav.appendChild(control);
       });
-      content=el('article','legal-center-content');content.id='legal-center-content';content.setAttribute('role','tabpanel');content.setAttribute('tabindex','0');
-      const layout=el('div','legal-center-layout');layout.append(navigation,content);
+      const legalContent=content=el('article','legal-center-content');legalContent.id='legal-center-content';legalContent.setAttribute('role','tabpanel');legalContent.setAttribute('tabindex','0');
+      const layout=el('div','legal-center-layout');layout.append(nav,legalContent);
       dialog.append(head,layout);overlay.appendChild(dialog);document.body.appendChild(overlay);
       overlay.addEventListener('mousedown',event=>{if(event.target===overlay)requestClose();});
       dialog.addEventListener('keydown',trapKeys);
-      navigation.addEventListener('keydown',event=>{
+      nav.addEventListener('keydown',event=>{
         if(!['ArrowRight','ArrowLeft','ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
-        const tabs=[...navigation.querySelectorAll<HTMLButtonElement>('[role="tab"]')],currentIndex=Math.max(0,tabs.indexOf(document.activeElement as HTMLButtonElement));
+        const tabs=[...nav.querySelectorAll<HTMLButtonElement>('[role="tab"]')],currentIndex=Math.max(0,tabs.indexOf(document.activeElement as HTMLButtonElement));
         let next=currentIndex;if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else next=(currentIndex+(event.key==='ArrowRight'||event.key==='ArrowDown'?1:-1)+tabs.length)%tabs.length;
         event.preventDefault();const target=tabs[next];if(!target)return;target.focus();open(target.dataset['legalDocument']);
       });
-      content.addEventListener('click',event=>{
+      legalContent.addEventListener('click',event=>{
         const target=event.target;if(!(target instanceof Element))return;const link=target.closest<HTMLAnchorElement>('a[href]');if(!link)return;
-        const href=String(link.getAttribute('href')||'').split(/[?#]/)[0].replace(/^\.\//,'').toLowerCase();
+        const href=(String(link.getAttribute('href')||'').split(/[?#]/)[0]??'').replace(/^\.\//,'').toLowerCase();
         const id=pathToId.get(href);if(!id)return;
         event.preventDefault();open(id);
       });
@@ -488,14 +488,14 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     function trapKeys(event:KeyboardEvent):void{
       if(event.key==='Escape'){event.preventDefault();requestClose();return;}
       if(event.key!=='Tab')return;
-      const items=focusable();if(!items.length){event.preventDefault();dialog.focus();return;}
+      const items=focusable();if(!items.length){event.preventDefault();dialog?.focus();return;}
       const first=items.at(0),last=items.at(-1);if(!first||!last)return;
       if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
       else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
     }
     function historyUrl(id:LegalDocumentId):string{const url=new URL(location.href);url.hash=`legal/${id}`;return url.href;}
     async function read(documentDefinition:LegalDocumentDefinition):Promise<string>{
-      if(cache.has(documentDefinition.id))return cache.get(documentDefinition.id);
+      const cached=cache.get(documentDefinition.id);if(cached!==undefined)return cached;
       const response=await fetch(documentDefinition.path,{credentials:'same-origin'});
       if(!response.ok)throw new Error(`Could not load ${documentDefinition.label} (${response.status}).`);
       const source=await response.text();cache.set(documentDefinition.id,source);return source;
@@ -517,20 +517,21 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     async function render(id:unknown):Promise<void>{
       const key=typeof id==='string'&&byId.has(id as LegalDocumentId)?id as LegalDocumentId:'privacy';
       const documentDefinition=byId.get(key)??documents[0];if(!documentDefinition)throw new Error('Legal documents are unavailable.');const revision=++loadRevision;
-      activeId=documentDefinition.id;title.textContent=documentDefinition.label;
-      [...navigation.children].forEach(control=>{const selected=control.dataset['legalDocument']===activeId;control.classList.toggle('on',selected);control.setAttribute('aria-selected',selected?'true':'false');control.tabIndex=selected?0:-1;});
-      content.setAttribute('aria-labelledby',`legal-center-tab-${activeId}`);
-      content.setAttribute('aria-label',`${documentDefinition.label} document`);content.setAttribute('aria-busy','true');
-      content.replaceChildren(el('div','legal-center-loading ui-status',`Loading ${documentDefinition.label}…`));
+      const layer=ensure(),heading=title,nav=navigation,legalContent=content;if(!heading||!nav||!legalContent||layer.hidden)throw new Error('Legal Center is unavailable.');
+      activeId=documentDefinition.id;heading.textContent=documentDefinition.label;
+      [...nav.children].forEach(control=>{if(!(control instanceof HTMLElement))return;const selected=control.dataset['legalDocument']===activeId;control.classList.toggle('on',selected);control.setAttribute('aria-selected',selected?'true':'false');control.tabIndex=selected?0:-1;});
+      legalContent.setAttribute('aria-labelledby',`legal-center-tab-${activeId}`);
+      legalContent.setAttribute('aria-label',`${documentDefinition.label} document`);legalContent.setAttribute('aria-busy','true');
+      legalContent.replaceChildren(el('div','legal-center-loading ui-status',`Loading ${documentDefinition.label}…`));
       try{
         const source=await read(documentDefinition);if(revision!==loadRevision)return;
-        content.replaceChildren(documentDefinition.type==='html'?renderHtml(source):renderText(source));content.scrollTop=0;
+        legalContent.replaceChildren(documentDefinition.type==='html'?renderHtml(source):renderText(source));legalContent.scrollTop=0;
       }catch(error){
         if(revision!==loadRevision)return;
         const errorBox=el('div','legal-center-error ui-status',errorMessage(error,'The legal document could not be loaded.'));
         const direct=el('a','mini-btn ui-btn','Open direct document');direct.href=documentDefinition.path;
-        content.replaceChildren(errorBox,direct);
-      }finally{if(revision===loadRevision)content.setAttribute('aria-busy','false');}
+        legalContent.replaceChildren(errorBox,direct);
+      }finally{if(revision===loadRevision)legalContent.setAttribute('aria-busy','false');}
     }
     function open(id:unknown='privacy',trigger:HTMLElement|null=null,options:LegalOpenOptions={}):boolean{
       const key=typeof id==='string'&&byId.has(id as LegalDocumentId)?id as LegalDocumentId:'privacy';const layer=ensure();
@@ -541,7 +542,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
       activeId=key;
       if(options.fromHistory!==true&&routeHistory){const next=descriptor(key),historyOptions={url:historyUrl(key)};if(firstOpen)routeHistory.open(next,historyOptions);else routeHistory.replace(next,historyOptions);}
       void render(key);
-      requestAnimationFrame(()=>{const selected=navigation.querySelector('[aria-selected="true"]');(firstOpen?closeButton:selected||closeButton).focus({preventScroll:true});});
+      requestAnimationFrame(()=>{const selected=navigation?.querySelector<HTMLElement>('[aria-selected="true"]')??null;const target=firstOpen?closeButton:selected??closeButton;target?.focus({preventScroll:true});});
       return true;
     }
     function requestClose():boolean{
@@ -686,10 +687,10 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
         const done=total!==null?Math.round(total*completion/100):null;
         const shiftAmount=(dayIndex%5===1&&isWork&&workOrdinal>2)?15:(dayIndex%7===3&&isWork&&workOrdinal>3)?25:0;
         const adjustedStart=shiftAmount?endTime(row.start,shiftAmount):row.start;
-        const startDelay=isWork?([0,4,8,14,22,35,48][(dayIndex+workOrdinal)%7]-(dayIndex%6===0?6:0)):0;
+        const startDelay=isWork?(([0,4,8,14,22,35,48][(dayIndex+workOrdinal)%7]??0)-(dayIndex%6===0?6:0)):0;
         const actualStart=endTime(adjustedStart,startDelay);
         const pauseEvents=demoPauseEvents(date,actualStart,isWork,dayIndex,workOrdinal,completion);
-        const result={
+        const result:DailyResult={
           completion,completionSource,actualSeconds:minutesToSeconds(actualMin),
           actualStart:date+'T'+actualStart+':00.000Z',actualEnd:date+'T'+endTime(actualStart,actualMin)+':00.000Z',
           actualStartLocalMinute:clockMinute(actualStart),actualStartUtcOffsetMinutes:0,actualStartTimeZone:'Etc/UTC',
@@ -847,7 +848,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     tabList.addEventListener('keydown',event=>{
       if(!['ArrowRight','ArrowLeft','ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
       const tabs=[...tabList.querySelectorAll<HTMLElement>(selector)];
-      const current=tabs.indexOf(document.activeElement);
+      const current=tabs.indexOf(document.activeElement as HTMLElement);
       if(current<0||!tabs.length)return;
       let next=current;
       if(event.key==='Home')next=0;
@@ -949,7 +950,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     const map=el('div','guide-map');
     const tabs=mapTabDefinitions(section);
     const previous=state.mapTabs&&state.mapTabs[activeId];
-    const first=tabs[0];if(!first)throw new Error('Guide reference topics are unavailable.');const selected=tabs.some(tab=>tab.id===previous)?String(previous):first.id;
+    const first=tabs[0];if(!first)throw new Error('Guide reference topics are unavailable.');const firstTab:QuickReferenceTab=first;const selected=tabs.some(tab=>tab.id===previous)?String(previous):firstTab.id;
     if(!state.mapTabs)state.mapTabs={};
     state.mapTabs[activeId]=selected;
     const head=el('div','guide-map-head');
@@ -961,9 +962,9 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     body.id=`guide-reference-panel-${activeId}`;
     body.setAttribute('role','tabpanel');
     function selectReference(id:string|undefined):void{
-      const active=tabs.find(tab=>tab.id===id)??first;
+      const active=tabs.find(tab=>tab.id===id)??firstTab;
       state.mapTabs[activeId]=active.id;
-      tabRow.querySelectorAll('.guide-map-tab').forEach(tab=>setGuideTabState(tab,tab.dataset['guideReference']===active.id));
+      tabRow.querySelectorAll<HTMLElement>('.guide-map-tab').forEach(tab=>setGuideTabState(tab,tab.dataset['guideReference']===active.id));
       body.setAttribute('aria-labelledby',`guide-reference-${activeId}-${active.id}`);
       const content=active.render();
       body.replaceChildren(...(content?[content]:[]));
@@ -1013,7 +1014,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     state.step=activeId;
     const pane=context?.pane;
     if(!pane)return;
-    pane.querySelectorAll('.guide-life-node').forEach(tab=>setGuideTabState(tab,tab.dataset['guideStep']===activeId));
+    pane.querySelectorAll<HTMLElement>('.guide-life-node').forEach(tab=>setGuideTabState(tab,tab.dataset['guideStep']===activeId));
     const stage=pane.querySelector('#guide-stage-panel');
     if(!stage)return;
     const content=renderStageContent(state,activeId);
@@ -1104,7 +1105,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
       const copy=el('div');
       copy.append(el('div','guide-template-title ui-label',t.label),el('div','ui-body',t.note));
       const load=button('mini-btn ui-btn primary','Load into Draft',()=>loadTemplate(api,state,t,context));
-      load.dataset.ownerMutation='plan-template';
+      load.dataset['ownerMutation']='plan-template';
       row.append(copy,load);
       templateGrid.appendChild(row);
     });
