@@ -3,6 +3,7 @@ import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {TimerEngineInput,SoundMetadata,SoundOperation,LiveActualRecord,ActualRecordSnapshot,TaskEvidence,RuntimeEvidence,PlannedRow,TimerBoundary,LivePauseMeta,RestoredBreak} from '../../types/timer-engine.ts';
 import type {Task,TaskInput} from '../../types/domain.ts';
 import type {PauseEvent,TimerPayload} from '../../types/record-models.ts';
+import type {Cue} from '../../types/notifications.ts';
 import type {RuntimeInput,InactiveGap,DeepReadonly} from '../../types/timer-state.ts';
 const sdTimerEngineFactory=(()=>{
 'use strict';
@@ -43,7 +44,7 @@ const createModule=()=>{
     const {Pomodoro,notifications}=ports.userPreferences;
     let soundOperation:SoundOperation|null=null,soundOccurrence=0;
     function clearSoundOperation(){if(soundOperation)soundOperation.resolve();soundOperation=null;}
-    function soundEvent(cue:string,metadata:SoundMetadata={},fresh:boolean=false){
+    function soundEvent(cue:Cue,metadata:SoundMetadata={},fresh:boolean=false){
       if(fresh)clearSoundOperation();
       if(!soundOperation)soundOperation=notifications.begin({source:'timer',id:'execution',surface:'quiet',foreground:false});
       soundOperation.update({cue,occurrence:String(++soundOccurrence),system:false,title:'Study Director',message:'',...metadata});
