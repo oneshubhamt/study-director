@@ -49,7 +49,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     return typeof ui['registerTab']==='function'&&typeof ui['goTab']==='function'&&isWorkspaceHistory(ui['workspaceHistory'])&&typeof plan['loadDraft']==='function'&&typeof preview['useSample']==='function'&&typeof preview['clear']==='function'&&typeof installation['status']==='function'&&typeof installation['prompt']==='function'&&typeof installation['inspect']==='function'&&typeof installation['showHelp']==='function';
   }
   function trustedTypesFactory():TrustedTypesHtmlFactory|null{
-    const value=Reflect.get(globalThis,'trustedTypes');
+    const value=(globalThis as typeof globalThis&{trustedTypes?:unknown}).trustedTypes;
     return isRecord(value)&&typeof value['createPolicy']==='function'?value as unknown as TrustedTypesHtmlFactory:null;
   }
   function normalizeTaskKind(value:unknown):TaskKind{return value==='support'||value==='fixed'?value:'work';}
@@ -1198,7 +1198,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     if(typeof register!=='function'||registrationAttempts>=MAX_REGISTRATION_ATTEMPTS)return false;
     registrationAttempts+=1;
     try{registrationComplete=Reflect.apply(register,runtime,[PLUGIN_DESCRIPTOR])===true;}catch{}
-    if(!registrationComplete&&registrationAttempts<MAX_REGISTRATION_ATTEMPTS)Promise.resolve().then(connectPlugin);
+    if(!registrationComplete&&registrationAttempts<MAX_REGISTRATION_ATTEMPTS)void Promise.resolve().then(connectPlugin);
     return registrationComplete;
   }
   function boot():void{
