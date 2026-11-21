@@ -1,6 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {RealTimeScheduleState} from '../../types/execution-host.ts';
-import type {ExecutionViewInput,ExecuteIdleOptions,TimerFocusMetrics,RecoveryShiftPlan,RecoveryCarryItem} from '../../types/execution-views.ts';
+import type {ExecutionViewInput,ExecuteIdleOptions,TimerFocusMetrics,TimerViewEvidence,RecoveryShiftPlan,RecoveryCarryItem} from '../../types/execution-views.ts';
 const sdExecutionViewsFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'execution-views','study-director.execution-views-module'>|undefined;

@@ -1337,7 +1337,7 @@ const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryCompo
     clock:Object.freeze<RepositoryCompositionInput['appData']['clock']>({nowMs:DecisionClock.nowMs}),
     helpers:Object.freeze({
       boundedInt,boundedNumber,clampText,clampEditorContent,editorContentWithinLimits,wipeObject,isValidIsoDate,isCanonicalScheduleText,sameDataValue,
-      activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay,normalizeTimestamp,jsonByteLength
+      activeSessionScheduleFingerprint,normalizeAreaName,displayAreaName,isoDateDay:value=>{const day=isoDateDay(value);if(day===null)throw new TypeError('Canonical ISO date is invalid.');return day;},normalizeTimestamp,jsonByteLength
     }),
     hooks:Object.freeze<RepositoryCompositionInput['appData']['hooks']>({
       canMutate:appCanMutate,
@@ -2263,7 +2263,7 @@ const PlanRuntime=PlanHostModule.createController(Object.freeze<PlanControllerIn
     }),
     parser:Object.freeze<PlanControllerInput['ports']['parser']>({isCanonicalScheduleText,parseScheduleDraftText,scheduleTextFromRows}),
     clock:Object.freeze<PlanControllerInput['ports']['clock']>({clockHM,clockMinuteToStudyMinute,getMinuteOfDay,isValidHHMM,normalizeHHMM,studyMinuteToHHMM,t2m,timeLabelFromIso}),
-    view:Object.freeze<PlanControllerInput['ports']['view']>({document,on,textEl,updateRealTimeAwareness,window}),
+    view:Object.freeze<PlanControllerInput['ports']['view']>({document,on:(target,type,handler)=>{target.addEventListener(type,handler);return target;},textEl,updateRealTimeAwareness,window}),
     notifications:NoticeCoordinator.presentation('plan'),
     scheduleGateway:PlanScheduleGateway,
     ownership:Object.freeze<PlanControllerInput['ports']['ownership']>({canMutate:()=>appCanMutate(),requirePrimary:(event,reason)=>!requireMutationCoordinator().blocksUi()&&requirePrimaryTab(event,reason)}),
@@ -2305,8 +2305,8 @@ function saveNote(){
 let pnoteInfoPopover:ReturnType<typeof RichTextApi.createAnchoredPopover>|null=null;
 function togglePnoteInfo(){const button=document.getElementById('pn-info-btn'),popover=document.getElementById('pn-info-popover');if(!button||!popover)return false;pnoteInfoPopover??=RichTextApi.createAnchoredPopover(popover,{align:'end'});const opening=popover.hidden;if(opening)pnoteInfoPopover.show(button);else pnoteInfoPopover.hide();return opening;}
 const backupInfoPopovers=new Map<string,ReturnType<typeof RichTextApi.createAnchoredPopover>>();
-function toggleBackupInfo(event:MouseEvent){const button=event.target instanceof Element?event.target.closest<HTMLElement>('[data-backup-info-target]'):null,id=String(button?.dataset?.backupInfoTarget||''),popover=id?document.getElementById(id):null;if(!button||!popover)return false;let controller=backupInfoPopovers.get(id);if(!controller){controller=RichTextApi.createAnchoredPopover(popover,{align:'end',onClose:()=>button.setAttribute('aria-expanded','false')});backupInfoPopovers.set(id,controller);}const opening=popover.hidden;if(opening){controller.show(button);button.setAttribute('aria-expanded','true');}else{controller.hide();button.setAttribute('aria-expanded','false');}return opening;}
-let executeNoteView:Readonly<{taskId:string;id:string}>|null=null;
+function toggleBackupInfo(event:MouseEvent){const button=event.target instanceof Element?event.target.closest<HTMLElement>('[data-backup-info-target]'):null,id=String(button?.dataset?.['backupInfoTarget']||''),popover=id?document.getElementById(id):null;if(!button||!popover)return false;let controller=backupInfoPopovers.get(id);if(!controller){controller=RichTextApi.createAnchoredPopover(popover,{align:'end',onClose:()=>button.setAttribute('aria-expanded','false')});backupInfoPopovers.set(id,controller);}const opening=popover.hidden;if(opening){controller.show(button);button.setAttribute('aria-expanded','true');}else{controller.hide();button.setAttribute('aria-expanded','false');}return opening;}
+let executeNoteView:Readonly<{taskId:string|null;id:string}>|null=null;
 function refreshPnote(options:Readonly<{force?:boolean}>={}){
   const t=TASKS[TimerState.currentIndex];
   if(!isLiveTrackableTimer()||!t){

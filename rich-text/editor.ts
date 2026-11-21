@@ -40,7 +40,8 @@ export interface AttachmentPort{upload(file:File,options?:AttachmentUploadOption
 export interface WorkspaceHistoryDescriptor{kind:'focus'|'audio';token:string;key?:string}
 export interface WorkspaceHistoryOptions{kind:'focus'|'audio';key?:string;token?:string|undefined;reopen?:(descriptor:WorkspaceHistoryDescriptor)=>boolean|Promise<boolean>;valid?:()=>boolean}
 export type WorkspaceOverlayHandle=OverlayHandle;
-export interface WorkspaceOverlayPort{open(options:OverlayOptions):WorkspaceOverlayHandle|null}
+export type RichTextOverlayOptions=Omit<OverlayOptions,'history'>&{history?:WorkspaceHistoryOptions};
+export interface WorkspaceOverlayPort{open(options:RichTextOverlayOptions):WorkspaceOverlayHandle|null}
 // Notes, for links to them: the picker, a note's title (null once deleted) and
 // opening one. Tags: showing the notes with one (passive when the click only
 // placed the caret) and the # suggestions, which resolve to the name to write

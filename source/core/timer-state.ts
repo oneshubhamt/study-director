@@ -251,7 +251,7 @@ const createModule=()=>{
         return cloneFrozen({
           ...projected,
           format:'study-director.review-evidence',version:1,
-          date:session.studyDate||base.date||'',
+          date:session.studyDate||projected.date||'',
           currentTaskIndex:currentIndex,currentTaskId:taskIdAt(currentIndex),
           timerMode:mode,paused,inactiveGap:inactiveGap||null,pendingGap:!!inactiveGap,
           contentRevision:Math.max(0,Math.round(Number(session.contentRevision)||0)),

@@ -45,7 +45,7 @@ export interface ReviewPracticeController{
   status():ReviewPracticeStatus;
 }
 export type ReviewEvidenceClock=ClockRecord;
-export type ReviewActualRecord=Partial<ActualRecord>;
+export type ReviewActualRecord=Partial<ActualRecordSnapshot>;
 export interface ReviewTaskProgress{readonly done?:number|null;readonly total?:number|null}
 export interface ReviewNoteInfo{
   readonly exactKey:string;readonly exactLabel:string;readonly exactText:string;
@@ -55,7 +55,7 @@ export interface ReviewTaskRow{
   readonly idx:number;readonly i:number;readonly id:string;readonly name:string;readonly kind:Task['kind'];readonly area:string;readonly measure:string;readonly target:number|null;
   readonly duration:number;readonly dur:number;readonly originalStart:string;readonly originalStartMin:number;readonly originalEndMin:number;
   readonly adjustedStart:string;readonly adjustedStartMin:number;readonly adjustedEndMin:number;readonly shifted:boolean;readonly trackable:boolean;readonly work:boolean;
-  readonly completion:number;readonly completionSource:CompletionSource;readonly outcome:TaskOutcome;readonly resolvedState:''|'done'|'skipped';
+  readonly completion:number|null;readonly completionSource:CompletionSource;readonly outcome:TaskOutcome;readonly resolvedState:''|'done'|'skipped';
   readonly progress:ReviewTaskProgress;readonly actualSeconds:number|null;readonly clock:ReviewEvidenceClock;readonly actualRecord:ReviewActualRecord;readonly note:ReviewNoteInfo;
 }
 export interface ReviewTaskEvidence {
