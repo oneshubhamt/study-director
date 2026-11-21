@@ -79,6 +79,7 @@ const BackupMaintenanceHostModule=INTERNAL_MODULES.load('backup-maintenance-host
 const BackupIntegrityHostModule=INTERNAL_MODULES.load('backup-integrity-host',1,'study-director.backup-integrity-host-module',1);
 const BackupRecoveryHostModule=INTERNAL_MODULES.load('backup-recovery-host',1,'study-director.backup-recovery-host-module',1);
 const PwaLifecycleModule=INTERNAL_MODULES.load('pwa-lifecycle',1,'study-director.pwa-lifecycle-module',1);
+const PwaUpdateHostModule=INTERNAL_MODULES.load('pwa-update-host',1,'study-director.pwa-update-host-module',1);
 const NativeCapabilitiesModule=INTERNAL_MODULES.load('native-capabilities',1,'study-director.native-capabilities-module',1);
 const CapabilitiesHostModule=INTERNAL_MODULES.load('capabilities-host',1,'study-director.capabilities-host-module',1);
 const PlanHostModule=INTERNAL_MODULES.load('plan-host',1,'study-director.plan-host-module',1);
@@ -663,7 +664,6 @@ const OWNERSHIP_STATES=OwnershipModule.OWNERSHIP_STATES;
 
 let AppMutationCoordinator=null;
 let mutationUiOperationActive=false;
-let pwaUpdateReservation=null;
 const AppOwnership=StartupHostModule.createOwnershipController(Object.freeze({
   module:OwnershipModule,
   config:Object.freeze({
@@ -1626,7 +1626,7 @@ SyncStatusHost=SyncStatusHostModule.createController(Object.freeze({
   storageIssues:()=>readStorageHealth().issues,
   unsupportedDataHeld:()=>UnsupportedData.held(),
   backupReminder:()=>BackupNudge?.message()||'',
-  updateReady:()=>!!(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying),
+  updateReady:()=>PwaRuntime.updateReady(),
   sessionElsewhere:()=>sessionPanelMode==='elsewhere'&&sessionPanelSession?sessionDevice(sessionPanelSession):'',
   sessionReady:()=>sessionParkedHere()&&sessionFromElsewhere(sessionPanelSession)?sessionDevice(sessionPanelSession):'',
   unseen:()=>NoticeCoordinator.recent().unseen,
@@ -3241,7 +3241,7 @@ BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze
     storageResetUnresolved:()=>storageResetUnresolved(),unsupportedDataHeld:()=>UnsupportedData.held()
   }),
   foreground:Object.freeze({
-    pwaReserved:()=>!!pwaUpdateReservation,mutation:AppMutationCoordinator,attachmentIngest:AttachmentIngest,
+    pwaReserved:()=>PwaRuntime.reservationActive(),mutation:AppMutationCoordinator,attachmentIngest:AttachmentIngest,
     exports:Exports,backupController:BackupController,providers:BackupProviderRuntime
   }),
   data:Object.freeze({maintenance:AppData.maintenance,notes:AppData.notes}),
@@ -3448,347 +3448,49 @@ BackupProviderRuntime.configureSessionOwnership(Object.freeze({
   read:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});if(!loaded||loaded.ok!==true||loaded.error)throw loaded?.error||new Error('Active Session ownership could not be read safely.');const value=loaded.value;return value?Object.freeze({date:value.date,runningOn:value.runningOn,revision:value.revision}):null;}
 }));
 /* PWA SHELL AND SAFE UPDATE COORDINATION */
-const PWA_UPDATE_READY_DELAY_MS=650;
-const PWA_UPDATE_SAFETY_RETRY_MS=5*60*1000;
-// A window whose service worker already moved to the new release runs old page
-// code against it, so it retries within seconds rather than at the safety retry.
-const PWA_UPDATE_EXTERNAL_RETRY_MS=5000;
-const PWA_UPDATE_CHECK_INTERVAL_MS=24*60*60*1000;
-const PWA_UPDATE_CHECK_RETRY_BASE_MS=5*60*1000;
-const PWA_UPDATE_CHECK_RETRY_MAX_MS=60*60*1000;
-const PWA_UPDATE_CHECK_LOCK='study-director-pwa-update-check-v1';
-const PWA_EDIT_IDLE_MS=1800;
-let pwaLatestUpdateState=null,pwaUpdateRetryTimer=null,pwaUpdateEvaluationRunning=false,pwaAutomaticBlockMessage='';
-let pwaUpdateCheckTimer=null,pwaUpdateCheckDueAt=0,pwaUpdateCheckRunning=false,pwaLastEditableInputAt=0,pwaLastSuccessfulUpdateCheckMemoryAt=0,pwaUpdateCheckFailureCount=0,pwaUpdateCheckRetryAt=0;
-function pwaRecentEditableInput(){return pwaLastEditableInputAt>0&&Date.now()-pwaLastEditableInputAt<PWA_EDIT_IDLE_MS;}
-function pwaAppliedPlanEnded(){
-  if(!TASKS.length)return false;
-  const trackable=TASKS.map((task,index)=>({task,index})).filter(row=>isTrackableBlock(row.task));
-  return trackable.length?trackable.every(row=>isTaskResolved(row.index)):TimerState.currentIndex>=TASKS.length;
-}
-function pwaUpdateBlockReason(options={}){
-  const automatic=options&&options.automatic===true,ignoreActiveTimers=options&&options.ignoreActiveTimers===true;
-  const ownReservation=pwaUpdateReservation?.requestId===options.requestId&&!!options.requestId;
-  if(pwaUpdateReservation&&!ownReservation)return 'Another update is already preparing this window.';
-  if(!StartupLifecycle.status().fullyInitialized)return 'Study Director is still starting. Try again in a moment.';
-  const ownership=AppOwnership.status();
-  if(ownership.hydrating||ownership.takeoverPending||ownership.resolving||![OWNERSHIP_STATES.PRIMARY,OWNERSHIP_STATES.SECONDARY].includes(ownership.state)){
-    return 'Study Director ownership is still changing. Wait for this tab to settle, then try again.';
-  }
-  const follower=options.external===true&&ownership.state===OWNERSHIP_STATES.SECONDARY;
-  if(ownership.state!==OWNERSHIP_STATES.PRIMARY&&!follower)return automatic?'The primary Study Director window will apply this update when saved state is safe.':'This is a read-only secondary window. Update from the Study Director window that currently has control.';
-  // A read-only follower holds nothing to save, so a lifecycle left unreconciled
-  // (for example after it lost primary control) must not keep it on the old release.
-  const lifecycle=SessionLifecycle.status();
-  if(lifecycle.transitioning||!lifecycle.ready&&!follower)return 'Study Director is still reconciling session state. Try again when it is ready.';
-  const mutation=AppMutationCoordinator.status();
-  if(mutation.active&&!(ownReservation&&mutation.active==='pwa-update'))return `A ${mutation.active} operation is still active. The update will retry after it finishes.`;
-  if(mutation.foreign&&!follower)return 'Another Study Director window is changing stored data. The update will retry after it finishes.';
-  if(mutation.recoveryFault)return `Stored-data recovery must finish before updating: ${mutation.recoveryFault}`;
-  const review=ReviewSaveService.status();
-  if(review.rolloverSaveInProgress||review.saveDayInProgress||review.activeSessionPersistenceBlocked)return 'A Review save is still finishing. Wait for it to complete.';
-  if(imagePreparationCount>0||AttachmentLibrary.status().busy||AttachmentIngest.status().busy)return 'An attachment is still being prepared or saved.';
-  if(Exports.status().busy||BackupController.status().busy||BackupProviderRuntime.status().busy)return 'A backup, import, or storage-provider operation is still active.';
-  if(!follower&&!ignoreActiveTimers&&isLiveTrackableTimer()&&!TimerState.paused&&TimerState.mode===TIMER_MODES.RUNNING)return 'Pause or finish the live timer before updating.';
-  if(!follower&&!ignoreActiveTimers&&PracticePacer.status().running)return 'Pause or finish the Practice Pacer before updating.';
-  if(!appCanMutate()&&!follower)return 'This window cannot safely write saved state yet. Wait for storage and ownership to settle.';
-  if(!ownReservation&&document.querySelector('dialog[open],[data-rich-asset-picker="active"]'))return 'Finish the open dialog or file selection before updating.';
-  if(automatic&&pwaRecentEditableInput())return 'Automatic update is waiting for the current edit to settle.';
-  return '';
-}
-function reserveApplicationUpdate(context){
-  const reason=pwaUpdateBlockReason(context);if(reason)throw new Error(reason);
-  const owner=AppOwnership.status(),follower=context.external===true&&owner.state===OWNERSHIP_STATES.SECONDARY;
-  const token={requestId:context.requestId,ownerRevision:owner.revision,ownerState:owner.state,workRevision:null,authority:null};
-  let released=false,resolveReady,rejectReady,unlock,providerHold=null;
-  const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;}),held=new Promise(resolve=>{unlock=resolve;});
-  // Observe early rejection even if releasing beats the caller's await.
-  ready.catch(()=>{});
-  pwaUpdateReservation=token;
-  const dialog=document.createElement('dialog');dialog.id='pwa-update-progress';dialog.className='interaction-dialog';
-  dialog.setAttribute('aria-labelledby','pwa-update-progress-title');dialog.setAttribute('aria-describedby','pwa-update-progress-message');
-  const body=document.createElement('div');body.className='interaction-body';
-  const title=document.createElement('h2');title.id='pwa-update-progress-title';title.textContent='Updating Study Director';
-  const copy=document.createElement('p');copy.id='pwa-update-progress-message';copy.setAttribute('role','status');copy.textContent='Saving your work. Editing will resume if the update cannot finish.';
-  body.append(title,copy);dialog.append(body);dialog.addEventListener('cancel',event=>event.preventDefault());document.body.append(dialog);
-  const block=event=>{if(!released&&!dialog.contains(event.target)){event.preventDefault();event.stopImmediatePropagation();}};
-  const blockedEvents=['beforeinput','click','dblclick','keydown','paste','cut','drop','submit','change'];
-  for(const type of blockedEvents)window.addEventListener(type,block,true);
-  const validate=()=>{
-    if(released||context.signal.aborted||pwaUpdateReservation!==token)return false;
-    const now=AppOwnership.status();
-    if(now.state!==token.ownerState||now.revision!==token.ownerRevision||now.hydrating||now.takeoverPending||now.resolving)return false;
-    if(token.workRevision!==null&&token.workRevision!==pwaWorkRevision)return false;
-    token.authority?.assert();return !pwaUpdateBlockReason({...context,requestId:token.requestId});
-  };
-  const releaseSignal=()=>{released=true;unlock();rejectReady(new Error('Update preparation was cancelled.'));};
-  context.signal.addEventListener('abort',releaseSignal,{once:true});
-  const task=(async()=>{
-    try{
-      dialog.showModal();OwnershipUiProjection.apply();
-      const run=async authority=>{
-        token.authority=authority;if(released||context.signal.aborted)return;
-        providerHold=BackupProviderRuntime.suspendBackground('pwa-update');
-        const settled=Promise.all([providerHold.settled,RichTextAssetMaintenance.settled(),AppData.maintenance.settled(),AttachmentIntegrityJob.settled()]);
-        await Promise.race([settled,held]);
-        if(released||context.signal.aborted)return;
-        if(!validate())throw new Error('Study Director control changed while preparing the update.');
-        resolveReady();await held;
-      };
-      if(follower)await RichTextRuntime.quiesce(()=>run(null));
-      else await AppMutationCoordinator.runExclusive('pwa-update',authority=>ManagedRecoveryQuiescence.run(()=>run(authority)));
-    }catch(error){rejectReady(error);}
-    finally{
-      providerHold?.release();
-      context.signal.removeEventListener('abort',releaseSignal);
-      for(const type of blockedEvents)window.removeEventListener(type,block,true);
-      if(pwaUpdateReservation===token){pwaUpdateReservation=null;foregroundChanged();}
-      dialog.close();dialog.remove();OwnershipUiProjection.apply();
-    }
-  })();
-  return Object.freeze({ready,validate,release:()=>{releaseSignal();return task;}});
-}
-async function prepareApplicationUpdate(context={}){
-  const initialReason=pwaUpdateBlockReason(context);
-  if(initialReason)return Object.freeze({ok:false,reason:initialReason});
-  const reservation=pwaUpdateReservation?.requestId===context.requestId?pwaUpdateReservation:null;
-  const check=()=>{context.signal?.throwIfAborted();if(reservation&&pwaUpdateReservation!==reservation)throw new Error('Update preparation was cancelled.');};
-  if(context.external===true&&AppOwnership.status().state===OWNERSHIP_STATES.SECONDARY){
-    if(reservation)reservation.workRevision=pwaWorkRevision;
-    return Object.freeze({ok:true,reason:''});
-  }
-  const workRevision=pwaWorkRevision;
-  const ownershipBefore=AppOwnership.status();
-  const lifecycleBefore=SessionLifecycle.status();
-  try{
-    if(!reservation)await AppMutationCoordinator.settled();check();
-    if(!await LibraryView.settleDiary())return Object.freeze({ok:false,reason:'The Diary edit could not be saved. Keep this tab open and retry.'});
-    check();
-    if(await PlanDraftEditor.flush()===false)return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
-    check();
-    // The default plan shown over no stored draft is not saved as a draft.
-    const planText=PlanDraftEditor.authoredText();
-    if(planText!==null&&(PlanData.readDraft()??'')!==planText&&await PlanDraftEditor.save()===false){
-      return Object.freeze({ok:false,reason:'The Plan draft could not be saved. Keep this tab open and retry after browser storage recovers.'});
-    }
-    await PlanData.settled();
-    check();
-    const storedPlan=planText!==null?await AppData.planData.read():null;
-    check();
-    if(planText!==null&&storedPlan.draft!==planText){
-      return Object.freeze({ok:false,reason:'The Plan draft did not pass the update read-back check.'});
-    }
-    if(await flushPendingReviewSave({strict:true})===false)return Object.freeze({ok:false,reason:'The pending reflection could not be saved. Keep this tab open and retry.'});
-    await ReviewEditor.settled();
-    check();
-    const liveResult=TASKS.length?await writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence:!!reservation}):null;
-    check();
-    await AppData.notes.flush();
-    check();
-    const noteFailure=AppData.notes.failure();
-    if(noteFailure&&noteFailure.failed)return Object.freeze({ok:false,reason:noteFailure.message||'Notes are not safely stored yet.'});
-    if(await AppData.deletionRecovery.flush()!==true)return Object.freeze({ok:false,reason:'Pending deletions could not be safely reconciled. Keep this tab open and retry after browser storage recovers.'});
-    check();
-    await AppData.activeSession.settled();
-    const loaded=await AppData.activeSession.load();
-    await AppData.activeSession.settled();
-    const recoveryIssue=BackupRecoveryHostModule.activeSessionIssue(loaded);
-    if(recoveryIssue)return Object.freeze({ok:false,reason:recoveryIssue});
-    if(TASKS.length){
-      if(!liveResult||!liveResult.ok||!liveResult.value||liveResult.storage?.idb!==true)return Object.freeze({ok:false,reason:'The active session could not be confirmed in canonical browser storage.'});
-      if(!loaded.value||Number(loaded.value.revision)!==Number(liveResult.value.revision)){
-        return Object.freeze({ok:false,reason:'The saved active session did not pass the update read-back check.'});
-      }
-    }
-  }catch(error){
-    AppDiagnostics.capture('pwa.prepare',error,'error');
-    return Object.freeze({ok:false,reason:error&&error.message?error.message:'Current work could not be safely settled for the update.'});
-  }
-  if(workRevision!==pwaWorkRevision)return Object.freeze({ok:false,reason:'New work started while the update was preparing. Retry after it is saved.'});
-  check();
-  const finalReason=pwaUpdateBlockReason(context);
-  if(finalReason)return Object.freeze({ok:false,reason:finalReason});
-  const ownershipAfter=AppOwnership.status(),lifecycleAfter=SessionLifecycle.status();
-  if(ownershipAfter.state!==OWNERSHIP_STATES.PRIMARY||ownershipAfter.state!==ownershipBefore.state||ownershipAfter.revision!==ownershipBefore.revision||
-    lifecycleAfter.revision!==lifecycleBefore.revision||lifecycleAfter.transitioning){
-    return Object.freeze({ok:false,reason:'Session ownership changed while the update was preparing. Let this tab settle and try again.'});
-  }
-  if(reservation)reservation.workRevision=pwaWorkRevision;
-  return Object.freeze({ok:true,reason:''});
-}
-function pwaUpdateRetryDelay(){return pwaLatestUpdateState?.externalUpdate?PWA_UPDATE_EXTERNAL_RETRY_MS:PWA_UPDATE_SAFETY_RETRY_MS;}
-function schedulePwaUpdateEvaluation(delay=pwaUpdateRetryDelay()){
-  if(pwaUpdateRetryTimer!==null){clearTimeout(pwaUpdateRetryTimer);pwaUpdateRetryTimer=null;}
-  if(!pwaLatestUpdateState||(!pwaLatestUpdateState.updateReady&&!pwaLatestUpdateState.applying))return false;
-  const editDelay=pwaLastEditableInputAt?Math.max(0,pwaLastEditableInputAt+PWA_EDIT_IDLE_MS+50-Date.now()):0;
-  pwaUpdateRetryTimer=setTimeout(()=>{pwaUpdateRetryTimer=null;void evaluateAutomaticPwaUpdate();},Math.max(0,Number(delay)||0,editDelay));
-  return true;
-}
-async function evaluateAutomaticPwaUpdate(){
-  const state=pwaLatestUpdateState;
-  if(!state||!state.updateReady||state.applying||pwaUpdateEvaluationRunning)return false;
-  const readOnlyFollower=state.externalUpdate===true&&AppOwnership.status().state===OWNERSHIP_STATES.SECONDARY;
-  if(state.bootState==='mismatch'&&!readOnlyFollower){pwaAutomaticBlockMessage='The loaded release needs confirmation. Use Update Now after saving current work.';return false;}
-  pwaUpdateEvaluationRunning=true;
-  try{
-    const blocker=pwaUpdateBlockReason({automatic:true,external:state.externalUpdate===true});
-    if(blocker){pwaAutomaticBlockMessage=blocker;return false;}
-    if(TASKS.length&&!pwaAppliedPlanEnded()&&!(state.externalUpdate&&AppOwnership.status().state===OWNERSHIP_STATES.SECONDARY)){
-      pwaAutomaticBlockMessage='Update queued. It will install when the applied Plan ends and saved state is verified.';
-      return false;
-    }
-    await backUpBeforeUpdate();
-    pwaAutomaticBlockMessage='Updating Study Director…';
-    return PwaLifecycle.apply({automatic:true});
-  }catch(error){
-    AppDiagnostics.capture('pwa.auto-update',error,'warn');
-    pwaAutomaticBlockMessage=`Automatic update is waiting because saved state could not be verified${error&&error.message?`: ${error.message}`:'.'}`;
-    return false;
-  }finally{
-    pwaUpdateEvaluationRunning=false;
-    if(pwaLatestUpdateState&&!pwaLatestUpdateState.applying)renderPwaUpdateStatus(pwaLatestUpdateState);
-    if(pwaLatestUpdateState?.updateReady&&!pwaLatestUpdateState.applying&&pwaUpdateRetryTimer===null)schedulePwaUpdateEvaluation(pwaUpdateRetryDelay());
-  }
-}
-function pwaUpdateActionLabel(){
-  return AppOwnership.status().state===OWNERSHIP_STATES.PRIMARY&&(isLiveTrackableTimer()&&!TimerState.paused&&TimerState.mode===TIMER_MODES.RUNNING||PracticePacer.status().running)?'Pause & Update':'Update Now';
-}
-async function applyPwaUpdateFromUi(){
-  const state=PwaLifecycle.status();
-  if(state.applying)return false;
-  if(!state.updateReady){clearPwaUpdateCheckFailure();return checkPwaUpdateIfDue({force:true});}
-  const preflightReason=pwaUpdateBlockReason({automatic:false,ignoreActiveTimers:true,external:state.externalUpdate===true});
-  if(preflightReason){
-    pwaAutomaticBlockMessage=preflightReason;
-    renderPwaUpdateStatus(state);
-    return false;
-  }
-  if(AppOwnership.status().state===OWNERSHIP_STATES.PRIMARY){
-    if(isLiveTrackableTimer()&&!TimerState.paused&&TimerState.mode===TIMER_MODES.RUNNING)togglePause();
-    if(PracticePacer.status().running)PracticePacer.toggle();
-  }
-  await backUpBeforeUpdate();
-  return PwaLifecycle.apply();
-}
-function renderPwaUpdateStatus(state){
-  const control=document.getElementById('pwa-update-control');
-  const button=document.getElementById('pwa-update-apply');
-  const message=document.getElementById('pwa-update-message');
-  if(!control||!button||!message)return;
-  const previous=pwaLatestUpdateState;
-  pwaLatestUpdateState=state;scheduleSyncStatus();
-  button.disabled=!!state.applying||!!state.checking;
-  button.textContent=state.applying?'Updating…':state.checking?'Checking…':!state.updateReady&&state.bootState==='pending'?'Retry confirmation':state.registrationError||state.checkError&&!state.updateReady?'Retry update check':pwaUpdateActionLabel();
-  const progress=document.getElementById('pwa-update-progress-message');if(progress)progress.textContent=state.message||'Preparing the update…';
-  const lifecycleMessage=String(state.message||'');
-  const lifecyclePriority=state.applying||['blocked','registering','checking','downloading','installation-failed','registration-failed','boot-failed','boot-pending'].includes(state.phase);
-  const messageText=lifecyclePriority?lifecycleMessage:pwaAutomaticBlockMessage||lifecycleMessage||'Saved state will be checked before reload.';
-  message.textContent=messageText;
-  NoticeCoordinator.publish('update',{
-    visible:!!state.updateReady||!!state.applying||!!state.registrationError||!!state.checkError||['mismatch','pending'].includes(state.bootState)||['checking','downloading'].includes(state.phase),kind:'update',
-    title:state.applying?'Updating Study Director':state.registrationError?'Update checks unavailable':state.checkError?'Update installation needs attention':state.bootState==='pending'?'Update confirmation pending':state.bootState==='mismatch'?'Update not confirmed':state.checking?'Checking for an update':'Study Director update available',message:messageText,
-    actionLabel:button.textContent
-  });
-  if(state.checkError&&!previous?.checkError&&!pwaUpdateCheckRunning){recordPwaUpdateCheckFailure();schedulePwaUpdateCheck();}
-  if(!state.updateReady||state.applying){
-    if(pwaUpdateRetryTimer!==null){clearTimeout(pwaUpdateRetryTimer);pwaUpdateRetryTimer=null;}
-    return;
-  }
-  const newlyReady=!previous?.updateReady||previous.waitingReleaseId!==state.waitingReleaseId;
-  if(newlyReady)schedulePwaUpdateEvaluation(PWA_UPDATE_READY_DELAY_MS);
-  else if(pwaUpdateRetryTimer===null)schedulePwaUpdateEvaluation(pwaUpdateRetryDelay());
-}
-function pwaLastUpdateCheckAt(){
-  let stored=0;
-  try{const value=Number(AppData.local.getText(STORAGE_KEYS.pwaUpdateCheck,'')||0);stored=Number.isFinite(value)&&value>0?value:0;}catch(error){}
-  return Math.max(stored,pwaLastSuccessfulUpdateCheckMemoryAt);
-}
-function markPwaUpdateCheck(at=Date.now()){
-  const exact=Math.max(1,Math.floor(Number(at)||Date.now()));
-  pwaLastSuccessfulUpdateCheckMemoryAt=Math.max(pwaLastSuccessfulUpdateCheckMemoryAt,exact);
-  try{return AppData.local.setText(STORAGE_KEYS.pwaUpdateCheck,String(exact));}catch(error){return false;}
-}
-function pwaUpdateCheckDue(now=Date.now()){
-  const last=pwaLastUpdateCheckAt();
-  return !last||Math.max(0,Number(now)||Date.now())-last>=PWA_UPDATE_CHECK_INTERVAL_MS;
-}
-function pwaUpdateCheckBackoffMs(failureCount=pwaUpdateCheckFailureCount){
-  const exponent=Math.max(0,Math.min(8,Math.floor(Number(failureCount)||1)-1));
-  return Math.min(PWA_UPDATE_CHECK_RETRY_MAX_MS,PWA_UPDATE_CHECK_RETRY_BASE_MS*(2**exponent));
-}
-function clearPwaUpdateCheckFailure(){pwaUpdateCheckFailureCount=0;pwaUpdateCheckRetryAt=0;}
-function recordPwaUpdateCheckFailure(at=Date.now()){
-  pwaUpdateCheckFailureCount=Math.min(9,pwaUpdateCheckFailureCount+1);
-  pwaUpdateCheckRetryAt=Math.max(1,Math.floor(Number(at)||Date.now()))+pwaUpdateCheckBackoffMs();
-  return pwaUpdateCheckRetryAt;
-}
-function clearPwaUpdateCheckTimer(){pwaUpdateCheckDueAt=0;if(pwaUpdateCheckTimer!==null){clearTimeout(pwaUpdateCheckTimer);pwaUpdateCheckTimer=null;}}
-function schedulePwaUpdateCheck(minimumDelay=0){
-  clearPwaUpdateCheckTimer();
-  const lifecycle=PwaLifecycle.status();if(!lifecycle.supported)return false;
-  if(AppOwnership.status().state!==OWNERSHIP_STATES.PRIMARY)return false;
-  if(lifecycle.registrationError&&!pwaUpdateCheckRetryAt)recordPwaUpdateCheckFailure();
-  const now=Date.now(),last=pwaLastUpdateCheckAt(),dueIn=lifecycle.registered&&!lifecycle.checkError&&last?Math.max(0,last+PWA_UPDATE_CHECK_INTERVAL_MS-now):0,retryIn=pwaUpdateCheckRetryAt?Math.max(0,pwaUpdateCheckRetryAt-now):0;
-  const delay=Math.max(dueIn,retryIn,Math.max(0,Number(minimumDelay)||0));
-  pwaUpdateCheckDueAt=now+delay;pwaUpdateCheckTimer=setTimeout(()=>{pwaUpdateCheckTimer=null;pwaUpdateCheckDueAt=0;void checkPwaUpdateIfDue();},delay);
-  return true;
-}
-function pwaProviderNetworkBusy(){return BackupProviderRuntime.status().busy===true||BackupProviderRuntime.locationStatus('google-drive')?.backingUp===true;}
-async function checkPwaUpdateIfDue({force=false}={}){
-  const lifecycle=PwaLifecycle.status();
-  if(!lifecycle.supported||pwaUpdateCheckRunning||!force&&(lifecycle.registered&&!lifecycle.checkError&&!pwaUpdateCheckDue()||pwaUpdateCheckRetryAt>Date.now()))return false;
-  const ownership=AppOwnership.status();
-  if(ownership.state!==OWNERSHIP_STATES.PRIMARY)return false;
-  if(navigator.onLine===false)return false;
-  // Automatic update discovery must not compete with an active provider transfer.
-  // Manual checks remain explicit user actions; they are never delayed here.
-  if(!force&&pwaProviderNetworkBusy()){schedulePwaUpdateCheck(30000);return false;}
-  pwaUpdateCheckRunning=true;let deferredForProvider=false;
-  const perform=async()=>{
-    if(!force&&(PwaLifecycle.status().registered&&!PwaLifecycle.status().checkError&&!pwaUpdateCheckDue()||pwaUpdateCheckRetryAt>Date.now()))return false;
-    // A transfer may have started while waiting for the cross-tab update lock.
-    if(!force&&pwaProviderNetworkBusy()){deferredForProvider=true;return false;}
-    const success=await PwaLifecycle.checkForUpdate();
-    if(success){markPwaUpdateCheck();clearPwaUpdateCheckFailure();return true;}
-    recordPwaUpdateCheckFailure();
-    return false;
-  };
-  try{
-    if(navigator.locks&&typeof navigator.locks.request==='function'){
-      return await navigator.locks.request(PWA_UPDATE_CHECK_LOCK,{mode:'exclusive'},perform);
-    }
-    return await perform();
-  }catch(error){recordPwaUpdateCheckFailure();AppDiagnostics.capture('pwa.update-check-scheduler',error,'warn');return false;}
-  finally{pwaUpdateCheckRunning=false;schedulePwaUpdateCheck(deferredForProvider?30000:0);}
-}
-const PwaLifecycle=PwaLifecycleModule.createCoordinator(Object.freeze({
-  configuration:Object.freeze({assetId:'__SD_PAGE_ASSET_ID__',buildId:'@@SD_BUILD_ID@@',scope:'./',workerUrl:trustedAssetURL('./sw.js'),reloadSessionKey:SESSION_STORAGE_KEYS.pwaReload}),
-  environment:Object.freeze({
-    AbortController,
-    MessageChannel:typeof MessageChannel==='function'?MessageChannel:null,
-    clearTimeout:timer=>clearTimeout(timer),document,navigator,
-    setTimeout:(callback,delay)=>setTimeout(callback,delay),window
+const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze({
+  configuration:Object.freeze({
+    assetId:'__SD_PAGE_ASSET_ID__',buildId:'@@SD_BUILD_ID@@',reloadSessionKey:SESSION_STORAGE_KEYS.pwaReload,scope:'./',workerUrl:trustedAssetURL('./sw.js'),
+    updateCheckStorageKey:STORAGE_KEYS.pwaUpdateCheck,primaryState:OWNERSHIP_STATES.PRIMARY,secondaryState:OWNERSHIP_STATES.SECONDARY,runningTimerMode:TIMER_MODES.RUNNING
   }),
-  hooks:Object.freeze({
-    capture:(scope,error)=>AppDiagnostics.capture(scope,error,'warn'),
-    prepare:prepareApplicationUpdate,
-    reserve:reserveApplicationUpdate,
-    render:renderPwaUpdateStatus
+  lifecycle:Object.freeze({
+    module:PwaLifecycleModule,
+    environment:Object.freeze({AbortController,MessageChannel:typeof MessageChannel==='function'?MessageChannel:null,clearTimeout:timer=>clearTimeout(timer),document,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),window})
+  }),
+  environment:Object.freeze({document,window,navigator,setTimeout:(callback,delay)=>setTimeout(callback,delay),clearTimeout:timer=>clearTimeout(timer),now:()=>Date.now()}),
+  state:Object.freeze({
+    startupReady:()=>StartupLifecycle.status().fullyInitialized,ownership:()=>AppOwnership.status(),sessionLifecycle:()=>SessionLifecycle.status(),mutation:()=>AppMutationCoordinator.status(),reviewSave:()=>ReviewSaveService.status(),
+    imagePreparationCount:()=>imagePreparationCount,attachmentLibraryBusy:()=>AttachmentLibrary.status().busy,attachmentIngestBusy:()=>AttachmentIngest.status().busy,exportsBusy:()=>Exports.status().busy,
+    backupBusy:()=>BackupController.status().busy,providerBusy:()=>BackupProviderRuntime.status().busy,providerDriveBackingUp:()=>BackupProviderRuntime.locationStatus('google-drive')?.backingUp===true,
+    liveTimer:()=>isLiveTrackableTimer(),timerPaused:()=>TimerState.paused,timerMode:()=>TimerState.mode,pacerRunning:()=>PracticePacer.status().running,canMutate:()=>appCanMutate(),
+    blockingUiOpen:()=>!!document.querySelector('dialog[open],[data-rich-asset-picker="active"]'),workRevision:()=>pwaWorkRevision,tasks:()=>TASKS,
+    isTrackableTask:task=>isTrackableBlock(task),isTaskResolved:index=>isTaskResolved(index),currentTaskIndex:()=>TimerState.currentIndex
+  }),
+  reservation:Object.freeze({
+    suspendProvider:()=>BackupProviderRuntime.suspendBackground('pwa-update'),settleRichTextAssets:()=>RichTextAssetMaintenance.settled(),settleMaintenance:()=>AppData.maintenance.settled(),
+    settleAttachmentIntegrity:()=>AttachmentIntegrityJob.settled(),quiesceRichText:run=>RichTextRuntime.quiesce(run),
+    runExclusive:(name,run)=>AppMutationCoordinator.runExclusive(name,run),runManagedRecovery:run=>ManagedRecoveryQuiescence.run(run),
+    projectOwnership:()=>OwnershipUiProjection.apply(),foregroundChanged:()=>foregroundChanged()
+  }),
+  persistence:Object.freeze({
+    settleDiary:()=>LibraryView.settleDiary(),flushPlanDraft:()=>PlanDraftEditor.flush(),planAuthoredText:()=>PlanDraftEditor.authoredText(),planReadDraft:()=>PlanData.readDraft(),
+    savePlanDraft:()=>PlanDraftEditor.save(),settlePlanData:()=>PlanData.settled(),readStoredPlan:()=>AppData.planData.read(),
+    flushPendingReview:()=>flushPendingReviewSave({strict:true}),settleReviewEditor:()=>ReviewEditor.settled(),
+    writeLiveDraft:allowDuringRecoveryQuiescence=>writeLiveDraftNow({markChanged:false,allowDuringRecoveryQuiescence}),flushNotes:()=>AppData.notes.flush(),noteFailure:()=>AppData.notes.failure(),
+    flushDeletionRecovery:()=>AppData.deletionRecovery.flush(),settleActiveSession:()=>AppData.activeSession.settled(),loadActiveSession:()=>AppData.activeSession.load(),
+    activeSessionIssue:loaded=>BackupRecoveryHostModule.activeSessionIssue(loaded)
+  }),
+  effects:Object.freeze({
+    backupBeforeUpdate:()=>backUpBeforeUpdate(),pauseTimer:()=>togglePause(),togglePacer:()=>PracticePacer.toggle(),scheduleSyncStatus:()=>scheduleSyncStatus(),
+    publishNotice:value=>NoticeCoordinator.publish('update',value),capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+    localGet:(key,fallback)=>AppData.local.getText(key,fallback),localSet:(key,value)=>AppData.local.setText(key,value)
   })
 }));
-if(!Object.isFrozen(PwaLifecycle)||PwaLifecycle.format!=='study-director.pwa-lifecycle'||PwaLifecycle.contractVersion!==1){
-  throw new Error('Study Director PWA lifecycle coordinator is unavailable or incompatible.');
-}
-document.addEventListener('input',event=>{
-  const target=event.target instanceof Element?event.target:null;
-  if(!target||!(target.isContentEditable||target.matches('input,textarea,select,[contenteditable]:not([contenteditable="false"])')))return;
-  pwaLastEditableInputAt=Date.now();
-  schedulePwaUpdateEvaluation(PWA_EDIT_IDLE_MS+50);
-},true);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){schedulePwaUpdateCheck(250);schedulePwaUpdateEvaluation(250);}});
-window.addEventListener('focus',()=>{schedulePwaUpdateCheck(250);schedulePwaUpdateEvaluation(250);});
-window.addEventListener('online',()=>{schedulePwaUpdateCheck(250);schedulePwaUpdateEvaluation(250);});
-window.addEventListener('storage',event=>{if(event.key===STORAGE_KEYS.pwaUpdateCheck)schedulePwaUpdateCheck();});
+const PwaLifecycle=PwaRuntime.lifecycle;
+const schedulePwaUpdateEvaluation=delay=>PwaRuntime.scheduleEvaluation(delay);
+const schedulePwaUpdateCheck=delay=>PwaRuntime.scheduleCheck(delay);
+const clearPwaUpdateCheckTimer=()=>PwaRuntime.clearCheckTimer();
+const applyPwaUpdateFromUi=()=>PwaRuntime.applyFromUi();
 /* INSIGHTS AND PLUGIN BOUNDARY */
 // Read-only Insights boundary. Insights modules should read through this object
 // and return derived metrics without mutating records, notes, timer state, or storage.
@@ -3825,7 +3527,7 @@ function currentBackupDiagnosticStates(){
   sample('Backup encryption',()=>BackupProtection.status(),value=>[{job:'Backup encryption',state:value.enabled?value.unlocked?'unlocked':'locked':'off',enabled:value.enabled,unlocked:value.unlocked}]);
   sample('Canonical maintenance',()=>({...DataMaintenanceJob.status(),busy:DataMaintenanceJob.status().busy||AppData.maintenance.status().busy}),value=>[{job:'Canonical maintenance',...value,...OperationLifecycle.snapshot(value),lastOutcome:value.lastOutcome}]);
   for(const [job,owner] of [['Attachment cleanup',RichTextAssetMaintenance],['Backup scratch cleanup',BackupFiles],['Attachment processor',AttachmentIngest],['File processor',Exports]])sample(job,()=>owner.status(),value=>[{job,...(job.endsWith('processor')?OperationLifecycle.snapshot(value):value)}]);
-  sample('App update',()=>PwaLifecycle.status(),pwa=>[{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:pwaUpdateCheckDueAt>0,nextEligibleAt:pwaUpdateCheckDueAt?new Date(pwaUpdateCheckDueAt).toISOString():'',completedAt:pwaLastUpdateCheckAt()?new Date(pwaLastUpdateCheckAt()).toISOString():'',retryAttempt:pwaUpdateCheckFailureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}]);
+  sample('App update',()=>PwaLifecycle.status(),pwa=>{const update=PwaRuntime.diagnostics();return [{job:'App update',state:pwa.phase,busy:pwa.applying||pwa.reloading||pwa.checking,pending:pwa.updateReady,scheduled:update.nextCheckAt>0,nextEligibleAt:update.nextCheckAt?new Date(update.nextCheckAt).toISOString():'',completedAt:update.lastSuccessfulCheckAt?new Date(update.lastSuccessfulCheckAt).toISOString():'',retryAttempt:update.failureCount,bootState:pwa.bootState,cacheState:pwa.cacheState||'',reason:pwa.cacheReason||''}];});
   states.push(...(BackupIntegrity?.diagnosticRows()||[]));
   // Sync with Drive and the profiles on this device: what to read first when
   // a device does not sync.
@@ -4098,7 +3800,7 @@ const OwnershipUiProjection=(()=>{
   function createSnapshot(){
     const status=AppOwnership.status();
     const transitional=TRANSITIONAL_STATES.has(status.state);
-    const mutationBlocked=!!pwaUpdateReservation||!!(AppMutationCoordinator&&AppMutationCoordinator.blocksUi());
+    const mutationBlocked=PwaRuntime.reservationActive()||!!(AppMutationCoordinator&&AppMutationCoordinator.blocksUi());
     return Object.freeze({
       format:'study-director.ownership-ui-snapshot',contractVersion:1,
       state:status.state,
@@ -4446,5 +4148,5 @@ window.StudyDirector=StudyDirectorPublicAPI;
 window.dispatchEvent(new CustomEvent(STUDY_DIRECTOR_READY_EVENT,{detail:Object.freeze({version:StudyDirectorPublicAPI.version,theme:PRESENTATION_KERNEL.activeThemeId(),presentation:PRESENTATION_KERNEL.activePresentationId()})}));
 SessionLifecycle.invalidate('app-restart',{date:todayISO(),autoDate:true,reconcile:false});
 StartupLifecycle.start();
-void PwaLifecycle.install().then(()=>schedulePwaUpdateCheck(750));
+void PwaRuntime.install();
 })();

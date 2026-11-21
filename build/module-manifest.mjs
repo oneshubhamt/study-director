@@ -74,6 +74,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'backup-integrity-host',source:'core/backup-integrity-host.ts',stem:'sd.backup-integrity-host'}),
   Object.freeze({id:'backup-recovery-host',source:'core/backup-recovery-host.ts',stem:'sd.backup-recovery-host'}),
   Object.freeze({id:'pwa-lifecycle',source:'core/pwa-lifecycle.ts',stem:'sd.pwa-lifecycle'}),
+  Object.freeze({id:'pwa-update-host',source:'core/pwa-update-host.ts',stem:'sd.pwa-update-host'}),
   Object.freeze({id:'native-capabilities',source:'core/native-capabilities.ts',stem:'sd.native-capabilities'}),
   Object.freeze({id:'startup',registryId:'startup-lifecycle',source:'core/startup.ts',stem:'sd.startup'}),
   Object.freeze({id:'startup-host',source:'core/startup-host.ts',stem:'sd.startup-host'}),
