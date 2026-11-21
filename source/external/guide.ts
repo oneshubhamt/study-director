@@ -1,3 +1,7 @@
+import type {InsightsPreviewProvider} from '../core/insights-host.ts';
+import type {CompletionSource,TaskKind} from '../../types/domain.ts';
+import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,StudyRecord} from '../../types/record-models.ts';
+
 /*
   Study Director Guide
   Copyright © 2026 Shubham Tiwari and Dr Satyam Kumar. All rights reserved.
@@ -7,6 +11,49 @@
 */
 (function(){
   'use strict';
+
+  type Template=Readonly<{id:string;label:string;note:string;schedule:string}>;
+  type GuideStep='plan'|'execute'|'review'|'library'|'insights';
+  type GuidePair=readonly [string,string];
+  type GuideReferenceItem=string|GuidePair;
+  type GuideReferenceDefinition=Readonly<{id:string;label:string;heading:string;kind:'pairs'|'fields'|'list';items:readonly GuideReferenceItem[]}>;
+  type GuideSectionInput=Readonly<{label:string;title:string;purpose:readonly string[];actions:readonly string[];records:readonly string[];referenceTabs:readonly GuideReferenceDefinition[];saved:readonly string[];flow:readonly string[];remember:string}>;
+  type GuideSection=GuideSectionInput;
+  type GuideRenderContext=Readonly<{pane:HTMLElement}>;
+  type GuideState={step:GuideStep;status:string;ok:boolean;mapTabs:Record<string,string>;referenceOpen:Record<string,boolean>;installHelpOpen:boolean;context:GuideRenderContext|null};
+  type QuickReferenceTab=Readonly<{id:string;label:string;render:()=>HTMLElement|null}>;
+  type InstallStatus=Readonly<{installationAction:string;installationState:string;installationLabel:string;installationSummary:string;installationContext:string;installationSteps:readonly string[];installationFallback:readonly string[];installationInspecting:boolean;installHelpRequested:boolean}>;
+  type WorkspaceRoute=Readonly<{kind:'legal';token:string;key:string}>;
+  type WorkspaceHistoryPort=Readonly<{register:(kind:'legal',controller:Readonly<{current:()=>WorkspaceRoute|null;reconcile:(desired:unknown)=>Promise<WorkspaceRoute|null>}>)=>boolean;open:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;replace:(descriptor:WorkspaceRoute,options:Readonly<{url:string}>)=>unknown;close:(descriptor:WorkspaceRoute)=>unknown;closed:(descriptor:WorkspaceRoute,meta:Readonly<{fromHistory:boolean;historyPending:boolean}>)=>unknown}>;
+  type GuideApi=Readonly<{capabilities:Readonly<Record<string,number>>;ui:Readonly<{registerTab:(definition:Readonly<{id:string;label:string;icon:string;render:(context:GuideRenderContext)=>void}>)=>unknown;goTab:(tab:string)=>unknown;workspaceHistory:WorkspaceHistoryPort}>;plan:Readonly<{loadDraft:(schedule:string,options:Readonly<{label:string}>)=>PromiseLike<Readonly<{ok?:boolean;error?:string}>>|Readonly<{ok?:boolean;error?:string}>}>;preview:Readonly<{useSample:(options:Readonly<{label:string;target:'insights'}>)=>PromiseLike<Readonly<{ok?:boolean}>>|Readonly<{ok?:boolean}>;clear:(target:'insights')=>unknown}>;installation:Readonly<{status:()=>InstallStatus;prompt:()=>PromiseLike<unknown>|unknown;inspect:()=>PromiseLike<unknown>|unknown;showHelp:()=>unknown}>}>;
+  type PluginDescriptor=Readonly<{name:string;version:string;requires:Readonly<Record<string,number>>;previewProviders:Readonly<{insights:InsightsPreviewProvider}>;setup:(api:unknown)=>boolean}>;
+  type LegalDocumentId='privacy'|'terms'|'security'|'license'|'notices';
+  type LegalDocumentDefinition=Readonly<{id:LegalDocumentId;label:string;path:string;type:'html'|'text'}>;
+  type LegalCloseMeta=Readonly<{fromHistory?:boolean;historyPending?:boolean}>;
+  type LegalOpenOptions=Readonly<{fromHistory?:boolean}>;
+  type TrustedHtmlPolicy=Readonly<{createHTML:(value:string)=>unknown}>;
+  type TrustedTypesHtmlFactory=Readonly<{createPolicy:(name:string,rules:Readonly<{createHTML:(value:string)=>string}>)=>TrustedHtmlPolicy}>;
+  type SampleRow=Readonly<{idx:number;start:string;dur:number;name:string;kind:TaskKind;area:string;measure:string;target:string}>;
+  type StudyDirectorWindow=Window&{StudyDirector?:unknown};
+
+  function isRecord(value:unknown):value is Record<string,unknown>{return typeof value==='object'&&value!==null&&!Array.isArray(value);}
+  function errorMessage(value:unknown,fallback:string):string{return value instanceof Error&&value.message?value.message:fallback;}
+  function isWorkspaceHistory(value:unknown):value is WorkspaceHistoryPort{
+    if(!isRecord(value))return false;
+    return ['register','open','replace','close','closed'].every(key=>typeof value[key]==='function');
+  }
+  function isGuideApi(value:unknown):value is GuideApi{
+    if(!isRecord(value)||!isRecord(value['capabilities'])||!isRecord(value['ui'])||!isRecord(value['plan'])||!isRecord(value['preview'])||!isRecord(value['installation']))return false;
+    const capabilities=value['capabilities'],ui=value['ui'],plan=value['plan'],preview=value['preview'],installation=value['installation'];
+    if(!Object.values(capabilities).every(item=>typeof item==='number'))return false;
+    return typeof ui['registerTab']==='function'&&typeof ui['goTab']==='function'&&isWorkspaceHistory(ui['workspaceHistory'])&&typeof plan['loadDraft']==='function'&&typeof preview['useSample']==='function'&&typeof preview['clear']==='function'&&typeof installation['status']==='function'&&typeof installation['prompt']==='function'&&typeof installation['inspect']==='function'&&typeof installation['showHelp']==='function';
+  }
+  function trustedTypesFactory():TrustedTypesHtmlFactory|null{
+    const value=Reflect.get(globalThis,'trustedTypes');
+    return isRecord(value)&&typeof value['createPolicy']==='function'?value as unknown as TrustedTypesHtmlFactory:null;
+  }
+  function normalizeTaskKind(value:unknown):TaskKind{return value==='support'||value==='fixed'?value:'work';}
+  function normalizeGuideStep(value:unknown):GuideStep{return value==='execute'||value==='review'||value==='library'||value==='insights'?value:'plan';}
 
   const PLUGIN_VERSION='@@SD_RELEASE@@';
   const TAB_ID='guide';
@@ -21,7 +68,7 @@
     workspaceHistory:1
   });
 
-  const TEMPLATES=Object.freeze([
+  const TEMPLATES:readonly Template[]=Object.freeze([
     {id:'generic',label:'Generic Student',note:'Balanced study day with practice, review, meals, and sleep.',schedule:`05:30 | 90 | Morning Routine: Wake-up + Exercise + Freshen-up | support | Routine | block | 1
 07:00 | 120 | Deep Study Block 1 | work | Core Subject | block | 1
 09:00 | 30 | Breakfast + Short Break | fixed | Meal | |
@@ -92,26 +139,22 @@
 21:30 | 480 | Sleep | fixed | Rest | |`}
   ]);
 
-  function freezeGuideItems(items,kind){
-    return Object.freeze((items||[]).map(item=>(kind==='pairs'||kind==='fields')?Object.freeze([String(item[0]),String(item[1])]):String(item)));
-  }
-  function guideTab(definition){
-    return Object.freeze({...definition,items:freezeGuideItems(definition.items,definition.kind)});
-  }
-  function guideSection(definition){
-    return Object.freeze({
-      ...definition,
-      purpose:Object.freeze([...(definition.purpose||[])]),
-      actions:Object.freeze([...(definition.actions||[])]),
-      records:Object.freeze([...(definition.records||[])]),
-      referenceTabs:Object.freeze((definition.referenceTabs||[]).map(guideTab)),
-      saved:Object.freeze([...(definition.saved||[])]),
-      flow:Object.freeze([...(definition.flow||[])])
+  function guideTab(definition:GuideReferenceDefinition):GuideReferenceDefinition{
+    const items:GuideReferenceItem[]=definition.items.map(item=>{
+      if(definition.kind==='pairs'||definition.kind==='fields'){
+        if(!Array.isArray(item)||item.length<2)return Object.freeze(['','']) as GuidePair;
+        return Object.freeze([String(item[0]??''),String(item[1]??'')]) as GuidePair;
+      }
+      return String(item);
     });
+    return Object.freeze({...definition,items:Object.freeze(items)});
+  }
+  function guideSection(definition:GuideSectionInput):GuideSection{
+    return Object.freeze({...definition,purpose:Object.freeze([...definition.purpose]),actions:Object.freeze([...definition.actions]),records:Object.freeze([...definition.records]),referenceTabs:Object.freeze(definition.referenceTabs.map(guideTab)),saved:Object.freeze([...definition.saved]),flow:Object.freeze([...definition.flow])});
   }
 
-  const GUIDE_ORDER=Object.freeze(['plan','execute','review','library','insights']);
-  const GUIDE_SECTIONS=Object.freeze({
+  const GUIDE_ORDER:readonly GuideStep[]=Object.freeze(['plan','execute','review','library','insights']);
+  const GUIDE_SECTIONS:Readonly<Record<GuideStep,GuideSection>>=Object.freeze({
     plan:guideSection({
       label:"Plan",
       title:"Plan is where the day becomes real.",
@@ -346,70 +389,70 @@
     })
   });
 
-  function el(tag,className,text){
+  function el<K extends keyof HTMLElementTagNameMap>(tag:K,className:string,text?:unknown):HTMLElementTagNameMap[K]{
     const node=document.createElement(tag);
     if(className)node.className=className;
     if(text!==undefined&&text!==null)node.textContent=String(text);
     return node;
   }
-  function button(className,text,onClick){
+  function button(className:string,text:string,onClick:(event:MouseEvent,control:HTMLButtonElement)=>unknown):HTMLButtonElement{
     const b=el('button',className,text);
     b.type='button';
-    b.addEventListener('click',onClick);
+    b.addEventListener('click',event=>{void onClick(event,b);});
     return b;
   }
   const LegalCenter=(()=>{
-    const documents=Object.freeze([
+    const documents:readonly LegalDocumentDefinition[]=Object.freeze([
       Object.freeze({id:'privacy',label:'Privacy',path:'privacy.html',type:'html'}),
       Object.freeze({id:'terms',label:'Terms',path:'terms.html',type:'html'}),
       Object.freeze({id:'security',label:'Security',path:'security.html',type:'html'}),
       Object.freeze({id:'license',label:'License',path:'LICENSE.txt',type:'text'}),
       Object.freeze({id:'notices',label:'Notices',path:'NOTICE.txt',type:'text'})
     ]);
-    const byId=new Map(documents.map(documentDefinition=>[documentDefinition.id,documentDefinition]));
-    const pathToId=new Map(documents.flatMap(documentDefinition=>{
+    const byId=new Map<LegalDocumentId,LegalDocumentDefinition>(documents.map(documentDefinition=>[documentDefinition.id,documentDefinition]));
+    const pathToId=new Map<string,LegalDocumentId>(documents.flatMap(documentDefinition=>{
       const aliases=[documentDefinition.path.toLowerCase()];
       if(documentDefinition.id==='license')aliases.push('license.html');
       if(documentDefinition.id==='notices')aliases.push('notices.html');
       return aliases.map(path=>[path,documentDefinition.id]);
     }));
-    const cache=new Map();
+    const cache=new Map<LegalDocumentId,string>();
     const CLOSE_FALLBACK_MS=220;
-    let overlay=null,dialog=null,title=null,navigation=null,content=null,closeButton=null,routeHistory=null;
-    let activeId='',activeTrigger=null,loadRevision=0,restoreOverflow='',closeTimer=0,closeEndHandler=null,closing=false,closePromise=Promise.resolve(true),resolveClose=()=>{};
-    function visible(){return !!(overlay&&!overlay.hidden);}
-    function active(){return !!(visible()&&activeId);}
-    function descriptor(id){const key=byId.has(id)?id:'privacy';return Object.freeze({kind:'legal',token:`legal:${key}`,key});}
-    function current(){return activeId?descriptor(activeId):null;}
-    function reducedMotion(){try{return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches}catch{return false}}
-    function cancelCloseVisual(){
-      if(closeTimer){clearTimeout(closeTimer);closeTimer=0;}
+    let overlay:HTMLDivElement|null=null,dialog:HTMLElement|null=null,title:HTMLHeadingElement|null=null,navigation:HTMLElement|null=null,content:HTMLElement|null=null,closeButton:HTMLButtonElement|null=null,routeHistory:WorkspaceHistoryPort|null=null;
+    let activeId:LegalDocumentId|null=null,activeTrigger:HTMLElement|null=null,loadRevision=0,restoreOverflow='',closeTimer:ReturnType<typeof setTimeout>|null=null,closeEndHandler:((event:TransitionEvent)=>void)|null=null,closing=false,closePromise:Promise<boolean>=Promise.resolve(true),resolveClose:(value:boolean)=>void=()=>{};
+    function visible():boolean{return !!(overlay&&!overlay.hidden);}
+    function active():boolean{return !!(visible()&&activeId);}
+    function descriptor(id:unknown):WorkspaceRoute{const key=typeof id==='string'&&byId.has(id as LegalDocumentId)?id as LegalDocumentId:'privacy';return Object.freeze({kind:'legal',token:`legal:${key}`,key});}
+    function current():WorkspaceRoute|null{return activeId?descriptor(activeId):null;}
+    function reducedMotion():boolean{try{return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches}catch{return false}}
+    function cancelCloseVisual():void{
+      if(closeTimer!==null){clearTimeout(closeTimer);closeTimer=null;}
       if(closeEndHandler){overlay?.removeEventListener('transitionend',closeEndHandler);dialog?.removeEventListener('transitionend',closeEndHandler);closeEndHandler=null;}
     }
-    function finishHide(){
-      if(!overlay||overlay.hidden)return false;
+    function finishHide():boolean{
+      const layer=overlay;if(!layer||layer.hidden)return false;
       cancelCloseVisual();
-      closing=false;overlay.classList.remove('is-open','is-closing');overlay.hidden=true;document.body.style.overflow=restoreOverflow;
-      const target=activeTrigger;activeTrigger=null;if(target&&target.isConnected)requestAnimationFrame(()=>target.focus({preventScroll:true}));
+      closing=false;layer.classList.remove('is-open','is-closing');layer.hidden=true;document.body.style.overflow=restoreOverflow;
+      const target=activeTrigger;activeTrigger=null;if(target?.isConnected)requestAnimationFrame(()=>target.focus({preventScroll:true}));
       resolveClose(true);return true;
     }
-    function beginHide(meta={}){
+    function beginHide(meta:LegalCloseMeta={}):Promise<boolean>{
       if(!active()&&!(overlay&&!overlay.hidden))return Promise.resolve(true);
       if(closing)return closePromise;
       const closingDescriptor=current();
       loadRevision+=1;activeId='';closing=true;
       closePromise=new Promise(resolve=>{resolveClose=resolve;});
       if(closingDescriptor)routeHistory?.closed(closingDescriptor,{fromHistory:meta.fromHistory===true,historyPending:meta.historyPending===true});
-      overlay.classList.remove('is-open');overlay.classList.add('is-closing');
+      const layer=overlay;if(!layer)return Promise.resolve(false);layer.classList.remove('is-open');layer.classList.add('is-closing');
       if(reducedMotion())finishHide();
       else{
-        closeEndHandler=event=>{if(event.target===overlay||event.target===dialog)finishHide();};
-        overlay.addEventListener('transitionend',closeEndHandler);dialog?.addEventListener('transitionend',closeEndHandler);
+        closeEndHandler=event=>{if(event.target===layer||event.target===dialog)finishHide();};
+        layer.addEventListener('transitionend',closeEndHandler);dialog?.addEventListener('transitionend',closeEndHandler);
         closeTimer=setTimeout(finishHide,CLOSE_FALLBACK_MS);
       }
       return closePromise;
     }
-    function ensure(){
+    function ensure():HTMLDivElement{
       if(overlay)return overlay;
       overlay=el('div','legal-center-overlay');overlay.hidden=true;
       dialog=el('section','legal-center-dialog');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');dialog.setAttribute('aria-labelledby','legal-center-title');dialog.tabIndex=-1;
@@ -420,7 +463,7 @@
       navigation=el('nav','legal-center-nav');navigation.setAttribute('aria-label','Legal documents');navigation.setAttribute('role','tablist');
       documents.forEach(documentDefinition=>{
         const control=button('legal-center-nav-button ui-btn',documentDefinition.label,()=>open(documentDefinition.id));
-        control.id=`legal-center-tab-${documentDefinition.id}`;control.dataset.legalDocument=documentDefinition.id;control.setAttribute('role','tab');control.setAttribute('aria-selected','false');control.setAttribute('aria-controls','legal-center-content');navigation.appendChild(control);
+        control.id=`legal-center-tab-${documentDefinition.id}`;control.dataset['legalDocument']=documentDefinition.id;control.setAttribute('role','tab');control.setAttribute('aria-selected','false');control.setAttribute('aria-controls','legal-center-content');navigation.appendChild(control);
       });
       content=el('article','legal-center-content');content.id='legal-center-content';content.setAttribute('role','tabpanel');content.setAttribute('tabindex','0');
       const layout=el('div','legal-center-layout');layout.append(navigation,content);
@@ -429,39 +472,40 @@
       dialog.addEventListener('keydown',trapKeys);
       navigation.addEventListener('keydown',event=>{
         if(!['ArrowRight','ArrowLeft','ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
-        const tabs=[...navigation.querySelectorAll('[role="tab"]')],currentIndex=Math.max(0,tabs.indexOf(document.activeElement));
+        const tabs=[...navigation.querySelectorAll<HTMLButtonElement>('[role="tab"]')],currentIndex=Math.max(0,tabs.indexOf(document.activeElement as HTMLButtonElement));
         let next=currentIndex;if(event.key==='Home')next=0;else if(event.key==='End')next=tabs.length-1;else next=(currentIndex+(event.key==='ArrowRight'||event.key==='ArrowDown'?1:-1)+tabs.length)%tabs.length;
-        event.preventDefault();const target=tabs[next];target.focus();open(target.dataset.legalDocument);
+        event.preventDefault();const target=tabs[next];if(!target)return;target.focus();open(target.dataset['legalDocument']);
       });
       content.addEventListener('click',event=>{
-        const link=event.target.closest&&event.target.closest('a[href]');if(!link)return;
+        const target=event.target;if(!(target instanceof Element))return;const link=target.closest<HTMLAnchorElement>('a[href]');if(!link)return;
         const href=String(link.getAttribute('href')||'').split(/[?#]/)[0].replace(/^\.\//,'').toLowerCase();
         const id=pathToId.get(href);if(!id)return;
         event.preventDefault();open(id);
       });
       return overlay;
     }
-    function focusable(){return [...dialog.querySelectorAll('button:not([disabled]),a[href],input:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(node=>!node.hidden);}
-    function trapKeys(event){
+    function focusable():HTMLElement[]{return dialog?[...dialog.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(node=>!node.hidden):[];}
+    function trapKeys(event:KeyboardEvent):void{
       if(event.key==='Escape'){event.preventDefault();requestClose();return;}
       if(event.key!=='Tab')return;
       const items=focusable();if(!items.length){event.preventDefault();dialog.focus();return;}
-      const first=items[0],last=items.at(-1);
+      const first=items.at(0),last=items.at(-1);if(!first||!last)return;
       if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
       else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
     }
-    function historyUrl(id){const url=new URL(location.href);url.hash=`legal/${id}`;return url.href;}
-    async function read(documentDefinition){
+    function historyUrl(id:LegalDocumentId):string{const url=new URL(location.href);url.hash=`legal/${id}`;return url.href;}
+    async function read(documentDefinition:LegalDocumentDefinition):Promise<string>{
       if(cache.has(documentDefinition.id))return cache.get(documentDefinition.id);
       const response=await fetch(documentDefinition.path,{credentials:'same-origin'});
       if(!response.ok)throw new Error(`Could not load ${documentDefinition.label} (${response.status}).`);
       const source=await response.text();cache.set(documentDefinition.id,source);return source;
     }
-    let legalPolicy;
-    function renderHtml(source){
-      const types=globalThis.trustedTypes;
+    let legalPolicy:TrustedHtmlPolicy|null=null;
+    function renderHtml(source:string):HTMLElement{
+      const types=trustedTypesFactory();
       if(types&&!legalPolicy)legalPolicy=types.createPolicy('sd-legal-html',{createHTML:value=>value});
-      const parsed=new DOMParser().parseFromString(legalPolicy?legalPolicy.createHTML(source):source,'text/html');
+      const parser=new DOMParser() as unknown as {parseFromString:(value:unknown,type:'text/html')=>Document};
+      const parsed=parser.parseFromString(legalPolicy?legalPolicy.createHTML(source):source,'text/html');
       parsed.querySelectorAll('script,style,link,base,iframe,object,embed').forEach(node=>node.remove());
       parsed.querySelectorAll('*').forEach(node=>{for(const attr of [...node.attributes]){if(/^on/i.test(attr.name)||['srcdoc','src','srcset','action','formaction'].includes(attr.name))node.removeAttribute(attr.name);if(attr.name==='href'){try{const url=new URL(attr.value,location.href);if(!['https:','http:','mailto:'].includes(url.protocol))node.removeAttribute('href');}catch{node.removeAttribute('href');}}}});
       const main=parsed.querySelector('main')||parsed.body;main.querySelectorAll('nav').forEach(node=>node.remove());
@@ -469,11 +513,12 @@
       [...main.childNodes].forEach(node=>article.appendChild(document.importNode(node,true)));
       return article;
     }
-    function renderText(source){const pre=el('pre','legal-center-plain-text',source);return pre;}
-    async function render(id){
-      const documentDefinition=byId.get(id)||documents[0],revision=++loadRevision;
+    function renderText(source:string):HTMLElement{const pre=el('pre','legal-center-plain-text',source);return pre;}
+    async function render(id:unknown):Promise<void>{
+      const key=typeof id==='string'&&byId.has(id as LegalDocumentId)?id as LegalDocumentId:'privacy';
+      const documentDefinition=byId.get(key)??documents[0];if(!documentDefinition)throw new Error('Legal documents are unavailable.');const revision=++loadRevision;
       activeId=documentDefinition.id;title.textContent=documentDefinition.label;
-      [...navigation.children].forEach(control=>{const selected=control.dataset.legalDocument===activeId;control.classList.toggle('on',selected);control.setAttribute('aria-selected',selected?'true':'false');control.tabIndex=selected?0:-1;});
+      [...navigation.children].forEach(control=>{const selected=control.dataset['legalDocument']===activeId;control.classList.toggle('on',selected);control.setAttribute('aria-selected',selected?'true':'false');control.tabIndex=selected?0:-1;});
       content.setAttribute('aria-labelledby',`legal-center-tab-${activeId}`);
       content.setAttribute('aria-label',`${documentDefinition.label} document`);content.setAttribute('aria-busy','true');
       content.replaceChildren(el('div','legal-center-loading ui-status',`Loading ${documentDefinition.label}…`));
@@ -482,78 +527,75 @@
         content.replaceChildren(documentDefinition.type==='html'?renderHtml(source):renderText(source));content.scrollTop=0;
       }catch(error){
         if(revision!==loadRevision)return;
-        const errorBox=el('div','legal-center-error ui-status',error&&error.message?error.message:'The legal document could not be loaded.');
+        const errorBox=el('div','legal-center-error ui-status',errorMessage(error,'The legal document could not be loaded.'));
         const direct=el('a','mini-btn ui-btn','Open direct document');direct.href=documentDefinition.path;
         content.replaceChildren(errorBox,direct);
       }finally{if(revision===loadRevision)content.setAttribute('aria-busy','false');}
     }
-    function open(id='privacy',trigger=null,options={}){
-      const key=byId.has(id)?id:'privacy';ensure();
-      const firstOpen=!visible();
-      if(closing){cancelCloseVisual();closing=false;resolveClose(true);overlay.classList.remove('is-closing');}
-      if(firstOpen){activeTrigger=trigger&&trigger.nodeType===1?trigger:document.activeElement;restoreOverflow=document.body.style.overflow;document.body.style.overflow='hidden';overlay.hidden=false;requestAnimationFrame(()=>overlay.classList.add('is-open'));}
-      else overlay.classList.add('is-open');
+    function open(id:unknown='privacy',trigger:HTMLElement|null=null,options:LegalOpenOptions={}):boolean{
+      const key=typeof id==='string'&&byId.has(id as LegalDocumentId)?id as LegalDocumentId:'privacy';const layer=ensure();
+      const firstOpen=!visible(),reopening=closing;
+      if(reopening){cancelCloseVisual();closing=false;resolveClose(true);layer.classList.remove('is-closing');if(trigger?.isConnected)activeTrigger=trigger;}
+      if(firstOpen){activeTrigger=trigger?.isConnected?trigger:(document.activeElement instanceof HTMLElement?document.activeElement:null);restoreOverflow=document.body.style.overflow;document.body.style.overflow='hidden';layer.hidden=false;requestAnimationFrame(()=>layer.classList.add('is-open'));}
+      else layer.classList.add('is-open');
       activeId=key;
       if(options.fromHistory!==true&&routeHistory){const next=descriptor(key),historyOptions={url:historyUrl(key)};if(firstOpen)routeHistory.open(next,historyOptions);else routeHistory.replace(next,historyOptions);}
       void render(key);
       requestAnimationFrame(()=>{const selected=navigation.querySelector('[aria-selected="true"]');(firstOpen?closeButton:selected||closeButton).focus({preventScroll:true});});
       return true;
     }
-    function requestClose(){
+    function requestClose():boolean{
       const activeDescriptor=current();if(!activeDescriptor)return false;
       const historyPending=!!routeHistory?.close(activeDescriptor);void beginHide({historyPending});return true;
     }
-    async function reconcile(desired){
-      if(!desired||desired.kind!=='legal'){await beginHide({fromHistory:true});return null;}
-      const key=String(desired.key||'');if(!byId.has(key)||desired.token!==`legal:${key}`)return current();
+    async function reconcile(desired:unknown):Promise<WorkspaceRoute|null>{
+      if(!isRecord(desired)||desired['kind']!=='legal'){await beginHide({fromHistory:true});return null;}
+      const key=String(desired['key']||'');if(!byId.has(key as LegalDocumentId)||desired['token']!==`legal:${key}`)return current();
       open(key,null,{fromHistory:true});return current();
     }
-    function connect(history){
-      if(!history||typeof history.register!=='function'||typeof history.open!=='function'||typeof history.replace!=='function'||typeof history.close!=='function'||typeof history.closed!=='function')return false;
-      routeHistory=history;
-      return history.register('legal',Object.freeze({current,reconcile}));
+    function connect(history:WorkspaceHistoryPort):boolean{
+      if(routeHistory===history)return true;if(routeHistory)return false;
+      const registered=history.register('legal',Object.freeze({current,reconcile}));if(!registered)return false;routeHistory=history;return true;
     }
     return Object.freeze({open,close:requestClose,documents,connect});
   })();
   const SampleDataEngine=(()=>{
     const SAMPLE_TEMPLATE_ID='upsc';
-    function localIsoDate(date=new Date()){
+    function localIsoDate(date:Date=new Date()):string{
       const y=date.getFullYear();
       const m=String(date.getMonth()+1).padStart(2,'0');
       const d=String(date.getDate()).padStart(2,'0');
       return `${y}-${m}-${d}`;
     }
-    function dayOffset(iso,offset){
+    function dayOffset(iso:string,offset:number):string{
       const date=new Date(`${iso}T00:00:00`);
       date.setDate(date.getDate()+offset);
       return localIsoDate(date);
     }
-    function parseRows(schedule){
-      return String(schedule||'').split(/\n+/).map((line,idx)=>{
-        const p=line.split('|').map(value=>value.trim());
-        if(p.length<5)return null;
-        return {idx,start:p[0],dur:Number(p[1])||0,name:p[2],kind:p[3]||'work',area:p[4]||'General',measure:p[5]||'',target:p[6]||''};
-      }).filter(Boolean);
+    function parseRows(schedule:unknown):SampleRow[]{
+      const rows:SampleRow[]=[];
+      String(schedule||'').split(/\n+/).forEach((line,idx)=>{const p=line.split('|').map(value=>value.trim());if(p.length<5)return;const [start='',duration='',name='',kind='work',area='General',measure='',target='']=p;rows.push({idx,start,dur:Number(duration)||0,name,kind:normalizeTaskKind(kind),area:area||'General',measure,target});});
+      return rows;
     }
-    function minutesToSeconds(minutes){return Math.max(0,Math.round((Number(minutes)||0)*60));}
-    function clockMinute(hhmm){
+    function minutesToSeconds(minutes:unknown):number{return Math.max(0,Math.round((Number(minutes)||0)*60));}
+    function clockMinute(hhmm:unknown):number{
       const parts=String(hhmm||'00:00').split(':').map(Number);
       return ((parts[0]||0)*60+(parts[1]||0)+1440)%1440;
     }
-    function endTime(hhmm,minutes){
+    function endTime(hhmm:unknown,minutes:unknown):string{
       const parts=String(hhmm||'00:00').split(':').map(Number);
       const total=((parts[0]||0)*60+(parts[1]||0)+(Number(minutes)||0)+1440)%1440;
       return `${String(Math.floor(total/60)).padStart(2,'0')}:${String(total%60).padStart(2,'0')}`;
     }
-    function completionPattern(day,idx,area){
-      const base=[72,78,84,68,88,92,62,80,75,86,58,90,82,70,94,76,88,65,91,83][day%20];
+    function completionPattern(day:number,idx:number,area:unknown):number{
+      const base=[72,78,84,68,88,92,62,80,75,86,58,90,82,70,94,76,88,65,91,83][day%20]??0;
       const ordinalDrag=[8,0,-3,-7,-12,-18,-22][idx%7]||0;
       const areaKey=String(area||'').toLowerCase();
       const areaBias=areaKey.includes('current')?7:areaKey.includes('revision')?5:areaKey.includes('optional')?-4:areaKey.includes('csat')?-18:areaKey.includes('essay')?-8:areaKey.includes('mock')?-6:0;
       const shock=(day===5&&idx>=4)?-22:(day===10&&idx>=2)?-26:(day===15&&idx<=2)?8:0;
       return Math.max(0,Math.min(100,Math.round(base+ordinalDrag+areaBias+shock)));
     }
-    function demoArea(row,dayIndex){
+    function demoArea(row:SampleRow,dayIndex:number):string{
       if(row.area==='Practice'){
         if(dayIndex%6===1)return 'Essay';
         if(dayIndex%6===3)return 'CSAT';
@@ -564,16 +606,16 @@
       if(row.area==='Optional'&&dayIndex%4===0)return 'Optional Paper 1';
       return row.area;
     }
-    function demoTaskName(row,area){
+    function demoTaskName(row:SampleRow,area:string):string{
       if(area==='CSAT')return 'CSAT timed practice';
       if(area==='Essay')return 'Essay outline + intro practice';
       if(area==='Mock Review')return 'Mock test review + error log';
       if(area==='Polity')return 'Polity static study';
       return row.name;
     }
-    function demoPauseEvents(date,start,isWork,dayIndex,workOrdinal,completion){
+    function demoPauseEvents(date:string,start:string,isWork:boolean,dayIndex:number,workOrdinal:number,completion:number):PauseEvent[]|undefined{
       if(!isWork||dayIndex<3)return undefined;
-      const events=[];
+      const events:PauseEvent[]=[];
       if((dayIndex+workOrdinal)%4===0){
         const seconds=180+((dayIndex+workOrdinal)%3)*120;
         events.push({startedAt:date+'T'+start+':00.000Z',endedAt:date+'T'+endTime(start,Math.round(seconds/60))+':00.000Z',seconds,type:'manual'});
@@ -589,31 +631,27 @@
       }
       return events;
     }
-    function sampleTemplate(){
+    function sampleTemplate():Template{
       const template=TEMPLATES.find(item=>item.id===SAMPLE_TEMPLATE_ID);
       if(!template)throw new Error(`Guide sample template ${SAMPLE_TEMPLATE_ID} is unavailable.`);
       return template;
     }
-    function samplePracticeRuns(schedule,dayIndex){
+    function samplePracticeRuns(schedule:readonly StoredSchedule[],dayIndex:number):PracticeRun[]{
       if(![3,6,9,12,15,18,19,22,23,25].includes(dayIndex))return [];
       const work=schedule.filter(entry=>entry.kind==='work');
       if(!work.length)return [];
-      const matching=(pattern,fallbackIndex)=>work.find(entry=>pattern.test(`${entry.name} ${entry.area}`))||work[Math.min(fallbackIndex,work.length-1)];
+      const matching=(pattern:RegExp,fallbackIndex:number):StoredSchedule=>{const match=work.find(entry=>pattern.test(`${entry.name} ${entry.area}`));if(match)return match;const fallback=work[Math.min(fallbackIndex,work.length-1)];if(!fallback)throw new Error('Guide sample work task is unavailable.');return fallback;};
       const answerTask=matching(/answer|mains/i,2);
       const paperTask=matching(/test|practice|essay|csat/i,work.length-1);
       const secondaryTask=matching(/optional|revision/i,1);
-      const run=(task,targetMs,unitMs,extra={})=>({taskId:task.id,targetMs,unitMs,...extra});
+      const run=(task:StoredSchedule,targetMs:number,unitMs:number[],extra:Omit<PracticeRun,'taskId'|'targetMs'|'unitMs'>={}):PracticeRun=>({taskId:task.id,targetMs,unitMs,...extra});
       const variation=(dayIndex%5-2)*7000;
       const uniform=run(answerTask,600000,[565000+variation,618000-variation,592000+variation],{totalUnits:3});
       const timedUnits=[548000+variation,586000-variation,612000+variation,805000-variation,936000+variation,1053000-variation];
-      const timedPaper=run(paperTask,600000,dayIndex===15?timedUnits.slice(0,4):timedUnits,{
-        ...(dayIndex===15?{partial:true}:{}),
-        unitPlan:{mode:'time',groups:[[3,600000],[3,900000]],segments:[[3,'Section A'],[6,'Section B']]}
-      });
-      const marksPaper=run(secondaryTask,720000,[570000+variation,630000-variation,660000+variation,870000-variation,1020000+variation,1140000-variation],{
-        sessionTargetMs:4500000,
-        unitPlan:{mode:'marks',groups:[[3,10],[3,15]],segments:[[3,'Q1'],[6,'Q2']]}
-      });
+      const timedPlan:PracticePlan={mode:'time',groups:[[3,600000],[3,900000]],segments:[[3,'Section A'],[6,'Section B']]};
+      const marksPlan:PracticePlan={mode:'marks',groups:[[3,10],[3,15]],segments:[[3,'Q1'],[6,'Q2']]};
+      const timedPaper=run(paperTask,600000,dayIndex===15?timedUnits.slice(0,4):timedUnits,{...(dayIndex===15?{partial:true as const}:{}),unitPlan:timedPlan});
+      const marksPaper=run(secondaryTask,720000,[570000+variation,630000-variation,660000+variation,870000-variation,1020000+variation,1140000-variation],{sessionTargetMs:4500000,unitPlan:marksPlan});
       if([3,19,22].includes(dayIndex))return [uniform];
       if([6,15,25].includes(dayIndex))return [timedPaper];
       if([9,23].includes(dayIndex))return [marksPaper];
@@ -621,12 +659,12 @@
       if(dayIndex===18)return [uniform,marksPaper];
       return [];
     }
-    function buildRecord(date,dayIndex){
+    function buildRecord(date:string,dayIndex:number):StudyRecord{
       const rows=parseRows(sampleTemplate().schedule);
       const weekend=new Date(`${date}T00:00:00`).getDay()===0;
       let workOrdinal=0;
-      const results={};
-      const schedule=rows.map((row,index)=>{
+      const results:Record<string,DailyResult>={};
+      const schedule:StoredSchedule[]=rows.map((row,index)=>{
         const isWork=row.kind==='work';
         const isTrackable=row.kind!=='fixed';
         if(isWork)workOrdinal+=1;
@@ -640,7 +678,7 @@
         if(isWork&&dayIndex%9===4&&workOrdinal>=5)completion=0;
         const focusRatio=isWork?Math.max(.45,Math.min(1.08,.64+(completion/100)*.34+(dayIndex%5===2?.04:0)-(dayIndex===10?.12:0))):.78;
         const actualMin=isWork&&completion<=0?0:Math.round(duration*focusRatio);
-        let completionSource=isWork?(['units','manual','finished-time','time','finished-unverified','time','units','manual'][(dayIndex+workOrdinal)%8]):'finished-unverified';
+        let completionSource:CompletionSource=isWork?((['units','manual','finished-time','time','finished-unverified','time','units','manual'] as const)[(dayIndex+workOrdinal)%8]??'none'):'finished-unverified';
         if(isWork&&completion<=0)completionSource='skipped';
         if(isWork&&(completionSource==='time'||completionSource==='finished-time'))completion=Math.min(100,Math.round(actualMin/duration*100));
         if(isWork&&completionSource==='finished-unverified')completion=0;
@@ -679,22 +717,23 @@
         'Late starts hurt the third and fourth work blocks. Morning start discipline matters here.'
       ];
       const savedAt=date+'T21:35:00.000Z';
-      const record={
+      const record:StudyRecord={
         version:16,recordKind:'study',date,savedAt,updatedAt:savedAt,sourceRevision:1,
-        quote:'Sample record for exploring Study Director.',reflection:reflections[dayIndex%reflections.length],
-        studyQuality:[3,4,4,3,5,2,3,4,4,3,2,5,4,3,5,4,4,3,5,4][dayIndex%20],realTimeSnapshot:null,
+        quote:'Sample record for exploring Study Director.',reflection:reflections[dayIndex%reflections.length]??'',
+        studyQuality:[3,4,4,3,5,2,3,4,4,3,2,5,4,3,5,4,4,3,5,4][dayIndex%20]??3,realTimeSnapshot:null,
         schedule,results,practiceRuns:samplePracticeRuns(schedule,dayIndex),
         carryForwardDraft:dayIndex%4===1?'Carry forward: revise weak questions before the next timed block.':dayIndex%6===3?'Carry forward: keep CSAT in a short recurring slot.':''
       };
       return record;
     }
-    function records(context={}){
+    function records(context:Readonly<{today?:string}>={}):readonly StudyRecord[]{
       const today=context.today||localIsoDate();
       return Array.from({length:PREVIEW_SAMPLE_DAYS},(_,index)=>buildRecord(dayOffset(today,index-PREVIEW_SAMPLE_DAYS),index));
     }
-    return Object.freeze({records});
+    const recordsProvider:InsightsPreviewProvider=records;
+    return Object.freeze({records:recordsProvider});
   })();
-  function injectStyles(){
+  function injectStyles():void{
     if(document.getElementById('sd-guide-style'))return;
     const style=document.createElement('style');
     style.id='sd-guide-style';
@@ -799,15 +838,15 @@
     `;
     document.head.appendChild(style);
   }
-  function setGuideTabState(tab,selected){
+  function setGuideTabState(tab:HTMLElement,selected:boolean):void{
     tab.classList.toggle('on',selected);
     tab.setAttribute('aria-selected',selected?'true':'false');
     tab.tabIndex=selected?0:-1;
   }
-  function bindGuideTabKeys(tabList,selector,activate){
+  function bindGuideTabKeys(tabList:HTMLElement,selector:string,activate:(tab:HTMLElement)=>void):void{
     tabList.addEventListener('keydown',event=>{
       if(!['ArrowRight','ArrowLeft','ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
-      const tabs=[...tabList.querySelectorAll(selector)];
+      const tabs=[...tabList.querySelectorAll<HTMLElement>(selector)];
       const current=tabs.indexOf(document.activeElement);
       if(current<0||!tabs.length)return;
       let next=current;
@@ -815,11 +854,10 @@
       else if(event.key==='End')next=tabs.length-1;
       else next=(current+(event.key==='ArrowRight'||event.key==='ArrowDown'?1:-1)+tabs.length)%tabs.length;
       event.preventDefault();
-      tabs[next].focus();
-      activate(tabs[next]);
+      const target=tabs[next];if(!target)return;target.focus();activate(target);
     });
   }
-  function renderLifecycle(context,state,activeId){
+  function renderLifecycle(context:GuideRenderContext,state:GuideState,activeId:GuideStep):HTMLElement{
     const ribbon=el('div','guide-lifecycle');
     ribbon.setAttribute('role','tablist');
     ribbon.setAttribute('aria-label','Daily loop stages');
@@ -832,21 +870,21 @@
       const section=GUIDE_SECTIONS[id];
       const tab=button('guide-life-node mini-btn ui-btn '+(id===activeId?'on':''),section.label,()=>updateGuideStage(context,state,id));
       tab.id=`guide-step-${id}`;
-      tab.dataset.guideStep=id;
+      tab.dataset['guideStep']=id;
       tab.setAttribute('role','tab');
       tab.setAttribute('aria-controls','guide-stage-panel');
       setGuideTabState(tab,id===activeId);
       ribbon.appendChild(tab);
     });
-    bindGuideTabKeys(ribbon,'.guide-life-node',tab=>updateGuideStage(context,state,tab.dataset.guideStep));
+    bindGuideTabKeys(ribbon,'.guide-life-node',tab=>updateGuideStage(context,state,tab.dataset['guideStep']));
     return ribbon;
   }
-  function renderPurpose(section){
+  function renderPurpose(section:GuideSection):HTMLElement{
     const block=el('div','guide-purpose');
     section.purpose.forEach(line=>block.appendChild(el('p','ui-body',line)));
     return block;
   }
-  function renderSavedPanel(section){
+  function renderSavedPanel(section:GuideSection):HTMLElement{
     const panel=el('div','guide-map-group');
     panel.appendChild(el('div','guide-label ui-label','What gets saved'));
     const list=el('div','guide-save-list');
@@ -854,7 +892,7 @@
     panel.appendChild(list);
     return panel;
   }
-  function renderFlow(section){
+  function renderFlow(section:GuideSection):HTMLElement{
     const flow=el('div','guide-flow');
     flow.tabIndex=0;
     flow.setAttribute('role','region');
@@ -869,20 +907,21 @@
     });
     return flow;
   }
-  function renderMapGroup(label,items){
+  function renderMapGroup(label:string,items:readonly GuideReferenceItem[]):HTMLElement{
     const group=el('div','guide-map-group');
     group.appendChild(el('div','guide-label ui-label',label));
     const list=el('div','guide-chip-list');
-    items.forEach(item=>list.appendChild(el('div','guide-chip ui-mono',item)));
+    items.forEach(item=>list.appendChild(el('div','guide-chip ui-mono',Array.isArray(item)?item.join(' · '):item)));
     group.appendChild(list);
     return group;
   }
-  function renderDefinitionGuide(label,rows,pairRows=false){
+  function renderDefinitionGuide(label:string,rows:readonly GuideReferenceItem[],pairRows=false):HTMLElement|null{
     if(!rows||!rows.length)return null;
     const group=el('div','guide-map-group');
     group.appendChild(el('div','guide-label ui-label',label));
     const list=el('div','guide-field-list');
-    rows.forEach(([key,desc])=>{
+    rows.forEach(item=>{
+      if(!Array.isArray(item)||item.length<2)return;const key=String(item[0]??''),desc=String(item[1]??'');
       const row=el('div','guide-field-row'+(pairRows?' guide-pair-row':''));
       row.append(el('div','guide-field-key ui-mono',key),el('div','guide-field-desc ui-body',desc));
       list.appendChild(row);
@@ -890,18 +929,18 @@
     group.appendChild(list);
     return group;
   }
-  function renderReferenceTab(tab){
+  function renderReferenceTab(tab:GuideReferenceDefinition):HTMLElement|null{
     if(!tab||!tab.items||!tab.items.length)return null;
     if(tab.kind==='pairs')return renderDefinitionGuide(tab.heading,tab.items,true);
     if(tab.kind==='fields')return renderDefinitionGuide(tab.heading,tab.items);
     return renderMapGroup(tab.heading,tab.items);
   }
-  function mapTabDefinitions(section){
-    const tabs=section.referenceTabs.map(tab=>({...tab,render:()=>renderReferenceTab(tab)}));
+  function mapTabDefinitions(section:GuideSection):QuickReferenceTab[]{
+    const tabs:QuickReferenceTab[]=section.referenceTabs.map(tab=>Object.freeze({id:tab.id,label:tab.label,render:()=>renderReferenceTab(tab)}));
     tabs.push({id:'saved',label:'Saved',render:()=>renderSavedPanel(section)});
     return tabs;
   }
-  function renderQuickMap(section,state,activeId){
+  function renderQuickMap(section:GuideSection,state:GuideState,activeId:GuideStep):HTMLDetailsElement{
     const disclosure=el('details','guide-reference ui-disclosure');
     if(!state.referenceOpen)state.referenceOpen={};
     disclosure.open=state.referenceOpen[activeId]===true;
@@ -910,7 +949,7 @@
     const map=el('div','guide-map');
     const tabs=mapTabDefinitions(section);
     const previous=state.mapTabs&&state.mapTabs[activeId];
-    const selected=tabs.some(tab=>tab.id===previous)?previous:tabs[0].id;
+    const first=tabs[0];if(!first)throw new Error('Guide reference topics are unavailable.');const selected=tabs.some(tab=>tab.id===previous)?String(previous):first.id;
     if(!state.mapTabs)state.mapTabs={};
     state.mapTabs[activeId]=selected;
     const head=el('div','guide-map-head');
@@ -921,10 +960,10 @@
     const body=el('div','guide-map-body');
     body.id=`guide-reference-panel-${activeId}`;
     body.setAttribute('role','tabpanel');
-    function selectReference(id){
-      const active=tabs.find(tab=>tab.id===id)||tabs[0];
+    function selectReference(id:string|undefined):void{
+      const active=tabs.find(tab=>tab.id===id)??first;
       state.mapTabs[activeId]=active.id;
-      tabRow.querySelectorAll('.guide-map-tab').forEach(tab=>setGuideTabState(tab,tab.dataset.guideReference===active.id));
+      tabRow.querySelectorAll('.guide-map-tab').forEach(tab=>setGuideTabState(tab,tab.dataset['guideReference']===active.id));
       body.setAttribute('aria-labelledby',`guide-reference-${activeId}-${active.id}`);
       const content=active.render();
       body.replaceChildren(...(content?[content]:[]));
@@ -932,13 +971,13 @@
     tabs.forEach(tab=>{
       const tabButton=button('guide-map-tab mini-btn ui-btn '+(tab.id===selected?'on':''),tab.label,()=>selectReference(tab.id));
       tabButton.id=`guide-reference-${activeId}-${tab.id}`;
-      tabButton.dataset.guideReference=tab.id;
+      tabButton.dataset['guideReference']=tab.id;
       tabButton.setAttribute('role','tab');
       tabButton.setAttribute('aria-controls',body.id);
       setGuideTabState(tabButton,tab.id===selected);
       tabRow.appendChild(tabButton);
     });
-    bindGuideTabKeys(tabRow,'.guide-map-tab',tab=>selectReference(tab.dataset.guideReference));
+    bindGuideTabKeys(tabRow,'.guide-map-tab',tab=>selectReference(tab.dataset['guideReference']));
     head.appendChild(tabRow);
     map.appendChild(head);
     map.appendChild(body);
@@ -946,7 +985,7 @@
     disclosure.appendChild(map);
     return disclosure;
   }
-  function renderOverviewList(label,items){
+  function renderOverviewList(label:string,items:readonly string[]):HTMLElement{
     const card=el('section','guide-overview-card');
     card.appendChild(el('h3','guide-label ui-label',label));
     const list=el('ul','guide-overview-list');
@@ -954,7 +993,7 @@
     card.appendChild(list);
     return card;
   }
-  function renderStageContent(state,activeId){
+  function renderStageContent(state:GuideState,activeId:GuideStep):DocumentFragment{
     const section=GUIDE_SECTIONS[activeId];
     const fragment=document.createDocumentFragment();
     const intro=el('div','guide-copy');
@@ -969,20 +1008,20 @@
     fragment.append(el('div','guide-label ui-label','Flow'),renderFlow(section),renderQuickMap(section,state,activeId));
     return fragment;
   }
-  function updateGuideStage(context,state,requestedId){
-    const activeId=GUIDE_SECTIONS[requestedId]?requestedId:'plan';
+  function updateGuideStage(context:GuideRenderContext,state:GuideState,requestedId:unknown):void{
+    const activeId=normalizeGuideStep(requestedId);
     state.step=activeId;
-    const pane=context&&context.pane;
+    const pane=context?.pane;
     if(!pane)return;
-    pane.querySelectorAll('.guide-life-node').forEach(tab=>setGuideTabState(tab,tab.dataset.guideStep===activeId));
+    pane.querySelectorAll('.guide-life-node').forEach(tab=>setGuideTabState(tab,tab.dataset['guideStep']===activeId));
     const stage=pane.querySelector('#guide-stage-panel');
     if(!stage)return;
     const content=renderStageContent(state,activeId);
     stage.setAttribute('aria-labelledby',`guide-step-${activeId}`);
     stage.replaceChildren(content);
   }
-  function renderHandbook(context,state){
-    const activeId=GUIDE_SECTIONS[state.step]?state.step:'plan';
+  function renderHandbook(context:GuideRenderContext,state:GuideState):HTMLElement{
+    const activeId=normalizeGuideStep(state.step);
     const handbook=el('section','guide-handbook ui-card');
     handbook.append(el('div','guide-label ui-label','Daily loop'),renderLifecycle(context,state,activeId));
     const stage=el('div','guide-stage-panel');
@@ -993,7 +1032,7 @@
     handbook.appendChild(stage);
     return handbook;
   }
-  async function runInstallAction(context,api,state){
+  async function runInstallAction(context:GuideRenderContext|null,api:GuideApi,state:GuideState):Promise<void>{
     const current=api.installation.status();
     if(current.installationAction==='install')await api.installation.prompt();
     else if(current.installationState==='manual'&&state.installHelpOpen)await api.installation.inspect();
@@ -1002,7 +1041,7 @@
     }
     refreshInstallCard(context,api,state);
   }
-  function renderInstallCard(context,api,state){
+  function renderInstallCard(context:GuideRenderContext|null,api:GuideApi,state:GuideState):HTMLElement{
     const current=api.installation.status();
     if(current.installHelpRequested)state.installHelpOpen=true;
     const card=el('section','guide-section guide-install ui-card');
@@ -1039,13 +1078,13 @@
     }
     return card;
   }
-  function refreshInstallCard(context,api,state){
-    const pane=context&&context.pane;
+  function refreshInstallCard(context:GuideRenderContext|null,api:GuideApi,state:GuideState):void{
+    const pane=context?.pane;
     const current=pane&&pane.querySelector('#guide-install-card');
     if(current)current.replaceWith(renderInstallCard(context,api,state));
   }
-  function renderGuide(context,api,state){
-    const pane=context&&context.pane;
+  function renderGuide(context:GuideRenderContext,api:GuideApi,state:GuideState):void{
+    const pane=context?.pane;
     if(!pane)return;
     state.context=context;
     injectStyles();
@@ -1105,7 +1144,7 @@
     const legalLinks=el('nav','guide-legal-links');
     legalLinks.setAttribute('aria-label','Study Director legal documents');
     LegalCenter.documents.forEach(documentDefinition=>{
-      const control=button('mini-btn ui-btn',documentDefinition.label,event=>LegalCenter.open(documentDefinition.id,event.currentTarget));
+      const control=button('mini-btn ui-btn',documentDefinition.label,(_event,control)=>LegalCenter.open(documentDefinition.id,control));
       control.setAttribute('aria-haspopup','dialog');
       legalLinks.appendChild(control);
     });
@@ -1114,66 +1153,56 @@
     wrap.appendChild(legal);
     pane.replaceChildren(wrap);
   }
-  function updateTemplateStatus(context,state){
+  function updateTemplateStatus(context:GuideRenderContext|null,state:GuideState):void{
     const status=context&&context.pane&&context.pane.querySelector('.guide-status');
     if(!status)return;
     status.textContent=state.status||'';
     status.classList.toggle('ok',state.ok);
   }
-  async function loadTemplate(api,state,template,context){
-    if(!api.plan||typeof api.plan.loadDraft!=='function')return;
+  async function loadTemplate(api:GuideApi,state:GuideState,template:Template,context:GuideRenderContext|null):Promise<void>{
     const result=await api.plan.loadDraft(template.schedule,{label:template.label});
     state.status=result&&result.ok?`${template.label} loaded into Plan Draft.`:result?.error==='cancelled'?'Current draft kept.':'Template could not load.';
     state.ok=!!result?.ok;updateTemplateStatus(context,state);
     if(result?.ok&&api.ui?.goTab)api.ui.goTab('plan');
   }
-  async function showSample(api){
-    if(!api.preview||typeof api.preview.useSample!=='function')return;
+  async function showSample(api:GuideApi):Promise<void>{
     const result=await api.preview.useSample({label:`Sample ${PREVIEW_SAMPLE_DAYS} days`,target:'insights'});
-    if(result&&result.ok&&api.ui&&api.ui.goTab)api.ui.goTab('insights');
+    if(result?.ok)api.ui.goTab('insights');
   }
-  function supportsCapabilities(api,requirements){
-    const capabilities=api&&api.capabilities;
-    return !!capabilities&&Object.entries(requirements).every(([key,minimum])=>Number(capabilities[key]||0)>=Number(minimum));
+  function supportsCapabilities(api:GuideApi,requirements:Readonly<Record<string,number>>):boolean{
+    return Object.entries(requirements).every(([key,minimum])=>Number(api.capabilities[key]??0)>=minimum);
   }
-  function setup(api){
-    if(!supportsCapabilities(api,REQUIRED_CAPABILITIES)||!api.ui||typeof api.ui.registerTab!=='function'||typeof api.ui.goTab!=='function'||!api.ui.workspaceHistory||typeof api.ui.workspaceHistory.register!=='function'||!api.plan||typeof api.plan.loadDraft!=='function'||!api.preview||typeof api.preview.useSample!=='function'||typeof api.preview.clear!=='function'||!api.installation||typeof api.installation.status!=='function'||typeof api.installation.prompt!=='function'||typeof api.installation.inspect!=='function'||typeof api.installation.showHelp!=='function')return false;
-    if(!LegalCenter.connect(api.ui.workspaceHistory))return false;
-    const state={step:'plan',pending:'',status:'',ok:false,mapTabs:{},referenceOpen:{},installHelpOpen:false,context:null};
-    window.addEventListener(INSTALL_STATE_EVENT,event=>{
-      if(event.detail&&event.detail.installHelpRequested)state.installHelpOpen=true;
-      refreshInstallCard(state.context,api,state);
-    });
-    return api.ui.registerTab({
-      id:TAB_ID,
-      label:'Guide',
-      icon:'?',
-      render:context=>renderGuide(context,api,state)
-    });
+  let guideState:GuideState|null=null,guideApi:GuideApi|null=null,installListenerBound=false;
+  function installStateChanged(event:Event):void{
+    if(!guideState||!guideApi)return;const detail=event instanceof CustomEvent&&isRecord(event.detail)?event.detail:null;
+    if(detail?.['installHelpRequested']===true)guideState.installHelpOpen=true;refreshInstallCard(guideState.context,guideApi,guideState);
+  }
+  function setup(value:unknown):boolean{
+    if(!isGuideApi(value)||!supportsCapabilities(value,REQUIRED_CAPABILITIES))return false;
+    const api=value;if(!LegalCenter.connect(api.ui.workspaceHistory))return false;
+    const state=guideState??(guideState={step:'plan',status:'',ok:false,mapTabs:{},referenceOpen:{},installHelpOpen:false,context:null});
+    const registered=api.ui.registerTab({id:TAB_ID,label:'Guide',icon:'?',render:context=>renderGuide(context,api,state)});
+    if(registered===false)return false;guideApi=api;
+    if(!installListenerBound){window.addEventListener(INSTALL_STATE_EVENT,installStateChanged);installListenerBound=true;}
+    return true;
   }
   const PLUGIN_READY_EVENT='studydirector:ready';
-  const PLUGIN_DESCRIPTOR=Object.freeze({
-    name:'SD-guide',
-    version:PLUGIN_VERSION,
-    requires:REQUIRED_CAPABILITIES,
-    previewProviders:Object.freeze({insights:SampleDataEngine.records}),
-    setup
-  });
+  const PLUGIN_DESCRIPTOR:PluginDescriptor=Object.freeze({name:'SD-guide',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,previewProviders:Object.freeze({insights:SampleDataEngine.records}),setup});
   const MAX_REGISTRATION_ATTEMPTS=2;
   let registrationAttempts=0;
   let registrationComplete=false;
-  function connectPlugin(){
+  function connectPlugin():boolean{
     if(registrationComplete)return true;
-    const register=window.StudyDirector&&window.StudyDirector.registerPlugin;
+    const runtime=(window as StudyDirectorWindow).StudyDirector;if(!isRecord(runtime))return false;const register=runtime['registerPlugin'];
     if(typeof register!=='function'||registrationAttempts>=MAX_REGISTRATION_ATTEMPTS)return false;
     registrationAttempts+=1;
-    try{registrationComplete=register(PLUGIN_DESCRIPTOR)===true;}catch(error){}
+    try{registrationComplete=Reflect.apply(register,runtime,[PLUGIN_DESCRIPTOR])===true;}catch{}
     if(!registrationComplete&&registrationAttempts<MAX_REGISTRATION_ATTEMPTS)Promise.resolve().then(connectPlugin);
     return registrationComplete;
   }
-  function boot(){
-    const api=window.StudyDirector;
-    if(api&&typeof api.registerPlugin==='function')connectPlugin();
+  function boot():void{
+    const api=(window as StudyDirectorWindow).StudyDirector;
+    if(isRecord(api)&&typeof api['registerPlugin']==='function')connectPlugin();
     else window.addEventListener(PLUGIN_READY_EVENT,connectPlugin,{once:true});
   }
   boot();

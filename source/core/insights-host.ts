@@ -3,6 +3,7 @@ import type {RepositoriesModule} from './repositories.ts';
 import type {RecordCodecsModule} from './record-codecs.ts';
 import type {NoticeCoordinator} from './notice-coordinator.ts';
 import type {InsightsEngineDependencies} from '../external/insights-model.ts';
+import type {StudyRecord} from '../../types/record-models.ts';
 
 type AppData=ReturnType<RepositoriesModule['createAppData']>;
 type DailyRecords=AppData['dailyRecords'];
@@ -13,7 +14,7 @@ type DailySummaryView=NonNullable<ReturnType<DailyRecordCodec['materializeDailyR
 type DailyWindowOptions=NonNullable<Parameters<DailyRecords['window']>[0]>;
 type InsightNotifications=ReturnType<NoticeCoordinator['presentation']>;
 type PreviewTarget='insights';
-export type InsightsPreviewProvider=(options:Readonly<{today:string}>)=>readonly unknown[];
+export type InsightsPreviewProvider=(options:Readonly<{today:string}>)=>readonly StudyRecord[];
 type PreviewProvider=InsightsPreviewProvider;
 type PreviewStatus=Readonly<{
   type:'demo'|'real';target:PreviewTarget;available:boolean;label:string;mode:'preview'|'saved';revision:string;
