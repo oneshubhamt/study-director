@@ -1,12 +1,17 @@
 # TypeScript conversion — execution record
 
-## P5.11a implementation checkpoint · OPEN · 2026-11-21
+## P5.11a · VERIFIED — TARGETED · 2026-11-21
 
-- Started from published `ts-exp` head `33597f7a`; scope is P5.11a only.
-- Audit found two in-scope lifecycle defects: failed Guide registration could retain duplicate installation listeners on retry, and a close/reopen Legal Center transition could restore focus to the stale opener.
-- Guide is converted to checked TypeScript, its Insights sample producer is typed against the canonical `StudyRecord` contract, and compiled-source readers/coverage ownership follow the new source.
-- Registration retry and Legal Center ownership fixes are implemented without changing P5.11b presentation, P5.12 install/update policy, P5.13 generic loading, canonical storage topology, or vendored Wordgard.
-- **Still open:** strict type/lint/build/generated gates, Guide browser acceptance including delayed legal reads and template accept/cancel, targeted five-run browser evidence, and final execution-record closure. Full QA remains intentionally deferred.
+- **Baseline / implementation head:** P5.11a started from published `ts-exp` `33597f7a`; checked implementation and targeted evidence are at `9e78fd457b5c0cf0b846452b4da8816f9ae60e46`.
+- **Outcome:** `source/external/guide.js` is now checked `guide.ts`; the manifest and browser TS project point at it, transitional source readers use compiled TypeScript, and coverage ownership follows the typed source. `InsightsPreviewProvider` is checked as canonical `StudyRecord[]`.
+- **Runtime correctness:** Guide setup is retry-safe and idempotent after success, so retry does not duplicate tab registration or installation listeners. Legal Center preserves its allowlist, sanitizer and Trusted Types policy; delayed reads are revision-fenced across document switch/close, close→reopen transfers trigger ownership correctly, and final close restores both focus and page overflow.
+- **Guide behavior:** keyboard lifecycle selection, template replace/cancel, Legal Back/close focus, delayed Privacy→Terms switching and close-pending Security reads are exercised in the strict Trusted Types browser boundary. The 28-day sample uses the real record codec; browser evidence proves preview roundtrip does not add, replace or delete canonical Saved Days.
+- **Type/build gates:** hosted pinned-toolchain `npm run check:types` passed strict typecheck and typed lint across **229 checked / 0 unchecked** TS files. Fresh build, generated-build verification and generated-JS syntax all passed. [Repository checks](https://github.com/oneshubhamt/study-director/actions/runs/44852102178)
+- **Feature evidence:** Guide/sample lifecycle and architecture checks passed; populated Insights including the saved-data roundtrip passed **5/5** isolated browser runs. [Insights verification](https://github.com/oneshubhamt/study-director/actions/runs/44852102156)
+- **Guide browser evidence:** the changed strict security/Guide browser witness passed **5/5** isolated runs, covering keyboard/template/Legal ownership plus the existing Trusted Types boundary. [Guide browser verification](https://github.com/oneshubhamt/study-director/actions/runs/44852102143)
+- **Regression note:** the unrelated Drive/profile browser workflow had one transient `sync-and-profiles` failure; an unchanged exact failed-job rerun passed in attempt 2, while its type/provider/build gates passed both times. [Drive/status rerun](https://github.com/oneshubhamt/study-director/actions/runs/44852102198)
+- **Scope boundary:** no P5.11b presentation work, P5.12 install/update policy, P5.13 generic plugin loading, canonical storage topology, workflow configuration, `main`, `TS-Conversion` or vendored Wordgard was changed.
+- **Still open:** P5.11b, P5.12, P5.13, Phase 6 and Phase 7/full whole-app/device QA remain intentionally open.
 
 ## Executor handoff · 2026-11-21
 
