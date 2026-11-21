@@ -67,6 +67,7 @@ assert.equal(descriptor.setup(retryApi),false,'a failed tab registration must ke
 assert.equal(descriptor.setup(retryApi),true,'the retry must complete Guide setup');
 assert.equal(descriptor.setup(retryApi),true,'completed Guide setup remains idempotent');
 assert.equal(historyRegistrations,1,'Guide retries must reuse one Legal Center history registration');
+assert.equal(tabRegistrationAttempts,2,'successful Guide setup must not register the tab again');
 assert.equal(windowListeners.get('studydirector:installationchange')?.length,1,'Guide retries must install one installation listener');
 const provider=descriptor.previewProviders?.insights;
 assert.equal(typeof provider,'function','Guide must expose the Insights sample provider.');

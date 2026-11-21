@@ -535,7 +535,7 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
     }
     function open(id:unknown='privacy',trigger:HTMLElement|null=null,options:LegalOpenOptions={}):boolean{
       const key=typeof id==='string'&&byId.has(id as LegalDocumentId)?id as LegalDocumentId:'privacy';const layer=ensure();
-      const firstOpen=!visible(),reopening=closing;
+      const reopening=closing&&!layer.hidden,firstOpen=!visible()&&!reopening;
       if(reopening){cancelCloseVisual();closing=false;resolveClose(true);layer.classList.remove('is-closing');if(trigger?.isConnected)activeTrigger=trigger;}
       if(firstOpen){activeTrigger=trigger?.isConnected?trigger:(document.activeElement instanceof HTMLElement?document.activeElement:null);restoreOverflow=document.body.style.overflow;document.body.style.overflow='hidden';layer.hidden=false;requestAnimationFrame(()=>layer.classList.add('is-open'));}
       else layer.classList.add('is-open');
@@ -1173,19 +1173,20 @@ import type {DailyResult,PauseEvent,PracticePlan,PracticeRun,StoredSchedule,Stud
   function supportsCapabilities(api:GuideApi,requirements:Readonly<Record<string,number>>):boolean{
     return Object.entries(requirements).every(([key,minimum])=>Number(api.capabilities[key]??0)>=minimum);
   }
-  let guideState:GuideState|null=null,guideApi:GuideApi|null=null,installListenerBound=false;
+  let guideState:GuideState|null=null,guideApi:GuideApi|null=null,installListenerBound=false,setupComplete=false;
   function installStateChanged(event:Event):void{
     if(!guideState||!guideApi)return;const detail=event instanceof CustomEvent&&isRecord(event.detail)?event.detail:null;
     if(detail?.['installHelpRequested']===true)guideState.installHelpOpen=true;refreshInstallCard(guideState.context,guideApi,guideState);
   }
   function setup(value:unknown):boolean{
     if(!isGuideApi(value)||!supportsCapabilities(value,REQUIRED_CAPABILITIES))return false;
-    const api=value;if(!LegalCenter.connect(api.ui.workspaceHistory))return false;
+    const api=value;if(setupComplete)return guideApi===api;
+    if(!LegalCenter.connect(api.ui.workspaceHistory))return false;
     const state=guideState??(guideState={step:'plan',status:'',ok:false,mapTabs:{},referenceOpen:{},installHelpOpen:false,context:null});
     const registered=api.ui.registerTab({id:TAB_ID,label:'Guide',icon:'?',render:context=>renderGuide(context,api,state)});
     if(registered===false)return false;guideApi=api;
     if(!installListenerBound){window.addEventListener(INSTALL_STATE_EVENT,installStateChanged);installListenerBound=true;}
-    return true;
+    setupComplete=true;return true;
   }
   const PLUGIN_READY_EVENT='studydirector:ready';
   const PLUGIN_DESCRIPTOR:PluginDescriptor=Object.freeze({name:'SD-guide',version:PLUGIN_VERSION,requires:REQUIRED_CAPABILITIES,previewProviders:Object.freeze({insights:SampleDataEngine.records}),setup});

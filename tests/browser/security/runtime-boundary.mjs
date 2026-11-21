@@ -96,7 +96,7 @@ try{
  await waitFor(()=>page.evaluate(`document.querySelector('.legal-center-overlay')?.hidden===true`),{label:'Legal close while pending'});
  await waitFor(()=>page.evaluate(`document.activeElement?.textContent?.trim()==='Security'&&!!document.activeElement?.closest?.('.guide-legal-links')`),{label:'Legal close focus restoration'});
  await page.evaluate(`window.__guideLegalQA.resolve('security')`);await new Promise(resolve=>setTimeout(resolve,60));
- assert.deepEqual(await page.evaluate(`({hidden:document.querySelector('.legal-center-overlay')?.hidden===true,security:/SECURITY_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||''),focused:document.activeElement?.textContent?.trim()||''})`),{hidden:true,security:false,focused:'Security'});
+ assert.deepEqual(await page.evaluate(`({hidden:document.querySelector('.legal-center-overlay')?.hidden===true,security:/SECURITY_SENTINEL/.test(document.querySelector('.legal-center-content')?.textContent||''),focused:document.activeElement?.textContent?.trim()||'',overflow:document.body.style.overflow})`),{hidden:true,security:false,focused:'Security',overflow:''});
  await page.evaluate(`window.__guideLegalQA.restore()`);
  // Export worker construction is also a TrustedScriptURL sink.
  await page.evaluate('__PWA6.BackupController.createCheckpoint()');
