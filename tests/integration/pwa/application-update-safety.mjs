@@ -37,7 +37,7 @@ function makeHarness(options={}){
     install:async()=>lifecycleStatus,
     apply:async()=>{calls.apply++;return options.applyResult!==false;},
     checkForUpdate:async()=>{calls.check++;return options.checkResult!==false;},
-    confirmBoot:async()=>true,reportClient:()=>true,status:()=>lifecycleStatus
+    confirmBoot:async()=>true,reportClient:()=>true,reconcileFollowerRole:()=>true,status:()=>lifecycleStatus
   };
   const lifecycleModule={createCoordinator:input=>{lifecycleHooks=input.hooks;return Object.freeze(lifecycle);}};
   const local=new Map();
