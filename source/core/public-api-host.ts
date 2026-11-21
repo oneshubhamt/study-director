@@ -1,5 +1,5 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
-import type {OptionalPluginDescriptor,PluginFileState,PluginFileStatus,PluginRegistrationStatus,PluginRuntimeStatus,PublicApiHostModule,PublicApiInput,PublicApiRuntime,PublicApiRuntimeInput,StudyDirectorPluginDescriptor,StudyDirectorPublicApi} from '../../types/public-api-host.ts';
+import type {OptionalPluginDescriptor,PluginFileState,PluginFileStatus,PluginRegistrationStatus,PluginRuntimeStatus,PublicApiHostModule as PublicApiHostContract,PublicApiInput,PublicApiRuntime,PublicApiRuntimeInput,StudyDirectorPluginDescriptor,StudyDirectorPublicApi} from '../../types/public-api-host.ts';
 const sdPublicApiHostFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'public-api-host','study-director.public-api-host-module'>|undefined;
@@ -81,7 +81,8 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     if(!name)return null;
     const requires=isRecord(value['requires'])?value['requires'] as Readonly<Record<string,number>>:freeze({});
     const previewProviders=isRecord(value['previewProviders'])?value['previewProviders'] as StudyDirectorPluginDescriptor['previewProviders']:undefined;
-    return {name,version,requires,previewProviders,setup:value['setup'] as StudyDirectorPluginDescriptor['setup']};
+    const base={name,version,requires,setup:value['setup'] as StudyDirectorPluginDescriptor['setup']};
+    return previewProviders?{...base,previewProviders}:base;
   }
   function register(value:unknown){
     const plugin=normalizePlugin(value);if(!plugin||!publicApi)return false;
@@ -165,7 +166,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
   }
   return freeze({format:'study-director.public-api-host',contractVersion:1,registerPlaceholders,requestTab,status,createPublicApi});
 }
-const createModule=():PublicApiHostModule=>freeze({format:'study-director.public-api-host-module',contractVersion:1,createRuntime});
+const createModule=():PublicApiHostContract=>freeze({format:'study-director.public-api-host-module',contractVersion:1,createRuntime});
 registry.define('public-api-host',1,createModule);return createModule;
 })();
 export type PublicApiHostModule=typeof sdPublicApiHostFactory;
