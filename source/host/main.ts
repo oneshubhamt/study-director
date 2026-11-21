@@ -2,7 +2,7 @@ import type {BrowserRegistry} from '../../types/browser-registry.ts';
 import type {PresentationKernel} from '../../types/presentation.ts';
 import type {ProfileScopeValue} from '../../types/profile-scope.ts';
 import type {StudyDirectorPublicApi} from '../../types/public-api-host.ts';
-import type {RichTextApi} from '../../rich-text/editor.ts';
+import type {RichTextApi,AssetStore,WorkspaceOverlayPort,NotePort} from '../../rich-text/editor.ts';
 import type {ActiveSession} from '../../types/record-models.ts';
 import type {SessionActionState} from '../../types/session-actions.ts';
 import type {Task} from '../../types/domain.ts';
@@ -1037,12 +1037,13 @@ function handlePreviousActiveSession(...args:Parameters<typeof SessionActions.ha
 function revisitPreviousStoredSession(...args:Parameters<typeof SessionActions.revisitPreviousStoredSession>){return SessionActions.revisitPreviousStoredSession(...args);}
 function attemptAutoRestoreActiveSession(...args:Parameters<typeof SessionActions.attemptAutoRestoreActiveSession>){return SessionActions.attemptAutoRestoreActiveSession(...args);}
 /* INDEXEDDB STORE ADAPTERS · IMPORTED */
-const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze<Parameters<typeof DataBootstrapHostModule.createIndexedDb>[0]>({
+type IndexedDbHostInput=Parameters<typeof DataBootstrapHostModule.createIndexedDb>[0];
+const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze<IndexedDbHostInput>({
   module:PersistenceModule,
-  config:Object.freeze({
+  config:Object.freeze<IndexedDbHostInput['config']>({
     dbName:DB_NAME,
     dbVersion:DB_VER,
-    stores:Object.freeze({
+    stores:Object.freeze<IndexedDbHostInput['config']['stores']>({
       dailyRecords:DB_DAILY_RECORD_STORE,
       dailySummaries:DB_DAILY_SUMMARY_STORE,
       notes:DB_NOTES_STORE,
@@ -1051,10 +1052,10 @@ const IndexedDb=DataBootstrapHostModule.createIndexedDb(Object.freeze<Parameters
       assets:DB_ASSET_STORE
     }),
   }),
-  hooks:Object.freeze({
-    onError:message=>markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`),
-    onOk:key=>markStorageHealthOk('indexedDB',key),
-    capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
+  hooks:Object.freeze<IndexedDbHostInput['hooks']>({
+    onError:message=>{markStorageHealthError('indexedDB',`Browser database is unavailable: ${message}`);},
+    onOk:()=>{markStorageHealthOk('indexedDB');},
+    capture:(scope,error,level)=>{AppDiagnostics.capture(scope,error,level);},
     onReset:event=>{void handleBrowserStorageReset(event).catch(error=>AppDiagnostics.capture('storage-reset.handle',error,'error'));}
   })
 
@@ -1117,10 +1118,10 @@ let imagePreparationCount=0,pwaWorkRevision=0;
 document.addEventListener('input',()=>{pwaWorkRevision++;},true);
 document.addEventListener('change',()=>{pwaWorkRevision++;},true);
 let invalidateAttachmentLibrary=()=>false;
-let scheduleRichTextAssetMaintenance=()=>false;
-let notifyRichTextAssetLeaseReleased=()=>false;
+let scheduleRichTextAssetMaintenance:(delay?:number)=>boolean=()=>false;
+let notifyRichTextAssetLeaseReleased:()=>boolean=()=>false;
 const CanonicalCommitHost=BackupReadinessHostModule.createCanonicalCommit(Object.freeze<Parameters<typeof BackupReadinessHostModule.createCanonicalCommit>[0]>({
-  storage:StorageHealthController,scanAttachmentReferences:value=>RichTextApi.scanAttachmentReferences(value),incrementReferenceRevision:()=>{richAssetReferenceRevision++;},
+  storage:requireStorageHealthController(),scanAttachmentReferences:value=>RichTextApi.scanAttachmentReferences(value),incrementReferenceRevision:()=>{richAssetReferenceRevision++;},
   syncCapability:event=>CapabilityBadge?.syncFromCanonicalCommit(event),notifyBackupChange:change=>notifyBackupChange(change),scheduleAssetMaintenance:()=>scheduleRichTextAssetMaintenance(),invalidateAttachmentLibrary:()=>invalidateAttachmentLibrary(),
   fullyInitialized:()=>StartupLifecycle.status().fullyInitialized,refreshKeptVersions:()=>KeptVersions?.refresh()||false,reminderDate:()=>ReviewDayState.reminder.date,revalidateSaveReminder:()=>revalidateSaveReminderAfterCanonicalConvergence(),nowIso:()=>new Date().toISOString()
 }));
@@ -1131,17 +1132,19 @@ if(!Object.isFrozen(RecoveryAssetMaintenancePause)||RecoveryAssetMaintenancePaus
 let BackupIntegrity:ReturnType<typeof BackupIntegrityHostModule.createController>|null=null,AttachmentIntegrityJob:ReturnType<typeof BackupIntegrityHostModule.createController>['attachmentJob']|null=null;
 const RichTextAssetWriteLease=AssetStorageModule.createLease();
 function richAssetId(value:unknown){const id=String(value||'');if(!RichTextApi.isAssetId(id))throw new TypeError('Rich-text asset identity is invalid.');return id;}
-const AttachmentIngest=AttachmentIngestModule.create({
-  createWorker:()=>new Worker(trustedAssetURL('@@SD_ATTACHMENT_WORKER_FILENAME@@'),{name:'study-director-attachment-ingest'}),storage:navigator.storage,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),onAbandoned:()=>scheduleRichTextAssetMaintenance(5000)
-});
+type AttachmentIngestInput=Parameters<typeof AttachmentIngestModule.create>[0];
+const AttachmentIngest=AttachmentIngestModule.create(Object.freeze<AttachmentIngestInput>({
+  createWorker:()=>new Worker(trustedAssetURL('@@SD_ATTACHMENT_WORKER_FILENAME@@'),{name:'study-director-attachment-ingest'}),storage:navigator.storage,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),onAbandoned:()=>{scheduleRichTextAssetMaintenance(5000);}
+}));
 window.addEventListener('pagehide',()=>AttachmentIngest.destroy());
-const AttachmentStorage=AssetStorageModule.create({
+type AttachmentStorageInput=Parameters<typeof AssetStorageModule.create>[0];
+const AttachmentStorage=AssetStorageModule.create(Object.freeze<AttachmentStorageInput>({
   name:DB_NAME,directory:ProfileScope.scoped('@@SD_ATTACHMENT_OPFS_DIRECTORY@@'),maxBytes:APP_LIMITS.richAssetMaxBytes,validId:AttachmentsModule.validId,validType:AttachmentsModule.validType,limitForType:AttachmentsModule.limitForType,
   storage:navigator.storage,locks:navigator.locks,protocol:location.protocol,ingest:AttachmentIngest,onReleased:()=>notifyRichTextAssetLeaseReleased(),
-  canMutate:()=>appCanMutate(),issueToken:options=>AppOwnership.issueWriteToken('write attachment',options),assertToken:token=>AppOwnership.assertWriteToken(token,'write attachment'),
+  canMutate:()=>appCanMutate(),issueToken:()=>AppOwnership.issueWriteToken('write attachment'),assertToken:token=>AppOwnership.assertWriteToken(token,'write attachment'),
   read:id=>IndexedDb.get(DB_ASSET_STORE,id,'attachment metadata read aborted'),
-  entries:()=>IndexedDb.storeTransaction(DB_ASSET_STORE,'readonly',(store,tx,finish)=>{const keys=store.getAllKeys(),values=store.getAll();tx.oncomplete=()=>finish(true,keys.result.map((id,i)=>[id,values.result[i]]));},'attachment catalogue read aborted'),
-  keys:()=>IndexedDb.storeTransaction(DB_ASSET_STORE,'readonly',(store,tx,finish)=>{const request=store.getAllKeys();request.onsuccess=()=>finish(true,request.result||[]);request.onerror=()=>finish(false,request.error);},'attachment keys read aborted'),
+  entries:()=>IndexedDb.storeTransaction<readonly (readonly [string,unknown])[]>(DB_ASSET_STORE,'readonly',(store,tx,finish)=>{const keys=store.getAllKeys(),values=store.getAll();tx.oncomplete=()=>finish(true,keys.result.map((id,i)=>[String(id),values.result[i]] as const));},'attachment catalogue read aborted'),
+  keys:()=>IndexedDb.storeTransaction<string[]>(DB_ASSET_STORE,'readonly',(store,tx,finish)=>{const request=store.getAllKeys();request.onsuccess=()=>finish(true,(request.result||[]).map(String));request.onerror=()=>finish(false,request.error);},'attachment keys read aborted'),
   commit:(rows,remove,token,guard=()=>true,deletionState=null)=>IndexedDb.strictTransaction([DB_ASSET_STORE,DB_APP_META_STORE],'readwrite',(tx,finish)=>{
     const store=tx.objectStore(DB_ASSET_STORE);AppOwnership.assertWriteToken(token,'commit attachment metadata');if(!guard())throw new Error('Attachment references changed during cleanup.');
     if(rows.length||remove.length){
@@ -1149,33 +1152,35 @@ const AttachmentStorage=AssetStorageModule.create({
       AppData.mutationEpoch.stage(tx,units);
     }
     if(deletionState)AppData.deletionRecovery.stageAttachments(tx,deletionState);
-    for(const [id,row] of rows)store.put(row,id);for(const id of remove)store.delete(id);tx.oncomplete=()=>finish(true);
+    for(const [id,row] of rows)store.put(row,id);for(const id of remove)store.delete(id);tx.oncomplete=()=>finish(true,undefined);
   },'attachment metadata commit aborted').then(result=>{writeStorageHealth({lastLocalSaveAt:AppData.mutationEpoch.nextChangeAt()});notifyBackupChange({reason:'attachment-metadata'});if(BackupIntegrity?.attachmentState()?.issues.length)scheduleAttachmentIntegrityAudit(5000);return result;})
-});
-const RichTextAssets=Object.freeze({
+}));
+type RichTextAssetStore=AssetStore&Readonly<{keys():Promise<string[]>;removeMany(assetIds:readonly string[]):Promise<number>}>;
+const RichTextAssets:RichTextAssetStore=Object.freeze({
   retain:()=>AttachmentStorage.retain(),
-  get:assetId=>AttachmentStorage.get(richAssetId(assetId)),
-  async put(assetId,blob){const id=richAssetId(assetId),notice=NoticeCoordinator.presentation('attachments').begin({id:'image-'+id,title:'Attach image',message:'Saving image…',announce:false});try{await AttachmentStorage.during(async()=>{await AttachmentStorage.put(id,blob);RichTextAssetWriteLease.protect(id);});invalidateAttachmentLibrary();notice.finish('succeeded','Image attached.',{announce:false,surface:'quiet'});}catch(error){notice.finish('failed','Image could not be attached. Keep this tab open and retry after storage recovers. '+error.message);throw error;}},
+  get:(assetId:string)=>AttachmentStorage.get(richAssetId(assetId)),
+  async put(assetId:string,blob:Blob){const id=richAssetId(assetId),notice=NoticeCoordinator.presentation('attachments').begin({id:'image-'+id,title:'Attach image',message:'Saving image…',announce:false});try{await AttachmentStorage.during(async()=>{await AttachmentStorage.put(id,blob);RichTextAssetWriteLease.protect(id);});invalidateAttachmentLibrary();notice.finish('succeeded','Image attached.',{announce:false,surface:'quiet'});}catch(error){notice.finish('failed','Image could not be attached. Keep this tab open and retry after storage recovers. '+(error instanceof Error?error.message:String(error)));throw error;}},
   // An abandoned insertion releases its lease; only a verified reference sweep deletes it.
-  async remove(assetId){RichTextAssetWriteLease.release(richAssetId(assetId));scheduleRichTextAssetMaintenance();},
+  async remove(assetId:string){RichTextAssetWriteLease.release(richAssetId(assetId));scheduleRichTextAssetMaintenance();},
   keys:()=>AttachmentStorage.keys(),
-  async removeMany(_assetIds){scheduleRichTextAssetMaintenance();return 0;}
+  async removeMany(_assetIds:readonly string[]){scheduleRichTextAssetMaintenance();return 0;}
 });
-const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze<Parameters<typeof AssetMaintenanceModule.create>[0]>({
+type RichTextAssetMaintenancePorts=Parameters<typeof AssetMaintenanceModule.create>[0];
+const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze<RichTextAssetMaintenancePorts>({
   isAvailable:()=>upkeepBlocker()||(AttachmentStorage.supported()?true:'storage-unavailable'),
   canMutate:()=>appCanMutate(),
   mutationActive:()=>RecoveryAssetMaintenancePause.active()||backgroundMaintenanceForegroundBusy()||storageResetUnresolved(),
   collect:(operation,options)=>AttachmentStorage.collect(operation,options),
   readRestoreJournal:()=>AppData.restoreJournal.read(),
   readLibraryClearJournal:()=>AppData.libraryClearJournal.read(),
-  liveFields:()=>[...document.querySelectorAll('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection')],
+  liveFields:()=>[...document.querySelectorAll<HTMLTextAreaElement>('textarea.task-note-field,textarea.library-diary-textarea,#daily-reflection')],
   getReferenceRevision:()=>richAssetReferenceRevision,
   getDatasetRevision:async()=>{const daily=await AppData.dailyRecords.datasetRevision(),epoch=await AppData.mutationEpoch.read();return daily===null||!epoch?.token?null:daily+'|'+epoch.token;},
   scanReferences:value=>RichTextApi.scanAttachmentReferences(String(value??'')),
   readNotes:()=>AppData.notes.readFreshPayload(),
-  loadActiveSession:()=>AppData.activeSession.load(0,{strict:true}),
+  loadActiveSession:async()=>{const loaded=await AppData.activeSession.load(0,{strict:true});const row=loaded&&typeof loaded==='object'?loaded as {ok?:unknown;error?:unknown;value?:unknown}:null;const value=ActiveSessionCodec.sanitizeCurrent(row?.value);return {ok:row?.ok===true,error:row?.error,value};},
   listDailyRecords:()=>AppData.dailyRecords.list({strict:true}),
-  readPendingReviewTexts:async()=>(await AppData.pendingReviews.list()).flatMap(review=>PendingReviewCodec.richTexts(review)),
+  readPendingReviewTexts:async()=>(await AppData.pendingReviews.list()).flatMap(review=>PendingReviewCodec.richTexts(review)).filter((value):value is string=>typeof value==='string'),
   budget:()=>BackgroundTasks.budget(),yieldTask:options=>BackgroundTasks.yieldTask(options),
   invalidate:()=>invalidateAttachmentLibrary(),
   captureError:error=>AppDiagnostics.capture('rich-text.assets.maintenance',error,'warn'),
@@ -1185,7 +1190,7 @@ const RichTextAssetMaintenance=AssetMaintenanceModule.create(Object.freeze<Param
 // unused. A request lost to a reload is caught by the next day's sweep.
 scheduleRichTextAssetMaintenance=delay=>RichTextAssetMaintenance.schedule(delay);
 notifyRichTextAssetLeaseReleased=()=>RichTextAssetMaintenance.leaseReleased();
-function renderRichTextContent(container,value,emptyText='',label='Rich text'){
+function renderRichTextContent(container:HTMLElement|null,value:unknown,emptyText:string='',label:string='Rich text'){
   if(!container)return false;
   const canonical=String(value??'');
   if(!canonical.trim()){container.textContent=String(emptyText||'');return false;}
@@ -1230,7 +1235,7 @@ if(!Object.isFrozen(VerifiedRecovery)||VerifiedRecovery.format!=='study-director
 }
 
 BackupNudge=BackupReadinessHostModule.createBackupNudge(Object.freeze<Parameters<typeof BackupReadinessHostModule.createBackupNudge>[0]>({
-  verified:VerifiedRecovery,storageHealth:StorageHealthController,dueMs:7*24*60*60*1000,checkMs:60*60*1000,
+  verified:VerifiedRecovery,storageHealth:requireStorageHealthController(),dueMs:7*24*60*60*1000,checkMs:60*60*1000,
   canMutate:()=>appCanMutate(),now:()=>Date.now(),automaticActive:()=>BackupProviderRuntime.automaticActive(),
   dailySummaryCount:async()=>{const summaries=await AppData.dailyRecords.summaries();return Array.isArray(summaries)?summaries.length:0;},
   todayIso:()=>todayISO(),publishMessage:()=>refreshStorageFallbackWarning(),
@@ -1407,7 +1412,7 @@ function legacyNoteBinding(binding:NoteEditorBinding|null){
 }
 function noteStoredValueForKey(key:Parameters<NonNullable<typeof NotesRuntime>['storedValueForKey']>[0]){return notesRuntime().storedValueForKey(key);}
 function noteTextForKey(key:Parameters<NonNullable<typeof NotesRuntime>['textForKey']>[0]){return notesRuntime().textForKey(key);}
-function noteEditorContent(binding:NoteEditorBinding|null,value:unknown){return notesRuntime().editorContent({key:binding?.areaKey||binding?.key||''},value);}
+function noteEditorContent(binding:NoteEditorBinding|null,value:unknown){return notesRuntime().editorContent({key:binding?.key||''},value);}
 function applicableNotesForTask(task:Task|undefined){return notesRuntime().applicableForTask(task);}
 function inheritedNoteEntries(areaKey:unknown){return notesRuntime().inheritedEntries(areaKey);}
 function normalizeOngoingAreaInput(value:unknown){return notesRuntime().normalizeAreaInput(value);}
