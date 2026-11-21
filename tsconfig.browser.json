@@ -185,6 +185,8 @@
     "source/core/foundation-host.ts",
     "types/foundation-host.ts",
     "types/checks/foundation.ts",
+    "source/core/public-api-host.ts",
+    "types/public-api-host.ts",
     "source/core/native-capabilities.ts",
     "source/core/capabilities-host.ts",
     "types/native-capabilities.ts",

@@ -41,6 +41,7 @@ const AudioEngineModule=INTERNAL_MODULES.load('audio-engine',1,'study-director.a
 const NoticeCoordinatorModule=INTERNAL_MODULES.load('notice-coordinator',1,'study-director.notice-coordinator-module',1);
 const NavigationModule=INTERNAL_MODULES.load('navigation',1,'study-director.navigation-module',1);
 const FoundationHostModule=INTERNAL_MODULES.load('foundation-host',1,'study-director.foundation-host-module',1);
+const PublicApiHostModule=INTERNAL_MODULES.load('public-api-host',1,'study-director.public-api-host-module',1);
 const DataBootstrapHostModule=INTERNAL_MODULES.load('data-bootstrap-host',1,'study-director.data-bootstrap-host-module',1);
 
 const RepositoryJournalModule=INTERNAL_MODULES.load('repository-journals',1,'study-director.repository-journals',1);
@@ -1752,208 +1753,13 @@ const OPTIONAL_PLUGIN_DESCRIPTORS=Object.freeze([
   Object.freeze({tabId:'guide',label:'Guide',icon:'?',src:'@@SD_EXTERNAL_GUIDE_FILENAME@@',pluginName:'SD-guide'}),
   Object.freeze({tabId:'insights',label:'Insights',icon:'✦',src:'@@SD_EXTERNAL_INSIGHTS_FILENAME@@',pluginName:'SD-insights'})
 ]);
-const PluginRuntime=(()=>{
-  const descriptorsByTab=new Map(OPTIONAL_PLUGIN_DESCRIPTORS.map(descriptor=>[descriptor.tabId,descriptor]));
-  const descriptorsByPlugin=new Map(OPTIONAL_PLUGIN_DESCRIPTORS.map(descriptor=>[descriptor.pluginName,descriptor]));
-  const files=new Map(OPTIONAL_PLUGIN_DESCRIPTORS.map(descriptor=>[descriptor.tabId,Object.freeze({...descriptor,state:'not-requested',detail:'',attempts:0,updatedAt:null})]));
-  const loadPromises=new Map();
-  const registered=new Map();
-  const MAX_LOAD_ATTEMPTS=2;
-  const MAX_REGISTRATION_ATTEMPTS=2;
-  function nowStamp(){return new Date().toISOString();}
-  function fileState(tabId){
-    const descriptor=descriptorsByTab.get(tabId);
-    return descriptor?(files.get(tabId)||Object.freeze({...descriptor,state:'not-requested',detail:'',attempts:0,updatedAt:null})):null;
-  }
-  function markFile(tabId,state,detail='',attempts=null){
-    const descriptor=descriptorsByTab.get(tabId);
-    if(!descriptor)return null;
-    const previous=fileState(tabId);
-    const next=Object.freeze({
-      ...descriptor,
-      state,
-      detail:clampText(detail||'',200),
-      attempts:attempts===null?Math.max(0,Number(previous&&previous.attempts)||0):Math.max(0,Number(attempts)||0),
-      updatedAt:nowStamp()
-    });
-    files.set(tabId,next);
-    const pane=document.getElementById('pane-'+tabId);
-    if(pane)pane.setAttribute('aria-busy',state==='loading'?'true':'false');
-    return next;
-  }
-  function activeTabId(){return document.querySelector('.nav-item.on[data-tab]')?.dataset.tab||'';}
-  function renderIfActive(tabId){
-    if(activeTabId()===tabId)UiTabRegistry.renderTab(tabId);
-  }
-  function canRetry(record){
-    return !!record&&['loaded','missing','failed'].includes(record.state)&&record.attempts<MAX_LOAD_ATTEMPTS;
-  }
-  function placeholderMessage(record){
-    if(record.state==='loading')return `Loading ${record.label}…`;
-    if(record.state==='missing')return `${record.label} could not be loaded. The core app remains available.`;
-    if(record.state==='incompatible')return `${record.label} is not compatible with this core build.`;
-    if(record.state==='failed')return `${record.label} could not start. The core app remains available.`;
-    if(record.state==='loaded')return `${record.label} loaded but did not register.`;
-    if(record.state==='registered')return `Opening ${record.label}…`;
-    return `${record.label} loads only when you open this tab.`;
-  }
-  function renderPlaceholder(context,descriptor){
-    const pane=context&&context.pane;
-    if(!pane)return;
-    const record=fileState(descriptor.tabId);
-    pane.setAttribute('aria-busy',record&&record.state==='loading'?'true':'false');
-    const panel=document.createElement('section');
-    const insightsLoading=descriptor.tabId==='insights'&&record&&!['missing','incompatible','failed','loaded'].includes(record.state);
-    panel.className='ui-panel'+(insightsLoading?' plugin-loading-panel':'');
-    const kicker=document.createElement('div');
-    kicker.className='ui-label';
-    kicker.textContent=insightsLoading?'Study Coach + Evidence Dashboard':'Optional module';
-    const title=document.createElement('h1');
-    title.className='ui-title';
-    title.textContent=descriptor.label;
-    const status=document.createElement('div');
-    const isError=record&&['missing','incompatible','failed','loaded'].includes(record.state);
-    status.className='ui-status'+(isError?' err':'');
-    status.setAttribute('role',isError?'alert':'status');
-    status.setAttribute('aria-live',isError?'assertive':'polite');
-    status.textContent=insightsLoading?(record.state==='registered'?'Opening Insights…':'Preparing your saved study history…'):placeholderMessage(record);
-    panel.append(kicker,title,status);
-    if(insightsLoading){
-      const copy=document.createElement('div');
-      copy.className='ui-body plugin-loading-copy';
-      copy.textContent='Insights is loading once for this app session. Your existing page will be retained on later visits unless its source data changes.';
-      const track=document.createElement('div');
-      track.className='plugin-loading-track';
-      track.setAttribute('aria-hidden','true');
-      panel.append(copy,track);
-    }
-    if(record&&record.detail){
-      const detail=document.createElement('div');
-      detail.className='ui-helper';
-      detail.textContent=record.detail;
-      panel.appendChild(detail);
-    }
-    if(canRetry(record)){
-      const retry=document.createElement('button');
-      retry.className='mini-btn ui-btn';
-      retry.type='button';
-      retry.textContent='Retry loading';
-      retry.addEventListener('click',()=>{
-        requestTab(descriptor.tabId,{retry:true});
-        renderIfActive(descriptor.tabId);
-      });
-      panel.appendChild(retry);
-    }
-    pane.replaceChildren(panel);
-  }
-  function registerPlaceholders(){
-    let complete=true;
-    OPTIONAL_PLUGIN_DESCRIPTORS.forEach(descriptor=>{
-      if(!UiTabRegistry.registerTab({
-        id:descriptor.tabId,
-        label:descriptor.label,
-        icon:descriptor.icon,
-        render:context=>renderPlaceholder(context,descriptor)
-      }))complete=false;
-    });
-    return complete;
-  }
-  function unmetCapabilities(requirements){
-    if(!requirements||typeof requirements!=='object')return [];
-    return Object.entries(requirements).filter(([key,minimum])=>Number(STUDY_DIRECTOR_CAPABILITIES[key]||0)<Math.max(0,Number(minimum)||0));
-  }
-  function register(plugin){
-    if(!plugin||typeof plugin.setup!=='function')return false;
-    const name=clampText(plugin.name||'anonymous-plugin',80);
-    const descriptor=descriptorsByPlugin.get(name)||null;
-    const previous=registered.get(name);
-    if(previous&&previous.state==='registered'){
-      if(descriptor){markFile(descriptor.tabId,'registered','',fileState(descriptor.tabId)?.attempts);renderIfActive(descriptor.tabId);}
-      return true;
-    }
-    if(previous&&previous.state==='incompatible'){
-      if(descriptor){markFile(descriptor.tabId,'incompatible',previous.detail||'',fileState(descriptor.tabId)?.attempts);renderIfActive(descriptor.tabId);}
-      return false;
-    }
-    const attempts=Math.max(0,Number(previous&&previous.attempts)||0);
-    if(attempts>=MAX_REGISTRATION_ATTEMPTS){
-      if(descriptor){markFile(descriptor.tabId,'failed','Registration attempt limit reached.',fileState(descriptor.tabId)?.attempts);renderIfActive(descriptor.tabId);}
-      return false;
-    }
-    const nextAttempt=attempts+1;
-    const unmet=unmetCapabilities(plugin.requires);
-    if(unmet.length){
-      const detail='Missing capabilities: '+unmet.map(([key,minimum])=>`${key}>=${Math.max(0,Number(minimum)||0)}`).join(', ');
-      registered.set(name,{name,version:clampText(plugin.version||'',40),state:'incompatible',attempts:nextAttempt,detail:clampText(detail,160),updatedAt:nowStamp()});
-      if(descriptor){markFile(descriptor.tabId,'incompatible',detail,fileState(descriptor.tabId)?.attempts);renderIfActive(descriptor.tabId);}
-      return false;
-    }
-    try{
-      const ok=plugin.setup(window.StudyDirector)!==false;
-      const detail=ok?'':'Plugin setup did not activate.';
-      if(ok&&plugin.previewProviders&&typeof plugin.previewProviders==='object'){
-        Object.entries(plugin.previewProviders).forEach(([target,provider])=>PreviewRuntime.registerProvider(target,provider));
-      }
-      registered.set(name,{name,version:clampText(plugin.version||'',40),state:ok?'registered':'inactive',attempts:nextAttempt,detail,updatedAt:nowStamp()});
-      if(descriptor){markFile(descriptor.tabId,ok?'registered':'failed',detail,fileState(descriptor.tabId)?.attempts);renderIfActive(descriptor.tabId);}
-      return ok;
-    }catch(error){
-      const detail=clampText(error&&error.message||String(error),160);
-      registered.set(name,{name,version:clampText(plugin.version||'',40),state:'failed',attempts:nextAttempt,detail,updatedAt:nowStamp()});
-      if(descriptor){markFile(descriptor.tabId,'failed',detail,fileState(descriptor.tabId)?.attempts);renderIfActive(descriptor.tabId);}
-      return false;
-    }
-  }
-  function startLoad(descriptor){
-    const previous=fileState(descriptor.tabId);
-    const attempts=Math.max(0,Number(previous&&previous.attempts)||0)+1;
-    markFile(descriptor.tabId,'loading','',attempts);
-    const promise=new Promise(resolve=>{
-      const script=document.createElement('script');
-      script.src=trustedAssetURL(descriptor.src);
-      script.async=false;
-      script.dataset.studyDirectorPlugin='optional';
-      script.dataset.studyDirectorPluginTab=descriptor.tabId;
-      script.onload=()=>{
-        const latest=fileState(descriptor.tabId);
-        if(latest&&latest.state==='loading')markFile(descriptor.tabId,'loaded','Plugin file loaded but did not register.',attempts);
-        renderIfActive(descriptor.tabId);
-        resolve(fileState(descriptor.tabId)?.state==='registered');
-      };
-      script.onerror=()=>{
-        script.remove();
-        markFile(descriptor.tabId,'missing',`Could not load ${descriptor.src}.`,attempts);
-        renderIfActive(descriptor.tabId);
-        resolve(false);
-      };
-      document.head.appendChild(script);
-    });
-    loadPromises.set(descriptor.tabId,promise);
-    promise.finally(()=>{
-      if(loadPromises.get(descriptor.tabId)===promise)loadPromises.delete(descriptor.tabId);
-    });
-    return promise;
-  }
-  function requestTab(tabId,{retry=false}={}){
-    const descriptor=descriptorsByTab.get(String(tabId||'').trim());
-    if(!descriptor)return null;
-    const pending=loadPromises.get(descriptor.tabId);
-    if(pending)return pending;
-    const record=fileState(descriptor.tabId);
-    if(record&&record.state==='registered')return Promise.resolve(true);
-    if(record&&record.state==='not-requested')return startLoad(descriptor);
-    if(retry&&canRetry(record))return startLoad(descriptor);
-    return Promise.resolve(false);
-  }
-  function status(){
-    return {
-      optionalFiles:OPTIONAL_PLUGIN_DESCRIPTORS.map(descriptor=>fileState(descriptor.tabId)),
-      registered:[...registered.values()]
-    };
-  }
-  return Object.freeze({registerPlaceholders,requestTab,register,status});
-})();
-// Insights-owned preload policy is checked; the generic optional-plugin loader remains P5.13-owned.
+const PluginRuntime=PublicApiHostModule.createRuntime(Object.freeze({
+  configuration:Object.freeze({capabilities:STUDY_DIRECTOR_CAPABILITIES,descriptors:OPTIONAL_PLUGIN_DESCRIPTORS}),
+  environment:Object.freeze({document,trustedAssetURL:value=>trustedAssetURL(value)}),
+  tabs:Object.freeze({registerTab:config=>UiTabRegistry.registerTab(config),renderTab:id=>UiTabRegistry.renderTab(id)}),
+  preview:Object.freeze({registerProvider:(target,provider)=>PreviewRuntime.registerProvider(target,provider)}),
+  clampText
+}));
 const InsightsPreload=InsightsHostModule.createPreloadScheduler(Object.freeze({
   document,
   setTimer:(callback,delayMs)=>setTimeout(callback,delayMs),
@@ -4063,19 +3869,12 @@ StartupLifecycle=StartupHostModule.createCoordinator(Object.freeze({
 }));
 /* PUBLIC PLUGIN API */
 PluginRuntime.registerPlaceholders();
-const StudyDirectorPublicAPI=Object.freeze({
+const StudyDirectorPublicAPI=PluginRuntime.createPublicApi(Object.freeze({
   version:APP_VERSION,
-  capabilities:STUDY_DIRECTOR_CAPABILITIES,
-  data:Object.freeze({
-    contract:DATA_CONTRACT,
-    deviceState:InsightsDeviceState
-  }),
+  data:Object.freeze({contract:DATA_CONTRACT,deviceState:InsightsDeviceState}),
   insights:AppInsights,
   logic:InsightsBoundary.logic,
-  plan:Object.freeze({
-    getDraft:getPlanDraftText,
-    loadDraft:loadScheduleIntoDraft
-  }),
+  plan:Object.freeze({getDraft:getPlanDraftText,loadDraft:loadScheduleIntoDraft}),
   preview:InsightsBoundary.publicPreview,
   backup:Object.freeze({
     createCheckpoint:CheckpointPipeline.create,
@@ -4085,56 +3884,24 @@ const StudyDirectorPublicAPI=Object.freeze({
     checksum:(blob,signal)=>Exports.job(()=>Exports.run('checksum',{value:blob},{signal}),{wait:true}),
     restore:CheckpointPipeline.restore,
     downloadSafetyCopy:BackupController.downloadSafetyCopy,
-    limits:Object.freeze({
-      maxFileBytes:APP_LIMITS.backupMaxFileBytes
-    }),
+    maxFileBytes:APP_LIMITS.backupMaxFileBytes,
     repositoryPolicy:RepositoryPolicyModule.protocol,
-    // This device, named on Drive's upload markers.
     device:()=>AppData.provenance.installationId(),
-    // The active profile, and who decides which Drive library it may use.
     profile:Object.freeze({id:()=>Profiles.current()?.id||'',name:()=>backupFolderName(),bind:info=>bindDriveLibrary(info),deleted:info=>driveProfileDeleted(info),controls:control=>ProfileDeletion.setLibraryControl(control)}),
-    providers:Object.freeze({
-      register:BackupProviderRuntime.register,
-      list:BackupProviderRuntime.list
-    })
+    providers:Object.freeze({register:BackupProviderRuntime.register,list:BackupProviderRuntime.list})
   }),
   installation:Object.freeze({
-    status:NativeCapabilities.status,
-    prompt:NativeCapabilities.promptInstall,
-    inspect:NativeCapabilities.inspectInstallation,
-    showHelp:NativeCapabilities.revealInstallHelp
+    status:NativeCapabilities.status,promptInstall:NativeCapabilities.promptInstall,inspectInstallation:NativeCapabilities.inspectInstallation,revealInstallHelp:NativeCapabilities.revealInstallHelp
   }),
   appearance:Object.freeze({
-    theme:Object.freeze({
-      defaultId:DEFAULT_THEME_ID,
-      supported:PUBLIC_THEME_METADATA,
-      get:PRESENTATION_KERNEL.activeThemeId,
-      set:setTheme
-    }),
+    theme:Object.freeze({defaultId:DEFAULT_THEME_ID,supported:PUBLIC_THEME_METADATA,get:PRESENTATION_KERNEL.activeThemeId,set:setTheme}),
     presentation:Object.freeze({
-      defaultId:DEFAULT_PRESENTATION_ID,
-      get supported(){return PRESENTATION_KERNEL.listPresentations();},
-      invariants:PRESENTATION_INVARIANTS,
-      breakpoints:PRESENTATION_BREAKPOINTS,
-      tokens:PRESENTATION_TOKEN_CONTRACT,
-      manifest:PRESENTATION_MANIFEST,
-      list:PRESENTATION_KERNEL.listPresentations,
-      register:registerPresentationPack,
-      get:PRESENTATION_KERNEL.activePresentationId,
-      set:setPresentation
+      defaultId:DEFAULT_PRESENTATION_ID,invariants:PRESENTATION_INVARIANTS,breakpoints:PRESENTATION_BREAKPOINTS,tokens:PRESENTATION_TOKEN_CONTRACT,manifest:PRESENTATION_MANIFEST,
+      list:PRESENTATION_KERNEL.listPresentations,register:registerPresentationPack,get:PRESENTATION_KERNEL.activePresentationId,set:setPresentation
     })
   }),
-  ui:Object.freeze({
-    registerTab:UiTabRegistry.registerTab,
-    goTab,
-    navigationStatus:()=>NavigationController.status(),
-    workspaceHistory:WorkspaceHistoryPublic
-  }),
-  plugins:Object.freeze({
-    status:PluginRuntime.status
-  }),
-  registerPlugin:registerStudyDirectorPlugin
-});
+  ui:Object.freeze({registerTab:UiTabRegistry.registerTab,goTab,navigationStatus:()=>NavigationController.status(),workspaceHistory:WorkspaceHistoryPublic})
+}));
 window.StudyDirector=StudyDirectorPublicAPI;
 window.dispatchEvent(new CustomEvent(STUDY_DIRECTOR_READY_EVENT,{detail:Object.freeze({version:StudyDirectorPublicAPI.version,theme:PRESENTATION_KERNEL.activeThemeId(),presentation:PRESENTATION_KERNEL.activePresentationId()})}));
 SessionLifecycle.invalidate('app-restart',{date:todayISO(),autoDate:true,reconcile:false});
