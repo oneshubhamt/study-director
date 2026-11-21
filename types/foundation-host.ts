@@ -9,7 +9,7 @@ export type NavigationController=ReturnType<NavigationModule['createController']
 export type Interactions=ReturnType<InteractionsModule['createController']>;
 export type Overlay=ReturnType<WorkspaceOverlayModule['createController']>;
 export interface DiagnosticPort {capture(scope:string,error:unknown,level:'warn'):void}
-export interface PrimitivesInput {document:Document;APP_LIMITS:{maxNoteChars:number};CompletionModel:{fromUnits(done:number,total:number):number}}
+export interface PrimitivesInput {document:Document;APP_LIMITS:{maxNoteChars:number};CompletionModel:{fromUnits(done:number,total:number):number|null}}
 export interface WorkspaceHandler {current():WorkspaceDescriptor|null;reconcile(desired:WorkspaceDescriptor|null,context:NavigationContext):unknown}
 export interface WorkspaceRouterInput {navigation():NavigationController|null;interactions():Pick<Interactions,'historyDescriptor'|'reconcileHistory'>;overlay():Pick<Overlay,'historyDescriptor'|'reconcile'>}
 export interface RecentInput {document:Document;sessionStorage:Pick<Storage,'getItem'|'setItem'|'removeItem'>;SESSION_STORAGE_KEYS:{notifications:string};ProfileScope:{scope:string};NoticeCoordinator:NoticeCoordinator;AppDiagnostics:DiagnosticPort;scheduleSyncStatus():void;closeProfilePanel():void}
