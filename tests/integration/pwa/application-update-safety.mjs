@@ -45,7 +45,7 @@ function makeHarness(options={}){
     startupReady:()=>options.startupReady!==false,ownership:()=>ownership,sessionLifecycle:()=>session,mutation:()=>mutation,
     reviewSave:()=>({rolloverSaveInProgress:false,saveDayInProgress:false,activeSessionPersistenceBlocked:false,...(options.reviewSave||{})}),
     imagePreparationCount:()=>options.imageBusy?1:0,attachmentLibraryBusy:()=>!!options.attachmentBusy,attachmentIngestBusy:()=>!!options.ingestBusy,
-    exportsBusy:()=>!!options.exportsBusy,backupBusy:()=>backupBusy,providerBusy:()=>providerBusy,providerDriveBackingUp:()=>!!options.driveBackingUp,
+    exportsBusy:()=>!!options.exportsBusy,backupBusy:()=>backupBusy,providerBusy:()=>providerBusy,providerBackgroundBackupActive:()=>!!options.backgroundBackingUp||!!options.driveBackingUp,providerDriveBackingUp:()=>!!options.driveBackingUp,
     liveTimer:()=>timerLive,timerPaused:()=>timerPaused,timerMode:()=> 'running',pacerRunning:()=>pacerRunning,canMutate:()=>options.canMutate!==false,
     blockingUiOpen:()=>!!options.blockingUi,workRevision:()=>workRevision,tasks:()=>tasks,
     isTrackableTask:()=>true,isTaskResolved:index=>options.resolvedTasks?.has(index)??false,currentTaskIndex:()=>options.currentTaskIndex??0
@@ -70,7 +70,7 @@ function makeHarness(options={}){
   });
   const effects=Object.freeze({
     automaticBackupsWaiting:()=>options.backupWaiting===true,
-    backupBeforeUpdate:async()=>{calls.backup++;calls.backupMessage=elements.get('pwa-update-message')?.textContent||'';},pauseTimer:()=>{calls.pause++;timerPaused=true;},
+    flushAutomaticBackups:async reason=>{assert.equal(reason,'app-update');calls.backup++;calls.backupMessage=elements.get('pwa-update-message')?.textContent||'';},pauseTimer:()=>{calls.pause++;timerPaused=true;},
     togglePacer:()=>{calls.pacer++;pacerRunning=false;},scheduleSyncStatus:()=>{},
     publishNotice:()=>{},capture:(scope,error,level)=>calls.captures.push({scope,error,level}),
     localGet:(key,fallback)=>local.get(key)??fallback,localSet:(key,value)=>{calls.localWrites++;local.set(key,value);return true;}
@@ -100,14 +100,14 @@ function makeHarness(options={}){
   assert.equal(t.calls.pause,0);assert.equal(t.calls.backup,0);assert.equal(t.calls.apply,0);
 }
 {
-  const t=makeHarness({timerLive:true,driveBackingUp:true});
+  const t=makeHarness({timerLive:true,backgroundBackingUp:true});
   assert.equal(await t.controller.applyFromUi(),false);
   assert.equal(t.calls.pause,0);assert.equal(t.calls.backup,0);assert.equal(t.calls.apply,0);
 }
 {
   const t=makeHarness({timerLive:true,pacerRunning:true});
   assert.equal(await t.controller.applyFromUi(),true);
-  assert.equal(t.calls.pause,1);assert.equal(t.calls.pacer,1);assert.equal(t.calls.backup,1);assert.equal(t.calls.apply,1);
+  assert.equal(t.calls.pause,1);assert.equal(t.calls.pacer,1);assert.equal(t.calls.backup,0);assert.equal(t.calls.apply,1);
 }
 
 // A reservation owns exactly its own guard and releases provider/UI state on cancellation.
@@ -175,7 +175,7 @@ function makeHarness(options={}){
 {
   const t=makeHarness({tasks:[{},{}],resolvedTasks:new Set([0])});
   assert.equal(await t.controller.evaluateAutomatic(),false);assert.equal(t.calls.apply,0);
-  t.setTasks([]);assert.equal(await t.controller.evaluateAutomatic(),true);assert.equal(t.calls.backup,1);assert.equal(t.calls.apply,1);
+  t.setTasks([]);assert.equal(await t.controller.evaluateAutomatic(),true);assert.equal(t.calls.backup,0);assert.equal(t.calls.apply,1);
 }
 {
   const t=makeHarness({backupWaiting:true});

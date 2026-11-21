@@ -9,7 +9,7 @@ const sw=readRuntimeSource('source/platform/sw.ts');
 
 assert.match(app,/PwaUpdateHostModule\.createController\(/u,'main must compose the checked PWA update host');
 assert.doesNotMatch(app,/function (?:pwaUpdateBlockReason|reserveApplicationUpdate|prepareApplicationUpdate|checkPwaUpdateIfDue)\b/u,'PWA update algorithms must not remain unchecked in main');
-assert.match(updater,/const READY_DELAY=650,SAFETY_RETRY=5\*60\*1000,EXTERNAL_RETRY=5000,CHECK_INTERVAL=24\*60\*60\*1000/u,'checked updater must retain ready, safety and 24-hour check cadence');
+assert.match(updater,/const READY_DELAY=650,SAFETY_RETRY=5\*60\*1000,EXTERNAL_RETRY=5000,CHECK_INTERVAL=24\*60\*60\*1000,CHECK_RETRY_BASE=5\*60\*1000,CHECK_RETRY_MAX=60\*60\*1000,BACKUP_WAIT=60\*1000/u,'checked updater must retain ready, safety, backup-wait and 24-hour check cadence');
 assert.doesNotMatch(updater,/PWA_UPDATE_RETRY_MS=1800/u,'waiting updates must not restore legacy 1.8-second polling');
 assert.match(updater,/CHECK_RETRY_BASE=5\*60\*1000,CHECK_RETRY_MAX=60\*60\*1000/u,'failed checks need bounded retry backoff');
 
@@ -34,7 +34,9 @@ assert.match(updater,/token\.workRevision!==state\.workRevision\(\)/u,'reservati
 assert.match(updater,/await input\.reservation\.settleMutation\(\)/u,'unreserved preparation must still wait for the mutation coordinator');
 assert.match(app,/flushPendingReview:\(\)=>flushPendingReviewSave\(\{strict:true,allowDuringRecoveryQuiescence:true\}\)/u,'PWA-owned Review checkpoint must be allowed inside its recovery-quiesced reservation');
 assert.match(updater,/loaded\.value\.revision\)!==Number\(liveResult\.value\.revision\)/u,'active-session persistence must retain read-back verification');
-assert.match(updater,/state\.providerBusy\(\)\|\|state\.providerDriveBackingUp\(\)/u,'a running background Drive backup must defer update activation');
+assert.match(updater,/state\.providerBusy\(\)\|\|state\.providerBackgroundBackupActive\(\)/u,'a running background backup must defer update activation');
+assert.match(updater,/effects\.flushAutomaticBackups\('app-update'\)/u,'checked update safety must own the pre-update backup wait policy');
+assert.doesNotMatch(app,/PWA_UPDATE_BACKUP_WAIT_MS|function backUpBeforeUpdate\b/u,'PWA-specific backup wait policy must not remain in unchecked main');
 assert.match(updater,/lifecycle\.reconcileFollowerRole\(state\.ownership\(\)\.state===configuration\.secondaryState\)/u,'ownership projection must clear stale follower evidence before a later controller change');
 assert.match(lifecycle,/identity\.releaseId!==target\.releaseId\|\|identity\.buildId!==target\.buildId\|\|identity\.assetId!==target\.assetId/u,'reload authorization must re-identify the exact release, build and page-asset tuple');
 assert.match(lifecycle,/followerIdentities\.has\(followerIdentity\(target\)\)/u,'external follower ownership must survive browser ServiceWorker wrapper replacement by verified full identity');

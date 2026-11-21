@@ -758,16 +758,6 @@ function automaticBackupsWaiting(){return BackupProviderBackground.waiting();}
 // Hidden: back up waiting changes. Visible again: redraw the locations, since a
 // sign-in may have ended while timers were throttled.
 document.addEventListener('visibilitychange',()=>{if(document.hidden){if(appCanMutate())void flushAutomaticBackups('app-hidden');}else BackupProviderRuntime.refresh();});
-// An update waits up to a minute for waiting automatic backups to finish. A
-// backup that is still running after that keeps the update postponed until it
-// is done; one that failed does not hold the update back.
-const PWA_UPDATE_BACKUP_WAIT_MS=60*1000;
-async function backUpBeforeUpdate(){
-  if(!automaticBackupsWaiting())return;
-  let timer=null;
-  try{await Promise.race([flushAutomaticBackups('app-update'),new Promise(resolve=>{timer=setTimeout(resolve,PWA_UPDATE_BACKUP_WAIT_MS);})]);}
-  finally{clearTimeout(timer);}
-}
 // A plan applied by hand goes to Drive within seconds, like Suspend and
 // Continue Here, so the other device sees today's session at its next check.
 function uploadSoonAfterPlanApply(...args){return SessionActions.uploadSoonAfterPlanApply(...args);}
@@ -3460,7 +3450,9 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze({
   state:Object.freeze({
     startupReady:()=>StartupLifecycle.status().fullyInitialized,ownership:()=>AppOwnership.status(),sessionLifecycle:()=>SessionLifecycle.status(),mutation:()=>AppMutationCoordinator.status(),reviewSave:()=>ReviewSaveService.status(),
     imagePreparationCount:()=>imagePreparationCount,attachmentLibraryBusy:()=>AttachmentLibrary.status().busy,attachmentIngestBusy:()=>AttachmentIngest.status().busy,exportsBusy:()=>Exports.status().busy,
-    backupBusy:()=>BackupController.status().busy,providerBusy:()=>BackupProviderRuntime.status().busy,providerDriveBackingUp:()=>BackupProviderRuntime.locationStatus('google-drive')?.backingUp===true,
+    backupBusy:()=>BackupController.status().busy,providerBusy:()=>BackupProviderRuntime.status().busy,
+    providerBackgroundBackupActive:()=>BackupProviderRuntime.list().some(row=>BackupProviderRuntime.locationStatus(row.id)?.backingUp===true),
+    providerDriveBackingUp:()=>BackupProviderRuntime.locationStatus('google-drive')?.backingUp===true,
     liveTimer:()=>isLiveTrackableTimer(),timerPaused:()=>TimerState.paused,timerMode:()=>TimerState.mode,pacerRunning:()=>PracticePacer.status().running,canMutate:()=>appCanMutate(),
     blockingUiOpen:()=>!!document.querySelector('dialog[open],[data-rich-asset-picker="active"]'),workRevision:()=>pwaWorkRevision,tasks:()=>TASKS,
     isTrackableTask:task=>isTrackableBlock(task),isTaskResolved:index=>isTaskResolved(index),currentTaskIndex:()=>TimerState.currentIndex
@@ -3480,7 +3472,7 @@ const PwaRuntime=PwaUpdateHostModule.createController(Object.freeze({
     activeSessionIssue:loaded=>BackupRecoveryHostModule.activeSessionIssue(loaded)
   }),
   effects:Object.freeze({
-    automaticBackupsWaiting:()=>automaticBackupsWaiting(),backupBeforeUpdate:()=>backUpBeforeUpdate(),pauseTimer:()=>togglePause(),togglePacer:()=>PracticePacer.toggle(),scheduleSyncStatus:()=>scheduleSyncStatus(),
+    automaticBackupsWaiting:()=>automaticBackupsWaiting(),flushAutomaticBackups:reason=>flushAutomaticBackups(reason),pauseTimer:()=>togglePause(),togglePacer:()=>PracticePacer.toggle(),scheduleSyncStatus:()=>scheduleSyncStatus(),
     publishNotice:value=>NoticeCoordinator.publish('update',value),capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level),
     localGet:(key,fallback)=>AppData.local.getText(key,fallback),localSet:(key,value)=>AppData.local.setText(key,value)
   })
