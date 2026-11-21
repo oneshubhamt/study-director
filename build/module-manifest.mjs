@@ -159,6 +159,7 @@ export const runtimeDependencies=Object.freeze({
   'backup-integrity-host':Object.freeze([]),
   'backup-recovery-host':Object.freeze(['backup','managed-recovery','device-backup']),
   'pwa-lifecycle':Object.freeze([]),
+  'pwa-update-host':Object.freeze(['pwa-lifecycle']),
   'native-capabilities':Object.freeze([]),
   startup:Object.freeze(['library','backup','pomodoro','plan','repositories','review','session-lifecycle','timer-engine','timer-state']),
   'startup-host':Object.freeze([]),
