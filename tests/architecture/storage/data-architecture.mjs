@@ -210,7 +210,7 @@ assert.equal(OPFS_IDENTITIES.attachments,'study-director-assets-v2');
 for(const boundary of ['completeBackup','deviceBackup','driveBackup','attachmentArchive','markdownExport','zipExport'])assert.ok(DATA_ARCHITECTURE.external[boundary],`external boundary ${boundary} must be classified`);
 
 
-const sw=read('source/platform/sw.js'),deviceBackupSource=read('source/core/device-backup.ts')+read('source/core/device-folder-storage.ts'),driveSource=read('source/external/drive.ts');
+const sw=read('source/platform/sw.ts'),deviceBackupSource=read('source/core/device-backup.ts')+read('source/core/device-folder-storage.ts'),driveSource=read('source/external/drive.ts');
 assert.match(sw,/@@SD_CACHE_STORAGE_IDENTITIES@@/u,'service worker cache identities must come from the canonical contract');
 assert.doesNotMatch(sw,/const CACHE_PREFIX=['"]study-director-shell-/u,'service worker must not mint the shell cache prefix');
 assert.doesNotMatch(sw,/const bridgeCache=['"]study-director-update-bridge-v2/u,'service worker must not mint the update bridge cache');

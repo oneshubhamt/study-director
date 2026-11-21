@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 import vm from 'node:vm';
 import cryptoNode,{webcrypto} from 'node:crypto';
 import {CACHE_STORAGE_IDENTITIES} from '../../../contracts/canonical-identities.mjs';
-const template=fs.readFileSync('source/platform/sw.js','utf8'),sha=value=>cryptoNode.createHash('sha256').update(value).digest('hex');
+const template=readRuntimeSource('source/platform/sw.ts'),sha=value=>cryptoNode.createHash('sha256').update(value).digest('hex');
 const scope='https://study.test/app/',current='study-director-shell-current',assetId='a'.repeat(24),meta=scope+'__sd_pwa_release__';
 const rows=Array.from({length:9},(_,i)=>({path:`./asset-${i}.js`,body:`asset-${i}`})),manifest=rows.map(row=>({path:row.path,sha256:sha(row.body)}));
 const cases=[];
@@ -24,8 +24,8 @@ function fixture({badPath='',active=null,windows=[],rejectDelete='',failMetadata
  const clients={async matchAll(){return windows;},async claim(){claims.push('claim');},async openWindow(url){opened.push(url);return {url};}};
  const fetch=async request=>{const row=rows.find(row=>new URL(row.path,scope).href===request.url);fetches.push({url:request.url,cache:request.cache});fetchEvents.push(`start:${row?.path||request.url}:${request.cache}`);if(!row)throw new Error('offline');concurrent++;maximum=Math.max(maximum,concurrent);await new Promise(resolve=>setTimeout(resolve,Number(delays[row.path])||1));concurrent--;fetchEvents.push(`finish:${row.path}:${request.cache}`);return new Response(row.body+(row.path===badPath?'corrupt':''));};
  const context=vm.createContext({self,caches,clients,URL,Request,Response,crypto:webcrypto,fetch,Date,console});
- const rendered=template.replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_BUILD_ID@@','qa-build').replaceAll('@@SD_PAGE_ASSET_ID@@',assetId).replaceAll('@@SD_PWA_RELEASE_ID@@','current').replaceAll('@@SD_PWA_ASSET_MANIFEST@@',JSON.stringify(manifest)).replaceAll('@@SD_CACHE_STORAGE_IDENTITIES@@',JSON.stringify(CACHE_STORAGE_IDENTITIES));
- vm.runInContext(rendered,context,{filename:'source/platform/sw.js'});
+ const rendered=template.replaceAll('@@SD_RELEASE@@','QA_FIXTURE').replaceAll('@@SD_BUILD_ID@@','qa-build').replaceAll('@@SD_PAGE_ASSET_ID@@',assetId).replaceAll('@@SD_PWA_RELEASE_ID@@','current').replaceAll('@@SD_PWA_ASSET_MANIFEST@@',JSON.stringify(manifest)).replaceAll('@@SD_CACHE_STORAGE_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(CACHE_STORAGE_IDENTITIES)));
+ vm.runInContext(rendered,context,{filename:'source/platform/sw.ts'});
  async function emit(type,event={}){const waits=[];let response;listeners.get(type)({...event,waitUntil(value){waits.push(value);},respondWith(value){response=value;}});await Promise.all(waits);return response?await response:null;}
  function seed(name,id,{activatedAt=1,state='active',asset='old.js'}={}){const map=ensure(name);map.set(meta,new Response(JSON.stringify({assetId:id,buildId:'qa-'+id,state,activatedAt})));map.set(scope+asset,new Response(name+' offline bytes'));return map;}
  function client(id){return {id,url:scope,postMessage(value){messages.push({id,...value});}};}

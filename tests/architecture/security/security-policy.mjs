@@ -14,7 +14,7 @@ const review=read('source/core/review.ts');
 const plan=read('source/core/plan.ts');
 const timer=read('source/core/timer-engine.ts');
 const insights=readInsightsRuntimeSource();
-const sw=read('source/platform/sw.js');
+const sw=readRuntimeSource(new URL('../../../source/platform/sw.ts',import.meta.url));
 
 // Static security policy: forbidden capabilities and trust boundaries only.
 assert.match(drive,/https:\/\/www\.googleapis\.com\/auth\/drive\.file/u,'Drive must request only the app-file OAuth scope.');

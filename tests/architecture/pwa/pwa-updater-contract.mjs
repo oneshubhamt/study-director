@@ -1,9 +1,9 @@
 import {readHostHtml} from '../../../build/host-source.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
+import {readRuntimeSource} from '../../helpers/runtime-source.mjs';
 
 const app=readHostHtml();
-const sw=fs.readFileSync('source/platform/sw.js','utf8');
+const sw=readRuntimeSource('source/platform/sw.ts');
 assert.match(app,/const PWA_UPDATE_CHECK_INTERVAL_MS=24\*60\*60\*1000;/,'proactive update checks must use a 24-hour success cooldown');
 assert.doesNotMatch(app,/const PWA_UPDATE_RETRY_MS=1800;/,'waiting updates must not use the legacy 1.8-second polling loop');
 assert.match(app,/const PWA_UPDATE_SAFETY_RETRY_MS=5\*60\*1000;/,'waiting updates need only a slow safety fallback');

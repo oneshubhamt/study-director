@@ -1,5 +1,13 @@
 # TypeScript conversion — execution record
 
+## P5.12 · IN PROGRESS · 2026-11-21
+
+- **Baseline:** started from published `ts-exp` `a875595a`. Scope is P5.12 only: early install capture, checked page update lifecycle/policy, service-worker protocol/build integration and targeted PWA evidence.
+- **Checkpoint 1:** `001f0718` replaces `install-capture.js`, `pwa-lifecycle.js` and `platform/sw.js` with admitted TypeScript. The worker now decodes and validates canonical cache identities and validates every precache row before use; build identity hashes the type-erased worker template and still emits classic `sw.js`.
+- **Acceptance wiring underway:** PWA VM/build readers now follow the production erasure path; the native-capabilities witness captures a valid install prompt before host startup and consumes it through the existing bridge.
+- **Safety invariants retained:** exact waiting/controller identity gates reload; operation-owned reservation release remains intact; malformed reload markers cannot confirm boot; verified live shell generations remain pinned.
+- **Open:** extract page reservation/UI/scheduling from `main.js` into a checked owner, correct/verify minified worker-inclusive identity, run all P5.12 direct/build/browser checks, reconcile objectives and replace this entry with closure. Full QA remains intentionally out of scope.
+
 ## P5.11 second de novo breadth audit · VERIFIED — TARGETED · 2026-11-21
 
 - **Audit baseline / corrected code head:** re-audited the complete P5.11 programme from prior published closure `8fa1f716`, deliberately extending beyond the earlier findings into provider implementations, unchecked-host boundaries, async ownership, popover/overlay lifecycle, first-paint/reload behavior, accessibility, build admission and coverage ownership. Corrected production/test head is `84e771a9af87247fecc6fb2e73af8efe41964f7d`.

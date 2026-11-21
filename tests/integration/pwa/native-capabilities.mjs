@@ -63,7 +63,17 @@ const controller=CapabilitiesHost.createController(Object.freeze({module:NativeM
   })
 }));
 
+let prevented=false,promptCalls=0;
+const promptEvent={
+  preventDefault(){prevented=true;},
+  prompt:async()=>{promptCalls+=1;},
+  userChoice:Promise.resolve({outcome:'accepted'})
+};
+vm.runInNewContext(read('source/host/install-capture.ts'),{window});
+window.emit('beforeinstallprompt',promptEvent);
+assert.equal(prevented,true,'the early inline capture must retain a valid prompt before host startup');
 controller.install();
+assert.equal(controller.status().installAvailable,true,'native capabilities must consume the prompt captured before its own startup');
 assert.equal(persistCalls,0,'startup must not request persistence');
 assert.equal(controller.status().keepAwake,false,'wake lock must default off');
 assert.equal(wakeRequests,0);
@@ -95,18 +105,10 @@ await controller.setKeepAwake(false);
 assert.equal(sentinels[2].released,true);
 assert.equal(controller.status().wakeAcquired,false);
 
-let prevented=false,promptCalls=0;
-window.emit('beforeinstallprompt',{preventDefault(){prevented=true;}});
-assert.equal(prevented,false,'malformed install events are ignored rather than retained as callable prompts');
-assert.equal(controller.status().installAvailable,false);
-const promptEvent={
-  preventDefault(){prevented=true;},
-  prompt:async()=>{promptCalls+=1;},
-  userChoice:Promise.resolve({outcome:'accepted'})
-};
-window.emit('beforeinstallprompt',promptEvent);
-assert.equal(prevented,true);
-assert.equal(controller.status().installAvailable,true);
+let malformedPrevented=false;
+window.emit('beforeinstallprompt',{preventDefault(){malformedPrevented=true;}});
+assert.equal(malformedPrevented,false,'malformed install events are ignored rather than retained as callable prompts');
+assert.equal(controller.status().installAvailable,true,'a malformed later event must not displace the captured prompt');
 assert.equal(await controller.promptInstall(),true);
 assert.equal(promptCalls,1);
 assert.equal(controller.status().standalone,false,'accepting installation must not convert the current tab to standalone');
