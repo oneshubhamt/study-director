@@ -1,5 +1,6 @@
 import type {ModuleRegistration} from '../../types/module-registration.ts';
 import type {OptionalPluginDescriptor,PluginFileState,PluginFileStatus,PluginRegistrationStatus,PluginRuntimeStatus,PublicApiHostModule as PublicApiHostContract,PublicApiInput,PublicApiRuntime,PublicApiRuntimeInput,StudyDirectorPublicApi} from '../../types/public-api-host.ts';
+import type {InsightsPreviewProvider} from './insights-host.ts';
 const sdPublicApiHostFactory=(()=>{
 'use strict';
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'public-api-host','study-director.public-api-host-module'>|undefined;
