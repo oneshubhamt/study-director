@@ -82,6 +82,11 @@ try{
  await waitFor(()=>page.evaluate(`__PWA6.AppData.personalPreferences.read().then(value=>value?.presentation==='director-current'&&value?.theme==='light'&&value?.fontScale===1.08)`),{label:'canonical appearance preferences'});
  assert.deepEqual(await page.evaluate(`({theme:localStorage.getItem('studyDirector.theme.v1'),presentation:localStorage.getItem('studyDirector.presentation.v1'),fontScale:localStorage.getItem('studyDirector.fontScale.v1')})`),{theme:'light',presentation:'director-current',fontScale:'1.08'});
 
+ await page.reload();await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'appearance ownership after reload'});
+ const reloadedAppearance=await page.evaluate(`(()=>({theme:document.documentElement.dataset.theme,presentation:document.documentElement.dataset.presentation,fontScale:document.documentElement.dataset.fontScale,themePressed:document.querySelector('.theme-btn[data-theme-id="light"]')?.getAttribute('aria-pressed'),presentationPressed:document.querySelector('.presentation-btn[data-presentation-id="director-current"]')?.getAttribute('aria-pressed'),themeColor:document.querySelector('meta[name="theme-color"]')?.getAttribute('content'),computedThemeColor:getComputedStyle(document.documentElement).getPropertyValue('--sd-meta-theme-color').trim()}))()`);
+ assert.deepEqual({theme:reloadedAppearance.theme,presentation:reloadedAppearance.presentation,fontScale:reloadedAppearance.fontScale,themePressed:reloadedAppearance.themePressed,presentationPressed:reloadedAppearance.presentationPressed},{theme:'light',presentation:'director-current',fontScale:'1.08',themePressed:'true',presentationPressed:'true'},'a physically selected saved appearance must survive a real built-page reload');
+ assert.equal(reloadedAppearance.themeColor,reloadedAppearance.computedThemeColor,'reloaded browser chrome follows the saved appearance');
+
  const originalProfile=await page.evaluate(`__PWA6.Profiles.current()`);
  await page.evaluate(`setTimeout(()=>__PWA6.Profiles.add(),0)`);
  await new Promise(resolve=>setTimeout(resolve,1700));await waitForStudyDirector(page,{instrumented:true});await waitFor(()=>page.evaluate(`__PWA6.AppOwnership.status().hasControl`),{label:'new profile ownership'});
