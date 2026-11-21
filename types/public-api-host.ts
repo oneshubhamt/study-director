@@ -7,7 +7,7 @@ import type {PresentationKernel,PresentationManifest,PresentationProfile,ThemeDe
 import type {PresentationHostController} from './presentation-host.ts';
 import type {ProviderConfig} from './backup-provider.ts';
 import type {PlanController} from './plan.ts';
-import type {InsightsHostBoundary,InsightsHostModule} from '../source/core/insights-host.ts';
+import type {InsightsHostBoundary,InsightsHostModule,InsightsPreviewProvider} from '../source/core/insights-host.ts';
 
 export type CapabilityMap=Readonly<Record<string,number>>;
 export type PluginFileState='not-requested'|'loading'|'loaded'|'registered'|'missing'|'incompatible'|'failed';
@@ -68,19 +68,19 @@ export interface StudyDirectorPublicApi{
 }
 export interface StudyDirectorPluginDescriptor{
  readonly name:string;readonly version?:string;readonly requires?:Readonly<Record<string,number>>;
- readonly previewProviders?:Readonly<Record<string,unknown>>;
+ readonly previewProviders?:Readonly<Record<string,InsightsPreviewProvider>>;
  setup(api:StudyDirectorPublicApi):unknown;
 }
 export interface PublicApiRuntimeInput{
  readonly configuration:Readonly<{capabilities:CapabilityMap;descriptors:readonly OptionalPluginDescriptor[]}>;
  readonly environment:Readonly<{document:Document;trustedAssetURL(value:string):unknown}>;
  readonly tabs:Readonly<{registerTab(config:TabConfig):boolean;renderTab(id:string):unknown}>;
- readonly preview:Readonly<{registerProvider(target:string,provider:unknown):boolean}>;
+ readonly preview:Readonly<{registerProvider(target:string,provider:InsightsPreviewProvider):boolean}>;
  clampText(value:unknown,max:number):string;
 }
 export interface PublicApiRuntime{
  readonly format:'study-director.public-api-host';readonly contractVersion:1;
- registerPlaceholders():boolean;requestTab(tabId:unknown,options?:Readonly<{retry?:boolean}>):Promise<boolean>|null;
+ registerPlaceholders():boolean;requestTab(tabId:unknown,options?:Readonly<{retry?:boolean}>):Promise<boolean>|null;register(plugin:unknown):boolean;
  status():PluginRuntimeStatus;createPublicApi(input:Readonly<PublicApiInput>):StudyDirectorPublicApi;
 }
 export interface PublicApiHostModule{readonly format:'study-director.public-api-host-module';readonly contractVersion:1;createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApiRuntime>}
