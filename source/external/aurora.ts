@@ -1139,6 +1139,7 @@ html[data-material="aurora"] #pane-insights .ui-disclosure{
 `;
 
 type OverlaySurface=Readonly<{id:string;element:HTMLElement;visible:(element:HTMLElement)=>boolean;blocksTools:boolean}>;
+type OverlaySurfaceDefinition=Readonly<{id:string;element:()=>HTMLElement|null;visible:(element:HTMLElement)=>boolean;blocksTools:boolean}>;
 type PackKernel=Pick<PresentationKernel,'format'|'version'|'registerPresentation'>;
 const record=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null;
 function isPackKernel(value:unknown):value is PackKernel{
@@ -1159,23 +1160,29 @@ function registerPack():boolean{
 function installOverlayCoordinator():boolean{
   const root=document.documentElement;
   if(root.dataset['auroraOverlayCoordinator']==='installed')return true;
-  const candidates:readonly (Readonly<{id:string;element:HTMLElement|null;visible:(element:HTMLElement)=>boolean;blocksTools:boolean}>)[]=[
-    {id:'owner',element:document.querySelector<HTMLElement>('.ownership-banner'),visible:element=>element.classList.contains('on'),blocksTools:true},
-    {id:'update',element:document.querySelector<HTMLElement>('.pwa-update-control'),visible:element=>!element.hidden,blocksTools:false},
-    {id:'nudge',element:document.getElementById('nudge-overlay'),visible:element=>element.classList.contains('on'),blocksTools:true}
-  ];
-  const surfaces:OverlaySurface[]=[];
-  for(const surface of candidates){
-    const element=surface.element;if(!element)return false;
-    surfaces.push(Object.freeze({id:surface.id,element,visible:surface.visible,blocksTools:surface.blocksTools}));
-  }
-  const menu=document.getElementById('display-tools-menu'),trigger=document.getElementById('display-tools-trigger');
-  if(!menu||!trigger)return false;
+  const update=document.querySelector<HTMLElement>('.pwa-update-control'),nudge=document.getElementById('nudge-overlay');
+  const menu=document.getElementById('display-tools-menu'),trigger=document.getElementById('display-tools-trigger'),body=document.body;
+  if(!update||!nudge||!menu||!trigger||!body)return false;
+  const definitions:readonly OverlaySurfaceDefinition[]=Object.freeze([
+    Object.freeze({id:'owner',element:()=>document.querySelector<HTMLElement>('.ownership-banner'),visible:(element:HTMLElement)=>element.classList.contains('on'),blocksTools:true}),
+    Object.freeze({id:'update',element:()=>update,visible:(element:HTMLElement)=>!element.hidden,blocksTools:false}),
+    Object.freeze({id:'nudge',element:()=>nudge,visible:(element:HTMLElement)=>element.classList.contains('on'),blocksTools:true})
+  ]);
   let queued=false,running=false;
-  const reconcile=():void=>{
+  const observer=new MutationObserver(schedule);
+  function currentSurfaces():readonly OverlaySurface[]{
+    const surfaces:OverlaySurface[]=[];
+    for(const definition of definitions){
+      const element=definition.element();if(!element)continue;
+      surfaces.push(Object.freeze({id:definition.id,element,visible:definition.visible,blocksTools:definition.blocksTools}));
+      if(definition.id==='owner')observer.observe(element,{attributes:true,attributeFilter:['class','hidden']});
+    }
+    return surfaces;
+  }
+  function reconcile():void{
     queued=false;if(running)return;running=true;
     try{
-      const active=root.dataset['presentation']===PROFILE.id;
+      const surfaces=currentSurfaces(),active=root.dataset['presentation']===PROFILE.id;
       const visible=active?surfaces.filter(surface=>surface.visible(surface.element)):[];
       const winner=visible[0]??null;
       surfaces.forEach(surface=>surface.element.classList.toggle('sd-aurora-surface-suppressed',!!winner&&surface!==winner));
@@ -1183,11 +1190,12 @@ function installOverlayCoordinator():boolean{
       else{delete root.dataset['auroraOverlayActive'];delete root.dataset['auroraOverlayBlocksTools'];}
       if(winner?.blocksTools&&!menu.hidden){menu.hidden=true;trigger.setAttribute('aria-expanded','false');}
     }finally{running=false;}
-  };
-  const schedule=():void=>{if(queued)return;queued=true;queueMicrotask(reconcile);};
-  const observer=new MutationObserver(schedule);
+  }
+  function schedule():void{if(queued)return;queued=true;queueMicrotask(reconcile);}
   observer.observe(root,{attributes:true,attributeFilter:['data-presentation']});
-  surfaces.forEach(surface=>observer.observe(surface.element,{attributes:true,attributeFilter:['class','hidden']}));
+  observer.observe(body,{childList:true});
+  observer.observe(update,{attributes:true,attributeFilter:['class','hidden']});
+  observer.observe(nudge,{attributes:true,attributeFilter:['class','hidden']});
   root.dataset['auroraOverlayCoordinator']='installed';reconcile();return true;
 }
 function install():boolean{return registerPack()&&installOverlayCoordinator();}
