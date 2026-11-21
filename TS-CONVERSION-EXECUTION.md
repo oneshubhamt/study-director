@@ -1,14 +1,17 @@
 # TypeScript conversion — execution record
 
-## P5.11b implementation checkpoint · OPEN · 2026-11-21
+## P5.11b · VERIFIED — TARGETED · 2026-11-21
 
-- Started from published `ts-exp` head `dd1144b7`; scope is P5.11b only.
-- Audit confirmed presentation ownership was split: checked conversion required the inline kernel/metadata, Glass/Aurora packs, and appearance/preference callbacks still embedded in unchecked `main.js`.
-- A checked `presentation-host.ts` now owns theme/skin controls, font scaling, first-paint mirror refresh, appearance transitions and display-tools behavior; `main.js` retains thin composition and the existing canonical preference writer.
-- Audit also found an in-scope startup defect: Glass/Aurora ran in `<head>` before overlay surfaces existed, yet marked their overlay coordinators installed. Pack registration and DOM-coordinator installation are now independently retry-safe at `studydirector:ready`, with stylesheet/coordinator deduplication.
-- Source contracts and browser acceptance are staged for all three skins in both themes, reload/profile restoration, duplicate pack registration, ready-event retry, and live overlay handoff.
-- Hosted pinned-toolchain repository checks are green at `892e1d32`: strict typecheck and typed lint cover **236 checked / 0 unchecked** TypeScript files; the affected runtime-boundary contract, fresh source build, generated-build verification and generated-JS syntax all passed. This is supporting evidence only; the dedicated P5.11b gate remains required for its feature-specific contracts/browser repetitions.
-- **Still open:** dedicated P5.11b unit/architecture checks, changed runtime-security browser witness 5×, changed populated-accessibility witness 5×, objective reconciliation and final record closure. Full QA remains intentionally deferred.
+- **Baseline / verified implementation head:** started from `dd1144b7`; production and targeted browser evidence are at `22d688fdef97d3749875cb2223148dfecabaa49f`.
+- **Ownership:** typed presentation kernel/metadata, typed Glass/Aurora packs, and checked `presentation-host.ts` now own the P5.11b presentation system. `main.js` retains thin composition and the shared canonical Personal Preferences writer.
+- **Behavior:** fresh profiles remain implicit Glass/Dark; saved Director, Glass and Aurora restore at first paint; unavailable well-formed skins fail closed to Director without rewriting the saved value; physical Display tools controls switch all three skins in Dark/Light and restore across reload/profile changes with metadata, focus, ARIA and font scale intact.
+- **Durability / packs / overlays:** source contracts retain canonical-success-before-mirror, stale-write fencing and failed-write retry semantics. Pack registration and ready retry are idempotent with one stylesheet/coordinator. Real update and Pomodoro surfaces pass Aurora → Glass → Director → Aurora handoff and cleanup.
+- **QA fixes:** corrected the head-load overlay coordinator defect, presentation metadata synchronization, dynamic ownership-overlay observation, inactive Display tools contrast/accessibility names, and Director Light Area-share contrast.
+- **Type/build evidence:** strict TypeScript and typed lint passed **236 checked / 0 unchecked** files; presentation defaults/contracts, affected runtime boundaries, fresh build, generated-build verification and generated syntax passed (**180 generated JS files**). [Repository checks](https://github.com/oneshubhamt/study-director/actions/runs/44863774328)
+- **Browser evidence:** runtime/security presentation acceptance passed **5/5** isolated Chromium runs. Dedicated presentation accessibility passed **5/5**; each pass covered **42 axe states** plus mobile appearance-control touch targets, with no serious/critical violations or runtime errors. [P5.11b targeted gate](https://github.com/oneshubhamt/study-director/actions/runs/44863774409)
+- **QA note:** an unrelated auto-triggered P5.10C browser job failed before its app test because Chromium never exposed a DevTools port; its direct, architecture, type/lint and build gates passed. No P5.10C code was changed.
+- **Objective reconciliation:** all P5.11b acceptance criteria in `docs/typescript/PHASE-5.md` are closed.
+- **Still open:** P5.12, P5.13, Phase 6 and Phase 7/full whole-app/device QA. Full QA was **not** run in this pass.
 
 ## P5.11a · VERIFIED — TARGETED · 2026-11-21
 
