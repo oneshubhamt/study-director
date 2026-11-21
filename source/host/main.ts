@@ -492,12 +492,12 @@ const ReviewDayState=ReviewHostModule.createDayState(Object.freeze<Parameters<ty
   document,timerState:TimerState,tasks:()=>TASKS,isTrackableBlock,isValidIsoDate,todayISO,fullWeekdayNames:FULL_WEEKDAY_NAMES
 }));
 function getReviewDate(){return ReviewDayState.getReviewDate();}
-function cleanDayRevision(value){return ReviewDayState.cleanRevision(value);}
+function cleanDayRevision(value:Parameters<typeof ReviewDayState['cleanRevision']>[0]){return ReviewDayState.cleanRevision(value);}
 function daySaveDirty(date=getReviewDate()){return ReviewDayState.isDirty(date);}
 function markDayContentChanged(){return ReviewDayState.markChanged();}
-function markDayContentSaved(date,revision){return ReviewDayState.markSaved(date,revision);}
-function reviewDateTitle(iso){return ReviewDayState.dateTitle(iso);}
-function setReviewDateTitle(iso){return ReviewDayState.setDateTitle(iso);}
+function markDayContentSaved(date:Parameters<typeof ReviewDayState['markSaved']>[0],revision:Parameters<typeof ReviewDayState['markSaved']>[1]){return ReviewDayState.markSaved(date,revision);}
+function reviewDateTitle(iso:Parameters<typeof ReviewDayState['dateTitle']>[0]){return ReviewDayState.dateTitle(iso);}
+function setReviewDateTitle(iso:Parameters<typeof ReviewDayState['setDateTitle']>[0]){return ReviewDayState.setDateTitle(iso);}
 let ReviewSavedDayRuntime:ReturnType<typeof ReviewHostModule.createSavedDayCoordinator>|null=null;
 function requireReviewSavedDayRuntime(){if(!ReviewSavedDayRuntime)throw new Error('Study Director Saved Day coordinator is unavailable.');return ReviewSavedDayRuntime;}
 function promptSaveToday(...args){return requireReviewSavedDayRuntime().promptSaveToday(...args);}
@@ -523,7 +523,7 @@ const TimerRestoration=ExecutionHostModule.createTimerRestoration(Object.freeze<
   invalidateIdleDisplay:()=>{executeIdleDisplayKey='';},
   setExecuteShellVisible,setExecuteControlsEnabled,clearExecuteStateOverlay,refreshPnote,requestRender,updateBadges,flushLiveDraft
 }));
-function validateTimerRestoreCandidate(runtime){return TimerRestoration.validateTimerRestoreCandidate(runtime);}
+function validateTimerRestoreCandidate(runtime:Parameters<typeof TimerRestoration['validateTimerRestoreCandidate']>[0]){return TimerRestoration.validateTimerRestoreCandidate(runtime);}
 function restoreTimerRuntimeIfAny(){return TimerRestoration.restoreTimerRuntimeIfAny();}
 /* TASK SESSION STATE · 3. LIVE DRAFT, NOTES, AND RECOVERY COORDINATION */
 const LIVE_DRAFT_SAVE_DEBOUNCE_MS=1000;
@@ -782,8 +782,8 @@ function togglePause(...args:Parameters<typeof ExecutionViews.togglePause>){retu
 const BackupProviderBackground=BackupMaintenanceHostModule.createProviderBackgroundBridge(Object.freeze<Parameters<typeof BackupMaintenanceHostModule.createProviderBackgroundBridge>[0]>({
   provider:()=>BackupProviderRuntime,capture:(scope,error,level)=>AppDiagnostics.capture(scope,error,level)
 }));
-function notifyBackupChange(change){return BackupProviderBackground.noteChange(change);}
-function flushAutomaticBackups(reason){return BackupProviderBackground.flush(reason);}
+function notifyBackupChange(change:Parameters<typeof BackupProviderBackground['noteChange']>[0]){return BackupProviderBackground.noteChange(change);}
+function flushAutomaticBackups(reason:Parameters<typeof BackupProviderBackground['flush']>[0]){return BackupProviderBackground.flush(reason);}
 function automaticBackupsWaiting(){return BackupProviderBackground.waiting();}
 // Hidden: back up waiting changes. Visible again: redraw the locations, since a
 // sign-in may have ended while timers were throttled.
@@ -807,11 +807,11 @@ function handlePracticeStartKey(...args:Parameters<typeof ExecutionViews.handleP
 /* STORAGE HEALTH AND SINGLE-TAB GUARD */
 
 function readStorageHealth(){return StorageHealthController.snapshot();}
-function writeStorageHealth(patch){return StorageHealthController.updateHistory(patch);}
+function writeStorageHealth(patch:Parameters<NonNullable<typeof StorageHealthController>['updateHistory']>[0]){return StorageHealthController.updateHistory(patch);}
 function renderStorageHealth(health=readStorageHealth()){return StorageHealthController.render(health);}
-function markStorageHealthOk(source,key=''){return StorageHealthController.markOk(source,key);}
-function markStorageHealthTimestamp(key){return StorageHealthController.markTimestamp(key);}
-function markStorageHealthError(source,reason,options={}){return StorageHealthController.markError(source,reason,options);}
+function markStorageHealthOk(source:Parameters<NonNullable<typeof StorageHealthController>['markOk']>[0],key:Parameters<NonNullable<typeof StorageHealthController>['markOk']>[1]=''){return StorageHealthController.markOk(source,key);}
+function markStorageHealthTimestamp(key:Parameters<NonNullable<typeof StorageHealthController>['markTimestamp']>[0]){return StorageHealthController.markTimestamp(key);}
+function markStorageHealthError(source:Parameters<NonNullable<typeof StorageHealthController>['markError']>[0],reason:Parameters<NonNullable<typeof StorageHealthController>['markError']>[1],options:Parameters<NonNullable<typeof StorageHealthController>['markError']>[2]={}){return StorageHealthController.markError(source,reason,options);}
 function storageSizeLabel(bytes){
   const value=Math.max(0,Number(bytes)||0);
   if(value<1024*1024)return `${Math.round(value/1024)} KB`;
@@ -875,7 +875,7 @@ const {
   writeLease:writeAppOwner, release:releaseAppOwner, evaluate:evaluateAppOwnership,
   setPrimary:setPrimaryTabState, takeOwnership:claimAppControl, install:installAppOwnership
 }=AppOwnership;
-function flushAndReleaseAppOwner(requestId=''){return AppOwnership.flushAndRelease(requestId);}
+function flushAndReleaseAppOwner(requestId:Parameters<typeof AppOwnership['flushAndRelease']>[0]=''){return AppOwnership.flushAndRelease(requestId);}
 function requirePrimaryTab(...args:Parameters<typeof StartupOwnershipViews.requirePrimaryTab>){return StartupOwnershipViews.requirePrimaryTab(...args);}
 function renderPrimaryTabBlock(...args:Parameters<typeof StartupOwnershipViews.renderPrimaryTabBlock>){return StartupOwnershipViews.renderPrimaryTabBlock(...args);}
 /* DAILY RECORD COMPACTION AND SANITIZERS · IMPORTED */
@@ -976,7 +976,7 @@ function captureSessionSnapshot(evidence=null){return ActiveSessionRuntime?.capt
 // Keep elapsed time and practice progress at the ownership boundary while
 // retaining any later text, completion or reflection edits for reconciliation.
 function snapshotWhileSessionClaimFrozen(){return SessionHandoffRuntime?.snapshotForWrite()||captureSessionSnapshot();}
-function nextSessionRevision(seed=0){return AppData.activeSession.nextRevision(seed);}
+function nextSessionRevision(seed:Parameters<typeof AppData['activeSession']['nextRevision']>[0]=0){return AppData.activeSession.nextRevision(seed);}
 async function activeSessionContentFingerprint(session){
   const content=ActiveSessionCodec.contentValue(session);
   if(!content)throw new Error('Active Session content is invalid.');
@@ -987,10 +987,10 @@ async function activeSessionContentFingerprint(session){
 function activeSessionPayload(snapshot=null,options={}){return ActiveSessionRuntime?.payload(snapshot,options)||null;}
 function readLocalRecoverySession(){return ActiveSessionRuntime?.readLocal()||null;}
 function handleActiveSessionRepositoryResult(...args:Parameters<typeof SessionActions.handleActiveSessionRepositoryResult>){return SessionActions.handleActiveSessionRepositoryResult(...args);}
-function requireCanonicalSessionWrite(saved,expected,operation='active-session transition'){return ActiveSessionRuntime.requireCanonicalWrite(saved,expected,operation);}
-function writeActiveSessionNow(snapshot,options={}){return ActiveSessionRuntime.writeSnapshot(snapshot,options);}
-function writeLiveDraftNow(options={}){return ActiveSessionRuntime.writeNow(options);}
-function saveLiveDraft(options={}){return ActiveSessionRuntime.saveLiveDraft(options);}
+function requireCanonicalSessionWrite(saved:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[0],expected:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[1],operation:Parameters<NonNullable<typeof ActiveSessionRuntime>['requireCanonicalWrite']>[2]='active-session transition'){return ActiveSessionRuntime.requireCanonicalWrite(saved,expected,operation);}
+function writeActiveSessionNow(snapshot:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeSnapshot']>[0],options:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeSnapshot']>[1]={}){return ActiveSessionRuntime.writeSnapshot(snapshot,options);}
+function writeLiveDraftNow(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['writeNow']>[0]={}){return ActiveSessionRuntime.writeNow(options);}
+function saveLiveDraft(options:Parameters<NonNullable<typeof ActiveSessionRuntime>['saveLiveDraft']>[0]={}){return ActiveSessionRuntime.saveLiveDraft(options);}
 function cancelPendingLiveDraftSave(){return ActiveSessionRuntime?.cancelPendingLiveDraftSave()||false;}
 function flushLiveDraft(options={}){return ActiveSessionRuntime?.flushLiveDraft(options)||null;}
 function maybeSnapshotRunningTimer(){return ActiveSessionRuntime?.maybeSnapshotRunningTimer()||false;}
@@ -1188,9 +1188,9 @@ function exactAppMetaStorage(capability,family,key,label){
 async function readHostAppMetaValue(key){return HostAppMeta.read(exactAppMetaFamily(HostAppMeta,key,'host app metadata'));}
 function writeHostAppMetaValue(key,value,options={}){return HostAppMeta.write(exactAppMetaFamily(HostAppMeta,key,'host app metadata'),value,options);}
 async function readReconciliationBase(){return ReconciliationBaselineStore.readHeader();}
-async function readReconciliationBaseNotes(keys){return ReconciliationBaselineStore.readNotes(keys);}
-async function readReconciliationBaseDayAncestry(dates,checkpointId){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
-async function writeReconciliationBase(checkpointId,spec){return ReconciliationBaselineStore.write(checkpointId,spec);}
+async function readReconciliationBaseNotes(keys:Parameters<typeof ReconciliationBaselineStore['readNotes']>[0]){return ReconciliationBaselineStore.readNotes(keys);}
+async function readReconciliationBaseDayAncestry(dates:Parameters<typeof ReconciliationBaselineStore['readDayAncestry']>[0],checkpointId:Parameters<typeof ReconciliationBaselineStore['readDayAncestry']>[1]){return ReconciliationBaselineStore.readDayAncestry(dates,checkpointId);}
+async function writeReconciliationBase(checkpointId:Parameters<typeof ReconciliationBaselineStore['write']>[0],spec:Parameters<typeof ReconciliationBaselineStore['write']>[1]){return ReconciliationBaselineStore.write(checkpointId,spec);}
 const VerifiedRecovery=BackupReadinessHostModule.createVerifiedRecovery(Object.freeze<Parameters<typeof BackupReadinessHostModule.createVerifiedRecovery>[0]>({
   metadata:Object.freeze({
     read:()=>readHostAppMetaValue(APP_META_KEYS.verifiedRecoveryBackups),
@@ -1241,7 +1241,7 @@ function persistedActiveSessionUnfinished(session){
     return resolved!=='done'&&resolved!=='skipped';
   });
 }
-function handleCanonicalCommit(event){return CanonicalCommitHost.handle(event);}
+function handleCanonicalCommit(event:Parameters<typeof CanonicalCommitHost['handle']>[0]){return CanonicalCommitHost.handle(event);}
 
 async function refreshPersistedSessionBadge(){return CapabilityBadge?CapabilityBadge.refreshPersistedSessionBadge():false;}
 const {RepositoryJournals,AppData}=DataBootstrapHostModule.createRepositoryComposition(Object.freeze<Parameters<typeof DataBootstrapHostModule.createRepositoryComposition>[0]>({
@@ -1595,7 +1595,7 @@ function closeProfilePanel(){return ProfilePanelActions.close();}
 function installProfileDialogs(){return ProfilePanelActions.install();}
 function startProfileRename(){return ProfilePanelActions.startRename();}
 function finishProfileRename(){return ProfilePanelActions.finishRename();}
-function handleProfileNameKey(event){return ProfilePanelActions.handleNameKey(event);}
+function handleProfileNameKey(event:Parameters<typeof ProfilePanelActions['handleNameKey']>[0]){return ProfilePanelActions.handleNameKey(event);}
 
 function profileDriveAction(){return ProfileViews.profileDriveAction();}
 // Profile deletion composes backup/provider effects behind a checked profile-owned adapter.
@@ -1717,7 +1717,7 @@ const askProfilePassword=ProfileLifecycle.askProfilePassword;
 // Version History reads each encrypted version for its date and counts, so a
 // password put off at start is asked for first. Not now still opens the list,
 // with those versions shown as locked.
-function withBackupPassword(open){return BackupProtectionHost.withPassword(open);}
+function withBackupPassword(open:Parameters<NonNullable<typeof BackupProtectionHost>['withPassword']>[0]){return BackupProtectionHost.withPassword(open);}
 function onQuoteChange(options={}){
   if(options.markChanged!==false)markDayContentChanged();
   const input=document.getElementById('quote-input');
@@ -2704,9 +2704,9 @@ AttachmentLibrary=AttachmentsModule.create({
 const RichTextAttachmentPort=LibraryDocuments.richAttachmentPort;
 invalidateAttachmentLibrary=()=>AttachmentLibrary.invalidate();
 
-function normalizeAttachmentIntegrityState(value){return BackupIntegrityHostModule.normalizeAttachmentState(value,AttachmentsModule.validId);}
-function normalizeRepositoryIntegrityTarget(value){return BackupIntegrityHostModule.normalizeRepositoryTarget(value,IntegrityContinuationModule.normalize);}
-function normalizeRepositoryIntegrityState(value){return BackupIntegrityHostModule.normalizeRepositoryState(value,IntegrityContinuationModule.normalize);}
+function normalizeAttachmentIntegrityState(value:Parameters<typeof BackupIntegrityHostModule['normalizeAttachmentState']>[0]){return BackupIntegrityHostModule.normalizeAttachmentState(value,AttachmentsModule.validId);}
+function normalizeRepositoryIntegrityTarget(value:Parameters<typeof BackupIntegrityHostModule['normalizeRepositoryTarget']>[0]){return BackupIntegrityHostModule.normalizeRepositoryTarget(value,IntegrityContinuationModule.normalize);}
+function normalizeRepositoryIntegrityState(value:Parameters<typeof BackupIntegrityHostModule['normalizeRepositoryState']>[0]){return BackupIntegrityHostModule.normalizeRepositoryState(value,IntegrityContinuationModule.normalize);}
 function renderIntegrityStatuses(){return BackupIntegrity?.render()||false;}
 function requestRepositoryIntegrityRecheck(target){return BackupIntegrity?.requestRepositoryRecheck(target)||Promise.resolve(false);}
 function scheduleAttachmentIntegrityAudit(delay=15000,trigger='scheduled'){return BackupIntegrity?.scheduleAttachment(delay,trigger)||false;}
@@ -3055,7 +3055,7 @@ if(!Object.isFrozen(BackupActions)||BackupActions.format!=='study-director.backu
   throw new Error('Study Director backup controls are unavailable or incompatible.');
 }
 function renderDriveBackup(){return BackupActions.renderDrive();}
-function renderDeviceBackup(state){return BackupActions.renderDevice(state);}
+function renderDeviceBackup(state:Parameters<NonNullable<typeof BackupActions>['renderDevice']>[0]){return BackupActions.renderDevice(state);}
 BackupActions.install();
 BackgroundMaintenance=BackupMaintenanceHostModule.createBackground(Object.freeze<Parameters<typeof BackupMaintenanceHostModule.createBackground>[0]>({
   lifecycle:OperationLifecycle,
