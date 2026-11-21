@@ -81,11 +81,12 @@ function setElementStyle<K extends keyof CSSStyleDeclaration>(el:HTMLElement|nul
   el.style[name]=value;return true;
 }
 function setTextSafe(id:string,value:unknown){return setElementText(document.getElementById(id),value);}
-function cachedElements(owner:{cache?:Record<string,HTMLElement|null>},spec:Readonly<Record<string,string>>){
-  if(owner.cache)return owner.cache;
+function cachedElements(owner:object,spec:Readonly<Record<string,string>>){
+  const cacheOwner=owner as {cache?:Record<string,HTMLElement|null>};
+  if(cacheOwner.cache)return cacheOwner.cache;
   const out:Record<string,HTMLElement|null>={};
   Object.entries(spec).forEach(([key,id])=>{out[key]=document.getElementById(id);});
-  owner.cache=out;
+  cacheOwner.cache=out;
   return out;
 }
 function clampText(value:unknown,max=APP_LIMITS.maxNoteChars){
