@@ -5,6 +5,7 @@ const sdPublicApiHostFactory=(()=>{
 const registry=(globalThis as unknown as Record<symbol,unknown>)[Symbol.for('studyDirector.internalModules.v1')] as ModuleRegistration<'public-api-host','study-director.public-api-host-module'>|undefined;
 if(!registry||registry.format!=='study-director.internal-module-registry'||registry.version!==1)throw new Error('Study Director internal module registry is unavailable or incompatible.');
 const {exactFrozenObject,functionPort}=registry.contracts,freeze=Object.freeze;
+const ensureFunctions=(value:object,names:readonly string[],label:string)=>{const row=value as Record<string,unknown>;for(const name of names)if(typeof row[name]!=='function')throw new TypeError(label+' is unavailable or incompatible.');};
 const MAX_LOAD_ATTEMPTS=2,MAX_REGISTRATION_ATTEMPTS=2;
 const isRecord=(value:unknown):value is Record<string,unknown>=>typeof value==='object'&&value!==null&&!Array.isArray(value);
 const errorMessage=(error:unknown,fallback:string)=>error instanceof Error&&error.message?error.message:String(error||fallback);
@@ -15,7 +16,7 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
   exactFrozenObject(input.environment,['document','trustedAssetURL'],'Public API environment');
   exactFrozenObject(input.tabs,['registerTab','renderTab'],'Public API tab ports');
   exactFrozenObject(input.preview,['registerProvider'],'Public API preview ports');
-  functionPort(input.environment,['trustedAssetURL'],'Public API environment');
+  ensureFunctions(input.environment,['trustedAssetURL'],'Public API environment');
   functionPort(input.tabs,['registerTab','renderTab'],'Public API tab ports');
   functionPort(input.preview,['registerProvider'],'Public API preview ports');
   if(typeof input.clampText!=='function')throw new TypeError('Public API text adapter is unavailable.');
@@ -134,13 +135,13 @@ function createRuntime(input:Readonly<PublicApiRuntimeInput>):Readonly<PublicApi
     if(publicApi)return publicApi;
     exactFrozenObject(apiInput,['version','data','insights','logic','plan','preview','backup','installation','appearance','ui'],'Public API composition');
     functionPort(apiInput.plan,['getDraft','loadDraft'],'Public API plan');
-    functionPort(apiInput.backup,['createCheckpoint','inspect','releaseFile','receiveStream','checksum','restore','downloadSafetyCopy','device'],'Public API backup');
+    ensureFunctions(apiInput.backup,['createCheckpoint','inspect','releaseFile','receiveStream','checksum','restore','downloadSafetyCopy','device'],'Public API backup');
     functionPort(apiInput.backup.profile,['id','name','bind','deleted','controls'],'Public API backup profile');
     functionPort(apiInput.backup.providers,['register','list'],'Public API backup providers');
     functionPort(apiInput.installation,['status','promptInstall','inspectInstallation','revealInstallHelp'],'Public API installation');
-    functionPort(apiInput.appearance.theme,['get','set'],'Public API theme');
-    functionPort(apiInput.appearance.presentation,['list','register','get','set'],'Public API presentation');
-    functionPort(apiInput.ui,['registerTab','goTab','navigationStatus'],'Public API UI');
+    ensureFunctions(apiInput.appearance.theme,['get','set'],'Public API theme');
+    ensureFunctions(apiInput.appearance.presentation,['list','register','get','set'],'Public API presentation');
+    ensureFunctions(apiInput.ui,['registerTab','goTab','navigationStatus'],'Public API UI');
     functionPort(apiInput.ui.workspaceHistory,['register','open','replace','close','closed'],'Public API workspace history');
     const backup=freeze({
       createCheckpoint:apiInput.backup.createCheckpoint,inspect:apiInput.backup.inspect,releaseFile:apiInput.backup.releaseFile,receiveStream:apiInput.backup.receiveStream,checksum:apiInput.backup.checksum,restore:apiInput.backup.restore,downloadSafetyCopy:apiInput.backup.downloadSafetyCopy,
