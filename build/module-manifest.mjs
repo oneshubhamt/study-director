@@ -73,7 +73,7 @@ export const privateModules=Object.freeze([
   Object.freeze({id:'backup-maintenance-host',source:'core/backup-maintenance-host.ts',stem:'sd.backup-maintenance-host'}),
   Object.freeze({id:'backup-integrity-host',source:'core/backup-integrity-host.ts',stem:'sd.backup-integrity-host'}),
   Object.freeze({id:'backup-recovery-host',source:'core/backup-recovery-host.ts',stem:'sd.backup-recovery-host'}),
-  Object.freeze({id:'pwa-lifecycle',source:'core/pwa-lifecycle.js',stem:'sd.pwa-lifecycle'}),
+  Object.freeze({id:'pwa-lifecycle',source:'core/pwa-lifecycle.ts',stem:'sd.pwa-lifecycle'}),
   Object.freeze({id:'native-capabilities',source:'core/native-capabilities.ts',stem:'sd.native-capabilities'}),
   Object.freeze({id:'startup',registryId:'startup-lifecycle',source:'core/startup.ts',stem:'sd.startup'}),
   Object.freeze({id:'startup-host',source:'core/startup-host.ts',stem:'sd.startup-host'}),
@@ -186,7 +186,7 @@ export const styleModules=Object.freeze([
 
 // Authored scripts are inlined at these exact HTML positions before token rendering.
 export const hostScripts=Object.freeze([
-  Object.freeze({id:'install-capture',source:'host/install-capture.js',marker:'<!-- @SD_HOST_INSTALL_CAPTURE@ -->'}),
+  Object.freeze({id:'install-capture',source:'host/install-capture.ts',marker:'<!-- @SD_HOST_INSTALL_CAPTURE@ -->'}),
   Object.freeze({id:'profile-scope',source:'host/profile-scope.ts',marker:'<!-- @SD_HOST_PROFILE_SCOPE@ -->'}),
   Object.freeze({id:'presentation-kernel',source:'host/presentation-kernel.ts',marker:'<!-- @SD_HOST_PRESENTATION_KERNEL@ -->'}),
   Object.freeze({id:'presentation-metadata',source:'host/presentation-metadata.ts',marker:'<!-- @SD_HOST_PRESENTATION_METADATA@ -->'}),
@@ -198,7 +198,7 @@ export const privateModuleMarker='<!-- @SD_PRIVATE_MODULES@ -->';
 
 export const platformFiles=Object.freeze({
   manifest:Object.freeze({source:'platform/manifest.webmanifest',output:'manifest.webmanifest'}),
-  serviceWorker:Object.freeze({source:'platform/sw.js',output:'sw.js'}),
+  serviceWorker:Object.freeze({source:'platform/sw.ts',output:'sw.js'}),
   hostingHeaders:Object.freeze({source:'platform/firebase-hosting-headers.merge.json',output:'firebase-hosting-headers.merge.json'})
 });
 

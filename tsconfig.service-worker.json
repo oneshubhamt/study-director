@@ -8,6 +8,7 @@
     "types": []
   },
   "files": [
+    "source/platform/sw.ts",
     "types/checks/service-worker.ts"
   ]
 }

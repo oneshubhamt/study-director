@@ -88,6 +88,7 @@ function renderTokens(value,identity,sourceName){
     .replaceAll('@@SD_ATTACHMENT_OPFS_DIRECTORY@@',OPFS_IDENTITIES.attachments)
     .replaceAll('@@SD_BACKUP_FILES_OPFS_DIRECTORY@@',OPFS_IDENTITIES.backupFiles)
     .replaceAll('@@SD_CACHE_STORAGE_IDENTITIES@@',JSON.stringify(CACHE_STORAGE_IDENTITIES))
+    .replaceAll('@@SD_CACHE_STORAGE_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(CACHE_STORAGE_IDENTITIES)))
     .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES@@',JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES))
     .replaceAll('@@SD_EXTERNAL_REPOSITORY_IDENTITIES_URI@@',encodeURIComponent(JSON.stringify(EXTERNAL_REPOSITORY_IDENTITIES)))
 
@@ -221,7 +222,7 @@ export function renderBuild(){
   const developmentTags=privateModules.map(module=>`<script src="${privateNames.get(module.id)}"></script>`).join('\n');
   const deploymentTags=developmentTags;
   const manifestSource=renderTokens(sourceFile(platformFiles.manifest.source),identity,platformFiles.manifest.source);
-  const serviceWorkerTemplate=sourceFile(platformFiles.serviceWorker.source);
+  const serviceWorkerTemplate=compileScript(sourceFile(platformFiles.serviceWorker.source),platformFiles.serviceWorker.source);
   const staticSources=new Map(staticAssets.map(asset=>[
     asset.source,
     asset.template?Buffer.from(renderTokens(sourceFile(asset.source),identity,asset.source),'utf8'):sourceBytes(asset.source)
@@ -316,7 +317,7 @@ function verifyPwaTarget(files,pwa,label){
   invariant(pwa&&/^[a-f0-9]{24}$/.test(pwa.releaseId),`${label} PWA release identity is invalid.`);
   invariant(/^[a-f0-9]{24}$/.test(pwa.assetId),`${label} page asset identity is invalid.`);
   invariant(files.get('index.html').includes(`<meta name="study-director-assets" content="${pwa.assetId}">`),`${label} boot asset identity drifted.`);
-  invariant(pwa.releaseId===sha256(JSON.stringify({precache:pwa.precache,worker:sha256(sourceFile(platformFiles.serviceWorker.source))})).slice(0,24),`${label} worker-inclusive PWA identity drifted.`);
+  invariant(pwa.releaseId===sha256(JSON.stringify({precache:pwa.precache,worker:sha256(compileScript(sourceFile(platformFiles.serviceWorker.source),platformFiles.serviceWorker.source))})).slice(0,24),`${label} worker-inclusive PWA identity drifted.`);
   invariant(Array.isArray(pwa.precache)&&pwa.precache.length>0,`${label} precache inventory is empty.`);
   const paths=pwa.precache.map(asset=>asset.path);
   invariant(new Set(paths).size===paths.length,`${label} precache inventory contains duplicates.`);

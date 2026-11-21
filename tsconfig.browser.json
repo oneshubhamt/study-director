@@ -244,6 +244,9 @@
     "types/checks/p5-7c.ts",
     "types/checks/review-persistence.ts",
     "types/checks/review-host.ts",
-    "types/checks/plan.ts"
+    "types/checks/plan.ts",
+    "source/core/pwa-lifecycle.ts",
+    "source/host/install-capture.ts",
+    "types/pwa-lifecycle.ts"
   ]
 }
